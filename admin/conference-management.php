@@ -1130,10 +1130,10 @@ if ($facebook_settings_css_version === '' || $facebook_settings_css_version === 
             const fb = document.getElementById(feedbackId);
             const origHtml = saveBtn.innerHTML;
             saveBtn.disabled = true;
-                saveBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Saving...';
+            saveBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Saving...';
             fb.className = 'admin-modal-feedback';
             fb.innerHTML = '';
-                setConferenceLoader(true, 'Saving conference room...');
+            setConferenceLoader(true, 'Saving conference room...');
             fetch(window.location.pathname, {
                     method: 'POST',
                     headers: {

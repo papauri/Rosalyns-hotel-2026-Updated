@@ -1427,8 +1427,8 @@ body.modal-open {
 
 /* Form section headings in legacy .content pages were inheriting public
    editorial h3 sizing; force compact admin UI typography everywhere. */
-:is(.admin-content, #rh-admin-page .content, #rh-admin-page .admin-container) .form-section > :is(h3, h4, h5, h6),
-:is(.admin-content, #rh-admin-page .content, #rh-admin-page .admin-container) .form-section .calculation-preview > :is(h4, h5, h6) {
+:is(.admin-content, #rh-admin-page .content, #rh-admin-page .admin-container) .form-section> :is(h3, h4, h5, h6),
+:is(.admin-content, #rh-admin-page .content, #rh-admin-page .admin-container) .form-section .calculation-preview> :is(h4, h5, h6) {
     margin: 0 0 var(--space-3, 0.75rem) !important;
     font-family: var(--font-body, 'Jost', sans-serif) !important;
     font-size: clamp(0.98rem, 0.93rem + 0.18vw, 1.08rem) !important;
@@ -1438,8 +1438,8 @@ body.modal-open {
     color: var(--admin-text, var(--color-text-primary)) !important;
 }
 
-:is(.admin-content, #rh-admin-page .content, #rh-admin-page .admin-container) .form-section > :is(h3, h4, h5, h6) i,
-:is(.admin-content, #rh-admin-page .content, #rh-admin-page .admin-container) .form-section .calculation-preview > :is(h4, h5, h6) i {
+:is(.admin-content, #rh-admin-page .content, #rh-admin-page .admin-container) .form-section> :is(h3, h4, h5, h6) i,
+:is(.admin-content, #rh-admin-page .content, #rh-admin-page .admin-container) .form-section .calculation-preview> :is(h4, h5, h6) i {
     font-size: 0.95em;
 }
 

@@ -1,4 +1,5 @@
 <?php
+
 /**
  * Gallery Management - Admin Panel
  * Manage hotel gallery images and videos (hotel_gallery table)
@@ -10,7 +11,8 @@ require_once 'admin-init.php';
 require_once '../includes/alert.php';
 require_once 'video-upload-handler.php';
 
-function syncHotelGalleryManagedMedia(array $item): void {
+function syncHotelGalleryManagedMedia(array $item): void
+{
     if (!function_exists('upsertManagedMediaForSource')) {
         return;
     }
@@ -57,7 +59,8 @@ $message = '';
 $error = '';
 
 // Helper: upload gallery image (hardened: size cap + extension + MIME + image content verification)
-function uploadGalleryImage(?array $fileInput) {
+function uploadGalleryImage(?array $fileInput)
+{
     if (!$fileInput || !isset($fileInput['tmp_name']) || $fileInput['error'] !== UPLOAD_ERR_OK) {
         return null;
     }
@@ -101,8 +104,13 @@ $isAjax  = !empty($_SERVER['HTTP_X_REQUESTED_WITH']) && strtolower($_SERVER['HTT
 $savedId = null;
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if (!validateCsrfToken($_POST['csrf_token'] ?? '')) {
-        if (!empty($_SERVER['HTTP_X_REQUESTED_WITH'])) { header('Content-Type: application/json; charset=utf-8'); echo json_encode(['success' => false, 'message' => 'Security token invalid.']); exit; }
-        header('Location: ' . basename($_SERVER['PHP_SELF'])); exit;
+        if (!empty($_SERVER['HTTP_X_REQUESTED_WITH'])) {
+            header('Content-Type: application/json; charset=utf-8');
+            echo json_encode(['success' => false, 'message' => 'Security token invalid.']);
+            exit;
+        }
+        header('Location: ' . basename($_SERVER['PHP_SELF']));
+        exit;
     }
     try {
         $action = $_POST['action'] ?? '';
@@ -113,7 +121,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
             if (empty($imageUrl)) {
                 $error = 'Please provide an image (upload or URL).';
-                if ($isAjax) { header('Content-Type: application/json; charset=utf-8'); echo json_encode(['success' => false, 'message' => $error]); exit; }
+                if ($isAjax) {
+                    header('Content-Type: application/json; charset=utf-8');
+                    echo json_encode(['success' => false, 'message' => $error]);
+                    exit;
+                }
             } else {
                 // Handle video
                 $videoUrl = processVideoUrl($_POST['video_url'] ?? '');
@@ -156,9 +168,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
                 $message = 'Gallery item added successfully!';
                 $savedId = $newId;
-                if ($isAjax) { header('Content-Type: application/json; charset=utf-8'); echo json_encode(['success' => true, 'message' => $message, 'saved_id' => $savedId]); exit; }
+                if ($isAjax) {
+                    header('Content-Type: application/json; charset=utf-8');
+                    echo json_encode(['success' => true, 'message' => $message, 'saved_id' => $savedId]);
+                    exit;
+                }
             }
-
         } elseif ($action === 'update') {
             $imagePath = uploadGalleryImage($_FILES['image'] ?? null);
 
@@ -222,8 +237,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
             $message = 'Gallery item updated successfully!';
             $savedId = (int)($_POST['id'] ?? 0);
-            if ($isAjax) { header('Content-Type: application/json; charset=utf-8'); echo json_encode(['success' => true, 'message' => $message, 'saved_id' => $savedId]); exit; }
-
+            if ($isAjax) {
+                header('Content-Type: application/json; charset=utf-8');
+                echo json_encode(['success' => true, 'message' => $message, 'saved_id' => $savedId]);
+                exit;
+            }
         } elseif ($action === 'delete') {
             $itemId = (int)($_POST['id'] ?? 0);
             if ($itemId > 0 && function_exists('upsertManagedMediaForSource')) {
@@ -251,16 +269,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 }
             }
             $message = 'Gallery item deleted successfully!';
-
         } elseif ($action === 'toggle_active') {
             $stmt = $pdo->prepare("UPDATE hotel_gallery SET is_active = NOT is_active WHERE id = ?");
             $stmt->execute([$_POST['id']]);
             $message = 'Gallery item status updated!';
         }
-
     } catch (PDOException $e) {
         $error = 'Error: ' . $e->getMessage();
-        if ($isAjax) { header('Content-Type: application/json; charset=utf-8'); echo json_encode(['success' => false, 'message' => $error]); exit; }
+        if ($isAjax) {
+            header('Content-Type: application/json; charset=utf-8');
+            echo json_encode(['success' => false, 'message' => $error]);
+            exit;
+        }
     }
 }
 
@@ -291,11 +311,21 @@ if ($gallery_css_version === '' || $gallery_css_version === '0') {
 ?>
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="csrf-token" content="<?= htmlspecialchars($csrf_token, ENT_QUOTES) ?>">
-    <script>(function(){var _t='<?= htmlspecialchars($csrf_token,ENT_QUOTES)?>';var _f=window.fetch;window.fetch=function(u,o){if(o&&o.body instanceof FormData&&!o.body.has('csrf_token'))o.body.append('csrf_token',_t);return _f.apply(this,arguments);};})();</script>
+    <script>
+        (function() {
+            var _t = '<?= htmlspecialchars($csrf_token, ENT_QUOTES) ?>';
+            var _f = window.fetch;
+            window.fetch = function(u, o) {
+                if (o && o.body instanceof FormData && !o.body.has('csrf_token')) o.body.append('csrf_token', _t);
+                return _f.apply(this, arguments);
+            };
+        })();
+    </script>
     <title>Gallery Management - Admin Panel</title>
 
     <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -308,6 +338,7 @@ if ($gallery_css_version === '' || $gallery_css_version === '0') {
     <link rel="stylesheet" href="css/admin-components.css">
     <link rel="stylesheet" href="css/gallery-management.css?v=<?php echo urlencode($gallery_css_version); ?>">
 </head>
+
 <body>
     <?php require_once 'includes/admin-header.php'; ?>
 
@@ -343,58 +374,58 @@ if ($gallery_css_version === '' || $gallery_css_version === '0') {
 
         <!-- Gallery Grid -->
         <?php if (!empty($gallery_items)): ?>
-        <div class="gallery-grid" id="galleryGrid">
-            <?php foreach ($gallery_items as $item): ?>
-            <div class="gallery-card" data-category="<?php echo htmlspecialchars($item['category']); ?>">
-                <?php
-                    $imgSrc = $item['image_url'];
-                    if (!preg_match('#^https?://#i', $imgSrc)) {
-                        $imgSrc = '../' . $imgSrc;
-                    }
-                ?>
-                <img src="<?php echo htmlspecialchars($imgSrc); ?>"
-                     alt="<?php echo htmlspecialchars($item['title']); ?>"
-                     class="gallery-card-image"
-                     onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';">
-                <div class="no-image-placeholder" style="display:none;"><i class="fas fa-image"></i></div>
+            <div class="gallery-grid" id="galleryGrid">
+                <?php foreach ($gallery_items as $item): ?>
+                    <div class="gallery-card" data-category="<?php echo htmlspecialchars($item['category']); ?>">
+                        <?php
+                        $imgSrc = $item['image_url'];
+                        if (!preg_match('#^https?://#i', $imgSrc)) {
+                            $imgSrc = '../' . $imgSrc;
+                        }
+                        ?>
+                        <img src="<?php echo htmlspecialchars($imgSrc); ?>"
+                            alt="<?php echo htmlspecialchars($item['title']); ?>"
+                            class="gallery-card-image"
+                            onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';">
+                        <div class="no-image-placeholder" style="display:none;"><i class="fas fa-image"></i></div>
 
-                <div class="gallery-card-body">
-                    <div class="gallery-card-title"><?php echo htmlspecialchars($item['title']); ?></div>
-                    <div class="gallery-card-desc"><?php echo htmlspecialchars(substr($item['description'] ?? '', 0, 80)); ?></div>
+                        <div class="gallery-card-body">
+                            <div class="gallery-card-title"><?php echo htmlspecialchars($item['title']); ?></div>
+                            <div class="gallery-card-desc"><?php echo htmlspecialchars(substr($item['description'] ?? '', 0, 80)); ?></div>
 
-                    <div class="gallery-card-meta">
-                        <span class="gallery-badge badge-category"><?php echo htmlspecialchars(ucfirst($item['category'] ?? 'general')); ?></span>
-                        <?php if ($item['is_active']): ?>
-                            <span class="gallery-badge badge-active"><i class="fas fa-check"></i> Active</span>
-                        <?php else: ?>
-                            <span class="gallery-badge badge-inactive"><i class="fas fa-times"></i> Inactive</span>
-                        <?php endif; ?>
-                        <?php if (!empty($item['video_path'])): ?>
-                            <span class="gallery-badge badge-video"><i class="fas fa-video"></i> Video</span>
-                        <?php endif; ?>
-                        <span class="gallery-order">Order: <?php echo $item['display_order']; ?></span>
+                            <div class="gallery-card-meta">
+                                <span class="gallery-badge badge-category"><?php echo htmlspecialchars(ucfirst($item['category'] ?? 'general')); ?></span>
+                                <?php if ($item['is_active']): ?>
+                                    <span class="gallery-badge badge-active"><i class="fas fa-check"></i> Active</span>
+                                <?php else: ?>
+                                    <span class="gallery-badge badge-inactive"><i class="fas fa-times"></i> Inactive</span>
+                                <?php endif; ?>
+                                <?php if (!empty($item['video_path'])): ?>
+                                    <span class="gallery-badge badge-video"><i class="fas fa-video"></i> Video</span>
+                                <?php endif; ?>
+                                <span class="gallery-order">Order: <?php echo $item['display_order']; ?></span>
+                            </div>
+
+                            <div class="gallery-card-actions">
+                                <button class="btn btn-primary btn-action btn-edit" type="button" onclick='openEditModal(<?php echo htmlspecialchars(json_encode($item), ENT_QUOTES, "UTF-8"); ?>)'>
+                                    <i class="fas fa-edit"></i> Edit
+                                </button>
+                                <button class="btn btn-secondary btn-action btn-toggle-active" type="button" title="Toggle active status" aria-label="Toggle active status" onclick="confirmToggleActive(<?php echo (int)$item['id']; ?>, <?php echo (int)$item['is_active']; ?>, <?php echo htmlspecialchars(json_encode($item['title'] ?? 'Gallery item'), ENT_QUOTES, 'UTF-8'); ?>)">
+                                    <i class="fas fa-power-off"></i> Toggle
+                                </button>
+                                <button class="btn btn-danger btn-action btn-delete" type="button" title="Delete gallery item" aria-label="Delete gallery item" onclick="confirmDeleteItem(<?php echo (int)$item['id']; ?>, <?php echo htmlspecialchars(json_encode($item['title'] ?? 'Gallery item'), ENT_QUOTES, 'UTF-8'); ?>)">
+                                    <i class="fas fa-trash-alt"></i> Delete
+                                </button>
+                            </div>
+                        </div>
                     </div>
-
-                    <div class="gallery-card-actions">
-                        <button class="btn btn-primary btn-action btn-edit" type="button" onclick='openEditModal(<?php echo htmlspecialchars(json_encode($item), ENT_QUOTES, "UTF-8"); ?>)'>
-                            <i class="fas fa-edit"></i> Edit
-                        </button>
-                        <button class="btn btn-secondary btn-action btn-toggle-active" type="button" title="Toggle active status" aria-label="Toggle active status" onclick="confirmToggleActive(<?php echo (int)$item['id']; ?>, <?php echo (int)$item['is_active']; ?>, <?php echo htmlspecialchars(json_encode($item['title'] ?? 'Gallery item'), ENT_QUOTES, 'UTF-8'); ?>)">
-                            <i class="fas fa-power-off"></i> Toggle
-                        </button>
-                        <button class="btn btn-danger btn-action btn-delete" type="button" title="Delete gallery item" aria-label="Delete gallery item" onclick="confirmDeleteItem(<?php echo (int)$item['id']; ?>, <?php echo htmlspecialchars(json_encode($item['title'] ?? 'Gallery item'), ENT_QUOTES, 'UTF-8'); ?>)">
-                            <i class="fas fa-trash-alt"></i> Delete
-                        </button>
-                    </div>
-                </div>
+                <?php endforeach; ?>
             </div>
-            <?php endforeach; ?>
-        </div>
         <?php else: ?>
-        <div class="empty-state gallery-empty-state">
-            <i class="fas fa-images gallery-empty-state__icon"></i>
-            <p>No gallery items found. Click "Add Gallery Item" to get started.</p>
-        </div>
+            <div class="empty-state gallery-empty-state">
+                <i class="fas fa-images gallery-empty-state__icon"></i>
+                <p>No gallery items found. Click "Add Gallery Item" to get started.</p>
+            </div>
         <?php endif; ?>
     </div>
 
@@ -489,245 +520,258 @@ if ($gallery_css_version === '' || $gallery_css_version === '0') {
     </div>
 
     <script>
-    const GALLERY_CSRF_TOKEN = <?php echo json_encode($csrf_token); ?>;
+        const GALLERY_CSRF_TOKEN = <?php echo json_encode($csrf_token); ?>;
 
-    function setGalleryLoader(visible, label) {
-        const loader = document.getElementById('admin-page-loader');
-        if (!loader) {
-            return;
+        function setGalleryLoader(visible, label) {
+            const loader = document.getElementById('admin-page-loader');
+            if (!loader) {
+                return;
+            }
+
+            const title = loader.querySelector('.admin-page-loader-title');
+            if (title && label) {
+                title.textContent = label;
+            }
+
+            loader.classList.toggle('is-visible', !!visible);
         }
 
-        const title = loader.querySelector('.admin-page-loader-title');
-        if (title && label) {
-            title.textContent = label;
+        function showGalleryMessage(isError, message) {
+            const safeMessage = String(message)
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;')
+                .replace(/"/g, '&quot;')
+                .replace(/'/g, '&#39;');
+
+            if (window.Modal && typeof window.Modal.showMessage === 'function') {
+                window.Modal.showMessage({
+                    title: isError ? 'Action Failed' : 'Success',
+                    message: '<p>' + safeMessage + '</p>',
+                    size: 'sm'
+                });
+                return;
+            }
+
+            const feedback = document.getElementById('galleryPageFeedback');
+            if (!feedback) {
+                return;
+            }
+
+            feedback.hidden = false;
+            feedback.className = 'admin-modal-feedback ' + (isError ? 'admin-modal-feedback--error' : 'admin-modal-feedback--success') + ' visible';
+            feedback.innerHTML = '<i class="fas ' + (isError ? 'fa-exclamation-circle' : 'fa-check-circle') + '"></i> ' + safeMessage;
         }
 
-        loader.classList.toggle('is-visible', !!visible);
-    }
+        function requestGalleryConfirmation(options) {
+            if (window.AdminConfirm && typeof window.AdminConfirm.request === 'function') {
+                return window.AdminConfirm.request(options);
+            }
 
-    function showGalleryMessage(isError, message) {
-        const safeMessage = String(message)
-            .replace(/&/g, '&amp;')
-            .replace(/</g, '&lt;')
-            .replace(/>/g, '&gt;')
-            .replace(/"/g, '&quot;')
-            .replace(/'/g, '&#39;');
-
-        if (window.Modal && typeof window.Modal.showMessage === 'function') {
-            window.Modal.showMessage({
-                title: isError ? 'Action Failed' : 'Success',
-                message: '<p>' + safeMessage + '</p>',
-                size: 'sm'
-            });
-            return;
+            return Promise.resolve(true);
         }
 
-        const feedback = document.getElementById('galleryPageFeedback');
-        if (!feedback) {
-            return;
+        function postGalleryAction(action, id, loadingText) {
+            const formData = new FormData();
+            formData.append('action', action);
+            formData.append('id', String(id));
+            formData.append('csrf_token', GALLERY_CSRF_TOKEN || '');
+
+            setGalleryLoader(true, loadingText);
+
+            return fetch(window.location.href, {
+                    method: 'POST',
+                    body: formData,
+                    credentials: 'same-origin',
+                    headers: {
+                        'X-Requested-With': 'XMLHttpRequest'
+                    }
+                })
+                .then(function(response) {
+                    if (!response.ok) {
+                        throw new Error('Request failed');
+                    }
+
+                    window.location.reload();
+                })
+                .catch(function() {
+                    setGalleryLoader(false, 'Loading...');
+                    showGalleryMessage(true, 'Unable to complete this action. Please try again.');
+                });
         }
 
-        feedback.hidden = false;
-        feedback.className = 'admin-modal-feedback ' + (isError ? 'admin-modal-feedback--error' : 'admin-modal-feedback--success') + ' visible';
-        feedback.innerHTML = '<i class="fas ' + (isError ? 'fa-exclamation-circle' : 'fa-check-circle') + '"></i> ' + safeMessage;
-    }
-
-    function requestGalleryConfirmation(options) {
-        if (window.AdminConfirm && typeof window.AdminConfirm.request === 'function') {
-            return window.AdminConfirm.request(options);
-        }
-
-        return Promise.resolve(true);
-    }
-
-    function postGalleryAction(action, id, loadingText) {
-        const formData = new FormData();
-        formData.append('action', action);
-        formData.append('id', String(id));
-        formData.append('csrf_token', GALLERY_CSRF_TOKEN || '');
-
-        setGalleryLoader(true, loadingText);
-
-        return fetch(window.location.href, {
-            method: 'POST',
-            body: formData,
-            credentials: 'same-origin',
-            headers: { 'X-Requested-With': 'XMLHttpRequest' }
-        })
-            .then(function(response) {
-                if (!response.ok) {
-                    throw new Error('Request failed');
-                }
-
-                window.location.reload();
-            })
-            .catch(function() {
-                setGalleryLoader(false, 'Loading...');
-                showGalleryMessage(true, 'Unable to complete this action. Please try again.');
-            });
-    }
-
-    function openAddModal() {
-        document.getElementById('modalTitle').innerHTML = '<i class="fas fa-plus-circle"></i> Add Gallery Item';
-        document.getElementById('formAction').value = 'add';
-        document.getElementById('formId').value = '';
-        document.getElementById('formTitle').value = '';
-        document.getElementById('formDescription').value = '';
-        document.getElementById('formCategory').value = 'general';
-        document.getElementById('formOrder').value = '0';
-        document.getElementById('formImageUrlExternal').value = '';
-        document.getElementById('formVideoUrl').value = '';
-        document.getElementById('currentImagePreview').style.display = 'none';
-        document.getElementById('currentVideoInfo').style.display = 'none';
-        document.getElementById('galleryModal').style.display = 'flex';
-    }
-
-    function openEditModal(item) {
-        document.getElementById('modalTitle').innerHTML = '<i class="fas fa-edit"></i> Edit Gallery Item';
-        document.getElementById('formAction').value = 'update';
-        document.getElementById('formId').value = item.id;
-        document.getElementById('formTitle').value = item.title;
-        document.getElementById('formDescription').value = item.description || '';
-        document.getElementById('formCategory').value = item.category || 'general';
-        document.getElementById('formOrder').value = item.display_order || 0;
-
-        // Show current image if exists
-        if (item.image_url) {
-            const imgSrc = item.image_url.match(/^https?:\/\//) ? item.image_url : '../' + item.image_url;
-            document.getElementById('previewImg').src = imgSrc;
-            document.getElementById('currentImagePreview').style.display = 'block';
-            document.getElementById('formImageUrlExternal').value = item.image_url.match(/^https?:\/\//) ? item.image_url : '';
-        } else {
+        function openAddModal() {
+            document.getElementById('modalTitle').innerHTML = '<i class="fas fa-plus-circle"></i> Add Gallery Item';
+            document.getElementById('formAction').value = 'add';
+            document.getElementById('formId').value = '';
+            document.getElementById('formTitle').value = '';
+            document.getElementById('formDescription').value = '';
+            document.getElementById('formCategory').value = 'general';
+            document.getElementById('formOrder').value = '0';
+            document.getElementById('formImageUrlExternal').value = '';
+            document.getElementById('formVideoUrl').value = '';
             document.getElementById('currentImagePreview').style.display = 'none';
-        }
-
-        // Show current video info
-        if (item.video_path) {
-            document.getElementById('currentVideoText').textContent = item.video_path.substring(0, 60) + (item.video_path.length > 60 ? '...' : '') + ' (' + (item.video_type || 'unknown') + ')';
-            document.getElementById('currentVideoInfo').style.display = 'block';
-            if (item.video_path.match(/^https?:\/\//)) {
-                document.getElementById('formVideoUrl').value = item.video_path;
-            }
-        } else {
             document.getElementById('currentVideoInfo').style.display = 'none';
+            document.getElementById('galleryModal').style.display = 'flex';
         }
 
-        document.getElementById('galleryModal').style.display = 'flex';
-    }
+        function openEditModal(item) {
+            document.getElementById('modalTitle').innerHTML = '<i class="fas fa-edit"></i> Edit Gallery Item';
+            document.getElementById('formAction').value = 'update';
+            document.getElementById('formId').value = item.id;
+            document.getElementById('formTitle').value = item.title;
+            document.getElementById('formDescription').value = item.description || '';
+            document.getElementById('formCategory').value = item.category || 'general';
+            document.getElementById('formOrder').value = item.display_order || 0;
 
-    function closeModal() {
-        document.getElementById('galleryModal').style.display = 'none';
-        const fb = document.getElementById('galleryModalFeedback');
-        if (fb) { fb.className = 'admin-modal-feedback'; fb.innerHTML = ''; }
-    }
-
-    // Close on outside click
-    document.getElementById('galleryModal').addEventListener('click', function(e) {
-        if (e.target === this) closeModal();
-    });
-
-    // ── AJAX save — keep modal open ─────────────────────────────
-    document.getElementById('galleryForm').addEventListener('submit', function(e) {
-        e.preventDefault();
-        const saveBtn = document.getElementById('galleryFormSubmitBtn');
-        const fb      = document.getElementById('galleryModalFeedback');
-        saveBtn.disabled = true;
-        saveBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Saving...';
-        fb.className = 'admin-modal-feedback'; fb.innerHTML = '';
-        setGalleryLoader(true, 'Saving gallery item...');
-        fetch(window.location.pathname, {
-            method: 'POST',
-            headers: { 'X-Requested-With': 'XMLHttpRequest' },
-            body: new FormData(this)
-        })
-        .then(function(r) { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
-        .then(function(res) {
-            setGalleryLoader(false, 'Loading...');
-            saveBtn.disabled = false;
-            saveBtn.innerHTML = '<i class="fas fa-save"></i> Save';
-            fb.className = 'admin-modal-feedback ' + (res.success ? 'admin-modal-feedback--success' : 'admin-modal-feedback--error') + ' visible';
-            fb.innerHTML = '<i class="fas fa-' + (res.success ? 'check-circle' : 'exclamation-circle') + '"></i> ' + res.message;
-            if (res.success) {
-                if (res.saved_id && document.getElementById('formAction').value === 'add') {
-                    document.getElementById('formAction').value = 'update';
-                    document.getElementById('formId').value = res.saved_id;
-                    document.getElementById('modalTitle').innerHTML = '<i class="fas fa-edit"></i> Edit Gallery Item';
-                }
-                refreshGalleryGrid();
-            }
-        })
-        .catch(function() {
-            setGalleryLoader(false, 'Loading...');
-            saveBtn.disabled = false;
-            saveBtn.innerHTML = '<i class="fas fa-save"></i> Save';
-            fb.className = 'admin-modal-feedback admin-modal-feedback--error visible';
-            fb.innerHTML = '<i class="fas fa-exclamation-circle"></i> Network error — please try again.';
-        });
-    });
-
-    function refreshGalleryGrid() {
-        fetch(window.location.href)
-        .then(function(r) { return r.text(); })
-        .then(function(html) {
-            const doc  = new DOMParser().parseFromString(html, 'text/html');
-            const next = doc.getElementById('galleryGrid');
-            const cur  = document.getElementById('galleryGrid');
-            if (next && cur) cur.innerHTML = next.innerHTML;
-        }).catch(function() {});
-    }
-
-    function toggleActive(id) {
-        return postGalleryAction('toggle_active', id, 'Updating gallery item...');
-    }
-
-    function confirmToggleActive(id, isActive, title) {
-        requestGalleryConfirmation({
-            title: isActive ? 'Deactivate gallery item?' : 'Activate gallery item?',
-            message: 'This will update whether the item appears on the website.',
-            details: [title || 'Gallery item'],
-            confirmText: isActive ? 'Deactivate' : 'Activate',
-            cancelText: 'Cancel',
-            tone: isActive ? 'warning' : 'success',
-            icon: isActive ? 'fa-eye-slash' : 'fa-eye'
-        }).then(function(confirmed) {
-            if (confirmed) {
-                toggleActive(id);
-            }
-        });
-    }
-
-    function deleteItem(id) {
-        return postGalleryAction('delete', id, 'Deleting gallery item...');
-    }
-
-    function confirmDeleteItem(id, title) {
-        requestGalleryConfirmation({
-            title: 'Delete gallery item?',
-            message: 'This permanently removes the item from the gallery.',
-            details: [title || 'Gallery item'],
-            confirmText: 'Delete item',
-            cancelText: 'Cancel',
-            tone: 'danger',
-            icon: 'fa-trash-alt'
-        }).then(function(confirmed) {
-            if (confirmed) {
-                deleteItem(id);
-            }
-        });
-    }
-
-    function filterGallery(category, btn) {
-        document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
-        btn.classList.add('active');
-
-        document.querySelectorAll('.gallery-card').forEach(card => {
-            if (category === 'all' || card.dataset.category === category) {
-                card.style.display = '';
+            // Show current image if exists
+            if (item.image_url) {
+                const imgSrc = item.image_url.match(/^https?:\/\//) ? item.image_url : '../' + item.image_url;
+                document.getElementById('previewImg').src = imgSrc;
+                document.getElementById('currentImagePreview').style.display = 'block';
+                document.getElementById('formImageUrlExternal').value = item.image_url.match(/^https?:\/\//) ? item.image_url : '';
             } else {
-                card.style.display = 'none';
+                document.getElementById('currentImagePreview').style.display = 'none';
             }
+
+            // Show current video info
+            if (item.video_path) {
+                document.getElementById('currentVideoText').textContent = item.video_path.substring(0, 60) + (item.video_path.length > 60 ? '...' : '') + ' (' + (item.video_type || 'unknown') + ')';
+                document.getElementById('currentVideoInfo').style.display = 'block';
+                if (item.video_path.match(/^https?:\/\//)) {
+                    document.getElementById('formVideoUrl').value = item.video_path;
+                }
+            } else {
+                document.getElementById('currentVideoInfo').style.display = 'none';
+            }
+
+            document.getElementById('galleryModal').style.display = 'flex';
+        }
+
+        function closeModal() {
+            document.getElementById('galleryModal').style.display = 'none';
+            const fb = document.getElementById('galleryModalFeedback');
+            if (fb) {
+                fb.className = 'admin-modal-feedback';
+                fb.innerHTML = '';
+            }
+        }
+
+        // Close on outside click
+        document.getElementById('galleryModal').addEventListener('click', function(e) {
+            if (e.target === this) closeModal();
         });
-    }
+
+        // ── AJAX save — keep modal open ─────────────────────────────
+        document.getElementById('galleryForm').addEventListener('submit', function(e) {
+            e.preventDefault();
+            const saveBtn = document.getElementById('galleryFormSubmitBtn');
+            const fb = document.getElementById('galleryModalFeedback');
+            saveBtn.disabled = true;
+            saveBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Saving...';
+            fb.className = 'admin-modal-feedback';
+            fb.innerHTML = '';
+            setGalleryLoader(true, 'Saving gallery item...');
+            fetch(window.location.pathname, {
+                    method: 'POST',
+                    headers: {
+                        'X-Requested-With': 'XMLHttpRequest'
+                    },
+                    body: new FormData(this)
+                })
+                .then(function(r) {
+                    if (!r.ok) throw new Error('HTTP ' + r.status);
+                    return r.json();
+                })
+                .then(function(res) {
+                    setGalleryLoader(false, 'Loading...');
+                    saveBtn.disabled = false;
+                    saveBtn.innerHTML = '<i class="fas fa-save"></i> Save';
+                    fb.className = 'admin-modal-feedback ' + (res.success ? 'admin-modal-feedback--success' : 'admin-modal-feedback--error') + ' visible';
+                    fb.innerHTML = '<i class="fas fa-' + (res.success ? 'check-circle' : 'exclamation-circle') + '"></i> ' + res.message;
+                    if (res.success) {
+                        if (res.saved_id && document.getElementById('formAction').value === 'add') {
+                            document.getElementById('formAction').value = 'update';
+                            document.getElementById('formId').value = res.saved_id;
+                            document.getElementById('modalTitle').innerHTML = '<i class="fas fa-edit"></i> Edit Gallery Item';
+                        }
+                        refreshGalleryGrid();
+                    }
+                })
+                .catch(function() {
+                    setGalleryLoader(false, 'Loading...');
+                    saveBtn.disabled = false;
+                    saveBtn.innerHTML = '<i class="fas fa-save"></i> Save';
+                    fb.className = 'admin-modal-feedback admin-modal-feedback--error visible';
+                    fb.innerHTML = '<i class="fas fa-exclamation-circle"></i> Network error — please try again.';
+                });
+        });
+
+        function refreshGalleryGrid() {
+            fetch(window.location.href)
+                .then(function(r) {
+                    return r.text();
+                })
+                .then(function(html) {
+                    const doc = new DOMParser().parseFromString(html, 'text/html');
+                    const next = doc.getElementById('galleryGrid');
+                    const cur = document.getElementById('galleryGrid');
+                    if (next && cur) cur.innerHTML = next.innerHTML;
+                }).catch(function() {});
+        }
+
+        function toggleActive(id) {
+            return postGalleryAction('toggle_active', id, 'Updating gallery item...');
+        }
+
+        function confirmToggleActive(id, isActive, title) {
+            requestGalleryConfirmation({
+                title: isActive ? 'Deactivate gallery item?' : 'Activate gallery item?',
+                message: 'This will update whether the item appears on the website.',
+                details: [title || 'Gallery item'],
+                confirmText: isActive ? 'Deactivate' : 'Activate',
+                cancelText: 'Cancel',
+                tone: isActive ? 'warning' : 'success',
+                icon: isActive ? 'fa-eye-slash' : 'fa-eye'
+            }).then(function(confirmed) {
+                if (confirmed) {
+                    toggleActive(id);
+                }
+            });
+        }
+
+        function deleteItem(id) {
+            return postGalleryAction('delete', id, 'Deleting gallery item...');
+        }
+
+        function confirmDeleteItem(id, title) {
+            requestGalleryConfirmation({
+                title: 'Delete gallery item?',
+                message: 'This permanently removes the item from the gallery.',
+                details: [title || 'Gallery item'],
+                confirmText: 'Delete item',
+                cancelText: 'Cancel',
+                tone: 'danger',
+                icon: 'fa-trash-alt'
+            }).then(function(confirmed) {
+                if (confirmed) {
+                    deleteItem(id);
+                }
+            });
+        }
+
+        function filterGallery(category, btn) {
+            document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
+            btn.classList.add('active');
+
+            document.querySelectorAll('.gallery-card').forEach(card => {
+                if (category === 'all' || card.dataset.category === category) {
+                    card.style.display = '';
+                } else {
+                    card.style.display = 'none';
+                }
+            });
+        }
     </script>
 
     <?php require_once 'includes/admin-footer.php'; ?>

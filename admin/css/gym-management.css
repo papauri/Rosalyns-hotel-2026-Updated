@@ -54,7 +54,7 @@
     position: relative;
 }
 
-.gym-card-icon-area > i {
+.gym-card-icon-area>i {
     font-size: 34px;
     color: var(--gold, #8B7355);
     opacity: 0.85;

@@ -183,7 +183,7 @@ if ($gym_css_version === '' || $gym_css_version === '0') {
             gap: 8px !important;
         }
 
-        #rh-admin-page .gym-card-icon-area > i {
+        #rh-admin-page .gym-card-icon-area>i {
             font-size: 34px !important;
             line-height: 1 !important;
         }
