@@ -1,0 +1,282 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>POS Till Guide — Rosalyn's Hotel</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link
+    href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@400;500;600;700&family=Jost:wght@300;400;500;600&display=swap"
+    rel="stylesheet">
+  <link rel="stylesheet" href="assets/guide-theme.css">
+  <script src="assets/guide-init.js" defer></script>
+</head>
+
+<body>
+
+  <nav class="top">
+    <a href="index.html" class="brand">ROSALYN'S HOTEL</a>
+    <div class="nav-links">
+      <a href="index.html">All Guides</a>
+      <a href="99-admin-dashboard-full-guide.html">Admin Bible</a>
+      <a href="owner-handover.php">Owner</a>
+      <a href="02-kds-kitchen.html">Next →</a>
+    </div>
+  </nav>
+
+  <header class="hero">
+    <div class="deck">
+      <div class="eyebrow">Guide 01 &middot; Cashier</div>
+      <h1>POS Till</h1>
+      <p class="lead">Your home screen for the restaurant, bar and coffee shop. Every order starts here.</p>
+      <div class="meta">
+        <span>URL <strong>/admin/pos.php</strong></span>
+        <span>Role <strong>restaurant_staff · manager · admin</strong></span>
+        <span>Read time <strong>5 min</strong></span>
+      </div>
+    </div>
+  </header>
+
+  <main class="content">
+    <div class="deck">
+
+      <section>
+        <h2>Layout (left → right)</h2>
+        <table>
+          <thead>
+            <tr>
+              <th>Pane</th>
+              <th>Purpose</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><strong>Left — Categories</strong></td>
+              <td>All menu sections (Starters, Mains, Drinks…). Tap one to filter.</td>
+            </tr>
+            <tr>
+              <td><strong>Centre — Items</strong></td>
+              <td>Tap an item to add it to the cart. Counts (e.g. <strong>23 items</strong>) are visible per category.
+              </td>
+            </tr>
+            <tr>
+              <td><strong>Right — Cart &amp; Pay</strong></td>
+              <td>Current order, quantities, totals, payment buttons, park-as-tab.</td>
+            </tr>
+          </tbody>
+        </table>
+        <p>The top <strong>Till Bar</strong> always shows: cashier name, today's order count, today's revenue, today's
+          cash collected, plus links to <strong>Stations</strong> (KDS/BDS/CDS feed), <strong>Restaurant
+            Orders</strong>, and <strong>Sign Out</strong>.</p>
+      </section>
+
+      <section>
+        <h2>Take an order</h2>
+        <ol class="steps">
+          <li><strong>Pick the destination</strong> &mdash; choose a <strong>Table number</strong> (dine-in),
+            <strong>Room number</strong> (room charge / room service) or leave blank for <strong>takeaway</strong>.
+          </li>
+          <li><strong>Pick a category</strong> on the left.</li>
+          <li><strong>Tap items</strong> in the centre &mdash; each tap adds 1; tap <strong>+ / −</strong> in the cart
+            to adjust qty.</li>
+          <li>Review the cart total at the bottom-right.</li>
+          <li><strong>Choose action:</strong>
+            <ul>
+              <li><strong>Pay &amp; Send</strong> (walk-in/takeaway) &mdash; pay now, then fire immediately to
+                KDS/BDS/CDS.</li>
+              <li><strong>Fire to Stations</strong> (or <strong>Send to Kitchen</strong> / <strong>Send to Bar</strong>,
+                based on cart mix) &mdash; opens the order as a tab to settle later.</li>
+              <li><strong>Settle from Tabs</strong> (dine-in) or <strong>Room Folio</strong> (room service) &mdash; the
+                pay button guides you to the correct settlement path.</li>
+              <li>Open tabs can be re-opened later from
+                the Tabs panel and add more items, then settle.</li>
+            </ul>
+          </li>
+          <li><strong>Choose payment method:</strong> Cash · Mobile Money · Card.
+            <ul>
+              <li>Mobile Money requires <strong>provider + transaction reference</strong>.</li>
+              <li>Card requires <strong>last 4 digits + authorisation code</strong>.</li>
+            </ul>
+          </li>
+          <li>The success overlay shows the <strong>order reference</strong>. Print or hand the receipt to the guest.
+          </li>
+        </ol>
+      </section>
+
+      <section>
+        <h2>Tabs (parked orders)</h2>
+        <ul class="checklist">
+          <li>A parked tab stays open until you settle it.</li>
+          <li>The Tabs tray shows: reference, table/room, order type, item count, total, age timer (turns red after 30
+            min), fired time, served time, and current kitchen status (pending / prep / ready / collection / served
+            counts).</li>
+          <li>Tap <strong>Settle</strong> to add payment &amp; close.</li>
+          <li>Tap <strong>Details</strong> to open the full order detail modal. Inside you'll see:
+            <ul>
+              <li><strong>Order Lifecycle track</strong> — five milestone steps (Placed → Fired → Ready → Served → Paid)
+                with icons, timestamps, and colour-coded dots: green for completed steps, primary colour for the current
+                active step.</li>
+              <li><strong>Item Status stepper</strong> — how many items are at each kitchen stage (pending / preparing /
+                ready / collecting / served).</li>
+              <li><strong>Line items table</strong> with per-item kitchen status and timestamps.</li>
+              <li><strong>Audit &amp; event log</strong> — every action on this order in chronological order.</li>
+            </ul>
+          </li>
+          <li>For settled tabs, use <strong>Receipt</strong> to open the printable receipt page.</li>
+          <li>Admin/manager tab cards also show a <strong>Lifecycle</strong> link that opens
+            <code>/admin/order-lifecycle.php</code> in a full page with Cancel and Void actions.
+          </li>
+        </ul>
+      </section>
+
+      <section>
+        <h2>How stock works</h2>
+        <ul class="checklist">
+          <li>Stock is <strong>not deducted when you fire an order</strong>. It is deducted when the kitchen/bar/coffee
+            station marks each item <strong>Ready</strong> (preparation complete).</li>
+          <li>This means a <em>Cancel Before Prep</em> never needs to restore stock &mdash; nothing was taken yet.</li>
+          <li>A <em>Void</em> on a partially-prepared order only restores stock for items that had already been marked
+            Ready.</li>
+          <li>The POS shows a ready alert from each station when all their items are ready or in the collection queue.
+          </li>
+        </ul>
+      </section>
+
+      <section>
+        <h2>My Orders tracker</h2>
+        <p>The <strong>My Orders</strong> panel (bottom-left of the POS till) shows every live order you have fired this
+          shift, refreshed every second so KDS/BDS/CDS changes appear almost immediately.</p>
+        <table>
+          <thead>
+            <tr>
+              <th>Element</th>
+              <th>What it means</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><span class="pill red">⚡ RUSH</span> badge</td>
+              <td>This order has been marked high-priority. All stations see it highlighted in red.</td>
+            </tr>
+            <tr>
+              <td>Station pips (🍳 · 🍺 · ☕)</td>
+              <td>One pip per station. <strong>Green tick</strong> = all items at that station done. <strong>Blue
+                  spinner + count</strong> = items still in progress.</td>
+            </tr>
+            <tr>
+              <td>Amber italic note</td>
+              <td>The order note currently visible on all station screens.</td>
+            </tr>
+            <tr>
+              <td>Small item summary</td>
+              <td>Shows the ordered items in small text. Long orders show the first few items plus a remaining count.
+              </td>
+            </tr>
+            <tr>
+              <td><strong>Rush</strong> button</td>
+              <td>Toggles priority on/off. All stations get an instant <span class="pill red">URGENT</span> inbox
+                message when you set or clear Rush.</td>
+            </tr>
+            <tr>
+              <td><strong>Edit note</strong> button</td>
+              <td>Opens a text overlay to update the order note. All stations receive an <span
+                  class="pill red">URGENT</span> inbox message with the new text the moment you save.</td>
+            </tr>
+          </tbody>
+        </table>
+        <div class="callout note">Rush and Edit note are only available while the order is in <strong>placed</strong>
+          status (kitchen not yet done). Once all stations have served, the buttons disappear.</div>
+      </section>
+
+      <section>
+        <h2>Station replies &amp; notifications</h2>
+        <ul class="checklist">
+          <li>When kitchen/bar/coffee sends a note back, you get an in-app notification and sound alert on POS.</li>
+          <li>Use <strong>Sounds</strong> / <strong>Sound Settings</strong> to choose the normal alert, urgent alert,
+            and
+            volume for the till device.</li>
+          <li>Direct station messages (for your user) appear in the POS inbox as <strong>Station → You</strong>.</li>
+          <li>When all items at a station are <strong>Ready</strong> or in <strong>Collection</strong>, POS shows a
+            ready-collection alert with the item summary. <strong>The cashier who placed the order</strong> gets a
+            vibrating urgent banner ("🔔 Your order is ready!"). Other POS sessions get a quieter green banner.</li>
+          <li>Ready and station-message popups stay on POS for <strong>2 minutes</strong> and can be closed immediately
+            with the <strong>×</strong> button.</li>
+          <li>If a tab was already paid elsewhere, stock is short, or there is nothing pending, POS shows a friendly
+            dialog and refreshes the affected tray instead of leaving the cashier guessing.</li>
+          <li>Important action buttons include a brief click lock to prevent accidental double taps.</li>
+        </ul>
+      </section>
+
+      <section>
+        <h2>Cancelling an order before prep</h2>
+        <p>If you realise a mistake immediately after firing — and the kitchen/bar has not started yet — you can cancel
+          without involving a manager.</p>
+        <ol class="steps">
+          <li>Open the <strong>Tabs tray</strong>.</li>
+          <li>Find the order. If <strong>all items are still pending</strong> (none started), a red
+            <strong>Cancel (Before Prep)</strong> button appears.
+          </li>
+          <li>Enter a reason of at least 8 characters (logged for audit).</li>
+          <li>The order is removed from all station boards. Because no stock was deducted yet, nothing needs restoring.
+          </li>
+        </ol>
+        <div class="callout warn">Once the kitchen or bar taps <strong>Start</strong> or <strong>Ready</strong> on any
+          item, the <em>Cancel Before Prep</em> button disappears. You must use <strong>Void</strong> (manager) instead.
+        </div>
+      </section>
+
+      <section>
+        <h2>Voiding an order <span class="pill amber">manager only</span></h2>
+        <ol class="steps">
+          <li>Open the <strong>Tabs tray</strong> and find the order, or open it from <strong>Restaurant
+              Orders</strong>.</li>
+          <li>Tap <strong>Void &amp; restore stock</strong>.</li>
+          <li>Type a reason of <strong>at least 8 characters</strong> (saved for audit).</li>
+          <li>Stock is restored for any items that had already been prepared (marked Ready on KDS). Payment is cancelled
+            and the order is removed from KDS/BDS/CDS automatically.</li>
+        </ol>
+      </section>
+
+      <section>
+        <h2>Closing your shift (Z-report)</h2>
+        <ol class="steps">
+          <li>Tap <strong>Close Shift</strong> in the till bar (visible from cashier role and above).</li>
+          <li>Type your <strong>counted cash drawer total</strong>.</li>
+          <li>The variance is calculated automatically.</li>
+          <li>If variance &gt; tolerance, an <strong>admin override + reason ≥ 5 chars</strong> is required.</li>
+          <li>Confirm. A Z-report is saved and you are signed out.</li>
+        </ol>
+      </section>
+
+      <section>
+        <h2>Tips</h2>
+        <div class="callout tip">
+          The Till works <strong>offline</strong> &mdash; your orders queue locally and sync when the internet returns.
+        </div>
+        <ul class="checklist">
+          <li>All hard buttons are at least 44px tall &mdash; designed for touch.</li>
+          <li>Press <code>?</code> on a keyboard to see the help bubbles.</li>
+          <li><strong>Fullscreen kiosk mode</strong> &mdash; on first load a small banner at the bottom says "Tap
+            anywhere to go fullscreen". Tap anywhere and the browser enters full-screen, hiding tabs and the address
+            bar. If you accidentally exit (e.g. back-swipe), the banner reappears and the next tap re-enters it
+            automatically.</li>
+        </ul>
+      </section>
+
+    </div>
+  </main>
+
+  <footer class="guide-footer">
+    <div class="deck">
+      <div class="crest">— R H —</div>
+      <p><a href="index.html">← All guides</a> &middot; <a href="99-admin-dashboard-full-guide.html">Admin Bible</a>
+        &middot; <a href="owner-handover.php">Owner handover</a> &middot; <a href="02-kds-kitchen.html">Next: KDS
+          Kitchen →</a></p>
+    </div>
+  </footer>
+
+</body>
+
+</html>

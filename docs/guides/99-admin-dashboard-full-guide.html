@@ -1,0 +1,925 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Full Admin Dashboard Guide — Rosalyn's Hotel</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link
+    href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@400;500;600;700&family=Jost:wght@300;400;500;600&display=swap"
+    rel="stylesheet">
+  <link rel="stylesheet" href="assets/guide-theme.css">
+  <style>
+    /* TOC sidebar additions */
+    .layout-with-toc {
+      display: grid;
+      grid-template-columns: 240px 1fr;
+      gap: 2.5rem;
+      align-items: start;
+    }
+
+    .toc-sidebar {
+      position: sticky;
+      top: 76px;
+      max-height: calc(100vh - 100px);
+      overflow-y: auto;
+      padding: 1rem 0;
+    }
+
+    .toc-sidebar h4 {
+      font-family: 'Jost', sans-serif;
+      text-transform: uppercase;
+      letter-spacing: 0.15em;
+      font-size: 0.78rem;
+      color: var(--gold);
+      margin-bottom: 0.6rem;
+    }
+
+    .toc-sidebar ol {
+      list-style: none;
+      padding: 0;
+      margin: 0;
+      counter-reset: tocstep;
+    }
+
+    .toc-sidebar ol li {
+      counter-increment: tocstep;
+      margin: 0;
+      padding: 0.25rem 0;
+      border-bottom: 1px dashed var(--line);
+      font-size: 0.88rem;
+    }
+
+    .toc-sidebar ol li::before {
+      content: counter(tocstep) ". ";
+      color: var(--gold);
+      font-weight: 600;
+    }
+
+    .toc-sidebar a {
+      color: var(--ink);
+      border: none;
+    }
+
+    .toc-sidebar a:hover {
+      color: var(--gold);
+    }
+
+    @media (max-width: 900px) {
+      .layout-with-toc {
+        grid-template-columns: 1fr;
+      }
+
+      .toc-sidebar {
+        position: static;
+        max-height: none;
+      }
+    }
+  </style>
+  <script src="assets/guide-init.js" defer></script>
+</head>
+
+<body>
+
+  <nav class="top">
+    <a href="index.html" class="brand">ROSALYN'S HOTEL</a>
+    <div class="nav-links">
+      <a href="index.html">All Guides</a>
+      <a href="08-stock-orders.html">← Stock</a>
+      <a href="owner-handover.php">Owner →</a>
+    </div>
+  </nav>
+
+  <header class="hero">
+    <div class="deck">
+      <div class="eyebrow">★ Manager &middot; Admin</div>
+      <h1>Full Admin Dashboard Guide</h1>
+      <p class="lead">Comprehensive walkthrough of every section in the back office. Bookmark this page; the table of
+        contents on the left is your map.</p>
+      <div class="meta">
+        <span>Audience <strong>Hotel manager &amp; admins</strong></span>
+        <span>Read time <strong>~40 min</strong></span>
+        <span>Entry <strong>/admin/login.php</strong></span>
+      </div>
+    </div>
+  </header>
+
+  <main class="content">
+    <div class="deck layout-with-toc">
+
+      <aside class="toc-sidebar">
+        <h4>Contents</h4>
+        <ol>
+          <li><a href="#getting-started">Getting started</a></li>
+          <li><a href="#dashboard-home">Dashboard home</a></li>
+          <li><a href="#bookings">Bookings</a></li>
+          <li><a href="#packages">Packages &amp; rate plans</a></li>
+          <li><a href="#calendar">Calendar &amp; rooms</a></li>
+          <li><a href="#payments">Payments &amp; invoices</a></li>
+          <li><a href="#fnb">POS / KDS / BDS / CDS</a></li>
+          <li><a href="#room-service">Room service</a></li>
+          <li><a href="#hk">Housekeeping</a></li>
+          <li><a href="#stock">Stock</a></li>
+          <li><a href="#menu">Menu management</a></li>
+          <li><a href="#conf">Conference &amp; events</a></li>
+          <li><a href="#gym">Gym &amp; guest services</a></li>
+          <li><a href="#users">Users &amp; permissions</a></li>
+          <li><a href="#reviews">Reviews</a></li>
+          <li><a href="#pages">Page, footer &amp; section content</a></li>
+          <li><a href="#media">Media &amp; gallery</a></li>
+          <li><a href="#reports">Reports &amp; analytics</a></li>
+          <li><a href="#settings">Site settings</a></li>
+          <li><a href="#security">Security &amp; cache</a></li>
+          <li><a href="#backups">Backups &amp; offline log</a></li>
+          <li><a href="#trouble">Troubleshooting</a></li>
+        </ol>
+      </aside>
+
+      <article>
+
+        <section id="getting-started">
+          <h2>1. Getting started</h2>
+          <h3>Roles</h3>
+          <table>
+            <thead>
+              <tr>
+                <th>Role</th>
+                <th>Sees</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td><strong>admin</strong></td>
+                <td>Everything.</td>
+              </tr>
+              <tr>
+                <td><strong>manager</strong></td>
+                <td>Everything except destructive admin actions (DB tools, role edits).</td>
+              </tr>
+              <tr>
+                <td><strong>receptionist</strong></td>
+                <td>Bookings, payments, guest details, calendar, room service.</td>
+              </tr>
+              <tr>
+                <td><strong>restaurant_staff</strong></td>
+                <td>POS Till, restaurant orders.</td>
+              </tr>
+              <tr>
+                <td><strong>chef</strong></td>
+                <td>KDS only (locked-in mode).</td>
+              </tr>
+              <tr>
+                <td><strong>bar_staff</strong></td>
+                <td>BDS only.</td>
+              </tr>
+              <tr>
+                <td><strong>coffee_staff</strong></td>
+                <td>CDS only.</td>
+              </tr>
+              <tr>
+                <td><strong>room_service</strong></td>
+                <td>Room-service dashboard, in-house bookings.</td>
+              </tr>
+              <tr>
+                <td><strong>stock_manager</strong></td>
+                <td>Stock pages + reports.</td>
+              </tr>
+              <tr>
+                <td><strong>housekeeping</strong></td>
+                <td>Housekeeping board only.</td>
+              </tr>
+              <tr>
+                <td><strong>maintenance</strong></td>
+                <td>Maintenance schedules + room dashboard (out-of-service flag).</td>
+              </tr>
+            </tbody>
+          </table>
+          <div class="callout note">Permissions can be <strong>overridden per-user</strong> at <strong>Users → Edit →
+              Permissions</strong> without changing the role.</div>
+
+          <h3>Sign-in security</h3>
+          <ul class="checklist">
+            <li>5 failed attempts → 15 min lockout per account.</li>
+            <li>10 failed attempts from the same IP → 1 hour IP block.</li>
+            <li>Password reset uses one-time hashed tokens, valid for 1 hour.</li>
+            <li>Every action (login, logout, password change, role change) logged in <code>admin_activity_log</code>.
+            </li>
+          </ul>
+        </section>
+
+        <section id="dashboard-home">
+          <h2>2. Dashboard home <code>/admin/dashboard.php</code></h2>
+          <table>
+            <thead>
+              <tr>
+                <th>Widget</th>
+                <th>Click → goes to</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>Today's check-ins</td>
+                <td><code>bookings.php?filter=checkin_today</code></td>
+              </tr>
+              <tr>
+                <td>Today's check-outs</td>
+                <td><code>bookings.php?filter=checkout_today</code></td>
+              </tr>
+              <tr>
+                <td>In-house guests</td>
+                <td><code>bookings.php?filter=in_house</code></td>
+              </tr>
+              <tr>
+                <td>Pending tentatives</td>
+                <td><code>tentative-bookings.php</code></td>
+              </tr>
+              <tr>
+                <td>Today's revenue</td>
+                <td><code>payments.php?filter=today</code></td>
+              </tr>
+              <tr>
+                <td>Outstanding folios</td>
+                <td><code>bookings.php?filter=unpaid_in_house</code></td>
+              </tr>
+              <tr>
+                <td>Active POS orders</td>
+                <td><code>pos.php?ajax=resto_orders</code></td>
+              </tr>
+              <tr>
+                <td>KDS active tickets</td>
+                <td><code>kds.php</code></td>
+              </tr>
+            </tbody>
+          </table>
+          <p>The dashboard auto-refreshes every 60 s.</p>
+        </section>
+
+        <section id="bookings">
+          <h2>3. Bookings <code>/admin/bookings.php</code></h2>
+          <p>The full guide is at <a href="07-reception-bookings.html">07-reception-bookings.html</a>. Manager-only
+            extras:</p>
+          <ul class="checklist">
+            <li><strong>Bulk export</strong> to CSV.</li>
+            <li><strong>Reassign</strong> an individual room to a different booking (timeline-aware).</li>
+            <li><strong>Override price</strong> at creation &mdash; saved alongside the calculated price for audit.</li>
+            <li><strong>Edit booking</strong> &mdash; anything except dates while in-house.</li>
+            <li><strong>Tentative bookings</strong> &mdash; <code>/admin/tentative-bookings.php</code> — pending queue
+              with one-click <em>Convert</em> (fires confirmation email + status flip) or <em>Cancel</em> with reason.
+              Every action logs who did it and when. Tentatives auto-expire if not actioned within the configured
+              window.</li>
+          </ul>
+        </section>
+
+        <section id="packages">
+          <h2>Packages &amp; Rate Plans</h2>
+          <h3>Room Packages <code>/admin/packages.php</code></h3>
+          <ul class="checklist">
+            <li>Create add-on packages guests can select during booking: honeymoon, half-board, airport transfer, etc.
+            </li>
+            <li>Pricing models: <strong>per night</strong>, <strong>per stay</strong>, or <strong>per person per
+                night</strong>.</li>
+            <li>Configure inclusions (bullet list), Font Awesome icon, description, sort order, and a <em>featured</em>
+              flag for homepage promotion.</li>
+            <li>Scope to all room types or specific types; auto-generates a URL slug for deep-linking.</li>
+          </ul>
+          <h3>Dynamic Rate Plans <code>/admin/rate-plans.php</code></h3>
+          <ul class="checklist">
+            <li>Six plan types: <strong>seasonal</strong>, <strong>weekend</strong>, <strong>length-of-stay
+                discount</strong>, <strong>last-minute</strong>, <strong>early-bird</strong>, and
+              <strong>promotion</strong>.
+            </li>
+            <li>Adjustments are percentage or fixed; set active date ranges, minimum/maximum nights, specific days of
+              the week, and booking lead-time windows.</li>
+            <li>Priority ordering decides which plan wins when multiple plans match; <em>is_stacking</em> controls
+              whether plans compound.</li>
+            <li>Scope to all rooms or specific room types; disable/enable without deleting.</li>
+          </ul>
+          <div class="callout note">Rate plans run automatically at booking time — no manual discounting needed. Review
+            plans before peak season to ensure they are not stacking unexpectedly.</div>
+        </section>
+
+        <section id="calendar">
+          <h2>4. Calendar &amp; individual rooms</h2>
+          <ul class="checklist">
+            <li><code>/admin/calendar.php</code> &mdash; colour-coded month view of every individual room's
+              availability, bookings, and blocked dates at a glance.</li>
+            <li><code>/admin/individual-rooms.php</code> &mdash; manage physical room instances (e.g. "Executive 101").
+              Set per-room occupancy tier overrides, child price multiplier, floor, notes, amenities, and photos. All
+              status changes logged to <code>room_maintenance_log</code>.</li>
+            <li><code>/admin/room-dashboard.php</code> &mdash; real-time housekeeping status board. Quick-action
+              buttons: Mark Clean, Pass Inspection, Fail Inspection (with reason). KPI bar: check-outs today, check-ins
+              today, rooms by status.</li>
+            <li><code>/admin/room-maintenance.php</code> &mdash; priority-based maintenance task system (urgent / high /
+              medium / low). Full lifecycle: pending → in_progress → completed → verified → cancelled. Supports
+              recurring schedules and staff assignment with workload tracking.</li>
+            <li><code>/admin/blocked-dates.php</code> &mdash; block availability at room-type level or individual-room
+              level; single date or multiple dates; block types include maintenance, event, VIP hold. Unblock by ID.
+            </li>
+            <li><code>/admin/room-management.php</code> &mdash; edit room types: pricing per occupancy, child
+              multiplier, max guests, amenities, photos, video.</li>
+          </ul>
+        </section>
+
+        <section id="payments">
+          <h2>5. Payments &amp; invoices</h2>
+          <ul class="checklist">
+            <li><code>/admin/payments.php</code> &mdash; every payment row with filters by date, method, status.</li>
+            <li><code>/admin/payment-add.php</code> &mdash; record a payment against a booking.</li>
+            <li><code>/admin/payment-refund.php</code> &mdash; refund a previous payment with reason.</li>
+            <li><code>/admin/payment-details.php?id=…</code> &mdash; full record + invoice download.</li>
+            <li><code>/admin/invoices.php</code> &mdash; list of every generated invoice PDF.</li>
+            <li><code>/admin/credit-notes.php</code> &mdash; issue, apply, void, and re-send <strong>Credit
+                Notes</strong>. Credit notes are generated when a refund is owed but cash cannot be returned immediately
+              (e.g. early checkout, service issue, goodwill). Each CN carries a sequential number
+              (<code>CN-YYYY-NNNNNN</code>), a face value, a VAT breakdown, an optional expiry date, and a running
+              balance. Applying a CN against a booking inserts a <code>credit_note</code> payment row; the balance
+              decrements automatically. Only active or partially-applied CNs can be voided.</li>
+          </ul>
+          <div class="callout warn">Invoice and credit-note numbers are sequential and never edited directly. Re-sending
+            a document is allowed, but the number is preserved.</div>
+          <div class="callout note"><strong>Credit note settings:</strong> expiry period
+            (<code>credit_note_expiry_months</code>) and VAT rate live in Booking Settings. Set
+            <code>credit_note_expiry_months</code> to <code>0</code> for no expiry.
+          </div>
+          <div class="callout note">Full step-by-step guide: <a href="13-finance-payments.html">→ Guide 13: Finance &amp; Payments</a></div>
+        </section>
+
+        <section id="fnb">
+          <h2>6. POS / KDS / BDS / CDS</h2>
+          <p>See: <a href="01-pos-till.html">POS</a> · <a href="02-kds-kitchen.html">KDS</a> · <a
+              href="03-bds-bar.html">BDS</a> · <a href="04-cds-coffee.html">CDS</a>.</p>
+          <h3>Manager extras</h3>
+          <ul class="checklist">
+            <li><strong>Void any order</strong> with reason ≥ 8 chars — works at any stage; restores stock for any items
+              already marked Ready on a station.</li>
+            <li><strong>Cancel before prep</strong> — cashiers can cancel an order themselves via the POS Tabs tray if
+              all items are still <em>pending</em> (no station has started). No stock is restored because none was
+              deducted yet.</li>
+            <li><strong>Close shift override</strong> with variance reason ≥ 5 chars.</li>
+            <li>Stations can send direct notes back to POS from ticket cards; POS shows and sounds notification alerts
+              for new direct replies.</li>
+            <li>KDS/BDS/CDS ticket helpers show real fired-time context (for example, <strong>Late — fired
+                14:32</strong>) to improve runner communication.</li>
+            <li>Critical action buttons in POS and display stations use short click-lock loaders to reduce accidental
+              double-taps during rush.</li>
+            <li><strong>Stock deduction is deferred</strong> — stock deducts when KDS/BDS/CDS marks each item
+              <strong>Ready</strong>, not when the order fires. Cancels before prep cost no stock.
+            </li>
+          </ul>
+
+          <h3>Order Lifecycle Viewer <code>/admin/order-lifecycle.php?id=…</code></h3>
+          <p>A dedicated read-only audit page for any single order. Access it from:</p>
+          <ul class="checklist">
+            <li>Stock Orders list → order reference link.</li>
+            <li>KDS / BDS / CDS ticket footer → <strong>Log</strong> button (opens new tab).</li>
+            <li>POS → Tabs tray → <strong>Details</strong> → <em>Lifecycle</em> link (admin/manager only).</li>
+            <li>POS → Tabs tray → <strong>Details</strong> modal — shows an inline <strong>Order Lifecycle
+                track</strong> (Placed → Fired → Ready → Served → Paid) with timestamps and colour-coded milestone dots
+              without leaving the POS.</li>
+          </ul>
+          <p>The page shows: metrics bar (placed/fired/ready/served/paid times + total cycle), all line items with
+            per-item kitchen timestamps, a chronological activity timeline combining audit events and KDS events (stock
+            deductions, bumps, voids), the linked payment row, and a void banner for cancelled/voided orders.</p>
+          <table>
+            <thead>
+              <tr>
+                <th>Action</th>
+                <th>Role</th>
+                <th>Conditions</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td><span class="pill amber">Cancel order</span></td>
+                <td>admin · manager</td>
+                <td>Status placed/new; no item has been started yet (all still pending on station).</td>
+              </tr>
+              <tr>
+                <td><span class="pill red">Void order</span></td>
+                <td>admin only</td>
+                <td>Status paid or completed. Restores stock for Ready items, cancels payment, clears station boards.
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </section>
+
+        <section id="room-service">
+          <h2>7. Room service</h2>
+          <p>See <a href="05-room-service.html">05-room-service.html</a>.</p>
+          <h3>Manager extras</h3>
+          <ul class="checklist">
+            <li><strong>Reassign</strong> a room-service order to a different room.</li>
+            <li><strong>Comp</strong> an order (zero the folio line, keep stock deducted).</li>
+          </ul>
+        </section>
+
+        <section id="hk">
+          <h2>8. Housekeeping &amp; maintenance</h2>
+          <ul class="checklist">
+            <li><a href="06-housekeeping.html">06-housekeeping.html</a> &mdash; full housekeeping guide.</li>
+            <li><code>/admin/room-maintenance.php</code> &mdash; log a maintenance request: room, issue, priority, parts
+              ordered, ETA.</li>
+            <li>Housekeeping &amp; maintenance share the same <code>*_audit_log</code> pattern: every change is
+              timestamped and reversible.</li>
+          </ul>
+        </section>
+
+        <section id="stock">
+          <h2>9. Stock &amp; ingredients</h2>
+          <p>See <a href="08-stock-orders.html">08-stock-orders.html</a>.</p>
+          <h3>Manager extras</h3>
+          <ul class="checklist">
+            <li><strong>Stock variance</strong> thresholds &mdash; set the % at which red alerts trigger.</li>
+            <li><strong>Supplier list</strong> &mdash; add new suppliers, attach delivery contacts.</li>
+            <li><strong>Recipe builder</strong> &mdash; link menu items to ingredient quantities for accurate
+              auto-deduction.</li>
+          </ul>
+        </section>
+
+        <section id="menu">
+          <h2>10. Menu management <code>/admin/menu-management.php</code></h2>
+          <ul class="checklist">
+            <li>Add / edit menu items: name, description, price, category, image, station routing (kitchen / bar /
+              coffee), recipe, room-service visibility.</li>
+            <li>Re-order via drag-and-drop.</li>
+            <li><code>/menu-pdf.php</code> &mdash; auto-generated guest-facing PDF menu.</li>
+          </ul>
+        </section>
+
+        <section id="conf">
+          <h2>11. Conference &amp; events</h2>
+          <h3>Conference Rooms <code>/admin/conference-management.php</code></h3>
+          <ul class="checklist">
+            <li>Card-based CRUD: name, description, capacity (pax), room size (sqm), daily rate, amenities list.</li>
+            <li>Image upload with extension + MIME + <code>getimagesize()</code> triple-validation; stored in
+              <code>images/conference/</code> and synced to the unified media library.
+            </li>
+            <li>Public inquiry form at <code>/conference.php</code> captures company name, contact, date, duration,
+              attendees, and special requirements. Confirmation email sent on submission.</li>
+          </ul>
+          <h3>Events <code>/admin/events-management.php</code></h3>
+          <ul class="checklist">
+            <li>Full CRUD for hotel events; supports image (JPG/PNG/WebP) and video upload via the async video handler.
+            </li>
+            <li>Events are date-stamped; the public <code>/events.php</code> page automatically splits them into
+              <strong>upcoming</strong> and <strong>past</strong>.
+            </li>
+            <li>Both image and video paths sync to the managed media library for centralised control.</li>
+          </ul>
+        </section>
+
+        <section id="gym">
+          <h2>12. Gym &amp; guest services</h2>
+          <h3>Gym Inquiries <code>/admin/gym-inquiries.php</code></h3>
+          <ul class="checklist">
+            <li>Inbox for fitness centre membership leads submitted via the public <code>/gym.php</code> page.</li>
+            <li>Status pipeline: <strong>new</strong> → <strong>contacted</strong> (sends notification email) →
+              <strong>converted</strong> (sends member welcome email). Each transition is logged.
+            </li>
+            <li>Filterable by status tab; searchable by name, email, phone, reference number. Delete with confirmation
+              modal.</li>
+          </ul>
+          <h3>Content management</h3>
+          <ul class="checklist">
+            <li><code>/admin/page-management.php</code> &mdash; enable/disable any public page; control nav visibility,
+              sort order, and icon. Core pages (<em>index, booking-confirmation, review-confirmation,
+                submit-review</em>)
+              are protected from being disabled &mdash; the system rejects the toggle with a clear message rather than
+              silently breaking those flows. Safe path validation prevents traversal attacks. A confirmation modal
+              replaces any browser <code>confirm()</code> dialog, and every toggle is audit-logged to
+              <code>system_event_log</code>.
+            </li>
+            <li><strong>Feature toggle system</strong> &mdash; Events and Guest Services pages can be independently
+              enabled or disabled from <code>/admin/booking-settings.php</code> (Service Modules section). When a
+              module is off the public page redirects gracefully, the nav link is hidden, and cards for that module are
+              removed from any fallback sections. All toggle logic is centralised in
+              <code>includes/booking-functions.php</code>.
+            </li>
+            <li><code>/admin/section-headers-management.php</code> &mdash; CMS editor for every section label, title,
+              subtitle, and description on every public page. Toggle sections active/inactive. Revert-to-defaults wipes
+              all and re-seeds from built-in defaults; clears cache on every save.</li>
+            <li><code>/admin/footer-management.php</code> &mdash; full CRUD for the public footer. See
+              <a href="#pages">section 15</a> for the complete reference.
+            </li>
+            <li><code>/admin/station-settings.php</code> &mdash; set open/close times (24 h) for Kitchen, Bar, and
+              Coffee Bar. Handles cross-midnight stations. These windows drive the KDS production reports and define
+              each station's business day.</li>
+          </ul>
+        </section>
+
+        <section id="users">
+          <h2>13. Users &amp; permissions</h2>
+          <ul class="checklist">
+            <li><code>/admin/user-management.php</code> &mdash; list users, invite, deactivate, reset passwords.</li>
+            <li><strong>Edit → Permissions</strong> overrides the role's defaults for a single user.</li>
+            <li><code>/admin/api-keys.php</code> &mdash; generate API keys for external integrations.</li>
+          </ul>
+        </section>
+
+        <section id="reviews">
+          <h2>14. Reviews</h2>
+          <p><code>/admin/reviews.php</code> &mdash; moderate guest reviews left via <code>/submit-review.php</code>.
+            Approve, reply, or hide. Approved reviews appear on the public homepage.</p>
+
+          <h3>Guest review actions</h3>
+          <ul class="checklist">
+            <li><strong>Approve</strong> &mdash; makes the review visible on the public homepage carousel.</li>
+            <li><strong>Reply</strong> &mdash; attach a management response visible below the review on the homepage.
+            </li>
+            <li><strong>Hide / Reject</strong> &mdash; removes the review from public view without deleting the record.
+            </li>
+            <li>Filter by status (<em>Pending / Approved / Rejected</em>) or search by guest name, email, or comment
+              text.</li>
+            <li>Ratings are broken down by category: <em>Overall, Service, Cleanliness, Location, Value</em>.</li>
+          </ul>
+
+          <h3>Web Feedback Importer</h3>
+          <p>A search panel at the top of the reviews page lets you pull public mentions of the hotel from the web and
+            social platforms, then import them as pending reviews for moderation.</p>
+          <ul class="checklist">
+            <li>Enter the <strong>hotel name</strong> and <strong>location</strong> (defaults: Rosalyn's Beach Hotel,
+              Mangochi Malawi).</li>
+            <li>Choose how many results to fetch (3&ndash;20) and select <strong>Feedback Type</strong>:
+              <em>Positive</em> (praise, recommendations) or <em>Negative</em> (complaints, criticisms).
+            </li>
+            <li>Click <strong>Find Web Feedback</strong> &mdash; the system searches public web snippets and social
+              platforms including <strong>TikTok, Facebook, Instagram, and X/Twitter</strong>.</li>
+            <li>Results appear as cards showing the source, a sentiment badge (<em>Positive</em> or <em>Negative</em>),
+              a star rating estimate, and the full snippet text.</li>
+            <li>Click <strong>Import</strong> on any card to save it as a pending review in the system. You can then
+              approve, reply to, or reject it like any guest-submitted review.</li>
+            <li>Duplicate snippets are automatically detected &mdash; if a snippet is already in the system the
+              Import button is replaced with <em>Already saved</em>.</li>
+          </ul>
+          <div class="callout note">
+            <strong>Moderation first.</strong> All imported reviews land in <em>Pending</em> status regardless of
+            sentiment &mdash; nothing goes public until a manager approves it. Negative feedback is valuable for
+            identifying service gaps and should not be deleted; use the Reply field to acknowledge it publicly.
+          </div>
+        </section>
+
+        <section id="pages">
+          <h2>15. Page, footer &amp; section content</h2>
+
+          <h3>Page Management <code>/admin/page-management.php</code></h3>
+          <ul class="checklist">
+            <li>Enable, disable, and reorder every public page from a single table.</li>
+            <li>Core system pages (<em>index, booking-confirmation, review-confirmation, submit-review</em>) cannot be
+              disabled &mdash; the toggle is blocked with a descriptive error message.</li>
+            <li>Every toggle is confirmed through an admin modal (no browser <code>confirm()</code>) and written to
+              <code>system_event_log</code> with the page name, new state, and acting user.
+            </li>
+            <li>When adding a new page you can check <strong>Create PHP scaffold</strong> to have the system generate a
+              complete Japandi-styled PHP skeleton in the webroot; the file path field auto-populates from the page key
+              you type.</li>
+          </ul>
+
+          <h3>Section Headers &amp; Page Hero Text <code>/admin/section-headers-management.php</code></h3>
+          <p>A two-tab CMS editor that controls all text on every public page.</p>
+
+          <h4>Tab 1 &mdash; Page Hero Text</h4>
+          <ul class="checklist">
+            <li>Every public page has its own hero banner card with fields for:
+              <em>Hero Title</em>, <em>Hero Subtitle</em>, <em>Description</em>, <em>Primary Button Text</em>,
+              and <em>Primary Button Link</em>.
+            </li>
+            <li>All 9 pages are displayed with their edit fields <strong>always open</strong> &mdash; no toggle
+              required.
+              Scroll to the page you want, edit, and click <strong>Save Hero Text</strong>.</li>
+            <li>Use the <strong>Jump to page</strong> dropdown to filter the list to a single page instantly.</li>
+            <li>Toggle the <strong>Active</strong> checkbox to enable or disable a page's hero banner.</li>
+            <li>Use <strong>Add Hero for New Page</strong> to create a hero entry for any page not yet in the system.
+            </li>
+          </ul>
+
+          <h4>Tab 2 &mdash; Section Headers</h4>
+          <ul class="checklist">
+            <li>CMS editor for every section label, heading, subtitle, and description on every public page.</li>
+            <li>Use the <strong>Filter by page</strong> dropdown to show only one page's sections &mdash; the page
+              filter preserves your tab position so you stay on the Sections tab after filtering.</li>
+            <li>Toggle sections active/inactive individually.</li>
+            <li><strong>Revert to Defaults</strong> (Danger Zone at the bottom) wipes all overrides and re-seeds
+              from built-in defaults. Cache is cleared on every save.</li>
+          </ul>
+
+          <h3>Footer Management <code>/admin/footer-management.php</code></h3>
+          <p>Three-tab interface giving full control over every part of the public footer:</p>
+
+          <h4>Tab 1 — Footer Links</h4>
+          <ul class="checklist">
+            <li>All footer navigation columns are managed here. Each link belongs to a named column (e.g.
+              <em>Guest Services</em>, <em>About Hotel</em>).
+            </li>
+            <li>Each link has a <strong>primary URL</strong> (used on the homepage, typically a hash anchor like
+              <code>#rooms</code>) and an optional <strong>secondary URL</strong> (used on all other pages, typically
+              a full path like <code>rooms-gallery.php</code>). The footer selects the correct one automatically.
+            </li>
+            <li>Toggle visibility per link, set display order, or delete. A column with no active links disappears from
+              the footer automatically.</li>
+            <li>Click <strong>Add</strong> next to any column to open a pre-filled modal; or use the <em>Add New
+                Footer Link</em> form below with the column datalist for quick lookup.</li>
+          </ul>
+
+          <h4>Tab 2 — Policies &amp; Modals</h4>
+          <ul class="checklist">
+            <li>Each policy appears as a click-to-open pop-up modal in the footer. CRUD: slug, title, summary,
+              full content, display order, active/inactive.</li>
+            <li>The <strong>slug</strong> links the footer link to the matching modal (e.g. slug
+              <code>faqs</code> links to the FAQs modal).
+            </li>
+            <li>Policy content supports <strong>DB tags</strong> &mdash; dynamic placeholders that are replaced with
+              live database values when the footer renders. Type <code>{{</code> in any policy field to trigger the
+              <strong>tag autocomplete dropdown</strong>.
+            </li>
+          </ul>
+
+          <h4>Tab 3 — Contact &amp; Social</h4>
+          <ul class="checklist">
+            <li>Edit phone, email, address, working hours, Facebook, Instagram, Twitter/X, and LinkedIn URLs directly.
+              Changes go live immediately after saving (cache is cleared).</li>
+            <li>Copyright text and design credit line at the bottom of the footer are also editable here.</li>
+          </ul>
+
+          <h3>DB Tags &mdash; dynamic content in footer text</h3>
+          <p>Any saved text in footer policies, copyright line, or credits can include <code>{{tag}}</code> tokens.
+            They are resolved to live site_settings values at render time &mdash; no redeploy needed.</p>
+          <table>
+            <thead>
+              <tr>
+                <th>Tag</th>
+                <th>Resolves to</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td><code>{{site_name}}</code></td>
+                <td>Hotel name from Site Settings</td>
+              </tr>
+              <tr>
+                <td><code>{{year}}</code></td>
+                <td>Current 4-digit year (auto-updates)</td>
+              </tr>
+              <tr>
+                <td><code>{{check_in_time}}</code></td>
+                <td>Check-in time from Booking Settings</td>
+              </tr>
+              <tr>
+                <td><code>{{check_out_time}}</code></td>
+                <td>Check-out time from Booking Settings</td>
+              </tr>
+              <tr>
+                <td><code>{{phone}}</code></td>
+                <td>Main phone number</td>
+              </tr>
+              <tr>
+                <td><code>{{phone_reservations}}</code></td>
+                <td>Reservations phone</td>
+              </tr>
+              <tr>
+                <td><code>{{email}}</code></td>
+                <td>Main email address</td>
+              </tr>
+              <tr>
+                <td><code>{{email_reservations}}</code></td>
+                <td>Reservations email</td>
+              </tr>
+              <tr>
+                <td><code>{{address}}</code> / <code>{{address_line2}}</code></td>
+                <td>Property address</td>
+              </tr>
+              <tr>
+                <td><code>{{address_country}}</code></td>
+                <td>Country</td>
+              </tr>
+              <tr>
+                <td><code>{{working_hours}}</code></td>
+                <td>Opening hours text</td>
+              </tr>
+              <tr>
+                <td><code>{{payment_policy}}</code></td>
+                <td>Payment policy text</td>
+              </tr>
+              <tr>
+                <td><code>{{cancellation_policy}}</code></td>
+                <td>Cancellation policy text</td>
+              </tr>
+              <tr>
+                <td><code>{{currency}}</code></td>
+                <td>Currency code (e.g. MWK)</td>
+              </tr>
+              <tr>
+                <td><code>{{vat_rate}}</code></td>
+                <td>VAT percentage</td>
+              </tr>
+              <tr>
+                <td><code>{{site_tagline}}</code></td>
+                <td>Hotel tagline</td>
+              </tr>
+              <tr>
+                <td><code>{{hotel_star_rating}}</code></td>
+                <td>Star rating</td>
+              </tr>
+              <tr>
+                <td><code>{{facebook_url}}</code> &hellip; <code>{{linkedin_url}}</code></td>
+                <td>Social media URLs</td>
+              </tr>
+            </tbody>
+          </table>
+          <div class="callout note"><strong>Tag autocomplete:</strong> In any policy content or summary field, type
+            <code>{{</code> and a filtered dropdown appears showing all available tags with their current live values.
+            Use <kbd>&darr;</kbd><kbd>&uarr;</kbd> to navigate, <kbd>Enter</kbd> or <kbd>Tab</kbd> to insert,
+            <kbd>Esc</kbd> to dismiss. Or click any tag chip in the <em>DB Tags</em> reference panel at the top of
+            the page to insert at the cursor.
+          </div>
+        </section>
+
+        <section id="media">
+          <h2>16. Media &amp; gallery</h2>
+          <ul class="checklist">
+            <li><code>/admin/media-management.php</code> &mdash; central library of photos and videos.</li>
+            <li><code>/admin/gallery-management.php</code> &mdash; group images into galleries.</li>
+            <li>Drag to re-order, set alt text for accessibility, mark as featured.</li>
+          </ul>
+        </section>
+
+        <section id="reports">
+          <h2>17. Reports &amp; analytics</h2>
+          <div class="callout note">Full step-by-step guide: <a href="14-reports-eod.html">→ Guide 14: Reports &amp; End of Day</a></div>
+          <ul class="checklist">
+            <li><code>/admin/reports.php</code> &mdash; revenue, occupancy, RevPAR, ADR, by date range. CSV export.</li>
+            <li><code>/admin/accounting-dashboard.php</code> &mdash; month-end VAT &amp; revenue breakdown by source
+              (rooms, conference, restaurant); payment method totals; refund tracking.</li>
+            <li><code>/admin/pos-accounting.php</code> &mdash; <strong>POS cashier shift reconciliation</strong>.
+              Pick a business date and the system shows every cashier's expected totals (cash, mobile money, card)
+              derived from paid orders. The accountant enters the <em>declared</em> amounts from the physical drawer,
+              reviews each individual sale in a collapsible per-cashier drawer (tick sales as verified, add per-order
+              notes), and submits to close selected shifts. Variance is calculated live; a reason is required if
+              the declared total doesn't match. Shift closes are written to <code>pos_shift_closes</code> and
+              audited in <code>stock_order_audit</code>. Re-opening a closed date is not permitted &mdash; contact
+              a developer if correction is needed.</li>
+            <li><code>/admin/end-of-day-report.php</code> &mdash; daily operations snapshot: arrivals vs completed,
+              departures, stayovers, revenue per category, occupancy %, trend vs previous day with colour-coded
+              indicators. Designed to be shared with ownership each evening.</li>
+            <li><code>/admin/kds-report.php</code> &mdash; per-station production report for any date using each
+              station's configured business window. Shows every served/voided item with full KDS timestamps, top items
+              by count, avg prep time. CSV export &amp; email delivery.</li>
+            <li><code>/admin/visitor-analytics.php</code> &mdash; public-site traffic: pages visited, device breakdown,
+              geographic origin. Date range filters. Purge tool for old records.</li>
+          </ul>
+        </section>
+
+        <section id="settings">
+          <h2>18. Site settings</h2>
+          <ul class="checklist">
+            <li><code>/admin/booking-settings.php</code> &mdash; VAT rate, tourism levy %, currency, child multiplier
+              default, tentative duration. Also contains the <strong>Service Modules</strong> panel where Events and
+              Guest Services can be independently enabled or disabled; when off, the public page redirects gracefully
+              and the nav link disappears.</li>
+            <li><code>/admin/footer-management.php</code> &mdash; all footer links, policies, contact / social info,
+              and copyright text. Supports DB tag tokens (see <a href="#pages">Section 15</a>).</li>
+            <li><code>/admin/whatsapp-settings.php</code> &mdash; toggle WhatsApp notifications, configure API key.
+              <div class="callout warn">Enabling WhatsApp turns on a <strong>billable service</strong>. Confirm pricing
+                with your provider first.</div>
+            </li>
+            <li>Email settings (under booking settings) &mdash; SMTP host, from-name, BCC admin, invoice CC list, dev
+              preview mode.</li>
+            <li><strong>Email Template Editor</strong> &mdash; every outgoing guest email has an editable subject and
+              HTML body, stored in <code>booking_email_templates</code>. Use <code>{{double-curly-brace}}</code> tags
+              to insert live data (guest name, booking reference, totals, dates, hotel info, and more).
+              <strong><a href="12-email-templates.php">→ Full variable &amp; HTML tag reference (Guide 12)</a></strong>
+            </li>
+          </ul>
+        </section>
+
+        <section id="security">
+          <h2>19. Cache, audit &amp; security</h2>
+          <ul class="checklist">
+            <li><code>/admin/cache-management.php</code> &mdash; toggle cache types on/off; clear page cache, query
+              cache, settings cache with before/after file counts reported.</li>
+            <li><code>admin_activity_log</code> &mdash; every login, password reset, role change.</li>
+            <li><code>housekeeping_audit_log</code> + <code>maintenance_audit_log</code> &mdash; every status change
+              with old &rarr; new + reason.</li>
+            <li><code>booking_timeline_logs</code> &mdash; every status change on a booking.</li>
+            <li><code>/admin/system-logs.php</code> &mdash; <code>system_event_log</code> viewer for all
+              <code>rh_log_event()</code> entries across every module.
+            </li>
+          </ul>
+        </section>
+
+        <section id="backups">
+          <h2>20a. Backups &amp; offline log</h2>
+          <ul class="checklist">
+            <li><code>/admin/backup-management.php</code> &mdash; on-demand database backup
+              (<code>scripts/backup_database.php</code>). Lists available backups by date/size. Admin-only download as
+              <code>.sql.gz</code> and restore from a selected backup.
+            </li>
+            <li><code>/admin/offline-log.php</code> &mdash; every POS/KDS action queued offline (load shedding / poor
+              connectivity) and replayed when connection returned. Shows queue lag, replayed action count, per-user and
+              per-endpoint breakdown. Useful for shift reconciliation.</li>
+          </ul>
+          <div class="callout note">Run an on-demand backup before any DB migration or major configuration change.
+            Download it to off-site storage monthly.</div>
+        </section>
+
+        <section id="trouble">
+          <h2>20. Troubleshooting cheatsheet</h2>
+          <table>
+            <thead>
+              <tr>
+                <th>Symptom</th>
+                <th>Likely cause</th>
+                <th>Fix</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>Login screen rejects valid password</td>
+                <td>Account locked (5 fails)</td>
+                <td>Wait 15 min OR use <strong>Forgot password</strong>.</td>
+              </tr>
+              <tr>
+                <td>KDS shows nothing</td>
+                <td>Station role mismatch</td>
+                <td>Sign in as <code>chef</code> / <code>bar_staff</code> / <code>coffee_staff</code>.</td>
+              </tr>
+              <tr>
+                <td>POS won't fire to KDS</td>
+                <td>Item not routed</td>
+                <td>Open Menu → Item → set <strong>Station</strong>.</td>
+              </tr>
+              <tr>
+                <td>Stock count drifted</td>
+                <td>Untracked void</td>
+                <td>Cross-check <strong>Stock Variance</strong> &amp; recipe.</td>
+              </tr>
+              <tr>
+                <td>Email not sending</td>
+                <td>SMTP password rotated</td>
+                <td>Update <strong>email_settings → smtp_password</strong>.</td>
+              </tr>
+              <tr>
+                <td>Guest got duplicate confirmation</td>
+                <td>Multiple status changes</td>
+                <td>Expected &mdash; one email per status change.</td>
+              </tr>
+              <tr>
+                <td>Invoice PDF missing</td>
+                <td>TCPDF font missing</td>
+                <td>Falls back to HTML; check <code>logs/</code>.</td>
+              </tr>
+              <tr>
+                <td>Restore button missing</td>
+                <td>Not logged in as admin</td>
+                <td>Only <code>admin</code> role can restore &mdash; sign in as admin.</td>
+              </tr>
+              <tr>
+                <td>Rate plan not applying</td>
+                <td>Priority clash or wrong date range</td>
+                <td>Check <code>rate-plans.php</code> — confirm date range covers the stay and priority ordering.</td>
+              </tr>
+              <tr>
+                <td>Footer tag not resolving (shows <code>{{tag}}</code> literally)</td>
+                <td>Tag typed incorrectly or setting value is empty</td>
+                <td>Check the Tags panel in <code>footer-management.php</code> — the <em>live</em> value is shown next
+                  to each chip. If blank, update the setting in Booking Settings or Site Settings first.</td>
+              </tr>
+              <tr>
+                <td>Events or Guest Services page returns &ldquo;coming soon&rdquo;</td>
+                <td>Module disabled in Service Modules</td>
+                <td>Go to <code>booking-settings.php</code> &rarr; Service Modules &rarr; enable the relevant toggle.
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </section>
+
+        <section>
+          <h2>Final reminders</h2>
+          <div class="callout warn"><strong>Every action is logged.</strong> Sign in as yourself.</div>
+          <ul class="checklist">
+            <li><strong>Never delete</strong> &mdash; always <strong>cancel</strong> or <strong>void</strong> with a
+              reason.</li>
+            <li>Cache updates on every save; if the public site looks stale, use <strong>Cache → Clear page
+                cache</strong>.</li>
+            <li>The test scripts under <code>/scripts/</code> are safe to re-run any time you suspect drift.</li>
+          </ul>
+        </section>
+
+      </article>
+    </div>
+  </main>
+
+  <footer class="guide-footer">
+    <div class="deck">
+      <div class="crest">— R H —</div>
+      <p><a href="08-stock-orders.html">← Stock</a> &middot; <a href="index.html">All guides</a> &middot; <a
+          href="owner-handover.php">Owner handover →</a></p>
+    </div>
+  </footer>
+
+</body>
+
+</html>

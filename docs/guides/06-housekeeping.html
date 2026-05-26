@@ -1,0 +1,132 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Housekeeping Guide — Rosalyn's Hotel</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link
+    href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@400;500;600;700&family=Jost:wght@300;400;500;600&display=swap"
+    rel="stylesheet">
+  <link rel="stylesheet" href="assets/guide-theme.css">
+  <script src="assets/guide-init.js" defer></script>
+</head>
+
+<body>
+
+  <nav class="top">
+    <a href="index.html" class="brand">ROSALYN'S HOTEL</a>
+    <div class="nav-links">
+      <a href="index.html">All Guides</a>
+      <a href="99-admin-dashboard-full-guide.html">Admin Bible</a>
+      <a href="owner-handover.php">Owner</a>
+      <a href="05-room-service.html">← Prev</a>
+      <a href="07-reception-bookings.html">Next →</a>
+    </div>
+  </nav>
+
+  <header class="hero">
+    <div class="deck">
+      <div class="eyebrow">Guide 06 &middot; Housekeeping</div>
+      <h1>Housekeeping</h1>
+      <p class="lead">Track every individual room's clean / dirty / inspected status. Every change is logged with old →
+        new state and timestamp.</p>
+      <div class="meta">
+        <span>URL <strong>/admin/housekeeping.php</strong></span>
+        <span>Role <strong>housekeeping · manager · admin</strong></span>
+        <span>Read time <strong>5 min</strong></span>
+      </div>
+    </div>
+  </header>
+
+  <main class="content">
+    <div class="deck">
+
+      <section>
+        <h2>Status colours</h2>
+        <table>
+          <thead>
+            <tr>
+              <th>Status</th>
+              <th>Meaning</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><span class="pill green">Clean</span></td>
+              <td>Ready for the next guest.</td>
+            </tr>
+            <tr>
+              <td><span class="pill amber">Dirty</span></td>
+              <td>Guest has checked out / room needs service.</td>
+            </tr>
+            <tr>
+              <td><span class="pill blue">In progress</span></td>
+              <td>Housekeeper currently cleaning.</td>
+            </tr>
+            <tr>
+              <td><span class="pill purple">Inspected</span></td>
+              <td>Manager-verified clean.</td>
+            </tr>
+            <tr>
+              <td><span class="pill red">Out of service</span></td>
+              <td>Maintenance issue, blocked from booking.</td>
+            </tr>
+          </tbody>
+        </table>
+      </section>
+
+      <section>
+        <h2>A typical morning</h2>
+        <ol class="steps">
+          <li>Sign in. The board shows every room grouped by floor.</li>
+          <li>Tap a <strong>dirty</strong> card → choose <strong>Start cleaning</strong> → status moves to <em>In
+              progress</em>, timer starts.</li>
+          <li>When done, tap <strong>Mark clean</strong>.</li>
+          <li>The supervisor walks through and taps <strong>Inspected</strong> on each green card to mark it ready for
+            the next arrival.</li>
+        </ol>
+      </section>
+
+      <section>
+        <h2>Out of service</h2>
+        <ol class="steps">
+          <li>Tap a card → <strong>Mark out of service</strong>.</li>
+          <li>Type a reason (e.g. "AC not cooling, parts ordered").</li>
+          <li>The room is removed from the <strong>bookable inventory</strong> automatically.</li>
+          <li>Once fixed, tap <strong>Return to clean</strong>.</li>
+        </ol>
+      </section>
+
+      <section>
+        <h2>Audit history</h2>
+        <ul class="checklist">
+          <li>Every status change is saved to <code>housekeeping_audit_log</code>.</li>
+          <li>Tap a room name to see who changed what, when, and the reason.</li>
+        </ul>
+      </section>
+
+      <section>
+        <h2>Tips</h2>
+        <div class="callout tip">If a guest reports a dirty room, mark it <strong>dirty</strong> immediately &mdash; the
+          room stays bookable but supervisors get an alert.</div>
+        <p>Always sign out at end of shift &mdash; the next housekeeper sees their own action history.</p>
+      </section>
+
+    </div>
+  </main>
+
+  <footer class="guide-footer">
+    <div class="deck">
+      <div class="crest">— R H —</div>
+      <p><a href="05-room-service.html">← Room Service</a> &middot; <a href="index.html">All guides</a> &middot; <a
+          href="99-admin-dashboard-full-guide.html">Admin Bible</a> &middot; <a href="owner-handover.php">Owner
+          handover</a> &middot; <a href="07-reception-bookings.html">Reception →</a></p>
+    </div>
+  </footer>
+
+</body>
+
+</html>

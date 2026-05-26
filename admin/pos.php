@@ -1,0 +1,6313 @@
+<?php
+
+/**
+ * POS Till — Modern Touchscreen Restaurant Till
+ *
+ * Designed for tablets / dedicated POS terminals. Full-screen layout,
+ * big touch targets, category tabs, search, payment modal, receipt
+ * print/email handoff, real-time cart total.
+ *
+ * Reuses ALL the anti-cheat machinery in admin/stock-orders.php:
+ *   - server-side price lookup
+ *   - atomic place-and-pay
+ *   - audit log + activity log
+ *   - method-specific validation (cash tendered ≥ total, mobile ref, card last4+auth)
+ *   - card_pos disabled (provision)
+ *
+ * Permission: pos_till (granted to admin, manager, restaurant_staff).
+ */
+require_once 'admin-init.php';
+require_once '../includes/alert.php';
+require_once __DIR__ . '/../includes/finance-sequences.php';
+require_once __DIR__ . '/../includes/station-hours.php';
+require_once __DIR__ . '/../includes/restaurant-location-locks.php';
+require_once __DIR__ . '/includes/restaurant-payment-sync.php';
+
+$user = [
+    'id'        => $_SESSION['admin_user_id'],
+    'username'  => $_SESSION['admin_username'],
+    'role'      => $_SESSION['admin_role'],
+    'full_name' => $_SESSION['admin_full_name'],
+];
+$currency_symbol = getSetting('currency_symbol');
+$siteName = getSetting('site_name') ?: 'Hotel';
+$restaurantWindow = rh_station_union_business_window();
+$kitchenWindow    = rh_station_business_window('kitchen');
+$barWindow        = rh_station_business_window('bar');
+
+if (!ensureStockTablesExist()) {
+    http_response_code(500);
+    exit('Stock tables missing. Run migration 015 first.');
+}
+finance_ensure_sequence_tables($pdo);
+
+/* ---------------- Inline copies of helpers (kept lean) ---------------- */
+function pos_calculateRestaurantVatParts(float $grossAmount): array
+{
+    $vatEnabled = in_array(getSetting('vat_enabled'), ['1', 1, true, 'true', 'on'], true);
+    $vatRate = $vatEnabled ? (float)getSetting('vat_rate') : 0.0;
+    if ($grossAmount <= 0 || $vatRate <= 0) {
+        return ['net' => round($grossAmount, 2), 'vat_rate' => 0.0, 'vat' => 0.0, 'gross' => round($grossAmount, 2)];
+    }
+    $net = round($grossAmount / (1 + ($vatRate / 100)), 2);
+    $vat = round($grossAmount - $net, 2);
+    return ['net' => $net, 'vat_rate' => $vatRate, 'vat' => $vat, 'gross' => round($grossAmount, 2)];
+}
+function pos_mapMethod(string $m): string
+{
+    return match ($m) {
+        'cash'         => 'cash',
+        'mobile_money' => 'mobile_money',
+        'card_manual'  => 'credit_card',
+        'card_pos'     => 'credit_card',
+        default        => 'other',
+    };
+}
+function pos_calculateMenuItemRecipeCost(PDO $pdo, int $menuItemId, string $menuType, float $quantity): float
+{
+    if ($quantity <= 0) return 0.0;
+    $stmt = $pdo->prepare("
+        SELECT COALESCE(SUM((sri.quantity_per_portion / (GREATEST(sri.yield_percent, 0.1) / 100)) * i.cost_per_unit), 0)
+        FROM stock_recipes sr
+        INNER JOIN stock_recipe_ingredients sri ON sri.recipe_id = sr.id
+        INNER JOIN stock_ingredients i ON i.id = sri.ingredient_id
+        WHERE sr.menu_item_id = ? AND sr.menu_type = ?
+    ");
+    $stmt->execute([$menuItemId, $menuType]);
+    return round(((float)$stmt->fetchColumn()) * $quantity, 4);
+}
+function pos_logAudit(PDO $pdo, int $orderId, ?int $actorId, ?string $actorName, string $event, ?string $details = null): void
+{
+    try {
+        $pdo->prepare("INSERT INTO stock_order_audit (order_id, actor_id, actor_name, event, details, ip_address) VALUES (?, ?, ?, ?, ?, ?)")
+            ->execute([$orderId, $actorId, $actorName, $event, $details, $_SERVER['REMOTE_ADDR'] ?? null]);
+    } catch (Throwable $e) {
+        error_log('pos_logAudit: ' . $e->getMessage());
+    }
+}
+function pos_syncPayment(PDO $pdo, array $order, int $recordedBy, string $paymentMethod): void
+{
+    $orderId = (int)$order['id'];
+    $reference = (string)$order['reference'];
+    $vat = pos_calculateRestaurantVatParts((float)$order['total_amount']);
+    $mappedMethod = pos_mapMethod($paymentMethod);
+
+    rh_sync_restaurant_payment(
+        $pdo,
+        $orderId,
+        $reference,
+        !empty($order['customer_name']) ? (string)$order['customer_name'] : null,
+        $vat,
+        $recordedBy,
+        $mappedMethod
+    );
+}
+
+/* ---------------- POST: place / pay / park / close shift ---------------- */
+$message = '';
+$error = '';
+$lastOrderId = 0;
+$lastOrderRef = '';
+$justParked = false;
+$lastOrderCustomerEmail = '';
+$lastOrderCustomerPhone = '';
+$justClosedShift = null;
+
+function pos_redirectWithFlash(array $flash): void
+{
+    $_SESSION['pos_flash'] = $flash;
+    header('Location: pos.php?pos_saved=1');
+    exit;
+}
+
+if ($_SERVER['REQUEST_METHOD'] !== 'POST' && isset($_SESSION['pos_flash']) && is_array($_SESSION['pos_flash'])) {
+    $posFlash = $_SESSION['pos_flash'];
+    unset($_SESSION['pos_flash']);
+    $message = (string)($posFlash['message'] ?? '');
+    $lastOrderId = (int)($posFlash['last_order_id'] ?? 0);
+    $lastOrderRef = (string)($posFlash['last_order_ref'] ?? '');
+    $justParked = !empty($posFlash['just_parked']);
+    $justClosedShift = is_array($posFlash['just_closed_shift'] ?? null) ? $posFlash['just_closed_shift'] : null;
+}
+
+if ($lastOrderId > 0 && !$justParked) {
+    try {
+        $lastOrderContactStmt = $pdo->prepare("SELECT customer_email, customer_phone FROM stock_orders WHERE id = ? LIMIT 1");
+        $lastOrderContactStmt->execute([$lastOrderId]);
+        $lastOrderContact = $lastOrderContactStmt->fetch(PDO::FETCH_ASSOC) ?: [];
+        $lastOrderCustomerEmail = (string)($lastOrderContact['customer_email'] ?? '');
+        $lastOrderCustomerPhone = (string)($lastOrderContact['customer_phone'] ?? '');
+    } catch (Throwable $ignored) {
+        $lastOrderCustomerEmail = '';
+        $lastOrderCustomerPhone = '';
+    }
+}
+
+/**
+ * Create a placed (unpaid) order from POSTed cart. Returns [orderId, reference, total].
+ */
+function pos_buildOrderFromPost(PDO $pdo, array $user, string $orderType, ?string $tableNumber, ?string $customerName, ?string $customerEmail, ?string $customerPhone, ?string $orderNote, bool $openedAsTab): array
+{
+    $itemIds   = $_POST['item_id']   ?? [];
+    $itemTypes = $_POST['item_type'] ?? [];
+    $itemQtys  = $_POST['item_qty']  ?? [];
+    $itemNotes = $_POST['item_note'] ?? [];
+    $count = is_array($itemIds) ? count($itemIds) : 0;
+    if ($count === 0) throw new RuntimeException('Cart is empty — tap items to add.');
+
+    $reference = generateStockOrderReference();
+    $clientUuid = isset($_POST['client_uuid']) ? mb_substr(trim((string)$_POST['client_uuid']), 0, 64) : '';
+    if ($clientUuid !== '') {
+        // Use FOR UPDATE so the row-level/gap lock held by the caller's transaction
+        // serializes concurrent requests with the same client_uuid.
+        // DB-level enforcement requires migration 038_pos_client_uuid_unique.php.
+        $existing = $pdo->prepare("SELECT id, reference, total_amount FROM stock_orders WHERE client_uuid=? LIMIT 1 FOR UPDATE");
+        $existing->execute([$clientUuid]);
+        if ($prior = $existing->fetch(PDO::FETCH_ASSOC)) {
+            return [(int)$prior['id'], (string)$prior['reference'], (float)$prior['total_amount'], 0];
+        }
+    }
+
+    $location = rh_restaurant_resolve_pos_location($pdo, $orderType, $tableNumber);
+    if ($orderType === 'room_service' && !empty($location['booking']) && is_array($location['booking'])) {
+        $booking = $location['booking'];
+        $customerName = $customerName !== '' ? $customerName : (string)($booking['guest_name'] ?? '');
+        $customerEmail = $customerEmail !== '' ? $customerEmail : (string)($booking['guest_email'] ?? '');
+        $customerPhone = $customerPhone !== '' ? $customerPhone : (string)($booking['guest_phone'] ?? '');
+    }
+
+    $pdo->prepare("INSERT INTO stock_orders (reference, client_uuid, order_type, booking_id, individual_room_id, table_number, room_number, customer_name, customer_email, customer_phone, notes, status, total_amount, created_by, opened_as_tab) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'placed', 0, ?, ?)")
+        ->execute([
+            $reference,
+            $clientUuid ?: null,
+            $orderType,
+            $location['booking_id'],
+            $location['individual_room_id'],
+            $location['table_number'],
+            $location['room_number'],
+            $customerName ?: null,
+            $customerEmail ?: null,
+            $customerPhone ?: null,
+            $orderNote ?: null,
+            $user['id'],
+            $openedAsTab ? 1 : 0
+        ]);
+    $orderId = (int)$pdo->lastInsertId();
+
+    $itemIns = $pdo->prepare("INSERT INTO stock_order_items (order_id, menu_item_id, menu_type, item_name, quantity, unit_price, line_total, notes, station) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)");
+    $totalAmount = 0;
+    $totalCost = 0;
+    $folioItems  = [];   // populated for room_service orders — folio posted after loop
+    for ($k = 0; $k < $count; $k++) {
+        $itemId = (int)($itemIds[$k] ?? 0);
+        $type = trim((string)($itemTypes[$k] ?? 'food'));
+        $qty = (float)($itemQtys[$k] ?? 0);
+        $lineNote = isset($itemNotes[$k]) ? mb_substr(trim((string)$itemNotes[$k]), 0, 250) : '';
+        if ($itemId <= 0 || $qty <= 0) continue;
+        if ($qty > 1000) throw new RuntimeException('Quantity cap: 1000.');
+        $sel = $pdo->prepare("
+            SELECT mi.id, mi.item_name AS name, mi.price,
+                   COALESCE(mi.station, mc.default_station) AS station,
+                   mc.slug AS menu_type
+            FROM menu_items mi
+            JOIN menu_categories mc ON mc.id = mi.category_id
+            WHERE mi.id = ? AND mi.is_available = 1
+        ");
+        $sel->execute([$itemId]);
+        $row = $sel->fetch(PDO::FETCH_ASSOC);
+        if (!$row) throw new RuntimeException('Menu item not found or unavailable.');
+        $menuType = $row['menu_type']; // dynamic slug from menu_categories
+        $line = round((float)$row['price'] * $qty, 2);
+        $lineCost = pos_calculateMenuItemRecipeCost($pdo, $itemId, $menuType, $qty);
+        $station = in_array($row['station'] ?? '', ['kitchen', 'bar', 'coffee_bar'], true)
+            ? $row['station']
+            : 'kitchen';
+        $itemIns->execute([$orderId, $itemId, $menuType, $row['name'], $qty, (float)$row['price'], $line, $lineNote ?: null, $station]);
+        $soiId = (int)$pdo->lastInsertId();
+        $totalAmount += $line;
+        $totalCost += $lineCost;
+        if ($orderType === 'room_service') {
+            $folioItems[] = ['item_id' => $itemId, 'type' => $menuType, 'qty' => $qty, 'soi_id' => $soiId];
+        }
+        // For non-room-service: stock deduction deferred to KDS ready_item
+    }
+    if ($totalAmount <= 0) throw new RuntimeException('Order total must be greater than zero.');
+
+    $pdo->prepare("UPDATE stock_orders SET total_amount=?, subtotal=?, total_cost=? WHERE id=?")
+        ->execute([$totalAmount, $totalAmount, $totalCost, $orderId]);
+
+    // ── Room-service: post all items to the booking folio immediately ──────
+    // addBookingChargeFromMenu deducts stock; setting stock_deducted=1 on the
+    // stock_order_items row prevents KDS ready_item from double-deducting.
+    if ($orderType === 'room_service' && !empty($location['booking_id'])) {
+        $rs_booking_id = (int)$location['booking_id'];
+        foreach ($folioItems as $fi) {
+            $charge = addBookingChargeFromMenu($rs_booking_id, $fi['type'], $fi['item_id'], $fi['qty'], (int)$user['id']);
+            if (!empty($charge['success']) && !empty($charge['charge_id'])) {
+                $pdo->prepare("UPDATE booking_charges SET stock_order_id = ? WHERE id = ?")
+                    ->execute([$orderId, (int)$charge['charge_id']]);
+                $pdo->prepare("UPDATE stock_order_items SET stock_deducted = 1 WHERE id = ?")
+                    ->execute([$fi['soi_id']]);
+            }
+        }
+        $pdo->prepare("UPDATE stock_orders SET folio_posted_at = NOW() WHERE id = ?")->execute([$orderId]);
+        recalculateBookingFinancials($rs_booking_id);
+    }
+
+    // Stamp offline timestamps + log a replay event if this came from the offline queue
+    if (function_exists('rh_stamp_order_offline')) {
+        rh_stamp_order_offline($pdo, $orderId);
+    }
+    if (function_exists('rh_log_offline_replay')) {
+        rh_log_offline_replay($pdo, 'pos.php?action=' . ($_POST['action'] ?? 'place_order'), [
+            'action' => $_POST['action'] ?? 'place_order',
+            'entity_type' => 'stock_order',
+            'entity_id' => $orderId,
+            'entity_reference' => $reference,
+            'response_status' => 200,
+            'response_summary' => "Order created · " . number_format($totalAmount, 2) . " · {$count} item(s)",
+            'details' => ['order_type' => $orderType, 'location' => $location['label'], 'items' => $count],
+        ]);
+    }
+
+    return [$orderId, $reference, $totalAmount, $count];
+}
+
+/**
+ * Fire an order to all relevant station displays (Kitchen / Bar / Coffee Bar).
+ * Sets order kitchen_status='new' and fired_at=NOW() if not already, defaults all
+ * items to kds_status='pending'. Each station's display filters items by station.
+ * Idempotent: re-firing only stamps missing timestamps.
+ */
+function pos_fireKitchen(PDO $pdo, int $orderId, int $userId, string $userName): void
+{
+    // Are there ANY items that still need prep?
+    $st = $pdo->prepare("SELECT COUNT(*) FROM stock_order_items WHERE order_id=? AND kds_status='pending'");
+    $st->execute([$orderId]);
+    $pending = (int)$st->fetchColumn();
+    if ($pending <= 0) {
+        // Nothing to fire — mark served so the order is closed-out.
+        $pdo->prepare("UPDATE stock_orders SET kitchen_status='served' WHERE id=? AND kitchen_status='none'")->execute([$orderId]);
+        return;
+    }
+    $pdo->prepare("UPDATE stock_orders SET kitchen_status='new', fired_at=COALESCE(fired_at,NOW()), kitchen_printed_at=COALESCE(kitchen_printed_at,NOW()) WHERE id=? AND kitchen_status IN ('none','new')")->execute([$orderId]);
+    // Audit per station so each board can see who fired what
+    $ip = $_SERVER['REMOTE_ADDR'] ?? null;
+    $pdo->prepare("INSERT INTO stock_kds_events (order_id, event, to_status, user_id, user_name, ip_address) VALUES (?, 'fired', 'new', ?, ?, ?)")
+        ->execute([$orderId, $userId, $userName, $ip]);
+}
+
+/**
+ * Apply payment to an existing placed order. Validates method-specific extras.
+ */
+function pos_applyPaymentToOrder(PDO $pdo, array $user, int $orderId, string $reference, float $totalAmount, string $paymentMethod, array $post): array
+{
+    $tendered = (float)($post['tendered_amount'] ?? 0);
+    $mobileProvider = trim($post['mobile_wallet_provider'] ?? '');
+    $mobileReference = trim($post['mobile_wallet_reference'] ?? '');
+    $cardLast4Raw = preg_replace('/\D/', '', (string)($post['card_last4'] ?? ''));
+    $cardLast4 = strlen($cardLast4Raw) >= 4 ? substr($cardLast4Raw, -4) : null;
+    $cardAuthCode = trim($post['card_auth_code'] ?? '');
+
+    $extras = ['tendered' => null, 'change' => null, 'mp' => null, 'mr' => null, 'l4' => null, 'auth' => null];
+    if ($paymentMethod === 'cash') {
+        if ($tendered + 0.001 < $totalAmount) throw new RuntimeException('Tendered ' . number_format($tendered, 2) . ' < total ' . number_format($totalAmount, 2));
+        $extras['tendered'] = round($tendered, 2);
+        $extras['change']   = round($tendered - $totalAmount, 2);
+    } elseif ($paymentMethod === 'mobile_money') {
+        if ($mobileProvider === '' || $mobileReference === '') throw new RuntimeException('Mobile money requires provider + transaction reference.');
+        $extras['mp'] = mb_substr($mobileProvider, 0, 50);
+        $extras['mr'] = mb_substr($mobileReference, 0, 100);
+    } elseif ($paymentMethod === 'card_manual') {
+        if (!$cardLast4 || $cardAuthCode === '') throw new RuntimeException('Card requires last 4 digits + authorisation code.');
+        $extras['l4']   = $cardLast4;
+        $extras['auth'] = mb_substr($cardAuthCode, 0, 50);
+    }
+
+    $pdo->prepare("UPDATE stock_orders SET status='paid', paid_at=NOW(), payment_method=?, tendered_amount=?, change_due=?, mobile_wallet_provider=?, mobile_wallet_reference=?, card_last4=?, card_auth_code=? WHERE id=?")
+        ->execute([$paymentMethod, $extras['tendered'], $extras['change'], $extras['mp'], $extras['mr'], $extras['l4'], $extras['auth'], $orderId]);
+
+    $cnStmt = $pdo->prepare("SELECT customer_name FROM stock_orders WHERE id = ?");
+    $cnStmt->execute([$orderId]);
+    $syncCustomerName = (string)($cnStmt->fetchColumn() ?: '');
+    pos_syncPayment($pdo, ['id' => $orderId, 'reference' => $reference, 'total_amount' => $totalAmount, 'customer_name' => $syncCustomerName, 'status' => 'paid'], $user['id'], $paymentMethod);
+    return $extras;
+}
+
+if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    $token = $_POST['csrf_token'] ?? '';
+    $action = $_POST['action'] ?? 'pay';
+    if (!validateCsrfToken($token)) {
+        $error = 'Security token invalid — refresh the page.';
+    } else {
+        try {
+            $allowedMethods = ['cash', 'mobile_money', 'card_manual', 'card_pos'];
+            $allowedTypes = ['walk_in', 'dine_in', 'takeaway', 'room_service'];
+            $orderType = in_array($_POST['order_type'] ?? '', $allowedTypes, true) ? $_POST['order_type'] : 'walk_in';
+            $tableNumber  = trim($_POST['table_number'] ?? '');
+            $customerName = trim($_POST['customer_name'] ?? '');
+            $customerEmail = trim($_POST['customer_email'] ?? '');
+            $customerPhone = trim($_POST['customer_phone'] ?? '');
+            if ($customerEmail !== '' && !filter_var($customerEmail, FILTER_VALIDATE_EMAIL)) {
+                throw new RuntimeException('Customer email looks invalid.');
+            }
+            $orderNote = trim($_POST['notes'] ?? '');
+
+            if ($action === 'park') {
+                /* === Fire order to stations, pay later (open tab) === */
+                $pdo->beginTransaction();
+                [$orderId, $reference, $totalAmount, $count] = pos_buildOrderFromPost($pdo, $user, $orderType, $tableNumber, $customerName, $customerEmail, $customerPhone, $orderNote, true);
+                $pdo->prepare("UPDATE stock_orders SET kitchen_printed_at=NOW() WHERE id=?")->execute([$orderId]);
+                pos_fireKitchen($pdo, $orderId, $user['id'], $user['full_name']);
+                pos_logAudit($pdo, $orderId, $user['id'], $user['full_name'], 'parked_open_tab', json_encode(['lines' => $count, 'total' => $totalAmount, 'table' => $tableNumber, 'till' => 'pos.php']));
+                $pdo->commit();
+                if (function_exists('deleteCache')) deleteCache('stock_dashboard_metrics_v1');
+                $lastOrderId = $orderId;
+                $lastOrderRef = $reference;
+                $justParked = true;
+                // Build human-readable station list from actual items
+                $stnStmt = $pdo->prepare("SELECT DISTINCT station FROM stock_order_items WHERE order_id=? ORDER BY station");
+                $stnStmt->execute([$orderId]);
+                $stnNames = array_map(fn($s) => match ($s) {
+                    'kitchen' => 'Kitchen',
+                    'bar' => 'Bar',
+                    'coffee_bar' => 'Coffee Bar',
+                    default => ucfirst($s)
+                }, array_column($stnStmt->fetchAll(PDO::FETCH_ASSOC), 'station'));
+                $stationLabel = implode(' & ', $stnNames) ?: 'Station';
+                $message = "Fired to {$stationLabel}: {$reference} — {$currency_symbol} " . number_format($totalAmount, 2) . " · open tab.";
+                pos_redirectWithFlash([
+                    'message' => $message,
+                    'last_order_id' => $lastOrderId,
+                    'last_order_ref' => $lastOrderRef,
+                    'just_parked' => true,
+                ]);
+            } elseif ($action === 'pay_existing') {
+                /* === Recall a parked order and take payment === */
+                $orderId = (int)($_POST['order_id'] ?? 0);
+                $paymentMethod = $_POST['payment_method'] ?? '';
+                if (!in_array($paymentMethod, $allowedMethods, true)) throw new RuntimeException('Select a payment method.');
+                if ($paymentMethod === 'card_pos') throw new RuntimeException('Card POS terminal is not enabled yet — use Card (manual).');
+
+                $pdo->beginTransaction();
+                $stmt = $pdo->prepare("SELECT id, reference, total_amount, status, order_type, created_by FROM stock_orders WHERE id=? FOR UPDATE");
+                $stmt->execute([$orderId]);
+                $row = $stmt->fetch(PDO::FETCH_ASSOC);
+                if (!$row) throw new RuntimeException('Order not found.');
+                if ($row['status'] !== 'placed') {
+                    $settledStmt = $pdo->prepare("SELECT COALESCE(NULLIF(u.full_name, ''), u.username, '') AS recorded_by_name
+                                                    FROM payments p
+                                                    LEFT JOIN admin_users u ON u.id = p.recorded_by
+                                                   WHERE p.booking_type = 'restaurant'
+                                                     AND p.booking_id = ?
+                                                     AND COALESCE(p.payment_type, '') != 'refund'
+                                                     AND p.deleted_at IS NULL
+                                                ORDER BY p.id DESC
+                                                   LIMIT 1");
+                    $settledStmt->execute([$orderId]);
+                    $settledByName = trim((string)$settledStmt->fetchColumn());
+                    $statusLabel = str_replace('_', ' ', (string)$row['status']);
+                    $byLine = $settledByName !== '' ? ' by ' . $settledByName : '';
+                    throw new RuntimeException("This tab is already {$statusLabel}{$byLine}. Refreshing open tabs so it cannot be charged twice.");
+                }
+                // Room-service tabs must be settled via the booking folio at checkout.
+                if (($row['order_type'] ?? '') === 'room_service') {
+                    throw new RuntimeException('Room-service orders are settled via the guest folio at check-out — they cannot be paid directly at the till.');
+                }
+                // Restaurant_staff can only pay tabs they themselves opened. Admin/manager can pay any.
+                if (($user['role'] ?? '') === 'restaurant_staff' && (int)$row['created_by'] !== (int)$user['id']) {
+                    throw new RuntimeException('You can only settle tabs you opened.');
+                }
+
+                $pendingItemsStmt = $pdo->prepare("SELECT COUNT(*) FROM stock_order_items WHERE order_id = ? AND kds_status NOT IN ('served', 'void')");
+                $pendingItemsStmt->execute([$orderId]);
+                $pendingItems = (int)$pendingItemsStmt->fetchColumn();
+                if ($pendingItems > 0) {
+                    throw new RuntimeException('This tab still has ' . $pendingItems . ' item' . ($pendingItems === 1 ? '' : 's') . ' that have not been served yet. In real-world flow, settle the tab after service is complete.');
+                }
+
+                $extras = pos_applyPaymentToOrder($pdo, $user, $orderId, $row['reference'], (float)$row['total_amount'], $paymentMethod, $_POST);
+                pos_logAudit($pdo, $orderId, $user['id'], $user['full_name'], 'paid_from_tab', json_encode(['method' => $paymentMethod, 'total' => $row['total_amount'], 'tendered' => $extras['tendered'], 'change' => $extras['change'], 'till' => 'pos.php']));
+                $pdo->commit();
+                if (function_exists('deleteCache')) deleteCache('stock_dashboard_metrics_v1');
+                $lastOrderId = $orderId;
+                $lastOrderRef = $row['reference'];
+                $changeMsg = ($paymentMethod === 'cash' && $extras['change'] > 0) ? ' Change: ' . $currency_symbol . ' ' . number_format($extras['change'], 2) . '.' : '';
+                $message = "Paid {$row['reference']} — {$currency_symbol} " . number_format((float)$row['total_amount'], 2) . " · " . str_replace('_', ' ', $paymentMethod) . "." . $changeMsg;
+                pos_redirectWithFlash([
+                    'message' => $message,
+                    'last_order_id' => $lastOrderId,
+                    'last_order_ref' => $lastOrderRef,
+                    'just_parked' => false,
+                ]);
+            } elseif ($action === 'close_shift') {
+                /* === Z-report: cashier declares cash, system records variance === */
+                /* HARD BLOCK: a cashier (and the admin closing on their behalf) MUST settle or
+                 * cancel every open tab they opened today before closing. This stops the
+                 * "leave a tab unpaid, close the shift, pocket the cash later" loophole. */
+                $openTabsCheck = $pdo->prepare("SELECT COUNT(*) FROM stock_orders WHERE created_by = ? AND status = 'placed'");
+                $openTabsCheck->execute([$user['id']]);
+                $openTabsRemaining = (int)$openTabsCheck->fetchColumn();
+                if ($openTabsRemaining > 0) {
+                    throw new RuntimeException('Cannot close shift: ' . $openTabsRemaining . ' open tab(s) still need to be settled or cancelled. Open the Tabs tray, take payment, or cancel them first.');
+                }
+                $declCash   = round((float)($_POST['declared_cash']   ?? 0), 2);
+                $declMobile = round((float)($_POST['declared_mobile'] ?? 0), 2);
+                $declCard   = round((float)($_POST['declared_card']   ?? 0), 2);
+                $shiftNote  = trim($_POST['shift_note'] ?? '');
+                if ($declCash < 0 || $declMobile < 0 || $declCard < 0) throw new RuntimeException('Declared amounts cannot be negative.');
+
+                // Expected totals (this cashier, paid in the active restaurant window).
+                // Uses paid_at so tabs created earlier but settled now are included.
+                $windowStart = $restaurantWindow['start_sql'];
+                $windowEnd = $restaurantWindow['end_sql'];
+                $exp = $pdo->prepare("
+                    SELECT COALESCE(SUM(CASE WHEN payment_method='cash' THEN total_amount ELSE 0 END),0) AS cash,
+                           COALESCE(SUM(CASE WHEN payment_method='mobile_money' THEN total_amount ELSE 0 END),0) AS mobile,
+                           COALESCE(SUM(CASE WHEN payment_method IN ('card_manual','card_pos') THEN total_amount ELSE 0 END),0) AS card,
+                           COUNT(*) AS orders_count,
+                           COALESCE(SUM(CASE WHEN created_at < ? THEN 1 ELSE 0 END),0) AS settled_from_tabs_count,
+                           COALESCE(SUM(CASE WHEN created_at < ? THEN total_amount ELSE 0 END),0) AS settled_from_tabs_amount
+                    FROM stock_orders
+                    WHERE created_by = ?
+                      AND status = 'paid'
+                             AND (
+                                     (paid_at IS NOT NULL AND paid_at >= ? AND paid_at < ?)
+                                 OR (paid_at IS NULL AND created_at >= ? AND created_at < ?)
+                             )
+                ");
+                $exp->execute([$windowStart, $windowStart, $user['id'], $windowStart, $windowEnd, $windowStart, $windowEnd]);
+                $E = $exp->fetch(PDO::FETCH_ASSOC) ?: ['cash' => 0, 'mobile' => 0, 'card' => 0, 'orders_count' => 0, 'settled_from_tabs_count' => 0, 'settled_from_tabs_amount' => 0];
+
+                // Voids reporting follows voided_at (fallback to created_at for legacy rows).
+                $voidsStmt = $pdo->prepare("
+                    SELECT COUNT(*) AS voids_count,
+                           COALESCE(SUM(total_amount),0) AS voids_amount
+                    FROM stock_orders
+                    WHERE created_by = ?
+                      AND status = 'voided'
+                      AND (
+                            (voided_at IS NOT NULL AND voided_at >= ? AND voided_at < ?)
+                         OR (voided_at IS NULL AND created_at >= ? AND created_at < ?)
+                      )
+                ");
+                $voidsStmt->execute([$user['id'], $windowStart, $windowEnd, $windowStart, $windowEnd]);
+                $V = $voidsStmt->fetch(PDO::FETCH_ASSOC) ?: ['voids_count' => 0, 'voids_amount' => 0];
+                $E['voids_count'] = (int)($V['voids_count'] ?? 0);
+                $E['voids_amount'] = (float)($V['voids_amount'] ?? 0);
+                $vCash   = round($declCash   - (float)$E['cash'], 2);
+                $vMobile = round($declMobile - (float)$E['mobile'], 2);
+                $vCard   = round($declCard   - (float)$E['card'], 2);
+                // Balance enforcement: cashier must balance to within MWK 1.00 unless an admin/manager overrides.
+                $isPrivileged = in_array($user['role'] ?? '', ['admin', 'manager'], true);
+                $overrideRequested = !empty($_POST['admin_override']);
+                $overrideReason = trim($_POST['override_reason'] ?? '');
+                $threshold = 1.00; // tolerance for rounding
+                $maxVar = max(abs($vCash), abs($vMobile), abs($vCard));
+                if ($maxVar > $threshold) {
+                    if (!$isPrivileged) {
+                        throw new RuntimeException('Shift does not balance (variance ' . number_format($maxVar, 2) . '). Recount the drawer or ask an admin/manager to close on your behalf with an override.');
+                    }
+                    if (!$overrideRequested) {
+                        throw new RuntimeException('Variance of ' . number_format($maxVar, 2) . ' exceeds tolerance. Tick the override box to record this close with a reason.');
+                    }
+                    if (mb_strlen($overrideReason) < 5) {
+                        throw new RuntimeException('Override reason is required (minimum 5 characters) and will be saved for audit.');
+                    }
+                    $shiftNote = trim('[OVERRIDE by ' . $user['username'] . '] ' . $overrideReason . ($shiftNote !== '' ? ' | ' . $shiftNote : ''));
+                }
+
+                $pdo->prepare("INSERT INTO stock_shift_closes (user_id, user_name, shift_date, closed_at, expected_cash, declared_cash, variance_cash, expected_mobile, declared_mobile, variance_mobile, expected_card, declared_card, variance_card, orders_count, voids_count, voids_amount, notes, ip_address) VALUES (?, ?, ?, NOW(), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
+                    ->execute([$user['id'], $user['full_name'], $restaurantWindow['business_date'], (float)$E['cash'], $declCash, $vCash, (float)$E['mobile'], $declMobile, $vMobile, (float)$E['card'], $declCard, $vCard, (int)$E['orders_count'], (int)$E['voids_count'], (float)$E['voids_amount'], $shiftNote ?: null, $_SERVER['REMOTE_ADDR'] ?? null]);
+                $closeId = (int)$pdo->lastInsertId();
+                pos_logAudit($pdo, 0, $user['id'], $user['full_name'], 'shift_closed', json_encode(['close_id' => $closeId, 'window_start' => $windowStart, 'window_end' => $windowEnd, 'expected_cash' => $E['cash'], 'declared_cash' => $declCash, 'variance_cash' => $vCash, 'expected_mobile' => $E['mobile'], 'declared_mobile' => $declMobile, 'variance_mobile' => $vMobile, 'expected_card' => $E['card'], 'declared_card' => $declCard, 'variance_card' => $vCard, 'orders' => $E['orders_count'], 'voids' => $E['voids_count'], 'settled_from_tabs_count' => $E['settled_from_tabs_count'], 'settled_from_tabs_amount' => $E['settled_from_tabs_amount'], 'override' => $overrideRequested && $maxVar > $threshold, 'override_reason' => $overrideRequested ? $overrideReason : null]));
+
+                $justClosedShift = [
+                    'expected_cash' => (float)$E['cash'],
+                    'declared_cash' => $declCash,
+                    'variance_cash' => $vCash,
+                    'expected_mobile' => (float)$E['mobile'],
+                    'declared_mobile' => $declMobile,
+                    'variance_mobile' => $vMobile,
+                    'expected_card' => (float)$E['card'],
+                    'declared_card' => $declCard,
+                    'variance_card' => $vCard,
+                    'orders_count' => (int)$E['orders_count'],
+                    'voids_count' => (int)$E['voids_count'],
+                    'settled_from_tabs_count' => (int)$E['settled_from_tabs_count'],
+                    'settled_from_tabs_amount' => (float)$E['settled_from_tabs_amount'],
+                ];
+                $message = 'Shift closed. Paid orders: ' . (int)$E['orders_count'] . ' (settled earlier tabs: ' . (int)$E['settled_from_tabs_count'] . '). Variance — cash: ' . number_format($vCash, 2) . ', mobile: ' . number_format($vMobile, 2) . ', card: ' . number_format($vCard, 2) . '.';
+                pos_redirectWithFlash([
+                    'message' => $message,
+                    'just_closed_shift' => $justClosedShift,
+                ]);
+            } else {
+                /* === Default: place + pay (single transaction) === */
+                $paymentMethod = $_POST['payment_method'] ?? '';
+                if (!in_array($paymentMethod, $allowedMethods, true)) throw new RuntimeException('Select a payment method.');
+                if ($paymentMethod === 'card_pos') throw new RuntimeException('Card POS terminal is not enabled yet — use Card (manual).');
+                // Room-service orders must always be charged to the guest folio — settled at checkout.
+                // Direct cash/card/mobile payment at the till is not permitted for room service.
+                if ($orderType === 'room_service') {
+                    throw new RuntimeException('Room-service orders are charged to the guest room folio — use Park (Fire to Kitchen) to send the order to the kitchen.');
+                }
+
+                $pdo->beginTransaction();
+                [$orderId, $reference, $totalAmount, $count] = pos_buildOrderFromPost($pdo, $user, $orderType, $tableNumber, $customerName, $customerEmail, $customerPhone, $orderNote, false);
+                $extras = pos_applyPaymentToOrder($pdo, $user, $orderId, $reference, $totalAmount, $paymentMethod, $_POST);
+                // Fire to kitchen for any sit-down/takeaway/room_service flow with food items.
+                if (in_array($orderType, ['dine_in', 'takeaway', 'room_service', 'walk_in'], true)) {
+                    pos_fireKitchen($pdo, $orderId, $user['id'], $user['full_name']);
+                }
+                pos_logAudit($pdo, $orderId, $user['id'], $user['full_name'], 'placed_paid', json_encode([
+                    'method' => $paymentMethod,
+                    'total' => $totalAmount,
+                    'lines' => $count,
+                    'tendered' => $extras['tendered'],
+                    'change' => $extras['change'],
+                    'till' => 'pos.php'
+                ]));
+                $pdo->commit();
+                if (function_exists('deleteCache')) deleteCache('stock_dashboard_metrics_v1');
+                $lastOrderId = $orderId;
+                $lastOrderRef = $reference;
+                $changeMsg = ($paymentMethod === 'cash' && $extras['change'] > 0) ? ' Change: ' . $currency_symbol . ' ' . number_format($extras['change'], 2) . '.' : '';
+                $message = "Paid {$reference} — {$currency_symbol} " . number_format($totalAmount, 2) . " · " . str_replace('_', ' ', $paymentMethod) . "." . $changeMsg;
+                pos_redirectWithFlash([
+                    'message' => $message,
+                    'last_order_id' => $lastOrderId,
+                    'last_order_ref' => $lastOrderRef,
+                    'just_parked' => false,
+                ]);
+            }
+        } catch (Throwable $e) {
+            if ($pdo->inTransaction()) $pdo->rollBack();
+            $error = $e->getMessage();
+        }
+    }
+}
+
+/* ---------------- Load menu, categories, snapshot, recent ----------------
+ * Items flagged for EITHER POS or Room Service are loaded from the unified
+ * menu_items table. Each item carries `show_pos` / `show_rs` flags so the
+ * JS can filter per active mode. Categories are dynamic from menu_categories. */
+$allMenuItems = $pdo->query("
+    SELECT mi.id, mi.item_name AS name, mi.price,
+           COALESCE(mi.category, 'Other') AS sub_category,
+           mi.show_pos, mi.show_room_service,
+           mc.name AS cat_name, mc.slug AS menu_type, mc.sort_order AS cat_sort
+    FROM menu_items mi
+    JOIN menu_categories mc ON mc.id = mi.category_id
+    WHERE mi.is_available = 1
+      AND mc.is_active = 1
+      AND (mi.show_pos = 1 OR mi.show_room_service = 1)
+    ORDER BY mc.sort_order ASC, mi.display_order ASC, mi.item_name ASC
+")->fetchAll(PDO::FETCH_ASSOC);
+
+$menuList = [];
+$categories = ['__ALL__' => ['label' => 'All', 'count' => 0]];
+$posVisibleCount = 0;
+foreach ($allMenuItems as $item) {
+    $cat = $item['cat_name'] . ' · ' . ($item['sub_category'] ?: 'Other');
+    $isPos = (int)$item['show_pos'];
+    $isRs  = (int)$item['show_room_service'];
+    if ($isPos) {
+        $categories[$cat] = ['label' => $cat, 'count' => ($categories[$cat]['count'] ?? 0) + 1];
+        $posVisibleCount++;
+    }
+    $menuList[] = [
+        'id'       => (int)$item['id'],
+        'type'     => $item['menu_type'],
+        'name'     => $item['name'],
+        'price'    => (float)$item['price'],
+        'category' => $cat,
+        'show_pos' => $isPos,
+        'show_rs'  => $isRs,
+    ];
+}
+$categories['__ALL__']['count'] = $posVisibleCount;
+
+$stockSnapshot = [];
+$snap = $pdo->query("
+    SELECT sr.menu_item_id, sr.menu_type,
+           MIN(FLOOR(GREATEST(0, i.current_quantity) / (sri.quantity_per_portion / (GREATEST(sri.yield_percent, 0.1)/100)))) AS max_portions
+    FROM stock_recipes sr
+    INNER JOIN stock_recipe_ingredients sri ON sri.recipe_id = sr.id
+    INNER JOIN stock_ingredients i ON i.id = sri.ingredient_id
+    WHERE sri.quantity_per_portion > 0
+    GROUP BY sr.menu_item_id, sr.menu_type
+")->fetchAll(PDO::FETCH_ASSOC);
+foreach ($snap as $s) $stockSnapshot[$s['menu_type'] . ':' . $s['menu_item_id']] = (int)$s['max_portions'];
+
+/* My-shift summary (per-cashier, based on payment time in this restaurant window). */
+function pos_fetch_shift_summary(PDO $pdo, array $restaurantWindow, int $userId): array
+{
+    $myShift = $pdo->prepare("
+        SELECT COUNT(*) AS orders_today,
+            COALESCE(SUM(total_amount),0) AS revenue_today,
+            COALESCE(SUM(CASE WHEN payment_method='cash' THEN total_amount ELSE 0 END),0) AS cash_today,
+            COALESCE(SUM(CASE WHEN payment_method='mobile_money' THEN total_amount ELSE 0 END),0) AS mobile_today,
+            COALESCE(SUM(CASE WHEN payment_method IN ('card_manual','card_pos') THEN total_amount ELSE 0 END),0) AS card_today,
+            COALESCE(SUM(CASE WHEN created_at < ? THEN 1 ELSE 0 END),0) AS settled_from_tabs_count,
+            COALESCE(SUM(CASE WHEN created_at < ? THEN total_amount ELSE 0 END),0) AS settled_from_tabs_amount
+        FROM stock_orders
+        WHERE created_by = ?
+          AND status = 'paid'
+          AND (
+                (paid_at IS NOT NULL AND paid_at >= ? AND paid_at < ?)
+             OR (paid_at IS NULL AND created_at >= ? AND created_at < ?)
+          )
+    ");
+    $myShift->execute([
+        $restaurantWindow['start_sql'],
+        $restaurantWindow['start_sql'],
+        $userId,
+        $restaurantWindow['start_sql'],
+        $restaurantWindow['end_sql'],
+        $restaurantWindow['start_sql'],
+        $restaurantWindow['end_sql']
+    ]);
+    $row = $myShift->fetch(PDO::FETCH_ASSOC) ?: [];
+    return [
+        'orders_today' => (int)($row['orders_today'] ?? 0),
+        'revenue_today' => (float)($row['revenue_today'] ?? 0),
+        'cash_today' => (float)($row['cash_today'] ?? 0),
+        'mobile_today' => (float)($row['mobile_today'] ?? 0),
+        'card_today' => (float)($row['card_today'] ?? 0),
+        'settled_from_tabs_count' => (int)($row['settled_from_tabs_count'] ?? 0),
+        'settled_from_tabs_amount' => (float)($row['settled_from_tabs_amount'] ?? 0),
+    ];
+}
+
+$shift = pos_fetch_shift_summary($pdo, $restaurantWindow, (int)$user['id']);
+
+if (isset($_GET['ajax']) && $_GET['ajax'] === 'shift_stats') {
+    header('Content-Type: application/json; charset=utf-8');
+    try {
+        echo json_encode([
+            'success' => true,
+            'shift' => pos_fetch_shift_summary($pdo, $restaurantWindow, (int)$user['id']),
+            'ts' => date('c'),
+        ]);
+    } catch (Throwable $e) {
+        http_response_code(500);
+        echo json_encode(['success' => false, 'error' => 'Unable to load shift stats.']);
+    }
+    exit;
+}
+
+$myRecent = $pdo->prepare("SELECT id, reference, total_amount, payment_method, change_due, status, created_at FROM stock_orders WHERE created_by = ? AND created_at >= ? AND created_at < ? ORDER BY created_at DESC LIMIT 10");
+$myRecent->execute([$user['id'], $restaurantWindow['start_sql'], $restaurantWindow['end_sql']]);
+$recent = $myRecent->fetchAll(PDO::FETCH_ASSOC);
+
+$restaurantTables = rh_restaurant_active_tables($pdo);
+$checkedInRooms = rh_restaurant_checked_in_rooms($pdo);
+$activeLocationLocks = rh_restaurant_active_location_locks($pdo);
+
+/* Open tabs (placed but not yet paid) — scoped to the last 48 hours so stale
+ * previous-shift tabs are visible and cannot be left behind. Admins/managers
+ * see all tabs; restaurant_staff only see their own. */
+$tabsSql = "SELECT o.id, o.reference, o.total_amount, o.table_number, o.customer_name, o.created_at, o.created_by,
+                   u.full_name AS opened_by,
+                   (SELECT COUNT(*) FROM stock_order_items WHERE order_id = o.id) AS line_count,
+                   (SELECT COUNT(*) FROM stock_order_items WHERE order_id = o.id AND kds_status = 'pending')                   AS pending_count,
+                   (SELECT COUNT(*) FROM stock_order_items WHERE order_id = o.id AND kds_status IN ('preparing','in_progress')) AS preparing_count,
+                   (SELECT COUNT(*) FROM stock_order_items WHERE order_id = o.id AND kds_status = 'ready')                     AS ready_count,
+                   (SELECT COUNT(*) FROM stock_order_items WHERE order_id = o.id AND kds_status = 'collection')                AS collection_count,
+                   (SELECT COUNT(*) FROM stock_order_items WHERE order_id = o.id AND kds_status = 'served')                    AS served_count
+            FROM stock_orders o
+            LEFT JOIN admin_users u ON u.id = o.created_by
+            WHERE o.status = 'placed' ";
+$tabsArgs = [];
+if (($user['role'] ?? '') === 'restaurant_staff') {
+    $tabsSql .= " AND o.created_by = ? ";
+    $tabsArgs[] = $user['id'];
+}
+$tabsSql .= " ORDER BY o.created_at DESC LIMIT 50";
+$tabsStmt = $pdo->prepare($tabsSql);
+$tabsStmt->execute($tabsArgs);
+$openTabs = $tabsStmt->fetchAll(PDO::FETCH_ASSOC);
+
+if (isset($_GET['ajax']) && $_GET['ajax'] === 'tabs') {
+    header('Content-Type: application/json; charset=utf-8');
+    echo json_encode([
+        'tabs' => $openTabs,
+        'count' => count($openTabs),
+        'window_start' => $restaurantWindow['start_sql'],
+        'now' => date('c'),
+    ]);
+    exit;
+}
+
+/* ============================================================
+ * Admin/manager live "All Stations" JSON poll endpoint.
+ * GET ?ajax=stations — returns counts + ticket details across
+ * Kitchen / Bar / Coffee Bar plus open tabs and today's revenue.
+ * Read-only, no writes, lightweight (≤50 rows).
+ * ============================================================ */
+if (isset($_GET['ajax']) && $_GET['ajax'] === 'stations') {
+    header('Content-Type: application/json; charset=utf-8');
+    if (!in_array($user['role'] ?? '', ['admin', 'manager'], true)) {
+        http_response_code(403);
+        echo json_encode(['error' => 'forbidden']);
+        exit;
+    }
+    try {
+        $stations = ['kitchen', 'bar', 'coffee_bar'];
+        $counts = [];
+        $countStmt = $pdo->prepare("
+            SELECT oi.station,
+                   SUM(CASE WHEN oi.kds_status='pending' THEN 1 ELSE 0 END) AS pending,
+                   SUM(CASE WHEN oi.kds_status='preparing' THEN 1 ELSE 0 END) AS in_progress,
+                   SUM(CASE WHEN oi.kds_status='ready' THEN 1 ELSE 0 END) AS ready,
+                   SUM(CASE WHEN oi.kds_status NOT IN ('served','void') THEN 1 ELSE 0 END) AS open_total
+            FROM stock_order_items oi
+            INNER JOIN stock_orders o ON o.id = oi.order_id
+            WHERE oi.station = ?
+              AND o.fired_at IS NOT NULL
+                            AND o.fired_at >= ?
+                            AND o.fired_at < ?
+              AND o.status NOT IN ('voided','cancelled')
+        ");
+        foreach ($stations as $st) {
+            $countStmt->execute([$st, $restaurantWindow['start_sql'], $restaurantWindow['end_sql']]);
+            $r = $countStmt->fetch(PDO::FETCH_ASSOC) ?: [];
+            $counts[$st] = [
+                'pending'     => (int)($r['pending']     ?? 0),
+                'in_progress' => (int)($r['in_progress'] ?? 0),
+                'ready'       => (int)($r['ready']       ?? 0),
+                'open_total'  => (int)($r['open_total']  ?? 0),
+            ];
+        }
+
+        // Live tickets per station (max 30 each, oldest first to surface bottlenecks).
+        $itemsStmt = $pdo->prepare("
+            SELECT oi.id, oi.order_id, oi.item_name, oi.quantity, oi.notes, oi.kds_status,
+                   oi.station, o.reference, o.table_number, o.fired_at, o.order_type,
+                   o.customer_name, ir.room_number AS booking_room_number
+            FROM stock_order_items oi
+            INNER JOIN stock_orders o ON o.id = oi.order_id
+            LEFT JOIN individual_rooms ir ON ir.id = o.individual_room_id
+            WHERE oi.station = ?
+              AND oi.kds_status NOT IN ('served','void')
+              AND o.fired_at IS NOT NULL
+              AND o.fired_at >= ?
+              AND o.fired_at < ?
+              AND o.status NOT IN ('voided','cancelled')
+            ORDER BY o.fired_at ASC
+            LIMIT 30
+        ");
+        $tickets = [];
+        foreach ($stations as $st) {
+            $itemsStmt->execute([$st, $restaurantWindow['start_sql'], $restaurantWindow['end_sql']]);
+            $tickets[$st] = $itemsStmt->fetchAll(PDO::FETCH_ASSOC);
+        }
+
+        // Open-tabs count system-wide and current business-window totals.
+        $openAll = (int)$pdo->query("SELECT COUNT(*) FROM stock_orders WHERE status='placed'")->fetchColumn();
+        $openVisibleStmt = $pdo->prepare("SELECT COUNT(*) FROM stock_orders WHERE status='placed'");
+        $openVisibleStmt->execute();
+        $openVisible = (int)$openVisibleStmt->fetchColumn();
+        $todayTotalsStmt = $pdo->prepare("
+            SELECT COUNT(*) AS orders_count,
+                   COALESCE(SUM(CASE WHEN status='paid' THEN total_amount ELSE 0 END),0) AS revenue
+            FROM stock_orders WHERE created_at >= ? AND created_at < ?
+        ");
+        $todayTotalsStmt->execute([$restaurantWindow['start_sql'], $restaurantWindow['end_sql']]);
+        $todayTotals = $todayTotalsStmt->fetch(PDO::FETCH_ASSOC) ?: ['orders_count' => 0, 'revenue' => 0];
+
+        echo json_encode([
+            'ts'             => date('c'),
+            'counts'         => $counts,
+            'tickets'        => $tickets,
+            'open_tabs_all'  => $openAll,
+            'open_tabs_visible' => $openVisible,
+            'orders_today'   => (int)$todayTotals['orders_count'],
+            'revenue_today'  => (float)$todayTotals['revenue'],
+        ]);
+    } catch (Throwable $e) {
+        http_response_code(500);
+        echo json_encode(['error' => $e->getMessage()]);
+    }
+    exit;
+}
+
+/* ============================================================
+ * Admin/manager: today's restaurant orders AJAX endpoint.
+ * GET ?ajax=resto_orders — order list + summary for today.
+ * ============================================================ */
+if (isset($_GET['ajax']) && $_GET['ajax'] === 'resto_orders') {
+    header('Content-Type: application/json; charset=utf-8');
+    if (!in_array($user['role'] ?? '', ['admin', 'manager'], true)) {
+        http_response_code(403);
+        echo json_encode(['error' => 'forbidden']);
+        exit;
+    }
+    try {
+        $restoStmt = $pdo->prepare("
+            SELECT o.id, o.reference, o.order_type, o.status, o.total_amount,
+                   o.created_at, o.fired_at, o.table_number, o.customer_name,
+                   ir.room_number, COUNT(oi.id) AS item_count
+            FROM stock_orders o
+            LEFT JOIN stock_order_items oi ON oi.order_id = o.id
+            LEFT JOIN individual_rooms ir ON ir.id = o.individual_room_id
+            WHERE o.created_at >= ?
+              AND o.created_at < ?
+              AND o.status NOT IN ('voided','cancelled')
+            GROUP BY o.id
+            ORDER BY o.created_at DESC
+            LIMIT 150
+        ");
+        $restoStmt->execute([$restaurantWindow['start_sql'], $restaurantWindow['end_sql']]);
+        $restoOrders = $restoStmt->fetchAll(PDO::FETCH_ASSOC);
+        $restoSumStmt = $pdo->prepare("
+            SELECT COUNT(*) AS total,
+                   SUM(CASE WHEN status='placed' THEN 1 ELSE 0 END) AS open_tabs,
+                   SUM(CASE WHEN status='paid'   THEN 1 ELSE 0 END) AS paid,
+                   COALESCE(SUM(total_amount), 0) AS revenue
+            FROM stock_orders
+            WHERE created_at >= ?
+              AND created_at < ?
+              AND status NOT IN ('voided','cancelled')
+        ");
+        $restoSumStmt->execute([$restaurantWindow['start_sql'], $restaurantWindow['end_sql']]);
+        $restoSum = $restoSumStmt->fetch(PDO::FETCH_ASSOC) ?: [];
+        echo json_encode(['orders' => $restoOrders, 'summary' => $restoSum]);
+    } catch (Throwable $e) {
+        http_response_code(500);
+        echo json_encode(['error' => $e->getMessage()]);
+    }
+    exit;
+}
+
+/* Deep-link: ?settle=ID from stock-orders.php "Take Payment" buttons.
+   Admin/manager (or the cashier who opened the tab) lands here with the settle modal pre-opened. */
+$settleAuto = null;
+if (!empty($_GET['settle']) && ctype_digit((string)$_GET['settle'])) {
+    $settleStmt = $pdo->prepare("SELECT id, reference, total_amount, created_by, status FROM stock_orders WHERE id = ? LIMIT 1");
+    $settleStmt->execute([(int)$_GET['settle']]);
+    $settleRow = $settleStmt->fetch(PDO::FETCH_ASSOC);
+    if ($settleRow && $settleRow['status'] === 'placed') {
+        $isPrivileged = in_array($user['role'] ?? '', ['admin', 'manager'], true);
+        if ($isPrivileged || (int)$settleRow['created_by'] === (int)$user['id']) {
+            $settleAuto = [
+                'id'    => (int)$settleRow['id'],
+                'total' => (float)$settleRow['total_amount'],
+                'ref'   => (string)$settleRow['reference'],
+            ];
+        }
+    }
+}
+
+$csrf_token = generateCsrfToken();
+$isFullScreen = ($user['role'] ?? '') === 'restaurant_staff';
+
+/* Initial admin/manager "All Stations" snapshot rendered server-side so the
+ * panel works even before the JS poller fires. Same query shape as ?ajax=stations. */
+$adminStationsInit = ['counts' => ['kitchen' => ['open_total' => 0, 'pending' => 0, 'in_progress' => 0, 'ready' => 0], 'bar' => ['open_total' => 0, 'pending' => 0, 'in_progress' => 0, 'ready' => 0], 'coffee_bar' => ['open_total' => 0, 'pending' => 0, 'in_progress' => 0, 'ready' => 0]], 'open_tabs_all' => 0];
+if (in_array($user['role'] ?? '', ['admin', 'manager'], true)) {
+    try {
+        $cs = $pdo->prepare("
+            SELECT oi.station,
+                   SUM(CASE WHEN oi.kds_status='pending' THEN 1 ELSE 0 END) AS pending,
+                   SUM(CASE WHEN oi.kds_status='preparing' THEN 1 ELSE 0 END) AS in_progress,
+                   SUM(CASE WHEN oi.kds_status='ready' THEN 1 ELSE 0 END) AS ready,
+                   SUM(CASE WHEN oi.kds_status NOT IN ('served','void') THEN 1 ELSE 0 END) AS open_total
+            FROM stock_order_items oi
+            INNER JOIN stock_orders o ON o.id = oi.order_id
+            WHERE oi.station = ? AND o.fired_at IS NOT NULL
+                            AND o.fired_at >= ?
+                            AND o.fired_at < ?
+              AND o.status NOT IN ('voided','cancelled')
+        ");
+        foreach (['kitchen', 'bar', 'coffee_bar'] as $st) {
+            $cs->execute([$st, $restaurantWindow['start_sql'], $restaurantWindow['end_sql']]);
+            $r = $cs->fetch(PDO::FETCH_ASSOC) ?: [];
+            $adminStationsInit['counts'][$st] = [
+                'pending'     => (int)($r['pending']     ?? 0),
+                'in_progress' => (int)($r['in_progress'] ?? 0),
+                'ready'       => (int)($r['ready']       ?? 0),
+                'open_total'  => (int)($r['open_total']  ?? 0),
+            ];
+        }
+        $adminStationsInit['open_tabs_all'] = (int)$pdo->query("SELECT COUNT(*) FROM stock_orders WHERE status='placed'")->fetchColumn();
+    } catch (Throwable $e) {
+        // Silent — JS poller will retry.
+    }
+}
+?>
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <title>POS Till — <?php echo htmlspecialchars($siteName); ?></title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <meta name="theme-color" content="#8B7355">
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="RH POS">
+    <link rel="manifest" href="manifest.php">
+    <link href="https://fonts.googleapis.com/css2?family=Jost:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.7.2/css/all.min.css">
+    <link rel="stylesheet" href="css/admin-responsive-enhancements.css">
+    <link rel="stylesheet" href="css/pos-overrides.css">
+    <script src="js/station-sounds.js"></script>
+</head>
+
+<body class="pos-screen<?php echo in_array($user['role'] ?? '', ['admin', 'manager'], true) ? ' pos-admin' : ''; ?>">
+    <div class="pos-action-loader" id="posActionLoader" role="status" aria-live="polite" aria-label="Loading">
+        <div class="pos-action-loader__card">
+            <div class="pos-action-loader__brand">
+                <i class="fas fa-hotel pos-action-loader__icon" aria-hidden="true"></i>
+                <span class="pos-action-loader__hotel"><?php echo htmlspecialchars($siteName, ENT_QUOTES, 'UTF-8'); ?></span>
+            </div>
+            <div class="pos-action-loader__divider"></div>
+            <div class="pos-action-loader__spinner" aria-hidden="true"></div>
+            <p class="pos-action-loader__title" id="posActionLoaderTitle">Loading…</p>
+            <p class="pos-action-loader__text" id="posActionLoaderText">Please wait.</p>
+        </div>
+    </div>
+    <div class="till-wrap">
+        <div class="till-bar">
+
+            <!-- ROW 1: Brand | Cashier | Actions | Sign-out -->
+            <div class="tb-row1">
+
+                <!-- Brand + Cashier identity block -->
+                <div class="brand">
+                    <span class="brand-name"><?php echo htmlspecialchars($siteName); ?></span>
+                    <span class="brand-label">Point of Sale</span>
+                    <span class="brand-cashier">
+                        <i class="fas fa-user-circle"></i>
+                        <span class="brand-cashier-name"><?php echo htmlspecialchars($user['full_name']); ?></span>
+                        <span class="brand-cashier-sep">·</span>
+                        <?php echo htmlspecialchars(ucfirst($user['role'] ?? 'Cashier')); ?>
+                    </span>
+                </div>
+
+                <!-- Mobile menu button -->
+                <button type="button" class="pos-mobile-menu-btn" id="posMobileMenuBtn" onclick="openPosMobileMenu()" aria-label="Open POS menu" aria-controls="posMobileMenu" aria-expanded="false" title="Open menu">
+                    <i class="fas fa-bars"></i>
+                    <span>Menu</span>
+                    <span class="mobile-menu-badge" id="mobileMenuBadge"></span>
+                </button>
+
+                <!-- Action buttons -->
+                <div class="tb-actions">
+                    <!-- Till ops -->
+                    <button class="recent-toggle" onclick="toggleRecent()" data-help="Recent orders|Last 10 orders you rang up."><i class="fas fa-receipt"></i> Recent</button>
+                    <button class="recent-toggle" onclick="openTabsTray()" data-help="Open tabs|Unpaid kitchen orders."><i class="fas fa-utensils"></i> Tabs <span id="tabBadge" <?php echo empty($openTabs) ? ' style="display:none;"' : ''; ?>><?php echo count($openTabs); ?></span></button>
+                    <button class="recent-toggle" onclick="openStationNoteModal()" data-help="Station note|Quick note to Kitchen/Bar/Coffee."><i class="fas fa-paper-plane"></i> Note</button>
+                    <button class="recent-toggle" onclick="openCloseShift()" data-help="Close shift (Z-report)|End-of-shift cash count."><i class="fas fa-cash-register"></i> Close Shift</button>
+
+                    <?php if (in_array($user['role'] ?? '', ['admin', 'manager'], true)): ?>
+                        <div class="tb-sep"></div>
+                        <!-- Live screens -->
+                        <a class="recent-toggle" href="kds.php" target="_blank" style="text-decoration:none;"><i class="fas fa-utensils"></i> Kitchen<span id="kitchenBadge" style="<?php echo ($adminStationsInit['counts']['kitchen']['open_total'] ?? 0) > 0 ? '' : 'display:none;'; ?>"><?php echo (int)($adminStationsInit['counts']['kitchen']['open_total'] ?? 0); ?></span></a>
+                        <a class="recent-toggle" href="bds.php" target="_blank" style="text-decoration:none;"><i class="fas fa-wine-glass"></i> Bar<span id="barBadge" style="<?php echo ($adminStationsInit['counts']['bar']['open_total'] ?? 0) > 0 ? '' : 'display:none;'; ?>"><?php echo (int)($adminStationsInit['counts']['bar']['open_total'] ?? 0); ?></span></a>
+                        <a class="recent-toggle" href="cds.php" target="_blank" style="text-decoration:none;"><i class="fas fa-mug-hot"></i> Coffee<span id="coffeeBadge" style="<?php echo ($adminStationsInit['counts']['coffee_bar']['open_total'] ?? 0) > 0 ? '' : 'display:none;'; ?>"><?php echo (int)($adminStationsInit['counts']['coffee_bar']['open_total'] ?? 0); ?></span></a>
+                        <button class="recent-toggle" onclick="openStationsTray()"><i class="fas fa-layer-group"></i> Stations<span id="stationsBadge" style="<?php $tot = ($adminStationsInit['counts']['kitchen']['open_total'] ?? 0) + ($adminStationsInit['counts']['bar']['open_total'] ?? 0) + ($adminStationsInit['counts']['coffee_bar']['open_total'] ?? 0);
+                                                                                                                                                                echo $tot > 0 ? '' : 'display:none;'; ?>"><?php echo $tot; ?></span></button>
+                        <a class="recent-toggle" href="stock-orders.php"><i class="fas fa-list"></i> All Orders</a>
+                    <?php endif; ?>
+
+                    <div class="tb-sep"></div>
+                    <!-- Nav -->
+                    <a class="recent-toggle" href="../docs/guides/01-pos-till.html" target="_blank" rel="noopener" style="text-decoration:none;"><i class="fas fa-book-open"></i> POS Guide</a>
+                    <button type="button" class="rh-help-toggle recent-toggle" data-inline="1" id="rhHelpToggle" aria-label="Toggle help tooltips" data-help="Help mode|Turn tooltip hints on or off for POS actions."><span class="dot"></span><i class="fas fa-question-circle"></i> <span id="rhHelpLabel">Help</span></button>
+                    <button class="recent-toggle" onclick="RHSounds.openSettings()" title="Sound settings"><i class="fas fa-sliders"></i> Sounds</button> <?php if (!$isFullScreen): ?><a class="exit" href="dashboard.php"><i class="fas fa-arrow-left"></i> Admin</a><?php endif; ?>
+                    <a class="logout" href="logout.php"><i class="fas fa-sign-out-alt"></i> Sign out</a>
+                </div>
+
+            </div>
+
+            <!-- ROW 2: Shift stats (scrollable) -->
+            <div class="tb-row2">
+                <span class="stat"><strong id="tbStatOrders"><?php echo (int)($shift['orders_today'] ?? 0); ?></strong><span class="stat-label">Orders</span></span>
+                <span class="stat"><strong id="tbStatRevenue"><?php echo $currency_symbol . ' ' . number_format((float)($shift['revenue_today'] ?? 0), 0); ?></strong><span class="stat-label">Revenue</span></span>
+                <span class="stat"><strong id="tbStatCash"><?php echo $currency_symbol . ' ' . number_format((float)($shift['cash_today'] ?? 0), 0); ?></strong><span class="stat-label">Cash</span></span>
+                <span class="stat"><strong id="tbStatMobile"><?php echo $currency_symbol . ' ' . number_format((float)($shift['mobile_today'] ?? 0), 0); ?></strong><span class="stat-label">Mobile</span></span>
+                <span class="stat"><strong id="tbStatCard"><?php echo $currency_symbol . ' ' . number_format((float)($shift['card_today'] ?? 0), 0); ?></strong><span class="stat-label">Card</span></span>
+            </div>
+
+        </div>
+
+        <div class="till-grid">
+            <!-- Menu mode toggle: flicks the visible menu between Restaurant (POS) and Room Service.
+             Selecting Room Service also auto-sets the order type so the location field expects a room. -->
+            <div class="menu-mode" role="tablist" aria-label="Menu mode" data-active-mode="restaurant">
+                <button type="button" class="menu-mode-btn is-active" data-mode="restaurant" role="tab" aria-selected="true" onclick="setMenuMode('restaurant')">
+                    <i class="fas fa-utensils"></i> <span>Restaurant</span>
+                </button>
+                <button type="button" class="menu-mode-btn" data-mode="room_service" role="tab" aria-selected="false" onclick="setMenuMode('room_service')">
+                    <i class="fas fa-bed"></i> <span>Room Service</span>
+                </button>
+            </div>
+
+            <!-- Categories -->
+            <div class="cats-wrap" id="catsWrap">
+                <button type="button" class="cat-dropdown-trigger" id="catDropdownTrigger" onclick="toggleCatDropdown()" aria-haspopup="listbox" aria-expanded="false">
+                    <i class="fas fa-th-large"></i>
+                    <span id="catDropdownLabel">All Items</span>
+                    <i class="fas fa-chevron-down cat-dropdown-chevron"></i>
+                </button>
+                <div class="cats" id="cats" role="listbox" aria-label="Menu categories">
+                    <?php foreach ($categories as $key => $cat): ?>
+                        <button class="cat-btn<?php echo $key === '__ALL__' ? ' active' : ''; ?>" data-cat="<?php echo htmlspecialchars($key, ENT_QUOTES); ?>" onclick="selectCat(this)" role="option" aria-selected="<?php echo $key === '__ALL__' ? 'true' : 'false'; ?>">
+                            <?php echo htmlspecialchars($cat['label']); ?>
+                            <span class="count"><?php echo (int)$cat['count']; ?></span>
+                        </button>
+                    <?php endforeach; ?>
+                </div>
+            </div>
+
+            <!-- Menu -->
+            <div class="menu">
+                <div class="toolbar">
+                    <input type="text" id="search" placeholder="Search menu…" oninput="renderMenu()">
+                    <button onclick="document.getElementById('search').value='';renderMenu()"><i class="fas fa-times"></i></button>
+                </div>
+                <div class="grid" id="grid"></div>
+            </div>
+
+            <!-- Cart -->
+            <div class="cart" id="mainCart">
+                <div class="cart-head">
+                    <h3><i class="fas fa-shopping-cart"></i> Order</h3>
+                    <div style="display:flex; gap:10px;">
+                        <button class="clear" onclick="clearCart()"><i class="fas fa-trash"></i> Clear</button>
+                        <button class="cart-close-btn" onclick="toggleCartDrawer()" data-help="Close order panel|Hide the current order panel so the menu has more room. Tap the floating cart button to bring it back."><i class="fas fa-times"></i></button>
+                    </div>
+                </div>
+                <div class="cart-lines" id="cart-lines">
+                    <p style="color:#6c757d; text-align:center; padding:30px 0; font-size:13px;">Tap items to add to the order.</p>
+                </div>
+                <div class="cart-foot">
+                    <!-- Service context: order type + location + customer name. These inputs live OUTSIDE the
+                     pay form (form="payForm" attribute) so they submit with both Fire-Order and Pay flows. -->
+                    <div class="service-ctx">
+                        <div class="ctx-chips" role="group" aria-label="Service type">
+                            <button type="button" class="ctx-chip is-active" data-type="walk_in" onclick="setServiceType('walk_in')"><i class="fas fa-walking"></i><span>Walk-in</span></button>
+                            <button type="button" class="ctx-chip" data-type="dine_in" onclick="setServiceType('dine_in')"><i class="fas fa-utensils"></i><span>Dine-in</span></button>
+                            <button type="button" class="ctx-chip" data-type="takeaway" onclick="setServiceType('takeaway')"><i class="fas fa-shopping-bag"></i><span>Takeaway</span></button>
+                            <button type="button" class="ctx-chip" data-type="room_service" onclick="setServiceType('room_service')"><i class="fas fa-bed"></i><span>Room</span></button>
+                        </div>
+                        <input type="hidden" id="ctxOrderType" name="order_type" form="payForm" value="walk_in">
+                        <div class="ctx-fields">
+                            <input type="hidden" id="ctxLocation" name="table_number" form="payForm" value="">
+                            <select id="ctxTableSelect" onchange="syncServiceLocation()" style="display:none;">
+                                <option value="">Select table...</option>
+                                <?php foreach ($restaurantTables as $table): ?>
+                                    <?php
+                                    $tableNumber = (string)$table['table_number'];
+                                    $tableLock = $activeLocationLocks['tables'][$tableNumber] ?? null;
+                                    $tableMeta = $table['capacity'] !== null ? ' · seats ' . (int)$table['capacity'] : '';
+                                    ?>
+                                    <option value="<?php echo htmlspecialchars($tableNumber); ?>" data-capacity="<?php echo $table['capacity'] !== null ? (int)$table['capacity'] : ''; ?>" <?php echo $tableLock ? 'disabled' : ''; ?>>
+                                        Table <?php echo htmlspecialchars($tableNumber . $tableMeta); ?><?php echo $tableLock ? ' · busy ' . htmlspecialchars((string)$tableLock['reference']) : ''; ?>
+                                    </option>
+                                <?php endforeach; ?>
+                            </select>
+                            <select id="ctxRoomSelect" onchange="syncServiceLocation()" style="display:none;">
+                                <option value="">Select checked-in room...</option>
+                                <?php foreach ($checkedInRooms as $room): ?>
+                                    <?php
+                                    $roomNumber = (string)$room['room_number'];
+                                    $roomLock = $activeLocationLocks['rooms'][$roomNumber] ?? null;
+                                    $guest = trim((string)($room['guest_name'] ?? ''));
+                                    ?>
+                                    <option value="<?php echo htmlspecialchars($roomNumber); ?>" data-booking="<?php echo (int)$room['booking_id']; ?>" <?php echo $roomLock ? 'disabled' : ''; ?>>
+                                        Room <?php echo htmlspecialchars($roomNumber); ?><?php echo $guest !== '' ? ' · ' . htmlspecialchars($guest) : ''; ?><?php echo $roomLock ? ' · busy ' . htmlspecialchars((string)$roomLock['reference']) : ''; ?>
+                                    </option>
+                                <?php endforeach; ?>
+                            </select>
+                            <div class="ctx-location-hint" id="ctxLocationHint"></div>
+                            <input type="text" id="ctxCustomer" name="customer_name" form="payForm" placeholder="Guest name (optional)" autocomplete="off">
+                        </div>
+                    </div>
+                    <div class="total-row"><span>Total</span><span id="total"><?php echo $currency_symbol; ?> 0.00</span></div>
+                    <div style="display:grid; grid-template-columns: 1fr 1fr; gap:8px;">
+                        <button class="park-btn" id="parkBtn" onclick="parkOrder()" disabled data-help="Fire order|Sends the order to the relevant station (Kitchen, Bar, or both) and opens it as a TAB (no payment yet). Stock is deducted immediately. Pay later from the Tabs button.
+Use for dine-in: staff can prepare while the customer is still seated."><span id="parkBtnLabel"><i class="fas fa-fire"></i> Fire Order</span></button>
+                        <button class="pay-btn" id="payBtn" onclick="openPayModal()" disabled data-help="Pay now|Take payment AND place the order in one step. Use for walk-in / takeaway / quick-service. The kitchen still receives the ticket automatically."><i class="fas fa-credit-card ico"></i> Pay</button>
+                    </div>
+                    <div style="font-size:11px; color:#6c757d; margin-top:8px; text-align:center;" id="parkHint">Fire Order = open tab (pay later)</div>
+                </div>
+            </div>
+
+            <button class="mobile-cart-toggle" onclick="toggleCartDrawer()">
+                <i class="fas fa-shopping-cart"></i>
+                <span class="badge" id="cartBadge" style="display:none;">0</span>
+            </button>
+        </div>
+    </div>
+
+    <!-- Recent dropdown -->
+    <div class="recent-list" id="recentList">
+        <div class="recent-list__header">
+            <span>Recent Orders</span>
+            <button type="button" onclick="toggleRecent()" aria-label="Close recent orders">
+                <i class="fas fa-times" aria-hidden="true"></i>
+            </button>
+        </div>
+        <?php if (empty($recent)): ?>
+            <div style="padding:18px; color:#6c757d; text-align:center;">No orders yet today.</div>
+        <?php else: ?>
+            <?php foreach ($recent as $r): ?>
+                <a class="r" href="stock-receipt.php?id=<?php echo (int)$r['id']; ?>" target="_blank">
+                    <div class="ref"><?php echo htmlspecialchars($r['reference']); ?> · <?php echo $currency_symbol . ' ' . number_format((float)$r['total_amount'], 2); ?></div>
+                    <div style="color:#6c757d; font-size:11px;"><?php echo htmlspecialchars(ucfirst(str_replace('_', ' ', $r['payment_method'] ?? '—'))); ?> · <?php echo htmlspecialchars(date('H:i', strtotime($r['created_at']))); ?> · <?php echo htmlspecialchars($r['status']); ?></div>
+                </a>
+            <?php endforeach; ?>
+        <?php endif; ?>
+    </div>
+
+    <!-- Pay modal -->
+    <div class="overlay modal-overlay" data-modal id="payOverlay">
+        <div class="modal modal-content">
+            <div class="modal-head modal-header">
+                <h3><i class="fas fa-credit-card"></i> Take payment</h3><button class="close modal-close" onclick="closePayModal()">&times;</button>
+            </div>
+            <form method="POST" id="payForm" data-offline-queue="1">
+                <input type="hidden" name="csrf_token" value="<?php echo $csrf_token; ?>">
+                <div id="payHiddenItems"></div>
+                <div class="modal-body">
+                    <div style="font-size:32px; font-weight:700; text-align:center; margin-bottom:14px;">
+                        <span id="payTotal"><?php echo $currency_symbol; ?> 0.00</span>
+                    </div>
+
+                    <div id="payKitchenWarning" style="display:none; align-items:flex-start; gap:10px; background:#fff3cd; border:1px solid #ffc107; border-radius:8px; padding:10px 14px; margin-bottom:14px; font-size:13px; color:#856404; line-height:1.4;">
+                        <i class="fas fa-exclamation-triangle" style="flex-shrink:0; margin-top:1px;"></i>
+                        <span id="payKitchenWarningText"></span>
+                    </div>
+                    <div id="paySvcSummary" style="background:#f8fafc; border:1px solid #e5e7eb; border-radius:8px; padding:8px 12px; margin-bottom:12px; font-size:12.5px; color:#475569; display:flex; align-items:center; gap:8px;">
+                        <i class="fas fa-info-circle" style="color:#8B7355;"></i>
+                        <span id="paySvcSummaryText">Walk-in</span>
+                        <button type="button" onclick="closePayModal()" style="margin-left:auto; background:transparent; border:none; color:#8B7355; font-size:12px; cursor:pointer; text-decoration:underline;">Change</button>
+                    </div>
+
+                    <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px;">
+                        <div><label>Email (for receipt)</label><input type="email" name="customer_email"></div>
+                        <div><label>Phone (for WhatsApp)</label><input type="text" name="customer_phone"></div>
+                    </div>
+                    <label>Notes</label>
+                    <input type="text" name="notes" placeholder="Allergies, special requests…">
+
+                    <label>Payment method</label>
+                    <div class="pay-method-grid">
+                        <button type="button" data-method="cash" onclick="setMethod(this)"><i class="fas fa-money-bill-wave"></i> Cash</button>
+                        <button type="button" data-method="mobile_money" onclick="setMethod(this)"><i class="fas fa-mobile-alt"></i> Mobile Money</button>
+                        <button type="button" data-method="card_manual" onclick="setMethod(this)"><i class="fas fa-credit-card"></i> Card (manual)</button>
+                        <button type="button" class="disabled" data-method="card_pos" onclick="showCardPosUnavailable()"><i class="fas fa-microchip"></i> Card POS<br><small>(soon)</small></button>
+                    </div>
+                    <input type="hidden" name="payment_method" id="payment_method" value="">
+
+                    <div id="ext-cash" style="display:none;">
+                        <label>Tendered (<?php echo $currency_symbol; ?>)</label>
+                        <input type="number" step="0.01" min="0" name="tendered_amount" id="tendered" oninput="updChange()">
+                        <div class="change-banner">Change: <span id="changeOut"><?php echo $currency_symbol; ?> 0.00</span></div>
+                        <div style="display:grid; grid-template-columns:repeat(4,1fr); gap:6px; margin-top:8px;">
+                            <button type="button" onclick="quickTend(500)" style="padding:10px;border:1px solid #d6d8db;background:#fff;border-radius:6px;cursor:pointer;">+500</button>
+                            <button type="button" onclick="quickTend(1000)" style="padding:10px;border:1px solid #d6d8db;background:#fff;border-radius:6px;cursor:pointer;">+1k</button>
+                            <button type="button" onclick="quickTend(5000)" style="padding:10px;border:1px solid #d6d8db;background:#fff;border-radius:6px;cursor:pointer;">+5k</button>
+                            <button type="button" onclick="quickTendExact()" style="padding:10px;border:1px solid #28a745;background:#e9f5ee;color:#155724;border-radius:6px;cursor:pointer;font-weight:600;">Exact</button>
+                        </div>
+                    </div>
+
+                    <div id="ext-mobile_money" style="display:none;">
+                        <label>Provider</label>
+                        <select name="mobile_wallet_provider">
+                            <option value="">Select…</option>
+                            <option>Airtel Money</option>
+                            <option>TNM Mpamba</option>
+                            <option>Mo626</option>
+                            <option>Other</option>
+                        </select>
+                        <label>Transaction reference</label>
+                        <input type="text" name="mobile_wallet_reference" placeholder="MP25.0123.A4567">
+                    </div>
+
+                    <div id="ext-card_manual" style="display:none;">
+                        <label>Card last 4 digits</label>
+                        <input type="text" name="card_last4" maxlength="4" pattern="\d{4}" placeholder="1234">
+                        <label>Authorisation code (from slip)</label>
+                        <input type="text" name="card_auth_code" maxlength="50">
+                    </div>
+                </div>
+                <div class="modal-foot modal-footer">
+                    <button type="button" class="btn-cancel" onclick="closePayModal()">Cancel</button>
+                    <button type="submit" class="btn-confirm" id="confirmBtn" disabled>Confirm payment</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <div class="overlay modal-overlay" data-modal id="posMobileQuickViewOverlay">
+        <div class="modal modal-content pos-mobile-quick-view-modal">
+            <div class="modal-head modal-header pos-mobile-quick-view-modal__head">
+                <div class="pos-mobile-quick-view-modal__heading">
+                    <h3 id="posMobileQuickViewTitle"><i class="fas fa-layer-group"></i> Quick View</h3>
+                    <p class="pos-mobile-quick-view-modal__subtitle" id="posMobileQuickViewSubtitle" hidden></p>
+                </div>
+                <button class="close modal-close" type="button" onclick="closePosMobileQuickView()" aria-label="Close quick view">&times;</button>
+            </div>
+            <div class="modal-body" id="posMobileQuickViewBody"></div>
+        </div>
+    </div>
+
+    <!-- Station-closed fire confirmation overlay -->
+    <div class="overlay modal-overlay" data-modal id="kitchenClosedOverlay">
+        <div class="modal modal-content" style="max-width:400px; text-align:center; padding:0;">
+            <div style="padding:28px 24px 20px;">
+                <div style="font-size:44px; margin-bottom:10px; line-height:1;" id="stationClosedEmoji">⚠️</div>
+                <h3 style="margin:0 0 8px; font-size:18px; font-weight:700; color:#c82333;" id="stationClosedTitle">Station Closed</h3>
+                <p style="font-size:13px; color:#888; margin:0 0 0;" id="stationClosedMsg">This station is currently closed. The ticket will sit unseen until it reopens. Proceed?</p>
+            </div>
+            <div style="display:flex; gap:10px; padding:0 24px 24px;">
+                <button onclick="cancelKitchenFire()" style="flex:1; padding:14px; background:#f8f9fa; border:1px solid #dee2e6; border-radius:8px; font-size:14px; font-weight:600; cursor:pointer; font-family:inherit;">Cancel</button>
+                <button onclick="confirmKitchenFire()" style="flex:1; padding:14px; background:#c82333; color:#fff; border:none; border-radius:8px; font-size:14px; font-weight:700; cursor:pointer; font-family:inherit;"><i class="fas fa-fire"></i> Fire Anyway</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Success modal -->
+    <?php if ($lastOrderRef): ?>
+        <div class="overlay modal-overlay show" data-modal id="successOverlay" data-dismissible="1">
+            <div class="success-modal modal-content" style="position:relative;">
+                <button type="button" class="close modal-close" aria-label="Close" onclick="closeSuccess()" data-help="Close|Dismiss this dialog and start a new order."
+                    style="position:absolute; top:10px; right:14px; background:transparent; border:none; font-size:26px; line-height:1; cursor:pointer; color:#6c757d;">&times;</button>
+                <div class="icon"><i class="fas fa-<?php echo $justParked ? 'fire' : 'check-circle'; ?>"></i></div>
+                <h2><?php echo $justParked ? 'Order Fired' : 'Payment received'; ?></h2>
+                <div class="ref"><?php echo htmlspecialchars($lastOrderRef); ?></div>
+                <div style="font-size:14px; color:#155724;"><?php echo htmlspecialchars($message); ?></div>
+                <div class="actions">
+                    <a class="a-print" href="stock-receipt.php?id=<?php echo (int)$lastOrderId; ?>&print=1&kot=<?php echo $justParked ? '1' : '0'; ?>" target="_blank" data-help="<?php echo $justParked ? 'Print KOT|Kitchen Order Ticket — the chef-side slip listing what to cook. Opens in a new tab so you can keep the till open.' : 'Print receipt|Customer-facing slip with totals, VAT and payment method. Opens in a new tab.'; ?>"><i class="fas fa-print"></i> <?php echo $justParked ? 'Print KOT' : 'Print'; ?></a>
+                    <?php if (!$justParked): ?>
+                        <a class="a-receipt" href="stock-receipt.php?id=<?php echo (int)$lastOrderId; ?>" target="_blank" data-help="Email / WhatsApp|Send the receipt to the customer's email or WhatsApp number from the receipt page."><i class="fas fa-envelope"></i> Email / WhatsApp</a>
+                    <?php else: ?>
+                        <button class="a-receipt" onclick="closeSuccess(); openTabsTray();" data-help="View open tabs|Jump to the list of unpaid tickets. From there you can settle this tab when the customer is ready."><i class="fas fa-list"></i> View Tabs</button>
+                    <?php endif; ?>
+                    <?php if (in_array($user['role'] ?? '', ['admin', 'manager'], true)): ?>
+                        <a class="a-receipt" href="order-lifecycle.php?id=<?php echo (int)$lastOrderId; ?>" target="_blank" data-help="Order lifecycle|See every event for this order — placement, kitchen actions, stock movements, payment — with timestamps and the user who did each." style="background:#3a3a40;"><i class="fas fa-stream"></i> Lifecycle</a>
+                    <?php endif; ?>
+                    <button class="a-new" onclick="closeSuccess()" data-help="New order|Close this dialog and start ringing up the next order."><i class="fas fa-plus-circle"></i> New order</button>
+                </div>
+                <?php if (!$justParked): ?>
+                    <div style="margin-top:14px;padding:12px 12px 10px;border:1px solid #e5e7eb;border-radius:10px;background:#fbfaf7;text-align:left;">
+                        <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:8px;">
+                            <strong style="font-size:13px;color:#3f3a33;"><i class="fas fa-paper-plane" style="color:#8B7355;margin-right:6px;"></i>Send receipt now</strong>
+                            <a href="whatsapp-settings.php" target="_blank" rel="noopener" style="font-size:11px;color:#8B7355;text-decoration:none;"><i class="fas fa-sliders"></i> WhatsApp setup</a>
+                        </div>
+                        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">
+                            <form method="POST" action="stock-receipt.php?id=<?php echo (int)$lastOrderId; ?>" target="_blank" style="display:grid;gap:6px;">
+                                <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf_token, ENT_QUOTES, 'UTF-8'); ?>">
+                                <input type="hidden" name="action" value="email_receipt">
+                                <input type="hidden" name="order_id" value="<?php echo (int)$lastOrderId; ?>">
+                                <input type="email" name="recipient" required value="<?php echo htmlspecialchars((string)($lastOrderCustomerEmail ?? ''), ENT_QUOTES, 'UTF-8'); ?>" placeholder="guest@example.com" style="min-height:36px;border:1px solid #d9d4cc;border-radius:8px;padding:7px 10px;font-size:12px;font-family:inherit;">
+                                <button type="submit" class="a-receipt" style="justify-content:center;"><i class="fas fa-envelope"></i> Send Email</button>
+                            </form>
+                            <form method="POST" action="stock-receipt.php?id=<?php echo (int)$lastOrderId; ?>" target="_blank" style="display:grid;gap:6px;">
+                                <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf_token, ENT_QUOTES, 'UTF-8'); ?>">
+                                <input type="hidden" name="action" value="whatsapp_receipt">
+                                <input type="hidden" name="order_id" value="<?php echo (int)$lastOrderId; ?>">
+                                <input type="text" name="recipient" required value="<?php echo htmlspecialchars((string)($lastOrderCustomerPhone ?? ''), ENT_QUOTES, 'UTF-8'); ?>" placeholder="+265 999 123 456" style="min-height:36px;border:1px solid #d9d4cc;border-radius:8px;padding:7px 10px;font-size:12px;font-family:inherit;">
+                                <button type="submit" class="a-receipt" style="justify-content:center;background:#1d6a3e;"><i class="fab fa-whatsapp"></i> Send WhatsApp</button>
+                            </form>
+                        </div>
+                        <p style="margin:7px 0 0;font-size:11px;color:#6c757d;line-height:1.5;">If WhatsApp provider is not fully configured yet, the intent is logged with no billable send; complete number + API token in WhatsApp Settings to go live.</p>
+                    </div>
+                <?php endif; ?>
+            </div>
+        </div>
+    <?php endif; ?>
+
+    <!-- Shift-close result modal -->
+    <?php if ($justClosedShift !== null): ?>
+        <div class="overlay modal-overlay show" data-modal id="shiftResultOverlay">
+            <div class="success-modal modal-content" style="text-align:left; width:560px;">
+                <h2 style="text-align:center; color:#1f1f24;"><i class="fas fa-cash-register"></i> Shift closed</h2>
+                <div style="text-align:center; font-size:13px; color:#6c757d; margin-bottom:18px;"><?php echo htmlspecialchars($user['full_name']); ?> · <?php echo date('Y-m-d H:i'); ?></div>
+                <table style="width:100%; border-collapse:collapse; font-size:14px;">
+                    <thead>
+                        <tr style="background:#f7f7f7;">
+                            <th style="text-align:left; padding:8px;">Tender</th>
+                            <th style="text-align:right; padding:8px;">Expected</th>
+                            <th style="text-align:right; padding:8px;">Declared</th>
+                            <th style="text-align:right; padding:8px;">Variance</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <?php foreach (['cash' => 'Cash', 'mobile' => 'Mobile', 'card' => 'Card'] as $k => $lbl): $v = $justClosedShift["variance_$k"];
+                            $vc = $v == 0 ? '#155724' : ($v < 0 ? '#c82333' : '#856404'); ?>
+                            <tr>
+                                <td style="padding:8px; border-top:1px solid #eee;"><?php echo $lbl; ?></td>
+                                <td style="padding:8px; border-top:1px solid #eee; text-align:right;"><?php echo number_format($justClosedShift["expected_$k"], 2); ?></td>
+                                <td style="padding:8px; border-top:1px solid #eee; text-align:right;"><?php echo number_format($justClosedShift["declared_$k"], 2); ?></td>
+                                <td style="padding:8px; border-top:1px solid #eee; text-align:right; color:<?php echo $vc; ?>; font-weight:700;"><?php echo ($v > 0 ? '+' : '') . number_format($v, 2); ?></td>
+                            </tr>
+                        <?php endforeach; ?>
+                    </tbody>
+                </table>
+                <p style="font-size:12px; color:#6c757d; margin-top:14px;">Orders: <?php echo $justClosedShift['orders_count']; ?> · Voids: <?php echo $justClosedShift['voids_count']; ?> · Settled earlier tabs: <?php echo (int)($justClosedShift['settled_from_tabs_count'] ?? 0); ?> (<?php echo $currency_symbol . ' ' . number_format((float)($justClosedShift['settled_from_tabs_amount'] ?? 0), 2); ?>). Recorded in <code>stock_shift_closes</code> for management review.</p>
+                <div class="actions">
+                    <button class="a-print" type="button" onclick="window.print()"><i class="fas fa-print"></i> Print Z-report</button>
+                    <a class="a-new" href="pos.php"><i class="fas fa-arrow-right"></i> Continue</a>
+                </div>
+            </div>
+        </div>
+    <?php endif; ?>
+
+    <!-- Open tabs tray -->
+    <div class="overlay modal-overlay" data-modal id="tabsOverlay">
+        <div class="modal modal-content" style="width:760px;">
+            <div class="modal-head modal-header">
+                <h3 id="openTabsTitle"><i class="fas fa-utensils"></i> Open tabs (<?php echo count($openTabs); ?>)</h3>
+                <button class="close modal-close" onclick="closeTabsTray()">&times;</button>
+            </div>
+            <div class="modal-body" id="tabsTrayBody" style="max-height:72vh; overflow-y:auto;">
+                <?php if (empty($openTabs)): ?>
+                    <div class="tabs-tray-tools is-collapsed" id="tabsTrayTools">
+                        <div class="tabs-tray-tools__headline">
+                            <div class="tabs-tray-tools__metrics">
+                                <div class="tabs-tray-metric"><span class="tabs-tray-metric__label">Open</span><strong>0</strong></div>
+                                <div class="tabs-tray-metric"><span class="tabs-tray-metric__label">Outstanding</span><strong><?php echo htmlspecialchars($currency_symbol, ENT_QUOTES, 'UTF-8'); ?> 0.00</strong></div>
+                                <div class="tabs-tray-metric"><span class="tabs-tray-metric__label">Stale</span><strong>0</strong></div>
+                            </div>
+                            <div class="tabs-tray-tools__status">
+                                <span class="tabs-tray-updated" id="tabsTrayUpdated">Live</span>
+                                <button type="button" class="tabs-tray-toggle" id="tabsTrayToggleBtn" onclick="toggleTabsTrayTools()" aria-expanded="false"><i class="fas fa-sliders"></i> Bulk tools</button>
+                            </div>
+                        </div>
+                        <div class="tabs-tray-tools__bulk-panel" id="tabsTrayBulkPanel" hidden>
+                            <div class="tabs-tray-tools__bulk-row">
+                                <label class="tabs-bulk-check"><input type="checkbox" id="tabsBulkAll" onchange="toggleTabsBulkAll(this.checked)" disabled> <span>Select all</span></label>
+                                <button type="button" class="tabs-bulk-btn" onclick="tabsSelectStale()" disabled><i class="fas fa-triangle-exclamation"></i> Select stale</button>
+                                <button type="button" class="tabs-bulk-btn" onclick="tabsClearSelection()" disabled><i class="fas fa-broom"></i> Clear</button>
+                                <span class="tabs-bulk-info" id="tabsBulkSelectionInfo">No tabs selected</span>
+                            </div>
+                            <div class="tabs-tray-tools__bulk-actions">
+                                <button type="button" class="tabs-bulk-btn tabs-bulk-btn--cancel" id="tabsBulkCancelBtn" onclick="bulkCancelTabs()" disabled><i class="fas fa-circle-xmark"></i> Bulk cancel</button>
+                                <?php if (in_array($user['role'] ?? '', ['admin', 'manager'], true)): ?>
+                                    <button type="button" class="tabs-bulk-btn tabs-bulk-btn--void" id="tabsBulkVoidBtn" onclick="bulkVoidTabs()" disabled><i class="fas fa-ban"></i> Bulk void</button>
+                                <?php endif; ?>
+                            </div>
+                        </div>
+                    </div>
+                    <p style="text-align:center; color:#6c757d; padding:30px 0;">No open tabs.</p>
+                <?php else: ?>
+                    <?php
+                    $openTabsTotalAmount = 0.0;
+                    $staleTabsCount = 0;
+                    foreach ($openTabs as $open_tab_metric) {
+                        $openTabsTotalAmount += (float)($open_tab_metric['total_amount'] ?? 0);
+                        if (!empty($restaurantWindow['start_sql']) && (($open_tab_metric['created_at'] ?? '') < $restaurantWindow['start_sql'])) {
+                            $staleTabsCount++;
+                        }
+                    }
+                    ?>
+                    <div class="tabs-tray-tools is-collapsed" id="tabsTrayTools">
+                        <div class="tabs-tray-tools__headline">
+                            <div class="tabs-tray-tools__metrics">
+                                <div class="tabs-tray-metric"><span class="tabs-tray-metric__label">Open</span><strong><?php echo count($openTabs); ?></strong></div>
+                                <div class="tabs-tray-metric"><span class="tabs-tray-metric__label">Outstanding</span><strong><?php echo htmlspecialchars($currency_symbol, ENT_QUOTES, 'UTF-8') . ' ' . number_format($openTabsTotalAmount, 2); ?></strong></div>
+                                <div class="tabs-tray-metric"><span class="tabs-tray-metric__label">Stale</span><strong><?php echo (int)$staleTabsCount; ?></strong></div>
+                            </div>
+                            <div class="tabs-tray-tools__status">
+                                <span class="tabs-tray-updated" id="tabsTrayUpdated">Live</span>
+                                <button type="button" class="tabs-tray-toggle" id="tabsTrayToggleBtn" onclick="toggleTabsTrayTools()" aria-expanded="false"><i class="fas fa-sliders"></i> Bulk tools</button>
+                            </div>
+                        </div>
+                        <div class="tabs-tray-tools__bulk-panel" id="tabsTrayBulkPanel" hidden>
+                            <div class="tabs-tray-tools__bulk-row">
+                                <label class="tabs-bulk-check"><input type="checkbox" id="tabsBulkAll" onchange="toggleTabsBulkAll(this.checked)"> <span>Select all</span></label>
+                                <button type="button" class="tabs-bulk-btn" onclick="tabsSelectStale()"><i class="fas fa-triangle-exclamation"></i> Select stale</button>
+                                <button type="button" class="tabs-bulk-btn" onclick="tabsClearSelection()"><i class="fas fa-broom"></i> Clear</button>
+                                <span class="tabs-bulk-info" id="tabsBulkSelectionInfo">No tabs selected</span>
+                            </div>
+                            <div class="tabs-tray-tools__bulk-actions">
+                                <button type="button" class="tabs-bulk-btn tabs-bulk-btn--cancel" id="tabsBulkCancelBtn" onclick="bulkCancelTabs()" disabled><i class="fas fa-circle-xmark"></i> Bulk cancel</button>
+                                <?php if (in_array($user['role'] ?? '', ['admin', 'manager'], true)): ?>
+                                    <button type="button" class="tabs-bulk-btn tabs-bulk-btn--void" id="tabsBulkVoidBtn" onclick="bulkVoidTabs()" disabled><i class="fas fa-ban"></i> Bulk void</button>
+                                <?php endif; ?>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="tab-cards-list" id="tabsCardsList">
+                        <?php foreach ($openTabs as $t):
+                            $created   = strtotime($t['created_at']);
+                            $ageSec    = max(0, time() - $created);
+                            $ageM = floor($ageSec / 60);
+                            $ageS = $ageSec % 60;
+                            $ageStr = $ageM > 0 ? ($ageM . 'm ' . str_pad((string)$ageS, 2, '0', STR_PAD_LEFT) . 's') : ($ageS . 's');
+                            $ageColor  = $ageSec >= 1800 ? '#c82333' : ($ageSec >= 900 ? '#d4a843' : '#28a745');
+                            $isStale   = $t['created_at'] < ($restaurantWindow['start_sql'] ?? '');
+                            $pendingCount    = (int)($t['pending_count']    ?? 0);
+                            $preparingCount  = (int)($t['preparing_count']  ?? 0);
+                            $readyCount      = (int)($t['ready_count']      ?? 0);
+                            $collectionCount = (int)($t['collection_count'] ?? 0);
+                            $servedCount     = (int)($t['served_count']     ?? 0);
+                            $totalItems      = (int)($t['line_count']       ?? 0);
+                            $canCancelBeforePrep = ($pendingCount > 0)
+                                && ($preparingCount === 0) && ($readyCount === 0)
+                                && ($collectionCount === 0) && ($servedCount === 0);
+                            $openedByOther = ((int)($t['created_by'] ?? 0) !== (int)$user['id']);
+                        ?>
+                            <article class="tab-card<?php echo $isStale ? ' stale' : ''; ?>" data-order-id="<?php echo (int)$t['id']; ?>" data-is-stale="<?php echo $isStale ? '1' : '0'; ?>">
+                                <div class="tc-row1">
+                                    <label class="tc-select-wrap" aria-label="Select <?php echo htmlspecialchars((string)($t['reference'] ?? 'TAB'), ENT_QUOTES, 'UTF-8'); ?>">
+                                        <input type="checkbox" class="tc-select-input" data-order-id="<?php echo (int)$t['id']; ?>" data-ref="<?php echo htmlspecialchars((string)($t['reference'] ?? 'TAB'), ENT_QUOTES, 'UTF-8'); ?>" data-total="<?php echo (float)($t['total_amount'] ?? 0); ?>" data-can-cancel="<?php echo $canCancelBeforePrep ? '1' : '0'; ?>" data-is-stale="<?php echo $isStale ? '1' : '0'; ?>" onchange="tabsSelectionChanged()">
+                                        <span class="tc-select-indicator"><i class="fas fa-check"></i></span>
+                                    </label>
+                                    <div class="tc-ref"><?php echo htmlspecialchars($t['reference']); ?></div>
+                                    <div class="tc-age tab-age" data-created="<?php echo (int)$created; ?>" style="color:<?php echo $ageColor; ?>;">
+                                        <i class="fas fa-stopwatch"></i> <?php echo $ageStr; ?>
+                                    </div>
+                                </div>
+                                <div class="tc-meta">
+                                    <?php if (!empty($t['table_number'])): ?><span class="tc-meta-pill"><i class="fas fa-table-cells-large"></i> Table <?php echo htmlspecialchars($t['table_number']); ?></span><?php endif; ?>
+                                    <?php if (!empty($t['customer_name'])): ?><span class="tc-meta-pill"><i class="fas fa-user"></i> <?php echo htmlspecialchars($t['customer_name']); ?></span><?php endif; ?>
+                                    <span class="tc-meta-pill"><i class="fas fa-list"></i> <?php echo $totalItems; ?> item<?php echo $totalItems === 1 ? '' : 's'; ?></span>
+                                    <span class="tc-meta-pill"><i class="fas fa-clock"></i> Opened <?php echo htmlspecialchars(date('H:i', $created)); ?></span>
+                                    <?php if ($openedByOther): ?>
+                                        <span class="tc-meta-pill"><i class="fas fa-user-tie"></i> <?php echo htmlspecialchars((string)($t['opened_by'] ?? 'staff')); ?></span>
+                                    <?php else: ?>
+                                        <span class="tc-meta-pill"><i class="fas fa-user-check"></i> You</span>
+                                    <?php endif; ?>
+                                </div>
+                                <?php if ($totalItems > 0): ?>
+                                    <div class="tc-flow">
+                                        <?php if ($pendingCount > 0):    ?><span class="tc-flow-chip pending"><i class="fas fa-clock"></i> <?php echo $pendingCount; ?> pending</span><?php endif; ?>
+                                        <?php if ($preparingCount > 0):  ?><span class="tc-flow-chip preparing"><i class="fas fa-fire-burner"></i> <?php echo $preparingCount; ?> prep</span><?php endif; ?>
+                                        <?php if ($readyCount > 0):      ?><span class="tc-flow-chip ready"><i class="fas fa-bell"></i> <?php echo $readyCount; ?> ready</span><?php endif; ?>
+                                        <?php if ($collectionCount > 0): ?><span class="tc-flow-chip collection"><i class="fas fa-hand-holding"></i> <?php echo $collectionCount; ?> collecting</span><?php endif; ?>
+                                        <?php if ($servedCount > 0):     ?><span class="tc-flow-chip served"><i class="fas fa-check"></i> <?php echo $servedCount; ?> served</span><?php endif; ?>
+                                        <?php if ($totalItems > 0 && $servedCount === $totalItems): ?><span class="tc-flow-chip served-all"><i class="fas fa-circle-check"></i> All served</span><?php endif; ?>
+                                    </div>
+                                <?php endif; ?>
+                                <div class="tc-summary-row">
+                                    <div>
+                                        <span class="tc-total-label">Total</span>
+                                        <div class="tc-total"><?php echo $currency_symbol . ' ' . number_format((float)$t['total_amount'], 2); ?></div>
+                                    </div>
+                                    <?php if ($isStale): ?><div class="tc-stale-warn"><i class="fas fa-triangle-exclamation"></i> Previous shift</div><?php endif; ?>
+                                </div>
+                                <div class="tc-actions">
+                                    <button type="button" onclick="openPayForTab(<?php echo (int)$t['id']; ?>, <?php echo (float)$t['total_amount']; ?>, '<?php echo htmlspecialchars($t['reference'], ENT_QUOTES); ?>')"
+                                        class="tc-btn tc-btn-settle"
+                                        data-help="Settle tab|Close this tab — take payment and mark the order as paid.">
+                                        <i class="fas fa-credit-card"></i> Settle
+                                    </button>
+                                    <button type="button" onclick="openTabDetail(<?php echo (int)$t['id']; ?>)"
+                                        class="tc-btn tc-btn-detail"
+                                        data-help="View details|See all items, kitchen status, and the full audit trail for this tab.">
+                                        <i class="fas fa-receipt"></i> Details
+                                    </button>
+                                    <a href="stock-receipt.php?id=<?php echo (int)$t['id']; ?>&print=1&kot=1" target="_blank" rel="noopener"
+                                        class="tc-btn tc-btn-kot"
+                                        data-help="Print KOT|Reprint the kitchen ticket for this open tab.">
+                                        <i class="fas fa-print"></i> KOT
+                                    </a>
+                                    <?php if ($canCancelBeforePrep): ?>
+                                        <button type="button"
+                                            onclick="cancelOpenOrder(<?php echo (int)$t['id']; ?>, '<?php echo htmlspecialchars($t['reference'], ENT_QUOTES); ?>')"
+                                            class="tc-btn tc-btn-cancel"
+                                            data-help="Cancel before prep|Cancels this order only while all items are still pending. Nothing has been cooked yet.">
+                                            <i class="fas fa-circle-xmark"></i> Cancel
+                                        </button>
+                                    <?php endif; ?>
+                                    <?php if (in_array($user['role'] ?? '', ['admin', 'manager'], true)): ?>
+                                        <a href="order-lifecycle.php?id=<?php echo (int)$t['id']; ?>" target="_blank" rel="noopener"
+                                            class="tc-btn tc-btn-log"
+                                            data-help="Lifecycle|See every event for this order with full timestamps and user info.">
+                                            <i class="fas fa-stream"></i> Lifecycle
+                                        </a>
+                                        <button type="button"
+                                            onclick="adminVoidTab(<?php echo (int)$t['id']; ?>, '<?php echo htmlspecialchars($t['reference'], ENT_QUOTES); ?>')"
+                                            class="tc-btn tc-btn-void"
+                                            data-help="Void order|Admin/manager only. Cancels the order, restores stock, clears station boards.">
+                                            <i class="fas fa-ban"></i> Void
+                                        </button>
+                                    <?php endif; ?>
+                                </div>
+                            </article>
+                        <?php endforeach; ?>
+                    </div>
+                <?php endif; ?>
+            </div>
+        </div>
+    </div>
+
+    <!-- Tab Detail Overlay -->
+    <div class="overlay modal-overlay" data-modal id="tabDetailOverlay">
+        <div class="modal modal-content" style="width:880px; max-width:96vw;">
+            <div class="modal-head modal-header">
+                <h3 id="tdiTitle"><i class="fas fa-receipt"></i> Tab details</h3>
+                <button class="close modal-close" onclick="document.getElementById('tabDetailOverlay').classList.remove('show')">&times;</button>
+            </div>
+            <div class="modal-body" id="tdiBody" style="max-height:78vh; overflow-y:auto;">
+                <div style="text-align:center; padding:40px 0; color:#9ca3af;"><i class="fas fa-spinner fa-spin fa-2x"></i></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- POS Reason Modal (replaces browser prompt/alert for cancel + void) -->
+    <div class="overlay modal-overlay" data-modal id="posReasonOverlay">
+        <div class="modal modal-content">
+            <div class="modal-head modal-header">
+                <h3 id="prmTitle"><i class="fas fa-comment-alt"></i> Reason required</h3>
+                <button class="close modal-close" onclick="posReasonCancel()">&times;</button>
+            </div>
+            <div class="prm-body">
+                <p class="prm-prompt" id="prmPrompt"></p>
+                <div class="prm-warn" id="prmWarn" style="display:none;"></div>
+                <label class="prm-label" for="prmReason">Reason <span style="color:#c82333;">*</span></label>
+                <textarea class="prm-textarea" id="prmReason" rows="3" placeholder="Enter reason (min 8 characters)…"></textarea>
+                <div class="prm-hint" id="prmHint">0 / 8 characters minimum</div>
+                <div id="prmNotesWrap" style="display:none;">
+                    <label class="prm-label" for="prmNotes" style="margin-top:8px;">Additional notes (optional)</label>
+                    <input type="text" class="prm-notes" id="prmNotes" placeholder="Optional follow-up notes…">
+                </div>
+                <div class="prm-error" id="prmError"></div>
+            </div>
+            <div class="modal-foot modal-footer">
+                <button type="button" class="tc-btn" style="background:#f0f2f4; color:#495057; flex:1; padding:14px;" onclick="posReasonCancel()">Cancel</button>
+                <button type="button" id="prmConfirm" class="tc-btn" style="flex:2; padding:14px; border-radius:8px; font-size:15px; font-weight:700; background:#c82333; color:#fff; cursor:pointer;" onclick="posReasonConfirm()"><i class="fas fa-check"></i> <span id="prmConfirmLabel">Confirm</span></button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Close shift modal -->
+    <div class="overlay modal-overlay" data-modal id="closeShiftOverlay">
+        <div class="modal modal-content">
+            <div class="modal-head modal-header">
+                <h3><i class="fas fa-cash-register"></i> Close shift (Z-report)</h3><button class="close modal-close" onclick="closeShiftModal()">&times;</button>
+            </div>
+            <form method="POST">
+                <input type="hidden" name="csrf_token" value="<?php echo $csrf_token; ?>">
+                <input type="hidden" name="action" value="close_shift">
+                <div class="modal-body">
+                    <p style="font-size:13px; color:#6c757d; margin-top:0;">Count what's actually in the drawer / records. The shift must balance — variance &gt; <?php echo $currency_symbol; ?> 1.00 will be blocked unless overridden by an admin/manager.</p>
+                    <div style="background:#f7f7f7; border-radius:8px; padding:12px; font-size:13px; margin-bottom:14px;">
+                        <div>Expected cash: <strong id="expCash" data-amount="<?php echo (float)($shift['cash_today'] ?? 0); ?>"><?php echo $currency_symbol . ' ' . number_format((float)($shift['cash_today'] ?? 0), 2); ?></strong></div>
+                        <div>Expected mobile: <strong id="expMobile" data-amount="<?php echo (float)($shift['mobile_today'] ?? 0); ?>"><?php echo $currency_symbol . ' ' . number_format((float)($shift['mobile_today'] ?? 0), 2); ?></strong></div>
+                        <div>Expected card: <strong id="expCard" data-amount="<?php echo (float)($shift['card_today'] ?? 0); ?>"><?php echo $currency_symbol . ' ' . number_format((float)($shift['card_today'] ?? 0), 2); ?></strong></div>
+                        <div>Paid orders this shift: <strong id="closeShiftOrdersCount"><?php echo (int)($shift['orders_today'] ?? 0); ?></strong></div>
+                        <div>Settled earlier tabs: <strong id="closeShiftSettledCount"><?php echo (int)($shift['settled_from_tabs_count'] ?? 0); ?></strong> · <span id="closeShiftSettledAmount"><?php echo $currency_symbol . ' ' . number_format((float)($shift['settled_from_tabs_amount'] ?? 0), 2); ?></span></div>
+                    </div>
+                    <label>Cash counted (<?php echo $currency_symbol; ?>)</label>
+                    <input type="number" step="0.01" min="0" name="declared_cash" id="declCash" required oninput="updShiftVariance()">
+                    <label>Mobile money totals (<?php echo $currency_symbol; ?>)</label>
+                    <input type="number" step="0.01" min="0" name="declared_mobile" id="declMobile" value="<?php echo number_format((float)($shift['mobile_today'] ?? 0), 2, '.', ''); ?>" oninput="updShiftVariance()">
+                    <label>Card totals (<?php echo $currency_symbol; ?>)</label>
+                    <input type="number" step="0.01" min="0" name="declared_card" id="declCard" value="<?php echo number_format((float)($shift['card_today'] ?? 0), 2, '.', ''); ?>" oninput="updShiftVariance()">
+
+                    <div id="shiftVarianceBox" style="margin-top:10px; padding:10px 12px; border-radius:8px; font-size:13px; display:none;"></div>
+
+                    <?php if (in_array($user['role'] ?? '', ['admin', 'manager'], true)): ?>
+                        <div id="shiftOverrideBox" style="display:none; margin-top:10px; padding:10px 12px; background:#fff3cd; border:1px solid #d4a843; border-radius:8px;">
+                            <label style="display:flex; align-items:center; gap:8px; font-weight:600; color:#856404; margin-bottom:6px;">
+                                <input type="checkbox" name="admin_override" value="1" id="adminOverride" onchange="document.getElementById('overrideReason').required = this.checked;">
+                                <i class="fas fa-user-shield"></i> Admin override (close despite variance)
+                            </label>
+                            <label style="font-size:12px;">Reason (audit-logged)</label>
+                            <input type="text" name="override_reason" id="overrideReason" placeholder="e.g. drawer short — counted by JS &amp; LM, signed off" minlength="5">
+                        </div>
+                    <?php endif; ?>
+
+                    <label>Note (optional)</label>
+                    <input type="text" name="shift_note" placeholder="Drawer started with X, etc.">
+                </div>
+                <div class="modal-foot modal-footer">
+                    <button type="button" class="btn-cancel" onclick="closeShiftModal()">Cancel</button>
+                    <button type="submit" class="btn-confirm" id="closeShiftBtn">Close shift</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Pay-existing-tab modal (small wrapper that points payForm at action=pay_existing) -->
+    <div class="overlay modal-overlay" data-modal id="payTabOverlay">
+        <div class="modal modal-content">
+            <div class="modal-head modal-header">
+                <h3><i class="fas fa-credit-card"></i> Settle tab</h3><button class="close modal-close" onclick="document.getElementById('payTabOverlay').classList.remove('show');">&times;</button>
+            </div>
+            <form method="POST" id="payTabForm" data-offline-queue="1">
+                <input type="hidden" name="csrf_token" value="<?php echo $csrf_token; ?>">
+                <input type="hidden" name="action" value="pay_existing">
+                <input type="hidden" name="order_id" id="payTabOrderId" value="">
+                <div class="modal-body">
+                    <div style="font-size:14px; color:#6c757d; text-align:center;" id="payTabRef">—</div>
+                    <div style="font-size:32px; font-weight:700; text-align:center; margin:6px 0 14px;"><span id="payTabTotal"><?php echo $currency_symbol; ?> 0.00</span></div>
+                    <label>Payment method</label>
+                    <div class="pay-method-grid">
+                        <button type="button" data-method="cash" onclick="setMethodTab(this)"><i class="fas fa-money-bill-wave"></i> Cash</button>
+                        <button type="button" data-method="mobile_money" onclick="setMethodTab(this)"><i class="fas fa-mobile-alt"></i> Mobile</button>
+                        <button type="button" data-method="card_manual" onclick="setMethodTab(this)"><i class="fas fa-credit-card"></i> Card</button>
+                        <button type="button" class="disabled" onclick="showCardPosUnavailable()"><i class="fas fa-microchip"></i> Card POS<br><small>(soon)</small></button>
+                    </div>
+                    <input type="hidden" name="payment_method" id="payTabMethod" value="">
+                    <div id="ext-tab-cash" style="display:none;">
+                        <label>Tendered (<?php echo $currency_symbol; ?>)</label>
+                        <input type="number" step="0.01" min="0" name="tendered_amount" id="payTabTendered" oninput="updTabChange()">
+                        <div class="change-banner">Change: <span id="payTabChange"><?php echo $currency_symbol; ?> 0.00</span></div>
+                    </div>
+                    <div id="ext-tab-mobile_money" style="display:none;">
+                        <label>Provider</label>
+                        <select name="mobile_wallet_provider">
+                            <option value="">Select…</option>
+                            <option>Airtel Money</option>
+                            <option>TNM Mpamba</option>
+                            <option>Mo626</option>
+                            <option>Other</option>
+                        </select>
+                        <label>Reference</label><input type="text" name="mobile_wallet_reference">
+                    </div>
+                    <div id="ext-tab-card_manual" style="display:none;">
+                        <label>Card last 4</label><input type="text" name="card_last4" maxlength="4" pattern="\d{4}">
+                        <label>Auth code</label><input type="text" name="card_auth_code" maxlength="50">
+                    </div>
+                </div>
+                <div class="modal-foot modal-footer">
+                    <button type="button" class="btn-cancel" onclick="document.getElementById('payTabOverlay').classList.remove('show');">Cancel</button>
+                    <button type="submit" class="btn-confirm">Take payment</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <?php if (in_array($user['role'] ?? '', ['admin', 'manager'], true)): ?>
+        <!-- Admin/manager: Live "All Stations" panel — Kitchen + Bar + Coffee Bar in one view, polled every 10s -->
+        <div class="overlay modal-overlay" data-modal id="stationsOverlay">
+            <div class="modal modal-content" style="width:980px; max-width:96vw; display:flex; flex-direction:column; max-height:94vh; overflow:hidden;">
+                <div class="modal-head modal-header" style="flex-shrink:0;">
+                    <h3><i class="fas fa-layer-group"></i> All Stations — Live</h3>
+                    <span style="margin-left:14px; font-size:12px; color:#6c757d;">Auto-refresh every 10s · Last update: <span id="stationsTs">—</span></span>
+                    <button class="close modal-close" onclick="document.getElementById('stationsOverlay').classList.remove('show');">&times;</button>
+                </div>
+                <div class="modal-body" style="flex:1; overflow-y:auto; padding:18px 20px;">
+                    <div id="stationsTotals" style="display:flex; gap:10px; flex-wrap:wrap; margin-bottom:14px; font-size:12px;">
+                        <span class="stat" style="background:#f8f9fb; padding:6px 12px; border-radius:18px;">Open tabs system-wide: <strong id="stOpenTabs">0</strong></span>
+                        <span class="stat" style="background:#f8f9fb; padding:6px 12px; border-radius:18px;">Orders today: <strong id="stOrdersToday">0</strong></span>
+                        <span class="stat" style="background:#f8f9fb; padding:6px 12px; border-radius:18px;">Revenue today: <strong id="stRevenueToday"><?php echo $currency_symbol; ?> 0.00</strong></span>
+                    </div>
+                    <div style="display:grid; grid-template-columns:repeat(3, 1fr); gap:14px;">
+                        <?php foreach (['kitchen' => ['Kitchen', 'fa-utensils', '#d4a843'], 'bar' => ['Bar', 'fa-wine-glass', '#6f42c1'], 'coffee_bar' => ['Coffee Bar', 'fa-mug-hot', '#8B5A2B']] as $stKey => $meta): ?>
+                            <div style="background:#fff; border:1px solid #eaecef; border-radius:10px; padding:12px;">
+                                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
+                                    <h4 style="margin:0; color:<?php echo $meta[2]; ?>; font-size:14px;"><i class="fas <?php echo $meta[1]; ?>"></i> <?php echo $meta[0]; ?></h4>
+                                    <span style="font-size:11px; color:#6c757d;">Open: <strong id="stOpen-<?php echo $stKey; ?>">0</strong> · Pending: <strong id="stPending-<?php echo $stKey; ?>">0</strong> · Ready: <strong id="stReady-<?php echo $stKey; ?>">0</strong></span>
+                                </div>
+                                <div id="stTickets-<?php echo $stKey; ?>" style="font-size:12px; color:#6c757d;">Loading…</div>
+                            </div>
+                        <?php endforeach; ?>
+                    </div>
+                </div>
+                <div style="padding:12px 20px; border-top:1px solid #eaecef; display:flex; gap:8px; flex-wrap:wrap; font-size:12px; flex-shrink:0; background:#fafafa; border-radius:0 0 14px 14px;">
+                    <a href="kds.php" target="_blank" style="padding:8px 12px; background:#d4a843; color:#1f1f24; text-decoration:none; border-radius:6px; font-weight:600;"><i class="fas fa-external-link-alt"></i> Kitchen</a>
+                    <a href="bds.php" target="_blank" style="padding:8px 12px; background:#6f42c1; color:#fff; text-decoration:none; border-radius:6px; font-weight:600;"><i class="fas fa-external-link-alt"></i> Bar</a>
+                    <a href="cds.php" target="_blank" style="padding:8px 12px; background:#8B5A2B; color:#fff; text-decoration:none; border-radius:6px; font-weight:600;"><i class="fas fa-external-link-alt"></i> Coffee</a>
+                    <button type="button" onclick="openRestoOrdersModal()" style="padding:8px 14px; background:#1a5276; color:#fff; border:none; border-radius:6px; font-weight:600; font-size:12px; cursor:pointer;"><i class="fas fa-receipt"></i> Today's restaurant orders</button>
+                    <a href="stock-orders.php" style="padding:8px 12px; background:#3a3a40; color:#fff; text-decoration:none; border-radius:6px; font-weight:600;"><i class="fas fa-list"></i> Full orders list</a>
+                </div>
+            </div>
+        </div>
+
+        <!-- Today's restaurant orders modal -->
+        <div class="overlay modal-overlay" data-modal id="restoOrdersOverlay">
+            <div class="modal modal-content" style="width:960px; max-width:96vw; display:flex; flex-direction:column; max-height:94vh; overflow:hidden;">
+                <div class="modal-head modal-header" style="flex-shrink:0; flex-wrap:wrap; gap:8px;">
+                    <div>
+                        <h3><i class="fas fa-receipt"></i> Today's Restaurant Orders</h3>
+                        <div style="font-size:12px; color:#6c757d; margin-top:3px;" id="restoOrdersSummary">—</div>
+                    </div>
+                    <div style="display:flex; gap:6px; align-items:center; flex-wrap:wrap;">
+                        <button onclick="loadRestoOrders('all')" id="rfAll" style="padding:5px 12px; font-size:11px; border:1px solid #d6d8db; border-radius:14px; cursor:pointer; font-weight:600; background:#edf2f7;">All</button>
+                        <button onclick="loadRestoOrders('pending')" id="rfPending" style="padding:5px 12px; font-size:11px; border:1px solid #d6d8db; border-radius:14px; cursor:pointer; font-weight:600; background:#fff;">Pending</button>
+                        <button onclick="loadRestoOrders('paid')" id="rfPaid" style="padding:5px 12px; font-size:11px; border:1px solid #d6d8db; border-radius:14px; cursor:pointer; font-weight:600; background:#fff;">Paid</button>
+                        <button class="close modal-close" onclick="document.getElementById('restoOrdersOverlay').classList.remove('show');" style="margin-left:6px;">&times;</button>
+                    </div>
+                </div>
+                <div id="restoOrdersTable" style="flex:1; overflow-y:auto; padding:18px 20px;">
+                    <p style="color:#6c757d; text-align:center; padding:20px 0;">Loading…</p>
+                </div>
+            </div>
+        </div>
+    <?php endif; ?>
+
+    <!-- Station note modal -->
+    <div class="overlay modal-overlay" data-modal id="stationNoteOverlay">
+        <div class="modal modal-content" style="width:480px;">
+            <div class="modal-head modal-header">
+                <h3><i class="fas fa-paper-plane"></i> Station note</h3><button class="close modal-close" onclick="closeStationNoteModal()">&times;</button>
+            </div>
+            <div class="modal-body">
+                <label>Send to</label>
+                <select id="stationNoteTarget">
+                    <option value="kitchen">Kitchen</option>
+                    <option value="bar">Bar</option>
+                    <option value="coffee_bar">Coffee Bar</option>
+                </select>
+                <label style="margin-top:10px;">Priority</label>
+                <div style="display:flex;gap:8px;margin-bottom:6px;">
+                    <label style="display:flex;align-items:center;gap:6px;cursor:pointer;padding:7px 14px;border:1px solid #ddd;border-radius:14px;font-size:13px;user-select:none;">
+                        <input type="radio" name="stationNotePriority" id="snPriorityNormal" value="normal" checked> Normal
+                    </label>
+                    <label id="snPriorityUrgentLabel" style="display:flex;align-items:center;gap:6px;cursor:pointer;padding:7px 14px;border:2px solid #c82333;border-radius:14px;font-size:13px;color:#c82333;font-weight:600;user-select:none;">
+                        <input type="radio" name="stationNotePriority" id="snPriorityUrgent" value="urgent"> <i class="fas fa-exclamation-triangle"></i> Urgent
+                    </label>
+                </div>
+                <label>Link to order <span style="font-weight:400;color:#9ca3af;">(optional)</span></label>
+                <select id="stationNoteOrderId" style="margin-bottom:8px;">
+                    <option value="">— No specific order —</option>
+                    <?php if ($lastOrderId && $lastOrderRef): ?>
+                        <option value="<?php echo (int)$lastOrderId; ?>" data-ref="<?php echo htmlspecialchars($lastOrderRef); ?>">Last order: <?php echo htmlspecialchars($lastOrderRef); ?></option>
+                    <?php endif; ?>
+                    <?php foreach ($openTabs as $ot): ?>
+                        <option value="<?php echo (int)$ot['id']; ?>" data-ref="<?php echo htmlspecialchars($ot['reference']); ?>">
+                            <?php
+                            $label = $ot['reference'];
+                            if (!empty($ot['table_number'])) $label .= ' · Table ' . $ot['table_number'];
+                            elseif (!empty($ot['customer_name'])) $label .= ' · ' . $ot['customer_name'];
+                            echo htmlspecialchars($label);
+                            ?>
+                        </option>
+                    <?php endforeach; ?>
+                </select>
+                <div id="stationNoteHistoryWrap" style="margin:2px 0 10px;border:1px solid #e5e7eb;border-radius:8px;background:#f8fafc;">
+                    <div style="padding:8px 10px;border-bottom:1px solid #e5e7eb;">
+                        <strong style="font-size:12px;color:#4b5563;display:flex;align-items:center;gap:6px;"><i class="fas fa-message"></i> Order station thread</strong>
+                        <div id="stationNoteHistoryMeta" style="margin-top:4px;font-size:11px;color:#6b7280;">Select an order to view station messages received and sent.</div>
+                    </div>
+                    <div id="stationNoteHistoryList" style="max-height:170px;overflow-y:auto;padding:8px 10px;">
+                        <div style="font-size:12px;color:#9ca3af;">No order selected.</div>
+                    </div>
+                </div>
+                <label>Message</label>
+                <input type="text" id="stationNoteText" maxlength="255" placeholder="Table 5 needs extra napkins">
+                <div style="display:flex; gap:6px; flex-wrap:wrap; margin-top:10px;">
+                    <?php foreach (['Hold last order', 'Extra napkins', 'Guest allergy', 'Rush pickup', 'Call waiter', 'Table ready'] as $t): ?>
+                        <button type="button" onclick="addStationNoteChip('<?php echo htmlspecialchars($t, ENT_QUOTES); ?>')" style="padding:7px 10px; background:#f0f0f0; border:1px solid #ddd; border-radius:14px; cursor:pointer; font-size:12px;"><?php echo htmlspecialchars($t); ?></button>
+                    <?php endforeach; ?>
+                </div>
+            </div>
+            <div class="modal-foot modal-footer">
+                <button type="button" class="btn-cancel" onclick="closeStationNoteModal()">Cancel</button>
+                <button type="button" class="btn-confirm" id="stationNoteSendBtn" onclick="sendStationNote()"><i class="fas fa-paper-plane"></i> Send note</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Line note modal (per-item modifier) -->
+    <div class="overlay modal-overlay" data-modal id="noteOverlay">
+        <div class="modal modal-content" style="width:420px;">
+            <div class="modal-head modal-header">
+                <h3><i class="fas fa-comment-dots"></i> Item note</h3><button class="close modal-close" onclick="document.getElementById('noteOverlay').classList.remove('show');">&times;</button>
+            </div>
+            <div class="modal-body">
+                <p style="margin:0 0 8px; font-size:13px; color:#6c757d;" id="noteItemName"></p>
+                <textarea id="noteText" rows="3" placeholder="No onion · extra cheese · well done · allergy:peanuts"></textarea>
+                <div style="display:flex; gap:6px; flex-wrap:wrap; margin-top:8px;">
+                    <?php foreach (['No onion', 'Extra cheese', 'Well done', 'Medium', 'No ice', 'Spicy', 'Allergy'] as $t): ?>
+                        <button type="button" onclick="addNoteChip('<?php echo $t; ?>')" style="padding:6px 10px; background:#f0f0f0; border:1px solid #ddd; border-radius:14px; cursor:pointer; font-size:12px;"><?php echo $t; ?></button>
+                    <?php endforeach; ?>
+                </div>
+            </div>
+            <div class="modal-foot modal-footer">
+                <button type="button" class="btn-cancel" onclick="document.getElementById('noteOverlay').classList.remove('show');">Cancel</button>
+                <button type="button" class="btn-confirm" onclick="saveNote()">Save note</button>
+            </div>
+        </div>
+    </div>
+
+    <?php if ($error): ?>
+        <div class="toast err" data-pos-server-toast>
+            <span class="toast__message"><?php echo htmlspecialchars($error); ?></span>
+            <button type="button" class="toast__close" aria-label="Close notification" onclick="this.closest('.toast').remove()"><i class="fas fa-xmark" aria-hidden="true"></i></button>
+        </div>
+    <?php endif; ?>
+
+    <script>
+        /* ── RHPoll: persistent polling helper ──────────────────────────────
+   Keep polling active even when this tab is not focused so notifications
+   continue to arrive without switching back to POS/KDS tabs. */
+        const RHPoll = (() => {
+            const timers = new Map(); // fn -> interval id
+            return {
+                every(fn, ms) {
+                    if (timers.has(fn)) return;
+                    const id = setInterval(() => {
+                        try {
+                            fn();
+                        } catch (e) {
+                            /* keep scheduler alive */
+                        }
+                    }, ms);
+                    timers.set(fn, id);
+                }
+            };
+        })();
+        const menuList = <?php echo json_encode($menuList); ?>;
+        const stockSnapshot = <?php echo json_encode($stockSnapshot); ?>;
+        const currencySymbol = <?php echo json_encode($currency_symbol); ?>;
+        const posKitchenOpen = <?php echo $kitchenWindow['is_open_now'] ? 'true' : 'false'; ?>;
+        const posKitchenHours = <?php echo json_encode($kitchenWindow['opens_at'] . ' – ' . $kitchenWindow['closes_at']); ?>;
+        const posBarOpen = <?php echo $barWindow['is_open_now'] ? 'true' : 'false'; ?>;
+        const posBarHours = <?php echo json_encode($barWindow['opens_at'] . ' – ' . $barWindow['closes_at']); ?>;
+        const posCsrfToken = <?php echo json_encode($csrf_token); ?>;
+        const posUserId = <?php echo (int)$user['id']; ?>;
+        const posCurrentUserName = <?php echo json_encode($user['full_name'] ?: $user['username']); ?>;
+        const posCanManageTabs = <?php echo in_array($user['role'] ?? '', ['admin', 'manager'], true) ? 'true' : 'false'; ?>;
+        const posVatEnabled = <?php echo in_array(getSetting('vat_enabled'), ['1', 1, true, 'true', 'on'], true) ? 'true' : 'false'; ?>;
+        const posVatRate = <?php echo json_encode((float)getSetting('vat_rate')); ?>;
+        const posServerErrorMessage = <?php echo json_encode($error, JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT); ?>;
+        const posRestaurantTables = <?php echo json_encode($restaurantTables, JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_AMP | JSON_HEX_QUOT); ?>;
+        const posCheckedInRooms = <?php echo json_encode($checkedInRooms, JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_AMP | JSON_HEX_QUOT); ?>;
+        const POS_LIVE_POLL_MS = 1000;
+        const POS_INBOX_POLL_MS = 700;
+        const POS_NOTIFICATION_DURATION_MS = 120000;
+
+        function posEnsureClientUuid(form) {
+            if (!form || form.querySelector('[name="client_uuid"]')) return;
+            const field = document.createElement('input');
+            field.type = 'hidden';
+            field.name = 'client_uuid';
+            field.value = (window.crypto && typeof window.crypto.randomUUID === 'function') ?
+                window.crypto.randomUUID() :
+                'pos-' + Date.now() + '-' + Math.random().toString(36).slice(2, 10);
+            form.appendChild(field);
+        }
+
+        document.addEventListener('submit', e => {
+            const form = e.target;
+            if (!(form instanceof HTMLFormElement)) return;
+            if ((form.method || '').toLowerCase() === 'post') posEnsureClientUuid(form);
+        }, true);
+
+        let cart = [];
+        let activeCat = '__ALL__';
+        /* Menu mode: 'restaurant' (default) shows items flagged show_pos. 'room_service' shows items
+           flagged show_room_service and auto-pins the order context to Room service. */
+        let menuMode = 'restaurant';
+
+        function menuItemVisibleInMode(m) {
+            return menuMode === 'room_service' ? !!m.show_rs : !!m.show_pos;
+        }
+
+        function rebuildCategories() {
+            const wrap = document.getElementById('cats');
+            if (!wrap) return;
+            const counts = {
+                __ALL__: 0
+            };
+            const order = ['__ALL__'];
+            menuList.forEach(m => {
+                if (!menuItemVisibleInMode(m)) return;
+                counts.__ALL__++;
+                if (!(m.category in counts)) {
+                    counts[m.category] = 0;
+                    order.push(m.category);
+                }
+                counts[m.category]++;
+            });
+            if (!(activeCat in counts)) activeCat = '__ALL__';
+            wrap.innerHTML = order.map(key => {
+                const label = key === '__ALL__' ? 'All' : key;
+                const active = key === activeCat ? ' active' : '';
+                const sel = key === activeCat ? 'true' : 'false';
+                return `<button class="cat-btn${active}" data-cat="${escHtml(key)}" onclick="selectCat(this)" role="option" aria-selected="${sel}">${escHtml(label)} <span class="count">${counts[key]}</span></button>`;
+            }).join('');
+            /* Sync the dropdown label (used on narrow screens) */
+            const lbl = document.getElementById('catDropdownLabel');
+            if (lbl) lbl.textContent = activeCat === '__ALL__' ? 'All Items' : activeCat;
+        }
+
+        function setMenuMode(mode) {
+            if (mode !== 'restaurant' && mode !== 'room_service') return;
+            const menuModeSwitch = document.querySelector('.menu-mode');
+            if (menuModeSwitch) menuModeSwitch.setAttribute('data-active-mode', mode);
+            if (mode === menuMode) return;
+            menuMode = mode;
+            document.querySelectorAll('.menu-mode-btn').forEach(b => {
+                const isActive = b.dataset.mode === mode;
+                b.classList.toggle('is-active', isActive);
+                b.setAttribute('aria-selected', isActive ? 'true' : 'false');
+            });
+            /* Lock / unlock service-type chips based on menu mode.
+               In Room Service mode only the Room chip is selectable — the others are
+               greyed-out and pointer-events disabled so the cashier cannot accidentally
+               mix a restaurant order type with the RS menu. */
+            document.querySelectorAll('.ctx-chip').forEach(c => {
+                const isRoomChip = c.dataset.type === 'room_service';
+                if (mode === 'room_service') {
+                    if (!isRoomChip) {
+                        c.classList.add('is-locked');
+                        c.setAttribute('disabled', '');
+                        c.setAttribute('aria-disabled', 'true');
+                    }
+                } else {
+                    c.classList.remove('is-locked');
+                    c.removeAttribute('disabled');
+                    c.removeAttribute('aria-disabled');
+                }
+            });
+            /* Tie the order-type chip to the selected menu mode so RS orders fire to room_service. */
+            const ot = document.getElementById('ctxOrderType');
+            if (mode === 'room_service') {
+                if (typeof setServiceType === 'function') setServiceType('room_service');
+            } else if (ot && ot.value === 'room_service') {
+                if (typeof setServiceType === 'function') setServiceType('walk_in');
+            }
+            rebuildCategories();
+            renderMenu();
+        }
+
+        const POS_READY_SEEN_KEY = 'rh_pos_ready_seen_v2_u' + posUserId;
+        const POS_INBOX_SEEN_KEY = 'rh_pos_inbox_seen_v2_u' + posUserId;
+
+        function posLoadSeenSet(key) {
+            try {
+                const parsed = JSON.parse(localStorage.getItem(key) || '[]');
+                return new Set(Array.isArray(parsed) ? parsed.map(String) : []);
+            } catch (e) {
+                return new Set();
+            }
+        }
+
+        function posSaveSeenSet(key, set) {
+            try {
+                localStorage.setItem(key, JSON.stringify(Array.from(set).slice(-500)));
+            } catch (e) {
+                /* storage may be unavailable in private mode */
+            }
+        }
+
+        function posRememberSeen(set, key, value) {
+            set.add(String(value));
+            posSaveSeenSet(key, set);
+        }
+        const _seenReadyNotifications = posLoadSeenSet(POS_READY_SEEN_KEY);
+
+        /* ── Ready-order notification system ─────────────────────────── */
+        let _notifGranted = (typeof Notification !== 'undefined' && Notification.permission === 'granted');
+
+        RHSounds.init();
+
+        function posRequestNotifPermission() {
+            if (typeof Notification === 'undefined') return;
+            if (Notification.permission === 'default') {
+                Notification.requestPermission().then(p => {
+                    _notifGranted = (p === 'granted');
+                });
+            }
+        }
+
+        function posShowNotification(title, body, vibrate) {
+            if (vibrate && navigator.vibrate) navigator.vibrate([300, 100, 300, 100, 600]);
+            RHNotif.show({
+                title,
+                body,
+                type: vibrate ? 'urgent' : 'success',
+                source: 'Station',
+                sound: true,
+                duration: POS_NOTIFICATION_DURATION_MS,
+            });
+        }
+
+        function posCompactItemsSummary(summary, maxItems = 4) {
+            const parts = String(summary || '')
+                .split(',')
+                .map(part => part.trim())
+                .filter(Boolean);
+            if (!parts.length) return '';
+            if (parts.length <= maxItems) return parts.join(', ');
+            return parts.slice(0, maxItems).join(', ') + ' +' + (parts.length - maxItems) + ' more';
+        }
+
+        function posReadyNotificationBody(notification) {
+            const itemSummary = posCompactItemsSummary(notification.items_summary || '', 4);
+            const itemCount = parseInt(notification.item_count || 0, 10) || 0;
+            if (!itemSummary) return notification.message || '';
+            const countLabel = itemCount > 0 ? itemCount + ' item' + (itemCount === 1 ? '' : 's') : 'Items';
+            return (notification.message || '') + '\n' + countLabel + ': ' + itemSummary;
+        }
+
+        let _notifInFlight = false;
+        async function pollReadyNotifications() {
+            if (_notifInFlight) return;
+            _notifInFlight = true;
+            try {
+                const fd = new FormData();
+                fd.append('action', 'poll');
+                fd.append('csrf_token', posCsrfToken);
+                const r = await fetch('../api/pos-notifications.php', {
+                    method: 'POST',
+                    body: fd,
+                    credentials: 'same-origin'
+                });
+                const j = await r.json();
+                if (j.ok && j.notifications && j.notifications.length) {
+                    j.notifications.forEach(n => {
+                        const readyKey = [n.order_id, n.station, n.reference || n.id].join(':');
+                        if (_seenReadyNotifications.has(readyKey)) return;
+                        posRememberSeen(_seenReadyNotifications, POS_READY_SEEN_KEY, readyKey);
+                        const stnLabel = {
+                            kitchen: 'Kitchen',
+                            bar: 'Bar',
+                            coffee_bar: 'Coffee Bar'
+                        };
+                        const src = stnLabel[n.station] || 'Station';
+                        RHNotif.show({
+                            title: n.vibrate ? '🔔 Your order is ready!' : '✅ Order Ready',
+                            body: posReadyNotificationBody(n),
+                            type: n.vibrate ? 'urgent' : 'success',
+                            source: src,
+                            duration: POS_NOTIFICATION_DURATION_MS,
+                            sound: false,
+                        });
+                        if (n.vibrate) RHSounds.play('urgent');
+                        else RHSounds.play('normal');
+                        pollMyOrders(true);
+                        refreshOpenTabs(false);
+                    });
+                }
+            } catch (e) {
+                /* swallow — network blip */
+            } finally {
+                _notifInFlight = false;
+            }
+        }
+
+        // Request permission on first interaction
+        document.addEventListener('click', function onFirstClick() {
+            posRequestNotifPermission();
+            document.removeEventListener('click', onFirstClick);
+        }, {
+            once: true
+        });
+
+        // Kept active in background tabs so runner notifications arrive quickly.
+        RHPoll.every(pollReadyNotifications, POS_LIVE_POLL_MS);
+        setTimeout(pollReadyNotifications, 250);
+        /* ── End notification system ──────────────────────────────────── */
+
+        /* ── Station inbox (replies + ack feed) ───────────────────────── */
+        let _inboxVisible = false;
+        let _inboxLastMsgs = [];
+        const _seenReplies = posLoadSeenSet(POS_INBOX_SEEN_KEY);
+        const _inboxReplyInFlight = new Set();
+        const POS_INBOX_STATION_LABELS = {
+            kitchen: 'Kitchen',
+            bar: 'Bar',
+            coffee_bar: 'Coffee Bar'
+        };
+
+        function posInboxReplyKey(message) {
+            return 'reply:' + message.id;
+        }
+
+        function posInboxDirectKey(message) {
+            return 'direct:' + message.id;
+        }
+
+        function posInboxStationLabel(station) {
+            return POS_INBOX_STATION_LABELS[station] || station || 'Station';
+        }
+
+        function isPosInboxDirectMessage(message) {
+            return !!message && message.source === 'station' && parseInt(message.to_user_id, 10) > 0;
+        }
+
+        function isPosInboxDirectPending(message) {
+            return isPosInboxDirectMessage(message) && parseInt(message.pos_acknowledged || 0, 10) !== 1;
+        }
+
+        function isCollectionDirectMessage(message) {
+            if (!isPosInboxDirectMessage(message)) return false;
+            const text = String(message?.message || '').toLowerCase();
+            return text.includes('ready for collection') || text.includes('for collection');
+        }
+
+        function normalizePosInboxMessages(messages) {
+            return (messages || []).filter(m => !isPosInboxDirectMessage(m) || isPosInboxDirectPending(m) || !!m.reply_message);
+        }
+
+        function posInboxFindMessage(messageId) {
+            const msgId = parseInt(messageId, 10) || 0;
+            if (msgId <= 0) return null;
+            return (_inboxLastMsgs || []).find(m => (parseInt(m.id, 10) || 0) === msgId) || null;
+        }
+
+        function posInboxApplyLocalReply(messageId, replyText) {
+            const msgId = parseInt(messageId, 10) || 0;
+            const reply = String(replyText || '').trim();
+            if (msgId <= 0 || !reply || !Array.isArray(_inboxLastMsgs)) return;
+            const ts = new Date().toISOString().slice(0, 19).replace('T', ' ');
+            _inboxLastMsgs = _inboxLastMsgs.map(m => {
+                if ((parseInt(m.id, 10) || 0) !== msgId) return m;
+                return {
+                    ...m,
+                    reply_message: reply,
+                    replied_at: ts,
+                    replied_by_name: posCurrentUserName || m.replied_by_name || 'You',
+                };
+            });
+            if (_inboxVisible) renderPosInbox(_inboxLastMsgs);
+            updatePosInboxBadgesFromMessages(_inboxLastMsgs);
+            _syncPosMobileBadges();
+        }
+
+        function posInboxPendingCount(messages) {
+            return (messages || []).filter(isPosInboxDirectPending).length;
+        }
+
+        function posInboxOrderContext(message) {
+            const parts = [];
+            const type = String(message.order_type || '').trim();
+            if (type) {
+                const label = type.replace(/_/g, ' ');
+                parts.push(label.charAt(0).toUpperCase() + label.slice(1));
+            }
+            if (message.table_number) parts.push('Table ' + message.table_number);
+            if (message.room_number) parts.push('Room ' + message.room_number);
+            if (message.customer_name) parts.push(message.customer_name);
+            return parts.join(' · ');
+        }
+
+        function posInboxOrderThreadKey(message) {
+            const orderId = parseInt(message?.order_id, 10) || 0;
+            if (orderId > 0) return 'order:' + orderId;
+            const orderRef = String(message?.order_ref || '').trim().toLowerCase();
+            if (orderRef) return 'ref:' + orderRef;
+            return 'msg:' + (parseInt(message?.id, 10) || 0);
+        }
+
+        function posInboxMessageTimeValue(message) {
+            if (!message || !message.created_at) return 0;
+            const parsed = Date.parse(String(message.created_at).replace(' ', 'T'));
+            return Number.isFinite(parsed) ? parsed : 0;
+        }
+
+        function groupPosInboxDirectThreads(messages) {
+            const map = new Map();
+            (messages || []).forEach(message => {
+                if (!isPosInboxDirectMessage(message)) return;
+                const key = posInboxOrderThreadKey(message);
+                if (!map.has(key)) map.set(key, []);
+                map.get(key).push(message);
+            });
+            const threads = Array.from(map.values()).map(items => {
+                return items.sort((a, b) => posInboxMessageTimeValue(a) - posInboxMessageTimeValue(b));
+            });
+            return threads.sort((a, b) => {
+                const aLast = a[a.length - 1] || null;
+                const bLast = b[b.length - 1] || null;
+                return posInboxMessageTimeValue(bLast) - posInboxMessageTimeValue(aLast);
+            });
+        }
+
+        function markInboxMessagesSeen(messages) {
+            let changed = false;
+            messages.forEach(message => {
+                if (message.reply_message) {
+                    _seenReplies.add(posInboxReplyKey(message));
+                    changed = true;
+                }
+                if (message.source === 'station' && message.to_user_id) {
+                    _seenReplies.add(posInboxDirectKey(message));
+                    changed = true;
+                }
+            });
+            if (changed) posSaveSeenSet(POS_INBOX_SEEN_KEY, _seenReplies);
+        }
+
+        function updatePosInboxBadgesFromMessages(messages) {
+            _inboxBadgeUpdate(posInboxPendingCount(messages));
+        }
+
+        function posInboxReplyComposerHtml(message, includeReplyAndAction = false) {
+            const msgId = parseInt(message.id, 10) || 0;
+            if (msgId <= 0) return '';
+            const stationLabel = posInboxStationLabel(message.station);
+            const inputId = 'posInboxReplyInput-' + msgId;
+            const replyButton = `<button type="button" data-pos-reply="${msgId}" onclick="sendPosInboxReply(${msgId}, this)" style="min-height:40px;padding:7px 10px;border:1px solid #8B7355;background:#8B7355;color:#fff;border-radius:7px;font-size:12px;font-weight:700;cursor:pointer;">` +
+                `<i class="fas fa-paper-plane" style="margin-right:5px;"></i>Reply</button>`;
+            const replyAndActionButton = includeReplyAndAction ?
+                `<button type="button" data-pos-reply-ack="${msgId}" onclick="sendPosInboxReply(${msgId}, this, true)" style="min-height:40px;padding:7px 10px;border:1px solid #1d4a2e;background:#1d6a3e;color:#fff;border-radius:7px;font-size:12px;font-weight:700;cursor:pointer;">` +
+                `<i class="fas fa-check" style="margin-right:5px;"></i>Reply + Actioned</button>` :
+                '';
+            return `<div style="margin-top:8px;display:grid;gap:6px;">` +
+                `<input type="text" id="${inputId}" maxlength="255" placeholder="Reply to ${escHtml(stationLabel)}..." ` +
+                `onkeydown="if(event.key==='Enter'){event.preventDefault();sendPosInboxReply(${msgId});}" ` +
+                `style="min-height:40px;border:1px solid #d1d5db;border-radius:7px;padding:7px 10px;font-size:12px;color:#111;">` +
+                `<div style="display:grid;grid-template-columns:${includeReplyAndAction ? '1fr 1fr' : '1fr'};gap:6px;">${replyButton}${replyAndActionButton}</div>` +
+                `</div>`;
+        }
+
+        function togglePosInbox(forceState = null) {
+            const opening = typeof forceState === 'boolean' ? forceState : !_inboxVisible;
+            _inboxVisible = opening;
+            const widget = document.getElementById('posInboxWidget');
+            const panel = document.getElementById('posInboxPanel');
+            if (widget) widget.classList.toggle('is-mobile-open', _inboxVisible && window.innerWidth <= 640);
+            if (panel) panel.style.display = _inboxVisible ? 'block' : 'none';
+            if (typeof window.__posClampFloatingWidgets === 'function') {
+                setTimeout(window.__posClampFloatingWidgets, 0);
+            }
+            if (_inboxVisible) {
+                renderPosInbox(_inboxLastMsgs);
+                markInboxMessagesSeen(_inboxLastMsgs);
+                updatePosInboxBadgesFromMessages(_inboxLastMsgs);
+            }
+            _syncPosMobileBadges();
+        }
+
+        function _inboxBadgeUpdate(count) {
+            const badge = document.getElementById('posInboxBadge');
+            const widget = document.getElementById('posInboxWidget');
+            if (!badge || !widget) return;
+            const showWidget = window.innerWidth > 640 || (_inboxLastMsgs && _inboxLastMsgs.length > 0) || count > 0;
+            widget.style.display = showWidget ? 'flex' : 'none';
+            if (showWidget && typeof window.__posClampFloatingWidgets === 'function') {
+                setTimeout(window.__posClampFloatingWidgets, 0);
+            }
+            if (count > 0) {
+                badge.textContent = count > 99 ? '99+' : String(count);
+                badge.style.display = 'flex';
+            } else {
+                badge.textContent = '';
+                badge.style.display = 'none';
+            }
+            _syncPosMobileBadges();
+        }
+
+        function showPosInboxAttention(urgent = false) {
+            const widget = document.getElementById('posInboxWidget');
+            const button = document.getElementById('posInboxBtn');
+            if (widget) widget.style.display = 'flex';
+            if (typeof window.__posClampFloatingWidgets === 'function') {
+                setTimeout(window.__posClampFloatingWidgets, 0);
+            }
+            if (!button) return;
+            button.style.background = urgent ? '#7f1d1d' : '#1d4a2e';
+            button.style.boxShadow = urgent ?
+                '0 0 0 4px rgba(220,38,38,.24), 0 8px 24px rgba(220,38,38,.5)' :
+                '0 0 0 4px rgba(34,197,94,.22), 0 8px 24px rgba(34,197,94,.35)';
+            clearTimeout(window._posInboxAttentionTimer);
+            window._posInboxAttentionTimer = setTimeout(() => {
+                button.style.background = '#1d4a2e';
+                button.style.boxShadow = '0 4px 14px rgba(0,0,0,.35)';
+            }, urgent ? 12000 : 8000);
+        }
+
+        function renderPosInbox(messages) {
+            const list = document.getElementById('posInboxList');
+            if (!list) return;
+            if (!messages.length) {
+                list.innerHTML = '<p style="text-align:center;color:#888;padding:20px;font-size:13px;">No active station notes right now.</p>';
+                return;
+            }
+
+            const directThreads = groupPosInboxDirectThreads(messages);
+            const directMessageIds = new Set();
+            directThreads.forEach(thread => thread.forEach(msg => directMessageIds.add(parseInt(msg.id, 10) || 0)));
+
+            const directHtml = directThreads.map(thread => {
+                const lead = thread[thread.length - 1] || null;
+                if (!lead) return '';
+                const leadId = parseInt(lead.id, 10) || 0;
+                const isUrgent = thread.some(m => m.priority === 'urgent');
+                const pendingMessages = thread.filter(isPosInboxDirectPending);
+                const latestPending = pendingMessages[pendingMessages.length - 1] || null;
+                const pendingCount = pendingMessages.length;
+
+                const orderRef = lead.order_ref ?
+                    escHtml(lead.order_ref) :
+                    (lead.order_id ? 'Order #' + escHtml(String(lead.order_id)) : 'Order not linked');
+                const orderContext = posInboxOrderContext(lead);
+                const dishSummary = lead.order_items_summary ?
+                    `<div style="margin-top:4px;font-size:12px;color:#5b3f1d;"><i class="fas fa-utensils" style="margin-right:4px;"></i>${escHtml(lead.order_items_summary)}</div>` :
+                    (lead.order_id ? '<div style="margin-top:4px;font-size:11px;color:#7c5a2b;"><i class="fas fa-utensils"></i> Dish details unavailable.</div>' : '');
+
+                const threadMessagesHtml = thread.map(m => {
+                    const stationName = posInboxStationLabel(m.station);
+                    const t = m.created_at ? stationNoteFmtTime(m.created_at) : '';
+                    const pending = isPosInboxDirectPending(m);
+                    const replyLine = m.reply_message ?
+                        `<div style="margin-top:6px;padding:6px 8px;background:#f0fdf4;border-left:3px solid #22c55e;border-radius:0 6px 6px 0;font-size:12px;color:#166534;"><i class="fas fa-reply"></i> <strong>You:</strong> ${escHtml(m.reply_message)}${m.replied_at ? ` <span style="color:#6b7280;">${escHtml(stationNoteFmtTime(m.replied_at))}</span>` : ''}</div>` : '';
+                    const actionLine = !pending ?
+                        `<div style="margin-top:5px;font-size:11px;color:#166534;"><i class="fas fa-check-circle"></i> Actioned${m.pos_acknowledged_at ? ` · ${escHtml(stationNoteFmtTime(m.pos_acknowledged_at))}` : ''}</div>` :
+                        '<div style="margin-top:5px;font-size:11px;color:#92400e;"><i class="fas fa-hourglass-half"></i> Waiting for FOH action</div>';
+
+                    return `<div style="margin-top:8px;padding:8px 9px;background:#fffdfa;border:1px solid #f3e7cd;border-radius:8px;">
+                        <div style="display:flex;align-items:center;justify-content:space-between;gap:6px;">
+                            <span style="font-size:11px;font-weight:700;color:${m.priority === 'urgent' ? '#c82333' : '#92400e'};text-transform:uppercase;letter-spacing:.04em;"><i class="fas fa-user-chef"></i> ${escHtml(stationName)}${m.priority === 'urgent' ? ' · URGENT' : ''}</span>
+                            <span style="font-size:11px;color:#9ca3af;">${escHtml(t)}</span>
+                        </div>
+                        <div style="margin-top:4px;font-size:13px;color:#111;font-weight:500;"><i class="fas fa-comment-dots" style="margin-right:4px;color:${m.priority === 'urgent' ? '#c82333' : '#92400e'};"></i>${escHtml(m.message || '')}</div>
+                        ${replyLine}
+                        ${actionLine}
+                    </div>`;
+                }).join('');
+
+                const replyComposer = latestPending ? posInboxReplyComposerHtml(latestPending, true) : '';
+
+                return `<div style="padding:10px 14px;border-bottom:1px solid #f3f4f6;background:#fffbeb;border-left:4px solid ${isUrgent ? '#c82333' : '#f59e0b'};">
+                    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:3px;gap:8px;">
+                        <span style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.04em;color:${isUrgent ? '#c82333' : '#92400e'};"><i class="fas fa-layer-group"></i> Order Thread${isUrgent ? ' · URGENT' : ''}</span>
+                        <span style="font-size:11px;color:#9ca3af;">${thread.length} msg${thread.length === 1 ? '' : 's'}</span>
+                    </div>
+                    <div style="margin-bottom:3px;"><span style="display:inline-block;background:#fef3c7;border:1px solid #fde68a;border-radius:5px;padding:1px 7px;font-size:11px;font-weight:700;color:#92400e;"><i class="fas fa-receipt" style="margin-right:3px;"></i>${orderRef}</span>${pendingCount > 0 ? `<span style="display:inline-block;margin-left:6px;background:#fff7ed;border:1px solid #fed7aa;border-radius:5px;padding:1px 7px;font-size:11px;font-weight:700;color:#9a3412;"><i class="fas fa-bell"></i> ${pendingCount} pending</span>` : ''}</div>
+                    ${orderContext ? `<div style="margin-top:3px;font-size:11px;color:#7c5a2b;"><i class="fas fa-location-dot" style="margin-right:4px;"></i>${escHtml(orderContext)}</div>` : ''}
+                    ${dishSummary}
+                    ${threadMessagesHtml}
+                    ${replyComposer}
+                    ${!latestPending && leadId > 0 ? '<div style="margin-top:7px;font-size:11px;color:#166534;"><i class="fas fa-check-circle"></i> This order thread is fully actioned.</div>' : ''}
+                </div>`;
+            }).join('');
+
+            const otherHtml = messages.filter(m => !directMessageIds.has(parseInt(m.id, 10) || 0)).map(m => {
+                const stn = posInboxStationLabel(m.station);
+                const msgId = parseInt(m.id, 10) || 0;
+                const time = m.created_at ?
+                    new Date(m.created_at.replace(' ', 'T')).toLocaleTimeString([], {
+                        hour: '2-digit',
+                        minute: '2-digit'
+                    }) :
+                    '';
+                const isUrgent = m.priority === 'urgent';
+                /* Direct note from station → THIS POS user (source='station' + to_user_id set).
+                   These are not replies — they are fresh notes initiated by the station. */
+                const isStationDirect = isPosInboxDirectMessage(m);
+                if (isStationDirect) {
+                    return '';
+                }
+                let statusHtml = '';
+                if (m.reply_message) {
+                    const rt = m.replied_at ?
+                        new Date(m.replied_at.replace(' ', 'T')).toLocaleTimeString([], {
+                            hour: '2-digit',
+                            minute: '2-digit'
+                        }) :
+                        '';
+                    statusHtml = `<div style="margin-top:5px;padding:5px 8px;background:#f0fdf4;border-left:3px solid #22c55e;border-radius:0 5px 5px 0;font-size:12px;color:#166534;">
+                <i class="fas fa-reply"></i> <strong>${escHtml(m.replied_by_name || stn)}</strong>: ${escHtml(m.reply_message)} <span style="color:#9ca3af;">${rt}</span></div>`;
+                } else if (parseInt(m.is_acknowledged) === 1) {
+                    const at = m.acknowledged_at ?
+                        new Date(m.acknowledged_at.replace(' ', 'T')).toLocaleTimeString([], {
+                            hour: '2-digit',
+                            minute: '2-digit'
+                        }) :
+                        '';
+                    statusHtml = `<div style="margin-top:4px;font-size:11px;color:#22c55e;"><i class="fas fa-check-double"></i> Acknowledged ${at}</div>`;
+                } else if (m.seen_at) {
+                    statusHtml = `<div style="margin-top:4px;font-size:11px;color:#6c757d;"><i class="fas fa-eye"></i> Seen by station — awaiting action</div>`;
+                } else {
+                    statusHtml = `<div style="margin-top:4px;font-size:11px;color:#f59e0b;"><i class="fas fa-hourglass-half"></i> Not yet seen by station</div>`;
+                }
+                const replyComposer = posInboxReplyComposerHtml(m, false);
+                return `<div style="padding:10px 14px;border-bottom:1px solid #f3f4f6;">
+            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:3px;">
+                <span style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.04em;color:${isUrgent ? '#c82333' : '#6c757d'};">${escHtml(stn)}${isUrgent ? ' · <i class="fas fa-exclamation-triangle"></i> URGENT' : ''}</span>
+                <span style="font-size:11px;color:#9ca3af;">${time}</span>
+            </div>
+            ${m.order_ref ? `<div style="margin-bottom:3px;"><span style="display:inline-block;background:#f3f4f6;border:1px solid #e5e7eb;border-radius:5px;padding:1px 7px;font-size:11px;font-weight:700;color:#374151;"><i class="fas fa-receipt" style="margin-right:3px;"></i>${escHtml(m.order_ref)}</span></div>` : ''}
+            <div style="font-size:13px;color:#111;">${escHtml(m.message || '')}</div>
+            ${statusHtml}
+            ${replyComposer}
+        </div>`;
+            }).join('');
+
+            list.innerHTML = directHtml + otherHtml;
+        }
+
+        async function sendPosInboxReply(messageId, triggerButton = null, markActioned = false) {
+            const msgId = parseInt(messageId, 10) || 0;
+            if (msgId <= 0 || _inboxReplyInFlight.has(msgId)) return false;
+
+            const message = posInboxFindMessage(msgId);
+            if (!message || !message.station) {
+                posToastReady('Message context expired. Refreshing inbox.', true);
+                setTimeout(pollStationReplies, 150);
+                return false;
+            }
+
+            const input = document.getElementById('posInboxReplyInput-' + msgId);
+            const reply = (input?.value || '').trim().slice(0, 255);
+            if (!reply) {
+                posToastReady('Type a reply first.', true);
+                input?.focus();
+                return false;
+            }
+
+            const replyBtn = triggerButton || document.querySelector('[data-pos-reply="' + msgId + '"]');
+            const replyAckBtn = document.querySelector('[data-pos-reply-ack="' + msgId + '"]');
+            const actionBtn = document.querySelector('[data-pos-ack="' + msgId + '"]');
+
+            _inboxReplyInFlight.add(msgId);
+            [replyBtn, replyAckBtn, actionBtn, input].forEach(el => {
+                if (!el) return;
+                el.disabled = true;
+                el.setAttribute('aria-busy', 'true');
+            });
+
+            try {
+                const fd = new FormData();
+                fd.append('csrf_token', posCsrfToken);
+                if (isPosInboxDirectMessage(message)) {
+                    // Reply directly onto the original station→POS thread row so KDS
+                    // can render the response as part of the same conversation.
+                    fd.append('action', 'station_reply');
+                    fd.append('station', String(message.station));
+                    fd.append('message_id', String(msgId));
+                    fd.append('reply', reply);
+                } else {
+                    fd.append('action', 'send_message');
+                    fd.append('station', String(message.station));
+                    fd.append('message', reply);
+                    fd.append('priority', message.priority === 'urgent' ? 'urgent' : 'normal');
+                    const orderId = parseInt(message.order_id || 0, 10) || 0;
+                    if (orderId > 0) fd.append('order_id', String(orderId));
+                }
+
+                const controller = new AbortController();
+                const timeoutId = setTimeout(() => controller.abort(), 12000);
+                const r = await fetch('../api/kds-action.php', {
+                    method: 'POST',
+                    body: fd,
+                    credentials: 'same-origin',
+                    signal: controller.signal
+                });
+                clearTimeout(timeoutId);
+                const j = await r.json();
+                if (!j.ok) {
+                    posToastReady(j.error || 'Reply failed.', true);
+                    return false;
+                }
+
+                posInboxApplyLocalReply(msgId, reply);
+
+                if (input) input.value = '';
+                const stationName = posInboxStationLabel(message.station);
+
+                if (markActioned && isPosInboxDirectPending(message)) {
+                    const acked = await ackPosInboxMessage(msgId, null, {
+                        suppressToast: true,
+                        skipRepoll: true
+                    });
+                    if (!acked) posToastReady('Reply sent, but action mark failed.', true);
+                    else posToastReady('Reply sent and action recorded for ' + stationName + '.', false);
+                } else {
+                    posToastReady('Reply sent to ' + stationName + '.', false);
+                }
+
+                setTimeout(() => {
+                    pollStationReplies().catch(() => {
+                        // Background refresh failure should not block the cashier after a successful reply.
+                    });
+                }, 80);
+                return true;
+            } catch (e) {
+                if (e && e.name === 'AbortError') posToastReady('Reply timed out. Please retry.', true);
+                else posToastReady('Network error sending reply.', true);
+                return false;
+            } finally {
+                _inboxReplyInFlight.delete(msgId);
+                [replyBtn, replyAckBtn, actionBtn, input].forEach(el => {
+                    if (!el) return;
+                    el.disabled = false;
+                    el.removeAttribute('aria-busy');
+                });
+            }
+        }
+
+        async function ackPosInboxMessage(messageId, triggerButton = null, options = {}) {
+            const suppressToast = !!(options && options.suppressToast);
+            const skipRepoll = !!(options && options.skipRepoll);
+            const msgId = parseInt(messageId, 10) || 0;
+            if (msgId <= 0) return false;
+            const btn = triggerButton || document.querySelector('[data-pos-ack="' + msgId + '"]');
+            if (btn) {
+                btn.classList.add('is-loading');
+                btn.disabled = true;
+                btn.setAttribute('aria-busy', 'true');
+            }
+            try {
+                const fd = new FormData();
+                fd.append('csrf_token', posCsrfToken);
+                fd.append('action', 'ack_pos_message');
+                fd.append('station', 'kitchen');
+                fd.append('message_id', String(msgId));
+                const r = await fetch('../api/kds-action.php', {
+                    method: 'POST',
+                    body: fd,
+                    credentials: 'same-origin'
+                });
+                const j = await r.json();
+                if (!j.ok) {
+                    if (!suppressToast) posToastReady(j.error || 'Could not save action.', true);
+                    return false;
+                }
+                const ts = new Date().toISOString().slice(0, 19).replace('T', ' ');
+                _inboxLastMsgs = (_inboxLastMsgs || []).map(m => {
+                    if ((parseInt(m.id, 10) || 0) !== msgId) return m;
+                    return {
+                        ...m,
+                        pos_acknowledged: 1,
+                        pos_acknowledged_at: ts,
+                        pos_acknowledged_by: posUserId,
+                    };
+                });
+                renderPosInbox(_inboxLastMsgs);
+                markInboxMessagesSeen(_inboxLastMsgs);
+                updatePosInboxBadgesFromMessages(_inboxLastMsgs);
+                _syncPosMobileBadges();
+                if (!suppressToast) posToastReady('FOH action recorded.', false);
+                if (!skipRepoll) setTimeout(pollStationReplies, 300);
+                return true;
+            } catch (e) {
+                if (!suppressToast) posToastReady('Network error while recording action.', true);
+                return false;
+            } finally {
+                if (btn) {
+                    btn.classList.remove('is-loading');
+                    btn.disabled = false;
+                    btn.removeAttribute('aria-busy');
+                }
+            }
+        }
+
+        let _inboxPollInFlight = false;
+        let _inboxPollQueued = false;
+        async function pollStationReplies() {
+            if (_inboxPollInFlight) {
+                _inboxPollQueued = true;
+                return;
+            }
+            _inboxPollInFlight = true;
+            try {
+                const fd = new FormData();
+                fd.append('csrf_token', posCsrfToken);
+                fd.append('action', 'get_pos_inbox');
+                fd.append('station', 'kitchen'); /* station param required by API but ignored for this action */
+                const r = await fetch('../api/kds-action.php', {
+                    method: 'POST',
+                    body: fd,
+                    credentials: 'same-origin'
+                });
+                const j = await r.json();
+                if (!j.ok) return;
+                const msgs = normalizePosInboxMessages(j.messages || []);
+                _inboxLastMsgs = msgs;
+                const widget = document.getElementById('posInboxWidget');
+                if (widget) {
+                    widget.style.display = msgs.length > 0 ? 'flex' : 'none';
+                }
+                /* Detect new replies we haven't notified about yet */
+                const newReplies = msgs.filter(m => m.reply_message && !_seenReplies.has(posInboxReplyKey(m)));
+                if (newReplies.length > 0 && !_inboxVisible) {
+                    showPosInboxAttention(false);
+                    newReplies.forEach(m => {
+                        posRememberSeen(_seenReplies, POS_INBOX_SEEN_KEY, posInboxReplyKey(m));
+                        const stn = posInboxStationLabel(m.station);
+                        RHNotif.show({
+                            title: stn + ' replied to your note',
+                            body: '\u201c' + m.reply_message + '\u201d',
+                            type: 'success',
+                            source: stn,
+                            duration: POS_NOTIFICATION_DURATION_MS,
+                        });
+                    });
+                    pollMyOrders(true);
+                }
+                /* Detect new direct station→POS notes (initiated by the station, not replies). */
+                const newDirect = msgs.filter(m => isPosInboxDirectPending(m) && !_seenReplies.has(posInboxDirectKey(m)));
+                if (newDirect.length > 0) {
+                    const hasUrgentDirect = newDirect.some(m => m.priority === 'urgent' || isCollectionDirectMessage(m));
+                    showPosInboxAttention(hasUrgentDirect);
+                    newDirect.forEach(m => {
+                        posRememberSeen(_seenReplies, POS_INBOX_SEEN_KEY, posInboxDirectKey(m));
+                        const stn = posInboxStationLabel(m.station);
+                        const isCollectionAlert = isCollectionDirectMessage(m);
+                        const isUrgent = m.priority === 'urgent' || isCollectionAlert;
+                        const detail = [posCompactItemsSummary(m.order_items_summary || '', 4), m.message].filter(Boolean).join(' · ');
+                        RHNotif.show({
+                            title: isCollectionAlert ? '\u{1F514} READY FOR COLLECTION: ' + stn + (m.order_ref ? ' \u00b7 ' + m.order_ref : '') : (isUrgent ? '\u26a0 URGENT: ' + stn + (m.order_ref ? ' \u00b7 ' + m.order_ref : '') : stn + ' note' + (m.order_ref ? ' \u00b7 ' + m.order_ref : '')),
+                            body: detail || m.message || '',
+                            type: isUrgent ? 'urgent' : 'info',
+                            source: stn,
+                            duration: POS_NOTIFICATION_DURATION_MS,
+                            sound: false,
+                        });
+                        RHSounds.play(isUrgent ? 'urgent' : 'normal');
+                    });
+                    pollMyOrders(true);
+                    if (!_inboxVisible) {
+                        _inboxVisible = true;
+                        const panel = document.getElementById('posInboxPanel');
+                        if (panel) panel.style.display = 'block';
+                        renderPosInbox(msgs);
+                    }
+                }
+                updatePosInboxBadgesFromMessages(msgs);
+                if (_inboxVisible) {
+                    renderPosInbox(msgs);
+                    markInboxMessagesSeen(msgs);
+                }
+                const stationNoteOverlay = document.getElementById('stationNoteOverlay');
+                const stationNoteOrderId = document.getElementById('stationNoteOrderId')?.value || '';
+                if (stationNoteOverlay?.classList.contains('show') && stationNoteOrderId) {
+                    loadStationNoteOrderHistory(stationNoteOrderId, {
+                        silent: true
+                    });
+                }
+                _syncPosMobileBadges();
+            } catch (e) {
+                /* swallow */
+            } finally {
+                _inboxPollInFlight = false;
+                if (_inboxPollQueued) {
+                    _inboxPollQueued = false;
+                    setTimeout(pollStationReplies, 60);
+                }
+            }
+        }
+
+        RHPoll.every(pollStationReplies, POS_INBOX_POLL_MS);
+        setTimeout(pollStationReplies, 400); /* initial check shortly after load */
+        /* ── End station inbox ────────────────────────────────────────── */
+
+        /* ── My Orders live tracker ──────────────────────────────────────
+           Polls /api/kds-action.php?action=get_my_orders every few seconds and renders the
+           current cashier's orders with kitchen + payment status, table/customer
+           info, age, and total. Click an order to open its receipt. */
+        let _myOrdersVisible = false;
+        let _myOrdersPollInFlight = false;
+        let _myOrdersLast = [];
+
+        function toggleMyOrders(forceState = null) {
+            const opening = typeof forceState === 'boolean' ? forceState : !_myOrdersVisible;
+            _myOrdersVisible = opening;
+            const widget = document.getElementById('myOrdersWidget');
+            const panel = document.getElementById('myOrdersPanel');
+            if (widget) widget.classList.toggle('is-mobile-open', _myOrdersVisible && window.innerWidth <= 640);
+            if (panel) panel.style.display = _myOrdersVisible ? 'block' : 'none';
+            if (_myOrdersVisible) pollMyOrders();
+        }
+
+        async function openMyOrdersCurrentDetail() {
+            showPosActionLoader('Loading orders…', 'Fetching your current order details.');
+            try {
+                await pollMyOrders(true);
+            } finally {
+                hidePosActionLoader();
+            }
+
+            toggleMyOrders(true);
+
+            const orders = Array.isArray(_myOrdersLast) ? _myOrdersLast : [];
+            if (!orders.length) return;
+
+            const currentOrder = orders[0];
+            if (currentOrder && parseInt(currentOrder.id || 0, 10) > 0) {
+                await openTabDetail(parseInt(currentOrder.id, 10));
+            }
+        }
+
+        function myOrderStatusPill(o) {
+            const map = {
+                placed: {
+                    lbl: 'Placed',
+                    bg: '#fef3c7',
+                    fg: '#92400e',
+                    icon: 'fa-receipt'
+                },
+                preparing: {
+                    lbl: 'Preparing',
+                    bg: '#dbeafe',
+                    fg: '#1e40af',
+                    icon: 'fa-fire'
+                },
+                ready: {
+                    lbl: 'Ready',
+                    bg: '#bbf7d0',
+                    fg: '#166534',
+                    icon: 'fa-bell'
+                },
+                served: {
+                    lbl: 'Served',
+                    bg: '#e5e7eb',
+                    fg: '#374151',
+                    icon: 'fa-check-double'
+                },
+                paid: {
+                    lbl: 'Paid',
+                    bg: '#d1fae5',
+                    fg: '#065f46',
+                    icon: 'fa-check-circle'
+                },
+                voided: {
+                    lbl: 'Voided',
+                    bg: '#fee2e2',
+                    fg: '#991b1b',
+                    icon: 'fa-ban'
+                },
+                cancelled: {
+                    lbl: 'Cancelled',
+                    bg: '#f3f4f6',
+                    fg: '#6b7280',
+                    icon: 'fa-circle-xmark'
+                },
+                empty: {
+                    lbl: 'Empty',
+                    bg: '#f3f4f6',
+                    fg: '#6b7280',
+                    icon: 'fa-circle-question'
+                }
+            };
+            const c = map[o.kitchen_status] || map.placed;
+            return `<span style="display:inline-flex;align-items:center;gap:4px;background:${c.bg};color:${c.fg};font-size:10.5px;font-weight:700;padding:2px 8px;border-radius:10px;text-transform:uppercase;letter-spacing:.04em;"><i class="fas ${c.icon}"></i> ${c.lbl}</span>`;
+        }
+
+        function myOrderPaymentPill(o) {
+            if (o.status === 'voided' || o.status === 'cancelled') {
+                const label = o.status === 'voided' ? 'Voided' : 'Cancelled';
+                return `<span style="display:inline-flex;align-items:center;gap:4px;background:#fee2e2;color:#991b1b;font-size:10.5px;font-weight:700;padding:2px 8px;border-radius:10px;"><i class="fas fa-ban"></i> ${label}</span>`;
+            }
+            if (o.status === 'paid') {
+                const m = (o.payment_method || '').replace(/_/g, ' ');
+                return `<span style="display:inline-flex;align-items:center;gap:4px;background:#d1fae5;color:#065f46;font-size:10.5px;font-weight:700;padding:2px 8px;border-radius:10px;"><i class="fas fa-check-circle"></i> Paid${m ? ' · ' + escHtml(m) : ''}</span>`;
+            }
+            if (o.opened_as_tab == 1 || o.opened_as_tab === '1') {
+                return `<span style="display:inline-flex;align-items:center;gap:4px;background:#fef3c7;color:#92400e;font-size:10.5px;font-weight:700;padding:2px 8px;border-radius:10px;"><i class="fas fa-clock"></i> Open tab</span>`;
+            }
+            return `<span style="display:inline-flex;align-items:center;gap:4px;background:#fee2e2;color:#991b1b;font-size:10.5px;font-weight:700;padding:2px 8px;border-radius:10px;"><i class="fas fa-circle-exclamation"></i> Unpaid</span>`;
+        }
+
+        function fmtAgeFromIso(iso) {
+            if (!iso) return '';
+            const t = Date.parse(iso.replace(' ', 'T'));
+            if (isNaN(t)) return '';
+            const sec = Math.max(0, Math.floor((Date.now() - t) / 1000));
+            if (sec < 60) return sec + 's ago';
+            const m = Math.floor(sec / 60);
+            if (m < 60) return m + 'm ago';
+            const h = Math.floor(m / 60);
+            return h + 'h ' + (m % 60) + 'm ago';
+        }
+
+        function myOrderKdsBreakdown(o) {
+            const buckets = [
+                ['pending', 'Pending'],
+                ['preparing', 'Preparing'],
+                ['ready', 'Ready'],
+                ['collection', 'Collection'],
+                ['served', 'Served']
+            ];
+            const parts = buckets.map(([key, label]) => {
+                const value = parseInt(o['items_' + key] || 0, 10) || 0;
+                return value > 0 ? (label + ': ' + value) : '';
+            }).filter(Boolean);
+            if (!parts.length) {
+                const kitchen = String(o.kitchen_status || o.status || 'placed').replace(/_/g, ' ');
+                return 'KDS: ' + kitchen;
+            }
+            return 'KDS: ' + parts.join(' · ');
+        }
+
+        function renderMyOrders(orders) {
+            const list = document.getElementById('myOrdersList');
+            const chip = document.getElementById('myOrdersTotalChip');
+            const badge = document.getElementById('myOrdersBadge');
+            if (!list) return;
+            const todayCount = orders.length;
+            if (chip) chip.textContent = todayCount + (todayCount === 1 ? ' order' : ' orders');
+            if (badge) {
+                if (todayCount > 0) {
+                    badge.textContent = todayCount > 99 ? '99+' : String(todayCount);
+                    badge.style.display = '';
+                } else {
+                    badge.style.display = 'none';
+                }
+            }
+            if (!orders.length) {
+                list.innerHTML = '<p style="text-align:center;color:#9ca3af;padding:30px 18px;font-size:13px;">No orders fired yet today. Tap items in the menu to start a new order.</p>';
+                return;
+            }
+            list.innerHTML = orders.map(o => {
+                const total = fmtMoney(o.total_amount || 0);
+                const items = parseInt(o.item_total || 0, 10);
+                const where = o.table_number ? 'Table ' + escHtml(o.table_number) : (o.order_type || 'walk_in').replace(/_/g, ' ');
+                const customer = o.customer_name ? ' · ' + escHtml(o.customer_name) : '';
+                const itemSummary = posCompactItemsSummary(o.items_summary || '', 4);
+                const stationSummary = (o.stations || []).map(st => {
+                    const done = !!st.done;
+                    return `<span style="display:inline-flex;align-items:center;gap:4px;background:${done ? '#ecfdf5' : '#fff7ed'};color:${done ? '#047857' : '#9a3412'};border:1px solid ${done ? '#a7f3d0' : '#fed7aa'};border-radius:9px;padding:1px 7px;font-size:10.5px;font-weight:700;"><i class="fas ${done ? 'fa-check' : 'fa-hourglass-half'}"></i>${escHtml(st.label || st.station || 'Station')}${done ? ' done' : ' · ' + parseInt(st.pending || 0, 10) + ' pending'}</span>`;
+                }).join('');
+                const progress = parseInt(o.progress_percent || 0, 10);
+                const isLive = o.kitchen_status === 'placed' || o.kitchen_status === 'preparing';
+                const ringClr = o.kitchen_status === 'ready' ? '#16a34a' :
+                    o.kitchen_status === 'preparing' ? '#2563eb' :
+                    o.kitchen_status === 'served' ? '#9ca3af' : '#f59e0b';
+                const kdsSummary = escHtml(myOrderKdsBreakdown(o));
+                return `<a href="#" onclick="openTabDetail(${o.id}); return false;" style="display:block;padding:11px 14px;border-bottom:1px solid #f3f4f6;text-decoration:none;color:inherit;cursor:pointer;${isLive ? 'background:#fffdf7;' : ''}">
+            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:5px;gap:8px;">
+                <div style="display:flex;align-items:center;gap:8px;min-width:0;">
+                    <strong style="font-size:13px;color:#1f1f24;white-space:nowrap;">${escHtml(o.reference)}</strong>
+                    <span style="font-size:11.5px;color:#6c757d;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${escHtml(where)}${customer}</span>
+                </div>
+                <strong style="font-size:13px;color:#1f1f24;white-space:nowrap;">${currencySymbol} ${total}</strong>
+            </div>
+            <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-bottom:6px;">
+                ${myOrderStatusPill(o)}
+                ${myOrderPaymentPill(o)}
+                <span style="font-size:10.5px;color:#9ca3af;margin-left:auto;"><i class="fas fa-clock"></i> ${escHtml(fmtAgeFromIso(o.created_at))} · ${items} item${items===1?'':'s'}</span>
+            </div>
+            <div style="font-size:10.5px;color:#5f6368;line-height:1.35;margin:-1px 0 6px;"><i class="fas fa-sitemap"></i> ${kdsSummary}</div>
+            ${itemSummary ? `<div style="font-size:10.5px;color:#6b7280;line-height:1.35;margin:-1px 0 6px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;"><i class="fas fa-list-check"></i> ${escHtml(itemSummary)}</div>` : ''}
+            ${stationSummary ? `<div style="display:flex;align-items:center;gap:5px;flex-wrap:wrap;margin:-1px 0 6px;">${stationSummary}</div>` : ''}
+            ${isLive || o.kitchen_status === 'ready' ? `<div style="height:5px;background:#f3f4f6;border-radius:3px;overflow:hidden;"><div style="height:100%;width:${progress}%;background:${ringClr};transition:width .4s ease;"></div></div>` : ''}
+                <div style="display:flex;justify-content:flex-end;gap:6px;flex-wrap:wrap;margin-top:8px;">
+                    <span style="display:inline-flex;align-items:center;gap:4px;background:#f8fafc;color:#334155;border:1px solid #e2e8f0;border-radius:999px;padding:2px 8px;font-size:10px;font-weight:700;"><i class="fas fa-receipt"></i> Details</span>
+                    ${o.opened_as_tab == 1 || o.opened_as_tab === '1' ? '<span style="display:inline-flex;align-items:center;gap:4px;background:#fef3c7;color:#92400e;border:1px solid #fde68a;border-radius:999px;padding:2px 8px;font-size:10px;font-weight:700;"><i class="fas fa-credit-card"></i> Settle later</span>' : ''}
+                </div>
+        </a>`;
+            }).join('');
+            _syncPosMobileBadges();
+        }
+
+        async function pollMyOrders(force = false) {
+            if (_myOrdersPollInFlight) return;
+            _myOrdersPollInFlight = true;
+            try {
+                const fd = new FormData();
+                fd.append('csrf_token', posCsrfToken);
+                fd.append('action', 'get_my_orders');
+                const r = await fetch('../api/kds-action.php', {
+                    method: 'POST',
+                    body: fd,
+                    credentials: 'same-origin'
+                });
+                const j = await r.json();
+                if (!j.ok) return;
+                _myOrdersLast = Array.isArray(j.orders) ? j.orders : [];
+                renderMyOrders(_myOrdersLast);
+            } catch (e) {
+                /* ignore — silent background poll */
+            } finally {
+                _myOrdersPollInFlight = false;
+            }
+        }
+
+        RHPoll.every(pollMyOrders, POS_LIVE_POLL_MS);
+        setTimeout(pollMyOrders, 250);
+        /* ── End my orders ────────────────────────────────────────────── */
+
+        let _stationNoteHistoryReqToken = 0;
+
+        function stationNoteResolveOrderLabel(orderId) {
+            const select = document.getElementById('stationNoteOrderId');
+            if (!select) return '';
+            const needle = String(orderId || '');
+            const option = Array.from(select.options).find(opt => String(opt.value) === needle);
+            if (!option) return '';
+            return (option.dataset.ref || option.textContent || '').trim();
+        }
+
+        function stationNoteFmtTime(iso) {
+            if (!iso) return '';
+            const ts = new Date(String(iso).replace(' ', 'T'));
+            if (Number.isNaN(ts.getTime())) return '';
+            return ts.toLocaleTimeString([], {
+                hour: '2-digit',
+                minute: '2-digit'
+            });
+        }
+
+        function renderStationNoteOrderHistory(orderId, messages) {
+            const metaEl = document.getElementById('stationNoteHistoryMeta');
+            const listEl = document.getElementById('stationNoteHistoryList');
+            if (!metaEl || !listEl) return;
+
+            const normalizedOrderId = parseInt(orderId || 0, 10) || 0;
+            if (!normalizedOrderId) {
+                metaEl.textContent = 'Select an order to view station messages received and sent.';
+                listEl.innerHTML = '<div style="font-size:12px;color:#9ca3af;">No order selected.</div>';
+                return;
+            }
+
+            const orderLabel = stationNoteResolveOrderLabel(normalizedOrderId) || ('Order #' + normalizedOrderId);
+            const rows = [];
+            let receivedCount = 0;
+            let pendingActionCount = 0;
+
+            (messages || []).forEach(message => {
+                const station = posInboxStationLabel(message.station);
+                const isUrgent = message.priority === 'urgent';
+                const isDirectReceived = message.source === 'station' && parseInt(message.to_user_id || 0, 10) > 0;
+
+                if (message.source !== 'station') {
+                    rows.push({
+                        direction: 'sent',
+                        station,
+                        text: String(message.message || ''),
+                        timestamp: message.created_at,
+                        urgent: isUrgent,
+                        status: 'Outbound note',
+                    });
+                }
+
+                if (message.reply_message) {
+                    receivedCount += 1;
+                    rows.push({
+                        direction: 'received',
+                        station,
+                        text: String(message.reply_message || ''),
+                        timestamp: message.replied_at || message.created_at,
+                        urgent: isUrgent,
+                        status: 'Station reply',
+                    });
+                }
+
+                if (isDirectReceived) {
+                    receivedCount += 1;
+                    const pendingAction = parseInt(message.pos_acknowledged || 0, 10) !== 1;
+                    if (pendingAction) pendingActionCount += 1;
+                    const actionStamp = message.pos_acknowledged_at ? (' · ' + stationNoteFmtTime(message.pos_acknowledged_at)) : '';
+                    rows.push({
+                        direction: 'received',
+                        station,
+                        text: String(message.message || ''),
+                        timestamp: message.created_at,
+                        urgent: isUrgent,
+                        status: pendingAction ? 'Pending action' : ('Actioned' + actionStamp),
+                    });
+                }
+            });
+
+            const toMs = value => {
+                if (!value) return 0;
+                const dt = new Date(String(value).replace(' ', 'T'));
+                return Number.isNaN(dt.getTime()) ? 0 : dt.getTime();
+            };
+            rows.sort((a, b) => toMs(b.timestamp) - toMs(a.timestamp));
+
+            metaEl.textContent = orderLabel + ' · Received ' + receivedCount + (receivedCount === 1 ? ' message' : ' messages') + ' from stations' + (pendingActionCount > 0 ? (' · ' + pendingActionCount + ' pending action') : '');
+
+            if (!rows.length) {
+                listEl.innerHTML = '<div style="font-size:12px;color:#9ca3af;">No station traffic yet for this order.</div>';
+                return;
+            }
+
+            listEl.innerHTML = rows.map(row => {
+                const isReceived = row.direction === 'received';
+                const bg = isReceived ? '#fffbeb' : '#f5f3ff';
+                const border = isReceived ? '#f59e0b' : '#8B7355';
+                const icon = isReceived ? 'fa-inbox' : 'fa-paper-plane';
+                const dirLabel = isReceived ? 'Received' : 'Sent';
+                const urgentTag = row.urgent ? '<span style="margin-left:6px;background:#c82333;color:#fff;border-radius:9px;padding:1px 6px;font-size:10px;font-weight:700;">URGENT</span>' : '';
+                const time = stationNoteFmtTime(row.timestamp);
+                return `<div style="padding:7px 8px;margin-bottom:6px;border-left:3px solid ${border};border-radius:6px;background:${bg};">` +
+                    `<div style="display:flex;align-items:center;justify-content:space-between;gap:8px;">` +
+                    `<span style="font-size:11px;font-weight:700;color:#4b5563;"><i class="fas ${icon}" style="margin-right:4px;"></i>${dirLabel} · ${escHtml(row.station)}${urgentTag}</span>` +
+                    `<span style="font-size:10px;color:#9ca3af;">${escHtml(time)}</span>` +
+                    `</div>` +
+                    `<div style="margin-top:3px;font-size:12px;color:#111;line-height:1.35;">${escHtml(row.text)}</div>` +
+                    `<div style="margin-top:2px;font-size:10.5px;color:#6b7280;">${escHtml(row.status)}</div>` +
+                    `</div>`;
+            }).join('');
+        }
+
+        async function loadStationNoteOrderHistory(orderId = '', options = {}) {
+            const silent = !!(options && options.silent);
+            const normalizedOrderId = parseInt(orderId || 0, 10) || 0;
+            const listEl = document.getElementById('stationNoteHistoryList');
+            const metaEl = document.getElementById('stationNoteHistoryMeta');
+
+            if (!normalizedOrderId) {
+                renderStationNoteOrderHistory('', []);
+                return;
+            }
+
+            const reqToken = ++_stationNoteHistoryReqToken;
+            if (!silent && listEl) {
+                listEl.innerHTML = '<div style="font-size:12px;color:#9ca3af;"><i class="fas fa-spinner fa-spin"></i> Loading order thread…</div>';
+            }
+            try {
+                const fd = new FormData();
+                fd.append('csrf_token', posCsrfToken);
+                fd.append('action', 'get_order_station_messages');
+                fd.append('order_id', String(normalizedOrderId));
+                fd.append('limit', '60');
+                const r = await fetch('../api/kds-action.php', {
+                    method: 'POST',
+                    body: fd,
+                    credentials: 'same-origin'
+                });
+                const j = await r.json();
+                if (reqToken !== _stationNoteHistoryReqToken) return;
+                if (!j.ok) {
+                    if (!silent && metaEl && listEl) {
+                        metaEl.textContent = 'Could not load station thread.';
+                        listEl.innerHTML = '<div style="font-size:12px;color:#c82333;">' + escHtml(j.error || 'Request failed') + '</div>';
+                    }
+                    return;
+                }
+                renderStationNoteOrderHistory(normalizedOrderId, j.messages || []);
+            } catch (e) {
+                if (reqToken !== _stationNoteHistoryReqToken) return;
+                if (!silent && metaEl && listEl) {
+                    metaEl.textContent = 'Could not load station thread.';
+                    listEl.innerHTML = '<div style="font-size:12px;color:#c82333;">Network error while loading order messages.</div>';
+                }
+            }
+        }
+
+        function openStationNoteModal(target = 'kitchen', presetOrderId = '') {
+            const targetEl = document.getElementById('stationNoteTarget');
+            const textEl = document.getElementById('stationNoteText');
+            const orderEl = document.getElementById('stationNoteOrderId');
+            if (targetEl) targetEl.value = target;
+            if (textEl) textEl.value = '';
+            if (orderEl && presetOrderId) orderEl.value = String(presetOrderId);
+            loadStationNoteOrderHistory(orderEl?.value || '');
+            document.getElementById('stationNoteOverlay').classList.add('show');
+            setTimeout(() => textEl?.focus(), 60);
+        }
+
+        function closeStationNoteModal() {
+            document.getElementById('stationNoteOverlay').classList.remove('show');
+        }
+
+        function addStationNoteChip(text) {
+            const input = document.getElementById('stationNoteText');
+            if (!input) return;
+            input.value = (input.value ? input.value + ' · ' : '') + text;
+            input.focus();
+        }
+        async function sendStationNote() {
+            const target = document.getElementById('stationNoteTarget')?.value || 'kitchen';
+            const input = document.getElementById('stationNoteText');
+            const btn = document.getElementById('stationNoteSendBtn');
+            const orderSel = document.getElementById('stationNoteOrderId');
+            const message = (input?.value || '').trim().slice(0, 255);
+            const priority = document.querySelector('input[name="stationNotePriority"]:checked')?.value || 'normal';
+            const orderId = orderSel?.value || '';
+            if (!message) {
+                posToastReady('Type a station note first.', true);
+                return;
+            }
+            if (btn) btn.disabled = true;
+            try {
+                const fd = new FormData();
+                fd.append('csrf_token', posCsrfToken);
+                fd.append('action', 'send_message');
+                fd.append('station', target);
+                fd.append('message', message);
+                fd.append('priority', priority);
+                if (orderId) fd.append('order_id', orderId);
+                const r = await fetch('../api/kds-action.php', {
+                    method: 'POST',
+                    body: fd,
+                    credentials: 'same-origin'
+                });
+                const j = await r.json();
+                if (!j.ok) {
+                    posToastReady(j.error || 'Station note failed.', true);
+                    return;
+                }
+                closeStationNoteModal();
+                const label = {
+                    kitchen: 'Kitchen',
+                    bar: 'Bar',
+                    coffee_bar: 'Coffee Bar'
+                } [target] || 'Station';
+                posToastReady(label + ' note sent' + (priority === 'urgent' ? ' [URGENT]' : '') + '.', priority === 'urgent');
+                if (orderId) loadStationNoteOrderHistory(orderId, {
+                    silent: true
+                });
+                document.getElementById('posInboxWidget').style.display = 'flex';
+                setTimeout(pollStationReplies, 800); /* quick re-poll so the message appears in inbox */
+            } catch (e) {
+                posToastReady('Network error sending station note.', true);
+            } finally {
+                if (btn) btn.disabled = false;
+            }
+        }
+
+        document.addEventListener('DOMContentLoaded', () => {
+            document.getElementById('stationNoteOrderId')?.addEventListener('change', e => {
+                loadStationNoteOrderHistory(e.target?.value || '');
+            });
+            document.getElementById('stationNoteText')?.addEventListener('keydown', e => {
+                if (e.key === 'Enter') {
+                    e.preventDefault();
+                    sendStationNote();
+                }
+            });
+        });
+
+        function maxPortions(id, type) {
+            const k = type + ':' + id;
+            return Object.prototype.hasOwnProperty.call(stockSnapshot, k) ? stockSnapshot[k] : null;
+        }
+
+        function escHtml(s) {
+            return String(s).replace(/[&<>"']/g, c => ({
+                '&': '&amp;',
+                '<': '&lt;',
+                '>': '&gt;',
+                '"': '&quot;',
+                "'": '&#39;'
+            } [c]));
+        }
+
+        function fmtMoney(n) {
+            return Number(n || 0).toLocaleString('en-US', {
+                minimumFractionDigits: 2,
+                maximumFractionDigits: 2
+            });
+        }
+
+        function fmtMoneyNoDecimals(n) {
+            return Number(n || 0).toLocaleString('en-US', {
+                minimumFractionDigits: 0,
+                maximumFractionDigits: 0
+            });
+        }
+
+        function applyShiftStats(shift) {
+            if (!shift || typeof shift !== 'object') return;
+
+            const orders = parseInt(shift.orders_today, 10) || 0;
+            const revenue = Number(shift.revenue_today || 0);
+            const cash = Number(shift.cash_today || 0);
+            const mobile = Number(shift.mobile_today || 0);
+            const card = Number(shift.card_today || 0);
+            const settledCount = parseInt(shift.settled_from_tabs_count, 10) || 0;
+            const settledAmount = Number(shift.settled_from_tabs_amount || 0);
+
+            const setText = (id, text) => {
+                const el = document.getElementById(id);
+                if (el) el.textContent = text;
+            };
+
+            setText('tbStatOrders', String(orders));
+            setText('tbStatRevenue', currencySymbol + ' ' + fmtMoneyNoDecimals(revenue));
+            setText('tbStatCash', currencySymbol + ' ' + fmtMoneyNoDecimals(cash));
+            setText('tbStatMobile', currencySymbol + ' ' + fmtMoneyNoDecimals(mobile));
+            setText('tbStatCard', currencySymbol + ' ' + fmtMoneyNoDecimals(card));
+
+            const setExpected = (id, amount) => {
+                const el = document.getElementById(id);
+                if (!el) return;
+                el.dataset.amount = amount.toFixed(2);
+                el.textContent = currencySymbol + ' ' + fmtMoney(amount);
+            };
+
+            setExpected('expCash', cash);
+            setExpected('expMobile', mobile);
+            setExpected('expCard', card);
+
+            setText('closeShiftOrdersCount', String(orders));
+            setText('closeShiftSettledCount', String(settledCount));
+            setText('closeShiftSettledAmount', currencySymbol + ' ' + fmtMoney(settledAmount));
+        }
+
+        let _shiftStatsPollInFlight = false;
+        async function refreshShiftStats(force = false) {
+            if (_shiftStatsPollInFlight) return;
+            if (document.hidden && !force) return;
+            _shiftStatsPollInFlight = true;
+            try {
+                const response = await fetch('pos.php?ajax=shift_stats', {
+                    credentials: 'same-origin'
+                });
+                if (!response.ok) return;
+                const data = await response.json();
+                if (!data || data.success !== true || !data.shift) return;
+                applyShiftStats(data.shift);
+            } catch (e) {
+                /* network blip — next poll will retry */
+            } finally {
+                _shiftStatsPollInFlight = false;
+            }
+        }
+
+        /* Global click-lock — prevents accidental double-taps on payment, fire-order
+           and other hard-to-undo buttons. 1200ms cooldown per element + spinner overlay.
+           Opt out with data-no-lock or anchors that lead elsewhere (links inside
+           widgets are already lockable; we exclude tab/category buttons). */
+        const _posClickLocks = new WeakMap();
+        document.addEventListener('click', (e) => {
+            const btn = e.target.closest('button, a, [role="button"], [data-lock-click]');
+            if (!btn) return;
+            if (btn.dataset.noLock !== undefined) return;
+            if (btn.classList.contains('cat-btn') || btn.classList.contains('menu-btn')) return; /* high-frequency tap targets */
+            if (btn.disabled || btn.getAttribute('aria-disabled') === 'true') return;
+            const now = Date.now();
+            const last = _posClickLocks.get(btn) || 0;
+            if (now - last < 1200) {
+                e.stopImmediatePropagation();
+                e.preventDefault();
+                return;
+            }
+            _posClickLocks.set(btn, now);
+            btn.classList.add('is-loading');
+            btn.setAttribute('aria-busy', 'true');
+            setTimeout(() => {
+                btn.classList.remove('is-loading');
+                btn.removeAttribute('aria-busy');
+            }, 1200);
+        }, true);
+
+        function showPosActionLoader(title, text) {
+            const loader = document.getElementById('posActionLoader');
+            if (!loader) return;
+            document.getElementById('posActionLoaderTitle').textContent = title || 'Loading…';
+            document.getElementById('posActionLoaderText').textContent = text || 'Please wait.';
+            loader.classList.add('show');
+            // Safety net — auto-dismiss after 12s to prevent stuck overlay
+            clearTimeout(window._posLoaderSafetyTimer);
+            window._posLoaderSafetyTimer = setTimeout(() => hidePosActionLoader(), 12000);
+        }
+
+        function hidePosActionLoader() {
+            clearTimeout(window._posLoaderSafetyTimer);
+            document.getElementById('posActionLoader')?.classList.remove('show');
+        }
+
+        function initPosCatsResizer() {
+            const STORAGE_KEY = 'rh_pos_cats_width_v1';
+            const MOBILE_QUERY = '(max-width: 1024px)';
+            const grid = document.querySelector('.till-grid');
+            const catsWrap = document.getElementById('catsWrap');
+            if (!grid || !catsWrap || catsWrap.dataset.resizeReady === '1') return;
+            catsWrap.dataset.resizeReady = '1';
+
+            const clampWidth = (width) => {
+                const minWidth = 182;
+                const cart = document.getElementById('mainCart');
+                const gridWidth = Math.max(0, Math.floor(grid.getBoundingClientRect().width));
+                const cartWidth = (cart && !grid.classList.contains('order-menu-closed')) ? Math.floor(cart.getBoundingClientRect().width || 0) : 0;
+                const reserveForMenu = 330;
+                const maxWidth = Math.max(minWidth + 8, Math.min(460, gridWidth - cartWidth - reserveForMenu));
+                return Math.max(minWidth, Math.min(maxWidth, Math.round(width)));
+            };
+
+            const applyWidth = (width, persist) => {
+                if (window.matchMedia(MOBILE_QUERY).matches) return;
+                const safeWidth = clampWidth(width);
+                grid.style.setProperty('--pos-cats-width-live', safeWidth + 'px');
+                if (persist) {
+                    try {
+                        localStorage.setItem(STORAGE_KEY, String(safeWidth));
+                    } catch (_) {
+                        // no-op
+                    }
+                }
+            };
+
+            const clearWidth = () => {
+                grid.style.removeProperty('--pos-cats-width-live');
+            };
+
+            const handle = document.createElement('button');
+            handle.type = 'button';
+            handle.id = 'catsResizeHandle';
+            handle.setAttribute('aria-label', 'Resize categories panel');
+            handle.title = 'Drag to resize categories';
+            handle.dataset.noLock = '1';
+            handle.style.position = 'absolute';
+            handle.style.top = '50%';
+            handle.style.right = '-9px';
+            handle.style.transform = 'translateY(-50%)';
+            handle.style.width = '18px';
+            handle.style.height = '60px';
+            handle.style.borderRadius = '999px';
+            handle.style.border = '1px solid rgba(255,255,255,.16)';
+            handle.style.background = 'linear-gradient(180deg, rgba(255,255,255,.18), rgba(255,255,255,.06))';
+            handle.style.boxShadow = '0 6px 16px rgba(0,0,0,.25)';
+            handle.style.cursor = 'col-resize';
+            handle.style.zIndex = '4';
+            handle.style.touchAction = 'none';
+            handle.style.display = 'none';
+            handle.innerHTML = '<i class="fas fa-grip-lines-vertical" aria-hidden="true" style="font-size:11px; color:rgba(255,255,255,.82);"></i>';
+
+            catsWrap.style.position = catsWrap.style.position || 'relative';
+            catsWrap.appendChild(handle);
+
+            const syncVisibility = () => {
+                const isMobile = window.matchMedia(MOBILE_QUERY).matches;
+                handle.style.display = isMobile ? 'none' : 'inline-flex';
+                handle.style.alignItems = 'center';
+                handle.style.justifyContent = 'center';
+                if (isMobile) {
+                    clearWidth();
+                    return;
+                }
+
+                let saved = null;
+                try {
+                    saved = parseInt(localStorage.getItem(STORAGE_KEY) || '', 10);
+                } catch (_) {
+                    saved = null;
+                }
+
+                if (Number.isFinite(saved) && saved > 0) {
+                    applyWidth(saved, false);
+                }
+            };
+
+            const stopDrag = () => {
+                document.body.style.userSelect = '';
+                document.body.style.cursor = '';
+                document.removeEventListener('pointermove', onMove, true);
+                document.removeEventListener('pointerup', stopDrag, true);
+                document.removeEventListener('pointercancel', stopDrag, true);
+            };
+
+            const onMove = (event) => {
+                applyWidth(event.clientX - grid.getBoundingClientRect().left, true);
+            };
+
+            handle.addEventListener('pointerdown', (event) => {
+                if (event.pointerType === 'mouse' && event.button !== 0) return;
+                if (window.matchMedia(MOBILE_QUERY).matches) return;
+                event.preventDefault();
+                document.body.style.userSelect = 'none';
+                document.body.style.cursor = 'col-resize';
+                document.addEventListener('pointermove', onMove, true);
+                document.addEventListener('pointerup', stopDrag, true);
+                document.addEventListener('pointercancel', stopDrag, true);
+            });
+
+            handle.addEventListener('dblclick', () => {
+                clearWidth();
+                try {
+                    localStorage.removeItem(STORAGE_KEY);
+                } catch (_) {
+                    // no-op
+                }
+            });
+
+            window.addEventListener('resize', syncVisibility);
+            window.syncPosCatsResize = syncVisibility;
+            syncVisibility();
+        }
+
+        function showPosScopedLoader(scopeEl, message) {
+            if (!scopeEl) return function() {
+                return;
+            };
+
+            const computedPosition = window.getComputedStyle(scopeEl).position;
+            const originalInlinePosition = scopeEl.style.position;
+            if (computedPosition === 'static') {
+                scopeEl.style.position = 'relative';
+            }
+
+            const overlay = document.createElement('div');
+            overlay.setAttribute('role', 'status');
+            overlay.setAttribute('aria-live', 'polite');
+            overlay.setAttribute('aria-label', message || 'Refreshing');
+            overlay.style.position = 'absolute';
+            overlay.style.inset = '0';
+            overlay.style.zIndex = '20';
+            overlay.style.display = 'flex';
+            overlay.style.alignItems = 'center';
+            overlay.style.justifyContent = 'center';
+            overlay.style.padding = '10px';
+            overlay.style.background = 'linear-gradient(135deg, rgba(247,243,238,0.90), rgba(243,236,228,0.84))';
+            overlay.style.backdropFilter = 'blur(1px)';
+            overlay.style.pointerEvents = 'auto';
+            overlay.style.borderRadius = 'inherit';
+
+            const card = document.createElement('div');
+            card.style.minWidth = 'min(320px, 92%)';
+            card.style.maxWidth = '420px';
+            card.style.borderRadius = '12px';
+            card.style.border = '1px solid rgba(139,115,85,0.35)';
+            card.style.background = 'rgba(255,255,255,0.92)';
+            card.style.boxShadow = '0 10px 28px rgba(0,0,0,0.12)';
+            card.style.padding = '12px 14px';
+
+            const row = document.createElement('div');
+            row.style.display = 'flex';
+            row.style.alignItems = 'center';
+            row.style.gap = '10px';
+
+            const spinner = document.createElement('span');
+            spinner.style.width = '17px';
+            spinner.style.height = '17px';
+            spinner.style.borderRadius = '999px';
+            spinner.style.border = '2px solid rgba(139,115,85,0.30)';
+            spinner.style.borderTopColor = 'rgba(111,91,65,0.95)';
+            spinner.style.flex = '0 0 auto';
+
+            const textWrap = document.createElement('div');
+            textWrap.style.display = 'grid';
+            textWrap.style.gap = '2px';
+
+            const title = document.createElement('strong');
+            title.textContent = 'Updating tabs';
+            title.style.fontSize = '12px';
+            title.style.letterSpacing = '0.08em';
+            title.style.textTransform = 'uppercase';
+            title.style.color = '#6f5b41';
+
+            const text = document.createElement('span');
+            text.textContent = message || 'Refreshing open tabs...';
+            text.style.fontSize = '14px';
+            text.style.color = '#2f2a24';
+
+            const track = document.createElement('div');
+            track.style.marginTop = '8px';
+            track.style.height = '3px';
+            track.style.borderRadius = '999px';
+            track.style.overflow = 'hidden';
+            track.style.background = 'rgba(139,115,85,0.16)';
+
+            const bar = document.createElement('span');
+            bar.style.display = 'block';
+            bar.style.width = '42%';
+            bar.style.height = '100%';
+            bar.style.borderRadius = 'inherit';
+            bar.style.background = 'linear-gradient(90deg, rgba(139,115,85,0.86), rgba(111,91,65,0.68))';
+
+            track.appendChild(bar);
+            textWrap.appendChild(title);
+            textWrap.appendChild(text);
+            row.appendChild(spinner);
+            row.appendChild(textWrap);
+            card.appendChild(row);
+            card.appendChild(track);
+            overlay.appendChild(card);
+            scopeEl.appendChild(overlay);
+
+            const spinAnim = spinner.animate([{
+                    transform: 'rotate(0deg)'
+                },
+                {
+                    transform: 'rotate(360deg)'
+                }
+            ], {
+                duration: 900,
+                iterations: Infinity,
+                easing: 'linear'
+            });
+
+            const barAnim = bar.animate([{
+                    transform: 'translateX(-22%)',
+                    opacity: 0.72
+                },
+                {
+                    transform: 'translateX(95%)',
+                    opacity: 1
+                },
+                {
+                    transform: 'translateX(-22%)',
+                    opacity: 0.72
+                }
+            ], {
+                duration: 1300,
+                iterations: Infinity,
+                easing: 'ease-in-out'
+            });
+
+            return function() {
+                spinAnim.cancel();
+                barAnim.cancel();
+                if (overlay.parentNode) overlay.parentNode.removeChild(overlay);
+                if (computedPosition === 'static') {
+                    if (originalInlinePosition) {
+                        scopeEl.style.position = originalInlinePosition;
+                    } else {
+                        scopeEl.style.removeProperty('position');
+                    }
+                }
+            };
+        }
+
+        function selectCat(btn) {
+            activeCat = btn.dataset.cat;
+            document.querySelectorAll('.cat-btn').forEach(b => {
+                b.classList.toggle('active', b === btn);
+                b.setAttribute('aria-selected', b === btn ? 'true' : 'false');
+            });
+            // Update dropdown trigger label on mobile
+            const label = document.getElementById('catDropdownLabel');
+            if (label) label.textContent = btn.querySelector('.count') ? btn.firstChild.textContent.trim() : btn.textContent.trim();
+            closeCatDropdown();
+            renderMenu();
+        }
+
+        function toggleCatDropdown() {
+            const wrap = document.getElementById('catsWrap');
+            const trigger = document.getElementById('catDropdownTrigger');
+            const isOpen = wrap.classList.contains('open');
+            if (isOpen) {
+                closeCatDropdown();
+                return;
+            }
+            // Pin the fixed-position dropdown exactly below the trigger button
+            const cats = document.getElementById('cats');
+            if (cats && trigger) {
+                const rect = trigger.getBoundingClientRect();
+                cats.style.top = rect.bottom + 'px';
+            }
+            wrap.classList.add('open');
+            trigger.setAttribute('aria-expanded', 'true');
+            // Backdrop to close on outside tap
+            let bd = document.getElementById('catsBackdrop');
+            if (!bd) {
+                bd = document.createElement('div');
+                bd.id = 'catsBackdrop';
+                bd.className = 'cats-backdrop';
+                bd.addEventListener('click', closeCatDropdown);
+                document.body.appendChild(bd);
+            }
+            bd.classList.add('show');
+        }
+
+        function closeCatDropdown() {
+            const wrap = document.getElementById('catsWrap');
+            const trigger = document.getElementById('catDropdownTrigger');
+            if (wrap) wrap.classList.remove('open');
+            if (trigger) trigger.setAttribute('aria-expanded', 'false');
+            const bd = document.getElementById('catsBackdrop');
+            if (bd) bd.classList.remove('show');
+        }
+
+        let lastMenuTapKey = '';
+        let lastMenuTapAt = 0;
+
+        function bindMenuItemTap(tile, menuItem) {
+            let startX = 0;
+            let startY = 0;
+            let startAt = 0;
+            let moved = false;
+            tile.tabIndex = 0;
+            tile.setAttribute('role', 'button');
+            tile.setAttribute('aria-label', 'Add ' + menuItem.name);
+
+            tile.addEventListener('pointerdown', event => {
+                if (event.pointerType === 'mouse' && event.button !== 0) return;
+                startX = event.clientX;
+                startY = event.clientY;
+                startAt = Date.now();
+                moved = false;
+                tile.classList.add('is-pressing');
+                if (tile.setPointerCapture) tile.setPointerCapture(event.pointerId);
+            });
+            tile.addEventListener('pointermove', event => {
+                if (Math.abs(event.clientX - startX) > 12 || Math.abs(event.clientY - startY) > 12) {
+                    moved = true;
+                    tile.classList.remove('is-pressing');
+                }
+            });
+            tile.addEventListener('pointercancel', () => tile.classList.remove('is-pressing'));
+            tile.addEventListener('pointerleave', () => tile.classList.remove('is-pressing'));
+            tile.addEventListener('pointerup', event => {
+                tile.classList.remove('is-pressing');
+                const dragDistance = Math.max(Math.abs(event.clientX - startX), Math.abs(event.clientY - startY));
+                if (moved || dragDistance > 12 || Date.now() - startAt > 700) return;
+                const tapKey = menuItem.type + ':' + menuItem.id;
+                const now = Date.now();
+                if (tapKey === lastMenuTapKey && now - lastMenuTapAt < 260) return;
+                lastMenuTapKey = tapKey;
+                lastMenuTapAt = now;
+                addToCart(menuItem);
+            });
+            tile.addEventListener('keydown', event => {
+                if (event.key === 'Enter' || event.key === ' ') {
+                    event.preventDefault();
+                    addToCart(menuItem);
+                }
+            });
+        }
+
+        function renderMenu() {
+            const q = document.getElementById('search').value.toLowerCase();
+            const grid = document.getElementById('grid');
+            grid.innerHTML = '';
+            menuList.forEach(m => {
+                if (!menuItemVisibleInMode(m)) return;
+                if (q && m.name.toLowerCase().indexOf(q) === -1) return;
+                if (activeCat !== '__ALL__' && m.category !== activeCat) return;
+                const max = maxPortions(m.id, m.type);
+                const cartQty = cart.filter(c => c.id === m.id && c.type === m.type).reduce((s, c) => s + c.qty, 0);
+                const remain = max === null ? null : (max - cartQty);
+                const oos = (max !== null && remain <= 0);
+                let stockStr, low = '';
+                if (max === null) stockStr = 'Untracked';
+                else if (remain <= 0) {
+                    stockStr = 'Out of stock';
+                    low = 'low';
+                } else if (remain <= 5) {
+                    stockStr = remain + ' left';
+                    low = 'low';
+                } else stockStr = remain + ' avail';
+                const div = document.createElement('div');
+                div.className = 'item' + (oos ? ' oos' : '');
+                div.innerHTML = `
+            <div>
+                <div class="badge">${escHtml(m.type)}</div>
+                <div class="nm">${escHtml(m.name)}</div>
+            </div>
+            <div>
+                <div class="pr">${currencySymbol} ${fmtMoney(m.price)}</div>
+                <div class="st ${low}">${stockStr}</div>
+            </div>`;
+                if (!oos) bindMenuItemTap(div, m);
+                grid.appendChild(div);
+            });
+        }
+
+        function addToCart(m) {
+            const ex = cart.find(c => c.id === m.id && c.type === m.type);
+            if (ex) ex.qty++;
+            else cart.push({
+                ...m,
+                qty: 1
+            });
+            renderCart();
+            renderMenu();
+        }
+
+        function setQty(idx, q) {
+            q = Math.max(0, Math.min(1000, parseFloat(q) || 0));
+            if (q === 0) cart.splice(idx, 1);
+            else cart[idx].qty = q;
+            renderCart();
+            renderMenu();
+        }
+
+        function bump(idx, d) {
+            setQty(idx, (cart[idx]?.qty || 0) + d);
+        }
+
+        function rm(idx) {
+            cart.splice(idx, 1);
+            renderCart();
+            renderMenu();
+        }
+        async function clearCart() {
+            if (cart.length) {
+                const confirmed = await posConfirm('Clear cart', 'Remove all items from the current sale?', 'Clear cart');
+                if (!confirmed) return;
+            }
+            cart = [];
+            renderCart();
+            renderMenu();
+        }
+
+        function cartTotal() {
+            return cart.reduce((s, l) => s + l.price * l.qty, 0);
+        }
+
+        /** Returns which station types are in the current cart */
+        function cartStations() {
+            const hasFood = cart.some(l => l.type === 'food');
+            const hasDrink = cart.some(l => l.type === 'drink');
+            return {
+                hasFood,
+                hasDrink
+            };
+        }
+
+        const CLOSED_BADGE = '<span style="background:#c82333;color:#fff;font-size:9px;font-weight:700;padding:2px 5px;border-radius:4px;letter-spacing:.04em;vertical-align:middle;margin-left:4px;">CLOSED</span>';
+
+        /** Dynamically updates park button label/icon/CLOSED badge + hint text */
+        function updateFireButton() {
+            const btn = document.getElementById('parkBtn');
+            const label = document.getElementById('parkBtnLabel');
+            const hint = document.getElementById('parkHint');
+            if (!btn || !label) return;
+            const {
+                hasFood,
+                hasDrink
+            } = cartStations();
+            let icon, text, stationOpen;
+            if (hasFood && hasDrink) {
+                icon = 'fa-fire';
+                text = 'Fire to Stations';
+                stationOpen = posKitchenOpen && posBarOpen;
+            } else if (hasDrink) {
+                icon = 'fa-cocktail';
+                text = 'Send to Bar';
+                stationOpen = posBarOpen;
+            } else if (hasFood) {
+                icon = 'fa-utensils';
+                text = 'Send to Kitchen';
+                stationOpen = posKitchenOpen;
+            } else {
+                icon = 'fa-fire';
+                text = 'Fire Order';
+                stationOpen = true;
+            }
+            label.innerHTML = `<i class="fas ${icon}"></i> ${text}${stationOpen ? '' : CLOSED_BADGE}`;
+            if (hint) hint.textContent = text + ' = open tab (pay later)';
+        }
+
+        function toggleCartDrawer() {
+            const cart = document.getElementById('mainCart');
+            const grid = document.querySelector('.till-grid');
+            const backdrop = document.getElementById('cartBackdrop');
+            if (!cart || !grid) return;
+            if (window.matchMedia('(max-width: 1024px)').matches) {
+                const opening = !cart.classList.contains('open');
+                cart.classList.toggle('open');
+                document.body.classList.toggle('pos-cart-open', opening);
+                if (backdrop) backdrop.classList.toggle('show', opening);
+                return;
+            }
+            grid.classList.toggle('order-menu-closed');
+            if (typeof window.syncPosCatsResize === 'function') {
+                window.syncPosCatsResize();
+            }
+        }
+
+        /* ===== Mobile POS menu ===== */
+        function openPosMobileMenu() {
+            const menu = document.getElementById('posMobileMenu');
+            const backdrop = document.getElementById('posMobileBackdrop');
+            const menuBtn = document.getElementById('posMobileMenuBtn');
+            if (!menu || !backdrop) return;
+            menu.classList.add('is-open');
+            backdrop.classList.add('is-open');
+            if (menuBtn) menuBtn.setAttribute('aria-expanded', 'true');
+            document.addEventListener('keydown', _posMobileMenuEsc);
+        }
+
+        function closePosMobileMenu() {
+            const menu = document.getElementById('posMobileMenu');
+            const backdrop = document.getElementById('posMobileBackdrop');
+            const menuBtn = document.getElementById('posMobileMenuBtn');
+            if (!menu || !backdrop) return;
+            menu.classList.remove('is-open');
+            backdrop.classList.remove('is-open');
+            if (menuBtn) menuBtn.setAttribute('aria-expanded', 'false');
+            document.removeEventListener('keydown', _posMobileMenuEsc);
+        }
+
+        function bindPosMobileMenuButton() {
+            const menuBtn = document.getElementById('posMobileMenuBtn');
+            if (!menuBtn || menuBtn.dataset.bound === '1') return;
+            menuBtn.dataset.bound = '1';
+            menuBtn.addEventListener('click', function(event) {
+                event.preventDefault();
+                if (!document.getElementById('posMobileMenu')?.classList.contains('is-open')) openPosMobileMenu();
+            });
+        }
+
+        function _posMobileMenuEsc(e) {
+            if (e.key === 'Escape') closePosMobileMenu();
+        }
+
+        function isPosPhoneViewport() {
+            return window.innerWidth <= 640;
+        }
+
+        function isPosCompactViewport() {
+            return window.matchMedia('(max-width: 1024px)').matches;
+        }
+
+        function posMobileQuickViewEmpty(iconClass, title, text) {
+            return '<div class="pos-mobile-empty-state">' +
+                '<div class="pos-mobile-empty-state__icon"><i class="fas ' + escHtml(iconClass || 'fa-circle-info') + '"></i></div>' +
+                '<h4 class="pos-mobile-empty-state__title">' + escHtml(title || 'Nothing to show') + '</h4>' +
+                '<p class="pos-mobile-empty-state__text">' + escHtml(text || 'There is nothing to show right now.') + '</p>' +
+                '</div>';
+        }
+
+        function openPosMobileQuickView(title, html, options = {}) {
+            const overlay = document.getElementById('posMobileQuickViewOverlay');
+            const titleEl = document.getElementById('posMobileQuickViewTitle');
+            const subtitleEl = document.getElementById('posMobileQuickViewSubtitle');
+            const bodyEl = document.getElementById('posMobileQuickViewBody');
+            if (!overlay || !titleEl || !bodyEl) return;
+            titleEl.innerHTML = title || '<i class="fas fa-layer-group"></i> Quick View';
+            const subtitleText = typeof options.subtitle === 'string' ? options.subtitle.trim() : '';
+            if (subtitleEl) {
+                subtitleEl.textContent = subtitleText;
+                subtitleEl.hidden = subtitleText === '';
+            }
+            bodyEl.innerHTML = html || posMobileQuickViewEmpty('fa-circle-info', 'Nothing to show', 'There is nothing to see right now.');
+            bodyEl.scrollTop = 0;
+            overlay.classList.add('show');
+        }
+
+        function closePosMobileQuickView() {
+            document.getElementById('posMobileQuickViewOverlay')?.classList.remove('show');
+            const subtitleEl = document.getElementById('posMobileQuickViewSubtitle');
+            if (subtitleEl) {
+                subtitleEl.textContent = '';
+                subtitleEl.hidden = true;
+            }
+        }
+
+        function openPosMobileRecentView() {
+            if (!isPosPhoneViewport()) {
+                toggleRecent();
+                return;
+            }
+            const recentList = document.getElementById('recentList');
+            const rows = Array.from(recentList?.querySelectorAll('a.r') || []);
+            if (!rows.length) {
+                openPosMobileQuickView(
+                    '<i class="fas fa-receipt"></i> Recent Orders',
+                    posMobileQuickViewEmpty('fa-receipt', 'No recent orders', 'As soon as an order is fired or paid, it will appear here.'), {
+                        subtitle: 'Latest activity'
+                    }
+                );
+                return;
+            }
+            const cards = rows.map((row, index) => {
+                const ref = row.querySelector('.ref')?.textContent?.trim() || ('Order ' + (index + 1));
+                const detail = Array.from(row.querySelectorAll('div')).find(el => !el.classList.contains('ref'))?.textContent?.trim() || 'Open to view details';
+                const href = row.getAttribute('href') || '#';
+                return '<a class="pos-mobile-quick-view-item pos-mobile-quick-view-item--recent" href="' + escHtml(href) + '" target="_blank" rel="noopener">' +
+                    '<div class="pos-mobile-quick-view-item__top">' +
+                    '<strong class="pos-mobile-quick-view-item__title">' + escHtml(ref) + '</strong>' +
+                    '<span class="pos-mobile-quick-view-item__badge">Recent</span>' +
+                    '</div>' +
+                    '<p class="pos-mobile-quick-view-item__meta">' + escHtml(detail) + '</p>' +
+                    '<span class="pos-mobile-quick-view-item__cta">Open receipt <i class="fas fa-arrow-right"></i></span>' +
+                    '</a>';
+            }).join('');
+            openPosMobileQuickView(
+                '<i class="fas fa-receipt"></i> Recent Orders',
+                '<div class="pos-mobile-quick-view-list">' + cards + '</div>', {
+                    subtitle: rows.length + (rows.length === 1 ? ' order' : ' orders')
+                }
+            );
+        }
+
+        async function openPosMobileInboxView() {
+            if (!isPosPhoneViewport()) {
+                togglePosInbox();
+                return;
+            }
+            showPosActionLoader('Loading inbox…', 'Checking station replies.');
+            try {
+                await pollStationReplies();
+            } finally {
+                hidePosActionLoader();
+            }
+            const messages = Array.isArray(_inboxLastMsgs) ? _inboxLastMsgs : [];
+            if (!messages.length) {
+                openPosMobileQuickView(
+                    '<i class="fas fa-inbox"></i> Station Inbox',
+                    posMobileQuickViewEmpty('fa-inbox', 'Inbox is clear', 'No station notes or replies right now.'), {
+                        subtitle: 'Live station communication'
+                    }
+                );
+                return;
+            }
+            const messageHtml = messages.map((message) => {
+                const station = posInboxStationLabel(message.station);
+                const urgent = message.priority === 'urgent';
+                const messageText = escHtml(message.message || 'No message body');
+                const contextText = escHtml(posInboxOrderContext(message) || (message.order_ref ? String(message.order_ref) : 'General note'));
+                const timeLabel = message.created_at ?
+                    new Date(String(message.created_at).replace(' ', 'T')).toLocaleTimeString([], {
+                        hour: '2-digit',
+                        minute: '2-digit'
+                    }) :
+                    '';
+                return '<article class="pos-mobile-quick-view-item pos-mobile-quick-view-item--inbox' + (urgent ? ' pos-mobile-quick-view-item--alert' : '') + '">' +
+                    '<div class="pos-mobile-quick-view-item__top">' +
+                    '<strong class="pos-mobile-quick-view-item__title">' + escHtml(station) + '</strong>' +
+                    '<span class="pos-mobile-quick-view-item__badge">' + (urgent ? 'Urgent' : 'Inbox') + '</span>' +
+                    '</div>' +
+                    '<p class="pos-mobile-quick-view-item__summary">' + messageText + '</p>' +
+                    '<p class="pos-mobile-quick-view-item__meta">' + contextText + '</p>' +
+                    '<div class="pos-mobile-quick-view-item__footer">' + (timeLabel ? '<span><i class="fas fa-clock"></i> ' + escHtml(timeLabel) + '</span>' : '<span><i class="fas fa-clock"></i> Just now</span>') + '</div>' +
+                    '</article>';
+            }).join('');
+            openPosMobileQuickView(
+                '<i class="fas fa-inbox"></i> Station Inbox',
+                '<div class="pos-mobile-quick-view-list">' + messageHtml + '</div>', {
+                    subtitle: messages.length + (messages.length === 1 ? ' message' : ' messages')
+                }
+            );
+        }
+
+        async function openPosMobileOrdersView() {
+            await openMyOrdersCurrentDetail();
+        }
+
+        function runPosMobileMenuAction(actionName) {
+            const action = typeof actionName === 'function' ? actionName : window[actionName];
+            const shouldDelay = isPosCompactViewport() &&
+                !!document.getElementById('posMobileMenu')?.classList.contains('is-open');
+            closePosMobileMenu();
+            if (typeof action !== 'function') return;
+            if (shouldDelay) {
+                window.setTimeout(() => action(), 320);
+                return;
+            }
+            action();
+        }
+
+        function _syncPosMobileMenuViewport() {
+            // Wide desktop uses inline top actions; close any open sheet to avoid stale UI state.
+            if (window.innerWidth > 1700) closePosMobileMenu();
+            if (window.innerWidth > 640) {
+                document.getElementById('recentList')?.classList.remove('recent-list--mobile');
+                document.getElementById('posInboxWidget')?.classList.remove('is-mobile-open');
+                document.getElementById('myOrdersWidget')?.classList.remove('is-mobile-open');
+            }
+        }
+        bindPosMobileMenuButton();
+        initPosCatsResizer();
+        window.addEventListener('resize', _syncPosMobileMenuViewport);
+        _syncPosMobileMenuViewport();
+
+        function toggleMobileHelp() {
+            const help = document.getElementById('rhHelpToggle');
+            if (help) help.click();
+        }
+
+        /* Keep mobile quick actions and menu badges in sync with desktop badges. */
+        function _syncPosMobileBadges() {
+            const pairs = [
+                ['tabBadge', ['mobileTabBadge']],
+                ['posInboxBadge', ['mobileInboxBadge']],
+                ['myOrdersBadge', ['mobileMyOrdersBadge']],
+                ['kitchenBadge', ['menuKitchenBadge']],
+                ['barBadge', ['menuBarBadge']],
+                ['coffeeBadge', ['menuCoffeeBadge']],
+            ];
+            let totalCount = 0;
+            pairs.forEach(([srcId, dstIds]) => {
+                const src = document.getElementById(srcId);
+                if (!src) return;
+                const visible = src.style.display !== 'none' && src.textContent.trim() !== '';
+                const count = parseInt(src.textContent, 10) || 0;
+                dstIds.forEach(dstId => {
+                    const dst = document.getElementById(dstId);
+                    if (!dst) return;
+                    dst.textContent = src.textContent;
+                    dst.style.display = visible ? 'inline-flex' : 'none';
+                });
+                totalCount += count;
+            });
+            const menuBadge = document.getElementById('mobileMenuBadge');
+            if (menuBadge) {
+                menuBadge.textContent = totalCount > 0 ? (totalCount > 99 ? '99+' : totalCount) : '';
+                menuBadge.style.display = totalCount > 0 ? 'inline-flex' : 'none';
+            }
+        }
+        /* Observe DOM changes on known badges to keep mobile menu in sync. */
+        (function() {
+            const ids = ['tabBadge', 'posInboxBadge', 'kitchenBadge', 'barBadge', 'coffeeBadge', 'stationsBadge'];
+            const obs = new MutationObserver(_syncPosMobileBadges);
+            ids.forEach(id => {
+                const el = document.getElementById(id);
+                if (el) obs.observe(el, {
+                    childList: true,
+                    subtree: true,
+                    attributes: true,
+                    attributeFilter: ['style']
+                });
+            });
+            _syncPosMobileBadges();
+        })();
+        document.addEventListener('DOMContentLoaded', _syncPosMobileBadges);
+
+
+        function renderCart() {
+            const c = document.getElementById('cart-lines');
+
+            // Update mobile badge
+            const badge = document.getElementById('cartBadge');
+            const mobileCartBadge = document.getElementById('mobileCartBadge');
+            const totQty = cart.reduce((s, l) => s + l.qty, 0);
+            if (totQty > 0) {
+                if (badge) {
+                    badge.style.display = 'inline-block';
+                    badge.textContent = totQty;
+                }
+                if (mobileCartBadge) {
+                    mobileCartBadge.style.display = 'inline-flex';
+                    mobileCartBadge.textContent = totQty;
+                }
+            } else {
+                if (badge) {
+                    badge.style.display = 'none';
+                    badge.textContent = '0';
+                }
+                if (mobileCartBadge) {
+                    mobileCartBadge.style.display = 'none';
+                    mobileCartBadge.textContent = '0';
+                }
+            }
+
+            if (!cart.length) {
+                c.innerHTML = '<p style="color:#6c757d; text-align:center; padding:30px 0; font-size:13px;">Tap items to add to the order.</p>';
+            } else {
+                c.innerHTML = cart.map((l, i) => `
+            <div class="cline">
+                <div>
+                    <div class="nm">${escHtml(l.name)}</div>
+                    <div class="ln-meta">${currencySymbol} ${fmtMoney(l.price)} · ${escHtml(l.type)}</div>
+                    ${l.note ? `<div class="ln-note" style="font-size:11px; color:#8B7355; margin-top:3px; font-style:italic;"><i class="fas fa-comment-dots"></i> ${escHtml(l.note)}</div>` : ''}
+                    <button type="button" onclick="openNote(${i})" style="background:none; border:none; color:${l.note ? '#8B7355' : '#a0a0a0'}; font-size:11px; padding:2px 0; cursor:pointer; margin-top:2px;"><i class="fas fa-comment-dots"></i> ${l.note ? 'Edit note' : 'Add note'}</button>
+                </div>
+                <div class="qty">
+                    <button type="button" onclick="bump(${i},-1)">−</button>
+                    <input type="number" min="0" max="1000" step="0.5" value="${l.qty}" onchange="setQty(${i}, this.value)">
+                    <button type="button" onclick="bump(${i},1)">+</button>
+                </div>
+                <button type="button" class="rm" onclick="rm(${i})"><i class="fas fa-times"></i></button>
+            </div>`).join('');
+            }
+            const t = cartTotal();
+            document.getElementById('total').textContent = currencySymbol + ' ' + fmtMoney(t);
+            document.getElementById('payBtn').disabled = !cart.length;
+            const parkBtn = document.getElementById('parkBtn');
+            if (parkBtn) parkBtn.disabled = !cart.length;
+            updateFireButton();
+        }
+
+        let activeNoteIdx = -1;
+
+        function openNote(i) {
+            activeNoteIdx = i;
+            document.getElementById('noteItemName').textContent = cart[i].name;
+            document.getElementById('noteText').value = cart[i].note || '';
+            document.getElementById('noteOverlay').classList.add('show');
+        }
+
+        function addNoteChip(t) {
+            const ta = document.getElementById('noteText');
+            ta.value = (ta.value ? ta.value + ', ' : '') + t;
+            ta.focus();
+        }
+
+        function saveNote() {
+            if (activeNoteIdx < 0) return;
+            cart[activeNoteIdx].note = document.getElementById('noteText').value.trim().slice(0, 250);
+            document.getElementById('noteOverlay').classList.remove('show');
+            activeNoteIdx = -1;
+            renderCart();
+        }
+
+        function injectCartHidden(targetId) {
+            document.getElementById(targetId).innerHTML = cart.map(l => `
+        <input type="hidden" name="item_id[]" value="${l.id}">
+        <input type="hidden" name="item_type[]" value="${l.type}">
+        <input type="hidden" name="item_qty[]" value="${l.qty}">
+        <input type="hidden" name="item_note[]" value="${(l.note || '').replace(/"/g,'&quot;')}">
+    `).join('');
+        }
+
+        function openPayModal() {
+            if (!cart.length) return;
+            if (!validateServiceContext()) return;
+            const t = cartTotal();
+            document.getElementById('payTotal').textContent = currencySymbol + ' ' + fmtMoney(t);
+            injectCartHidden('payHiddenItems');
+            /* Render the service-context summary inside the modal so the cashier sees what they're paying for */
+            updatePaySvcSummary();
+            const kw = document.getElementById('payKitchenWarning');
+            if (kw) {
+                const {
+                    hasFood,
+                    hasDrink
+                } = cartStations();
+                const warnParts = [];
+                if (hasFood && !posKitchenOpen) warnParts.push(`Kitchen is closed (${posKitchenHours})`);
+                if (hasDrink && !posBarOpen) warnParts.push(`Bar is closed (${posBarHours})`);
+                if (warnParts.length) {
+                    const wtxt = document.getElementById('payKitchenWarningText');
+                    if (wtxt) wtxt.innerHTML = '<strong>' + warnParts.join(' · ') + '</strong>. Tickets will sit unseen until they reopen.';
+                    kw.style.display = 'flex';
+                } else {
+                    kw.style.display = 'none';
+                }
+            }
+            document.getElementById('payOverlay').classList.add('show');
+            updConfirm();
+        }
+
+        function closePayModal() {
+            document.getElementById('payOverlay').classList.remove('show');
+        }
+
+        let _kitchenFireCallback = null;
+
+        function showKitchenClosedWarning(onConfirm) {
+            _kitchenFireCallback = onConfirm;
+            document.getElementById('kitchenClosedOverlay').classList.add('show');
+        }
+
+        function cancelKitchenFire() {
+            _kitchenFireCallback = null;
+            document.getElementById('kitchenClosedOverlay').classList.remove('show');
+        }
+
+        function confirmKitchenFire() {
+            document.getElementById('kitchenClosedOverlay').classList.remove('show');
+            if (typeof _kitchenFireCallback === 'function') {
+                const cb = _kitchenFireCallback;
+                _kitchenFireCallback = null;
+                cb();
+            }
+        }
+
+        /* === Service context (order type, table/room, customer) ===========================
+           Chips toggle the hidden order_type input. Dine-in & Room service require a
+           table / room number — validateServiceContext() blocks Fire / Pay until filled. */
+        const SVC_LABEL = {
+            walk_in: 'Walk-in',
+            dine_in: 'Dine-in',
+            takeaway: 'Takeaway',
+            room_service: 'Room service'
+        };
+
+        function setServiceType(t) {
+            const ot = document.getElementById('ctxOrderType');
+            if (!ot) return;
+            /* Block selection of locked chips — e.g. walk-in/dine-in/takeaway while in
+               Room Service menu mode. The Room chip is always allowed. */
+            if (t !== 'room_service' && typeof menuMode !== 'undefined' && menuMode === 'room_service') return;
+            ot.value = t;
+            document.querySelectorAll('.ctx-chip').forEach(c => c.classList.toggle('is-active', c.dataset.type === t));
+            /* Keep the menu-mode toggle in sync with the chosen service context so the visible
+               menu always matches what the order will fire as. Guard against infinite recursion
+               via the early-return inside setMenuMode() when the mode is unchanged. */
+            if (typeof menuMode !== 'undefined') {
+                if (t === 'room_service' && menuMode !== 'room_service') setMenuMode('room_service');
+                else if (t !== 'room_service' && menuMode === 'room_service') setMenuMode('restaurant');
+            }
+            const loc = document.getElementById('ctxLocation');
+            const tableSelect = document.getElementById('ctxTableSelect');
+            const roomSelect = document.getElementById('ctxRoomSelect');
+            const hint = document.getElementById('ctxLocationHint');
+            if (!loc || !tableSelect || !roomSelect) return;
+            tableSelect.style.display = 'none';
+            roomSelect.style.display = 'none';
+            tableSelect.required = false;
+            roomSelect.required = false;
+            tableSelect.classList.remove('is-required');
+            roomSelect.classList.remove('is-required');
+            loc.value = '';
+            if (hint) {
+                hint.style.display = 'none';
+                hint.textContent = '';
+                hint.classList.remove('is-warn');
+            }
+            if (t === 'dine_in') {
+                tableSelect.style.display = '';
+                tableSelect.required = true;
+                tableSelect.classList.add('is-required');
+                if (hint) {
+                    hint.style.display = 'block';
+                    if (!posRestaurantTables.length) {
+                        hint.textContent = 'No active restaurant tables are configured. Ask an admin to set Restaurant Tables first.';
+                        hint.classList.add('is-warn');
+                    } else {
+                        hint.textContent = 'Select a free table from the admin-managed table range.';
+                    }
+                }
+            } else if (t === 'room_service') {
+                roomSelect.style.display = '';
+                roomSelect.required = true;
+                roomSelect.classList.add('is-required');
+                if (hint) {
+                    hint.style.display = 'block';
+                    if (!posCheckedInRooms.length) {
+                        hint.textContent = 'No checked-in rooms are available for room-service orders.';
+                        hint.classList.add('is-warn');
+                    } else {
+                        hint.textContent = 'Only checked-in rooms are listed. Busy rooms are disabled until their active order is served, settled, cancelled, or completed.';
+                    }
+                }
+            } else {
+                loc.value = '';
+            }
+            syncServiceLocation();
+        }
+
+        function syncServiceLocation() {
+            const t = document.getElementById('ctxOrderType')?.value || 'walk_in';
+            const hidden = document.getElementById('ctxLocation');
+            const tableSelect = document.getElementById('ctxTableSelect');
+            const roomSelect = document.getElementById('ctxRoomSelect');
+            const hint = document.getElementById('ctxLocationHint');
+            if (!hidden) return;
+            if (t === 'dine_in') {
+                hidden.value = tableSelect?.value || '';
+                const opt = tableSelect?.selectedOptions?.[0];
+                if (hint && opt && opt.value) {
+                    const cap = opt.dataset.capacity || '';
+                    hint.textContent = cap ? ('Table ' + opt.value + ' seats ' + cap + '.') : ('Table ' + opt.value + ' selected.');
+                    hint.classList.remove('is-warn');
+                    hint.style.display = 'block';
+                }
+            } else if (t === 'room_service') {
+                hidden.value = roomSelect?.value || '';
+                const opt = roomSelect?.selectedOptions?.[0];
+                if (hint && opt && opt.value) {
+                    hint.textContent = 'Room ' + opt.value + ' selected.';
+                    hint.classList.remove('is-warn');
+                    hint.style.display = 'block';
+                }
+            } else {
+                hidden.value = '';
+            }
+        }
+
+        function validateServiceContext() {
+            const t = document.getElementById('ctxOrderType')?.value || 'walk_in';
+            const loc = (document.getElementById('ctxLocation')?.value || '').trim();
+            if ((t === 'dine_in' || t === 'room_service') && !loc) {
+                const label = t === 'dine_in' ? 'a table number' : 'a room number';
+                posToastReady('Enter ' + label + ' before sending the order.', true);
+                const el = document.getElementById(t === 'dine_in' ? 'ctxTableSelect' : 'ctxRoomSelect');
+                if (el) {
+                    el.style.display = '';
+                    el.focus();
+                }
+                return false;
+            }
+            return true;
+        }
+
+        function updatePaySvcSummary() {
+            const txt = document.getElementById('paySvcSummaryText');
+            if (!txt) return;
+            const t = document.getElementById('ctxOrderType')?.value || 'walk_in';
+            const loc = (document.getElementById('ctxLocation')?.value || '').trim();
+            const customer = (document.getElementById('ctxCustomer')?.value || '').trim();
+            const parts = [SVC_LABEL[t] || 'Walk-in'];
+            if (loc) parts.push((t === 'room_service' ? 'Room ' : 'Table ') + loc);
+            if (customer) parts.push(customer);
+            txt.textContent = parts.join(' · ');
+        }
+
+        function parkOrder() {
+            if (!cart.length) return;
+            if (!validateServiceContext()) return;
+            const {
+                hasFood,
+                hasDrink
+            } = cartStations();
+            const kitchenBlocked = hasFood && !posKitchenOpen;
+            const barBlocked = hasDrink && !posBarOpen;
+            if (kitchenBlocked || barBlocked) {
+                // Build a station-specific warning message
+                const parts = [];
+                if (kitchenBlocked) parts.push(`Kitchen (${posKitchenHours})`);
+                if (barBlocked) parts.push(`Bar (${posBarHours})`);
+                const closed = parts.join(' and ');
+                const emoji = hasFood && hasDrink ? '⚠️' : (kitchenBlocked ? '🍳' : '🍷');
+                const el = document.getElementById('stationClosedEmoji');
+                if (el) el.textContent = emoji;
+                const ti = document.getElementById('stationClosedTitle');
+                if (ti) ti.textContent = closed + ' Closed';
+                const ms = document.getElementById('stationClosedMsg');
+                if (ms) ms.textContent = `${closed} ${parts.length > 1 ? 'are' : 'is'} currently closed. The ticket will sit unseen on the station display until it reopens. Proceed?`;
+                showKitchenClosedWarning(() => doParkSubmit());
+                return;
+            }
+            doParkSubmit();
+        }
+
+        function doParkSubmit() {
+            document.getElementById('payment_method').value = '';
+            injectCartHidden('payHiddenItems');
+            const f = document.getElementById('payForm');
+            let actionInput = f.querySelector('input[name="action"]');
+            if (!actionInput) {
+                actionInput = document.createElement('input');
+                actionInput.type = 'hidden';
+                actionInput.name = 'action';
+                f.appendChild(actionInput);
+            }
+            actionInput.value = 'park';
+            posEnsureClientUuid(f);
+            showPosActionLoader('Firing order...', 'Sending the ticket to the station display.');
+            f.submit();
+        }
+
+        function openTabsTray() {
+            const overlay = document.getElementById('tabsOverlay');
+            if (!overlay) return;
+            overlay.classList.add('show');
+            try {
+                _tabsToolsExpanded = localStorage.getItem(POS_TABS_TOOLS_STATE_KEY) === '1';
+            } catch (_) {
+                _tabsToolsExpanded = false;
+            }
+            startTabsAutoRefresh();
+            tabsSelectionChanged();
+            applyTabsTrayToolsState();
+            updateTabsTrayUpdatedLabel();
+            refreshOpenTabs(true, {
+                scopedLoader: true,
+                loaderMessage: 'Fetching open tabs...'
+            });
+        }
+
+        let _tabsRefreshInFlight = false;
+        let _selectedOpenTabIds = new Set();
+        let _tabsAutoRefreshTimer = null;
+        let _tabsToolsExpanded = false;
+        const POS_TABS_TOOLS_STATE_KEY = 'rh_pos_tabs_tools_expanded_v1';
+
+        function tabCreatedSeconds(createdAt) {
+            const ts = Date.parse(String(createdAt || '').replace(' ', 'T'));
+            return Number.isNaN(ts) ? 0 : Math.floor(ts / 1000);
+        }
+
+        function tabAgeLabel(createdAt) {
+            const created = tabCreatedSeconds(createdAt);
+            if (!created) return '';
+            return fmtAgeSec(Math.max(0, Math.floor(Date.now() / 1000) - created));
+        }
+
+        function tabAgeColor(createdAt) {
+            const created = tabCreatedSeconds(createdAt);
+            const sec = created ? Math.max(0, Math.floor(Date.now() / 1000) - created) : 0;
+            if (sec >= 1800) return '#c82333';
+            if (sec >= 900) return '#d4a843';
+            return '#28a745';
+        }
+
+        function updateTabsTrayUpdatedLabel() {
+            const updated = document.getElementById('tabsTrayUpdated');
+            if (!updated) return;
+            const stamp = new Date().toLocaleTimeString([], {
+                hour: '2-digit',
+                minute: '2-digit',
+                second: '2-digit'
+            });
+            updated.textContent = 'Live · ' + stamp;
+        }
+
+        function applyTabsTrayToolsState() {
+            const tools = document.getElementById('tabsTrayTools');
+            const panel = document.getElementById('tabsTrayBulkPanel');
+            const toggle = document.getElementById('tabsTrayToggleBtn');
+            if (!tools || !panel || !toggle) return;
+
+            tools.classList.toggle('is-collapsed', !_tabsToolsExpanded);
+            panel.hidden = !_tabsToolsExpanded;
+            toggle.setAttribute('aria-expanded', _tabsToolsExpanded ? 'true' : 'false');
+            toggle.innerHTML = _tabsToolsExpanded ? '<i class="fas fa-chevron-up"></i> Hide bulk' : '<i class="fas fa-sliders"></i> Bulk tools';
+        }
+
+        function toggleTabsTrayTools(forceExpanded = null) {
+            if (typeof forceExpanded === 'boolean') {
+                _tabsToolsExpanded = forceExpanded;
+            } else {
+                _tabsToolsExpanded = !_tabsToolsExpanded;
+            }
+            try {
+                localStorage.setItem(POS_TABS_TOOLS_STATE_KEY, _tabsToolsExpanded ? '1' : '0');
+            } catch (_) {
+                // localStorage unavailable in private modes — ignore.
+            }
+            applyTabsTrayToolsState();
+        }
+
+        function startTabsAutoRefresh() {
+            if (_tabsAutoRefreshTimer) return;
+            _tabsAutoRefreshTimer = window.setInterval(() => {
+                const overlay = document.getElementById('tabsOverlay');
+                if (!overlay || !overlay.classList.contains('show')) return;
+                refreshOpenTabs(false);
+            }, 10000);
+        }
+
+        function stopTabsAutoRefresh() {
+            if (!_tabsAutoRefreshTimer) return;
+            window.clearInterval(_tabsAutoRefreshTimer);
+            _tabsAutoRefreshTimer = null;
+        }
+
+        function renderTabsTrayTools(openCount, outstandingAmount, staleCount) {
+            const openTabs = Math.max(0, parseInt(openCount, 10) || 0);
+            const staleTabs = Math.max(0, parseInt(staleCount, 10) || 0);
+            const outstanding = parseFloat(outstandingAmount || 0) || 0;
+            const hasTabs = openTabs > 0;
+            const disabledAttr = hasTabs ? '' : ' disabled';
+            return `<div class="tabs-tray-tools${_tabsToolsExpanded ? '' : ' is-collapsed'}" id="tabsTrayTools">
+                <div class="tabs-tray-tools__headline">
+                    <div class="tabs-tray-tools__metrics">
+                        <div class="tabs-tray-metric"><span class="tabs-tray-metric__label">Open</span><strong>${openTabs}</strong></div>
+                        <div class="tabs-tray-metric"><span class="tabs-tray-metric__label">Outstanding</span><strong>${currencySymbol} ${fmtMoney(outstanding)}</strong></div>
+                        <div class="tabs-tray-metric"><span class="tabs-tray-metric__label">Stale</span><strong>${staleTabs}</strong></div>
+                    </div>
+                    <div class="tabs-tray-tools__status">
+                        <span class="tabs-tray-updated" id="tabsTrayUpdated">Live</span>
+                        <button type="button" class="tabs-tray-toggle" id="tabsTrayToggleBtn" onclick="toggleTabsTrayTools()" aria-expanded="${_tabsToolsExpanded ? 'true' : 'false'}">${_tabsToolsExpanded ? '<i class="fas fa-chevron-up"></i> Hide bulk' : '<i class="fas fa-sliders"></i> Bulk tools'}</button>
+                    </div>
+                </div>
+                <div class="tabs-tray-tools__bulk-panel" id="tabsTrayBulkPanel"${_tabsToolsExpanded ? '' : ' hidden'}>
+                    <div class="tabs-tray-tools__bulk-row">
+                        <label class="tabs-bulk-check"><input type="checkbox" id="tabsBulkAll" onchange="toggleTabsBulkAll(this.checked)"${disabledAttr}> <span>Select all</span></label>
+                        <button type="button" class="tabs-bulk-btn" onclick="tabsSelectStale()"${disabledAttr}><i class="fas fa-triangle-exclamation"></i> Select stale</button>
+                        <button type="button" class="tabs-bulk-btn" onclick="tabsClearSelection()"${disabledAttr}><i class="fas fa-broom"></i> Clear</button>
+                        <span class="tabs-bulk-info" id="tabsBulkSelectionInfo">No tabs selected</span>
+                    </div>
+                    <div class="tabs-tray-tools__bulk-actions">
+                        <button type="button" class="tabs-bulk-btn tabs-bulk-btn--cancel" id="tabsBulkCancelBtn" onclick="bulkCancelTabs()" disabled><i class="fas fa-circle-xmark"></i> Bulk cancel</button>
+                        ${posCanManageTabs ? '<button type="button" class="tabs-bulk-btn tabs-bulk-btn--void" id="tabsBulkVoidBtn" onclick="bulkVoidTabs()" disabled><i class="fas fa-ban"></i> Bulk void</button>' : ''}
+                    </div>
+                </div>
+            </div>`;
+        }
+
+        function getOpenTabSelectionInputs() {
+            return Array.from(document.querySelectorAll('#tabsCardsList .tc-select-input'));
+        }
+
+        function getSelectedOpenTabs(filterFn = null) {
+            const selected = getOpenTabSelectionInputs().filter(input => input.checked).map(input => ({
+                orderId: parseInt(input.dataset.orderId || '0', 10) || 0,
+                ref: String(input.dataset.ref || 'TAB'),
+                total: parseFloat(input.dataset.total || '0') || 0,
+                canCancel: input.dataset.canCancel === '1',
+                isStale: input.dataset.isStale === '1',
+            })).filter(tab => tab.orderId > 0);
+            return typeof filterFn === 'function' ? selected.filter(filterFn) : selected;
+        }
+
+        function tabsSelectionChanged() {
+            const inputs = getOpenTabSelectionInputs();
+            const selectedTabs = getSelectedOpenTabs();
+            const selectedIds = selectedTabs.map(tab => tab.orderId);
+            _selectedOpenTabIds = new Set(selectedIds);
+
+            const totalTabs = inputs.length;
+            const selectedCount = selectedTabs.length;
+            const cancellableSelected = selectedTabs.filter(tab => tab.canCancel).length;
+            const staleSelected = selectedTabs.filter(tab => tab.isStale).length;
+
+            const selectAll = document.getElementById('tabsBulkAll');
+            if (selectAll) {
+                selectAll.checked = totalTabs > 0 && selectedCount === totalTabs;
+                selectAll.indeterminate = selectedCount > 0 && selectedCount < totalTabs;
+            }
+
+            const summary = document.getElementById('tabsBulkSelectionInfo');
+            if (summary) {
+                if (selectedCount === 0) {
+                    summary.textContent = 'No tabs selected';
+                } else {
+                    summary.textContent = selectedCount + ' selected' + (staleSelected > 0 ? (' · ' + staleSelected + ' stale') : '');
+                }
+            }
+
+            const cancelBtn = document.getElementById('tabsBulkCancelBtn');
+            if (cancelBtn) cancelBtn.disabled = cancellableSelected === 0;
+
+            const voidBtn = document.getElementById('tabsBulkVoidBtn');
+            if (voidBtn) voidBtn.disabled = selectedCount === 0;
+        }
+
+        function toggleTabsBulkAll(checked) {
+            getOpenTabSelectionInputs().forEach(input => {
+                input.checked = !!checked;
+            });
+            tabsSelectionChanged();
+        }
+
+        function tabsSelectStale() {
+            const inputs = getOpenTabSelectionInputs();
+            if (!inputs.length) return;
+            inputs.forEach(input => {
+                input.checked = input.dataset.isStale === '1';
+            });
+            tabsSelectionChanged();
+        }
+
+        function tabsClearSelection() {
+            getOpenTabSelectionInputs().forEach(input => {
+                input.checked = false;
+            });
+            _selectedOpenTabIds.clear();
+            tabsSelectionChanged();
+        }
+
+        async function bulkCancelTabs() {
+            const selected = getSelectedOpenTabs(tab => tab.canCancel);
+            if (!selected.length) {
+                posToast('Select tabs that are still pending to bulk-cancel.', 'err');
+                return;
+            }
+            const reason = await posAskReason({
+                title: 'Bulk cancel tabs',
+                prompt: `Cancel <strong>${selected.length}</strong> selected tab${selected.length === 1 ? '' : 's'}? This works only while all items are still pending (not yet cooking).`,
+                warn: 'Bulk cancel does not affect tabs already in preparation. Those are skipped automatically.',
+                confirmLabel: 'Cancel selected',
+                confirmColor: '#7c2d12',
+                hasNotes: false,
+            });
+            if (!reason) return;
+
+            showPosActionLoader('Bulk cancelling tabs…', 'Applying your action to selected tabs.');
+            let okCount = 0;
+            let failCount = 0;
+            const failedRefs = [];
+
+            for (const tab of selected) {
+                const fd = new FormData();
+                fd.append('csrf_token', '<?php echo $csrf_token; ?>');
+                fd.append('order_id', String(tab.orderId));
+                fd.append('cancel_reason', reason);
+                try {
+                    const resp = await fetch('/api/cancel-order.php', {
+                        method: 'POST',
+                        body: fd,
+                        credentials: 'include'
+                    });
+                    const j = await resp.json();
+                    if (j.ok) {
+                        okCount++;
+                    } else {
+                        failCount++;
+                        failedRefs.push(tab.ref);
+                    }
+                } catch (error) {
+                    failCount++;
+                    failedRefs.push(tab.ref);
+                }
+            }
+
+            hidePosActionLoader();
+            if (okCount > 0 && failCount === 0) {
+                posToast(okCount + ' tab' + (okCount === 1 ? '' : 's') + ' cancelled.', 'ok');
+            } else if (okCount > 0) {
+                posToast(okCount + ' cancelled, ' + failCount + ' failed.', 'err');
+            } else {
+                posToast('Bulk cancel failed for selected tabs.', 'err');
+            }
+            if (failedRefs.length) {
+                posToast('Failed: ' + failedRefs.slice(0, 3).join(', ') + (failedRefs.length > 3 ? '…' : ''), 'err');
+            }
+
+            _selectedOpenTabIds.clear();
+            await refreshOpenTabs(true);
+            refreshShiftStats(true);
+        }
+
+        async function bulkVoidTabs() {
+            if (!posCanManageTabs) {
+                posToast('Only admin/manager can void tabs in bulk.', 'err');
+                return;
+            }
+            const selected = getSelectedOpenTabs();
+            if (!selected.length) {
+                posToast('Select at least one tab to void.', 'err');
+                return;
+            }
+            const reason = await posAskReason({
+                title: 'Bulk void tabs',
+                prompt: `Void <strong>${selected.length}</strong> selected tab${selected.length === 1 ? '' : 's'}? Stock will be restored for ready items and station tickets removed.`,
+                warn: 'Bulk void is permanent, admin/manager only, and fully audit-logged.',
+                confirmLabel: 'Void selected',
+                confirmColor: '#c82333',
+                hasNotes: true,
+            });
+            if (!reason) return;
+
+            const notes = document.getElementById('prmNotes')?.value?.trim() || '';
+            showPosActionLoader('Bulk voiding tabs…', 'Applying admin action to selected tabs.');
+            let okCount = 0;
+            let failCount = 0;
+            const failedRefs = [];
+
+            for (const tab of selected) {
+                const fd = new FormData();
+                fd.append('csrf_token', '<?php echo $csrf_token; ?>');
+                fd.append('order_id', String(tab.orderId));
+                fd.append('void_reason', reason);
+                fd.append('void_notes', notes);
+                try {
+                    const resp = await fetch('/api/void-order.php', {
+                        method: 'POST',
+                        body: fd,
+                        credentials: 'include'
+                    });
+                    const j = await resp.json();
+                    if (j.ok) {
+                        okCount++;
+                    } else {
+                        failCount++;
+                        failedRefs.push(tab.ref);
+                    }
+                } catch (error) {
+                    failCount++;
+                    failedRefs.push(tab.ref);
+                }
+            }
+
+            hidePosActionLoader();
+            if (okCount > 0 && failCount === 0) {
+                posToast(okCount + ' tab' + (okCount === 1 ? '' : 's') + ' voided.', 'ok');
+            } else if (okCount > 0) {
+                posToast(okCount + ' voided, ' + failCount + ' failed.', 'err');
+            } else {
+                posToast('Bulk void failed for selected tabs.', 'err');
+            }
+            if (failedRefs.length) {
+                posToast('Failed: ' + failedRefs.slice(0, 3).join(', ') + (failedRefs.length > 3 ? '…' : ''), 'err');
+            }
+
+            _selectedOpenTabIds.clear();
+            await refreshOpenTabs(true);
+            refreshShiftStats(true);
+        }
+
+        function renderOpenTabs(tabs, windowStart) {
+            const title = document.getElementById('openTabsTitle');
+            const body = document.getElementById('tabsTrayBody');
+            if (title) title.innerHTML = '<i class="fas fa-utensils"></i> Open tabs (' + tabs.length + ')';
+            if (!body) return;
+            const orderedTabs = [...tabs].sort((a, b) => tabCreatedSeconds(a.created_at) - tabCreatedSeconds(b.created_at));
+            const staleCount = orderedTabs.filter(t => windowStart && String(t.created_at || '') < String(windowStart || '')).length;
+            const outstandingTotal = orderedTabs.reduce((sum, t) => sum + (parseFloat(t.total_amount || 0) || 0), 0);
+
+            if (!orderedTabs.length) {
+                _selectedOpenTabIds.clear();
+                body.innerHTML = renderTabsTrayTools(0, 0, 0) + '<p style="text-align:center; color:#6c757d; padding:30px 0;">No open tabs.</p>';
+                tabsSelectionChanged();
+                applyTabsTrayToolsState();
+                updateTabsTrayUpdatedLabel();
+                return;
+            }
+            body.innerHTML = renderTabsTrayTools(orderedTabs.length, outstandingTotal, staleCount) + `<div class="tab-cards-list" id="tabsCardsList">` + orderedTabs.map(t => {
+                const orderId = parseInt(t.id, 10) || 0;
+                const createdSec = tabCreatedSeconds(t.created_at);
+                const totalItems = parseInt(t.line_count || 0, 10) || 0;
+                const pendingCount = parseInt(t.pending_count || 0, 10) || 0;
+                const preparingCount = parseInt(t.preparing_count || 0, 10) || 0;
+                const readyCount = parseInt(t.ready_count || 0, 10) || 0;
+                const collectionCount = parseInt(t.collection_count || 0, 10) || 0;
+                const servedCount = parseInt(t.served_count || 0, 10) || 0;
+                const canCancelBeforePrep = pendingCount > 0 && preparingCount === 0 && readyCount === 0 && collectionCount === 0 && servedCount === 0;
+                const canSettle = (pendingCount + preparingCount + readyCount + collectionCount) === 0 && totalItems > 0;
+                const isStale = windowStart && String(t.created_at || '') < String(windowStart || '');
+                const byOther = parseInt(t.created_by || 0, 10) !== posUserId;
+                const openedAt = createdSec ? new Date(createdSec * 1000).toLocaleTimeString([], {
+                    hour: '2-digit',
+                    minute: '2-digit'
+                }) : '—';
+                const ref = escHtml(t.reference || 'TAB');
+                const actionRef = escHtml(JSON.stringify(String(t.reference || 'TAB')));
+                const refAttr = escHtml(String(t.reference || 'TAB'));
+                const flow = [
+                    pendingCount > 0 ? `<span class="tc-flow-chip pending"><i class="fas fa-clock"></i> ${pendingCount} pending</span>` : '',
+                    preparingCount > 0 ? `<span class="tc-flow-chip preparing"><i class="fas fa-fire-burner"></i> ${preparingCount} prep</span>` : '',
+                    readyCount > 0 ? `<span class="tc-flow-chip ready"><i class="fas fa-bell"></i> ${readyCount} ready</span>` : '',
+                    collectionCount > 0 ? `<span class="tc-flow-chip collection"><i class="fas fa-hand-holding"></i> ${collectionCount} collecting</span>` : '',
+                    servedCount > 0 ? `<span class="tc-flow-chip served"><i class="fas fa-check"></i> ${servedCount} served</span>` : '',
+                    totalItems > 0 && servedCount === totalItems ? '<span class="tc-flow-chip served-all"><i class="fas fa-circle-check"></i> All served</span>' : ''
+                ].join('');
+                const metaPills = [
+                    t.table_number ? `<span class="tc-meta-pill"><i class="fas fa-table-cells-large"></i> Table ${escHtml(t.table_number)}</span>` : '',
+                    t.customer_name ? `<span class="tc-meta-pill"><i class="fas fa-user"></i> ${escHtml(t.customer_name)}</span>` : '',
+                    `<span class="tc-meta-pill"><i class="fas fa-list"></i> ${totalItems} item${totalItems === 1 ? '' : 's'}</span>`,
+                    `<span class="tc-meta-pill"><i class="fas fa-clock"></i> Opened ${escHtml(openedAt)}</span>`,
+                    byOther ? `<span class="tc-meta-pill"><i class="fas fa-user-tie"></i> ${escHtml(t.opened_by || 'staff')}</span>` : `<span class="tc-meta-pill"><i class="fas fa-user-check"></i> You</span>`
+                ].filter(Boolean).join('');
+                const managerTools = posCanManageTabs ? `
+                    <a href="order-lifecycle.php?id=${orderId}" target="_blank" rel="noopener" class="tc-btn tc-btn-log" data-help="Lifecycle|See every event for this order with full timestamps and user info."><i class="fas fa-stream"></i> Lifecycle</a>
+                    <button type="button" onclick="adminVoidTab(${orderId}, ${actionRef})" class="tc-btn tc-btn-void" data-help="Void order|Admin/manager only. Cancels the order, restores stock, clears station boards."><i class="fas fa-ban"></i> Void</button>` : '';
+                return `<article class="tab-card${isStale ? ' stale' : ''}" data-order-id="${orderId}" data-is-stale="${isStale ? '1' : '0'}">
+                    <div class="tc-row1">
+                        <label class="tc-select-wrap" aria-label="Select ${ref}">
+                            <input type="checkbox" class="tc-select-input" data-order-id="${orderId}" data-ref="${refAttr}" data-total="${parseFloat(t.total_amount || 0) || 0}" data-can-cancel="${canCancelBeforePrep ? '1' : '0'}" data-is-stale="${isStale ? '1' : '0'}" onchange="tabsSelectionChanged()"${_selectedOpenTabIds.has(orderId) ? ' checked' : ''}>
+                            <span class="tc-select-indicator"><i class="fas fa-check"></i></span>
+                        </label>
+                        <div class="tc-ref">${ref}</div>
+                        <div class="tc-age tab-age" data-created="${createdSec}" style="color:${tabAgeColor(t.created_at)};"><i class="fas fa-stopwatch"></i> ${escHtml(tabAgeLabel(t.created_at))}</div>
+                    </div>
+                    <div class="tc-meta">${metaPills}</div>
+                    ${totalItems > 0 ? `<div class="tc-flow">${flow}</div>` : ''}
+                    <div class="tc-summary-row">
+                        <div>
+                            <span class="tc-total-label">Total</span>
+                            <div class="tc-total">${currencySymbol} ${fmtMoney(t.total_amount)}</div>
+                        </div>
+                        ${isStale ? '<div class="tc-stale-warn"><i class="fas fa-triangle-exclamation"></i> Previous shift</div>' : ''}
+                    </div>
+                    <div class="tc-actions">
+                        <button type="button" onclick="openPayForTab(${orderId}, ${parseFloat(t.total_amount || 0) || 0}, ${actionRef}, ${canSettle ? 'true' : 'false'})" class="tc-btn tc-btn-settle${canSettle ? '' : ' disabled'}" data-help="${canSettle ? 'Settle tab|Close this tab — take payment and mark the order as paid.' : 'Wait for service|All items must be served before the tab can be settled.'}" ${canSettle ? '' : 'disabled'}><i class="fas fa-credit-card"></i> ${canSettle ? 'Settle' : 'Wait to settle'}</button>
+                        <button type="button" onclick="openTabDetail(${orderId})" class="tc-btn tc-btn-detail" data-help="View details|See all items, kitchen status, and the full audit trail for this tab."><i class="fas fa-receipt"></i> Details</button>
+                        <a href="stock-receipt.php?id=${orderId}&print=1&kot=1" target="_blank" rel="noopener" class="tc-btn tc-btn-kot" data-help="Print KOT|Reprint the kitchen ticket for this open tab."><i class="fas fa-print"></i> KOT</a>
+                        ${canCancelBeforePrep ? `<button type="button" onclick="cancelOpenOrder(${orderId}, ${actionRef})" class="tc-btn tc-btn-cancel" data-help="Cancel before prep|Cancels this order only while all items are still pending. Nothing has been cooked yet."><i class="fas fa-circle-xmark"></i> Cancel</button>` : ''}
+                        ${managerTools}
+                    </div>
+                </article>`;
+            }).join('') + '</div>';
+            tabsSelectionChanged();
+            applyTabsTrayToolsState();
+            updateTabsTrayUpdatedLabel();
+        }
+
+        async function refreshOpenTabs(force = false, options = {}) {
+            if (_tabsRefreshInFlight) return;
+            _tabsRefreshInFlight = true;
+            const useScopedLoader = !!options.scopedLoader;
+            const releaseScopedLoader = useScopedLoader ?
+                showPosScopedLoader(document.getElementById('tabsTrayBody'), options.loaderMessage || 'Refreshing tabs...') :
+                function() {
+                    return;
+                };
+            try {
+                const response = await fetch('pos.php?ajax=tabs', {
+                    credentials: 'same-origin'
+                });
+                const data = await response.json();
+                const tabs = Array.isArray(data.tabs) ? data.tabs : [];
+                renderOpenTabs(tabs, data.window_start || '');
+                const setBadge = (id, n) => {
+                    const el = document.getElementById(id);
+                    if (!el) return;
+                    el.textContent = n > 99 ? '99+' : String(n);
+                    el.style.display = n > 0 ? '' : 'none';
+                };
+                setBadge('tabBadge', tabs.length);
+                _syncPosMobileBadges();
+                updateTabsTrayUpdatedLabel();
+                if (force) tickTabAges();
+            } catch (e) {
+                if (force) posToastReady('Could not refresh open tabs.', true);
+            } finally {
+                releaseScopedLoader();
+                _tabsRefreshInFlight = false;
+            }
+        }
+
+        /* Live tab-age timers (updates every 15s) */
+        function fmtAgeSec(sec) {
+            const m = Math.floor(sec / 60),
+                s = sec % 60;
+            return m > 0 ? (m + 'm ' + String(s).padStart(2, '0') + 's') : (s + 's');
+        }
+
+        function tickTabAges() {
+            const now = Math.floor(Date.now() / 1000);
+            document.querySelectorAll('.tab-age').forEach(el => {
+                const c = parseInt(el.dataset.created || '0', 10);
+                if (!c) return;
+                const sec = Math.max(0, now - c);
+                el.innerHTML = '<i class="fas fa-stopwatch"></i> ' + fmtAgeSec(sec);
+                el.style.color = sec >= 1800 ? '#c82333' : (sec >= 900 ? '#d4a843' : '#28a745');
+            });
+        }
+        RHPoll.every(tickTabAges, 15000);
+        document.addEventListener('DOMContentLoaded', tickTabAges);
+
+        function closeTabsTray() {
+            const overlay = document.getElementById('tabsOverlay');
+            if (overlay) overlay.classList.remove('show');
+            stopTabsAutoRefresh();
+            _selectedOpenTabIds.clear();
+        }
+
+        /* POS in-app toast notification (used by cancel/void and station note flows) */
+        function closePosToast(closeButton) {
+            const toast = closeButton?.closest?.('.toast');
+            if (toast) toast.remove();
+        }
+
+        function posToast(msg, type, duration) {
+            const timeoutMs = duration || POS_NOTIFICATION_DURATION_MS;
+            const t = document.createElement('div');
+            t.className = 'toast ' + (type === 'err' ? 'err' : 'ok');
+            const text = document.createElement('span');
+            text.className = 'toast__message';
+            text.textContent = msg;
+            const close = document.createElement('button');
+            close.type = 'button';
+            close.className = 'toast__close';
+            close.setAttribute('aria-label', 'Close notification');
+            close.innerHTML = '<i class="fas fa-xmark" aria-hidden="true"></i>';
+            close.addEventListener('click', event => {
+                event.preventDefault();
+                event.stopPropagation();
+                closePosToast(close);
+            });
+            t.append(text, close);
+            document.body.appendChild(t);
+            setTimeout(() => t.remove(), timeoutMs);
+        }
+
+        document.addEventListener('click', event => {
+            const closeButton = event.target.closest?.('.toast__close');
+            if (!closeButton) return;
+            event.preventDefault();
+            event.stopPropagation();
+            closePosToast(closeButton);
+        });
+        /* Alias for older calls in pos.php (station notes etc.) */
+        function posToastReady(msg, isErr) {
+            posToast(msg, isErr ? 'err' : 'ok');
+        }
+
+        function posFriendlyIssue(rawMessage) {
+            const raw = String(rawMessage || 'Action failed');
+            const lower = raw.toLowerCase();
+            if (lower.includes('already') || lower.includes('charged twice') || lower.includes('settled') || lower.includes('paid')) {
+                return {
+                    title: 'Tab already settled',
+                    message: raw + ' The open tabs tray will refresh so the cashier does not take a duplicate payment.'
+                };
+            }
+            if (lower.includes('open tab') || lower.includes('nothing') || lower.includes('pending')) {
+                return {
+                    title: 'Nothing pending here',
+                    message: raw + ' Refresh the tabs tray and check whether the order has already moved to the station board or been settled.'
+                };
+            }
+            if (lower.includes('ingredient') || lower.includes('stock') || lower.includes('86')) {
+                return {
+                    title: 'Stock needs attention',
+                    message: raw + ' Ask a manager to receive stock, adjust the recipe, or 86 the item before continuing.'
+                };
+            }
+            if (lower.includes('security') || lower.includes('csrf') || lower.includes('token')) {
+                return {
+                    title: 'Session check needed',
+                    message: 'Refresh POS and try again so the security token is renewed.'
+                };
+            }
+            return {
+                title: 'POS action needs attention',
+                message: raw
+            };
+        }
+
+        function posAlert(title, message) {
+            let overlay = document.getElementById('posAlertOverlay');
+            if (!overlay) {
+                overlay = document.createElement('div');
+                overlay.id = 'posAlertOverlay';
+                overlay.className = 'overlay modal-overlay';
+                overlay.setAttribute('data-modal', '');
+                overlay.innerHTML = `
+                <div class="modal modal-content" role="dialog" aria-modal="true" aria-labelledby="posAlertTitle">
+                    <div class="modal-head modal-header">
+                        <h3 id="posAlertTitle"></h3>
+                        <button type="button" class="close modal-close" id="posAlertClose" aria-label="Close">&times;</button>
+                    </div>
+                    <div class="modal-body">
+                        <p id="posAlertMessage" class="prm-prompt"></p>
+                    </div>
+                    <div class="modal-foot modal-footer">
+                        <button type="button" class="btn-confirm" id="posAlertOk">Close</button>
+                    </div>
+                </div>`;
+                document.body.appendChild(overlay);
+            }
+            const titleNode = document.getElementById('posAlertTitle');
+            const messageNode = document.getElementById('posAlertMessage');
+            const closeButton = document.getElementById('posAlertClose');
+            const okButton = document.getElementById('posAlertOk');
+            const close = () => overlay.classList.remove('show');
+            titleNode.textContent = title;
+            messageNode.textContent = message;
+            closeButton.onclick = close;
+            okButton.onclick = close;
+            overlay.onclick = event => {
+                if (event.target === overlay) close();
+            };
+            overlay.classList.add('show');
+            okButton.focus();
+        }
+
+        function posShowFriendlyError(rawMessage) {
+            const issue = posFriendlyIssue(rawMessage);
+            posAlert(issue.title, issue.message);
+            posToast(issue.title, 'err');
+            refreshOpenTabs(false);
+        }
+
+        if (posServerErrorMessage) {
+            setTimeout(() => posShowFriendlyError(posServerErrorMessage), 250);
+        }
+
+        document.querySelectorAll('[data-pos-server-toast]').forEach(toast => {
+            setTimeout(() => toast.remove(), POS_NOTIFICATION_DURATION_MS);
+        });
+
+        let activePosConfirm = null;
+
+        function posConfirm(title, message, confirmLabel) {
+            if (activePosConfirm) activePosConfirm(false);
+
+            return new Promise(resolve => {
+                let overlay = document.getElementById('posConfirmOverlay');
+                if (!overlay) {
+                    overlay = document.createElement('div');
+                    overlay.className = 'overlay modal-overlay';
+                    overlay.setAttribute('data-modal', '');
+                    overlay.id = 'posConfirmOverlay';
+                    overlay.innerHTML = `
+                <div class="modal modal-content" role="dialog" aria-modal="true" aria-labelledby="posConfirmTitle">
+                    <div class="modal-head modal-header">
+                        <h3 id="posConfirmTitle"></h3>
+                        <button type="button" class="close modal-close" id="posConfirmClose" aria-label="Close">&times;</button>
+                    </div>
+                    <div class="modal-body">
+                        <p id="posConfirmMessage" class="prm-prompt"></p>
+                    </div>
+                    <div class="modal-foot modal-footer">
+                        <button type="button" class="btn-cancel" id="posConfirmCancel">Keep cart</button>
+                        <button type="button" class="tc-btn tc-btn-cancel" id="posConfirmAccept"></button>
+                    </div>
+                </div>`;
+                    document.body.appendChild(overlay);
+                }
+
+                const titleNode = document.getElementById('posConfirmTitle');
+                const messageNode = document.getElementById('posConfirmMessage');
+                const closeButton = document.getElementById('posConfirmClose');
+                const cancelButton = document.getElementById('posConfirmCancel');
+                const acceptButton = document.getElementById('posConfirmAccept');
+
+                titleNode.textContent = title;
+                messageNode.textContent = message;
+                acceptButton.textContent = confirmLabel || 'Confirm';
+
+                const finish = confirmed => {
+                    overlay.classList.remove('show');
+                    closeButton.removeEventListener('click', closeHandler);
+                    cancelButton.removeEventListener('click', closeHandler);
+                    acceptButton.removeEventListener('click', acceptHandler);
+                    overlay.removeEventListener('click', backdropHandler);
+                    document.removeEventListener('keydown', keyHandler);
+                    activePosConfirm = null;
+                    resolve(confirmed);
+                };
+                const closeHandler = () => finish(false);
+                const acceptHandler = () => finish(true);
+                const backdropHandler = event => {
+                    if (event.target === overlay) finish(false);
+                };
+                const keyHandler = event => {
+                    if (!overlay.classList.contains('show')) return;
+                    if (event.key === 'Escape') finish(false);
+                    if (event.key === 'Enter') finish(true);
+                };
+
+                activePosConfirm = finish;
+                closeButton.addEventListener('click', closeHandler);
+                cancelButton.addEventListener('click', closeHandler);
+                acceptButton.addEventListener('click', acceptHandler);
+                overlay.addEventListener('click', backdropHandler);
+                document.addEventListener('keydown', keyHandler);
+                overlay.classList.add('show');
+                cancelButton.focus();
+            });
+        }
+
+        function showCardPosUnavailable() {
+            const message = 'Card POS terminal is not enabled yet. Use Card (manual) for now.';
+            if (typeof Modal !== 'undefined' && typeof Modal.showMessage === 'function') {
+                Modal.showMessage({
+                    title: 'Card POS unavailable',
+                    message: '<p>' + message + '</p>',
+                    size: 'sm'
+                });
+                return;
+            }
+            posToast(message, 'err');
+        }
+
+        // Cancel-before-prep: available to any cashier while ALL items are still pending.
+        async function cancelOpenOrder(orderId, ref) {
+            const reason = await posAskReason({
+                title: 'Cancel order',
+                prompt: `Cancel <strong>${ref}</strong>? This only works while all items are still pending (not yet cooking). No stock has been deducted yet.`,
+                warn: 'Once the kitchen or bar starts any item, Cancel is blocked. Use Void instead.',
+                confirmLabel: 'Cancel order',
+                confirmColor: '#7c2d12',
+                hasNotes: false,
+            });
+            if (!reason) return;
+            const fd = new FormData();
+            fd.append('csrf_token', '<?php echo $csrf_token; ?>');
+            fd.append('order_id', orderId);
+            fd.append('cancel_reason', reason);
+            try {
+                const resp = await fetch('/api/cancel-order.php', {
+                    method: 'POST',
+                    body: fd,
+                    credentials: 'include'
+                });
+                const j = await resp.json();
+                if (!j.ok) {
+                    posToast(j.error || 'Cancel failed', 'err');
+                    return;
+                }
+                posToast(j.message || 'Order cancelled.', 'ok');
+                _selectedOpenTabIds.delete(parseInt(orderId, 10) || 0);
+                await refreshOpenTabs(true);
+                refreshShiftStats(true);
+            } catch (e) {
+                posToast('Network error: ' + e.message, 'err');
+            }
+        }
+
+        // Admin/manager-only: void an open or paid order from the tabs tray.
+        async function adminVoidTab(orderId, ref) {
+            const reason = await posAskReason({
+                title: 'Void order',
+                prompt: `Void <strong>${ref}</strong>? Stock will be restored for any items already marked Ready. The order will be removed from all station boards and any payment cancelled.`,
+                warn: 'Void is permanent and admin/manager only. This action is fully audit-logged.',
+                confirmLabel: 'Void order',
+                confirmColor: '#c82333',
+                hasNotes: true,
+            });
+            if (!reason) return;
+            const notes = document.getElementById('prmNotes')?.value?.trim() || '';
+            const fd = new FormData();
+            fd.append('csrf_token', '<?php echo $csrf_token; ?>');
+            fd.append('order_id', orderId);
+            fd.append('void_reason', reason);
+            fd.append('void_notes', notes);
+            try {
+                const resp = await fetch('/api/void-order.php', {
+                    method: 'POST',
+                    body: fd,
+                    credentials: 'include'
+                });
+                const j = await resp.json();
+                if (!j.ok) {
+                    posToast(j.error || 'Void failed', 'err');
+                    return;
+                }
+                posToast(j.message || 'Order voided.', 'ok');
+                _selectedOpenTabIds.delete(parseInt(orderId, 10) || 0);
+                await refreshOpenTabs(true);
+                refreshShiftStats(true);
+            } catch (e) {
+                posToast('Network error: ' + e.message, 'err');
+            }
+        }
+
+        /* ─── POS Reason Modal ─────────── */
+        let _prmResolve = null;
+
+        function posAskReason({
+            title = 'Reason required',
+            prompt = '',
+            warn = '',
+            confirmLabel = 'Confirm',
+            confirmColor = '#c82333',
+            hasNotes = false
+        } = {}) {
+            return new Promise(resolve => {
+                _prmResolve = resolve;
+                document.getElementById('prmTitle').innerHTML = '<i class="fas fa-comment-alt"></i> ' + title;
+                document.getElementById('prmPrompt').innerHTML = prompt;
+                const warnEl = document.getElementById('prmWarn');
+                if (warn) {
+                    warnEl.innerHTML = '<i class="fas fa-triangle-exclamation"></i> ' + warn;
+                    warnEl.style.display = '';
+                } else {
+                    warnEl.style.display = 'none';
+                }
+                const notesWrap = document.getElementById('prmNotesWrap');
+                notesWrap.style.display = hasNotes ? '' : 'none';
+                if (hasNotes && document.getElementById('prmNotes')) document.getElementById('prmNotes').value = '';
+                const confirmBtn = document.getElementById('prmConfirm');
+                confirmBtn.style.background = confirmColor;
+                document.getElementById('prmConfirmLabel').textContent = confirmLabel;
+                const ta = document.getElementById('prmReason');
+                ta.value = '';
+                document.getElementById('prmHint').textContent = '0 / 8 characters minimum';
+                document.getElementById('prmError').textContent = '';
+                ta.oninput = () => {
+                    const l = ta.value.trim().length;
+                    document.getElementById('prmHint').textContent = l + ' / 8 characters minimum';
+                    document.getElementById('prmHint').style.color = l >= 8 ? '#155724' : '#9ca3af';
+                };
+                document.getElementById('posReasonOverlay').classList.add('show');
+                setTimeout(() => ta.focus(), 80);
+            });
+        }
+
+        function posReasonConfirm() {
+            const reason = document.getElementById('prmReason').value.trim();
+            const errEl = document.getElementById('prmError');
+            if (reason.length < 8) {
+                errEl.textContent = 'Please enter at least 8 characters.';
+                return;
+            }
+            errEl.textContent = '';
+            document.getElementById('posReasonOverlay').classList.remove('show');
+            if (_prmResolve) {
+                _prmResolve(reason);
+                _prmResolve = null;
+            }
+        }
+
+        function posReasonCancel() {
+            document.getElementById('posReasonOverlay').classList.remove('show');
+            if (_prmResolve) {
+                _prmResolve(null);
+                _prmResolve = null;
+            }
+        }
+        // Allow Enter to submit the modal (Shift+Enter for newlines)
+        document.addEventListener('keydown', e => {
+            if (e.key === 'Enter' && !e.shiftKey && document.getElementById('posReasonOverlay')?.classList.contains('show')) {
+                e.preventDefault();
+                posReasonConfirm();
+            }
+            if (e.key === 'Escape' && document.getElementById('posReasonOverlay')?.classList.contains('show')) {
+                posReasonCancel();
+            }
+        });
+
+        /* ─── Tab Detail Modal ────────────────────────────────────────────────── */
+        const KDS_LABEL = {
+            pending: 'Pending',
+            preparing: 'Preparing',
+            ready: 'Ready',
+            collection: 'Collecting',
+            served: 'Served',
+            void: 'Void'
+        };
+        const KDS_ICON = {
+            pending: 'fas fa-clock',
+            preparing: 'fas fa-fire-burner',
+            ready: 'fas fa-bell',
+            collection: 'fas fa-hand-holding',
+            served: 'fas fa-check-circle',
+            void: 'fas fa-ban'
+        };
+        const AUDIT_LABEL = {
+            parked_open_tab: 'Tab opened',
+            placed_paid: 'Paid immediately',
+            paid_from_tab: 'Tab settled',
+            voided: 'Order voided',
+            cancelled: 'Order cancelled',
+            item_cancelled: 'Item cancelled',
+        };
+        const KDS_EVENT_LABEL = {
+            fired: 'Ticket fired to station',
+            started: 'Started preparing',
+            ready: 'Marked ready — stock deducted',
+            collected: 'Collected by runner',
+            served: 'Served',
+            recalled: 'Recalled',
+            bumped: 'Ticket bumped',
+            voided: 'Voided on station',
+        };
+
+        async function openTabDetail(orderId) {
+            const overlay = document.getElementById('tabDetailOverlay');
+            const body = document.getElementById('tdiBody');
+            const title = document.getElementById('tdiTitle');
+            overlay.classList.add('show');
+            body.innerHTML = '<div style="text-align:center;padding:40px 0;color:#9ca3af;"><i class="fas fa-spinner fa-spin fa-2x"></i></div>';
+            try {
+                const resp = await fetch('/api/pos-tab-detail.php?order_id=' + orderId, {
+                    credentials: 'include'
+                });
+                const data = await resp.json();
+                if (!data.success) {
+                    body.innerHTML = '<p style="color:#c82333;padding:20px;">' + (data.error || 'Failed to load') + '</p>';
+                    return;
+                }
+                title.innerHTML = '<i class="fas fa-receipt"></i> ' + escH(data.order.reference);
+                body.innerHTML = renderTabDetail(data);
+            } catch (e) {
+                body.innerHTML = '<p style="color:#c82333;padding:20px;">Network error: ' + escH(e.message) + '</p>';
+            }
+        }
+
+        function escH(s) {
+            const d = document.createElement('div');
+            d.textContent = String(s || '');
+            return d.innerHTML;
+        }
+
+        function fmtTs(ts) {
+            if (!ts) return '—';
+            const d = new Date(ts.replace(' ', 'T'));
+            return d.toLocaleDateString('en-GB', {
+                day: '2-digit',
+                month: 'short'
+            }) + ' ' + d.toLocaleTimeString('en-GB', {
+                hour: '2-digit',
+                minute: '2-digit',
+                second: '2-digit'
+            });
+        }
+
+        function fmtTime(ts) {
+            if (!ts) return '—';
+            const d = new Date(ts.replace(' ', 'T'));
+            return d.toLocaleTimeString('en-GB', {
+                hour: '2-digit',
+                minute: '2-digit',
+                second: '2-digit'
+            });
+        }
+
+        function renderTabDetail(data) {
+            const o = data.order;
+            const items = data.items || [];
+            const kdsEvts = data.kds_events || [];
+            const auditEvts = data.audit_events || [];
+
+            /* Status counts */
+            const counts = {
+                pending: 0,
+                preparing: 0,
+                ready: 0,
+                collection: 0,
+                served: 0
+            };
+            items.forEach(i => {
+                if (counts[i.kds_status] !== undefined) counts[i.kds_status]++;
+            });
+            const total = items.length;
+            const grossTotal = parseFloat(o.total_amount || 0) || 0;
+            const vatRate = posVatEnabled ? parseFloat(posVatRate || 0) : 0;
+            const netTotal = vatRate > 0 ? Math.max(0, grossTotal / (1 + (vatRate / 100))) : grossTotal;
+            const vatAmount = Math.max(0, grossTotal - netTotal);
+            const amountDue = o.status === 'paid' || o.status === 'voided' || o.status === 'cancelled' ? 0 : grossTotal;
+            const canSettle = o.status !== 'paid' && o.status !== 'voided' && o.status !== 'cancelled' && counts.pending === 0 && counts.preparing === 0 && counts.ready === 0 && counts.collection === 0 && total > 0;
+            const canCancelBeforePrep = counts.pending > 0 && counts.preparing === 0 && counts.ready === 0 && counts.collection === 0 && counts.served === 0;
+            const settlementBlocked = !canSettle && o.status !== 'paid' && o.status !== 'voided' && o.status !== 'cancelled';
+
+            /* ── Summary ── */
+            const statusBadge = o.status === 'paid' ? `<span class="tdi-status paid"><i class="fas fa-check-circle"></i> Paid</span>` :
+                o.status === 'voided' ? `<span class="tdi-status voided"><i class="fas fa-ban"></i> Voided</span>` :
+                `<span class="tdi-status placed"><i class="fas fa-clock"></i> Open tab</span>`;
+            let metaRows = '';
+            if (o.table_number) metaRows += `<span>Table <strong>${escH(o.table_number)}</strong></span>  &nbsp;·&nbsp; `;
+            if (o.customer_name) metaRows += `<span>${escH(o.customer_name)}</span>  &nbsp;·&nbsp; `;
+            metaRows += `Opened ${fmtTs(o.created_at)}`;
+            if (o.opened_by_name) metaRows += `  &nbsp;·&nbsp; by <strong>${escH(o.opened_by_name)}</strong>`;
+            if (o.order_type) metaRows += `<br>Type: <strong>${escH(o.order_type)}</strong>`;
+            if (o.notes) metaRows += `<br>Notes: <em>${escH(o.notes)}</em>`;
+
+            let html = `
+    <div class="tdi-summary">
+        <div>
+            <div class="tdi-ref">${escH(o.reference)}</div>
+            <div class="tdi-sub">${metaRows}</div>
+            ${statusBadge}
+        </div>
+        <div class="tdi-total-block">
+            <div class="tdi-total"><?php echo $currency_symbol; ?> ${fmtMoney(o.total_amount)}</div>
+            <div style="font-size:12px;color:#6c757d;margin-top:4px;">${total} item${total !== 1 ? 's' : ''}</div>
+        </div>
+    </div>`;
+
+            html += `
+    <div class="tdi-accounting">
+        <div class="tdi-accounting__metric">
+            <span>Gross total</span>
+            <strong><?php echo $currency_symbol; ?> ${fmtMoney(grossTotal)}</strong>
+        </div>
+        <div class="tdi-accounting__metric">
+            <span>Net total</span>
+            <strong><?php echo $currency_symbol; ?> ${fmtMoney(netTotal)}</strong>
+        </div>
+        <div class="tdi-accounting__metric">
+            <span>VAT${vatRate > 0 ? ` · ${fmtMoney(vatRate)}%` : ''}</span>
+            <strong><?php echo $currency_symbol; ?> ${fmtMoney(vatAmount)}</strong>
+        </div>
+        <div class="tdi-accounting__metric">
+            <span>Balance due</span>
+            <strong><?php echo $currency_symbol; ?> ${fmtMoney(amountDue)}</strong>
+        </div>
+    </div>`;
+
+            if (settlementBlocked) {
+                html += `<div class="tdi-settlement-note"><i class="fas fa-triangle-exclamation"></i> This tab cannot be settled yet. Wait until every item is served, then take payment and close the tab.</div>`;
+            }
+
+            const detailActions = [];
+            if (canSettle) {
+                detailActions.push(`<button type="button" class="tc-btn tc-btn-settle tdi-action" onclick="openPayForTab(${parseInt(o.id, 10) || 0}, ${grossTotal}, ${JSON.stringify(String(o.reference || 'TAB'))}, true)"><i class="fas fa-credit-card"></i> Settle tab</button>`);
+            } else if (settlementBlocked) {
+                detailActions.push(`<button type="button" class="tc-btn tc-btn-settle tdi-action disabled" disabled data-help="Wait for service|All items must be served before the tab can be settled."><i class="fas fa-clock"></i> Wait to settle</button>`);
+            }
+            detailActions.push(`<a href="stock-receipt.php?id=${parseInt(o.id, 10) || 0}&print=1&kot=1" target="_blank" rel="noopener" class="tc-btn tc-btn-kot tdi-action"><i class="fas fa-print"></i> Print KOT</a>`);
+            detailActions.push(`<a href="order-lifecycle.php?id=${parseInt(o.id, 10) || 0}" target="_blank" rel="noopener" class="tc-btn tc-btn-log tdi-action"><i class="fas fa-stream"></i> Timeline</a>`);
+            if (canCancelBeforePrep) {
+                detailActions.push(`<button type="button" class="tc-btn tc-btn-cancel tdi-action" onclick="cancelOpenOrder(${parseInt(o.id, 10) || 0}, ${JSON.stringify(String(o.reference || 'TAB'))})"><i class="fas fa-circle-xmark"></i> Cancel</button>`);
+            }
+            if (posCanManageTabs) {
+                detailActions.push(`<button type="button" class="tc-btn tc-btn-void tdi-action" onclick="adminVoidTab(${parseInt(o.id, 10) || 0}, ${JSON.stringify(String(o.reference || 'TAB'))})"><i class="fas fa-ban"></i> Void</button>`);
+            }
+
+            html += `<div class="tdi-actions">${detailActions.join('')}</div>`;
+            html += '<div class="tdi-columns"><div class="tdi-column tdi-column--main">';
+
+            /* ── Kitchen Flow Stepper ── */
+            /* ── Order Lifecycle Track ── */
+            const lcMilestones = [{
+                    key: 'placed',
+                    icon: 'fas fa-clipboard-check',
+                    label: 'Placed'
+                },
+                {
+                    key: 'fired',
+                    icon: 'fas fa-fire-burner',
+                    label: 'Fired'
+                },
+                {
+                    key: 'ready',
+                    icon: 'fas fa-bell',
+                    label: 'Ready'
+                },
+                {
+                    key: 'served',
+                    icon: 'fas fa-concierge-bell',
+                    label: 'Served'
+                },
+                {
+                    key: 'paid',
+                    icon: 'fas fa-circle-check',
+                    label: 'Paid'
+                },
+            ];
+            const lcFiredEvt = kdsEvts.find(e => e.event === 'fired');
+            const readyTimes = items.map(i => i.ready_at).filter(Boolean);
+            const servedTimes = items.map(i => i.served_at).filter(Boolean);
+            const paidAudit = auditEvts.find(e => e.event === 'paid_from_tab' || e.event === 'payment_recorded');
+            const lcTs = {
+                placed: o.created_at || null,
+                fired: lcFiredEvt ? lcFiredEvt.created_at : null,
+                ready: readyTimes.length ? readyTimes.reduce((a, b) => (a > b ? a : b)) : null,
+                served: servedTimes.length ? servedTimes.reduce((a, b) => (a > b ? a : b)) : null,
+                paid: paidAudit ? paidAudit.created_at : (o.status === 'paid' ? o.updated_at : null),
+            };
+            const lcVoided = o.status === 'voided' || o.status === 'cancelled';
+            const lcKeys = ['placed', 'fired', 'ready', 'served', 'paid'];
+            let lcCurrent = 'placed';
+            lcKeys.forEach(k => {
+                if (lcTs[k]) lcCurrent = k;
+            });
+
+            let lcHtml = '<div class="tdi-section-hd">Order lifecycle</div><div class="lc-track">';
+            lcMilestones.forEach((s, idx) => {
+                const ts = lcTs[s.key];
+                const isDone = !!ts;
+                const cls = lcVoided ? 'lc-step lc-voided' :
+                    isDone ? 'lc-step lc-done' :
+                    s.key === lcCurrent ? 'lc-step lc-active' :
+                    'lc-step';
+                lcHtml += `<div class="${cls}">
+            <div class="lc-dot"><i class="${s.icon}"></i></div>
+            <div class="lc-label">${s.label}</div>
+            <div class="lc-time">${ts ? fmtTime(ts) : '—'}</div>
+        </div>`;
+                if (idx < lcMilestones.length - 1) {
+                    lcHtml += `<div class="lc-connector${isDone ? ' lc-done' : ''}"></div>`;
+                }
+            });
+            lcHtml += '</div>';
+            html += lcHtml;
+
+            /* ── Item Status Stepper ── */
+            const steps = [{
+                    key: 'pending',
+                    icon: 'fas fa-clock',
+                    label: 'Pending'
+                },
+                {
+                    key: 'preparing',
+                    icon: 'fas fa-fire-burner',
+                    label: 'Preparing'
+                },
+                {
+                    key: 'ready',
+                    icon: 'fas fa-bell',
+                    label: 'Ready'
+                },
+                {
+                    key: 'collection',
+                    icon: 'fas fa-hand-holding',
+                    label: 'Collecting'
+                },
+                {
+                    key: 'served',
+                    icon: 'fas fa-check-circle',
+                    label: 'Served'
+                },
+            ];
+            let stepHtml = '<div class="tdi-section-hd" style="margin-top:18px;">Item status</div><div class="kds-stepper">';
+            steps.forEach(s => {
+                const cnt = counts[s.key] || 0;
+                const allDone = s.key === 'served' && cnt === total && total > 0;
+                const hasAny = cnt > 0;
+                const cls = allDone ? 'kds-step all-done' : (hasAny ? 'kds-step has-items' : 'kds-step');
+                stepHtml += `<div class="${cls}">
+            <div class="step-dot"><i class="${s.icon}"></i></div>
+            <span class="step-lbl">${s.label}</span>
+            <span class="step-cnt">${cnt > 0 ? cnt : '—'}</span>
+        </div>`;
+            });
+            stepHtml += '</div>';
+            html += stepHtml;
+
+            /* ── Items Table ── */
+            html += '<div class="tdi-section-hd">Line items</div>';
+            if (items.length === 0) {
+                html += '<p style="color:#9ca3af;font-size:13px;">No items found.</p>';
+            } else {
+                html += `<table class="tdi-tbl">
+            <thead><tr>
+                <th>Item</th><th>Qty</th><th>Total</th><th>Status</th><th>Station</th><th>Started</th><th>Ready</th><th>Served</th>
+            </tr></thead><tbody>`;
+                items.forEach(i => {
+                    const badge = `<span class="kbadge ${i.kds_status}"><i class="${KDS_ICON[i.kds_status] || 'fas fa-circle'}"></i> ${KDS_LABEL[i.kds_status] || i.kds_status}</span>`;
+                    const deduct = i.stock_deducted == 1 ? ' <span style="font-size:10px;color:#166534;font-weight:700;" title="Stock has been deducted">✓ stk</span>' : '';
+                    const notes = i.notes ? `<br><span style="font-size:11px;color:#9ca3af;font-style:italic;">${escH(i.notes)}</span>` : '';
+                    html += `<tr>
+                <td><strong>${escH(i.item_name)}</strong>${notes}${deduct}</td>
+                <td>${parseFloat(i.quantity)}</td>
+                <td style="white-space:nowrap;"><?php echo $currency_symbol; ?> ${fmtMoney(i.line_total)}</td>
+                <td>${badge}</td>
+                <td style="font-size:12px;color:#6c757d;">${escH(i.station || '—')}</td>
+                <td class="ts">${fmtTime(i.started_at)}</td>
+                <td class="ts">${fmtTime(i.ready_at)}</td>
+                <td class="ts">${fmtTime(i.served_at)}</td>
+            </tr>`;
+                });
+                html += '</tbody></table>';
+            }
+
+            html += '</div><div class="tdi-column tdi-column--side">';
+
+            /* ── Combined Audit + KDS Timeline ── */
+            const allEvents = [];
+            auditEvts.forEach(e => allEvents.push({
+                ts: e.created_at,
+                type: 'audit',
+                event: e.event,
+                actor: e.actor_name,
+                detail: e.details
+            }));
+            kdsEvts.forEach(e => allEvents.push({
+                ts: e.created_at,
+                type: 'kds',
+                event: e.event,
+                actor: e.user_name,
+                detail: e.item_name ? `Item: ${e.item_name}${e.from_status ? ' · ' + e.from_status + ' → ' + (e.to_status || '?') : ''}` : ''
+            }));
+            allEvents.sort((a, b) => a.ts < b.ts ? -1 : a.ts > b.ts ? 1 : 0);
+
+            html += '<div class="tdi-section-hd" style="margin-top:20px;">Audit &amp; event log</div>';
+            if (allEvents.length === 0) {
+                html += '<p style="color:#9ca3af;font-size:13px;">No events recorded yet.</p>';
+            } else {
+                html += '<div class="tdi-timeline">';
+                allEvents.forEach(ev => {
+                    const label = ev.type === 'kds' ? (KDS_EVENT_LABEL[ev.event] || ev.event) : (AUDIT_LABEL[ev.event] || ev.event.replace(/_/g, ' '));
+                    let extra = '';
+                    if (ev.type === 'audit' && ev.detail) {
+                        try {
+                            const d = JSON.parse(ev.detail);
+                            extra = Object.entries(d).filter(([k]) => !['till'].includes(k)).map(([k, v]) => `${k}: ${v}`).join(' · ');
+                        } catch {
+                            extra = ev.detail;
+                        }
+                    } else if (ev.detail) {
+                        extra = ev.detail;
+                    }
+                    html += `<div class="tl-item tl-${ev.type}">
+                <span class="tl-time">${fmtTs(ev.ts)}${ev.actor ? ' · ' + escH(ev.actor) : ''}</span>
+                <div class="tl-title">${escH(label)}</div>
+                ${extra ? `<div class="tl-extra">${escH(extra)}</div>` : ''}
+            </div>`;
+                });
+                html += '</div>';
+            }
+
+            html += '</div></div>';
+
+            return html;
+        }
+
+        function openCloseShift() {
+            document.getElementById('closeShiftOverlay').classList.add('show');
+            refreshShiftStats(true).finally(() => {
+                updShiftVariance();
+            });
+        }
+
+        function closeShiftModal() {
+            document.getElementById('closeShiftOverlay').classList.remove('show');
+        }
+
+        /* Live variance preview for shift close. Blocks/warns when out-of-tolerance. */
+        function updShiftVariance() {
+            const expCash = parseFloat(document.getElementById('expCash')?.dataset.amount || '0');
+            const expMobile = parseFloat(document.getElementById('expMobile')?.dataset.amount || '0');
+            const expCard = parseFloat(document.getElementById('expCard')?.dataset.amount || '0');
+            const decCash = parseFloat(document.getElementById('declCash')?.value || '0') || 0;
+            const decMobile = parseFloat(document.getElementById('declMobile')?.value || '0') || 0;
+            const decCard = parseFloat(document.getElementById('declCard')?.value || '0') || 0;
+            const vC = +(decCash - expCash).toFixed(2);
+            const vM = +(decMobile - expMobile).toFixed(2);
+            const vK = +(decCard - expCard).toFixed(2);
+            const max = Math.max(Math.abs(vC), Math.abs(vM), Math.abs(vK));
+            const box = document.getElementById('shiftVarianceBox');
+            const ovBox = document.getElementById('shiftOverrideBox');
+            const btn = document.getElementById('closeShiftBtn');
+            if (!box || !btn) return;
+            const sym = (typeof currencySymbol !== 'undefined') ? currencySymbol : '';
+            const fmt = v => (v >= 0 ? '+' : '-') + sym + ' ' + fmtMoney(Math.abs(v));
+            box.style.display = 'block';
+            box.innerHTML = `<strong>Variance preview:</strong> Cash ${fmt(vC)} · Mobile ${fmt(vM)} · Card ${fmt(vK)}`;
+            const tolerance = 1.00;
+            if (max <= tolerance) {
+                box.style.background = '#d4edda';
+                box.style.color = '#155724';
+                box.style.border = '1px solid #28a745';
+                if (ovBox) ovBox.style.display = 'none';
+                btn.disabled = false;
+                btn.textContent = 'Close shift';
+            } else {
+                box.style.background = '#f8d7da';
+                box.style.color = '#721c24';
+                box.style.border = '1px solid #c82333';
+                box.innerHTML += `<br><small>Out of tolerance (max variance ${sym} ${fmtMoney(max)} &gt; ${sym} ${fmtMoney(tolerance)}).</small>`;
+                if (ovBox) {
+                    // Privileged user — show override box, allow submit only if checked
+                    ovBox.style.display = 'block';
+                    const ov = document.getElementById('adminOverride');
+                    btn.disabled = !(ov && ov.checked);
+                    btn.textContent = (ov && ov.checked) ? 'Close shift (override)' : 'Override required';
+                } else {
+                    btn.disabled = true;
+                    btn.textContent = 'Recount required';
+                }
+            }
+        }
+        document.addEventListener('change', e => {
+            if (e.target && e.target.id === 'adminOverride') updShiftVariance();
+        });
+
+        function closeSuccess() {
+            const o = document.getElementById('successOverlay');
+            if (o) o.remove();
+            // Also strip ?-style query params if present so a refresh doesn't re-show the dialog
+            if (window.history.replaceState && window.location.search) {
+                const url = window.location.pathname;
+                try {
+                    window.history.replaceState({}, '', url);
+                } catch (e) {}
+            }
+        }
+
+        function posModalBridgeSyncBodyState() {
+            const hasOpenOverlay = !!document.querySelector('.overlay.show, .modal-overlay.active');
+            document.body.classList.toggle('modal-open', hasOpenOverlay);
+        }
+
+        function posModalBridgeApply(overlay) {
+            if (!overlay || !overlay.classList || !overlay.classList.contains('overlay')) {
+                return;
+            }
+
+            overlay.classList.add('modal-overlay');
+            overlay.setAttribute('data-modal', '');
+
+            Array.from(overlay.children).forEach(child => {
+                if (!child.classList) {
+                    return;
+                }
+                if (child.classList.contains('modal') || child.classList.contains('success-modal')) {
+                    child.classList.add('modal-content');
+                }
+            });
+
+            overlay.querySelectorAll('.modal-head').forEach(header => header.classList.add('modal-header'));
+            overlay.querySelectorAll('.modal-foot').forEach(footer => footer.classList.add('modal-footer'));
+            overlay.querySelectorAll('.close').forEach(closeBtn => closeBtn.classList.add('modal-close'));
+
+            overlay.classList.toggle('active', overlay.classList.contains('show'));
+
+            if (overlay.dataset.modalBridgeBound === '1') {
+                return;
+            }
+
+            const classObserver = new MutationObserver(() => {
+                overlay.classList.toggle('active', overlay.classList.contains('show'));
+                posModalBridgeSyncBodyState();
+            });
+            classObserver.observe(overlay, {
+                attributes: true,
+                attributeFilter: ['class']
+            });
+
+            overlay.dataset.modalBridgeBound = '1';
+        }
+
+        function initPosSharedModalBridge() {
+            document.querySelectorAll('.overlay').forEach(posModalBridgeApply);
+            posModalBridgeSyncBodyState();
+
+            const domObserver = new MutationObserver(mutations => {
+                mutations.forEach(mutation => {
+                    mutation.addedNodes.forEach(node => {
+                        if (!node || node.nodeType !== 1) {
+                            return;
+                        }
+
+                        if (node.classList && node.classList.contains('overlay')) {
+                            posModalBridgeApply(node);
+                        }
+
+                        if (typeof node.querySelectorAll === 'function') {
+                            node.querySelectorAll('.overlay').forEach(posModalBridgeApply);
+                        }
+                    });
+                });
+                posModalBridgeSyncBodyState();
+            });
+
+            domObserver.observe(document.body, {
+                childList: true,
+                subtree: true
+            });
+        }
+
+        initPosSharedModalBridge();
+
+        // ----- Global modal-close behaviour -----
+        // 1. ESC closes the topmost open .overlay.show
+        document.addEventListener('keydown', e => {
+            if (e.key !== 'Escape') return;
+            const open = Array.from(document.querySelectorAll('.overlay.show'));
+            if (!open.length) return;
+            const top = open[open.length - 1];
+            if (top.id === 'successOverlay') {
+                closeSuccess();
+                return;
+            }
+            if (top.id === 'tabsOverlay') {
+                closeTabsTray();
+                return;
+            }
+            top.classList.remove('show');
+        });
+        // 2. Click on the dimmed backdrop (not on the modal body) closes the overlay
+        document.querySelectorAll('.overlay').forEach(ov => {
+            ov.addEventListener('mousedown', e => {
+                if (e.target !== ov) return; // ignore clicks inside the modal
+                if (ov.id === 'successOverlay') {
+                    closeSuccess();
+                    return;
+                }
+                if (ov.id === 'tabsOverlay') {
+                    closeTabsTray();
+                    return;
+                }
+                ov.classList.remove('show');
+            });
+        });
+
+        function openPayForTab(orderId, total, ref, canSettle = true) {
+            if (!canSettle) {
+                posToastReady('Wait until all items are served before settling the tab.', true);
+                return;
+            }
+            document.getElementById('payTabOrderId').value = orderId;
+            document.getElementById('payTabRef').textContent = ref;
+            document.getElementById('payTabTotal').textContent = currencySymbol + ' ' + fmtMoney(total);
+            document.getElementById('payTabTotal').dataset.total = total;
+            document.getElementById('payTabMethod').value = '';
+            ['cash', 'mobile_money', 'card_manual'].forEach(k => {
+                const e = document.getElementById('ext-tab-' + k);
+                if (e) e.style.display = 'none';
+            });
+            document.querySelectorAll('#payTabOverlay .pay-method-grid button').forEach(b => b.classList.remove('active'));
+            closeTabsTray();
+            document.getElementById('payTabOverlay').classList.add('show');
+        }
+
+        function setMethodTab(btn) {
+            if (btn.classList.contains('disabled')) return;
+            const m = btn.dataset.method;
+            document.getElementById('payTabMethod').value = m;
+            document.querySelectorAll('#payTabOverlay .pay-method-grid button').forEach(b => b.classList.toggle('active', b === btn));
+            ['cash', 'mobile_money', 'card_manual'].forEach(k => {
+                const e = document.getElementById('ext-tab-' + k);
+                if (e) e.style.display = (k === m) ? 'block' : 'none';
+            });
+            if (m === 'cash') {
+                const tEl = document.getElementById('payTabTendered');
+                const total = parseFloat(document.getElementById('payTabTotal').dataset.total) || 0;
+                if (tEl && total > 0 && (!tEl.value || parseFloat(tEl.value) < total)) {
+                    tEl.value = total.toFixed(2);
+                    updTabChange();
+                }
+                if (tEl) tEl.focus();
+            }
+        }
+
+        function updTabChange() {
+            const t = parseFloat(document.getElementById('payTabTendered').value) || 0;
+            const total = parseFloat(document.getElementById('payTabTotal').dataset.total) || 0;
+            const ch = Math.max(0, t - total);
+            document.getElementById('payTabChange').textContent = currencySymbol + ' ' + fmtMoney(ch);
+        }
+
+        function setMethod(btn) {
+            const m = btn.dataset.method;
+            if (btn.classList.contains('disabled')) return;
+            document.getElementById('payment_method').value = m;
+            document.querySelectorAll('.pay-method-grid button').forEach(b => b.classList.toggle('active', b === btn));
+            ['cash', 'mobile_money', 'card_manual'].forEach(k => {
+                const el = document.getElementById('ext-' + k);
+                if (el) el.style.display = (k === m) ? 'block' : 'none';
+            });
+            // Auto-fill tendered with full cart total when cashier picks cash (admin/cashier convenience).
+            if (m === 'cash') {
+                const tEl = document.getElementById('tendered');
+                const total = cartTotal();
+                if (tEl && total > 0 && (!tEl.value || parseFloat(tEl.value) < total)) {
+                    tEl.value = total.toFixed(2);
+                    updChange();
+                }
+                if (tEl) tEl.focus();
+            }
+            updConfirm();
+        }
+
+        function updChange() {
+            const t = parseFloat(document.getElementById('tendered').value) || 0;
+            const ch = Math.max(0, t - cartTotal());
+            document.getElementById('changeOut').textContent = currencySymbol + ' ' + fmtMoney(ch);
+            updConfirm();
+        }
+
+        function quickTend(n) {
+            const cur = parseFloat(document.getElementById('tendered').value) || 0;
+            document.getElementById('tendered').value = (cur + n).toFixed(2);
+            updChange();
+        }
+
+        function quickTendExact() {
+            document.getElementById('tendered').value = cartTotal().toFixed(2);
+            updChange();
+        }
+
+        function updConfirm() {
+            const m = document.getElementById('payment_method').value;
+            let ok = !!m && cart.length > 0;
+            if (m === 'cash') {
+                const t = parseFloat(document.getElementById('tendered').value) || 0;
+                ok = ok && (t + 0.001 >= cartTotal());
+            }
+            document.getElementById('confirmBtn').disabled = !ok;
+        }
+
+        function toggleRecent(forceState = null) {
+            const recentList = document.getElementById('recentList');
+            if (!recentList) return;
+            const opening = typeof forceState === 'boolean' ? forceState : !recentList.classList.contains('show');
+            recentList.classList.toggle('show', opening);
+            recentList.classList.toggle('recent-list--mobile', opening && window.innerWidth <= 640);
+        }
+
+        document.getElementById('payForm').addEventListener('submit', e => {
+            const m = document.getElementById('payment_method').value;
+            if (!m) {
+                e.preventDefault();
+                posToastReady('Pick a payment method.', true);
+                hidePosActionLoader();
+                return;
+            }
+            showPosActionLoader('Taking payment...', 'Saving the order and sending station tickets.');
+        });
+
+        // Initial render
+        renderMenu();
+        renderCart();
+        setTimeout(() => refreshShiftStats(true), 700);
+        RHPoll.every(refreshShiftStats, 6000);
+
+        <?php if ($settleAuto): ?>
+            // Deep-link from stock-orders.php "Take Payment" — auto-open the settle modal for this tab.
+            openPayForTab(<?php echo (int)$settleAuto['id']; ?>, <?php echo number_format($settleAuto['total'], 2, '.', ''); ?>, <?php echo json_encode($settleAuto['ref']); ?>);
+        <?php endif; ?>
+
+        <?php if (in_array($user['role'] ?? '', ['admin', 'manager'], true)): ?>
+            /* ============================================================
+             * Admin/manager: live "All Stations" poller.
+             * Polls ?ajax=stations every few seconds; updates badges + tray content
+             * if open (shows full ticket lists). Skips when tab is hidden
+             * to spare the DB.
+             * ============================================================ */
+            function openStationsTray() {
+                document.getElementById('stationsOverlay').classList.add('show');
+                refreshStations(true);
+            }
+
+            function fmtAge(firedAt) {
+                if (!firedAt) return '';
+                const sec = Math.max(0, Math.floor((Date.now() - new Date(firedAt.replace(' ', 'T')).getTime()) / 1000));
+                const m = Math.floor(sec / 60);
+                const s = sec % 60;
+                return m > 0 ? (m + 'm ' + String(s).padStart(2, '0') + 's') : (s + 's');
+            }
+
+            function ageColor(firedAt) {
+                if (!firedAt) return '#6c757d';
+                const sec = Math.max(0, Math.floor((Date.now() - new Date(firedAt.replace(' ', 'T')).getTime()) / 1000));
+                if (sec >= 900) return '#c82333';
+                if (sec >= 600) return '#d4a843';
+                return '#155724';
+            }
+
+            function renderStationTickets(stKey, tickets) {
+                const box = document.getElementById('stTickets-' + stKey);
+                if (!box) return;
+                if (!tickets || !tickets.length) {
+                    box.innerHTML = '<em style="color:#6c757d;">No open tickets.</em>';
+                    return;
+                }
+                // Group by order_id so each ticket is one card.
+                const groups = {};
+                tickets.forEach(t => {
+                    (groups[t.order_id] = groups[t.order_id] || {
+                        order: t,
+                        items: []
+                    }).items.push(t);
+                });
+                let html = '';
+                Object.values(groups).forEach(g => {
+                    const o = g.order;
+                    const room = o.booking_room_number ? 'Room ' + o.booking_room_number :
+                        (o.table_number ? 'Table ' + o.table_number : (o.customer_name || '—'));
+                    html += '<div style="border:1px solid #eaecef; border-radius:6px; padding:8px; margin-bottom:6px; background:#fbfbfd;">' +
+                        '<div style="display:flex; justify-content:space-between; font-weight:600; font-size:12px;">' +
+                        '<span>' + escAttr(o.reference) + ' · ' + escAttr(room) + '</span>' +
+                        '<span style="color:' + ageColor(o.fired_at) + ';">' + fmtAge(o.fired_at) + '</span>' +
+                        '</div>';
+                    g.items.forEach(it => {
+                        const statusColor = it.kds_status === 'pending' ? '#856404' :
+                            (it.kds_status === 'preparing' ? '#004085' : '#155724');
+                        html += '<div style="font-size:11px; color:#495057; margin-top:3px;">' +
+                            '<span style="color:' + statusColor + '; font-weight:600;">[' + escAttr(it.kds_status) + ']</span> ' +
+                            escAttr(it.quantity) + '× ' + escAttr(it.item_name) +
+                            (it.notes ? ' <em style="color:#6c757d;">(' + escAttr(it.notes) + ')</em>' : '') +
+                            '</div>';
+                    });
+                    html += '</div>';
+                });
+                box.innerHTML = html;
+            }
+
+            function escAttr(s) {
+                return String(s == null ? '' : s).replace(/[&<>"']/g, c => ({
+                    '&': '&amp;',
+                    '<': '&lt;',
+                    '>': '&gt;',
+                    '"': '&quot;',
+                    "'": '&#39;'
+                } [c]));
+            }
+
+            let _stationsInflight = false;
+            async function refreshStations(forceFull) {
+                if (_stationsInflight) return;
+                if (document.hidden && !forceFull) return;
+                _stationsInflight = true;
+                try {
+                    const r = await fetch('pos.php?ajax=stations', {
+                        credentials: 'same-origin'
+                    });
+                    if (!r.ok) return;
+                    const d = await r.json();
+                    if (d.error) return;
+                    // Update top-bar badges.
+                    const setBadge = (id, n) => {
+                        const el = document.getElementById(id);
+                        if (!el) return;
+                        el.textContent = n;
+                        el.style.display = n > 0 ? '' : 'none';
+                    };
+                    setBadge('kitchenBadge', d.counts.kitchen.open_total);
+                    setBadge('barBadge', d.counts.bar.open_total);
+                    setBadge('coffeeBadge', d.counts.coffee_bar.open_total);
+                    setBadge('stationsBadge', d.counts.kitchen.open_total + d.counts.bar.open_total + d.counts.coffee_bar.open_total);
+                    setBadge('tabBadge', parseInt(d.open_tabs_visible ?? d.open_tabs_all ?? 0, 10) || 0);
+                    _syncPosMobileBadges();
+
+                    // If the tray is open, also refresh the inside.
+                    const tray = document.getElementById('stationsOverlay');
+                    if (tray && tray.classList.contains('show')) {
+                        document.getElementById('stationsTs').textContent = new Date().toLocaleTimeString();
+                        document.getElementById('stOpenTabs').textContent = d.open_tabs_all;
+                        document.getElementById('stOrdersToday').textContent = d.orders_today;
+                        document.getElementById('stRevenueToday').textContent = currencySymbol + ' ' + fmtMoney(d.revenue_today);
+                        ['kitchen', 'bar', 'coffee_bar'].forEach(stKey => {
+                            const c = d.counts[stKey];
+                            document.getElementById('stOpen-' + stKey).textContent = c.open_total;
+                            document.getElementById('stPending-' + stKey).textContent = c.pending;
+                            document.getElementById('stReady-' + stKey).textContent = c.ready;
+                            renderStationTickets(stKey, d.tickets[stKey]);
+                        });
+                    }
+                } catch (e) {
+                    /* network blip — next poll will retry */
+                } finally {
+                    _stationsInflight = false;
+                }
+            }
+            // Poll quickly; first poll after load so initial page render is unaffected.
+            // Kept active in background tabs so station counters stay live.
+            setTimeout(refreshStations, 1200);
+            RHPoll.every(refreshStations, 4000);
+
+            /* ============================================================
+             * Restaurant orders today modal
+             * ============================================================ */
+            let _restoOrdersData = null;
+            let _restoFilter = 'all';
+
+            function openRestoOrdersModal() {
+                document.getElementById('restoOrdersOverlay').classList.add('show');
+                _restoOrdersData = null; // force fresh fetch
+                showPosActionLoader('Loading orders…', 'Fetching today\'s restaurant orders.');
+                loadRestoOrders('all');
+            }
+            async function loadRestoOrders(filter) {
+                if (filter !== undefined) _restoFilter = filter;
+                ['rfAll', 'rfPending', 'rfPaid'].forEach(id => {
+                    const b = document.getElementById(id);
+                    if (b) b.style.background = '#fff';
+                });
+                const activeId = {
+                    all: 'rfAll',
+                    pending: 'rfPending',
+                    paid: 'rfPaid'
+                } [_restoFilter];
+                if (activeId) {
+                    const b = document.getElementById(activeId);
+                    if (b) b.style.background = '#edf2f7';
+                }
+                const tableEl = document.getElementById('restoOrdersTable');
+                const summEl = document.getElementById('restoOrdersSummary');
+                if (!_restoOrdersData) {
+                    tableEl.innerHTML = '<p style="color:#6c757d;text-align:center;padding:30px 0;"><i class="fas fa-spinner fa-spin"></i> Loading…</p>';
+                }
+                try {
+                    const resp = await fetch('?ajax=resto_orders', {
+                        credentials: 'include'
+                    });
+                    const d = await resp.json();
+                    if (!d.orders) {
+                        tableEl.innerHTML = '<p style="color:#c82333; padding:20px;">Error loading orders.</p>';
+                        return;
+                    }
+                    _restoOrdersData = d.orders;
+                    const s = d.summary || {};
+                    summEl.innerHTML = 'Total: <strong>' + (s.total || 0) + '</strong>' +
+                        ' &nbsp;·&nbsp; Pending: <strong>' + (s.open_tabs || 0) + '</strong>' +
+                        ' &nbsp;·&nbsp; Paid: <strong>' + (s.paid || 0) + '</strong>' +
+                        ' &nbsp;·&nbsp; Revenue: <strong>' + currencySymbol + ' ' + fmtMoney(s.revenue || 0) + '</strong>';
+                    renderRestoOrders();
+                } catch (e) {
+                    tableEl.innerHTML = '<p style="color:#c82333; padding:20px;">Failed: ' + escHtml(e.message) + '</p>';
+                } finally {
+                    hidePosActionLoader();
+                }
+            }
+
+            function renderRestoOrders() {
+                const tableEl = document.getElementById('restoOrdersTable');
+                if (!_restoOrdersData) return;
+                let orders = _restoOrdersData;
+                if (_restoFilter === 'pending') orders = orders.filter(o => o.status === 'placed');
+                else if (_restoFilter === 'paid') orders = orders.filter(o => o.status === 'paid');
+                if (!orders.length) {
+                    tableEl.innerHTML = '<p style="color:#6c757d; text-align:center; padding:30px 0;">No orders match this filter.</p>';
+                    return;
+                }
+                const statusBadge = s => {
+                    const c = {
+                        placed: '#856404',
+                        paid: '#155724'
+                    } [s] || '#495057';
+                    const label = s === 'placed' ? 'pending' : s;
+                    return '<span style="color:' + c + ';font-weight:600;text-transform:capitalize;">' + escHtml(label) + '</span>';
+                };
+                let html = '<table style="width:100%;border-collapse:collapse;font-size:12px;">' +
+                    '<thead><tr style="border-bottom:2px solid #eaecef; font-size:11px; color:#6c757d; text-transform:uppercase; letter-spacing:.4px;">' +
+                    '<th style="text-align:left;padding:7px 8px;">Ref</th>' +
+                    '<th style="text-align:left;padding:7px 8px;">Type</th>' +
+                    '<th style="text-align:left;padding:7px 8px;">Location</th>' +
+                    '<th style="text-align:center;padding:7px 8px;">Items</th>' +
+                    '<th style="text-align:left;padding:7px 8px;">Status</th>' +
+                    '<th style="text-align:right;padding:7px 8px;">Total</th>' +
+                    '<th style="text-align:center;padding:7px 8px;">Time</th>' +
+                    '<th style="padding:7px 8px;"></th>' +
+                    '</tr></thead><tbody>';
+                orders.forEach((o, i) => {
+                    const loc = o.room_number ? 'Room ' + o.room_number :
+                        (o.table_number ? 'Table ' + o.table_number :
+                            (o.customer_name || '—'));
+                    const time = (o.created_at || '').substring(11, 16);
+                    const bg = i % 2 === 0 ? '#fff' : '#f8f9fb';
+                    html += '<tr style="border-bottom:1px solid #f0f0f0;background:' + bg + ';">' +
+                        '<td style="padding:7px 8px;font-weight:600;">' + escHtml(o.reference) + '</td>' +
+                        '<td style="padding:7px 8px;color:#6c757d;">' + escHtml((o.order_type || '—').replace(/_/g, ' ')) + '</td>' +
+                        '<td style="padding:7px 8px;">' + escHtml(loc) + '</td>' +
+                        '<td style="padding:7px 8px;text-align:center;">' + (o.item_count || 0) + '</td>' +
+                        '<td style="padding:7px 8px;">' + statusBadge(o.status) + '</td>' +
+                        '<td style="padding:7px 8px;text-align:right;">' + currencySymbol + ' ' + fmtMoney(o.total_amount) + '</td>' +
+                        '<td style="padding:7px 8px;text-align:center;color:#6c757d;">' + escHtml(time) + '</td>' +
+                        '<td style="padding:7px 8px;white-space:nowrap;">' +
+                        '<a href="order-lifecycle.php?id=' + o.id + '" target="_blank" style="font-size:11px;color:#8B7355;text-decoration:none;" title="Lifecycle log">Log</a>' +
+                        '</td></tr>';
+                });
+                html += '</tbody></table>';
+                tableEl.innerHTML = html;
+            }
+        <?php endif; ?>
+
+            /* ── Draggable floating widgets ──────────────────────────────────── */
+            (function() {
+                /* handleEl: the element that initiates drag; el: the element that moves */
+                function makeWidgetDraggable(el, storageKey, handleEl) {
+                    try {
+                        var saved = JSON.parse(localStorage.getItem(storageKey) || 'null');
+                        if (saved && typeof saved.left === 'number' && typeof saved.top === 'number') {
+                            applyAbsPos(el, saved.left, saved.top);
+                            constrainWidgetToViewport(el);
+                        }
+                    } catch (_) {}
+
+                    var grip = handleEl || el;
+                    var ds = null;
+
+                    grip.addEventListener('pointerdown', function(e) {
+                        if (e.button !== 0 && e.pointerType === 'mouse') return;
+                        var r = el.getBoundingClientRect();
+                        ds = {
+                            sx: e.clientX,
+                            sy: e.clientY,
+                            ol: r.left,
+                            ot: r.top,
+                            moved: false
+                        };
+                        grip.setPointerCapture(e.pointerId);
+                        e.stopPropagation();
+                    });
+
+                    grip.addEventListener('pointermove', function(e) {
+                        if (!ds) return;
+                        var dx = e.clientX - ds.sx,
+                            dy = e.clientY - ds.sy;
+                        if (!ds.moved && Math.abs(dx) + Math.abs(dy) < 6) return;
+                        ds.moved = true;
+                        grip.style.cursor = 'grabbing';
+                        var maxL = window.innerWidth - el.offsetWidth - 4;
+                        var maxT = window.innerHeight - el.offsetHeight - 4;
+                        applyAbsPos(el, Math.max(4, Math.min(maxL, ds.ol + dx)), Math.max(4, Math.min(maxT, ds.ot + dy)));
+                    });
+
+                    grip.addEventListener('pointerup', function() {
+                        if (!ds) return;
+                        var wasMoved = ds.moved;
+                        ds = null;
+                        grip.style.cursor = 'grab';
+                        if (wasMoved) {
+                            var r = el.getBoundingClientRect();
+                            try {
+                                localStorage.setItem(storageKey, JSON.stringify({
+                                    left: r.left,
+                                    top: r.top
+                                }));
+                            } catch (_) {}
+                        }
+                        constrainWidgetToViewport(el, storageKey);
+                    });
+
+                    grip.addEventListener('pointercancel', function() {
+                        ds = null;
+                        grip.style.cursor = 'grab';
+                    });
+                }
+
+                function applyAbsPos(el, left, top) {
+                    el.style.left = left + 'px';
+                    el.style.top = top + 'px';
+                    el.style.right = 'auto';
+                    el.style.bottom = 'auto';
+                }
+
+                function constrainWidgetToViewport(el, storageKey) {
+                    if (!el) return;
+                    if (window.getComputedStyle(el).display === 'none') return;
+                    var pad = 8;
+                    var r = el.getBoundingClientRect();
+                    var maxL = Math.max(pad, window.innerWidth - r.width - pad);
+                    var maxT = Math.max(pad, window.innerHeight - r.height - pad);
+                    var nextL = Math.max(pad, Math.min(maxL, r.left));
+                    var nextT = Math.max(pad, Math.min(maxT, r.top));
+                    applyAbsPos(el, nextL, nextT);
+                    if (storageKey) {
+                        try {
+                            localStorage.setItem(storageKey, JSON.stringify({
+                                left: nextL,
+                                top: nextT
+                            }));
+                        } catch (_) {}
+                    }
+                }
+
+                function syncFloatingWidgetsToViewport() {
+                    constrainWidgetToViewport(document.getElementById('posInboxWidget'), 'rh_pos_inbox_pos');
+                    constrainWidgetToViewport(document.getElementById('myOrdersWidget'), 'rh_pos_orders_pos');
+                }
+
+                window.__posClampFloatingWidgets = syncFloatingWidgetsToViewport;
+
+                document.addEventListener('DOMContentLoaded', function() {
+                    var inbox = document.getElementById('posInboxWidget');
+                    var orders = document.getElementById('myOrdersWidget');
+                    if (inbox) makeWidgetDraggable(inbox, 'rh_pos_inbox_pos', document.getElementById('posInboxDragHandle'));
+                    if (orders) makeWidgetDraggable(orders, 'rh_pos_orders_pos', document.getElementById('myOrdersDragHandle'));
+                    window.addEventListener('resize', syncFloatingWidgetsToViewport);
+                    setTimeout(syncFloatingWidgetsToViewport, 80);
+                });
+            }());
+    </script>
+    <?php $rh_help_hide_fab = true;
+    $rh_help_disable_fallback = true;
+    require __DIR__ . '/includes/help-tooltips.php'; ?>
+    <?php require __DIR__ . '/includes/offline-banner.php'; ?>
+
+    <!-- Station inbox widget -->
+    <div id="posInboxWidget" style="display:none;position:fixed;bottom:90px;right:22px;z-index:99990;flex-direction:column;align-items:flex-end;gap:8px;">
+        <!-- Inbox slide-up panel -->
+        <div id="posInboxPanel" style="display:none;width:320px;max-height:420px;background:#fff;border-radius:12px;box-shadow:0 8px 32px rgba(0,0,0,.22);border:1px solid #e5e7eb;overflow:hidden;">
+            <div style="padding:11px 14px;border-bottom:1px solid #f3f4f6;display:flex;align-items:center;justify-content:space-between;">
+                <strong style="font-size:13px;display:flex;align-items:center;gap:6px;"><i class="fas fa-inbox" style="color:#1d6a3e;"></i> Station Replies</strong>
+                <button onclick="togglePosInbox()" style="background:none;border:none;cursor:pointer;font-size:17px;color:#9ca3af;line-height:1;">&times;</button>
+            </div>
+            <div id="posInboxList" style="max-height:340px;overflow-y:auto;">
+                <p style="text-align:center;color:#9ca3af;padding:20px;font-size:13px;">Loading…</p>
+            </div>
+        </div>
+        <!-- FAB row: inbox button + drag handle on the right -->
+        <div style="display:flex;align-items:center;gap:6px;">
+            <button id="posInboxBtn" onclick="togglePosInbox()" title="Station message inbox" style="width:52px;height:52px;border-radius:50%;background:#1d4a2e;border:none;color:#86efac;font-size:20px;cursor:pointer;box-shadow:0 4px 14px rgba(0,0,0,.35);display:flex;align-items:center;justify-content:center;position:relative;touch-action:manipulation;flex-shrink:0;">
+                <i class="fas fa-inbox"></i>
+                <span id="posInboxBadge" style="display:none;position:absolute;top:-3px;right:-3px;background:#c82333;color:#fff;font-size:10px;font-weight:800;padding:2px 5px;border-radius:10px;min-width:18px;text-align:center;line-height:1.4;"></span>
+            </button>
+            <div id="posInboxDragHandle" title="Drag to reposition" style="width:20px;height:52px;display:flex;align-items:center;justify-content:center;cursor:grab;color:rgba(134,239,172,0.5);font-size:13px;touch-action:none;user-select:none;-webkit-user-select:none;border-radius:10px;background:rgba(29,74,46,0.55);border:1px solid rgba(134,239,172,0.15);transition:background 0.15s,color 0.15s;">
+                <i class="fas fa-grip-vertical"></i>
+            </div>
+        </div>
+    </div>
+
+    <!-- My orders live tracker — floating bottom-left -->
+    <div id="myOrdersWidget" style="position:fixed;bottom:22px;left:22px;z-index:99990;display:flex;flex-direction:column;align-items:flex-start;gap:8px;">
+        <div id="myOrdersPanel" style="display:none;width:380px;max-width:calc(100vw - 44px);max-height:520px;background:#fff;border-radius:12px;box-shadow:0 8px 32px rgba(0,0,0,.22);border:1px solid #e5e7eb;overflow:hidden;">
+            <div style="padding:11px 14px;border-bottom:1px solid #f3f4f6;display:flex;align-items:center;justify-content:space-between;background:linear-gradient(135deg,#fdf8f3,#f5efe5);">
+                <strong style="font-size:13px;display:flex;align-items:center;gap:6px;color:#5a4a36;"><i class="fas fa-list-check" style="color:#8B7355;"></i> My Orders Today</strong>
+                <div style="display:flex;align-items:center;gap:10px;">
+                    <span id="myOrdersTotalChip" style="font-size:11px;color:#6c757d;background:#fff;padding:2px 8px;border-radius:9px;border:1px solid #e5e7eb;">0</span>
+                    <button onclick="toggleMyOrders()" style="background:none;border:none;cursor:pointer;font-size:17px;color:#9ca3af;line-height:1;">&times;</button>
+                </div>
+            </div>
+            <div id="myOrdersList" style="max-height:460px;overflow-y:auto;">
+                <p style="text-align:center;color:#9ca3af;padding:24px 18px;font-size:13px;">Loading…</p>
+            </div>
+        </div>
+        <!-- FAB row: my-orders button + drag handle on the right -->
+        <div style="display:flex;align-items:center;gap:6px;">
+            <button id="myOrdersBtn" onclick="openMyOrdersCurrentDetail()" title="My orders — live status" style="height:52px;padding:0 18px;border-radius:26px;background:linear-gradient(135deg,#8B7355,#6f5b41);border:none;color:#fff;font-size:13px;font-weight:600;cursor:pointer;box-shadow:0 4px 14px rgba(0,0,0,.35);display:flex;align-items:center;gap:9px;position:relative;touch-action:manipulation;">
+                <i class="fas fa-list-check"></i>
+                <span>My Orders</span>
+                <span id="myOrdersBadge" style="display:none;background:#fff;color:#8B7355;font-size:11px;font-weight:800;padding:2px 7px;border-radius:10px;min-width:20px;text-align:center;line-height:1.4;">0</span>
+            </button>
+            <div id="myOrdersDragHandle" title="Drag to reposition" style="width:20px;height:52px;display:flex;align-items:center;justify-content:center;cursor:grab;color:rgba(255,255,255,0.45);font-size:13px;touch-action:none;user-select:none;-webkit-user-select:none;border-radius:10px;background:rgba(139,115,85,0.5);border:1px solid rgba(255,255,255,0.12);transition:background 0.15s,color 0.15s;">
+                <i class="fas fa-grip-vertical"></i>
+            </div>
+        </div>
+    </div>
+
+    <!-- Cart backdrop (mobile) -->
+    <div class="cart-backdrop" id="cartBackdrop" onclick="toggleCartDrawer()"></div>
+
+    <!-- Mobile POS bottom-sheet menu -->
+    <div class="pos-mobile-backdrop" id="posMobileBackdrop" onclick="closePosMobileMenu()"></div>
+    <div class="pos-mobile-sheet" id="posMobileMenu" role="dialog" aria-modal="true" aria-label="POS mobile menu">
+        <div class="pm-handle"></div>
+        <div class="pm-head">
+            <div class="pm-title">
+                <strong><?php echo htmlspecialchars($siteName); ?></strong>
+                <span>Point of Sale Menu</span>
+            </div>
+            <button type="button" class="pm-close" onclick="closePosMobileMenu()" aria-label="Close POS menu"><i class="fas fa-times"></i></button>
+        </div>
+        <div class="pm-user">
+            <div class="pm-user-avatar"><i class="fas fa-user-circle"></i></div>
+            <div>
+                <strong><?php echo htmlspecialchars($user['full_name']); ?></strong>
+                <span><?php echo htmlspecialchars(ucfirst($user['role'] ?? 'Cashier')); ?></span>
+            </div>
+        </div>
+        <div class="pm-scroll">
+            <section>
+                <h3 class="pm-group-title">Till Actions</h3>
+                <div class="pos-mobile-actions" aria-label="POS mobile actions">
+                    <button type="button" class="pos-mobile-action" onclick="runPosMobileMenuAction('openPosMobileRecentView')"><i class="fas fa-receipt"></i><span>Recent</span></button>
+                    <button type="button" class="pos-mobile-action" onclick="runPosMobileMenuAction('openTabsTray')"><i class="fas fa-utensils"></i><span>Tabs</span><span class="mobile-action-badge" id="mobileTabBadge" <?php echo empty($openTabs) ? ' style="display:none;"' : ''; ?>><?php echo count($openTabs); ?></span></button>
+                    <button type="button" class="pos-mobile-action" onclick="runPosMobileMenuAction('openStationNoteModal')"><i class="fas fa-paper-plane"></i><span>Note</span></button>
+                    <button type="button" class="pos-mobile-action" onclick="runPosMobileMenuAction('openPosMobileInboxView')"><i class="fas fa-inbox"></i><span>Inbox</span><span class="mobile-action-badge" id="mobileInboxBadge" style="display:none;"></span></button>
+                    <button type="button" class="pos-mobile-action is-primary" onclick="runPosMobileMenuAction('toggleCartDrawer')"><i class="fas fa-shopping-cart"></i><span>Cart</span><span class="mobile-action-badge" id="mobileCartBadge" style="display:none;"></span></button>
+                    <button type="button" class="pos-mobile-action" onclick="runPosMobileMenuAction('openPosMobileOrdersView')"><i class="fas fa-list-check"></i><span>My Orders</span><span class="mobile-action-badge" id="mobileMyOrdersBadge" style="display:none;"></span></button>
+
+                    <button type="button" class="pos-mobile-action" onclick="runPosMobileMenuAction('openCloseShift')"><i class="fas fa-cash-register"></i><span>Close Shift</span></button>
+                </div>
+            </section>
+            <?php if (in_array($user['role'] ?? '', ['admin', 'manager'], true)): ?>
+                <section>
+                    <h3 class="pm-group-title">Stations</h3>
+                    <div class="pm-grid">
+                        <a class="pm-action" href="kds.php" target="_blank" rel="noopener"><i class="fas fa-utensils"></i><span>Kitchen</span><span class="pm-badge" id="menuKitchenBadge" style="<?php echo ($adminStationsInit['counts']['kitchen']['open_total'] ?? 0) > 0 ? '' : 'display:none;'; ?>"><?php echo (int)($adminStationsInit['counts']['kitchen']['open_total'] ?? 0); ?></span></a>
+                        <a class="pm-action" href="bds.php" target="_blank" rel="noopener"><i class="fas fa-wine-glass"></i><span>Bar</span><span class="pm-badge" id="menuBarBadge" style="<?php echo ($adminStationsInit['counts']['bar']['open_total'] ?? 0) > 0 ? '' : 'display:none;'; ?>"><?php echo (int)($adminStationsInit['counts']['bar']['open_total'] ?? 0); ?></span></a>
+                        <a class="pm-action" href="cds.php" target="_blank" rel="noopener"><i class="fas fa-mug-hot"></i><span>Coffee</span><span class="pm-badge" id="menuCoffeeBadge" style="<?php echo ($adminStationsInit['counts']['coffee_bar']['open_total'] ?? 0) > 0 ? '' : 'display:none;'; ?>"><?php echo (int)($adminStationsInit['counts']['coffee_bar']['open_total'] ?? 0); ?></span></a>
+                        <button type="button" class="pm-action" onclick="runPosMobileMenuAction('openStationsTray')"><i class="fas fa-layer-group"></i><span>All Stations</span></button>
+                        <a class="pm-action" href="stock-orders.php"><i class="fas fa-list"></i><span>All Orders</span></a>
+                    </div>
+                </section>
+            <?php endif; ?>
+            <section>
+                <h3 class="pm-group-title">Tools</h3>
+                <div class="pm-grid">
+                    <button type="button" class="pm-action" onclick="runPosMobileMenuAction(function () { RHSounds.openSettings(); })"><i class="fas fa-sliders"></i><span>Sound Settings</span></button>
+                    <button type="button" class="pm-action" onclick="runPosMobileMenuAction('toggleMobileHelp')"><i class="fas fa-question-circle"></i><span>Help Tooltips</span></button>
+                    <a class="pm-action" href="../docs/guides/01-pos-till.html" target="_blank" rel="noopener"><i class="fas fa-book-open"></i><span>POS Guide</span></a>
+                    <?php if (!$isFullScreen): ?>
+                        <a class="pm-action" href="dashboard.php"><i class="fas fa-arrow-left"></i><span>Admin</span></a>
+                    <?php endif; ?>
+                    <a class="pm-action is-danger" href="logout.php"><i class="fas fa-sign-out-alt"></i><span>Sign Out</span></a>
+                </div>
+            </section>
+        </div>
+    </div>
+    <script src="js/pwa-install.js" defer></script>
+</body>
+
+</html>

@@ -1,0 +1,13 @@
+🏨 *{{hotel_name}}*
+
+❌ *Booking Cancelled*
+
+Dear {{guest_name}},
+Your booking *{{booking_reference}}* has been cancelled.
+
+Check-in: {{check_in_date}}
+Check-out: {{check_out_date}}
+Room: {{room_name}}
+
+If this was a mistake, please contact us:
+📞 {{hotel_phone}}

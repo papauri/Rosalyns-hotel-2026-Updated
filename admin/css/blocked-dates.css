@@ -1,0 +1,481 @@
+/* ================================================================
+   Blocked Dates Page — blocked-dates.css
+   ================================================================ */
+
+/* ── Layout ───────────────────────────────────────────────────── */
+.blocked-dates-page {
+    display: flex;
+    flex-direction: column;
+    gap: clamp(1rem, 0.8rem + 1vw, 1.5rem);
+}
+
+/* ── Page Header ─────────────────────────────────────────────── */
+.blocked-dates-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 1rem;
+    padding-bottom: 1.25rem;
+    border-bottom: 1px solid var(--admin-surface-border);
+}
+
+.blocked-dates-header__title .section-title {
+    margin: 0 0 0.2rem;
+    font-size: clamp(1.3rem, 1.1rem + 0.8vw, 1.85rem);
+}
+
+.blocked-dates-header__subtitle {
+    margin: 0;
+    font-size: 0.8rem;
+    color: var(--admin-muted);
+}
+
+/* ── Page Actions (header buttons) ──────────────────────────── */
+.blocked-dates-page .page-actions {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+.blocked-dates-page .page-actions .btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.45rem;
+    padding: 0.5rem 1rem;
+    min-height: 38px;
+    font-size: 0.85rem;
+    font-weight: 500;
+    border-radius: 8px;
+    white-space: nowrap;
+    transition: all 0.18s ease;
+}
+
+/* ── Alert ───────────────────────────────────────────────────── */
+.blocked-dates-page .alert {
+    margin: 0;
+}
+
+/* ── Filter Card ─────────────────────────────────────────────── */
+.blocked-dates-filter-card .card-header.blocked-dates-filter-card__header {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    font-weight: 600;
+    font-size: 0.875rem;
+    color: var(--admin-text);
+}
+
+/* ── Filter Form ─────────────────────────────────────────────── */
+.blocked-dates-filter-form {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: flex-end;
+    gap: 0.75rem;
+}
+
+.bdfilter-field {
+    display: flex;
+    flex-direction: column;
+    flex: 1 1 11rem;
+    min-width: 0;
+}
+
+.bdfilter-field .form-label {
+    font-size: 0.78rem;
+    font-weight: 500;
+    margin-bottom: 0.3rem;
+    color: var(--admin-text);
+    white-space: nowrap;
+}
+
+.bdfilter-field .form-select,
+.bdfilter-field .form-control {
+    font-size: 0.875rem;
+    height: 38px;
+    min-height: 38px;
+    box-sizing: border-box;
+    padding: 0 0.75rem;
+    border-radius: 8px;
+}
+
+.bdfilter-field--actions {
+    flex: 0 0 auto;
+}
+
+.bdfilter-actions-row {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+.bdfilter-actions-row .btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    height: 40px;
+    min-height: 40px;
+    box-sizing: border-box;
+    padding: 0 1rem;
+    font-size: 0.85rem;
+    border-radius: 8px;
+    white-space: nowrap;
+}
+
+/* Ghost/text reset button */
+.btn-ghost {
+    background: transparent;
+    border: 1px solid transparent;
+    color: var(--admin-muted);
+    padding: 0.45rem 0.75rem;
+    border-radius: 8px;
+    font-size: 0.83rem;
+    cursor: pointer;
+    transition: color 0.15s, background 0.15s;
+    text-decoration: none;
+    display: inline-flex;
+    align-items: center;
+    min-height: 38px;
+}
+
+.btn-ghost:hover {
+    color: var(--admin-text);
+    background: var(--admin-surface);
+    border-color: var(--admin-surface-border);
+}
+
+/* ── Results Card Header ─────────────────────────────────────── */
+.blocked-dates-page .card .card-header {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+.blocked-dates-count {
+    margin-left: auto;
+    font-size: 0.75rem;
+}
+
+/* ── Table ────────────────────────────────────────────────────── */
+.blocked-dates-table {
+    font-size: 0.855rem;
+}
+
+.blocked-dates-table thead th {
+    font-size: 0.78rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    white-space: nowrap;
+    background: var(--admin-surface);
+    color: var(--admin-muted);
+    padding: 9px 12px;
+}
+
+.blocked-dates-table tbody td {
+    padding: 10px 12px;
+    vertical-align: middle;
+}
+
+.blocked-dates-table tbody tr {
+    border-bottom: 1px solid var(--admin-surface-border);
+    transition: background 0.12s;
+}
+
+.blocked-dates-table tbody tr:hover td {
+    background: var(--admin-surface);
+}
+
+.blocked-dates-table td[data-label='Actions'] {
+    white-space: nowrap;
+}
+
+/* ── Table accessories ─────────────────────────────────────────  */
+.blocked-dates-date-icon {
+    color: var(--admin-muted);
+    margin-right: 0.4rem;
+}
+
+.blocked-dates-muted {
+    color: var(--admin-muted);
+    font-size: 0.8rem;
+}
+
+.blocked-dates-inline-form {
+    display: inline-flex;
+    margin: 0;
+}
+
+.blocked-dates-unblock-btn {
+    min-height: 36px;
+    font-size: 0.82rem;
+}
+
+/* ── Empty State ─────────────────────────────────────────────── */
+.blocked-dates-empty {
+    text-align: center;
+    padding-block: clamp(2.5rem, 2rem + 2vw, 4rem);
+    color: var(--admin-muted);
+}
+
+.blocked-dates-empty i {
+    font-size: clamp(2.2rem, 1.6rem + 2vw, 3.5rem);
+    margin-bottom: 0.85rem;
+    color: var(--admin-surface-border);
+    display: block;
+}
+
+.blocked-dates-empty h5 {
+    margin: 0 0 0.45rem;
+    font-size: clamp(1rem, 0.9rem + 0.3vw, 1.15rem);
+    color: var(--admin-text);
+}
+
+.blocked-dates-empty p {
+    margin: 0;
+    font-size: 0.875rem;
+}
+
+/* ── Flatpickr theming ──────────────────────────────────────── */
+#selectedDatesDisplay {
+    margin: 0;
+    border-color: var(--admin-surface-border);
+    background: var(--admin-bg);
+    color: var(--admin-text);
+}
+
+.flatpickr-calendar {
+    font-family: 'Jost', sans-serif;
+    border: 1px solid var(--admin-surface-border);
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.1);
+}
+
+.flatpickr-months,
+.flatpickr-weekdays {
+    background: var(--admin-bg);
+}
+
+.flatpickr-current-month .flatpickr-monthDropdown-months,
+.flatpickr-current-month input.cur-year {
+    color: var(--admin-text);
+}
+
+.flatpickr-day.today {
+    border-color: var(--admin-accent);
+    color: var(--admin-accent);
+}
+
+.flatpickr-day.selected,
+.flatpickr-day.startRange,
+.flatpickr-day.endRange,
+.flatpickr-day.selected:hover,
+.flatpickr-day.startRange:hover,
+.flatpickr-day.endRange:hover {
+    background: var(--admin-accent);
+    border-color: var(--admin-accent);
+    color: white;
+}
+
+.flatpickr-day.inRange {
+    background: color-mix(in srgb, var(--admin-accent) 15%, transparent);
+    border-color: transparent;
+    box-shadow: none;
+}
+
+/* ── Responsive ─────────────────────────────────────────────── */
+@media (max-width: 768px) {
+    .blocked-dates-header {
+        flex-direction: column;
+        align-items: flex-start;
+    }
+
+    .blocked-dates-page .page-actions {
+        width: 100%;
+    }
+
+    .blocked-dates-page .page-actions .btn {
+        flex: 1;
+        justify-content: center;
+    }
+
+    .bdfilter-field {
+        flex-basis: 100%;
+    }
+
+    .bdfilter-field--actions {
+        flex-basis: 100%;
+    }
+
+    .bdfilter-actions-row {
+        width: 100%;
+    }
+
+    .bdfilter-actions-row .btn {
+        flex: 1;
+        justify-content: center;
+    }
+}
+
+@media (min-width: 769px) and (max-width: 1024px) {
+    .bdfilter-field {
+        flex-basis: calc(50% - 0.4rem);
+    }
+}
+
+
+.blocked-dates-page .section-title {
+    margin: 0;
+    font-size: clamp(1.35rem, 1.1rem + 1vw, 2rem);
+}
+
+.blocked-dates-page .info-box {
+    background: var(--admin-surface);
+    border: 1px solid var(--admin-surface-border);
+    border-left: 4px solid var(--admin-accent);
+    border-radius: var(--admin-radius);
+    padding: clamp(0.9rem, 0.7rem + 1vw, 1.4rem);
+    color: var(--admin-text);
+}
+
+.blocked-dates-page .info-box h4 {
+    margin: 0 0 0.6rem;
+    font-size: clamp(1rem, 0.9rem + 0.4vw, 1.2rem);
+    color: var(--admin-text);
+}
+
+.blocked-dates-page .info-box p,
+.blocked-dates-page .info-box li {
+    color: var(--admin-text);
+}
+
+.blocked-dates-page .page-actions {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: clamp(0.65rem, 0.55rem + 0.5vw, 0.95rem);
+}
+
+.blocked-dates-page .page-actions .btn {
+    min-height: 44px;
+}
+
+.blocked-dates-filter-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(min(14rem, 100%), 1fr));
+    gap: clamp(0.7rem, 0.5rem + 0.8vw, 1rem);
+}
+
+.blocked-dates-filter-field {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+}
+
+.blocked-dates-filter-field--actions {
+    justify-content: flex-end;
+}
+
+.blocked-dates-filter-btn {
+    width: 100%;
+    min-height: 44px;
+}
+
+.blocked-dates-count {
+    margin-left: 0.6rem;
+}
+
+.blocked-dates-empty {
+    text-align: center;
+    padding-block: clamp(2rem, 1.5rem + 2vw, 3.4rem);
+    color: var(--admin-muted);
+}
+
+.blocked-dates-empty i {
+    font-size: clamp(2rem, 1.5rem + 2vw, 3rem);
+    margin-bottom: clamp(0.5rem, 0.4rem + 0.5vw, 0.8rem);
+    color: var(--admin-muted);
+}
+
+.blocked-dates-empty h5 {
+    margin: 0;
+    font-size: clamp(1rem, 0.9rem + 0.4vw, 1.2rem);
+    color: var(--admin-text);
+}
+
+.blocked-dates-empty p {
+    margin: 0.45rem 0 0;
+}
+
+.blocked-dates-table td[data-label='Actions'] {
+    white-space: nowrap;
+}
+
+.blocked-dates-date-icon {
+    color: var(--admin-muted);
+    margin-right: 0.4rem;
+}
+
+.blocked-dates-muted {
+    color: var(--admin-muted);
+}
+
+.blocked-dates-inline-form {
+    display: inline-flex;
+    margin: 0;
+}
+
+.blocked-dates-unblock-btn {
+    min-height: 44px;
+}
+
+#selectedDatesDisplay {
+    margin: 0;
+    border-color: var(--admin-surface-border);
+    background: var(--admin-bg);
+    color: var(--admin-text);
+}
+
+/* Flatpickr theming to match admin palette */
+.flatpickr-calendar {
+    font-family: 'Jost', sans-serif;
+    border: 1px solid var(--admin-surface-border);
+    box-shadow: var(--shadow);
+}
+
+.flatpickr-months,
+.flatpickr-weekdays {
+    background: var(--admin-bg);
+}
+
+.flatpickr-current-month .flatpickr-monthDropdown-months,
+.flatpickr-current-month input.cur-year {
+    color: var(--admin-text);
+}
+
+.flatpickr-day.today {
+    border-color: var(--admin-accent);
+    color: var(--admin-accent);
+}
+
+.flatpickr-day.selected,
+.flatpickr-day.startRange,
+.flatpickr-day.endRange,
+.flatpickr-day.selected:hover,
+.flatpickr-day.startRange:hover,
+.flatpickr-day.endRange:hover {
+    background: var(--admin-accent);
+    border-color: var(--admin-accent);
+    color: var(--admin-surface);
+}
+
+@media (min-width: 768px) {
+    .blocked-dates-page .page-actions {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+    }
+
+    .blocked-dates-page .page-actions .btn {
+        width: auto;
+    }
+}

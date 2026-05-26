@@ -1,0 +1,195 @@
+/**
+ * Section Flash Animation
+ * Rosalyn's Hotel 2027
+ * Modern highlight effect for anchor link navigation
+ */
+
+/* ============================================
+   BASE SECTION STYLES
+   Ensure sections have position relative for flash effect
+   ============================================ */
+
+section[id],
+.section-flash-active {
+    position: relative; /* Required for flash border positioning */
+}
+
+/* ============================================
+   SECTION FLASH ANIMATION
+   Applied when scrolling to section via anchor link
+   ============================================ */
+
+.section-flash-active {
+    animation: sectionFlash 1.2s cubic-bezier(0.4, 0, 0.2, 1) forwards;
+}
+
+@keyframes sectionFlash {
+    0% {
+        background-color: transparent;
+        transform: scale(1);
+        box-shadow: 0 0 0 0 rgba(139, 115, 85, 0);
+    }
+    15% {
+        background-color: rgba(139, 115, 85, 0.08);
+        transform: scale(1.005);
+        box-shadow: 0 0 30px 8px rgba(139, 115, 85, 0.15);
+    }
+    30% {
+        background-color: rgba(139, 115, 85, 0.12);
+        transform: scale(1.008);
+        box-shadow: 0 0 50px 15px rgba(139, 115, 85, 0.2);
+    }
+    50% {
+        background-color: rgba(139, 115, 85, 0.1);
+        transform: scale(1.005);
+        box-shadow: 0 0 40px 10px rgba(139, 115, 85, 0.15);
+    }
+    70% {
+        background-color: rgba(139, 115, 85, 0.06);
+        transform: scale(1.002);
+        box-shadow: 0 0 25px 5px rgba(139, 115, 85, 0.08);
+    }
+    85% {
+        background-color: rgba(139, 115, 85, 0.03);
+        transform: scale(1);
+        box-shadow: 0 0 15px 2px rgba(139, 115, 85, 0.04);
+    }
+    100% {
+        background-color: transparent;
+        transform: scale(1);
+        box-shadow: 0 0 0 0 rgba(139, 115, 85, 0);
+    }
+}
+
+/* ============================================
+   SECTION FLASH - BORDER ACCENT
+   Adds a subtle border glow effect
+   ============================================ */
+
+.section-flash-active::before {
+    content: '';
+    position: absolute;
+    top: -2px;
+    left: -2px;
+    right: -2px;
+    bottom: -2px;
+    background: linear-gradient(
+        135deg,
+        rgba(139, 115, 85, 0.4) 0%,
+        rgba(139, 115, 85, 0.2) 50%,
+        transparent 100%
+    );
+    border-radius: inherit;
+    z-index: -1;
+    opacity: 0;
+    animation: sectionFlashBorder 1.2s cubic-bezier(0.4, 0, 0.2, 1) forwards;
+}
+
+@keyframes sectionFlashBorder {
+    0% {
+        opacity: 0;
+    }
+    20% {
+        opacity: 1;
+    }
+    100% {
+        opacity: 0;
+    }
+}
+
+/* ============================================
+   SECTION FLASH - TITLE HIGHLIGHT
+   Flash effect for section titles
+   ============================================ */
+
+.section-flash-active > .section-header,
+.section-flash-active > h1,
+.section-flash-active > h2,
+.section-flash-active > h3,
+.section-flash-active > .editorial-header,
+.section-flash-active > .matuwi-welcome-content {
+    animation: sectionTitleFlash 1.2s cubic-bezier(0.4, 0, 0.2, 1) forwards;
+}
+
+@keyframes sectionTitleFlash {
+    0% {
+        color: inherit;
+        transform: translateY(0);
+    }
+    30% {
+        color: var(--color-primary, #8B7355);
+        transform: translateY(-2px);
+    }
+    100% {
+        color: inherit;
+        transform: translateY(0);
+    }
+}
+
+/* ============================================
+   REDUCED MOTION SUPPORT
+   Disable flash animation for users who prefer reduced motion
+   ============================================ */
+
+@media (prefers-reduced-motion: reduce) {
+    .section-flash-active,
+    .section-flash-active::before,
+    .section-flash-active > .section-header,
+    .section-flash-active > h1,
+    .section-flash-active > h2,
+    .section-flash-active > h3 {
+        animation: none !important;
+        background-color: transparent !important;
+        transform: none !important;
+        box-shadow: none !important;
+    }
+}
+
+/* ============================================
+   DARK MODE SUPPORT
+   Adjust flash colors for dark mode
+   ============================================ */
+
+@media (prefers-color-scheme: dark) {
+    .section-flash-active {
+        background-color: transparent;
+    }
+    
+    @keyframes sectionFlash {
+        0% {
+            background-color: transparent;
+            transform: scale(1);
+            box-shadow: 0 0 0 0 rgba(212, 175, 55, 0);
+        }
+        15% {
+            background-color: rgba(212, 175, 55, 0.12);
+            transform: scale(1.005);
+            box-shadow: 0 0 30px 8px rgba(212, 175, 55, 0.2);
+        }
+        30% {
+            background-color: rgba(212, 175, 55, 0.18);
+            transform: scale(1.008);
+            box-shadow: 0 0 50px 15px rgba(212, 175, 55, 0.25);
+        }
+        50% {
+            background-color: rgba(212, 175, 55, 0.14);
+            transform: scale(1.005);
+            box-shadow: 0 0 40px 10px rgba(212, 175, 55, 0.2);
+        }
+        70% {
+            background-color: rgba(212, 175, 55, 0.08);
+            transform: scale(1.002);
+            box-shadow: 0 0 25px 5px rgba(212, 175, 55, 0.12);
+        }
+        85% {
+            background-color: rgba(212, 175, 55, 0.04);
+            transform: scale(1);
+            box-shadow: 0 0 15px 2px rgba(212, 175, 55, 0.06);
+        }
+        100% {
+            background-color: transparent;
+            transform: scale(1);
+            box-shadow: 0 0 0 0 rgba(212, 175, 55, 0);
+        }
+    }
+}

@@ -1,0 +1,142 @@
+/* Stock Receipt view — admin/stock-receipt.php
+   Note: The print KOT CSS inside echo '<style>...</style>' (PHP echo for KOT window) is left inline
+   as it is a dynamically generated print document, not a regular page stylesheet.
+*/
+
+.receipt-grid {
+    display: grid;
+    grid-template-columns: 1fr 380px;
+    gap: 18px;
+}
+
+@media (max-width:1100px) {
+    .receipt-grid {
+        grid-template-columns: 1fr;
+    }
+}
+
+.panel {
+    background: #fff;
+    border: 1px solid #eaecef;
+    border-radius: 10px;
+    padding: 16px;
+    margin-bottom: 14px;
+}
+
+.panel h3 {
+    margin: 0 0 10px;
+    font-size: 14px;
+}
+
+.panel label {
+    display: block;
+    font-size: 11px;
+    font-weight: 600;
+    color: #495057;
+    margin: 8px 0 4px;
+    text-transform: uppercase;
+    letter-spacing: .5px;
+}
+
+.panel input,
+.panel textarea,
+.panel select {
+    width: 100%;
+    padding: 8px 10px;
+    border: 1px solid #d6d8db;
+    border-radius: 6px;
+    font-size: 13px;
+}
+
+.receipt-frame {
+    background: #fff;
+    border: 1px solid #eaecef;
+    border-radius: 10px;
+    padding: 0;
+    overflow: hidden;
+}
+
+.btn-primary {
+    background: var(--color-primary, #8A775F);
+    color: #fff;
+    border: none;
+    padding: 9px 14px;
+    border-radius: 6px;
+    cursor: pointer;
+    font-weight: 600;
+}
+
+.btn-secondary {
+    background: #fff;
+    color: #495057;
+    border: 1px solid #d6d8db;
+    padding: 8px 12px;
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 13px;
+    text-decoration: none;
+    display: inline-block;
+}
+
+.btn-whatsapp {
+    background: #25D366;
+    color: #fff;
+    border: none;
+    padding: 9px 14px;
+    border-radius: 6px;
+    cursor: pointer;
+    font-weight: 600;
+}
+
+.delivery-list {
+    font-size: 12px;
+}
+
+.delivery-list .row {
+    padding: 6px 0;
+    border-bottom: 1px solid #f0f0f0;
+}
+
+.delivery-list .row:last-child {
+    border: none;
+}
+
+.pill {
+    display: inline-block;
+    padding: 1px 8px;
+    border-radius: 10px;
+    font-size: 10px;
+    font-weight: 600;
+    text-transform: uppercase;
+}
+
+.pill.sent {
+    background: #d4edda;
+    color: #155724;
+}
+
+.pill.failed {
+    background: #f8d7da;
+    color: #721c24;
+}
+
+.pill.queued {
+    background: #cce5ff;
+    color: #004085;
+}
+
+.pill.preview {
+    background: #fff3cd;
+    color: #856404;
+}
+
+.badge-future {
+    background: #fff7e6;
+    border: 1px dashed #ffc107;
+    color: #856404;
+    padding: 6px 10px;
+    border-radius: 6px;
+    font-size: 11px;
+    margin-bottom: 8px;
+    display: block;
+}

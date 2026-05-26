@@ -1,0 +1,19 @@
+🏨 *{{hotel_name}}*
+
+✅ *New Booking Received!*
+
+Hello {{guest_name}}, thank you for choosing us!
+
+📋 *Booking Details*
+Reference: *{{booking_reference}}*
+Room: {{room_name}}
+Check-in: {{check_in_date}} at {{check_in_time}}
+Check-out: {{check_out_date}} at {{check_out_time}}
+Nights: {{nights}}
+Guests: {{guests}} (Adults: {{adults}}, Children: {{children}})
+Total: *{{total_amount}}*
+
+Special Requests: {{special_requests}}
+
+Our team will review and confirm your booking shortly.
+📞 {{hotel_phone}}

@@ -1,0 +1,467 @@
+/**
+ * Modal Components
+ * Rosalyn's Hotel 2026
+ * Japandi Luxury — refined, spacious, warm
+ */
+
+/* ============================================
+   MODAL OVERLAY
+   ============================================ */
+
+.modal {
+    position: fixed;
+    inset: 0;
+    z-index: var(--z-modal-backdrop);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: var(--space-4);
+    opacity: 0;
+    visibility: hidden;
+    transition: opacity 320ms cubic-bezier(0.4, 0, 0.2, 1),
+        visibility 320ms cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.modal--active {
+    opacity: 1;
+    visibility: visible;
+}
+
+/* Semi-transparent dark overlay behind the card */
+.modal__backdrop {
+    position: absolute;
+    inset: 0;
+    background: rgba(35, 31, 28, 0.68);
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+}
+
+/* ============================================
+   MODAL CARD (WRAPPER + CONTAINER)
+   ============================================ */
+
+.modal__wrapper {
+    position: relative;
+    z-index: 1;
+    display: flex;
+    flex-direction: column;
+    background: var(--color-lux-clay-50);
+    border: 1px solid rgba(177, 130, 71, 0.16);
+    border-radius: var(--radius-xl);
+    box-shadow:
+        0 2px 4px rgba(35, 31, 28, 0.04),
+        0 12px 28px rgba(35, 31, 28, 0.14),
+        0 40px 72px rgba(35, 31, 28, 0.18);
+    max-width: 90vw;
+    max-height: 88vh;
+    width: 100%;
+    overflow: hidden;
+    transform: scale(0.95) translateY(-12px);
+    opacity: 0;
+    transition: transform 320ms cubic-bezier(0.34, 1.4, 0.64, 1),
+        opacity 280ms cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.modal--active .modal__wrapper {
+    transform: scale(1) translateY(0);
+    opacity: 1;
+}
+
+.modal__container {
+    display: flex;
+    flex-direction: column;
+    max-height: 88vh;
+    overflow: hidden;
+}
+
+/* ============================================
+   MODAL SIZES
+   ============================================ */
+
+.modal--sm .modal__wrapper {
+    max-width: 420px;
+}
+
+.modal--md .modal__wrapper {
+    max-width: 580px;
+}
+
+.modal--lg .modal__wrapper {
+    max-width: 780px;
+}
+
+.modal--xl .modal__wrapper {
+    max-width: 1100px;
+}
+
+/* ============================================
+   MODAL HEADER
+   ============================================ */
+
+.modal__header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--space-4);
+    padding: 1.75rem var(--space-8);
+    border-bottom: 1px solid rgba(177, 130, 71, 0.18);
+    flex-shrink: 0;
+}
+
+.modal__title {
+    font-family: var(--font-serif);
+    font-size: clamp(1.3rem, 1.1rem + 1vw, 1.65rem);
+    font-weight: 400;
+    color: var(--color-lux-ink);
+    letter-spacing: 0.015em;
+    line-height: 1.2;
+    margin: 0;
+    flex: 1;
+}
+
+/* ============================================
+   MODAL CLOSE BUTTON
+   ============================================ */
+
+/* Inside header (standard pattern) */
+.modal__close {
+    flex-shrink: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 34px;
+    height: 34px;
+    padding: 0;
+    background: transparent;
+    border: 1px solid transparent;
+    border-radius: 50%;
+    color: var(--color-text-muted);
+    cursor: pointer;
+    transition: color var(--transition-fast) var(--easing-out),
+        background var(--transition-fast) var(--easing-out),
+        border-color var(--transition-fast) var(--easing-out);
+    line-height: 1;
+}
+
+.modal__close::before {
+    content: '×';
+    font-size: 1.5rem;
+    font-weight: 300;
+    line-height: 1;
+    margin-top: -1px;
+}
+
+.modal__close:hover {
+    color: var(--color-lux-ink);
+    background: rgba(139, 115, 85, 0.08);
+    border-color: var(--color-border-light);
+}
+
+.modal__close:focus-visible {
+    outline: 2px solid var(--color-lux-gold);
+    outline-offset: 2px;
+}
+
+/* Floating close — no title, button sits top-right of wrapper */
+.modal__close--floating {
+    position: absolute;
+    top: var(--space-4);
+    right: var(--space-4);
+    z-index: 2;
+    background: var(--color-lux-clay-50);
+    border-color: var(--color-border-light);
+    box-shadow: 0 2px 8px rgba(35, 31, 28, 0.08);
+}
+
+/* ============================================
+   MODAL BODY
+   ============================================ */
+
+.modal__body {
+    padding: var(--space-8);
+    overflow-y: auto;
+    flex: 1;
+    color: var(--color-text-secondary);
+    font-size: var(--text-base);
+    line-height: var(--leading-relaxed);
+    -webkit-overflow-scrolling: touch;
+}
+
+.modal__body table {
+    width: 100%;
+    max-width: 100%;
+    table-layout: fixed;
+    border-collapse: collapse;
+}
+
+.modal__body th,
+.modal__body td {
+    white-space: normal;
+    overflow-wrap: anywhere;
+    word-break: break-word;
+    vertical-align: top;
+}
+
+.modal__body td .btn,
+.modal__body td button {
+    max-width: 100%;
+    white-space: normal;
+}
+
+/* Scrollbar styling */
+.modal__body::-webkit-scrollbar {
+    width: 4px;
+}
+
+.modal__body::-webkit-scrollbar-track {
+    background: transparent;
+}
+
+.modal__body::-webkit-scrollbar-thumb {
+    background: var(--color-lux-clay-300);
+    border-radius: 2px;
+}
+
+/* ============================================
+   POLICY MODAL CONTENT
+   ============================================ */
+
+.policy-summary {
+    font-family: var(--font-serif);
+    font-style: italic;
+    font-size: clamp(1.1rem, 0.9rem + 0.8vw, 1.25rem);
+    color: var(--color-lux-clay-500);
+    line-height: 1.55;
+    margin: 0 0 var(--space-6);
+    padding-bottom: var(--space-6);
+    border-bottom: 1px solid var(--color-border-light);
+}
+
+/* ============================================
+   MODAL FOOTER
+   ============================================ */
+
+.modal__footer {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: var(--space-3);
+    padding: var(--space-4) var(--space-8);
+    border-top: 1px solid rgba(177, 130, 71, 0.14);
+    flex-shrink: 0;
+}
+
+.modal__footer .btn {
+    min-width: 120px;
+}
+
+.modal__footer .btn--secondary {
+    order: 1;
+}
+
+/* ============================================
+   BODY SCROLL LOCK
+   ============================================ */
+
+body.modal-open {
+    overflow: hidden;
+}
+
+/* ============================================
+   LOADING STATE
+   ============================================ */
+
+.modal--loading .modal__wrapper {
+    position: relative;
+    overflow: hidden;
+}
+
+.modal--loading .modal__wrapper::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: rgba(243, 236, 228, 0.82);
+    z-index: 3;
+}
+
+.modal--loading .modal__wrapper::before {
+    content: '';
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    z-index: 4;
+    width: 36px;
+    height: 36px;
+    margin: -18px 0 0 -18px;
+    border: 2px solid var(--color-lux-clay-300);
+    border-top-color: var(--color-lux-gold);
+    border-radius: 50%;
+    animation: modal-spin 0.8s linear infinite;
+}
+
+@keyframes modal-spin {
+    to {
+        transform: rotate(360deg);
+    }
+}
+
+/* ============================================
+   RESPONSIVE
+   ============================================ */
+
+@media (max-width: 768px) {
+    .modal {
+        padding: var(--space-3);
+        align-items: center;
+    }
+
+    .modal__wrapper {
+        max-width: 100%;
+        border-radius: var(--radius-xl) var(--radius-xl) var(--radius-md) var(--radius-md);
+        transform: translateY(40px);
+    }
+
+    .modal--active .modal__wrapper {
+        transform: translateY(0);
+    }
+
+    .modal__header {
+        padding: var(--space-5) var(--space-5);
+    }
+
+    .modal__title {
+        font-size: clamp(1.15rem, 1rem + 0.6vw, 1.35rem);
+    }
+
+    .modal__body {
+        padding: var(--space-5);
+    }
+
+    .modal__footer {
+        padding: var(--space-4) var(--space-5);
+        flex-direction: column;
+    }
+
+    .modal__footer .btn {
+        width: 100%;
+    }
+}
+
+@media (max-width: 64rem) {
+    .modal__body table {
+        table-layout: auto;
+    }
+
+    .modal__body table thead {
+        display: none;
+    }
+
+    .modal__body table tbody {
+        display: flex;
+        flex-direction: column;
+        gap: var(--space-3);
+    }
+
+    .modal__body table tbody tr {
+        display: grid;
+        grid-template-columns: 1fr;
+        border: 1px solid color-mix(in srgb, var(--color-primary) 18%, var(--color-white));
+        border-radius: var(--radius-md);
+        background: color-mix(in srgb, var(--color-lux-clay-50) 54%, var(--color-white));
+        overflow: hidden;
+    }
+
+    .modal__body table tbody td {
+        display: flex;
+        justify-content: space-between;
+        align-items: flex-start;
+        gap: var(--space-3);
+        border-bottom: 1px solid color-mix(in srgb, var(--color-primary) 16%, var(--color-white));
+        padding: var(--space-3) var(--space-4);
+    }
+
+    .modal__body table tbody td:last-child {
+        border-bottom: none;
+    }
+
+    .modal__body table tbody td::before {
+        content: attr(data-label);
+        font-size: clamp(0.64rem, 0.61rem + 0.1vw, 0.74rem);
+        letter-spacing: 0.05em;
+        text-transform: uppercase;
+        color: var(--color-text-secondary);
+        font-weight: 500;
+        flex-shrink: 0;
+        min-width: 6.4rem;
+    }
+
+    .modal__body table tbody td[data-label='']::before {
+        content: '';
+        min-width: 0;
+    }
+}
+
+@media (max-width: 480px) {
+    .modal {
+        padding: 0;
+        align-items: stretch;
+    }
+
+    .modal__wrapper {
+        max-width: 100vw;
+        max-height: 100dvh;
+        border-radius: 0;
+    }
+
+    .modal__header {
+        padding: var(--space-4) var(--space-4);
+    }
+
+    .modal__body {
+        padding: var(--space-4);
+    }
+
+    .modal__footer {
+        padding: var(--space-3) var(--space-4);
+    }
+}
+
+/* ============================================
+   ACCESSIBILITY
+   ============================================ */
+
+@media (prefers-reduced-motion: reduce) {
+
+    .modal,
+    .modal__wrapper {
+        transition: opacity 150ms linear, visibility 150ms linear;
+    }
+
+    .modal--loading .modal__wrapper::before {
+        animation: none;
+    }
+}
+
+/* ============================================
+   ANIMATION VARIANTS
+   ============================================ */
+
+.modal--slide-up .modal__wrapper {
+    transform: translateY(60px);
+    opacity: 0;
+}
+
+.modal--slide-up.modal--active .modal__wrapper {
+    transform: translateY(0);
+    opacity: 1;
+}
+
+.modal--scale .modal__wrapper {
+    transform: scale(0.8);
+    opacity: 0;
+}
+
+.modal--scale.modal--active .modal__wrapper {
+    transform: scale(1);
+    opacity: 1;
+}

@@ -1,0 +1,546 @@
+/* Room Management page specific refinements */
+
+.page-header-row {
+    background: var(--admin-surface, #fff);
+    border: 1px solid var(--admin-surface-border, #e5e7eb);
+    border-radius: 12px;
+    padding: 14px 16px;
+    box-shadow: 0 1px 3px rgba(15, 23, 42, 0.05);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 12px;
+}
+
+.page-header-row .page-title {
+    margin: 0;
+}
+
+.room-cards-grid {
+    margin-top: 16px;
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+    gap: 20px;
+}
+
+.room-card {
+    position: relative;
+    background: #fff;
+    border: 1px solid var(--admin-surface-border, #e5e7eb);
+    border-radius: 12px;
+    box-shadow: 0 2px 8px rgba(15, 23, 42, 0.07);
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+    transition: box-shadow 0.2s ease, transform 0.2s ease;
+}
+
+.room-card:hover {
+    box-shadow: 0 6px 20px rgba(15, 23, 42, 0.13);
+    transform: translateY(-2px);
+}
+
+.room-card-body {
+    padding: 14px 16px;
+    display: flex;
+    flex-direction: column;
+    flex: 1;
+}
+
+.drag-handle {
+    position: absolute;
+    top: 10px;
+    left: 10px;
+    z-index: 2;
+    width: 30px;
+    height: 30px;
+    border-radius: 8px;
+    border: 1px solid rgba(255, 255, 255, 0.7);
+    background: rgba(17, 24, 39, 0.4);
+    color: #fff;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    cursor: grab;
+}
+
+.room-card.dragging .drag-handle {
+    cursor: grabbing;
+}
+
+.order-badge {
+    position: absolute;
+    top: 10px;
+    right: 10px;
+    z-index: 2;
+    padding: 4px 8px;
+    border-radius: 999px;
+    background: rgba(17, 24, 39, 0.72);
+    color: #fff;
+    font-size: 11px;
+    font-weight: 700;
+}
+
+.room-card-image,
+.no-image-placeholder {
+    height: 190px;
+    width: 100%;
+}
+
+.room-card-image {
+    object-fit: cover;
+    display: block;
+}
+
+.no-image-placeholder {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    background: linear-gradient(135deg, #f6f7fb, #eceff6);
+    color: #7a8090;
+}
+
+.no-image-placeholder i {
+    font-size: 24px;
+}
+
+.room-card-desc {
+    min-height: 34px;
+    margin-bottom: 8px;
+}
+
+.room-card-price {
+    margin-bottom: 10px;
+    font-size: 18px;
+    font-weight: 700;
+    color: var(--navy, #1A1A1A);
+}
+
+.room-card-price small {
+    font-size: 12px;
+    font-weight: 400;
+    color: #888;
+}
+
+.room-card-details {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 6px 10px;
+    margin-bottom: 10px;
+}
+
+.detail-item {
+    font-size: 12px;
+    color: #4b5563;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.detail-item-price {
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--navy, #1A1A1A);
+}
+
+.detail-item-price i {
+    color: var(--gold, #8B7355);
+}
+
+.room-card-meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-bottom: 12px;
+}
+
+.room-badge {
+    font-size: 11px;
+    padding: 4px 8px;
+    border-radius: 999px;
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    font-weight: 600;
+}
+
+.badge-video {
+    background: #eef2ff;
+    color: #3730a3;
+}
+
+.room-card-actions {
+    display: flex;
+    flex-direction: column;
+    gap: 7px;
+    padding-top: 10px;
+    border-top: 1px solid #f0f0f0;
+    margin-top: auto;
+}
+
+/* ── Icon toolbar ──────────────────────────────────────────────────── */
+.rmc-toolbar {
+    display: flex;
+    align-items: center;
+    gap: 3px;
+}
+
+.rmc-icon-btn {
+    width: 34px;
+    height: 34px;
+    border-radius: 7px;
+    border: 1px solid #e5e7eb;
+    background: #f9fafb;
+    color: #6b7280;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    font-size: 12px;
+    transition: background 0.14s, color 0.14s, border-color 0.14s, transform 0.1s;
+    flex-shrink: 0;
+    padding: 0;
+    line-height: 1;
+}
+
+.rmc-icon-btn:hover {
+    background: #f3f4f6;
+    color: #374151;
+    border-color: #d1d5db;
+    transform: translateY(-1px);
+}
+
+.rmc-icon-btn--active-on {
+    background: #dcfce7;
+    color: #16a34a;
+    border-color: #86efac;
+}
+
+.rmc-icon-btn--active-on:hover {
+    background: #bbf7d0;
+}
+
+.rmc-icon-btn--active-off {
+    background: #fff7ed;
+    color: #c2410c;
+    border-color: #fed7aa;
+}
+
+.rmc-icon-btn--active-off:hover {
+    background: #ffedd5;
+}
+
+.rmc-icon-btn--featured-on {
+    background: #fef9c3;
+    color: #a16207;
+    border-color: #fde047;
+}
+
+.rmc-icon-btn--featured-on:hover {
+    background: #fef08a;
+}
+
+.rmc-icon-btn--facebook {
+    background: #1877F2;
+    color: #fff;
+    border-color: #1877F2;
+    font-size: 11px;
+}
+
+.rmc-icon-btn--facebook:hover {
+    background: #1558c0;
+    border-color: #1558c0;
+}
+
+.rmc-icon-btn--danger:hover {
+    background: #fee2e2;
+    color: #dc2626;
+    border-color: #fca5a5;
+}
+
+.rmc-toolbar-sep {
+    width: 1px;
+    height: 20px;
+    background: #e5e7eb;
+    margin: 0 3px;
+    flex-shrink: 0;
+}
+
+.rmc-spacer {
+    flex: 1;
+}
+
+/* ── Primary edit CTA ───────────────────────────────────────────────── */
+.rmc-edit-btn {
+    width: 100%;
+    padding: 9px 14px;
+    border-radius: 8px;
+    background: var(--gold, #8B7355);
+    color: #fff;
+    border: none;
+    font-family: inherit;
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 7px;
+    letter-spacing: 0.02em;
+    transition: background 0.15s, transform 0.1s;
+}
+
+.rmc-edit-btn:hover {
+    background: #7a6347;
+    transform: translateY(-1px);
+}
+
+/* ── Share All Rooms banner ─────────────────────────────────────────── */
+.fb-share-all-banner {
+    margin-top: 20px;
+    border-radius: 12px;
+    background: linear-gradient(135deg, #1877F2 0%, #0d47a1 100%);
+    color: #fff;
+    padding: 18px 24px;
+    display: flex;
+    align-items: center;
+    gap: 18px;
+    flex-wrap: wrap;
+    box-shadow: 0 4px 16px rgba(24, 119, 242, 0.25);
+}
+
+.fb-share-all-banner__icon {
+    width: 52px;
+    height: 52px;
+    border-radius: 14px;
+    background: rgba(255, 255, 255, 0.18);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 24px;
+    flex-shrink: 0;
+}
+
+.fb-share-all-banner__text {
+    flex: 1;
+    min-width: 180px;
+}
+
+.fb-share-all-banner__title {
+    font-weight: 700;
+    font-size: 1rem;
+    margin-bottom: 3px;
+    letter-spacing: 0.01em;
+}
+
+.fb-share-all-banner__sub {
+    font-size: 0.82rem;
+    opacity: 0.82;
+    line-height: 1.4;
+}
+
+.fb-share-all-btn {
+    background: rgba(255, 255, 255, 0.15);
+    color: #fff;
+    border: 2px solid rgba(255, 255, 255, 0.55);
+    border-radius: 8px;
+    padding: 10px 22px;
+    font-family: inherit;
+    font-size: 0.9rem;
+    font-weight: 600;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    transition: background 0.18s, border-color 0.18s;
+    white-space: nowrap;
+    letter-spacing: 0.01em;
+}
+
+.fb-share-all-btn:hover {
+    background: rgba(255, 255, 255, 0.28);
+    border-color: rgba(255, 255, 255, 0.9);
+}
+
+/* ── Room selection list in Share All modal ─────────────────────────── */
+.fb-room-select-list {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    max-height: 300px;
+    overflow-y: auto;
+    padding-right: 2px;
+}
+
+.fb-room-select-item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 12px;
+    border: 1.5px solid #e5e7eb;
+    border-radius: 8px;
+    cursor: pointer;
+    transition: border-color 0.14s, background 0.14s;
+    user-select: none;
+}
+
+.fb-room-select-item:hover {
+    border-color: #93c5fd;
+    background: #f8faff;
+}
+
+.fb-room-select-item.checked {
+    border-color: #1877F2;
+    background: #eff6ff;
+}
+
+.fb-room-select-item input[type="checkbox"] {
+    width: 16px;
+    height: 16px;
+    cursor: pointer;
+    flex-shrink: 0;
+    accent-color: #1877F2;
+}
+
+.fb-room-select-thumb {
+    width: 46px;
+    height: 36px;
+    object-fit: cover;
+    border-radius: 6px;
+    flex-shrink: 0;
+    background: #f3f4f6;
+}
+
+.fb-room-select-info {
+    flex: 1;
+    min-width: 0;
+}
+
+.fb-room-select-name {
+    font-weight: 600;
+    font-size: 0.86rem;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    color: #1c1e21;
+}
+
+.fb-room-select-price {
+    font-size: 0.76rem;
+    color: #6b7280;
+}
+
+.modal-content {
+    max-width: 920px;
+    width: min(920px, calc(100vw - 32px));
+}
+
+#imageModal .modal-content,
+#videoModal .modal-content {
+    max-width: 760px;
+}
+
+.modal-body {
+    padding: 18px;
+}
+
+.form-section {
+    padding-bottom: 16px;
+    margin-bottom: 16px;
+    border-bottom: 1px solid var(--admin-surface-border, #e5e7eb);
+}
+
+.form-section-title {
+    font-weight: 700;
+    color: var(--navy, #1f2937);
+    margin-bottom: 12px;
+}
+
+.form-row,
+.form-row-3,
+.checkbox-row {
+    display: grid;
+    gap: 12px;
+}
+
+.form-row {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.form-row-3 {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.checkbox-row {
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+}
+
+.form-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 10px;
+    padding: 16px 18px 20px;
+    border-top: 1px solid var(--admin-surface-border, #e5e7eb);
+}
+
+.current-image {
+    width: 100%;
+    max-height: 300px;
+    object-fit: cover;
+    border-radius: 10px;
+    border: 1px solid var(--admin-surface-border, #e5e7eb);
+}
+
+.upload-area {
+    border: 2px dashed #d6dbe6;
+    border-radius: 10px;
+    padding: 20px;
+    text-align: center;
+    background: #fafbff;
+    cursor: pointer;
+    transition: border-color .2s ease, background .2s ease;
+}
+
+.upload-area:hover {
+    border-color: var(--gold, #8B7355);
+    background: #f5f8ff;
+}
+
+@media (max-width: 900px) {
+
+    .form-row,
+    .form-row-3 {
+        grid-template-columns: 1fr;
+    }
+
+    .room-card-details {
+        grid-template-columns: 1fr;
+    }
+
+    /* Tablet: 2-column card grid with clear spacing */
+    .room-cards-grid {
+        grid-template-columns: repeat(2, 1fr);
+        gap: 16px;
+    }
+}
+
+@media (max-width: 600px) {
+
+    /* Mobile: single column, full-bleed with side breathing room */
+    .room-cards-grid {
+        grid-template-columns: 1fr;
+        gap: 16px;
+    }
+
+    .room-card-body {
+        padding: 12px 14px;
+    }
+
+    .page-header-row {
+        flex-direction: column;
+        align-items: flex-start;
+    }
+}

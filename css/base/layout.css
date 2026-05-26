@@ -1,0 +1,1588 @@
+/**
+ * Layout System
+ * Rosalyn's Hotel 2026
+ * Container, grid, flexbox, and spacing utilities
+ */
+
+/* ============================================
+   BODY & MAIN CONTENT STRUCTURE
+   ============================================ */
+
+/* Base body styles */
+body {
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    background-color: var(--color-background, #F7F3EE);
+    background-image: none;
+    color: var(--text-dark);
+    font-family: var(--font-body);
+    line-height: 1.6;
+    overflow-x: hidden;
+}
+
+/* Main content wrapper */
+main {
+    flex: 1;
+    width: 100%;
+    position: relative;
+    /* Account for fixed header */
+    padding-top: var(--header-height-mobile, var(--header-height, 80px));
+}
+
+/* Hero section is first child of main, remove its top padding */
+main>[class*="hero"]:first-child,
+main>div>[class*="hero"]:first-child {
+    margin-top: calc(var(--header-height-mobile, var(--header-height, 80px)) * -1);
+}
+
+/* Page-specific body classes */
+body.booking-page,
+body.rooms-page,
+body.rooms-gallery-page,
+body.lookup-page,
+body.confirmation-page,
+body.review-page,
+body.privacy-page {
+    background-color: var(--color-background, #F7F3EE);
+}
+
+/* Main content container - standard wrapper for page content */
+.main-content {
+    width: 100%;
+    max-width: var(--container-content, var(--container-xl));
+    margin: 0 auto;
+    padding: 0 var(--container-gutter, var(--space-4));
+}
+
+.landing-shell {
+    max-width: var(--landing-content-max, 1240px);
+    margin-inline: auto;
+}
+
+.landing-main .landing-scroll-container {
+    position: relative;
+}
+
+/* Full-width main content */
+.main-content--full {
+    max-width: 100%;
+    padding: 0;
+}
+
+/* Scroll container for special scroll effects */
+.scroll-container {
+    width: 100%;
+    overflow-x: hidden;
+}
+
+/* ============================================
+   SECTION SYSTEM
+   ============================================ */
+
+/* Standard section wrapper */
+.section {
+    padding: var(--premium-space-section, var(--section-padding)) 0;
+    position: relative;
+    background: transparent;
+    border-top: 1px solid var(--premium-divider-soft, var(--section-divider, color-mix(in srgb, #D6C9BA 72%, transparent 28%)));
+    border-bottom: 1px solid color-mix(in srgb, var(--premium-divider-soft, #D6C9BA) 48%, transparent 52%);
+    isolation: isolate;
+}
+
+/* Section aliases used in templates/includes should inherit global section system */
+:is(.section,
+    .section-padding,
+    .editorial-section,
+    .editorial-about,
+    .editorial-rooms-section,
+    .editorial-facilities-section,
+    .editorial-testimonials-section,
+    .editorial-events-section,
+    .editorial-gallery-section,
+    .editorial-experience-section,
+    .matuwi-welcome-section,
+    .restaurant-menu,
+    .editorial-wellness-intro,
+    .editorial-gym-facilities,
+    .class-schedule,
+    .personal-training,
+    .wellness-packages,
+    .upcoming-events-section,
+    .reviews-section,
+    .policy-section,
+    .review-form-container,
+    .booking-section,
+    .booking-cta) {
+    position: relative;
+}
+
+:is(.section-padding,
+    .editorial-section,
+    .editorial-rooms-section,
+    .editorial-facilities-section,
+    .editorial-testimonials-section,
+    .editorial-events-section,
+    .editorial-gallery-section,
+    .editorial-experience-section,
+    .matuwi-welcome-section,
+    .restaurant-menu,
+    .editorial-wellness-intro,
+    .editorial-gym-facilities,
+    .class-schedule,
+    .personal-training,
+    .wellness-packages,
+    .upcoming-events-section,
+    .reviews-section,
+    .review-form-container,
+    .booking-section,
+    .booking-cta) {
+    padding: var(--premium-space-section, var(--section-padding)) 0;
+    background: transparent;
+    border-top: 1px solid var(--premium-divider-soft, var(--section-divider, color-mix(in srgb, #D6C9BA 72%, transparent 28%)));
+    border-bottom: 1px solid color-mix(in srgb, var(--premium-divider-soft, #D6C9BA) 48%, transparent 52%);
+}
+
+:is(.section,
+    .section-padding,
+    .editorial-section,
+    .editorial-about,
+    .editorial-rooms-section,
+    .editorial-facilities-section,
+    .editorial-testimonials-section,
+    .editorial-events-section,
+    .editorial-gallery-section,
+    .editorial-experience-section,
+    .matuwi-welcome-section,
+    .restaurant-menu,
+    .editorial-wellness-intro,
+    .editorial-gym-facilities,
+    .class-schedule,
+    .personal-training,
+    .wellness-packages,
+    .upcoming-events-section,
+    .reviews-section,
+    .policy-section,
+    .review-form-container,
+    .booking-section,
+    .booking-cta)::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 1px;
+    pointer-events: none;
+    background: linear-gradient(90deg, transparent, color-mix(in srgb, var(--premium-divider-strong, var(--section-divider, #D6C9BA)) 78%, transparent 22%), transparent);
+    opacity: 0.72;
+}
+
+:is(.editorial-gallery-section,
+    .editorial-reviews,
+    .upcoming-events-section) {
+    background: transparent;
+}
+
+:is(.editorial-about,
+    .editorial-testimonials-section) {
+    background: transparent;
+}
+
+:is(.section,
+    .section-padding,
+    .editorial-section,
+    .editorial-about,
+    .editorial-rooms-section,
+    .editorial-facilities-section,
+    .editorial-testimonials-section,
+    .editorial-events-section,
+    .editorial-gallery-section,
+    .editorial-experience-section,
+    .matuwi-welcome-section,
+    .restaurant-menu,
+    .editorial-wellness-intro,
+    .editorial-gym-facilities,
+    .class-schedule,
+    .personal-training,
+    .wellness-packages,
+    .upcoming-events-section,
+    .reviews-section,
+    .policy-section,
+    .review-form-container,
+    .booking-section,
+    .booking-cta)> :is(.container, .main-content, .editorial-container, .editorial-about-container, .booking-widget-container) {
+    position: relative;
+    z-index: 1;
+}
+
+.section--compact {
+    padding: var(--section-padding-compact) 0;
+}
+
+.section--spacious {
+    padding: var(--section-padding-spacious) 0;
+}
+
+.section--no-padding {
+    padding: 0;
+}
+
+.section--no-padding-top {
+    padding-top: 0;
+}
+
+.section--no-padding-bottom {
+    padding-bottom: 0;
+}
+
+/* Section backgrounds */
+.section--cream {
+    background-color: transparent;
+}
+
+.section--white {
+    background-color: transparent;
+}
+
+.section--dark {
+    background-color: var(--dark);
+    color: var(--white);
+}
+
+.section--gold {
+    background-color: transparent;
+}
+
+/* Landing page premium symmetry system */
+.landing-section {
+    --section-padding: var(--premium-space-section, clamp(4.5rem, 7.5vw, 7.8rem));
+}
+
+.landing-section> :is(.container, .editorial-container, .editorial-about-container, .booking-widget-container, .main-content, .landing-shell) {
+    max-width: var(--landing-content-max, 1240px);
+    margin-inline: auto;
+}
+
+.landing-grid {
+    display: grid;
+    gap: var(--landing-grid-gap, 1.5rem);
+    align-items: stretch;
+}
+
+.landing-grid--asym {
+    grid-template-columns: minmax(0, 1.18fr) minmax(0, 0.82fr);
+    gap: clamp(1.4rem, 2.4vw, 2.8rem);
+    align-items: center;
+}
+
+.landing-grid--asym-reverse {
+    grid-template-columns: minmax(0, 0.84fr) minmax(0, 1.16fr);
+    gap: clamp(1.4rem, 2.4vw, 2.8rem);
+    align-items: center;
+}
+
+.landing-grid--three {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: var(--landing-grid-gap-lg, 2rem);
+}
+
+.landing-grid--two {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.landing-main :is(.editorial-facility-card, .editorial-testimonial-card, .editorial-review-card, .ue-card-modern, .editorial-gallery-item, .editorial-about-image) {
+    border-radius: var(--landing-card-radius, 1.1rem);
+    border-color: var(--landing-card-border, var(--color-border));
+}
+
+/* Shared japandi masonry rhythm for section-level containers/cards */
+.section-header,
+.editorial-header,
+.editorial-header-wrapper {
+    margin-bottom: var(--premium-space-intro, clamp(1.75rem, 3vw, 3rem));
+}
+
+.room-card,
+.editorial-facility-card,
+.editorial-testimonial-card,
+.editorial-review-card,
+.booking-form,
+.booking-form-card,
+.ue-card-modern,
+.event-card,
+.package-card,
+.facility-card,
+.conference-room,
+.menu-item,
+.dining-info__card,
+.room-details__section,
+.right-card,
+.review-form-card,
+.policy-section,
+.room-option {
+    background: var(--color-surface, #FCFAF8);
+    border: 1px solid var(--color-border, #DCCFC2);
+    border-radius: var(--premium-card-radius, var(--section-radius, 1rem));
+    box-shadow: var(--premium-shadow-soft, var(--shadow-japandi-soft, 0 10px 24px rgba(46, 40, 33, 0.08)));
+}
+
+.room-card:hover,
+.editorial-facility-card:hover,
+.editorial-testimonial-card:hover,
+.editorial-review-card:hover,
+.ue-card-modern:hover,
+.event-card:hover,
+.package-card:hover,
+.conference-room:hover,
+.menu-item:hover,
+.room-option:hover {
+    box-shadow: var(--premium-shadow-elevated, var(--shadow-japandi-elevated, 0 18px 34px rgba(46, 40, 33, 0.12)));
+}
+
+/* Global masonry/editorial rhythm for common content grids */
+:is(.editorial-events-grid,
+    .editorial-facilities-grid,
+    .editorial-testimonials-grid,
+    .editorial-reviews-grid,
+    .card-grid,
+    .schedule-grid,
+    .packages-grid,
+    .rooms-grid,
+    .events-grid,
+    .facilities-grid,
+    .conference-rooms,
+    .menu-items,
+    .editorial-gallery-grid,
+    .editorial-rooms-gallery-grid,
+    .room-gallery-grid,
+    .editorial-gallery,
+    .editorial-experience-grid,
+    .editorial-wellness-content-grid,
+    .training-content-grid,
+    .rights-grid) {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(min(260px, 100%), 1fr));
+    gap: var(--masonry-gap, 1.3rem);
+    align-items: stretch;
+    justify-items: stretch;
+}
+
+/* Single-item centered presentation for editorial grids */
+:is(.editorial-events-grid,
+    .editorial-conference-grid,
+    .editorial-experience-grid)>*:only-child {
+    max-width: min(600px, 100%);
+    margin-inline: auto;
+    grid-column: 1 / -1;
+}
+
+/* Two-item balanced layout for editorial grids */
+:is(.editorial-events-grid,
+    .editorial-conference-grid,
+    .editorial-experience-grid)>*:nth-last-child(2):first-child,
+:is(.editorial-events-grid,
+    .editorial-conference-grid,
+    .editorial-experience-grid)>*:nth-last-child(2):first-child~* {
+    max-width: min(520px, 100%);
+    margin-inline: auto;
+}
+
+@media (min-width: 992px) {
+
+    :is(.editorial-events-grid,
+        .editorial-conference-grid,
+        .editorial-experience-grid)>*:nth-last-child(2):first-child,
+    :is(.editorial-events-grid,
+        .editorial-conference-grid,
+        .editorial-experience-grid)>*:nth-last-child(2):first-child~* {
+        max-width: none;
+        margin-inline: 0;
+    }
+}
+
+/* Keep dark treatment sections intact */
+.personal-training.bg-dark,
+.section--dark {
+    background: var(--dark, #1B1A18) !important;
+    color: var(--white, #FFFFFF);
+}
+
+/* ============================================
+   CONTAINER SYSTEM
+   ============================================ */
+
+.container {
+    width: 100%;
+    max-width: var(--container-content, var(--container-xl));
+    margin: 0 auto;
+    padding: 0 var(--container-gutter, var(--space-4));
+}
+
+.editorial-about-container,
+.cookie-banner__inner {
+    max-width: var(--container-content, var(--container-xl));
+    margin-inline: auto;
+    padding-inline: var(--container-gutter, var(--space-4));
+}
+
+.container-sm {
+    max-width: var(--container-sm);
+}
+
+.container-md {
+    max-width: var(--container-md);
+}
+
+.container-lg {
+    max-width: var(--container-lg);
+}
+
+.container-xl {
+    max-width: var(--container-xl);
+}
+
+.container-2xl {
+    max-width: var(--container-2xl);
+}
+
+.container-fluid {
+    width: 100%;
+    padding: 0 var(--space-4);
+}
+
+/* ============================================
+   GRID SYSTEM
+   ============================================ */
+
+.grid {
+    display: grid;
+    gap: var(--grid-gap);
+}
+
+.grid-cols-1 {
+    grid-template-columns: repeat(1, 1fr);
+}
+
+.grid-cols-2 {
+    grid-template-columns: repeat(2, 1fr);
+}
+
+.grid-cols-3 {
+    grid-template-columns: repeat(3, 1fr);
+}
+
+.grid-cols-4 {
+    grid-template-columns: repeat(4, 1fr);
+}
+
+.grid-cols-6 {
+    grid-template-columns: repeat(6, 1fr);
+}
+
+.grid-cols-12 {
+    grid-template-columns: repeat(12, 1fr);
+}
+
+.grid-auto-fit {
+    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+}
+
+.grid-auto-fill {
+    grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+}
+
+.grid-gap-sm {
+    gap: var(--grid-gap-sm);
+}
+
+.grid-gap-md {
+    gap: var(--grid-gap);
+}
+
+.grid-gap-lg {
+    gap: var(--grid-gap-lg);
+}
+
+/* ============================================
+   FLEXBOX SYSTEM
+   ============================================ */
+
+.flex {
+    display: flex;
+}
+
+.flex-col {
+    flex-direction: column;
+}
+
+.flex-row {
+    flex-direction: row;
+}
+
+.flex-wrap {
+    flex-wrap: wrap;
+}
+
+.flex-nowrap {
+    flex-wrap: nowrap;
+}
+
+.justify-start {
+    justify-content: flex-start;
+}
+
+.justify-center {
+    justify-content: center;
+}
+
+.justify-end {
+    justify-content: flex-end;
+}
+
+.justify-between {
+    justify-content: space-between;
+}
+
+.justify-around {
+    justify-content: space-around;
+}
+
+.justify-evenly {
+    justify-content: space-evenly;
+}
+
+.items-start {
+    align-items: flex-start;
+}
+
+.items-center {
+    align-items: center;
+}
+
+.items-end {
+    align-items: flex-end;
+}
+
+.items-stretch {
+    align-items: stretch;
+}
+
+.flex-1 {
+    flex: 1;
+}
+
+.flex-auto {
+    flex: auto;
+}
+
+.flex-none {
+    flex: none;
+}
+
+/* ============================================
+   SPACING UTILITIES
+   ============================================ */
+
+/* Margin */
+.m-0 {
+    margin: var(--space-0);
+}
+
+.m-1 {
+    margin: var(--space-1);
+}
+
+.m-2 {
+    margin: var(--space-2);
+}
+
+.m-3 {
+    margin: var(--space-3);
+}
+
+.m-4 {
+    margin: var(--space-4);
+}
+
+.m-5 {
+    margin: var(--space-5);
+}
+
+.m-6 {
+    margin: var(--space-6);
+}
+
+.m-8 {
+    margin: var(--space-8);
+}
+
+.m-10 {
+    margin: var(--space-10);
+}
+
+.m-12 {
+    margin: var(--space-12);
+}
+
+.m-16 {
+    margin: var(--space-16);
+}
+
+.m-20 {
+    margin: var(--space-20);
+}
+
+.m-24 {
+    margin: var(--space-24);
+}
+
+.mt-0 {
+    margin-top: var(--space-0);
+}
+
+.mt-1 {
+    margin-top: var(--space-1);
+}
+
+.mt-2 {
+    margin-top: var(--space-2);
+}
+
+.mt-3 {
+    margin-top: var(--space-3);
+}
+
+.mt-4 {
+    margin-top: var(--space-4);
+}
+
+.mt-5 {
+    margin-top: var(--space-5);
+}
+
+.mt-6 {
+    margin-top: var(--space-6);
+}
+
+.mt-8 {
+    margin-top: var(--space-8);
+}
+
+.mt-10 {
+    margin-top: var(--space-10);
+}
+
+.mt-12 {
+    margin-top: var(--space-12);
+}
+
+.mt-16 {
+    margin-top: var(--space-16);
+}
+
+.mt-20 {
+    margin-top: var(--space-20);
+}
+
+.mt-24 {
+    margin-top: var(--space-24);
+}
+
+.mb-0 {
+    margin-bottom: var(--space-0);
+}
+
+.mb-1 {
+    margin-bottom: var(--space-1);
+}
+
+.mb-2 {
+    margin-bottom: var(--space-2);
+}
+
+.mb-3 {
+    margin-bottom: var(--space-3);
+}
+
+.mb-4 {
+    margin-bottom: var(--space-4);
+}
+
+.mb-5 {
+    margin-bottom: var(--space-5);
+}
+
+.mb-6 {
+    margin-bottom: var(--space-6);
+}
+
+.mb-8 {
+    margin-bottom: var(--space-8);
+}
+
+.mb-10 {
+    margin-bottom: var(--space-10);
+}
+
+.mb-12 {
+    margin-bottom: var(--space-12);
+}
+
+.mb-16 {
+    margin-bottom: var(--space-16);
+}
+
+.mb-20 {
+    margin-bottom: var(--space-20);
+}
+
+.mb-24 {
+    margin-bottom: var(--space-24);
+}
+
+.ml-0 {
+    margin-left: var(--space-0);
+}
+
+.ml-1 {
+    margin-left: var(--space-1);
+}
+
+.ml-2 {
+    margin-left: var(--space-2);
+}
+
+.ml-3 {
+    margin-left: var(--space-3);
+}
+
+.ml-4 {
+    margin-left: var(--space-4);
+}
+
+.ml-5 {
+    margin-left: var(--space-5);
+}
+
+.ml-6 {
+    margin-left: var(--space-6);
+}
+
+.ml-8 {
+    margin-left: var(--space-8);
+}
+
+.ml-10 {
+    margin-left: var(--space-10);
+}
+
+.ml-12 {
+    margin-left: var(--space-12);
+}
+
+.ml-16 {
+    margin-left: var(--space-16);
+}
+
+.ml-20 {
+    margin-left: var(--space-20);
+}
+
+.ml-24 {
+    margin-left: var(--space-24);
+}
+
+.mr-0 {
+    margin-right: var(--space-0);
+}
+
+.mr-1 {
+    margin-right: var(--space-1);
+}
+
+.mr-2 {
+    margin-right: var(--space-2);
+}
+
+.mr-3 {
+    margin-right: var(--space-3);
+}
+
+.mr-4 {
+    margin-right: var(--space-4);
+}
+
+.mr-5 {
+    margin-right: var(--space-5);
+}
+
+.mr-6 {
+    margin-right: var(--space-6);
+}
+
+.mr-8 {
+    margin-right: var(--space-8);
+}
+
+.mr-10 {
+    margin-right: var(--space-10);
+}
+
+.mr-12 {
+    margin-right: var(--space-12);
+}
+
+.mr-16 {
+    margin-right: var(--space-16);
+}
+
+.mr-20 {
+    margin-right: var(--space-20);
+}
+
+.mr-24 {
+    margin-right: var(--space-24);
+}
+
+.mx-0 {
+    margin-left: var(--space-0);
+    margin-right: var(--space-0);
+}
+
+.mx-1 {
+    margin-left: var(--space-1);
+    margin-right: var(--space-1);
+}
+
+.mx-2 {
+    margin-left: var(--space-2);
+    margin-right: var(--space-2);
+}
+
+.mx-3 {
+    margin-left: var(--space-3);
+    margin-right: var(--space-3);
+}
+
+.mx-4 {
+    margin-left: var(--space-4);
+    margin-right: var(--space-4);
+}
+
+.mx-5 {
+    margin-left: var(--space-5);
+    margin-right: var(--space-5);
+}
+
+.mx-6 {
+    margin-left: var(--space-6);
+    margin-right: var(--space-6);
+}
+
+.mx-8 {
+    margin-left: var(--space-8);
+    margin-right: var(--space-8);
+}
+
+.mx-10 {
+    margin-left: var(--space-10);
+    margin-right: var(--space-10);
+}
+
+.mx-12 {
+    margin-left: var(--space-12);
+    margin-right: var(--space-12);
+}
+
+.mx-16 {
+    margin-left: var(--space-16);
+    margin-right: var(--space-16);
+}
+
+.mx-20 {
+    margin-left: var(--space-20);
+    margin-right: var(--space-20);
+}
+
+.mx-24 {
+    margin-left: var(--space-24);
+    margin-right: var(--space-24);
+}
+
+.my-0 {
+    margin-top: var(--space-0);
+    margin-bottom: var(--space-0);
+}
+
+.my-1 {
+    margin-top: var(--space-1);
+    margin-bottom: var(--space-1);
+}
+
+.my-2 {
+    margin-top: var(--space-2);
+    margin-bottom: var(--space-2);
+}
+
+.my-3 {
+    margin-top: var(--space-3);
+    margin-bottom: var(--space-3);
+}
+
+.my-4 {
+    margin-top: var(--space-4);
+    margin-bottom: var(--space-4);
+}
+
+.my-5 {
+    margin-top: var(--space-5);
+    margin-bottom: var(--space-5);
+}
+
+.my-6 {
+    margin-top: var(--space-6);
+    margin-bottom: var(--space-6);
+}
+
+.my-8 {
+    margin-top: var(--space-8);
+    margin-bottom: var(--space-8);
+}
+
+.my-10 {
+    margin-top: var(--space-10);
+    margin-bottom: var(--space-10);
+}
+
+.my-12 {
+    margin-top: var(--space-12);
+    margin-bottom: var(--space-12);
+}
+
+.my-16 {
+    margin-top: var(--space-16);
+    margin-bottom: var(--space-16);
+}
+
+.my-20 {
+    margin-top: var(--space-20);
+    margin-bottom: var(--space-20);
+}
+
+.my-24 {
+    margin-top: var(--space-24);
+    margin-bottom: var(--space-24);
+}
+
+/* Padding */
+.p-0 {
+    padding: var(--space-0);
+}
+
+.p-1 {
+    padding: var(--space-1);
+}
+
+.p-2 {
+    padding: var(--space-2);
+}
+
+.p-3 {
+    padding: var(--space-3);
+}
+
+.p-4 {
+    padding: var(--space-4);
+}
+
+.p-5 {
+    padding: var(--space-5);
+}
+
+.p-6 {
+    padding: var(--space-6);
+}
+
+.p-8 {
+    padding: var(--space-8);
+}
+
+.p-10 {
+    padding: var(--space-10);
+}
+
+.p-12 {
+    padding: var(--space-12);
+}
+
+.p-16 {
+    padding: var(--space-16);
+}
+
+.p-20 {
+    padding: var(--space-20);
+}
+
+.p-24 {
+    padding: var(--space-24);
+}
+
+.pt-0 {
+    padding-top: var(--space-0);
+}
+
+.pt-1 {
+    padding-top: var(--space-1);
+}
+
+.pt-2 {
+    padding-top: var(--space-2);
+}
+
+.pt-3 {
+    padding-top: var(--space-3);
+}
+
+.pt-4 {
+    padding-top: var(--space-4);
+}
+
+.pt-5 {
+    padding-top: var(--space-5);
+}
+
+.pt-6 {
+    padding-top: var(--space-6);
+}
+
+.pt-8 {
+    padding-top: var(--space-8);
+}
+
+.pt-10 {
+    padding-top: var(--space-10);
+}
+
+.pt-12 {
+    padding-top: var(--space-12);
+}
+
+.pt-16 {
+    padding-top: var(--space-16);
+}
+
+.pt-20 {
+    padding-top: var(--space-20);
+}
+
+.pt-24 {
+    padding-top: var(--space-24);
+}
+
+.pb-0 {
+    padding-bottom: var(--space-0);
+}
+
+.pb-1 {
+    padding-bottom: var(--space-1);
+}
+
+.pb-2 {
+    padding-bottom: var(--space-2);
+}
+
+.pb-3 {
+    padding-bottom: var(--space-3);
+}
+
+.pb-4 {
+    padding-bottom: var(--space-4);
+}
+
+.pb-5 {
+    padding-bottom: var(--space-5);
+}
+
+.pb-6 {
+    padding-bottom: var(--space-6);
+}
+
+.pb-8 {
+    padding-bottom: var(--space-8);
+}
+
+.pb-10 {
+    padding-bottom: var(--space-10);
+}
+
+.pb-12 {
+    padding-bottom: var(--space-12);
+}
+
+.pb-16 {
+    padding-bottom: var(--space-16);
+}
+
+.pb-20 {
+    padding-bottom: var(--space-20);
+}
+
+.pb-24 {
+    padding-bottom: var(--space-24);
+}
+
+.pl-0 {
+    padding-left: var(--space-0);
+}
+
+.pl-1 {
+    padding-left: var(--space-1);
+}
+
+.pl-2 {
+    padding-left: var(--space-2);
+}
+
+.pl-3 {
+    padding-left: var(--space-3);
+}
+
+.pl-4 {
+    padding-left: var(--space-4);
+}
+
+.pl-5 {
+    padding-left: var(--space-5);
+}
+
+.pl-6 {
+    padding-left: var(--space-6);
+}
+
+.pl-8 {
+    padding-left: var(--space-8);
+}
+
+.pl-10 {
+    padding-left: var(--space-10);
+}
+
+.pl-12 {
+    padding-left: var(--space-12);
+}
+
+.pl-16 {
+    padding-left: var(--space-16);
+}
+
+.pl-20 {
+    padding-left: var(--space-20);
+}
+
+.pl-24 {
+    padding-left: var(--space-24);
+}
+
+.pr-0 {
+    padding-right: var(--space-0);
+}
+
+.pr-1 {
+    padding-right: var(--space-1);
+}
+
+.pr-2 {
+    padding-right: var(--space-2);
+}
+
+.pr-3 {
+    padding-right: var(--space-3);
+}
+
+.pr-4 {
+    padding-right: var(--space-4);
+}
+
+.pr-5 {
+    padding-right: var(--space-5);
+}
+
+.pr-6 {
+    padding-right: var(--space-6);
+}
+
+.pr-8 {
+    padding-right: var(--space-8);
+}
+
+.pr-10 {
+    padding-right: var(--space-10);
+}
+
+.pr-12 {
+    padding-right: var(--space-12);
+}
+
+.pr-16 {
+    padding-right: var(--space-16);
+}
+
+.pr-20 {
+    padding-right: var(--space-20);
+}
+
+.pr-24 {
+    padding-right: var(--space-24);
+}
+
+.px-0 {
+    padding-left: var(--space-0);
+    padding-right: var(--space-0);
+}
+
+.px-1 {
+    padding-left: var(--space-1);
+    padding-right: var(--space-1);
+}
+
+.px-2 {
+    padding-left: var(--space-2);
+    padding-right: var(--space-2);
+}
+
+.px-3 {
+    padding-left: var(--space-3);
+    padding-right: var(--space-3);
+}
+
+.px-4 {
+    padding-left: var(--space-4);
+    padding-right: var(--space-4);
+}
+
+.px-5 {
+    padding-left: var(--space-5);
+    padding-right: var(--space-5);
+}
+
+.px-6 {
+    padding-left: var(--space-6);
+    padding-right: var(--space-6);
+}
+
+.px-8 {
+    padding-left: var(--space-8);
+    padding-right: var(--space-8);
+}
+
+.px-10 {
+    padding-left: var(--space-10);
+    padding-right: var(--space-10);
+}
+
+.px-12 {
+    padding-left: var(--space-12);
+    padding-right: var(--space-12);
+}
+
+.px-16 {
+    padding-left: var(--space-16);
+    padding-right: var(--space-16);
+}
+
+.px-20 {
+    padding-left: var(--space-20);
+    padding-right: var(--space-20);
+}
+
+.px-24 {
+    padding-left: var(--space-24);
+    padding-right: var(--space-24);
+}
+
+.py-0 {
+    padding-top: var(--space-0);
+    padding-bottom: var(--space-0);
+}
+
+.py-1 {
+    padding-top: var(--space-1);
+    padding-bottom: var(--space-1);
+}
+
+.py-2 {
+    padding-top: var(--space-2);
+    padding-bottom: var(--space-2);
+}
+
+.py-3 {
+    padding-top: var(--space-3);
+    padding-bottom: var(--space-3);
+}
+
+.py-4 {
+    padding-top: var(--space-4);
+    padding-bottom: var(--space-4);
+}
+
+.py-5 {
+    padding-top: var(--space-5);
+    padding-bottom: var(--space-5);
+}
+
+.py-6 {
+    padding-top: var(--space-6);
+    padding-bottom: var(--space-6);
+}
+
+.py-8 {
+    padding-top: var(--space-8);
+    padding-bottom: var(--space-8);
+}
+
+.py-10 {
+    padding-top: var(--space-10);
+    padding-bottom: var(--space-10);
+}
+
+.py-12 {
+    padding-top: var(--space-12);
+    padding-bottom: var(--space-12);
+}
+
+.py-16 {
+    padding-top: var(--space-16);
+    padding-bottom: var(--space-16);
+}
+
+.py-20 {
+    padding-top: var(--space-20);
+    padding-bottom: var(--space-20);
+}
+
+.py-24 {
+    padding-top: var(--space-24);
+    padding-bottom: var(--space-24);
+}
+
+/* ============================================
+   DISPLAY UTILITIES
+   ============================================ */
+
+.block {
+    display: block;
+}
+
+.inline {
+    display: inline;
+}
+
+.inline-block {
+    display: inline-block;
+}
+
+.hidden {
+    display: none;
+}
+
+.visible {
+    display: block;
+}
+
+.relative {
+    position: relative;
+}
+
+.absolute {
+    position: absolute;
+}
+
+.fixed {
+    position: fixed;
+}
+
+.sticky {
+    position: sticky;
+}
+
+.static {
+    position: static;
+}
+
+/* ============================================
+   WIDTH & SIZING
+   ============================================ */
+
+.w-full {
+    width: 100%;
+}
+
+.w-auto {
+    width: auto;
+}
+
+.w-screen {
+    width: 100vw;
+}
+
+.w-min-screen {
+    min-width: 100vw;
+}
+
+.h-full {
+    height: 100%;
+}
+
+.h-auto {
+    height: auto;
+}
+
+.h-screen {
+    height: 100vh;
+}
+
+.h-min-screen {
+    min-height: 100vh;
+}
+
+.max-w-full {
+    max-width: 100%;
+}
+
+.max-w-none {
+    max-width: none;
+}
+
+.max-h-full {
+    max-height: 100%;
+}
+
+.max-h-none {
+    max-height: none;
+}
+
+/* ============================================
+   RESPONSIVE UTILITIES
+   ============================================ */
+
+@media (max-width: 768px) {
+    .container {
+        padding: 0 var(--space-4);
+    }
+
+    .main-content {
+        padding: 0 var(--space-4);
+    }
+
+    .section {
+        padding: var(--premium-space-section-mobile, var(--section-padding-mobile)) 0;
+    }
+
+    :is(.section-padding,
+        .editorial-section,
+        .editorial-about,
+        .editorial-rooms-section,
+        .editorial-facilities-section,
+        .editorial-testimonials-section,
+        .editorial-events-section,
+        .editorial-gallery-section,
+        .editorial-experience-section,
+        .matuwi-welcome-section,
+        .restaurant-menu,
+        .editorial-wellness-intro,
+        .editorial-gym-facilities,
+        .class-schedule,
+        .personal-training,
+        .wellness-packages,
+        .upcoming-events-section,
+        .reviews-section,
+        .review-form-container,
+        .booking-section,
+        .booking-cta,
+        .policy-section) {
+        padding: var(--premium-space-section-mobile, var(--section-padding-mobile)) 0;
+    }
+
+    .section--compact {
+        padding: var(--section-padding-compact-mobile) 0;
+    }
+
+    .section--spacious {
+        padding: var(--section-padding-spacious-mobile) 0;
+    }
+
+    :is(.editorial-events-grid,
+        .editorial-facilities-grid,
+        .editorial-testimonials-grid,
+        .editorial-reviews-grid,
+        .card-grid,
+        .schedule-grid,
+        .packages-grid,
+        .rooms-grid,
+        .events-grid,
+        .facilities-grid,
+        .conference-rooms,
+        .menu-items,
+        .editorial-gallery-grid,
+        .editorial-rooms-gallery-grid,
+        .room-gallery-grid,
+        .editorial-gallery,
+        .rights-grid) {
+        grid-template-columns: 1fr;
+    }
+
+    .grid-cols-4,
+    .grid-cols-6,
+    .grid-cols-12 {
+        grid-template-columns: repeat(2, 1fr);
+    }
+
+    .grid-cols-3 {
+        grid-template-columns: repeat(1, 1fr);
+    }
+
+    .landing-grid--three,
+    .landing-grid--two,
+    .landing-grid--asym,
+    .landing-grid--asym-reverse {
+        grid-template-columns: 1fr;
+    }
+
+    .flex-col-sm {
+        flex-direction: column;
+    }
+
+    .hidden-mobile {
+        display: none;
+    }
+
+    .visible-mobile {
+        display: block;
+    }
+}
+
+@media (min-width: 769px) {
+    .hidden-desktop {
+        display: none;
+    }
+
+    .visible-desktop {
+        display: block;
+    }
+}
+
+@media (min-width: 1024px) {
+    .main-content {
+        padding: 0 var(--container-gutter, var(--space-6));
+    }
+
+    .landing-grid--three>* {
+        min-width: 0;
+    }
+}
+
+@media (min-width: 1280px) {
+    .main-content {
+        padding: 0 var(--container-gutter, var(--space-8));
+    }
+}

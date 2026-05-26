@@ -1,0 +1,611 @@
+/**
+ * Animation Utilities
+ * Rosalyn's Hotel 2026
+ * Reusable animations and transitions with BEM methodology
+ */
+
+/* ============================================
+   SCROLL REVEAL — IntersectionObserver driven
+   scroll-reveal.js adds .revealed and .is-revealed when element enters viewport
+   ============================================ */
+
+.reveal-on-scroll {
+    opacity: 0;
+    transform: translateY(28px);
+    transition: opacity 0.7s cubic-bezier(0.4, 0, 0.2, 1),
+        transform 0.7s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.reveal-on-scroll[data-scroll-delay="100"] {
+    transition-delay: 0.1s;
+}
+
+.reveal-on-scroll[data-scroll-delay="200"] {
+    transition-delay: 0.2s;
+}
+
+.reveal-on-scroll[data-scroll-delay="300"] {
+    transition-delay: 0.3s;
+}
+
+.reveal-on-scroll.is-revealed {
+    opacity: 1;
+    transform: translateY(0);
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .reveal-on-scroll {
+        opacity: 1;
+        transform: none;
+        transition: none;
+    }
+}
+
+/* ============================================
+   FADE ANIMATIONS
+   ============================================ */
+
+.fade-in {
+    animation: fadeIn 0.5s ease-out;
+}
+
+.fade-out {
+    animation: fadeOut 0.5s ease-out;
+}
+
+.fade-up {
+    animation: fadeUp 0.6s ease-out;
+}
+
+.fade-down {
+    animation: fadeDown 0.6s ease-out;
+}
+
+.fade-left {
+    animation: fadeLeft 0.6s ease-out;
+}
+
+.fade-right {
+    animation: fadeRight 0.6s ease-out;
+}
+
+@keyframes fadeIn {
+    from {
+        opacity: 0;
+    }
+
+    to {
+        opacity: 1;
+    }
+}
+
+@keyframes fadeOut {
+    from {
+        opacity: 1;
+    }
+
+    to {
+        opacity: 0;
+    }
+}
+
+@keyframes fadeUp {
+    from {
+        opacity: 0;
+        transform: translateY(20px);
+    }
+
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+@keyframes fadeDown {
+    from {
+        opacity: 0;
+        transform: translateY(-20px);
+    }
+
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+@keyframes fadeLeft {
+    from {
+        opacity: 0;
+        transform: translateX(20px);
+    }
+
+    to {
+        opacity: 1;
+        transform: translateX(0);
+    }
+}
+
+@keyframes fadeRight {
+    from {
+        opacity: 0;
+        transform: translateX(-20px);
+    }
+
+    to {
+        opacity: 1;
+        transform: translateX(0);
+    }
+}
+
+/* ============================================
+   SLIDE ANIMATIONS
+   ============================================ */
+
+.slide-in-up {
+    animation: slideInUp 0.6s ease-out;
+}
+
+.slide-in-down {
+    animation: slideInDown 0.6s ease-out;
+}
+
+.slide-in-left {
+    animation: slideInLeft 0.6s ease-out;
+}
+
+.slide-in-right {
+    animation: slideInRight 0.6s ease-out;
+}
+
+.slide-out-up {
+    animation: slideOutUp 0.6s ease-out;
+}
+
+.slide-out-down {
+    animation: slideOutDown 0.6s ease-out;
+}
+
+.slide-out-left {
+    animation: slideOutLeft 0.6s ease-out;
+}
+
+.slide-out-right {
+    animation: slideOutRight 0.6s ease-out;
+}
+
+@keyframes slideInUp {
+    from {
+        opacity: 0;
+        transform: translateY(30px);
+    }
+
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+@keyframes slideInDown {
+    from {
+        opacity: 0;
+        transform: translateY(-30px);
+    }
+
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+@keyframes slideInLeft {
+    from {
+        opacity: 0;
+        transform: translateX(30px);
+    }
+
+    to {
+        opacity: 1;
+        transform: translateX(0);
+    }
+}
+
+@keyframes slideInRight {
+    from {
+        opacity: 0;
+        transform: translateX(-30px);
+    }
+
+    to {
+        opacity: 1;
+        transform: translateX(0);
+    }
+}
+
+@keyframes slideOutUp {
+    from {
+        opacity: 1;
+        transform: translateY(0);
+    }
+
+    to {
+        opacity: 0;
+        transform: translateY(-30px);
+    }
+}
+
+@keyframes slideOutDown {
+    from {
+        opacity: 1;
+        transform: translateY(0);
+    }
+
+    to {
+        opacity: 0;
+        transform: translateY(30px);
+    }
+}
+
+@keyframes slideOutLeft {
+    from {
+        opacity: 1;
+        transform: translateX(0);
+    }
+
+    to {
+        opacity: 0;
+        transform: translateX(-30px);
+    }
+}
+
+@keyframes slideOutRight {
+    from {
+        opacity: 1;
+        transform: translateX(0);
+    }
+
+    to {
+        opacity: 0;
+        transform: translateX(30px);
+    }
+}
+
+/* ============================================
+   SCALE ANIMATIONS
+   ============================================ */
+
+.scale-in {
+    animation: scaleIn 0.4s ease-out;
+}
+
+.scale-out {
+    animation: scaleOut 0.4s ease-out;
+}
+
+.scale-up {
+    animation: scaleUp 0.4s ease-out;
+}
+
+.scale-down {
+    animation: scaleDown 0.4s ease-out;
+}
+
+@keyframes scaleIn {
+    from {
+        opacity: 0;
+        transform: scale(0.8);
+    }
+
+    to {
+        opacity: 1;
+        transform: scale(1);
+    }
+}
+
+@keyframes scaleOut {
+    from {
+        opacity: 1;
+        transform: scale(1);
+    }
+
+    to {
+        opacity: 0;
+        transform: scale(0.8);
+    }
+}
+
+@keyframes scaleUp {
+    0% {
+        opacity: 0;
+        transform: scale(0.8) translateY(20px);
+    }
+
+    50% {
+        opacity: 1;
+        transform: scale(1.05) translateY(-5px);
+    }
+
+    100% {
+        opacity: 1;
+        transform: scale(1) translateY(0);
+    }
+}
+
+@keyframes scaleDown {
+    0% {
+        opacity: 0;
+        transform: scale(0.8) translateY(-20px);
+    }
+
+    50% {
+        opacity: 1;
+        transform: scale(1.05) translateY(5px);
+    }
+
+    100% {
+        opacity: 1;
+        transform: scale(1) translateY(0);
+    }
+}
+
+/* ============================================
+   ROTATE ANIMATIONS
+   ============================================ */
+
+.rotate-in {
+    animation: rotateIn 0.6s ease-out;
+}
+
+.rotate-out {
+    animation: rotateOut 0.6s ease-out;
+}
+
+.rotate-clockwise {
+    animation: rotateClockwise 2s linear infinite;
+}
+
+.rotate-counter-clockwise {
+    animation: rotateCounterClockwise 2s linear infinite;
+}
+
+@keyframes rotateIn {
+    from {
+        opacity: 0;
+        transform: rotate(-180deg) scale(0.8);
+    }
+
+    to {
+        opacity: 1;
+        transform: rotate(0deg) scale(1);
+    }
+}
+
+@keyframes rotateOut {
+    from {
+        opacity: 1;
+        transform: rotate(0deg) scale(1);
+    }
+
+    to {
+        opacity: 0;
+        transform: rotate(180deg) scale(0.8);
+    }
+}
+
+@keyframes rotateClockwise {
+    from {
+        transform: rotate(0deg);
+    }
+
+    to {
+        transform: rotate(360deg);
+    }
+}
+
+@keyframes rotateCounterClockwise {
+    from {
+        transform: rotate(360deg);
+    }
+
+    to {
+        transform: rotate(0deg);
+    }
+}
+
+/* ============================================
+   BOUNCE ANIMATIONS
+   ============================================ */
+
+.bounce-in {
+    animation: bounceIn 0.8s ease-out;
+}
+
+.bounce-up {
+    animation: bounceUp 1s ease-out;
+}
+
+.bounce-down {
+    animation: bounceDown 1s ease-out;
+}
+
+@keyframes bounceIn {
+    0% {
+        opacity: 0;
+        transform: scale(0.3);
+    }
+
+    50% {
+        opacity: 1;
+        transform: scale(1.05);
+    }
+
+    70% {
+        transform: scale(0.9);
+    }
+
+    80% {
+        transform: scale(1.05);
+    }
+
+    100% {
+        opacity: 1;
+        transform: scale(1);
+    }
+}
+
+@keyframes bounceUp {
+
+    0%,
+    20%,
+    50%,
+    80% {
+        transform: translateY(0);
+    }
+
+    40% {
+        transform: translateY(-10px);
+    }
+
+    60% {
+        transform: translateY(-5px);
+    }
+}
+
+@keyframes bounceDown {
+
+    0%,
+    20%,
+    50%,
+    80% {
+        transform: translateY(0);
+    }
+
+    40% {
+        transform: translateY(10px);
+    }
+
+    60% {
+        transform: translateY(5px);
+    }
+}
+
+/* ============================================
+   PULSE ANIMATIONS
+   ============================================ */
+
+.pulse {
+    animation: pulse 2s ease-in-out infinite;
+}
+
+.pulse-once {
+    animation: pulseOnce 1s ease-out;
+}
+
+@keyframes pulse {
+    0% {
+        transform: scale(1);
+        opacity: 1;
+    }
+
+    50% {
+        transform: scale(1.05);
+        opacity: 0.8;
+    }
+
+    100% {
+        transform: scale(1);
+        opacity: 1;
+    }
+}
+
+@keyframes pulseOnce {
+    0% {
+        transform: scale(1);
+        opacity: 0;
+    }
+
+    50% {
+        transform: scale(1.1);
+        opacity: 1;
+    }
+
+    100% {
+        transform: scale(1);
+        opacity: 0;
+    }
+}
+
+/* ============================================
+   UTILITY CLASSES
+   ============================================ */
+
+.animate-on-hover:hover {
+    animation-play-state: paused;
+}
+
+.animate-on-hover:hover:hover {
+    animation-play-state: running;
+}
+
+.animate-on-scroll {
+    opacity: 0;
+    transform: translateY(20px);
+    transition: all var(--transition-base) var(--easing-out);
+}
+
+.animate-on-scroll.is-visible {
+    opacity: 1;
+    transform: translateY(0);
+}
+
+/* ============================================
+   DURATION UTILITIES
+   ============================================ */
+
+.duration-fast {
+    animation-duration: var(--transition-fast);
+}
+
+.duration-base {
+    animation-duration: var(--transition-base);
+}
+
+.duration-slow {
+    animation-duration: var(--transition-slow);
+}
+
+.duration-slower {
+    animation-duration: var(--transition-slower);
+}
+
+/* ============================================
+   PREFERS REDUCED MOTION
+   ============================================ */
+
+@media (prefers-reduced-motion: reduce) {
+
+    .animate-on-hover,
+    .animate-on-scroll {
+        transition: none;
+        animation: none;
+    }
+
+    .rotate-clockwise,
+    .rotate-counter-clockwise,
+    .pulse {
+        animation: none;
+    }
+
+    .rotate-clockwise::before,
+    .rotate-counter-clockwise::before,
+    .pulse::before {
+        content: '';
+        position: absolute;
+        top: 50%;
+        left: 50%;
+        width: 10px;
+        height: 10px;
+        background: var(--color-primary);
+        border-radius: 50%;
+        opacity: 0.8;
+    }
+}

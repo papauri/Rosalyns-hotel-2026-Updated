@@ -1,0 +1,80 @@
+/* Facebook Settings — admin/facebook-settings.css */
+
+.fb-icon {
+    color: #1877F2;
+    margin-right: 10px;
+}
+
+.fb-card {
+    border-left: 4px solid #1877F2;
+}
+
+.fb-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 10px 22px;
+    background: #1877F2;
+    color: #fff;
+    border: none;
+    border-radius: 6px;
+    font-family: inherit;
+    font-size: 0.9rem;
+    font-weight: 500;
+    cursor: pointer;
+    transition: background 0.2s;
+}
+
+.fb-btn:hover {
+    background: #1558c0;
+}
+
+.fb-btn:disabled {
+    background: #9ab3de;
+    cursor: not-allowed;
+}
+
+/* Share-to-Facebook button in card action rows.
+   .btn-action.btn-facebook uses 2-class specificity to override .btn-action (1 class). */
+.btn-facebook,
+.btn-action.btn-facebook {
+    background: #1877F2;
+    color: #fff;
+    border-color: #1877F2;
+}
+
+.btn-facebook:hover,
+.btn-action.btn-facebook:hover {
+    background: #1558c0;
+    border-color: #1558c0;
+    color: #fff;
+}
+
+/* Preview caption textarea in share modal */
+.fb-caption-preview {
+    width: 100%;
+    min-height: 120px;
+    padding: 10px 12px;
+    border: 1px solid #d0d7de;
+    border-radius: 6px;
+    font-family: inherit;
+    font-size: 0.875rem;
+    line-height: 1.5;
+    resize: vertical;
+    box-sizing: border-box;
+}
+
+.fb-caption-preview:focus {
+    outline: none;
+    border-color: #1877F2;
+    box-shadow: 0 0 0 3px rgba(24, 119, 242, 0.12);
+}
+
+.fb-include-image-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-top: 12px;
+    font-size: 0.875rem;
+    color: var(--color-text-secondary, #5E554D);
+}

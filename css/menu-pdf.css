@@ -1,0 +1,298 @@
+/* Editorial menu inspired by reference card, with dynamic content support */
+:root {
+    --paper: #ece7df;
+    --paper-2: #f3efe8;
+    --ink: #111111;
+    --muted: #4c463f;
+    --line: rgba(17, 17, 17, 0.6);
+}
+
+* { box-sizing: border-box; }
+
+html,
+body {
+    margin: 0;
+    padding: 0;
+}
+
+body {
+    font-family: 'Montserrat', Arial, sans-serif;
+    color: var(--ink);
+    background: var(--paper);
+}
+
+.print-bar {
+    position: sticky;
+    top: 0;
+    z-index: 20;
+    display: flex;
+    justify-content: center;
+    gap: 10px;
+    padding: 12px;
+    border-bottom: 1px solid var(--line);
+    background: rgba(243, 239, 232, 0.94);
+}
+
+.btn-print,
+.btn-back {
+    border: 1px solid #1f1f1f;
+    padding: 9px 14px;
+    border-radius: 0;
+    font-size: 0.86rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.07em;
+    text-decoration: none;
+    cursor: pointer;
+}
+
+.btn-print {
+    background: #111;
+    color: #fff;
+}
+
+.btn-back {
+    background: transparent;
+    color: #111;
+}
+
+.menu-page {
+    max-width: 1100px;
+    margin: 0 auto;
+    padding: 24px 28px 34px;
+    background: var(--paper);
+}
+
+.menu-top {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-end;
+    border-bottom: 1px solid var(--line);
+    padding-bottom: 12px;
+    margin-bottom: 18px;
+}
+
+.hotel-name {
+    font-family: 'Cormorant Garamond', Georgia, serif;
+    font-size: clamp(1.7rem, 3.2vw, 2.35rem);
+    font-weight: 600;
+    letter-spacing: 0.03em;
+    line-height: 1;
+}
+
+.tagline {
+    margin-top: 4px;
+    color: var(--muted);
+    font-size: 0.9rem;
+}
+
+.menu-date {
+    color: var(--muted);
+    font-size: 0.8rem;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+}
+
+.editorial-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 0 30px;
+}
+
+.col {
+    min-width: 0;
+}
+
+.col-right {
+    border-left: 1px solid var(--line);
+    padding-left: 28px;
+}
+
+.menu-wordmark {
+    margin: 8px 0 18px;
+    line-height: 0.88;
+    font-family: 'Cormorant Garamond', Georgia, serif;
+    font-size: clamp(6rem, 16vw, 10.2rem);
+    font-weight: 700;
+    letter-spacing: -0.02em;
+}
+
+.menu-wordmark span {
+    display: block;
+}
+
+.menu-category {
+    margin-bottom: 14px;
+}
+
+.section-divider {
+    border-top: 1px solid var(--line);
+    border-bottom: 1px solid var(--line);
+    padding: 10px 0 8px;
+    margin: 0 0 10px;
+}
+
+.section-divider h2 {
+    margin: 0;
+    font-size: clamp(1.58rem, 2.4vw, 2rem);
+    font-family: 'Cormorant Garamond', Georgia, serif;
+    font-weight: 600;
+    line-height: 1;
+}
+
+.menu-item {
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+    padding: 4px 0 1px;
+}
+
+.item-name {
+    max-width: 62%;
+    font-size: 1.08rem;
+    font-weight: 600;
+    line-height: 1.28;
+}
+
+.item-dots {
+    flex: 1;
+    border-bottom: 1px dotted rgba(17, 17, 17, 0.42);
+    transform: translateY(-2px);
+}
+
+.item-price {
+    font-size: 1.02rem;
+    font-weight: 700;
+    white-space: nowrap;
+}
+
+.item-desc {
+    margin: 2px 0 7px;
+    font-size: 0.88rem;
+    color: var(--muted);
+    line-height: 1.35;
+    max-width: 95%;
+}
+
+.specials-block {
+    margin: 14px 0 16px;
+}
+
+.specials-title {
+    background: #0f0f0f;
+    color: #fff;
+    padding: 11px 12px;
+    font-size: 1.85rem;
+    font-family: 'Cormorant Garamond', Georgia, serif;
+    font-weight: 600;
+    line-height: 1;
+    margin: 8px 0 12px;
+}
+
+.drinks-block {
+    margin-top: 6px;
+}
+
+.drinks-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 0 18px;
+}
+
+.drinks-grid > div + div {
+    border-left: 1px solid var(--line);
+    padding-left: 16px;
+}
+
+.drink-row .item-name {
+    font-size: 1.01rem;
+    max-width: 65%;
+}
+
+.menu-footer {
+    margin-top: 18px;
+    border-top: 1px solid var(--line);
+    padding-top: 12px;
+    text-align: center;
+    color: var(--muted);
+    font-size: 0.87rem;
+    line-height: 1.45;
+}
+
+.currency-note {
+    color: var(--ink);
+    margin-top: 4px;
+}
+
+.contact-line {
+    margin-top: 5px;
+    display: flex;
+    justify-content: center;
+    flex-wrap: wrap;
+    gap: 8px;
+}
+
+@media (max-width: 900px) {
+    .menu-page {
+        padding: 20px 16px 28px;
+    }
+
+    .editorial-grid {
+        grid-template-columns: 1fr;
+        gap: 0;
+    }
+
+    .col-right {
+        border-left: 0;
+        padding-left: 0;
+    }
+
+    .menu-wordmark {
+        font-size: clamp(4.2rem, 21vw, 7.8rem);
+    }
+
+    .drinks-grid {
+        grid-template-columns: 1fr;
+    }
+
+    .drinks-grid > div + div {
+        border-left: 0;
+        border-top: 1px solid var(--line);
+        padding-left: 0;
+        margin-top: 8px;
+        padding-top: 8px;
+    }
+}
+
+@media print {
+    body {
+        background: #fff;
+    }
+
+    .no-print {
+        display: none !important;
+    }
+
+    .menu-page {
+        max-width: none;
+        margin: 0;
+        padding: 0;
+    }
+
+    .menu-top,
+    .section-divider,
+    .menu-footer,
+    .col-right,
+    .drinks-grid > div + div {
+        border-color: #666;
+    }
+
+    .item-dots {
+        border-bottom-color: #666;
+    }
+
+    .specials-title {
+        background: #111;
+        color: #fff;
+    }
+}

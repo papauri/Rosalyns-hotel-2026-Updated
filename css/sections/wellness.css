@@ -1,0 +1,1056 @@
+/**
+ * Wellness Section Styles
+ * Rosalyn's Hotel 2026
+ * Styles for gym, fitness, and wellness pages
+ */
+
+/* ============================================
+   EDITORIAL WELLNESS INTRO SECTION
+   ============================================ */
+
+.editorial-wellness-intro {
+    position: relative;
+    padding: var(--spacing-3xl, 80px) 0;
+    background: linear-gradient(180deg, var(--color-surface, #FCFAF8) 0%, white 100%);
+}
+
+.editorial-wellness-content-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: var(--spacing-3xl, 80px);
+    align-items: center;
+}
+
+.editorial-wellness-text {
+    color: var(--color-text-primary, #1A1A1A);
+}
+
+.editorial-wellness-features {
+    display: flex;
+    flex-direction: column;
+    gap: var(--spacing-lg, 24px);
+}
+
+.editorial-feature-item {
+    display: flex;
+    gap: var(--spacing-lg, 24px);
+    padding: var(--spacing-lg, 24px);
+    background: white;
+    border: 1px solid rgba(139, 115, 85, 0.12);
+    border-radius: var(--radius-lg, 16px);
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.editorial-feature-item:hover {
+    transform: translateX(8px);
+    box-shadow: 0 8px 24px rgba(46, 40, 33, 0.08);
+    border-color: rgba(139, 115, 85, 0.2);
+}
+
+.editorial-feature-item > i {
+    font-size: 1.75rem;
+    color: var(--color-primary, #8B7355);
+    flex-shrink: 0;
+    width: 48px;
+    height: 48px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: linear-gradient(135deg, rgba(139, 115, 85, 0.1), rgba(139, 115, 85, 0.05));
+    border-radius: var(--radius-md, 8px);
+}
+
+.editorial-feature-item h4 {
+    font-family: var(--font-sans, 'Jost', sans-serif);
+    font-size: 1rem;
+    font-weight: 600;
+    color: var(--color-text-primary, #1A1A1A);
+    margin: 0 0 var(--spacing-xs, 4px) 0;
+}
+
+.editorial-feature-item p {
+    font-size: 0.9rem;
+    color: var(--color-text-secondary, #5E554D);
+    margin: 0;
+    line-height: 1.6;
+}
+
+.editorial-wellness-image {
+    position: relative;
+    border-radius: var(--radius-xl, 20px);
+    overflow: hidden;
+    box-shadow: 0 16px 48px rgba(46, 40, 33, 0.12);
+}
+
+.editorial-wellness-image img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block;
+    aspect-ratio: 4/5;
+}
+
+.editorial-image-badge {
+    position: absolute;
+    bottom: var(--spacing-lg, 24px);
+    left: var(--spacing-lg, 24px);
+    display: flex;
+    align-items: center;
+    gap: var(--spacing-sm, 8px);
+    padding: 10px 20px;
+    background: rgba(26, 26, 26, 0.85);
+    backdrop-filter: blur(8px);
+    border-radius: var(--radius-full, 999px);
+    color: white;
+    font-size: 0.85rem;
+    font-weight: 500;
+}
+
+.editorial-image-badge i {
+    color: #FFD700;
+}
+
+/* ============================================
+   EDITORIAL GYM FACILITIES SECTION
+   ============================================ */
+
+.editorial-gym-facilities {
+    position: relative;
+    padding: var(--spacing-3xl, 80px) 0;
+    background: var(--color-surface, #FCFAF8);
+}
+
+.editorial-facilities-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(min(340px, 100%), 1fr));
+    gap: var(--spacing-xl, 32px);
+}
+
+.editorial-facility-card {
+    position: relative;
+    background: white;
+    border: 1px solid rgba(139, 115, 85, 0.12);
+    border-radius: var(--radius-xl, 20px);
+    padding: var(--spacing-xl, 32px);
+    text-align: center;
+    transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.editorial-facility-card:hover {
+    transform: translateY(-8px);
+    box-shadow: 0 20px 48px rgba(46, 40, 33, 0.12);
+    border-color: rgba(139, 115, 85, 0.2);
+}
+
+.editorial-facility-card::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 60%;
+    height: 3px;
+    background: linear-gradient(90deg, transparent, var(--color-primary, #8B7355), transparent);
+    border-radius: 0 0 var(--radius-md, 8px) var(--radius-md, 8px);
+}
+
+.editorial-facility-icon {
+    width: 64px;
+    height: 64px;
+    margin: 0 auto var(--spacing-lg, 24px);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: linear-gradient(135deg, rgba(139, 115, 85, 0.1), rgba(139, 115, 85, 0.05));
+    border-radius: var(--radius-lg, 16px);
+}
+
+.editorial-facility-icon i {
+    font-size: 1.75rem;
+    color: var(--color-primary, #8B7355);
+}
+
+.editorial-facility-card h3 {
+    font-family: var(--font-serif, 'Cormorant Garamond', Georgia, serif);
+    font-size: clamp(1.25rem, 2vw, 1.5rem);
+    font-weight: 500;
+    color: var(--color-text-primary, #1A1A1A);
+    margin: 0 0 var(--spacing-md, 16px) 0;
+}
+
+.editorial-facility-divider {
+    width: 40px;
+    height: 2px;
+    margin: 0 auto var(--spacing-md, 16px);
+    background: linear-gradient(90deg, var(--color-primary, #8B7355), transparent);
+}
+
+.editorial-facility-card p {
+    font-size: 0.95rem;
+    color: var(--color-text-secondary, #5E554D);
+    line-height: 1.7;
+    margin: 0;
+}
+
+/* ============================================
+   CLASS SCHEDULE SECTION
+   ============================================ */
+
+.class-schedule {
+    position: relative;
+    padding: var(--spacing-3xl, 80px) 0;
+    background: white;
+}
+
+.schedule-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(min(280px, 100%), 1fr));
+    gap: var(--spacing-lg, 24px);
+    margin-bottom: var(--spacing-2xl, 48px);
+}
+
+.class-card {
+    background: var(--color-surface, #FCFAF8);
+    border: 1px solid rgba(139, 115, 85, 0.12);
+    border-radius: var(--radius-lg, 16px);
+    padding: var(--spacing-lg, 24px);
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.class-card:hover {
+    transform: translateY(-4px);
+    box-shadow: 0 12px 32px rgba(46, 40, 33, 0.1);
+    border-color: rgba(139, 115, 85, 0.2);
+}
+
+.class-time {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--spacing-sm, 8px);
+    margin-bottom: var(--spacing-md, 16px);
+}
+
+.class-time .day {
+    display: inline-block;
+    padding: 4px 12px;
+    background: var(--color-primary, #8B7355);
+    color: white;
+    font-size: 0.75rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    border-radius: var(--radius-full, 999px);
+}
+
+.class-time .time {
+    display: inline-block;
+    padding: 4px 12px;
+    background: rgba(139, 115, 85, 0.1);
+    color: var(--color-primary, #8B7355);
+    font-size: 0.8rem;
+    font-weight: 500;
+    border-radius: var(--radius-full, 999px);
+}
+
+.class-card h3 {
+    font-family: var(--font-serif, 'Cormorant Garamond', Georgia, serif);
+    font-size: 1.35rem;
+    font-weight: 500;
+    color: var(--color-text-primary, #1A1A1A);
+    margin: 0 0 var(--spacing-sm, 8px) 0;
+}
+
+.class-card p {
+    font-size: 0.9rem;
+    color: var(--color-text-secondary, #5E554D);
+    line-height: 1.6;
+    margin: 0 0 var(--spacing-md, 16px) 0;
+}
+
+.class-level {
+    display: inline-block;
+    padding: 6px 16px;
+    background: linear-gradient(135deg, rgba(139, 115, 85, 0.08), rgba(139, 115, 85, 0.04));
+    border: 1px solid rgba(139, 115, 85, 0.15);
+    border-radius: var(--radius-full, 999px);
+    font-size: 0.8rem;
+    font-weight: 500;
+    color: var(--color-text-secondary, #5E554D);
+}
+
+.schedule-cta {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: var(--spacing-md, 16px);
+}
+
+/* ============================================
+   PERSONAL TRAINING SECTION
+   ============================================ */
+
+.personal-training {
+    position: relative;
+    padding: var(--spacing-3xl, 80px) 0;
+    background: linear-gradient(135deg, #1a1a1a 0%, #2d2620 50%, #1a1a1a 100%);
+    color: white;
+    overflow: hidden;
+}
+
+.personal-training::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: 
+        radial-gradient(ellipse at 20% 50%, rgba(139, 115, 85, 0.15) 0%, transparent 50%),
+        radial-gradient(ellipse at 80% 50%, rgba(139, 115, 85, 0.1) 0%, transparent 50%);
+    pointer-events: none;
+}
+
+.training-content-grid {
+    position: relative;
+    z-index: 1;
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: var(--spacing-3xl, 80px);
+    align-items: center;
+}
+
+.training-image {
+    border-radius: var(--radius-xl, 20px);
+    overflow: hidden;
+    box-shadow: 0 20px 48px rgba(0, 0, 0, 0.3);
+}
+
+.training-image img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block;
+    aspect-ratio: 4/5;
+}
+
+.training-text {
+    color: white;
+}
+
+.training-text .section-header {
+    text-align: left;
+    margin-bottom: var(--spacing-xl, 32px);
+}
+
+.training-text .section-header h2 {
+    color: white;
+}
+
+.training-text .section-header p {
+    color: rgba(255, 255, 255, 0.75);
+}
+
+.training-benefits {
+    list-style: none;
+    padding: 0;
+    margin: 0 0 var(--spacing-xl, 32px) 0;
+    display: flex;
+    flex-direction: column;
+    gap: var(--spacing-md, 16px);
+}
+
+.training-benefits li {
+    display: flex;
+    align-items: center;
+    gap: var(--spacing-md, 16px);
+    font-size: 1rem;
+    color: rgba(255, 255, 255, 0.9);
+}
+
+.training-benefits i {
+    color: #4CAF50;
+    font-size: 1.1rem;
+}
+
+.training-cta {
+    display: flex;
+    flex-direction: column;
+    gap: var(--spacing-md, 16px);
+}
+
+.training-note {
+    font-size: 0.85rem;
+    color: rgba(255, 255, 255, 0.6);
+    font-style: italic;
+}
+
+/* ============================================
+   WELLNESS PACKAGES SECTION
+   ============================================ */
+
+.wellness-packages {
+    position: relative;
+    padding: var(--spacing-3xl, 80px) 0;
+    background: var(--color-surface, #FCFAF8);
+}
+
+.packages-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(min(320px, 100%), 1fr));
+    gap: var(--spacing-xl, 32px);
+}
+
+.package-card {
+    position: relative;
+    background: white;
+    border: 1px solid rgba(139, 115, 85, 0.12);
+    border-radius: var(--radius-xl, 20px);
+    padding: var(--spacing-xl, 32px);
+    text-align: center;
+    transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.package-card:hover {
+    transform: translateY(-8px);
+    box-shadow: 0 20px 48px rgba(46, 40, 33, 0.12);
+    border-color: rgba(139, 115, 85, 0.2);
+}
+
+.package-card.featured {
+    border-color: var(--color-primary, #8B7355);
+    box-shadow: 0 8px 32px rgba(139, 115, 85, 0.2);
+}
+
+.package-card.featured::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 4px;
+    background: linear-gradient(90deg, var(--color-primary, #8B7355), var(--color-primary-dark, #6B5740));
+    border-radius: var(--radius-xl, 20px) var(--radius-xl, 20px) 0 0;
+}
+
+.popular-badge {
+    position: absolute;
+    top: -12px;
+    left: 50%;
+    transform: translateX(-50%);
+    padding: 6px 20px;
+    background: linear-gradient(135deg, var(--color-primary, #8B7355), var(--color-primary-dark, #6B5740));
+    color: white;
+    font-size: 0.75rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    border-radius: var(--radius-full, 999px);
+    white-space: nowrap;
+}
+
+.package-icon {
+    width: 72px;
+    height: 72px;
+    margin: 0 auto var(--spacing-lg, 24px);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: linear-gradient(135deg, rgba(139, 115, 85, 0.1), rgba(139, 115, 85, 0.05));
+    border-radius: var(--radius-lg, 16px);
+}
+
+.package-icon i {
+    font-size: 2rem;
+    color: var(--color-primary, #8B7355);
+}
+
+.package-card h3 {
+    font-family: var(--font-serif, 'Cormorant Garamond', Georgia, serif);
+    font-size: clamp(1.35rem, 2vw, 1.65rem);
+    font-weight: 500;
+    color: var(--color-text-primary, #1A1A1A);
+    margin: 0 0 var(--spacing-lg, 24px) 0;
+}
+
+.package-includes {
+    list-style: none;
+    padding: 0;
+    margin: 0 0 var(--spacing-lg, 24px) 0;
+    text-align: left;
+}
+
+.package-includes li {
+    display: flex;
+    align-items: flex-start;
+    gap: var(--spacing-sm, 8px);
+    padding: var(--spacing-sm, 8px) 0;
+    font-size: 0.9rem;
+    color: var(--color-text-secondary, #5E554D);
+    line-height: 1.5;
+}
+
+.package-includes li::before {
+    content: '✓';
+    color: var(--color-primary, #8B7355);
+    font-weight: 600;
+    flex-shrink: 0;
+}
+
+.package-duration {
+    display: inline-block;
+    padding: 6px 16px;
+    background: rgba(139, 115, 85, 0.1);
+    border-radius: var(--radius-full, 999px);
+    font-size: 0.85rem;
+    font-weight: 500;
+    color: var(--color-primary, #8B7355);
+    margin-bottom: var(--spacing-md, 16px);
+}
+
+.package-price {
+    margin-bottom: var(--spacing-lg, 24px);
+}
+
+.package-price .price-currency {
+    font-size: 1rem;
+    color: var(--color-text-secondary, #5E554D);
+    vertical-align: top;
+}
+
+.package-price .price-amount {
+    font-family: var(--font-serif, 'Cormorant Garamond', Georgia, serif);
+    font-size: clamp(1.75rem, 3vw, 2.25rem);
+    font-weight: 600;
+    color: var(--color-primary, #8B7355);
+}
+
+.package-card .btn {
+    width: 100%;
+}
+
+/* ============================================
+   WELLNESS HERO (Original)
+   ============================================ */
+
+.wellness-hero {
+    position: relative;
+    height: 60vh;
+    min-height: 400px;
+    background: linear-gradient(135deg, rgba(5, 9, 15, 0.8), rgba(10, 25, 41, 0.8)),
+                url('/images/gym/hero.jpg') center/cover no-repeat;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+    color: var(--color-text-white, #ffffff);
+}
+
+.wellness-hero__content {
+    max-width: 800px;
+    padding: var(--spacing-xl, 32px);
+}
+
+.wellness-hero__title {
+    font-size: var(--text-4xl, 3rem);
+    font-weight: 700;
+    margin-bottom: var(--spacing-md, 16px);
+    font-family: var(--font-serif, 'Cormorant Garamond', serif);
+}
+
+.wellness-hero__subtitle {
+    font-size: var(--text-lg, 1.125rem);
+    opacity: 0.9;
+    margin-bottom: var(--spacing-lg, 24px);
+}
+
+/* ============================================
+   FITNESS PACKAGES
+   ============================================ */
+
+.fitness-packages {
+    padding: var(--spacing-2xl, 48px) 0;
+    background: transparent;
+}
+
+.fitness-packages__title {
+    font-size: var(--text-3xl, 2rem);
+    font-weight: 600;
+    text-align: center;
+    color: var(--color-text-primary, #1A1A1A);
+    margin-bottom: var(--spacing-xl, 32px);
+    font-family: var(--font-serif, 'Cormorant Garamond', serif);
+}
+
+.fitness-packages__grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+    gap: var(--masonry-gap-lg, var(--spacing-xl, 32px));
+    max-width: 1200px;
+    margin: 0 auto;
+}
+
+@media (min-width: 768px) {
+    .fitness-packages__grid {
+        grid-template-columns: repeat(auto-fill, minmax(350px, 1fr));
+        gap: var(--spacing-2xl, 48px);
+    }
+}
+
+/* ============================================
+   PACKAGE CARD
+   ============================================ */
+
+.package-card {
+    background: var(--color-bg-white, #ffffff);
+    border-radius: var(--section-radius, var(--radius-lg, 12px));
+    overflow: hidden;
+    box-shadow: var(--shadow-sm, 0 2px 4px rgba(0, 0, 0, 0.1));
+    transition: transform var(--transition-base, 0.3s ease), 
+                box-shadow var(--transition-base, 0.3s ease);
+}
+
+.package-card:hover {
+    transform: translateY(-4px);
+    box-shadow: var(--shadow-lg, 0 8px 16px rgba(0, 0, 0, 0.15));
+}
+
+.package-card__image {
+    width: 100%;
+    height: 200px;
+    object-fit: cover;
+    background: var(--color-bg-light, #f8f9fa);
+}
+
+.package-card__content {
+    padding: var(--spacing-lg, 24px);
+}
+
+.package-card__badge {
+    display: inline-block;
+    padding: var(--spacing-xs, 4px) var(--spacing-sm, 8px);
+    background: var(--color-primary, #8B7355);
+    color: var(--color-text-white, #ffffff);
+    border-radius: var(--radius-full, 9999px);
+    font-size: var(--text-xs, 0.75rem);
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    margin-bottom: var(--spacing-md, 16px);
+}
+
+.package-card__title {
+    font-size: var(--text-xl, 1.25rem);
+    font-weight: 600;
+    color: var(--color-text-primary, #1A1A1A);
+    margin-bottom: var(--spacing-sm, 8px);
+}
+
+.package-card__description {
+    font-size: var(--text-sm, 0.875rem);
+    color: var(--color-text-secondary, #4A5568);
+    line-height: 1.6;
+    margin-bottom: var(--spacing-lg, 24px);
+}
+
+.package-card__features {
+    list-style: none;
+    padding: 0;
+    margin-bottom: var(--spacing-lg, 24px);
+}
+
+.package-card__feature {
+    display: flex;
+    align-items: center;
+    gap: var(--spacing-sm, 8px);
+    padding: var(--spacing-xs, 4px) 0;
+    font-size: var(--text-sm, 0.875rem);
+    color: var(--color-text-secondary, #4A5568);
+}
+
+.package-card__feature-icon {
+    color: var(--color-primary, #8B7355);
+    font-size: 1em;
+}
+
+.package-card__price {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding-top: var(--spacing-md, 16px);
+    border-top: 1px solid var(--color-border-light, #e0e0e0);
+}
+
+.package-card__amount {
+    font-size: var(--text-2xl, 1.5rem);
+    font-weight: 700;
+    color: var(--color-primary, #8B7355);
+}
+
+.package-card__period {
+    font-size: var(--text-sm, 0.875rem);
+    color: var(--color-text-muted, #666);
+}
+
+.package-card__actions {
+    padding: var(--spacing-md, 16px);
+    background: var(--color-bg-light, #f8f9fa);
+}
+
+/* ============================================
+   BOOKING FORM
+   ============================================ */
+
+.gym-booking-form {
+    max-width: 600px;
+    margin: 0 auto;
+    padding: var(--spacing-xl, 32px);
+    background: var(--color-bg-white, #ffffff);
+    border-radius: var(--radius-lg, 12px);
+    box-shadow: var(--shadow-md, 0 4px 6px rgba(0, 0, 0, 0.1));
+}
+
+.gym-booking-form__title {
+    font-size: var(--text-2xl, 1.5rem);
+    font-weight: 600;
+    color: var(--color-text-primary, #1A1A1A);
+    margin-bottom: var(--spacing-lg, 24px);
+    text-align: center;
+}
+
+.gym-booking-form__group {
+    margin-bottom: var(--spacing-md, 16px);
+}
+
+.gym-booking-form__label {
+    display: block;
+    font-size: var(--text-sm, 0.875rem);
+    font-weight: 500;
+    color: var(--color-text-secondary, #4A5568);
+    margin-bottom: var(--spacing-xs, 4px);
+}
+
+.gym-booking-form__input,
+.gym-booking-form__select,
+.gym-booking-form__textarea {
+    width: 100%;
+    padding: var(--spacing-sm, 8px) var(--spacing-md, 16px);
+    border: 1px solid var(--color-border, #E0E0E0);
+    border-radius: var(--radius-md, 8px);
+    font-size: var(--text-base, 1rem);
+    font-family: var(--font-sans, 'Jost', sans-serif);
+    transition: border-color var(--transition-fast, 0.3s ease);
+}
+
+.gym-booking-form__input:focus,
+.gym-booking-form__select:focus,
+.gym-booking-form__textarea:focus {
+    outline: none;
+    border-color: var(--color-primary, #8B7355);
+    box-shadow: 0 0 0 3px rgba(139, 115, 85, 0.1);
+}
+
+.gym-booking-form__submit {
+    width: 100%;
+    margin-top: var(--spacing-md, 16px);
+}
+
+/* ============================================
+   FACILITIES
+   ============================================ */
+
+.facilities-section {
+    padding: var(--spacing-2xl, 48px) 0;
+    background: transparent;
+}
+
+.facilities-section__title {
+    font-size: var(--text-3xl, 2rem);
+    font-weight: 600;
+    text-align: center;
+    color: var(--color-text-primary, #1A1A1A);
+    margin-bottom: var(--spacing-xl, 32px);
+}
+
+.facilities-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
+    gap: var(--spacing-xl, 32px);
+    max-width: 1200px;
+    margin: 0 auto;
+}
+
+.facility-card {
+    background: var(--color-bg-white, #ffffff);
+    padding: var(--spacing-lg, 24px);
+    border-radius: var(--section-radius, var(--radius-md, 8px));
+    box-shadow: var(--shadow-sm, 0 2px 4px rgba(0, 0, 0, 0.1));
+    text-align: center;
+}
+
+.facility-card__icon {
+    font-size: var(--text-3xl, 2rem);
+    color: var(--color-primary, #8B7355);
+    margin-bottom: var(--spacing-md, 16px);
+}
+
+.facility-card__name {
+    font-size: var(--text-lg, 1.125rem);
+    font-weight: 600;
+    color: var(--color-text-primary, #1A1A1A);
+    margin-bottom: var(--spacing-sm, 8px);
+}
+
+.facility-card__description {
+    font-size: var(--text-sm, 0.875rem);
+    color: var(--color-text-secondary, #4A5568);
+    line-height: 1.6;
+}
+
+/* ============================================
+   RESPONSIVE - EDITORIAL WELLNESS INTRO
+   ============================================ */
+
+@media (max-width: 1024px) {
+    .editorial-wellness-intro {
+        padding: var(--spacing-2xl, 48px) 0;
+    }
+    
+    .editorial-wellness-content-grid {
+        gap: var(--spacing-2xl, 48px);
+    }
+}
+
+@media (max-width: 768px) {
+    .editorial-wellness-intro {
+        padding: var(--spacing-xl, 32px) 0;
+    }
+    
+    .editorial-wellness-content-grid {
+        grid-template-columns: 1fr;
+        gap: var(--spacing-xl, 32px);
+    }
+    
+    .editorial-wellness-image {
+        order: -1;
+    }
+    
+    .editorial-wellness-image img {
+        aspect-ratio: 16/10;
+    }
+    
+    .editorial-feature-item {
+        padding: var(--spacing-md, 16px);
+        gap: var(--spacing-md, 16px);
+    }
+    
+    .editorial-feature-item > i {
+        width: 40px;
+        height: 40px;
+        font-size: 1.4rem;
+    }
+}
+
+/* ============================================
+   RESPONSIVE - EDITORIAL GYM FACILITIES
+   ============================================ */
+
+@media (max-width: 1024px) {
+    .editorial-gym-facilities {
+        padding: var(--spacing-2xl, 48px) 0;
+    }
+    
+    .editorial-facilities-grid {
+        grid-template-columns: repeat(auto-fit, minmax(min(280px, 100%), 1fr));
+    }
+}
+
+@media (max-width: 768px) {
+    .editorial-gym-facilities {
+        padding: var(--spacing-xl, 32px) 0;
+    }
+    
+    .editorial-facilities-grid {
+        grid-template-columns: 1fr;
+        gap: var(--spacing-lg, 24px);
+    }
+    
+    .editorial-facility-card {
+        padding: var(--spacing-lg, 24px);
+    }
+}
+
+/* ============================================
+   RESPONSIVE - CLASS SCHEDULE
+   ============================================ */
+
+@media (max-width: 768px) {
+    .class-schedule {
+        padding: var(--spacing-xl, 32px) 0;
+    }
+    
+    .schedule-grid {
+        grid-template-columns: 1fr;
+        gap: var(--spacing-md, 16px);
+    }
+    
+    .class-card {
+        padding: var(--spacing-md, 16px);
+    }
+    
+    .schedule-cta {
+        flex-direction: column;
+    }
+    
+    .schedule-cta .btn {
+        width: 100%;
+    }
+}
+
+/* ============================================
+   RESPONSIVE - PERSONAL TRAINING
+   ============================================ */
+
+@media (max-width: 1024px) {
+    .personal-training {
+        padding: var(--spacing-2xl, 48px) 0;
+    }
+    
+    .training-content-grid {
+        gap: var(--spacing-2xl, 48px);
+    }
+}
+
+@media (max-width: 768px) {
+    .personal-training {
+        padding: var(--spacing-xl, 32px) 0;
+    }
+    
+    .training-content-grid {
+        grid-template-columns: 1fr;
+        gap: var(--spacing-xl, 32px);
+    }
+    
+    .training-image {
+        order: -1;
+    }
+    
+    .training-image img {
+        aspect-ratio: 16/10;
+    }
+    
+    .training-text .section-header {
+        text-align: center;
+    }
+    
+    .training-benefits {
+        gap: var(--spacing-sm, 12px);
+    }
+    
+    .training-benefits li {
+        font-size: 0.9rem;
+    }
+    
+    .training-cta {
+        align-items: center;
+    }
+    
+    .training-cta .btn {
+        width: 100%;
+    }
+}
+
+/* ============================================
+   RESPONSIVE - WELLNESS PACKAGES
+   ============================================ */
+
+@media (max-width: 1024px) {
+    .wellness-packages {
+        padding: var(--spacing-2xl, 48px) 0;
+    }
+    
+    .packages-grid {
+        grid-template-columns: repeat(auto-fit, minmax(min(280px, 100%), 1fr));
+    }
+}
+
+@media (max-width: 768px) {
+    .wellness-packages {
+        padding: var(--spacing-xl, 32px) 0;
+    }
+    
+    .packages-grid {
+        grid-template-columns: 1fr;
+        gap: var(--spacing-xl, 24px);
+    }
+    
+    .package-card {
+        padding: var(--spacing-lg, 24px);
+    }
+    
+    .package-card.featured {
+        order: -1;
+    }
+}
+
+/* ============================================
+   RESPONSIVE - ORIGINAL SECTIONS
+   ============================================ */
+
+@media (max-width: 768px) {
+    .wellness-hero {
+        height: 50vh;
+        min-height: 300px;
+    }
+    
+    .wellness-hero__title {
+        font-size: var(--text-3xl, 2rem);
+    }
+    
+    .fitness-packages {
+        padding: var(--spacing-xl, 32px) 0;
+    }
+    
+    .fitness-packages__grid {
+        grid-template-columns: 1fr;
+        gap: var(--spacing-lg, 24px);
+    }
+    
+    .facilities-grid {
+        grid-template-columns: 1fr;
+        gap: var(--spacing-lg, 24px);
+    }
+    
+    .gym-booking-form {
+        padding: var(--spacing-lg, 24px);
+    }
+}
+
+/* ============================================
+   ACCESSIBILITY
+   ============================================ */
+
+@media (prefers-reduced-motion: reduce) {
+    .editorial-feature-item,
+    .editorial-facility-card,
+    .class-card,
+    .package-card,
+    .training-image img {
+        transition: none;
+    }
+    
+    .editorial-feature-item:hover,
+    .editorial-facility-card:hover,
+    .class-card:hover,
+    .package-card:hover {
+        transform: none;
+    }
+}
+
+@media (prefers-contrast: high) {
+    .editorial-feature-item,
+    .editorial-facility-card,
+    .class-card,
+    .package-card {
+        border-width: 2px;
+    }
+}

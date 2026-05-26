@@ -1,0 +1,483 @@
+/* Room Dashboard — real-time room status and housekeeping management */
+.room-dashboard {
+    padding: 24px;
+    max-width: 1600px;
+    margin: 0 auto;
+}
+
+.dashboard-header {
+    margin-bottom: 24px;
+}
+
+.dashboard-header h1 {
+    font-family: 'Cormorant Garamond', serif;
+    font-size: 32px;
+    color: var(--navy, #231F1C);
+    margin: 0 0 8px 0;
+}
+
+.dashboard-header p {
+    color: #666;
+    margin: 0;
+}
+
+/* Status Overview Cards */
+.status-overview {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    gap: 16px;
+    margin-bottom: 24px;
+}
+
+.status-card {
+    background: var(--color-white, #fff);
+    border-radius: 16px;
+    padding: 20px;
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    box-shadow: 0 2px 12px rgba(0, 0, 0, 0.06);
+    border: 1px solid rgba(0, 0, 0, 0.05);
+    transition: transform 0.2s, box-shadow 0.2s;
+}
+
+.status-card:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.1);
+}
+
+.status-card .icon {
+    width: 56px;
+    height: 56px;
+    border-radius: 14px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 24px;
+}
+
+.status-card .info h3 {
+    font-size: 28px;
+    font-weight: 700;
+    margin: 0;
+    color: var(--navy, #231F1C);
+}
+
+.status-card .info span {
+    font-size: 13px;
+    color: #666;
+}
+
+.status-card.available .icon {
+    background: rgba(40, 167, 69, 0.1);
+    color: #28a745;
+}
+
+.status-card.occupied .icon {
+    background: rgba(220, 53, 69, 0.1);
+    color: #dc3545;
+}
+
+.status-card.cleaning .icon {
+    background: rgba(255, 193, 7, 0.1);
+    color: #ffc107;
+}
+
+.status-card.inspection .icon {
+    background: rgba(23, 162, 184, 0.1);
+    color: #17a2b8;
+}
+
+.status-card.maintenance .icon {
+    background: rgba(253, 126, 20, 0.1);
+    color: #fd7e14;
+}
+
+.status-card.out_of_order .icon {
+    background: rgba(108, 117, 125, 0.1);
+    color: #6c757d;
+}
+
+/* Today's Stats */
+.today-stats {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 16px;
+    margin-bottom: 24px;
+}
+
+@media (max-width: 900px) {
+    .today-stats {
+        grid-template-columns: repeat(2, 1fr);
+    }
+}
+
+.today-stat {
+    background: linear-gradient(135deg, var(--navy, #231F1C) 0%, #2A2A2A 100%);
+    color: white;
+    border-radius: 16px;
+    padding: 20px;
+    text-align: center;
+}
+
+.today-stat .value {
+    font-size: 36px;
+    font-weight: 700;
+    color: var(--gold, var(--color-lux-gold, #B18247));
+}
+
+.today-stat .label {
+    font-size: 13px;
+    opacity: 0.8;
+}
+
+/* Queue Sections */
+.queue-section {
+    background: var(--color-white, #fff);
+    border-radius: 16px;
+    margin-bottom: 24px;
+    box-shadow: 0 2px 12px rgba(0, 0, 0, 0.06);
+    overflow: hidden;
+}
+
+.queue-header {
+    padding: 20px 24px;
+    border-bottom: 1px solid #f0f0f0;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.queue-header h2 {
+    font-family: 'Cormorant Garamond', serif;
+    font-size: 24px;
+    margin: 0;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+
+.queue-header h2 .badge {
+    font-family: 'Jost', sans-serif;
+    font-size: 12px;
+    background: var(--gold, var(--color-lux-gold, #B18247));
+    color: white;
+    padding: 4px 12px;
+    border-radius: 12px;
+}
+
+.queue-body {
+    padding: 0;
+}
+
+/* Room Queue Item */
+.room-queue-item {
+    display: flex;
+    align-items: center;
+    padding: 16px 24px;
+    border-bottom: 1px solid #f8f8f8;
+    gap: 16px;
+    transition: background 0.2s;
+}
+
+.room-queue-item:hover {
+    background: var(--admin-hover-bg, #f8f9fb);
+}
+
+.room-queue-item:last-child {
+    border-bottom: none;
+}
+
+.room-number-badge {
+    width: 80px;
+    text-align: center;
+    flex-shrink: 0;
+}
+
+.room-number-badge .number {
+    font-size: 18px;
+    font-weight: 700;
+    color: var(--navy, #231F1C);
+}
+
+.room-number-badge .type {
+    font-size: 11px;
+    color: #888;
+}
+
+.room-info {
+    flex: 1;
+}
+
+.room-info .guest {
+    font-weight: 500;
+    color: var(--navy, #231F1C);
+}
+
+.room-info .details {
+    font-size: 12px;
+    color: #666;
+    margin-top: 4px;
+}
+
+.room-status-badge {
+    padding: 6px 14px;
+    border-radius: 20px;
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+}
+
+.room-status-badge.cleaning {
+    background: #fff3cd;
+    color: #856404;
+}
+
+.room-status-badge.inspection {
+    background: #d1ecf1;
+    color: #0c5460;
+}
+
+.room-status-badge.available {
+    background: #d4edda;
+    color: #155724;
+}
+
+.room-status-badge.occupied {
+    background: #f8d7da;
+    color: #721c24;
+}
+
+.room-status-badge.urgent {
+    background: #dc3545;
+    color: white;
+}
+
+.room-actions {
+    display: flex;
+    gap: 8px;
+}
+
+.room-actions button {
+    padding: 8px 16px;
+    border-radius: 8px;
+    border: none;
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.room-actions .btn-success {
+    background: #28a745;
+    color: white;
+}
+
+.room-actions .btn-success:hover {
+    background: #208637;
+}
+
+.room-actions .btn-primary {
+    background: var(--gold, var(--color-lux-gold, #B18247));
+    color: white;
+}
+
+.room-actions .btn-primary:hover {
+    background: var(--color-primary, #8A775F);
+}
+
+.room-actions .btn-danger {
+    background: #dc3545;
+    color: white;
+}
+
+.room-actions .btn-danger:hover {
+    background: #c82333;
+}
+
+.room-actions .btn-secondary {
+    background: #e9ecef;
+    color: #495057;
+}
+
+.room-actions .btn-secondary:hover {
+    background: #dee2e6;
+}
+
+/* Priority indicator */
+.priority-indicator {
+    width: 4px;
+    height: 40px;
+    border-radius: 2px;
+    flex-shrink: 0;
+}
+
+.priority-indicator.urgent {
+    background: #dc3545;
+}
+
+.priority-indicator.high {
+    background: #fd7e14;
+}
+
+.priority-indicator.normal {
+    background: #28a745;
+}
+
+/* Empty state */
+.empty-queue {
+    padding: 48px 24px;
+    text-align: center;
+    color: #888;
+}
+
+.empty-queue i {
+    font-size: 48px;
+    margin-bottom: 16px;
+    color: #ddd;
+}
+
+.empty-queue p {
+    margin: 0;
+}
+
+/* Time since */
+.time-since {
+    font-size: 11px;
+    color: #888;
+}
+
+/* Occupancy bar */
+.occupancy-section {
+    background: var(--color-white, #fff);
+    border-radius: 16px;
+    padding: 24px;
+    margin-bottom: 24px;
+    box-shadow: 0 2px 12px rgba(0, 0, 0, 0.06);
+}
+
+.occupancy-bar {
+    height: 24px;
+    background: #f0f0f0;
+    border-radius: 12px;
+    overflow: hidden;
+    display: flex;
+}
+
+.occupancy-segment {
+    height: 100%;
+    transition: width 0.5s ease;
+}
+
+.occupancy-legend {
+    display: flex;
+    gap: 24px;
+    margin-top: 16px;
+    flex-wrap: wrap;
+}
+
+.legend-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 13px;
+}
+
+.legend-dot {
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+}
+
+/* Modal overrides for this page */
+.modal-overlay {
+    display: none;
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: rgba(0, 0, 0, 0.5);
+    z-index: 1000;
+    align-items: center;
+    justify-content: center;
+}
+
+.modal-overlay.active {
+    display: flex;
+}
+
+.modal-content {
+    background: var(--color-white, #fff);
+    border-radius: 16px;
+    padding: 24px;
+    width: 90%;
+    max-width: 500px;
+}
+
+.modal-header {
+    margin-bottom: 20px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+}
+
+.modal-header h3 {
+    margin: 0;
+    font-family: 'Cormorant Garamond', serif;
+    font-size: 24px;
+}
+
+.form-group {
+    margin-bottom: 16px;
+}
+
+.form-group label {
+    display: block;
+    font-size: 13px;
+    font-weight: 600;
+    margin-bottom: 6px;
+    color: var(--navy, #231F1C);
+}
+
+.form-group textarea,
+.form-group select {
+    width: 100%;
+    padding: 10px 14px;
+    border: 1px solid #e0e0e0;
+    border-radius: 10px;
+    font-size: 14px;
+    font-family: 'Jost', sans-serif;
+}
+
+.form-group textarea:focus,
+.form-group select:focus {
+    outline: none;
+    border-color: var(--gold, var(--color-lux-gold, #B18247));
+}
+
+.modal-actions {
+    display: flex;
+    gap: 12px;
+    margin-top: 20px;
+}
+
+.modal-actions button {
+    flex: 1;
+    padding: 12px;
+    border-radius: 10px;
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
+    border: none;
+}
+
+.btn-cancel {
+    background: #f0f0f0;
+    color: #333;
+}
+
+.btn-submit {
+    background: var(--gold, var(--color-lux-gold, #B18247));
+    color: white;
+}

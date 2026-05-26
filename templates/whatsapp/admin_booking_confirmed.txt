@@ -1,0 +1,7 @@
+✅ *BOOKING CONFIRMED*
+━━━━━━━━━━━━━━━━━━━
+Ref: *{{booking_reference}}*
+Guest: {{guest_name}} | {{guest_phone}}
+Room: {{room_name}}
+In: {{check_in_date}} | Out: {{check_out_date}}
+💰 *{{total_amount}}*

@@ -1,0 +1,1145 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Rosalyn's Hotel — Complete System Handover 2026</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,400;0,500;0,600;0,700;1,400;1,500&family=Jost:wght@300;400;500;600&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --gold: #d4a843;
+      --gold-soft: #e8c878;
+      --gold-dim: rgba(212,168,67,0.15);
+      --dark: #1a1a1a;
+      --brown: #8b7355;
+      --cream: #f8f3e9;
+      --cream-mid: #f0e9da;
+      --ink: #2a2a2a;
+      --muted: #6c6c6c;
+      --line: rgba(212,168,67,0.22);
+      --shadow: 0 18px 40px -18px rgba(26,26,26,0.3);
+      --shadow-sm: 0 4px 16px -4px rgba(26,26,26,0.15);
+      --green: #1e7e5a;
+      --red: #c0392b;
+      --blue: #17547a;
+      --orange: #c0651a;
+    }
+    *{box-sizing:border-box;margin:0;padding:0;}
+    html{scroll-behavior:smooth;}
+    body{font-family:'Jost',sans-serif;font-size:clamp(15px,0.55vw + 13px,18px);line-height:1.72;color:var(--ink);background:var(--cream);}
+    h1,h2,h3,h4{font-family:'Cormorant Garamond',serif;font-weight:500;line-height:1.2;color:var(--dark);}
+    h1{font-size:clamp(2.4rem,5vw,4.8rem);letter-spacing:-0.5px;}
+    h2{font-size:clamp(1.8rem,3.4vw,3rem);margin-bottom:1.25rem;}
+    h3{font-size:clamp(1.2rem,1.8vw,1.65rem);margin-bottom:0.6rem;color:var(--brown);}
+    h4{font-size:1.1rem;margin-bottom:0.4rem;font-family:'Jost',sans-serif;font-weight:600;color:var(--dark);}
+    p{margin-bottom:1rem;max-width:72ch;}
+    p.wide{max-width:100%;}
+    strong{color:var(--dark);font-weight:600;}
+    em{color:var(--brown);font-style:italic;}
+    a{color:var(--gold);text-decoration:none;border-bottom:1px solid var(--line);transition:0.2s;}
+    a:hover{color:var(--brown);border-color:var(--brown);}
+    code{background:rgba(26,26,26,0.08);border-radius:4px;padding:0.15em 0.45em;font-size:0.875em;font-family:'Courier New',monospace;color:var(--dark);}
+
+    .deck{max-width:1180px;margin:0 auto;padding:0 clamp(1rem,4vw,3rem);}
+    section.slide{min-height:80vh;padding:clamp(3rem,8vw,7rem) 0 clamp(2.5rem,5vw,5rem);display:flex;flex-direction:column;justify-content:center;border-bottom:1px solid var(--line);scroll-margin-top:56px;}
+    section.slide.compact{min-height:auto;padding:clamp(2.5rem,6vw,5rem) 0;}
+
+    .eyebrow{font-family:'Jost',sans-serif;text-transform:uppercase;letter-spacing:0.25em;font-size:0.78rem;color:var(--gold);font-weight:500;margin-bottom:1rem;}
+    .lead{font-family:'Cormorant Garamond',serif;font-size:clamp(1.15rem,1.7vw,1.45rem);font-style:italic;color:var(--brown);max-width:62ch;margin-bottom:1.75rem;}
+    .divider{width:60px;height:1px;background:var(--gold);margin:1.5rem auto;}
+
+    .hero{background:linear-gradient(135deg,var(--dark) 0%,#2a2418 100%);color:var(--cream);text-align:center;position:relative;overflow:hidden;min-height:100vh;}
+    .hero::before{content:'';position:absolute;inset:0;background:radial-gradient(circle at 30% 30%,rgba(212,168,67,0.14),transparent 60%),radial-gradient(circle at 70% 70%,rgba(212,168,67,0.07),transparent 50%);pointer-events:none;}
+    .hero h1{color:var(--cream);position:relative;}
+    .hero .crest{font-family:'Cormorant Garamond',serif;font-size:2.6rem;color:var(--gold);letter-spacing:0.4em;margin-bottom:2rem;font-style:italic;}
+    .hero .lead{color:var(--gold-soft);margin:1.5rem auto 0;}
+    .hero .meta{margin-top:3rem;font-size:0.88rem;color:rgba(248,243,233,0.55);letter-spacing:0.22em;text-transform:uppercase;}
+    .hero .scroll-hint{position:absolute;bottom:2.5rem;left:50%;transform:translateX(-50%);display:flex;flex-direction:column;align-items:center;gap:0.5rem;color:rgba(248,243,233,0.4);font-size:0.78rem;letter-spacing:0.18em;text-transform:uppercase;border:none;}
+    .hero .scroll-hint::after{content:'';width:1px;height:40px;background:linear-gradient(to bottom,rgba(212,168,67,0.6),transparent);}
+
+    .stat-row{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:1rem;margin:2rem 0;}
+    .stat{background:white;border-left:3px solid var(--gold);padding:1.2rem 1.4rem;border-radius:6px;box-shadow:var(--shadow-sm);}
+    .stat .num{font-family:'Cormorant Garamond',serif;font-size:2.4rem;color:var(--brown);display:block;line-height:1;}
+    .stat .lbl{font-size:0.82rem;color:var(--muted);letter-spacing:0.1em;text-transform:uppercase;margin-top:0.5rem;display:block;}
+
+    .cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(270px,1fr));gap:1.25rem;margin-top:2rem;}
+    .cards.two-col{grid-template-columns:repeat(auto-fit,minmax(340px,1fr));}
+    .cards.three-col{grid-template-columns:repeat(auto-fit,minmax(240px,1fr));}
+    .card{background:white;border:1px solid var(--line);border-radius:14px;padding:1.6rem;box-shadow:var(--shadow-sm);transition:0.3s;}
+    .card:hover{transform:translateY(-3px);border-color:var(--gold);}
+    .card .icon{width:44px;height:44px;background:linear-gradient(135deg,var(--gold),var(--gold-soft));border-radius:10px;display:inline-flex;align-items:center;justify-content:center;font-family:'Cormorant Garamond',serif;font-size:1.5rem;color:var(--dark);margin-bottom:0.9rem;font-weight:600;}
+    .card.green-accent{border-left:3px solid var(--green);}
+    .card.red-accent{border-left:3px solid var(--red);}
+    .card.blue-accent{border-left:3px solid var(--blue);}
+    .card.orange-accent{border-left:3px solid var(--orange);}
+
+    .table-wrap{overflow-x:auto;margin:1.5rem 0;border-radius:10px;box-shadow:var(--shadow-sm);}
+    table{width:100%;border-collapse:collapse;background:white;}
+    th{background:var(--dark);color:var(--cream);text-align:left;padding:0.85rem 1rem;font-weight:500;letter-spacing:0.05em;font-family:'Jost',sans-serif;font-size:0.88rem;}
+    td{padding:0.82rem 1rem;border-bottom:1px solid var(--line);vertical-align:top;font-size:0.93rem;}
+    tr:last-child td{border-bottom:none;}
+    tr:nth-child(even) td{background:rgba(248,243,233,0.38);}
+    td strong{color:var(--dark);}
+
+    ul.checklist{list-style:none;padding:0;}
+    ul.checklist li{padding:0.5rem 0 0.5rem 2rem;position:relative;border-bottom:1px dashed var(--line);}
+    ul.checklist li::before{content:'checkmark';content:'✓';position:absolute;left:0;top:0.5rem;color:var(--gold);font-weight:700;font-size:1.1rem;}
+    ul.checklist.tight li{padding-top:0.35rem;padding-bottom:0.35rem;}
+    ol.steps{padding-left:0;counter-reset:step;list-style:none;}
+    ol.steps>li{position:relative;padding:0.65rem 0 0.65rem 3.2rem;counter-increment:step;}
+    ol.steps>li::before{content:counter(step);position:absolute;left:0;top:0.5rem;width:30px;height:30px;background:var(--gold);color:var(--dark);border-radius:50%;display:inline-flex;align-items:center;justify-content:center;font-weight:600;font-family:'Cormorant Garamond',serif;font-size:1.05rem;}
+
+    .callout{border-radius:10px;padding:1.2rem 1.4rem;margin:1.5rem 0;display:flex;gap:0.85rem;align-items:flex-start;}
+    .callout .callout-icon{font-size:1.3rem;flex-shrink:0;margin-top:0.1rem;}
+    .callout p{margin:0;max-width:100%;}
+    .callout.tip{background:rgba(30,126,90,0.09);border-left:3px solid var(--green);}
+    .callout.tip .callout-icon{color:var(--green);}
+    .callout.warn{background:rgba(192,101,26,0.09);border-left:3px solid var(--orange);}
+    .callout.warn .callout-icon{color:var(--orange);}
+    .callout.danger{background:rgba(192,57,43,0.09);border-left:3px solid var(--red);}
+    .callout.danger .callout-icon{color:var(--red);}
+    .callout.info{background:rgba(23,84,122,0.08);border-left:3px solid var(--blue);}
+    .callout.info .callout-icon{color:var(--blue);}
+
+    blockquote{font-family:'Cormorant Garamond',serif;font-style:italic;font-size:1.45rem;color:var(--brown);border-left:3px solid var(--gold);padding:1rem 1.5rem;margin:2rem 0;background:white;border-radius:6px;box-shadow:var(--shadow-sm);}
+
+    .role-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:1rem;margin-top:1.5rem;}
+    .role-card{background:white;border-radius:12px;padding:1.2rem 1.4rem;box-shadow:var(--shadow-sm);border-top:3px solid var(--gold);display:flex;gap:1rem;align-items:flex-start;}
+    .role-card .role-icon{width:38px;height:38px;border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:1.1rem;flex-shrink:0;color:white;}
+    .role-card .role-name{font-weight:600;font-size:0.95rem;margin-bottom:0.2rem;color:var(--dark);}
+    .role-card .role-desc{font-size:0.84rem;color:var(--muted);line-height:1.5;}
+
+    .two-col-prose{display:grid;grid-template-columns:1fr 1fr;gap:2.5rem;align-items:start;margin-top:1.5rem;}
+
+    .flow{display:flex;flex-wrap:wrap;gap:0.5rem;align-items:stretch;margin:1.5rem 0;}
+    .flow-step{background:white;border:1px solid var(--line);border-radius:10px;padding:1rem 1.2rem;flex:1 1 120px;text-align:center;box-shadow:var(--shadow-sm);}
+    .flow-step .step-num{font-family:'Cormorant Garamond',serif;font-size:1.6rem;color:var(--gold);display:block;line-height:1;margin-bottom:0.35rem;}
+    .flow-step .step-label{font-size:0.82rem;font-weight:600;color:var(--dark);text-transform:uppercase;letter-spacing:0.08em;}
+    .flow-step .step-sub{font-size:0.78rem;color:var(--muted);margin-top:0.25rem;}
+    .flow-arrow{display:flex;align-items:center;padding:0 0.25rem;color:var(--gold);font-size:1.2rem;flex-shrink:0;}
+
+    .timeline{position:relative;padding-left:2rem;margin-top:1.5rem;}
+    .timeline::before{content:'';position:absolute;left:8px;top:0;bottom:0;width:1px;background:var(--line);}
+    .tl-item{position:relative;margin-bottom:1.5rem;}
+    .tl-item::before{content:'';position:absolute;left:-1.7rem;top:0.5rem;width:10px;height:10px;background:var(--gold);border-radius:50%;}
+    .tl-item h4{margin-bottom:0.25rem;}
+
+    nav.top{position:fixed;top:0;left:0;right:0;background:rgba(26,26,26,0.94);backdrop-filter:blur(12px);z-index:100;padding:0.7rem 1.2rem;display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid rgba(212,168,67,0.18);}
+    nav.top .brand{color:var(--gold);font-family:'Cormorant Garamond',serif;font-size:1.15rem;font-style:italic;letter-spacing:0.2em;border:none;}
+    nav.top .nav-links{display:flex;gap:0.7rem;align-items:center;}
+    nav.top .nav-links a{font-size:0.82rem;color:rgba(248,243,233,0.7);border:none;letter-spacing:0.05em;}
+    nav.top .nav-links a:hover{color:var(--gold);}
+    nav.top .toc-toggle{background:transparent;color:var(--cream);border:1px solid rgba(248,243,233,0.22);padding:0.4rem 0.9rem;border-radius:20px;cursor:pointer;font-family:inherit;font-size:0.82rem;letter-spacing:0.1em;transition:0.2s;}
+    nav.top .toc-toggle:hover{background:var(--gold);color:var(--dark);border-color:var(--gold);}
+
+    .toc-panel{position:fixed;top:56px;right:1rem;background:white;box-shadow:var(--shadow);border-radius:10px;padding:1rem 1.2rem;border:1px solid var(--line);display:none;z-index:99;width:300px;max-height:82vh;overflow-y:auto;}
+    .toc-panel.open{display:block;}
+    .toc-panel h4{font-size:0.8rem;text-transform:uppercase;letter-spacing:0.15em;color:var(--muted);margin-bottom:0.75rem;font-family:'Jost',sans-serif;}
+    .toc-panel ol{padding-left:1.2rem;font-size:0.88rem;}
+    .toc-panel ol li{padding:0.22rem 0;}
+    .toc-panel ol li a{border:none;color:var(--ink);}
+    .toc-panel ol li a:hover,.toc-panel ol li a.active{color:var(--gold);}
+
+    .reading-progress{position:fixed;top:0;left:0;height:2px;background:var(--gold);z-index:200;transition:width 0.1s linear;width:0%;}
+
+    footer.handover{background:var(--dark);color:var(--cream);padding:5rem 0 4rem;text-align:center;}
+    footer.handover .crest{color:var(--gold);font-family:'Cormorant Garamond',serif;font-style:italic;font-size:1.5rem;letter-spacing:0.35em;margin-bottom:1rem;}
+    footer.handover p{margin:0.5rem auto;color:rgba(248,243,233,0.7);}
+    footer.handover .signature{font-family:'Cormorant Garamond',serif;font-style:italic;color:var(--gold);font-size:1.25rem;margin-top:1.75rem;}
+
+    @media print{
+      nav.top,.toc-panel,.reading-progress{display:none!important;}
+      section.slide{page-break-after:always;min-height:auto;padding:1rem 0;}
+      body{background:white;font-size:11pt;}
+      .card,table,blockquote,.callout{box-shadow:none;border:1px solid #ccc;}
+      .hero{background:white;color:var(--dark);min-height:auto;}
+      .hero h1,.hero .crest,.hero .lead{color:var(--dark);}
+      a{color:var(--ink);border:none;}
+    }
+    @media(max-width:700px){
+      .two-col-prose{grid-template-columns:1fr;}
+      section.slide{min-height:auto;padding:3rem 0;}
+      blockquote{font-size:1.15rem;}
+      table{font-size:0.83rem;}
+      th,td{padding:0.6rem 0.7rem;}
+      .flow-arrow{display:none;}
+      nav.top .nav-links{display:none;}
+    }
+  </style>
+  <script src="assets/guide-init.js" defer></script>
+</head>
+
+<body>
+
+<div class="reading-progress" id="readingBar"></div>
+
+<nav class="top">
+  <a href="index.html" class="brand">ROSALYN'S HOTEL</a>
+  <div class="nav-links">
+    <a href="index.html">All Guides</a>
+    <a href="99-admin-dashboard-full-guide.html">Admin Bible</a>
+  </div>
+  <button class="toc-toggle" onclick="document.getElementById('toc').classList.toggle('open')">CONTENTS</button>
+</nav>
+
+<aside class="toc-panel" id="toc">
+  <h4>Table of Contents</h4>
+  <ol>
+    <li><a href="#welcome">Welcome</a></li>
+    <li><a href="#overview">What you have</a></li>
+    <li><a href="#technology">The technology</a></li>
+    <li><a href="#access">Accessing the system</a></li>
+    <li><a href="#users">Staff &amp; user management</a></li>
+    <li><a href="#website">The public website</a></li>
+    <li><a href="#content">Content management</a></li>
+    <li><a href="#rooms">Room management</a></li>
+    <li><a href="#booking">The booking engine</a></li>
+    <li><a href="#packages">Packages &amp; pricing</a></li>
+    <li><a href="#payments">Payments &amp; invoicing</a></li>
+    <li><a href="#dining">The dining floor</a></li>
+    <li><a href="#menu">Menu management</a></li>
+    <li><a href="#roomservice">Room service</a></li>
+    <li><a href="#housekeeping">Housekeeping</a></li>
+    <li><a href="#conf">Conference, events &amp; wellness</a></li>
+    <li><a href="#stock">Stock management</a></li>
+    <li><a href="#reports">Reports &amp; analytics</a></li>
+    <li><a href="#whatsapp">WhatsApp &amp; notifications</a></li>
+    <li><a href="#security">Security &amp; backups</a></li>
+    <li><a href="#admin">System administration</a></li>
+    <li><a href="#routine">Daily / weekly / monthly</a></li>
+    <li><a href="#emergency">Emergency procedures</a></li>
+    <li><a href="#golive">Go-live checklist</a></li>
+    <li><a href="#support">Support &amp; credentials</a></li>
+    <li><a href="#close">Closing</a></li>
+  </ol>
+</aside>
+
+<!-- HERO -->
+<section class="slide hero" id="welcome">
+  <div class="deck">
+    <div class="crest">&#8212; R H &#8212;</div>
+    <h1 class="g-site-name">Rosalyn's Hotel</h1>
+    <div class="divider"></div>
+    <p class="lead">A complete operational handover of the digital hospitality system &mdash; from the front desk to the kitchen, from the bar to the boardroom.</p>
+    <div class="meta">COMPLETE SYSTEM HANDOVER &nbsp;&middot;&nbsp; 2026 EDITION &nbsp;&middot;&nbsp; CONFIDENTIAL</div>
+    <a href="#overview" class="scroll-hint">Scroll to begin</a>
+  </div>
+</section>
+
+<!-- OVERVIEW -->
+<section class="slide" id="overview">
+  <div class="deck">
+    <div class="eyebrow">Chapter 1 &middot; What you have</div>
+    <h2>One platform. Every department.</h2>
+    <p class="lead">Every reservation, every drink, every plate, every payment &mdash; flows through one beautifully connected system built specifically for <span class="g-site-name">Rosalyn's Hotel</span>.</p>
+    <div class="stat-row">
+      <div class="stat"><span class="num">11</span><span class="lbl">Staff roles</span></div>
+      <div class="stat"><span class="num">55+</span><span class="lbl">Admin pages</span></div>
+      <div class="stat"><span class="num">4</span><span class="lbl">Live touch screens</span></div>
+      <div class="stat"><span class="num">35+</span><span class="lbl">DB migrations</span></div>
+      <div class="stat"><span class="num">12</span><span class="lbl">Public pages</span></div>
+      <div class="stat"><span class="num">100%</span><span class="lbl">Custom-built</span></div>
+    </div>
+    <div class="cards">
+      <div class="card"><div class="icon">B</div><h3>Booking Engine</h3><p>Website-to-checkout: tentative holds, confirmations, check-in, check-out, folios, automated emails and sequential invoices.</p></div>
+      <div class="card"><div class="icon">F</div><h3>Food &amp; Beverage</h3><p>Touch POS for the till, KDS for the kitchen, BDS for the bar, CDS for the coffee station &mdash; all connected in real time.</p></div>
+      <div class="card"><div class="icon">R</div><h3>Room Service</h3><p>In-room orders charged directly to the guest folio, stock decremented automatically, full delivery tracking.</p></div>
+      <div class="card"><div class="icon">H</div><h3>Housekeeping</h3><p>Live room-status board, assignment management, and maintenance pipeline. Out-of-order rooms block bookings instantly.</p></div>
+      <div class="card"><div class="icon">S</div><h3>Stock &amp; Finance</h3><p>Recipe-linked ingredients, end-of-day variance, sequential invoices, VAT, tourism levy, accounting dashboard.</p></div>
+      <div class="card"><div class="icon">A</div><h3>Analytics</h3><p>Occupancy, RevPAR, ADR, top sellers, visitor traffic, device breakdown. CSV export for your accountant.</p></div>
+      <div class="card"><div class="icon">P</div><h3>Packages &amp; Pricing</h3><p>Add-on packages and six types of dynamic rate plans (seasonal, early-bird, last-minute) applied automatically at booking.</p></div>
+      <div class="card"><div class="icon">C</div><h3>Conference &amp; Events</h3><p>Conference room management, public inquiry forms, events calendar with video, and a gym &amp; wellness membership pipeline.</p></div>
+      <div class="card"><div class="icon">W</div><h3>Content &amp; Website</h3><p>CMS-driven section headers, gallery, media library, and page content &mdash; update every visible word and image from the admin.</p></div>
+    </div>
+  </div>
+</section>
+
+<!-- TECHNOLOGY -->
+<section class="slide compact" id="technology">
+  <div class="deck">
+    <div class="eyebrow">Chapter 2 &middot; How it's built</div>
+    <h2>The technology behind the curtain</h2>
+    <p class="lead">A handcrafted system &mdash; no rented SaaS, no monthly platform fee. You own it outright.</p>
+    <div class="two-col-prose">
+      <div>
+        <h3>Server &amp; infrastructure</h3>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Layer</th><th>Technology</th></tr></thead>
+            <tbody>
+              <tr><td>Language</td><td>PHP 8.2+ (procedural, security-hardened)</td></tr>
+              <tr><td>Database</td><td>MySQL 8.0, UTF-8, UTC timezone</td></tr>
+              <tr><td>Hosting</td><td>Shared / VPS (promanaged-it.com)</td></tr>
+              <tr><td>Email</td><td>PHPMailer via SMTP</td></tr>
+              <tr><td>PDF invoices</td><td>TCPDF (server-generated, never client-side)</td></tr>
+              <tr><td>Fonts</td><td>Google Fonts (Cormorant Garamond + Jost)</td></tr>
+              <tr><td>Icons</td><td>Font Awesome 6.7.2</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <div class="callout info"><span class="callout-icon">&#8505;</span><p><strong>No monthly SaaS fee.</strong> The system runs on your own server. Your data never leaves your hosting account.</p></div>
+      </div>
+      <div>
+        <h3>What this means for you</h3>
+        <ul class="checklist">
+          <li>You own the codebase outright &mdash; no vendor lock-in.</li>
+          <li>All guest data stays on your server, in your MySQL database.</li>
+          <li>Credentials and secrets live in a <code>.env</code> file on the server &mdash; never in the code.</li>
+          <li>The system runs on standard shared or VPS hosting &mdash; no specialised cloud required.</li>
+          <li>Backups are SQL dumps you can download and store anywhere.</li>
+          <li>A developer can pick up and extend the codebase without proprietary tools.</li>
+        </ul>
+        <div class="callout warn"><span class="callout-icon">&#9888;</span><p><strong>Keep your hosting renewed.</strong> If the hosting lapses, the website and admin go offline. Set auto-renewal and keep a local backup.</p></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ACCESSING THE SYSTEM -->
+<section class="slide compact" id="access">
+  <div class="deck">
+    <div class="eyebrow">Chapter 3 &middot; Getting in</div>
+    <h2>Accessing the admin system</h2>
+    <div class="two-col-prose">
+      <div>
+        <h3>Login &amp; screens</h3>
+        <p>Navigate to <code>yourdomain.com/admin/</code> and sign in with your credentials. Use a private browser tab on shared devices and always log out when finished.</p>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Screen</th><th>URL</th><th>Who uses it</th></tr></thead>
+            <tbody>
+              <tr><td><strong>Admin panel</strong></td><td><code>/admin/</code></td><td>All staff</td></tr>
+              <tr><td><strong>POS Till</strong></td><td><code>/admin/pos.php</code></td><td>Restaurant staff &amp; cashiers</td></tr>
+              <tr><td><strong>Kitchen KDS</strong></td><td><code>/admin/kds.php</code></td><td>Chefs</td></tr>
+              <tr><td><strong>Bar BDS</strong></td><td><code>/admin/bds.php</code></td><td>Bar staff</td></tr>
+              <tr><td><strong>Coffee CDS</strong></td><td><code>/admin/cds.php</code></td><td>Coffee staff</td></tr>
+              <tr><td><strong>Public website</strong></td><td><code>/</code></td><td>Guests</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+      <div>
+        <h3>Security rules</h3>
+        <ul class="checklist">
+          <li><strong>5 failed logins</strong> &rarr; account locked for 15 minutes.</li>
+          <li><strong>10 failed attempts</strong> from the same IP &rarr; 1-hour IP block.</li>
+          <li>Never share your admin password by email, chat, or phone.</li>
+          <li>Password resets via the <em>Forgot Password</em> link &mdash; or by the developer via server CLI.</li>
+          <li>Every login is logged with timestamp and IP address.</li>
+          <li>Sessions expire after inactivity &mdash; you will be asked to re-login.</li>
+        </ul>
+        <div class="callout danger"><span class="callout-icon">&#9940;</span><p><strong>Never share the administrator account.</strong> Create individual accounts for each staff member so the audit trail is meaningful.</p></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- USER MANAGEMENT -->
+<section class="slide compact" id="users">
+  <div class="deck">
+    <div class="eyebrow">Chapter 4 &middot; Your team</div>
+    <h2>Staff &amp; user management</h2>
+    <p class="lead">Eleven distinct roles, each with precisely the access they need &mdash; and nothing more.</p>
+    <p>Manage all accounts at <strong>Admin &rarr; User Management</strong>. Administrators can create, edit, deactivate, and delete users. Each user gets a role with a pre-configured permission set. Individual permissions can also be overridden per-user without changing the role.</p>
+    <div class="role-grid">
+      <div class="role-card"><div class="role-icon" style="background:#d4a843;">&#128081;</div><div><div class="role-name">Administrator</div><div class="role-desc">Full access to every feature, setting, and user. Assign only to the owner and trusted senior manager. Level 100.</div></div></div>
+      <div class="role-card"><div class="role-icon" style="background:#17a2b8;">&#128084;</div><div><div class="role-name">Manager</div><div class="role-desc">All operations: bookings, payments, rooms, stock, reports, gallery, events. Cannot manage other admin accounts. Level 75.</div></div></div>
+      <div class="role-card"><div class="role-icon" style="background:#28a745;">&#127950;</div><div><div class="role-name">Receptionist</div><div class="role-desc">Front desk: view/create/check-in/check-out bookings, room dashboard, housekeeping status, room service. Level 50.</div></div></div>
+      <div class="role-card"><div class="role-icon" style="background:#6c757d;">&#129529;</div><div><div class="role-name">Housekeeping</div><div class="role-desc">Housekeeping board and maintenance requests only. No access to bookings, payments, or POS. Level 25.</div></div></div>
+      <div class="role-card"><div class="role-icon" style="background:#fd7e14;">&#129518;</div><div><div class="role-name">Accountant</div><div class="role-desc">Payments, invoices, accounting dashboard, reports, and read-only bookings. No operational access. Level 50.</div></div></div>
+      <div class="role-card"><div class="role-icon" style="background:#6c757d;">&#128065;</div><div><div class="role-name">Viewer</div><div class="role-desc">Read-only: dashboard, bookings, calendar, rooms, and reports. Ideal for silent partners or auditors. Level 10.</div></div></div>
+      <div class="role-card"><div class="role-icon" style="background:#8B7355;">&#128421;</div><div><div class="role-name">Restaurant Staff</div><div class="role-desc">POS till only &mdash; place orders, take payments, print/email receipts. Also sees room service dashboard. Level 20.</div></div></div>
+      <div class="role-card"><div class="role-icon" style="background:#c82333;">&#127859;</div><div><div class="role-name">Chef / Kitchen</div><div class="role-desc">KDS screen only &mdash; view fired tickets, bump items as ready or served, access daily KDS report. Level 20.</div></div></div>
+      <div class="role-card"><div class="role-icon" style="background:#5e35b1;">&#127864;</div><div><div class="role-name">Bar Staff</div><div class="role-desc">BDS screen only &mdash; view drink tickets, mark pours as ready/served. Sees KDS daily report. Level 20.</div></div></div>
+      <div class="role-card"><div class="role-icon" style="background:#6f4e37;">&#9749;</div><div><div class="role-name">Coffee Bar Staff</div><div class="role-desc">CDS screen only &mdash; coffee and tea tickets, mark as ready/served. Level 20.</div></div></div>
+      <div class="role-card"><div class="role-icon" style="background:#0c8d6c;">&#128276;</div><div><div class="role-name">Room Service</div><div class="role-desc">Place in-room dining orders, charge to folio, confirm delivery. Also has POS access. Level 20.</div></div></div>
+    </div>
+    <div class="callout tip" style="margin-top:2rem;"><span class="callout-icon">&#10003;</span><p><strong>Best practice:</strong> Create one account per person, never share logins. Deactivate (do not delete) accounts when staff leave &mdash; this preserves the audit trail while revoking access immediately.</p></div>
+  </div>
+</section>
+
+<!-- THE PUBLIC WEBSITE -->
+<section class="slide compact" id="website">
+  <div class="deck">
+    <div class="eyebrow">Chapter 5 &middot; What guests see</div>
+    <h2>The public website</h2>
+    <p class="lead">The website is fully DB-driven. Every heading, description, image, and price can be updated from the admin without touching code.</p>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Page</th><th>What it shows</th><th>Managed via</th></tr></thead>
+        <tbody>
+          <tr><td><strong>Home</strong> (<code>/</code>)</td><td>Hero, featured rooms, packages, reviews, events teaser</td><td>Section Headers, Rooms, Packages, Reviews</td></tr>
+          <tr><td><strong>Rooms &amp; Gallery</strong></td><td>All room types with photos, rates, features</td><td>Room Management, Gallery</td></tr>
+          <tr><td><strong>Booking</strong></td><td>Date picker, room selection, package add-ons, payment</td><td>Booking Settings, Rate Plans, Packages</td></tr>
+          <tr><td><strong>Restaurant</strong></td><td>Menu, hours, reservation form, gallery</td><td>Menu Management, Section Headers</td></tr>
+          <tr><td><strong>Conference</strong></td><td>Rooms, capacity, daily rates, inquiry form</td><td>Conference Management</td></tr>
+          <tr><td><strong>Events</strong></td><td>Upcoming &amp; past events, videos, images</td><td>Events Management</td></tr>
+          <tr><td><strong>Guest Services / Gym</strong></td><td>Facilities, class schedule, membership packages</td><td>Section Headers, Gym Inquiries</td></tr>
+          <tr><td><strong>Contact</strong></td><td>Contact form, map, opening hours</td><td>Contact Inquiries (admin inbox)</td></tr>
+          <tr><td><strong>Booking Lookup</strong></td><td>Guest self-service to view or cancel their booking</td><td>Automatic</td></tr>
+          <tr><td><strong>Submit Review</strong></td><td>Post-stay review form (linked from checkout email)</td><td>Reviews (admin approves before publish)</td></tr>
+          <tr><td><strong>Privacy Policy</strong></td><td>Data policy page</td><td>Page Management</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</section>
+
+<!-- CONTENT MANAGEMENT -->
+<section class="slide compact" id="content">
+  <div class="deck">
+    <div class="eyebrow">Chapter 6 &middot; The CMS</div>
+    <h2>Content management</h2>
+    <p class="lead">Change what the world sees &mdash; no developer required.</p>
+    <div class="cards two-col">
+      <div class="card">
+        <h3>Section Headers</h3>
+        <p>Every section on every public page has an editable label, heading, and description stored in the database. Go to <strong>Admin &rarr; Section Headers Management</strong> and click any section to edit. Changes appear on the website immediately after clearing the cache.</p>
+        <div class="callout tip"><span class="callout-icon">&#10003;</span><p>This is the fastest way to refresh messaging &mdash; change the homepage hero tagline, the restaurant intro, or the rooms description without any code change.</p></div>
+      </div>
+      <div class="card">
+        <h3>Gallery Management</h3>
+        <p>Upload photos at <strong>Admin &rarr; Gallery Management</strong>. Assign each image to a category (rooms, restaurant, pool, events, etc.) and toggle <em>featured</em> to promote it to the homepage. Drag to reorder. Delete removes both the DB record and the file from the server.</p>
+      </div>
+      <div class="card">
+        <h3>Media Library</h3>
+        <p><strong>Admin &rarr; Media Management</strong> is the central file store. All images uploaded from gallery, events, menus, and conference rooms appear here. Use it to find, organise, or delete media across the whole system from a single screen.</p>
+      </div>
+      <div class="card">
+        <h3>Page Management</h3>
+        <p>Manage static page content (Privacy Policy, Terms) at <strong>Admin &rarr; Page Management</strong>. A rich text editor lets you update text without HTML knowledge. Add new static pages when needed.</p>
+      </div>
+      <div class="card">
+        <h3>Video Uploads</h3>
+        <p>Events and the homepage can feature background or embedded videos. Upload via <strong>Admin &rarr; Events Management &rarr; Edit Event &rarr; Video</strong>. Videos are served from your own server &mdash; no YouTube dependency required.</p>
+      </div>
+      <div class="card">
+        <h3>Reviews</h3>
+        <p>Guests submit reviews via a link in their checkout email. All reviews land in <strong>Admin &rarr; Reviews</strong> with <em>pending</em> status. You approve, edit, or reject before they appear on the website. Star ratings feed the homepage testimonials section automatically.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ROOM MANAGEMENT -->
+<section class="slide compact" id="rooms">
+  <div class="deck">
+    <div class="eyebrow">Chapter 7 &middot; Your inventory</div>
+    <h2>Room management</h2>
+    <p class="lead">From type to individual unit &mdash; every room is tracked, status-aware, and booking-ready.</p>
+    <div class="two-col-prose">
+      <div>
+        <h3>Room Types</h3>
+        <p>Manage at <strong>Admin &rarr; Room Management</strong>. Each type has: name, description, photos (gallery-linked), base nightly rate (MWK), capacity (adults + children), amenities list, <em>featured</em> toggle (homepage), and active/inactive toggle.</p>
+        <h3 style="margin-top:1.5rem;">Individual Rooms</h3>
+        <p>Each physical room unit has its own record at <strong>Admin &rarr; Individual Rooms</strong>: room number, floor, type assignment, current status, and notes. Status flows: <em>available &rarr; occupied &rarr; dirty &rarr; cleaning &rarr; inspected &rarr; available</em>. Out-of-service rooms are removed from bookable inventory immediately.</p>
+        <h3 style="margin-top:1.5rem;">Room Dashboard</h3>
+        <p><strong>Admin &rarr; Room Dashboard</strong> shows a live colour-coded grid of every room on every floor. Reception uses this for an instant hotel snapshot at any moment of the day.</p>
+      </div>
+      <div>
+        <h3>Maintenance</h3>
+        <p>Log a fault at <strong>Admin &rarr; Room Maintenance</strong>. Set priority (urgent / high / medium / low) and assign to a technician. When a room is set to <em>out-of-service</em> it is automatically removed from bookable inventory until cleared by maintenance.</p>
+        <h3 style="margin-top:1.5rem;">Blocked Dates</h3>
+        <p>Block specific dates for a room or the whole hotel at <strong>Admin &rarr; Blocked Dates</strong>. Four block types: <em>manual, maintenance, event, full</em>. Blocked dates prevent new bookings. Existing bookings are unaffected.</p>
+        <div class="callout warn"><span class="callout-icon">&#9888;</span><p>Always set room status to <strong>out-of-service</strong> via Maintenance before physically locking a room for renovation &mdash; this ensures it drops out of online availability.</p></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- BOOKING ENGINE -->
+<section class="slide" id="booking">
+  <div class="deck">
+    <div class="eyebrow">Chapter 8 &middot; Front desk</div>
+    <h2>The booking engine</h2>
+    <p class="lead">A guest's first impression begins on your website. Every booking is captured, confirmed, and converted into revenue &mdash; automatically.</p>
+    <h3>The lifecycle</h3>
+    <div class="flow">
+      <div class="flow-step"><span class="step-num">1</span><div class="step-label">Pending</div><div class="step-sub">Website request arrives</div></div>
+      <div class="flow-arrow">&rarr;</div>
+      <div class="flow-step"><span class="step-num">2</span><div class="step-label">Tentative</div><div class="step-sub">Held 48 h, auto-expires</div></div>
+      <div class="flow-arrow">&rarr;</div>
+      <div class="flow-step"><span class="step-num">3</span><div class="step-label">Confirmed</div><div class="step-sub">Email sent, room reserved</div></div>
+      <div class="flow-arrow">&rarr;</div>
+      <div class="flow-step"><span class="step-num">4</span><div class="step-label">Checked In</div><div class="step-sub">Folio opens</div></div>
+      <div class="flow-arrow">&rarr;</div>
+      <div class="flow-step"><span class="step-num">5</span><div class="step-label">Checked Out</div><div class="step-sub">Invoice &amp; email sent</div></div>
+    </div>
+    <div class="two-col-prose" style="margin-top:2rem;">
+      <div>
+        <h3>Booking settings</h3>
+        <p>Configure at <strong>Admin &rarr; Booking Settings</strong>:</p>
+        <ul class="checklist tight">
+          <li>VAT rate (16.5% Malawi standard)</li>
+          <li>Tourism levy percentage</li>
+          <li>Standard check-in and check-out times</li>
+          <li>Advance booking window (how far ahead guests can book)</li>
+          <li>Cancellation policy text (appears on confirmation emails)</li>
+          <li>Idempotency window (prevents duplicate bookings from double-taps)</li>
+        </ul>
+        <h3 style="margin-top:1.5rem;">Tentative bookings</h3>
+        <p>Tentative bookings arrive from the website and are held for 48 hours. Manage at <strong>Admin &rarr; Tentative Bookings</strong>. Auto-expiry releases the room back to inventory.</p>
+      </div>
+      <div>
+        <h3>Walk-in bookings</h3>
+        <p>Reception can create a booking at <strong>Admin &rarr; Create Booking</strong> &mdash; no website needed. Select room, dates, guest details, and apply a rate plan. The folio opens immediately for same-day check-ins.</p>
+        <h3 style="margin-top:1.5rem;">Edit, cancel &amp; calendar</h3>
+        <p>Edit any booking via <strong>Admin &rarr; Bookings &rarr; Edit</strong>. Change dates, room type, guest details, or add notes. Full audit history is stored on every change.</p>
+        <p><strong>Admin &rarr; Calendar</strong> shows a colour-coded month view of all bookings. Click any booking to jump to its detail. Use it for occupancy planning before publishing rate changes.</p>
+        <div class="callout danger"><span class="callout-icon">&#9940;</span><p><strong>Never delete a booking.</strong> Always cancel &mdash; this preserves the audit trail and keeps room availability accurate.</p></div>
+      </div>
+    </div>
+    <blockquote>"The system protects your audit trail. One cancelled booking tells a better story than a deleted one."</blockquote>
+  </div>
+</section>
+
+<!-- PACKAGES & PRICING -->
+<section class="slide compact" id="packages">
+  <div class="deck">
+    <div class="eyebrow">Chapter 9 &middot; Revenue optimisation</div>
+    <h2>Packages &amp; dynamic pricing</h2>
+    <p class="lead">Sell more without discounting &mdash; let the system adjust rates and upsell automatically around the clock.</p>
+    <div class="cards three-col">
+      <div class="card">
+        <h3>Room Packages</h3>
+        <p>Create add-ons at <strong>Admin &rarr; Packages</strong>: honeymoon, half-board, airport transfer, spa day, safari. Pricing can be per-night, per-stay, or per-person. Toggle <em>featured</em> to show on the homepage. Guests select during website checkout.</p>
+      </div>
+      <div class="card">
+        <h3>Dynamic Rate Plans</h3>
+        <p>Six plan types at <strong>Admin &rarr; Rate Plans</strong>:</p>
+        <ul class="checklist tight">
+          <li><strong>Seasonal</strong> &mdash; date-range pricing</li>
+          <li><strong>Weekend</strong> &mdash; Friday/Saturday uplift</li>
+          <li><strong>Length-of-stay</strong> &mdash; discount for 3+ nights</li>
+          <li><strong>Last-minute</strong> &mdash; fill empty rooms</li>
+          <li><strong>Early-bird</strong> &mdash; reward forward planners</li>
+          <li><strong>Promotional</strong> &mdash; ad-hoc % or MWK discount</li>
+        </ul>
+      </div>
+      <div class="card">
+        <h3>Priority &amp; Stacking</h3>
+        <p>Set a priority order so the correct plan wins when multiple apply. Toggle <em>stacking</em> to allow or block compound discounts. Plans are calculated and stored at booking time &mdash; not recalculated at check-in.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- PAYMENTS & INVOICING -->
+<section class="slide compact" id="payments">
+  <div class="deck">
+    <div class="eyebrow">Chapter 10 &middot; Money</div>
+    <h2>Payments &amp; invoicing</h2>
+    <p class="lead">Every transaction &mdash; accommodation, F&amp;B, room service &mdash; flows into one folio per guest, settled once at checkout.</p>
+    <div class="two-col-prose">
+      <div>
+        <h3>Payment methods</h3>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Method</th><th>Notes</th></tr></thead>
+            <tbody>
+              <tr><td><strong>Cash</strong></td><td>Enter tendered amount; change calculated automatically.</td></tr>
+              <tr><td><strong>Card</strong></td><td>Logged as card payment; amount reconciled at EOD.</td></tr>
+              <tr><td><strong>Mobile Money</strong></td><td>Airtel Money &amp; TNM Mpamba &mdash; first-class, not an afterthought.</td></tr>
+              <tr><td><strong>Bank transfer</strong></td><td>Reference number stored against the payment record.</td></tr>
+              <tr><td><strong>Complimentary</strong></td><td>Management override with required notes/reason.</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <p>Add payments at <strong>Booking Details &rarr; Add Payment</strong>. Partial payments are supported; the outstanding balance updates in real time.</p>
+      </div>
+      <div>
+        <h3>Invoicing</h3>
+        <p>Invoices are numbered sequentially <code>INV-YYYY-NNNNNN</code> and can never be reused or deleted. Each invoice shows itemised accommodation + F&amp;B charges, calculates VAT (16.5%) and tourism levy separately, is generated as PDF server-side, can be emailed to the guest directly, and is archived permanently under <strong>Admin &rarr; Invoices</strong>.</p>
+        <h3 style="margin-top:1.5rem;">Refunds</h3>
+        <p>Process at <strong>Admin &rarr; Payment Refund</strong>. Enter amount, reason, and method. The accounting dashboard records the refund against the original payment. Refunds do not auto-cancel bookings &mdash; cancel separately if needed.</p>
+        <div class="callout info"><span class="callout-icon">&#8505;</span><p>The server validates all prices. A guest cannot tamper with totals in the browser &mdash; every price calculation happens in PHP, never in JavaScript.</p></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- THE DINING FLOOR -->
+<section class="slide" id="dining">
+  <div class="deck">
+    <div class="eyebrow">Chapter 11 &middot; F&amp;B operations</div>
+    <h2>The connected dining floor</h2>
+    <p class="lead">When a waiter taps an order, four screens light up at once &mdash; and stock decrements automatically.</p>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Screen</th><th>Operated by</th><th>What it shows</th><th>Stock impact</th></tr></thead>
+        <tbody>
+          <tr><td><strong>POS Till</strong><br><code>/admin/pos.php</code></td><td>Restaurant Staff</td><td>Full menu, cart, payment, receipt</td><td>Fires order; deducts all ingredients atomically via recipe</td></tr>
+          <tr><td><strong>KDS</strong><br><code>/admin/kds.php</code></td><td>Chef / Kitchen</td><td>Food tickets, priority order</td><td>Read-only; stock already decremented at POS</td></tr>
+          <tr><td><strong>BDS</strong><br><code>/admin/bds.php</code></td><td>Bar Staff</td><td>Drink tickets only</td><td>Bottle counts auto-updated per pour via recipe</td></tr>
+          <tr><td><strong>CDS</strong><br><code>/admin/cds.php</code></td><td>Coffee Staff</td><td>Coffee &amp; tea tickets</td><td>Milk, beans, syrups decremented per recipe</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="two-col-prose" style="margin-top:2rem;">
+      <div>
+        <h3>POS Till</h3>
+        <ul class="checklist tight">
+          <li>Touchscreen-first &mdash; large tap targets, one-handed operation</li>
+          <li>Category tabs for fast item lookup</li>
+          <li>Split payments across methods on one order</li>
+          <li>Room charge &mdash; sends directly to guest folio</li>
+          <li>Order void &mdash; reverses stock and folio in one transaction</li>
+          <li>Receipt by print or email</li>
+          <li>Offline mode &mdash; orders queue locally during load shedding; replay on reconnect</li>
+        </ul>
+      </div>
+      <div>
+        <h3>KDS / BDS / CDS</h3>
+        <ul class="checklist tight">
+          <li>Full-screen, no scrolling &mdash; designed for a fixed kiosk tablet</li>
+          <li>Colour-coded urgency: <span style="color:#c0392b;font-weight:600;">red = urgent</span>, <span style="color:#c0651a;font-weight:600;">amber = medium</span>, <span style="color:#1e7e5a;font-weight:600;">green = normal</span></li>
+          <li>Tap ticket to bump to <em>ready</em>; tap again for <em>served</em></li>
+          <li>Auto-refreshes every 15&ndash;30 seconds without losing position</li>
+          <li>Station hours configurable &mdash; will not accept tickets outside open hours</li>
+          <li>Daily report: total tickets, top sellers, average prep time</li>
+        </ul>
+      </div>
+    </div>
+    <h3 style="margin-top:2rem;">Order lifecycle</h3>
+    <div class="flow">
+      <div class="flow-step"><span class="step-num">1</span><div class="step-label">Placed</div><div class="step-sub">POS submits</div></div>
+      <div class="flow-arrow">&rarr;</div>
+      <div class="flow-step"><span class="step-num">2</span><div class="step-label">Routed</div><div class="step-sub">Kitchen / Bar / Coffee</div></div>
+      <div class="flow-arrow">&rarr;</div>
+      <div class="flow-step"><span class="step-num">3</span><div class="step-label">In Progress</div><div class="step-sub">Station bumps ticket</div></div>
+      <div class="flow-arrow">&rarr;</div>
+      <div class="flow-step"><span class="step-num">4</span><div class="step-label">Ready</div><div class="step-sub">Runner collects</div></div>
+      <div class="flow-arrow">&rarr;</div>
+      <div class="flow-step"><span class="step-num">5</span><div class="step-label">Served / Paid</div><div class="step-sub">Cashier closes</div></div>
+    </div>
+    <div class="callout tip" style="margin-top:1.5rem;"><span class="callout-icon">&#10003;</span><p>The full order audit trail is viewable at <strong>Admin &rarr; Order Lifecycle</strong> for any order, any day.</p></div>
+  </div>
+</section>
+
+<!-- MENU MANAGEMENT -->
+<section class="slide compact" id="menu">
+  <div class="deck">
+    <div class="eyebrow">Chapter 12 &middot; The menu</div>
+    <h2>Menu management</h2>
+    <p class="lead">Build and update your menu entirely from the admin &mdash; changes are live on the POS and public website immediately.</p>
+    <div class="two-col-prose">
+      <div>
+        <h3>Structure</h3>
+        <p>Manage at <strong>Admin &rarr; Menu Management</strong>. Items are organised into categories (Starters, Mains, Desserts, Cocktails, Wines, Coffees, etc.). Each item has: name, description, price (MWK), category, routing (Kitchen / Bar / Coffee), optional photo, available toggle, and featured toggle.</p>
+        <div class="callout warn"><span class="callout-icon">&#9888;</span><p>Changing an item's <strong>routing</strong> takes effect on the next order &mdash; in-progress tickets on KDS/BDS are unaffected.</p></div>
+      </div>
+      <div>
+        <h3>Restaurant Tables</h3>
+        <p>Configure your floor plan at <strong>Admin &rarr; Restaurant Tables</strong>. Assign table numbers, sections (indoor/outdoor/bar), and cover count. The POS uses table numbers so tickets on the KDS/BDS arrive with the correct table reference.</p>
+        <h3 style="margin-top:1.5rem;">Station Hours</h3>
+        <p>Each station has configurable operating hours at <strong>Admin &rarr; Station Settings</strong>. The KDS/BDS/CDS will not accept new tickets outside these hours, and the POS shows a visual warning to the cashier. Update whenever opening hours change.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ROOM SERVICE -->
+<section class="slide compact" id="roomservice">
+  <div class="deck">
+    <div class="eyebrow">Chapter 13 &middot; In-room dining</div>
+    <h2>Room service that pays for itself</h2>
+    <p class="lead">Every breakfast tray, late-night snack, and bottle of wine &mdash; billed cleanly to the right room, automatically.</p>
+    <ol class="steps">
+      <li>Reception or room-service runner opens the <strong>Room Service Dashboard</strong> and taps <em>New Order</em>.</li>
+      <li>Select the room number from the live occupied-rooms list.</li>
+      <li>Add items from the full menu. Routing fires to KDS (food), BDS (drinks), or CDS (coffee) automatically.</li>
+      <li>The guest folio is debited the same instant &mdash; VAT and tourism levy applied.</li>
+      <li>Runner taps <strong>Mark Delivered</strong> when the tray arrives at the room.</li>
+      <li>At checkout, room-service charges appear as individual line items on the final invoice.</li>
+    </ol>
+    <div class="callout info"><span class="callout-icon">&#8505;</span><p>A void on a room-service order reverses both the stock deduction and the folio charge in a single atomic transaction &mdash; no partial corrections needed.</p></div>
+  </div>
+</section>
+
+<!-- HOUSEKEEPING -->
+<section class="slide compact" id="housekeeping">
+  <div class="deck">
+    <div class="eyebrow">Chapter 14 &middot; The rooms</div>
+    <h2>Housekeeping</h2>
+    <p class="lead">A clean room is a sellable room. The system tracks every status transition with a full audit log.</p>
+    <div class="two-col-prose">
+      <div>
+        <h3>Room status flow</h3>
+        <div class="timeline">
+          <div class="tl-item"><h4>Available (Green)</h4><p>Clean, inspected, and ready to book.</p></div>
+          <div class="tl-item"><h4>Occupied (Blue)</h4><p>Guest checked in. Locked from new bookings.</p></div>
+          <div class="tl-item"><h4>Checkout (Amber)</h4><p>Guest checked out. Assigned to housekeeping.</p></div>
+          <div class="tl-item"><h4>Dirty / Cleaning (Orange)</h4><p>Housekeeper assigned and working.</p></div>
+          <div class="tl-item"><h4>Inspected (Teal)</h4><p>Supervisor inspected. Moves to Available on approval.</p></div>
+          <div class="tl-item"><h4>Maintenance / Out-of-Service (Red)</h4><p>Removed from bookable inventory until cleared.</p></div>
+        </div>
+      </div>
+      <div>
+        <h3>Assignments</h3>
+        <p>Assign rooms at <strong>Admin &rarr; Housekeeping</strong>. Assignment types: checkout cleanup, regular cleaning, deep clean, turndown service, maintenance support. Each housekeeper sees only their assigned rooms. Every status change is logged with timestamp and user.</p>
+        <h3 style="margin-top:1.5rem;">Maintenance requests</h3>
+        <p>Housekeeping staff can flag a fault directly from their dashboard. The fault routes to <strong>Admin &rarr; Room Maintenance</strong> where the manager sets priority and assigns a technician. The room is blocked until the fault is resolved and manually cleared.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- CONFERENCE, EVENTS & WELLNESS -->
+<section class="slide compact" id="conf">
+  <div class="deck">
+    <div class="eyebrow">Chapter 15 &middot; Beyond the rooms</div>
+    <h2>Conference, events &amp; wellness</h2>
+    <p class="lead">From boardroom to ballroom to gym &mdash; all managed through the same system.</p>
+    <div class="cards">
+      <div class="card">
+        <h3>Conference Rooms</h3>
+        <p>Add venues at <strong>Admin &rarr; Conference Management</strong>: name, description, capacity, area (sqm), daily rate (MWK), amenities (projector, AV, WiFi, catering), photo gallery, and active status. Guest inquiries land in the admin inbox with full contact details and preferred dates.</p>
+      </div>
+      <div class="card">
+        <h3>Events Calendar</h3>
+        <p>Publish events at <strong>Admin &rarr; Events Management</strong>: title, date/time, description, featured image, optional video, and active toggle. The public events page automatically divides upcoming from past events. Featured events appear on the homepage.</p>
+      </div>
+      <div class="card">
+        <h3>Gym &amp; Wellness</h3>
+        <p>The gym page is fully DB-driven: facilities grid, class schedule, and membership packages. Inquiries go through a three-step pipeline at <strong>Admin &rarr; Gym Inquiries</strong>: <em>new &rarr; contacted &rarr; converted</em>. Automated emails trigger at each stage.</p>
+      </div>
+      <div class="card">
+        <h3>Contact Inquiries</h3>
+        <p>General website inquiries land at <strong>Admin &rarr; Contact Inquiries</strong>. Each is timestamped and can be marked <em>read / responded / archived</em>. An auto-acknowledgement email is sent to the guest on submission.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- STOCK MANAGEMENT -->
+<section class="slide" id="stock">
+  <div class="deck">
+    <div class="eyebrow">Chapter 16 &middot; The stockroom</div>
+    <h2>Stock management &mdash; from delivery to glass</h2>
+    <p class="lead">Recipe-linked ingredients. Live deductions. Automatic variance. Every unit accounted for.</p>
+    <h3>The stock flow</h3>
+    <div class="flow">
+      <div class="flow-step"><span class="step-num">1</span><div class="step-label">Ingredients</div><div class="step-sub">Base catalogue</div></div>
+      <div class="flow-arrow">&rarr;</div>
+      <div class="flow-step"><span class="step-num">2</span><div class="step-label">Recipes</div><div class="step-sub">Link items to quantities</div></div>
+      <div class="flow-arrow">&rarr;</div>
+      <div class="flow-step"><span class="step-num">3</span><div class="step-label">Order</div><div class="step-sub">Purchase from supplier</div></div>
+      <div class="flow-arrow">&rarr;</div>
+      <div class="flow-step"><span class="step-num">4</span><div class="step-label">Receipt</div><div class="step-sub">GRN updates stock</div></div>
+      <div class="flow-arrow">&rarr;</div>
+      <div class="flow-step"><span class="step-num">5</span><div class="step-label">Sale / Void</div><div class="step-sub">POS deducts / restores</div></div>
+      <div class="flow-arrow">&rarr;</div>
+      <div class="flow-step"><span class="step-num">6</span><div class="step-label">Count</div><div class="step-sub">Physical count</div></div>
+      <div class="flow-arrow">&rarr;</div>
+      <div class="flow-step"><span class="step-num">7</span><div class="step-label">Variance</div><div class="step-sub">Report &amp; action</div></div>
+    </div>
+    <div class="cards" style="margin-top:2rem;">
+      <div class="card green-accent"><h3>Ingredients</h3><p><strong>Admin &rarr; Stock Ingredients</strong>. Master catalogue: name, unit (ml, g, each), par level, cost price, and supplier. Par levels trigger reorder alerts on the stock dashboard.</p></div>
+      <div class="card green-accent"><h3>Recipes</h3><p><strong>Admin &rarr; Stock Recipes</strong>. Link each menu item to ingredient quantities. Sell a cocktail &mdash; spirit, mixer, and garnish all decrement. No recipe = no automatic deduction.</p></div>
+      <div class="card blue-accent"><h3>Stock Orders</h3><p><strong>Admin &rarr; Stock Orders</strong>. Raise a purchase order to a supplier. Status tracks: draft &rarr; submitted &rarr; partially received &rarr; received.</p></div>
+      <div class="card blue-accent"><h3>Stock Receipt (GRN)</h3><p><strong>Admin &rarr; Stock Receipt</strong>. Log quantities received against the PO. The system updates on-hand stock levels and recalculates average cost prices.</p></div>
+      <div class="card orange-accent"><h3>Batches</h3><p><strong>Admin &rarr; Stock Batches</strong>. Track batch numbers and expiry dates for perishables. Alerts flag approaching expiry before wastage occurs.</p></div>
+      <div class="card orange-accent"><h3>Wastage</h3><p><strong>Admin &rarr; Stock Wastage</strong>. Record spoilage, breakage, or theft. Each record carries a reason code and unit cost of the loss. Wastage is included in the variance report.</p></div>
+      <div class="card red-accent"><h3>Stock Count</h3><p><strong>Admin &rarr; Stock Count</strong>. Walk the bar or kitchen with a tablet, key in physical counts. The system flags variances above 5% in red.</p></div>
+      <div class="card red-accent"><h3>Variance Reports</h3><p><strong>Admin &rarr; Stock Reports</strong>. Item-by-item variance: theoretical vs physical. Export as CSV. Consistently high variance on one item = recipe error, measurement problem, or shrinkage to investigate.</p></div>
+    </div>
+  </div>
+</section>
+
+<!-- REPORTS & ANALYTICS -->
+<section class="slide compact" id="reports">
+  <div class="deck">
+    <div class="eyebrow">Chapter 17 &middot; Numbers</div>
+    <h2>Reports &amp; analytics</h2>
+    <p class="lead">The numbers you need, every morning, without asking anyone.</p>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Report</th><th>Location</th><th>Use it for</th><th>Export</th></tr></thead>
+        <tbody>
+          <tr><td><strong>End-of-Day Snapshot</strong></td><td>Admin &rarr; End-of-Day Report</td><td>Owner evening brief: arrivals, revenue, occupancy, trend vs yesterday</td><td>Email to owner</td></tr>
+          <tr><td><strong>Occupancy &amp; RevPAR</strong></td><td>Admin &rarr; Reports</td><td>Pricing strategy, seasonal planning</td><td>CSV</td></tr>
+          <tr><td><strong>ADR</strong></td><td>Admin &rarr; Reports</td><td>Rate plan performance</td><td>CSV</td></tr>
+          <tr><td><strong>Revenue by category</strong></td><td>Admin &rarr; Reports</td><td>Rooms vs F&amp;B vs services split</td><td>CSV</td></tr>
+          <tr><td><strong>Outstanding folios</strong></td><td>Admin &rarr; Bookings &rarr; filter unpaid</td><td>Front-desk follow-up before checkout</td><td>&mdash;</td></tr>
+          <tr><td><strong>VAT &amp; tourism levy</strong></td><td>Admin &rarr; Accounting Dashboard</td><td>Monthly tax returns</td><td>CSV</td></tr>
+          <tr><td><strong>Payments by method</strong></td><td>Admin &rarr; Payments</td><td>Cash reconciliation, mobile money audit</td><td>CSV</td></tr>
+          <tr><td><strong>Stock variance</strong></td><td>Admin &rarr; Stock Reports</td><td>Catch shrinkage, recipe calibration</td><td>CSV</td></tr>
+          <tr><td><strong>KDS Production Report</strong></td><td>Admin &rarr; KDS Report</td><td>Prep times, top items, void value per station</td><td>CSV &amp; email</td></tr>
+          <tr><td><strong>Top-selling items</strong></td><td>KDS / BDS / CDS daily report</td><td>Menu engineering, up-selling training</td><td>&mdash;</td></tr>
+          <tr><td><strong>Visitor analytics</strong></td><td>Admin &rarr; Visitor Analytics</td><td>Top pages, device breakdown, conversion funnel</td><td>&mdash;</td></tr>
+          <tr><td><strong>Gym conversion</strong></td><td>Admin &rarr; Gym Inquiries</td><td>Inquiry-to-membership conversion rate</td><td>&mdash;</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="callout tip" style="margin-top:1.5rem;"><span class="callout-icon">&#10003;</span><p>The <strong>Accounting Dashboard</strong> summarises all revenue, VAT, tourism levy, refunds, and outstanding balances for any period. Give your accountant the <em>Accountant</em> role &mdash; they will have everything they need without seeing operational data.</p></div>
+  </div>
+</section>
+
+<!-- WHATSAPP & NOTIFICATIONS -->
+<section class="slide compact" id="whatsapp">
+  <div class="deck">
+    <div class="eyebrow">Chapter 18 &middot; Guest communications</div>
+    <h2>WhatsApp &amp; email notifications</h2>
+    <p class="lead">Guests in Malawi expect WhatsApp. The system speaks both languages.</p>
+    <div class="two-col-prose">
+      <div>
+        <h3>Email (active by default)</h3>
+        <p>The following emails fire automatically via SMTP:</p>
+        <ul class="checklist tight">
+          <li>Booking confirmation &mdash; on status change to <em>Confirmed</em></li>
+          <li>Booking cancellation &mdash; on cancel</li>
+          <li>Check-out invoice &mdash; PDF attached, sent on checkout</li>
+          <li>Review request &mdash; 24 hours after checkout</li>
+          <li>Gym inquiry acknowledgement &mdash; on form submission</li>
+          <li>Contact inquiry acknowledgement &mdash; on form submission</li>
+        </ul>
+        <p style="margin-top:1rem;">SMTP credentials are in the <code>.env</code> file on the server. Never store email passwords in the admin panel or in code.</p>
+      </div>
+      <div>
+        <h3>WhatsApp</h3>
+        <p>Configure at <strong>Admin &rarr; WhatsApp Settings</strong>. When enabled, automated WhatsApp messages supplement the email confirmations with a brief booking summary and hotel welcome message.</p>
+        <div class="callout warn"><span class="callout-icon">&#9888;</span><p><strong>Billing alert.</strong> The WhatsApp Business API (Meta) charges per conversation. Enabling this feature will incur costs. Confirm your API account is set up and budgeted before enabling in production. Contact the developer to activate.</p></div>
+        <div class="callout tip"><span class="callout-icon">&#10003;</span><p>If WhatsApp is not yet active, the booking confirmation email includes a direct WhatsApp link to reception so guests can still reach you instantly.</p></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- SECURITY & BACKUPS -->
+<section class="slide compact" id="security">
+  <div class="deck">
+    <div class="eyebrow">Chapter 19 &middot; Protection</div>
+    <h2>Security, audit &amp; backups</h2>
+    <div class="two-col-prose">
+      <div>
+        <h3>Built-in security</h3>
+        <ul class="checklist">
+          <li>Every login, password change, and role change is logged.</li>
+          <li>5 failed logins &rarr; 15-minute account lockout.</li>
+          <li>10 failed attempts from one IP &rarr; 1-hour IP block.</li>
+          <li>Passwords stored as bcrypt hashes &mdash; never plain text.</li>
+          <li>Reset tokens: one-use, hashed, expire after 1 hour.</li>
+          <li>All database queries use prepared statements &mdash; SQL injection is architecturally impossible.</li>
+          <li>All forms use CSRF tokens &mdash; cross-site request forgery is blocked.</li>
+          <li>Security headers (CSP, X-Frame-Options) sent on every response.</li>
+          <li>Rate limiting on booking form: 5 attempts per 10 minutes per IP.</li>
+          <li>Public API endpoints protected by API key authentication.</li>
+        </ul>
+      </div>
+      <div>
+        <h3>Audit trail</h3>
+        <ul class="checklist">
+          <li>Every booking status change: who, when, from what to what.</li>
+          <li>Every payment add/refund: user ID and timestamp.</li>
+          <li>Every housekeeping status transition logged.</li>
+          <li>Every maintenance request, assignment, and resolution.</li>
+          <li>Every stock receipt, count, and wastage entry.</li>
+          <li>Offline POS actions queued during load shedding and replayed on reconnect &mdash; nothing is lost.</li>
+          <li>All system events viewable at <strong>Admin &rarr; System Logs</strong>.</li>
+        </ul>
+        <h3 style="margin-top:1.5rem;">Backups</h3>
+        <p>Run on-demand at <strong>Admin &rarr; Backup Management</strong>. Produces a compressed <code>.sql.gz</code> file. Download and store off-site monthly. The restore function lets you select any backup and rebuild from it. <strong>Admin-only access.</strong></p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- SYSTEM ADMINISTRATION -->
+<section class="slide compact" id="admin">
+  <div class="deck">
+    <div class="eyebrow">Chapter 20 &middot; Under the hood</div>
+    <h2>System administration</h2>
+    <div class="cards three-col">
+      <div class="card">
+        <h3>Cache Management</h3>
+        <p>The system caches DB queries for speed. If a content change does not appear on the website, go to <strong>Admin &rarr; Cache Management</strong> and clear the page cache. Full clear refreshes everything in under 1 second. Caches rebuild automatically on the next page load.</p>
+        <div class="callout tip"><span class="callout-icon">&#10003;</span><p>80% of &ldquo;the website hasn't updated&rdquo; issues resolve with a cache clear.</p></div>
+      </div>
+      <div class="card">
+        <h3>System Logs</h3>
+        <p><strong>Admin &rarr; System Logs</strong> shows the event log: info, warning, and error entries from every module. Filter by date, severity, or source. The most recent error is at the top of the filtered list. Logs are also written to <code>logs/system-events.log</code> on the server for developer access.</p>
+      </div>
+      <div class="card">
+        <h3>API Keys</h3>
+        <p>Manage at <strong>Admin &rarr; API Keys</strong>. Keys protect the public availability and booking API endpoints. Generate a new key when onboarding a third-party integration (channel manager, OTA). Revoke keys that are no longer in use.</p>
+      </div>
+      <div class="card">
+        <h3>Offline Log</h3>
+        <p><strong>Admin &rarr; Offline Log</strong> shows every POS or KDS action queued during a network outage. Verify successful replay after connectivity returns. Failed replays are flagged for manual reconciliation before end-of-day.</p>
+      </div>
+      <div class="card">
+        <h3>Visitor Analytics</h3>
+        <p>Built-in analytics at <strong>Admin &rarr; Visitor Analytics</strong> &mdash; no Google Analytics or third-party tracking. View daily/weekly/monthly visitors, top pages, device types, and the booking conversion funnel. GDPR-friendly: no external cookies.</p>
+      </div>
+      <div class="card">
+        <h3>Health Check</h3>
+        <p>Run a full system diagnostic from the server: <code>php scripts/health-check.php</code>. Verifies database connectivity, file permissions, SMTP, and table integrity. Run after any server migration or major update.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- DAILY / WEEKLY / MONTHLY -->
+<section class="slide" id="routine">
+  <div class="deck">
+    <div class="eyebrow">Chapter 21 &middot; The rhythm</div>
+    <h2>Daily, weekly &amp; monthly routines</h2>
+    <p class="lead">A simple cadence that keeps every department aligned and every number clean.</p>
+    <div class="two-col-prose">
+      <div>
+        <h3>Every day &mdash; morning</h3>
+        <ul class="checklist">
+          <li>Review <strong>Dashboard</strong>: today's arrivals, departures, occupancy.</li>
+          <li>Front desk filters today's check-ins in <strong>Bookings</strong>.</li>
+          <li>Housekeeping receives room assignments for all departures.</li>
+          <li>Check <strong>Tentative Bookings</strong> &mdash; confirm or release expiring holds.</li>
+          <li>Verify <strong>Blocked Dates</strong> for any upcoming maintenance closures.</li>
+        </ul>
+        <h3 style="margin-top:1.5rem;">Every day &mdash; close of business</h3>
+        <ul class="checklist">
+          <li>All checkout rooms moved to <em>inspected</em> status.</li>
+          <li>POS / KDS / BDS / CDS run daily reports at end-of-shift.</li>
+          <li>Bar and kitchen stock variance walked.</li>
+          <li>Cash drawer reconciled against POS shift total.</li>
+          <li>Manager sends <strong>End-of-Day Report</strong> to the owner.</li>
+          <li>Review <strong>Offline Log</strong> if there was a power outage.</li>
+        </ul>
+      </div>
+      <div>
+        <h3>Every week</h3>
+        <ul class="checklist">
+          <li>Manager reviews outstanding folios &mdash; chase any unpaid balances.</li>
+          <li>Review <strong>Reviews</strong> inbox &mdash; approve, reply, or reject pending reviews.</li>
+          <li>Reorder stock items below par level.</li>
+          <li>Check upcoming events &mdash; ensure assets are published on the website.</li>
+          <li>Check <strong>Gym Inquiries</strong> &mdash; follow up on new inquiries within 48 hours.</li>
+          <li>Check <strong>Contact Inquiries</strong> &mdash; respond to any unanswered messages.</li>
+        </ul>
+        <h3 style="margin-top:1.5rem;">Every month</h3>
+        <ul class="checklist">
+          <li>Run <strong>Accounting Dashboard</strong> &mdash; export VAT &amp; tourism levy for tax filing.</li>
+          <li>Print stock variance summary and file it.</li>
+          <li>Review <strong>User Management</strong> &mdash; deactivate any leavers immediately.</li>
+          <li>Rotate SMTP password and update in <code>.env</code>.</li>
+          <li>Download a database backup and store off-site.</li>
+          <li>Review <strong>Visitor Analytics</strong> for conversion trends &mdash; adjust rate plans if needed.</li>
+          <li>Audit <strong>API Keys</strong> &mdash; revoke any that are unused.</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- EMERGENCY PROCEDURES -->
+<section class="slide compact" id="emergency">
+  <div class="deck">
+    <div class="eyebrow">Chapter 22 &middot; When things go wrong</div>
+    <h2>Emergency procedures</h2>
+    <div class="cards two-col">
+      <div class="card red-accent">
+        <h3>&#9889; Load shedding / power cut</h3>
+        <ul class="checklist tight">
+          <li>POS and KDS switch to offline mode automatically &mdash; orders queue locally on the device.</li>
+          <li>Staff continue taking orders on the POS with no stoppage.</li>
+          <li>On power return, the system replays all queued orders automatically.</li>
+          <li>Verify successful replay in <strong>Admin &rarr; Offline Log</strong>.</li>
+          <li>Any failed replays require manual entry via POS before EOD reconciliation.</li>
+        </ul>
+      </div>
+      <div class="card red-accent">
+        <h3>&#127760; Internet outage</h3>
+        <ul class="checklist tight">
+          <li>POS runs offline as above &mdash; no internet required for F&amp;B operations.</li>
+          <li>Admin panel is inaccessible from outside the LAN without internet.</li>
+          <li>On recovery, the website resumes accepting bookings immediately.</li>
+          <li>Check <strong>Tentative Bookings</strong> &mdash; any forms submitted during outage may have queued.</li>
+        </ul>
+      </div>
+      <div class="card orange-accent">
+        <h3>&#128421; Admin panel returns 500 error</h3>
+        <ol class="steps">
+          <li>Check <code>logs/error.log</code> on the server for the most recent error.</li>
+          <li>Run <code>php scripts/health-check.php</code> for a full diagnostic.</li>
+          <li>Try <strong>Cache Management &rarr; Full Clear</strong> if any page is accessible.</li>
+          <li>Contact the developer with the last 50 lines of <code>logs/error.log</code> and the timestamp.</li>
+        </ol>
+      </div>
+      <div class="card orange-accent">
+        <h3>&#128274; Locked admin account</h3>
+        <ul class="checklist tight">
+          <li>Wait 15 minutes for automatic unlock (5-attempt lockout).</li>
+          <li>Wait 1 hour for automatic IP unblock (10-attempt IP block).</li>
+          <li>Use <em>Forgot Password</em> to reset via email if the account is accessible.</li>
+          <li>If the owner account is completely locked, the developer can reset via server CLI.</li>
+          <li>Never try to brute-force your own account &mdash; it compounds the lockout.</li>
+        </ul>
+      </div>
+      <div class="card blue-accent">
+        <h3>&#128179; Payment discrepancy</h3>
+        <ul class="checklist tight">
+          <li>Check <strong>Admin &rarr; Payments</strong> &mdash; filter by date and method.</li>
+          <li>Compare POS shift report with the cash drawer count.</li>
+          <li>Check <strong>Admin &rarr; Order Lifecycle</strong> for any voided or reversed orders.</li>
+          <li>Run the <strong>Accounting Dashboard</strong> for a clean figure by payment method.</li>
+          <li>Document discrepancies and investigate before reconciling.</li>
+        </ul>
+      </div>
+      <div class="card blue-accent">
+        <h3>&#128230; Stock level wrong</h3>
+        <ul class="checklist tight">
+          <li>Run a manual stock count for the affected items.</li>
+          <li>Check the wastage log &mdash; unreported breakages cause system drift.</li>
+          <li>Verify the recipe for the affected item &mdash; a quantity error compounds over every sale.</li>
+          <li>Log any corrections as wastage with reason <em>count adjustment</em>.</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- GO-LIVE CHECKLIST -->
+<section class="slide compact" id="golive">
+  <div class="deck">
+    <div class="eyebrow">Chapter 23 &middot; Opening day</div>
+    <h2>Go-live checklist</h2>
+    <p class="lead">Before the first guest booking arrives &mdash; confirm every setting is live and tested.</p>
+    <div class="two-col-prose">
+      <div>
+        <h4>System configuration</h4>
+        <ul class="checklist tight">
+          <li>SMTP credentials in <code>.env</code> tested &mdash; test email sent and received.</li>
+          <li>VAT rate set correctly in Booking Settings (16.5%).</li>
+          <li>Tourism levy percentage confirmed.</li>
+          <li>Check-in and check-out times set.</li>
+          <li>All room types created with correct rates and photos.</li>
+          <li>All individual room units created and set to <em>Available</em>.</li>
+          <li>Menu items created with correct routing (Kitchen / Bar / Coffee).</li>
+          <li>Recipes linked to all menu items.</li>
+          <li>Station hours set for KDS, BDS, and CDS.</li>
+          <li>Restaurant tables configured.</li>
+        </ul>
+        <h4 style="margin-top:1.5rem;">Staff setup</h4>
+        <ul class="checklist tight">
+          <li>Individual accounts created for each staff member.</li>
+          <li>Every staff member logged in and changed their password.</li>
+          <li>POS tablet loaded at <code>/admin/pos.php</code> and tested with a dummy order.</li>
+          <li>KDS, BDS, and CDS screens loaded and tested.</li>
+        </ul>
+      </div>
+      <div>
+        <h4>Website content</h4>
+        <ul class="checklist tight">
+          <li>All section headers reviewed and approved.</li>
+          <li>Gallery populated with professional photos.</li>
+          <li>Homepage hero image/video live.</li>
+          <li>Room descriptions and photos complete.</li>
+          <li>At least one package created and featured.</li>
+          <li>Conference rooms created with photos and rates.</li>
+          <li>Contact details correct on the Contact page.</li>
+          <li>Privacy Policy published.</li>
+        </ul>
+        <h4 style="margin-top:1.5rem;">End-to-end test</h4>
+        <ul class="checklist tight">
+          <li>Place a test booking on the public website &mdash; confirm it arrives in admin.</li>
+          <li>Confirm the guest confirmation email arrives.</li>
+          <li>Check in the test booking and open the folio.</li>
+          <li>Place a POS order &mdash; verify it appears on KDS/BDS/CDS.</li>
+          <li>Place a room-service order &mdash; verify it charges to the folio.</li>
+          <li>Check out &mdash; verify invoice PDF is generated and emailed.</li>
+          <li>Cancel the test booking &mdash; verify room availability is restored.</li>
+          <li>Run the End-of-Day Report and verify figures.</li>
+          <li>Download a database backup &mdash; verify non-zero file size.</li>
+        </ul>
+        <div class="callout tip"><span class="callout-icon">&#10003;</span><p>Only accept real guest bookings once the full end-to-end test passes. Thirty minutes of testing prevents days of corrections after opening.</p></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- SUPPORT & CREDENTIALS -->
+<section class="slide compact" id="support">
+  <div class="deck">
+    <div class="eyebrow">Chapter 24 &middot; Getting help</div>
+    <h2>Support &amp; credentials</h2>
+    <div class="two-col-prose">
+      <div>
+        <h3>Self-service &mdash; try these first</h3>
+        <ol class="steps">
+          <li>Clear the page cache at <strong>Admin &rarr; Cache Management</strong>. Fixes 80% of visual issues.</li>
+          <li>Check <strong>Admin &rarr; System Logs</strong> &mdash; the error is usually in the most recent entry.</li>
+          <li>Run <code>php scripts/health-check.php</code> on the server for a full diagnostic.</li>
+          <li>Check the relevant staff guide below.</li>
+          <li>Contact the developer with: the page URL, what you expected, what happened, and the last 50 lines of <code>logs/error.log</code>.</li>
+        </ol>
+        <h3 style="margin-top:1.5rem;">Credential security</h3>
+        <ul class="checklist tight">
+          <li>The developer never needs your admin password &mdash; only CLI server access.</li>
+          <li>Never share admin credentials by email, WhatsApp, or phone.</li>
+          <li>Rotate the SMTP password monthly and update <code>.env</code>.</li>
+          <li>Revoke any API keys that are no longer in use.</li>
+        </ul>
+      </div>
+      <div>
+        <h3>Staff guides</h3>
+        <ul class="checklist tight">
+          <li><a href="index.html">index.html</a> &mdash; index of all staff guides</li>
+          <li><a href="01-pos-till.html">01-pos-till.html</a> &mdash; cashier guide</li>
+          <li><a href="02-kds-kitchen.html">02-kds-kitchen.html</a> &mdash; chef guide</li>
+          <li><a href="03-bds-bar.html">03-bds-bar.html</a> &mdash; bar guide</li>
+          <li><a href="04-cds-coffee.html">04-cds-coffee.html</a> &mdash; coffee guide</li>
+          <li><a href="05-room-service.html">05-room-service.html</a> &mdash; room service guide</li>
+          <li><a href="06-housekeeping.html">06-housekeeping.html</a> &mdash; housekeeping guide</li>
+          <li><a href="07-reception-bookings.html">07-reception-bookings.html</a> &mdash; reception &amp; bookings</li>
+          <li><a href="08-stock-orders.html">08-stock-orders.html</a> &mdash; stock &amp; orders</li>
+          <li><a href="09-packages-rates.html">09-packages-rates.html</a> &mdash; packages &amp; rate plans</li>
+          <li><a href="10-conference-events.html">10-conference-events.html</a> &mdash; conference, events &amp; gym</li>
+          <li><a href="99-admin-dashboard-full-guide.html">99-admin-dashboard-full-guide.html</a> &mdash; the manager bible</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- CLOSING -->
+<footer class="handover" id="close">
+  <div class="deck">
+    <div class="crest">&#8212; R H &#8212;</div>
+    <h2 style="color:var(--cream);font-size:clamp(2rem,3.5vw,3.5rem);">A house ready for its guests.</h2>
+    <div class="divider" style="background:var(--gold);"></div>
+    <p>Every door, every drink, every detail &mdash; now connected.</p>
+    <p>The system is yours. The guests will follow.</p>
+    <p style="margin-top:1.5rem;font-size:0.88rem;color:rgba(248,243,233,0.4);letter-spacing:0.15em;"><span class="g-site-name-upper">ROSALYN'S HOTEL</span> &nbsp;&middot;&nbsp; SYSTEM HANDOVER 2026 &nbsp;&middot;&nbsp; CONFIDENTIAL</p>
+    <p class="signature">With care, for <span class="g-site-name">Rosalyn's Hotel</span>.</p>
+  </div>
+</footer>
+
+<script>
+  const bar = document.getElementById('readingBar');
+  window.addEventListener('scroll', () => {
+    const pct = (window.scrollY / (document.body.scrollHeight - window.innerHeight)) * 100;
+    bar.style.width = Math.min(pct, 100) + '%';
+  }, { passive: true });
+
+  const links = document.querySelectorAll('.toc-panel a');
+  const sections = Array.from(document.querySelectorAll('section[id], footer[id]'));
+  function updateToc() {
+    const y = window.scrollY + 90;
+    let active = sections[0]?.id;
+    for (const s of sections) { if (s.offsetTop <= y) active = s.id; }
+    links.forEach(a => a.classList.toggle('active', a.getAttribute('href') === '#' + active));
+  }
+  window.addEventListener('scroll', updateToc, { passive: true });
+  updateToc();
+
+  links.forEach(a => a.addEventListener('click', () => document.getElementById('toc').classList.remove('open')));
+  document.addEventListener('click', (e) => {
+    const toc = document.getElementById('toc');
+    if (!toc.contains(e.target) && !e.target.classList.contains('toc-toggle')) toc.classList.remove('open');
+  });
+</script>
+
+</body>
+</html>

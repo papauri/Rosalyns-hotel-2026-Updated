@@ -1,0 +1,367 @@
+<?php
+// Include admin initialization (PHP-only, no HTML output)
+require_once 'admin-init.php';
+/** @var string $csrf_token */
+
+require_once '../config/email.php';
+require_once '../includes/alert.php';
+
+$user = [
+    'id' => $_SESSION['admin_user_id'],
+    'username' => $_SESSION['admin_username'],
+    'role' => $_SESSION['admin_role'],
+    'full_name' => $_SESSION['admin_full_name']
+];
+$message = '';
+$error = '';
+
+// Handle status updates and deletions
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['inquiry_action'])) {
+    if (!validateCsrfToken($_POST['csrf_token'] ?? '')) {
+        if (!empty($_SERVER['HTTP_X_REQUESTED_WITH'])) { header('Content-Type: application/json'); echo json_encode(['success' => false, 'message' => 'Security token invalid.']); exit; }
+        header('Location: ' . basename($_SERVER['PHP_SELF'])); exit;
+    }
+    try {
+        $inquiry_id = $_POST['inquiry_id'] ?? 0;
+        $action = $_POST['inquiry_action'];
+
+        if ($action === 'update_status') {
+            $new_status = $_POST['new_status'] ?? 'new';
+
+            // Fetch inquiry before updating for email context
+            $fetch = $pdo->prepare("SELECT * FROM gym_inquiries WHERE id = ?");
+            $fetch->execute([$inquiry_id]);
+            $inquiry_row = $fetch->fetch(PDO::FETCH_ASSOC);
+
+            $stmt = $pdo->prepare("UPDATE gym_inquiries SET status = ? WHERE id = ?");
+            $stmt->execute([$new_status, $inquiry_id]);
+
+            // Send status-change emails
+            if ($inquiry_row && !empty($inquiry_row['email'])) {
+                if ($new_status === 'contacted') {
+                    $email_result = sendGymInquiryContactedEmail($inquiry_row);
+                    $email_note = $email_result['success']
+                        ? ' Notification email sent to ' . htmlspecialchars($inquiry_row['email']) . '.'
+                        : ' (Email not sent: ' . htmlspecialchars($email_result['message']) . ')';
+                    $message = 'Inquiry marked as Contacted.' . $email_note;
+                } elseif ($new_status === 'converted') {
+                    $email_result = sendGymInquiryConvertedEmail($inquiry_row);
+                    $email_note = $email_result['success']
+                        ? ' Welcome email sent to ' . htmlspecialchars($inquiry_row['email']) . '.'
+                        : ' (Email not sent: ' . htmlspecialchars($email_result['message']) . ')';
+                    $message = 'Inquiry converted to member.' . $email_note;
+                } else {
+                    $message = 'Inquiry status updated successfully!';
+                }
+            } else {
+                $message = 'Inquiry status updated successfully!';
+            }
+        } elseif ($action === 'delete') {
+            $stmt = $pdo->prepare("DELETE FROM gym_inquiries WHERE id = ?");
+            $stmt->execute([$inquiry_id]);
+            $message = 'Gym inquiry deleted successfully!';
+        }
+    } catch (PDOException $e) {
+        $error = 'Error: ' . $e->getMessage();
+    }
+}
+
+// Fetch gym inquiries with search/filter
+$search = $_GET['search'] ?? '';
+$status_filter = $_GET['status'] ?? '';
+
+try {
+    $sql = "SELECT * FROM gym_inquiries WHERE 1=1";
+    $params = [];
+
+    if (!empty($search)) {
+        $sql .= " AND (name LIKE ? OR email LIKE ? OR phone LIKE ? OR reference_number LIKE ?)";
+        $search_term = '%' . $search . '%';
+        $params = array_fill(0, 4, $search_term);
+    }
+
+    if (!empty($status_filter)) {
+        $sql .= " AND status = ?";
+        $params[] = $status_filter;
+    }
+
+    $sql .= " ORDER BY created_at DESC";
+
+    $stmt = $pdo->prepare($sql);
+    $stmt->execute($params);
+    $gym_inquiries = $stmt->fetchAll(PDO::FETCH_ASSOC);
+} catch (PDOException $e) {
+    $gym_inquiries = [];
+    $error = 'Error fetching gym inquiries: ' . $e->getMessage();
+}
+
+// Get status counts for filter tabs
+try {
+    $status_counts = [];
+    $stmt = $pdo->query("SELECT status, COUNT(*) as count FROM gym_inquiries GROUP BY status");
+    while ($row = $stmt->fetch(PDO::FETCH_ASSOC)) {
+        $status_counts[$row['status']] = $row['count'];
+    }
+} catch (PDOException $e) {
+    $status_counts = [];
+}
+?>
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="csrf-token" content="<?= htmlspecialchars($csrf_token, ENT_QUOTES) ?>">
+    <script>(function(){var _t='<?= htmlspecialchars($csrf_token,ENT_QUOTES)?>';var _f=window.fetch;window.fetch=function(u,o){if(o&&o.body instanceof FormData&&!o.body.has('csrf_token'))o.body.append('csrf_token',_t);return _f.apply(this,arguments);};})();</script>
+    <title>Gym Inquiries - Admin Panel</title>
+
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,300;0,400;0,500;0,600;1,300;1,400;1,500&family=Jost:wght@300;400;500;600&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.7.2/css/all.min.css">
+    <link rel="stylesheet" href="../css/main.css">
+    <link rel="stylesheet" href="css/admin-styles.css">
+    <link rel="stylesheet" href="css/admin-responsive-enhancements.css">
+    <link rel="stylesheet" href="css/admin-components.css"></head>
+<body>
+
+    <?php require_once 'includes/admin-header.php'; ?>
+
+    <div class="content">
+        <?php if ($message): ?>
+            <?php showAlert($message, 'success'); ?>
+        <?php endif; ?>
+        <?php if ($error): ?>
+            <?php showAlert($error, 'error'); ?>
+        <?php endif; ?>
+
+        <div class="page-header">
+            <h2 class="section-title"><i class="fas fa-dumbbell"></i> Gym Inquiries Management</h2>
+        </div>
+
+        <!-- Filter Tabs -->
+        <div class="filter-tabs">
+            <a href="gym-inquiries.php" class="filter-tab <?php echo empty($status_filter) ? 'active' : ''; ?>">
+                All <?php if (!empty($status_counts)) { ?><span class="count"><?php echo array_sum($status_counts); ?></span><?php } ?>
+            </a>
+            <a href="gym-inquiries.php?status=new" class="filter-tab <?php echo $status_filter === 'new' ? 'active' : ''; ?>">
+                New <?php if (isset($status_counts['new'])) { ?><span class="count"><?php echo $status_counts['new']; ?></span><?php } ?>
+            </a>
+            <a href="gym-inquiries.php?status=contacted" class="filter-tab <?php echo $status_filter === 'contacted' ? 'active' : ''; ?>">
+                Contacted <?php if (isset($status_counts['contacted'])) { ?><span class="count"><?php echo $status_counts['contacted']; ?></span><?php } ?>
+            </a>
+            <a href="gym-inquiries.php?status=converted" class="filter-tab <?php echo $status_filter === 'converted' ? 'active' : ''; ?>">
+                Converted <?php if (isset($status_counts['converted'])) { ?><span class="count"><?php echo $status_counts['converted']; ?></span><?php } ?>
+            </a>
+            <a href="gym-inquiries.php?status=closed" class="filter-tab <?php echo $status_filter === 'closed' ? 'active' : ''; ?>">
+                Closed <?php if (isset($status_counts['closed'])) { ?><span class="count"><?php echo $status_counts['closed']; ?></span><?php } ?>
+            </a>
+            <a href="gym-inquiries.php?status=cancelled" class="filter-tab <?php echo $status_filter === 'cancelled' ? 'active' : ''; ?>">
+                Cancelled <?php if (isset($status_counts['cancelled'])) { ?><span class="count"><?php echo $status_counts['cancelled']; ?></span><?php } ?>
+            </a>
+        </div>
+
+        <!-- Search Bar -->
+        <form method="GET" class="search-bar">
+            <input type="text" name="search" placeholder="Search by name, email, phone, or reference..." value="<?php echo htmlspecialchars($search); ?>" class="form-control">
+            <?php if (!empty($status_filter)): ?>
+                <input type="hidden" name="status" value="<?php echo htmlspecialchars($status_filter); ?>">
+            <?php endif; ?>
+            <button type="submit" class="btn btn-primary"><i class="fas fa-search"></i> Search</button>
+            <?php if (!empty($search) || !empty($status_filter)): ?>
+                <a href="gym-inquiries.php" class="btn btn-danger"><i class="fas fa-times"></i> Clear</a>
+            <?php endif; ?>
+        </form>
+
+        <!-- Inquiries Table -->
+        <div class="table-container">
+            <table class="table">
+                <thead>
+                    <tr>
+                        <th>Reference</th>
+                        <th>Name</th>
+                        <th>Contact</th>
+                        <th>Package</th>
+                        <th>Preferred Date</th>
+                        <th>Status</th>
+                        <th>Created</th>
+                        <th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <?php if (empty($gym_inquiries)): ?>
+                    <tr>
+                        <td colspan="8">
+                            <div class="empty-state">
+                                <i class="fas fa-inbox"></i>
+                                <p>No gym inquiries found</p>
+                            </div>
+                        </td>
+                    </tr>
+                    <?php else: ?>
+                    <?php foreach ($gym_inquiries as $inquiry): ?>
+                    <tr>
+                        <td><strong><?php echo htmlspecialchars($inquiry['reference_number']); ?></strong></td>
+                        <td><?php echo htmlspecialchars($inquiry['name']); ?></td>
+                        <td>
+                            <?php echo htmlspecialchars($inquiry['email']); ?><br>
+                            <small><?php echo htmlspecialchars($inquiry['phone']); ?></small>
+                        </td>
+                        <td><?php echo htmlspecialchars($inquiry['membership_type'] ?? 'N/A'); ?></td>
+                        <td>
+                            <?php if ($inquiry['preferred_date']): ?>
+                                <?php echo date('M j, Y', strtotime($inquiry['preferred_date'])); ?>
+                                <?php if ($inquiry['preferred_time']): ?>
+                                    <br><small><?php echo date('H:i', strtotime($inquiry['preferred_time'])); ?></small>
+                                <?php endif; ?>
+                            <?php else: ?>
+                                <em>N/A</em>
+                            <?php endif; ?>
+                        </td>
+                        <td>
+                            <form method="POST" style="display:inline;">
+                                <input type="hidden" name="inquiry_action" value="update_status">
+                                <input type="hidden" name="inquiry_id" value="<?php echo $inquiry['id']; ?>">
+                                <input type="hidden" name="csrf_token" value="<?= htmlspecialchars($csrf_token, ENT_QUOTES) ?>">
+                                <select name="new_status" class="status-select" onchange="this.form.submit();">
+                                    <option value="new" <?php echo $inquiry['status'] === 'new' ? 'selected' : ''; ?>>New</option>
+                                    <option value="contacted" <?php echo $inquiry['status'] === 'contacted' ? 'selected' : ''; ?>>Contacted</option>
+                                    <option value="converted" <?php echo $inquiry['status'] === 'converted' ? 'selected' : ''; ?>>Converted</option>
+                                    <option value="closed" <?php echo $inquiry['status'] === 'closed' ? 'selected' : ''; ?>>Closed</option>
+                                    <option value="cancelled" <?php echo $inquiry['status'] === 'cancelled' ? 'selected' : ''; ?>>Cancelled</option>
+                                </select>
+                            </form>
+                        </td>
+                        <td>
+                            <small><?php echo date('M j, Y', strtotime($inquiry['created_at'])); ?></small><br>
+                            <small style="color:#999;"><?php echo date('H:i', strtotime($inquiry['created_at'])); ?></small>
+                        </td>
+                        <td>
+                            <div class="action-buttons">
+                                <button type="button" class="btn btn-primary btn-sm" onclick="showInquiryDetails(<?php echo htmlspecialchars(json_encode($inquiry)); ?>)">
+                                    <i class="fas fa-eye"></i> View
+                                </button>
+                                <form method="POST" style="display:inline;">
+                                    <input type="hidden" name="inquiry_action" value="delete">
+                                    <input type="hidden" name="inquiry_id" value="<?php echo $inquiry['id']; ?>">
+                                    <input type="hidden" name="csrf_token" value="<?= htmlspecialchars($csrf_token, ENT_QUOTES) ?>">
+                                    <button type="submit" class="btn btn-danger btn-sm" onclick="return confirm('Are you sure you want to delete this inquiry?');">
+                                        <i class="fas fa-trash"></i> Delete
+                                    </button>
+                                </form>
+                            </div>
+                        </td>
+                    </tr>
+                    <?php endforeach; ?>
+                    <?php endif; ?>
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <!-- Inquiry Details Modal -->
+    <div id="inquiryModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>Gym Inquiry Details</h3>
+                <span class="close" onclick="closeInquiryModal()">&times;</span>
+            </div>
+            <div class="modal-body" id="inquiryModalBody">
+                <!-- Content will be loaded dynamically -->
+            </div>
+        </div>
+    </div>
+
+    <script>
+        function showInquiryDetails(inquiry) {
+            const modal = document.getElementById('inquiryModal');
+            const body = document.getElementById('inquiryModalBody');
+
+            const statusColors = {
+                'new': '#17a2b8',
+                'contacted': '#ffc107',
+                'converted': '#28a745',
+                'closed': '#6c757d',
+                'cancelled': '#dc3545'
+            };
+
+            body.innerHTML = `
+                <div class="inquiry-details">
+                    <div class="detail-item">
+                        <label>Reference Number</label>
+                        <span><strong>${inquiry.reference_number}</strong></span>
+                    </div>
+                    <div class="detail-item">
+                        <label>Full Name</label>
+                        <span>${inquiry.name}</span>
+                    </div>
+                    <div class="detail-item">
+                        <label>Email</label>
+                        <span><a href="mailto:${inquiry.email}">${inquiry.email}</a></span>
+                    </div>
+                    <div class="detail-item">
+                        <label>Phone</label>
+                        <span><a href="tel:${inquiry.phone}">${inquiry.phone}</a></span>
+                    </div>
+                    <div class="detail-item">
+                        <label>Membership Type</label>
+                        <span>${inquiry.membership_type || 'N/A'}</span>
+                    </div>
+                    <div class="detail-item">
+                        <label>Preferred Date</label>
+                        <span>${inquiry.preferred_date ? new Date(inquiry.preferred_date).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : 'N/A'}</span>
+                    </div>
+                    <div class="detail-item">
+                        <label>Preferred Time</label>
+                        <span>${inquiry.preferred_time ? new Date('1970-01-01T' + inquiry.preferred_time).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }) : 'N/A'}</span>
+                    </div>
+                    <div class="detail-item">
+                        <label>Number of Guests</label>
+                        <span>${inquiry.guests || 1}</span>
+                    </div>
+                    <div class="detail-item">
+                        <label>Status</label>
+                        <span><span class="badge" style="background:${statusColors[inquiry.status] || '#999'};color:white;">${inquiry.status.charAt(0).toUpperCase() + inquiry.status.slice(1)}</span></span>
+                    </div>
+                    <div class="detail-item">
+                        <label>Consent Given</label>
+                        <span>${inquiry.consent ? '✓ Yes' : '✗ No'}</span>
+                    </div>
+                    <div class="detail-item">
+                        <label>Created At</label>
+                        <span>${new Date(inquiry.created_at).toLocaleString('en-US', { month: 'short', day: 'numeric', year: 'numeric', hour: '2-digit', minute: '2-digit' })}</span>
+                    </div>
+                    ${inquiry.message ? `
+                    <div class="detail-item" style="grid-column: 1 / -1;">
+                        <label>Message / Goals</label>
+                        <span style="white-space: pre-wrap; background: #f8f9fa; padding: 12px; border-radius: 6px;">${inquiry.message}</span>
+                    </div>
+                    ` : ''}
+                </div>
+            `;
+
+            modal.classList.add('show');
+        }
+
+        function closeInquiryModal() {
+            document.getElementById('inquiryModal').classList.remove('show');
+        }
+
+        // Close modal when clicking outside
+        window.onclick = function(event) {
+            const modal = document.getElementById('inquiryModal');
+            if (event.target === modal) {
+                closeInquiryModal();
+            }
+        }
+
+        // Close modal on Escape key
+        document.addEventListener('keydown', function(event) {
+            if (event.key === 'Escape') {
+                closeInquiryModal();
+            }
+        });
+    </script>
+    <script src="js/admin-components.js"></script>
+
+    <?php require_once 'includes/admin-footer.php'; ?>

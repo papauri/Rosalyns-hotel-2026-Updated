@@ -1,0 +1,198 @@
+{
+  "header_menu": [
+    {
+      "id": 1,
+      "label": "Home",
+      "url": "index.php",
+      "icon": "fas fa-home",
+      "order": 1,
+      "visibility": true,
+      "type": "link",
+      "special_class": "",
+      "children": []
+    },
+    {
+      "id": 2,
+      "label": "About",
+      "url": "about.php",
+      "icon": "fas fa-info-circle",
+      "order": 2,
+      "visibility": true,
+      "type": "link",
+      "special_class": "",
+      "children": []
+    },
+    {
+      "id": 3,
+      "label": "Rooms & Suites",
+      "url": "rooms.php",
+      "icon": "fas fa-bed",
+      "order": 3,
+      "visibility": true,
+      "type": "dropdown",
+      "special_class": "",
+      "children": [
+        {
+          "id": 31,
+          "label": "Standard Room",
+          "url": "rooms.php#standard",
+          "icon": "fas fa-star",
+          "order": 1,
+          "visibility": true
+        },
+        {
+          "id": 32,
+          "label": "Deluxe Room",
+          "url": "rooms.php#deluxe",
+          "icon": "fas fa-crown",
+          "order": 2,
+          "visibility": true
+        },
+        {
+          "id": 33,
+          "label": "Executive Suite",
+          "url": "rooms.php#suite",
+          "icon": "fas fa-gem",
+          "order": 3,
+          "visibility": true
+        },
+        {
+          "id": 34,
+          "label": "Family Suite",
+          "url": "rooms.php#family",
+          "icon": "fas fa-users",
+          "order": 4,
+          "visibility": true
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "label": "Facilities",
+      "url": "facilities.php",
+      "icon": "fas fa-swimming-pool",
+      "order": 4,
+      "visibility": true,
+      "type": "dropdown",
+      "special_class": "",
+      "children": [
+        {
+          "id": 41,
+          "label": "Swimming Pool",
+          "url": "facilities.php#pool",
+          "icon": "fas fa-swimming-pool",
+          "order": 1,
+          "visibility": true
+        },
+        {
+          "id": 42,
+          "label": "Restaurant & Dining",
+          "url": "facilities.php#dining",
+          "icon": "fas fa-utensils",
+          "order": 2,
+          "visibility": true
+        },
+        {
+          "id": 43,
+          "label": "Spa & Wellness",
+          "url": "facilities.php#spa",
+          "icon": "fas fa-spa",
+          "order": 3,
+          "visibility": true
+        },
+        {
+          "id": 44,
+          "label": "Fitness Center",
+          "url": "facilities.php#fitness",
+          "icon": "fas fa-dumbbell",
+          "order": 4,
+          "visibility": true
+        }
+      ]
+    },
+    {
+      "id": 5,
+      "label": "Gallery",
+      "url": "gallery.php",
+      "icon": "fas fa-images",
+      "order": 5,
+      "visibility": true,
+      "type": "link",
+      "special_class": "",
+      "children": []
+    },
+    {
+      "id": 6,
+      "label": "Contact",
+      "url": "contact.php",
+      "icon": "fas fa-envelope",
+      "order": 6,
+      "visibility": true,
+      "type": "link",
+      "special_class": "",
+      "children": []
+    },
+    {
+      "id": 7,
+      "label": "Book Now",
+      "url": "booking.php",
+      "icon": "fas fa-calendar-check",
+      "order": 7,
+      "visibility": true,
+      "type": "link",
+      "special_class": "btn-premium",
+      "children": []
+    }
+  ],
+  "footer_menu": [
+    {
+      "id": 101,
+      "label": "Home",
+      "url": "index.php",
+      "order": 1,
+      "visibility": true
+    },
+    {
+      "id": 102,
+      "label": "About Us",
+      "url": "about.php",
+      "order": 2,
+      "visibility": true
+    },
+    {
+      "id": 103,
+      "label": "Rooms",
+      "url": "rooms.php",
+      "order": 3,
+      "visibility": true
+    },
+    {
+      "id": 104,
+      "label": "Facilities",
+      "url": "facilities.php",
+      "order": 4,
+      "visibility": true
+    },
+    {
+      "id": 105,
+      "label": "Gallery",
+      "url": "gallery.php",
+      "order": 5,
+      "visibility": true
+    },
+    {
+      "id": 106,
+      "label": "Contact",
+      "url": "contact.php",
+      "order": 6,
+      "visibility": true
+    },
+    {
+      "id": 107,
+      "label": "Book Now",
+      "url": "booking.php",
+      "order": 7,
+      "visibility": true
+    }
+  ]
+}

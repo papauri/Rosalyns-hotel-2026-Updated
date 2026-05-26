@@ -1,0 +1,1017 @@
+/**
+ * Hero Section
+ * Rosalyn's Hotel 2026
+ * Passalacqua-inspired elegant hero styling
+ */
+
+/* ============================================
+   HERO COLOR VARIABLES - Passalacqua Inspired
+   ============================================ */
+
+:root {
+    /* Passalacqua-inspired elegant color palette */
+    --hero-bg-primary: #FAF8F5;
+    --hero-bg-secondary: #F5F3F0;
+    --hero-text-primary: #1A1A1A;
+    --hero-text-secondary: #6B5740;
+    --hero-accent: #C9A86C;
+    --hero-gold: #D4AF37;
+    --hero-cream: #FAF8F5;
+    --hero-overlay: rgba(26, 26, 26, 0.4);
+    --hero-overlay-light: rgba(255, 255, 255, 0.2);
+}
+
+/* ============================================
+   BASE HERO STYLES
+   ============================================ */
+
+.hero {
+    position: relative;
+    width: 100%;
+    min-height: 100vh;
+    min-height: 100svh;
+    min-height: 100dvh;
+    height: 100vh;
+    height: 100dvh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    overflow: hidden;
+    overflow: clip;
+    box-sizing: border-box;
+    background: linear-gradient(180deg, var(--hero-bg-primary) 0%, var(--hero-bg-secondary) 100%);
+}
+
+.hero__media {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    z-index: 1;
+    overflow: hidden;
+    overflow: clip;
+    contain: layout paint;
+}
+
+/* Ensure helper video wrapper fills hero media (not fixed 16:9) */
+.hero__media .video-wrapper {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    max-width: 100%;
+    max-height: 100%;
+    padding-bottom: 0;
+    overflow: hidden;
+    overflow: clip;
+}
+
+.hero__media picture,
+.hero__media video,
+.hero__media iframe {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    max-width: 100%;
+    max-height: 100%;
+    display: block;
+}
+
+.hero__picture {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    display: block;
+}
+
+.hero__media .video-wrapper iframe,
+.hero__media .video-wrapper video,
+.hero__media .video-wrapper picture,
+.hero__media .video-wrapper img {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    max-width: 100%;
+    max-height: 100%;
+    border: 0;
+    display: block;
+}
+
+.hero__image {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    object-position: center center;
+    position: absolute;
+    top: 0;
+    left: 0;
+}
+
+.hero__video {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    object-position: center center;
+}
+
+.hero__media iframe,
+.hero__media video,
+.hero__media img {
+    object-fit: cover;
+    object-position: center center;
+}
+
+/* Shared fit model for all pages using the reusable hero component */
+.hero--fit-standard,
+.hero--fit-full-frame {
+    --hero-media-object-fit: cover;
+    --hero-media-object-position: center center;
+}
+
+.hero--fit-standard .hero__media,
+.hero--fit-full-frame .hero__media,
+.hero--fit-standard .hero__picture {
+    width: 100%;
+    height: 100%;
+}
+
+.hero--fit-full-frame .hero__picture {
+    width: 100%;
+    height: 100%;
+}
+
+.hero--fit-standard .hero__media img,
+.hero--fit-standard .hero__media video,
+.hero--fit-standard .hero__media iframe,
+.hero--fit-standard .hero__media .video-wrapper iframe,
+.hero--fit-standard .hero__media .video-wrapper video,
+.hero--fit-standard .hero__media .video-wrapper img,
+.hero--fit-full-frame .hero__media img,
+.hero--fit-full-frame .hero__media video,
+.hero--fit-full-frame .hero__media iframe,
+.hero--fit-full-frame .hero__media .video-wrapper iframe,
+.hero--fit-full-frame .hero__media .video-wrapper video,
+.hero--fit-full-frame .hero__media .video-wrapper img {
+    width: 100%;
+    height: 100%;
+    min-width: 100%;
+    min-height: 100%;
+    object-fit: var(--hero-media-object-fit);
+    object-position: var(--hero-media-object-position);
+    display: block;
+}
+
+.hero--has-video .hero__media {
+    background: #000;
+}
+
+.hero--fit-full-frame .hero__media {
+    background: #0f0f0f;
+}
+
+/* ============================================
+   HERO CONTENT - Passalacqua Inspired
+   ============================================ */
+
+.hero__content {
+    position: relative;
+    z-index: 2;
+    text-align: center;
+    color: var(--color-text-primary);
+    padding: var(--space-20) var(--space-8);
+    max-width: 900px;
+    margin: 0 auto;
+}
+
+/* Elegant title styling - Passalacqua inspired */
+.hero__title {
+    font-family: var(--font-serif);
+    font-size: clamp(2.75rem, 6vw, 5.5rem);
+    font-weight: 300;
+    line-height: 1.1;
+    margin-bottom: var(--space-4);
+    letter-spacing: -0.03em;
+    color: var(--hero-text-primary);
+    animation: heroFadeInUp 1.6s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+    opacity: 0;
+    transform: translateY(30px);
+}
+
+/* Subtitle as elegant accent text */
+.hero__subtitle {
+    font-family: var(--font-sans);
+    font-size: clamp(0.875rem, 1.5vw, 1rem);
+    font-weight: 500;
+    color: var(--hero-accent);
+    margin-bottom: var(--space-6);
+    line-height: 1.5;
+    letter-spacing: 0.15em;
+    text-transform: uppercase;
+    animation: heroFadeInUp 1.6s cubic-bezier(0.16, 1, 0.3, 1) 0.2s forwards;
+    opacity: 0;
+    transform: translateY(25px);
+}
+
+/* Description with refined typography */
+.hero__description {
+    font-family: var(--font-sans);
+    font-size: clamp(1rem, 1.5vw, 1.125rem);
+    line-height: 1.75;
+    margin-bottom: var(--space-10);
+    max-width: 620px;
+    margin-left: auto;
+    margin-right: auto;
+    color: var(--hero-text-secondary);
+    animation: heroFadeInUp 1.6s cubic-bezier(0.16, 1, 0.3, 1) 0.35s forwards;
+    opacity: 0;
+    transform: translateY(20px);
+}
+
+/* Action buttons with elegant spacing */
+.hero__actions {
+    display: flex;
+    gap: var(--space-5);
+    justify-content: center;
+    flex-wrap: wrap;
+    animation: heroFadeInUp 1.6s cubic-bezier(0.16, 1, 0.3, 1) 0.5s forwards;
+    opacity: 0;
+    transform: translateY(15px);
+}
+
+/* ============================================
+   PASSALACQUA HERO VARIANT
+   ============================================ */
+
+.hero--passalacqua {
+    min-height: 100vh;
+    min-height: 100dvh;
+    height: 100vh;
+    height: 100dvh;
+    background: linear-gradient(180deg, var(--hero-bg-primary) 0%, var(--hero-bg-secondary) 100%);
+}
+
+.hero--passalacqua .hero__content {
+    padding: var(--space-24) var(--space-8);
+}
+
+.hero--passalacqua .hero__title {
+    font-size: clamp(3rem, 7vw, 6rem);
+    font-weight: 200;
+    letter-spacing: -0.04em;
+    margin-bottom: var(--space-5);
+}
+
+.hero--passalacqua .hero__subtitle {
+    font-size: clamp(0.875rem, 1.25vw, 1rem);
+    letter-spacing: 0.2em;
+    color: var(--hero-gold);
+}
+
+.hero--passalacqua .hero__description {
+    font-size: clamp(1rem, 1.5vw, 1.125rem);
+    max-width: 580px;
+    margin-bottom: var(--space-12);
+}
+
+/* Homepage premium symmetric composition */
+.hero--home-lux.hero--image .hero__content {
+    left: max(4vw, 2.5rem);
+    right: auto;
+    width: min(58vw, 860px);
+    max-width: min(58vw, 860px);
+    padding: clamp(2.5rem, 4.5vw, 5.5rem) clamp(2.25rem, 3.4vw, 4rem) clamp(3.6rem, 5.4vw, 6.2rem) clamp(2.25rem, 3.4vw, 4rem) !important;
+    border-radius: var(--landing-card-radius, 1rem);
+    border: 1px solid color-mix(in srgb, #FFFFFF 36%, transparent 64%);
+    background: linear-gradient(155deg, rgba(20, 19, 16, 0.5) 0%, rgba(20, 19, 16, 0.22) 100%);
+    backdrop-filter: blur(5px);
+}
+
+.hero--home-lux.hero--image .hero__title {
+    padding-right: 0;
+    margin-bottom: clamp(0.45rem, 0.8vw, 0.85rem) !important;
+    font-style: normal !important;
+    font-weight: 400 !important;
+    font-size: clamp(2.2rem, 4.2vw, 4.1rem) !important;
+}
+
+.hero--home-lux.hero--image .hero__subtitle {
+    background: rgba(201, 168, 108, 0.14);
+    border-left-width: 1px;
+    letter-spacing: 0.14em;
+}
+
+.hero--home-lux.hero--image .hero__description {
+    max-width: 56ch;
+    margin-bottom: clamp(1.2rem, 2vw, 2rem) !important;
+}
+
+.hero--home-lux.hero--image .hero__actions {
+    margin-top: 0.35rem !important;
+    gap: clamp(0.65rem, 1.4vw, 1rem);
+}
+
+.hero--home-lux.hero--image .hero__actions .btn {
+    min-width: clamp(160px, 14vw, 220px);
+}
+
+.hero--home-lux.hero--image .hero__actions .btn--explore-rooms:hover {
+    transform: translateY(-2px) !important;
+}
+
+/* ============================================
+   HERO VARIANTS
+   ============================================ */
+
+/* Minimal Hero */
+.hero--minimal {
+    background: var(--hero-bg-primary);
+    min-height: 55vh;
+}
+
+.hero--minimal .hero__title {
+    font-size: clamp(2rem, 4vw, 3rem);
+    font-weight: 300;
+}
+
+.hero--minimal .hero__subtitle {
+    font-size: clamp(1rem, 1.5vw, 1.125rem);
+    color: var(--hero-text-secondary);
+}
+
+/* Centered Hero */
+.hero--centered {
+    text-align: center;
+}
+
+.hero--centered .hero__content {
+    padding: var(--space-20) var(--space-12);
+}
+
+/* Fullscreen Hero */
+.hero--fullscreen {
+    min-height: 100vh;
+    height: 100vh;
+}
+
+.hero--fullscreen .hero__content {
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+}
+
+/* ============================================
+   IMAGE BACKGROUND HERO - Passalacqua Style
+   ============================================ */
+
+.hero--image {
+    background-position: center;
+    background-size: cover;
+    background-repeat: no-repeat;
+    position: relative;
+    align-items: flex-end;
+}
+
+.hero--image::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: var(--hero-overlay);
+    z-index: 1;
+}
+
+/* Masonry-inspired hero design with better edge spacing */
+.hero--image .hero__content {
+    position: absolute;
+    bottom: 5%;
+    left: 0;
+    z-index: 2;
+    text-align: left;
+    color: #FFFFFF !important;
+    padding: min(7vw, 104px) min(7vw, 120px) min(5.5vw, 82px) min(7vw, 120px) !important;
+    max-width: 900px;
+    margin: 0;
+    align-self: flex-end;
+    width: 100%;
+    box-sizing: border-box;
+}
+
+/* Masonry-inspired typography with better font styling */
+.hero--image .hero__title {
+    color: #FFFFFF !important;
+    font-family: 'Cormorant Garamond', Georgia, serif !important;
+    font-size: clamp(2rem, 4.5vw, 3.5rem) !important;
+    font-weight: 300 !important;
+    font-style: italic !important;
+    line-height: 1.15 !important;
+    letter-spacing: -0.02em !important;
+    text-shadow: 0 4px 30px rgba(0, 0, 0, 0.6) !important;
+    text-align: left !important;
+    margin-bottom: var(--space-3) !important;
+    padding-right: 30%;
+    position: relative;
+}
+
+/* Add decorative element for masonry feel */
+.hero--image .hero__title::after {
+    content: '';
+    position: absolute;
+    bottom: -12px;
+    left: 0;
+    width: 60px;
+    height: 2px;
+    background: linear-gradient(90deg, #C9A86C, transparent);
+    border-radius: 2px;
+}
+
+.hero--image .hero__subtitle {
+    color: rgba(255, 255, 255, 0.9) !important;
+    font-family: 'Jost', sans-serif !important;
+    font-size: clamp(0.875rem, 1.4vw, 1.125rem) !important;
+    font-weight: 400 !important;
+    font-style: normal !important;
+    text-shadow: 0 2px 20px rgba(0, 0, 0, 0.5) !important;
+    text-align: left !important;
+    opacity: 0.9 !important;
+    margin-bottom: var(--space-5) !important;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    display: inline-block;
+    padding: 4px 12px;
+    background: rgba(201, 168, 108, 0.15);
+    border-radius: 4px;
+    border-left: 2px solid #C9A86C;
+}
+
+.hero--image .hero__description {
+    color: rgba(255, 255, 255, 0.85) !important;
+    text-shadow: 0 2px 15px rgba(0, 0, 0, 0.4) !important;
+    text-align: left !important;
+    margin-left: 0;
+    margin-right: 0;
+    font-family: 'Jost', sans-serif !important;
+    font-size: clamp(1rem, 1.6vw, 1.25rem) !important;
+    line-height: 1.7 !important;
+    margin-bottom: var(--space-8) !important;
+    max-width: 65%;
+    font-weight: 300;
+    letter-spacing: 0.01em;
+}
+
+.hero--image .hero__actions {
+    justify-content: flex-start;
+    margin-top: var(--space-10) !important;
+    position: relative;
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-4);
+    align-items: center;
+}
+
+/* Special Explore Rooms button styling */
+.hero--image .hero__actions .btn--explore-rooms {
+    background: linear-gradient(135deg, #C9A86C 0%, #D4AF37 100%) !important;
+    color: #1A1A1A !important;
+    border: none !important;
+    padding: var(--space-4) var(--space-8) !important;
+    border-radius: 50px !important;
+    font-family: 'Jost', sans-serif !important;
+    font-weight: 600 !important;
+    font-size: clamp(0.875rem, 1.2vw, 1rem) !important;
+    letter-spacing: 0.05em !important;
+    text-transform: uppercase !important;
+    position: relative;
+    overflow: hidden;
+    z-index: 1;
+    transition: all 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275) !important;
+    box-shadow: 0 4px 20px rgba(201, 168, 108, 0.3) !important;
+}
+
+.hero--image .hero__actions .btn--explore-rooms::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: -100%;
+    width: 100%;
+    height: 100%;
+    background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.2), transparent);
+    transition: left 0.7s ease;
+    z-index: -1;
+}
+
+.hero--image .hero__actions .btn--explore-rooms:hover {
+    transform: translateY(-3px) scale(1.05) !important;
+    box-shadow: 0 8px 30px rgba(201, 168, 108, 0.5) !important;
+    background: linear-gradient(135deg, #D4AF37 0%, #E8C158 100%) !important;
+}
+
+.hero--image .hero__actions .btn--explore-rooms:hover::before {
+    left: 100%;
+}
+
+.hero--image .hero__actions .btn--explore-rooms:active {
+    transform: translateY(-1px) scale(1.02) !important;
+    box-shadow: 0 4px 15px rgba(201, 168, 108, 0.4) !important;
+}
+
+.hero--image .hero__actions .btn--explore-rooms i {
+    margin-left: var(--space-2) !important;
+    transition: transform 0.3s ease !important;
+}
+
+.hero--image .hero__actions .btn--explore-rooms:hover i {
+    transform: translateX(4px) !important;
+}
+
+/* Ensure all text in hero is white on image backgrounds */
+.hero--image h1,
+.hero--image h2,
+.hero--image h3,
+.hero--image p,
+.hero--image span {
+    color: #FFFFFF !important;
+}
+
+/* ============================================
+   HERO SPECIFIC STYLES
+   ============================================ */
+
+/* Restaurant Hero */
+.hero--restaurant {
+    background: linear-gradient(180deg,
+            #1a1a1a 0%,
+            #2d2d2d 100%);
+    color: var(--color-white);
+}
+
+.hero--restaurant .hero__title {
+    color: var(--color-white);
+}
+
+.hero--restaurant .hero__subtitle {
+    color: rgba(255, 255, 255, 0.8);
+}
+
+/* Events Hero */
+.hero--events {
+    background: linear-gradient(180deg,
+            #1a1a1a 0%,
+            #2d2d2d 100%);
+    color: var(--color-white);
+}
+
+.hero--events .hero__title {
+    color: var(--color-white);
+}
+
+/* Wellness Hero */
+.hero--wellness {
+    background: linear-gradient(180deg,
+            var(--hero-bg-primary) 0%,
+            var(--hero-bg-secondary) 100%);
+}
+
+.hero--wellness .hero__title {
+    color: var(--hero-text-primary);
+}
+
+/* ============================================
+   ANIMATIONS - Passalacqua Inspired
+   ============================================ */
+
+@keyframes heroFadeInUp {
+    0% {
+        opacity: 0;
+        transform: translateY(30px);
+    }
+
+    100% {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+@keyframes heroFadeIn {
+    0% {
+        opacity: 0;
+    }
+
+    100% {
+        opacity: 1;
+    }
+}
+
+@keyframes heroSlideIn {
+    0% {
+        opacity: 0;
+        transform: translateX(-20px);
+    }
+
+    100% {
+        opacity: 1;
+        transform: translateX(0);
+    }
+}
+
+@keyframes fadeInUp {
+    from {
+        opacity: 0;
+        transform: translateY(30px);
+    }
+
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+@keyframes slideInLeft {
+    from {
+        opacity: 0;
+        transform: translateX(-40px);
+    }
+
+    to {
+        opacity: 1;
+        transform: translateX(0);
+    }
+}
+
+@keyframes slideInRight {
+    from {
+        opacity: 0;
+        transform: translateX(40px);
+    }
+
+    to {
+        opacity: 1;
+        transform: translateX(0);
+    }
+}
+
+@keyframes scaleIn {
+    from {
+        opacity: 0;
+        transform: scale(0.92);
+    }
+
+    to {
+        opacity: 1;
+        transform: scale(1);
+    }
+}
+
+/* ============================================
+   RESPONSIVE DESIGN
+   ============================================ */
+
+@media (max-width: 767px) {
+    .hero {
+        min-height: 100svh;
+        min-height: 100dvh;
+        height: 100svh;
+        height: 100dvh;
+    }
+
+    .hero--has-video .hero__video,
+    .hero--has-video .hero__media iframe {
+        object-fit: cover;
+    }
+
+    .hero__content {
+        padding: var(--space-16) var(--space-6);
+    }
+
+    /* Masonry-inspired mobile adjustments */
+    .hero--image .hero__content {
+        left: 0;
+        right: 0;
+        bottom: 5%;
+        padding: clamp(1.4rem, 6vw, 2.2rem) clamp(1rem, 5vw, 1.8rem) calc(clamp(1.2rem, 5vw, 2rem) + env(safe-area-inset-bottom, 0px)) clamp(1rem, 5vw, 1.8rem) !important;
+        max-width: 100%;
+        width: 100%;
+        border-top-left-radius: 1rem;
+        border-top-right-radius: 1rem;
+        background: linear-gradient(180deg, rgba(15, 14, 12, 0.1) 0%, rgba(15, 14, 12, 0.7) 22%, rgba(15, 14, 12, 0.86) 100%);
+        backdrop-filter: blur(6px);
+    }
+
+    .hero--home-lux.hero--image .hero__content {
+        left: clamp(0.45rem, 2vw, 0.75rem);
+        right: clamp(0.45rem, 2vw, 0.75rem);
+        width: auto;
+        max-width: none;
+        border-radius: 1rem;
+        border: 1px solid rgba(255, 255, 255, 0.28);
+        padding-bottom: calc(clamp(1.8rem, 7vw, 2.6rem) + env(safe-area-inset-bottom, 0px)) !important;
+    }
+
+    .hero--image .hero__title {
+        font-size: clamp(1.75rem, 5vw, 2.5rem) !important;
+        padding-right: 0 !important;
+        margin-bottom: var(--space-2) !important;
+        line-height: 1.12 !important;
+        max-width: 100% !important;
+    }
+
+    .hero--image .hero__title::after {
+        width: 40px !important;
+        bottom: -8px !important;
+    }
+
+    .hero--image .hero__subtitle {
+        font-size: clamp(0.75rem, 2vw, 0.875rem) !important;
+        padding: 4px 10px !important;
+        margin-bottom: var(--space-4) !important;
+        letter-spacing: 0.08em !important;
+        border-radius: 999px;
+    }
+
+    .hero--image .hero__description {
+        font-size: clamp(0.875rem, 2.2vw, 1rem) !important;
+        max-width: 100% !important;
+        line-height: 1.6 !important;
+        margin-bottom: var(--space-6) !important;
+    }
+
+    .hero--image .hero__actions {
+        margin-top: var(--space-6) !important;
+        flex-direction: column;
+        align-items: stretch;
+        gap: var(--space-3);
+        width: 100%;
+    }
+
+    .hero--image .hero__actions .btn {
+        width: 100%;
+        max-width: 100%;
+        justify-content: center;
+        min-height: 48px;
+    }
+
+    .hero--passalacqua .hero__content {
+        padding: var(--space-20) var(--space-6);
+    }
+
+    .hero__title {
+        font-size: clamp(2rem, 6vw, 3rem);
+    }
+
+    .hero__subtitle {
+        font-size: clamp(0.875rem, 2.5vw, 0.9375rem);
+        margin-bottom: var(--space-5);
+    }
+
+    .hero__description {
+        font-size: clamp(0.875rem, 2vw, 1rem);
+        margin-bottom: var(--space-8);
+    }
+
+    .hero__actions {
+        flex-direction: column;
+        align-items: center;
+        gap: var(--space-4);
+    }
+
+    .hero__actions .btn {
+        width: 100%;
+        max-width: 280px;
+    }
+}
+
+@media (min-width: 768px) and (max-width: 1023px) {
+    .hero__content {
+        padding: var(--space-18) var(--space-8);
+    }
+
+    /* Image hero maintains bottom positioning on tablet */
+    .hero--image .hero__content {
+        padding: var(--space-16) var(--space-8) var(--space-14) var(--space-8);
+        max-width: 600px;
+    }
+
+    .hero--passalacqua .hero__content {
+        padding: var(--space-22) var(--space-8);
+    }
+
+    .hero--home-lux.hero--image .hero__content {
+        left: clamp(0.85rem, 2.4vw, 1.6rem);
+        right: clamp(0.85rem, 2.4vw, 1.6rem);
+        bottom: clamp(0.9rem, 2.6vh, 1.7rem);
+        width: auto;
+        max-width: min(92vw, 760px);
+        padding: clamp(1.25rem, 2.3vw, 1.85rem) clamp(1rem, 2vw, 1.45rem) clamp(1.45rem, 2.8vw, 2.2rem) clamp(1rem, 2vw, 1.45rem) !important;
+        border: 1px solid color-mix(in srgb, var(--color-white, #FFFFFF) 28%, transparent 72%);
+        background: linear-gradient(158deg, color-mix(in srgb, var(--color-lux-ink, #231F1C) 58%, transparent 42%) 0%, color-mix(in srgb, var(--color-lux-ink, #231F1C) 36%, transparent 64%) 100%);
+        backdrop-filter: blur(4px);
+    }
+
+    .hero--home-lux.hero--image .hero__title {
+        font-size: clamp(1.95rem, 4.2vw, 3.05rem) !important;
+        line-height: 1.08 !important;
+        margin-bottom: clamp(0.38rem, 0.8vw, 0.7rem) !important;
+    }
+
+    .hero--home-lux.hero--image .hero__subtitle {
+        font-size: clamp(0.74rem, 0.9vw + 0.48rem, 0.88rem) !important;
+        letter-spacing: 0.11em;
+        border-left-width: 0;
+        border: 1px solid color-mix(in srgb, var(--color-lux-gold, #B18247) 34%, transparent 66%);
+        border-radius: var(--radius-full, 999px);
+        padding: 0.14rem 0.52rem;
+    }
+
+    .hero--home-lux.hero--image .hero__description {
+        font-size: clamp(0.88rem, 1.18vw, 1.02rem) !important;
+        line-height: 1.54 !important;
+        max-width: 60ch;
+    }
+
+    .hero--home-lux.hero--image .hero__actions {
+        margin-top: clamp(0.25rem, 0.7vw, 0.55rem) !important;
+        gap: clamp(0.46rem, 1vw, 0.75rem);
+    }
+
+    .hero--home-lux.hero--image .hero__actions .btn {
+        min-height: 44px;
+        min-width: clamp(136px, 15vw, 196px);
+    }
+}
+
+@media (max-width: 480px) {
+    .hero {
+        min-height: 100svh;
+        min-height: 100dvh;
+        height: 100svh;
+        height: 100dvh;
+    }
+
+    .hero__content {
+        padding: var(--space-12) var(--space-5);
+    }
+
+    /* Image hero maintains bottom positioning on small mobile */
+    .hero--image .hero__content {
+        left: 0;
+        right: 0;
+        border-radius: 0;
+        padding: clamp(1.1rem, 5vw, 1.35rem) clamp(0.9rem, 4.2vw, 1.1rem) calc(clamp(1rem, 4.8vw, 1.25rem) + env(safe-area-inset-bottom, 0px)) clamp(0.9rem, 4.2vw, 1.1rem) !important;
+    }
+
+    .hero--home-lux.hero--image .hero__content {
+        padding-bottom: calc(clamp(1.45rem, 6.2vw, 1.9rem) + env(safe-area-inset-bottom, 0px)) !important;
+    }
+
+    .hero--image .hero__actions {
+        gap: var(--space-2);
+    }
+
+    .hero--image .hero__actions .btn {
+        min-height: 46px;
+        font-size: 0.92rem;
+    }
+
+    .hero__title {
+        font-size: clamp(1.75rem, 7vw, 2.5rem);
+    }
+
+    .hero__subtitle {
+        font-size: clamp(0.75rem, 3vw, 0.875rem);
+        margin-bottom: var(--space-4);
+    }
+
+    .hero__description {
+        font-size: clamp(0.8125rem, 2.5vw, 0.9375rem);
+        margin-bottom: var(--space-6);
+    }
+}
+
+/* Desktop styles for image hero - Passalacqua positioning */
+@media (min-width: 1024px) {
+    .hero--image .hero__content {
+        top: calc(var(--header-height, 5.625rem) + clamp(1rem, 2.2vh, 1.8rem));
+        bottom: clamp(1rem, 4vh, 2.5rem);
+        left: max(2.2vw, 1.6rem);
+        padding: clamp(2rem, 3.4vw, 3.4rem) clamp(1.75rem, 2.9vw, 2.9rem) clamp(2.4rem, 4.2vw, 4rem) clamp(1.75rem, 2.9vw, 2.9rem);
+        max-width: min(44rem, 62vw);
+        max-height: calc(100dvh - var(--header-height, 5.625rem) - clamp(2.5rem, 6vh, 4.8rem));
+        overflow-y: auto;
+        scrollbar-width: thin;
+    }
+
+    .hero--home-lux.hero--image .hero__content {
+        left: max(4vw, 2.5rem);
+        width: min(58vw, 54rem);
+        max-width: min(58vw, 54rem);
+    }
+
+    body.home-page .hero--home-lux.hero--image .hero__content {
+        top: calc(var(--header-height, 5.625rem) + clamp(1rem, 2.2vh, 1.8rem));
+        bottom: auto;
+        max-height: calc(100dvh - var(--header-height, 5.625rem) - clamp(2rem, 5vh, 3.8rem));
+    }
+}
+
+@media (min-width: 1024px) and (max-height: 56rem) {
+    .hero--home-lux.hero--image .hero__content {
+        padding: clamp(1.6rem, 2.4vw, 2.4rem) clamp(1.35rem, 2.2vw, 2rem) clamp(1.8rem, 2.8vw, 2.7rem) clamp(1.35rem, 2.2vw, 2rem) !important;
+    }
+
+    .hero--home-lux.hero--image .hero__title {
+        font-size: clamp(1.9rem, 3.5vw, 3rem) !important;
+        line-height: 1.08 !important;
+    }
+
+    .hero--home-lux.hero--image .hero__description {
+        font-size: clamp(0.95rem, 1.1vw, 1.15rem) !important;
+        line-height: 1.55 !important;
+    }
+}
+
+@media (min-width: 1440px) {
+    .hero--image .hero__content {
+        left: max(3vw, 2.25rem);
+        max-width: min(46rem, 54vw);
+        padding: clamp(2.4rem, 3.2vw, 3.8rem) clamp(2.1rem, 2.8vw, 3.2rem) clamp(2.8rem, 3.8vw, 4.4rem) clamp(2.1rem, 2.8vw, 3.2rem);
+    }
+}
+
+@media (min-width: 1920px) {
+    .hero--image .hero__content {
+        left: max(3.5vw, 3rem);
+        max-width: min(50rem, 52vw);
+        padding: clamp(2.8rem, 3.6vw, 4.6rem) clamp(2.5rem, 3.2vw, 3.8rem) clamp(3.2rem, 4.2vw, 5.2rem) clamp(2.5rem, 3.2vw, 3.8rem);
+    }
+}
+
+/* ============================================
+   ACCESSIBILITY
+   ============================================ */
+
+@media (prefers-reduced-motion: reduce) {
+
+    .hero__title,
+    .hero__subtitle,
+    .hero__description,
+    .hero__actions {
+        animation: none;
+        opacity: 1;
+        transform: none;
+    }
+}
+
+/* Focus visible for keyboard navigation */
+.hero__actions a:focus-visible {
+    outline: 2px solid var(--hero-accent);
+    outline-offset: 4px;
+    border-radius: var(--radius-md);
+}
+
+/* High contrast mode */
+@media (prefers-contrast: high) {
+    .hero {
+        background: var(--color-surface);
+        border: 2px solid var(--color-text-primary);
+    }
+
+    .hero--image::before {
+        background: rgba(0, 0, 0, 0.6);
+    }
+}
+
+/* ============================================
+   PRINT STYLES
+   ============================================ */
+
+@media print {
+    .hero {
+        background: none;
+        min-height: auto;
+        height: auto;
+    }
+
+    .hero__content {
+        padding: 20px;
+        color: black;
+    }
+
+    .hero__title,
+    .hero__subtitle,
+    .hero__description {
+        color: black;
+    }
+
+    .hero__actions {
+        display: none;
+    }
+}

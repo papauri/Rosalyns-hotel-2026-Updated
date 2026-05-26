@@ -1,0 +1,281 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Packages &amp; Rate Plans — Rosalyn's Hotel</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link
+        href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@400;500;600;700&family=Jost:wght@300;400;500;600&display=swap"
+        rel="stylesheet">
+    <link rel="stylesheet" href="assets/guide-theme.css">
+    <script src="assets/guide-init.js" defer></script>
+</head>
+
+<body>
+
+    <nav class="top">
+        <a href="index.html" class="brand">ROSALYN'S HOTEL</a>
+        <div class="nav-links">
+            <a href="index.html">All Guides</a>
+            <a href="08-stock-orders.html">← Stock</a>
+            <a href="10-conference-events.html">Conference →</a>
+        </div>
+    </nav>
+
+    <header class="hero">
+        <div class="deck">
+            <div class="eyebrow">9 &middot; Revenue Management</div>
+            <h1>Packages &amp; Rate Plans</h1>
+            <p class="lead">Add-on packages guests love, and dynamic pricing that optimises revenue automatically.</p>
+            <div class="meta">
+                <span>Audience <strong>Manager &amp; admin</strong></span>
+                <span>Read time <strong>~5 min</strong></span>
+                <span>Pages <strong>/admin/packages.php &middot; /admin/rate-plans.php</strong></span>
+            </div>
+        </div>
+    </header>
+
+    <main class="content">
+        <div class="deck">
+
+            <!-- PACKAGES -->
+            <section>
+                <h2>Room Packages</h2>
+                <p class="lead">Packages are add-ons a guest can select when booking — honeymoon extras, half-board
+                    meals,
+                    airport transfers, spa access, and more.</p>
+
+                <h3>Creating a package</h3>
+                <ol class="steps">
+                    <li>Go to <strong>Admin → Packages</strong> (<code>/admin/packages.php</code>).</li>
+                    <li>Click <strong>Add Package</strong>. Fill in the name, short description, and inclusions (one
+                        item per
+                        line).</li>
+                    <li>Choose a <strong>pricing model</strong>:
+                        <ul class="checklist" style="margin-top:0.5rem;">
+                            <li><strong>Per night</strong> — multiplied by the number of nights in the booking.</li>
+                            <li><strong>Per stay</strong> — a flat charge regardless of duration.</li>
+                            <li><strong>Per person per night</strong> — multiplied by guest count × nights.</li>
+                        </ul>
+                    </li>
+                    <li>Set the price, choose a Font Awesome icon (e.g. <code>fa-heart</code>, <code>fa-plane</code>),
+                        and assign
+                        a sort order.</li>
+                    <li>Tick <strong>Featured</strong> to promote it on the homepage packages section.</li>
+                    <li>Scope to <strong>All room types</strong> or pick specific types from the list. Guests only see
+                        packages
+                        valid for the room they are booking.</li>
+                    <li><strong>Save</strong>. The system auto-generates a URL slug from the name.</li>
+                </ol>
+
+                <div class="callout note">
+                    <strong>Inclusions</strong> appear as a bullet list under the package title on the booking page.
+                    Keep each
+                    line short — one item, one line.
+                </div>
+
+                <h3>Editing &amp; disabling packages</h3>
+                <ul class="checklist">
+                    <li>Click <strong>Edit</strong> on any package card. All fields are editable; the slug updates
+                        automatically
+                        if you change the name (existing booking links still work).</li>
+                    <li>Toggle the <strong>Active</strong> switch to hide a package from guests without deleting it.
+                    </li>
+                    <li>Set <strong>Sort order</strong> (lower number appears earlier), then save to control display
+                        sequence on the booking form.</li>
+                </ul>
+
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Pricing model</th>
+                            <th>Best for</th>
+                            <th>Example</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr>
+                            <td>Per night</td>
+                            <td>Breakfast, dinner, airport pick-up on each day</td>
+                            <td>MWK 8,500 × 3 nights = MWK 25,500</td>
+                        </tr>
+                        <tr>
+                            <td>Per stay</td>
+                            <td>One-off gifts: bouquet, champagne, early check-in</td>
+                            <td>MWK 35,000 flat</td>
+                        </tr>
+                        <tr>
+                            <td>Per person per night</td>
+                            <td>Full board, guided activities, spa passes</td>
+                            <td>MWK 6,000 × 2 guests × 4 nights = MWK 48,000</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </section>
+
+            <!-- RATE PLANS -->
+            <section>
+                <h2>Dynamic Rate Plans</h2>
+                <p class="lead">Rate plans automatically adjust room prices at booking time based on season, demand, or
+                    booking
+                    behaviour — no manual discounting needed.</p>
+
+                <h3>Creating a rate plan</h3>
+                <ol class="steps">
+                    <li>Go to <strong>Admin → Rate Plans</strong> (<code>/admin/rate-plans.php</code>).</li>
+                    <li>Click <strong>Add Rate Plan</strong>. Choose a plan type:</li>
+                </ol>
+
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Plan type</th>
+                            <th>When it fires</th>
+                            <th>Typical use</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr>
+                            <td><strong>Seasonal</strong></td>
+                            <td>Stay falls within a date range</td>
+                            <td>Christmas / school holiday surcharge, low-season discount</td>
+                        </tr>
+                        <tr>
+                            <td><strong>Weekend</strong></td>
+                            <td>Stay includes specific days of the week</td>
+                            <td>Friday–Sunday premium</td>
+                        </tr>
+                        <tr>
+                            <td><strong>Length of stay</strong></td>
+                            <td>Minimum nights threshold is met</td>
+                            <td>10% off 5-night stays, 15% off 7+ nights</td>
+                        </tr>
+                        <tr>
+                            <td><strong>Last-minute</strong></td>
+                            <td>Booking made within X days of check-in</td>
+                            <td>Fill empty rooms at 20% off, booked &lt; 3 days before</td>
+                        </tr>
+                        <tr>
+                            <td><strong>Early-bird</strong></td>
+                            <td>Booking made at least X days in advance</td>
+                            <td>5% off if booked ≥ 60 days ahead</td>
+                        </tr>
+                        <tr>
+                            <td><strong>Promotion</strong></td>
+                            <td>Booking falls within an active promo window</td>
+                            <td>Anniversary sale, Valentine's special</td>
+                        </tr>
+                    </tbody>
+                </table>
+
+                <ol class="steps">
+                    <li>Set the <strong>adjustment</strong>: choose <em>Percentage</em> or <em>Fixed amount</em> and
+                        enter the
+                        value (negative for a discount, positive for a surcharge).</li>
+                    <li>Set the <strong>active date range</strong> — the plan only applies to bookings made OR stays
+                        falling
+                        within these dates (depending on type).</li>
+                    <li>Optionally restrict to specific <strong>days of the week</strong>, minimum/maximum nights, or
+                        room types.
+                    </li>
+                    <li>Set a <strong>priority</strong> number — lower number = higher priority when multiple plans
+                        match.</li>
+                    <li>Toggle <strong>Stacking</strong> to allow this plan to compound with others on the same booking,
+                        or leave
+                        it off to let the highest-priority plan win alone.</li>
+                    <li><strong>Save</strong>. The plan is active immediately.</li>
+                </ol>
+
+                <div class="callout warn">
+                    <strong>Review plans before peak season.</strong> If stacking is ON across multiple plans, discounts
+                    compound.
+                    Run a test booking to verify the final price before going live.
+                </div>
+
+                <h3>Managing existing plans</h3>
+                <ul class="checklist">
+                    <li>Edit the <strong>Priority</strong> value (higher number is evaluated first), then save.</li>
+                    <li>Toggle <strong>Active</strong> to enable/disable without deleting.</li>
+                    <li><strong>Edit</strong> to change any field; changes apply to new bookings only (existing bookings
+                        are
+                        unaffected).</li>
+                    <li><strong>Delete</strong> removes the plan permanently; use deactivation instead if you want to
+                        reuse it
+                        next season.</li>
+                </ul>
+
+                <h3>How plans interact at booking</h3>
+                <ol class="steps">
+                    <li>System collects all active plans that match the booking's dates, room type, nights, and lead
+                        time.</li>
+                    <li>Plans are sorted by priority (lowest number first).</li>
+                    <li>If the top-priority plan has <em>stacking OFF</em>, only that plan is applied.</li>
+                    <li>If it has <em>stacking ON</em>, the next-priority matching plan is also applied, and so on down
+                        the stack.
+                    </li>
+                    <li>The adjusted price is shown to the guest at checkout and stored with the booking for audit.</li>
+                </ol>
+            </section>
+
+            <!-- QUICK REFERENCE -->
+            <section>
+                <h2>Quick reference</h2>
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Task</th>
+                            <th>Where</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr>
+                            <td>Create a new add-on package</td>
+                            <td><code>/admin/packages.php</code> → Add Package</td>
+                        </tr>
+                        <tr>
+                            <td>Feature a package on the homepage</td>
+                            <td>Edit package → tick <strong>Featured</strong></td>
+                        </tr>
+                        <tr>
+                            <td>Temporarily hide a package</td>
+                            <td>Edit package → toggle <strong>Active</strong> off</td>
+                        </tr>
+                        <tr>
+                            <td>Create a seasonal discount</td>
+                            <td><code>/admin/rate-plans.php</code> → Add Rate Plan → Seasonal</td>
+                        </tr>
+                        <tr>
+                            <td>Set a minimum-stay deal</td>
+                            <td>Add Rate Plan → Length of Stay → set min nights</td>
+                        </tr>
+                        <tr>
+                            <td>Run a last-minute flash sale</td>
+                            <td>Add Rate Plan → Last-minute → set lead-time window</td>
+                        </tr>
+                        <tr>
+                            <td>Pause a rate plan temporarily</td>
+                            <td>Rate Plans list → toggle <strong>Active</strong> off</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </section>
+
+        </div>
+    </main>
+
+    <footer class="guide-footer">
+        <div class="deck">
+            <div class="crest">— R H —</div>
+            <p><a href="08-stock-orders.html">← Stock &amp; Orders</a> &middot; <a href="index.html">All guides</a>
+                &middot;
+                <a href="10-conference-events.html">Conference &amp; Events →</a>
+            </p>
+        </div>
+    </footer>
+
+</body>
+
+</html>

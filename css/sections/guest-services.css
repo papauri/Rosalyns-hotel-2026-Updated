@@ -1,0 +1,248 @@
+/**
+ * Guest Services Page
+ * Rosalyn's Beach Hotel — Japandi Luxury Design System
+ */
+
+/* ============================================
+   SERVICES SECTION
+   ============================================ */
+
+.gs-section {
+    padding: clamp(64px, 8vw, 100px) 0;
+    position: relative;
+    background-color: var(--color-background, #F7F3EE);
+}
+
+.gs-section::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background-image: radial-gradient(var(--color-primary, #8A775F) 0.5px, transparent 0.5px);
+    background-size: 24px 24px;
+    opacity: 0.03;
+    pointer-events: none;
+}
+
+.gs-section .container {
+    max-width: 1360px;
+    margin: 0 auto;
+    padding: 0 clamp(1rem, 3.2vw, 2.25rem);
+}
+
+/* ============================================
+   SERVICES GRID
+   ============================================ */
+
+.gs-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(min(380px, 100%), 1fr));
+    gap: clamp(24px, 3vw, 40px);
+    margin-top: clamp(40px, 5vw, 60px);
+}
+
+/* Card refinements for GS context */
+.room-card.gs-variant {
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+    background: var(--color-white, #FFFFFF);
+}
+
+.room-card.gs-variant .room-card-content {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    padding: clamp(20px, 2.5vw, 32px);
+}
+
+.room-card.gs-variant .room-card-description {
+    flex: 1;
+    margin-bottom: 24px;
+}
+
+/* ============================================
+   CONTACT BANNER — Dark CTA Section
+   ============================================ */
+
+.gs-contact-banner {
+    background: linear-gradient(135deg, var(--color-lux-ink, #231F1C) 0%, var(--color-lux-charcoal, #312924) 100%);
+    padding: clamp(64px, 8vw, 100px) 0;
+    text-align: center;
+    color: var(--color-white, #FFFFFF);
+    position: relative;
+    overflow: hidden;
+    /* Override rh-reveal so the dark bg section doesn't slide; only children fade */
+    opacity: 1 !important;
+    transform: none !important;
+}
+
+.gs-contact-banner::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 1px;
+    background: linear-gradient(90deg, transparent, rgba(177, 130, 71, 0.5), transparent);
+}
+
+.gs-contact-banner .container {
+    max-width: 800px;
+    margin: 0 auto;
+    padding: 0 clamp(1rem, 3.2vw, 2.25rem);
+    position: relative;
+    z-index: 2;
+}
+
+.gs-contact-banner h2 {
+    font-family: var(--font-serif, 'Cormorant Garamond', serif);
+    font-size: clamp(2rem, 4vw, 3rem);
+    font-weight: 300;
+    margin-bottom: 16px;
+    color: var(--color-lux-gold, #B18247);
+    opacity: 0;
+    transform: translateY(20px);
+    transition: opacity 0.7s cubic-bezier(0.4, 0, 0.2, 1) 0.1s,
+        transform 0.7s cubic-bezier(0.4, 0, 0.2, 1) 0.1s;
+}
+
+.gs-contact-banner p {
+    color: rgba(255, 255, 255, 0.85);
+    margin-bottom: clamp(28px, 4vw, 40px);
+    font-size: clamp(1rem, 1.2vw, 1.1rem);
+    font-family: var(--font-sans, 'Jost', sans-serif);
+    font-weight: 300;
+    letter-spacing: 0.02em;
+    opacity: 0;
+    transform: translateY(20px);
+    transition: opacity 0.7s cubic-bezier(0.4, 0, 0.2, 1) 0.2s,
+        transform 0.7s cubic-bezier(0.4, 0, 0.2, 1) 0.2s;
+}
+
+.gs-contact-actions {
+    display: flex;
+    gap: 20px;
+    justify-content: center;
+    flex-wrap: wrap;
+    opacity: 0;
+    transform: translateY(20px);
+    transition: opacity 0.7s cubic-bezier(0.4, 0, 0.2, 1) 0.35s,
+        transform 0.7s cubic-bezier(0.4, 0, 0.2, 1) 0.35s;
+}
+
+/* Reveal state — triggered when scroll-reveal.js adds .is-revealed to the section */
+.gs-contact-banner.is-revealed h2,
+.gs-contact-banner.is-revealed p,
+.gs-contact-banner.is-revealed .gs-contact-actions {
+    opacity: 1;
+    transform: translateY(0);
+}
+
+/* Respect reduced motion */
+@media (prefers-reduced-motion: reduce) {
+
+    .gs-contact-banner h2,
+    .gs-contact-banner p,
+    .gs-contact-actions {
+        opacity: 1;
+        transform: none;
+        transition: none;
+    }
+}
+
+/* ============================================
+   PREMIUM CTA BUTTONS (page-specific)
+   ============================================ */
+
+.btn-premium-gold {
+    background: var(--color-primary, #8A775F);
+    color: var(--color-white, #FFFFFF);
+    padding: 16px 32px;
+    border-radius: 50px;
+    font-family: var(--font-sans, 'Jost', sans-serif);
+    text-transform: uppercase;
+    font-size: 0.85rem;
+    letter-spacing: 0.1em;
+    transition: all 0.4s cubic-bezier(0.16, 1, 0.3, 1);
+    border: 1px solid var(--color-primary, #8A775F);
+    display: inline-flex;
+    align-items: center;
+    gap: 10px;
+    text-decoration: none;
+}
+
+.btn-premium-gold:hover {
+    background: transparent;
+    color: var(--color-primary, #8A775F);
+    transform: translateY(-2px);
+}
+
+.btn-premium-outline {
+    background: transparent;
+    color: var(--color-white, #FFFFFF);
+    padding: 16px 32px;
+    border-radius: 50px;
+    font-family: var(--font-sans, 'Jost', sans-serif);
+    text-transform: uppercase;
+    font-size: 0.85rem;
+    letter-spacing: 0.1em;
+    transition: all 0.4s cubic-bezier(0.16, 1, 0.3, 1);
+    border: 1px solid rgba(255, 255, 255, 0.3);
+    display: inline-flex;
+    align-items: center;
+    gap: 10px;
+    text-decoration: none;
+}
+
+.btn-premium-outline:hover {
+    border-color: var(--color-white, #FFFFFF);
+    background: rgba(255, 255, 255, 0.05);
+    transform: translateY(-2px);
+}
+
+/* ============================================
+   RESPONSIVE
+   ============================================ */
+
+@media (max-width: 768px) {
+    .gs-grid {
+        grid-template-columns: 1fr;
+        gap: 24px;
+    }
+
+    .gs-section {
+        padding: clamp(48px, 7vw, 72px) 0;
+    }
+
+    .gs-contact-banner h2 {
+        font-size: clamp(1.75rem, 5vw, 2.2rem);
+    }
+
+    .gs-contact-actions {
+        flex-direction: column;
+        width: 100%;
+        max-width: 320px;
+        margin: 0 auto;
+    }
+
+    .btn-premium-gold,
+    .btn-premium-outline {
+        width: 100%;
+        justify-content: center;
+    }
+}
+
+/* ============================================
+   REDUCED MOTION
+   ============================================ */
+
+@media (prefers-reduced-motion: reduce) {
+
+    .btn-premium-gold:hover,
+    .btn-premium-outline:hover {
+        transform: none;
+    }
+}

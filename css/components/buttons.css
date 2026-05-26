@@ -1,0 +1,461 @@
+/**
+ * Button Components
+ * Rosalyn's Hotel 2026
+ * Consolidated button styles with BEM methodology and conflict resolution
+ */
+
+/* ============================================
+   BASE BUTTON
+   ============================================ */
+
+.btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: var(--space-2);
+    padding: var(--space-3) var(--space-6);
+    font-family: var(--font-sans);
+    font-size: var(--text-base);
+    font-weight: 500;
+    line-height: var(--leading-tight);
+    text-align: center;
+    text-decoration: none;
+    border-radius: var(--radius-lg);
+    border: 1px solid transparent;
+    cursor: pointer;
+    transition: all 0.3s cubic-bezier(0.22, 1, 0.36, 1);
+    position: relative;
+    overflow: hidden;
+    background: none;
+    min-height: 44px;
+    white-space: nowrap;
+}
+
+.btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+    pointer-events: none;
+}
+
+.btn:focus-visible {
+    outline: 2px solid var(--color-primary);
+    outline-offset: 2px;
+}
+
+/* ============================================
+   BUTTON VARIANTS
+   ============================================ */
+
+/* Primary Button */
+.btn--primary {
+    background: var(--color-primary, #8A775F);
+    color: var(--color-white, #FFFFFF);
+    border-color: var(--color-primary, #8A775F);
+}
+
+/* Backward compatibility aliases (legacy class names used in templates) */
+.btn-primary {
+    background: var(--color-primary, #8A775F);
+    color: var(--color-white, #FFFFFF);
+    border-color: var(--color-primary, #8A775F);
+}
+
+.btn-primary:hover:not(:disabled) {
+    background: var(--color-primary-dark, #5F5343);
+    border-color: var(--color-primary-dark, #5F5343);
+    transform: translateY(-1px);
+    box-shadow: 0 4px 12px rgba(138, 119, 95, 0.3);
+}
+
+.btn-primary:active:not(:disabled) {
+    transform: translateY(0);
+    box-shadow: 0 2px 6px rgba(138, 119, 95, 0.2);
+}
+
+.btn--primary:hover:not(:disabled) {
+    background: var(--color-primary-dark, #5F5343);
+    border-color: var(--color-primary-dark, #5F5343);
+    transform: translateY(-1px);
+    box-shadow: 0 4px 12px rgba(138, 119, 95, 0.3);
+}
+
+.btn--primary:active:not(:disabled) {
+    transform: translateY(0);
+    box-shadow: 0 2px 6px rgba(138, 119, 95, 0.2);
+}
+
+/* Secondary Button */
+.btn--secondary {
+    background: var(--color-lux-ink, #231F1C);
+    color: var(--color-white, #FFFFFF);
+    border-color: var(--color-lux-ink, #231F1C);
+}
+
+.btn--secondary:hover:not(:disabled) {
+    background: var(--color-lux-charcoal, #312924);
+    border-color: var(--color-lux-charcoal, #312924);
+    transform: translateY(-1px);
+    box-shadow: 0 4px 12px rgba(35, 31, 28, 0.25);
+}
+
+.btn--secondary:active:not(:disabled) {
+    transform: translateY(0);
+    box-shadow: 0 2px 6px rgba(35, 31, 28, 0.15);
+}
+
+/* White Button */
+.btn--white {
+    background: var(--color-white, #FFFFFF);
+    color: var(--color-lux-ink, #231F1C);
+    border-color: var(--color-white, #FFFFFF);
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+}
+
+.btn--white:hover:not(:disabled) {
+    background: var(--color-surface-soft, #F4EFE9);
+    border-color: var(--color-surface-soft, #F4EFE9);
+    transform: translateY(-1px);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.12);
+}
+
+/* Outline Button */
+.btn--outline {
+    background: transparent;
+    color: var(--color-lux-ink, #231F1C);
+    border-color: var(--color-border-light, #EAE1D8);
+}
+
+.btn-outline {
+    background: transparent;
+    color: var(--color-lux-ink, #231F1C);
+    border-color: var(--color-border-light, #EAE1D8);
+}
+
+.btn-outline:hover:not(:disabled) {
+    background: rgba(138, 119, 95, 0.08);
+    border-color: var(--color-primary, #8A775F);
+    color: var(--color-primary, #8A775F);
+}
+
+.btn--outline:hover:not(:disabled) {
+    background: rgba(138, 119, 95, 0.08);
+    border-color: var(--color-primary, #8A775F);
+    color: var(--color-primary, #8A775F);
+}
+
+/* White Background Fix for Outline Buttons on Light Backgrounds */
+.btn--outline-on-light {
+    background: rgba(255, 255, 255, 0.9);
+    color: var(--color-text-primary);
+    border: 1px solid var(--color-border);
+    backdrop-filter: blur(10px);
+    box-shadow: var(--shadow-sm);
+}
+
+.btn--outline-on-light:hover:not(:disabled) {
+    background: rgba(255, 255, 255, 0.95);
+    transform: translateY(-1px);
+    box-shadow: var(--shadow-md);
+    border-color: var(--color-primary);
+}
+
+/* Ghost Button */
+.btn--ghost {
+    background: transparent;
+    color: var(--color-lux-ink, #231F1C);
+    border-color: transparent;
+}
+
+.btn--ghost:hover:not(:disabled) {
+    background: rgba(35, 31, 28, 0.05);
+}
+
+/* Submit Button (Special variant for forms) */
+.btn--submit {
+    width: 100%;
+    background: linear-gradient(135deg, var(--color-primary, #8A775F) 0%, var(--color-primary-dark, #5F5343) 100%);
+    color: var(--color-white, #FFFFFF);
+    border: none;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+    padding: var(--space-4) var(--space-8);
+}
+
+.btn--submit:hover:not(:disabled) {
+    transform: translateY(-1px);
+    box-shadow: 0 6px 20px rgba(138, 119, 95, 0.35);
+}
+
+.btn--submit:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+    transform: none;
+    box-shadow: none;
+    background: var(--color-gray-300, #DDD3C8);
+}
+
+/* ============================================
+   BUTTON SIZES
+   ============================================ */
+
+.btn--sm {
+    padding: var(--space-2) var(--space-4);
+    font-size: var(--text-sm);
+    min-height: 36px;
+}
+
+.btn--lg {
+    padding: var(--space-4) var(--space-8);
+    font-size: var(--text-lg);
+    min-height: 52px;
+}
+
+.btn--xl {
+    padding: var(--space-5) var(--space-10);
+    font-size: var(--text-xl);
+    min-height: 60px;
+}
+
+/* ============================================
+   BUTTON WITH ICON
+   ============================================ */
+
+.btn__icon {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+}
+
+.btn--icon-only {
+    padding: var(--space-3);
+    aspect-ratio: 1;
+    min-width: 44px;
+    min-height: 44px;
+}
+
+.btn__icon--left {
+    order: -1;
+}
+
+.btn__icon--right {
+    order: 1;
+}
+
+/* ============================================
+   BUTTON GROUPS
+   ============================================ */
+
+.btn-group {
+    display: flex;
+    gap: var(--space-2);
+}
+
+.btn-group .btn {
+    border-radius: 0;
+}
+
+.btn-group .btn:first-child {
+    border-top-left-radius: var(--radius-lg);
+    border-bottom-left-radius: var(--radius-lg);
+}
+
+.btn-group .btn:last-child {
+    border-top-right-radius: var(--radius-lg);
+    border-bottom-right-radius: var(--radius-lg);
+}
+
+.btn-group .btn:not(:first-child):not(:last-child) {
+    border-radius: 0;
+}
+
+/* ============================================
+   SPECIALIZED BUTTONS
+   ============================================ */
+
+/* Restaurant Hero Actions */
+.restaurant-hero-actions .btn {
+    min-width: 180px;
+}
+
+/* QR Menu Actions */
+.qr-menu-actions .btn {
+    min-width: 170px;
+    justify-content: center;
+    border-radius: var(--radius-xl);
+    background: linear-gradient(135deg, var(--color-button-primary) 0%, #7a6449 100%);
+    color: var(--color-button-primary-text);
+    border: 1px solid var(--color-button-primary);
+    font-weight: var(--font-semibold);
+    padding: var(--space-3) var(--space-6);
+    position: relative;
+    overflow: hidden;
+    transition: all var(--transition-base) var(--easing-out);
+    box-shadow: 0 4px 12px rgba(139, 115, 85, 0.25);
+}
+
+/* Ripple effect */
+.qr-menu-actions .btn::before {
+    content: '';
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    width: 0;
+    height: 0;
+    background: rgba(255, 255, 255, 0.3);
+    border-radius: 50%;
+    transform: translate(-50%, -50%);
+    transition: width 0.6s ease, height 0.6s ease;
+}
+
+.qr-menu-actions .btn:active::before {
+    width: 300px;
+    height: 300px;
+}
+
+.qr-menu-actions .btn:hover {
+    background: linear-gradient(135deg, #9a8264 0%, #8b7355 100%);
+    transform: translateY(-2px);
+    box-shadow: 0 8px 20px rgba(139, 115, 85, 0.35);
+}
+
+.qr-menu-actions .btn--outline,
+.qr-menu-actions .btn-outline {
+    background: transparent;
+    color: var(--color-primary, #8A775F);
+    border: 1px solid rgba(138, 119, 95, 0.5);
+    box-shadow: none;
+}
+
+.qr-menu-actions .btn--outline:hover,
+.qr-menu-actions .btn-outline:hover {
+    background: rgba(138, 119, 95, 0.08);
+    color: var(--color-primary-dark, #5F5343);
+    border-color: var(--color-primary, #8A775F);
+    transform: translateY(-2px);
+    box-shadow: 0 4px 12px rgba(138, 119, 95, 0.15);
+}
+
+/* Conference Enquiry Button */
+.btn-inquire {
+    width: 100%;
+    background: linear-gradient(135deg, var(--color-primary) 0%, var(--color-primary-dark) 100%);
+    color: var(--color-white);
+    border: none;
+    border-radius: var(--radius-lg);
+    padding: var(--space-4) var(--space-6);
+    font-weight: var(--font-semibold);
+    font-size: var(--text-base);
+    text-transform: none;
+    letter-spacing: 0.01em;
+    transition: all 0.3s cubic-bezier(0.22, 1, 0.36, 1);
+    cursor: pointer;
+    min-height: 50px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: var(--space-2);
+}
+
+.btn-inquire:hover:not(:disabled) {
+    transform: translateY(-2px);
+    box-shadow: 0 8px 24px rgba(139, 115, 85, 0.3);
+    filter: brightness(1.05);
+}
+
+.btn-inquire:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+    transform: none;
+    box-shadow: none;
+    filter: grayscale(0.5);
+}
+
+/* Hero Section Buttons */
+.hero .btn {
+    display: inline-flex;
+}
+
+.hero .btn--white:hover {
+    background: var(--color-surface-soft, #F4EFE9);
+    border-color: var(--color-surface-soft, #F4EFE9);
+}
+
+/* ============================================
+   RESPONSIVE
+   ============================================ */
+
+@media (max-width: 768px) {
+    .btn {
+        width: 100%;
+        min-height: 48px;
+        /* Larger touch target */
+    }
+
+    .btn-group {
+        flex-direction: column;
+        width: 100%;
+    }
+
+    .btn-group .btn {
+        border-radius: var(--radius-lg) !important;
+        margin-bottom: var(--space-2);
+    }
+
+    .btn-group .btn:last-child {
+        margin-bottom: 0;
+    }
+
+    .restaurant-hero-actions .btn,
+    .qr-menu-actions .btn {
+        min-width: auto;
+    }
+}
+
+@media (max-width: 480px) {
+    .btn--sm {
+        min-height: 40px;
+    }
+
+    .btn {
+        font-size: var(--text-sm);
+    }
+
+    .btn--lg {
+        font-size: var(--text-base);
+        padding: var(--space-3) var(--space-6);
+    }
+}
+
+/* ============================================
+   ACCESSIBILITY
+   ============================================ */
+
+@media (prefers-reduced-motion: reduce) {
+    .btn {
+        transition: none;
+    }
+
+    .btn:hover,
+    .btn:active {
+        transform: none;
+    }
+}
+
+/* High contrast mode */
+@media (prefers-contrast: high) {
+    .btn {
+        border-width: 2px;
+    }
+
+    .btn--outline {
+        border-width: 2px;
+    }
+}
+
+/* ============================================
+   LEGACY SUPPORT
+   ============================================ */
+
+/* Support for old class names - use BEM classes instead */
+/* These will be removed in future versions */

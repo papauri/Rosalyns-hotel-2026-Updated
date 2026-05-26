@@ -1,0 +1,148 @@
+/* Stock Batches page styles */
+.stock-toolbar {
+    display: flex;
+    gap: 12px;
+    flex-wrap: wrap;
+    align-items: center;
+    margin-bottom: 16px;
+}
+
+.stock-toolbar select,
+.stock-toolbar input {
+    padding: 8px 12px;
+    border: 1px solid #d6d8db;
+    border-radius: 6px;
+    font-size: 14px;
+}
+
+.stock-table {
+    width: 100%;
+    border-collapse: collapse;
+    background: var(--color-white, #fff);
+    border-radius: 10px;
+    overflow: hidden;
+}
+
+.stock-table th,
+.stock-table td {
+    padding: 10px 14px;
+    border-bottom: 1px solid var(--admin-surface-border, #eaecef);
+    font-size: 13px;
+}
+
+.stock-table th {
+    background: var(--admin-table-head, #f8f9fb);
+    font-weight: 600;
+    text-align: left;
+    color: #3f4654;
+}
+
+.pill {
+    display: inline-block;
+    padding: 3px 10px;
+    border-radius: 20px;
+    font-size: 11px;
+    font-weight: 600;
+}
+
+.tier-expired {
+    background: #f8d7da;
+    color: #721c24;
+}
+
+.tier-critical {
+    background: #f8d7da;
+    color: #721c24;
+}
+
+.tier-soon {
+    background: #fff3cd;
+    color: #856404;
+}
+
+.tier-upcoming {
+    background: #d1ecf1;
+    color: #0c5460;
+}
+
+.tier-ok {
+    background: #d4edda;
+    color: #155724;
+}
+
+.tier-none {
+    background: #e9ecef;
+    color: #495057;
+}
+
+.status-active {
+    color: #155724;
+    font-weight: 600;
+}
+
+.status-depleted {
+    color: #6c757d;
+}
+
+.status-expired,
+.status-wasted,
+.status-recalled {
+    color: #c82333;
+}
+
+.row-actions button {
+    background: var(--color-white, #fff);
+    border: 1px solid #d6d8db;
+    padding: 6px 10px;
+    border-radius: 6px;
+    font-size: 12px;
+    cursor: pointer;
+}
+
+.row-actions button:hover {
+    background: #f0f1f3;
+}
+
+.row-actions .btn-danger {
+    color: #c82333;
+    border-color: #f1b0b7;
+}
+
+.summary-cards {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: 14px;
+    margin-bottom: 18px;
+}
+
+.summary-card {
+    background: var(--color-white, #fff);
+    padding: 16px;
+    border-radius: 10px;
+    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.06);
+}
+
+.summary-card .label {
+    font-size: 12px;
+    color: #6c757d;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.summary-card .value {
+    font-size: 24px;
+    font-weight: 600;
+    margin-top: 4px;
+}
+
+.summary-card.critical {
+    border-left: 4px solid #c82333;
+}
+
+.summary-card.soon {
+    border-left: 4px solid #856404;
+}
+
+.summary-card.upcoming {
+    border-left: 4px solid #0c5460;
+}

@@ -1,0 +1,526 @@
+/* Gym Management page styles — gmc-* prefix */
+
+.page-header-row {
+    background: var(--admin-surface, #fff);
+    border: 1px solid var(--admin-surface-border, #e5e7eb);
+    border-radius: 12px;
+    padding: 14px 16px;
+    box-shadow: 0 1px 3px rgba(15, 23, 42, 0.05);
+}
+
+.page-header-row .page-title {
+    margin: 0;
+}
+
+/* ── Gym Package Cards Grid ──────────────────────────────────────────── */
+.gym-cards-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+    gap: 16px;
+    margin-top: 12px;
+    grid-auto-rows: 1fr;
+    align-items: stretch;
+}
+
+.gym-card {
+    position: relative;
+    background: var(--admin-surface, #fff);
+    border: 1px solid var(--admin-surface-border, #e5e7eb);
+    border-radius: 12px;
+    overflow: hidden;
+    box-shadow: 0 1px 3px rgba(15, 23, 42, 0.05);
+    transition: transform 0.15s ease, box-shadow 0.15s ease, border-color 0.15s ease;
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+}
+
+.gym-card:hover {
+    transform: translateY(-1px);
+    border-color: color-mix(in srgb, var(--gold, #8B7355) 38%, var(--admin-surface-border, #e5e7eb) 62%);
+    box-shadow: 0 10px 24px rgba(15, 23, 42, 0.08);
+}
+
+/* Icon hero area */
+.gym-card-icon-area {
+    height: 132px;
+    width: 100%;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    background: linear-gradient(135deg, #f0f4ff 0%, #e8f5e9 100%);
+    position: relative;
+}
+
+.gym-card-icon-area > i {
+    font-size: 34px;
+    color: var(--gold, #8B7355);
+    opacity: 0.85;
+}
+
+.gym-card-featured-badge {
+    position: absolute;
+    top: 10px;
+    left: 10px;
+    background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%);
+    color: #fff;
+    font-size: 11px;
+    font-weight: 700;
+    padding: 4px 10px;
+    border-radius: 999px;
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    letter-spacing: 0.02em;
+}
+
+.gym-card-featured-badge i {
+    font-size: 10px;
+    color: inherit;
+    opacity: 1;
+}
+
+.gym-card-order-badge {
+    position: absolute;
+    top: 10px;
+    right: 10px;
+    padding: 4px 8px;
+    border-radius: 999px;
+    background: rgba(17, 24, 39, 0.68);
+    color: #fff;
+    font-size: 11px;
+    font-weight: 700;
+}
+
+/* Card body */
+.gym-card-body {
+    padding: 12px 14px 10px;
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.gym-card-title {
+    font-size: 14px;
+    font-weight: 700;
+    color: var(--navy, #1A1A1A);
+    line-height: 1.35;
+    min-height: 2.7em;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+}
+
+.gym-card-price {
+    font-size: 15px;
+    font-weight: 700;
+    color: var(--navy, #1A1A1A);
+    line-height: 1.35;
+    min-height: 1.35em;
+}
+
+.gym-card-price small {
+    font-size: 11px;
+    font-weight: 400;
+    color: #888;
+}
+
+.gym-card-duration {
+    font-size: 12px;
+    color: var(--gold, #8B7355);
+    font-weight: 600;
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    min-height: 18px;
+}
+
+.gym-card-includes {
+    font-size: 12px;
+    color: #6b7280;
+    line-height: 1.6;
+    min-height: 3.2em;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+}
+
+.gym-card-meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    min-height: 24px;
+}
+
+.gym-badge {
+    font-size: 11px;
+    padding: 4px 8px;
+    border-radius: 999px;
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    font-weight: 600;
+}
+
+.gym-badge.active {
+    background: #edf7f0;
+    color: #1f7a42;
+}
+
+.gym-badge.inactive {
+    background: #fef2f2;
+    color: #a03030;
+}
+
+/* Card actions area */
+.gym-card-actions {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    padding-top: 10px;
+    border-top: 1px solid #f0f0f0;
+    margin-top: auto;
+}
+
+/* ── Icon toolbar ─────────────────────────────────────────────────────── */
+.gmc-toolbar {
+    display: flex;
+    align-items: center;
+    gap: 3px;
+}
+
+.gmc-icon-btn {
+    width: 30px;
+    height: 30px;
+    border-radius: 7px;
+    border: 1px solid #e5e7eb;
+    background: #f9fafb;
+    color: #6b7280;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    font-size: 11px;
+    transition: background 0.14s, color 0.14s, border-color 0.14s, transform 0.1s;
+    flex-shrink: 0;
+    padding: 0;
+    line-height: 1;
+}
+
+.gmc-icon-btn:hover {
+    background: #f3f4f6;
+    color: #374151;
+    border-color: #d1d5db;
+    transform: translateY(-1px);
+}
+
+.gmc-icon-btn--active-on {
+    background: #dcfce7;
+    color: #16a34a;
+    border-color: #86efac;
+}
+
+.gmc-icon-btn--active-on:hover {
+    background: #bbf7d0;
+}
+
+.gmc-icon-btn--active-off {
+    background: #fff7ed;
+    color: #c2410c;
+    border-color: #fed7aa;
+}
+
+.gmc-icon-btn--active-off:hover {
+    background: #ffedd5;
+}
+
+.gmc-icon-btn--featured-on {
+    background: #fef9c3;
+    color: #b45309;
+    border-color: #fde68a;
+}
+
+.gmc-icon-btn--featured-on:hover {
+    background: #fef08a;
+}
+
+.gmc-icon-btn--facebook {
+    background: #1877F2;
+    color: #fff;
+    border-color: #1877F2;
+    font-size: 10px;
+}
+
+.gmc-icon-btn--facebook:hover {
+    background: #1558c0;
+    border-color: #1558c0;
+}
+
+.gmc-icon-btn--danger:hover {
+    background: #fee2e2;
+    color: #dc2626;
+    border-color: #fca5a5;
+}
+
+.gmc-toolbar-sep {
+    width: 1px;
+    height: 20px;
+    background: #e5e7eb;
+    margin: 0 3px;
+    flex-shrink: 0;
+}
+
+.gmc-spacer {
+    flex: 1;
+}
+
+/* ── Primary edit CTA ────────────────────────────────────────────────── */
+.gmc-edit-btn {
+    width: 100%;
+    padding: 8px 12px;
+    border-radius: 8px;
+    background: var(--gold, #8B7355);
+    color: #fff;
+    border: none;
+    font-family: inherit;
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 7px;
+    letter-spacing: 0.02em;
+    transition: background 0.15s, transform 0.1s;
+}
+
+.gmc-edit-btn:hover {
+    background: #7a6347;
+    transform: translateY(-1px);
+}
+
+/* ── Share All Gym banner ─────────────────────────────────────────────── */
+.fb-gym-all-banner {
+    margin-top: 20px;
+    border-radius: 12px;
+    background: linear-gradient(135deg, #1877F2 0%, #0d47a1 100%);
+    color: #fff;
+    padding: 18px 24px;
+    display: flex;
+    align-items: center;
+    gap: 18px;
+    flex-wrap: wrap;
+    box-shadow: 0 4px 16px rgba(24, 119, 242, 0.25);
+}
+
+.fb-gym-all-banner__icon {
+    width: 52px;
+    height: 52px;
+    border-radius: 14px;
+    background: rgba(255, 255, 255, 0.18);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 24px;
+    flex-shrink: 0;
+}
+
+.fb-gym-all-banner__text {
+    flex: 1;
+    min-width: 180px;
+}
+
+.fb-gym-all-banner__title {
+    font-weight: 700;
+    font-size: 1rem;
+    margin-bottom: 3px;
+    letter-spacing: 0.01em;
+}
+
+.fb-gym-all-banner__sub {
+    font-size: 0.82rem;
+    opacity: 0.82;
+    line-height: 1.4;
+}
+
+.fb-gym-all-btn {
+    background: rgba(255, 255, 255, 0.15);
+    color: #fff;
+    border: 2px solid rgba(255, 255, 255, 0.55);
+    border-radius: 8px;
+    padding: 10px 22px;
+    font-family: inherit;
+    font-size: 0.9rem;
+    font-weight: 600;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    transition: background 0.18s, border-color 0.18s;
+    white-space: nowrap;
+    letter-spacing: 0.01em;
+}
+
+.fb-gym-all-btn:hover {
+    background: rgba(255, 255, 255, 0.28);
+    border-color: rgba(255, 255, 255, 0.9);
+}
+
+/* ── Gym package selection list in Share All modal ───────────────────── */
+.fb-gym-select-list {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    max-height: 300px;
+    overflow-y: auto;
+    padding-right: 2px;
+}
+
+.fb-gym-select-item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 12px;
+    border: 1.5px solid #e5e7eb;
+    border-radius: 8px;
+    cursor: pointer;
+    transition: border-color 0.14s, background 0.14s;
+    user-select: none;
+}
+
+.fb-gym-select-item:hover {
+    border-color: #93c5fd;
+    background: #f8faff;
+}
+
+.fb-gym-select-item.checked {
+    border-color: #1877F2;
+    background: #eff6ff;
+}
+
+.fb-gym-select-item input[type="checkbox"] {
+    width: 16px;
+    height: 16px;
+    cursor: pointer;
+    flex-shrink: 0;
+    accent-color: #1877F2;
+}
+
+.fb-gym-select-icon {
+    width: 36px;
+    height: 36px;
+    border-radius: 8px;
+    background: linear-gradient(135deg, #f0f4ff, #e8f5e9);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 16px;
+    color: var(--gold, #8B7355);
+    flex-shrink: 0;
+}
+
+.fb-gym-select-info {
+    flex: 1;
+    min-width: 0;
+}
+
+.fb-gym-select-name {
+    font-weight: 600;
+    font-size: 0.86rem;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    color: #1c1e21;
+}
+
+.fb-gym-select-price {
+    font-size: 0.76rem;
+    color: #6b7280;
+}
+
+/* ── Form Grid (modals) ───────────────────────────────────────────────── */
+.form-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: 16px;
+}
+
+.form-row {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 12px;
+}
+
+.form-row-3 {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 12px;
+}
+
+.form-section {
+    padding-bottom: 16px;
+    margin-bottom: 16px;
+    border-bottom: 1px solid var(--admin-surface-border, #e5e7eb);
+}
+
+.form-section-title {
+    font-weight: 700;
+    color: var(--navy, #1f2937);
+    margin-bottom: 12px;
+}
+
+.form-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 10px;
+    padding: 16px 18px 20px;
+    border-top: 1px solid var(--admin-surface-border, #e5e7eb);
+}
+
+/* Empty State */
+.empty-state {
+    text-align: center;
+    padding: 48px 24px;
+    color: #9ca3af;
+}
+
+.empty-state i {
+    font-size: 48px;
+    margin-bottom: 16px;
+    display: block;
+    color: #d1d5db;
+}
+
+.empty-state p {
+    margin: 0;
+    font-size: 15px;
+}
+
+/* ── Responsive ──────────────────────────────────────────────────────── */
+@media (max-width: 900px) {
+
+    .form-row,
+    .form-row-3 {
+        grid-template-columns: 1fr;
+    }
+
+    .gym-cards-grid {
+        grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+    }
+}
+
+@media (max-width: 600px) {
+    .gym-cards-grid {
+        grid-template-columns: 1fr;
+    }
+
+    .fb-gym-all-banner {
+        flex-direction: column;
+        align-items: flex-start;
+    }
+}

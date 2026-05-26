@@ -1,0 +1,217 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Conference Enquiry Received</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            line-height: 1.6;
+            color: #333;
+            background-color: #f4f4f4;
+            margin: 0;
+            padding: 20px;
+        }
+        .email-container {
+            max-width: 600px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 10px;
+            overflow: hidden;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+        }
+        .header {
+            background: linear-gradient(135deg, #1A1A1A 0%, #252525 100%);
+            color: #8B7355;
+            padding: 30px;
+            text-align: center;
+        }
+        .header h1 {
+            margin: 0;
+            font-size: 28px;
+            font-weight: 600;
+        }
+        .content {
+            padding: 30px;
+        }
+        .greeting {
+            font-size: 16px;
+            margin-bottom: 20px;
+        }
+        .enquiry-details {
+            background: #f8f9fa;
+            border: 2px solid #1A1A1A;
+            border-radius: 10px;
+            padding: 20px;
+            margin: 20px 0;
+        }
+        .enquiry-details h2 {
+            color: #1A1A1A;
+            margin-top: 0;
+            font-size: 20px;
+            border-bottom: 2px solid #8B7355;
+            padding-bottom: 10px;
+        }
+        .reference-number {
+            background: #8B7355;
+            color: #1A1A1A;
+            padding: 10px 15px;
+            border-radius: 5px;
+            font-weight: bold;
+            font-size: 18px;
+            text-align: center;
+            margin: 15px 0;
+        }
+        .detail-row {
+            display: flex;
+            justify-content: space-between;
+            padding: 10px 0;
+            border-bottom: 1px solid #ddd;
+        }
+        .detail-row:last-child {
+            border-bottom: none;
+        }
+        .detail-label {
+            font-weight: bold;
+            color: #1A1A1A;
+        }
+        .detail-value {
+            color: #333;
+        }
+        .info-box {
+            background: #e7f3ff;
+            border-left: 4px solid #0d6efd;
+            border-radius: 5px;
+            padding: 15px;
+            margin: 20px 0;
+        }
+        .info-box h3 {
+            color: #0d6efd;
+            margin-top: 0;
+            font-size: 18px;
+        }
+        .info-box p {
+            color: #0d6efd;
+            margin: 0;
+        }
+        .footer {
+            background: #f8f9fa;
+            padding: 20px;
+            text-align: center;
+            border-top: 2px solid #1A1A1A;
+        }
+        .footer p {
+            color: #666;
+            font-size: 14px;
+            margin: 5px 0;
+        }
+        .footer a {
+            color: #1A1A1A;
+            text-decoration: none;
+        }
+        @media only screen and (max-width: 600px) {
+            .email-container {
+                width: 100% !important;
+            }
+            .detail-row {
+                flex-direction: column;
+            }
+            .detail-label {
+                margin-bottom: 5px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="email-container">
+        <div class="header">
+            <h1>🏢 Conference Enquiry Received</h1>
+        </div>
+        <div class="content">
+            <p class="greeting">Dear {{contact_person}},</p>
+            <p>Thank you for your conference enquiry with <strong>{{site_name}}</strong>. We have received your request and it is currently being reviewed by our team.</p>
+            
+            <div class="enquiry-details">
+                <h2>Enquiry Details</h2>
+                
+                <div class="reference-number">
+                    Reference: {{inquiry_reference}}
+                </div>
+                
+                <div class="detail-row">
+                    <span class="detail-label">Company:</span>
+                    <span class="detail-value">{{company_name}}</span>
+                </div>
+                
+                <div class="detail-row">
+                    <span class="detail-label">Conference Room:</span>
+                    <span class="detail-value">{{room_name}}</span>
+                </div>
+                
+                <div class="detail-row">
+                    <span class="detail-label">Event Date:</span>
+                    <span class="detail-value">{{event_date}}</span>
+                </div>
+                
+                <div class="detail-row">
+                    <span class="detail-label">Event Time:</span>
+                    <span class="detail-value">{{start_time}} - {{end_time}}</span>
+                </div>
+                
+                <div class="detail-row">
+                    <span class="detail-label">Number of Attendees:</span>
+                    <span class="detail-value">{{number_of_attendees}}</span>
+                </div>
+                
+                <div class="detail-row">
+                    <span class="detail-label">Estimated Amount:</span>
+                    <span class="detail-value">{{currency_symbol}} {{total_amount}}</span>
+                </div>
+            </div>
+            
+            {{#if event_type}}
+            <div class="info-box">
+                <h3>Event Type</h3>
+                <p>{{event_type}}</p>
+            </div>
+            {{/if}}
+            
+            {{#if catering_required}}
+            <div class="info-box">
+                <h3>Catering</h3>
+                <p>Catering services have been requested for your event.</p>
+            </div>
+            {{/if}}
+            
+            {{#if av_equipment}}
+            <div class="info-box">
+                <h3>AV Equipment Requirements</h3>
+                <p>{{av_equipment}}</p>
+            </div>
+            {{/if}}
+            
+            {{#if special_requirements}}
+            <div class="info-box">
+                <h3>Special Requirements</h3>
+                <p>{{special_requirements}}</p>
+            </div>
+            {{/if}}
+            
+            <div class="info-box">
+                <h3>What Happens Next?</h3>
+                <p><strong>Our team will review your enquiry and contact you within 24 hours to confirm availability and finalize details.</strong><br>
+                Once confirmed, you will receive a second email with final confirmation and payment instructions.</p>
+            </div>
+            
+            <p>If you have any questions, please contact us at <a href="mailto:{{contact_email}}">{{contact_email}}</a> or call {{phone}}.</p>
+            
+            <p>Thank you for considering {{site_name}} for your event!</p>
+        </div>
+        <div class="footer">
+            <p><strong>The {{site_name}} Team</strong></p>
+            <p><a href="{{site_url}}">{{site_url}}</a></p>
+        </div>
+    </div>
+</body>
+</html>

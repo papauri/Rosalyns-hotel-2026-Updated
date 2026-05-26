@@ -1,0 +1,1321 @@
+﻿<?php
+// Include admin initialization (PHP-only, no HTML output)
+require_once 'admin-init.php';
+/** @var string $csrf_token */
+require_once 'includes/finance-schema.php';
+require_once '../config/credit-notes.php';
+
+$user = [
+    'id' => $_SESSION['admin_user_id'],
+    'username' => $_SESSION['admin_username'],
+    'role' => $_SESSION['admin_role'],
+    'full_name' => $_SESSION['admin_full_name']
+];
+$site_name = getSetting('site_name');
+$currency_symbol = getSetting('currency_symbol');
+$conferenceFields = finance_conference_fields($pdo);
+$today = date('Y-m-d');
+$thisMonth = date('Y-m');
+$thisYear = date('Y');
+
+// Get date filters - support "all" for no date filtering
+$showAll = isset($_GET['show_all']) && $_GET['show_all'] === '1';
+$startDate = isset($_GET['start_date']) ? $_GET['start_date'] : ($showAll ? '2000-01-01' : date('Y-m-01'));
+$endDate = isset($_GET['end_date']) ? $_GET['end_date'] : ($showAll ? '2099-12-31' : date('Y-m-t'));
+
+$financialSummary = [
+    'total_payments' => 0,
+    'total_collected' => 0,
+    'total_collected_excl_vat' => 0,
+    'total_vat_collected' => 0,
+    'total_pending' => 0,
+    'total_refunds_issued' => 0,
+    'total_refunded' => 0,
+    'total_cancelled' => 0,
+    'pending_refunds' => 0,
+    'completed_refunds' => 0,
+];
+$roomSummary = ['total_bookings_with_payments' => 0, 'room_collected' => 0, 'room_vat_collected' => 0, 'total_room_outstanding' => 0];
+$confSummary = ['total_conferences_with_payments' => 0, 'conf_collected' => 0, 'conf_vat_collected' => 0, 'total_conf_outstanding' => 0];
+$restaurantSummary = ['total_restaurant_orders_with_payments' => 0, 'restaurant_collected' => 0, 'restaurant_vat_collected' => 0];
+$paymentMethods = [];
+$refundReasons = [];
+$recentPayments = [];
+$outstandingSummary = [];
+$complianceSummary = [
+    'completed_sales' => 0,
+    'missing_receipts' => 0,
+    'generated_invoices_missing_numbers' => 0,
+    'mra_pending_or_unsubmitted' => 0,
+    'paid_pos_without_ledger' => 0,
+];
+$mraColumnsAvailable = false;
+$vatEnabled = in_array(getSetting('vat_enabled'), ['1', 1, true, 'true', 'on'], true);
+$vatRate = getSetting('vat_rate');
+$vatNumber = getSetting('vat_number');
+$vatSettingsMessage = '';
+$vatSettingsError = '';
+
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['save_vat_settings'])) {
+    if (!validateCsrfToken($_POST['csrf_token'] ?? '')) {
+        $vatSettingsError = 'Security token invalid. Please refresh and try again.';
+    } else {
+        try {
+            $vatEnabledValue = (string)(($_POST['vat_enabled'] ?? '0') === '1' ? '1' : '0');
+            $vatRateInput = trim((string)($_POST['vat_rate'] ?? '0'));
+            $vatNumberValue = trim((string)($_POST['vat_number'] ?? ''));
+
+            if ($vatRateInput === '' || !is_numeric($vatRateInput)) {
+                throw new Exception('VAT rate must be a valid number.');
+            }
+
+            $vatRateValue = round((float)$vatRateInput, 2);
+            if ($vatRateValue < 0 || $vatRateValue > 100) {
+                throw new Exception('VAT rate must be between 0 and 100.');
+            }
+
+            if (strlen($vatNumberValue) > 120) {
+                throw new Exception('VAT number is too long.');
+            }
+
+            $savedEnabled = updateSetting('vat_enabled', $vatEnabledValue);
+            $savedRate = updateSetting('vat_rate', (string)$vatRateValue);
+            $savedNumber = updateSetting('vat_number', $vatNumberValue);
+
+            if (!$savedEnabled || !$savedRate || !$savedNumber) {
+                throw new Exception('Unable to save VAT settings right now.');
+            }
+
+            if (function_exists('rh_log_event')) {
+                rh_log_event('admin/' . basename(__FILE__, '.php'), 'info', 'VAT settings updated from accounting dashboard', [
+                    'user' => $user['username'] ?? '',
+                    'user_id' => $user['id'] ?? null,
+                    'vat_enabled' => $vatEnabledValue,
+                    'vat_rate' => $vatRateValue,
+                    'vat_number_set' => $vatNumberValue !== '',
+                ]);
+            }
+
+            $vatEnabled = in_array(getSetting('vat_enabled'), ['1', 1, true, 'true', 'on'], true);
+            $vatRate = getSetting('vat_rate');
+            $vatNumber = getSetting('vat_number');
+            $vatSettingsMessage = 'VAT settings updated successfully.';
+        } catch (Throwable $e) {
+            $vatSettingsError = $e->getMessage();
+        }
+    }
+}
+
+// Fetch accounting statistics
+try {
+    // Overall financial summary with gross/net revenue calculation
+    $financialStmt = $pdo->prepare("
+        SELECT
+            COUNT(*) as total_payments,
+            COALESCE(SUM(CASE WHEN payment_status IN ('completed', 'paid') AND COALESCE(payment_type, '') != 'refund' THEN total_amount ELSE 0 END), 0) as total_collected,
+            COALESCE(SUM(CASE WHEN payment_status IN ('completed', 'paid') AND COALESCE(payment_type, '') != 'refund' THEN payment_amount ELSE 0 END), 0) as total_collected_excl_vat,
+            COALESCE(SUM(CASE WHEN payment_status IN ('completed', 'paid') AND COALESCE(payment_type, '') != 'refund' THEN vat_amount ELSE 0 END), 0)
+                - COALESCE(SUM(CASE WHEN payment_type = 'refund' AND refund_status IN ('completed','processing') THEN vat_amount ELSE 0 END), 0)
+                as total_vat_collected,
+            COALESCE(SUM(CASE WHEN payment_status IN ('pending', 'partial') AND COALESCE(payment_type, '') != 'refund' THEN total_amount ELSE 0 END), 0) as total_pending,
+            COALESCE(SUM(CASE WHEN payment_type = 'refund' THEN refund_amount ELSE 0 END), 0) as total_refunds_issued,
+            COALESCE(SUM(CASE WHEN payment_status = 'refunded' THEN total_amount ELSE 0 END), 0) as total_refunded,
+            COALESCE(SUM(CASE WHEN payment_status = 'cancelled' THEN total_amount ELSE 0 END), 0) as total_cancelled,
+            COALESCE(SUM(CASE WHEN payment_type = 'refund' AND refund_status = 'pending' THEN refund_amount ELSE 0 END), 0) as pending_refunds,
+            COALESCE(SUM(CASE WHEN payment_type = 'refund' AND refund_status = 'completed' THEN refund_amount ELSE 0 END), 0) as completed_refunds
+        FROM payments
+        WHERE payment_date BETWEEN ? AND ?
+          AND deleted_at IS NULL
+    ");
+    $financialStmt->execute([$startDate, $endDate]);
+    $financialSummary = $financialStmt->fetch(PDO::FETCH_ASSOC);
+
+    // Room bookings financial summary
+    $roomStmt = $pdo->prepare("
+        SELECT
+            COUNT(DISTINCT p.booking_id) as total_bookings_with_payments,
+            COALESCE(SUM(CASE WHEN p.payment_status IN ('completed', 'paid') AND COALESCE(p.payment_type, '') != 'refund' THEN p.total_amount ELSE 0 END), 0) as room_collected,
+            COALESCE(SUM(CASE WHEN p.payment_status IN ('completed', 'paid') AND COALESCE(p.payment_type, '') != 'refund' THEN p.vat_amount ELSE 0 END), 0)
+                - COALESCE(SUM(CASE WHEN p.payment_type = 'refund' AND p.refund_status IN ('completed','processing') THEN p.vat_amount ELSE 0 END), 0)
+                as room_vat_collected,
+            (
+                SELECT COALESCE(SUM(b2.amount_due), 0)
+                FROM bookings b2
+                WHERE b2.id IN (
+                    SELECT DISTINCT p2.booking_id FROM payments p2
+                    WHERE p2.booking_type = 'room'
+                    AND p2.payment_date BETWEEN ? AND ?
+                    AND p2.deleted_at IS NULL
+                )
+            ) as total_room_outstanding
+        FROM payments p
+        WHERE p.booking_type = 'room'
+        AND p.payment_date BETWEEN ? AND ?
+        AND p.deleted_at IS NULL
+    ");
+    $roomStmt->execute([$startDate, $endDate, $startDate, $endDate]);
+    $roomSummary = $roomStmt->fetch(PDO::FETCH_ASSOC);
+
+    // Conference bookings financial summary
+    $confStmt = $pdo->prepare("
+        SELECT
+            COUNT(DISTINCT p.booking_id) as total_conferences_with_payments,
+            COALESCE(SUM(CASE WHEN p.payment_status IN ('completed', 'paid') AND COALESCE(p.payment_type, '') != 'refund' THEN p.total_amount ELSE 0 END), 0) as conf_collected,
+            COALESCE(SUM(CASE WHEN p.payment_status IN ('completed', 'paid') AND COALESCE(p.payment_type, '') != 'refund' THEN p.vat_amount ELSE 0 END), 0)
+                - COALESCE(SUM(CASE WHEN p.payment_type = 'refund' AND p.refund_status IN ('completed','processing') THEN p.vat_amount ELSE 0 END), 0)
+                as conf_vat_collected,
+            (
+                SELECT COALESCE(SUM(ci2.amount_due), 0)
+                FROM conference_inquiries ci2
+                WHERE ci2.id IN (
+                    SELECT DISTINCT p2.booking_id FROM payments p2
+                    WHERE p2.booking_type = 'conference'
+                    AND p2.payment_date BETWEEN ? AND ?
+                    AND p2.deleted_at IS NULL
+                )
+            ) as total_conf_outstanding
+        FROM payments p
+        WHERE p.booking_type = 'conference'
+        AND p.payment_date BETWEEN ? AND ?
+        AND p.deleted_at IS NULL
+    ");
+    $confStmt->execute([$startDate, $endDate, $startDate, $endDate]);
+    $confSummary = $confStmt->fetch(PDO::FETCH_ASSOC);
+
+    // Restaurant/POS financial summary synced from stock orders into payments
+    $restaurantStmt = $pdo->prepare("
+        SELECT
+            COUNT(DISTINCT CASE WHEN COALESCE(p.payment_type, '') != 'refund' THEN p.booking_id ELSE NULL END) as total_restaurant_orders_with_payments,
+            COALESCE(SUM(CASE WHEN p.payment_status IN ('completed', 'paid') AND COALESCE(p.payment_type, '') != 'refund' THEN p.total_amount ELSE 0 END), 0) as restaurant_collected,
+            COALESCE(SUM(CASE WHEN p.payment_status IN ('completed', 'paid') AND COALESCE(p.payment_type, '') != 'refund' THEN p.vat_amount ELSE 0 END), 0)
+                - COALESCE(SUM(CASE WHEN p.payment_type = 'refund' AND p.refund_status IN ('completed','processing') THEN p.vat_amount ELSE 0 END), 0)
+                as restaurant_vat_collected
+        FROM payments p
+        WHERE p.booking_type = 'restaurant'
+        AND p.payment_date BETWEEN ? AND ?
+        AND p.deleted_at IS NULL
+    ");
+    $restaurantStmt->execute([$startDate, $endDate]);
+    $restaurantSummary = $restaurantStmt->fetch(PDO::FETCH_ASSOC);
+
+    // Payment method breakdown
+    $methodStmt = $pdo->prepare("
+        SELECT
+            payment_method,
+            COUNT(*) as count,
+            COALESCE(SUM(CASE WHEN payment_status IN ('completed', 'paid') AND COALESCE(payment_type, '') != 'refund' THEN total_amount ELSE 0 END), 0) as total
+        FROM payments
+        WHERE payment_date BETWEEN ? AND ?
+          AND deleted_at IS NULL
+        GROUP BY payment_method
+        ORDER BY total DESC
+    ");
+    $methodStmt->execute([$startDate, $endDate]);
+    $paymentMethods = $methodStmt->fetchAll(PDO::FETCH_ASSOC);
+
+    // Refund breakdown by reason
+    $refundReasonStmt = $pdo->prepare("
+        SELECT
+            refund_reason,
+            COUNT(*) as count,
+            COALESCE(SUM(refund_amount), 0) as total_amount
+        FROM payments
+        WHERE payment_type = 'refund'
+          AND payment_date BETWEEN ? AND ?
+          AND deleted_at IS NULL
+        GROUP BY refund_reason
+        ORDER BY total_amount DESC
+    ");
+    $refundReasonStmt->execute([$startDate, $endDate]);
+    $refundReasons = $refundReasonStmt->fetchAll(PDO::FETCH_ASSOC);
+
+    // Recent payments in selected date range (last 20)
+    $recentStmt = $pdo->prepare("
+        SELECT
+            p.*,
+            CASE
+                WHEN p.booking_type = 'room' THEN CONCAT(b.guest_name, ' (', b.booking_reference, ')')
+                WHEN p.booking_type = 'conference' THEN CONCAT(ci.{$conferenceFields['company']}, ' (', ci.{$conferenceFields['reference']}, ')')
+                WHEN p.booking_type = 'restaurant' THEN CONCAT('Restaurant order ', so.reference, COALESCE(CONCAT(' - ', NULLIF(so.customer_name, '')), ''))
+                ELSE 'Unknown'
+            END as booking_description
+        FROM payments p
+        LEFT JOIN bookings b ON p.booking_type = 'room' AND p.booking_id = b.id
+        LEFT JOIN conference_inquiries ci ON p.booking_type = 'conference' AND p.booking_id = ci.id
+        LEFT JOIN stock_orders so ON p.booking_type = 'restaurant' AND p.booking_id = so.id
+                WHERE p.deleted_at IS NULL
+                    AND p.payment_date BETWEEN ? AND ?
+        ORDER BY p.payment_date DESC, p.created_at DESC
+        LIMIT 20
+    ");
+    $recentStmt->execute([$startDate, $endDate]);
+    $recentPayments = $recentStmt->fetchAll(PDO::FETCH_ASSOC);
+
+    // Outstanding payments summary
+    $outstandingStmt = $pdo->query("
+        SELECT
+            'room' as type,
+            COUNT(*) as count,
+            SUM(amount_due) as total_outstanding
+        FROM bookings
+        WHERE amount_due > 0
+        UNION ALL
+        SELECT
+            'conference' as type,
+            COUNT(*) as count,
+            SUM(amount_due) as total_outstanding
+        FROM conference_inquiries
+        WHERE amount_due > 0
+    ");
+    $outstandingSummary = $outstandingStmt->fetchAll(PDO::FETCH_ASSOC);
+
+    // ====================================================================
+    // Comprehensive analytics: POS by order type, daily trend, COGS, totals
+    // ====================================================================
+
+    // POS revenue split by station / order_type (room_service vs walk-in etc.)
+    $posByTypeStmt = $pdo->prepare("
+        SELECT
+            COALESCE(NULLIF(order_type, ''), 'walk_in') AS order_type,
+            COUNT(*) AS order_count,
+            COALESCE(SUM(CASE WHEN status IN ('paid','completed') THEN total_amount ELSE 0 END), 0) AS gross_revenue,
+            COALESCE(SUM(CASE WHEN status IN ('paid','completed') THEN total_cost ELSE 0 END), 0) AS cogs,
+            COALESCE(SUM(CASE WHEN status = 'voided' THEN total_amount ELSE 0 END), 0) AS voided_amount,
+            COALESCE(SUM(CASE WHEN status = 'voided' THEN 1 ELSE 0 END), 0) AS voided_count
+        FROM stock_orders
+        WHERE created_at BETWEEN ? AND ?
+        GROUP BY order_type
+        ORDER BY gross_revenue DESC
+    ");
+    $posByTypeStmt->execute([$startDate . ' 00:00:00', $endDate . ' 23:59:59']);
+    $posByType = $posByTypeStmt->fetchAll(PDO::FETCH_ASSOC);
+
+    // Total POS COGS in range (for gross margin calc)
+    $posTotalsStmt = $pdo->prepare("
+        SELECT
+            COALESCE(SUM(CASE WHEN status IN ('paid','completed') THEN total_amount ELSE 0 END), 0) AS gross_revenue,
+            COALESCE(SUM(CASE WHEN status IN ('paid','completed') THEN total_cost ELSE 0 END), 0) AS cogs
+        FROM stock_orders
+        WHERE created_at BETWEEN ? AND ?
+    ");
+    $posTotalsStmt->execute([$startDate . ' 00:00:00', $endDate . ' 23:59:59']);
+    $posTotals = $posTotalsStmt->fetch(PDO::FETCH_ASSOC) ?: ['gross_revenue' => 0, 'cogs' => 0];
+
+    // Daily revenue trend (last 14 days within the selected range, capped to range)
+    $trendStartCandidate = max(strtotime($startDate), strtotime('-13 days', strtotime($endDate)));
+    $trendStart = date('Y-m-d', $trendStartCandidate);
+    $trendStmt = $pdo->prepare("
+        SELECT
+            DATE(payment_date) AS day,
+            COALESCE(SUM(CASE WHEN booking_type = 'room' AND payment_status IN ('completed','paid') AND COALESCE(payment_type, '') != 'refund' THEN total_amount ELSE 0 END), 0) AS room_rev,
+            COALESCE(SUM(CASE WHEN booking_type = 'conference' AND payment_status IN ('completed','paid') AND COALESCE(payment_type, '') != 'refund' THEN total_amount ELSE 0 END), 0) AS conf_rev,
+            COALESCE(SUM(CASE WHEN booking_type = 'restaurant' AND payment_status IN ('completed','paid') AND COALESCE(payment_type, '') != 'refund' THEN total_amount ELSE 0 END), 0) AS fnb_rev,
+            COALESCE(SUM(CASE WHEN payment_type = 'refund' THEN refund_amount ELSE 0 END), 0) AS refunds,
+            COUNT(*) AS txn_count
+        FROM payments
+        WHERE deleted_at IS NULL
+          AND payment_date BETWEEN ? AND ?
+        GROUP BY DATE(payment_date)
+        ORDER BY day DESC
+    ");
+    $trendStmt->execute([$trendStart, $endDate]);
+    $dailyTrend = $trendStmt->fetchAll(PDO::FETCH_ASSOC);
+
+    $paymentColumns = finance_table_columns($pdo, 'payments');
+    $mraColumnsAvailable = isset($paymentColumns['mra_status']);
+    $mraPendingSql = $mraColumnsAvailable
+        ? "SUM(CASE WHEN payment_status IN ('completed','paid') AND COALESCE(payment_type, '') != 'refund' AND mra_status NOT IN ('accepted','not_required') THEN 1 ELSE 0 END)"
+        : "0";
+    $complianceStmt = $pdo->prepare("
+        SELECT
+            COUNT(*) AS completed_sales,
+            SUM(CASE WHEN payment_status IN ('completed','paid') AND COALESCE(payment_type, '') != 'refund' AND (receipt_number IS NULL OR receipt_number = '') THEN 1 ELSE 0 END) AS missing_receipts,
+            SUM(CASE WHEN invoice_generated = 1 AND (invoice_number IS NULL OR invoice_number = '') THEN 1 ELSE 0 END) AS generated_invoices_missing_numbers,
+            {$mraPendingSql} AS mra_pending_or_unsubmitted
+        FROM payments
+        WHERE deleted_at IS NULL
+          AND payment_date BETWEEN ? AND ?
+    ");
+    $complianceStmt->execute([$startDate, $endDate]);
+    $complianceSummary = array_merge($complianceSummary, $complianceStmt->fetch(PDO::FETCH_ASSOC) ?: []);
+
+    $posLedgerGapStmt = $pdo->prepare("
+        SELECT COUNT(*)
+        FROM stock_orders so
+        LEFT JOIN payments p ON p.booking_type = 'restaurant'
+            AND p.booking_id = so.id
+            AND COALESCE(p.payment_type, '') != 'refund'
+            AND p.deleted_at IS NULL
+        WHERE so.status = 'paid'
+          AND so.created_at BETWEEN ? AND ?
+          AND p.id IS NULL
+    ");
+    $posLedgerGapStmt->execute([$startDate . ' 00:00:00', $endDate . ' 23:59:59']);
+    $complianceSummary['paid_pos_without_ledger'] = (int)$posLedgerGapStmt->fetchColumn();
+} catch (Throwable $e) {
+    $error = "Unable to load accounting data.";
+}
+
+// ── Quotation pipeline stats ──────────────────────────────────────────────────
+$quotationStats = [
+    'total'         => 0,
+    'sent'          => 0,
+    'accepted'      => 0,
+    'expired'       => 0,
+    'declined'      => 0,
+    'total_value'   => 0.0,
+    'sent_value'    => 0.0,
+    'accepted_value' => 0.0,
+];
+try {
+    $qtStmt = $pdo->prepare("
+        SELECT
+            COUNT(*)                                        AS total,
+            SUM(status = 'sent')                            AS sent,
+            SUM(status = 'accepted')                        AS accepted,
+            SUM(status = 'expired')                         AS expired,
+            SUM(status = 'declined')                        AS declined,
+            COALESCE(SUM(total_amount), 0)                  AS total_value,
+            COALESCE(SUM(CASE WHEN status = 'sent'     THEN total_amount ELSE 0 END), 0) AS sent_value,
+            COALESCE(SUM(CASE WHEN status = 'accepted' THEN total_amount ELSE 0 END), 0) AS accepted_value
+        FROM quotations
+        WHERE sent_at BETWEEN ? AND ?
+    ");
+    $qtStmt->execute([$startDate . ' 00:00:00', $endDate . ' 23:59:59']);
+    $qtRow = $qtStmt->fetch(PDO::FETCH_ASSOC) ?: [];
+    foreach ($qtRow as $k => $v) {
+        $quotationStats[$k] = isset($quotationStats[$k]) ? (is_float($quotationStats[$k]) ? (float)$v : (int)$v) : $v;
+    }
+} catch (Throwable $e) {
+    // Non-fatal — quotations table may not exist yet
+}
+
+// ── Credit Note stats ─────────────────────────────────────────────────────────
+$cnStats = ['count_issued' => 0, 'total_issued' => 0.0, 'total_redeemed' => 0.0, 'total_outstanding' => 0.0];
+try {
+    if (function_exists('checkExpiredCreditNotes')) {
+        checkExpiredCreditNotes($pdo);
+    }
+    $cnStmt = $pdo->prepare("
+        SELECT
+            COUNT(*)                                                                       AS count_issued,
+            COALESCE(SUM(original_amount), 0)                                              AS total_issued,
+            COALESCE(SUM(amount_used), 0)                                                  AS total_redeemed,
+            COALESCE(SUM(CASE WHEN status IN ('active','partially_applied') THEN balance ELSE 0 END), 0) AS total_outstanding
+        FROM credit_notes
+        WHERE DATE(issued_at) BETWEEN ? AND ?
+    ");
+    $cnStmt->execute([$startDate, $endDate]);
+    $cnRow = $cnStmt->fetch(PDO::FETCH_ASSOC) ?: [];
+    foreach ($cnRow as $k => $v) {
+        $cnStats[$k] = isset($cnStats[$k]) && is_float($cnStats[$k]) ? (float)$v : (is_int($cnStats[$k]) ? (int)$v : $v);
+    }
+} catch (Throwable $e) {
+    // credit_notes table may not exist yet — non-fatal
+}
+
+// Safe defaults for new analytics blocks (in case the try { } above failed
+// before the new queries were reached).
+if (!isset($posByType)) {
+    $posByType = [];
+}
+if (!isset($posTotals)) {
+    $posTotals = ['gross_revenue' => 0, 'cogs' => 0];
+}
+if (!isset($dailyTrend)) {
+    $dailyTrend = [];
+}
+
+?>
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Accounting Dashboard | <?php echo htmlspecialchars($site_name); ?> Admin</title>
+
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,300;0,400;0,500;0,600;1,300;1,400;1,500&family=Jost:wght@300;400;500;600&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.7.2/css/all.min.css">
+    <link rel="stylesheet" href="../css/main.css">
+    <link rel="stylesheet" href="css/admin-styles.css">
+    <link rel="stylesheet" href="css/admin-responsive-enhancements.css">
+    <link rel="stylesheet" href="css/admin-components.css">
+    <link rel="stylesheet" href="css/admin-finance.css">
+</head>
+
+<body>
+
+    <?php require_once 'includes/admin-header.php'; ?>
+
+    <div class="content">
+        <?php
+        // -----------------------------------------------------------------
+        // Pre-computed values used in the redesigned layout.
+        // -----------------------------------------------------------------
+        $cat_revenue_gross = (float)($financialSummary['total_collected'] ?? 0);
+        $cat_revenue_net   = $cat_revenue_gross - (float)($financialSummary['total_refunds_issued'] ?? 0);
+        $cat_revenue_room  = (float)($roomSummary['room_collected'] ?? 0);
+        $cat_revenue_conf  = (float)($confSummary['conf_collected'] ?? 0);
+        $cat_revenue_fnb   = (float)($restaurantSummary['restaurant_collected'] ?? 0);
+        $cat_recv_total = 0;
+        $cat_recv_count = 0;
+        foreach ($outstandingSummary as $o) {
+            $cat_recv_total += (float)$o['total_outstanding'];
+            $cat_recv_count += (int)$o['count'];
+        }
+        $cat_pending          = (float)($financialSummary['total_pending'] ?? 0);
+        $cat_vat              = (float)($financialSummary['total_vat_collected'] ?? 0);
+        $cat_refunds          = (float)($financialSummary['total_refunds_issued'] ?? 0);
+        $cat_pending_refunds  = (float)($financialSummary['pending_refunds'] ?? 0);
+
+        $cat_cash_today = 0;
+        try {
+            $cashStmt = $pdo->prepare("SELECT COALESCE(SUM(total_amount),0) FROM payments WHERE payment_status IN ('completed','paid') AND payment_method IN ('cash','mobile_money') AND DATE(payment_date)=CURRENT_DATE() AND deleted_at IS NULL");
+            $cashStmt->execute();
+            $cat_cash_today = (float)$cashStmt->fetchColumn();
+        } catch (Throwable $e) { /* ignore */
+        }
+
+        $cat_voids_value = 0;
+        $cat_voids_count = 0;
+        try {
+            $vStmt = $pdo->prepare("SELECT COUNT(*) c, COALESCE(SUM(total_amount),0) v FROM stock_orders WHERE status='voided' AND voided_at BETWEEN ? AND ?");
+            $vStmt->execute([$startDate . ' 00:00:00', $endDate . ' 23:59:59']);
+            $vrow = $vStmt->fetch(PDO::FETCH_ASSOC) ?: ['c' => 0, 'v' => 0];
+            $cat_voids_count = (int)$vrow['c'];
+            $cat_voids_value = (float)$vrow['v'];
+        } catch (Throwable $e) { /* ignore */
+        }
+
+        // Source totals for the Revenue by Source table.
+        $source_total_gross = $cat_revenue_room + $cat_revenue_conf + $cat_revenue_fnb;
+        $pos_gross   = (float)($posTotals['gross_revenue'] ?? 0);
+        $pos_cogs    = (float)($posTotals['cogs'] ?? 0);
+        $pos_margin  = $pos_gross - $pos_cogs;
+        $pos_margin_pct = $pos_gross > 0 ? ($pos_margin / $pos_gross) * 100 : 0;
+
+        $order_type_labels = [
+            'walk_in'      => 'Walk-in / Dine-in',
+            'room_service' => 'Room Service (folio)',
+            'takeaway'     => 'Takeaway',
+            'delivery'     => 'Delivery',
+            'pos'          => 'POS Till',
+        ];
+        ?>
+
+        <!-- Page header -->
+        <div class="acct-page-header">
+            <div class="acct-page-header__copy">
+                <h1 class="acct-page-header__title">Accounting Dashboard</h1>
+                <p class="acct-page-header__subtitle">
+                    Live financial overview across rooms, conferences, F&amp;B (POS) and room service —
+                    <strong>
+                        <?php echo $showAll
+                            ? 'All-time'
+                            : 'period ' . htmlspecialchars(date('M j, Y', strtotime($startDate))) . ' &rarr; ' . htmlspecialchars(date('M j, Y', strtotime($endDate))); ?>
+                    </strong>.
+                </p>
+            </div>
+
+            <form method="GET" class="acct-filter-form">
+                <label class="acct-filter-field">
+                    <span>From</span>
+                    <input type="date" name="start_date" value="<?php echo htmlspecialchars($showAll ? '' : $startDate); ?>">
+                </label>
+                <label class="acct-filter-field">
+                    <span>To</span>
+                    <input type="date" name="end_date" value="<?php echo htmlspecialchars($showAll ? '' : $endDate); ?>">
+                </label>
+                <button type="submit" class="acct-btn acct-btn--primary">
+                    <i class="fas fa-filter"></i> Apply
+                </button>
+                <a href="accounting-dashboard.php?show_all=1" class="acct-btn acct-btn--ghost">
+                    <i class="fas fa-infinity"></i> All time
+                </a>
+                <a href="accounting-dashboard.php" class="acct-btn acct-btn--ghost">Reset</a>
+            </form>
+        </div>
+
+        <!-- Quick action bar -->
+        <div class="acct-quick-actions">
+            <a href="payments.php" class="acct-quick-action" title="View all individual payment records across all booking types">
+                <i class="fas fa-list"></i> All Payments
+            </a>
+            <a href="payment-add.php" class="acct-quick-action acct-quick-action--accent" title="Manually record a new payment against a booking or invoice">
+                <i class="fas fa-plus"></i> Record Payment
+            </a>
+            <a href="invoices.php" class="acct-quick-action" title="View, search, and download guest and client invoices">
+                <i class="fas fa-file-invoice-dollar"></i> Invoices
+            </a>
+            <a href="quotations.php" class="acct-quick-action" title="View all quotations issued, track status, download PDFs">
+                <i class="fas fa-file-contract"></i> Quotations
+            </a>
+            <a href="reports.php" class="acct-quick-action" title="Detailed financial reports — P&amp;L, revenue by source, VAT register, occupancy, and more">
+                <i class="fas fa-chart-bar"></i> Reports
+            </a>
+            <a href="#vat-settings" class="acct-quick-action" title="VAT (Value Added Tax) Settings — enable or disable VAT, set the tax rate, and configure your VAT registration number directly in accounting">
+                <i class="fas fa-percent"></i> VAT Settings
+            </a>
+        </div>
+
+        <section class="acct-panel acct-panel--vat" id="vat-settings">
+            <header class="acct-panel__head acct-panel__head--vat">
+                <div class="acct-panel__head-title-row">
+                    <h2 class="acct-panel__title"><i class="fas fa-percent"></i> VAT Settings</h2>
+                    <span class="vat-status-badge <?php echo $vatEnabled ? 'vat-status-badge--on' : 'vat-status-badge--off'; ?>">
+                        <i class="fas fa-circle"></i>
+                        <?php echo $vatEnabled ? 'VAT Enabled' : 'VAT Disabled'; ?>
+                    </span>
+                </div>
+                <p class="acct-panel__sub">Tax configuration affects all future invoices, payments, and MRA reporting. Changes cannot be undone automatically.</p>
+            </header>
+
+            <?php if ($vatSettingsMessage): ?>
+                <div class="vat-result-banner vat-result-banner--success">
+                    <i class="fas fa-check-circle"></i>
+                    <div><strong>Saved.</strong> <?php echo htmlspecialchars($vatSettingsMessage); ?></div>
+                </div>
+            <?php endif; ?>
+
+            <?php if ($vatSettingsError): ?>
+                <div class="vat-result-banner vat-result-banner--error">
+                    <i class="fas fa-exclamation-circle"></i>
+                    <div><?php echo htmlspecialchars($vatSettingsError); ?></div>
+                </div>
+            <?php endif; ?>
+
+            <!-- Read-only summary (default locked state) -->
+            <div class="vat-locked-view" id="vatLockedView">
+                <div class="vat-current-grid">
+                    <div class="vat-current-item">
+                        <span class="vat-current-item__label">Status</span>
+                        <span class="vat-current-item__value <?php echo $vatEnabled ? 'vat-current-item__value--on' : 'vat-current-item__value--off'; ?>">
+                            <?php echo $vatEnabled ? '<i class="fas fa-toggle-on"></i> Enabled' : '<i class="fas fa-toggle-off"></i> Disabled'; ?>
+                        </span>
+                    </div>
+                    <div class="vat-current-item">
+                        <span class="vat-current-item__label">Rate</span>
+                        <span class="vat-current-item__value"><?php echo htmlspecialchars((string)$vatRate); ?>%</span>
+                    </div>
+                    <div class="vat-current-item">
+                        <span class="vat-current-item__label">VAT Registration No.</span>
+                        <span class="vat-current-item__value">
+                            <?php echo $vatNumber ? htmlspecialchars((string)$vatNumber) : '<em style="color:var(--finance-muted)">Not set</em>'; ?>
+                        </span>
+                    </div>
+                </div>
+                <div class="vat-unlock-row">
+                    <button type="button" class="acct-btn acct-btn--unlock" id="vatUnlockBtn">
+                        <i class="fas fa-lock-open"></i> Unlock to Edit
+                    </button>
+                    <p class="vat-unlock-hint"><i class="fas fa-triangle-exclamation"></i> Editing VAT settings affects all future invoices, tax calculations, and MRA reports. Proceed with caution.</p>
+                </div>
+            </div>
+
+            <!-- Edit form (hidden until unlocked) -->
+            <div class="vat-edit-view" id="vatEditView" hidden>
+                <div class="vat-warning-banner">
+                    <i class="fas fa-triangle-exclamation vat-warning-banner__icon"></i>
+                    <div class="vat-warning-banner__body">
+                        <strong>Caution — tax-critical change</strong>
+                        <ul>
+                            <li>Changing the VAT rate affects all new payments going forward — existing invoices are not recalculated.</li>
+                            <li>Disabling VAT will stop tax being applied to all new transactions immediately.</li>
+                            <li>Your VAT registration number must match your MRA certificate exactly.</li>
+                            <li>Consult your accountant before making changes mid-period.</li>
+                        </ul>
+                    </div>
+                </div>
+
+                <form method="POST" class="vat-edit-form" action="accounting-dashboard.php<?php echo $showAll ? '?show_all=1' : ''; ?>">
+                    <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf_token, ENT_QUOTES, 'UTF-8'); ?>">
+                    <input type="hidden" name="save_vat_settings" value="1">
+
+                    <div class="vat-edit-fields">
+                        <div class="vat-field-group">
+                            <label class="vat-field-group__label" for="vat_enabled">VAT Status</label>
+                            <select class="vat-field-group__control" id="vat_enabled" name="vat_enabled">
+                                <option value="1" <?php echo $vatEnabled ? 'selected' : ''; ?>>Enabled</option>
+                                <option value="0" <?php echo !$vatEnabled ? 'selected' : ''; ?>>Disabled</option>
+                            </select>
+                        </div>
+                        <div class="vat-field-group">
+                            <label class="vat-field-group__label" for="vat_rate">VAT Rate (%)</label>
+                            <input class="vat-field-group__control" type="number" id="vat_rate" name="vat_rate"
+                                min="0" max="100" step="0.01"
+                                value="<?php echo htmlspecialchars((string)$vatRate); ?>" required>
+                        </div>
+                        <div class="vat-field-group vat-field-group--wide">
+                            <label class="vat-field-group__label" for="vat_number">VAT Registration Number</label>
+                            <input class="vat-field-group__control" type="text" id="vat_number" name="vat_number"
+                                maxlength="120"
+                                value="<?php echo htmlspecialchars((string)$vatNumber); ?>"
+                                placeholder="Enter your MRA VAT registration number">
+                        </div>
+                    </div>
+
+                    <div class="vat-edit-actions">
+                        <button type="button" class="acct-btn acct-btn--ghost" id="vatCancelBtn">
+                            <i class="fas fa-xmark"></i> Cancel
+                        </button>
+                        <button type="submit" class="acct-btn acct-btn--save-vat" id="vatSaveBtn">
+                            <i class="fas fa-save"></i> Save VAT Settings
+                        </button>
+                    </div>
+                </form>
+            </div>
+        </section>
+
+        <!-- VAT unlock confirmation modal -->
+        <div class="modal-overlay" id="vatConfirmModal-overlay" data-modal-overlay aria-hidden="true"></div>
+        <div class="modal-overlay vat-confirm-modal" id="vatConfirmModal" role="dialog" aria-modal="true" aria-labelledby="vatConfirmTitle" data-modal data-close-on-escape="true" data-close-on-overlay="false">
+            <div class="modal-container vat-confirm-modal__container">
+                <div class="vat-confirm-modal__icon"><i class="fas fa-shield-halved"></i></div>
+                <h3 class="vat-confirm-modal__title" id="vatConfirmTitle">Unlock VAT Settings?</h3>
+                <p class="vat-confirm-modal__body">
+                    VAT settings control how tax is calculated across all bookings, POS transactions, and invoices.
+                    Incorrect values can cause compliance issues with the MRA.
+                </p>
+                <p class="vat-confirm-modal__body">
+                    <strong>Are you sure you want to unlock and edit these settings?</strong>
+                </p>
+                <div class="vat-confirm-modal__actions">
+                    <button type="button" class="acct-btn acct-btn--ghost" id="vatConfirmCancel">
+                        <i class="fas fa-xmark"></i> No, keep locked
+                    </button>
+                    <button type="button" class="acct-btn acct-btn--unlock-confirm" id="vatConfirmYes">
+                        <i class="fas fa-lock-open"></i> Yes, unlock to edit
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <?php if (!empty($error)): ?>
+            <div class="acct-error">
+                <i class="fas fa-triangle-exclamation"></i> <?php echo htmlspecialchars($error); ?>
+            </div>
+        <?php endif; ?>
+
+        <!-- KPI strip — 4 headline numbers only (no card overload) -->
+        <div class="acct-kpis">
+            <div class="acct-kpi acct-kpi--revenue" title="Net Revenue — total money collected after deducting refunds. This is what the business actually kept.">
+                <div class="acct-kpi__label">Net Revenue</div>
+                <div class="acct-kpi__value"><?php echo '<span class="acct-kpi__currency">' . $currency_symbol . '</span>' . number_format($cat_revenue_net, 2); ?></div>
+                <div class="acct-kpi__meta">
+                    <span>Gross <?php echo $currency_symbol . number_format($cat_revenue_gross, 2); ?></span>
+                    <span>Refunds &minus;<?php echo $currency_symbol . number_format($cat_refunds, 2); ?></span>
+                </div>
+            </div>
+            <div class="acct-kpi acct-kpi--receivables" title="Receivables — money that guests/clients owe but have not yet paid. These are open invoices or partial bookings that still need collection.">
+                <div class="acct-kpi__label">Receivables</div>
+                <div class="acct-kpi__value"><?php echo '<span class="acct-kpi__currency">' . $currency_symbol . '</span>' . number_format($cat_recv_total, 2); ?></div>
+                <div class="acct-kpi__meta">
+                    <span><?php echo (int)$cat_recv_count; ?> open invoices</span>
+                    <span>Pending <?php echo $currency_symbol . number_format($cat_pending, 2); ?></span>
+                </div>
+            </div>
+            <div class="acct-kpi acct-kpi--cash" title="Cash Position (Today) — the total of all cash and mobile money payments received today. Does not include card, bank transfer, or credit.">
+                <div class="acct-kpi__label">Cash Position (Today)</div>
+                <div class="acct-kpi__value"><?php echo '<span class="acct-kpi__currency">' . $currency_symbol . '</span>' . number_format($cat_cash_today, 2); ?></div>
+                <div class="acct-kpi__meta">
+                    <span>Cash + Mobile Money</span>
+                    <a href="payments.php?date=<?php echo $today; ?>">Today's payments &rarr;</a>
+                </div>
+            </div>
+            <div class="acct-kpi acct-kpi--vat" title="VAT Collected — Value Added Tax (VAT) is the tax portion collected on top of the sale price. This amount must be reported and paid to the tax authority (MRA). It is not the hotel&#39;s income.">
+                <div class="acct-kpi__label">VAT Collected</div>
+                <div class="acct-kpi__value"><?php echo '<span class="acct-kpi__currency">' . $currency_symbol . '</span>' . number_format($cat_vat, 2); ?></div>
+                <div class="acct-kpi__meta">
+                    <span><?php echo $vatEnabled ? 'Enabled @ ' . htmlspecialchars($vatRate) . '%' : 'Disabled'; ?></span>
+                    <?php if ($vatEnabled && $vatNumber): ?><span>VAT&nbsp;# <?php echo htmlspecialchars($vatNumber); ?></span><?php endif; ?>
+                </div>
+            </div>
+        </div>
+
+        <!-- Quotation Pipeline panel -->
+        <section class="acct-panel" id="quotation-pipeline">
+            <header class="acct-panel__head">
+                <h2 class="acct-panel__title"><i class="fas fa-file-contract" style="color:#B18247;"></i> Quotation Pipeline</h2>
+                <p class="acct-panel__sub">Quotations issued in the selected period — track conversion from quoted to accepted bookings.</p>
+                <a href="quotations.php" style="margin-top:6px;display:inline-flex;align-items:center;gap:5px;font-size:12px;color:#8A775F;text-decoration:none;font-weight:500;">
+                    View all quotations <i class="fas fa-arrow-right"></i>
+                </a>
+            </header>
+            <div style="display:flex;flex-wrap:wrap;gap:14px;padding:0 0 20px;">
+                <div class="acct-kpi" style="flex:1;min-width:120px;" title="Total quotations issued in this period">
+                    <div class="acct-kpi__label">Total Issued</div>
+                    <div class="acct-kpi__value" style="font-size:1.4rem;"><?php echo (int)$quotationStats['total']; ?></div>
+                    <div class="acct-kpi__meta"><span><?php echo $currency_symbol . ' ' . number_format((float)$quotationStats['total_value'], 2); ?> quoted</span></div>
+                </div>
+                <div class="acct-kpi" style="flex:1;min-width:120px;" title="Quotations sent and awaiting response">
+                    <div class="acct-kpi__label">Active / Sent</div>
+                    <div class="acct-kpi__value" style="font-size:1.4rem;color:#2F4F78;"><?php echo (int)$quotationStats['sent']; ?></div>
+                    <div class="acct-kpi__meta"><span><?php echo $currency_symbol . ' ' . number_format((float)$quotationStats['sent_value'], 2); ?> outstanding</span></div>
+                </div>
+                <div class="acct-kpi" style="flex:1;min-width:120px;" title="Quotations accepted by the guest — indicates conversion">
+                    <div class="acct-kpi__label">Accepted</div>
+                    <div class="acct-kpi__value" style="font-size:1.4rem;color:#155724;"><?php echo (int)$quotationStats['accepted']; ?></div>
+                    <div class="acct-kpi__meta"><span><?php echo $currency_symbol . ' ' . number_format((float)$quotationStats['accepted_value'], 2); ?></span></div>
+                </div>
+                <div class="acct-kpi" style="flex:1;min-width:120px;" title="Quotations that passed their validity date without a response">
+                    <div class="acct-kpi__label">Expired / Declined</div>
+                    <div class="acct-kpi__value" style="font-size:1.4rem;color:#888;"><?php echo (int)$quotationStats['expired'] + (int)$quotationStats['declined']; ?></div>
+                    <div class="acct-kpi__meta">
+                        <?php if ((int)$quotationStats['total'] > 0):
+                            $convRate = round(((int)$quotationStats['accepted'] / (int)$quotationStats['total']) * 100);
+                        ?>
+                            <span>Conversion <?php echo $convRate; ?>%</span>
+                        <?php else: ?><span>No data</span><?php endif; ?>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- Credit Note Summary panel -->
+        <section class="acct-panel" id="credit-note-summary">
+            <header class="acct-panel__head">
+                <h2 class="acct-panel__title"><i class="fas fa-file-invoice" style="color:#8A775F;"></i> Credit Notes</h2>
+                <p class="acct-panel__sub">Credit notes issued in the selected period — track outstanding liability and redemption rate.</p>
+                <a href="credit-notes.php" style="margin-top:6px;display:inline-flex;align-items:center;gap:5px;font-size:12px;color:#8A775F;text-decoration:none;font-weight:500;">
+                    Manage credit notes <i class="fas fa-arrow-right"></i>
+                </a>
+            </header>
+            <div style="display:flex;flex-wrap:wrap;gap:14px;padding:0 0 20px;">
+                <div class="acct-kpi" style="flex:1;min-width:140px;" title="Total number and face value of credit notes issued in this period">
+                    <div class="acct-kpi__label">CN Issued</div>
+                    <div class="acct-kpi__value" style="font-size:1.4rem;"><?php echo (int)$cnStats['count_issued']; ?></div>
+                    <div class="acct-kpi__meta"><span><?php echo '<span class="acct-kpi__currency">' . $currency_symbol . '</span>' . number_format((float)$cnStats['total_issued'], 2); ?> face value</span></div>
+                </div>
+                <div class="acct-kpi acct-kpi--cash" style="flex:1;min-width:140px;" title="Total value of credit notes redeemed against bookings">
+                    <div class="acct-kpi__label">CN Redeemed</div>
+                    <div class="acct-kpi__value"><?php echo '<span class="acct-kpi__currency">' . $currency_symbol . '</span>' . number_format((float)$cnStats['total_redeemed'], 2); ?></div>
+                    <div class="acct-kpi__meta"><span>Applied to bookings</span></div>
+                </div>
+                <div class="acct-kpi acct-kpi--receivables" style="flex:1;min-width:140px;" title="Outstanding credit note liability — the value guests can still redeem">
+                    <div class="acct-kpi__label">CN Outstanding</div>
+                    <div class="acct-kpi__value"><?php echo '<span class="acct-kpi__currency">' . $currency_symbol . '</span>' . number_format((float)$cnStats['total_outstanding'], 2); ?></div>
+                    <div class="acct-kpi__meta"><span>Unredeemed liability</span></div>
+                </div>
+            </div>
+        </section>
+
+        <section class="acct-panel">
+            <header class="acct-panel__head">
+                <h2 class="acct-panel__title"><i class="fas fa-shield-halved"></i> Accounting Compliance Checks</h2>
+                <p class="acct-panel__sub">Flags receipt, invoice, POS ledger, and MRA-readiness gaps for the selected period.</p>
+            </header>
+            <div class="acct-table-wrap">
+                <table class="acct-table">
+                    <thead>
+                        <tr>
+                            <th>Check</th>
+                            <th class="num">Count</th>
+                            <th>Status</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <?php
+                        $complianceRows = [
+                            ['label' => 'Completed sales', 'count' => (int)($complianceSummary['completed_sales'] ?? 0), 'warn' => false],
+                            ['label' => 'Completed sales missing receipt number', 'count' => (int)($complianceSummary['missing_receipts'] ?? 0), 'warn' => true],
+                            ['label' => 'Generated invoices missing invoice number', 'count' => (int)($complianceSummary['generated_invoices_missing_numbers'] ?? 0), 'warn' => true],
+                            ['label' => 'Paid POS orders missing payments ledger row', 'count' => (int)($complianceSummary['paid_pos_without_ledger'] ?? 0), 'warn' => true],
+                            ['label' => $mraColumnsAvailable ? 'MRA pending/unsubmitted sales' : 'MRA readiness fields not installed', 'count' => $mraColumnsAvailable ? (int)($complianceSummary['mra_pending_or_unsubmitted'] ?? 0) : 1, 'warn' => true],
+                        ];
+                        foreach ($complianceRows as $row):
+                            $hasGap = $row['warn'] && (int)$row['count'] > 0;
+                        ?>
+                            <tr>
+                                <td><?php echo htmlspecialchars($row['label']); ?></td>
+                                <td class="num"><strong><?php echo number_format((int)$row['count']); ?></strong></td>
+                                <td>
+                                    <?php if ($hasGap): ?>
+                                        <span class="acct-pill acct-pill--danger">Review required</span>
+                                    <?php else: ?>
+                                        <span class="acct-pill acct-pill--paid">Clear</span>
+                                    <?php endif; ?>
+                                </td>
+                            </tr>
+                        <?php endforeach; ?>
+                    </tbody>
+                </table>
+            </div>
+        </section>
+
+        <!-- Revenue by Source — comprehensive table tying together rooms, conference, POS -->
+        <section class="acct-panel">
+            <header class="acct-panel__head">
+                <h2 class="acct-panel__title"><i class="fas fa-coins"></i> Revenue by Source</h2>
+                <p class="acct-panel__sub">Each line is wired to the originating system (bookings, conference inquiries, POS / stock orders).</p>
+            </header>
+            <div class="acct-table-wrap">
+                <table class="acct-table">
+                    <thead>
+                        <tr>
+                            <th>Source</th>
+                            <th class="num" title="Number of individual payment transactions for this source">Transactions</th>
+                            <th class="num" title="Gross Revenue — total amount received before deducting refunds or VAT">Gross</th>
+                            <th class="num" title="VAT (Value Added Tax) — the tax portion collected within this revenue. Not the hotel\'s income — must be remitted to MRA.">VAT</th>
+                            <th class="num" title="Share of total gross revenue from all sources combined">% of Gross</th>
+                            <th>Drill-down</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <?php
+                        $rows = [
+                            [
+                                'label'    => 'Rooms (bookings)',
+                                'icon'     => 'fa-bed',
+                                'count'    => (int)($roomSummary['total_bookings_with_payments'] ?? 0),
+                                'gross'    => $cat_revenue_room,
+                                'vat'      => (float)($roomSummary['room_vat_collected'] ?? 0),
+                                'link'     => 'payments.php?booking_type=room',
+                                'link_lbl' => 'Room payments',
+                            ],
+                            [
+                                'label'    => 'Conferences &amp; events',
+                                'icon'     => 'fa-briefcase',
+                                'count'    => (int)($confSummary['total_conferences_with_payments'] ?? 0),
+                                'gross'    => $cat_revenue_conf,
+                                'vat'      => (float)($confSummary['conf_vat_collected'] ?? 0),
+                                'link'     => 'payments.php?booking_type=conference',
+                                'link_lbl' => 'Conference payments',
+                            ],
+                            [
+                                'label'    => 'F&amp;B / Restaurant (POS)',
+                                'icon'     => 'fa-utensils',
+                                'count'    => (int)($restaurantSummary['total_restaurant_orders_with_payments'] ?? 0),
+                                'gross'    => $cat_revenue_fnb,
+                                'vat'      => (float)($restaurantSummary['restaurant_vat_collected'] ?? 0),
+                                'link'     => 'stock-orders.php',
+                                'link_lbl' => 'POS orders',
+                            ],
+                        ];
+                        foreach ($rows as $r):
+                            $pct = $source_total_gross > 0 ? ($r['gross'] / $source_total_gross) * 100 : 0;
+                        ?>
+                            <tr>
+                                <td><span class="acct-row-label"><i class="fas <?php echo $r['icon']; ?>"></i> <?php echo $r['label']; ?></span></td>
+                                <td class="num"><?php echo number_format($r['count']); ?></td>
+                                <td class="num"><strong><?php echo $currency_symbol . number_format($r['gross'], 2); ?></strong></td>
+                                <td class="num"><?php echo $currency_symbol . number_format($r['vat'], 2); ?></td>
+                                <td class="num">
+                                    <span class="acct-bar"><span class="acct-bar__fill" style="width: <?php echo number_format($pct, 1); ?>%"></span></span>
+                                    <small><?php echo number_format($pct, 1); ?>%</small>
+                                </td>
+                                <td><a href="<?php echo htmlspecialchars($r['link']); ?>" class="acct-link"><?php echo $r['link_lbl']; ?> &rarr;</a></td>
+                            </tr>
+                        <?php endforeach; ?>
+                    </tbody>
+                    <tfoot>
+                        <tr>
+                            <th>Total</th>
+                            <th class="num"><?php echo number_format(($roomSummary['total_bookings_with_payments'] ?? 0) + ($confSummary['total_conferences_with_payments'] ?? 0) + ($restaurantSummary['total_restaurant_orders_with_payments'] ?? 0)); ?></th>
+                            <th class="num"><?php echo $currency_symbol . number_format($source_total_gross, 2); ?></th>
+                            <th class="num"><?php echo $currency_symbol . number_format($cat_vat, 2); ?></th>
+                            <th class="num">100%</th>
+                            <th></th>
+                        </tr>
+                    </tfoot>
+                </table>
+            </div>
+        </section>
+
+        <!-- POS Performance — gross margin from stock_orders.total_cost -->
+        <?php if (!empty($posByType) || $pos_gross > 0): ?>
+            <section class="acct-panel">
+                <header class="acct-panel__head">
+                    <h2 class="acct-panel__title"><i class="fas fa-cash-register"></i> POS Performance &amp; Gross Margin</h2>
+                    <p class="acct-panel__sub">
+                        Pulled from <code>stock_orders</code>. COGS uses recorded recipe cost at order time.
+                        Total margin: <strong><?php echo $currency_symbol . number_format($pos_margin, 2); ?></strong>
+                        (<?php echo number_format($pos_margin_pct, 1); ?>%) on <?php echo $currency_symbol . number_format($pos_gross, 2); ?> gross.
+                    </p>
+                </header>
+                <div class="acct-table-wrap">
+                    <table class="acct-table">
+                        <thead>
+                            <tr>
+                                <th>Order Type</th>
+                                <th class="num" title="Number of paid or completed orders">Orders</th>
+                                <th class="num" title="Gross Revenue — total value of completed sales before any costs">Gross</th>
+                                <th class="num" title="COGS (Cost of Goods Sold) — the actual food and drink ingredient cost for items sold, recorded at the time of the order">COGS</th>
+                                <th class="num" title="Gross Profit — Revenue minus COGS. This is what remains after covering the cost of making the food or drinks.">Margin</th>
+                                <th class="num" title="Gross Profit Margin — Profit as a percentage of revenue. E.g. 65% means for every 100 in revenue, 65 is profit before overheads.">Margin %</th>
+                                <th class="num" title="Voided orders — orders that were cancelled or reversed after being placed. Shows count and total value.">Voids</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <?php if (empty($posByType)): ?>
+                                <tr>
+                                    <td colspan="7" class="acct-empty">No POS activity in this period.</td>
+                                </tr>
+                                <?php else: foreach ($posByType as $ot):
+                                    $g = (float)$ot['gross_revenue'];
+                                    $c = (float)$ot['cogs'];
+                                    $m = $g - $c;
+                                    $mpct = $g > 0 ? ($m / $g) * 100 : 0;
+                                    $label = $order_type_labels[$ot['order_type']] ?? ucwords(str_replace('_', ' ', (string)$ot['order_type']));
+                                ?>
+                                    <tr>
+                                        <td><?php echo htmlspecialchars($label); ?></td>
+                                        <td class="num"><?php echo number_format((int)$ot['order_count']); ?></td>
+                                        <td class="num"><?php echo $currency_symbol . number_format($g, 2); ?></td>
+                                        <td class="num"><?php echo $currency_symbol . number_format($c, 2); ?></td>
+                                        <td class="num"><strong><?php echo $currency_symbol . number_format($m, 2); ?></strong></td>
+                                        <td class="num"><?php echo number_format($mpct, 1); ?>%</td>
+                                        <td class="num">
+                                            <?php if ((int)$ot['voided_count'] > 0): ?>
+                                                <span class="acct-pill acct-pill--danger"><?php echo (int)$ot['voided_count']; ?> · <?php echo $currency_symbol . number_format((float)$ot['voided_amount'], 2); ?></span>
+                                            <?php else: ?>
+                                                <span class="acct-muted">—</span>
+                                            <?php endif; ?>
+                                        </td>
+                                    </tr>
+                            <?php endforeach;
+                            endif; ?>
+                        </tbody>
+                    </table>
+                </div>
+            </section>
+        <?php endif; ?>
+
+        <!-- Two-up: Payment methods + Outstanding receivables -->
+        <div class="acct-grid acct-grid--2">
+            <section class="acct-panel">
+                <header class="acct-panel__head">
+                    <h2 class="acct-panel__title"><i class="fas fa-credit-card"></i> Payment Methods</h2>
+                    <p class="acct-panel__sub">Where the money came in during this period.</p>
+                </header>
+                <div class="acct-table-wrap">
+                    <table class="acct-table">
+                        <thead>
+                            <tr>
+                                <th>Method</th>
+                                <th class="num" title="Number of payments received via this method">Count</th>
+                                <th class="num" title="Total amount collected via this payment method in the period">Total</th>
+                                <th class="num" title="Payment mix — what percentage of all revenue came in through this method">% Mix</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <?php
+                            $pmTotal = 0;
+                            foreach ($paymentMethods as $pm) {
+                                $pmTotal += (float)$pm['total'];
+                            }
+                            if (empty($paymentMethods)):
+                            ?>
+                                <tr>
+                                    <td colspan="4" class="acct-empty">No payments in this period.</td>
+                                </tr>
+                                <?php else: foreach ($paymentMethods as $method):
+                                    $mPct = $pmTotal > 0 ? ((float)$method['total'] / $pmTotal) * 100 : 0;
+                                    $icon = 'fa-money-bill';
+                                    switch ($method['payment_method']) {
+                                        case 'cash':
+                                            $icon = 'fa-money-bill-wave';
+                                            break;
+                                        case 'bank_transfer':
+                                            $icon = 'fa-building-columns';
+                                            break;
+                                        case 'credit_card':
+                                        case 'debit_card':
+                                            $icon = 'fa-credit-card';
+                                            break;
+                                        case 'mobile_money':
+                                            $icon = 'fa-mobile-screen';
+                                            break;
+                                        case 'cheque':
+                                            $icon = 'fa-file-invoice-dollar';
+                                            break;
+                                    }
+                                ?>
+                                    <tr>
+                                        <td><i class="fas <?php echo $icon; ?>"></i> <?php echo ucfirst(str_replace('_', ' ', $method['payment_method'])); ?></td>
+                                        <td class="num"><?php echo (int)$method['count']; ?></td>
+                                        <td class="num"><strong><?php echo $currency_symbol . number_format((float)$method['total'], 2); ?></strong></td>
+                                        <td class="num">
+                                            <span class="acct-bar"><span class="acct-bar__fill" style="width: <?php echo number_format($mPct, 1); ?>%"></span></span>
+                                            <small><?php echo number_format($mPct, 1); ?>%</small>
+                                        </td>
+                                    </tr>
+                            <?php endforeach;
+                            endif; ?>
+                        </tbody>
+                    </table>
+                </div>
+            </section>
+
+            <section class="acct-panel">
+                <header class="acct-panel__head">
+                    <h2 class="acct-panel__title"><i class="fas fa-triangle-exclamation"></i> Outstanding Receivables</h2>
+                    <p class="acct-panel__sub">Booking balances still owing — chase these first.</p>
+                </header>
+                <div class="acct-table-wrap">
+                    <table class="acct-table">
+                        <thead>
+                            <tr>
+                                <th>Source</th>
+                                <th class="num">Open</th>
+                                <th class="num">Amount Due</th>
+                                <th>Action</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <?php
+                            $hasOutstanding = false;
+                            foreach ($outstandingSummary as $os):
+                                if ((float)$os['total_outstanding'] <= 0) continue;
+                                $hasOutstanding = true;
+                                $linkBase = $os['type'] === 'room' ? 'bookings.php?payment_status=unpaid' : 'conference-management.php?payment_status=pending';
+                            ?>
+                                <tr>
+                                    <td><strong><?php echo ucfirst($os['type']); ?> bookings</strong></td>
+                                    <td class="num"><?php echo (int)$os['count']; ?></td>
+                                    <td class="num"><strong><?php echo $currency_symbol . number_format((float)$os['total_outstanding'], 2); ?></strong></td>
+                                    <td><a href="<?php echo htmlspecialchars($linkBase); ?>" class="acct-link">View &rarr;</a></td>
+                                </tr>
+                            <?php endforeach; ?>
+                            <?php if (!$hasOutstanding): ?>
+                                <tr>
+                                    <td colspan="4" class="acct-empty acct-empty--good"><i class="fas fa-check-circle"></i> All booking balances settled.</td>
+                                </tr>
+                            <?php endif; ?>
+                        </tbody>
+                    </table>
+                </div>
+            </section>
+        </div>
+
+        <!-- Daily revenue trend — last 14 days within the date range -->
+        <?php if (!empty($dailyTrend)): ?>
+            <section class="acct-panel">
+                <header class="acct-panel__head">
+                    <h2 class="acct-panel__title"><i class="fas fa-chart-line"></i> Daily Revenue Trend</h2>
+                    <p class="acct-panel__sub">Last 14 days within the selected range. Each row is a calendar day.</p>
+                </header>
+                <div class="acct-table-wrap">
+                    <table class="acct-table">
+                        <thead>
+                            <tr>
+                                <th>Date</th>
+                                <th class="num" title="Room booking payments received on this day">Rooms</th>
+                                <th class="num" title="Conference and events payments received on this day">Conference</th>
+                                <th class="num" title="Food &amp; Beverage (F&amp;B) — restaurant and bar sales via the POS system">F&amp;B</th>
+                                <th class="num" title="Refunds issued on this day (subtracted from Net Total)">Refunds</th>
+                                <th class="num" title="Net Total — all revenue sources combined, minus refunds">Net Total</th>
+                                <th class="num" title="Transactions — number of individual payment records on this day">Txns</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <?php
+                            $maxNet = 0;
+                            foreach ($dailyTrend as $d) {
+                                $net = (float)$d['room_rev'] + (float)$d['conf_rev'] + (float)$d['fnb_rev'] - (float)$d['refunds'];
+                                if ($net > $maxNet) $maxNet = $net;
+                            }
+                            foreach ($dailyTrend as $d):
+                                $net = (float)$d['room_rev'] + (float)$d['conf_rev'] + (float)$d['fnb_rev'] - (float)$d['refunds'];
+                                $netPct = $maxNet > 0 ? ($net / $maxNet) * 100 : 0;
+                            ?>
+                                <tr>
+                                    <td>
+                                        <strong><?php echo htmlspecialchars(date('D, M j', strtotime($d['day']))); ?></strong>
+                                        <small class="acct-muted"><?php echo htmlspecialchars(date('Y', strtotime($d['day']))); ?></small>
+                                    </td>
+                                    <td class="num"><?php echo $currency_symbol . number_format((float)$d['room_rev'], 2); ?></td>
+                                    <td class="num"><?php echo $currency_symbol . number_format((float)$d['conf_rev'], 2); ?></td>
+                                    <td class="num"><?php echo $currency_symbol . number_format((float)$d['fnb_rev'], 2); ?></td>
+                                    <td class="num">
+                                        <?php if ((float)$d['refunds'] > 0): ?>
+                                            <span class="acct-muted">&minus;<?php echo $currency_symbol . number_format((float)$d['refunds'], 2); ?></span>
+                                        <?php else: ?>
+                                            <span class="acct-muted">—</span>
+                                        <?php endif; ?>
+                                    </td>
+                                    <td class="num">
+                                        <strong><?php echo $currency_symbol . number_format($net, 2); ?></strong>
+                                        <span class="acct-bar acct-bar--inline"><span class="acct-bar__fill" style="width: <?php echo number_format($netPct, 1); ?>%"></span></span>
+                                    </td>
+                                    <td class="num"><?php echo (int)$d['txn_count']; ?></td>
+                                </tr>
+                            <?php endforeach; ?>
+                        </tbody>
+                    </table>
+                </div>
+            </section>
+        <?php endif; ?>
+
+        <!-- Refund breakdown -->
+        <?php if (!empty($refundReasons)): ?>
+            <section class="acct-panel">
+                <header class="acct-panel__head">
+                    <h2 class="acct-panel__title"><i class="fas fa-undo"></i> Refunds by Reason</h2>
+                    <p class="acct-panel__sub">
+                        Total refunds issued: <strong><?php echo $currency_symbol . number_format($cat_refunds, 2); ?></strong>
+                        <?php if ($cat_pending_refunds > 0): ?>
+                            · <span class="acct-muted">Pending <?php echo $currency_symbol . number_format($cat_pending_refunds, 2); ?></span>
+                        <?php endif; ?>
+                    </p>
+                </header>
+                <div class="acct-table-wrap">
+                    <table class="acct-table">
+                        <thead>
+                            <tr>
+                                <th>Reason</th>
+                                <th class="num">Count</th>
+                                <th class="num">Total</th>
+                                <th class="num">% of Refunds</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <?php
+                            $totalRefundAmount = array_sum(array_column($refundReasons, 'total_amount'));
+                            $reasonLabels = [
+                                'early_checkout'        => 'Early Checkout',
+                                'late_checkout_charge'  => 'Late Checkout Charge',
+                                'cancellation'          => 'Cancellation',
+                                'service_issue'         => 'Service Issue',
+                                'overpayment'           => 'Overpayment',
+                                'other'                 => 'Other'
+                            ];
+                            foreach ($refundReasons as $reason):
+                                $percentage = $totalRefundAmount > 0 ? ((float)$reason['total_amount'] / $totalRefundAmount) * 100 : 0;
+                            ?>
+                                <tr>
+                                    <td><?php echo htmlspecialchars($reasonLabels[$reason['refund_reason']] ?? ucfirst(str_replace('_', ' ', (string)$reason['refund_reason']))); ?></td>
+                                    <td class="num"><?php echo (int)$reason['count']; ?></td>
+                                    <td class="num"><strong><?php echo $currency_symbol . number_format((float)$reason['total_amount'], 2); ?></strong></td>
+                                    <td class="num">
+                                        <span class="acct-bar"><span class="acct-bar__fill acct-bar__fill--danger" style="width: <?php echo number_format($percentage, 1); ?>%"></span></span>
+                                        <small><?php echo number_format($percentage, 1); ?>%</small>
+                                    </td>
+                                </tr>
+                            <?php endforeach; ?>
+                        </tbody>
+                    </table>
+                </div>
+            </section>
+        <?php endif; ?>
+
+        <!-- Recent payments -->
+        <section class="acct-panel">
+            <header class="acct-panel__head">
+                <h2 class="acct-panel__title"><i class="fas fa-receipt"></i> Recent Payments</h2>
+                <p class="acct-panel__sub">Most recent 20 transactions across all sources.</p>
+            </header>
+            <div class="acct-table-wrap">
+                <table class="acct-table">
+                    <thead>
+                        <tr>
+                            <th>Reference</th>
+                            <th>Booking</th>
+                            <th>Type</th>
+                            <th>Date</th>
+                            <th class="num">Amount</th>
+                            <th>Method</th>
+                            <th>Status</th>
+                            <th></th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <?php if (empty($recentPayments)): ?>
+                            <tr>
+                                <td colspan="8" class="acct-empty"><i class="fas fa-inbox"></i> No payments recorded yet.</td>
+                            </tr>
+                            <?php else: foreach ($recentPayments as $payment): ?>
+                                <tr>
+                                    <td><strong><?php echo htmlspecialchars($payment['payment_reference']); ?></strong></td>
+                                    <td><?php echo htmlspecialchars($payment['booking_description']); ?></td>
+                                    <td><span class="acct-pill acct-pill--<?php echo htmlspecialchars($payment['booking_type']); ?>"><?php echo htmlspecialchars(ucfirst((string)$payment['booking_type'])); ?></span></td>
+                                    <td>
+                                        <?php echo htmlspecialchars(date('M j, Y', strtotime($payment['payment_date']))); ?>
+                                        <small class="acct-muted"><?php echo htmlspecialchars(date('H:i', strtotime($payment['payment_date']))); ?></small>
+                                    </td>
+                                    <td class="num">
+                                        <strong><?php echo $currency_symbol . number_format((float)$payment['total_amount'], 2); ?></strong>
+                                        <?php if ((float)$payment['vat_amount'] > 0): ?><small class="acct-muted">incl. VAT</small><?php endif; ?>
+                                    </td>
+                                    <td><?php echo htmlspecialchars(ucfirst(str_replace('_', ' ', (string)$payment['payment_method']))); ?></td>
+                                    <td><span class="acct-pill acct-pill--<?php echo htmlspecialchars($payment['payment_status']); ?>"><?php echo htmlspecialchars(ucfirst(str_replace('_', ' ', (string)$payment['payment_status']))); ?></span></td>
+                                    <td><a href="payment-details.php?id=<?php echo (int)$payment['id']; ?>" class="acct-link"><i class="fas fa-eye"></i></a></td>
+                                </tr>
+                        <?php endforeach;
+                        endif; ?>
+                    </tbody>
+                </table>
+            </div>
+            <?php if (count($recentPayments) >= 20): ?>
+                <div class="acct-panel__foot">
+                    <a href="payments.php" class="acct-btn acct-btn--primary">View all payments <i class="fas fa-arrow-right"></i></a>
+                </div>
+            <?php endif; ?>
+        </section>
+
+        <script>
+            (function() {
+                var unlockBtn = document.getElementById('vatUnlockBtn');
+                var cancelBtn = document.getElementById('vatCancelBtn');
+                var confirmYes = document.getElementById('vatConfirmYes');
+                var confirmNo = document.getElementById('vatConfirmCancel');
+                var lockedView = document.getElementById('vatLockedView');
+                var editView = document.getElementById('vatEditView');
+                var modal = document.getElementById('vatConfirmModal');
+                var overlay = document.getElementById('vatConfirmModal-overlay');
+
+                function openModal() {
+                    if (!modal) return;
+                    modal.classList.add('active');
+                    if (overlay) overlay.classList.add('active');
+                    document.body.classList.add('modal-open');
+                    var firstBtn = modal.querySelector('button');
+                    if (firstBtn) setTimeout(function() {
+                        firstBtn.focus();
+                    }, 80);
+                }
+
+                function closeModal() {
+                    if (!modal) return;
+                    modal.classList.remove('active');
+                    if (overlay) overlay.classList.remove('active');
+                    document.body.classList.remove('modal-open');
+                }
+
+                function showEditForm() {
+                    if (lockedView) lockedView.hidden = true;
+                    if (editView) editView.hidden = false;
+                    if (editView) editView.scrollIntoView({
+                        behavior: 'smooth',
+                        block: 'nearest'
+                    });
+                }
+
+                function showLockedView() {
+                    if (editView) editView.hidden = true;
+                    if (lockedView) lockedView.hidden = false;
+                }
+
+                if (unlockBtn) unlockBtn.addEventListener('click', openModal);
+                if (confirmYes) confirmYes.addEventListener('click', function() {
+                    closeModal();
+                    showEditForm();
+                });
+                if (confirmNo) confirmNo.addEventListener('click', closeModal);
+                if (cancelBtn) cancelBtn.addEventListener('click', showLockedView);
+
+                document.addEventListener('keydown', function(e) {
+                    if (e.key === 'Escape' && modal && modal.classList.contains('active')) closeModal();
+                });
+
+                // If there was a save error, re-open the form so admin can fix it
+                <?php if ($vatSettingsError): ?>
+                    if (editView) editView.hidden = false;
+                    if (lockedView) lockedView.hidden = true;
+                <?php endif; ?>
+            })();
+        </script>
+
+        <?php require_once 'includes/admin-footer.php'; ?>

@@ -1,0 +1,646 @@
+/**
+ * Events + Conference Section Styles
+ * Rosalyn's Hotel 2026
+ * Premium cinematic redesign — editorial hospitality aesthetic
+ */
+
+/* ============================================
+   PAGE RHYTHM + HERO POLISH
+   ============================================ */
+
+.events-page .hero--passalacqua,
+.conference-page .hero--passalacqua {
+    margin-bottom: clamp(2.25rem, 5vw, 4.75rem);
+}
+
+.events-page .hero__content,
+.conference-page .hero__content {
+    max-width: min(860px, 92vw);
+}
+
+.events-page .hero__description,
+.conference-page .hero__description {
+    max-width: 58ch;
+    margin-inline: auto;
+}
+
+.events-page .editorial-events-section,
+.conference-page .editorial-events-section {
+    position: relative;
+    padding-block: clamp(3rem, 6vw, 6rem);
+    isolation: isolate;
+}
+
+/* Cinematic dual-gradient ambient background */
+.events-page .editorial-events-section::before,
+.conference-page .editorial-events-section::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    z-index: 0;
+    background:
+        radial-gradient(ellipse 1400px 520px at 88% -8%,
+            color-mix(in srgb, var(--color-primary, #8B7355) 15%, transparent 85%),
+            transparent 70%),
+        radial-gradient(ellipse 1100px 440px at 5% 108%,
+            color-mix(in srgb, var(--color-primary, #8B7355) 9%, transparent 91%),
+            transparent 72%);
+}
+
+.events-showcase,
+.conference-showcase {
+    isolation: isolate;
+    position: relative;
+    z-index: 1;
+}
+
+/* ============================================
+   SHARED GRID CONTAINER
+   ============================================ */
+
+.events-showcase__grid,
+.conference-showcase__grid {
+    position: relative;
+    z-index: 1;
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(min(340px, 100%), 1fr));
+    gap: clamp(1.25rem, 2.2vw, 2.25rem);
+    align-items: stretch;
+}
+
+/* Single-item centered presentation */
+.events-showcase__grid > *:only-child,
+.conference-showcase__grid > *:only-child {
+    max-width: min(600px, 100%);
+    margin-inline: auto;
+    grid-column: 1 / -1;
+}
+
+/* Two-item balanced layout */
+.events-showcase__grid > *:nth-last-child(2):first-child,
+.events-showcase__grid > *:nth-last-child(2):first-child ~ *,
+.conference-showcase__grid > *:nth-last-child(2):first-child,
+.conference-showcase__grid > *:nth-last-child(2):first-child ~ * {
+    max-width: min(520px, 100%);
+    margin-inline: auto;
+}
+
+@media (min-width: 992px) {
+    .events-showcase__grid > *:nth-last-child(2):first-child,
+    .events-showcase__grid > *:nth-last-child(2):first-child ~ *,
+    .conference-showcase__grid > *:nth-last-child(2):first-child,
+    .conference-showcase__grid > *:nth-last-child(2):first-child ~ * {
+        max-width: none;
+        margin-inline: 0;
+    }
+}
+
+/* ============================================
+   PREMIUM CARD SHELL
+   ============================================ */
+
+.events-showcase__card,
+.conference-showcase__card {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    min-height: 100%;
+    overflow: hidden;
+    border-radius: clamp(14px, 1.4vw, 20px);
+    border: 1px solid color-mix(in srgb, var(--color-border, #DCCFC2) 68%, transparent 32%);
+    background:
+        linear-gradient(175deg,
+            color-mix(in srgb, var(--color-surface, #FBF8F4) 94%, #ffffff 6%) 0%,
+            color-mix(in srgb, var(--premium-surface-soft, #F4EFE9) 88%, #ffffff 12%) 100%);
+    box-shadow:
+        0 2px 4px rgba(46, 40, 33, 0.04),
+        0 8px 24px rgba(46, 40, 33, 0.07),
+        0 20px 48px rgba(46, 40, 33, 0.055),
+        inset 0 1px 0 rgba(255, 255, 255, 0.74);
+    transition:
+        transform 420ms cubic-bezier(0.22, 1, 0.36, 1),
+        box-shadow 420ms cubic-bezier(0.22, 1, 0.36, 1),
+        border-color 280ms ease;
+    will-change: transform, box-shadow;
+}
+
+/* Top gold accent line */
+.events-showcase__card::before,
+.conference-showcase__card::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 2px;
+    background: linear-gradient(90deg,
+        transparent 0%,
+        color-mix(in srgb, var(--color-primary, #8B7355) 68%, #c9a86c 32%) 32%,
+        color-mix(in srgb, var(--color-primary, #8B7355) 42%, transparent 58%) 100%);
+    opacity: 0.62;
+    z-index: 2;
+    transition: opacity 280ms ease;
+}
+
+.events-showcase__card:hover::before,
+.conference-showcase__card:hover::before {
+    opacity: 1;
+}
+
+.events-showcase__card:hover,
+.conference-showcase__card:hover {
+    transform: translateY(-6px);
+    border-color: color-mix(in srgb, var(--color-primary, #8B7355) 40%, var(--color-border, #DCCFC2) 60%);
+    box-shadow:
+        0 4px 8px rgba(46, 40, 33, 0.05),
+        0 16px 38px rgba(46, 40, 33, 0.11),
+        0 32px 64px rgba(46, 40, 33, 0.085),
+        inset 0 1px 0 rgba(255, 255, 255, 0.82);
+}
+
+/* ============================================
+   MEDIA / IMAGE CONTAINER
+   ============================================ */
+
+.events-showcase__media,
+.conference-showcase__media {
+    position: relative;
+    overflow: hidden;
+    aspect-ratio: 3 / 2;
+    min-height: 210px;
+    background: color-mix(in srgb, var(--premium-surface-soft, #F4EFE9) 82%, transparent 18%);
+    flex-shrink: 0;
+}
+
+/* Cinematic layered overlay on media */
+.events-showcase__media::after,
+.conference-showcase__media::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    z-index: 1;
+    pointer-events: none;
+    background:
+        linear-gradient(to top,
+            rgba(18, 15, 12, 0.52) 0%,
+            rgba(18, 15, 12, 0.14) 42%,
+            rgba(18, 15, 12, 0) 68%),
+        linear-gradient(to bottom,
+            rgba(18, 15, 12, 0.12) 0%,
+            transparent 28%);
+    transition: opacity 380ms ease;
+}
+
+.events-showcase__card:hover .events-showcase__media::after,
+.conference-showcase__card:hover .conference-showcase__media::after {
+    opacity: 0.82;
+}
+
+.editorial-event-image,
+.editorial-conference-image {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block;
+    transform: scale(1.001);
+    filter: saturate(0.92) contrast(1.04);
+    transition:
+        transform 720ms cubic-bezier(0.22, 1, 0.36, 1),
+        filter 500ms ease;
+}
+
+.events-showcase__card:hover .editorial-event-image,
+.conference-showcase__card:hover .editorial-conference-image {
+    transform: scale(1.058);
+    filter: saturate(1.02) contrast(1.06);
+}
+
+/* ============================================
+   CONTENT AREA
+   ============================================ */
+
+.events-showcase__card .editorial-event-content,
+.conference-showcase__content {
+    display: flex;
+    flex-direction: column;
+    gap: 0.9rem;
+    padding: clamp(1.1rem, 1.9vw, 1.55rem);
+    flex: 1;
+    position: relative;
+    z-index: 1;
+}
+
+/* ============================================
+   TYPOGRAPHY HIERARCHY
+   ============================================ */
+
+.editorial-event-title,
+.editorial-conference-title {
+    margin: 0;
+    font-family: var(--font-serif, 'Cormorant Garamond', Georgia, serif);
+    font-size: clamp(1.48rem, 1.22rem + 0.72vw, 2.05rem);
+    line-height: 1.1;
+    letter-spacing: -0.012em;
+    color: var(--color-text-primary, #1A1A1A);
+}
+
+.editorial-event-description,
+.editorial-conference-description {
+    margin: 0;
+    color: var(--color-text-secondary, #5E554D);
+    font-size: clamp(0.88rem, 0.84rem + 0.14vw, 0.97rem);
+    line-height: 1.78;
+    display: -webkit-box;
+    -webkit-line-clamp: 3;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+}
+
+/* ============================================
+   META CHIPS
+   ============================================ */
+
+.editorial-event-meta,
+.editorial-conference-meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.48rem;
+}
+
+.editorial-event-meta-item {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.42rem;
+    padding: 0.38rem 0.72rem;
+    border-radius: var(--radius-full, 9999px);
+    border: 1px solid color-mix(in srgb, var(--color-border, #DCCFC2) 72%, transparent 28%);
+    background:
+        linear-gradient(135deg,
+            color-mix(in srgb, var(--color-white, #fff) 82%, transparent 18%),
+            color-mix(in srgb, var(--premium-surface-soft, #F4EFE9) 78%, transparent 22%));
+    font-size: 0.74rem;
+    color: var(--color-text-secondary, #5E554D);
+    letter-spacing: 0.01em;
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.62);
+}
+
+.editorial-event-meta-item i {
+    color: var(--color-primary, #8B7355);
+    font-size: 0.7rem;
+}
+
+/* ============================================
+   FOOTER / PRICE STRIP
+   ============================================ */
+
+.editorial-event-footer,
+.editorial-conference-footer {
+    margin-top: auto;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 0.75rem;
+    padding-top: 1rem;
+    border-top: 1px solid color-mix(in srgb, var(--color-border, #DCCFC2) 56%, transparent 44%);
+}
+
+.editorial-event-price,
+.editorial-conference-price {
+    display: flex;
+    flex-direction: column;
+    gap: 0.08rem;
+}
+
+.editorial-price-label {
+    font-size: 0.67rem;
+    text-transform: uppercase;
+    letter-spacing: 0.14em;
+    color: var(--color-text-muted, #7A7065);
+    font-family: var(--font-sans, 'Jost', sans-serif);
+}
+
+.editorial-price-value {
+    font-family: var(--font-serif, 'Cormorant Garamond', Georgia, serif);
+    font-size: clamp(1.15rem, 1rem + 0.38vw, 1.42rem);
+    font-weight: var(--font-semibold, 600);
+    line-height: 1;
+    color: var(--color-text-primary, #1A1A1A);
+    letter-spacing: -0.01em;
+}
+
+.editorial-event-price.free .editorial-price-value {
+    color: var(--color-success, #24723F);
+}
+
+.editorial-event-price.free .editorial-price-label {
+    color: color-mix(in srgb, var(--color-success, #24723F) 72%, transparent 28%);
+}
+
+/* ============================================
+   DATE BADGE (top-left of media)
+   ============================================ */
+
+.editorial-event-date-badge {
+    position: absolute;
+    top: clamp(0.72rem, 1.2vw, 1rem);
+    left: clamp(0.72rem, 1.2vw, 1rem);
+    z-index: 4;
+    min-width: 3.5rem;
+    text-align: center;
+    padding: 0.56rem 0.62rem 0.52rem;
+    border-radius: 12px;
+    border: 1px solid rgba(255, 255, 255, 0.28);
+    background:
+        linear-gradient(158deg,
+            color-mix(in srgb, var(--color-primary, #8B7355) 84%, #c9a86c 16%) 0%,
+            color-mix(in srgb, var(--color-primary-dark, #6B5740) 92%, transparent 8%) 100%);
+    color: var(--color-white, #fff);
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+    box-shadow:
+        0 8px 20px rgba(0, 0, 0, 0.22),
+        inset 0 1px 0 rgba(255, 255, 255, 0.22);
+}
+
+.editorial-event-date-day {
+    display: block;
+    font-family: var(--font-serif, 'Cormorant Garamond', Georgia, serif);
+    font-size: clamp(1.22rem, 1.1rem + 0.28vw, 1.45rem);
+    font-weight: var(--font-semibold, 600);
+    color: var(--color-white, #fff);
+    line-height: 1;
+}
+
+.editorial-event-date-month {
+    display: block;
+    margin-top: 0.18rem;
+    font-size: 0.62rem;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    color: rgba(255, 255, 255, 0.82);
+}
+
+/* ============================================
+   FEATURED BADGE (bottom-right of media)
+   ============================================ */
+
+.editorial-featured-badge {
+    position: absolute;
+    right: clamp(0.72rem, 1.2vw, 1rem);
+    bottom: clamp(0.72rem, 1.2vw, 1rem);
+    z-index: 4;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.38rem;
+    padding: 0.44rem 0.78rem;
+    border-radius: var(--radius-full, 9999px);
+    border: 1px solid rgba(255, 255, 255, 0.24);
+    background:
+        linear-gradient(135deg,
+            color-mix(in srgb, var(--color-primary, #8B7355) 88%, #c9a86c 12%) 0%,
+            color-mix(in srgb, var(--color-primary-dark, #6B5740) 94%, transparent 6%) 100%);
+    color: var(--color-white, #fff);
+    font-size: 0.67rem;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    backdrop-filter: blur(6px);
+    -webkit-backdrop-filter: blur(6px);
+    box-shadow:
+        0 6px 16px rgba(0, 0, 0, 0.18),
+        inset 0 1px 0 rgba(255, 255, 255, 0.18);
+}
+
+/* ============================================
+   EVENTS: ACTIVE VS EXPIRED VISUAL STATES
+   ============================================ */
+
+.events-showcase__card[data-event-status='upcoming'] {
+    border-color: color-mix(in srgb, var(--color-primary, #8B7355) 26%, var(--color-border, #DCCFC2) 74%);
+}
+
+.events-showcase__card.is-expired {
+    border-color: color-mix(in srgb, #9e6060 40%, var(--color-border, #DCCFC2) 60%);
+    box-shadow:
+        0 4px 12px rgba(58, 36, 36, 0.06),
+        0 12px 28px rgba(58, 36, 36, 0.09);
+}
+
+.events-showcase__card.is-expired .events-showcase__media::after {
+    background: linear-gradient(to bottom,
+        rgba(18, 12, 12, 0.46),
+        rgba(18, 12, 12, 0.68));
+    opacity: 1;
+}
+
+.events-showcase__card.is-expired .editorial-event-image {
+    filter: grayscale(44%) saturate(0.68) brightness(0.88);
+}
+
+.event-expired-ribbon {
+    position: absolute;
+    top: 47%;
+    left: 50%;
+    z-index: 5;
+    width: 165%;
+    text-align: center;
+    pointer-events: none;
+    transform: translate(-50%, -50%) rotate(-14deg);
+}
+
+.event-expired-ribbon span {
+    display: inline-block;
+    width: 100%;
+    padding: 0.46rem 0.9rem;
+    border-top: 1px solid rgba(255, 255, 255, 0.26);
+    border-bottom: 1px solid rgba(255, 255, 255, 0.26);
+    background: linear-gradient(90deg,
+        rgba(132, 38, 38, 0.94),
+        rgba(162, 54, 54, 0.96),
+        rgba(132, 38, 38, 0.94));
+    color: #fff;
+    font-weight: 700;
+    letter-spacing: 0.28em;
+    text-transform: uppercase;
+    font-size: 0.7rem;
+    text-shadow: 0 2px 6px rgba(0, 0, 0, 0.3);
+    box-shadow: 0 4px 14px rgba(0, 0, 0, 0.26);
+}
+
+/* ============================================
+   PAST EVENTS SECTION
+   ============================================ */
+
+.editorial-expired-events-section {
+    margin-top: clamp(2.5rem, 5.5vw, 5rem);
+    padding-top: clamp(1.6rem, 3.2vw, 2.4rem);
+    border-top: 1px solid color-mix(in srgb, var(--color-border, #DCCFC2) 60%, transparent 40%);
+}
+
+.editorial-expired-section-title {
+    margin: 0;
+    font-family: var(--font-serif, 'Cormorant Garamond', Georgia, serif);
+    font-size: clamp(1.9rem, 1.55rem + 0.85vw, 2.6rem);
+    font-weight: var(--font-light, 300);
+    letter-spacing: -0.015em;
+    color: var(--color-text-primary, #1A1A1A);
+    text-align: center;
+}
+
+.editorial-expired-section-subtitle {
+    margin: 0.55rem auto 1.75rem;
+    max-width: 46ch;
+    text-align: center;
+    color: var(--color-text-secondary, #5E554D);
+    font-size: 0.96rem;
+}
+
+/* ============================================
+   CONFERENCE-SPECIFIC POLISH
+   ============================================ */
+
+.conference-showcase__card {
+    border-color: color-mix(in srgb, var(--color-primary, #8B7355) 22%, var(--color-border, #DCCFC2) 78%);
+}
+
+.editorial-conference-amenities {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.44rem;
+}
+
+.editorial-conference-amenity {
+    position: static;
+    transform: none;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.32rem;
+    padding: 0.28rem 0.62rem;
+    border-radius: var(--radius-full, 9999px);
+    border: 1px solid color-mix(in srgb, var(--color-border, #DCCFC2) 70%, transparent 30%);
+    background: color-mix(in srgb, var(--premium-surface-soft, #F4EFE9) 82%, transparent 18%);
+    color: var(--color-text-secondary, #5E554D);
+    font-size: 0.71rem;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.55);
+}
+
+.editorial-conference-amenity i {
+    color: var(--color-primary, #8B7355);
+    font-size: 0.66rem;
+}
+
+.editorial-conference-inquire {
+    min-width: 146px;
+    white-space: nowrap;
+}
+
+/* ============================================
+   EMPTY STATE
+   ============================================ */
+
+.editorial-no-events {
+    text-align: center;
+    max-width: 580px;
+    margin: 1.5rem auto 0;
+    padding: clamp(1.75rem, 3vw, 2.5rem);
+    border-radius: clamp(14px, 1.4vw, 20px);
+    border: 1px solid color-mix(in srgb, var(--color-border, #DCCFC2) 66%, transparent 34%);
+    background:
+        linear-gradient(165deg,
+            color-mix(in srgb, var(--color-surface, #FBF8F4) 92%, #ffffff 8%) 0%,
+            color-mix(in srgb, var(--premium-surface-soft, #F4EFE9) 84%, #ffffff 16%) 100%);
+    box-shadow:
+        0 8px 20px rgba(46, 40, 33, 0.06),
+        inset 0 1px 0 rgba(255, 255, 255, 0.72);
+    color: var(--color-text-secondary, #5E554D);
+}
+
+.editorial-no-events i {
+    font-size: 2.2rem;
+    margin-bottom: 0.75rem;
+    color: var(--color-primary, #8B7355);
+    opacity: 0.82;
+}
+
+/* ============================================
+   RESPONSIVE
+   ============================================ */
+
+@media (min-width: 1200px) {
+    .events-showcase__grid,
+    .conference-showcase__grid {
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+    }
+}
+
+@media (max-width: 991px) {
+    .editorial-event-footer,
+    .editorial-conference-footer {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 0.85rem;
+    }
+
+    .editorial-conference-inquire {
+        width: 100%;
+        text-align: center;
+    }
+}
+
+@media (max-width: 767px) {
+    .events-showcase__grid,
+    .conference-showcase__grid {
+        grid-template-columns: 1fr;
+        gap: clamp(1rem, 4vw, 1.5rem);
+    }
+
+    .events-showcase__media,
+    .conference-showcase__media {
+        min-height: 200px;
+        aspect-ratio: 16 / 10;
+    }
+
+    .event-expired-ribbon {
+        width: 178%;
+        transform: translate(-50%, -50%) rotate(-12deg);
+    }
+
+    .event-expired-ribbon span {
+        font-size: 0.66rem;
+        letter-spacing: 0.22em;
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .events-showcase__card,
+    .conference-showcase__card,
+    .editorial-event-image,
+    .editorial-conference-image {
+        transition: none !important;
+    }
+
+    .events-showcase__card:hover,
+    .conference-showcase__card:hover {
+        transform: none;
+    }
+
+    .events-showcase__card:hover .editorial-event-image,
+    .conference-showcase__card:hover .editorial-conference-image {
+        transform: none;
+        filter: none;
+    }
+
+    .events-showcase__card::before,
+    .conference-showcase__card::before {
+        transition: none;
+    }
+}
+
+@media (prefers-contrast: high) {
+    .events-showcase__card,
+    .conference-showcase__card {
+        border-width: 2px;
+    }
+}

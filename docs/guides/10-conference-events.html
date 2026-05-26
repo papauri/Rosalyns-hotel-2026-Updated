@@ -1,0 +1,286 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Conference, Events &amp; Gym — Rosalyn's Hotel</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link
+        href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@400;500;600;700&family=Jost:wght@300;400;500;600&display=swap"
+        rel="stylesheet">
+    <link rel="stylesheet" href="assets/guide-theme.css">
+    <script src="assets/guide-init.js" defer></script>
+</head>
+
+<body>
+
+    <nav class="top">
+        <a href="index.html" class="brand">ROSALYN'S HOTEL</a>
+        <div class="nav-links">
+            <a href="index.html">All Guides</a>
+            <a href="09-packages-rates.html">← Packages</a>
+            <a href="99-admin-dashboard-full-guide.html">Admin Bible →</a>
+        </div>
+    </nav>
+
+    <header class="hero">
+        <div class="deck">
+            <div class="eyebrow">10 &middot; Venues &amp; Wellness</div>
+            <h1>Conference, Events &amp; Gym</h1>
+            <p class="lead">Manage your boardrooms, ballroom, public events calendar, and fitness membership pipeline —
+                all
+                from one place.</p>
+            <div class="meta">
+                <span>Audience <strong>Manager &amp; Events coordinator</strong></span>
+                <span>Read time <strong>~5 min</strong></span>
+                <span>Pages <strong>conference-management · events-management · gym-inquiries</strong></span>
+            </div>
+        </div>
+    </header>
+
+    <main class="content">
+        <div class="deck">
+
+            <!-- CONFERENCE ROOMS -->
+            <section>
+                <h2>Conference Rooms</h2>
+                <p class="lead">Manage conference venues that guests can browse and enquire about on your public
+                    website.</p>
+
+                <h3>Adding a conference room</h3>
+                <ol class="steps">
+                    <li>Go to <strong>Admin → Conference Management</strong>
+                        (<code>/admin/conference-management.php</code>).</li>
+                    <li>Click <strong>Add Conference Room</strong>.</li>
+                    <li>Fill in: room name, description, capacity (number of people), size in square metres, and daily
+                        rate.</li>
+                    <li>Add amenities one by one (projector, whiteboard, AV system, catering, etc.).</li>
+                    <li>Upload a cover photo — the system accepts JPG, PNG, and WebP only and validates the file type
+                        twice
+                        (extension + MIME check) before saving to <code>images/conference/</code>.</li>
+                    <li>The image is automatically added to the <strong>unified media library</strong> for centralised
+                        management.</li>
+                    <li><strong>Save</strong>. The room appears immediately on <code>/conference.php</code>.</li>
+                </ol>
+
+                <h3>Public inquiry workflow</h3>
+                <ol class="steps">
+                    <li>A guest visits <code>/conference.php</code>, browses the rooms, and submits an inquiry (company
+                        name,
+                        contact person, preferred date, duration, attendee count, special requirements).</li>
+                    <li>The system validates the form server-side (CSRF protected) and emails a confirmation to the
+                        guest.</li>
+                    <li>The manager reviews the inquiry in the admin <strong>Conference Management</strong> inbox and
+                        follows up
+                        directly.</li>
+                </ol>
+
+                <div class="callout note">
+                    Conference room pricing is shown publicly as a daily rate. Any discounts for multi-day bookings
+                    should be
+                    negotiated manually and recorded as a custom booking charge.
+                </div>
+            </section>
+
+            <!-- EVENTS -->
+            <section>
+                <h2>Hotel Events</h2>
+                <p class="lead">Keep the public events page fresh — upcoming events build anticipation; past events
+                    build
+                    credibility.</p>
+
+                <h3>Publishing an event</h3>
+                <ol class="steps">
+                    <li>Go to <strong>Admin → Events Management</strong> (<code>/admin/events-management.php</code>).
+                    </li>
+                    <li>Click <strong>Add Event</strong>. Fill in: title, description, event date, and optionally a
+                        price or
+                        ticket link.</li>
+                    <li>Upload a cover <strong>image</strong> (JPG / PNG / WebP) — MIME-validated before storage.</li>
+                    <li>Optionally upload a <strong>video</strong> via the async video handler. The video path is stored
+                        alongside the image and both sync to the media library.</li>
+                    <li>Set <strong>Active</strong> to publish immediately, or leave inactive to schedule for later.
+                    </li>
+                    <li><strong>Save</strong>. The event appears on <code>/events.php</code>.</li>
+                </ol>
+
+                <h3>How the public page works</h3>
+                <ul class="checklist">
+                    <li><strong>Upcoming</strong> — events with a future date, sorted nearest first.</li>
+                    <li><strong>Past</strong> — events with a date in the past, sorted most-recent first.</li>
+                    <li>The page updates automatically at midnight &mdash; no action needed to move events between
+                        sections.</li>
+                    <li>Both image and video display if provided. Videos play inline without leaving the page.</li>
+                </ul>
+
+                <h3>Editing &amp; removing events</h3>
+                <ul class="checklist">
+                    <li>Click <strong>Edit</strong> on any event card to update any field.</li>
+                    <li>Toggle <strong>Active</strong> off to hide an event without deleting it.</li>
+                    <li>Delete removes the event and its media record from the library.</li>
+                </ul>
+            </section>
+
+            <!-- GYM -->
+            <section>
+                <h2>Gym &amp; Fitness Centre</h2>
+                <p class="lead">The gym is a full DB-driven experience — content, classes, packages, and a membership
+                    conversion pipeline.</p>
+
+                <h3>Managing the gym page content</h3>
+                <p>All gym content is edited in the database via the admin system. Tables you control:</p>
+                <table>
+                    <thead>
+                        <tr>
+                            <th>What</th>
+                            <th>Table</th>
+                            <th>Appears on</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr>
+                            <td>Hero text &amp; tagline</td>
+                            <td><code>gym_content</code></td>
+                            <td>Top of <code>/gym.php</code></td>
+                        </tr>
+                        <tr>
+                            <td>Facility features</td>
+                            <td><code>gym_features</code></td>
+                            <td>Features grid</td>
+                        </tr>
+                        <tr>
+                            <td>Equipment &amp; zones</td>
+                            <td><code>gym_facilities</code></td>
+                            <td>Facility cards</td>
+                        </tr>
+                        <tr>
+                            <td>Group &amp; personal class schedule</td>
+                            <td><code>gym_classes</code></td>
+                            <td>Class schedule table</td>
+                        </tr>
+                        <tr>
+                            <td>Membership tiers &amp; prices</td>
+                            <td><code>gym_packages</code></td>
+                            <td>Pricing cards</td>
+                        </tr>
+                    </tbody>
+                </table>
+
+                <h3>Managing gym inquiries</h3>
+                <p>When a visitor submits a membership inquiry on <code>/gym.php</code>, it lands in
+                    <strong>Admin → Gym Inquiries</strong> (<code>/admin/gym-inquiries.php</code>).
+                </p>
+
+                <ol class="steps">
+                    <li>Open the <strong>New</strong> tab to see unactioned inquiries. Each card shows name, email,
+                        phone, and
+                        membership type.</li>
+                    <li>Click <strong>Mark Contacted</strong> — status moves to <em>Contacted</em> and the system sends
+                        a
+                        notification email to the staff member responsible.</li>
+                    <li>Once the member has enrolled, click <strong>Mark Converted</strong> — status moves to
+                        <em>Converted</em>
+                        and a <strong>welcome email</strong> is sent to the new member automatically.</li>
+                </ol>
+
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Status</th>
+                            <th>Meaning</th>
+                            <th>Email triggered</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr>
+                            <td><span class="pill amber">new</span></td>
+                            <td>Inquiry just submitted, awaiting action</td>
+                            <td>None</td>
+                        </tr>
+                        <tr>
+                            <td><span class="pill gold">contacted</span></td>
+                            <td>Staff has reached out to the prospect</td>
+                            <td>Staff notification</td>
+                        </tr>
+                        <tr>
+                            <td><span class="pill green">converted</span></td>
+                            <td>Prospect enrolled as a member</td>
+                            <td>Member welcome email</td>
+                        </tr>
+                    </tbody>
+                </table>
+
+                <h3>Search &amp; filter</h3>
+                <ul class="checklist">
+                    <li>Use the tab strip to filter by status (New / Contacted / Converted / All).</li>
+                    <li>Use the search box to find by name, email, phone, or reference number.</li>
+                    <li>Delete an inquiry with the <strong>Delete</strong> button — a confirmation modal prevents
+                        accidents.</li>
+                </ul>
+
+                <div class="callout note">
+                    Never delete a converted inquiry — it is your enrolment record. Use the status tabs to archive
+                    instead.
+                </div>
+            </section>
+
+            <!-- QUICK REFERENCE -->
+            <section>
+                <h2>Quick reference</h2>
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Task</th>
+                            <th>Where</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr>
+                            <td>Add a new conference venue</td>
+                            <td><code>/admin/conference-management.php</code> → Add Conference Room</td>
+                        </tr>
+                        <tr>
+                            <td>View conference inquiries</td>
+                            <td>Conference Management → Inquiries tab</td>
+                        </tr>
+                        <tr>
+                            <td>Publish a new event</td>
+                            <td><code>/admin/events-management.php</code> → Add Event</td>
+                        </tr>
+                        <tr>
+                            <td>Hide an event temporarily</td>
+                            <td>Edit Event → toggle <strong>Active</strong> off</td>
+                        </tr>
+                        <tr>
+                            <td>View new gym inquiries</td>
+                            <td><code>/admin/gym-inquiries.php</code> → New tab</td>
+                        </tr>
+                        <tr>
+                            <td>Mark inquiry as contacted</td>
+                            <td>Gym Inquiries → inquiry card → <strong>Mark Contacted</strong></td>
+                        </tr>
+                        <tr>
+                            <td>Enrol a new gym member</td>
+                            <td>Gym Inquiries → inquiry card → <strong>Mark Converted</strong></td>
+                        </tr>
+                    </tbody>
+                </table>
+            </section>
+
+        </div>
+    </main>
+
+    <footer class="guide-footer">
+        <div class="deck">
+            <div class="crest">— R H —</div>
+            <p><a href="09-packages-rates.html">← Packages &amp; Rate Plans</a> &middot; <a href="index.html">All
+                    guides</a>
+                &middot; <a href="99-admin-dashboard-full-guide.html">Admin Bible →</a></p>
+        </div>
+    </footer>
+
+</body>
+
+</html>

@@ -1,0 +1,105 @@
+/**
+ * Main CSS - Modular Structure
+ * Rosalyn's Hotel 2026
+ * Clean, organized, and maintainable CSS architecture
+ */
+
+/* Shared icon font for frontend templates (footer/header/component icons) */
+@import url('https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.7.2/css/all.min.css');
+
+/* ============================================
+   BASE LAYER
+   ============================================ */
+
+@import url('./base/variables.css');
+@import url('./base/reset.css');
+@import url('./base/typography.css');
+@import url('./base/layout.css');
+
+/* ============================================
+   COMPONENTS
+   ============================================ */
+
+@import url('./components/buttons.css');
+@import url('./components/forms.css');
+@import url('./components/header.css');
+@import url('./components/footer.css');
+@import url('./components/cards.css');
+@import url('./components/modal.css');
+@import url('./components/loader.css');
+@import url('./components/editorial.css');
+@import url('./components/section-flash.css');
+
+/* ============================================
+   SECTIONS
+   ============================================ */
+
+@import url('./sections/hero.css');
+@import url('./sections/booking.css');
+@import url('./sections/rooms.css');
+@import url('./sections/rooms-showcase.css');
+@import url('./sections/restaurant.css');
+@import url('./sections/events.css');
+@import url('./sections/wellness.css');
+@import url('./sections/contact.css');
+@import url('./sections/lookup.css');
+@import url('./sections/privacy.css');
+@import url('./sections/guest-services.css');
+
+/* ============================================
+   UTILITIES
+   ============================================ */
+
+@import url('./utilities/animations.css');
+@import url('./utilities/inline-styles.css');
+@import url('./utilities/mobile-enhancements.css');
+@import url('./utilities/responsive-enhancements.css');
+
+/* ============================================
+   LEGACY SUPPORT
+   ============================================ */
+
+/* Support for old class names during transition period */
+/* Note: These are aliases for BEM classes - update HTML to use BEM naming */
+
+/* ============================================
+   CRITICAL CSS INLINE
+   ============================================ */
+
+/* Above-the-fold critical styles for immediate rendering */
+.critical-css {
+   font-family: var(--font-sans);
+   font-size: var(--text-sm);
+   line-height: var(--leading-relaxed);
+   color: var(--color-text-secondary);
+   text-align: center;
+   padding: var(--space-4);
+   background: var(--color-gray-100);
+   border-radius: var(--radius-md);
+   margin: var(--space-4) 0;
+}
+
+/* ============================================
+   COMMENT
+   ============================================ */
+
+/*
+    This is the new modular CSS structure for Rosalyn's Hotel 2026.
+
+    Architecture:
+    - Base: variables, reset, typography, layout
+    - Components: buttons, forms, header, footer, cards, modal, loader
+    - Sections: hero, booking, rooms, restaurant, events, wellness
+    - Utilities: animations
+
+    Benefits:
+    - Easier maintenance and debugging
+    - Better performance through selective loading
+    - Clear separation of concerns
+    - Consistent naming conventions (BEM)
+    - Improved collaboration workflow
+
+    Usage:
+    Replace the old main.css with this file and update imports in HTML.
+    The old main.css can be backed up as main-backup.css during transition.
+*/

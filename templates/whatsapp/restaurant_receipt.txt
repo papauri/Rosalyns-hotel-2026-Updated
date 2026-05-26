@@ -1,0 +1,15 @@
+🍽️ *{{hotel_name}} — Restaurant*
+
+✅ *Order Receipt*
+
+Order: *{{order_reference}}*
+Date: {{payment_date}}
+
+{{order_summary}}
+
+Total: *{{order_total}}*
+Paid via: {{payment_method}}
+Change: {{change_due}}
+
+Thank you for dining with us!
+📞 {{hotel_phone}}

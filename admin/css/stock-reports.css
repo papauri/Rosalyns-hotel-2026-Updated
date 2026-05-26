@@ -1,0 +1,277 @@
+/* Stock Reports — admin/stock-reports.php */
+
+.stock-reports__title {
+    display: flex;
+    align-items: center;
+    gap: clamp(0.45rem, 0.32rem + 0.4vw, 0.75rem);
+}
+
+.stock-reports__title-icon {
+    color: var(--color-lux-gold);
+}
+
+.tabs {
+    display: flex;
+    gap: clamp(0.35rem, 0.25rem + 0.25vw, 0.55rem);
+    flex-wrap: wrap;
+    margin-bottom: clamp(0.85rem, 0.72rem + 0.4vw, 1.2rem);
+    border-bottom: 1px solid color-mix(in srgb, var(--color-text-secondary) 20%, transparent);
+}
+
+.tab {
+    padding: clamp(0.5rem, 0.42rem + 0.3vw, 0.72rem) clamp(0.75rem, 0.62rem + 0.35vw, 1rem);
+    background: transparent;
+    border: 0;
+    cursor: pointer;
+    font-size: clamp(0.76rem, 0.72rem + 0.24vw, 0.9rem);
+    color: var(--color-text-secondary);
+    border-bottom: 2px solid transparent;
+    margin-bottom: -1px;
+    text-decoration: none;
+    font-weight: 500;
+}
+
+.tab.active {
+    color: var(--color-primary);
+    border-bottom-color: var(--color-primary);
+    font-weight: 600;
+}
+
+.filter-bar {
+    display: flex;
+    gap: clamp(0.5rem, 0.42rem + 0.24vw, 0.75rem);
+    align-items: center;
+    flex-wrap: wrap;
+    margin-bottom: clamp(0.8rem, 0.68rem + 0.38vw, 1.15rem);
+    background: var(--color-lux-clay-50);
+    padding: clamp(0.6rem, 0.5rem + 0.34vw, 0.85rem) clamp(0.75rem, 0.64rem + 0.38vw, 1.05rem);
+    border-radius: clamp(0.45rem, 0.38rem + 0.22vw, 0.65rem);
+}
+
+.filter-bar__label,
+.filter-bar__snapshot {
+    font-size: clamp(0.76rem, 0.72rem + 0.22vw, 0.88rem);
+    color: var(--color-text-secondary);
+    font-weight: 500;
+}
+
+.filter-bar input,
+.filter-bar a,
+.filter-bar button {
+    min-height: 2.75rem;
+    padding: 0.55rem 0.8rem;
+    border: 1px solid color-mix(in srgb, var(--color-text-secondary) 25%, transparent);
+    border-radius: clamp(0.4rem, 0.34rem + 0.2vw, 0.58rem);
+    font-size: clamp(0.78rem, 0.74rem + 0.22vw, 0.9rem);
+    text-decoration: none;
+    color: var(--color-text-primary);
+    background: var(--color-background);
+}
+
+.filter-bar a.btn-export {
+    background: var(--color-primary);
+    color: var(--color-lux-clay-50);
+    border-color: var(--color-primary);
+    font-weight: 600;
+}
+
+.summary-strip {
+    background: var(--color-lux-clay-50);
+    padding: clamp(0.62rem, 0.52rem + 0.3vw, 0.85rem) clamp(0.76rem, 0.64rem + 0.35vw, 1rem);
+    border-radius: clamp(0.45rem, 0.37rem + 0.22vw, 0.65rem);
+    margin-bottom: clamp(0.78rem, 0.64rem + 0.42vw, 1.15rem);
+    font-size: clamp(0.8rem, 0.75rem + 0.24vw, 0.92rem);
+    color: var(--color-text-primary);
+}
+
+.report-analysis {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(min(13rem, 100%), 1fr));
+    gap: clamp(0.6rem, 0.5rem + 0.35vw, 0.9rem);
+    margin-bottom: clamp(0.8rem, 0.68rem + 0.4vw, 1.2rem);
+}
+
+.report-analysis__card {
+    background: var(--color-background);
+    border: 1px solid color-mix(in srgb, var(--color-text-secondary) 18%, transparent);
+    border-radius: clamp(0.5rem, 0.4rem + 0.26vw, 0.72rem);
+    padding: clamp(0.68rem, 0.58rem + 0.34vw, 0.92rem);
+}
+
+.report-analysis__label {
+    margin: 0;
+    font-size: clamp(0.72rem, 0.68rem + 0.2vw, 0.84rem);
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--color-text-secondary);
+}
+
+.report-analysis__value {
+    margin: clamp(0.2rem, 0.16rem + 0.12vw, 0.3rem) 0;
+    font-size: clamp(0.98rem, 0.88rem + 0.32vw, 1.18rem);
+    font-weight: 600;
+    color: var(--color-text-primary);
+}
+
+.report-analysis__hint {
+    margin: 0;
+    font-size: clamp(0.72rem, 0.68rem + 0.2vw, 0.82rem);
+    color: var(--color-text-secondary);
+}
+
+.stock-table {
+    width: 100%;
+    border-collapse: collapse;
+    background: var(--color-background);
+    border-radius: clamp(0.45rem, 0.38rem + 0.2vw, 0.62rem);
+    overflow: hidden;
+}
+
+.stock-table th,
+.stock-table td {
+    padding: clamp(0.58rem, 0.48rem + 0.32vw, 0.82rem) clamp(0.72rem, 0.62rem + 0.34vw, 0.98rem);
+    border-bottom: 1px solid color-mix(in srgb, var(--color-text-secondary) 16%, transparent);
+    font-size: clamp(0.76rem, 0.72rem + 0.2vw, 0.88rem);
+}
+
+.stock-table th {
+    background: var(--color-lux-clay-50);
+    text-align: left;
+    color: var(--color-text-secondary);
+    font-weight: 600;
+}
+
+.stock-table__num-head,
+.stock-table__num {
+    text-align: right;
+}
+
+.stock-table__value {
+    font-weight: 600;
+}
+
+.stock-table__muted {
+    color: var(--color-text-secondary);
+    font-size: clamp(0.72rem, 0.68rem + 0.18vw, 0.82rem);
+}
+
+.stock-table__empty {
+    text-align: center;
+    padding: clamp(1.15rem, 0.95rem + 0.6vw, 1.6rem);
+    color: var(--color-text-secondary);
+}
+
+.source-pill,
+.yield-indicator,
+.days-left {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 999rem;
+    padding: 0.2rem 0.6rem;
+    font-size: clamp(0.68rem, 0.64rem + 0.18vw, 0.78rem);
+    font-weight: 600;
+}
+
+.source-pill {
+    background: color-mix(in srgb, var(--color-text-secondary) 14%, transparent);
+    color: var(--color-text-primary);
+}
+
+.yield-indicator--good,
+.days-left--healthy {
+    background: color-mix(in srgb, var(--color-primary) 20%, var(--color-background));
+    color: var(--color-primary);
+}
+
+.yield-indicator--warn,
+.days-left--warning {
+    background: color-mix(in srgb, var(--color-lux-gold) 20%, var(--color-background));
+    color: var(--color-lux-gold);
+}
+
+.yield-indicator--bad,
+.days-left--urgent,
+.days-left--expired,
+.qty-neg {
+    background: color-mix(in srgb, var(--color-text-primary) 18%, var(--color-background));
+    color: var(--color-text-primary);
+}
+
+.qty-pos {
+    color: var(--color-primary);
+    font-weight: 600;
+}
+
+.pagination {
+    display: flex;
+    gap: clamp(0.3rem, 0.22rem + 0.2vw, 0.45rem);
+    margin-top: clamp(0.75rem, 0.62rem + 0.38vw, 1.08rem);
+    justify-content: center;
+    flex-wrap: wrap;
+}
+
+.pagination a,
+.pagination span {
+    min-height: 2.35rem;
+    min-width: 2.35rem;
+    padding: 0.45rem 0.68rem;
+    border: 1px solid color-mix(in srgb, var(--color-text-secondary) 25%, transparent);
+    border-radius: clamp(0.4rem, 0.34rem + 0.2vw, 0.56rem);
+    text-decoration: none;
+    color: var(--color-text-primary);
+    font-size: clamp(0.76rem, 0.72rem + 0.2vw, 0.88rem);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.pagination .current {
+    background: var(--color-primary);
+    color: var(--color-lux-clay-50);
+    border-color: var(--color-primary);
+    font-weight: 600;
+}
+
+@media (max-width: 40rem) {
+    .stock-table thead {
+        display: none;
+    }
+
+    .stock-table,
+    .stock-table tbody,
+    .stock-table tr,
+    .stock-table td {
+        display: block;
+        width: 100%;
+    }
+
+    .stock-table tr {
+        border: 1px solid color-mix(in srgb, var(--color-text-secondary) 20%, transparent);
+        border-radius: clamp(0.48rem, 0.4rem + 0.22vw, 0.64rem);
+        margin-bottom: clamp(0.55rem, 0.44rem + 0.3vw, 0.78rem);
+        background: var(--color-background);
+        overflow: hidden;
+    }
+
+    .stock-table td {
+        display: flex;
+        justify-content: space-between;
+        gap: 0.7rem;
+        text-align: left;
+    }
+
+    .stock-table td::before {
+        content: attr(data-label);
+        font-size: clamp(0.66rem, 0.62rem + 0.18vw, 0.76rem);
+        font-weight: 600;
+        letter-spacing: 0.07em;
+        text-transform: uppercase;
+        color: var(--color-text-secondary);
+    }
+
+    .stock-table__num,
+    .stock-table__num-head {
+        text-align: left;
+    }
+}

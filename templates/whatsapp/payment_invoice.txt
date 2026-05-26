@@ -1,0 +1,22 @@
+🏨 *{{hotel_name}}*
+
+🧾 *Payment Received*
+
+Dear {{guest_name}},
+Thank you — we have received your payment.
+
+📋 *Invoice {{invoice_number}}*
+Booking: *{{booking_reference}}*
+Room: {{room_name}}
+Check-in: {{check_in_date}}
+Check-out: {{check_out_date}}
+
+Amount paid: *{{amount_paid}}*
+Method: {{payment_method}}
+Date: {{payment_date}}
+Balance: {{amount_due}}
+
+📎 View invoice: {{invoice_url}}
+
+For any queries, please reply or call:
+📞 {{hotel_phone}}

@@ -1,0 +1,1098 @@
+/**
+ * Mobile Responsiveness Enhancements
+ * Rosalyn's Hotel 2026
+ * Additional mobile-friendly styles for better cross-device compatibility
+ */
+
+/* ============================================
+   ROOT MOBILE VARIABLES
+   ============================================ */
+
+:root {
+    /* Touch-friendly tap targets */
+    --tap-target-min: 44px;
+    --tap-target-comfortable: 48px;
+    
+    /* Mobile spacing adjustments */
+    --mobile-gutter: clamp(0.75rem, 4vw, 1rem);
+    --mobile-section-padding: clamp(2rem, 6vw, 3rem);
+    
+    /* Safe area insets for notched devices */
+    --safe-area-top: env(safe-area-inset-top, 0px);
+    --safe-area-bottom: env(safe-area-inset-bottom, 0px);
+    --safe-area-left: env(safe-area-inset-left, 0px);
+    --safe-area-right: env(safe-area-inset-right, 0px);
+}
+
+/* ============================================
+   GLOBAL MOBILE IMPROVEMENTS
+   ============================================ */
+
+/* Prevent horizontal overflow on all devices */
+html {
+    overflow-x: hidden;
+    -webkit-text-size-adjust: 100%;
+    -ms-text-size-adjust: 100%;
+}
+
+body {
+    overflow-x: hidden;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+}
+
+/* Improve tap highlighting on iOS */
+a, button, input, select, textarea {
+    -webkit-tap-highlight-color: rgba(139, 115, 85, 0.15);
+}
+
+/* Better touch scrolling */
+.scroll-container,
+.main-content,
+.hero,
+section {
+    -webkit-overflow-scrolling: touch;
+}
+
+/* ============================================
+   SAFE AREA SUPPORT (Notched Devices)
+   ============================================ */
+
+/* Header safe area */
+.header {
+    padding-top: var(--safe-area-top);
+}
+
+/* Footer safe area */
+.footer {
+    padding-bottom: var(--safe-area-bottom);
+    padding-left: var(--safe-area-left);
+    padding-right: var(--safe-area-right);
+}
+
+/* Hero content safe area on mobile */
+@media (max-width: 767px) {
+    .hero--image .hero__content {
+        padding-bottom: calc(var(--space-6) + var(--safe-area-bottom)) !important;
+    }
+    
+    .hero--home-lux.hero--image .hero__content {
+        padding-bottom: calc(clamp(1.8rem, 7vw, 2.6rem) + var(--safe-area-bottom)) !important;
+    }
+}
+
+/* Cookie banner safe area */
+.cookie-banner {
+    padding-bottom: calc(var(--space-4) + var(--safe-area-bottom));
+    padding-left: max(var(--space-4), var(--safe-area-left));
+    padding-right: max(var(--space-4), var(--safe-area-right));
+}
+
+/* ============================================
+   IMPROVED TOUCH TARGETS
+   ============================================ */
+
+/* Ensure all interactive elements meet minimum tap target size */
+@media (max-width: 1024px) {
+    /* Buttons */
+    .btn,
+    .btn-submit,
+    .editorial-btn-primary,
+    .editorial-booking-submit,
+    button[type="submit"],
+    .room-card-actions .editorial-btn-primary {
+        min-height: var(--tap-target-min);
+        min-width: var(--tap-target-min);
+    }
+    
+    /* Form inputs */
+    .form-control,
+    .form-input,
+    .form-select,
+    .form-textarea,
+    input[type="text"],
+    input[type="email"],
+    input[type="tel"],
+    input[type="number"],
+    input[type="date"],
+    select,
+    textarea {
+        min-height: var(--tap-target-comfortable);
+        font-size: 16px; /* Prevents iOS zoom on focus */
+    }
+    
+    /* Navigation links */
+    .header__menu-link {
+        min-height: var(--tap-target-min);
+        display: flex;
+        align-items: center;
+    }
+    
+    /* Mobile navigation */
+    .header__mobile-link {
+        min-height: var(--tap-target-comfortable);
+        padding-top: var(--space-4);
+        padding-bottom: var(--space-4);
+    }
+    
+    /* Social links */
+    .footer__social-link,
+    .footer__share-btn {
+        min-width: var(--tap-target-min);
+        min-height: var(--tap-target-min);
+    }
+    
+    /* Footer links */
+    .footer__policy-link {
+        min-height: var(--tap-target-min);
+        display: inline-flex;
+        align-items: center;
+    }
+    
+    /* Room options */
+    .room-option {
+        min-height: var(--tap-target-comfortable);
+    }
+    
+    /* Booking type options */
+    .booking-type-option {
+        min-height: 100px;
+    }
+    
+    /* Occupancy labels */
+    .occupancy-type-label {
+        min-height: var(--tap-target-comfortable);
+    }
+    
+    /* Calendar days */
+    .flatpickr-day {
+        min-height: var(--tap-target-min);
+        min-width: var(--tap-target-min);
+    }
+    
+    /* Menu tabs */
+    .menu-tab,
+    .menu-category {
+        min-height: var(--tap-target-min);
+    }
+    
+    /* Scroll to top button */
+    .scroll-to-top {
+        width: var(--tap-target-comfortable);
+        height: var(--tap-target-comfortable);
+    }
+}
+
+/* ============================================
+   MOBILE NAVIGATION ENHANCEMENTS
+   ============================================ */
+
+@media (max-width: 1023px) {
+    /* Mobile menu panel improvements */
+    .header__mobile {
+        max-width: 100%;
+        width: min(420px, 85vw);
+    }
+    
+    /* Improve mobile menu scrolling */
+    .header__mobile-nav {
+        padding-bottom: calc(var(--space-8) + var(--safe-area-bottom));
+    }
+    
+    /* ============================================
+       FANCY MOBILE TOGGLE - Hotel Luxury Style
+       ============================================ */
+    
+    .header__toggle {
+        /* Keep button visible and interactive */
+        display: flex !important;
+        visibility: visible !important;
+        opacity: 1 !important;
+        
+        /* Remove background and border */
+        background: transparent !important;
+        background-image: none !important;
+        border: none !important;
+        box-shadow: none !important;
+        border-radius: 0 !important;
+        
+        /* Size and positioning */
+        width: var(--tap-target-comfortable);
+        height: var(--tap-target-comfortable);
+        
+        /* Override any inset borders */
+        overflow: visible;
+        
+        /* Ensure clickable */
+        cursor: pointer !important;
+        position: relative;
+        z-index: 10;
+        
+        /* Reset any transform animations */
+        transform: none !important;
+    }
+    
+    /* Remove pseudo-element borders/backgrounds from button */
+    .header__toggle::before,
+    .header__toggle::after {
+        display: none !important;
+    }
+    
+    /* Fancy toggle icon container */
+    .header__toggle-icon {
+        width: 28px;
+        height: 28px;
+        position: relative;
+        display: flex !important;
+        align-items: center;
+        justify-content: center;
+        pointer-events: none;
+    }
+    
+    /* Hide the original burger lines */
+    .header__toggle-line {
+        display: none !important;
+        opacity: 0 !important;
+        visibility: hidden !important;
+    }
+    
+    /* Create new fancy toggle design using pseudo-elements on the icon */
+    .header__toggle-icon::before {
+        content: '';
+        position: absolute;
+        top: 50%;
+        left: 50%;
+        width: 18px;
+        height: 18px;
+        transform: translate(-50%, -50%) rotate(45deg);
+        border: 1.5px solid var(--color-lux-ink, #231F1C);
+        pointer-events: none;
+        transition: 
+            transform 400ms cubic-bezier(0.34, 1.56, 0.64, 1),
+            border-color 300ms ease,
+            width 300ms ease,
+            height 300ms ease,
+            border-radius 300ms ease;
+    }
+    
+    .header__toggle-icon::after {
+        content: '';
+        position: absolute;
+        top: 50%;
+        left: 50%;
+        width: 6px;
+        height: 6px;
+        transform: translate(-50%, -50%) rotate(45deg);
+        background: var(--color-lux-gold, #B18247);
+        pointer-events: none;
+        transition: 
+            transform 400ms cubic-bezier(0.34, 1.56, 0.64, 1),
+            background 300ms ease,
+            width 300ms ease,
+            height 300ms ease;
+    }
+    
+    /* Hover state - elegant expansion */
+    .header__toggle:hover .header__toggle-icon::before {
+        transform: translate(-50%, -50%) rotate(45deg) scale(1.1);
+        border-color: var(--color-lux-gold, #B18247);
+    }
+    
+    .header__toggle:hover .header__toggle-icon::after {
+        transform: translate(-50%, -50%) rotate(45deg) scale(1.2);
+    }
+    
+    /* Active/expanded state - transforms to elegant X */
+    .header__toggle[aria-expanded="true"] .header__toggle-icon::before {
+        transform: translate(-50%, -50%) rotate(135deg);
+        width: 22px;
+        height: 22px;
+        border-color: var(--color-lux-ink, #231F1C);
+        border-radius: 2px;
+    }
+    
+    .header__toggle[aria-expanded="true"] .header__toggle-icon::after {
+        transform: translate(-50%, -50%) rotate(135deg);
+        width: 22px;
+        height: 1.5px;
+        background: var(--color-lux-ink, #231F1C);
+        border-radius: 1px;
+    }
+    
+    /* Focus state */
+    .header__toggle:focus-visible {
+        outline: none !important;
+    }
+    
+    .header__toggle:focus-visible .header__toggle-icon::before {
+        box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-lux-gold, #B18247) 50%, transparent 50%);
+    }
+}
+
+/* ============================================
+   MOBILE FORM ENHANCEMENTS
+   ============================================ */
+
+@media (max-width: 768px) {
+    /* Booking form improvements */
+    .booking-form-card {
+        margin: 0 var(--mobile-gutter);
+        border-radius: var(--radius-lg);
+    }
+    
+    /* Form sections */
+    .form-section {
+        padding: var(--space-5) var(--space-4);
+    }
+    
+    /* Form grid stacks on mobile */
+    .form-grid {
+        grid-template-columns: 1fr;
+        gap: var(--space-4);
+    }
+    
+    /* Room selection cards */
+    .room-selection {
+        gap: var(--space-3);
+    }
+    
+    .room-option {
+        padding: var(--space-4);
+        flex-direction: column;
+        align-items: flex-start;
+        text-align: left;
+    }
+    
+    .room-option .room-price {
+        margin-top: var(--space-3);
+        align-self: flex-end;
+    }
+    
+    /* Booking type selection */
+    .booking-type-selection {
+        gap: var(--space-4);
+    }
+    
+    .booking-type-option {
+        padding: var(--space-4);
+    }
+    
+    /* Occupancy type group */
+    .occupancy-type-group {
+        gap: var(--space-3);
+    }
+    
+    /* Booking summary */
+    .booking-summary {
+        margin: var(--space-4) 0;
+        padding: var(--space-4);
+    }
+    
+    /* Submit button */
+    .btn-submit {
+        min-height: 56px;
+        font-size: 1rem;
+    }
+}
+
+/* ============================================
+   MOBILE HERO ENHANCEMENTS
+   ============================================ */
+
+@media (max-width: 767px) {
+    /* Hero content improvements */
+    .hero__content {
+        padding: var(--space-12) var(--mobile-gutter);
+    }
+    
+    /* Hero actions stack on mobile */
+    .hero__actions {
+        flex-direction: column;
+        width: 100%;
+    }
+    
+    .hero__actions .btn {
+        width: 100%;
+        max-width: none;
+        justify-content: center;
+    }
+    
+    /* Image hero - Remove opacity background on mobile, use gradient fade instead */
+    .hero--image .hero__content {
+        position: absolute;
+        bottom: 0;
+        left: 0;
+        right: 0;
+        max-width: 100%;
+        border-radius: 0;
+        background: transparent !important;
+        backdrop-filter: none !important;
+        -webkit-backdrop-filter: none !important;
+        border: none !important;
+        padding: clamp(1.8rem, 6vw, 2.5rem) var(--mobile-gutter) calc(clamp(1.5rem, 5vw, 2rem) + env(safe-area-inset-bottom, 0px)) var(--mobile-gutter) !important;
+    }
+    
+    /* Home lux hero - also remove background on mobile */
+    .hero--home-lux.hero--image .hero__content {
+        left: 0;
+        right: 0;
+        width: 100%;
+        max-width: 100%;
+        border-radius: 0 !important;
+        border: none !important;
+        background: transparent !important;
+        backdrop-filter: none !important;
+        -webkit-backdrop-filter: none !important;
+    }
+    
+    /* Add subtle gradient fade at bottom for text readability */
+    .hero--image::after {
+        content: '';
+        position: absolute;
+        bottom: 0;
+        left: 0;
+        right: 0;
+        height: 65%;
+        background: linear-gradient(to top, 
+            rgba(0, 0, 0, 0.75) 0%,
+            rgba(0, 0, 0, 0.5) 25%,
+            rgba(0, 0, 0, 0.25) 50%,
+            transparent 100%
+        );
+        z-index: 1;
+        pointer-events: none;
+    }
+    
+    /* Hero content sits above the gradient overlay */
+    .hero--image .hero__content {
+        z-index: 2;
+    }
+    
+    /* Passalacqua hero */
+    .hero--passalacqua .hero__content {
+        padding: var(--space-16) var(--mobile-gutter);
+    }
+    
+    /* Enhanced hero title animation on mobile */
+    .hero--image .hero__title {
+        animation: mobileHeroTitleReveal 1.2s cubic-bezier(0.16, 1, 0.3, 1) forwards !important;
+        opacity: 0;
+        transform: translateY(40px) scale(0.95);
+    }
+    
+    /* Enhanced hero subtitle animation on mobile */
+    .hero--image .hero__subtitle {
+        animation: mobileHeroSubtitleReveal 1.2s cubic-bezier(0.16, 1, 0.3, 1) 0.15s forwards !important;
+        opacity: 0;
+        transform: translateY(30px);
+    }
+    
+    /* Enhanced hero description animation on mobile */
+    .hero--image .hero__description {
+        animation: mobileHeroDescReveal 1.2s cubic-bezier(0.16, 1, 0.3, 1) 0.3s forwards !important;
+        opacity: 0;
+        transform: translateY(25px);
+    }
+    
+    /* Enhanced hero actions animation on mobile */
+    .hero--image .hero__actions {
+        animation: mobileHeroActionsReveal 1.2s cubic-bezier(0.16, 1, 0.3, 1) 0.45s forwards !important;
+        opacity: 0;
+        transform: translateY(20px);
+    }
+}
+
+/* ============================================
+   FANCY MOBILE HERO ANIMATIONS
+   ============================================ */
+
+@keyframes mobileHeroTitleReveal {
+    0% {
+        opacity: 0;
+        transform: translateY(40px) scale(0.95);
+        filter: blur(8px);
+    }
+    60% {
+        opacity: 0.8;
+        transform: translateY(-5px) scale(1.01);
+        filter: blur(0);
+    }
+    100% {
+        opacity: 1;
+        transform: translateY(0) scale(1);
+        filter: blur(0);
+    }
+}
+
+@keyframes mobileHeroSubtitleReveal {
+    0% {
+        opacity: 0;
+        transform: translateY(30px);
+        filter: blur(4px);
+    }
+    50% {
+        filter: blur(0);
+    }
+    100% {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+@keyframes mobileHeroDescReveal {
+    0% {
+        opacity: 0;
+        transform: translateY(25px);
+        filter: blur(3px);
+    }
+    50% {
+        filter: blur(0);
+    }
+    100% {
+        opacity: 0.85;
+        transform: translateY(0);
+    }
+}
+
+@keyframes mobileHeroActionsReveal {
+    0% {
+        opacity: 0;
+        transform: translateY(20px);
+    }
+    100% {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+/* Staggered reveal for hero content elements */
+@media (max-width: 767px) {
+    .hero__title {
+        animation: mobileHeroTitleReveal 1.2s cubic-bezier(0.16, 1, 0.3, 1) forwards !important;
+    }
+    
+    .hero__subtitle {
+        animation: mobileHeroSubtitleReveal 1.2s cubic-bezier(0.16, 1, 0.3, 1) 0.15s forwards !important;
+    }
+    
+    .hero__description {
+        animation: mobileHeroDescReveal 1.2s cubic-bezier(0.16, 1, 0.3, 1) 0.3s forwards !important;
+    }
+    
+    .hero__actions {
+        animation: mobileHeroActionsReveal 1.2s cubic-bezier(0.16, 1, 0.3, 1) 0.45s forwards !important;
+    }
+    
+    /* Button hover effect enhancement on mobile */
+    .hero--image .hero__actions .btn:active {
+        transform: scale(0.98);
+    }
+    
+    /* Decorative line animation for title on mobile */
+    .hero--image .hero__title::after {
+        animation: mobileTitleLineReveal 0.8s cubic-bezier(0.16, 1, 0.3, 1) 0.8s forwards;
+        width: 0;
+        opacity: 0;
+    }
+}
+
+@keyframes mobileTitleLineReveal {
+    0% {
+        width: 0;
+        opacity: 0;
+    }
+    100% {
+        width: 50px;
+        opacity: 1;
+    }
+}
+
+/* ============================================
+   MOBILE CARD ENHANCEMENTS
+   ============================================ */
+
+@media (max-width: 768px) {
+    /* Card grids single column */
+    .card-grid,
+    .rooms-grid,
+    .facilities-grid,
+    .events-grid,
+    .conference-rooms,
+    .menu-items {
+        grid-template-columns: 1fr;
+        gap: var(--space-4);
+    }
+    
+    /* Room cards */
+    .room-card__image,
+    .event-card__image {
+        height: 200px;
+    }
+    
+    /* Menu items */
+    .menu-item {
+        padding: var(--space-5);
+    }
+    
+    .menu-item__header {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: var(--space-2);
+    }
+    
+    /* Facility cards */
+    .facility-card {
+        padding: var(--space-5);
+    }
+    
+    /* Editorial rooms grid */
+    .editorial-rooms-row,
+    .editorial-facilities-grid,
+    .editorial-testimonials-grid,
+    .editorial-reviews-grid {
+        grid-template-columns: 1fr;
+        gap: var(--space-4);
+    }
+}
+
+@media (max-width: 599px) {
+    /* Room card adjustments for small screens */
+    .editorial-room-card__media {
+        aspect-ratio: 16 / 11;
+    }
+    
+    .editorial-room-card__body {
+        padding: var(--space-4);
+        gap: var(--space-3);
+    }
+    
+    /* Gallery grid 2 columns on medium mobile */
+    .editorial-gallery-grid,
+    .editorial-rooms-gallery-grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: var(--space-3);
+    }
+}
+
+@media (max-width: 400px) {
+    /* Single column for very small screens */
+    .editorial-gallery-grid,
+    .editorial-rooms-gallery-grid {
+        grid-template-columns: 1fr;
+    }
+}
+
+/* ============================================
+   MOBILE FOOTER ENHANCEMENTS
+   ============================================ */
+
+@media (max-width: 768px) {
+    .footer {
+        padding: var(--space-8) 0;
+    }
+    
+    .footer__content {
+        padding: 0 var(--mobile-gutter);
+    }
+    
+    .footer__grid {
+        grid-template-columns: 1fr;
+        gap: var(--space-5);
+    }
+
+    .footer__grid--3,
+    .footer__grid--4,
+    .footer__grid--5,
+    .footer__grid--6 {
+        grid-template-columns: 1fr;
+    }
+
+    .footer__section {
+        margin-bottom: var(--space-4);
+    }
+    
+    /* Newsletter form stacks */
+    .footer__newsletter-form {
+        flex-direction: column;
+        gap: var(--space-3);
+    }
+    
+    .footer__newsletter-input,
+    .footer__newsletter-button {
+        width: 100%;
+    }
+    
+    /* Footer bottom stacks */
+    .footer__bottom {
+        flex-direction: column;
+        text-align: center;
+        gap: var(--space-4);
+    }
+    
+    .footer__policies {
+        justify-content: center;
+    }
+    
+    /* Social links centering */
+    .footer__social,
+    .footer__share {
+        justify-content: center;
+    }
+}
+
+/* ============================================
+   MOBILE SECTION ENHANCEMENTS
+   ============================================ */
+
+@media (max-width: 768px) {
+    /* Section padding */
+    .section,
+    .editorial-section,
+    .editorial-about,
+    .editorial-rooms-section,
+    .editorial-facilities-section,
+    .editorial-testimonials-section,
+    .editorial-events-section,
+    .editorial-gallery-section {
+        padding: var(--mobile-section-padding) 0;
+    }
+    
+    /* Section headers */
+    .section-header,
+    .editorial-header {
+        margin-bottom: var(--space-6);
+    }
+    
+    .section-header__title,
+    .editorial-header__title {
+        font-size: clamp(1.75rem, 5vw, 2.25rem);
+    }
+    
+    /* About section */
+    .editorial-about-grid {
+        grid-template-columns: 1fr;
+        gap: var(--space-6);
+    }
+    
+    .editorial-about-image {
+        aspect-ratio: 3 / 4;
+        min-height: 280px;
+    }
+    
+    .editorial-about-stats {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: var(--space-4);
+    }
+    
+    .editorial-about-cta {
+        flex-direction: column;
+        width: 100%;
+    }
+    
+    .editorial-about-cta .btn {
+        width: 100%;
+    }
+}
+
+/* ============================================
+   MOBILE RESTAURANT/MENU ENHANCEMENTS
+   ============================================ */
+
+@media (max-width: 768px) {
+    .menu-container {
+        padding: var(--space-4);
+        border-radius: var(--radius-lg);
+    }
+    
+    .menu-control-bar {
+        grid-template-columns: 1fr;
+        gap: var(--space-4);
+    }
+    
+    .qr-menu-panel {
+        grid-template-columns: 1fr;
+        text-align: center;
+    }
+    
+    .qr-menu-actions {
+        justify-content: center;
+    }
+    
+    .menu-type-tabs {
+        grid-template-columns: 1fr;
+    }
+    
+    .menu-tabs {
+        justify-content: flex-start;
+        overflow-x: auto;
+        flex-wrap: nowrap;
+        padding-bottom: var(--space-2);
+        -webkit-overflow-scrolling: touch;
+    }
+    
+    .menu-tab {
+        flex-shrink: 0;
+    }
+    
+    .menu-items-grid {
+        grid-template-columns: 1fr;
+    }
+}
+
+/* ============================================
+   MOBILE EVENTS/CONFERENCE ENHANCEMENTS
+   ============================================ */
+
+@media (max-width: 767px) {
+    .events-showcase__grid,
+    .conference-showcase__grid {
+        grid-template-columns: 1fr;
+        gap: var(--space-4);
+    }
+    
+    .events-showcase__media,
+    .conference-showcase__media {
+        aspect-ratio: 16 / 10;
+        min-height: 180px;
+    }
+    
+    .editorial-event-footer,
+    .editorial-conference-footer {
+        flex-direction: column;
+        align-items: stretch;
+        gap: var(--space-3);
+    }
+    
+    .editorial-conference-inquire {
+        width: 100%;
+    }
+}
+
+/* ============================================
+   MOBILE TIMELINE ENHANCEMENTS
+   ============================================ */
+
+@media (max-width: 768px) {
+    .ue-timeline-modern::before {
+        left: 20px;
+    }
+    
+    .ue-timeline-item {
+        grid-template-columns: auto 1fr;
+        gap: var(--space-4);
+        padding-left: 0;
+    }
+    
+    .ue-timeline-item--left,
+    .ue-timeline-item--right {
+        text-align: left;
+    }
+    
+    .ue-timeline-date {
+        grid-column: 2;
+        grid-row: 1;
+        justify-self: start;
+    }
+    
+    .ue-timeline-marker {
+        grid-column: 1;
+        grid-row: 1;
+    }
+    
+    .ue-timeline-content {
+        grid-column: 2;
+        grid-row: 2;
+    }
+    
+    .ue-card-image {
+        aspect-ratio: 16 / 10;
+    }
+}
+
+/* ============================================
+   MOBILE LOADER ENHANCEMENTS
+   ============================================ */
+
+@media (max-width: 768px) {
+    .loader__spinner {
+        width: 40px;
+        height: 40px;
+    }
+    
+    .loader__text {
+        font-size: var(--text-sm);
+    }
+}
+
+/* ============================================
+   MOBILE COOKIE BANNER ENHANCEMENTS
+   ============================================ */
+
+@media (max-width: 768px) {
+    .cookie-banner__inner {
+        flex-direction: column;
+        align-items: stretch;
+        gap: var(--space-4);
+    }
+    
+    .cookie-banner__content {
+        flex-direction: column;
+        text-align: center;
+        gap: var(--space-3);
+    }
+    
+    .cookie-banner__actions {
+        flex-direction: column;
+        gap: var(--space-2);
+    }
+    
+    .cookie-banner__btn {
+        width: 100%;
+        justify-content: center;
+    }
+}
+
+/* ============================================
+   MOBILE ALERT ENHANCEMENTS
+   ============================================ */
+
+@media (max-width: 768px) {
+    .alert-wrapper--top,
+    .alert-wrapper--bottom {
+        left: var(--space-3);
+        right: var(--space-3);
+        transform: none;
+    }
+    
+    .alert {
+        max-width: 100%;
+        flex-direction: column;
+        text-align: center;
+    }
+}
+
+/* ============================================
+   LANDSCAPE MOBILE ADJUSTMENTS
+   ============================================ */
+
+@media (max-width: 900px) and (orientation: landscape) {
+    /* Reduce hero height in landscape */
+    .hero {
+        min-height: 100svh;
+    }
+    
+    .hero--image .hero__content {
+        max-height: 80vh;
+        overflow-y: auto;
+    }
+    
+    /* Adjust booking widget for landscape */
+    .landing-main .editorial-booking-form {
+        grid-template-columns: repeat(3, minmax(0, 1fr)) minmax(160px, 1fr);
+    }
+}
+
+/* ============================================
+   SMALL MOBILE (under 375px)
+   ============================================ */
+
+@media (max-width: 374px) {
+    :root {
+        --mobile-gutter: 0.625rem;
+    }
+    
+    .hero__title {
+        font-size: clamp(1.5rem, 7vw, 2rem);
+    }
+    
+    .hero__subtitle {
+        font-size: 0.75rem;
+    }
+    
+    .hero__description {
+        font-size: 0.875rem;
+    }
+    
+    .btn {
+        padding: var(--space-3) var(--space-4);
+        font-size: 0.875rem;
+    }
+    
+    .section-header__title,
+    .editorial-header__title {
+        font-size: 1.5rem;
+    }
+    
+    .editorial-about-stats {
+        grid-template-columns: 1fr;
+        text-align: center;
+    }
+}
+
+/* ============================================
+   ACCESSIBILITY ENHANCEMENTS
+   ============================================ */
+
+/* Reduce motion for users who prefer it */
+@media (prefers-reduced-motion: reduce) {
+    * {
+        animation-duration: 0.01ms !important;
+        animation-iteration-count: 1 !important;
+        transition-duration: 0.01ms !important;
+    }
+    
+    .scroll-to-top,
+    .cookie-banner,
+    .alert {
+        transition: opacity 0.15s ease !important;
+    }
+}
+
+/* High contrast mode support */
+@media (prefers-contrast: high) {
+    .btn,
+    .form-control,
+    .form-select,
+    .room-option,
+    .booking-type-option {
+        border-width: 2px;
+    }
+    
+    a:focus,
+    button:focus,
+    input:focus,
+    select:focus,
+    textarea:focus {
+        outline: 3px solid currentColor;
+        outline-offset: 2px;
+    }
+}
+
+/* ============================================
+   PRINT STYLES
+   ============================================ */
+
+@media print {
+    .header,
+    .footer,
+    .hero__actions,
+    .booking-form,
+    .cookie-banner,
+    .scroll-to-top {
+        display: none !important;
+    }
+    
+    body {
+        font-size: 12pt;
+        line-height: 1.5;
+    }
+    
+    .hero {
+        min-height: auto;
+        padding: 20pt 0;
+    }
+    
+    main {
+        padding-top: 0;
+    }
+}

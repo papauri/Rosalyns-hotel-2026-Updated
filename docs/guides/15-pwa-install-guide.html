@@ -1,0 +1,285 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>PWA Install &amp; Service Worker Guide — Rosalyn's Hotel</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link
+    href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@400;500;600;700&family=Jost:wght@300;400;500;600&display=swap"
+    rel="stylesheet">
+  <link rel="stylesheet" href="assets/guide-theme.css">
+  <script src="assets/guide-init.js" defer></script>
+</head>
+
+<body>
+
+  <nav class="top">
+    <a href="index.html" class="brand">ROSALYN'S HOTEL</a>
+    <div class="nav-links">
+      <a href="index.html">All Guides</a>
+      <a href="99-admin-dashboard-full-guide.html">Admin Bible</a>
+      <a href="owner-handover.php">Owner</a>
+    </div>
+  </nav>
+
+  <header class="hero">
+    <div class="deck">
+      <div class="eyebrow">Guide 15 &middot; Admin</div>
+      <h1>PWA &amp; Service Worker</h1>
+      <p class="lead">Install the hotel system as an app on any device — phone, tablet, or laptop — and keep it running smoothly offline.</p>
+      <div class="meta">
+        <span>URL <strong>/admin/cache-management.php</strong></span>
+        <span>Role <strong>admin</strong></span>
+        <span>Read time <strong>5 min</strong></span>
+      </div>
+    </div>
+  </header>
+
+  <main class="content">
+    <div class="deck">
+
+      <!-- ─── WHAT IS A PWA ─────────────────────────────────────────── -->
+      <section>
+        <h2>What is a PWA?</h2>
+        <p>
+          PWA stands for <strong>Progressive Web App</strong>. It lets you install the Rosalyn's website
+          (guest-facing) or the Admin Panel directly onto any device — like a real app — without going through
+          the App Store or Google Play.
+        </p>
+        <p>Once installed:</p>
+        <ul>
+          <li>It opens in its own window, no browser address bar in the way.</li>
+          <li>It loads instantly because common files (CSS, JS, images) are saved on the device.</li>
+          <li>It works even when internet is slow or cut (load-shedding friendly).</li>
+          <li>Staff can pin POS, KDS, and BDS to the tablet home screen.</li>
+        </ul>
+      </section>
+
+      <!-- ─── WHAT IS A SERVICE WORKER ──────────────────────────────── -->
+      <section>
+        <h2>What is a Service Worker?</h2>
+        <p>
+          A <strong>service worker</strong> is a tiny background script the browser downloads once and keeps running silently.
+          Think of it as a smart cache assistant that:
+        </p>
+        <table>
+          <thead>
+            <tr><th>It does</th><th>Why it helps</th></tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>Saves CSS, JS, and fonts on the device</td>
+              <td>Pages load in under a second even on slow 3G</td>
+            </tr>
+            <tr>
+              <td>Serves a friendly offline page when there's no internet</td>
+              <td>Guests don't see a blank browser error</td>
+            </tr>
+            <tr>
+              <td>Keeps the admin POS/KDS working during brief network drops</td>
+              <td>Orders aren't lost during load-shedding cut-overs</td>
+            </tr>
+          </tbody>
+        </table>
+        <p>
+          There are two separate service workers in use:<br>
+          &bull; <strong>Public SW</strong> — covers the guest-facing website (<code>/public-sw.js</code>).<br>
+          &bull; <strong>Admin SW</strong> — covers the admin panel, POS, KDS, BDS (<code>/admin/sw.js</code>).
+        </p>
+      </section>
+
+      <!-- ─── INSTALLING ON EACH DEVICE ─────────────────────────────── -->
+      <section>
+        <h2>Installing the App on a Device</h2>
+
+        <h3>Android phone / tablet (Chrome)</h3>
+        <ol>
+          <li>Open <strong>Chrome</strong> and go to the site (or admin panel).</li>
+          <li>A banner will appear at the bottom: <em>"Install Rosalyn's Hotel"</em>. Tap <strong>Install</strong>.</li>
+          <li>If you missed the banner: tap the three-dot menu (⋮) → <strong>Add to Home Screen</strong>.</li>
+          <li>The icon appears on the home screen. Tap it — it opens as a full-screen app.</li>
+        </ol>
+
+        <h3>iPhone / iPad (Safari)</h3>
+        <ol>
+          <li>Open <strong>Safari</strong> (must be Safari — Chrome on iOS cannot install PWAs).</li>
+          <li>Go to the site or admin panel.</li>
+          <li>Tap the <strong>Share</strong> button (the square with an arrow pointing up).</li>
+          <li>Scroll down and tap <strong>Add to Home Screen</strong>.</li>
+          <li>Give it a name and tap <strong>Add</strong>.</li>
+        </ol>
+
+        <h3>Windows laptop / desktop (Chrome or Edge)</h3>
+        <ol>
+          <li>Open <strong>Chrome</strong> or <strong>Edge</strong> and go to the site.</li>
+          <li>Look for the install icon (⊕) in the address bar on the right side.</li>
+          <li>Click it and choose <strong>Install</strong>.</li>
+          <li>The app opens in its own window and appears in the Start Menu.</li>
+        </ol>
+
+        <p class="callout callout--info">
+          <strong>Tip for POS/KDS tablets:</strong> Install the Admin App on every tablet used in the restaurant, bar, and kitchen. This means even if the Wi-Fi drops briefly, orders on-screen stay visible.
+        </p>
+      </section>
+
+      <!-- ─── SW VERSION BUMP ────────────────────────────────────────── -->
+      <section>
+        <h2>Bumping the SW Version (Cache Refresh)</h2>
+        <p>
+          Occasionally, after a big update to the site's design or code, you want all devices — including those with the PWA installed — to throw away their old cached files and download the latest.
+          That is what <strong>Bumping the SW Version</strong> does.
+        </p>
+
+        <h3>When should I bump the version?</h3>
+        <table>
+          <thead>
+            <tr><th>Situation</th><th>Bump needed?</th></tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>New CSS or JS deployed (site redesign, big feature)</td>
+              <td>✅ Yes</td>
+            </tr>
+            <tr>
+              <td>New images or logos uploaded</td>
+              <td>✅ Yes</td>
+            </tr>
+            <tr>
+              <td>Minor text edits, DB changes, settings updates</td>
+              <td>❌ No</td>
+            </tr>
+            <tr>
+              <td>PHP page changes only (no new CSS/JS)</td>
+              <td>❌ No</td>
+            </tr>
+            <tr>
+              <td>After a MSP developer deployment</td>
+              <td>✅ Yes — developer will tell you</td>
+            </tr>
+          </tbody>
+        </table>
+
+        <h3>How to bump the version</h3>
+        <ol>
+          <li>Go to <strong>Admin → Cache Management</strong> (<code>/admin/cache-management.php</code>).</li>
+          <li>Scroll down to the <strong>PWA Service Worker</strong> section.</li>
+          <li>You will see the current version codes for both the Public SW and Admin SW (e.g. <code>rh-public-v1-2026-05-22</code>).</li>
+          <li>Click <strong>Bump SW Version to Today</strong>.</li>
+          <li>Confirm the dialog. Done.</li>
+        </ol>
+        <p>
+          The date in both version strings is now updated to today. The next time any device loads the site,
+          the browser notices the version changed and automatically discards the old cache and downloads fresh files.
+          Devices with the PWA installed will update silently in the background.
+        </p>
+
+        <p class="callout callout--warning">
+          <strong>Note:</strong> You do not need to do this regularly. Bumping too often is harmless but forces every visitor to re-download all cached files, which uses more data. Only bump when actually needed.
+        </p>
+      </section>
+
+      <!-- ─── WHAT THE VERSION STRING MEANS ────────────────────────── -->
+      <section>
+        <h2>Reading the Version String</h2>
+        <p>The version string looks like this:</p>
+        <pre style="background:#f5f0eb; border-left:4px solid #8A775F; padding:14px 18px; border-radius:6px; font-size:14px; overflow-x:auto;">rh-public-v1-2026-05-22</pre>
+        <table>
+          <thead>
+            <tr><th>Part</th><th>Meaning</th></tr>
+          </thead>
+          <tbody>
+            <tr><td><code>rh</code></td><td>Rosalyn's Hotel</td></tr>
+            <tr><td><code>public</code> / <code>admin</code></td><td>Which app the SW covers</td></tr>
+            <tr><td><code>v1</code></td><td>Major version (only changed by MSP developers)</td></tr>
+            <tr><td><code>2026-05-22</code></td><td>Date of last bump — this is the part that changes when you click the button</td></tr>
+          </tbody>
+        </table>
+      </section>
+
+      <!-- ─── OFFLINE PAGE ──────────────────────────────────────────── -->
+      <section>
+        <h2>The Offline Page</h2>
+        <p>
+          If a guest visits the website while their device has no internet connection, they will see a
+          friendly offline page (<code>/offline.php</code>) instead of a browser error.
+          It displays the hotel branding and a "Try Again" button. No action is needed from your side — this is automatic.
+        </p>
+        <p>The admin panel has its own offline handling built into the service worker for POS and KDS screens.</p>
+      </section>
+
+      <!-- ─── TROUBLESHOOTING ───────────────────────────────────────── -->
+      <section>
+        <h2>Troubleshooting</h2>
+        <table>
+          <thead>
+            <tr><th>Problem</th><th>Fix</th></tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>The install banner didn't appear</td>
+              <td>You may have already dismissed it. On Android, use ⋮ → Add to Home Screen. On iPhone, use Safari Share → Add to Home Screen.</td>
+            </tr>
+            <tr>
+              <td>I can see old CSS/JS after a deployment</td>
+              <td>Bump the SW version from Cache Management. Then on the affected device, close the app and reopen it.</td>
+            </tr>
+            <tr>
+              <td>POS is showing a stale menu after updating prices</td>
+              <td>Menu/price data is never cached by the SW — do a normal browser refresh (pull-down to refresh on mobile, or Ctrl+R on desktop).</td>
+            </tr>
+            <tr>
+              <td>A device is stuck on an old version even after bumping</td>
+              <td>On the device, go to Settings → Apps → find Chrome/Safari → Clear Cache. Then reopen the site.</td>
+            </tr>
+            <tr>
+              <td>The install icon doesn't appear on desktop</td>
+              <td>Make sure you are using Chrome or Edge (not Firefox). The site must be served over HTTPS.</td>
+            </tr>
+          </tbody>
+        </table>
+      </section>
+
+      <!-- ─── QUICK REFERENCE ───────────────────────────────────────── -->
+      <section>
+        <h2>Quick Reference</h2>
+        <table>
+          <thead>
+            <tr><th>Task</th><th>Where</th></tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>Bump SW version after deployment</td>
+              <td>Admin → Cache Management → PWA Service Worker section</td>
+            </tr>
+            <tr>
+              <td>Install app on Android</td>
+              <td>Chrome → tap Install banner or ⋮ → Add to Home Screen</td>
+            </tr>
+            <tr>
+              <td>Install app on iPhone/iPad</td>
+              <td>Safari → Share button → Add to Home Screen</td>
+            </tr>
+            <tr>
+              <td>Install app on Windows laptop</td>
+              <td>Chrome/Edge → ⊕ icon in address bar → Install</td>
+            </tr>
+            <tr>
+              <td>View current SW versions</td>
+              <td>Admin → Cache Management → PWA Service Worker section</td>
+            </tr>
+          </tbody>
+        </table>
+      </section>
+
+    </div>
+  </main>
+
+  <footer style="text-align:center; padding:40px 20px; color:#aaa; font-family:'Jost',sans-serif; font-size:13px;">
+    Rosalyn's Hotel PMS &mdash; Internal Documentation &mdash; MSP &copy; 2026
+  </footer>
+
+</body>
+</html>

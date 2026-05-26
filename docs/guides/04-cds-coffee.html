@@ -1,0 +1,152 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>CDS Coffee Guide — Rosalyn's Hotel</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link
+    href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@400;500;600;700&family=Jost:wght@300;400;500;600&display=swap"
+    rel="stylesheet">
+  <link rel="stylesheet" href="assets/guide-theme.css">
+  <script src="assets/guide-init.js" defer></script>
+</head>
+
+<body>
+
+  <nav class="top">
+    <a href="index.html" class="brand">ROSALYN'S HOTEL</a>
+    <div class="nav-links">
+      <a href="index.html">All Guides</a>
+      <a href="99-admin-dashboard-full-guide.html">Admin Bible</a>
+      <a href="owner-handover.php">Owner</a>
+      <a href="03-bds-bar.html">← Prev</a>
+      <a href="05-room-service.html">Next →</a>
+    </div>
+  </nav>
+
+  <header class="hero">
+    <div class="deck">
+      <div class="eyebrow">Guide 04 &middot; Coffee station</div>
+      <h1>CDS — Coffee Display</h1>
+      <p class="lead">The coffee counter's live order screen. Built for fast, repeat orders.</p>
+      <div class="meta">
+        <span>URL <strong>/admin/cds.php</strong></span>
+        <span>Role <strong>coffee_staff · manager · admin</strong></span>
+        <span>Read time <strong>4 min</strong></span>
+      </div>
+    </div>
+  </header>
+
+  <main class="content">
+    <div class="deck">
+
+      <section>
+        <h2>What lands here</h2>
+        <ul class="checklist">
+          <li>Espresso, Americano, Latte, Cappuccino, etc.</li>
+          <li>Tea, hot chocolate.</li>
+          <li>Pastries, breakfast plates routed to the coffee station.</li>
+        </ul>
+      </section>
+
+      <section>
+        <h2>Step-by-step</h2>
+        <ol class="steps">
+          <li><strong>Order arrives</strong> → chime + ticket.</li>
+          <li>Tap <strong>Start</strong> as you begin building the drink.</li>
+          <li>When each drink is complete, tap <strong>Ready</strong> on that line. This marks it done and
+            <strong>deducts the ingredients from stock</strong> at this moment.
+          </li>
+          <li>If milk, beans, syrup or another recipe ingredient is short, CDS shows a friendly stock dialog and blocks
+            Ready/Bump until stock is received, the recipe is fixed, or the item is 86'd.</li>
+          <li>Tap <strong>Collect</strong> to mark the drink taken by the guest or runner.</li>
+          <li>Tap <strong>Bump</strong> when all items on the ticket are done.</li>
+          <li>Call the guest by table or room number printed on the ticket.</li>
+        </ol>
+        <div class="callout note">
+          <strong>Stock deducts at Ready</strong>, not when the order fires. Cancels before any item is marked Ready
+          cost no stock.
+        </div>
+        <div class="callout tip">Use <strong>Sound Settings</strong> from the top/drawer menu to choose coffee alert
+          tones and volume. Ticket cards show FOH/orderer, guest/service type and item counts, and action buttons spin
+          while each change is being saved.</div>
+      </section>
+
+      <section>
+        <h2>RUSH priority</h2>
+        <ul class="checklist">
+          <li>A <span class="pill red">⚡ RUSH</span> badge means the cashier has marked the order urgent. RUSH tickets
+            jump to the top of the board.</li>
+          <li>An <span class="pill red">URGENT</span> message in the bottom bar fires the moment Rush is set or cleared.
+          </li>
+          <li>You can also toggle Rush from the <strong>Rush</strong> button in the ticket footer.</li>
+        </ul>
+      </section>
+
+      <section>
+        <h2>Ticket timer &amp; age colours</h2>
+        <ul class="checklist">
+          <li>Elapsed time shows as: <strong>just fired → 45 sec → 3m 12s → 12 min → 1h 04m</strong>.</li>
+          <li>Sub-label gives context: <em>On time</em> · <em>Watch closely</em> · <em>Late</em> · <em>Overdue — check
+              with FOH</em> (over 1 hour).</li>
+          <li>All times are in Malawi local time (UTC+2) — accurate to the second.</li>
+        </ul>
+      </section>
+
+      <section>
+        <h2>Useful behaviour</h2>
+        <ul class="checklist">
+          <li>Items that share an ingredient (e.g. milk) all decrement the same stock row when you tap
+            <strong>Ready</strong>.</li>
+          <li>Cards turn <span class="pill amber">amber</span> after 5 minutes &mdash; pull the espresso shot first when
+            you see this.</li>
+          <li>Recall recent served tickets from the <strong>Served</strong> menu (up to 80 entries per view) if a guest
+            comes back saying
+            their drink was wrong. Recalling restores any deducted stock so you can re-make correctly.</li>
+          <li>Use ticket notes when you need to send a clarification back to POS without leaving the station screen.
+          </li>
+        </ul>
+      </section>
+
+      <section>
+        <h2>Order Lifecycle Log (ticket footer)</h2>
+        <p>Each CDS ticket has a <strong>Log</strong> link in the ticket footer. Tap it to open the full order timeline
+          for that ticket in a new browser tab, showing every event from placement through stock deduction and payment.
+          Use it to audit a complaint or confirm a comp order.</p>
+      </section>
+
+      <section>
+        <h2>Mobile-friendly &amp; fullscreen kiosk</h2>
+        <div class="callout tip">
+          Use a tablet on a counter stand. Long-press any control to read the tooltip. Burger menu in the top-right has
+          all the controls.
+        </div>
+        <ul class="checklist">
+          <li>Buttons use short click-lock protection to avoid accidental double actions.</li>
+          <li><strong>Fullscreen kiosk mode</strong> &mdash; a banner appears at the bottom on load saying "Tap anywhere
+            to go fullscreen". One tap hides browser tabs and address bar. If you exit accidentally, the banner
+            reappears and any tap re-enters it. Ideal for counter stands and wall-mounted tablets.</li>
+          <li>The board refreshes every <strong>2 seconds</strong> &mdash; RUSH alerts and note changes from POS arrive
+            almost instantly. POS receives ready and station-note popups within about 1 second, with item summaries and
+            a 2-minute closeable banner.</li>
+        </ul>
+      </section>
+
+    </div>
+  </main>
+
+  <footer class="guide-footer">
+    <div class="deck">
+      <div class="crest">— R H —</div>
+      <p><a href="03-bds-bar.html">← BDS</a> &middot; <a href="index.html">All guides</a> &middot; <a
+          href="99-admin-dashboard-full-guide.html">Admin Bible</a> &middot; <a href="owner-handover.php">Owner
+          handover</a> &middot; <a href="05-room-service.html">Room Service →</a></p>
+    </div>
+  </footer>
+
+</body>
+
+</html>

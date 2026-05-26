@@ -1,0 +1,17 @@
+🏨 *{{hotel_name}}*
+
+🎉 *Booking CONFIRMED!*
+
+Dear {{guest_name}},
+Your reservation has been confirmed!
+
+📋 *Confirmed Booking*
+Reference: *{{booking_reference}}*
+Room: {{room_name}}
+Check-in: {{check_in_date}} at {{check_in_time}}
+Check-out: {{check_out_date}} at {{check_out_time}}
+Nights: {{nights}} | Guests: {{guests}}
+Total: *{{total_amount}}*
+
+We look forward to welcoming you!
+📞 {{hotel_phone}}

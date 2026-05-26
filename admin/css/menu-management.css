@@ -1,0 +1,765 @@
+/* ============================================================
+   Menu Management — Minimalist Styles
+   Loaded after admin-styles.css / admin-components.css.
+   Goal: flat, low-noise UI; one accent color (gold);
+         restrained spacing; no heavy shadows or gradients.
+   ============================================================ */
+
+:root {
+    --mm-border: var(--color-border-light, #EAE1D8);
+    --mm-border-strong: var(--color-border, #DCCFC2);
+    --mm-bg: var(--color-white, #FFFFFF);
+    --mm-bg-soft: var(--color-surface, #FBF8F4);
+    --mm-text: var(--color-text-primary, #2A2723);
+    --mm-muted: var(--color-text-secondary, #5E554D);
+    --mm-accent: var(--color-lux-gold, #B18247);
+    --mm-accent-dark: var(--color-primary, #8A775F);
+    --mm-success: #047857;
+    --mm-danger: var(--color-error, #C62828);
+    --mm-radius: 6px;
+}
+
+/* ---------- Tabs ---------- */
+.menu-type-tabs {
+    display: flex;
+    gap: 0;
+    border-bottom: 1px solid var(--mm-border);
+    margin: 0 0 24px;
+}
+
+.menu-type-tab {
+    background: none;
+    border: none;
+    border-bottom: 2px solid transparent;
+    padding: 12px 20px;
+    font-size: 14px;
+    font-weight: 500;
+    color: var(--mm-muted);
+    cursor: pointer;
+    transition: color .15s, border-color .15s;
+}
+
+.menu-type-tab:hover {
+    color: var(--mm-text);
+}
+
+.menu-type-tab.active {
+    color: var(--mm-text);
+    border-bottom-color: var(--mm-accent);
+}
+
+/* Room Service shortcut tab — teal accent, never gets .active class */
+.menu-type-tab--rs {
+    color: #0c8d6c;
+    margin-left: auto;
+    /* push to the right */
+    border-left: 1px solid var(--mm-border);
+}
+
+.menu-type-tab--rs:hover {
+    color: #097a5e;
+    background: rgba(12, 141, 108, 0.06);
+}
+
+.menu-type-tab--rs i {
+    color: #0c8d6c;
+}
+
+/* Highlight pulse on the category section after jump */
+@keyframes mmRsHighlight {
+    0% {
+        box-shadow: 0 0 0 0 rgba(12, 141, 108, 0.4);
+    }
+
+    60% {
+        box-shadow: 0 0 0 8px rgba(12, 141, 108, 0);
+    }
+
+    100% {
+        box-shadow: 0 0 0 0 rgba(12, 141, 108, 0);
+    }
+}
+
+.category-section.rs-highlight {
+    animation: mmRsHighlight 1.6s ease-out;
+}
+
+.menu-type-tab i {
+    margin-right: 6px;
+}
+
+.tab-content {
+    display: none;
+}
+
+.tab-content.active {
+    display: block;
+}
+
+/* ---------- Section header ---------- */
+.mm-page-bar {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin: 0 0 20px;
+}
+
+.mm-page-bar h3 {
+    font-size: 16px;
+    font-weight: 600;
+    color: var(--mm-text);
+    margin: 0;
+}
+
+.category-section {
+    background: var(--mm-bg);
+    border: 1px solid var(--mm-border);
+    border-radius: var(--mm-radius);
+    margin-bottom: 16px;
+    overflow: hidden;
+}
+
+.category-header {
+    display: flex !important;
+    justify-content: space-between !important;
+    align-items: center !important;
+    padding: 12px 16px;
+    background: var(--mm-bg-soft);
+    border-bottom: 1px solid var(--mm-border);
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--mm-text);
+    margin: 0;
+}
+
+.category-header i {
+    color: var(--mm-accent);
+    margin-right: 8px;
+}
+
+.category-header .cat-count {
+    color: var(--mm-muted);
+    font-weight: 400;
+    font-size: 12px;
+    margin-left: 6px;
+}
+
+/* ---------- Buttons ---------- */
+.mm-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 7px 12px;
+    font-size: 13px;
+    font-weight: 500;
+    border: 1px solid var(--mm-border-strong);
+    background: #fff;
+    color: var(--mm-text);
+    border-radius: var(--mm-radius);
+    cursor: pointer;
+    transition: background .15s, border-color .15s, color .15s;
+    text-decoration: none;
+}
+
+.mm-btn:hover {
+    background: var(--mm-bg-soft);
+    border-color: var(--mm-text);
+}
+
+.mm-btn-primary {
+    background: var(--mm-accent);
+    color: #1f2533;
+    border-color: var(--mm-accent);
+}
+
+.mm-btn-primary:hover {
+    background: var(--mm-accent-dark);
+    border-color: var(--mm-accent-dark);
+    color: #fff;
+}
+
+.mm-btn-sm {
+    padding: 5px 10px;
+    font-size: 12px;
+}
+
+.mm-btn-ghost {
+    background: transparent;
+    border-color: transparent;
+    color: var(--mm-muted);
+}
+
+.mm-btn-ghost:hover {
+    color: var(--mm-text);
+    background: var(--mm-bg-soft);
+}
+
+/* Override existing .btn-add to use minimalist style */
+.btn-add {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 8px 14px;
+    background: var(--mm-accent);
+    color: #1f2533;
+    border: 1px solid var(--mm-accent);
+    border-radius: var(--mm-radius);
+    font-size: 13px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: background .15s, color .15s;
+}
+
+.btn-add:hover {
+    background: var(--mm-accent-dark);
+    color: #fff;
+}
+
+/* ---------- Tables ---------- */
+.menu-table {
+    width: 100%;
+    border-collapse: collapse;
+    background: #fff;
+    font-size: 13px;
+}
+
+.menu-table thead th {
+    text-align: left;
+    padding: 10px 12px;
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--mm-muted);
+    background: var(--mm-bg-soft);
+    border-bottom: 1px solid var(--mm-border);
+}
+
+.menu-table tbody td {
+    padding: 8px 12px;
+    border-bottom: 1px solid var(--mm-border);
+    vertical-align: top;
+}
+
+.menu-table tbody tr:hover {
+    background: var(--mm-bg-soft);
+}
+
+.menu-table input[type="text"],
+.menu-table input[type="number"],
+.menu-table textarea,
+.menu-table select {
+    width: 100%;
+    border: 1px solid var(--mm-border);
+    border-radius: 4px;
+    padding: 6px 8px;
+    font-size: 13px;
+    color: var(--mm-text);
+    background: #fff;
+    font-family: inherit;
+}
+
+.menu-table input:focus,
+.menu-table textarea:focus,
+.menu-table select:focus {
+    outline: none;
+    border-color: var(--mm-accent);
+    box-shadow: 0 0 0 2px rgba(212, 168, 67, 0.15);
+}
+
+.menu-table textarea {
+    min-height: 38px;
+    resize: vertical;
+}
+
+/* ---------- Per-row actions ---------- */
+.actions-cell .action-buttons {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+}
+
+.btn-action {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 5px 9px;
+    font-size: 12px;
+    border-radius: 4px;
+    border: 1px solid var(--mm-border-strong);
+    background: #fff;
+    color: var(--mm-text);
+    cursor: pointer;
+    transition: background .15s, border-color .15s, color .15s;
+}
+
+.btn-action:hover {
+    background: var(--mm-bg-soft);
+}
+
+.btn-action.btn-save:hover {
+    color: var(--mm-success);
+    border-color: var(--mm-success);
+}
+
+.btn-action.btn-toggle.active {
+    color: var(--mm-success);
+}
+
+.btn-action.btn-delete:hover {
+    color: var(--mm-danger);
+    border-color: var(--mm-danger);
+}
+
+.btn-action.btn-recipe {
+    color: var(--mm-accent-dark);
+}
+
+.btn-action.btn-recipe:hover {
+    background: rgba(212, 168, 67, 0.08);
+    border-color: var(--mm-accent);
+    color: var(--mm-accent-dark);
+}
+
+.btn-action.btn-recipe.has-recipe {
+    background: rgba(4, 120, 87, 0.06);
+    border-color: rgba(4, 120, 87, 0.25);
+    color: var(--mm-success);
+}
+
+/* ---------- Empty state ---------- */
+.empty-state {
+    padding: 32px 16px;
+    text-align: center;
+    color: var(--mm-muted);
+    font-size: 13px;
+}
+
+.empty-state i {
+    font-size: 28px;
+    opacity: 0.4;
+    margin-bottom: 8px;
+}
+
+.empty-state p {
+    margin: 0;
+}
+
+/* ---------- Modal ---------- */
+.mm-modal {
+    position: fixed;
+    inset: 0;
+    background: rgba(15, 23, 42, 0.55);
+    z-index: 10000;
+    display: none;
+    align-items: center;
+    justify-content: center;
+    padding: 16px;
+}
+
+.mm-modal.open {
+    display: flex;
+}
+
+.mm-modal-card {
+    background: #fff;
+    border-radius: 8px;
+    width: 100%;
+    max-width: 720px;
+    max-height: 90vh;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+    box-shadow: 0 16px 48px rgba(0, 0, 0, 0.18);
+}
+
+.mm-modal-card.sm {
+    max-width: 520px;
+}
+
+.mm-modal-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 14px 20px;
+    border-bottom: 1px solid var(--mm-border);
+}
+
+.mm-modal-head h3 {
+    margin: 0;
+    font-size: 15px;
+    font-weight: 600;
+    color: var(--mm-text);
+}
+
+.mm-modal-close {
+    background: none;
+    border: none;
+    cursor: pointer;
+    font-size: 22px;
+    color: var(--mm-muted);
+    line-height: 1;
+}
+
+.mm-modal-close:hover {
+    color: var(--mm-text);
+}
+
+.mm-modal-body {
+    padding: 18px 20px;
+    overflow-y: auto;
+    flex: 1;
+}
+
+.mm-modal-foot {
+    display: flex;
+    justify-content: flex-end;
+    gap: 8px;
+    padding: 12px 20px;
+    border-top: 1px solid var(--mm-border);
+    background: var(--mm-bg-soft);
+}
+
+/* ---------- Form fields ---------- */
+.mm-field {
+    margin-bottom: 14px;
+}
+
+.mm-field label {
+    display: block;
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--mm-muted);
+    margin-bottom: 4px;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+}
+
+.mm-field input[type="text"],
+.mm-field input[type="number"],
+.mm-field select,
+.mm-field textarea {
+    width: 100%;
+    padding: 8px 10px;
+    border: 1px solid var(--mm-border);
+    border-radius: var(--mm-radius);
+    font-size: 13px;
+    color: var(--mm-text);
+    background: #fff;
+    font-family: inherit;
+}
+
+.mm-field input:focus,
+.mm-field select:focus,
+.mm-field textarea:focus {
+    outline: none;
+    border-color: var(--mm-accent);
+    box-shadow: 0 0 0 2px rgba(212, 168, 67, 0.15);
+}
+
+.mm-field-row {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 12px;
+}
+
+.mm-checkbox-line {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 13px;
+    color: var(--mm-text);
+}
+
+/* ---------- Recipe modal specifics ---------- */
+.recipe-meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 14px;
+    padding: 10px 12px;
+    background: var(--mm-bg-soft);
+    border: 1px solid var(--mm-border);
+    border-radius: var(--mm-radius);
+    margin-bottom: 16px;
+    font-size: 12px;
+    color: var(--mm-muted);
+}
+
+.recipe-meta strong {
+    color: var(--mm-text);
+    font-weight: 600;
+}
+
+.recipe-table {
+    width: 100%;
+    border-collapse: collapse;
+    margin-bottom: 12px;
+    font-size: 13px;
+}
+
+.recipe-table th {
+    text-align: left;
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--mm-muted);
+    padding: 8px 6px;
+    border-bottom: 1px solid var(--mm-border);
+}
+
+.recipe-table td {
+    padding: 6px 4px;
+    border-bottom: 1px solid var(--mm-border);
+    vertical-align: middle;
+}
+
+.recipe-table select,
+.recipe-table input {
+    width: 100%;
+    padding: 6px 8px;
+    border: 1px solid var(--mm-border);
+    border-radius: 4px;
+    font-size: 13px;
+    background: #fff;
+    color: var(--mm-text);
+}
+
+.recipe-table .col-qty {
+    width: 110px;
+}
+
+.recipe-table .col-unit {
+    width: 70px;
+    color: var(--mm-muted);
+    font-size: 12px;
+}
+
+.recipe-table .col-cost {
+    width: 110px;
+    color: var(--mm-muted);
+    font-size: 12px;
+    text-align: right;
+    white-space: nowrap;
+}
+
+.recipe-table .col-rm {
+    width: 36px;
+    text-align: right;
+}
+
+.recipe-rm-btn {
+    background: none;
+    border: none;
+    cursor: pointer;
+    color: var(--mm-muted);
+    padding: 4px 6px;
+    border-radius: 4px;
+}
+
+.recipe-rm-btn:hover {
+    color: var(--mm-danger);
+    background: rgba(185, 28, 28, 0.06);
+}
+
+.recipe-add-row {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+    padding-top: 8px;
+}
+
+.recipe-add-row .mm-btn {
+    white-space: nowrap;
+}
+
+.recipe-add-row select {
+    flex: 1;
+}
+
+.recipe-totals {
+    display: flex;
+    justify-content: space-between;
+    padding: 10px 12px;
+    background: var(--mm-bg-soft);
+    border: 1px solid var(--mm-border);
+    border-radius: var(--mm-radius);
+    margin-top: 12px;
+    font-size: 13px;
+}
+
+.recipe-totals strong {
+    color: var(--mm-text);
+}
+
+.recipe-link {
+    margin-top: 10px;
+    padding: 8px 12px;
+    background: rgba(212, 168, 67, 0.08);
+    border: 1px dashed var(--mm-accent);
+    border-radius: var(--mm-radius);
+    font-size: 12px;
+    color: var(--mm-text);
+}
+
+.recipe-link a {
+    color: var(--mm-accent-dark);
+    text-decoration: none;
+    font-weight: 500;
+}
+
+.recipe-link a:hover {
+    text-decoration: underline;
+}
+
+/* ---------- Responsive ---------- */
+@media (max-width: 1024px) {
+    .menu-table {
+        font-size: 12px;
+    }
+
+    .menu-table thead th,
+    .menu-table tbody td {
+        padding: 8px 8px;
+    }
+}
+
+@media (max-width: 768px) {
+    .menu-table {
+        display: block;
+        overflow-x: auto;
+        white-space: nowrap;
+    }
+
+    .mm-field-row {
+        grid-template-columns: 1fr;
+    }
+
+    .mm-modal-card {
+        max-height: 95vh;
+    }
+}
+
+/* ============================================================
+   Drag-to-reorder
+   ============================================================ */
+.drag-col {
+    width: 32px;
+    text-align: center;
+    padding: 0 6px !important;
+    vertical-align: middle !important;
+}
+
+.menu-table thead th.drag-col {
+    color: var(--mm-border-strong);
+    font-size: 13px;
+}
+
+.drag-handle {
+    cursor: grab;
+    color: var(--mm-muted);
+    opacity: 0.45;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 20px;
+    height: 28px;
+    border-radius: 3px;
+    font-size: 13px;
+    transition: opacity 0.15s, color 0.15s, background 0.15s;
+    user-select: none;
+}
+
+.drag-handle:hover {
+    opacity: 1;
+    color: var(--mm-accent-dark);
+    background: var(--mm-bg-soft);
+}
+
+.drag-handle:active {
+    cursor: grabbing;
+}
+
+tr.drag-dragging {
+    opacity: 0.35;
+    background: var(--mm-bg-soft);
+}
+
+tr.drag-over>td {
+    background: color-mix(in srgb, var(--mm-accent) 8%, transparent);
+    border-top: 2px solid var(--mm-accent);
+}
+
+/* ============================================================
+   Routing column
+   ============================================================ */
+.menu-routing-select {
+    font-size: 12px;
+    padding: 4px 6px;
+    width: 100%;
+}
+
+.menu-routing-checks {
+    margin-top: 4px;
+}
+
+.menu-routing-checks label {
+    display: block;
+    font-size: 11px;
+    color: var(--mm-muted);
+    line-height: 1.6;
+    cursor: pointer;
+}
+
+.menu-routing-checks label:hover {
+    color: var(--mm-text);
+}
+
+/* ============================================================
+   Delete confirm overlay
+   ============================================================ */
+.mm-confirm-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(15, 23, 42, 0.5);
+    z-index: 20000;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 16px;
+}
+
+.mm-confirm-card {
+    background: #fff;
+    border-radius: 8px;
+    padding: 24px 28px;
+    max-width: 380px;
+    width: 100%;
+    box-shadow: 0 16px 48px rgba(0, 0, 0, 0.22);
+    text-align: center;
+}
+
+.mm-confirm-msg {
+    margin: 0 0 20px;
+    font-size: 14px;
+    color: var(--mm-text);
+    line-height: 1.5;
+}
+
+.mm-confirm-msg i {
+    color: var(--mm-danger);
+    margin-right: 6px;
+}
+
+.mm-confirm-msg small {
+    display: block;
+    margin-top: 4px;
+    color: var(--mm-muted);
+    font-size: 12px;
+}
+
+.mm-confirm-actions {
+    display: flex;
+    justify-content: center;
+    gap: 10px;
+}

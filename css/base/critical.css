@@ -1,0 +1,582 @@
+/**
+ * Critical CSS
+ * Rosalyn's Hotel 2026
+ *
+ * This file contains critical CSS that loads immediately to prevent FOUC
+ * (Flash of Unstyled Content) and optimize initial render.
+ *
+ * These styles should be loaded synchronously before other CSS.
+ */
+
+/* ============================================
+   PREVENT LAYOUT SHIFT
+   ============================================ */
+
+body {
+    opacity: 1 !important;
+    visibility: visible !important;
+}
+
+/* ============================================
+   BODY & MAIN CONTENT STRUCTURE
+   ============================================ */
+
+body {
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    background-color: #FAF8F5;
+    color: #1A1A1A;
+    line-height: 1.6;
+    overflow-x: hidden;
+}
+
+main {
+    flex: 1;
+    width: 100%;
+    position: relative;
+    /* Account for fixed header */
+    padding-top: 80px;
+}
+
+/* Hero section is first child of main, remove its top padding */
+main>[class*="hero"]:first-child,
+main>div>[class*="hero"]:first-child {
+    margin-top: -80px;
+}
+
+.main-content {
+    width: 100%;
+    max-width: 1280px;
+    margin: 0 auto;
+    padding: 0 16px;
+}
+
+/* ============================================
+   PAGE LOADER
+   ============================================ */
+
+.page-loader {
+    position: fixed;
+    inset: 0;
+    z-index: 9999;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: #1A1A1A;
+    transition: opacity 0.5s ease;
+}
+
+.page-loader.fade-out {
+    opacity: 0;
+}
+
+.page-loader.hidden {
+    display: none;
+}
+
+/* ============================================
+   CRITICAL HEADER STYLES
+   Render immediately to prevent layout shift
+   ============================================ */
+
+.header {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 80px;
+    background: rgba(250, 248, 245, 0.95);
+    backdrop-filter: blur(20px) saturate(180%);
+    -webkit-backdrop-filter: blur(20px) saturate(180%);
+    border-bottom: 1px solid rgba(200, 168, 108, 0.2);
+    box-shadow: 0 2px 20px rgba(0, 0, 0, 0.1);
+    z-index: 1000;
+}
+
+.header__nav {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    height: 100%;
+    padding: 0 1rem;
+}
+
+.header__logo-link {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    font-family: 'Cormorant Garamond', Georgia, serif;
+    font-size: 1.25rem;
+    font-weight: 700;
+    color: #1A1A1A;
+    text-decoration: none;
+}
+
+.header__logo-link--mobile {
+    position: absolute;
+    left: 50%;
+    transform: translateX(-50%);
+}
+
+.header__logo-link--desktop {
+    position: relative;
+}
+
+.header__menu {
+    display: flex;
+    align-items: center;
+    gap: 1.5rem;
+    list-style: none;
+    margin: 0;
+    padding: 0;
+}
+
+.header__menu-link {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    font-family: 'Jost', sans-serif;
+    font-size: 0.875rem;
+    font-weight: 500;
+    color: #1A1A1A;
+    text-decoration: none;
+    padding: 0.75rem 1rem;
+    border-radius: 8px;
+    transition: all 0.3s ease-out;
+}
+
+.header__menu-link:hover {
+    color: #C9A86C;
+    background: rgba(200, 168, 108, 0.1);
+}
+
+.header__menu-link--active {
+    color: #C9A86C;
+    background: rgba(200, 168, 108, 0.15);
+}
+
+.header__cta {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.5rem;
+    min-height: 44px;
+    padding: 0.68rem 1.15rem;
+    border-radius: 9999px;
+    text-decoration: none;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    font-family: 'Jost', sans-serif;
+    font-size: 0.8rem;
+    font-weight: 600;
+    color: #FFFFFF;
+    background: linear-gradient(145deg, #B18247, #8E6231);
+}
+
+.header__cta:hover {
+    color: #FFFFFF;
+    filter: brightness(1.05);
+}
+
+.header__mobile-toggle {
+    display: none;
+    align-items: center;
+    justify-content: center;
+    background: none;
+    border: none;
+    cursor: pointer;
+    padding: 0.5rem;
+    border-radius: 8px;
+    color: #1A1A1A;
+}
+
+.header__actions {
+    margin-left: auto;
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+}
+
+.header__toggle {
+    display: none;
+}
+
+.header__toggle-icon {
+    position: relative;
+    width: 20px;
+    height: 16px;
+    display: inline-flex;
+}
+
+.header__toggle-line {
+    position: absolute;
+    left: 0;
+    width: 100%;
+    height: 2px;
+    border-radius: 999px;
+    background: currentColor;
+}
+
+.header__toggle-line:nth-child(1) {
+    top: 0;
+}
+
+.header__toggle-line:nth-child(2) {
+    top: 7px;
+}
+
+.header__toggle-line:nth-child(3) {
+    bottom: 0;
+    width: 82%;
+    left: 18%;
+}
+
+/* Mobile responsive */
+@media (max-width: 1023px) {
+    .header__toggle {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        width: 46px;
+        height: 46px;
+        padding: 0;
+        border-radius: 14px;
+        color: #231F1C;
+        border: 1px solid rgba(143, 118, 96, 0.44);
+        background-color: #efe3d6;
+        background:
+            radial-gradient(circle at 24% 22%, rgba(255, 255, 255, 0.72) 0%, rgba(255, 255, 255, 0) 58%),
+            linear-gradient(155deg, rgba(255, 255, 255, 0.9) 0%, rgba(236, 225, 214, 0.92) 100%);
+        box-shadow:
+            0 10px 22px rgba(23, 18, 13, 0.16),
+            inset 0 1px 0 rgba(255, 255, 255, 0.74),
+            inset 0 -1px 0 rgba(120, 89, 58, 0.2);
+    }
+
+    .header__mobile-toggle {
+        display: flex;
+    }
+
+    .header__menu {
+        display: none;
+    }
+
+    .header__cta {
+        display: none;
+    }
+
+    .header__logo-link--desktop {
+        display: none;
+    }
+
+    .header__logo-link--mobile {
+        display: flex;
+    }
+
+    main {
+        padding-top: 70px;
+    }
+
+    main>[class*="hero"]:first-child,
+    main>div>[class*="hero"]:first-child {
+        margin-top: -70px;
+    }
+
+    .header {
+        height: 70px;
+    }
+}
+
+/* ============================================
+   OPTIMIZE FONT RENDERING
+   Use system fonts initially, upgraded when custom fonts load
+   ============================================ */
+
+body,
+button,
+input,
+select,
+textarea {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+}
+
+/* Will be upgraded to custom fonts when loaded */
+body.fonts-loaded h1,
+body.fonts-loaded h2,
+body.fonts-loaded h3,
+body.fonts-loaded .cormorant {
+    font-family: 'Cormorant Garamond', Georgia, serif;
+}
+
+body.fonts-loaded .jost,
+body.fonts-loaded body,
+body.fonts-loaded button,
+body.fonts-loaded input {
+    font-family: 'Jost', sans-serif;
+}
+
+/* ============================================
+   CRITICAL SECTION HEADER STYLES
+   Force all section headers to be visible
+   ============================================ */
+
+.section-header,
+.section-header *,
+.editorial-header,
+.editorial-header *,
+body .section-header,
+body .section-header *,
+body .editorial-header,
+body .editorial-header * {
+    opacity: 1 !important;
+    visibility: visible !important;
+    display: block !important;
+    color: #1A1A1A !important;
+}
+
+.section-header__label,
+.editorial-header .section-header__label,
+body .section-header__label,
+body .editorial-header .section-header__label {
+    color: #8B7355 !important;
+}
+
+.section-header__title,
+.editorial-header .section-header__title,
+body .section-header__title,
+body .editorial-header .section-header__title,
+h1,
+h2,
+h3,
+h4,
+h5,
+h6 {
+    color: #1A1A1A !important;
+}
+
+.section-header__subtitle,
+.section-header__description,
+.editorial-header .section-header__subtitle,
+.editorial-header .section-header__description,
+body .section-header__subtitle,
+body .section-header__description,
+body .editorial-header .section-header__subtitle,
+body .editorial-header .section-header__description,
+p {
+    color: #4A4A4A !important;
+}
+
+/* ============================================
+   FORCE EDITORIAL SECTIONS VISIBILITY
+   ============================================ */
+
+.upcoming-events-section *,
+.editorial-gallery-section *,
+.editorial-reviews *,
+.editorial-testimonials-section *,
+.editorial-rooms-section *,
+.editorial-facilities-section * {
+    opacity: 1 !important;
+    visibility: visible !important;
+}
+
+/* ============================================
+   CRITICAL BUTTON STYLES
+   Prevent layout shift during load
+   ============================================ */
+
+.btn,
+button[type="submit"],
+button[type="button"] {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 12px 24px;
+    border: none;
+    border-radius: 8px;
+    font-size: 16px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.3s ease;
+}
+
+/* ============================================
+   CRITICAL FORM STYLES
+   ============================================ */
+
+input,
+select,
+textarea {
+    display: block;
+    width: 100%;
+    padding: 12px 16px;
+    border: 1px solid #E0E0E0;
+    border-radius: 8px;
+    font-size: 16px;
+    background: #ffffff;
+}
+
+/* ============================================
+   CRITICAL CONTAINER STYLES
+   ============================================ */
+
+.container,
+.container-fluid {
+    width: 100%;
+    max-width: 1200px;
+    margin: 0 auto;
+    padding: 0 20px;
+}
+
+/* ============================================
+   CRITICAL GRID STYLES
+   ============================================ */
+
+.grid {
+    display: grid;
+    gap: 20px;
+}
+
+.grid--2 {
+    grid-template-columns: repeat(2, 1fr);
+}
+
+.grid--3 {
+    grid-template-columns: repeat(3, 1fr);
+}
+
+@media (max-width: 768px) {
+
+    .grid--2,
+    .grid--3 {
+        grid-template-columns: 1fr;
+    }
+
+    .main-content {
+        padding: 0 12px;
+    }
+}
+
+@media (min-width: 1024px) {
+
+    /* header height becomes 90px — align main offset to match */
+    main {
+        padding-top: 90px;
+    }
+
+    main>[class*="hero"]:first-child,
+    main>div>[class*="hero"]:first-child {
+        margin-top: -90px;
+    }
+
+    .main-content {
+        padding: 0 24px;
+    }
+}
+
+@media (min-width: 1280px) {
+
+    /* header height becomes 100px — align main offset to match */
+    main {
+        padding-top: 100px;
+    }
+
+    main>[class*="hero"]:first-child,
+    main>div>[class*="hero"]:first-child {
+        margin-top: -100px;
+    }
+
+    .main-content {
+        padding: 0 32px;
+    }
+}
+
+@media (min-width: 1440px) {
+
+    /* header height becomes 104px — align main offset to match */
+    main {
+        padding-top: 104px;
+    }
+
+    main>[class*="hero"]:first-child,
+    main>div>[class*="hero"]:first-child {
+        margin-top: -104px;
+    }
+}
+
+/* ============================================
+   CRITICAL FLEX STYLES
+   ============================================ */
+
+.flex {
+    display: flex;
+}
+
+.flex--center {
+    align-items: center;
+    justify-content: center;
+}
+
+.flex--between {
+    align-items: center;
+    justify-content: space-between;
+}
+
+.flex--column {
+    flex-direction: column;
+}
+
+/* ============================================
+   CRITICAL SPACING
+   ============================================ */
+
+.mt-1 {
+    margin-top: 8px;
+}
+
+.mt-2 {
+    margin-top: 16px;
+}
+
+.mt-3 {
+    margin-top: 24px;
+}
+
+.mt-4 {
+    margin-top: 32px;
+}
+
+.mb-1 {
+    margin-bottom: 8px;
+}
+
+.mb-2 {
+    margin-bottom: 16px;
+}
+
+.mb-3 {
+    margin-bottom: 24px;
+}
+
+.mb-4 {
+    margin-bottom: 32px;
+}
+
+.p-1 {
+    padding: 8px;
+}
+
+.p-2 {
+    padding: 16px;
+}
+
+.p-3 {
+    padding: 24px;
+}
+
+.p-4 {
+    padding: 32px;
+}

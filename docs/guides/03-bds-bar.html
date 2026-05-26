@@ -1,0 +1,167 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>BDS Bar Guide — Rosalyn's Hotel</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link
+    href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@400;500;600;700&family=Jost:wght@300;400;500;600&display=swap"
+    rel="stylesheet">
+  <link rel="stylesheet" href="assets/guide-theme.css">
+  <script src="assets/guide-init.js" defer></script>
+</head>
+
+<body>
+
+  <nav class="top">
+    <a href="index.html" class="brand">ROSALYN'S HOTEL</a>
+    <div class="nav-links">
+      <a href="index.html">All Guides</a>
+      <a href="99-admin-dashboard-full-guide.html">Admin Bible</a>
+      <a href="owner-handover.php">Owner</a>
+      <a href="02-kds-kitchen.html">← Prev</a>
+      <a href="04-cds-coffee.html">Next →</a>
+    </div>
+  </nav>
+
+  <header class="hero">
+    <div class="deck">
+      <div class="eyebrow">Guide 03 &middot; Bar</div>
+      <h1>BDS — Bar Display</h1>
+      <p class="lead">Same engine as the kitchen &mdash; tuned for bar drinks. Works as a standalone touchscreen.</p>
+      <div class="meta">
+        <span>URL <strong>/admin/bds.php</strong></span>
+        <span>Role <strong>bar_staff · manager · admin</strong></span>
+        <span>Read time <strong>4 min</strong></span>
+      </div>
+    </div>
+  </header>
+
+  <main class="content">
+    <div class="deck">
+
+      <section>
+        <h2>What's different from the kitchen?</h2>
+        <ul class="checklist">
+          <li>Only <strong>drink</strong> items appear here (cocktails, beer, wine, soft drinks, spirits).</li>
+          <li>Tickets are usually short (1–3 lines) and fast &mdash; the bar pace is high.</li>
+          <li>Each drink can be ticked off individually as it's poured.</li>
+        </ul>
+      </section>
+
+      <section>
+        <h2>Step-by-step</h2>
+        <ol class="steps">
+          <li><strong>New ticket</strong> lands → chime + card.</li>
+          <li>Tap <strong>Start</strong> when you begin pouring.</li>
+          <li>When each drink is poured, tap <strong>Ready</strong> on that line. This signals the drink is at the pass
+            and <strong>deducts the bottle/ingredient from stock</strong> at this moment.</li>
+          <li>If the required bottle or ingredient is short, BDS shows a friendly stock dialog and blocks Ready/Bump
+            until stock is received, the recipe is fixed, or the item is 86'd.</li>
+          <li>Tap <strong>Collect</strong> to mark the drink taken by the runner for delivery to the guest.</li>
+          <li>Tap <strong>Bump</strong> when the full round is complete — any items not yet marked Ready are deducted
+            at Bump.</li>
+        </ol>
+        <div class="callout note">
+          <strong>Stock deducts at Ready, not at order fire.</strong> If an order is cancelled at the till before you
+          tap Ready, no stock is removed.
+        </div>
+        <div class="callout tip">Use <strong>Sound Settings</strong> from the top/drawer menu to choose bar alert tones
+          and volume. Ticket cards show FOH/orderer, guest/service type and item counts, and action buttons spin while
+          each change is being saved.</div>
+      </section>
+
+      <section>
+        <h2>Filters</h2>
+        <p><span class="pill gold">All</span> · <span class="pill blue">New</span> · <span
+            class="pill amber">Cooking</span> · <span class="pill green">Ready</span> &mdash; same logic as the kitchen.
+        </p>
+      </section>
+
+      <section>
+        <h2>RUSH priority</h2>
+        <ul class="checklist">
+          <li>A <span class="pill red">⚡ RUSH</span> badge on a ticket means the cashier or manager has marked the order
+            high-priority. Rush tickets sort to the top of the board.</li>
+          <li>An <span class="pill red">URGENT</span> message in the bottom bar appears the moment Rush is set or
+            cleared — you can't miss it.</li>
+          <li>Tap <strong>Rush</strong> in the ticket footer to toggle it from the bar screen.</li>
+        </ul>
+      </section>
+
+      <section>
+        <h2>Ticket timer &amp; age colours</h2>
+        <ul class="checklist">
+          <li>Each ticket shows elapsed time since fired: <strong>just fired → 45 sec → 3m 12s → 12 min → 1h
+              04m</strong>.</li>
+          <li>Sub-label gives context: <em>On time</em> · <em>Watch closely</em> · <em>Late</em> · <em>Overdue — check
+              with FOH</em> (over 1 hour on the board).</li>
+          <li>All times are accurate in Malawi local time (UTC+2).</li>
+        </ul>
+      </section>
+
+      <section>
+        <h2>Bar-specific tips</h2>
+        <div class="callout tip">
+          <strong>Stock deducts when you tap Ready</strong> on each drink &mdash; bottle counts in <strong>Stock
+            Ingredients</strong> drop at that moment, not when the order fires.
+        </div>
+        <ul class="checklist">
+          <li>Use the built-in ticket message flow to send quick clarifications back to POS when needed.</li>
+          <li>If you cancel a drink (broken glass, refused), tell the cashier to use <strong>Cancel Before Prep</strong>
+            (if not yet started) or <strong>Void</strong> (manager, if already poured). Stock for poured items is
+            restored automatically on void. Never just remove the ticket.</li>
+          <li>Voids are admin/manager-only. If your manager isn't there, leave the ticket on the board and notify the
+            till.</li>
+          <li>A short countdown badge on each ticket shows how long it's been waiting.</li>
+        </ul>
+      </section>
+
+      <section>
+        <h2>Mobile / tablet &amp; fullscreen kiosk</h2>
+        <ul class="checklist">
+          <li>Burger menu in the top-right contains: filter, sound, sign-out.</li>
+          <li>Action buttons use brief click-lock behavior to prevent double taps.</li>
+          <li>Long-press any button for help text.</li>
+          <li><strong>Fullscreen kiosk mode</strong> &mdash; a banner at the bottom says "Tap anywhere to go fullscreen"
+            on load. One tap hides the browser tabs, address bar and all chrome. If you exit accidentally, the banner
+            reappears and the next tap re-enters fullscreen. Keeps the board full-screen on any device.</li>
+          <li>The board polls every <strong>2 seconds</strong> &mdash; RUSH alerts and FOH note changes arrive in under
+            2 seconds. POS receives ready and station-note popups within about 1 second, with item summaries and a
+            2-minute closeable banner.</li>
+        </ul>
+      </section>
+
+      <section>
+        <h2>Order Lifecycle Log (ticket footer)</h2>
+        <p>Each BDS ticket card has a <strong>Log</strong> link in the footer. Tap it to open
+          <code>/admin/order-lifecycle.php</code> in a new tab — shows every event on the order: placement, KDS/BDS
+          events, stock deductions, payment, and any void with reason. Use this when a guest disputes a charge or a
+          drink needs investigating.</p>
+        <div class="callout note">Cancel and Void actions inside the lifecycle page require admin or manager role.</div>
+      </section>
+
+      <section>
+        <h2>End of shift</h2>
+        <p>Tap <strong>Daily Report</strong> to see the bar's served tickets, total drink count, top sellers and average
+          prep time. Use this to settle stock variance against <strong>Stock Ingredients</strong>.</p>
+      </section>
+
+    </div>
+  </main>
+
+  <footer class="guide-footer">
+    <div class="deck">
+      <div class="crest">— R H —</div>
+      <p><a href="02-kds-kitchen.html">← KDS</a> &middot; <a href="index.html">All guides</a> &middot; <a
+          href="99-admin-dashboard-full-guide.html">Admin Bible</a> &middot; <a href="owner-handover.php">Owner
+          handover</a> &middot; <a href="04-cds-coffee.html">CDS Coffee →</a></p>
+    </div>
+  </footer>
+
+</body>
+
+</html>

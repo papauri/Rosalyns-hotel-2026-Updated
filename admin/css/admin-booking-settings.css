@@ -1,0 +1,595 @@
+/* ============================================================
+   Booking Settings page — scoped via body.booking-settings-page
+   ============================================================ */
+
+.page-header {
+    margin-bottom: 14px;
+}
+
+.page-title {
+    margin: 0;
+}
+
+/* ---- Cards ---- */
+.settings-card {
+    background: #fff;
+    border: 1px solid var(--color-border-light, #EAE1D8);
+    border-radius: 12px;
+    box-shadow: 0 3px 12px rgba(18, 24, 38, 0.05);
+    padding: 16px 20px;
+    margin-bottom: 12px;
+}
+
+.settings-card h2 {
+    margin: 0 0 12px;
+    color: var(--navy, #231F1C);
+    font-size: 1.1rem;
+}
+
+.settings-card h3 {
+    margin: 18px 0 10px;
+    padding-bottom: 7px;
+    border-bottom: 1px solid var(--color-border-light, #EAE1D8);
+    color: var(--navy, #231F1C);
+    font-size: 0.9rem;
+}
+
+/* ---- Status row ---- */
+.current-value {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    background: var(--color-background, #F7F3EE);
+    border: 1px solid var(--color-border-light, #EAE1D8);
+    border-radius: 10px;
+    padding: 10px 12px;
+    margin-bottom: 10px;
+}
+
+.current-value .value {
+    color: var(--color-primary, #8A775F);
+    font-weight: 700;
+}
+
+/* ---- Form atoms ---- */
+.form-group {
+    margin-bottom: 10px;
+}
+
+.form-group label {
+    display: block;
+    margin-bottom: 4px;
+    color: var(--deep-navy, #111827);
+    font-weight: 600;
+    font-size: 12.5px;
+}
+
+.form-control {
+    width: 100%;
+    border: 1px solid #d8d2c6;
+    border-radius: 8px;
+    padding: 8px 10px;
+    background: #fff;
+    color: var(--color-text-primary, #2A2723);
+    font-size: 13px;
+    box-sizing: border-box;
+}
+
+.form-control:focus {
+    outline: none;
+    border-color: var(--color-primary, #8A775F);
+    box-shadow: 0 0 0 3px rgba(138, 119, 95, 0.12);
+}
+
+.help-text {
+    margin: 3px 0 0;
+    color: #6b7280;
+    font-size: 11px;
+    line-height: 1.4;
+}
+
+/* ---- 2-column form grid ---- */
+.form-row-2 {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 0 16px;
+}
+
+@media (max-width: 580px) {
+    .form-row-2 {
+        grid-template-columns: 1fr;
+    }
+}
+
+/* ---- Buttons ---- */
+.btn-submit {
+    border: none;
+    border-radius: 8px;
+    padding: 9px 15px;
+    background: linear-gradient(135deg, var(--color-primary, #8A775F) 0%, #a78d66 100%);
+    color: #fff;
+    font-weight: 700;
+    font-size: 13px;
+    cursor: pointer;
+    transition: transform 0.15s;
+}
+
+.btn-submit:hover {
+    transform: translateY(-1px);
+}
+
+.btn-preview {
+    background: linear-gradient(135deg, #1f4d7a 0%, #2a6aa5 100%);
+}
+
+/* ---- Info / tip boxes ---- */
+.info-box {
+    background: #f8fafc;
+    border-left: 3px solid var(--color-primary, #8A775F);
+    border-radius: 8px;
+    padding: 10px 12px;
+}
+
+.info-box ul {
+    margin: 5px 0 0 16px;
+}
+
+.info-box li {
+    font-size: 12px;
+    color: #4b5563;
+    margin-bottom: 2px;
+}
+
+.info-box h4 {
+    margin: 0 0 5px;
+    font-size: 12.5px;
+}
+
+/* Collapsible tips */
+details.tips-box {
+    background: var(--color-background, #F7F3EE);
+    border: 1px solid var(--color-border-light, #EAE1D8);
+    border-radius: 8px;
+    margin-top: 10px;
+    overflow: hidden;
+}
+
+details.tips-box>summary {
+    padding: 9px 12px;
+    cursor: pointer;
+    font-weight: 600;
+    font-size: 12px;
+    color: var(--color-primary-dark, #5F5343);
+    list-style: none;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+details.tips-box>summary::-webkit-details-marker {
+    display: none;
+}
+
+details.tips-box>summary::after {
+    content: '▸';
+    margin-left: auto;
+    transition: transform 0.2s;
+}
+
+details.tips-box[open]>summary::after {
+    transform: rotate(90deg);
+}
+
+details.tips-box .tips-body {
+    padding: 0 12px 10px;
+}
+
+details.tips-box ul {
+    margin: 0 0 0 16px;
+}
+
+details.tips-box li {
+    font-size: 12px;
+    color: #4b5563;
+    margin-bottom: 3px;
+}
+
+/* ---- Service modules compact layout ---- */
+.service-module {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 0 20px;
+    align-items: start;
+    padding: 10px 0;
+    border-bottom: 1px solid var(--color-border-light, #EAE1D8);
+}
+
+.service-module:last-of-type {
+    border-bottom: none;
+}
+
+@media (max-width: 580px) {
+    .service-module {
+        grid-template-columns: 1fr;
+    }
+}
+
+/* ---- Placeholder tag cloud ---- */
+.placeholder-grid {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px 8px;
+    margin-top: 8px;
+}
+
+.placeholder-grid code {
+    background: #fff;
+    border: 1px solid #D6CDBF;
+    border-radius: 4px;
+    padding: 1px 5px;
+    font-size: 11px;
+    color: var(--color-primary-dark, #5F5343);
+}
+
+/* ---- Email template accordion blocks ---- */
+details.template-block {
+    border: 1px solid var(--color-border-light, #EAE1D8);
+    border-radius: 10px;
+    margin-bottom: 8px;
+    overflow: hidden;
+}
+
+details.template-block>summary {
+    padding: 10px 14px;
+    cursor: pointer;
+    font-weight: 600;
+    font-size: 13px;
+    color: var(--navy, #231F1C);
+    background: var(--color-background, #F7F3EE);
+    list-style: none;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+details.template-block>summary::-webkit-details-marker {
+    display: none;
+}
+
+details.template-block>summary::after {
+    content: '▸';
+    margin-left: auto;
+    color: var(--color-primary, #8A775F);
+    transition: transform 0.2s;
+}
+
+details.template-block[open]>summary {
+    border-bottom: 1px solid var(--color-border-light, #EAE1D8);
+}
+
+details.template-block[open]>summary::after {
+    transform: rotate(90deg);
+}
+
+.template-block-body {
+    padding: 14px;
+    background: #fff;
+}
+
+/* active/inactive badge */
+.tpl-badge {
+    font-size: 10px;
+    font-weight: 700;
+    padding: 2px 6px;
+    border-radius: 20px;
+    margin-left: 4px;
+}
+
+.tpl-badge-active {
+    background: #d1fae5;
+    color: #065f46;
+}
+
+.tpl-badge-inactive {
+    background: #fee2e2;
+    color: #991b1b;
+}
+
+/* template preview actions */
+.template-preview-actions {
+    margin-top: 8px;
+}
+
+/* ============================================================
+   Email Template Editor  (new split-pane tab design)
+   ============================================================ */
+
+/* Card — full width, no artificial cap */
+.tpl-editor-card {
+    max-width: none;
+}
+
+/* ---- Tab bar ---- */
+.tpl-tabs {
+    display: flex;
+    gap: 3px;
+    flex-wrap: wrap;
+    border-bottom: 2px solid var(--color-border-light, #EAE1D8);
+    margin-bottom: 16px;
+}
+
+.tpl-tab {
+    padding: 7px 14px;
+    border: 1px solid transparent;
+    border-bottom: 2px solid transparent;
+    border-radius: 8px 8px 0 0;
+    background: none;
+    font-size: 12.5px;
+    font-weight: 600;
+    color: #6b7280;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    position: relative;
+    bottom: -2px;
+    transition: color 0.15s, background 0.15s;
+}
+
+.tpl-tab:hover {
+    background: var(--color-background, #F7F3EE);
+    color: var(--color-primary-dark, #5F5343);
+}
+
+.tpl-tab.active {
+    background: #fff;
+    color: var(--color-primary-dark, #5F5343);
+    border-color: var(--color-border-light, #EAE1D8) var(--color-border-light, #EAE1D8) #fff var(--color-border-light, #EAE1D8);
+    border-bottom-color: #fff;
+    font-weight: 700;
+}
+
+/* Status dots inside tabs */
+.tpl-dot {
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    display: inline-block;
+    flex-shrink: 0;
+}
+
+.dot-active {
+    background: #10b981;
+}
+
+.dot-inactive {
+    background: #f87171;
+}
+
+.dot-warn {
+    background: #f59e0b;
+}
+
+/* ---- Split pane ---- */
+.tpl-split {
+    display: grid;
+    grid-template-columns: 55% 45%;
+    gap: 18px;
+    align-items: start;
+}
+
+@media (max-width: 960px) {
+    .tpl-split {
+        grid-template-columns: 1fr;
+    }
+}
+
+/* ---- Editor side ---- */
+.tpl-editor-header {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex-wrap: wrap;
+    margin-bottom: 6px;
+}
+
+.tpl-active-toggle {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    margin-left: auto;
+    font-size: 12px;
+    font-weight: 600;
+    color: #374151;
+    cursor: pointer;
+}
+
+.tpl-html-editor {
+    font-family: 'Courier New', Consolas, monospace;
+    font-size: 12px;
+    line-height: 1.55;
+    resize: vertical;
+    min-height: 320px;
+    background: #fafaf9;
+    color: var(--navy, #231F1C);
+}
+
+.tpl-textbody-toggle {
+    border: 1px solid var(--color-border-light, #EAE1D8);
+    border-radius: 8px;
+    overflow: hidden;
+    margin-bottom: 2px;
+}
+
+.tpl-textbody-toggle>summary {
+    padding: 8px 12px;
+    cursor: pointer;
+    font-weight: 600;
+    font-size: 12px;
+    color: #4b5563;
+    list-style: none;
+    background: var(--color-background, #F7F3EE);
+}
+
+.tpl-textbody-toggle>summary::-webkit-details-marker {
+    display: none;
+}
+
+.tpl-textbody-toggle[open]>summary {
+    border-bottom: 1px solid var(--color-border-light, #EAE1D8);
+}
+
+.tpl-textbody-toggle>div {
+    padding: 10px 12px;
+}
+
+.tpl-placeholders {
+    margin-top: 10px;
+}
+
+/* Utility buttons in editor toolbar */
+.btn-load-default,
+.btn-format-html {
+    border: 1px solid #D6CDBF;
+    border-radius: 6px;
+    padding: 4px 9px;
+    background: var(--color-background, #F7F3EE);
+    color: var(--color-primary-dark, #5F5343);
+    font-size: 11px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: background 0.15s;
+    white-space: nowrap;
+}
+
+.btn-load-default:hover,
+.btn-format-html:hover {
+    background: var(--color-border-light, #EAE1D8);
+}
+
+/* ---- Preview pane ---- */
+.tpl-preview-pane {
+    border: 1px solid #D6CDBF;
+    border-radius: 10px;
+    overflow: hidden;
+    background: #f2ede6;
+    display: flex;
+    flex-direction: column;
+    min-height: 420px;
+}
+
+.tpl-preview-toolbar {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 14px;
+    border-bottom: 1px solid #D6CDBF;
+    background: var(--color-border-light, #EAE1D8);
+    flex-wrap: wrap;
+}
+
+.tpl-preview-subject-label {
+    font-size: 11px;
+    color: var(--color-primary-dark, #5F5343);
+    font-style: italic;
+    flex: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    min-width: 0;
+}
+
+.tpl-preview-wrapper {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    background: #fff;
+}
+
+.tpl-preview-empty {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 12px;
+    padding: 40px 20px;
+    color: #9ca3af;
+    text-align: center;
+    min-height: 300px;
+}
+
+.tpl-preview-empty p {
+    font-size: 13px;
+    margin: 0;
+}
+
+/* ---- Send test area ---- */
+.tpl-send-test {
+    padding: 12px 14px;
+    border-top: 1px solid #D6CDBF;
+    background: #fff;
+}
+
+.tpl-send-test-label {
+    font-weight: 600;
+    font-size: 12.5px;
+    color: var(--color-primary-dark, #5F5343);
+    margin: 0 0 8px;
+}
+
+.tpl-send-test-row {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+    align-items: center;
+}
+
+.tpl-test-email-input {
+    flex: 1;
+    min-width: 180px;
+}
+
+.tpl-send-feedback {
+    font-size: 12px;
+    font-weight: 600;
+    margin: 6px 0 0;
+}
+
+.tpl-feedback-ok {
+    color: #065f46;
+}
+
+.tpl-feedback-err {
+    color: #dc2626;
+}
+
+/* ---- Placeholder autocomplete ---- */
+.tpl-autocomplete {
+    position: absolute;
+    z-index: 1200;
+    background: #fff;
+    border: 1px solid #d6cdbf;
+    border-radius: 8px;
+    box-shadow: 0 8px 18px rgba(18, 24, 38, 0.12);
+    max-height: 220px;
+    overflow-y: auto;
+}
+
+.tpl-autocomplete__item {
+    width: 100%;
+    text-align: left;
+    border: none;
+    background: transparent;
+    padding: 8px 10px;
+    font-size: 12px;
+    font-family: 'Courier New', Consolas, monospace;
+    color: #2a2723;
+    cursor: pointer;
+}
+
+.tpl-autocomplete__item:hover,
+.tpl-autocomplete__item.is-active {
+    background: #f7f3ee;
+    color: #5f5343;
+}

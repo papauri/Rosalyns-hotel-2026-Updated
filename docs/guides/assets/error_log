@@ -1,0 +1,7 @@
+[21-May-2026 23:37:56 Europe/Dublin] Database Connection Attempt:
+[21-May-2026 23:37:56 Europe/Dublin]   Host: promanaged-it.com
+[21-May-2026 23:37:56 Europe/Dublin]   Port: 3306
+[21-May-2026 23:37:56 Europe/Dublin]   Database: p601229_Rosalyns_Hotel_V2
+[21-May-2026 23:37:56 Europe/Dublin]   User: p601229_hotel_admin
+[21-May-2026 23:37:56 Europe/Dublin]   Environment Variables Set: YES
+[21-May-2026 23:37:56 Europe/Dublin] Database Connection Successful!

@@ -1,0 +1,223 @@
+/* Stock Wastage — admin/stock-wastage.php */
+
+.summary-cards {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: 14px;
+    margin-bottom: 18px;
+}
+
+.summary-card {
+    background: #fff;
+    padding: 16px;
+    border-radius: 10px;
+    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.06);
+}
+
+.summary-card .label {
+    font-size: 12px;
+    color: #6c757d;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.summary-card .value {
+    font-size: 22px;
+    font-weight: 600;
+    margin-top: 4px;
+}
+
+.summary-card.warning {
+    border-left: 4px solid #856404;
+}
+
+.wastage-card {
+    background: var(--color-white, #fff);
+    padding: clamp(0.72rem, 0.62rem + 0.3vw, 0.96rem);
+    border-radius: 0.62rem;
+    margin-bottom: clamp(0.62rem, 0.55rem + 0.26vw, 0.88rem);
+    box-shadow: 0 0.12rem 0.5rem rgb(15 23 42 / 6%);
+}
+
+.wastage-card__title,
+.wastage-section-title {
+    margin: 0 0 clamp(0.48rem, 0.42rem + 0.2vw, 0.66rem);
+    font-family: var(--font-body, var(--font-sans));
+    font-weight: 600;
+    font-size: clamp(0.98rem, 0.92rem + 0.22vw, 1.16rem);
+    line-height: 1.25;
+    color: var(--admin-text, var(--color-text-primary));
+}
+
+.wastage-section-title--entries {
+    margin-top: clamp(0.86rem, 0.74rem + 0.36vw, 1.2rem);
+}
+
+.wastage-mini-table {
+    width: 100%;
+    border-collapse: collapse;
+}
+
+.wastage-mini-table td {
+    padding: 0.28rem 0;
+    font-size: clamp(0.72rem, 0.7rem + 0.12vw, 0.82rem);
+}
+
+.wastage-mini-table__muted {
+    color: var(--color-text-secondary, #6c757d);
+}
+
+.wastage-mini-table__cost {
+    text-align: right;
+    font-weight: 600;
+}
+
+.wastage-entry-form {
+    display: flex;
+    flex-direction: column;
+    gap: 0.55rem;
+}
+
+.wastage-date-field {
+    display: inline-flex;
+    flex-direction: column;
+    gap: 0.25rem;
+    margin-bottom: 0.2rem;
+}
+
+.wastage-date-field label {
+    font-size: clamp(0.66rem, 0.64rem + 0.08vw, 0.73rem);
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--color-text-secondary, #6c757d);
+}
+
+.wastage-date-field input {
+    min-height: 2.3rem;
+    padding: 0.35rem 0.58rem;
+    border: 1px solid var(--admin-surface-border, #d6d8db);
+    border-radius: 0.42rem;
+    font-size: clamp(0.78rem, 0.75rem + 0.1vw, 0.86rem);
+}
+
+.wastage-form-actions {
+    margin-top: 0.24rem;
+    display: flex;
+    gap: 0.46rem;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+}
+
+.reminder-banner {
+    background: #fff3cd;
+    color: #856404;
+    padding: 12px 16px;
+    border-radius: 6px;
+    margin-bottom: 16px;
+    font-size: 14px;
+}
+
+.form-row {
+    display: grid;
+    grid-template-columns: 2fr 1fr 2fr 32px;
+    gap: 0.5rem;
+    align-items: center;
+    margin-bottom: 0.46rem;
+}
+
+.form-row select,
+.form-row input {
+    min-height: 2.3rem;
+    padding: 0.35rem 0.52rem;
+    border: 1px solid #d6d8db;
+    border-radius: 6px;
+    font-size: clamp(0.76rem, 0.73rem + 0.12vw, 0.84rem);
+}
+
+.form-row__remove {
+    border: 0;
+    background: transparent;
+    color: #c82333;
+    cursor: pointer;
+    min-height: 2.1rem;
+    min-width: 2.1rem;
+    border-radius: 0.5rem;
+}
+
+.form-row__remove:hover {
+    background: rgb(185 32 29 / 10%);
+}
+
+.stock-table {
+    width: 100%;
+    border-collapse: collapse;
+    background: #fff;
+    border-radius: 10px;
+    overflow: hidden;
+    margin-top: 18px;
+}
+
+.stock-table th,
+.stock-table td {
+    padding: 10px 14px;
+    border-bottom: 1px solid #eaecef;
+    font-size: 13px;
+}
+
+.stock-table th {
+    background: #f8f9fb;
+    text-align: left;
+}
+
+.btn-primary {
+    background: var(--color-primary, #8A775F);
+    color: #fff;
+    border: none;
+    padding: 10px 18px;
+    border-radius: 6px;
+    cursor: pointer;
+}
+
+.btn-secondary {
+    background: #e9ecef;
+    color: #3f4654;
+    border: none;
+    padding: 10px 18px;
+    border-radius: 6px;
+    cursor: pointer;
+}
+
+@media (max-width: 64rem) {
+    .form-row {
+        grid-template-columns: 1.5fr 0.8fr 1.2fr 2.1rem;
+    }
+}
+
+@media (max-width: 48rem) {
+    .wastage-form-actions {
+        justify-content: stretch;
+    }
+
+    .wastage-form-actions .btn-primary,
+    .wastage-form-actions .btn-secondary {
+        width: 100%;
+    }
+
+    .form-row {
+        grid-template-columns: 1fr;
+        gap: 0.42rem;
+        position: relative;
+        padding: 0.46rem;
+        border: 1px solid var(--admin-surface-border, #eaecef);
+        border-radius: 0.52rem;
+        background: var(--color-white, #fff);
+    }
+
+    .form-row__remove {
+        position: absolute;
+        top: 0.22rem;
+        right: 0.22rem;
+    }
+}

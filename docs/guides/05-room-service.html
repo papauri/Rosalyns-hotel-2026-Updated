@@ -1,0 +1,142 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Room Service Guide — Rosalyn's Hotel</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link
+    href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@400;500;600;700&family=Jost:wght@300;400;500;600&display=swap"
+    rel="stylesheet">
+  <link rel="stylesheet" href="assets/guide-theme.css">
+  <script src="assets/guide-init.js" defer></script>
+</head>
+
+<body>
+
+  <nav class="top">
+    <a href="index.html" class="brand">ROSALYN'S HOTEL</a>
+    <div class="nav-links">
+      <a href="index.html">All Guides</a>
+      <a href="99-admin-dashboard-full-guide.html">Admin Bible</a>
+      <a href="owner-handover.php">Owner</a>
+      <a href="04-cds-coffee.html">← Prev</a>
+      <a href="06-housekeeping.html">Next →</a>
+    </div>
+  </nav>
+
+  <header class="hero">
+    <div class="deck">
+      <div class="eyebrow">Guide 05 &middot; In-room service</div>
+      <h1>Room Service</h1>
+      <p class="lead">The control panel for in-room food, drink and service requests. Charges go directly to the guest
+        folio.</p>
+      <div class="meta">
+        <span>URL <strong>/admin/room-service-dashboard.php</strong></span>
+        <span>Role <strong>room_service · receptionist · manager · admin</strong></span>
+        <span>Read time <strong>5 min</strong></span>
+      </div>
+    </div>
+  </header>
+
+  <main class="content">
+    <div class="deck">
+
+      <section>
+        <h2>At-a-glance KPIs</h2>
+        <table>
+          <thead>
+            <tr>
+              <th>Card</th>
+              <th>Meaning</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><strong>Active orders</strong></td>
+              <td>Orders not yet delivered to a room.</td>
+            </tr>
+            <tr>
+              <td><strong>Delivered today</strong></td>
+              <td>Completed today (resets at midnight).</td>
+            </tr>
+            <tr>
+              <td><strong>Avg. delivery time</strong></td>
+              <td>From order placement to <em>mark delivered</em>.</td>
+            </tr>
+            <tr>
+              <td><strong>Revenue today</strong></td>
+              <td>Sum of room-service charges added to folios today.</td>
+            </tr>
+          </tbody>
+        </table>
+      </section>
+
+      <section>
+        <h2>Place a new order</h2>
+        <ol class="steps">
+          <li>Click <strong>+ Place Room-Service Order</strong>.</li>
+          <li>Search the <strong>room number</strong> or guest name &mdash; current in-house bookings autocomplete.</li>
+          <li>Pick items from the menu (grouped by station &mdash; kitchen / bar / coffee).</li>
+          <li>Enter qty for each line.</li>
+          <li>(Optional) Add a <strong>special note</strong> (e.g. "no ice", "extra towels").</li>
+          <li>Tap <strong>Send to kitchen &amp; charge to folio</strong>.</li>
+        </ol>
+        <div class="callout note">
+          The order fires to the right station (KDS / BDS / CDS); a line is added to the guest's
+          <strong>booking folio</strong> with VAT applied. <strong>Stock is deducted when the station marks each item
+            Ready</strong> — not at order placement. The folio charge posts immediately at placement for billing
+          accuracy.
+        </div>
+      </section>
+
+      <section>
+        <h2>Mark an order delivered</h2>
+        <ol class="steps">
+          <li>From the <strong>Active queue</strong>, tap <strong>Mark Delivered</strong> on the order card.</li>
+          <li>The card moves to <strong>Delivered today</strong> and the runner timestamp is recorded.</li>
+        </ol>
+      </section>
+
+      <section>
+        <h2>Voiding <span class="pill amber">admin / manager only</span></h2>
+        <ol class="steps">
+          <li>Open the order from <strong>Stock Orders → Room Service</strong>.</li>
+          <li>Tap <strong>Void</strong>, type a reason ≥ 8 characters.</li>
+          <li>Stock is restored for any items already marked Ready on the station display, the folio line is reversed,
+            and the order disappears from KDS/BDS/CDS.</li>
+        </ol>
+      </section>
+
+      <section>
+        <h2>Tips</h2>
+        <ul class="checklist">
+          <li>Always confirm the room number with the guest before placing &mdash; folios cannot be moved between
+            bookings.</li>
+          <li>If a guest checks out before paying, the room-service line stays on the unpaid folio and shows on the
+            <strong>final invoice</strong>.
+          </li>
+          <li>For complimentary orders, admin or manager can void the line after delivery, which clears the folio charge
+            but
+            <strong>keeps the stock deducted</strong> (use this for staff meals / comps).
+          </li>
+        </ul>
+      </section>
+
+    </div>
+  </main>
+
+  <footer class="guide-footer">
+    <div class="deck">
+      <div class="crest">— R H —</div>
+      <p><a href="04-cds-coffee.html">← CDS</a> &middot; <a href="index.html">All guides</a> &middot; <a
+          href="99-admin-dashboard-full-guide.html">Admin Bible</a> &middot; <a href="owner-handover.php">Owner
+          handover</a> &middot; <a href="06-housekeeping.html">Housekeeping →</a></p>
+    </div>
+  </footer>
+
+</body>
+
+</html>

@@ -1,0 +1,196 @@
+/* ── Section Headers & Page Heroes Management Page Styles ── */
+
+/* Universal box-sizing inside this page's panels */
+#tab-heroes *,
+#tab-sections * {
+    box-sizing: border-box;
+}
+
+/* Tab navigation bar */
+.sh-tabs {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+}
+
+.sh-tabs::-webkit-scrollbar {
+    display: none;
+}
+
+/* Tab panels */
+.sh-tab-panel {
+    width: 100%;
+}
+
+/* -------------------------------------------------------------------
+   Hero cards (inside #tab-heroes)
+------------------------------------------------------------------- */
+
+/* Hero card top row: title+badges vs edit button */
+.sh-hero-card-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: 12px;
+    flex-wrap: wrap;
+    margin-bottom: 16px;
+}
+
+/* Preview block inside hero card */
+.sh-hero-preview {
+    padding: 20px;
+    background: linear-gradient(135deg, #2a2723 0%, #3d352e 100%);
+    border-radius: 6px;
+    margin-bottom: 16px;
+    text-align: center;
+    overflow: hidden;
+    word-break: break-word;
+}
+
+/* Edit form CTA grid: 2-col on wide, 1-col on narrow */
+.sh-cta-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 16px;
+}
+
+@media (max-width: 640px) {
+    .sh-cta-grid {
+        grid-template-columns: 1fr;
+    }
+}
+
+/* -------------------------------------------------------------------
+   Section header cards (inside #tab-sections)
+------------------------------------------------------------------- */
+
+/* Filter bar */
+.filter-bar {
+    background: #fff;
+    border: 1px solid #e7ebf1;
+    border-radius: 10px;
+    padding: 14px 16px;
+    margin-bottom: 20px;
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 10px;
+}
+
+/* Card top row: section key info vs action buttons */
+.sh-card-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: 12px;
+    flex-wrap: wrap;
+    margin-bottom: 20px;
+}
+
+/* Action buttons group */
+.sh-card-actions {
+    display: flex;
+    gap: 8px;
+    flex-shrink: 0;
+    flex-wrap: wrap;
+}
+
+/* Section preview h2 — fluid so it never overflows */
+.sh-section-preview h2 {
+    font-family: 'Cormorant Garamond', Georgia, serif;
+    font-size: clamp(20px, 3vw, 32px);
+    font-weight: 700;
+    color: var(--navy, #231F1C);
+    margin-bottom: 16px;
+    word-break: break-word;
+}
+
+/* -------------------------------------------------------------------
+   Inline form inputs shared by both panels
+------------------------------------------------------------------- */
+#tab-heroes input[type="text"],
+#tab-heroes textarea,
+#tab-sections input[type="text"],
+#tab-sections textarea {
+    width: 100%;
+    box-sizing: border-box;
+}
+
+/* -------------------------------------------------------------------
+   Style Guide block (inside .content so sidebar offset is inherited)
+------------------------------------------------------------------- */
+.sh-style-guide {
+    margin-top: 32px;
+}
+
+.sh-style-guide__heading {
+    font-size: 20px;
+    margin-bottom: 16px;
+    color: var(--navy, #231F1C);
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.sh-style-guide__heading i {
+    color: var(--gold, #B18247);
+}
+
+.sh-style-guide__grid {
+    display: grid;
+    gap: 20px;
+    grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+}
+
+.sh-style-guide__term {
+    color: var(--gold, #B18247);
+    margin: 0 0 8px;
+    font-size: 14px;
+}
+
+.sh-style-guide__desc {
+    color: var(--admin-muted, #6c757d);
+    font-size: 14px;
+    line-height: 1.6;
+    margin: 0;
+}
+
+/* -------------------------------------------------------------------
+   Responsive — narrow desktop / tablet (sidebar visible = tight)
+------------------------------------------------------------------- */
+@media (max-width: 1100px) {
+
+    /* Page header: stack title and revert button */
+    .page-header>div {
+        flex-wrap: wrap;
+        gap: 12px;
+    }
+}
+
+@media (max-width: 768px) {
+
+    /* Hero card: stack header row vertically */
+    .sh-hero-card-header,
+    .sh-card-header {
+        flex-direction: column;
+        align-items: flex-start;
+    }
+
+    /* Edit buttons go full-width on small screens */
+    .sh-card-actions {
+        width: 100%;
+    }
+
+    .sh-card-actions button,
+    .sh-card-actions .btn-small {
+        flex: 1;
+        text-align: center;
+        justify-content: center;
+    }
+}
+
+@media (max-width: 480px) {
+    .sh-cta-grid {
+        grid-template-columns: 1fr;
+    }
+}

@@ -1,0 +1,927 @@
+/* =====================================================================
+   admin-responsive-enhancements.css — Rosalyn's Hotel 2026
+   --------------------------------------------------------------------
+   Linked LAST so it overrides earlier admin rules where needed.
+   Goal: every admin page (and the touch-heavy stations: POS, KDS,
+   BDS, CDS, Stock-Orders) work fluidly from 320px phones to 4K
+   wall-mounted displays without horizontal scroll.
+   ===================================================================== */
+
+/* --- Global card + table scroll fix -------------------------------- *
+   .table-card has overflow:hidden which CLIPS tables placed directly  *
+   inside it without a .table-responsive wrapper (e.g. room-           *
+   maintenance.php). Switching to overflow-x:auto lets the card itself *
+   scroll horizontally when its table is wider than the viewport.      *
+   max-width:100% on all card wrappers stops them expanding the page.  *
+   Tables directly inside cards (no wrapper) get white-space:nowrap at *
+   ≤768px so scroll activates instead of text wrapping/clipping.       *
+   ------------------------------------------------------------------- */
+.table-card {
+    overflow-x: auto !important;
+    overflow-y: visible !important;
+    max-width: 100%;
+    -webkit-overflow-scrolling: touch;
+    /* show a subtle scrollbar so users know it scrolls */
+    scrollbar-width: thin;
+    scrollbar-color: var(--color-primary, #8A775F) #f1f1f1;
+}
+
+.card,
+.panel,
+.table-container,
+.hk-section,
+.rm-section,
+.content-card,
+.section-card {
+    max-width: 100%;
+}
+
+/* Tables with no .table-responsive wrapper inside cards */
+@media (max-width: 768px) {
+
+    .table-card>table,
+    .card>table,
+    .panel>table,
+    .hk-section>table,
+    .rm-section>table {
+        min-width: max-content;
+        white-space: nowrap;
+    }
+
+    /* th/td inside unclassed tables inside cards */
+    .table-card>table th,
+    .table-card>table td,
+    .card>table th,
+    .card>table td,
+    .panel>table th,
+    .panel>table td {
+        padding: 7px 9px !important;
+        font-size: 12px !important;
+    }
+}
+
+@media (max-width: 480px) {
+
+    .table-card>table th,
+    .table-card>table td,
+    .card>table th,
+    .card>table td,
+    .panel>table th,
+    .panel>table td {
+        padding: 6px 7px !important;
+        font-size: 11px !important;
+    }
+}
+
+/* --- Global table scroll: max-width is the critical missing piece -- *
+   admin-styles.css has width:100% + overflow-x:auto on .table-        *
+   responsive but WITHOUT max-width:100% the wrapper expands with the  *
+   table instead of constraining it. Adding it here once covers every  *
+   admin page without touching individual page CSS.                    *
+   ------------------------------------------------------------------- */
+.table-responsive,
+.table-wrapper {
+    max-width: 100%;
+}
+
+/* Compact th/td padding as screens narrow — applied globally with
+   !important so per-page CSS doesn't fight it. mobile-enhanced tables
+   opt out because they switch to card view and need normal whitespace. */
+@media (max-width: 1024px) {
+
+    .table th,
+    .table thead th {
+        padding: 8px 10px !important;
+        font-size: 12px !important;
+    }
+
+    .table td,
+    .table tbody td {
+        padding: 9px 10px !important;
+        font-size: 12.5px !important;
+    }
+}
+
+@media (max-width: 768px) {
+
+    .table-responsive,
+    .table-wrapper {
+        overflow-x: auto !important;
+        -webkit-overflow-scrolling: touch;
+    }
+
+    /* Prevent wrapping on dense tables so horizontal scroll kicks in */
+    .table:not(.mobile-enhanced) {
+        white-space: nowrap;
+    }
+
+    .table th,
+    .table thead th {
+        padding: 7px 8px !important;
+        font-size: 11.5px !important;
+    }
+
+    .table td,
+    .table tbody td {
+        padding: 7px 8px !important;
+        font-size: 12px !important;
+    }
+}
+
+@media (max-width: 480px) {
+
+    .table th,
+    .table thead th {
+        padding: 6px 7px !important;
+        font-size: 11px !important;
+    }
+
+    .table td,
+    .table tbody td {
+        padding: 6px 7px !important;
+        font-size: 11px !important;
+    }
+}
+
+:root {
+    --rh-admin-base-font: clamp(13px, 0.45vw + 11px, 17px);
+}
+
+@media screen and (min-width: 320px) {
+    body {
+        font-size: var(--rh-admin-base-font);
+    }
+}
+
+html,
+body {
+    max-width: 100%;
+    overflow-x: hidden;
+}
+
+/* --- Footer always at bottom --------------------------------------- *
+   Body is a flex column so the footer stays at the very bottom even   *
+   on short pages. The content area grows to fill available space.     *
+   ------------------------------------------------------------------- */
+body {
+    display: flex;
+    flex-direction: column;
+    min-height: 100vh;
+}
+
+body>.content,
+body>.admin-content,
+body>.admin-container,
+body>.admin-wrapper,
+body>main {
+    flex: 1 0 auto;
+}
+
+body>footer {
+    flex-shrink: 0;
+}
+
+/* --- Universal table responsiveness --------------------------------- */
+.admin-content table,
+.admin-container table {
+    max-width: 100%;
+}
+
+.admin-content .table-wrap,
+.admin-content .scroll-x,
+.admin-container .table-wrap,
+.admin-container .scroll-x {
+    width: 100%;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+}
+
+/* Force any plain table inside admin-content to be horizontally
+   scrollable on tight viewports. */
+@media (max-width: 900px) {
+    .admin-content table:not(.no-scroll) {
+        display: block;
+        overflow-x: auto;
+        -webkit-overflow-scrolling: touch;
+        white-space: nowrap;
+    }
+}
+
+/* --- Touch target ergonomics for stations --------------------------- */
+@media (hover: none) and (pointer: coarse) {
+
+    .admin-content button,
+    .admin-content .btn,
+    .admin-content a.btn,
+    .admin-content input[type="submit"],
+    .till-bar button,
+    .till-grid button,
+    .kds-drawer button,
+    .filter button,
+    .cat-btn,
+    .menu-btn {
+        min-height: 44px;
+        min-width: 44px;
+        touch-action: manipulation;
+    }
+
+    .admin-content input[type="text"],
+    .admin-content input[type="email"],
+    .admin-content input[type="number"],
+    .admin-content input[type="search"],
+    .admin-content input[type="tel"],
+    .admin-content input[type="password"],
+    .admin-content input[type="date"],
+    .admin-content textarea,
+    .admin-content select {
+        font-size: 16px;
+        min-height: 44px;
+    }
+
+    /* Stop accidental long-press selection on POS/KDS chrome */
+    .till-bar,
+    .till-grid,
+    .kds-board,
+    .kds-drawer,
+    .station-strip,
+    .ticket-card {
+        -webkit-user-select: none;
+        user-select: none;
+    }
+
+    /* iOS / Android tap highlight — disable for cleaner till feel */
+    .till-grid *,
+    .kds-board * {
+        -webkit-tap-highlight-color: rgba(0, 0, 0, 0);
+    }
+}
+
+/* --- POS till — layout fluidity ------------------------------------- */
+@media (max-width: 1100px) {
+    .till-grid {
+        grid-template-columns: 200px 1fr 320px;
+    }
+}
+
+@media (max-width: 900px) {
+    .till-grid {
+        grid-template-columns: 1fr;
+    }
+
+    .till-wrap {
+        grid-template-rows: 56px auto 1fr;
+    }
+
+    .till-bar {
+        flex-wrap: wrap;
+        padding: 6px 10px;
+        gap: 6px;
+    }
+
+    .till-bar .me {
+        width: 100%;
+        justify-content: flex-start;
+        gap: 6px;
+    }
+}
+
+@media (min-width: 1800px) {
+    .till-grid {
+        grid-template-columns: 280px 1fr 460px;
+    }
+}
+
+@media (min-width: 2560px) {
+    .till-grid {
+        grid-template-columns: 360px 1fr 600px;
+    }
+
+    .till-bar {
+        font-size: 16px;
+    }
+}
+
+/* --- KDS / BDS / CDS — bigger ticket cards on big-screen ----------- */
+@media (min-width: 1800px) {
+
+    .kds-board,
+    .board {
+        grid-template-columns: repeat(auto-fill, minmax(360px, 1fr)) !important;
+        gap: 20px !important;
+    }
+}
+
+@media (min-width: 2560px) {
+
+    .kds-board,
+    .board {
+        grid-template-columns: repeat(auto-fill, minmax(420px, 1fr)) !important;
+        gap: 28px !important;
+    }
+
+    .ticket-card {
+        font-size: 18px;
+    }
+}
+
+/* --- Stock orders & receipt grid ----------------------------------- */
+@media (max-width: 900px) {
+    .receipt-grid {
+        grid-template-columns: 1fr !important;
+    }
+}
+
+/* --- 4K TV wall-mount mode ----------------------------------------- */
+@media (min-width: 3840px) {
+    body {
+        font-size: 22px;
+    }
+
+    .admin-container,
+    .admin-content {
+        max-width: 3400px;
+        padding-left: 32px;
+        padding-right: 32px;
+    }
+
+    .stat-card .stat-value {
+        font-size: 3em;
+    }
+
+    .ticket-card {
+        font-size: 22px;
+        padding: 24px;
+    }
+
+    .till-bar {
+        font-size: 18px;
+        padding: 0 24px;
+    }
+}
+
+/* --- Page header compaction ---------------------------------------- *
+   Admin page-headers mix <h1>, <h2>, <h3> with/without .page-title.  *
+   The public typography.css sets h2 to clamp(38–55px) Cormorant       *
+   Garamond. Override ALL heading tags inside .page-header to a        *
+   compact Jost UI style, then tighten further as screens narrow.      *
+   ------------------------------------------------------------------- */
+.page-header h1,
+.page-header h2,
+.page-header h3,
+.page-header .page-title,
+.content-header h1,
+.content-header h2,
+.content-header h3,
+.content-header .page-title,
+.page-title {
+    font-family: 'Jost', sans-serif !important;
+    font-size: 20px !important;
+    font-weight: 600 !important;
+    color: var(--navy, #231F1C) !important;
+    letter-spacing: 0 !important;
+    line-height: 1.3 !important;
+    margin: 0 !important;
+}
+
+.page-header,
+.content-header {
+    margin-bottom: 20px !important;
+    gap: 10px 16px !important;
+}
+
+@media (max-width: 1200px) {
+
+    .page-header,
+    .content-header {
+        margin-bottom: 16px !important;
+    }
+
+    .page-header h1,
+    .page-header h2,
+    .page-header h3,
+    .page-header .page-title,
+    .content-header h1,
+    .content-header h2,
+    .content-header h3,
+    .content-header .page-title,
+    .page-title {
+        font-size: 18px !important;
+    }
+}
+
+@media (max-width: 900px) {
+
+    .page-header,
+    .content-header {
+        margin-bottom: 13px !important;
+        gap: 8px !important;
+    }
+
+    .page-header h1,
+    .page-header h2,
+    .page-header h3,
+    .page-header .page-title,
+    .content-header h1,
+    .content-header h2,
+    .content-header h3,
+    .content-header .page-title,
+    .page-title {
+        font-size: 16px !important;
+    }
+}
+
+@media (max-width: 768px) {
+
+    .page-header,
+    .content-header {
+        flex-direction: row !important;
+        align-items: center !important;
+        flex-wrap: wrap !important;
+        margin-bottom: 11px !important;
+        gap: 8px 12px !important;
+    }
+
+    .page-header h1,
+    .page-header h2,
+    .page-header h3,
+    .page-header .page-title,
+    .content-header h1,
+    .content-header h2,
+    .content-header h3,
+    .content-header .page-title,
+    .page-title {
+        font-size: 15px !important;
+    }
+}
+
+@media (max-width: 480px) {
+
+    .page-header,
+    .content-header {
+        margin-bottom: 9px !important;
+    }
+
+    .page-header h1,
+    .page-header h2,
+    .page-header h3,
+    .page-header .page-title,
+    .content-header h1,
+    .content-header h2,
+    .content-header h3,
+    .content-header .page-title,
+    .page-title {
+        font-size: 14px !important;
+    }
+}
+
+/* Normalized top page intro overrides compact page-header rules above */
+.rh-admin-page-header .rh-admin-page-title {
+    font-family: 'Jost', sans-serif !important;
+    font-size: clamp(1.35rem, 1.1rem + 1vw, 2rem) !important;
+    font-weight: 600 !important;
+    line-height: 1.08 !important;
+    letter-spacing: 0.012em !important;
+    margin: 0 !important;
+}
+
+.rh-admin-page-header .rh-admin-page-subtitle {
+    font-family: 'Jost', sans-serif !important;
+    font-size: clamp(0.8rem, 0.76rem + 0.2vw, 0.95rem) !important;
+    font-weight: 400 !important;
+    line-height: 1.5 !important;
+    margin: 0 !important;
+}
+
+/* Global adaptive density to keep admin sections/tables fitting short viewports */
+body.admin-dynamic-layout #rh-admin-page>.content,
+body.admin-dynamic-layout #rh-admin-page>.admin-content,
+body.admin-dynamic-layout #rh-admin-page>.admin-container,
+body.admin-dynamic-layout #rh-admin-page>.admin-wrapper,
+body.admin-dynamic-layout #rh-admin-page>.invoices-container,
+body.admin-dynamic-layout #rh-admin-page>.booking-details-container,
+body.admin-dynamic-layout #rh-admin-page>.booking-details-page,
+body.admin-dynamic-layout #rh-admin-page>.reports-container,
+body.admin-dynamic-layout #rh-admin-page>.payments-container,
+body.admin-dynamic-layout #rh-admin-page>.payment-details-container,
+body.admin-dynamic-layout #rh-admin-page>.payment-add-container,
+body.admin-dynamic-layout #rh-admin-page>.payment-refund-container,
+body.admin-dynamic-layout #rh-admin-page>.room-dashboard,
+body.admin-dynamic-layout #rh-admin-page>.tentative-page,
+body.admin-dynamic-layout #rh-admin-page>.user-management-container,
+body.admin-dynamic-layout #rh-admin-page>.wrap,
+body.admin-dynamic-layout #rh-admin-page>main {
+    max-width: 100%;
+}
+
+@media (min-width: 769px) and (max-height: 1100px) {
+
+    body.admin-dynamic-layout #rh-admin-page>.content,
+    body.admin-dynamic-layout #rh-admin-page>.admin-content,
+    body.admin-dynamic-layout #rh-admin-page>.admin-container,
+    body.admin-dynamic-layout #rh-admin-page>.admin-wrapper,
+    body.admin-dynamic-layout #rh-admin-page>.invoices-container,
+    body.admin-dynamic-layout #rh-admin-page>.booking-details-container,
+    body.admin-dynamic-layout #rh-admin-page>.booking-details-page,
+    body.admin-dynamic-layout #rh-admin-page>.reports-container,
+    body.admin-dynamic-layout #rh-admin-page>.payments-container,
+    body.admin-dynamic-layout #rh-admin-page>.payment-details-container,
+    body.admin-dynamic-layout #rh-admin-page>.payment-add-container,
+    body.admin-dynamic-layout #rh-admin-page>.payment-refund-container,
+    body.admin-dynamic-layout #rh-admin-page>.room-dashboard,
+    body.admin-dynamic-layout #rh-admin-page>.tentative-page,
+    body.admin-dynamic-layout #rh-admin-page>.user-management-container,
+    body.admin-dynamic-layout #rh-admin-page>.wrap,
+    body.admin-dynamic-layout #rh-admin-page>main {
+        padding-top: clamp(0.8rem, 0.74rem + 0.25vw, 1.1rem) !important;
+        padding-bottom: clamp(0.8rem, 0.72rem + 0.28vw, 1.15rem) !important;
+        gap: clamp(0.6rem, 0.54rem + 0.24vw, 0.95rem);
+    }
+
+    body.admin-dynamic-layout .rh-admin-page-header {
+        margin-bottom: clamp(0.6rem, 0.54rem + 0.2vw, 0.95rem) !important;
+        padding: clamp(0.75rem, 0.7rem + 0.2vw, 1rem) clamp(0.85rem, 0.8rem + 0.3vw, 1.15rem) !important;
+    }
+
+    body.admin-dynamic-layout .stat-card,
+    body.admin-dynamic-layout .dashboard-card,
+    body.admin-dynamic-layout .analytics-card,
+    body.admin-dynamic-layout .users-section,
+    body.admin-dynamic-layout .permissions-panel,
+    body.admin-dynamic-layout .table-card {
+        margin-bottom: clamp(0.55rem, 0.5rem + 0.22vw, 0.9rem) !important;
+    }
+
+    body.admin-dynamic-layout .table th,
+    body.admin-dynamic-layout .table td,
+    body.admin-dynamic-layout .admin-table th,
+    body.admin-dynamic-layout .admin-table td,
+    body.admin-dynamic-layout .users-table th,
+    body.admin-dynamic-layout .users-table td {
+        padding-top: clamp(0.36rem, 0.34rem + 0.12vw, 0.52rem) !important;
+        padding-bottom: clamp(0.36rem, 0.34rem + 0.12vw, 0.52rem) !important;
+    }
+
+    body.admin-dynamic-layout .table-container,
+    body.admin-dynamic-layout .admin-table-wrap,
+    body.admin-dynamic-layout .admin-table-container,
+    body.admin-dynamic-layout #rh-admin-page .table-responsive,
+    body.admin-dynamic-layout .users-section,
+    body.admin-dynamic-layout .bookings-table-wrap,
+    body.admin-dynamic-layout .report-table-wrapper {
+        max-height: none !important;
+        overflow-y: visible !important;
+    }
+
+    body.admin-dynamic-layout .table-container,
+    body.admin-dynamic-layout .admin-table-wrap,
+    body.admin-dynamic-layout .admin-table-container,
+    body.admin-dynamic-layout #rh-admin-page .table-responsive,
+    body.admin-dynamic-layout .bookings-table-wrap,
+    body.admin-dynamic-layout .report-table-wrapper {
+        overflow-x: auto;
+        overflow-y: hidden !important;
+    }
+
+    body.admin-dynamic-layout .table-container.mobile-enhanced-wrapper,
+    body.admin-dynamic-layout .admin-table-wrap.mobile-enhanced-wrapper,
+    body.admin-dynamic-layout .admin-table-container.mobile-enhanced-wrapper,
+    body.admin-dynamic-layout #rh-admin-page .table-responsive.mobile-enhanced-wrapper,
+    body.admin-dynamic-layout .bookings-table-wrap.mobile-enhanced-wrapper,
+    body.admin-dynamic-layout .report-table-wrapper.mobile-enhanced-wrapper {
+        overflow-x: hidden !important;
+        overflow-y: visible !important;
+    }
+
+    body.admin-dynamic-layout .users-section {
+        overflow: visible !important;
+    }
+
+    body.admin-dynamic-layout .role-overview {
+        grid-template-columns: repeat(auto-fit, minmax(min(8rem, 100%), 1fr));
+        gap: clamp(0.45rem, 0.42rem + 0.14vw, 0.7rem);
+        margin-bottom: clamp(0.65rem, 0.6rem + 0.2vw, 0.95rem);
+        max-height: none;
+        overflow: visible;
+        padding-right: 0.2rem;
+    }
+
+    body.admin-dynamic-layout .role-card {
+        padding: clamp(0.6rem, 0.56rem + 0.2vw, 0.9rem);
+    }
+
+    body.admin-dynamic-layout .role-card .role-icon {
+        width: clamp(2rem, 1.88rem + 0.4vw, 2.4rem);
+        height: clamp(2rem, 1.88rem + 0.4vw, 2.4rem);
+        margin-bottom: clamp(0.35rem, 0.32rem + 0.15vw, 0.58rem);
+        font-size: clamp(0.88rem, 0.83rem + 0.16vw, 1.1rem);
+    }
+
+    body.admin-dynamic-layout .role-card .role-count {
+        font-size: clamp(1.3rem, 1.15rem + 0.6vw, 1.8rem);
+    }
+
+    body.admin-dynamic-layout .role-card .role-label {
+        margin-top: clamp(0.12rem, 0.1rem + 0.05vw, 0.2rem);
+        font-size: clamp(0.62rem, 0.6rem + 0.1vw, 0.75rem);
+    }
+
+    body.admin-dynamic-layout .user-filters {
+        gap: clamp(0.25rem, 0.23rem + 0.1vw, 0.42rem);
+    }
+
+    body.admin-dynamic-layout .user-filters .filter-btn {
+        min-height: 1.95rem;
+        padding: 0.25rem 0.68rem;
+        font-size: clamp(0.64rem, 0.61rem + 0.1vw, 0.74rem);
+    }
+}
+
+@media (min-width: 769px) and (max-height: 920px) {
+
+    body.admin-dynamic-layout #rh-admin-page>.content,
+    body.admin-dynamic-layout #rh-admin-page>.admin-content,
+    body.admin-dynamic-layout #rh-admin-page>.admin-container,
+    body.admin-dynamic-layout #rh-admin-page>.admin-wrapper,
+    body.admin-dynamic-layout #rh-admin-page>.invoices-container,
+    body.admin-dynamic-layout #rh-admin-page>.booking-details-container,
+    body.admin-dynamic-layout #rh-admin-page>.booking-details-page,
+    body.admin-dynamic-layout #rh-admin-page>.reports-container,
+    body.admin-dynamic-layout #rh-admin-page>.payments-container,
+    body.admin-dynamic-layout #rh-admin-page>.payment-details-container,
+    body.admin-dynamic-layout #rh-admin-page>.payment-add-container,
+    body.admin-dynamic-layout #rh-admin-page>.payment-refund-container,
+    body.admin-dynamic-layout #rh-admin-page>.room-dashboard,
+    body.admin-dynamic-layout #rh-admin-page>.tentative-page,
+    body.admin-dynamic-layout #rh-admin-page>.user-management-container,
+    body.admin-dynamic-layout #rh-admin-page>.wrap,
+    body.admin-dynamic-layout #rh-admin-page>main {
+        padding-top: 0.65rem !important;
+        padding-bottom: 0.7rem !important;
+    }
+
+    body.admin-dynamic-layout .rh-admin-page-header {
+        margin-bottom: 0.56rem !important;
+        padding: 0.62rem 0.82rem !important;
+    }
+
+    body.admin-dynamic-layout .users-section,
+    body.admin-dynamic-layout .permissions-panel,
+    body.admin-dynamic-layout .table-card,
+    body.admin-dynamic-layout .table-container,
+    body.admin-dynamic-layout .admin-table-wrap,
+    body.admin-dynamic-layout .admin-table-container,
+    body.admin-dynamic-layout #rh-admin-page .table-responsive,
+    body.admin-dynamic-layout .bookings-table-wrap,
+    body.admin-dynamic-layout .report-table-wrapper {
+        max-height: none !important;
+        overflow-y: visible !important;
+    }
+
+    body.admin-dynamic-layout .table-container,
+    body.admin-dynamic-layout .admin-table-wrap,
+    body.admin-dynamic-layout .admin-table-container,
+    body.admin-dynamic-layout #rh-admin-page .table-responsive,
+    body.admin-dynamic-layout .bookings-table-wrap,
+    body.admin-dynamic-layout .report-table-wrapper {
+        overflow-x: auto;
+        overflow-y: hidden !important;
+    }
+
+    body.admin-dynamic-layout .table-container.mobile-enhanced-wrapper,
+    body.admin-dynamic-layout .admin-table-wrap.mobile-enhanced-wrapper,
+    body.admin-dynamic-layout .admin-table-container.mobile-enhanced-wrapper,
+    body.admin-dynamic-layout #rh-admin-page .table-responsive.mobile-enhanced-wrapper,
+    body.admin-dynamic-layout .bookings-table-wrap.mobile-enhanced-wrapper,
+    body.admin-dynamic-layout .report-table-wrapper.mobile-enhanced-wrapper {
+        overflow-x: hidden !important;
+        overflow-y: visible !important;
+    }
+
+    body.admin-dynamic-layout .users-section,
+    body.admin-dynamic-layout .permissions-panel,
+    body.admin-dynamic-layout .table-card {
+        overflow: visible !important;
+    }
+
+    body.admin-dynamic-layout .role-overview {
+        grid-template-columns: repeat(auto-fit, minmax(min(6.75rem, 100%), 1fr));
+        gap: 0.4rem;
+        margin-bottom: 0.7rem;
+        max-height: none;
+        overflow: visible;
+    }
+
+    body.admin-dynamic-layout .role-card {
+        padding: 0.52rem;
+        border-radius: 10px;
+    }
+
+    body.admin-dynamic-layout .role-card .role-count {
+        font-size: clamp(1.18rem, 1.08rem + 0.4vw, 1.45rem);
+    }
+
+    body.admin-dynamic-layout .users-section-header {
+        padding: 0.62rem 0.82rem;
+    }
+}
+
+/* bookings.php and tentative-bookings.php use <h3> label + .number value
+   without .stat-icon. Keep these compact and consistent in responsive mode. */
+.stat-card h3 {
+    font-family: 'Jost', sans-serif;
+    font-size: 12px;
+    font-weight: 500;
+    color: #6b7280;
+    margin: 0 0 5px;
+    letter-spacing: 0;
+    line-height: 1.2;
+    text-transform: none;
+}
+
+.stat-card .number {
+    font-family: 'Jost', sans-serif;
+    font-size: clamp(20px, 2.2vw, 28px);
+    font-weight: 700;
+    color: #1a1a2e;
+    line-height: 1.1;
+    letter-spacing: -0.4px;
+    margin: 0;
+}
+
+/* --- Stat cards: responsive compaction ----------------------------- *
+   Sidebar is ~292px wide. Cards stacked vertically (icon→value→label) *
+   become too tall as viewport narrows. Switching to a horizontal grid  *
+   layout (icon on left, value+label stacked right) cuts height ~50%.  *
+   :has(.stat-icon) scopes these rules to modern cards only — pages    *
+   that still use old <h3>+.number markup are unaffected here.         *
+   ------------------------------------------------------------------- */
+
+/* ≤1200px: 3 cols, horizontal card layout */
+@media (max-width: 1200px) {
+    .stats-grid {
+        grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
+        gap: 10px !important;
+    }
+
+    /* Horizontal layout: icon left, value+label stacked right */
+    .stat-card:has(.stat-icon) {
+        display: grid !important;
+        grid-template-columns: 26px 1fr !important;
+        grid-template-rows: auto auto !important;
+        align-items: center !important;
+        column-gap: 9px !important;
+        row-gap: 2px !important;
+        padding: 10px 12px !important;
+    }
+
+    .stat-card .stat-sub {
+        display: none !important;
+    }
+
+    .stat-card .stat-icon {
+        grid-column: 1 !important;
+        grid-row: 1 / 3 !important;
+        width: 26px !important;
+        height: 26px !important;
+        margin-bottom: 0 !important;
+    }
+
+    .stat-card .stat-icon i {
+        font-size: 12px !important;
+    }
+
+    .stat-card .stat-value {
+        grid-column: 2 !important;
+        grid-row: 1 !important;
+        font-size: 15px !important;
+        letter-spacing: 0 !important;
+        margin: 0 !important;
+    }
+
+    .stat-card .stat-label {
+        grid-column: 2 !important;
+        grid-row: 2 !important;
+        font-size: 10.5px !important;
+    }
+
+    /* Old-pattern responsive reductions */
+    .stat-card h3 {
+        font-size: 11px;
+    }
+
+    .stat-card .number {
+        font-size: 18px;
+    }
+}
+
+/* ≤900px: drop to 2 columns, shrink further */
+@media (max-width: 900px) {
+    .stats-grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+        gap: 8px !important;
+    }
+
+    .stat-card:has(.stat-icon) {
+        padding: 9px 10px !important;
+        column-gap: 8px !important;
+    }
+
+    .stat-card .stat-icon {
+        width: 22px !important;
+        height: 22px !important;
+    }
+
+    .stat-card .stat-icon i {
+        font-size: 10px !important;
+    }
+
+    .stat-card .stat-value {
+        font-size: 14px !important;
+    }
+
+    .stat-card .stat-label {
+        font-size: 10px !important;
+    }
+
+    /* Old-pattern responsive reductions */
+    .stat-card h3 {
+        font-size: 10.5px;
+    }
+
+    .stat-card .number {
+        font-size: 15px;
+    }
+
+    .stat-card {
+        padding: 11px 12px;
+    }
+}
+
+/* --- Small phone (≤420px) — 2-col, minimal padding ----------------- */
+@media (max-width: 420px) {
+
+    .admin-container,
+    .admin-content {
+        padding: 8px !important;
+    }
+
+    .stats-grid {
+        grid-template-columns: 1fr 1fr !important;
+        gap: 8px !important;
+    }
+
+    .stat-card:has(.stat-icon) {
+        padding: 8px !important;
+    }
+
+    .stat-card .number {
+        font-size: 14px;
+    }
+
+    .modal,
+    .modal-content {
+        width: 100% !important;
+        max-width: 100% !important;
+        border-radius: 0 !important;
+    }
+}
+
+/* --- Reduced motion ------------------------------------------------- */
+@media (prefers-reduced-motion: reduce) {
+
+    *,
+    *::before,
+    *::after {
+        animation-duration: 0.01ms !important;
+        transition-duration: 0.01ms !important;
+    }
+}
+
+/* --- KPI currency prefix (universal — used by EOD, dashboard, reports, finance) --- */
+.kpi-currency {
+    font-size: 0.5em;
+    font-weight: 500;
+    color: var(--color-text-secondary, #6c757d);
+    vertical-align: 0.35em;
+    letter-spacing: 0.04em;
+    margin-right: 1px;
+}
+
+/* --- Print: clean invoices/receipts -------------------------------- */
+@media print {
+
+    .admin-header,
+    .admin-sidebar,
+    .no-print,
+    .rh-help-toggle,
+    .kds-menu-toggle,
+    .till-bar {
+        display: none !important;
+    }
+
+    body,
+    .admin-content {
+        background: #fff !important;
+        color: #000 !important;
+    }
+}

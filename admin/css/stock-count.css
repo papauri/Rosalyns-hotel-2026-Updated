@@ -1,0 +1,391 @@
+/* Stock Count / Cycle Count page styles */
+.grid-2 {
+    display: grid;
+    grid-template-columns: 380px 1fr;
+    gap: 18px;
+}
+
+@media (max-width: 1100px) {
+    .grid-2 {
+        grid-template-columns: 1fr;
+    }
+}
+
+.card {
+    background: var(--color-white, #fff);
+    border-radius: 10px;
+    border: 1px solid var(--admin-surface-border, #eaecef);
+    padding: 16px;
+}
+
+.card h3 {
+    margin: 0 0 12px;
+    font-size: 16px;
+}
+
+.form-field {
+    margin-bottom: 10px;
+}
+
+.form-field label {
+    display: block;
+    font-size: 11px;
+    font-weight: 600;
+    color: #495057;
+    margin-bottom: 4px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.form-field input,
+.form-field select,
+.form-field textarea {
+    width: 100%;
+    padding: 8px 10px;
+    border: 1px solid #d6d8db;
+    border-radius: 6px;
+    font-size: 13px;
+}
+
+.btn-primary {
+    background: var(--color-primary, #8A775F);
+    color: #fff;
+    border: none;
+    padding: 10px 16px;
+    border-radius: 6px;
+    cursor: pointer;
+    font-weight: 600;
+}
+
+.btn-secondary {
+    background: var(--color-white, #fff);
+    color: #495057;
+    border: 1px solid #d6d8db;
+    padding: 8px 14px;
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 13px;
+}
+
+.btn-danger {
+    background: var(--color-white, #fff);
+    color: #c82333;
+    border: 1px solid #f1b0b7;
+    padding: 8px 14px;
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 13px;
+}
+
+.btn-success {
+    background: #28a745;
+    color: #fff;
+    border: none;
+    padding: 9px 15px;
+    border-radius: 6px;
+    cursor: pointer;
+    font-weight: 600;
+}
+
+table.count-list {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 13px;
+}
+
+table.count-list th,
+table.count-list td {
+    padding: 8px 10px;
+    border-bottom: 1px solid var(--admin-surface-border, #eaecef);
+}
+
+table.count-list th {
+    background: var(--admin-table-head, #f8f9fb);
+    text-align: left;
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    color: #495057;
+}
+
+.pill {
+    display: inline-block;
+    padding: 2px 9px;
+    border-radius: 20px;
+    font-size: 10px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.st-draft {
+    background: #fff3cd;
+    color: #856404;
+}
+
+.st-submitted {
+    background: #cce5ff;
+    color: #004085;
+}
+
+.st-approved {
+    background: #d4edda;
+    color: #155724;
+}
+
+.st-rejected {
+    background: #f8d7da;
+    color: #721c24;
+}
+
+.var-pos {
+    color: #155724;
+    font-weight: 600;
+}
+
+.var-neg {
+    color: #c82333;
+    font-weight: 600;
+}
+
+.var-zero {
+    color: #6c757d;
+}
+
+.row-flag {
+    background: #fff7e6;
+}
+
+.row-block {
+    background: #fde7e9;
+}
+
+.lines-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 13px;
+}
+
+.lines-table th {
+    position: sticky;
+    top: 0;
+    background: var(--admin-table-head, #f8f9fb);
+    padding: 8px;
+    text-align: left;
+    font-size: 11px;
+    text-transform: uppercase;
+}
+
+.lines-table td {
+    padding: 6px 8px;
+    border-bottom: 1px solid var(--admin-surface-border, #eaecef);
+}
+
+.lines-table input.qty {
+    width: 90px;
+    padding: 5px;
+    text-align: right;
+    border: 1px solid #d6d8db;
+    border-radius: 5px;
+}
+
+.lines-table select.reason {
+    padding: 5px;
+    border: 1px solid #d6d8db;
+    border-radius: 5px;
+    font-size: 12px;
+    max-width: 140px;
+}
+
+.lines-table input.notes {
+    padding: 5px;
+    border: 1px solid #d6d8db;
+    border-radius: 5px;
+    font-size: 12px;
+    width: 100%;
+}
+
+.summary-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+    gap: 10px;
+    margin: 0 0 14px;
+}
+
+.sum-card {
+    background: var(--color-white, #fff);
+    border: 1px solid var(--admin-surface-border, #eaecef);
+    border-radius: 8px;
+    padding: 10px 14px;
+}
+
+.sum-card .lbl {
+    font-size: 11px;
+    color: #6c757d;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.sum-card .val {
+    font-size: 18px;
+    font-weight: 600;
+    margin-top: 4px;
+}
+
+.sum-card.bad .val {
+    color: #c82333;
+}
+
+.sum-card.good .val {
+    color: #155724;
+}
+
+.count-header {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 0.82rem;
+    margin-bottom: 0.9rem;
+}
+
+.count-header__title {
+    margin: 0;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    min-width: 0;
+    font-size: clamp(1.22rem, 1.08rem + 0.45vw, 1.62rem);
+}
+
+.count-header__meta {
+    font-size: clamp(0.72rem, 0.66rem + 0.2vw, 0.82rem);
+    color: #6c757d;
+    text-align: right;
+    line-height: 1.35;
+}
+
+@media (max-width: 64rem) {
+    .count-header {
+        grid-template-columns: 1fr;
+        align-items: start;
+    }
+
+    .count-header__meta {
+        text-align: left;
+    }
+}
+
+@media (max-width: 64rem) {
+    .card {
+        padding: 14px;
+        border-radius: 12px;
+    }
+
+    .summary-grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .lines-table,
+    .count-list {
+        display: block;
+        width: 100%;
+    }
+
+    .lines-table thead,
+    .count-list thead {
+        display: none;
+    }
+
+    .lines-table tbody,
+    .count-list tbody {
+        display: grid;
+        gap: 0.7rem;
+    }
+
+    .lines-table tr,
+    .count-list tr {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 0.46rem;
+        border: 1px solid var(--admin-surface-border, #eaecef);
+        border-radius: 10px;
+        padding: 0.7rem 0.78rem;
+        background: linear-gradient(180deg, #ffffff 0%, #f8fafc 100%);
+        box-shadow: 0 4px 14px rgba(15, 23, 42, 0.06);
+    }
+
+    .lines-table td,
+    .count-list td {
+        display: grid;
+        grid-template-columns: minmax(5.6rem, 38%) minmax(0, 1fr);
+        align-items: start;
+        gap: 0.45rem;
+        border-bottom: 0;
+        padding: 0;
+        text-align: left !important;
+    }
+
+    .lines-table td::before,
+    .count-list td::before {
+        content: attr(data-label);
+        font-size: clamp(0.64rem, 0.58rem + 0.2vw, 0.75rem);
+        font-weight: 700;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+        color: #64748b;
+        line-height: 1.35;
+    }
+
+    .lines-table td[data-label="Ingredient"],
+    .count-list td[data-label="Ingredient"],
+    .count-list td[data-label="Reference"],
+    .lines-table td[data-label="Notes"],
+    .lines-table td[data-label="Reason"] {
+        grid-column: 1 / -1;
+        grid-template-columns: 1fr;
+        gap: 0.28rem;
+        padding-bottom: 0.34rem;
+        border-bottom: 1px dashed rgba(100, 116, 139, 0.35);
+        margin-bottom: 0.1rem;
+    }
+
+    .lines-table td[data-label="Ingredient"]::before,
+    .count-list td[data-label="Ingredient"]::before,
+    .count-list td[data-label="Reference"]::before {
+        margin-bottom: 0;
+    }
+
+    .lines-table input.qty,
+    .lines-table input.notes,
+    .lines-table select.reason {
+        width: 100%;
+        max-width: 100%;
+        min-height: 2.72rem;
+    }
+
+    .lines-table input.qty,
+    .lines-table .var,
+    .lines-table .varCost,
+    .count-list td[data-label="Shortage"],
+    .count-list td[data-label="Surplus"],
+    .count-list td[data-label="Cost lost"] {
+        font-weight: 600;
+    }
+}
+
+@media (max-width: 40rem) {
+    .summary-grid {
+        grid-template-columns: 1fr;
+    }
+
+    .lines-table td,
+    .count-list td {
+        grid-template-columns: 1fr;
+        gap: 0.18rem;
+    }
+
+    .lines-table tr,
+    .count-list tr {
+        grid-template-columns: 1fr;
+    }
+}

@@ -1,0 +1,16 @@
+🏨 *{{hotel_name}}*
+
+⏳ *Tentative Booking Placed*
+
+Dear {{guest_name}},
+Your room has been placed on tentative hold.
+
+📋 *Details*
+Reference: *{{booking_reference}}*
+Room: {{room_name}}
+Check-in: {{check_in_date}}
+Check-out: {{check_out_date}}
+Total: *{{total_amount}}*
+
+⚠️ Please confirm within the hold period.
+Reply to this message or call: 📞 {{hotel_phone}}

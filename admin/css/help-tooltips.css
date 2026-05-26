@@ -1,0 +1,225 @@
+/* Help Tooltips — admin/includes/help-tooltips.php
+   Floating help tooltip bubble + toggle button styles.
+   #d4a843 is an intentional POS/KDS gold accent preserved as-is.
+*/
+
+.rh-help-bubble {
+    position: fixed;
+    z-index: 9998;
+    max-width: 320px;
+    background: #1f1f24;
+    color: #fff;
+    border: 1px solid #d4a843;
+    border-radius: 10px;
+    padding: 10px 14px;
+    font-size: 13px;
+    line-height: 1.45;
+    box-shadow: 0 8px 28px rgba(0, 0, 0, 0.45);
+    pointer-events: none;
+    opacity: 0;
+    transform: translateY(4px);
+    transition: opacity .15s, transform .15s;
+    font-family: 'Jost', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    font-weight: 400;
+    text-transform: none;
+    letter-spacing: 0;
+}
+
+.rh-help-bubble.show {
+    opacity: 1;
+    transform: translateY(0);
+}
+
+.rh-help-bubble strong {
+    color: #d4a843;
+    display: block;
+    margin-bottom: 2px;
+    font-size: 13px;
+}
+
+.rh-help-bubble small {
+    display: block;
+    margin-top: 6px;
+    color: #9aa3af;
+    font-size: 11px;
+    font-style: italic;
+}
+
+.rh-help-toggle {
+    position: fixed;
+    bottom: 14px;
+    right: 14px;
+    left: auto;
+    z-index: 9997;
+    background: color-mix(in srgb, var(--color-lux-ink) 92%, var(--color-text-secondary) 8%);
+    color: color-mix(in srgb, var(--color-lux-clay-50) 78%, var(--color-background) 22%);
+    border: 1px solid color-mix(in srgb, var(--color-lux-ink) 78%, var(--color-text-secondary) 22%);
+    border-radius: 999px;
+    padding: 8px 14px;
+    font-size: clamp(0.75rem, 0.72rem + 0.08vw, 0.84rem);
+    font-weight: 600;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    width: auto;
+    max-width: max-content;
+    min-width: 0;
+    flex: 0 0 auto;
+    box-shadow: 0 0.24rem 0.76rem color-mix(in srgb, var(--color-lux-ink) 32%, transparent);
+    font-family: 'Jost', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    transition: background 0.16s ease, color 0.16s ease, box-shadow 0.16s ease, transform 0.16s ease;
+}
+
+/* Guard against broad rules that override the toggle's position/width.
+   position: fixed !important beats the same-specificity [data-help]{position:relative}
+   rule that also appears later in this file (toggle button carries data-help itself). */
+.rh-help-toggle:not([data-inline="1"]) {
+    position: fixed !important;
+    left: auto !important;
+    width: clamp(2.5rem, 2.35rem + 0.36vw, 2.95rem) !important;
+    height: clamp(2.5rem, 2.35rem + 0.36vw, 2.95rem) !important;
+    max-width: none !important;
+    min-width: clamp(2.5rem, 2.35rem + 0.36vw, 2.95rem) !important;
+    min-height: clamp(2.5rem, 2.35rem + 0.36vw, 2.95rem) !important;
+    display: inline-flex !important;
+    flex: 0 0 auto !important;
+    align-items: center;
+    justify-content: center;
+    padding: 0 !important;
+    gap: 0;
+    border-radius: 50%;
+    line-height: 1;
+}
+
+.rh-help-toggle:not([data-inline="1"]) .dot,
+.rh-help-toggle:not([data-inline="1"]) .rh-help-drag-icon,
+.rh-help-toggle:not([data-inline="1"]) [data-rh-help-label],
+.rh-help-toggle:not([data-inline="1"]) #rhHelpLabel {
+    display: none !important;
+}
+
+.rh-help-toggle:not([data-inline="1"]) .fa-question-circle {
+    font-size: clamp(1.02rem, 0.94rem + 0.24vw, 1.22rem);
+    margin: 0;
+    line-height: 1;
+}
+
+.rh-help-toggle.on {
+    background: linear-gradient(145deg,
+            color-mix(in srgb, var(--color-lux-gold) 86%, var(--color-lux-clay-50) 14%),
+            color-mix(in srgb, var(--color-lux-gold) 74%, var(--color-lux-ink) 26%));
+    color: var(--color-lux-ink);
+    border-color: color-mix(in srgb, var(--color-lux-gold) 78%, var(--color-lux-ink) 22%);
+    box-shadow: 0 0.32rem 0.86rem color-mix(in srgb, var(--color-lux-gold) 34%, transparent);
+}
+
+.rh-help-toggle:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 0.32rem 0.96rem color-mix(in srgb, var(--color-lux-ink) 38%, transparent);
+}
+
+.rh-help-toggle.is-draggable {
+    touch-action: none;
+    user-select: none;
+    cursor: grab;
+}
+
+.rh-help-toggle.dragging {
+    cursor: grabbing;
+    transform: none;
+    box-shadow: 0 0.24rem 0.76rem color-mix(in srgb, var(--color-lux-ink) 32%, transparent);
+}
+
+.rh-help-toggle .rh-help-drag-icon {
+    font-size: 11px;
+    opacity: 0.78;
+    margin-left: 1px;
+}
+
+.rh-help-toggle .dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: #6c757d;
+}
+
+.rh-help-toggle.on .dot {
+    background: #28a745;
+    box-shadow: 0 0 8px #28a745;
+}
+
+body.station-screen .rh-help-toggle:not([data-inline="1"]) {
+    bottom: calc(122px + env(safe-area-inset-bottom));
+    right: calc(14px + env(safe-area-inset-right));
+}
+
+body.pos-screen .rh-help-toggle:not([data-inline="1"]) {
+    bottom: calc(152px + env(safe-area-inset-bottom));
+    right: calc(22px + env(safe-area-inset-right));
+}
+
+.rh-help-toggle[data-inline="1"] {
+    position: static;
+    bottom: auto;
+    right: auto;
+    z-index: auto;
+    width: auto !important;
+    max-width: max-content !important;
+    min-width: 0 !important;
+    display: inline-flex !important;
+    flex: 0 0 auto !important;
+    box-shadow: none;
+    min-height: 36px;
+}
+
+@media (max-width: 1024px) {
+    body.station-screen .rh-help-toggle:not([data-inline="1"]) {
+        bottom: calc(204px + env(safe-area-inset-bottom));
+    }
+
+    body.pos-screen .rh-help-toggle:not([data-inline="1"]) {
+        display: none;
+    }
+}
+
+[data-help] {
+    position: relative;
+}
+
+body.rh-help-on .rh-help-toggle[data-help]::after {
+    content: none;
+    display: none;
+}
+
+body.rh-help-on [data-help]::after {
+    content: '?';
+    position: absolute;
+    top: 2px;
+    right: 2px;
+    width: 14px;
+    height: 14px;
+    background: #d4a843;
+    color: #1f1f24;
+    border-radius: 50%;
+    font-size: 10px;
+    font-weight: 700;
+    line-height: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    pointer-events: none;
+    border: 1px solid rgba(31, 31, 36, 0.2);
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.32), 0 0 0 1px rgba(255, 255, 255, 0.35);
+    z-index: 5;
+}
+
+/* Legacy stock table help icons used data-tip + ::after tooltips.
+   Those pseudo-tooltips get clipped inside scroll/overflow containers,
+   so route them through the shared floating bubble instead. */
+.help[data-tip]::after,
+.help[data-tip]:hover::after {
+    content: none !important;
+    display: none !important;
+    opacity: 0 !important;
+}

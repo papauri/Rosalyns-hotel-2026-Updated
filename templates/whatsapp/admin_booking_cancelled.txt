@@ -1,0 +1,7 @@
+❌ *BOOKING CANCELLED*
+━━━━━━━━━━━━━━━━━━━
+Ref: *{{booking_reference}}*
+Guest: {{guest_name}} | {{guest_phone}}
+Room: {{room_name}}
+Was: {{check_in_date}} → {{check_out_date}}
+💰 *{{total_amount}}*

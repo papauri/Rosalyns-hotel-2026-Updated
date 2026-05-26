@@ -1,0 +1,2072 @@
+/**
+ * Admin Components CSS
+ * Modal and Alert styles for admin pages
+ */
+
+/* ============================================
+   MODAL STYLES
+   ============================================ */
+
+:root {
+    --modal-overlay-bg: rgba(0, 0, 0, 0.7);
+    --modal-bg: #ffffff;
+    --modal-border-radius: 12px;
+    --modal-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.25);
+    --modal-transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    --modal-header-bg: linear-gradient(135deg, var(--color-surface-soft, #F4EFE9) 0%, var(--color-surface-stone, #EEE6DC) 100%);
+    --modal-header-color: var(--deep-navy, #111827);
+    --modal-close-color: var(--deep-navy, #111827);
+    --modal-close-hover: var(--color-primary, #8A775F);
+    /* Alert variables */
+    --alert-border-radius: 12px;
+    --alert-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+    --alert-transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    --alert-padding: 16px 20px;
+    --alert-font-size: 14px;
+}
+
+/* Modal Overlay */
+.modal-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 16px;
+    background: var(--modal-overlay-bg);
+    z-index: 9998;
+    opacity: 0;
+    visibility: hidden;
+    transition: var(--modal-transition);
+    backdrop-filter: blur(4px);
+}
+
+.modal-overlay.active {
+    opacity: 1;
+    visibility: visible;
+}
+
+/* BEM Modal Support (from renderModal function) */
+.modal {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    display: none;
+    align-items: center;
+    justify-content: center;
+    padding: 16px;
+    z-index: 9999;
+}
+
+.modal.active {
+    display: flex;
+    opacity: 1;
+    visibility: visible;
+}
+
+.modal__backdrop {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: var(--modal-overlay-bg);
+    backdrop-filter: blur(4px);
+    z-index: 1;
+}
+
+.modal__wrapper {
+    position: relative;
+    z-index: 2;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 100%;
+    max-height: 90vh;
+}
+
+/* Override public modal.css which sets opacity:0 + transform on .modal__wrapper
+   and only reveals it via .modal--active. Admin JS uses .active instead, so we
+   must counter the invisible wrapper here. */
+.modal.active .modal__wrapper,
+.modal.show .modal__wrapper {
+    opacity: 1;
+    transform: none;
+    visibility: visible;
+}
+
+.modal__container {
+    background: var(--modal-bg);
+    border-radius: var(--modal-border-radius);
+    box-shadow: var(--modal-shadow);
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+    max-height: 90vh;
+    width: 90%;
+}
+
+/* Modal Sizes for BEM */
+.modal--sm .modal__container {
+    max-width: 400px;
+}
+
+.modal--md .modal__container {
+    max-width: 500px;
+}
+
+.modal--lg .modal__container {
+    max-width: 700px;
+}
+
+.modal--xl .modal__container {
+    max-width: 900px;
+}
+
+.modal__header {
+    background: var(--modal-header-bg);
+    color: var(--modal-header-color);
+    padding: 20px 24px;
+    position: relative;
+}
+
+.modal__title {
+    margin: 0;
+    font-family: 'Cormorant Garamond', Georgia, serif;
+    font-size: 22px;
+    font-weight: 600;
+    color: var(--deep-navy, #0f1d2e);
+}
+
+.modal__body {
+    padding: 24px;
+    overflow-y: auto;
+    flex: 1;
+}
+
+.modal__footer {
+    padding: 16px 24px;
+    border-top: 1px solid #e0e0e0;
+    display: flex;
+    gap: 12px;
+    justify-content: flex-end;
+    background: #f8f9fa;
+}
+
+.modal__close {
+    position: absolute;
+    top: 16px;
+    right: 16px;
+    width: 36px;
+    height: 36px;
+    border: none;
+    background: rgba(255, 255, 255, 0.1);
+    color: var(--modal-close-color);
+    border-radius: 50%;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 18px;
+    transition: all 0.2s ease;
+    z-index: 10;
+}
+
+.modal__close:hover {
+    background: var(--modal-close-hover);
+    color: var(--deep-navy, #0f1d2e);
+    transform: rotate(90deg);
+}
+
+/* Backward compatibility for pages that still toggle modals via inline display */
+.modal-overlay[style*="display: flex"],
+.modal-overlay[style*="display:block"],
+.modal-overlay[style*="display: block"] {
+    opacity: 1;
+    visibility: visible;
+}
+
+/* Modal Wrapper - Centers modal on screen */
+.modal-wrapper {
+    position: fixed;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%) scale(0.9);
+    z-index: 9999;
+    opacity: 0;
+    visibility: hidden;
+    transition: var(--modal-transition);
+    pointer-events: none;
+}
+
+.modal-wrapper.active {
+    opacity: 1;
+    visibility: visible;
+    transform: translate(-50%, -50%) scale(1);
+    pointer-events: auto;
+}
+
+/* Modal Container */
+.modal-container {
+    background: var(--modal-bg);
+    border-radius: var(--modal-border-radius);
+    box-shadow: var(--modal-shadow);
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+    max-height: 90vh;
+}
+
+/* Modal Sizes */
+.modal-sm .modal-container {
+    width: 90%;
+    max-width: 400px;
+}
+
+.modal-md .modal-container {
+    width: 90%;
+    max-width: 500px;
+}
+
+.modal-lg .modal-container {
+    width: 90%;
+    max-width: 700px;
+}
+
+.modal-xl .modal-container {
+    width: 90%;
+    max-width: 900px;
+}
+
+/* Modal Close Button */
+.modal-close {
+    position: absolute;
+    top: 16px;
+    right: 16px;
+    width: 36px;
+    height: 36px;
+    border: none;
+    background: rgba(255, 255, 255, 0.1);
+    color: var(--modal-close-color);
+    border-radius: 50%;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 18px;
+    transition: all 0.2s ease;
+    z-index: 10;
+}
+
+.modal-close:hover {
+    background: var(--modal-close-hover);
+    color: var(--deep-navy, #0f1d2e);
+    transform: rotate(90deg);
+}
+
+.modal-close:focus {
+    outline: 2px solid var(--gold, #8B7355);
+    outline-offset: 2px;
+}
+
+/* Modal Header */
+.modal-header {
+    background: var(--modal-header-bg);
+    color: var(--modal-header-color);
+    padding: 14px 18px;
+    position: relative;
+}
+
+.modal-title {
+    margin: 0;
+    font-family: 'Cormorant Garamond', Georgia, serif;
+    font-size: 19px;
+    line-height: 1.24;
+    font-weight: 600;
+    color: var(--deep-navy, #0f1d2e);
+}
+
+/* Modal Body */
+.modal-body {
+    padding: 24px;
+    overflow-y: auto;
+    flex: 1;
+}
+
+/* Modal Footer */
+.modal-footer {
+    padding: 16px 24px;
+    border-top: 1px solid #e0e0e0;
+    display: flex;
+    gap: 12px;
+    justify-content: flex-end;
+    background: #f8f9fa;
+}
+
+/* Dynamic modal fit + no-horizontal-scroll content baseline */
+.modal-overlay,
+.modal {
+    padding: clamp(0.75rem, 0.62rem + 0.42vw, 1.15rem);
+}
+
+.modal__body,
+.modal-body,
+.admin-modal__body {
+    min-height: 0;
+    overflow: auto;
+    overscroll-behavior: contain;
+}
+
+.modal__body table,
+.modal-body table,
+.admin-modal__body table {
+    width: 100%;
+    max-width: 100%;
+    table-layout: fixed;
+    border-collapse: collapse;
+}
+
+.modal__body th,
+.modal__body td,
+.modal-body th,
+.modal-body td,
+.admin-modal__body th,
+.admin-modal__body td {
+    white-space: normal;
+    overflow-wrap: anywhere;
+    word-break: break-word;
+    vertical-align: top;
+}
+
+.modal__body td .btn,
+.modal-body td .btn,
+.admin-modal__body td .btn,
+.modal__body td button,
+.modal-body td button,
+.admin-modal__body td button {
+    max-width: 100%;
+    white-space: normal;
+}
+
+@media (max-width: 64rem) {
+
+    .modal__body table,
+    .modal-body table,
+    .admin-modal__body table {
+        table-layout: auto;
+    }
+
+    .modal__body table thead,
+    .modal-body table thead,
+    .admin-modal__body table thead {
+        display: none;
+    }
+
+    .modal__body table tbody,
+    .modal-body table tbody,
+    .admin-modal__body table tbody {
+        display: flex;
+        flex-direction: column;
+        gap: 0.6rem;
+    }
+
+    .modal__body table tbody tr,
+    .modal-body table tbody tr,
+    .admin-modal__body table tbody tr {
+        display: grid;
+        grid-template-columns: 1fr;
+        border: 1px solid var(--admin-surface-border, #eaecef);
+        border-radius: 0.75rem;
+        background: color-mix(in srgb, var(--color-lux-clay-50, #F3ECE4) 40%, var(--color-white, #fff));
+        overflow: hidden;
+    }
+
+    .modal__body table tbody td,
+    .modal-body table tbody td,
+    .admin-modal__body table tbody td {
+        display: flex;
+        justify-content: space-between;
+        align-items: flex-start;
+        gap: 0.65rem;
+        border-bottom: 1px solid var(--admin-surface-border, #eaecef);
+        padding: 0.58rem 0.72rem;
+    }
+
+    .modal__body table tbody td:last-child,
+    .modal-body table tbody td:last-child,
+    .admin-modal__body table tbody td:last-child {
+        border-bottom: none;
+    }
+
+    .modal__body table tbody td::before,
+    .modal-body table tbody td::before,
+    .admin-modal__body table tbody td::before {
+        content: attr(data-label);
+        font-size: clamp(0.64rem, 0.61rem + 0.1vw, 0.74rem);
+        letter-spacing: 0.05em;
+        text-transform: uppercase;
+        color: var(--color-text-secondary, #5E554D);
+        font-weight: 600;
+        flex-shrink: 0;
+        min-width: 6.4rem;
+    }
+
+    .modal__body table tbody td[data-label='']::before,
+    .modal-body table tbody td[data-label='']::before,
+    .admin-modal__body table tbody td[data-label='']::before {
+        content: '';
+        min-width: 0;
+    }
+}
+
+/* Modal Responsive */
+@media (max-width: 768px) {
+    .modal-wrapper {
+        width: 95%;
+    }
+
+    .modal-sm .modal-container,
+    .modal-md .modal-container,
+    .modal-lg .modal-container,
+    .modal-xl .modal-container {
+        width: 100%;
+        max-width: none;
+        max-height: 95vh;
+    }
+
+    .modal-header {
+        padding: 16px 20px;
+    }
+
+    .modal-title {
+        font-size: 18px;
+    }
+
+    .modal-body {
+        padding: 20px;
+    }
+
+    .modal-footer {
+        padding: 12px 20px;
+        flex-direction: column;
+    }
+
+    .modal-footer button,
+    .modal-footer a {
+        width: 100%;
+    }
+}
+
+/* Animation for modal content */
+@keyframes modalSlideIn {
+    from {
+        opacity: 0;
+        transform: translateY(-20px);
+    }
+
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+.modal-wrapper.active .modal-container {
+    animation: modalSlideIn 0.3s ease-out;
+}
+
+/* Prevent body scroll when modal is open */
+body.modal-open {
+    overflow: hidden;
+}
+
+/* ============================================
+   ALERT STYLES
+   ============================================ */
+
+/* Alert Wrapper - Centers alert on screen */
+.alert-wrapper {
+    position: fixed;
+    z-index: 10000;
+    pointer-events: none;
+    width: 100%;
+    max-width: 600px;
+    left: 50%;
+    transform: translateX(-50%);
+}
+
+.alert-wrapper.alert-top {
+    top: 20px;
+}
+
+.alert-wrapper.alert-bottom {
+    bottom: 20px;
+}
+
+.alert-wrapper.alert-top-left {
+    top: 20px;
+    left: 20px;
+    transform: none;
+    max-width: 400px;
+}
+
+.alert-wrapper.alert-top-right {
+    top: 20px;
+    right: 20px;
+    left: auto;
+    transform: none;
+    max-width: 400px;
+}
+
+.alert-wrapper.alert-bottom-left {
+    bottom: 20px;
+    left: 20px;
+    transform: none;
+    max-width: 400px;
+}
+
+.alert-wrapper.alert-bottom-right {
+    bottom: 20px;
+    right: 20px;
+    left: auto;
+    transform: none;
+    max-width: 400px;
+}
+
+/* Alert Container */
+.alert {
+    display: flex;
+    align-items: flex-start;
+    gap: 12px;
+    padding: var(--alert-padding);
+    border-radius: var(--alert-border-radius);
+    background: var(--alert-bg);
+    border-left: 4px solid var(--alert-border);
+    color: var(--alert-color);
+    box-shadow: var(--alert-shadow);
+    pointer-events: auto;
+    opacity: 0;
+    transform: translateY(-20px);
+    transition: var(--alert-transition);
+    position: relative;
+    overflow: hidden;
+}
+
+.alert.show {
+    opacity: 1;
+    transform: translateY(0);
+}
+
+.alert.hide {
+    opacity: 0;
+    transform: translateY(-20px);
+}
+
+/* Alert Icon */
+.alert-icon {
+    flex-shrink: 0;
+    font-size: 20px;
+    margin-top: 2px;
+}
+
+/* Alert Content */
+.alert-content {
+    flex: 1;
+    font-size: var(--alert-font-size);
+    line-height: 1.5;
+    word-wrap: break-word;
+}
+
+.alert-content strong {
+    font-weight: 600;
+}
+
+/* Alert Close Button */
+.alert-close {
+    flex-shrink: 0;
+    width: 24px;
+    height: 24px;
+    border: none;
+    background: transparent;
+    color: currentColor;
+    opacity: 0.6;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 4px;
+    transition: all 0.2s ease;
+    padding: 0;
+    margin-top: -4px;
+}
+
+.alert-close:hover {
+    opacity: 1;
+    background: rgba(0, 0, 0, 0.1);
+}
+
+.alert-close:focus {
+    outline: 2px solid var(--alert-border);
+    outline-offset: 2px;
+}
+
+/* Alert Type Specific Styles */
+.alert-success {
+    --alert-bg: linear-gradient(135deg, #d4edda 0%, #c3e6cb 100%);
+    --alert-border: #28a745;
+    --alert-color: #155724;
+}
+
+.alert-error {
+    --alert-bg: linear-gradient(135deg, #f8d7da 0%, #f5c6cb 100%);
+    --alert-border: #dc3545;
+    --alert-color: #721c24;
+}
+
+.alert-warning {
+    --alert-bg: linear-gradient(135deg, #fff3cd 0%, #ffeaa7 100%);
+    --alert-border: #ffc107;
+    --alert-color: #856404;
+}
+
+.alert-info {
+    --alert-bg: linear-gradient(135deg, #d1ecf1 0%, #bee5eb 100%);
+    --alert-border: #17a2b8;
+    --alert-color: #0c5460;
+}
+
+/* Alert Animation */
+@keyframes alertSlideIn {
+    from {
+        opacity: 0;
+        transform: translateY(-20px);
+    }
+
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+@keyframes alertSlideOut {
+    from {
+        opacity: 1;
+        transform: translateY(0);
+    }
+
+    to {
+        opacity: 0;
+        transform: translateY(-20px);
+    }
+}
+
+.alert.show {
+    animation: alertSlideIn 0.3s ease-out forwards;
+}
+
+.alert.hide {
+    animation: alertSlideOut 0.3s ease-out forwards;
+}
+
+/* Multiple Alerts Stacking */
+.alert-wrapper .alert+.alert {
+    margin-top: 12px;
+}
+
+/* Alert Responsive */
+@media (max-width: 768px) {
+    .alert-wrapper {
+        left: 10px;
+        right: 10px;
+        width: auto;
+        max-width: none;
+        transform: none;
+    }
+
+    .alert-wrapper.alert-top-left,
+    .alert-wrapper.alert-top-right,
+    .alert-wrapper.alert-bottom-left,
+    .alert-wrapper.alert-bottom-right {
+        left: 10px;
+        right: 10px;
+        max-width: none;
+    }
+
+    .alert {
+        padding: 14px 16px;
+        font-size: 13px;
+    }
+
+    .alert-icon {
+        font-size: 18px;
+    }
+}
+
+/* ============================================
+   320px SCREEN OPTIMIZATIONS
+   ============================================ */
+
+/* Modal 320px Optimizations */
+@media (max-width: 320px) {
+
+    /* Modal Overlay - Full Screen */
+    .modal-overlay {
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+    }
+
+    /* Modal Wrapper - Full Screen */
+    .modal-wrapper {
+        width: 100%;
+        height: 100%;
+        top: 0;
+        left: 0;
+        transform: none;
+        position: fixed;
+    }
+
+    .modal-wrapper.active {
+        transform: none;
+    }
+
+    /* All modal sizes become full screen */
+    .modal-sm .modal-container,
+    .modal-md .modal-container,
+    .modal-lg .modal-container,
+    .modal-xl .modal-container {
+        width: 100%;
+        height: 100%;
+        max-width: none;
+        max-height: none;
+        border-radius: 0;
+        margin: 0;
+    }
+
+    /* Modal Header - Compact */
+    .modal-header {
+        padding: 12px 16px;
+        background: var(--modal-header-bg);
+    }
+
+    .modal-title {
+        font-size: 16px;
+        line-height: 1.3;
+        padding-right: 40px;
+        /* Space for close button */
+    }
+
+    /* Modal Close Button - Adjusted Position */
+    .modal-close {
+        top: 8px;
+        right: 8px;
+        width: 32px;
+        height: 32px;
+        font-size: 16px;
+    }
+
+    .modal-close:focus {
+        outline-width: 2px;
+    }
+
+    /* Modal Body - Scrollable */
+    .modal-body {
+        padding: 12px 16px;
+        font-size: 12px;
+        overflow-y: auto;
+        -webkit-overflow-scrolling: touch;
+    }
+
+    /* Modal Footer - Stacked Buttons */
+    .modal-footer {
+        padding: 12px 16px;
+        flex-direction: column;
+        gap: 8px;
+        background: #f8f9fa;
+        border-top: 1px solid #e0e0e0;
+    }
+
+    .modal-footer button,
+    .modal-footer a,
+    .modal-footer .btn {
+        width: 100%;
+        padding: 10px 16px;
+        font-size: 12px;
+        margin: 0;
+        text-align: center;
+    }
+
+    /* Form elements in modals */
+    .modal-body .form-group {
+        margin-bottom: 16px;
+    }
+
+    .modal-body .form-control {
+        padding: 8px 10px;
+        font-size: 12px;
+    }
+
+    .modal-body label {
+        font-size: 12px;
+        margin-bottom: 6px;
+    }
+
+    /* Tables in modals */
+    .modal-body .table {
+        font-size: 10px;
+    }
+
+    .modal-body .table th,
+    .modal-body .table td {
+        padding: 6px 8px;
+    }
+}
+
+/* Alert 320px Optimizations */
+@media (max-width: 320px) {
+
+    /* Alert Wrapper - Full Width */
+    .alert-wrapper {
+        left: 0;
+        right: 0;
+        width: 100%;
+        max-width: none;
+        transform: none;
+        padding: 0 8px;
+    }
+
+    .alert-wrapper.alert-top {
+        top: 8px;
+    }
+
+    .alert-wrapper.alert-bottom {
+        bottom: 8px;
+    }
+
+    /* All alert positions become centered full-width */
+    .alert-wrapper.alert-top-left,
+    .alert-wrapper.alert-top-right,
+    .alert-wrapper.alert-bottom-left,
+    .alert-wrapper.alert-bottom-right {
+        left: 0;
+        right: 0;
+        max-width: none;
+        padding: 0 8px;
+        transform: none;
+    }
+
+    /* Alert Container - Compact */
+    .alert {
+        padding: 10px 12px;
+        font-size: 11px;
+        line-height: 1.4;
+        border-radius: 8px;
+    }
+
+    /* Alert Icon - Smaller */
+    .alert-icon {
+        font-size: 16px;
+        flex-shrink: 0;
+        margin-top: 1px;
+    }
+
+    /* Alert Content - Compact */
+    .alert-content {
+        font-size: 11px;
+        line-height: 1.4;
+    }
+
+    /* Alert Close Button - Compact */
+    .alert-close {
+        width: 20px;
+        height: 20px;
+        font-size: 14px;
+        margin-top: -2px;
+    }
+
+    /* Multiple alerts spacing */
+    .alert-wrapper .alert+.alert {
+        margin-top: 8px;
+    }
+
+    /* Animation adjustments */
+    .alert.show {
+        animation: alertSlideIn 0.25s ease-out forwards;
+    }
+
+    .alert.hide {
+        animation: alertSlideOut 0.25s ease-out forwards;
+    }
+}
+
+/* ============================================
+   BUTTON LOADING STATE
+   ============================================ */
+
+/* Admin page-level loader */
+.admin-page-loader {
+    position: fixed;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 18px;
+    background: rgba(15, 29, 46, 0.5);
+    backdrop-filter: blur(6px);
+    -webkit-backdrop-filter: blur(6px);
+    opacity: 0;
+    visibility: hidden;
+    pointer-events: none;
+    z-index: 10080;
+    transition: opacity 0.2s ease, visibility 0.2s ease;
+}
+
+.admin-page-loader.is-visible {
+    opacity: 1;
+    visibility: visible;
+    pointer-events: auto;
+}
+
+.admin-page-loader-card {
+    width: min(92vw, 320px);
+    background: #fff;
+    border: 1px solid rgba(177, 130, 71, 0.2);
+    border-radius: 16px;
+    box-shadow: 0 28px 80px rgba(15, 29, 46, 0.32), 0 0 0 1px rgba(255, 255, 255, 0.08) inset;
+    padding: 32px 28px 28px;
+    text-align: center;
+    animation: adminLoaderCardIn 0.22s cubic-bezier(0.34, 1.56, 0.64, 1) both;
+}
+
+.admin-page-loader-brand {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    margin-bottom: 14px;
+    color: #8B7355;
+    font-family: 'Jost', sans-serif;
+    font-size: 12px;
+    font-weight: 600;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+}
+
+.admin-page-loader-brand i {
+    font-size: 12px;
+}
+
+@keyframes adminLoaderCardIn {
+    from {
+        transform: scale(0.92) translateY(8px);
+        opacity: 0;
+    }
+
+    to {
+        transform: scale(1) translateY(0);
+        opacity: 1;
+    }
+}
+
+/* Ring spinner — single thick ring with a gold arc */
+.admin-page-loader-spinner {
+    position: relative;
+    width: 60px;
+    height: 60px;
+    margin: 0 auto 18px;
+}
+
+/* Track ring */
+.admin-page-loader-spinner::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    border-radius: 50%;
+    border: 4px solid rgba(177, 130, 71, 0.14);
+}
+
+/* Spinning arc */
+.admin-page-loader-spinner span:nth-child(1) {
+    position: absolute;
+    inset: 0;
+    border-radius: 50%;
+    border: 4px solid transparent;
+    border-top-color: #B18247;
+    border-right-color: #B18247;
+    animation: adminLoaderSpin 0.8s cubic-bezier(0.55, 0.055, 0.675, 0.19) infinite;
+}
+
+/* Inner dot */
+.admin-page-loader-spinner span:nth-child(2) {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border: none;
+    animation: none;
+}
+
+.admin-page-loader-spinner span:nth-child(2)::after {
+    content: '';
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    background: #B18247;
+    animation: adminLoaderPulse 0.8s ease-in-out infinite alternate;
+}
+
+/* Hide third span (legacy compat) */
+.admin-page-loader-spinner span:nth-child(3) {
+    display: none;
+}
+
+.admin-page-loader-title {
+    color: #111827;
+    font-family: 'Cormorant Garamond', Georgia, serif;
+    font-size: 20px;
+    font-weight: 600;
+    letter-spacing: 0.01em;
+    line-height: 1.2;
+    margin-bottom: 6px;
+}
+
+.admin-page-loader-text {
+    color: #64748b;
+    font-size: 12.5px;
+    font-family: 'Jost', sans-serif;
+    margin-bottom: 20px;
+    letter-spacing: 0.01em;
+}
+
+/* Shimmer progress bar */
+.admin-page-loader-bar {
+    height: 3px;
+    width: 100%;
+    border-radius: 999px;
+    background: rgba(177, 130, 71, 0.12);
+    overflow: hidden;
+    position: relative;
+}
+
+.admin-page-loader-bar span {
+    display: block;
+    position: absolute;
+    top: 0;
+    left: -60%;
+    width: 60%;
+    height: 100%;
+    border-radius: inherit;
+    background: linear-gradient(90deg, transparent 0%, #B18247 40%, #d4a84b 60%, transparent 100%);
+    animation: adminLoaderShimmer 1.4s ease-in-out infinite;
+}
+
+@keyframes adminLoaderSpin {
+    to {
+        transform: rotate(360deg);
+    }
+}
+
+@keyframes adminLoaderPulse {
+    from {
+        transform: scale(0.7);
+        opacity: 0.6;
+    }
+
+    to {
+        transform: scale(1.1);
+        opacity: 1;
+    }
+}
+
+@keyframes adminLoaderShimmer {
+    0% {
+        left: -60%;
+    }
+
+    100% {
+        left: 110%;
+    }
+}
+
+.admin-inline-loading {
+    pointer-events: none !important;
+    opacity: 0.82 !important;
+    cursor: wait !important;
+    display: inline-flex !important;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+}
+
+.admin-inline-spinner {
+    width: 14px;
+    height: 14px;
+    border: 2px solid currentColor;
+    border-right-color: transparent;
+    border-radius: 50%;
+    animation: adminLoaderSpin 0.75s linear infinite;
+    flex: 0 0 auto;
+}
+
+.admin-pagination-loader {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    margin: 12px auto 0;
+    padding: 8px 14px;
+    border-radius: 999px;
+    border: 1px solid rgba(138, 119, 95, 0.22);
+    background: rgba(247, 243, 238, 0.94);
+    color: var(--color-text-secondary, #5E554D);
+    font-size: 12px;
+    line-height: 1;
+    box-shadow: 0 10px 24px rgba(35, 31, 28, 0.08);
+}
+
+.admin-pagination-loader__spinner {
+    width: 14px;
+    height: 14px;
+    border: 2px solid rgba(138, 119, 95, 0.24);
+    border-right-color: transparent;
+    border-radius: 50%;
+    animation: adminLoaderSpin 0.75s linear infinite;
+    flex: 0 0 auto;
+}
+
+.admin-pagination-loader__text {
+    white-space: nowrap;
+}
+
+.admin-pagination-loader-wrap {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    min-height: 32px;
+    padding: 4px 0 2px;
+}
+
+.admin-pagination-loader-wrap .admin-pagination-loader {
+    margin: 0;
+}
+
+:is(.admin-content, #rh-admin-page) :is(.bookings-pagination, .pagination, .log-table-pagination, .receipts-pagination, .pagination-bar, .inv-pagination).is-loading {
+    opacity: 0.72;
+    pointer-events: none;
+}
+
+/* Unified pagination controls (matches bookings pagination visual style) */
+:is(.admin-content, #rh-admin-page) :is(.bookings-pagination, .pagination, .log-table-pagination, .receipts-pagination, .pagination-bar, .inv-pagination) {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    flex-wrap: wrap;
+    padding: 16px 0;
+}
+
+:is(.admin-content, #rh-admin-page) :is(.bookings-pagination, .pagination, .log-table-pagination, .receipts-pagination, .pagination-bar, .inv-pagination) :is(a.pg-btn, button.pg-btn, span.pg-current, .pagination a, .pagination button, .pagination .current, .pagination span.active, .pagination span.disabled, .pagination-item, .pagination-item--active, .receipts-pagination__link, .inv-pagination a, a.acct-btn--primary, span.acct-btn--primary) {
+    display: inline-flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    gap: 6px !important;
+    min-height: 32px !important;
+    padding: 6px 12px !important;
+    border: 1px solid #ddd !important;
+    border-radius: 6px !important;
+    text-decoration: none !important;
+    background: #fff !important;
+    color: #444 !important;
+    font-size: 13px !important;
+    font-weight: 500 !important;
+    line-height: 1.15 !important;
+    cursor: pointer !important;
+    transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease !important;
+}
+
+:is(.admin-content, #rh-admin-page) :is(.bookings-pagination, .pagination, .log-table-pagination, .receipts-pagination, .pagination-bar, .inv-pagination) :is(a.pg-btn, button.pg-btn, .pagination a, .pagination button, .pagination-item, .receipts-pagination__link, .inv-pagination a):hover:not(:disabled):not(.disabled):not(.is-disabled):not(.pagination-item--active):not(.acct-btn--primary) {
+    background: #f7f3ee !important;
+    border-color: #cfc4b8 !important;
+    color: #3f3933 !important;
+}
+
+:is(.admin-content, #rh-admin-page) :is(.bookings-pagination, .pagination, .log-table-pagination, .receipts-pagination, .pagination-bar, .inv-pagination) :is(.pg-current, .pagination .current, .pagination span.active, .pagination-item--active, a.acct-btn--primary, span.acct-btn--primary) {
+    border: 1px solid #8A775F !important;
+    background: #8A775F !important;
+    color: #fff !important;
+    font-weight: 600 !important;
+}
+
+:is(.admin-content, #rh-admin-page) :is(.bookings-pagination, .pagination, .log-table-pagination, .receipts-pagination, .pagination-bar, .inv-pagination) :is(.disabled, .is-disabled, a.disabled, button:disabled, .receipts-pagination__link.is-disabled) {
+    opacity: 0.55 !important;
+    cursor: default !important;
+    pointer-events: none !important;
+    background: #f7f7f7 !important;
+    color: #8b8b8b !important;
+    border-color: #e0e0e0 !important;
+}
+
+:is(.admin-content, #rh-admin-page) :is(.bookings-pagination, .pagination, .log-table-pagination, .receipts-pagination, .pagination-bar, .inv-pagination) .pg-ellipsis {
+    padding: 6px 4px;
+    font-size: 13px;
+    color: #888;
+}
+
+:is(.admin-content, #rh-admin-page) :is(.bookings-pagination, .pagination, .log-table-pagination, .receipts-pagination, .pagination-bar, .inv-pagination) :is(.pg-summary, .log-table-pagination__info) {
+    padding: 6px 8px;
+    font-size: 12px;
+    color: #888;
+    white-space: nowrap;
+}
+
+/* Shared admin confirmation modal */
+.admin-confirm-overlay {
+    z-index: 10090;
+    padding: 18px;
+}
+
+.admin-confirm-card {
+    width: min(94vw, 520px);
+    background: #fff;
+    border-radius: 12px;
+    box-shadow: 0 24px 80px rgba(15, 29, 46, 0.3);
+    overflow: hidden;
+    transform: translateY(10px) scale(0.98);
+    transition: transform 0.2s ease;
+}
+
+.admin-confirm-overlay.active .admin-confirm-card {
+    transform: translateY(0) scale(1);
+}
+
+.admin-confirm-head {
+    display: grid;
+    grid-template-columns: auto 1fr auto;
+    gap: 14px;
+    align-items: start;
+    padding: 22px 24px 18px;
+    background: linear-gradient(135deg, #fbfaf7 0%, #f1ede4 100%);
+    border-bottom: 1px solid #e9e0d2;
+}
+
+.admin-confirm-icon {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 42px;
+    height: 42px;
+    border-radius: 10px;
+    color: var(--deep-navy, #0f1d2e);
+    background: rgba(139, 115, 85, 0.14);
+    font-size: 18px;
+}
+
+.admin-confirm-warning .admin-confirm-icon {
+    color: #7c5a11;
+    background: #fff3cd;
+}
+
+.admin-confirm-danger .admin-confirm-icon {
+    color: #8a1f18;
+    background: #fde2df;
+}
+
+.admin-confirm-success .admin-confirm-icon {
+    color: #0f6b45;
+    background: #d9f3e7;
+}
+
+.admin-confirm-head h3 {
+    margin: 0 0 5px;
+    color: var(--deep-navy, #0f1d2e);
+    font-family: 'Cormorant Garamond', Georgia, serif;
+    font-size: 24px;
+    font-weight: 600;
+    line-height: 1.15;
+}
+
+.admin-confirm-head p {
+    margin: 0;
+    color: #526071;
+    font-size: 14px;
+    line-height: 1.45;
+}
+
+.admin-confirm-close {
+    width: 34px;
+    height: 34px;
+    border: 0;
+    border-radius: 50%;
+    background: rgba(15, 29, 46, 0.06);
+    color: #526071;
+    cursor: pointer;
+}
+
+.admin-confirm-close:hover,
+.admin-confirm-close:focus {
+    background: rgba(15, 29, 46, 0.12);
+    color: var(--deep-navy, #0f1d2e);
+}
+
+.admin-confirm-body {
+    padding: 20px 24px;
+}
+
+.admin-confirm-details {
+    border: 1px solid #ece4d8;
+    border-radius: 10px;
+    background: #fffbf4;
+    color: #3f4856;
+    font-size: 13px;
+    line-height: 1.45;
+    padding: 12px 14px;
+}
+
+.admin-confirm-details ul {
+    margin: 0;
+    padding-left: 18px;
+}
+
+.admin-confirm-details li+li {
+    margin-top: 5px;
+}
+
+.admin-confirm-input-wrap {
+    display: block;
+    margin-top: 14px;
+    color: #334155;
+    font-size: 13px;
+    font-weight: 600;
+}
+
+/* ============================================
+   ADMIN DENSITY PASS — uniform typography & spacing
+   Loaded last; standardises headings, cards, tables and buttons across
+   every admin page. Display systems (KDS / BDS / CDS / POS) do NOT load
+   this file, so their full-screen typography is untouched.
+   ============================================ */
+
+/* Page hero / titles */
+.admin-content .page-title,
+.admin-page-hero h1,
+.page-header h1 {
+    font-size: 20px !important;
+    line-height: 1.25;
+    margin: 0 0 4px 0;
+    letter-spacing: -0.005em;
+}
+
+.admin-content .page-subtitle,
+.admin-page-hero p,
+.page-header p {
+    font-size: 13px !important;
+    line-height: 1.45;
+    margin: 0;
+}
+
+/* Admin header brand */
+.admin-header h1,
+.admin-header .admin-header-brand h1 {
+    font-size: 16px !important;
+    letter-spacing: 0.01em;
+}
+
+.admin-header .admin-header-brand i,
+.admin-header h1 i {
+    font-size: 16px !important;
+}
+
+.admin-header .user-name {
+    font-size: 13px !important;
+}
+
+.admin-header .user-role {
+    font-size: 10.5px !important;
+}
+
+/* Section titles + widget headers */
+.admin-content .section-title,
+.admin-content .widget-header h3,
+.admin-content .widget-header .widget-title {
+    font-size: 14px !important;
+    line-height: 1.3;
+    letter-spacing: 0.005em;
+    margin-bottom: 10px;
+}
+
+.admin-content .widget-header {
+    padding: 12px 16px;
+}
+
+.admin-content .widget-content {
+    padding: 14px 16px;
+}
+
+/* Generic in-content headings (catch-all) */
+.admin-content h1 {
+    font-size: 19px;
+    line-height: 1.25;
+}
+
+.admin-content h2 {
+    font-size: 16px;
+    line-height: 1.3;
+}
+
+.admin-content h3 {
+    font-size: 14.5px;
+    line-height: 1.35;
+}
+
+/* Form section headings in legacy .content pages were inheriting public
+   editorial h3 sizing; force compact admin UI typography everywhere. */
+:is(.admin-content, #rh-admin-page .content, #rh-admin-page .admin-container) .form-section > :is(h3, h4, h5, h6),
+:is(.admin-content, #rh-admin-page .content, #rh-admin-page .admin-container) .form-section .calculation-preview > :is(h4, h5, h6) {
+    margin: 0 0 var(--space-3, 0.75rem) !important;
+    font-family: var(--font-body, 'Jost', sans-serif) !important;
+    font-size: clamp(0.98rem, 0.93rem + 0.18vw, 1.08rem) !important;
+    font-weight: var(--font-medium, 500) !important;
+    line-height: 1.3 !important;
+    letter-spacing: 0.01em !important;
+    color: var(--admin-text, var(--color-text-primary)) !important;
+}
+
+:is(.admin-content, #rh-admin-page .content, #rh-admin-page .admin-container) .form-section > :is(h3, h4, h5, h6) i,
+:is(.admin-content, #rh-admin-page .content, #rh-admin-page .admin-container) .form-section .calculation-preview > :is(h4, h5, h6) i {
+    font-size: 0.95em;
+}
+
+.admin-content h4 {
+    font-size: 13px;
+    line-height: 1.4;
+}
+
+/* Cards & widgets — gentler padding */
+.admin-content .card,
+.admin-content .widget {
+    border-radius: 12px;
+}
+
+.admin-content .card {
+    padding: 16px 18px;
+}
+
+/* Stat cards — smaller, denser */
+.admin-content .stat-card {
+    padding: 14px 16px;
+    border-radius: 12px;
+}
+
+.admin-content .stat-card .stat-icon {
+    width: 36px;
+    height: 36px;
+    margin-bottom: 8px;
+}
+
+.admin-content .stat-card .stat-icon i {
+    font-size: 14px !important;
+}
+
+.admin-content .stat-card .stat-value {
+    font-size: clamp(18px, 1.6vw, 22px) !important;
+    line-height: 1.15;
+}
+
+.admin-content .stat-card .stat-label {
+    font-size: 11.5px !important;
+    letter-spacing: 0.04em;
+}
+
+.admin-content .stat-card .stat-trend {
+    font-size: 10.5px !important;
+}
+
+/* Tables — compact, uniform */
+.admin-content .table {
+    font-size: 13px;
+}
+
+.admin-content .table thead th {
+    padding: 10px 12px !important;
+    font-size: 11.5px !important;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    font-weight: 600;
+}
+
+.admin-content .table tbody td {
+    padding: 10px 12px !important;
+    font-size: 12.5px !important;
+    line-height: 1.4;
+    vertical-align: middle;
+}
+
+/* Buttons — single source of truth, no overlap */
+
+:is(.admin-content, #rh-admin-page) .btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: clamp(0.28rem, 0.24rem + 0.12vw, 0.4rem);
+    padding: clamp(0.4rem, 0.36rem + 0.12vw, 0.52rem) clamp(0.68rem, 0.6rem + 0.24vw, 0.92rem);
+    font-size: clamp(0.76rem, 0.72rem + 0.1vw, 0.86rem);
+    min-height: clamp(2.15rem, 2.05rem + 0.24vw, 2.45rem);
+    border-radius: 0.72rem;
+    line-height: 1.2;
+    white-space: nowrap;
+    font-weight: 600;
+    letter-spacing: 0.01em;
+    background: linear-gradient(180deg,
+            color-mix(in srgb, var(--au-surface) 90%, var(--au-border-soft) 10%),
+            color-mix(in srgb, var(--au-surface) 82%, var(--au-border-soft) 18%)) !important;
+    border-color: color-mix(in srgb, var(--au-border) 84%, var(--au-text) 16%) !important;
+    color: color-mix(in srgb, var(--au-text) 93%, var(--au-muted) 7%) !important;
+    box-shadow: var(--au-shadow-sm);
+}
+
+:is(.admin-content, #rh-admin-page) .btn-sm {
+    padding: clamp(0.3rem, 0.27rem + 0.1vw, 0.4rem) clamp(0.56rem, 0.52rem + 0.12vw, 0.7rem);
+    font-size: clamp(0.7rem, 0.67rem + 0.08vw, 0.8rem);
+    min-height: clamp(1.9rem, 1.82rem + 0.18vw, 2.15rem);
+    border-radius: 0.62rem;
+}
+
+:is(.admin-content, #rh-admin-page) .btn-lg {
+    padding: clamp(0.56rem, 0.5rem + 0.18vw, 0.74rem) clamp(0.96rem, 0.86rem + 0.28vw, 1.24rem);
+    font-size: clamp(0.84rem, 0.8rem + 0.12vw, 0.98rem);
+    min-height: clamp(2.45rem, 2.32rem + 0.3vw, 2.8rem);
+    border-radius: 0.82rem;
+}
+
+:is(.admin-content, #rh-admin-page) .btn i {
+    font-size: 0.95em;
+}
+
+:is(.admin-content, #rh-admin-page) .btn:hover {
+    background: linear-gradient(180deg,
+            color-mix(in srgb, var(--au-surface) 82%, var(--au-border-soft) 18%),
+            color-mix(in srgb, var(--au-surface) 74%, var(--au-border-soft) 26%)) !important;
+    border-color: color-mix(in srgb, var(--au-border) 70%, var(--au-text) 30%) !important;
+    box-shadow: var(--au-shadow-md);
+}
+
+:is(.admin-content, #rh-admin-page) .btn:active {
+    transform: translateY(0) !important;
+}
+
+:is(.admin-content, #rh-admin-page) .btn-primary,
+:is(.admin-content, #rh-admin-page) .btn-dark {
+    background: linear-gradient(135deg,
+            color-mix(in srgb, var(--au-text) 92%, var(--au-accent-deep) 8%),
+            color-mix(in srgb, var(--au-text) 82%, var(--au-accent-deep) 18%)) !important;
+    border-color: color-mix(in srgb, var(--au-text) 78%, var(--au-border) 22%) !important;
+    color: var(--au-surface) !important;
+}
+
+:is(.admin-content, #rh-admin-page) .btn-primary:hover,
+:is(.admin-content, #rh-admin-page) .btn-dark:hover {
+    background: linear-gradient(135deg,
+            color-mix(in srgb, var(--au-text) 86%, var(--au-accent-deep) 14%),
+            color-mix(in srgb, var(--au-text) 76%, var(--au-accent-deep) 24%)) !important;
+    border-color: color-mix(in srgb, var(--au-text) 68%, var(--au-border) 32%) !important;
+}
+
+:is(.admin-content, #rh-admin-page) .btn-success {
+    background: linear-gradient(180deg,
+            color-mix(in srgb, var(--au-surface) 86%, var(--au-success) 14%),
+            color-mix(in srgb, var(--au-surface) 77%, var(--au-success) 23%)) !important;
+    border-color: color-mix(in srgb, var(--au-border) 74%, var(--au-success) 26%) !important;
+    color: color-mix(in srgb, var(--au-text) 86%, var(--au-success) 14%) !important;
+}
+
+:is(.admin-content, #rh-admin-page) .btn-danger {
+    background: linear-gradient(180deg,
+            color-mix(in srgb, var(--au-surface) 86%, var(--au-danger) 14%),
+            color-mix(in srgb, var(--au-surface) 76%, var(--au-danger) 24%)) !important;
+    border-color: color-mix(in srgb, var(--au-border) 72%, var(--au-danger) 28%) !important;
+    color: color-mix(in srgb, var(--au-text) 82%, var(--au-danger) 18%) !important;
+}
+
+:is(.admin-content, #rh-admin-page) .btn-info {
+    background: linear-gradient(180deg,
+            color-mix(in srgb, var(--au-surface) 88%, var(--au-info) 12%),
+            color-mix(in srgb, var(--au-surface) 78%, var(--au-info) 22%)) !important;
+    border-color: color-mix(in srgb, var(--au-border) 72%, var(--au-info) 28%) !important;
+    color: color-mix(in srgb, var(--au-text) 84%, var(--au-info) 16%) !important;
+}
+
+:is(.admin-content, #rh-admin-page) .btn-warning {
+    background: linear-gradient(180deg,
+            color-mix(in srgb, var(--au-surface) 88%, var(--au-warning) 12%),
+            color-mix(in srgb, var(--au-surface) 78%, var(--au-warning) 22%)) !important;
+    border-color: color-mix(in srgb, var(--au-border) 70%, var(--au-warning) 30%) !important;
+    color: color-mix(in srgb, var(--au-text) 84%, var(--au-warning) 16%) !important;
+}
+
+:is(.admin-content, #rh-admin-page) .btn-light,
+:is(.admin-content, #rh-admin-page) .btn-outline,
+:is(.admin-content, #rh-admin-page) .btn-secondary {
+    background: linear-gradient(180deg,
+            color-mix(in srgb, var(--au-surface) 92%, var(--au-border-soft) 8%),
+            color-mix(in srgb, var(--au-surface) 84%, var(--au-border-soft) 16%)) !important;
+    border-color: color-mix(in srgb, var(--au-border) 80%, var(--au-text) 20%) !important;
+    color: color-mix(in srgb, var(--au-text) 90%, var(--au-muted) 10%) !important;
+}
+
+:is(.admin-content, #rh-admin-page) .btn:disabled,
+:is(.admin-content, #rh-admin-page) .btn[disabled] {
+    background: color-mix(in srgb, var(--au-surface) 86%, var(--au-border-soft) 14%) !important;
+    border-color: color-mix(in srgb, var(--au-border) 92%, var(--au-muted) 8%) !important;
+    color: color-mix(in srgb, var(--au-muted) 88%, var(--au-text) 12%) !important;
+}
+
+@media (hover: hover) and (pointer: fine) {
+    :is(.admin-content, #rh-admin-page) .btn:hover {
+        transform: translateY(-0.06rem);
+    }
+}
+
+:is(.admin-content, #rh-admin-page) .btn:focus-visible {
+    outline: 0.12rem solid color-mix(in srgb, var(--au-accent-deep, var(--color-primary, #8A775F)) 42%, transparent);
+    outline-offset: 0.1rem;
+}
+
+/* Action button groups — wrap cleanly, never overlap */
+:is(.admin-content, #rh-admin-page) .action-buttons,
+:is(.admin-content, #rh-admin-page) .quick-actions,
+:is(.admin-content, #rh-admin-page) .table .actions,
+:is(.admin-content, #rh-admin-page) .table .quick-actions,
+:is(.admin-content, #rh-admin-page) .table .action-buttons,
+:is(.admin-content, #rh-admin-page) .table td .quick-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: clamp(0.34rem, 0.3rem + 0.14vw, 0.52rem);
+    align-items: center;
+}
+
+:is(.admin-content, #rh-admin-page) .action-buttons .btn,
+:is(.admin-content, #rh-admin-page) .quick-actions .btn,
+:is(.admin-content, #rh-admin-page) .table .actions .btn,
+:is(.admin-content, #rh-admin-page) .table .quick-actions .btn,
+:is(.admin-content, #rh-admin-page) .table .action-buttons .btn,
+:is(.admin-content, #rh-admin-page) .table td .quick-actions .btn {
+    flex: 0 1 auto;
+    min-width: 0;
+    justify-content: center;
+}
+
+:is(.admin-content, #rh-admin-page) .table .actions .btn,
+:is(.admin-content, #rh-admin-page) .table .quick-actions .btn,
+:is(.admin-content, #rh-admin-page) .table .action-buttons .btn,
+:is(.admin-content, #rh-admin-page) .table td .quick-actions .btn {
+    min-height: clamp(1.9rem, 1.84rem + 0.14vw, 2.06rem);
+    min-inline-size: clamp(1.9rem, 1.84rem + 0.18vw, 2.2rem);
+}
+
+:is(.admin-content, #rh-admin-page) .btn-group,
+:is(.admin-content, #rh-admin-page) .table td .btn-group {
+    display: inline-flex;
+    flex-wrap: wrap;
+    gap: clamp(0.3rem, 0.26rem + 0.12vw, 0.45rem);
+    align-items: center;
+}
+
+:is(.admin-content, #rh-admin-page) .btn-group .btn,
+:is(.admin-content, #rh-admin-page) .table td .btn-group .btn {
+    flex: 0 1 auto;
+}
+
+:is(.admin-content, #rh-admin-page) table.mobile-enhanced td[data-label="Action"] .quick-actions,
+:is(.admin-content, #rh-admin-page) table.mobile-enhanced td[data-label="Actions"] .quick-actions,
+:is(.admin-content, #rh-admin-page) table.mobile-enhanced td[data-label="Action"] .action-buttons,
+:is(.admin-content, #rh-admin-page) table.mobile-enhanced td[data-label="Actions"] .action-buttons,
+:is(.admin-content, #rh-admin-page) table.mobile-enhanced td[data-label="Action"] .actions-row,
+:is(.admin-content, #rh-admin-page) table.mobile-enhanced td[data-label="Actions"] .actions-row,
+:is(.admin-content, #rh-admin-page) table.mobile-enhanced td[data-label="Action"] .btn-group,
+:is(.admin-content, #rh-admin-page) table.mobile-enhanced td[data-label="Actions"] .btn-group {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(min(8.5rem, 100%), 1fr));
+    gap: clamp(0.34rem, 0.3rem + 0.14vw, 0.52rem);
+    width: 100%;
+}
+
+:is(.admin-content, #rh-admin-page) table.mobile-enhanced td[data-label="Action"] .btn,
+:is(.admin-content, #rh-admin-page) table.mobile-enhanced td[data-label="Actions"] .btn,
+:is(.admin-content, #rh-admin-page) table.mobile-enhanced td[data-label="Action"] .button,
+:is(.admin-content, #rh-admin-page) table.mobile-enhanced td[data-label="Actions"] .button,
+:is(.admin-content, #rh-admin-page) table.mobile-enhanced td[data-label="Action"] button.btn,
+:is(.admin-content, #rh-admin-page) table.mobile-enhanced td[data-label="Actions"] button.btn {
+    width: 100%;
+    justify-content: center;
+}
+
+:is(.admin-content, #rh-admin-page) table.mobile-enhanced td[data-label="Action"]>.btn,
+:is(.admin-content, #rh-admin-page) table.mobile-enhanced td[data-label="Actions"]>.btn,
+:is(.admin-content, #rh-admin-page) table.mobile-enhanced td[data-label="Action"]>.button,
+:is(.admin-content, #rh-admin-page) table.mobile-enhanced td[data-label="Actions"]>.button,
+:is(.admin-content, #rh-admin-page) table.mobile-enhanced td[data-label="Action"]>button.btn,
+:is(.admin-content, #rh-admin-page) table.mobile-enhanced td[data-label="Actions"]>button.btn {
+    width: auto;
+    min-width: clamp(5.6rem, 5.1rem + 1.2vw, 7.1rem);
+    max-width: 100%;
+    padding-inline: clamp(0.7rem, 0.62rem + 0.2vw, 0.95rem);
+    justify-content: center;
+}
+
+:is(.admin-content, #rh-admin-page) table.mobile-enhanced td[data-label="Action"] .actions-row .quick-action,
+:is(.admin-content, #rh-admin-page) table.mobile-enhanced td[data-label="Actions"] .actions-row .quick-action,
+:is(.admin-content, #rh-admin-page) table.mobile-enhanced td[data-label="Action"] .actions-row .actions-more-toggle,
+:is(.admin-content, #rh-admin-page) table.mobile-enhanced td[data-label="Actions"] .actions-row .actions-more-toggle {
+    width: auto;
+    min-width: clamp(2.5rem, 2.35rem + 0.3vw, 2.9rem);
+    height: clamp(2.4rem, 2.28rem + 0.24vw, 2.72rem);
+    padding-inline: clamp(0.62rem, 0.56rem + 0.2vw, 0.88rem);
+    gap: clamp(0.24rem, 0.2rem + 0.1vw, 0.36rem);
+}
+
+@media (max-width: 64rem) {
+
+    :is(.admin-content, #rh-admin-page) table.mobile-enhanced td[data-label="Action"] .actions-row .quick-action,
+    :is(.admin-content, #rh-admin-page) table.mobile-enhanced td[data-label="Actions"] .actions-row .quick-action,
+    :is(.admin-content, #rh-admin-page) table.mobile-enhanced td[data-label="Action"] .actions-row .actions-more-toggle,
+    :is(.admin-content, #rh-admin-page) table.mobile-enhanced td[data-label="Actions"] .actions-row .actions-more-toggle {
+        min-width: clamp(6.2rem, 5.9rem + 1.1vw, 7.6rem);
+        padding-inline: clamp(0.56rem, 0.5rem + 0.22vw, 0.9rem);
+        justify-content: center;
+    }
+
+    :is(.admin-content, #rh-admin-page) table.mobile-enhanced td[data-label="Action"] .actions-row .quick-action .label,
+    :is(.admin-content, #rh-admin-page) table.mobile-enhanced td[data-label="Actions"] .actions-row .quick-action .label,
+    :is(.admin-content, #rh-admin-page) table.mobile-enhanced td[data-label="Action"] .actions-row .actions-more-toggle .label,
+    :is(.admin-content, #rh-admin-page) table.mobile-enhanced td[data-label="Actions"] .actions-row .actions-more-toggle .label {
+        display: inline-flex !important;
+        align-items: center;
+        font-size: clamp(0.66rem, 0.62rem + 0.12vw, 0.76rem);
+        line-height: 1.15;
+        white-space: nowrap;
+    }
+}
+
+:is(.admin-content, #rh-admin-page) .actions-row .quick-action,
+:is(.admin-content, #rh-admin-page) .actions-row .actions-more-toggle {
+    background: linear-gradient(180deg,
+            color-mix(in srgb, var(--au-surface) 90%, var(--au-border-soft) 10%),
+            color-mix(in srgb, var(--au-surface) 82%, var(--au-border-soft) 18%)) !important;
+    border-color: color-mix(in srgb, var(--au-border) 84%, var(--au-text) 16%) !important;
+    color: color-mix(in srgb, var(--au-text) 90%, var(--au-muted) 10%) !important;
+    box-shadow: var(--au-shadow-sm);
+}
+
+:is(.admin-content, #rh-admin-page) .actions-row .quick-action:hover:not(:disabled):not([disabled]),
+:is(.admin-content, #rh-admin-page) .actions-row .actions-more-toggle:hover {
+    background: linear-gradient(180deg,
+            color-mix(in srgb, var(--au-surface) 82%, var(--au-border-soft) 18%),
+            color-mix(in srgb, var(--au-surface) 74%, var(--au-border-soft) 26%)) !important;
+    border-color: color-mix(in srgb, var(--au-border) 70%, var(--au-text) 30%) !important;
+    color: color-mix(in srgb, var(--au-text) 94%, var(--au-muted) 6%) !important;
+}
+
+:is(.admin-content, #rh-admin-page) .actions-row .quick-action[class*="--urgent"] {
+    background: linear-gradient(135deg,
+            color-mix(in srgb, var(--au-text) 90%, var(--au-accent-deep) 10%),
+            color-mix(in srgb, var(--au-text) 80%, var(--au-accent-deep) 20%)) !important;
+    border-color: color-mix(in srgb, var(--au-text) 72%, var(--au-border) 28%) !important;
+    color: var(--au-surface) !important;
+}
+
+:is(.admin-content, #rh-admin-page) .actions-row .quick-action[class*="--urgent"]:hover:not(:disabled):not([disabled]) {
+    background: linear-gradient(135deg,
+            color-mix(in srgb, var(--au-text) 84%, var(--au-accent-deep) 16%),
+            color-mix(in srgb, var(--au-text) 74%, var(--au-accent-deep) 26%)) !important;
+    border-color: color-mix(in srgb, var(--au-text) 66%, var(--au-border) 34%) !important;
+}
+
+@media (max-width: 30rem) {
+
+    :is(.admin-content, #rh-admin-page) .action-buttons,
+    :is(.admin-content, #rh-admin-page) .quick-actions,
+    :is(.admin-content, #rh-admin-page) .table .actions,
+    :is(.admin-content, #rh-admin-page) .table .quick-actions,
+    :is(.admin-content, #rh-admin-page) .table .action-buttons,
+    :is(.admin-content, #rh-admin-page) .table td .quick-actions {
+        flex-direction: row;
+        align-items: center;
+        justify-content: flex-start;
+    }
+
+    :is(.admin-content, #rh-admin-page) table.mobile-enhanced td[data-label="Action"] .quick-actions,
+    :is(.admin-content, #rh-admin-page) table.mobile-enhanced td[data-label="Actions"] .quick-actions,
+    :is(.admin-content, #rh-admin-page) table.mobile-enhanced td[data-label="Action"] .action-buttons,
+    :is(.admin-content, #rh-admin-page) table.mobile-enhanced td[data-label="Actions"] .action-buttons,
+    :is(.admin-content, #rh-admin-page) table.mobile-enhanced td[data-label="Action"] .actions-row,
+    :is(.admin-content, #rh-admin-page) table.mobile-enhanced td[data-label="Actions"] .actions-row,
+    :is(.admin-content, #rh-admin-page) table.mobile-enhanced td[data-label="Action"] .btn-group,
+    :is(.admin-content, #rh-admin-page) table.mobile-enhanced td[data-label="Actions"] .btn-group {
+        grid-template-columns: 1fr;
+    }
+
+    :is(.admin-content, #rh-admin-page) .action-buttons .btn,
+    :is(.admin-content, #rh-admin-page) .quick-actions .btn,
+    :is(.admin-content, #rh-admin-page) .table .actions .btn,
+    :is(.admin-content, #rh-admin-page) .table .quick-actions .btn,
+    :is(.admin-content, #rh-admin-page) .table .action-buttons .btn,
+    :is(.admin-content, #rh-admin-page) .table td .quick-actions .btn {
+        width: auto;
+        flex: 0 1 auto;
+    }
+}
+
+/* Filter / toolbar bars above tables */
+.admin-content .filter-bar,
+.admin-content .table-toolbar {
+    gap: 8px;
+    flex-wrap: wrap;
+    align-items: center;
+    /* keep inputs and buttons on the same midline */
+}
+
+.admin-content .filter-bar .btn,
+.admin-content .table-toolbar .btn {
+    min-height: 36px;
+    /* match input min-height so they sit on the same line */
+    font-size: 12px;
+}
+
+.admin-content .filter-bar label,
+.admin-content .table-toolbar label {
+    margin-bottom: 0;
+}
+
+/* Form labels & inputs in admin */
+.admin-content .form-label,
+.admin-content label.form-label {
+    font-size: 12.5px;
+    font-weight: 600;
+    margin-bottom: 5px;
+}
+
+.admin-content .form-control,
+.admin-content .form-select,
+.admin-content input[type="text"],
+.admin-content input[type="email"],
+.admin-content input[type="number"],
+.admin-content input[type="date"],
+.admin-content input[type="time"],
+.admin-content input[type="password"],
+.admin-content textarea,
+.admin-content select {
+    font-size: 13px;
+    padding: 7px 10px;
+    min-height: 36px;
+}
+
+/* Badges — tighter */
+.admin-content .badge {
+    font-size: 10.5px;
+    padding: 2px 8px;
+    letter-spacing: 0.03em;
+}
+
+/* Mobile: keep table action buttons stacking but consistent */
+@media (max-width: 640px) {
+
+    .admin-content .page-title,
+    .admin-page-hero h1,
+    .page-header h1 {
+        font-size: 18px !important;
+    }
+
+    .admin-content h2 {
+        font-size: 15px;
+    }
+
+    .admin-content h3 {
+        font-size: 13.5px;
+    }
+
+    .admin-content .stat-card .stat-value {
+        font-size: 18px !important;
+    }
+
+    .admin-content .table thead th,
+    .admin-content .table tbody td {
+        padding: 8px 10px !important;
+        font-size: 12px !important;
+    }
+
+    .admin-content .btn {
+        font-size: 12px;
+        min-height: 32px;
+        padding: 6px 10px;
+    }
+}
+
+
+.admin-confirm-input-wrap[hidden] {
+    display: none;
+}
+
+.admin-confirm-input-wrap textarea {
+    width: 100%;
+    min-height: 92px;
+    margin-top: 7px;
+    border: 1px solid #d9dee6;
+    border-radius: 8px;
+    padding: 10px 12px;
+    resize: vertical;
+    font: inherit;
+}
+
+.admin-confirm-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 10px;
+    padding: 16px 24px 20px;
+    border-top: 1px solid #eef0f3;
+    background: #fbfcfd;
+}
+
+.admin-confirm-submit {
+    min-width: 122px;
+}
+
+@media (max-width: 520px) {
+    .admin-confirm-head {
+        grid-template-columns: auto 1fr;
+        padding: 18px 18px 15px;
+    }
+
+    .admin-confirm-close {
+        position: absolute;
+        top: 12px;
+        right: 12px;
+    }
+
+    .admin-confirm-body,
+    .admin-confirm-actions {
+        padding-left: 18px;
+        padding-right: 18px;
+    }
+
+    .admin-confirm-actions {
+        flex-direction: column-reverse;
+    }
+
+    .admin-confirm-actions .btn {
+        width: 100%;
+    }
+}
+
+/* Loading state for buttons */
+.btn-loading,
+.quick-action.btn-loading {
+    position: relative;
+    pointer-events: none !important;
+    cursor: not-allowed !important;
+    opacity: 0.7 !important;
+}
+
+.btn-loading::before,
+.quick-action.btn-loading::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: rgba(255, 255, 255, 0.3);
+    border-radius: inherit;
+    z-index: 1;
+}
+
+/* Spinner animation for loading buttons */
+.btn-loading .fa-spinner,
+.quick-action.btn-loading .fa-spinner {
+    animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+    from {
+        transform: rotate(0deg);
+    }
+
+    to {
+        transform: rotate(360deg);
+    }
+}
+
+/* Prevent double-click on all quick-action buttons */
+.quick-action {
+    transition: all 0.2s ease;
+}
+
+.quick-action:disabled,
+.quick-action[disabled] {
+    pointer-events: none !important;
+    cursor: not-allowed !important;
+    opacity: 0.5 !important;
+}
+
+/* Quick action button pressed state */
+.quick-action:not(:disabled):active {
+    transform: scale(0.98);
+}
+
+/* Accessibility: Focus visible for quick action buttons */
+.quick-action:focus-visible {
+    outline: 2px solid var(--gold, #8B7355);
+    outline-offset: 2px;
+}
+
+/* Touch-friendly targets on 320px */
+@media (max-width: 320px) {
+
+    /* Increase tap targets for buttons */
+    .modal-close,
+    .alert-close {
+        min-width: 44px;
+        min-height: 44px;
+    }
+
+    .modal-footer button,
+    .modal-footer a {
+        min-height: 44px;
+    }
+}
+
+/* ── Quotation button & badge (tentative bookings) ──────────────────── */
+.btn-quote {
+    background: #4A6FA5;
+    color: #FFF;
+    border: 1px solid #3a5a8f;
+}
+
+.btn-quote:hover,
+.btn-quote:focus {
+    background: #3a5a8f;
+    color: #FFF;
+}
+
+.btn-quote:disabled {
+    opacity: 0.65;
+    cursor: not-allowed;
+}
+
+.badge-quoted {
+    display: inline-block;
+    background: #E8F0FB;
+    color: #3a5a8f;
+    border: 1px solid #C0D0EC;
+    border-radius: 10px;
+    padding: 2px 8px;
+    font-size: 11px;
+    font-weight: 500;
+    white-space: nowrap;
+}

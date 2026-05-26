@@ -1,0 +1,948 @@
+/**
+ * admin-spa.js
+ * Lightweight SPA router for the admin panel.
+ *
+ * - Intercepts clicks on admin links
+ * - Fetches target pages via Fetch API (GET, same-origin)
+ * - Swaps only the #rh-admin-page content area
+ * - Admin header and sidebar always remain visible
+ * - Injects missing CSS/JS from fetched <head> before swapping
+ * - Re-executes inline scripts in new content
+ * - Shows a top loading bar during navigation
+ * - Handles browser history (back / forward)
+ * - Falls back to full navigation on any error
+ */
+(function () {
+    'use strict';
+
+    /** Pages that always use full-page navigation (no SPA). */
+    var FULL_NAV = ['login.php', 'logout.php', 'kds.php', 'bds.php', 'cds.php', 'pos.php'];
+
+    var CONTENT_ID = 'rh-admin-page';
+
+    // ── Loading bar ──────────────────────────────────────────────────────────
+    var _loader = null;
+    var _loaderTimer = null;
+    var _loaderShownAt = 0;
+    var _loaderMinVisibleMs = 320;
+
+    function _getLoaderBrandName() {
+        var brand = document.querySelector('.admin-header-brand h1');
+        if (brand && brand.textContent.trim()) return brand.textContent.trim();
+
+        var navBrand = document.querySelector('.admin-nav-title-sub');
+        if (navBrand && navBrand.textContent.trim()) return navBrand.textContent.trim();
+
+        var title = document.title || '';
+        if (title.indexOf('|') !== -1) {
+            return title.split('|').slice(-1)[0].replace(/\s+Admin\s*$/i, '').trim() || 'Hotel Admin';
+        }
+
+        return 'Hotel Admin';
+    }
+
+    function _ensureOverlayLoader() {
+        var loader = document.getElementById('adminPageLoader');
+        if (loader) return loader;
+
+        loader = document.createElement('div');
+        loader.id = 'adminPageLoader';
+        loader.className = 'admin-page-loader';
+        loader.setAttribute('aria-live', 'polite');
+        loader.setAttribute('aria-hidden', 'true');
+        loader.innerHTML = [
+            '<div class="admin-page-loader-card">',
+            '<div class="admin-page-loader-brand"><i class="fas fa-hotel" aria-hidden="true"></i><span id="adminPageLoaderBrand"></span></div>',
+            '<div class="admin-page-loader-spinner" aria-hidden="true">',
+            '<span></span><span></span><span></span>',
+            '</div>',
+            '<div class="admin-page-loader-title">Loading admin workspace</div>',
+            '<div class="admin-page-loader-text" id="adminPageLoaderText">Loading...</div>',
+            '<div class="admin-page-loader-bar"><span></span></div>',
+            '</div>'
+        ].join('');
+        document.body.appendChild(loader);
+        return loader;
+    }
+
+    function _showOverlayLoader(message) {
+        if (window.AdminPageLoader && typeof window.AdminPageLoader.show === 'function') {
+            window.AdminPageLoader.show(message || 'Loading page...');
+            return;
+        }
+
+        var loader = _ensureOverlayLoader();
+        var brand = loader.querySelector('#adminPageLoaderBrand');
+        var text = loader.querySelector('#adminPageLoaderText');
+        if (brand) brand.textContent = _getLoaderBrandName();
+        if (text) text.textContent = message || 'Loading page...';
+        loader.classList.add('is-visible');
+        loader.setAttribute('aria-hidden', 'false');
+        document.body.classList.add('admin-page-loading');
+    }
+
+    function _hideOverlayLoader() {
+        if (window.AdminPageLoader && typeof window.AdminPageLoader.hide === 'function') {
+            window.AdminPageLoader.hide();
+            return;
+        }
+
+        var loader = document.getElementById('adminPageLoader');
+        if (!loader) return;
+        loader.classList.remove('is-visible');
+        loader.setAttribute('aria-hidden', 'true');
+        document.body.classList.remove('admin-page-loading');
+    }
+
+    function _ensureLegacyAdminModalHelpers() {
+        if (typeof window.openAdminModal !== 'function') {
+            window.openAdminModal = function (modalId) {
+                var modal = document.getElementById(modalId);
+                if (!modal) return;
+                modal.classList.add('active');
+                document.body.classList.add('modal-open');
+            };
+        }
+
+        if (typeof window.closeAdminModal !== 'function') {
+            window.closeAdminModal = function (modalId) {
+                var modal = document.getElementById(modalId);
+                if (!modal) return;
+                modal.classList.remove('active');
+                if (!document.querySelector('.modal-overlay.active')) {
+                    document.body.classList.remove('modal-open');
+                }
+            };
+        }
+
+        if (typeof window.bindAdminModal !== 'function') {
+            window.bindAdminModal = function (modalId) {
+                var modal = document.getElementById(modalId);
+                if (!modal || modal.dataset.bound === '1') return;
+
+                modal.addEventListener('click', function (event) {
+                    if (event.target === modal) {
+                        window.closeAdminModal(modalId);
+                    }
+                });
+
+                modal.dataset.bound = '1';
+            };
+        }
+
+        if (!window.__rhAdminModalEscapeBound) {
+            document.addEventListener('keydown', function (event) {
+                if (event.key !== 'Escape') return;
+                var active = document.querySelector('.modal-overlay.active');
+                if (active && active.id) {
+                    window.closeAdminModal(active.id);
+                }
+            });
+            window.__rhAdminModalEscapeBound = true;
+        }
+    }
+
+    function _collectInlineScriptExports(source) {
+        var names = [];
+        var patterns = [
+            /^\s*(?:async\s+)?function\s+([A-Za-z_$][\w$]*)\s*\(/gm,
+            /^\s*class\s+([A-Za-z_$][\w$]*)\b/gm,
+            /^\s*(?:var|let|const)\s+([A-Za-z_$][\w$]*)\s*=\s*(?:async\s*)?(?:function\b|class\b|\([^\n=]*\)\s*=>|[A-Za-z_$][\w$]*\s*=>)/gm
+        ];
+
+        patterns.forEach(function (pattern) {
+            var match;
+            while ((match = pattern.exec(source)) !== null) {
+                if (names.indexOf(match[1]) === -1) {
+                    names.push(match[1]);
+                }
+            }
+        });
+
+        return names;
+    }
+
+    function _buildInlineScriptSource(source) {
+        var exports = _collectInlineScriptExports(source);
+        var exportLines = exports.map(function (name) {
+            return 'if (typeof ' + name + ' !== "undefined") { window.' + name + ' = ' + name + '; }';
+        });
+
+        return [
+            '(function(window, document){',
+            source,
+            exportLines.join('\n'),
+            '})(window, document);'
+        ].join('\n');
+    }
+
+    function _initLoader() {
+        if (_loader) return;
+        _loader = document.createElement('div');
+        _loader.id = 'rh-spa-loader';
+        _loader.setAttribute('aria-hidden', 'true');
+        document.body.insertBefore(_loader, document.body.firstChild);
+    }
+
+    function _showLoader(message) {
+        _initLoader();
+        clearTimeout(_loaderTimer);
+        _loader.style.transition = 'none';
+        _loader.style.width = '0%';
+        _loader.style.opacity = '1';
+        _loaderShownAt = Date.now();
+        _showOverlayLoader(message || 'Opening page...');
+
+        // Start immediately so users can always see loading feedback.
+        _loaderTimer = setTimeout(function () {
+            _loader.style.transition = 'width 0.45s ease';
+            _loader.style.width = '42%';
+
+            _loaderTimer = setTimeout(function () {
+                _loader.style.transition = 'width 0.85s ease';
+                _loader.style.width = '78%';
+            }, 120);
+        }, 10);
+    }
+
+    function _finishLoader() {
+        clearTimeout(_loaderTimer);
+        if (!_loader) return;
+
+        var elapsed = _loaderShownAt > 0 ? (Date.now() - _loaderShownAt) : _loaderMinVisibleMs;
+        var wait = elapsed >= _loaderMinVisibleMs ? 0 : (_loaderMinVisibleMs - elapsed);
+
+        _loaderTimer = setTimeout(function () {
+            _loader.style.transition = 'width 0.2s ease';
+            _loader.style.width = '100%';
+
+            _loaderTimer = setTimeout(function () {
+                _loader.style.transition = 'opacity 0.22s ease';
+                _loader.style.opacity = '0';
+
+                _loaderTimer = setTimeout(function () {
+                    _loader.style.transition = 'none';
+                    _loader.style.width = '0%';
+                    _loaderShownAt = 0;
+                    _hideOverlayLoader();
+                }, 240);
+            }, 120);
+        }, wait);
+    }
+
+    function _hideLoader() {
+        clearTimeout(_loaderTimer);
+        if (!_loader) return;
+        _loader.style.transition = 'none';
+        _loader.style.opacity = '0';
+        _loader.style.width = '0%';
+        _loaderShownAt = 0;
+        _hideOverlayLoader();
+    }
+
+    function _showScopedPaginationLoader(scopeElement, message, navEl) {
+        if (!scopeElement) return function () { return; };
+
+        var host = navEl && navEl.parentNode ? navEl.parentNode : scopeElement;
+        var anchor = navEl && navEl.parentNode ? navEl.nextSibling : null;
+
+        var loader = document.createElement('div');
+        loader.className = 'admin-pagination-loader is-visible';
+        loader.setAttribute('role', 'status');
+        loader.setAttribute('aria-live', 'polite');
+        loader.setAttribute('aria-label', message || 'Loading results');
+        loader.innerHTML = [
+            '<span class="admin-pagination-loader__spinner" aria-hidden="true"></span>',
+            '<span class="admin-pagination-loader__text">' + (message || 'Loading next page...') + '</span>'
+        ].join('');
+
+        if (anchor) {
+            host.insertBefore(loader, anchor);
+        } else {
+            host.appendChild(loader);
+        }
+
+        var spinner = loader.querySelector('.admin-pagination-loader__spinner');
+        var spinnerAnimation = null;
+        if (spinner && typeof spinner.animate === 'function') {
+            spinnerAnimation = spinner.animate([
+                { transform: 'rotate(0deg)' },
+                { transform: 'rotate(360deg)' }
+            ], {
+                duration: 720,
+                iterations: Infinity,
+                easing: 'linear'
+            });
+        }
+
+        return function () {
+            if (spinnerAnimation) spinnerAnimation.cancel();
+            if (loader.parentNode) {
+                loader.parentNode.removeChild(loader);
+            }
+        };
+    }
+
+    // ── CSS injection ────────────────────────────────────────────────────────
+    /**
+     * Inject stylesheet links from the fetched page that aren't already loaded.
+     * Returns a Promise that resolves when all new sheets have loaded.
+     */
+    function _injectCSS(doc) {
+        // Mark the initial page stylesheet set as managed so we can safely
+        // remove stale page-specific CSS on later SPA navigations.
+        if (!window.__rhSpaManagedCssBootstrapped) {
+            document.querySelectorAll('link[rel="stylesheet"]').forEach(function (l) {
+                l.setAttribute('data-rh-spa-managed', '1');
+            });
+            window.__rhSpaManagedCssBootstrapped = true;
+        }
+
+        var targetHrefs = {};
+        doc.querySelectorAll('link[rel="stylesheet"]').forEach(function (link) {
+            targetHrefs[link.href] = true;
+        });
+
+        var linksToRemove = [];
+        document.querySelectorAll('link[rel="stylesheet"][data-rh-spa-managed="1"]').forEach(function (link) {
+            if (!targetHrefs[link.href]) {
+                linksToRemove.push(link);
+            }
+        });
+
+        var existingByHref = {};
+        document.querySelectorAll('link[rel="stylesheet"]').forEach(function (l) {
+            existingByHref[l.href] = l;
+        });
+
+        var promises = [];
+        doc.querySelectorAll('link[rel="stylesheet"]').forEach(function (link) {
+            var existing = existingByHref[link.href];
+            if (existing) {
+                existing.setAttribute('data-rh-spa-managed', '1');
+                return;
+            }
+
+            var clone = document.createElement('link');
+            clone.rel = 'stylesheet';
+            clone.href = link.href;
+            clone.setAttribute('data-rh-spa-managed', '1');
+
+            var p = new Promise(function (resolve) {
+                clone.onload = resolve;
+                clone.onerror = resolve; // don't block on CSS errors
+            });
+
+            document.head.appendChild(clone);
+            promises.push(p);
+        });
+
+        return Promise.all(promises).then(function () {
+            linksToRemove.forEach(function (link) {
+                if (link && link.parentNode) {
+                    link.parentNode.removeChild(link);
+                }
+            });
+        });
+    }
+
+    // ── External script injection ────────────────────────────────────────────
+    /**
+     * Inject <script src> tags from the fetched <head> that aren't yet loaded.
+     * Returns a Promise that resolves when new scripts have loaded.
+     */
+    function _injectHeadScripts(doc) {
+        var existingSrcs = {};
+        document.querySelectorAll('script[src]').forEach(function (s) {
+            existingSrcs[s.src] = true;
+        });
+
+        var promises = [];
+        doc.querySelectorAll('head script[src]').forEach(function (script) {
+            if (existingSrcs[script.src]) return;
+            // Skip admin-spa.js itself
+            if (script.src.indexOf('admin-spa.js') !== -1) return;
+            var s = document.createElement('script');
+            s.src = script.src;
+            if (script.hasAttribute('defer')) s.defer = true;
+            var p = new Promise(function (resolve) {
+                s.onload = resolve;
+                s.onerror = resolve;
+            });
+            document.head.appendChild(s);
+            promises.push(p);
+        });
+
+        return Promise.all(promises);
+    }
+
+    // ── Inline <style> management ────────────────────────────────────────────
+    function _updateInlineStyles(doc) {
+        // Remove styles injected by the previous SPA navigation
+        document.querySelectorAll('style[data-rh-spa]').forEach(function (s) { s.remove(); });
+
+        // Copy inline styles from the fetched page's <head>
+        doc.querySelectorAll('head > style').forEach(function (style) {
+            var clone = document.createElement('style');
+            clone.textContent = style.textContent;
+            clone.setAttribute('data-rh-spa', '1');
+            document.head.appendChild(clone);
+        });
+    }
+
+    // ── Inline script execution ──────────────────────────────────────────────
+    /**
+     * Re-execute <script> tags inside `container`.
+     * Scripts injected via innerHTML don't auto-run; we must recreate them.
+     */
+    function _runScripts(container) {
+        var scripts = Array.from(container.querySelectorAll('script'));
+        return scripts.reduce(function (chain, old) {
+            return chain.then(function () {
+                var s = document.createElement('script');
+
+                function hasLoadedScript(src) {
+                    return Array.from(document.querySelectorAll('script[src]')).some(function (existing) {
+                        if (container.contains(existing)) return false;
+                        return existing.src === src;
+                    });
+                }
+
+                // Copy attributes
+                Array.from(old.attributes).forEach(function (a) {
+                    s.setAttribute(a.name, a.value);
+                });
+
+                if (old.src) {
+                    // External: only add once
+                    if (hasLoadedScript(old.src)) {
+                        old.parentNode && old.parentNode.removeChild(old);
+                        return;
+                    }
+
+                    return new Promise(function (resolve) {
+                        s.async = false;
+                        s.onload = resolve;
+                        s.onerror = resolve;
+                        document.body.appendChild(s);
+                        old.parentNode && old.parentNode.removeChild(old);
+                    });
+                }
+
+                if (old.textContent.trim()) {
+                    // Isolate lexical declarations but re-export top-level page
+                    // helpers so later scripts and inline onclick handlers still work.
+                    s.textContent = _buildInlineScriptSource(old.textContent);
+                    document.body.appendChild(s);
+                    document.body.removeChild(s);
+                }
+
+                old.parentNode && old.parentNode.removeChild(old);
+            });
+        }, Promise.resolve());
+    }
+
+    // ── Active nav state ─────────────────────────────────────────────────────
+    function _updateNavActive(href) {
+        // Extract filename + query, e.g. "bookings.php" or "booking-details.php?id=5"
+        var urlObj;
+        try { urlObj = new URL(href); } catch (e) { return; }
+        var filename = urlObj.pathname.split('/').pop();
+
+        document.querySelectorAll('.admin-nav a.admin-nav-link').forEach(function (a) {
+            var aHref = a.getAttribute('href') || '';
+            var aFile = aHref.split('?')[0].split('/').pop();
+            a.classList.toggle('active', aFile === filename);
+        });
+
+        // Update is-active-group on nav sections
+        document.querySelectorAll('.nav-group').forEach(function (group) {
+            var hasActive = group.querySelector('.admin-nav-link.active');
+            group.classList.toggle('is-active-group', !!hasActive);
+        });
+    }
+
+    // ── Page entry animation ─────────────────────────────────────────────────
+    function _animateEnter(container) {
+        container.classList.remove('rh-page-entering');
+        // Trigger reflow to restart animation
+        void container.offsetHeight;
+        container.classList.add('rh-page-entering');
+        container.addEventListener('animationend', function () {
+            container.classList.remove('rh-page-entering');
+        }, { once: true });
+    }
+
+    // ── Pre-navigation cleanup ───────────────────────────────────────────────
+    function _cleanup() {
+        // Close any open admin modals
+        document.querySelectorAll(
+            '.admin-modal-overlay, .modal-overlay, [role="dialog"][aria-hidden="false"]'
+        ).forEach(function (el) {
+            el.classList.remove('active', 'visible', 'open');
+            el.setAttribute('aria-hidden', 'true');
+        });
+
+        // Remove floating datepicker overlays from the previous page.
+        // Flatpickr appends calendars to <body>, so they can leak across SPA swaps.
+        document.querySelectorAll('.flatpickr-calendar').forEach(function (el) {
+            el.remove();
+        });
+        document.querySelectorAll('.flatpickr-input.active').forEach(function (el) {
+            el.classList.remove('active');
+        });
+
+        // Restore body scroll if a modal had locked it
+        document.body.style.overflow = '';
+    }
+
+    // ── SPA eligibility check ────────────────────────────────────────────────
+    function _isSpaUrl(href) {
+        try {
+            var url = new URL(href);
+            if (url.origin !== window.location.origin) return false;
+            var path = url.pathname;
+            if (path.indexOf('/admin/') === -1) return false;
+
+            var file = path.split('/').pop();
+            // Exclude full-nav pages
+            for (var i = 0; i < FULL_NAV.length; i++) {
+                if (file === FULL_NAV[i]) return false;
+            }
+
+            // Only handle .php URLs (not assets, CSV exports, etc.)
+            if (file && file.indexOf('.') !== -1 && !file.endsWith('.php')) return false;
+
+            // Skip anchor-only navigation on the same page
+            if (url.pathname === window.location.pathname && !url.search && url.hash) return false;
+
+            return true;
+        } catch (e) {
+            return false;
+        }
+    }
+
+    // ── Core navigation ──────────────────────────────────────────────────────
+    var _navigating = false;
+    var _abortController = null;
+
+    function _notifyContentUpdated(url, mode) {
+        try {
+            document.dispatchEvent(new CustomEvent('rh:content-updated', {
+                detail: {
+                    url: url || window.location.href,
+                    mode: mode || 'navigation'
+                }
+            }));
+        } catch (_err) {
+            // non-fatal
+        }
+    }
+
+    function _isPaginationLink(href) {
+        try {
+            var target = new URL(href);
+            var current = new URL(window.location.href);
+            if (target.origin !== current.origin) return false;
+            if (target.pathname !== current.pathname) return false;
+
+            var hasPaginationParam = false;
+            target.searchParams.forEach(function (_value, key) {
+                var normalized = String(key || '').toLowerCase();
+                if (normalized === 'page' || normalized.endsWith('_page')) {
+                    hasPaginationParam = true;
+                }
+            });
+
+            if (!hasPaginationParam) return false;
+            return true;
+        } catch (e) {
+            return false;
+        }
+    }
+
+    function _paginationContainerSelector(navEl) {
+        if (!navEl) return null;
+        if (navEl.matches('[data-admin-pagination]')) return '[data-admin-pagination]';
+        if (navEl.classList.contains('bookings-pagination')) return '.bookings-pagination';
+        if (navEl.classList.contains('pagination')) return '.pagination';
+        return null;
+    }
+
+    function _findPaginationScope(root, navEl) {
+        if (!root || !navEl) return null;
+
+        var scoped = navEl.closest('[data-admin-pagination-scope]');
+        if (scoped) {
+            var scopedList = root.querySelectorAll('[data-admin-pagination-scope]');
+            var scopedIndex = Array.prototype.indexOf.call(scopedList, scoped);
+            if (scopedIndex >= 0) {
+                return {
+                    element: scoped,
+                    selector: '[data-admin-pagination-scope]',
+                    index: scopedIndex
+                };
+            }
+        }
+
+        var candidates = ['.today-checkins-section', '.dashboard-section', '.section-card', '.widget', '.acct-panel', '.table-container', '.invoices-table', '.report-section', '.content'];
+        for (var i = 0; i < candidates.length; i++) {
+            var selector = candidates[i];
+            var element = navEl.closest(selector);
+            if (!element) continue;
+            var list = root.querySelectorAll(selector);
+            var index = Array.prototype.indexOf.call(list, element);
+            if (index >= 0) {
+                return {
+                    element: element,
+                    selector: selector,
+                    index: index
+                };
+            }
+        }
+
+        return null;
+    }
+
+    function _gotoPagination(href, pushState, navEl, loaderMessage) {
+        if (typeof pushState === 'undefined') pushState = true;
+
+        var url;
+        try { url = new URL(href); } catch (e) {
+            _goto(href, pushState, loaderMessage);
+            return;
+        }
+        var fullHref = url.href;
+
+        var currentContent = document.getElementById(CONTENT_ID);
+        var navSelector = _paginationContainerSelector(navEl);
+        var scope = _findPaginationScope(currentContent, navEl);
+        if (!currentContent || !navSelector || !scope) {
+            _goto(href, pushState, loaderMessage);
+            return;
+        }
+
+        var navList = currentContent.querySelectorAll(navSelector);
+        var navIndex = Array.prototype.indexOf.call(navList, navEl);
+        if (navIndex < 0) {
+            _goto(href, pushState, loaderMessage);
+            return;
+        }
+
+        // Abort any in-flight request
+        if (_abortController) {
+            _abortController.abort();
+            _abortController = null;
+        }
+
+        _navigating = true;
+        _cleanup();
+        var hideScopedLoader = _showScopedPaginationLoader(scope.element, loaderMessage || 'Loading next page...', navEl);
+
+        var controller = null;
+        var signal = null;
+        if (typeof AbortController !== 'undefined') {
+            controller = new AbortController();
+            signal = controller.signal;
+            _abortController = controller;
+        }
+
+        var fetchOptions = {
+            method: 'GET',
+            credentials: 'same-origin',
+            headers: {
+                'X-Requested-With': 'XMLHttpRequest'
+            }
+        };
+        if (signal) fetchOptions.signal = signal;
+
+        fetch(fullHref, fetchOptions)
+            .then(function (res) {
+                if (res.url && (
+                    res.url.indexOf('login.php') !== -1 ||
+                    (res.url.indexOf('/admin/') === -1 && res.url.indexOf('admin') === -1)
+                )) {
+                    hideScopedLoader();
+                    window.location.href = res.url;
+                    return null;
+                }
+
+                if (!res.ok) {
+                    hideScopedLoader();
+                    _goto(fullHref, pushState, loaderMessage);
+                    return null;
+                }
+
+                var ct = res.headers.get('content-type') || '';
+                if (ct.indexOf('text/html') === -1) {
+                    hideScopedLoader();
+                    _goto(fullHref, pushState, loaderMessage);
+                    return null;
+                }
+
+                return res.text();
+            })
+            .then(function (html) {
+                if (html === null || html === undefined) return;
+
+                var doc = new DOMParser().parseFromString(html, 'text/html');
+                var newContent = doc.getElementById(CONTENT_ID);
+                if (!newContent) {
+                    hideScopedLoader();
+                    _goto(fullHref, pushState, loaderMessage);
+                    return;
+                }
+
+                var newScopes = newContent.querySelectorAll(scope.selector);
+                var newScope = newScopes[scope.index] || null;
+                if (!newScope) {
+                    hideScopedLoader();
+                    _goto(fullHref, pushState, loaderMessage);
+                    return;
+                }
+
+                scope.element.innerHTML = newScope.innerHTML;
+
+                _runScripts(scope.element)
+                    .catch(function () { /* non-fatal script errors are ignored here */ })
+                    .then(function () {
+                        var newTitle = doc.querySelector('title');
+                        if (newTitle) document.title = newTitle.textContent;
+
+                        _updateNavActive(fullHref);
+                        if (pushState) {
+                            history.pushState({ spa: true, url: fullHref }, '', fullHref);
+                        }
+
+                        var y = scope.element.getBoundingClientRect().top + window.scrollY - 80;
+                        if (y < 0) y = 0;
+                        window.scrollTo({ top: y, behavior: 'instant' });
+
+                        _notifyContentUpdated(fullHref, 'pagination');
+
+                        hideScopedLoader();
+                        _navigating = false;
+                        _abortController = null;
+                    });
+            })
+            .catch(function (err) {
+                if (err && err.name === 'AbortError') {
+                    hideScopedLoader();
+                    _navigating = false;
+                    return;
+                }
+                hideScopedLoader();
+                _navigating = false;
+                _abortController = null;
+                _goto(fullHref, pushState, loaderMessage);
+            });
+    }
+
+    function _goto(href, pushState, loaderMessage) {
+        if (typeof pushState === 'undefined') pushState = true;
+
+        var url;
+        try { url = new URL(href); } catch (e) {
+            window.location.href = href;
+            return;
+        }
+
+        var fullHref = url.href;
+
+        // Abort any in-flight request
+        if (_abortController) {
+            _abortController.abort();
+            _abortController = null;
+        }
+
+        _navigating = true;
+        _showLoader(loaderMessage || 'Opening page...');
+        _cleanup();
+
+        // AbortController for this request
+        var controller = null;
+        var signal = null;
+        if (typeof AbortController !== 'undefined') {
+            controller = new AbortController();
+            signal = controller.signal;
+            _abortController = controller;
+        }
+
+        var fetchOptions = {
+            method: 'GET',
+            credentials: 'same-origin',
+            headers: {
+                'X-Requested-With': 'XMLHttpRequest'
+            }
+        };
+        if (signal) fetchOptions.signal = signal;
+
+        fetch(fullHref, fetchOptions)
+            .then(function (res) {
+                // Detect redirect to login (session expired)
+                if (res.url && (
+                    res.url.indexOf('login.php') !== -1 ||
+                    (res.url.indexOf('/admin/') === -1 && res.url.indexOf('admin') === -1)
+                )) {
+                    window.location.href = res.url;
+                    return null;
+                }
+
+                if (!res.ok) {
+                    window.location.href = fullHref;
+                    return null;
+                }
+
+                var ct = res.headers.get('content-type') || '';
+                if (ct.indexOf('text/html') === -1) {
+                    // Non-HTML response (PDF, CSV, etc.) — let browser handle
+                    _hideLoader();
+                    _navigating = false;
+                    _abortController = null;
+                    window.location.href = fullHref;
+                    return null;
+                }
+
+                return res.text();
+            })
+            .then(function (html) {
+                if (html === null || html === undefined) return;
+
+                var doc = new DOMParser().parseFromString(html, 'text/html');
+
+                // Detect login page in response body (session expired)
+                if (doc.querySelector('input[name="admin_password"], form.login-form, #loginForm')) {
+                    window.location.href = fullHref;
+                    return;
+                }
+
+                var newContent = doc.getElementById(CONTENT_ID);
+                if (!newContent) {
+                    // Page doesn't have SPA wrapper — fall back
+                    window.location.href = fullHref;
+                    return;
+                }
+
+                var currentContent = document.getElementById(CONTENT_ID);
+                if (!currentContent) {
+                    window.location.href = fullHref;
+                    return;
+                }
+
+                // Inject missing CSS & head scripts, then swap content
+                Promise.all([_injectCSS(doc), _injectHeadScripts(doc)])
+                    .then(function () {
+                        _updateInlineStyles(doc);
+
+                        // Update page title
+                        var newTitle = doc.querySelector('title');
+                        if (newTitle) document.title = newTitle.textContent;
+
+                        // Swap content
+                        currentContent.innerHTML = newContent.innerHTML;
+
+                        return _runScripts(currentContent)
+                            .catch(function (scriptErr) {
+                                console.warn('[Admin SPA] Script execution error (non-fatal):', scriptErr);
+                            })
+                            .then(function () {
+                                // Update nav active state
+                                _updateNavActive(fullHref);
+
+                                // Update browser history
+                                if (pushState) {
+                                    history.pushState({ spa: true, url: fullHref }, '', fullHref);
+                                }
+
+                                // Scroll to top
+                                window.scrollTo({ top: 0, behavior: 'instant' });
+
+                                // Entry animation
+                                _animateEnter(currentContent);
+
+                                _notifyContentUpdated(fullHref, 'navigation');
+
+                                _finishLoader();
+                                _navigating = false;
+                                _abortController = null;
+                            });
+                    })
+                    .catch(function (innerErr) {
+                        console.warn('[Admin SPA] Post-fetch error, falling back:', innerErr);
+                        _hideLoader();
+                        _navigating = false;
+                        _abortController = null;
+                        window.location.href = fullHref;
+                    });
+            })
+            .catch(function (err) {
+                if (err && err.name === 'AbortError') {
+                    // Superseded by a newer navigation — ignore
+                    _navigating = false;
+                    return;
+                }
+                console.warn('[Admin SPA] Navigation failed, falling back to full load:', err);
+                _hideLoader();
+                _navigating = false;
+                _abortController = null;
+                window.location.href = fullHref;
+            });
+    }
+
+    // ── Click intercept (event delegation on document) ───────────────────────
+    document.addEventListener('click', function (e) {
+        // Find the closest anchor tag
+        var a = e.target.closest('a[href]');
+        if (!a) return;
+
+        // Ignore modified clicks (new tab, etc.)
+        if (e.ctrlKey || e.metaKey || e.shiftKey || e.altKey) return;
+
+        // Ignore target="_blank" or any explicit external target
+        if (a.target && a.target !== '' && a.target !== '_self') return;
+
+        // Ignore download links
+        if (a.hasAttribute('download')) return;
+
+        // Honour explicit opt-out
+        if (a.dataset.noSpa !== undefined) return;
+
+        // Confirmation dialogs — let their handler run first
+        if (a.dataset.adminConfirm !== undefined) return;
+
+        // Skip non-SPA URLs
+        if (!_isSpaUrl(a.href)) return;
+
+        e.preventDefault();
+        var loaderMessage = a.dataset.adminLoaderText || ('Opening ' + (a.textContent || 'page').trim() + '...');
+
+        var paginationNode = a.closest('[data-admin-pagination], .bookings-pagination, .pagination');
+        if (paginationNode && _isPaginationLink(a.href)) {
+            _gotoPagination(a.href, true, paginationNode, 'Loading page results...');
+            return;
+        }
+
+        _goto(a.href, true, loaderMessage);
+    });
+
+    // ── Browser history (back / forward) ────────────────────────────────────
+    window.addEventListener('popstate', function (e) {
+        if (e.state && e.state.spa && e.state.url) {
+            _goto(e.state.url, false);
+        } else {
+            // No SPA state — do a full reload to be safe
+            window.location.reload();
+        }
+    });
+
+    // ── Mark the initial page in history ────────────────────────────────────
+    // Replace the current history entry so pressing Back after navigating works.
+    history.replaceState(
+        { spa: true, url: window.location.href },
+        '',
+        window.location.href
+    );
+
+    _ensureLegacyAdminModalHelpers();
+
+})();

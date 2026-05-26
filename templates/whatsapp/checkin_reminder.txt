@@ -1,0 +1,13 @@
+🏨 *{{hotel_name}}*
+
+🔔 *Check-in Reminder*
+
+Dear {{guest_name}},
+Your stay begins tomorrow!
+
+Reference: *{{booking_reference}}*
+Check-in: {{check_in_date}} at {{check_in_time}}
+Room: {{room_name}}
+
+We look forward to seeing you!
+📞 {{hotel_phone}}

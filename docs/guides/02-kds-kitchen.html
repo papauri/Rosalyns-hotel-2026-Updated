@@ -1,0 +1,295 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>KDS Kitchen Guide — Rosalyn's Hotel</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link
+    href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@400;500;600;700&family=Jost:wght@300;400;500;600&display=swap"
+    rel="stylesheet">
+  <link rel="stylesheet" href="assets/guide-theme.css">
+  <script src="assets/guide-init.js" defer></script>
+</head>
+
+<body>
+
+  <nav class="top">
+    <a href="index.html" class="brand">ROSALYN'S HOTEL</a>
+    <div class="nav-links">
+      <a href="index.html">All Guides</a>
+      <a href="99-admin-dashboard-full-guide.html">Admin Bible</a>
+      <a href="owner-handover.php">Owner</a>
+      <a href="01-pos-till.html">← Prev</a>
+      <a href="03-bds-bar.html">Next →</a>
+    </div>
+  </nav>
+
+  <header class="hero">
+    <div class="deck">
+      <div class="eyebrow">Guide 02 &middot; Kitchen</div>
+      <h1>KDS — Kitchen Display</h1>
+      <p class="lead">A live ticket board for the kitchen. No printers, no paper &mdash; chefs work directly off the
+        screen.</p>
+      <div class="meta">
+        <span>URL <strong>/admin/kds.php</strong></span>
+        <span>Role <strong>chef · manager · admin</strong></span>
+        <span>Read time <strong>4 min</strong></span>
+      </div>
+    </div>
+  </header>
+
+  <main class="content">
+    <div class="deck">
+
+      <section>
+        <h2>Layout</h2>
+        <div class="diagram">┌──────────────────────────────────────────────────────────────────┐
+          │ [All] [New] [Cooking] [Ready] 🕒 21:14:02 🔊 Sound Logout │ ← top bar
+          ├──────────────────────────────────────────────────────────────────┤
+          │ │
+          │ Ticket #001 Ticket #002 Ticket #003 │
+          │ Table 4 Room 12 Takeaway │
+          │ ───────────── ───────────── ───────────── │
+          │ [ ] 2 × Steak [✓] 1 × Soup [ ] 1 × Pasta │
+          │ [ ] 1 × Salad [ ] 1 × Steak [ ] 2 × Wine │
+          │ [Start] [Bump] [Start] [Bump] [Start] [Bump] │
+          │ │
+          └──────────────────────────────────────────────────────────────────┘</div>
+
+        <ul class="checklist">
+          <li>Tickets fly in from the right when fired by the till.</li>
+          <li>Cards turn <span class="pill amber">amber</span> after 5 min, <span class="pill red">red</span> after 10
+            min &mdash; keeps the kitchen on time.</li>
+          <li>A soft chime plays when a new ticket lands. Tap <strong>Sound</strong> to mute, or open
+            <strong>Sound Settings</strong> to choose alert tones and volume for the station screen.</li>
+          <li>Each ticket shows FOH/orderer, guest/service type, line count, item count, fired time and current status
+            so the kitchen can identify who sent it without leaving the board.</li>
+        </ul>
+      </section>
+
+      <section>
+        <h2>Step-by-step</h2>
+        <ol class="steps">
+          <li><strong>A new ticket arrives</strong> &mdash; it appears on the board and chimes.</li>
+          <li>Tap <strong>Start</strong> on the ticket header (or on individual lines). The card border turns blue.</li>
+          <li>As you cook each item, tap <strong>Ready</strong> (<i class="fas fa-bell"></i>) on that line. This stamps
+            the ready time and <strong>deducts the ingredients from stock</strong> at this moment.</li>
+          <li>If recipe stock is short, the board stops the action and shows a friendly stock dialog. Receive stock,
+            adjust the recipe, or 86 the item before trying Ready/Bump again.</li>
+          <li>Tap <strong>Collect</strong> (<i class="fas fa-hand-holding"></i>) to mark the item ready for collection
+            by the runner. The item moves to <em>collection</em> status and appears orange on the board.</li>
+          <li>Once the runner delivers the item, tap <strong>Serve</strong> (<i class="fas fa-check"></i>) or
+            <strong>Bump</strong> the whole ticket. The ticket disappears from the active board.
+          </li>
+        </ol>
+        <div class="callout note">
+          <strong>Stock deducts at Ready, not at fire.</strong> If an order is cancelled before you tap Ready on any
+          item, no stock is lost. This ensures physical prep and stock usage stay in sync.
+        </div>
+      </section>
+
+      <section>
+        <h2>Item action buttons (per line)</h2>
+        <table>
+          <thead>
+            <tr>
+              <th>Button</th>
+              <th>When to use</th>
+              <th>Stock effect</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><span class="pill blue">Start</span></td>
+              <td>When you physically pick up the item to cook.</td>
+              <td>None.</td>
+            </tr>
+            <tr>
+              <td><span class="pill green">Ready</span></td>
+              <td>Plate/glass is up and ready to leave the pass.</td>
+              <td><strong>Deducts ingredients from stock.</strong></td>
+            </tr>
+            <tr>
+              <td><span class="pill amber">Collect</span></td>
+              <td>Runner has taken the item for delivery.</td>
+              <td>None (already deducted at Ready).</td>
+            </tr>
+            <tr>
+              <td><span class="pill green">Serve</span></td>
+              <td>Individual item confirmed delivered to guest.</td>
+              <td>None.</td>
+            </tr>
+            <tr>
+              <td><span class="pill gold">Bump</span></td>
+              <td>All items on ticket complete — clears the board.</td>
+              <td>Deducts any items that were bumped without going through Ready first.</td>
+            </tr>
+          </tbody>
+        </table>
+      </section>
+
+      <section>
+        <h2>Ticket timer &amp; age colours</h2>
+        <ul class="checklist">
+          <li>Each ticket shows elapsed time since it was fired. The format is compact: <strong>just fired → 45 sec → 3m
+              12s → 12 min → 1h 04m</strong>.</li>
+          <li>The sub-label below the timer gives context: <em>On time — fired 14:32</em> · <em>Watch closely — fired
+              14:20</em> · <em>Late — fired 14:05</em> · <em>Overdue — fired 13:50 · check with FOH</em>. "Overdue"
+            means the ticket has been on the board over one hour without being bumped — verify with Front of House.</li>
+          <li>Card border colour escalates: normal → <span class="pill amber">amber at 5 min</span> → <span
+              class="pill red">red at 10 min</span> → pulsing red "urgent" glow at 12 min.</li>
+          <li>All times are shown in <strong>Malawi local time</strong> (UTC+2) — the timers are accurate to the second.
+          </li>
+        </ul>
+      </section>
+
+      <section>
+        <h2>RUSH priority</h2>
+        <ul class="checklist">
+          <li>A RUSH ticket has a <span class="pill red">⚡ RUSH</span> badge in the ticket header and a red left border.
+          </li>
+          <li>RUSH tickets sort to the <strong>top of the board</strong>, above all other orders.</li>
+          <li>When a ticket is marked Rush, an <span class="pill red">URGENT</span> inbox message arrives in the bottom
+            bar so every station knows immediately.</li>
+          <li>The cashier on POS (or any admin) can toggle Rush from the <strong>My Orders</strong> tracker &mdash; so
+            expect to see priority change mid-service.</li>
+          <li>Rush can be set or cleared from the <strong>Rush</strong> button in the ticket footer on the station
+            screen.</li>
+          <li>When Rush is cleared, stations get a second URGENT message confirming the priority has been removed.</li>
+        </ul>
+        <div class="callout note">Any station (KDS, BDS, CDS) or POS cashier can toggle Rush. The last person to tap
+          wins. Coordinate with FOH before clearing a Rush set by the cashier.</div>
+      </section>
+
+      <section>
+        <h2>FOH notes &amp; station messages</h2>
+        <ul class="checklist">
+          <li>The <strong>bottom bar</strong> has three panels: FOH Messages, All-Day count, and Station Control.</li>
+          <li>Messages from POS (order notes updated by cashier) appear as <span class="pill red">URGENT</span> items
+            with a red border and pulse animation.</li>
+          <li>You can <strong>reply</strong> to any message from the bottom bar — your reply goes back to the POS
+            cashier's inbox.</li>
+          <li>You can also send a new note from inside a ticket card using the note composer at the bottom of the card.
+          </li>
+          <li>POS receives station replies, ready alerts, and My Orders status updates within about 1 second. Ready
+            popups include the first few ordered items and stay visible for 2 minutes unless the cashier closes them.</li>
+          <li>Messages expire after 6 hours or can be dismissed by tapping the ✕ on each row.</li>
+        </ul>
+      </section>
+
+      <section>
+        <h2>Filters</h2>
+        <table>
+          <thead>
+            <tr>
+              <th>Filter</th>
+              <th>Shows</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><span class="pill gold">All</span></td>
+              <td>Every open ticket.</td>
+            </tr>
+            <tr>
+              <td><span class="pill blue">New</span></td>
+              <td>Just arrived, not started.</td>
+            </tr>
+            <tr>
+              <td><span class="pill amber">Cooking</span></td>
+              <td>At least one item started or in collection.</td>
+            </tr>
+            <tr>
+              <td><span class="pill green">Ready</span></td>
+              <td>All items ready or awaiting collection, bump pending.</td>
+            </tr>
+          </tbody>
+        </table>
+      </section>
+
+      <section>
+        <h2>Order Lifecycle Log (ticket footer)</h2>
+        <p>Every KDS ticket card has a <strong>Log</strong> button in the footer alongside <em>Rush</em> and
+          <em>Bump</em>. Tapping it opens <code>/admin/order-lifecycle.php</code> in a new tab — a full audit trail
+          showing:</p>
+        <ul class="checklist">
+          <li>The exact second the order was placed, fired, each item marked Ready, collected, and served.</li>
+          <li>Every stock deduction with ingredient name, quantity, and unit cost.</li>
+          <li>KDS events with actor name and IP (who tapped what and when).</li>
+          <li>A linked payment row if payment has been taken, and any void with reason and actor.</li>
+          <li>Cancel or Void action buttons for admin and manager roles (when applicable).</li>
+        </ul>
+        <div class="callout note">The Log button is visible to all station roles but the Cancel and Void action buttons
+          inside the lifecycle page are restricted — Cancel requires admin/manager, Void requires admin only.</div>
+      </section>
+
+      <section>
+        <h2>Recall a ticket (mistake)</h2>
+        <ol class="steps">
+          <li>Tap <strong>Served</strong> in the top bar (opens the Served Menu).</li>
+          <li>Find the ticket, tap <strong>Recall</strong> (available within 10 minutes of bump).</li>
+          <li>The ticket reappears on the board. Any stock that was deducted for Ready/Collected items is
+            <strong>automatically restored</strong> so you can re-prep and re-deduct correctly.
+          </li>
+        </ol>
+        <div class="callout note">Recall is only available within <strong>10 minutes</strong> of bumping the ticket.
+          After that, ask a manager to void the order from Stock Orders.</div>
+      </section>
+
+      <section>
+        <h2>Mobile / tablet</h2>
+        <ul class="checklist">
+          <li>A <strong>burger menu</strong> in the top-right opens a drawer with all controls (filters, sound toggle,
+            daily report, sign-out).</li>
+          <li>Long-press any button to read its tooltip.</li>
+          <li>The board reflows to a single column at narrow widths.</li>
+          <li><strong>Fullscreen kiosk mode</strong> &mdash; a banner at the bottom of the screen says "Tap anywhere to
+            go fullscreen" on every load. Tap anywhere and the browser hides its tabs, address bar and all UI chrome. If
+            you accidentally exit fullscreen (e.g. back-swipe on Android), the banner reappears and the next tap
+            re-enters it automatically. This ensures the board uses the full screen on every device.</li>
+        </ul>
+      </section>
+
+      <section>
+        <h2>Daily report</h2>
+        <p>Top bar → <strong>Daily Report</strong> → opens an end-of-day summary. Includes: tickets served, average prep
+          time, item counts, optional CSV export and email delivery.</p>
+      </section>
+
+      <section>
+        <h2>Tips</h2>
+        <div class="callout tip">Always tap <strong>Ready</strong> per item as you complete them &mdash; this is how
+          stock gets deducted. <strong>Bump</strong> when everything is done and collected.</div>
+        <ul class="checklist">
+          <li>If the kitchen network drops, the board still works; orders queue locally.</li>
+          <li>Press <code>?</code> to peek at every button label.</li>
+          <li>The board <strong>polls every 2 seconds</strong> &mdash; RUSH alerts and note changes from POS arrive
+            within 2 seconds of being sent.</li>
+          <li>New tickets animate in smoothly (fade-up). If you see a flash of old cards on hard-reload, that means the
+            screen was idle overnight and the business-window filter has already cleared them &mdash; normal behaviour.
+          </li>
+          <li>Card sizes are uniform &mdash; short tickets stretch to match their neighbours in the same row so the grid
+            always looks clean and nothing feels like a squeeze.</li>
+          <li>Action buttons show a spinner while the server records the change, preventing double taps on Start,
+            Ready, Collect, Serve, Rush, 86, and Bump.</li>
+        </ul>
+      </section>
+
+    </div>
+  </main>
+
+  <footer class="guide-footer">
+    <div class="deck">
+      <div class="crest">— R H —</div>
+      <p><a href="01-pos-till.html">← POS Till</a> &middot; <a href="index.html">All guides</a> &middot; <a
+          href="99-admin-dashboard-full-guide.html">Admin Bible</a> &middot; <a href="owner-handover.php">Owner
+          handover</a> &middot; <a href="03-bds-bar.html">BDS Bar →</a></p>
+    </div>
+  </footer>
+
+</body>
+
+</html>

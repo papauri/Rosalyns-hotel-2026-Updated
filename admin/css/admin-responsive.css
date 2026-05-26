@@ -1,0 +1,11 @@
+/*
+ * Admin responsive overrides placeholder.
+ *
+ * This file is intentionally present so the @import in
+ * admin-styles.css always resolves without 404s.
+ *
+ * Page-specific responsive rules are currently maintained in:
+ * - admin/css/admin-styles.css
+ * - admin/css/admin-components.css
+ */
+

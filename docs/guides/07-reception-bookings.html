@@ -1,0 +1,1166 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Reception &amp; Bookings — Full Guide | Rosalyn's Hotel</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link
+    href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@400;500;600;700&family=Jost:wght@300;400;500;600&display=swap"
+    rel="stylesheet">
+  <link rel="stylesheet" href="assets/guide-theme.css">
+  <style>
+    .two-col {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 1rem;
+    }
+
+    @media (max-width: 640px) {
+      .two-col {
+        grid-template-columns: 1fr;
+      }
+    }
+
+    .status-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+      gap: 0.75rem;
+      margin: 1rem 0;
+    }
+
+    .status-badge {
+      padding: 0.75rem 1rem;
+      border-radius: 8px;
+      font-size: 0.9rem;
+      line-height: 1.4;
+    }
+
+    .sb-pending {
+      background: #fff8e6;
+      border-left: 4px solid #c87a3a;
+    }
+
+    .sb-tentative {
+      background: #fffbe6;
+      border-left: 4px solid #d4a843;
+    }
+
+    .sb-confirmed {
+      background: #e6f4ee;
+      border-left: 4px solid #2e7d52;
+    }
+
+    .sb-checkedin {
+      background: #e6f0fa;
+      border-left: 4px solid #1a5fa8;
+    }
+
+    .sb-out {
+      background: #f0e6f8;
+      border-left: 4px solid #7b4a9e;
+    }
+
+    .sb-cancelled {
+      background: #fce8e8;
+      border-left: 4px solid #c0392b;
+    }
+
+    .sb-noshow {
+      background: #f2f2f2;
+      border-left: 4px solid #888;
+    }
+
+    .status-badge strong {
+      display: block;
+      margin-bottom: 0.2rem;
+      font-size: 1rem;
+    }
+
+    .action-table td:first-child {
+      white-space: nowrap;
+      font-weight: 600;
+    }
+
+    .folio-type {
+      display: inline-block;
+      padding: 0.15em 0.5em;
+      border-radius: 4px;
+      font-size: 0.82em;
+      background: rgba(212, 168, 67, 0.12);
+      color: var(--brown);
+      font-weight: 600;
+      margin: 0.1em;
+    }
+  </style>
+  <script src="assets/guide-init.js" defer></script>
+</head>
+
+<body>
+
+  <nav class="top">
+    <a href="index.html" class="brand">ROSALYN'S HOTEL</a>
+    <div class="nav-links">
+      <a href="index.html">All Guides</a>
+      <a href="99-admin-dashboard-full-guide.html">Admin Bible</a>
+      <a href="owner-handover.php">Owner</a>
+      <a href="06-housekeeping.html">← Prev</a>
+      <a href="08-stock-orders.html">Next →</a>
+    </div>
+  </nav>
+
+  <header class="hero">
+    <div class="deck">
+      <div class="eyebrow">Guide 07 &middot; Front desk</div>
+      <h1>Reception &amp; Bookings</h1>
+      <p class="lead">Complete front-desk playbook: walk-ins, online bookings, check-in, folio charges, payments,
+        invoices, refunds, room assignment, tentative holds, blocked dates, and everything in between.</p>
+      <div class="meta">
+        <span>URLs <strong>/admin/bookings.php · /admin/create-booking.php</strong></span>
+        <span>Role <strong>receptionist · manager · admin</strong></span>
+        <span>Read time <strong>~12 min</strong></span>
+      </div>
+    </div>
+  </header>
+
+  <main class="content">
+    <div class="deck">
+
+      <!-- ══════════════════════════════════════════════════════════
+           1. BOOKING STATUSES
+      ══════════════════════════════════════════════════════════ -->
+      <section>
+        <h2>Booking statuses</h2>
+        <p>Every booking moves through a defined lifecycle. Only valid transitions are allowed — the system blocks
+          illegal jumps (e.g. you cannot check out a cancelled booking).</p>
+
+        <div class="status-grid">
+          <div class="status-badge sb-pending">
+            <strong>pending</strong>
+            Initial state when a guest submits the online form. Awaiting admin confirmation. Room not yet reserved.
+          </div>
+          <div class="status-badge sb-tentative">
+            <strong>tentative</strong>
+            Temporary hold with an expiry countdown (default 48 h). Room held for the guest but not confirmed.
+            Auto-expires if not converted.
+          </div>
+          <div class="status-badge sb-confirmed">
+            <strong>confirmed</strong>
+            Booking locked in. Room availability decremented. Confirmation email sent to guest.
+          </div>
+          <div class="status-badge sb-checkedin">
+            <strong>checked-in</strong>
+            Guest has arrived. Room marked occupied. Folio charges begin accumulating here.
+          </div>
+          <div class="status-badge sb-out">
+            <strong>checked-out</strong>
+            Stay complete. Room returned to <em>cleaning</em> status. Final invoice generated.
+          </div>
+          <div class="status-badge sb-cancelled">
+            <strong>cancelled</strong>
+            Booking voided. Room availability restored. Cancellation email sent. Audit trail preserved.
+          </div>
+          <div class="status-badge sb-noshow">
+            <strong>no-show</strong>
+            Guest never arrived past the check-in date. Triggers auto-refund rules if configured. No-show email sent.
+          </div>
+        </div>
+
+        <div class="callout note" style="margin-top:1rem;">
+          <strong>Payment statuses</strong> are separate from booking statuses:
+          <code>unpaid</code> · <code>partial</code> · <code>paid</code> · <code>completed</code> ·
+          <code>pending</code> · <code>failed</code> · <code>refunded</code> · <code>partially_refunded</code>
+        </div>
+      </section>
+
+      <!-- ══════════════════════════════════════════════════════════
+           2. THE BOOKINGS LIST
+      ══════════════════════════════════════════════════════════ -->
+      <section>
+        <h2>The bookings list — <code>/admin/bookings.php</code></h2>
+
+        <h3>Columns at a glance</h3>
+        <table>
+          <thead>
+            <tr>
+              <th>Column</th>
+              <th>What it shows</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><strong>Reference</strong></td>
+              <td>Auto-generated code (e.g. <code>BKG-2026-0012</code>). Immutable once created.</td>
+            </tr>
+            <tr>
+              <td><strong>Guest</strong></td>
+              <td>Name + email + phone.</td>
+            </tr>
+            <tr>
+              <td><strong>Room</strong></td>
+              <td>Room type + assigned individual room (if any).</td>
+            </tr>
+            <tr>
+              <td><strong>Dates</strong></td>
+              <td>Check-in → check-out, number of nights.</td>
+            </tr>
+            <tr>
+              <td><strong>Guests</strong></td>
+              <td>Adults + children count + occupancy tier.</td>
+            </tr>
+            <tr>
+              <td><strong>Total</strong></td>
+              <td>Grand total including VAT and tourism levy.</td>
+            </tr>
+            <tr>
+              <td><strong>Status</strong></td>
+              <td>Booking status badge.</td>
+            </tr>
+            <tr>
+              <td><strong>Payment</strong></td>
+              <td>Payment status badge + amount paid.</td>
+            </tr>
+          </tbody>
+        </table>
+
+        <h3>Filters</h3>
+        <ul class="checklist">
+          <li><strong>Room type</strong> — dropdown of active room types.</li>
+          <li><strong>Booking status</strong> — all statuses (pending, tentative, confirmed, checked-in, checked-out,
+            cancelled, no-show).</li>
+          <li><strong>Payment status</strong> — unpaid, partial, paid, completed, refunded.</li>
+          <li><strong>Guest name / email / phone</strong> — live text search.</li>
+          <li><strong>Check-in date range</strong> — from / to.</li>
+          <li><strong>Check-out date range</strong> — from / to.</li>
+          <li><strong>Occupancy</strong> — single, double, triple.</li>
+        </ul>
+
+        <div class="callout tip">
+          Use <strong>Filter → check-in today</strong> at the start of every shift. Use <strong>check-out today</strong>
+          before lunch to prepare folios for departing guests.
+        </div>
+      </section>
+
+      <!-- ══════════════════════════════════════════════════════════
+           3. CREATE A BOOKING
+      ══════════════════════════════════════════════════════════ -->
+      <section>
+        <h2>Create a booking — walk-in or phone reservation</h2>
+        <p>Go to <code>/admin/create-booking.php</code> or tap <strong>+ New booking</strong> on the bookings list.</p>
+
+        <ol class="steps">
+          <li>
+            <strong>Room &amp; occupancy</strong><br>
+            Pick the <strong>room type</strong>. If multiple physical rooms exist for that type, optionally assign an
+            <strong>individual room</strong> now — or leave it for later (auto-assign happens when the booking is paid).
+            Select <strong>occupancy tier</strong>: Single / Double / Triple. Each tier can have its own nightly rate
+            set in Room Management.
+          </li>
+          <li>
+            <strong>Guest counts</strong><br>
+            Enter <strong>adults</strong> and <strong>children (under 12)</strong>. Children are charged at a
+            configurable multiplier (e.g. 50% of the adult nightly rate). The system enforces capacity limits per room.
+          </li>
+          <li>
+            <strong>Dates</strong><br>
+            Pick <strong>check-in</strong> and <strong>check-out</strong> dates. The system calculates nights
+            automatically. Blocked dates and already-booked dates are unavailable.
+          </li>
+          <li>
+            <strong>Guest details</strong><br>
+            Full name (required), email (required), phone (required), country, address, special requests.
+          </li>
+          <li>
+            <strong>Booking status</strong>
+            <ul>
+              <li><strong>Pending</strong> — online submission, needs confirmation.</li>
+              <li><strong>Tentative</strong> — holds the room for the configured expiry period (default 48 h) pending
+                deposit or confirmation.</li>
+              <li><strong>Confirmed</strong> — reserves immediately.</li>
+              <li><strong>Checked-in</strong> — use this for a walk-in who is occupying the room right now.</li>
+            </ul>
+          </li>
+          <li>
+            <strong>Payment status &amp; method</strong><br>
+            Choose unpaid or paid. If paid, select the payment method (cash, card, mobile money, bank transfer, cheque,
+            other) and an optional transaction reference.
+          </li>
+          <li>
+            <strong>Price override (optional)</strong><br>
+            The system auto-calculates the total using: nightly rate × nights + child supplement ± rate plan
+            discount + tourism levy. You can override the total manually if needed (e.g. a negotiated rate).
+          </li>
+          <li>
+            <strong>Admin notes</strong> — internal memo visible only to staff (e.g. "Phone booking — guest requested
+            early check-in").
+          </li>
+          <li>
+            <strong>Send confirmation email</strong> — tick to auto-send the booking confirmation to the guest on save.
+          </li>
+        </ol>
+
+        <h3>How the price is calculated</h3>
+        <table>
+          <thead>
+            <tr>
+              <th>Component</th>
+              <th>Detail</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>Base rate</td>
+              <td>Nightly rate for selected occupancy tier × number of nights.</td>
+            </tr>
+            <tr>
+              <td>Child supplement</td>
+              <td><code>nightly_rate × (child_multiplier%) × num_children × nights</code></td>
+            </tr>
+            <tr>
+              <td>Rate plan discount</td>
+              <td>If a rate plan is active, it adjusts the nightly rate. See Guide 09.</td>
+            </tr>
+            <tr>
+              <td>Tourism levy</td>
+              <td>Optional percentage (default 1%) added to the room subtotal.</td>
+            </tr>
+            <tr>
+              <td>VAT</td>
+              <td>Configurable percentage applied to the total if VAT is enabled.</td>
+            </tr>
+          </tbody>
+        </table>
+
+        <div class="callout note">
+          <strong>Rates &amp; packages</strong> are configured separately in Guide 09 (Packages &amp; Rate Plans).
+          Rate plans can lower or raise the nightly rate on specific date ranges.
+        </div>
+      </section>
+
+      <!-- ══════════════════════════════════════════════════════════
+           4. BOOKING DETAILS PAGE
+      ══════════════════════════════════════════════════════════ -->
+      <section>
+        <h2>Booking details page — actions &amp; tabs</h2>
+        <p>Click any booking reference to open it. All management happens here.</p>
+
+        <h3>Status action buttons</h3>
+        <p>Buttons shown depend on the current status:</p>
+        <table class="action-table">
+          <thead>
+            <tr>
+              <th>Current status</th>
+              <th>Available actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>pending</td>
+              <td><strong>Confirm</strong> — locks the booking in, sends confirmation email, decrements availability.
+              </td>
+            </tr>
+            <tr>
+              <td>tentative</td>
+              <td><strong>Convert to Confirmed</strong> · <strong>Cancel</strong></td>
+            </tr>
+            <tr>
+              <td>confirmed</td>
+              <td><strong>Assign Room</strong> · <strong>Check In</strong> · <strong>No-Show</strong> ·
+                <strong>Cancel</strong>
+              </td>
+            </tr>
+            <tr>
+              <td>checked-in</td>
+              <td><strong>Check Out</strong> · <strong>Cancel Check-in</strong> (reverts to confirmed)</td>
+            </tr>
+            <tr>
+              <td>checked-out · cancelled · no-show</td>
+              <td>Read-only — no further status transitions.</td>
+            </tr>
+          </tbody>
+        </table>
+
+        <div class="callout warn">
+          <strong>Check-in prerequisites:</strong> payment must be at least <em>partial</em>, an individual room must be
+          assigned, and the check-in date must be today or in the past. All three must be true before the Check-in
+          button is enabled.
+        </div>
+
+        <h3>Quick actions (always available)</h3>
+        <ul class="checklist">
+          <li><strong>Edit Booking</strong> — full edit form (dates, guest info, room, price).</li>
+          <li><strong>Extend Stay</strong> — move check-out forward; system recalculates charges and creates a pending
+            additional payment if more is owed.</li>
+          <li><strong>Adjust Dates</strong> — change both check-in and check-out; recalculates delta and creates payment
+            if owed.</li>
+          <li><strong>Assign Room</strong> — pick or change the specific individual room.</li>
+          <li><strong>Resend Email</strong> — resend any template (booking received, confirmed, cancelled, invoice) with
+            optional CC recipients.</li>
+          <li><strong>Add Charge</strong> — post an extra item to the folio.</li>
+          <li><strong>Add Payment</strong> — record a new payment against this booking.</li>
+          <li><strong>Generate / Resend Invoice</strong> — create or email the PDF invoice.</li>
+        </ul>
+
+        <h3>Tabs on the details page</h3>
+        <div class="two-col">
+          <div>
+            <h4>Folio</h4>
+            <p>All charges: room base, child supplements, extras, room service, voids. See the Folio section below.</p>
+            <h4>Payments</h4>
+            <p>Full payment history, running balance, refund links per payment.</p>
+            <h4>Invoices</h4>
+            <p>Every invoice generated: download PDF, resend email, send via WhatsApp, regenerate.</p>
+          </div>
+          <div>
+            <h4>Internal Notes</h4>
+            <p>Staff-only memos — searchable, date-stamped, linked to the admin who wrote them.</p>
+            <h4>Activity Timeline</h4>
+            <p>Full audit log: every status change, edit, payment event, email send, room assignment — who did it and
+              when.</p>
+          </div>
+        </div>
+      </section>
+
+      <!-- ══════════════════════════════════════════════════════════
+           5. FOLIO / CHARGES
+      ══════════════════════════════════════════════════════════ -->
+      <section>
+        <h2>Folio &amp; charges</h2>
+        <p>The folio is the running tab for a guest's stay. Everything billable posts here.</p>
+
+        <h3>Charge types</h3>
+        <p>
+          <span class="folio-type">room</span>
+          <span class="folio-type">room_service</span>
+          <span class="folio-type">food</span>
+          <span class="folio-type">drink</span>
+          <span class="folio-type">minibar</span>
+          <span class="folio-type">laundry</span>
+          <span class="folio-type">breakfast</span>
+          <span class="folio-type">service</span>
+          <span class="folio-type">custom</span>
+          <span class="folio-type">other</span>
+        </p>
+
+        <h3>Adding a charge</h3>
+        <ol class="steps">
+          <li>Tap <strong>Add Charge</strong> on the folio tab.</li>
+          <li>Select charge type, enter description, quantity, and unit price.</li>
+          <li>The system calculates the line total and applies VAT if enabled.</li>
+          <li>Save — the charge posts immediately to the folio and the balance due updates.</li>
+        </ol>
+
+        <h3>Adding a menu item directly to the folio</h3>
+        <ol class="steps">
+          <li>Tap <strong>Add Menu Item</strong>.</li>
+          <li>Select food or drink category, then item, then quantity.</li>
+          <li>The item price is pulled from the menu — no manual entry needed.</li>
+          <li>Stock is deducted when the KDS station marks it as served.</li>
+        </ol>
+
+        <h3>Voiding a charge</h3>
+        <ol class="steps">
+          <li>Click the void icon next to the charge.</li>
+          <li>Enter a reason (required).</li>
+          <li>The charge is soft-deleted — it shows as struck-through with the void reason, never truly deleted for
+            audit purposes.</li>
+        </ol>
+
+        <h3>Folio summary</h3>
+        <table>
+          <thead>
+            <tr>
+              <th>Line</th>
+              <th>How it's calculated</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>Room base</td>
+              <td>Booking total_amount (room + child supplement).</td>
+            </tr>
+            <tr>
+              <td>Packages total</td>
+              <td>Sum of all package add-ons on the booking.</td>
+            </tr>
+            <tr>
+              <td>Extras total</td>
+              <td>Sum of all non-voided folio charges.</td>
+            </tr>
+            <tr>
+              <td>Subtotal</td>
+              <td>Room base + packages + extras.</td>
+            </tr>
+            <tr>
+              <td>VAT</td>
+              <td>Subtotal × VAT rate (if enabled).</td>
+            </tr>
+            <tr>
+              <td>Grand total</td>
+              <td>Subtotal + VAT.</td>
+            </tr>
+            <tr>
+              <td>Amount paid</td>
+              <td>Sum of all completed payments.</td>
+            </tr>
+            <tr>
+              <td>Balance due</td>
+              <td>Grand total − amount paid.</td>
+            </tr>
+          </tbody>
+        </table>
+      </section>
+
+      <!-- ══════════════════════════════════════════════════════════
+           6. CHECK-IN WORKFLOW
+      ══════════════════════════════════════════════════════════ -->
+      <section>
+        <h2>Check in a guest</h2>
+        <ol class="steps">
+          <li>Open the booking (search by name or reference).</li>
+          <li>Verify: booking is <span class="pill blue">confirmed</span>, an individual room is assigned, and at
+            least a deposit has been received.</li>
+          <li>Tap <strong>Check In</strong>. If the room has a children restriction but the booking includes children,
+            you'll be asked for an override note.</li>
+          <li>Status changes to <span class="pill blue">checked-in</span>. The individual room status moves to
+            <em>occupied</em>.
+          </li>
+          <li>Room service and restaurant charges will now post automatically to this folio.</li>
+        </ol>
+
+        <div class="callout tip">
+          For walk-ins, set the booking status to <strong>Checked-in</strong> directly at creation — no need to
+          create as confirmed first.
+        </div>
+      </section>
+
+      <!-- ══════════════════════════════════════════════════════════
+           7. ROOM ASSIGNMENT
+      ══════════════════════════════════════════════════════════ -->
+      <section>
+        <h2>Room assignment</h2>
+        <p>A booking can exist without a specific individual room assigned. Assignment can happen:</p>
+        <ul class="checklist">
+          <li><strong>Automatically</strong> — when a payment is recorded and the booking is confirmed.</li>
+          <li><strong>Manually</strong> — via the <strong>Assign Room</strong> button on the details page.</li>
+          <li><strong>At creation</strong> — if you pick an individual room in the create form.</li>
+        </ul>
+        <p>The assignment picker shows only available rooms of the correct type on the booking dates. Rooms in
+          maintenance, out-of-order, or already booked on those dates are excluded.</p>
+        <p>You can reassign a room anytime before check-out — the old room is freed and the new one is reserved.</p>
+      </section>
+
+      <!-- ══════════════════════════════════════════════════════════
+           8. PAYMENTS
+      ══════════════════════════════════════════════════════════ -->
+      <section>
+        <h2>Recording a payment</h2>
+        <ol class="steps">
+          <li>Open the booking → Payments tab → <strong>Add Payment</strong>.</li>
+          <li>Select payment method: <strong>cash · mobile money · credit card · debit card · bank transfer · cheque ·
+              other</strong>.</li>
+          <li>Enter amount, payment date, and an optional transaction reference (e.g. bank ref or cheque number).</li>
+          <li>Optionally add CC email recipients who should receive this invoice.</li>
+          <li>Save — a receipt number is generated, an invoice PDF is created via TCPDF, and the email is sent to the
+            guest (and any CC addresses).</li>
+        </ol>
+
+        <div class="callout note">
+          <strong>Invoice numbering:</strong> sequential format <code>INV-YYYY-NNNNNN</code>. Each payment generates
+          its own invoice. The final check-out generates a consolidated invoice.
+        </div>
+      </section>
+
+      <!-- ══════════════════════════════════════════════════════════
+           9. CHECK-OUT WORKFLOW
+      ══════════════════════════════════════════════════════════ -->
+      <section>
+        <h2>Check out</h2>
+        <ol class="steps">
+          <li>Open the booking → tap <strong>Check Out</strong>.</li>
+          <li>The system presents the folio summary: room nights + all extras + VAT + tourism levy − payments received
+            = balance due.</li>
+          <li>If a balance is outstanding, take payment now (the Add Payment modal opens inline).</li>
+          <li>Confirm check-out. The room status moves to <em>cleaning</em>. Status becomes
+            <span class="pill">checked-out</span>.
+          </li>
+          <li>A <strong>final consolidated invoice</strong> is auto-generated as a PDF and emailed to the guest.</li>
+        </ol>
+      </section>
+
+      <!-- ══════════════════════════════════════════════════════════
+           10. INVOICES
+      ══════════════════════════════════════════════════════════ -->
+      <section>
+        <h2>Invoices</h2>
+        <p>All invoices live on the <strong>Invoices</strong> tab of the booking details page.</p>
+        <table>
+          <thead>
+            <tr>
+              <th>Action</th>
+              <th>What it does</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><strong>Generate Invoice</strong></td>
+              <td>Creates a PDF without sending — useful to review before sending.</td>
+            </tr>
+            <tr>
+              <td><strong>Send Invoice</strong></td>
+              <td>Emails the PDF to the guest + any CC recipients.</td>
+            </tr>
+            <tr>
+              <td><strong>Send via WhatsApp</strong></td>
+              <td>Sends the invoice download link via WhatsApp (requires WhatsApp integration enabled).</td>
+            </tr>
+            <tr>
+              <td><strong>Regenerate Invoice</strong></td>
+              <td>Force-recreates the PDF — use if folio charges were added after the original was issued.</td>
+            </tr>
+          </tbody>
+        </table>
+      </section>
+
+      <!-- ══════════════════════════════════════════════════════════
+           11. REFUNDS
+      ══════════════════════════════════════════════════════════ -->
+      <section>
+        <h2>Issuing a refund</h2>
+        <div class="callout warn">
+          Always use the <strong>Refund</strong> button on the original payment — never manually adjust amounts or
+          create a negative payment. Refunds must link back to their source payment.
+        </div>
+        <ol class="steps">
+          <li>Payments tab → find the payment → tap <strong>Refund</strong>.</li>
+          <li>Enter refund amount (up to the remaining refundable balance — prior refunds are already subtracted).</li>
+          <li>Select reason: early checkout · cancellation · service issue · overpayment · other.</li>
+          <li>Set refund status: <strong>pending</strong> (processing by provider) or <strong>completed</strong>
+            (cash/bank already returned). For mobile money, keep as <em>pending</em> until the provider confirms.</li>
+          <li>Save. The system:
+            <ul>
+              <li>Creates a refund record linked to the original payment.</li>
+              <li>Pro-rates VAT on the refunded amount.</li>
+              <li>Recalculates the booking's amount paid and balance due.</li>
+              <li>Marks the original payment as <em>refunded</em> if fully refunded.</li>
+              <li>Logs the action in the audit trail.</li>
+            </ul>
+          </li>
+        </ol>
+      </section>
+
+      <!-- ══════════════════════════════════════════════════════════
+           12. TENTATIVE BOOKINGS
+      ══════════════════════════════════════════════════════════ -->
+      <section>
+        <h2>Tentative bookings — <code>/admin/tentative-bookings.php</code></h2>
+        <p>A tentative booking holds a room for a configurable period (default 48 h) while the guest arranges a
+          deposit or confirmation. Use it for phone enquiries where the guest isn't ready to commit immediately.</p>
+
+        <h3>How it works</h3>
+        <ol class="steps">
+          <li>Create the booking with status set to <strong>Tentative</strong>. The expiry timer starts.</li>
+          <li>An email is sent to the guest with a link to confirm or the hotel's payment details.</li>
+          <li>The dedicated tentative page shows all holds with a countdown. Ones expiring within 24 h are flagged.</li>
+          <li>When the guest pays or confirms → tap <strong>Convert to Confirmed</strong>. The booking locks in, room
+            auto-assigns if paid, and a confirmation email is sent.</li>
+          <li>If the guest doesn't confirm before expiry → tap <strong>Cancel</strong>. The room becomes available
+            again. Expired tentatives cannot be converted — cancel and create a new booking if the guest comes back.
+          </li>
+        </ol>
+
+        <div class="callout warn">
+          Expiry does <strong>not</strong> automatically cancel the booking — it only flags it. A manager must
+          manually cancel expired tentatives to release the room.
+        </div>
+      </section>
+
+      <!-- ══════════════════════════════════════════════════════════
+           13. NO-SHOW
+      ══════════════════════════════════════════════════════════ -->
+      <section>
+        <h2>No-show</h2>
+        <p>If a confirmed guest fails to arrive after the check-in date:</p>
+        <ol class="steps">
+          <li>Open the booking → tap <strong>No-Show</strong>.</li>
+          <li>The status changes to <span class="pill">no-show</span>.</li>
+          <li>If a no-show auto-refund policy is configured in Booking Settings, a refund is triggered
+            automatically.</li>
+          <li>A no-show notification email is sent to the guest.</li>
+          <li>The room is freed and the audit trail is updated.</li>
+        </ol>
+      </section>
+
+      <!-- ══════════════════════════════════════════════════════════
+           14. EDITING A BOOKING
+      ══════════════════════════════════════════════════════════ -->
+      <section>
+        <h2>Editing a booking — what can and cannot change</h2>
+
+        <div class="two-col">
+          <div>
+            <h4>Can be edited</h4>
+            <ul class="checklist">
+              <li>Guest name, email, phone, country</li>
+              <li>Check-in and check-out dates (nights recalculate)</li>
+              <li>Number of adults and children</li>
+              <li>Occupancy tier (single / double / triple)</li>
+              <li>Room type + individual room assignment</li>
+              <li>Special requests</li>
+              <li>Total amount (manual override)</li>
+              <li>Admin notes</li>
+            </ul>
+          </div>
+          <div>
+            <h4>Cannot be edited</h4>
+            <ul class="checklist">
+              <li>Booking reference — immutable, used on all invoices and emails</li>
+              <li>Booking status — changed via status action buttons only</li>
+              <li>Payment status — updated automatically when payments are recorded</li>
+              <li>Amount paid / balance due — recalculated from the payments ledger</li>
+              <li>Created at — system-set timestamp</li>
+            </ul>
+          </div>
+        </div>
+
+        <div class="callout note">
+          To change dates on a checked-in booking, use <strong>Extend Stay</strong> (moves check-out forward) or
+          <strong>Adjust Dates</strong> (changes both). Both recalculate charges and create a pending payment if
+          additional charges apply.
+        </div>
+      </section>
+
+      <!-- ══════════════════════════════════════════════════════════
+           15. BLOCKED DATES
+      ══════════════════════════════════════════════════════════ -->
+      <section>
+        <h2>Blocked dates — <code>/admin/blocked-dates.php</code></h2>
+        <p>Block dates to prevent new bookings on specific rooms or across all rooms (e.g. maintenance, deep clean,
+          private event).</p>
+
+        <h3>Block scopes</h3>
+        <table>
+          <thead>
+            <tr>
+              <th>Scope</th>
+              <th>Effect</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>All room types</td>
+              <td>No room can be booked on that date — hotel-wide close.</td>
+            </tr>
+            <tr>
+              <td>Room type</td>
+              <td>All physical rooms of that type are blocked on the date.</td>
+            </tr>
+            <tr>
+              <td>Individual room</td>
+              <td>Only one specific room is blocked — other rooms of the same type remain bookable.</td>
+            </tr>
+          </tbody>
+        </table>
+
+        <h3>Block types</h3>
+        <p><code>manual</code> · <code>maintenance</code> · <code>event</code> · <code>fully_booked</code></p>
+
+        <h3>Block a date range</h3>
+        <ol class="steps">
+          <li>Tap <strong>Block Date Range</strong>.</li>
+          <li>Choose scope (all / room type / individual room).</li>
+          <li>Pick start and end date in the calendar picker.</li>
+          <li>Select block type and optionally enter a reason.</li>
+          <li>Save — every date in the range is blocked.</li>
+          <li>To unblock: find the row in the list and tap <strong>Unblock</strong>.</li>
+        </ol>
+
+        <div class="callout note">
+          Blocked dates prevent <strong>new</strong> bookings only. Existing confirmed bookings on those dates are
+          unaffected.
+        </div>
+      </section>
+
+      <!-- ══════════════════════════════════════════════════════════
+           16. CALENDAR VIEW
+      ══════════════════════════════════════════════════════════ -->
+      <section>
+        <h2>Calendar view — <code>/admin/calendar.php</code></h2>
+        <p>Colour-coded month grid showing every individual room's availability at a glance.</p>
+        <table>
+          <thead>
+            <tr>
+              <th>Colour</th>
+              <th>Meaning</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><strong style="color:#2e7d52;">Green</strong></td>
+              <td>Available — no booking on that date.</td>
+            </tr>
+            <tr>
+              <td><strong style="color:#1a5fa8;">Blue</strong></td>
+              <td>Reserved — future booking not yet checked in.</td>
+            </tr>
+            <tr>
+              <td><strong style="color:#c87a3a;">Orange</strong></td>
+              <td>Occupied — guest is in the room.</td>
+            </tr>
+            <tr>
+              <td><strong style="color:#888;">Grey</strong></td>
+              <td>Cleaning / Maintenance / Out of order.</td>
+            </tr>
+            <tr>
+              <td><strong style="color:#c0392b;">Red</strong></td>
+              <td>Blocked date.</td>
+            </tr>
+          </tbody>
+        </table>
+        <ul class="checklist">
+          <li>Hover a cell badge to see guest name, dates, nights, and payment status in a tooltip.</li>
+          <li>Click the badge to jump straight to the booking details page.</li>
+          <li>Use the <strong>← / →</strong> arrows to navigate between months.</li>
+          <li>Summary KPIs at the top: active rooms, active bookings, blocked days in the current month.</li>
+        </ul>
+      </section>
+
+      <!-- ══════════════════════════════════════════════════════════
+           17. CANCELLATIONS
+      ══════════════════════════════════════════════════════════ -->
+      <section>
+        <h2>Cancelling a booking</h2>
+        <ol class="steps">
+          <li>Open the booking → tap <strong>Cancel</strong>.</li>
+          <li>Choose a reason from the list (or type a custom reason).</li>
+          <li>Confirm. The system:
+            <ul>
+              <li>Sets status to <span class="pill red">cancelled</span>.</li>
+              <li>Restores the room's availability on all affected dates.</li>
+              <li>Sends a cancellation email to the guest.</li>
+              <li>Logs the action in the audit trail.</li>
+            </ul>
+          </li>
+          <li>If a refund is due, go to the Payments tab and issue it via the <strong>Refund</strong> button on the
+            original payment.</li>
+        </ol>
+
+        <div class="callout warn">
+          <strong>Never manually delete a booking</strong> — always Cancel. Deletions destroy the financial and audit
+          trail. Cancelled bookings remain visible as a permanent record.
+        </div>
+      </section>
+
+      <!-- ══════════════════════════════════════════════════════════
+           18. RESENDING EMAILS
+      ══════════════════════════════════════════════════════════ -->
+      <section>
+        <h2>Resending emails</h2>
+        <ol class="steps">
+          <li>Open the booking → <strong>Resend Email</strong>.</li>
+          <li>Choose the template: booking received · booking confirmed · tentative confirmed · booking cancelled ·
+            invoice.</li>
+          <li>Optionally add CC recipients for this send only.</li>
+          <li>Send. The action is logged in the activity timeline.</li>
+        </ol>
+      </section>
+
+      <!-- ══════════════════════════════════════════════════════════
+           19. BOOKING SETTINGS
+      ══════════════════════════════════════════════════════════ -->
+      <section>
+        <h2>Booking settings — <code>/admin/booking-settings.php</code></h2>
+        <p><em>Manager / admin only.</em> All configuration that affects how bookings are priced, accepted, and
+          communicated.</p>
+        <table>
+          <thead>
+            <tr>
+              <th>Setting</th>
+              <th>What it controls</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><strong>Booking system on/off</strong></td>
+              <td>Disables all new online bookings. Existing bookings unaffected.</td>
+            </tr>
+            <tr>
+              <td><strong>Maintenance mode</strong></td>
+              <td>Shows a maintenance message to public visitors while admin remains accessible.</td>
+            </tr>
+            <tr>
+              <td><strong>Max advance days</strong></td>
+              <td>How far into the future guests can book (default 30 days, range 1–365).</td>
+            </tr>
+            <tr>
+              <td><strong>Tentative duration (hours)</strong></td>
+              <td>How long a tentative hold lasts before it expires (default 48 h).</td>
+            </tr>
+            <tr>
+              <td><strong>Tourism levy</strong></td>
+              <td>Enable/disable and set the % added to every room charge (default 1%).</td>
+            </tr>
+            <tr>
+              <td><strong>VAT rate</strong></td>
+              <td>Percentage applied to bookings and payments when VAT is enabled.</td>
+            </tr>
+            <tr>
+              <td><strong>SMTP settings</strong></td>
+              <td>Email server config — host, port, username, password, security (SSL/TLS).</td>
+            </tr>
+            <tr>
+              <td><strong>Email templates</strong></td>
+              <td>Customise subject + body for booking received, confirmed, cancelled, invoice emails. Supports template
+                placeholders.</td>
+            </tr>
+            <tr>
+              <td><strong>CC / BCC</strong></td>
+              <td>Always CC or BCC admin on every outgoing email.</td>
+            </tr>
+          </tbody>
+        </table>
+
+        <h3>Email template placeholders</h3>
+        <p>Use these in subject or body of any email template:</p>
+        <p style="font-family:monospace; font-size:0.88em; line-height:2;">
+          <code>{{site_name}}</code> · <code>{{booking_reference}}</code> · <code>{{guest_name}}</code> ·
+          <code>{{room_name}}</code> · <code>{{check_in_date_formatted}}</code> ·
+          <code>{{check_out_date_formatted}}</code> · <code>{{number_of_nights}}</code> ·
+          <code>{{number_of_guests}}</code> · <code>{{total_amount_formatted}}</code> ·
+          <code>{{currency_symbol}}</code> · <code>{{check_in_time}}</code> · <code>{{check_out_time}}</code> ·
+          <code>{{cancellation_reason}}</code> · <code>{{special_requests}}</code>
+        </p>
+      </section>
+
+      <!-- ══════════════════════════════════════════════════════════
+           20. COMMON MISTAKES
+      ══════════════════════════════════════════════════════════ -->
+      <section>
+        <h2>Common mistakes to avoid</h2>
+        <div class="callout warn">
+          <strong>Don't manually delete a booking</strong> — always Cancel. Deletes destroy the audit and financial
+          trail.
+        </div>
+        <ul class="checklist">
+          <li>Don't change dates by editing the booking while the guest is in-house — use <strong>Extend Stay</strong>
+            or <strong>Adjust Dates</strong> so the price recalculates correctly.</li>
+          <li>Don't issue a refund by manually editing a payment amount — use the <strong>Refund</strong> button so
+            the refund links back to its source payment.</li>
+          <li>Don't leave expired tentatives sitting — cancel them promptly so the room shows as available to other
+            guests.</li>
+          <li>Don't skip the room assignment before check-in — if the system blocks check-in, check that an individual
+            room is assigned.</li>
+          <li>Don't regenerate an invoice after the guest has a copy unless the folio has actually changed — this
+            overwrites their PDF.</li>
+        </ul>
+      </section>
+
+      <!-- ══════════════════════════════════════════════════════════
+           21. DAILY RECEPTION CHECKLIST
+      ══════════════════════════════════════════════════════════ -->
+      <section>
+        <h2>Daily reception checklist</h2>
+        <h3>Morning (start of shift)</h3>
+        <ul class="checklist">
+          <li>Filter → <strong>Check-in today</strong> — confirm all arrivals are assigned a room and payment is on
+            file.</li>
+          <li>Review <strong>tentative-bookings.php</strong> — convert any ready ones, cancel any expired ones.</li>
+          <li>Check <strong>calendar.php</strong> for the full picture of today's occupancy.</li>
+        </ul>
+        <h3>Afternoon (before close)</h3>
+        <ul class="checklist">
+          <li>Filter → <strong>Check-out today</strong> — prepare folios, add any outstanding extras.</li>
+          <li>Process all check-outs and confirm final invoices were sent.</li>
+          <li>Review any <strong>no-show</strong> candidates for confirmed bookings from yesterday or earlier.</li>
+        </ul>
+        <h3>End of day</h3>
+        <ul class="checklist">
+          <li>Verify all in-house guests show status <span class="pill blue">checked-in</span> and not
+            <span class="pill">confirmed</span> — a confirmed status with today's check-in date means someone forgot
+            to press Check In.
+          </li>
+          <li>Confirm balance due is zero for all guests checking out tomorrow (chase payment today).</li>
+        </ul>
+      </section>
+
+    </div>
+  </main>
+
+  <footer class="guide-footer">
+    <div class="deck">
+      <div class="crest">— R H —</div>
+      <p>
+        <a href="06-housekeeping.html">← Housekeeping</a> &middot;
+        <a href="index.html">All guides</a> &middot;
+        <a href="99-admin-dashboard-full-guide.html">Admin Bible</a> &middot;
+        <a href="owner-handover.php">Owner handover</a> &middot;
+        <a href="08-stock-orders.html">Stock →</a>
+      </p>
+    </div>
+  </footer>
+
+</body>
+
+</html>
+
+<main class="content">
+  <div class="deck">
+
+    <section>
+      <h2>The list page</h2>
+      <table>
+        <thead>
+          <tr>
+            <th>Column</th>
+            <th>Shows</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><strong>Reference</strong></td>
+            <td>Auto-generated booking code (e.g. <code>BKG-2026-0012</code>).</td>
+          </tr>
+          <tr>
+            <td><strong>Guest</strong></td>
+            <td>Primary guest name + email + phone.</td>
+          </tr>
+          <tr>
+            <td><strong>Room</strong></td>
+            <td>Room type + assigned individual room (if any).</td>
+          </tr>
+          <tr>
+            <td><strong>Dates</strong></td>
+            <td>Check-in → check-out, # of nights.</td>
+          </tr>
+          <tr>
+            <td><strong>Total</strong></td>
+            <td>Total with VAT + tourism levy.</td>
+          </tr>
+          <tr>
+            <td><strong>Status</strong></td>
+            <td>pending · tentative · confirmed · checked-in · checked-out · cancelled.</td>
+          </tr>
+          <tr>
+            <td><strong>Payment</strong></td>
+            <td>unpaid · partial · paid.</td>
+          </tr>
+        </tbody>
+      </table>
+      <p>Filters at the top: today's check-ins, today's check-outs, in-house, by status, search.</p>
+    </section>
+
+    <section>
+      <h2>Take a walk-in / phone booking</h2>
+      <ol class="steps">
+        <li>Tap <strong>+ New booking</strong> (top-right).</li>
+        <li>Pick the <strong>room type</strong> → if multiple physical rooms exist, pick the <strong>individual
+            room</strong>.</li>
+        <li><strong>Occupancy:</strong> Single, Double, or Triple &mdash; price updates automatically.</li>
+        <li>Enter <strong>adults</strong> and <strong>children</strong> counts. Children are charged the multiplier
+          set on the room (default 50%).</li>
+        <li>Pick <strong>check-in</strong> and <strong>check-out</strong> dates.</li>
+        <li>Fill guest details: name, email, phone, country.</li>
+        <li>Choose <strong>status:</strong>
+          <ul>
+            <li><strong>Tentative</strong> → reserves the room for 48h pending deposit/confirmation.</li>
+            <li><strong>Confirmed</strong> → reserves immediately.</li>
+          </ul>
+        </li>
+        <li>Choose <strong>payment status:</strong> unpaid, partial, paid.</li>
+        <li>Save. A confirmation email is sent to the guest.</li>
+      </ol>
+    </section>
+
+    <section>
+      <h2>Check in a guest</h2>
+      <ol class="steps">
+        <li>Open the booking.</li>
+        <li>Tap <strong>Check in</strong>.</li>
+        <li>The room availability decrements. Status moves to <span class="pill blue">checked-in</span>.</li>
+        <li>Any extras (room service, restaurant) added later post to the same folio.</li>
+      </ol>
+    </section>
+
+    <section>
+      <h2>Add a payment</h2>
+      <ol class="steps">
+        <li>Open the booking → <strong>Add Payment</strong>.</li>
+        <li>Choose method: cash, mobile money, card, bank transfer, cheque.</li>
+        <li>Enter amount + reference (where applicable).</li>
+        <li>The system generates a <strong>sequential invoice number</strong> (<code>INV-YYYY-NNNNNN</code>), creates
+          a PDF, attaches it to the email and sends it to the guest with the configured CC list.</li>
+      </ol>
+    </section>
+
+    <section>
+      <h2>Check out</h2>
+      <ol class="steps">
+        <li>Open the booking → <strong>Check out</strong>.</li>
+        <li>The system calculates: room nights + folio charges (room service, restaurant, laundry) + VAT + tourism
+          levy.</li>
+        <li>If the balance is positive, prompt to take payment now.</li>
+        <li>If zero, confirm.</li>
+        <li>A <strong>final consolidated invoice</strong> is generated and emailed automatically.</li>
+      </ol>
+    </section>
+
+    <section>
+      <h2>Cancel a booking</h2>
+      <ol class="steps">
+        <li>Open the booking → <strong>Cancel</strong>.</li>
+        <li>Choose a reason from the list (or type custom).</li>
+        <li>Confirm. The room availability is restored, status moves to <span class="pill red">cancelled</span>, and
+          the guest receives a cancellation email.</li>
+      </ol>
+    </section>
+
+    <section>
+      <h2>Tentative bookings</h2>
+      <ul class="checklist">
+        <li>A separate page <code>/admin/tentative-bookings.php</code> lists all tentatives.</li>
+        <li>Each one has an <strong>expiry timer</strong> (default 48h). At expiry the booking is auto-cancelled.</li>
+        <li>To convert a tentative to confirmed: open it → <strong>Confirm</strong> (or take a deposit, which
+          auto-confirms).</li>
+      </ul>
+    </section>
+
+    <section>
+      <h2>Common mistakes to avoid</h2>
+      <div class="callout warn">
+        <strong>Don't manually delete a booking</strong> &mdash; always <strong>Cancel</strong>. Deletes break the
+        audit trail.
+      </div>
+      <ul class="checklist">
+        <li>Don't change check-in dates while a guest is in-house &mdash; cancel and rebook instead.</li>
+        <li>Don't issue a refund through the payments table &mdash; use the <strong>Refund</strong> button on the
+          original payment so it links back.</li>
+      </ul>
+    </section>
+
+    <section>
+      <h2>Tips</h2>
+      <ul class="checklist">
+        <li>Use <strong>Filter → checkin_today</strong> at the start of every shift to see who's arriving.</li>
+        <li>Use <strong>Filter → checkout_today</strong> before lunch to prepare folios.</li>
+        <li>The <strong>Calendar view</strong> (<code>/admin/calendar.php</code>) gives a colour-coded month view of
+          every individual room.</li>
+      </ul>
+    </section>
+
+  </div>
+</main>
+
+<footer class="guide-footer">
+  <div class="deck">
+    <div class="crest">— R H —</div>
+    <p><a href="06-housekeeping.html">← Housekeeping</a> &middot; <a href="index.html">All guides</a> &middot; <a
+        href="99-admin-dashboard-full-guide.html">Admin Bible</a> &middot; <a href="owner-handover.php">Owner
+        handover</a> &middot; <a href="08-stock-orders.html">Stock →</a></p>
+  </div>
+</footer>
+
+</body>
+
+</html>

@@ -1,0 +1,11 @@
+🔔 *NEW BOOKING ALERT*
+━━━━━━━━━━━━━━━━━━━
+Hotel: {{hotel_name}}
+Ref: *{{booking_reference}}*
+Guest: {{guest_name}}
+Phone: {{guest_phone}}
+Room: {{room_name}}
+In: {{check_in_date}} | Out: {{check_out_date}}
+Nights: {{nights}} | Guests: {{guests}}
+💰 Total: *{{total_amount}}*
+Special: {{special_requests}}

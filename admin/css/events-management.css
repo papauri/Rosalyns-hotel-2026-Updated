@@ -1,0 +1,437 @@
+/* Events Management page specific styles */
+/* Matches the minimal aesthetic of gallery-management.css */
+
+.page-header {
+    background: var(--admin-surface, #fff);
+    border: 1px solid var(--admin-surface-border, #e5e7eb);
+    border-radius: 12px;
+    padding: 14px 16px;
+    box-shadow: 0 1px 3px rgba(15, 23, 42, 0.05);
+    margin-bottom: 18px;
+}
+
+.page-header .page-title {
+    margin: 0;
+}
+
+.btn-add {
+    background: linear-gradient(135deg, var(--gold, #8B7355) 0%, #6f5b43 100%);
+    color: var(--deep-navy, #111111);
+    border: none;
+    padding: 12px 24px;
+    border-radius: 8px;
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+
+.btn-add:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 6px 16px rgba(139, 115, 85, 0.3);
+}
+
+/* Events Grid */
+.events-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+    gap: 16px;
+}
+
+/* Event Card */
+.event-card {
+    position: relative;
+    background: var(--admin-surface, #fff);
+    border: 1px solid var(--admin-surface-border, #e5e7eb);
+    border-radius: 12px;
+    overflow: hidden;
+    box-shadow: 0 1px 3px rgba(15, 23, 42, 0.05);
+    transition: transform 0.2s ease, box-shadow 0.2s ease, border-color 0.2s ease;
+}
+
+.event-card:hover {
+    transform: translateY(-2px);
+    border-color: color-mix(in srgb, var(--gold, #8B7355) 38%, var(--admin-surface-border, #e5e7eb) 62%);
+    box-shadow: 0 8px 24px rgba(15, 23, 42, 0.1);
+}
+
+.event-card.expired {
+    opacity: 0.7;
+    border-color: #fecaca;
+}
+
+.event-card.expired:hover {
+    border-color: #f87171;
+}
+
+/* Event Card Image */
+.event-card-image,
+.event-card .no-image-placeholder {
+    height: 160px;
+    width: 100%;
+}
+
+.event-card-image {
+    object-fit: cover;
+    display: block;
+}
+
+.event-card .no-image-placeholder {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    background: linear-gradient(135deg, #f6f7fb, #eceff6);
+    color: #7a8090;
+}
+
+.event-card .no-image-placeholder i {
+    font-size: 32px;
+}
+
+/* Event Card Body */
+.event-card-body {
+    padding: 16px;
+}
+
+.event-card-title {
+    font-size: 16px;
+    font-weight: 700;
+    margin-bottom: 6px;
+    color: var(--navy, #1A1A1A);
+}
+
+.event-card-desc {
+    font-size: 13px;
+    color: #6b7280;
+    margin-bottom: 12px;
+    min-height: 32px;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+}
+
+/* Event Card Info */
+.event-card-info {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 6px 12px;
+    margin-bottom: 12px;
+    font-size: 12px;
+    color: #555;
+}
+
+.event-card-info-item {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.event-card-info-item i {
+    color: var(--gold, #8B7355);
+    width: 14px;
+    text-align: center;
+}
+
+.event-card-info-full {
+    grid-column: 1 / -1;
+}
+
+/* Event Card Meta */
+.event-card-meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-bottom: 12px;
+    align-items: center;
+}
+
+.event-badge {
+    font-size: 11px;
+    padding: 4px 8px;
+    border-radius: 999px;
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    font-weight: 600;
+}
+
+.event-badge.badge-active {
+    background: #edf7f0;
+    color: #1f7a42;
+}
+
+.event-badge.badge-inactive {
+    background: #fef2f2;
+    color: #a03030;
+}
+
+.event-badge.badge-featured {
+    background: linear-gradient(135deg, var(--gold, #8B7355) 0%, #c49b2e 100%);
+    color: var(--deep-navy, #111111);
+}
+
+.event-badge.badge-upcoming {
+    background: #e8f5e9;
+    color: #2e7d32;
+}
+
+.event-badge.badge-free {
+    background: #e3f2fd;
+    color: #1565c0;
+}
+
+.event-badge.badge-price {
+    background: #fff8e1;
+    color: #f57c00;
+}
+
+.event-badge.badge-video {
+    background: #f3e5f5;
+    color: #7b1fa2;
+}
+
+.event-badge.badge-expired {
+    background: #fef2f2;
+    color: #991b1b;
+}
+
+/* Event Card Actions */
+.event-card-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    padding-top: 10px;
+    border-top: 1px solid #f0f0f0;
+    margin-top: auto;
+}
+
+.event-card-actions .btn-action {
+    min-height: 34px;
+    border-radius: 8px;
+    flex: 1 1 auto;
+    justify-content: center;
+    font-size: 12px;
+    padding: 6px 10px;
+}
+
+.event-card-actions .btn-edit {
+    background: var(--gold, #8B7355);
+    color: var(--deep-navy, #111111);
+    border: none;
+}
+
+.event-card-actions .btn-quote {
+    background: #e8f0fb;
+    color: #2f4f78;
+    border: 1px solid #c8d7ec;
+}
+
+.event-card-actions .btn-toggle {
+    background: #f0f0f0;
+    color: #333;
+    border: 1px solid #ddd;
+}
+
+.event-card-actions .btn-featured {
+    background: #fff8e1;
+    color: #f57c00;
+    border: 1px solid #ffe082;
+}
+
+.event-card-actions .btn-upcoming {
+    background: #e8f5e9;
+    color: #2e7d32;
+    border: 1px solid #c8e6c9;
+}
+
+.event-card-actions .btn-delete {
+    background: #fef2f2;
+    color: #a03030;
+    border: 1px solid #fecaca;
+    flex: 0 0 auto;
+}
+
+/* Image Upload Wrapper */
+.image-upload-wrapper {
+    width: 100%;
+}
+
+.image-upload-area {
+    border: 2px dashed #d1d5db;
+    border-radius: 10px;
+    padding: 24px;
+    text-align: center;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    background: #fafafa;
+}
+
+.image-upload-area:hover {
+    border-color: var(--gold, #8B7355);
+    background: #fffbf5;
+}
+
+.image-upload-area i {
+    font-size: 28px;
+    color: var(--gold, #8B7355);
+    margin-bottom: 8px;
+    display: block;
+}
+
+.current-image-preview {
+    max-width: 100%;
+    max-height: 150px;
+    border-radius: 8px;
+    border: 1px solid #e5e7eb;
+}
+
+.video-upload-wrapper .image-upload-area {
+    border-color: #c4b5fd;
+    background: #faf5ff;
+}
+
+.video-upload-wrapper .image-upload-area:hover {
+    border-color: #9b59b6;
+    background: #f3e5f5;
+}
+
+/* Modal Forms */
+.modal-content {
+    max-width: 720px;
+    width: min(720px, calc(100vw - 32px));
+}
+
+.modal-body {
+    padding: 18px;
+    max-height: 70vh;
+    overflow-y: auto;
+}
+
+.form-group {
+    margin-bottom: 16px;
+}
+
+.form-group label {
+    display: block;
+    margin-bottom: 6px;
+    font-weight: 600;
+    font-size: 13px;
+    color: var(--navy, #1A1A1A);
+}
+
+.form-group input[type="text"],
+.form-group input[type="date"],
+.form-group input[type="time"],
+.form-group input[type="number"],
+.form-group input[type="url"],
+.form-group textarea,
+.form-group select {
+    width: 100%;
+    padding: 10px 12px;
+    border: 1px solid var(--admin-surface-border, #e5e7eb);
+    border-radius: 8px;
+    font-size: 14px;
+    font-family: 'Jost', sans-serif;
+    transition: border-color 0.2s ease, box-shadow 0.2s ease;
+    background: #fff;
+    color: var(--admin-text);
+}
+
+.form-group input:focus,
+.form-group textarea:focus,
+.form-group select:focus {
+    outline: none;
+    border-color: var(--gold, #8B7355);
+    box-shadow: 0 0 0 3px rgba(139, 115, 85, 0.1);
+}
+
+.form-group textarea {
+    min-height: 80px;
+    resize: vertical;
+}
+
+.checkbox-group {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.checkbox-group input[type="checkbox"] {
+    width: 16px;
+    height: 16px;
+    accent-color: var(--gold, #8B7355);
+}
+
+.checkbox-group label {
+    margin: 0;
+    font-weight: 500;
+    cursor: pointer;
+}
+
+/* Empty State */
+.empty-state {
+    text-align: center;
+    padding: 60px 24px;
+    color: #9ca3af;
+    background: var(--admin-surface, #fff);
+    border: 1px solid var(--admin-surface-border, #e5e7eb);
+    border-radius: 12px;
+}
+
+.empty-state i {
+    font-size: 48px;
+    margin-bottom: 16px;
+    display: block;
+    color: #d1d5db;
+}
+
+.empty-state p {
+    margin: 0;
+    font-size: 15px;
+}
+
+/* Upcoming Events Settings Panel - Already inline styled, just add enhancement */
+.events-settings-panel {
+    background: linear-gradient(135deg, #e8f5e9, #f1f8e9);
+    border: 1px solid #c8e6c9;
+    border-radius: 12px;
+    padding: 20px 24px;
+    margin-bottom: 24px;
+}
+
+/* Responsive */
+@media (max-width: 768px) {
+    .events-grid {
+        grid-template-columns: 1fr;
+    }
+
+    .page-header {
+        flex-direction: column;
+        align-items: flex-start;
+    }
+
+    .event-card-info {
+        grid-template-columns: 1fr;
+    }
+
+    .event-card-actions {
+        flex-direction: column;
+    }
+
+    .event-card-actions .btn-action {
+        width: 100%;
+    }
+
+    .modal-content {
+        width: 100%;
+        max-width: none;
+        border-radius: 0;
+        max-height: 100vh;
+    }
+}

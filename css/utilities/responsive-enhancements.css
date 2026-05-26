@@ -1,0 +1,161 @@
+/* =====================================================================
+   responsive-enhancements.css — Rosalyn's Hotel 2026
+   --------------------------------------------------------------------
+   Last layer in main.css (loaded after every other rule).
+   Adds graceful fluid scaling from 320px phones to 4K TVs (3840px+),
+   plus touch-first ergonomics for tablet/till hardware.
+   ===================================================================== */
+
+/* ---------------------------------------------------------------------
+   1. Fluid root sizing — uses clamp() so typography & spacing scale
+      smoothly from 320px through 4K without explicit breakpoints.
+   --------------------------------------------------------------------- */
+:root {
+    /* base font-size: 14px on phones → 18px on 4K TVs */
+    --rh-base-font: clamp(14px, 0.55vw + 12px, 18px);
+}
+
+html {
+    -webkit-text-size-adjust: 100%;
+    text-size-adjust: 100%;
+}
+
+@media screen and (min-width: 320px) {
+    html { font-size: var(--rh-base-font); }
+}
+
+/* ---------------------------------------------------------------------
+   2. Universal overflow guards — kill horizontal scroll on any device.
+   --------------------------------------------------------------------- */
+html, body {
+    max-width: 100%;
+    overflow-x: hidden;
+}
+
+img, video, iframe, table {
+    max-width: 100%;
+    height: auto;
+}
+
+table { border-collapse: collapse; }
+
+/* Wide content blocks: allow horizontal scroll inside container,
+   never on the page itself. */
+.table-scroll,
+.responsive-table-wrap,
+.scroll-x {
+    width: 100%;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+}
+
+/* ---------------------------------------------------------------------
+   3. Touch-first targets — applied on any device that lacks a hover
+      pointer (tablets, kiosks, KDS/POS touchscreens). Buttons get
+      a comfortable 44px minimum hit area per WCAG 2.5.5.
+   --------------------------------------------------------------------- */
+@media (hover: none) and (pointer: coarse) {
+    button,
+    .btn,
+    a.btn,
+    input[type="button"],
+    input[type="submit"],
+    input[type="reset"],
+    select,
+    .pagination a,
+    .pagination button,
+    .nav-link {
+        min-height: 44px;
+        min-width: 44px;
+        padding: 0.6rem 1rem;
+        touch-action: manipulation;
+    }
+
+    input[type="text"],
+    input[type="email"],
+    input[type="tel"],
+    input[type="number"],
+    input[type="password"],
+    input[type="date"],
+    input[type="search"],
+    textarea {
+        font-size: 16px;            /* prevents iOS auto-zoom on focus */
+        min-height: 44px;
+        padding: 0.6rem 0.8rem;
+    }
+
+    /* Disable text-selection on common UI chrome — avoids double-tap
+       selection during fast service. */
+    .navbar,
+    .header,
+    .booking-card,
+    .hero-section {
+        -webkit-user-select: none;
+        user-select: none;
+    }
+}
+
+/* ---------------------------------------------------------------------
+   4. Tablet portrait/landscape (iPad, Galaxy Tab) — 600–1024px wide.
+   --------------------------------------------------------------------- */
+@media (min-width: 600px) and (max-width: 1024px) {
+    .container,
+    .content-container,
+    .page-container {
+        padding-left: clamp(12px, 2vw, 24px);
+        padding-right: clamp(12px, 2vw, 24px);
+    }
+}
+
+/* ---------------------------------------------------------------------
+   5. Big-screen desktop & 4K TV (≥1920px through ≥3840px).
+      We deliberately let content fill the canvas instead of leaving
+      huge empty side gutters — hotels often use wall-mounted displays.
+   --------------------------------------------------------------------- */
+@media (min-width: 1920px) {
+    .container,
+    .content-container,
+    .page-container {
+        max-width: 1600px;
+        margin-left: auto;
+        margin-right: auto;
+    }
+}
+
+@media (min-width: 2560px) {
+    :root { --rh-base-font: 20px; }
+    .container,
+    .content-container,
+    .page-container { max-width: 2200px; }
+}
+
+@media (min-width: 3840px) {
+    :root { --rh-base-font: 24px; }
+    .container,
+    .content-container,
+    .page-container { max-width: 3200px; }
+    img { image-rendering: -webkit-optimize-contrast; }
+}
+
+/* ---------------------------------------------------------------------
+   6. Reduced motion respect — service staff often have motion
+      sensitivity; honour OS preference.
+   --------------------------------------------------------------------- */
+@media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+        animation-duration: 0.01ms !important;
+        transition-duration: 0.01ms !important;
+        scroll-behavior: auto !important;
+    }
+}
+
+/* ---------------------------------------------------------------------
+   7. Print fallbacks — invoices, receipts, daily reports.
+   --------------------------------------------------------------------- */
+@media print {
+    nav, .navbar, .header, .footer, .no-print { display: none !important; }
+    body { background: #fff !important; color: #000 !important; }
+    a[href]::after { content: " (" attr(href) ")"; font-size: 0.85em; }
+}

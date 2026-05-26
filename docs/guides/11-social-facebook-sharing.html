@@ -1,0 +1,218 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Social Media & Facebook Sharing Guide — Rosalyn's Hotel</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link
+        href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@400;500;600;700&family=Jost:wght@300;400;500;600&display=swap"
+        rel="stylesheet">
+    <link rel="stylesheet" href="assets/guide-theme.css">
+    <script src="assets/guide-init.js" defer></script>
+</head>
+
+<body>
+
+    <nav class="top">
+        <a href="index.html" class="brand">ROSALYN'S HOTEL</a>
+        <div class="nav-links">
+            <a href="index.html">All Guides</a>
+            <a href="99-admin-dashboard-full-guide.html">Admin Bible</a>
+            <a href="11-social-facebook-sharing.html" class="active">Facebook Guide</a>
+        </div>
+    </nav>
+
+    <header class="hero">
+        <div class="deck">
+            <div class="eyebrow">Guide 11 · Marketing</div>
+            <h1>Social Media &amp; Facebook Sharing</h1>
+            <p class="lead">How to connect your Facebook Page, publish from admin, and keep posts accurate, safe, and
+                consistent.
+            </p>
+            <div class="meta">
+                <span>Audience <strong>Manager &amp; marketing team</strong></span>
+                <span>Read time <strong>8 min</strong></span>
+                <span>Main page <strong>/admin/facebook-settings.php</strong></span>
+            </div>
+        </div>
+    </header>
+
+    <main class="content">
+        <div class="deck">
+
+            <section>
+                <h2>1. What this feature does</h2>
+                <ul class="checklist">
+                    <li>Lets you publish content to the hotel Facebook Page directly from admin.</li>
+                    <li>Supports sharing content from Rooms, Events, Conference, and Menu areas.</li>
+                    <li>Allows default hashtags to be appended automatically.</li>
+                    <li>Includes a test-post tool so you can validate the setup before daily use.</li>
+                </ul>
+            </section>
+
+            <section>
+                <h2>2. Prerequisites</h2>
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Requirement</th>
+                            <th>Why it matters</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr>
+                            <td>Facebook Page admin/editor access</td>
+                            <td>You need permission to post to the Page.</td>
+                        </tr>
+                        <tr>
+                            <td>Facebook app token with page permissions</td>
+                            <td>Without a valid token, posts cannot be sent.</td>
+                        </tr>
+                        <tr>
+                            <td>Page ID configured in admin</td>
+                            <td>The system needs to know which Page receives posts.</td>
+                        </tr>
+                        <tr>
+                            <td>Stable internet</td>
+                            <td>Publishing uses Facebook Graph API in real time.</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </section>
+
+            <section>
+                <h2>3. First-time setup</h2>
+                <ol class="steps">
+                    <li>Open <code>/admin/facebook-settings.php</code>.</li>
+                    <li>Turn on <strong>Enable Facebook Page Posting</strong>.</li>
+                    <li>Paste the <strong>Page Access Token</strong> and save.</li>
+                    <li>Click <strong>Fetch from Token</strong> to auto-fill Page ID and Page Name.</li>
+                    <li>Set <strong>Default Hashtags</strong> (for example: <code>#RosalynsHotel #Mangochi</code>).</li>
+                    <li>Choose which sections can show share buttons (Rooms, Events, Conference, Menu).</li>
+                    <li>Click <strong>Save Facebook Settings</strong>.</li>
+                </ol>
+
+                <div class="callout tip">
+                    Keep your token private and rotate it whenever the Facebook app security policy changes.
+                </div>
+            </section>
+
+            <section>
+                <h2>4. Validate with a test post</h2>
+                <ol class="steps">
+                    <li>In the same settings page, go to <strong>Test Post</strong>.</li>
+                    <li>Enter a short message like <code>Test post from Rosalyns admin</code>.</li>
+                    <li>Click <strong>Send Test Post to Facebook Page</strong>.</li>
+                    <li>Confirm success and open the returned Facebook link.</li>
+                    <li>Delete the test post from Facebook if it is only for setup verification.</li>
+                </ol>
+
+                <div class="callout warn">
+                    Test Post publishes a real post to your live Facebook Page.
+                </div>
+            </section>
+
+            <section>
+                <h2>5. Daily publishing workflow</h2>
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Step</th>
+                            <th>Action</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr>
+                            <td>1</td>
+                            <td>Open content in admin (room, event, conference item, or menu item).</td>
+                        </tr>
+                        <tr>
+                            <td>2</td>
+                            <td>Click the Facebook share action when available.</td>
+                        </tr>
+                        <tr>
+                            <td>3</td>
+                            <td>Review generated caption; keep it short, clear, and specific.</td>
+                        </tr>
+                        <tr>
+                            <td>4</td>
+                            <td>Confirm media and key details (price, date, phone, booking link).</td>
+                        </tr>
+                        <tr>
+                            <td>5</td>
+                            <td>Publish and verify immediately on the Facebook Page.</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </section>
+
+            <section>
+                <h2>6. Caption quality checklist</h2>
+                <ul class="checklist">
+                    <li>Lead with one strong message in the first line.</li>
+                    <li>Include a clear call-to-action: book now, call, or WhatsApp.</li>
+                    <li>Keep hashtags relevant and limited (3 to 6 is usually enough).</li>
+                    <li>Never publish placeholder text like lorem ipsum or test amounts.</li>
+                    <li>Match currency format to MWK where pricing is shown.</li>
+                </ul>
+            </section>
+
+            <section>
+                <h2>7. Troubleshooting</h2>
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Issue</th>
+                            <th>Fix</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr>
+                            <td>Share button not visible</td>
+                            <td>Enable posting globally and enable the specific section toggle in Facebook Settings.
+                            </td>
+                        </tr>
+                        <tr>
+                            <td>"Invalid token" or permission error</td>
+                            <td>Generate a new token with <code>pages_manage_posts</code>,
+                                <code>pages_read_engagement</code>, and <code>pages_show_list</code>.</td>
+                        </tr>
+                        <tr>
+                            <td>No pages returned by Fetch from Token</td>
+                            <td>Confirm the token belongs to a user/system user with access to the hotel Page.</td>
+                        </tr>
+                        <tr>
+                            <td>Post succeeded but content is wrong</td>
+                            <td>Correct the source content in admin and re-post with a revised caption.</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </section>
+
+            <section>
+                <h2>8. Governance and safety</h2>
+                <ul class="checklist">
+                    <li>Limit publishing rights to manager-level users.</li>
+                    <li>Log all post attempts for audit (keep post logging enabled).</li>
+                    <li>Review posts daily for brand consistency and factual accuracy.</li>
+                    <li>Use official contact details only: hotel phone, WhatsApp, and booking URL.</li>
+                </ul>
+            </section>
+
+        </div>
+    </main>
+
+    <footer class="guide-footer">
+        <div class="deck">
+            <div class="crest">— R H —</div>
+            <p>Rosalyn's Hotel Management System · Documentation Suite</p>
+            <p><a href="index.html">Back to all guides →</a></p>
+        </div>
+    </footer>
+
+</body>
+
+</html>
