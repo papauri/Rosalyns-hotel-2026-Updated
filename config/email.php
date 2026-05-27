@@ -129,7 +129,7 @@ function sendEmail(string $to, ?string $toName, string $subject, string $htmlBod
         $mail->Encoding = PHPMailer::ENCODING_BASE64;
         $mail->isHTML(true);
         $mail->Subject = $subject;
-        $mail->Body = wrapEmailTemplate($htmlBody, $subject);
+        $mail->Body = hotel_embed_logo_cid($mail, wrapEmailTemplate($htmlBody, $subject));
         $mail->AltBody = $textBody ?: strip_tags($htmlBody);
 
         $mail->send();
@@ -239,7 +239,7 @@ function sendEmailWithAttachments(string $to, ?string $toName, string $subject, 
         $mail->Encoding = PHPMailer::ENCODING_BASE64;
         $mail->isHTML(true);
         $mail->Subject = $subject;
-        $mail->Body = wrapEmailTemplate($htmlBody, $subject);
+        $mail->Body = hotel_embed_logo_cid($mail, wrapEmailTemplate($htmlBody, $subject));
         $mail->AltBody = $textBody !== '' ? $textBody : strip_tags($htmlBody);
         $mail->send();
 
@@ -553,6 +553,68 @@ if (!function_exists('hotel_email_logo_url')) {
         }
 
         return '';
+    }
+}
+
+/**
+ * Embed the hotel logo as a CID inline attachment in the PHPMailer instance.
+ *
+ * Replaces every occurrence of the logo HTTPS URL in $html with cid:hotel_logo_cid
+ * so the image renders in all email clients (Gmail, Outlook, Apple Mail) without
+ * requiring the recipient to "Load images". Works from localhost and production alike.
+ *
+ * @param PHPMailer $mail  The mailer instance (before send()).
+ * @param string    $html  The fully-wrapped HTML body.
+ * @return string          HTML with logo src replaced to cid: when successful.
+ */
+if (!function_exists('hotel_embed_logo_cid')) {
+    function hotel_embed_logo_cid(PHPMailer $mail, string $html): string
+    {
+        $candidates = [
+            (string)getSetting('site_logo', ''),
+            (string)getSetting('logo_url', ''),
+            (string)getSetting('hotel_logo', ''),
+            'images/logo/logo.png',
+        ];
+
+        foreach ($candidates as $candidate) {
+            $candidate = trim($candidate);
+            if ($candidate === '' || preg_match('#^https?://#i', $candidate)) {
+                continue;
+            }
+            $relative  = ltrim($candidate, '/');
+            $localPath = __DIR__ . '/../' . $relative;
+            if (!is_file($localPath)) {
+                continue;
+            }
+
+            $ext  = strtolower(pathinfo($localPath, PATHINFO_EXTENSION));
+            $mime = match ($ext) {
+                'jpg', 'jpeg' => 'image/jpeg',
+                'gif'         => 'image/gif',
+                'webp'        => 'image/webp',
+                default       => 'image/png',
+            };
+
+            try {
+                $mail->addEmbeddedImage($localPath, 'hotel_logo_cid', 'logo.' . $ext, 'base64', $mime);
+                // Replace public URL (both raw and HTML-escaped) with the CID reference
+                $pubUrl = hotel_email_logo_url();
+                if ($pubUrl !== '') {
+                    $html = str_replace(
+                        [htmlspecialchars($pubUrl, ENT_QUOTES, 'UTF-8'), $pubUrl],
+                        ['cid:hotel_logo_cid', 'cid:hotel_logo_cid'],
+                        $html
+                    );
+                }
+            } catch (Exception $e) {
+                error_log('hotel_embed_logo_cid: ' . $e->getMessage());
+            }
+
+            return $html;
+        }
+
+        return $html;
     }
 }
 
@@ -2994,7 +3056,7 @@ function sendEmailWithCC(string $to, ?string $toName, string $subject, string $h
         $mail->Encoding = PHPMailer::ENCODING_BASE64;
         $mail->isHTML(true);
         $mail->Subject = $subject;
-        $mail->Body = wrapEmailTemplate($htmlBody, $subject);
+        $mail->Body = hotel_embed_logo_cid($mail, wrapEmailTemplate($htmlBody, $subject));
         $mail->AltBody = $textBody ?: strip_tags($htmlBody);
 
         $mail->send();
@@ -4655,7 +4717,7 @@ function sendContactInquiryReplyEmail(array $inquiry, string $replySubject, stri
         $mail->Encoding = PHPMailer::ENCODING_BASE64;
         $mail->isHTML(true);
         $mail->Subject = $emailSubject;
-        $mail->Body = wrapEmailTemplate($htmlBody, $emailSubject);
+        $mail->Body = hotel_embed_logo_cid($mail, wrapEmailTemplate($htmlBody, $emailSubject));
         $mail->AltBody = $textBody;
 
         $mail->send();
@@ -4978,7 +5040,7 @@ function sendTentativeQuotationEmail(array $booking, array $options = []): array
             $mail->Encoding = PHPMailer::ENCODING_BASE64;
             $mail->isHTML(true);
             $mail->Subject  = $subject;
-            $mail->Body     = wrapEmailTemplate($htmlBody, $subject);
+            $mail->Body     = hotel_embed_logo_cid($mail, wrapEmailTemplate($htmlBody, $subject));
             $mail->AltBody  = 'Please see the attached PDF quotation for your stay at ' . $site_name . '.';
             $mail->addStringAttachment($pdfContent, 'Quotation-' . $quote_ref . '.pdf', 'base64', 'application/pdf');
             $mail->send();
@@ -5071,7 +5133,7 @@ function sendEmailWithBinaryAttachment(
         $mail->Encoding = PHPMailer::ENCODING_BASE64;
         $mail->isHTML(true);
         $mail->Subject = $subject;
-        $mail->Body = wrapEmailTemplate($htmlBody, $subject);
+        $mail->Body = hotel_embed_logo_cid($mail, wrapEmailTemplate($htmlBody, $subject));
         $mail->AltBody = $altBody !== '' ? $altBody : 'Please view this message in an HTML-compatible email client.';
         $mail->addStringAttachment($attachmentContent, $attachmentName, 'base64', $attachmentMime);
         $mail->send();

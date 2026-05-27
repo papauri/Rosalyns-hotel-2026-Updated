@@ -1414,9 +1414,11 @@ function sendEmailWithAttachmentAndCC(string $to, ?string $toName, string $subje
         }
 
         // Content
+        $mail->CharSet  = PHPMailer::CHARSET_UTF8;
+        $mail->Encoding = PHPMailer::ENCODING_BASE64;
         $mail->isHTML(true);
         $mail->Subject = $subject;
-        $mail->Body = wrapEmailTemplate($htmlBody, $subject);
+        $mail->Body = hotel_embed_logo_cid($mail, wrapEmailTemplate($htmlBody, $subject));
         $mail->AltBody = $textBody ?: strip_tags($htmlBody);
 
         $mail->send();
