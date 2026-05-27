@@ -618,7 +618,7 @@ if ($facebook_settings_css_version === '' || $facebook_settings_css_version === 
                             </div>
 
                             <?php if (!empty($room['amenities'])): ?>
-                                <div style="font-size:11px; color:#888; margin-bottom:10px;">
+                                <div class="conference-card-amenities">
                                     <i class="fas fa-concierge-bell"></i> <?php echo htmlspecialchars(substr($room['amenities'], 0, 60)); ?><?php echo strlen($room['amenities']) > 60 ? '...' : ''; ?>
                                 </div>
                             <?php endif; ?>
@@ -673,8 +673,8 @@ if ($facebook_settings_css_version === '' || $facebook_settings_css_version === 
         <?php endif; ?>
 
         <!-- Conference Enquiries Section -->
-        <div class="card" style="margin-top: 24px;">
-            <h2><i class="fas fa-calendar-check"></i> Conference Enquiries</h2>
+        <div class="card conference-enquiries-card">
+            <h2 class="conference-enquiries-title"><i class="fas fa-calendar-check"></i> Conference Enquiries</h2>
             <div class="table-container">
                 <table class="table">
                     <thead>
@@ -694,8 +694,8 @@ if ($facebook_settings_css_version === '' || $facebook_settings_css_version === 
                     <tbody>
                         <?php if (empty($conference_enquiries)): ?>
                             <tr>
-                                <td colspan="10" style="text-align:center; padding:40px; color:#999;">
-                                    <i class="fas fa-inbox" style="font-size:32px; display:block; margin-bottom:8px;"></i>
+                                <td colspan="10" class="conference-enquiries-empty">
+                                    <i class="fas fa-inbox conference-enquiries-empty__icon"></i>
                                     No conference enquiries found
                                 </td>
                             </tr>

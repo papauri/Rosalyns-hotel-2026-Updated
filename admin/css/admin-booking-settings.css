@@ -550,6 +550,12 @@ details.template-block[open]>summary::after {
     min-width: 180px;
 }
 
+.tpl-send-test-row .btn-send-test {
+    width: auto;
+    flex: 0 0 auto;
+    margin: 0;
+}
+
 .tpl-send-feedback {
     font-size: 12px;
     font-weight: 600;

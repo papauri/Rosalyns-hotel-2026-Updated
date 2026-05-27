@@ -7,7 +7,7 @@
  *  - HTML pages: network-first, offline fallback
  *  - POST/non-GET: never intercepted
  */
-const SW_VERSION = 'rh-public-v1-2026-05-22';
+const SW_VERSION = 'rh-public-v1-2026-05-26-231222-3213';
 const ASSET_CACHE = `${SW_VERSION}-assets`;
 const PAGE_CACHE = `${SW_VERSION}-pages`;
 

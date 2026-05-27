@@ -16,7 +16,7 @@
  *   IMPORTANT: bumping SW_VERSION deletes all old caches on activate.
  *   Bump it whenever cached assets must be force-refreshed on all clients.
  */
-const SW_VERSION = 'rh-admin-v5-2026-05-22';
+const SW_VERSION = 'rh-admin-v5-2026-05-26-231222-3213';
 const ASSET_CACHE = `${SW_VERSION}-assets`;  // fonts, images, icons only
 const PAGE_CACHE = `${SW_VERSION}-pages`;
 const DATA_CACHE = `${SW_VERSION}-data`;

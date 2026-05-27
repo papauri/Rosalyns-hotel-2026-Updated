@@ -18,6 +18,7 @@ $site_name = getSetting('site_name');
 $sourceFilter = trim((string)($_GET['source'] ?? 'all'));
 $levelFilter = trim((string)($_GET['level'] ?? 'all'));
 $limit = min(500, max(20, (int)($_GET['limit'] ?? 50)));
+$loginScanLimit = max(120, min(2000, $limit * 6));
 $autoRefresh = isset($_GET['auto']) && $_GET['auto'] === '1';
 
 $validLevels = ['all', 'debug', 'info', 'warning', 'error', 'critical'];
@@ -221,7 +222,7 @@ if (rh_logs_table_exists($pdo, 'admin_activity_log')) {
             FROM admin_activity_log
             WHERE action LIKE 'login%'
             ORDER BY created_at DESC
-            LIMIT 120
+            LIMIT {$loginScanLimit}
         ");
         $stmt->execute();
         $recentLogins = $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
@@ -316,7 +317,7 @@ if (rh_logs_table_exists($pdo, 'admin_activity_log')) {
             ];
         }
 
-        $recentLoginBundles = array_slice($recentLoginBundles, 0, 10);
+        $recentLoginBundles = array_slice($recentLoginBundles, 0, $limit);
         foreach ($recentLoginBundles as &$bundle) {
             $bundle['attempt_count'] = count($bundle['attempts']);
             $typeCount = 0;
@@ -426,7 +427,7 @@ if (rh_logs_table_exists($pdo, 'stock_shift_closes')) {
                    voids_count, voids_amount, declared_cash, variance_cash, notes
             FROM stock_shift_closes
             ORDER BY closed_at DESC
-            LIMIT 10
+            LIMIT {$limit}
         ");
         $stmt->execute();
         $shiftCloses = $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
@@ -599,7 +600,7 @@ sort($sources);
         </div>
 
         <div class="log-section">
-            <h3><i class="fas fa-right-to-bracket"></i> Last 10 Logins</h3>
+            <h3><i class="fas fa-right-to-bracket"></i> Recent Logins</h3>
             <div style="overflow-x:auto;">
                 <table class="log-table">
                     <thead>
@@ -1168,76 +1169,6 @@ sort($sources);
                 // Initial render — show first 10 rows
                 renderPOS('', 1);
             }
-
-            // ── Table pagination — 10 rows/page ───────────────────────────────────────
-            (function initTablePagination() {
-                document.querySelectorAll('table.log-table').forEach(function(table) {
-                    var tbody = table.querySelector('tbody');
-                    if (!tbody) return;
-                    // Skip POS table — it has its own user-filter that conflicts
-                    if (table.querySelector('.pos-user-cell')) return;
-                    // Only count real data rows (not colspan empty-state rows)
-                    var dataRows = Array.from(tbody.querySelectorAll('tr')).filter(function(tr) {
-                        return !tr.querySelector('td[colspan]');
-                    });
-                    if (dataRows.length <= 10) return;
-
-                    var page = 1;
-                    var pageSize = 10;
-                    var total = dataRows.length;
-                    var totalPages = Math.ceil(total / pageSize);
-                    var busy = false;
-
-                    var controls = document.createElement('div');
-                    controls.className = 'log-table-pagination';
-                    table.parentNode.insertBefore(controls, table.nextSibling);
-
-                    function queueRender(targetPage) {
-                        if (busy) return;
-                        busy = true;
-                        controls.classList.add('is-loading');
-
-                        withInlinePaginationLoader(controls, 'Loading next page...', function() {
-                            render(targetPage);
-                            controls.classList.remove('is-loading');
-                            busy = false;
-                        });
-                    }
-
-                    function render(p) {
-                        page = Math.min(Math.max(1, p), totalPages);
-                        var from = (page - 1) * pageSize;
-                        dataRows.forEach(function(tr, i) {
-                            tr.style.display = (i >= from && i < from + pageSize) ? '' : 'none';
-                        });
-                        var prev = document.createElement('button');
-                        prev.className = 'pg-btn';
-                        prev.textContent = '← Prev';
-                        prev.disabled = page <= 1;
-                        prev.onclick = function() {
-                            queueRender(page - 1);
-                        };
-
-                        var info = document.createElement('span');
-                        info.className = 'pg-summary';
-                        info.textContent = 'Page ' + page + ' of ' + totalPages + '  (' + total + ' rows)';
-
-                        var next = document.createElement('button');
-                        next.className = 'pg-btn';
-                        next.textContent = 'Next →';
-                        next.disabled = page >= totalPages;
-                        next.onclick = function() {
-                            queueRender(page + 1);
-                        };
-
-                        controls.innerHTML = '';
-                        controls.appendChild(prev);
-                        controls.appendChild(info);
-                        controls.appendChild(next);
-                    }
-                    render(1);
-                });
-            }());
 
             // ── IP Geolocation (ipwho.is — free, HTTPS, no API key) ──────────────────
             (function resolveIpCountries() {

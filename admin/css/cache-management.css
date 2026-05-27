@@ -428,3 +428,405 @@ input:checked+.slider:before {
     background: rgba(220, 53, 69, 0.15);
     color: #dc3545;
 }
+
+/* =====================================================================
+   Cache Management UI Refresh (uniform with global admin language)
+   ===================================================================== */
+
+.cache-stat-card,
+.cache-section {
+    border: 1px solid var(--admin-surface-border, #e5e7eb);
+    box-shadow: 0 1px 3px rgba(15, 23, 42, 0.06);
+    border-radius: 12px;
+}
+
+.cache-section {
+    padding: 20px;
+    margin-bottom: 18px;
+}
+
+.cache-section h2 {
+    margin: 0 0 16px;
+    padding-bottom: 10px;
+    border-bottom: 1px solid var(--admin-surface-border, #e5e7eb);
+    font-size: 18px;
+    line-height: 1.3;
+    font-weight: 700;
+    color: var(--deep-navy, #111827);
+}
+
+.cache-section h2 i {
+    color: var(--gold, var(--color-lux-gold, #8B7355));
+}
+
+.cache-stat-card {
+    padding: 16px;
+    gap: 14px;
+    align-items: center;
+}
+
+.cache-stat-icon {
+    width: 46px;
+    height: 46px;
+    border-radius: 10px;
+    font-size: 18px;
+    flex-shrink: 0;
+}
+
+.cache-stat-info h3 {
+    margin: 0 0 2px;
+    font-size: 22px;
+    line-height: 1.1;
+    font-weight: 700;
+    color: var(--deep-navy, #111827);
+}
+
+.cache-stat-info p {
+    margin: 0;
+    font-size: 12px;
+    color: var(--color-text-secondary, #6b7280);
+}
+
+.cache-inline-form {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    flex-wrap: wrap;
+}
+
+.switch-label {
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--deep-navy, #111827);
+}
+
+.content .btn-action,
+.content .cache-toggle-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    min-height: 38px;
+    border-radius: 8px;
+    border: 1px solid transparent;
+    padding: 8px 14px;
+    font-size: 13px;
+    font-weight: 600;
+    line-height: 1.2;
+    letter-spacing: 0.01em;
+    cursor: pointer;
+    transition: transform 0.16s ease, box-shadow 0.16s ease, background-color 0.16s ease, border-color 0.16s ease;
+}
+
+.content .btn-action i,
+.content .cache-toggle-btn i {
+    margin-right: 0;
+}
+
+.content .btn-action.btn-save,
+.content .btn-action.btn-primary {
+    background: var(--color-primary, #8A775F);
+    color: #fff;
+    border-color: var(--color-primary, #8A775F);
+}
+
+.content .btn-action.btn-save:hover,
+.content .btn-action.btn-primary:hover {
+    background: #756652;
+    border-color: #756652;
+    transform: translateY(-1px);
+    box-shadow: 0 4px 12px rgba(117, 102, 82, 0.28);
+}
+
+.content .btn-action.btn-delete {
+    background: #c62828;
+    color: #fff;
+    border-color: #c62828;
+}
+
+.content .btn-action.btn-delete:hover {
+    background: #a91f1f;
+    border-color: #a91f1f;
+    transform: translateY(-1px);
+    box-shadow: 0 4px 12px rgba(169, 31, 31, 0.28);
+}
+
+.cache-toggle-grid {
+    grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+    gap: 12px;
+}
+
+.cache-toggle-item {
+    border-width: 1px;
+    border-color: var(--admin-surface-border, #e5e7eb);
+    border-radius: 10px;
+    padding: 14px;
+    background: #fff;
+}
+
+.cache-toggle-item.active {
+    background: #f5fbf6;
+    border-color: #b6e1c0;
+}
+
+.cache-toggle-item.inactive {
+    background: #fff6f6;
+    border-color: #f1c2c2;
+}
+
+.cache-toggle-status {
+    font-size: 11px;
+    padding: 3px 8px;
+    border-radius: 999px;
+}
+
+.cache-toggle-status.enabled {
+    background: #dcfce7;
+    color: #166534;
+}
+
+.cache-toggle-status.disabled {
+    background: #fee2e2;
+    color: #991b1b;
+}
+
+.cache-toggle-desc {
+    font-size: 12px;
+    color: #64748b;
+    margin: 0 0 12px;
+    line-height: 1.45;
+}
+
+.content .cache-toggle-btn.enable {
+    background: #1f7a42;
+    color: #fff;
+    border-color: #1f7a42;
+}
+
+.content .cache-toggle-btn.enable:hover {
+    background: #166534;
+    border-color: #166534;
+}
+
+.content .cache-toggle-btn.disable {
+    background: #d14343;
+    color: #fff;
+    border-color: #d14343;
+}
+
+.content .cache-toggle-btn.disable:hover {
+    background: #b22f2f;
+    border-color: #b22f2f;
+}
+
+.bulk-clear-form {
+    grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
+    gap: 12px;
+}
+
+.cache-checkbox-item {
+    border-width: 1px;
+    border-color: var(--admin-surface-border, #e5e7eb);
+    border-radius: 8px;
+    background: #fff;
+    padding: 10px 12px;
+}
+
+.cache-checkbox-item span {
+    font-size: 13px;
+    line-height: 1.35;
+    color: var(--deep-navy, #111827);
+}
+
+.cache-checkbox-item i {
+    color: var(--color-primary, #8A775F);
+    width: 16px;
+    text-align: center;
+}
+
+.cache-checkbox-item input[type="checkbox"] {
+    width: 16px;
+    height: 16px;
+}
+
+.cache-option-rooms {
+    border-color: rgba(139, 115, 85, 0.45);
+    background: rgba(139, 115, 85, 0.06);
+}
+
+.cache-option-images {
+    border-color: rgba(23, 162, 184, 0.45);
+    background: rgba(23, 162, 184, 0.06);
+}
+
+.cache-option-pages {
+    border-color: rgba(111, 66, 193, 0.45);
+    background: rgba(111, 66, 193, 0.06);
+}
+
+.cache-option-all {
+    border-color: rgba(220, 53, 69, 0.45);
+    background: rgba(220, 53, 69, 0.06);
+}
+
+.schedule-form {
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    gap: 14px;
+}
+
+.form-group label {
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--deep-navy, #111827);
+}
+
+.form-group select,
+.form-group input[type="time"],
+.form-group input[type="number"] {
+    min-height: 38px;
+    border: 1px solid var(--admin-surface-border, #d1d5db);
+    border-radius: 8px;
+    padding: 8px 10px;
+    font-size: 13px;
+    color: #1f2937;
+    background: #fff;
+}
+
+.custom-interval-group {
+    display: none;
+}
+
+.form-help-text {
+    display: block;
+    margin-top: 4px;
+    color: #6b7280;
+    font-size: 11px;
+    line-height: 1.35;
+}
+
+.cache-list-intro {
+    margin-bottom: 10px;
+}
+
+.cache-bullet-list {
+    margin: 0 0 14px 18px;
+    color: #4b5563;
+    font-size: 13px;
+    line-height: 1.5;
+}
+
+.cache-bullet-list li+li {
+    margin-top: 4px;
+}
+
+.cache-section-intro {
+    margin-bottom: 12px;
+}
+
+.sw-version-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+    gap: 12px;
+    margin-bottom: 14px;
+}
+
+.sw-version-card {
+    background: var(--admin-table-head, #f8fafc);
+    border: 1px solid var(--admin-surface-border, #e5e7eb);
+    border-radius: 8px;
+    padding: 12px 14px;
+}
+
+.sw-version-label {
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: #6b7280;
+    margin-bottom: 4px;
+}
+
+.sw-version-code {
+    font-size: 12px;
+    color: #1f2937;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+}
+
+.schedule-note {
+    margin-top: 14px;
+    padding: 12px 14px;
+    border-left: 4px solid #c58a00;
+    border-radius: 6px;
+    background: #fff8e8;
+    color: #6b4f00;
+    font-size: 13px;
+    line-height: 1.5;
+}
+
+.schedule-note code {
+    font-size: 12px;
+    color: #1f2937;
+}
+
+.cache-table-wrap {
+    overflow-x: auto;
+}
+
+.cache-table {
+    margin-top: 8px;
+}
+
+.cache-table th,
+.cache-table td {
+    font-size: 12px;
+    padding: 9px 10px;
+}
+
+.cache-table th {
+    background: var(--admin-table-head, #f8fafc);
+    color: #475569;
+    letter-spacing: 0.06em;
+}
+
+.cache-table td code {
+    font-size: 11px;
+    color: #334155;
+}
+
+.badge {
+    border-radius: 999px;
+    padding: 3px 8px;
+    font-size: 10px;
+    letter-spacing: 0.04em;
+}
+
+@media (max-width: 900px) {
+    .cache-section {
+        padding: 16px;
+    }
+
+    .cache-section h2 {
+        font-size: 16px;
+    }
+
+    .cache-stat-info h3 {
+        font-size: 18px;
+    }
+}
+
+@media (max-width: 680px) {
+    .cache-overview {
+        grid-template-columns: 1fr 1fr;
+        gap: 10px;
+    }
+
+    .cache-inline-form {
+        flex-direction: column;
+        align-items: flex-start;
+    }
+
+    .content .btn-action,
+    .content .cache-toggle-btn {
+        width: 100%;
+        justify-content: center;
+    }
+}

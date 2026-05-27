@@ -161,6 +161,22 @@
     min-height: 24px;
 }
 
+.conference-card-amenities {
+    font-size: 11px;
+    color: #888;
+    line-height: 1.35;
+    min-height: 2.7em;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+}
+
+.conference-card-amenities i {
+    color: var(--gold, #8B7355);
+    margin-right: 4px;
+}
+
 .conference-badge {
     font-size: 11px;
     padding: 4px 8px;
@@ -632,13 +648,46 @@
 }
 
 /* Table Container */
-.table-container {
+.conference-enquiries-card {
+    margin-top: 24px;
+}
+
+.conference-enquiries-title {
+    margin: 0 0 14px;
+    padding-bottom: 10px;
+    border-bottom: 1px solid var(--admin-surface-border, #e5e7eb);
+    font-size: 20px;
+    font-weight: 700;
+    line-height: 1.25;
+    color: var(--navy, #1A1A1A);
+    font-family: var(--font-body, 'Jost', 'Avenir Next', 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif);
+    display: inline-flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.conference-enquiries-title i {
+    color: var(--gold, #8B7355);
+}
+
+.conference-enquiries-card .table-container {
     background: var(--admin-surface, #fff);
     border: 1px solid var(--admin-surface-border, #e5e7eb);
     border-radius: 12px;
     overflow: hidden;
-    margin-bottom: 20px;
     box-shadow: 0 1px 3px rgba(15, 23, 42, 0.05);
+}
+
+.conference-enquiries-empty {
+    text-align: center;
+    padding: 34px 16px;
+    color: #999;
+}
+
+.conference-enquiries-empty__icon {
+    font-size: 30px;
+    display: block;
+    margin-bottom: 8px;
 }
 
 /* Empty State */

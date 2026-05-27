@@ -175,10 +175,21 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['booking_email_templat
             throw new Exception('No content to preview — fill in the fields or save the template first.');
         }
 
+        $ajaxAddressParts = [
+            trim((string)getSetting('address_line1', '')),
+            trim((string)getSetting('address_line2', '')),
+            trim((string)getSetting('address_country', '')),
+        ];
+        $ajaxAddressParts = array_values(array_filter($ajaxAddressParts, static fn(string $value): bool => $value !== ''));
+        $ajaxAddress = implode(', ', $ajaxAddressParts);
+        if ($ajaxAddress === '') {
+            $ajaxAddress = (string)getSetting('hotel_address', getSetting('address', 'Beachfront Road, Cape Maclear'));
+        }
+
         $ajaxVars = [
             '{{site_name}}'                => (string)getSetting('site_name', 'Hotel'),
             '{{site_url}}'                 => (string)getSetting('site_url', ''),
-            '{{booking_reference}}'        => 'RBH-2026-PREVIEW-001',
+            '{{booking_reference}}'        => 'LSH2026423468',
             '{{inquiry_reference}}'        => 'CONF-2026-PREVIEW-001',
             '{{guest_name}}'               => 'Jane Doe',
             '{{guest_email}}'              => 'jane.doe@example.com',
@@ -186,7 +197,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['booking_email_templat
             '{{recipient_name}}'           => 'Jane Doe',
             '{{contact_person}}'           => 'Jane Doe',
             '{{company_name}}'             => 'Mwai Consulting Ltd',
-            '{{room_name}}'                => 'Deluxe Ocean Suite',
+            '{{room_name}}'                => 'QA Joined Room Test - QA-JOIN-101A + QA-JOIN-101B',
             '{{conference_room}}'          => 'Baobab Conference Suite',
             '{{event_title}}'              => 'Sunset Jazz Night',
             '{{event_location}}'           => 'Beachfront Pavilion',
@@ -194,6 +205,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['booking_email_templat
             '{{check_out_date_formatted}}' => date('F j, Y', strtotime('+16 days')),
             '{{check_in_date}}'            => date('l, F j, Y', strtotime('+14 days')),
             '{{check_out_date}}'           => date('l, F j, Y', strtotime('+16 days')),
+            '{{check_in}}'                 => date('j F Y', strtotime('+14 days')),
+            '{{check_out}}'                => date('j F Y', strtotime('+16 days')),
             '{{event_date}}'               => date('l, F j, Y', strtotime('+30 days')),
             '{{event_time}}'               => '09:00 - 17:00',
             '{{number_of_nights}}'         => '2',
@@ -226,7 +239,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['booking_email_templat
             '{{vat_rate}}'                 => '15',
             '{{child_supplement}}'         => (string)getSetting('currency_symbol', 'ZAR') . '0',
             '{{deposit_amount}}'           => (string)getSetting('currency_symbol', 'ZAR') . number_format(1000, 2),
-            '{{balance_due}}'              => (string)getSetting('currency_symbol', 'ZAR') . number_format(3500, 2),
+            '{{total_due}}'                => (string)getSetting('currency_symbol', 'ZAR') . number_format(5175, 2),
+            '{{amount_paid}}'              => (string)getSetting('currency_symbol', 'ZAR') . number_format(1000, 2),
+            '{{balance_due}}'              => (string)getSetting('currency_symbol', 'ZAR') . number_format(4175, 2),
             '{{credit_note_number}}'       => 'CN-RBH-2026-001',
             '{{amount}}'                   => (string)getSetting('currency_symbol', 'ZAR') . number_format(1200, 2),
             '{{balance}}'                  => (string)getSetting('currency_symbol', 'ZAR') . number_format(850, 2),
@@ -234,13 +249,132 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['booking_email_templat
             '{{reason}}'                   => 'Overpayment adjustment',
             '{{reason_notes}}'             => 'Issued after reservation amount was corrected.',
             '{{expires_at}}'               => date('F j, Y', strtotime('+90 days')),
+            '{{address}}'                  => $ajaxAddress,
             '{{hotel_phone}}'              => (string)getSetting('phone_main', ''),
-            '{{hotel_address}}'            => (string)getSetting('hotel_address', getSetting('address', 'Beachfront Road, Cape Maclear')),
+            '{{hotel_address}}'            => $ajaxAddress,
         ];
 
         $ajaxResSubject  = strtr($ajaxSubject,  $ajaxVars);
         $ajaxResHtmlBody = strtr($ajaxHtmlBody, $ajaxVars);
         $ajaxResTextBody = strtr($ajaxTextBody, $ajaxVars);
+
+        if ($ajaxKey === 'payment_invoice_document') {
+            $invoiceLogoUrl = function_exists('hotel_invoice_logo_src')
+                ? hotel_invoice_logo_src()
+                : '';
+
+            $invoiceLogoHtml = $invoiceLogoUrl !== ''
+                ? '<img src="' . htmlspecialchars($invoiceLogoUrl, ENT_QUOTES, 'UTF-8') . '" alt="' . htmlspecialchars((string)getSetting('site_name', 'Hotel'), ENT_QUOTES, 'UTF-8') . '" height="116" style="height:116px;width:auto;display:block;margin:0 auto;">'
+                : '';
+            $invoiceRoomIconHtml = '<span style="color:#B18247;font-size:11px;vertical-align:middle;">&#9679;</span>';
+            $invoiceChargesRows = ''
+                . '<tr>'
+                . '<td width="58%" style="padding:5px 7px;border-bottom:1px solid #ECE2D7;font-size:7px;color:#1F1C17;line-height:1.3;">Deluxe Ocean Suite - Accommodation</td>'
+                . '<td width="8%" style="padding:5px 7px;border-bottom:1px solid #ECE2D7;font-size:7px;color:#6C6258;text-align:center;">2</td>'
+                . '<td width="16%" style="padding:5px 7px;border-bottom:1px solid #ECE2D7;font-size:7px;color:#6C6258;text-align:right;">' . htmlspecialchars((string)getSetting('currency_symbol', 'MWK '), ENT_QUOTES, 'UTF-8') . ' 2,250.00</td>'
+                . '<td width="18%" style="padding:5px 7px;border-bottom:1px solid #ECE2D7;font-size:7px;color:#1F1C17;font-weight:600;text-align:right;">' . htmlspecialchars((string)getSetting('currency_symbol', 'MWK '), ENT_QUOTES, 'UTF-8') . ' 4,500.00</td>'
+                . '</tr>';
+            $invoiceTotalsRows = ''
+                . '<tr>'
+                . '<td colspan="3" style="padding:5px 7px 2px;border-top:1px solid #DCCFC2;font-size:7px;color:#6C6258;text-align:right;">Subtotal</td>'
+                . '<td width="18%" style="padding:5px 7px 2px;border-top:1px solid #DCCFC2;font-size:7px;color:#1F1C17;text-align:right;">' . htmlspecialchars((string)getSetting('currency_symbol', 'MWK '), ENT_QUOTES, 'UTF-8') . ' 4,500.00</td>'
+                . '</tr>'
+                . '<tr>'
+                . '<td colspan="3" style="padding:2px 7px;font-size:7px;color:#6C6258;text-align:right;">VAT (15%)</td>'
+                . '<td width="18%" style="padding:2px 7px;font-size:7px;color:#1F1C17;text-align:right;">' . htmlspecialchars((string)getSetting('currency_symbol', 'MWK '), ENT_QUOTES, 'UTF-8') . ' 675.00</td>'
+                . '</tr>'
+                . '<tr>'
+                . '<td colspan="3" style="padding:5px 7px;background:#20303E;color:#F7F1EA;font-size:7px;font-weight:700;text-align:right;">Invoice Total</td>'
+                . '<td width="18%" style="padding:5px 7px;background:#20303E;color:#D6A968;font-size:7px;font-weight:700;text-align:right;">' . htmlspecialchars((string)getSetting('currency_symbol', 'MWK '), ENT_QUOTES, 'UTF-8') . ' 5,175.00</td>'
+                . '</tr>'
+                . '<tr>'
+                . '<td colspan="3" style="padding:2px 7px 1px;font-size:7px;color:#6C6258;text-align:right;">Amount Paid</td>'
+                . '<td width="18%" style="padding:2px 7px 1px;font-size:7px;color:#1E6C43;font-weight:700;text-align:right;">' . htmlspecialchars((string)getSetting('currency_symbol', 'MWK '), ENT_QUOTES, 'UTF-8') . ' 1,000.00</td>'
+                . '</tr>'
+                . '<tr>'
+                . '<td colspan="3" style="padding:1px 7px 4px;font-size:7px;color:#A63A3A;font-weight:700;text-align:right;">Balance Due</td>'
+                . '<td width="18%" style="padding:1px 7px 4px;font-size:7px;color:#A63A3A;font-weight:700;text-align:right;">' . htmlspecialchars((string)getSetting('currency_symbol', 'MWK '), ENT_QUOTES, 'UTF-8') . ' 4,175.00</td>'
+                . '</tr>';
+            $invoicePaymentHistorySection = '<div style="background:#FCFAF7;padding:9px 11px;border-top:2px solid #D5B37C;">'
+                . '<p style="margin:0 0 4px;font-size:6px;letter-spacing:1px;text-transform:uppercase;color:#20303E;font-weight:700;">Payment History</p>'
+                . '<table style="width:100%;border-collapse:collapse;" cellpadding="0" cellspacing="0">'
+                . '<tr>'
+                . '<th style="padding:0 0 3px;text-align:left;font-size:6px;letter-spacing:0.7px;text-transform:uppercase;color:#7C6E5B;font-weight:700;">Date</th>'
+                . '<th style="padding:0 0 3px;text-align:left;font-size:6px;letter-spacing:0.7px;text-transform:uppercase;color:#7C6E5B;font-weight:700;">Method</th>'
+                . '<th style="padding:0 0 3px;text-align:right;font-size:6px;letter-spacing:0.7px;text-transform:uppercase;color:#7C6E5B;font-weight:700;">Amount</th>'
+                . '</tr>'
+                . '<tr>'
+                . '<td style="padding:3px 0;border-top:1px solid #E6D9CC;font-size:6px;color:#6C6258;">' . date('j M Y', strtotime('-2 days')) . '</td>'
+                . '<td style="padding:3px 0;border-top:1px solid #E6D9CC;font-size:6px;color:#6C6258;">Bank Transfer</td>'
+                . '<td style="padding:3px 0;border-top:1px solid #E6D9CC;font-size:6px;color:#1F1C17;font-weight:600;text-align:right;">' . htmlspecialchars((string)getSetting('currency_symbol', 'MWK '), ENT_QUOTES, 'UTF-8') . ' 1,000.00</td>'
+                . '</tr>'
+                . '</table>'
+                . '</div>';
+
+            $invoiceBankRows = [];
+            $invoiceBankName = trim((string)getSetting('bank_name', ''));
+            $invoiceBankAccountName = trim((string)getSetting('bank_account_name', ''));
+            $invoiceBankAccountNumber = trim((string)getSetting('bank_account_number', ''));
+            $invoiceBankBranch = trim((string)getSetting('bank_branch', ''));
+            if ($invoiceBankName !== '') {
+                $invoiceBankRows[] = '<tr><td style="padding:1px 0;font-size:6px;color:#1F1C17;line-height:1.3;text-align:left;"><span style="color:#7A6F63;font-weight:700;">Bank:</span> <span style="font-weight:600;">' . htmlspecialchars($invoiceBankName, ENT_QUOTES, 'UTF-8') . '</span></td></tr>';
+            }
+            if ($invoiceBankAccountName !== '') {
+                $invoiceBankRows[] = '<tr><td style="padding:1px 0;font-size:6px;color:#1F1C17;line-height:1.3;text-align:left;"><span style="color:#7A6F63;font-weight:700;">Account Name:</span> <span style="font-weight:600;">' . htmlspecialchars($invoiceBankAccountName, ENT_QUOTES, 'UTF-8') . '</span></td></tr>';
+            }
+            if ($invoiceBankAccountNumber !== '') {
+                $invoiceBankRows[] = '<tr><td style="padding:1px 0;font-size:6px;color:#1F1C17;line-height:1.3;text-align:left;"><span style="color:#7A6F63;font-weight:700;">Account No.:</span> <span style="font-weight:600;">' . htmlspecialchars($invoiceBankAccountNumber, ENT_QUOTES, 'UTF-8') . '</span></td></tr>';
+            }
+            if ($invoiceBankBranch !== '') {
+                $invoiceBankRows[] = '<tr><td style="padding:1px 0;font-size:6px;color:#1F1C17;line-height:1.3;text-align:left;"><span style="color:#7A6F63;font-weight:700;">Branch:</span> <span style="font-weight:600;">' . htmlspecialchars($invoiceBankBranch, ENT_QUOTES, 'UTF-8') . '</span></td></tr>';
+            }
+            $invoiceBankDetailsHtml = $invoiceBankRows !== []
+                ? '<div style="background:#FCFAF7;padding:9px 11px;border-top:2px solid #D5B37C;text-align:left;">'
+                . '<p style="margin:0 0 4px;font-size:6px;letter-spacing:1px;text-transform:uppercase;color:#20303E;font-weight:700;">Bank Details</p>'
+                . '<table style="width:100%;border-collapse:collapse;" cellpadding="0" cellspacing="0">' . implode('', $invoiceBankRows) . '</table>'
+                . '</div>'
+                : '';
+
+            $invoiceTermsText = trim((string)getSetting('invoice_terms', getSetting('payment_terms', '')));
+            if ($invoiceTermsText !== '') {
+                $invoiceTermsText = strtr($invoiceTermsText, [
+                    '{{contact_email}}' => (string)getSetting('email_from_email', getSetting('contact_email', 'reservations@example.com')),
+                    '{{contact_phone}}' => (string)getSetting('phone_main', ''),
+                    '{{site_name}}' => (string)getSetting('site_name', 'Hotel'),
+                ]);
+            }
+            $invoiceTermsHtml = $invoiceTermsText !== ''
+                ? '<div style="background:#FCFAF7;padding:9px 11px;border-top:2px solid #20303E;">'
+                . '<p style="margin:0 0 4px;font-size:6px;letter-spacing:1px;text-transform:uppercase;color:#20303E;font-weight:700;">Invoice Terms</p>'
+                . '<p style="margin:0;font-size:6px;line-height:1.4;color:#5F5343;">' . nl2br(htmlspecialchars($invoiceTermsText, ENT_QUOTES, 'UTF-8')) . '</p>'
+                . '</div>'
+                : '';
+            $invoiceVatNumber = trim((string)getSetting('vat_number', ''));
+            $invoiceVatNumberHtml = $invoiceVatNumber !== ''
+                ? '<p style="margin:0 0 3px;font-size:10px;color:#6C6258;">VAT Reg: ' . htmlspecialchars($invoiceVatNumber, ENT_QUOTES, 'UTF-8') . '</p>'
+                : '';
+
+            $invoicePreviewHtml = strtr($ajaxHtmlBody, array_merge($ajaxVars, [
+                '{{logo_html}}' => $invoiceLogoHtml,
+                '{{invoice_number}}' => 'INV-2026-000001',
+                '{{issued_date}}' => date('j F Y'),
+                '{{status_text}}' => 'BALANCE DUE',
+                '{{status_bg}}' => '#FCE8E6',
+                '{{status_fg}}' => '#A63A3A',
+                '{{room_icon_html}}' => $invoiceRoomIconHtml,
+                '{{vat_number_html}}' => $invoiceVatNumberHtml,
+                '{{charges_table_rows}}' => $invoiceChargesRows,
+                '{{totals_rows}}' => $invoiceTotalsRows,
+                '{{payment_history_section}}' => $invoicePaymentHistorySection,
+                '{{bank_details}}' => $invoiceBankDetailsHtml,
+                '{{invoice_terms}}' => $invoiceTermsHtml,
+            ]));
+
+            $ajaxFullHtml = '<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1"><style>body{margin:0;padding:18px;background:#F4EFE8;}img{max-width:100%;}</style></head><body>' . $invoicePreviewHtml . '</body></html>';
+            echo json_encode(['success' => true, 'full_html' => $ajaxFullHtml, 'subject' => $ajaxResSubject, 'text_body' => $ajaxResTextBody]);
+            exit;
+        }
+
         $ajaxFullHtml    = function_exists('wrapEmailTemplate')
             ? wrapEmailTemplate($ajaxResHtmlBody, $ajaxResSubject)
             : $ajaxResHtmlBody;
@@ -781,7 +915,7 @@ $tplDefaults = [
     ],
     'payment_invoice_document' => [
         'subject' => 'Invoice Document',
-        'html'    => '<div style="font-family:Georgia,\'Times New Roman\',serif; color:#231F1C; background:#FFFFFF; max-width:680px; margin:0 auto;"><table style="width:100%; background:#231F1C; margin-bottom:0;" cellpadding="0" cellspacing="0"><tr><td style="padding:28px 30px 22px; vertical-align:middle; width:50%;">{{logo_html}}<p style="margin:8px 0 0; font-size:11px; letter-spacing:3px; text-transform:uppercase; color:#B18247; font-family:Helvetica,Arial,sans-serif;">{{site_name}}</p></td><td style="padding:28px 30px 22px; vertical-align:middle; text-align:right; width:50%;"><p style="margin:0; font-size:30px; font-weight:400; letter-spacing:5px; color:#F3ECE4; font-family:Georgia,serif;">INVOICE</p><p style="margin:6px 0 0; font-size:12px; letter-spacing:1px; color:#B18247; font-family:Helvetica,Arial,sans-serif;">{{invoice_number}}</p><p style="margin:4px 0 0; font-size:10px; color:#8A775F; font-family:Helvetica,Arial,sans-serif;">Issued {{issued_date}}</p></td></tr></table><table style="width:100%; background:{{status_bg}};" cellpadding="0" cellspacing="0"><tr><td style="padding:9px 30px; font-family:Helvetica,Arial,sans-serif; font-size:10px; letter-spacing:3px; font-weight:700; color:{{status_fg}}; text-transform:uppercase; text-align:right;">{{status_text}}</td></tr></table><table style="width:100%; background:#F7F3EE;" cellpadding="0" cellspacing="0"><tr><td style="padding:20px 24px; width:50%; vertical-align:top;"><p style="margin:0 0 6px 0; font-size:9px; font-weight:700; letter-spacing:2px; text-transform:uppercase; color:#B18247;">Billed To</p><p style="margin:0 0 3px; font-size:15px; font-weight:700; color:#231F1C; font-family:Georgia,serif;">{{guest_name}}</p><p style="margin:0 0 2px; font-size:11px; color:#5E554D; font-family:Helvetica,Arial,sans-serif;">{{guest_email}}</p><p style="margin:0; font-size:11px; color:#5E554D; font-family:Helvetica,Arial,sans-serif;">{{guest_phone}}</p></td><td style="padding:20px 24px; width:50%; vertical-align:top;"><p style="margin:0 0 6px 0; font-size:9px; font-weight:700; letter-spacing:2px; text-transform:uppercase; color:#B18247;">Property</p><p style="margin:0 0 3px; font-size:15px; font-weight:700; color:#231F1C; font-family:Georgia,serif;">{{site_name}}</p><p style="margin:0 0 2px; font-size:11px; color:#5E554D; font-family:Helvetica,Arial,sans-serif;">{{address}}</p><p style="margin:0 0 2px; font-size:11px; color:#5E554D; font-family:Helvetica,Arial,sans-serif;">{{contact_email}}</p><p style="margin:0; font-size:11px; color:#5E554D; font-family:Helvetica,Arial,sans-serif;">{{contact_phone}}</p>{{vat_number_html}}</td></tr></table><table style="width:100%; background:#231F1C;" cellpadding="0" cellspacing="0"><tr><td style="padding:14px 30px; font-family:Helvetica,Arial,sans-serif;"><table style="width:100%;" cellpadding="0" cellspacing="0"><tr><td style="font-size:9px; color:#C4A882; letter-spacing:2px; text-transform:uppercase; padding-bottom:3px;">Reference</td><td style="font-size:9px; color:#C4A882; letter-spacing:2px; text-transform:uppercase; padding-bottom:3px;">Room</td><td style="font-size:9px; color:#C4A882; letter-spacing:2px; text-transform:uppercase; padding-bottom:3px;">Check-in</td><td style="font-size:9px; color:#C4A882; letter-spacing:2px; text-transform:uppercase; padding-bottom:3px;">Check-out</td><td style="font-size:9px; color:#C4A882; letter-spacing:2px; text-transform:uppercase; padding-bottom:3px;">Nights</td><td style="font-size:9px; color:#C4A882; letter-spacing:2px; text-transform:uppercase; padding-bottom:3px;">Guests</td></tr><tr><td style="font-size:12px; color:#B18247; font-weight:700;">{{booking_reference}}</td><td style="font-size:12px; color:#FFFFFF; font-weight:500;">{{room_name}}</td><td style="font-size:12px; color:#FFFFFF; font-weight:500;">{{check_in}}</td><td style="font-size:12px; color:#FFFFFF; font-weight:500;">{{check_out}}</td><td style="font-size:12px; color:#FFFFFF; font-weight:500;">{{nights}}</td><td style="font-size:12px; color:#FFFFFF; font-weight:500;">{{guests}}</td></tr></table></td></tr></table><p style="margin:16px 24px 6px; font-size:9px; font-weight:700; letter-spacing:2px; text-transform:uppercase; color:#B18247; font-family:Helvetica,Arial,sans-serif;">Itemised Charges</p><table width="100%" style="width:100%; border-collapse:collapse;" cellpadding="0" cellspacing="0"><tr><td width="52%" bgcolor="#8A775F" style="padding:12px 24px; text-align:left; font-size:10px; letter-spacing:1.5px; text-transform:uppercase; color:#FFFFFF; font-family:Helvetica,Arial,sans-serif; font-weight:700; background-color:#8A775F;">Description</td><td width="10%" bgcolor="#8A775F" style="padding:12px 10px; text-align:center; font-size:10px; letter-spacing:1.5px; text-transform:uppercase; color:#FFFFFF; font-family:Helvetica,Arial,sans-serif; font-weight:700; background-color:#8A775F;">Qty</td><td width="18%" bgcolor="#8A775F" style="padding:12px 10px; text-align:right; font-size:10px; letter-spacing:1.5px; text-transform:uppercase; color:#FFFFFF; font-family:Helvetica,Arial,sans-serif; font-weight:700; background-color:#8A775F;">Unit Price</td><td width="20%" bgcolor="#8A775F" style="padding:12px 24px; text-align:right; font-size:10px; letter-spacing:1.5px; text-transform:uppercase; color:#FFFFFF; font-family:Helvetica,Arial,sans-serif; font-weight:700; background-color:#8A775F;">Amount</td></tr>{{charges_table_rows}}{{totals_rows}}</table>{{payment_history_section}}<table style="width:100%; margin-top:28px; background:#F7F3EE;" cellpadding="0" cellspacing="0"><tr><td style="padding:20px 30px; border-top:2px solid #B18247; text-align:center; font-family:Helvetica,Arial,sans-serif;"><p style="margin:0 0 4px; font-size:13px; font-weight:700; color:#231F1C; letter-spacing:1px;">{{site_name}}</p><p style="margin:0 0 3px; font-size:10px; color:#8A775F;">{{address}}</p><p style="margin:0 0 12px; font-size:10px; color:#8A775F;">{{contact_email}} &nbsp;|&nbsp; {{contact_phone}}</p><p style="margin:0; font-size:9px; color:#B18247; letter-spacing:2px; text-transform:uppercase;">Thank you for choosing us</p></td></tr></table></div>',
+        'html'    => hotel_default_payment_invoice_document_html(),
     ],
     'tentative_booking_created' => [
         'subject' => 'Tentative Booking Created - {{site_name}} [{{booking_reference}}]',
@@ -1105,13 +1239,13 @@ $tplDefaults = [
 
             <script>
                 // Inject CSRF token into all POST forms on this page (anti-CSRF protection)
-                const _bsCsrf = <?php echo json_encode($csrf_token); ?>;
+                window._bsCsrf = <?php echo json_encode($csrf_token); ?>;
                 document.querySelectorAll('form[method="POST"], form[method="post"], form[action="booking-settings.php"]').forEach(function(f) {
                     if (!f.querySelector('[name="csrf_token"]')) {
                         var inp = document.createElement('input');
                         inp.type = 'hidden';
                         inp.name = 'csrf_token';
-                        inp.value = _bsCsrf;
+                        inp.value = window._bsCsrf;
                         f.appendChild(inp);
                     }
                 });
@@ -1619,7 +1753,7 @@ $tplDefaults = [
                 '{{hotel_address}}',
             ];
             ?>
-            <div class="settings-card tpl-editor-card">
+            <div class="settings-card tpl-editor-card" id="email-templates" style="scroll-margin-top:18px;">
                 <div style="margin-bottom:14px;">
                     <h2 style="margin:0 0 4px;"><i class="fas fa-envelope-open-text" style="color:#8B7355;"></i> Booking Email Templates</h2>
                     <p class="help-text" style="margin:0;">Edit each template's subject and body. Preview updates live while you type with full wrapped email rendering and placeholder replacement.</p>
@@ -1794,6 +1928,19 @@ $tplDefaults = [
                     // Seeded defaults for "Load Default" button
                     var tplDefaults = <?php echo json_encode($tplDefaults, JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_QUOT | JSON_HEX_AMP | JSON_UNESCAPED_UNICODE); ?>;
                     var placeholderTokens = <?php echo json_encode($allPlaceholders, JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_QUOT | JSON_HEX_AMP | JSON_UNESCAPED_UNICODE); ?>;
+
+                    var previewSectionTarget = document.getElementById('email-templates');
+                    if (previewSectionTarget) {
+                        var previewSectionParams = new URLSearchParams(window.location.search);
+                        if (window.location.hash === '#email-templates' || previewSectionParams.get('section') === 'email-templates') {
+                            window.requestAnimationFrame(function() {
+                                previewSectionTarget.scrollIntoView({
+                                    behavior: 'smooth',
+                                    block: 'start'
+                                });
+                            });
+                        }
+                    }
 
                     var autocompleteState = {
                         field: null,
@@ -2164,11 +2311,21 @@ $tplDefaults = [
                             var sendArea = document.getElementById('send-test-area-' + key);
                             var emailIn = document.getElementById('test-email-addr-' + key);
                             var feedback = document.getElementById('send-feedback-' + key);
+                            var csrfField = document.querySelector('#tpl-main-form [name="csrf_token"]');
+                            var csrfToken = String(window._bsCsrf || (csrfField ? csrfField.value : '') || '').trim();
                             var email = emailIn ? emailIn.value.trim() : '';
 
                             if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
                                 if (feedback) {
                                     feedback.textContent = 'Enter a valid email address.';
+                                    feedback.className = 'tpl-send-feedback tpl-feedback-err';
+                                    feedback.style.display = 'block';
+                                }
+                                return;
+                            }
+                            if (!csrfToken) {
+                                if (feedback) {
+                                    feedback.textContent = 'Security token missing. Refresh the page and try again.';
                                     feedback.className = 'tpl-send-feedback tpl-feedback-err';
                                     feedback.style.display = 'block';
                                 }
@@ -2188,7 +2345,7 @@ $tplDefaults = [
                             var fd = new FormData();
                             fd.set('send_test_email', '1');
                             fd.set('_ajax_send_test', '1');
-                            fd.set('csrf_token', _bsCsrf);
+                            fd.set('csrf_token', csrfToken);
                             fd.set('test_email_address', email);
                             fd.set('test_subject', subject);
                             fd.set('test_html', html);

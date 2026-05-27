@@ -40,6 +40,10 @@ $message = '';
 $error = '';
 $success = false;
 
+$allowedCacheTypes = ['email', 'settings', 'rooms', 'tables', 'images', 'pages', 'content'];
+$allowedBulkCacheTypes = array_merge($allowedCacheTypes, ['all']);
+$allowedScheduleIntervals = ['30sec', '1min', '5min', '15min', '30min', 'hourly', '6hours', '12hours', 'daily', 'weekly', 'custom'];
+
 // Include alert.php for showAlert function
 require_once __DIR__ . '/../includes/alert.php';
 
@@ -60,7 +64,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         switch ($action) {
             case 'toggle_cache':
                 $cache_type = $_POST['cache_type'] ?? '';
-                $enabled = isset($_POST['enabled']) ? (int)$_POST['enabled'] : 0;
+                if (!in_array($cache_type, $allowedCacheTypes, true)) {
+                    throw new RuntimeException('Invalid cache type selected.');
+                }
+                $enabled = (isset($_POST['enabled']) && (int)$_POST['enabled'] === 1) ? 1 : 0;
 
                 // Update or insert cache setting
                 $stmt = $pdo->prepare("
@@ -81,6 +88,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
             case 'clear_cache':
                 $cache_types = $_POST['cache_types'] ?? [];
+                $cache_types = is_array($cache_types) ? $cache_types : [];
+                $cache_types = array_values(array_unique(array_intersect($cache_types, $allowedBulkCacheTypes)));
+                if (in_array('all', $cache_types, true)) {
+                    // Avoid duplicate counting and repeated clear calls when ALL is selected.
+                    $cache_types = ['all'];
+                }
 
                 if (empty($cache_types)) {
                     $error = 'Please select at least one cache type to clear.';
@@ -168,6 +181,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $time = $_POST['schedule_time'] ?? '00:00';
                 $custom_seconds = isset($_POST['custom_seconds']) ? (int)$_POST['custom_seconds'] : 60;
 
+                if (!in_array($interval, $allowedScheduleIntervals, true)) {
+                    $interval = 'daily';
+                }
+                if (!preg_match('/^(?:[01]\d|2[0-3]):[0-5]\d$/', (string)$time)) {
+                    $time = '00:00';
+                }
+
                 // Validate custom seconds (minimum 10 seconds, maximum 86400 seconds/24 hours)
                 if ($custom_seconds < 10) $custom_seconds = 10;
                 if ($custom_seconds > 86400) $custom_seconds = 86400;
@@ -183,7 +203,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $stmt->execute(['cache_schedule_time', $time, $time]);
                 $stmt->execute(['cache_custom_seconds', $custom_seconds, $custom_seconds]);
 
-                $message = "Cache clearing schedule " . ($enabled ? 'enabled' : 'disabled') . "!";
+                $message = "Cache clearing schedule " . ($enabled ? 'enabled' : 'disabled') . " (" . $interval . ")!";
                 $success = true;
                 rh_log_event('cache_management', 'info', 'Cache schedule updated', ['enabled' => $enabled, 'interval' => $interval, 'time' => $time, 'custom_seconds' => $custom_seconds]);
                 break;
@@ -251,10 +271,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 break;
 
             case 'bump_sw':
-                // Bump SW_VERSION date in both public and admin service workers so
+                // Bump SW_VERSION stamp in both public and admin service workers so
                 // all browsers discard their PWA cache on next visit.
-                $bumpDate   = date('Y-m-d');
+                // Include time + nonce so admins can trigger a fresh bump multiple
+                // times in the same day when needed.
+                $bumpStamp  = date('Y-m-d-His') . '-' . random_int(1000, 9999);
                 $swBumped   = [];
+                $swMissing  = [];
                 $swFiles    = [
                     'Public SW'  => __DIR__ . '/../public-sw.js',
                     'Admin SW'   => __DIR__ . '/sw.js',
@@ -263,24 +286,29 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     if (!file_exists($swPath)) continue;
                     $swContent = file_get_contents($swPath);
                     $newContent = preg_replace(
-                        "/const SW_VERSION = '([^']*?)-\d{4}-\d{2}-\d{2}'/",
-                        "const SW_VERSION = '\$1-{$bumpDate}'",
+                        "/const\\s+SW_VERSION\\s*=\\s*'([^']*?)(?:-\\d{4}-\\d{2}-\\d{2}(?:-\\d{6})?(?:-\\d{4})?)?';/",
+                        "const SW_VERSION = '\$1-{$bumpStamp}';",
                         $swContent,
                         -1,
                         $swCount
                     );
-                    if ($swCount > 0 && $newContent !== $swContent) {
-                        file_put_contents($swPath, $newContent);
-                        $swBumped[] = $label;
+                    if ($swCount > 0 && is_string($newContent) && $newContent !== $swContent) {
+                        if (file_put_contents($swPath, $newContent) !== false) {
+                            $swBumped[] = $label;
+                        } else {
+                            $swMissing[] = $label;
+                        }
+                    } else {
+                        $swMissing[] = $label;
                     }
                 }
                 if (!empty($swBumped)) {
-                    $message = 'Service Worker versions bumped to ' . $bumpDate . ' (' . implode(', ', $swBumped) . '). All devices will refetch cached assets on next visit.';
+                    $message = 'Service Worker versions bumped to ' . $bumpStamp . ' (' . implode(', ', $swBumped) . '). All devices will refetch cached assets on next visit.';
                     $success = true;
                 } else {
-                    $error = 'SW version strings are already at today\'s date or could not be found.';
+                    $error = 'Could not update SW version strings for: ' . implode(', ', $swMissing) . '.';
                 }
-                rh_log_event('cache_management', 'info', 'SW versions bumped', ['date' => $bumpDate, 'bumped' => $swBumped]);
+                rh_log_event('cache_management', 'info', 'SW versions bumped', ['stamp' => $bumpStamp, 'bumped' => $swBumped, 'failed' => $swMissing]);
                 break;
 
             default:
@@ -541,7 +569,7 @@ $cache_types = [
         <!-- Global Cache Control -->
         <div class="cache-section">
             <h2><i class="fas fa-power-off"></i> Global Cache Control</h2>
-            <form method="POST" style="display: flex; align-items: center; gap: 20px;">
+            <form method="POST" class="cache-inline-form">
                 <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf_token, ENT_QUOTES, 'UTF-8'); ?>">
                 <input type="hidden" name="action" value="set_global_cache">
 
@@ -551,7 +579,7 @@ $cache_types = [
                             <?php echo !isset($cache_settings['cache_global_enabled']) || (string)$cache_settings['cache_global_enabled'] !== '0' ? 'checked' : ''; ?>>
                         <span class="slider"></span>
                     </label>
-                    <span style="font-weight: 600; color: var(--navy);">
+                    <span class="switch-label">
                         Enable All Caching
                     </span>
                 </div>
@@ -620,7 +648,7 @@ $cache_types = [
                                                                         })); ?> files)</span>
                     </label>
 
-                    <label class="cache-checkbox-item" style="border-color: var(--gold); background: rgba(139, 115, 85, 0.05);">
+                    <label class="cache-checkbox-item cache-option-rooms">
                         <input type="checkbox" name="cache_types[]" value="rooms">
                         <span><i class="fas fa-bed"></i> <strong>Rooms & Prices</strong> (<?php
                                                                                             $room_count = count(array_filter($caches, function ($c) {
@@ -631,13 +659,13 @@ $cache_types = [
                                                                                             echo $room_count; ?> files)</span>
                     </label>
 
-                    <label class="cache-checkbox-item" style="border-color: #17a2b8; background: rgba(23, 162, 184, 0.05);">
+                    <label class="cache-checkbox-item cache-option-images">
                         <input type="checkbox" name="cache_types[]" value="images">
                         <span><i class="fas fa-image"></i> <strong>Image Cache</strong> (<?php
                                                                                             echo $stats['image_cache']['files']; ?> images, <?php echo $stats['image_cache']['size_formatted']; ?>)</span>
                     </label>
 
-                    <label class="cache-checkbox-item" style="border-color: #6f42c1; background: rgba(111, 66, 193, 0.05);">
+                    <label class="cache-checkbox-item cache-option-pages">
                         <input type="checkbox" name="cache_types[]" value="pages">
                         <span><i class="fas fa-file-code"></i> <strong>Page HTML Cache</strong> (<?php
                                                                                                     echo $stats['page_cache']['files']; ?> files, <?php echo $stats['page_cache']['size_formatted']; ?>)</span>
@@ -650,7 +678,7 @@ $cache_types = [
                                                                                 })); ?> files)</span>
                     </label>
 
-                    <label class="cache-checkbox-item" style="border-color: #dc3545; background: rgba(220, 53, 69, 0.05);">
+                    <label class="cache-checkbox-item cache-option-all">
                         <input type="checkbox" name="cache_types[]" value="all">
                         <span><i class="fas fa-trash"></i> <strong>ALL CACHES (<?php echo $stats['total_files']; ?> files, <?php echo $stats['total_size_formatted']; ?>)</strong></span>
                     </label>
@@ -669,10 +697,10 @@ $cache_types = [
             <form method="POST" onsubmit="return confirm('This will clear ALL page HTML caches and bump favicon/meta asset versions so browsers refetch them. Proceed?');">
                 <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf_token, ENT_QUOTES, 'UTF-8'); ?>">
                 <input type="hidden" name="action" value="purge_seo_favicon">
-                <p class="cache-toggle-desc" style="margin-bottom:12px;">
+                <p class="cache-toggle-desc cache-list-intro">
                     Runs a targeted purge to ensure favicon and SEO/meta changes are reflected immediately:
                 </p>
-                <ul style="margin:0 0 16px 18px; color:#555;">
+                <ul class="cache-bullet-list">
                     <li>Clear all Page HTML caches (refreshes meta tags across the site)</li>
                     <li>Delete cached proxied logo (if logo is external and proxied)</li>
                     <li>Bump a version parameter on favicon and touch-icon links to bypass CDN/browser cache</li>
@@ -686,25 +714,25 @@ $cache_types = [
         <!-- PWA / Service Worker Version -->
         <div class="cache-section">
             <h2><i class="fas fa-mobile-screen-button"></i> PWA Service Worker</h2>
-            <p class="text-muted" style="margin-bottom:16px;">
+            <p class="text-muted cache-section-intro">
                 Bumping the SW version forces all browsers and installed PWA instances to discard their cached assets and reload fresh copies on their next visit.
                 Do this after a significant release or when you update JS, CSS, or images.
             </p>
-            <div style="display:flex; gap:20px; flex-wrap:wrap; margin-bottom:20px;">
-                <div style="flex:1; min-width:220px; background:var(--soft-bg,#f8f9fa); border:1px solid #e0e0e0; border-radius:8px; padding:14px 18px;">
-                    <div style="font-size:11px; text-transform:uppercase; letter-spacing:.1em; color:#888; margin-bottom:4px;">Public Site SW</div>
-                    <code style="font-size:13px; color:var(--navy,#1a1a2e);"><?php echo htmlspecialchars($pwa_public_version, ENT_QUOTES, 'UTF-8'); ?></code>
+            <div class="sw-version-grid">
+                <div class="sw-version-card">
+                    <div class="sw-version-label">Public Site SW</div>
+                    <code class="sw-version-code"><?php echo htmlspecialchars($pwa_public_version, ENT_QUOTES, 'UTF-8'); ?></code>
                 </div>
-                <div style="flex:1; min-width:220px; background:var(--soft-bg,#f8f9fa); border:1px solid #e0e0e0; border-radius:8px; padding:14px 18px;">
-                    <div style="font-size:11px; text-transform:uppercase; letter-spacing:.1em; color:#888; margin-bottom:4px;">Admin SW</div>
-                    <code style="font-size:13px; color:var(--navy,#1a1a2e);"><?php echo htmlspecialchars($pwa_admin_version, ENT_QUOTES, 'UTF-8'); ?></code>
+                <div class="sw-version-card">
+                    <div class="sw-version-label">Admin SW</div>
+                    <code class="sw-version-code"><?php echo htmlspecialchars($pwa_admin_version, ENT_QUOTES, 'UTF-8'); ?></code>
                 </div>
             </div>
-            <form method="POST" onsubmit="return confirm('Bump both SW versions to today\'s date? All browsers will re-download cached assets on next visit.');">
+            <form method="POST" onsubmit="return confirm('Bump both SW versions now? All browsers will re-download cached assets on next visit.');">
                 <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf_token, ENT_QUOTES, 'UTF-8'); ?>">
                 <input type="hidden" name="action" value="bump_sw">
                 <button type="submit" class="btn-action btn-primary">
-                    <i class="fas fa-arrow-up-right-dots"></i> Bump SW Version to Today
+                    <i class="fas fa-arrow-up-right-dots"></i> Bump SW Version Now
                 </button>
             </form>
         </div>
@@ -723,7 +751,7 @@ $cache_types = [
                                 <?php echo isset($cache_settings['cache_schedule_enabled']) && $cache_settings['cache_schedule_enabled'] ? 'checked' : ''; ?>>
                             <span class="slider"></span>
                         </label>
-                        <span style="font-weight: 600; color: var(--navy);">
+                        <span class="switch-label">
                             Enable Auto-Clear
                         </span>
                     </div>
@@ -778,12 +806,12 @@ $cache_types = [
                         </select>
                     </div>
 
-                    <div class="form-group" id="custom_interval_group" style="display: none;">
+                    <div class="form-group custom-interval-group" id="custom_interval_group">
                         <label>Custom Interval (seconds)</label>
                         <input type="number" name="custom_seconds" id="custom_seconds"
                             value="<?php echo $cache_settings['cache_custom_seconds'] ?? '60'; ?>"
                             min="10" max="86400" step="1">
-                        <small style="color: #666; display: block; margin-top: 5px;">
+                        <small class="form-help-text">
                             Min: 10 seconds (0.17 mins) | Max: 86400 seconds (24 hours)
                         </small>
                     </div>
@@ -801,7 +829,7 @@ $cache_types = [
                 </div>
             </form>
 
-            <div style="margin-top: 20px; padding: 16px; background: #fff3cd; border-left: 4px solid #ffc107; border-radius: 4px;">
+            <div class="schedule-note">
                 <i class="fas fa-info-circle"></i>
                 <strong>Note:</strong> Scheduled cache clearing requires a cron job (Linux/Mac) or Task Scheduler (Windows) to be set up.
                 <br><br>
@@ -850,7 +878,7 @@ $cache_types = [
         <?php if (!empty($caches)): ?>
             <div class="cache-section">
                 <h2><i class="fas fa-list"></i> Current Cache Files (<?php echo count($caches); ?>)</h2>
-                <div style="overflow-x: auto;">
+                <div class="cache-table-wrap">
                     <table class="cache-table">
                         <thead>
                             <tr>

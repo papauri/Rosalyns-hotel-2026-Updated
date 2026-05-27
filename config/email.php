@@ -331,6 +331,193 @@ function logEmail(string $to, ?string $toName, string $subject, string $status, 
     file_put_contents($logFile, $logEntry, FILE_APPEND);
 }
 
+if (!function_exists('hotel_inline_image_src')) {
+    function hotel_inline_image_src(string $filePath): string
+    {
+        if ($filePath === '' || !is_file($filePath) || !is_readable($filePath)) {
+            return '';
+        }
+
+        $bytes = @file_get_contents($filePath);
+        if ($bytes === false) {
+            return '';
+        }
+
+        $extension = strtolower((string)pathinfo($filePath, PATHINFO_EXTENSION));
+        $mime = match ($extension) {
+            'png' => 'image/png',
+            'jpg', 'jpeg' => 'image/jpeg',
+            'gif' => 'image/gif',
+            'webp' => 'image/webp',
+            'svg' => 'image/svg+xml',
+            default => function_exists('mime_content_type') ? (string)mime_content_type($filePath) : 'application/octet-stream',
+        };
+
+        return 'data:' . $mime . ';base64,' . base64_encode($bytes);
+    }
+}
+
+if (!function_exists('hotel_invoice_logo_src')) {
+    function hotel_invoice_logo_src(): string
+    {
+        $siteUrl = trim((string)getSetting('site_url', ''));
+        $remoteFallback = '';
+        $relativeFallback = '';
+        $candidates = [
+            (string)getSetting('site_logo', ''),
+            (string)getSetting('logo_url', ''),
+            (string)getSetting('hotel_logo', ''),
+            'images/logo/logo.png',
+        ];
+
+        foreach ($candidates as $candidate) {
+            $candidate = trim($candidate);
+            if ($candidate === '') {
+                continue;
+            }
+
+            if (preg_match('#^https?://#i', $candidate)) {
+                if ($remoteFallback === '') {
+                    $remoteFallback = $candidate;
+                }
+                continue;
+            }
+
+            $relativePath = ltrim($candidate, '/');
+            $localPath = __DIR__ . '/../' . $relativePath;
+            if (is_file($localPath)) {
+                $inlineSrc = hotel_inline_image_src($localPath);
+                if ($inlineSrc !== '') {
+                    return $inlineSrc;
+                }
+
+                return $siteUrl !== ''
+                    ? rtrim($siteUrl, '/') . '/' . $relativePath
+                    : $relativePath;
+            }
+
+            if ($relativeFallback === '') {
+                $relativeFallback = $relativePath;
+            }
+        }
+
+        if ($remoteFallback !== '') {
+            return $remoteFallback;
+        }
+
+        if ($relativeFallback !== '') {
+            return $siteUrl !== ''
+                ? rtrim($siteUrl, '/') . '/' . $relativeFallback
+                : $relativeFallback;
+        }
+
+        return '';
+    }
+}
+
+if (!function_exists('hotel_default_payment_invoice_document_html')) {
+    function hotel_default_payment_invoice_document_html(): string
+    {
+        return <<<'HTML'
+<div style="font-family:Arial,Helvetica,sans-serif;color:#1E2430;background:#FFFFFF;padding:0;">
+    <table style="width:100%;border-collapse:collapse;background:#FFFFFF;" cellpadding="0" cellspacing="0">
+        <tr>
+            <td style="padding:0 18px 0;">
+                <div style="height:1px;background:#20303E;"></div>
+            </td>
+        </tr>
+        <tr>
+            <td style="padding:0 18px 1px;text-align:center;">
+                <div style="max-width:360px;margin:0 auto 0;">{{logo_html}}</div>
+                <p style="margin:2px 0 0;font-size:8px;letter-spacing:1.6px;text-transform:uppercase;color:#20303E;font-weight:700;">{{site_name}}</p>
+                <p style="margin:1px 0 0;font-size:6px;line-height:1.2;color:#5F655F;">{{address}}</p>
+                <p style="margin:1px 0 0;font-size:6px;color:#5F655F;">{{contact_phone}} | {{contact_email}}</p>
+                {{vat_number_html}}
+            </td>
+        </tr>
+        <tr>
+            <td style="padding:0 18px 2px;">
+                    <div style="background:#F8F4EE;padding:8px 6px 5px;border-top:2px solid #D5B37C;">
+                        <table style="width:100%;border-collapse:collapse;" cellpadding="0" cellspacing="0">
+                            <tr>
+                                <td style="width:26%;padding:0 6px 0 0;vertical-align:top;border-right:1px solid #E7DED3;text-align:center;"><span style="display:inline-block;font-size:6px;letter-spacing:1px;text-transform:uppercase;color:#7C6E5B;font-weight:700;">Invoice</span></td>
+                                <td style="width:37%;padding:0 6px;vertical-align:top;border-right:1px solid #E7DED3;text-align:center;"><span style="display:inline-block;font-size:6px;letter-spacing:1px;text-transform:uppercase;color:#7C6E5B;font-weight:700;">Bill To</span></td>
+                                <td style="width:37%;padding:0 0 0 6px;vertical-align:top;text-align:center;"><span style="display:inline-block;font-size:6px;letter-spacing:1px;text-transform:uppercase;color:#7C6E5B;font-weight:700;">Stay Summary</span></td>
+                            </tr>
+                            <tr>
+                                <td style="width:26%;padding:6px 6px 0 0;vertical-align:top;border-right:1px solid #E7DED3;text-align:center;">
+                                    <div style="font-size:10px;line-height:1;color:#1E2430;font-weight:700;">{{invoice_number}}</div>
+                                </td>
+                                <td style="width:37%;padding:6px 6px 0;vertical-align:top;border-right:1px solid #E7DED3;text-align:center;">
+                                    <div style="font-size:6px;color:#5F655F;line-height:1.2;">Name: {{guest_name}}</div>
+                                </td>
+                                <td style="width:37%;padding:6px 0 0 6px;vertical-align:top;text-align:center;">
+                                    <div style="font-size:6px;color:#5F655F;line-height:1.2;">Reference: {{booking_reference}}</div>
+                                </td>
+                            </tr>
+                            <tr>
+                                <td style="width:26%;padding:2px 6px 0 0;vertical-align:top;border-right:1px solid #E7DED3;text-align:center;">
+                                    <div style="font-size:6px;color:#5F655F;line-height:1.2;">Issued {{issued_date}}</div>
+                                    <div style="margin-top:3px;">
+                                        <div style="display:inline-block;padding:2px 4px;background:{{status_bg}};color:{{status_fg}};font-size:6px;letter-spacing:0.7px;text-transform:uppercase;font-weight:700;border-radius:999px;">{{status_text}}</div>
+                                    </div>
+                                </td>
+                                <td style="width:37%;padding:1px 6px 0;vertical-align:top;border-right:1px solid #E7DED3;text-align:center;">
+                                    <div style="font-size:6px;color:#5F655F;line-height:1.2;">Email: {{guest_email}}</div>
+                                    <div style="font-size:6px;color:#5F655F;line-height:1.2;">Phone: {{guest_phone}}</div>
+                                </td>
+                                <td style="width:37%;padding:1px 0 0 6px;vertical-align:top;text-align:center;">
+                                    <div style="font-size:6px;color:#5F655F;line-height:1.2;">Room: {{room_name}}</div>
+                                    <div style="font-size:6px;color:#5F655F;line-height:1.2;">Check-in: {{check_in}}</div>
+                                    <div style="font-size:6px;color:#5F655F;line-height:1.2;">Check-out: {{check_out}}</div>
+                                    <div style="font-size:6px;color:#5F655F;line-height:1.2;">Guests: {{guests}}</div>
+                                    <div style="font-size:6px;color:#5F655F;line-height:1.2;">Duration: {{nights}} night(s)</div>
+                                </td>
+                            </tr>
+                        </table>
+                    </div>
+            </td>
+        </tr>
+        <tr>
+            <td style="padding:0 18px;">
+                <div style="background:#FCFAF7;padding:4px 6px;border-top:2px solid #20303E;">
+                    <p style="margin:0 0 2px;font-size:6px;letter-spacing:0.7px;text-transform:uppercase;color:#20303E;font-weight:700;">Invoice Items (Description, Qty, Unit Rate, Line Total)</p>
+                    <table style="width:100%;border-collapse:collapse;" cellpadding="0" cellspacing="0">
+                        <tr>
+                            <td width="58%" style="padding:3px 5px;background:#314654;color:#FFFFFF;font-size:7px;letter-spacing:0.2px;text-transform:none;font-weight:700;">Description</td>
+                            <td width="8%" style="padding:3px 5px;background:#314654;color:#FFFFFF;font-size:7px;letter-spacing:0.2px;text-transform:none;font-weight:700;text-align:center;">Qty</td>
+                            <td width="16%" style="padding:3px 5px;background:#314654;color:#FFFFFF;font-size:7px;letter-spacing:0.2px;text-transform:none;font-weight:700;text-align:right;">Unit Rate</td>
+                            <td width="18%" style="padding:3px 5px;background:#314654;color:#FFFFFF;font-size:7px;letter-spacing:0.2px;text-transform:none;font-weight:700;text-align:right;">Line Total</td>
+                        </tr>
+                        {{charges_table_rows}}
+                        {{totals_rows}}
+                    </table>
+                </div>
+            </td>
+        </tr>
+        <tr>
+            <td style="padding:3px 18px 0;">{{payment_history_section}}</td>
+        </tr>
+        <tr>
+            <td style="padding:2px 18px 0;">{{bank_details}}</td>
+        </tr>
+        <tr>
+            <td style="padding:2px 18px 0;">{{invoice_terms}}</td>
+        </tr>
+        <tr>
+            <td style="padding:2px 18px 3px;">
+                <div style="background:#F8F4EE;padding:6px 8px;text-align:center;border-top:2px solid #D5B37C;">
+                    <p style="margin:0;font-size:7px;letter-spacing:1.8px;text-transform:uppercase;color:#20303E;font-weight:700;">{{site_name}}</p>
+                    <p style="margin:2px 0 0;font-size:6px;line-height:1.2;color:#6D655C;">Thank you for choosing us</p>
+                </div>
+            </td>
+        </tr>
+    </table>
+</div>
+HTML;
+    }
+}
+
 /**
  * Ensure booking email template defaults exist in DB
  */
@@ -408,7 +595,7 @@ function ensureBookingEmailTemplateDefaults()
         'payment_invoice_document' => [
             'name' => 'Invoice Document (PDF Attachment)',
             'subject' => 'Invoice Document',
-            'html' => '<div style="font-family:Georgia,\'Times New Roman\',serif; color:#231F1C; background:#FFFFFF; max-width:680px; margin:0 auto;"><table style="width:100%; background:#231F1C; margin-bottom:0;" cellpadding="0" cellspacing="0"><tr><td style="padding:28px 30px 22px; vertical-align:middle; width:50%;">{{logo_html}}<p style="margin:8px 0 0; font-size:11px; letter-spacing:3px; text-transform:uppercase; color:#B18247; font-family:Helvetica,Arial,sans-serif;">{{site_name}}</p></td><td style="padding:28px 30px 22px; vertical-align:middle; text-align:right; width:50%;"><p style="margin:0; font-size:30px; font-weight:400; letter-spacing:5px; color:#F3ECE4; font-family:Georgia,serif;">INVOICE</p><p style="margin:6px 0 0; font-size:12px; letter-spacing:1px; color:#B18247; font-family:Helvetica,Arial,sans-serif;">{{invoice_number}}</p><p style="margin:4px 0 0; font-size:10px; color:#8A775F; font-family:Helvetica,Arial,sans-serif;">Issued {{issued_date}}</p></td></tr></table><table style="width:100%; background:{{status_bg}};" cellpadding="0" cellspacing="0"><tr><td style="padding:9px 30px; font-family:Helvetica,Arial,sans-serif; font-size:10px; letter-spacing:3px; font-weight:700; color:{{status_fg}}; text-transform:uppercase; text-align:right;">{{status_text}}</td></tr></table><table style="width:100%; background:#F7F3EE;" cellpadding="0" cellspacing="0"><tr><td style="padding:20px 24px; width:50%; vertical-align:top;"><p style="margin:0 0 6px 0; font-size:9px; font-weight:700; letter-spacing:2px; text-transform:uppercase; color:#B18247;">Billed To</p><p style="margin:0 0 3px; font-size:15px; font-weight:700; color:#231F1C; font-family:Georgia,serif;">{{guest_name}}</p><p style="margin:0 0 2px; font-size:11px; color:#5E554D; font-family:Helvetica,Arial,sans-serif;">{{guest_email}}</p><p style="margin:0; font-size:11px; color:#5E554D; font-family:Helvetica,Arial,sans-serif;">{{guest_phone}}</p></td><td style="padding:20px 24px; width:50%; vertical-align:top;"><p style="margin:0 0 6px 0; font-size:9px; font-weight:700; letter-spacing:2px; text-transform:uppercase; color:#B18247;">Property</p><p style="margin:0 0 3px; font-size:15px; font-weight:700; color:#231F1C; font-family:Georgia,serif;">{{site_name}}</p><p style="margin:0 0 2px; font-size:11px; color:#5E554D; font-family:Helvetica,Arial,sans-serif;">{{address}}</p><p style="margin:0 0 2px; font-size:11px; color:#5E554D; font-family:Helvetica,Arial,sans-serif;">{{contact_email}}</p><p style="margin:0; font-size:11px; color:#5E554D; font-family:Helvetica,Arial,sans-serif;">{{contact_phone}}</p>{{vat_number_html}}</td></tr></table><table style="width:100%; background:#231F1C;" cellpadding="0" cellspacing="0"><tr><td style="padding:14px 30px; font-family:Helvetica,Arial,sans-serif;"><table style="width:100%;" cellpadding="0" cellspacing="0"><tr><td style="font-size:9px; color:#C4A882; letter-spacing:2px; text-transform:uppercase; padding-bottom:3px;">Reference</td><td style="font-size:9px; color:#C4A882; letter-spacing:2px; text-transform:uppercase; padding-bottom:3px;">Room</td><td style="font-size:9px; color:#C4A882; letter-spacing:2px; text-transform:uppercase; padding-bottom:3px;">Check-in</td><td style="font-size:9px; color:#C4A882; letter-spacing:2px; text-transform:uppercase; padding-bottom:3px;">Check-out</td><td style="font-size:9px; color:#C4A882; letter-spacing:2px; text-transform:uppercase; padding-bottom:3px;">Nights</td><td style="font-size:9px; color:#C4A882; letter-spacing:2px; text-transform:uppercase; padding-bottom:3px;">Guests</td></tr><tr><td style="font-size:12px; color:#B18247; font-weight:700;">{{booking_reference}}</td><td style="font-size:12px; color:#FFFFFF; font-weight:500;">{{room_name}}</td><td style="font-size:12px; color:#FFFFFF; font-weight:500;">{{check_in}}</td><td style="font-size:12px; color:#FFFFFF; font-weight:500;">{{check_out}}</td><td style="font-size:12px; color:#FFFFFF; font-weight:500;">{{nights}}</td><td style="font-size:12px; color:#FFFFFF; font-weight:500;">{{guests}}</td></tr></table></td></tr></table><p style="margin:16px 24px 6px; font-size:9px; font-weight:700; letter-spacing:2px; text-transform:uppercase; color:#B18247; font-family:Helvetica,Arial,sans-serif;">Itemised Charges</p><table width="100%" style="width:100%; border-collapse:collapse;" cellpadding="0" cellspacing="0"><tr><td width="52%" bgcolor="#8A775F" style="padding:12px 24px; text-align:left; font-size:10px; letter-spacing:1.5px; text-transform:uppercase; color:#FFFFFF; font-family:Helvetica,Arial,sans-serif; font-weight:700; background-color:#8A775F;">Description</td><td width="10%" bgcolor="#8A775F" style="padding:12px 10px; text-align:center; font-size:10px; letter-spacing:1.5px; text-transform:uppercase; color:#FFFFFF; font-family:Helvetica,Arial,sans-serif; font-weight:700; background-color:#8A775F;">Qty</td><td width="18%" bgcolor="#8A775F" style="padding:12px 10px; text-align:right; font-size:10px; letter-spacing:1.5px; text-transform:uppercase; color:#FFFFFF; font-family:Helvetica,Arial,sans-serif; font-weight:700; background-color:#8A775F;">Unit Price</td><td width="20%" bgcolor="#8A775F" style="padding:12px 24px; text-align:right; font-size:10px; letter-spacing:1.5px; text-transform:uppercase; color:#FFFFFF; font-family:Helvetica,Arial,sans-serif; font-weight:700; background-color:#8A775F;">Amount</td></tr>{{charges_table_rows}}{{totals_rows}}</table>{{payment_history_section}}<table style="width:100%; margin-top:28px; background:#F7F3EE;" cellpadding="0" cellspacing="0"><tr><td style="padding:20px 30px; border-top:2px solid #B18247; text-align:center; font-family:Helvetica,Arial,sans-serif;"><p style="margin:0 0 4px; font-size:13px; font-weight:700; color:#231F1C; letter-spacing:1px;">{{site_name}}</p><p style="margin:0 0 3px; font-size:10px; color:#8A775F;">{{address}}</p><p style="margin:0 0 12px; font-size:10px; color:#8A775F;">{{contact_email}} &nbsp;|&nbsp; {{contact_phone}}</p><p style="margin:0; font-size:9px; color:#B18247; letter-spacing:2px; text-transform:uppercase;">Thank you for choosing us</p></td></tr></table></div>',
+            'html' => hotel_default_payment_invoice_document_html(),
         ],
     ];
 

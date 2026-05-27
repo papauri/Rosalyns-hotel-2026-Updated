@@ -192,7 +192,8 @@
         var tables = Array.prototype.slice.call(root.querySelectorAll('table'));
         tables.forEach(function (table) {
             if (table.closest('[data-disable-auto-pagination], .no-auto-pagination')) return;
-            if (table.classList.contains('log-table')) return;
+            // POS log table has its own user-filter pagination logic.
+            if (table.classList.contains('log-table') && table.querySelector('.pos-user-cell')) return;
             mountPagination(table);
         });
     }

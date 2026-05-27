@@ -49,7 +49,8 @@ if (!function_exists('_renderNavLink')) {
     function _renderNavLink(string $href, string $icon, string $label, ?string $perm, string $current_page, string $iconStyle = ''): void
     {
         if (!_canShowNavItem($perm)) return;
-        $isActive   = (strpos($href, '../') !== 0 && basename($href) === $current_page) ? ' active' : '';
+        $hrefPath   = (string)(parse_url($href, PHP_URL_PATH) ?: $href);
+        $isActive   = (strpos($href, '../') !== 0 && basename($hrefPath) === $current_page) ? ' active' : '';
         $iconAttr   = $iconStyle !== '' ? ' style="' . htmlspecialchars($iconStyle) . '"' : '';
         $extra      = (strpos($href, '../') === 0) ? ' target="_blank" rel="noopener"' : '';
         $linkClass  = 'admin-nav-link' . $isActive;
@@ -143,6 +144,7 @@ $_nav_groups = [
     ],
     'Configuration' => [
         ['booking-settings.php',           'fas fa-cog',         'Booking Settings',  'booking_settings'],
+        ['booking-settings.php?section=email-templates#email-templates', 'fas fa-envelope-open-text', 'Email Previewer', 'booking_settings'],
         ['whatsapp-settings.php',          'fab fa-whatsapp',       'WhatsApp Settings',  'whatsapp_settings',  'color:#25D366;'],
         ['facebook-settings.php',          'fab fa-facebook-f',     'Facebook Settings',  'facebook_settings',  'color:#1877F2;'],
         ['page-management.php',            'fas fa-file-alt',    'Page Management',   'pages'],

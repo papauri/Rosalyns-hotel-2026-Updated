@@ -289,11 +289,10 @@ $priceTypeLabels = [
             display: none;
             position: fixed;
             inset: 0;
-            background: rgba(35, 31, 28, .6);
+            background: rgba(0, 0, 0, .55);
             z-index: 1000;
             overflow-y: auto;
-            padding: 20px 16px;
-            backdrop-filter: blur(4px);
+            padding: 20px;
         }
 
         .pkg-modal-overlay.active {
@@ -305,28 +304,26 @@ $priceTypeLabels = [
         /* ── Modal box ───────────────────────────────────────────────────────── */
         .pkg-modal {
             background: #fff;
-            border-radius: 16px;
+            border-radius: 10px;
             max-width: 700px;
             width: 100%;
             margin: auto;
-            box-shadow: 0 20px 60px rgba(0, 0, 0, .25);
-            overflow: hidden;
+            box-shadow: 0 10px 40px rgba(0, 0, 0, .25);
         }
 
         .pkg-modal__header {
-            padding: 22px 28px 18px;
+            padding: 20px 24px 16px;
             border-bottom: 1px solid #e9ecef;
             display: flex;
             align-items: center;
             justify-content: space-between;
-            background: linear-gradient(135deg, #faf8f5 0%, #f3ece4 100%);
+            background: none;
         }
 
         .pkg-modal__header h3 {
             margin: 0;
-            font-size: 18px;
+            font-size: 17px;
             font-weight: 600;
-            color: #231F1C;
             display: flex;
             align-items: center;
             gap: 10px;
@@ -339,77 +336,69 @@ $priceTypeLabels = [
         .pkg-modal__close {
             background: none;
             border: none;
-            font-size: 22px;
+            font-size: 20px;
             cursor: pointer;
             color: #6c757d;
-            width: 36px;
-            height: 36px;
-            border-radius: 50%;
-            display: flex;
+            display: inline-flex;
             align-items: center;
             justify-content: center;
-            transition: background .2s, color .2s;
+            line-height: 1;
+            padding: 0;
         }
 
         .pkg-modal__close:hover {
-            background: #e9ecef;
-            color: #231F1C;
+            color: #495057;
         }
 
         .pkg-modal__body {
-            padding: 24px 28px;
-            max-height: calc(100vh - 160px);
+            padding: 20px 24px;
+            max-height: calc(100vh - 170px);
             overflow-y: auto;
         }
 
         .pkg-modal__footer {
-            padding: 18px 28px;
+            padding: 16px 24px;
             border-top: 1px solid #e9ecef;
             display: flex;
             justify-content: flex-end;
             gap: 10px;
-            background: #fafafa;
+            background: #f8f9fa;
         }
 
         /* ── Form layout ─────────────────────────────────────────────────────── */
         .form-row {
             display: grid;
             grid-template-columns: 1fr 1fr;
-            gap: 16px;
+            gap: 14px;
         }
 
-        @media (max-width: 600px) {
+        @media (max-width: 560px) {
             .form-row {
                 grid-template-columns: 1fr;
             }
         }
 
         .form-group {
-            margin-bottom: 16px;
+            margin-bottom: 14px;
         }
 
         .form-group label {
             display: block;
-            font-size: 12px;
-            font-weight: 600;
-            margin-bottom: 6px;
+            font-size: 13px;
+            font-weight: 500;
+            margin-bottom: 5px;
             color: #343a40;
-            text-transform: uppercase;
-            letter-spacing: .04em;
         }
 
         .form-group input,
         .form-group select,
         .form-group textarea {
             width: 100%;
-            padding: 10px 12px;
-            border: 1.5px solid #dee2e6;
-            border-radius: 8px;
+            padding: 8px 10px;
+            border: 1px solid #ced4da;
+            border-radius: 5px;
             font-size: 14px;
-            background: #fff;
-            color: #231F1C;
-            transition: border-color .2s, box-shadow .2s;
-            box-sizing: border-box;
+            transition: border-color .2s;
         }
 
         .form-group input:focus,
@@ -417,7 +406,6 @@ $priceTypeLabels = [
         .form-group textarea:focus {
             border-color: #8B7355;
             outline: none;
-            box-shadow: 0 0 0 3px rgba(139, 115, 85, .12);
         }
 
         .form-group input::placeholder,
@@ -426,25 +414,21 @@ $priceTypeLabels = [
         }
 
         .form-hint {
-            font-size: 11px;
+            font-size: 12px;
             color: #6c757d;
-            margin-top: 5px;
+            margin-top: 4px;
             line-height: 1.4;
         }
 
         /* ── Section dividers ────────────────────────────────────────────────── */
         .form-section-label {
-            font-size: 10px;
-            font-weight: 700;
-            letter-spacing: .1em;
-            text-transform: uppercase;
-            color: #8B7355;
-            padding: 6px 0 10px;
-            border-bottom: 1px solid rgba(139, 115, 85, .15);
-            margin-bottom: 16px;
+            font-size: 13px;
+            font-weight: 600;
+            color: #343a40;
+            margin: 0 0 10px;
             display: flex;
             align-items: center;
-            gap: 8px;
+            gap: 6px;
         }
 
         /* ── Price toggle ────────────────────────────────────────────────────── */
@@ -456,9 +440,9 @@ $priceTypeLabels = [
 
         .price-toggle-btn {
             flex: 1;
-            padding: 10px 8px;
-            border: 1.5px solid #dee2e6;
-            border-radius: 8px;
+            padding: 8px 10px;
+            border: 1px solid #ced4da;
+            border-radius: 5px;
             background: #fff;
             font-size: 13px;
             font-weight: 500;
@@ -489,56 +473,20 @@ $priceTypeLabels = [
             pointer-events: none;
         }
 
-        /* ── Modal inline feedback banner ───────────────────────────────────── */
-        .pkg-modal-feedback {
-            display: none;
-            align-items: center;
-            gap: 10px;
-            padding: 11px 16px;
-            border-radius: 8px;
-            font-size: 13px;
-            font-weight: 500;
-            line-height: 1.4;
-            margin-bottom: 14px;
-            border: 1px solid transparent;
-        }
-
-        .pkg-modal-feedback.visible {
-            display: flex;
-        }
-
-        .pkg-modal-feedback--success {
-            background: #d4edda;
-            color: #155724;
-            border-color: #c3e6cb;
-        }
-
-        .pkg-modal-feedback--error {
-            background: #f8d7da;
-            color: #721c24;
-            border-color: #f5c6cb;
-        }
-
-        .pkg-modal-feedback i {
-            font-size: 15px;
-            flex-shrink: 0;
-        }
-
         /* ── Toggle switch — see .pkg-modal .toggle-* rules below ─────────────── */
 
         /* ── Icon preview — flex prefix, no absolute overlap ────────────────── */
         .icon-preview-wrap {
             display: flex;
             align-items: stretch;
-            border: 1.5px solid #dee2e6;
-            border-radius: 8px;
+            border: 1px solid #ced4da;
+            border-radius: 5px;
             overflow: hidden;
-            transition: border-color .2s, box-shadow .2s;
+            transition: border-color .2s;
         }
 
         .icon-preview-wrap:focus-within {
             border-color: #8B7355;
-            box-shadow: 0 0 0 3px rgba(139, 115, 85, .12);
         }
 
         .icon-preview-badge {
@@ -548,7 +496,7 @@ $priceTypeLabels = [
             min-width: 40px;
             width: 40px;
             background: rgba(139, 115, 85, .06);
-            border-right: 1.5px solid #dee2e6;
+            border-right: 1px solid #ced4da;
             color: #8B7355;
             font-size: 15px;
             flex-shrink: 0;
@@ -562,7 +510,7 @@ $priceTypeLabels = [
         .icon-preview-wrap input {
             flex: 1;
             min-width: 0;
-            padding: 10px 12px;
+            padding: 8px 10px;
             border: none !important;
             outline: none !important;
             box-shadow: none !important;
@@ -572,77 +520,62 @@ $priceTypeLabels = [
 
         /* ── Toggle switch — scoped to .pkg-modal for full specificity ────────── */
         .pkg-modal .toggle-row {
-            display: flex !important;
-            align-items: center !important;
-            padding: 6px 0 !important;
-            margin: 0 !important;
+            display: flex;
+            align-items: center;
+            padding: 4px 0;
+            margin: 0;
         }
 
         .pkg-modal .toggle-switch {
-            display: inline-flex !important;
-            align-items: center !important;
-            gap: 10px !important;
-            cursor: pointer !important;
-            user-select: none !important;
-            width: auto !important;
-            padding: 0 !important;
-            border: none !important;
-            background: none !important;
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            cursor: pointer;
+            user-select: none;
         }
 
         /* Hide the real checkbox */
         .pkg-modal .toggle-switch input[type="checkbox"] {
-            display: none !important;
-            width: 0 !important;
-            height: 0 !important;
-            opacity: 0 !important;
-            position: absolute !important;
+            display: none;
         }
 
         /* The pill track */
         .pkg-modal .toggle-track {
-            flex-shrink: 0 !important;
-            display: inline-block !important;
-            width: 46px !important;
-            height: 26px !important;
-            background: #adb5bd !important;
-            border-radius: 13px !important;
-            position: relative !important;
-            transition: background .25s ease !important;
-            box-shadow: inset 0 1px 4px rgba(0, 0, 0, .25) !important;
-            vertical-align: middle !important;
+            display: inline-block;
+            width: 40px;
+            height: 22px;
+            background: #ccc;
+            border-radius: 11px;
+            position: relative;
+            transition: background .2s;
         }
 
         /* The knob */
         .pkg-modal .toggle-track::after {
-            content: '' !important;
-            position: absolute !important;
-            top: 4px !important;
-            left: 4px !important;
-            width: 18px !important;
-            height: 18px !important;
-            background: #fff !important;
-            border-radius: 50% !important;
-            transition: left .25s ease !important;
-            box-shadow: 0 1px 5px rgba(0, 0, 0, .35) !important;
+            content: '';
+            position: absolute;
+            top: 3px;
+            left: 3px;
+            width: 16px;
+            height: 16px;
+            background: #fff;
+            border-radius: 50%;
+            transition: left .2s;
         }
 
         /* Checked state — green, knob slides right */
         .pkg-modal .toggle-switch input[type="checkbox"]:checked+.toggle-track {
-            background: #28a745 !important;
-            box-shadow: none !important;
+            background: #28a745;
         }
 
         .pkg-modal .toggle-switch input[type="checkbox"]:checked+.toggle-track::after {
-            left: 24px !important;
+            left: 21px;
         }
 
         .pkg-modal .toggle-label {
-            font-size: 13px !important;
-            font-weight: 500 !important;
-            color: #343a40 !important;
-            line-height: 1.4 !important;
-            white-space: nowrap !important;
+            font-size: 13px;
+            color: #343a40;
+            line-height: 1.4;
         }
     </style>
     <style>
@@ -765,19 +698,19 @@ $priceTypeLabels = [
     </div>
 
     <!-- ─── Create / Edit Modal ─────────────────────────────────────────── -->
-    <div class="pkg-modal-overlay" id="pkgModalOverlay">
-        <div class="pkg-modal">
+    <div class="modal-overlay pkg-modal-overlay" id="pkgModalOverlay">
+        <div class="modal-content pkg-modal">
             <form method="POST" id="pkgForm">
                 <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf_token); ?>">
                 <input type="hidden" name="action" value="save">
                 <input type="hidden" name="pkg_id" id="fieldPkgId" value="">
 
-                <div class="pkg-modal__header">
+                <div class="modal-header pkg-modal__header">
                     <h3 id="pkgModalTitle"><i class="fas fa-gift"></i> New Package</h3>
-                    <button type="button" class="pkg-modal__close" onclick="closePkgModal()" aria-label="Close">&times;</button>
+                    <button type="button" class="modal-close pkg-modal__close" onclick="closePkgModal()" aria-label="Close">&times;</button>
                 </div>
 
-                <div class="pkg-modal__body">
+                <div class="modal-body pkg-modal__body">
 
                     <p class="form-section-label"><i class="fas fa-info-circle"></i> Identity</p>
 
@@ -894,8 +827,8 @@ $priceTypeLabels = [
                     </div>
                 </div>
 
-                <div class="pkg-modal__footer" style="flex-direction:column; align-items:stretch; gap:0;">
-                    <div id="pkgModalFeedback" class="pkg-modal-feedback"></div>
+                <div class="modal-footer pkg-modal__footer" style="flex-direction:column; align-items:stretch; gap:0;">
+                    <div id="pkgModalFeedback" class="admin-modal-feedback"></div>
                     <div style="display:flex; justify-content:flex-end; gap:10px;">
                         <button type="button" class="btn btn-secondary" onclick="closePkgModal()">Close</button>
                         <button type="submit" id="pkgSaveBtn" class="btn btn-primary"><i class="fas fa-save"></i> Save Package</button>
@@ -993,7 +926,7 @@ $priceTypeLabels = [
             // Clear feedback when modal is dismissed
             const fb = document.getElementById('pkgModalFeedback');
             if (fb) {
-                fb.className = 'pkg-modal-feedback';
+                fb.className = 'admin-modal-feedback';
                 fb.innerHTML = '';
             }
         }
@@ -1011,7 +944,7 @@ $priceTypeLabels = [
 
             saveBtn.disabled = true;
             saveBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Saving…';
-            fb.className = 'pkg-modal-feedback';
+            fb.className = 'admin-modal-feedback';
             fb.innerHTML = '';
 
             fetch(window.location.pathname, {
@@ -1029,7 +962,7 @@ $priceTypeLabels = [
                     saveBtn.disabled = false;
                     saveBtn.innerHTML = '<i class="fas fa-save"></i> Save Package';
                     if (res.success) {
-                        fb.className = 'pkg-modal-feedback pkg-modal-feedback--success visible';
+                        fb.className = 'admin-modal-feedback admin-modal-feedback--success visible';
                         fb.innerHTML = '<i class="fas fa-check-circle"></i> ' + res.message;
                         // Flip to "Edit" mode and lock in the real ID for subsequent saves
                         if (res.saved_id) {
@@ -1038,14 +971,14 @@ $priceTypeLabels = [
                         }
                         refreshPkgCardList();
                     } else {
-                        fb.className = 'pkg-modal-feedback pkg-modal-feedback--error visible';
+                        fb.className = 'admin-modal-feedback admin-modal-feedback--error visible';
                         fb.innerHTML = '<i class="fas fa-exclamation-circle"></i> ' + res.message;
                     }
                 })
                 .catch(function() {
                     saveBtn.disabled = false;
                     saveBtn.innerHTML = '<i class="fas fa-save"></i> Save Package';
-                    fb.className = 'pkg-modal-feedback pkg-modal-feedback--error visible';
+                    fb.className = 'admin-modal-feedback admin-modal-feedback--error visible';
                     fb.innerHTML = '<i class="fas fa-exclamation-circle"></i> Network error — please try again.';
                 });
         });

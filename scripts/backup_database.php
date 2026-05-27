@@ -1,4 +1,5 @@
 <?php
+
 /**
  * Automated Database Backup
  *
@@ -44,15 +45,19 @@ $db_pass = $db_pass ?? DB_PASS;
 
 $quiet = in_array('--quiet', $argv ?? [], true);
 
-function out(string $msg, bool $quiet = false): void {
+function out(string $msg, bool $quiet = false): void
+{
     if (!$quiet) {
         echo $msg . PHP_EOL;
     }
 }
 
-function backup_log(string $msg): void {
+function backup_log(string $msg): void
+{
     $logDir  = dirname(__DIR__) . '/logs';
-    if (!is_dir($logDir)) { @mkdir($logDir, 0775, true); }
+    if (!is_dir($logDir)) {
+        @mkdir($logDir, 0775, true);
+    }
     $line = '[' . date('Y-m-d H:i:s') . '] ' . $msg . PHP_EOL;
     @file_put_contents($logDir . '/backup.log', $line, FILE_APPEND | LOCK_EX);
 }
@@ -63,6 +68,33 @@ if (empty($db_host) || empty($db_name) || empty($db_user)) {
     fwrite(STDERR, "Database credentials not configured.\n");
     exit(1);
 }
+
+// Prevent overlapping backups (cron + manual) from running together.
+$logDir = $ROOT . '/logs';
+if (!is_dir($logDir)) {
+    @mkdir($logDir, 0775, true);
+}
+$lockFile = $logDir . '/backup.lock';
+$lockHandle = @fopen($lockFile, 'c+');
+if (!$lockHandle) {
+    backup_log('FATAL: cannot open backup lock file: ' . $lockFile);
+    fwrite(STDERR, "Cannot open backup lock file.\n");
+    exit(7);
+}
+if (!@flock($lockHandle, LOCK_EX | LOCK_NB)) {
+    backup_log('SKIP: backup already running; lock is held.');
+    out('Backup skipped: another backup process is already running.', $quiet);
+    fclose($lockHandle);
+    exit(0);
+}
+@ftruncate($lockHandle, 0);
+@fwrite($lockHandle, (string)getmypid() . ' ' . date('c') . PHP_EOL);
+register_shutdown_function(static function () use (&$lockHandle): void {
+    if (is_resource($lockHandle)) {
+        @flock($lockHandle, LOCK_UN);
+        @fclose($lockHandle);
+    }
+});
 
 $timestamp  = date('Ymd-His');
 $year       = date('Y');
@@ -95,14 +127,19 @@ $tmpFile  = $backupDir . '/.db-' . $timestamp . '.sql.gz.tmp';
 $usedMysqldump = false;
 $dumpedOk      = false;
 
-$mysqldump = trim((string)@shell_exec('command -v mysqldump 2>/dev/null'));
-if ($mysqldump === '') {
-    // Windows / cPanel may have it on PATH instead
+$mysqldump = '';
+$isWindows = DIRECTORY_SEPARATOR === '\\';
+if ($isWindows) {
     $which = trim((string)@shell_exec('where mysqldump 2>nul'));
     if ($which !== '') {
         $lines = preg_split('/\r?\n/', $which);
-        $mysqldump = $lines[0] ?? '';
+        $candidate = trim((string)($lines[0] ?? ''));
+        if ($candidate !== '') {
+            $mysqldump = $candidate;
+        }
     }
+} else {
+    $mysqldump = trim((string)@shell_exec('command -v mysqldump 2>/dev/null'));
 }
 
 if ($mysqldump !== '' && function_exists('proc_open')) {
@@ -175,7 +212,9 @@ if (!$dumpedOk) {
         ]);
 
         $gz = gzopen($tmpFile, 'wb6');
-        if (!$gz) { throw new RuntimeException('cannot open gz output'); }
+        if (!$gz) {
+            throw new RuntimeException('cannot open gz output');
+        }
 
         gzwrite($gz, "-- Rosalyns Hotel database backup\n-- Generated: " . date('c') . "\n");
         gzwrite($gz, "-- Database: $db_name\n\n");
@@ -200,9 +239,13 @@ if (!$dumpedOk) {
                 }
                 $vals = [];
                 foreach ($row as $v) {
-                    if ($v === null)               { $vals[] = 'NULL'; }
-                    elseif (is_int($v) || is_float($v)) { $vals[] = (string)$v; }
-                    else                           { $vals[] = $pdo->quote((string)$v); }
+                    if ($v === null) {
+                        $vals[] = 'NULL';
+                    } elseif (is_int($v) || is_float($v)) {
+                        $vals[] = (string)$v;
+                    } else {
+                        $vals[] = $pdo->quote((string)$v);
+                    }
                 }
                 $batch[] = '(' . implode(',', $vals) . ')';
                 if (count($batch) >= $batchSize) {
@@ -243,9 +286,14 @@ if (file_exists($tmpFile)) {
         $bytes = 0;
         while (!gzeof($g)) {
             $chunk = gzread($g, 65536);
-            if ($chunk === false) { $bytes = -1; break; }
+            if ($chunk === false) {
+                $bytes = -1;
+                break;
+            }
             $bytes += strlen($chunk);
-            if ($bytes > 64 * 1024 * 1024) { break; } // sample first 64MB is enough
+            if ($bytes > 64 * 1024 * 1024) {
+                break;
+            } // sample first 64MB is enough
         }
         gzclose($g);
         $verifyOk = ($bytes > 0);
@@ -288,7 +336,8 @@ try {
 }
 
 // --- Rotation: 14 daily / 8 weekly / 12 monthly --------------------------------------------
-function rotate_backups(string $rootBackups): void {
+function rotate_backups(string $rootBackups): void
+{
     if (!is_dir($rootBackups)) return;
     $all = [];
     $rii = new RecursiveIteratorIterator(new RecursiveDirectoryIterator($rootBackups, FilesystemIterator::SKIP_DOTS));
@@ -326,7 +375,9 @@ function rotate_backups(string $rootBackups): void {
             if (count($weekly) >= 8) break;
         }
     }
-    foreach ($weekly as $p) { $keep[$p] = true; }
+    foreach ($weekly as $p) {
+        $keep[$p] = true;
+    }
 
     // Monthly: 12 most recent calendar months
     $monthly = [];
@@ -337,7 +388,9 @@ function rotate_backups(string $rootBackups): void {
             if (count($monthly) >= 12) break;
         }
     }
-    foreach ($monthly as $p) { $keep[$p] = true; }
+    foreach ($monthly as $p) {
+        $keep[$p] = true;
+    }
 
     foreach ($all as $b) {
         if (!isset($keep[$b['path']])) {

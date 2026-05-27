@@ -242,3 +242,84 @@
         min-width: 90px;
     }
 }
+
+.runtime-checks {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+    display: grid;
+    gap: 10px;
+}
+
+.runtime-checks li {
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    background: #f9fafb;
+    border: 1px solid #eef2f7;
+    border-radius: 8px;
+    padding: 10px;
+}
+
+.check-badge {
+    border-radius: 999px;
+    font-size: 0.72rem;
+    font-weight: 700;
+    line-height: 1;
+    padding: 6px 9px;
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    margin-top: 1px;
+}
+
+.check-ok {
+    background: #dcfce7;
+    color: #166534;
+}
+
+.check-bad {
+    background: #fee2e2;
+    color: #991b1b;
+}
+
+.runtime-check-text {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+.runtime-check-text strong {
+    color: #111827;
+    font-size: 0.86rem;
+}
+
+.runtime-check-text small {
+    color: #6b7280;
+    font-size: 0.78rem;
+    word-break: break-word;
+}
+
+.command-blocks {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+    gap: 12px;
+}
+
+.cmd-label {
+    margin: 0 0 6px;
+    color: #374151;
+    font-size: 0.8rem;
+    font-weight: 600;
+}
+
+.cmd-box {
+    background: #111827;
+    color: #e5e7eb;
+    border-radius: 8px;
+    padding: 10px 12px;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+    font-size: 0.78rem;
+    line-height: 1.45;
+    word-break: break-all;
+}
