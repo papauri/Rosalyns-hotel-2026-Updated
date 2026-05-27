@@ -1955,6 +1955,11 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
         const POS_LIVE_POLL_MS = 1000;
         const POS_INBOX_POLL_MS = 700;
         const POS_NOTIFICATION_DURATION_MS = 120000;
+        const POS_API_BASE = '../api/';
+
+        function posApiUrl(path) {
+            return POS_API_BASE + String(path || '').replace(/^\/+/, '');
+        }
 
         function posEnsureClientUuid(form) {
             if (!form || form.querySelector('[name="client_uuid"]')) return;
@@ -2126,16 +2131,21 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
             if (_notifInFlight) return;
             _notifInFlight = true;
             try {
-                const fd = new FormData();
-                fd.append('action', 'poll');
-                fd.append('csrf_token', posCsrfToken);
-                const r = await fetch('../api/pos-notifications.php', {
+                const payload = new URLSearchParams();
+                payload.set('csrf_token', posCsrfToken);
+                const r = await fetch(posApiUrl('pos-notifications.php?action=poll'), {
                     method: 'POST',
-                    body: fd,
+                    headers: {
+                        'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
+                        'Accept': 'application/json',
+                        'X-CSRF-Token': posCsrfToken,
+                    },
+                    body: payload.toString(),
                     credentials: 'same-origin'
                 });
-                const j = await r.json();
-                if (j.ok && j.notifications && j.notifications.length) {
+                if (!r.ok) return;
+                const j = await r.json().catch(() => null);
+                if (j && j.ok && j.notifications && j.notifications.length) {
                     j.notifications.forEach(n => {
                         const readyKey = [n.order_id, n.station, n.reference || n.id].join(':');
                         if (_seenReadyNotifications.has(readyKey)) return;
@@ -2766,10 +2776,10 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
         setTimeout(pollStationReplies, 400); /* initial check shortly after load */
         /* ── End station inbox ────────────────────────────────────────── */
 
-        /* ── My Orders live tracker ──────────────────────────────────────
-           Polls /api/kds-action.php?action=get_my_orders every few seconds and renders the
-           current cashier's orders with kitchen + payment status, table/customer
-           info, age, and total. Click an order to open its receipt. */
+/* ── My Orders live tracker ──────────────────────────────────────
+    Polls ../api/kds-action.php?action=get_my_orders every few seconds and renders the
+    current cashier's orders with kitchen + payment status, table/customer
+    info, age, and total. Click an order to open its receipt. */
         let _myOrdersVisible = false;
         let _myOrdersPollInFlight = false;
         let _myOrdersLast = [];
@@ -2969,16 +2979,21 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
             if (_myOrdersPollInFlight) return;
             _myOrdersPollInFlight = true;
             try {
-                const fd = new FormData();
-                fd.append('csrf_token', posCsrfToken);
-                fd.append('action', 'get_my_orders');
-                const r = await fetch('../api/kds-action.php', {
+                const payload = new URLSearchParams();
+                payload.set('csrf_token', posCsrfToken);
+                const r = await fetch(posApiUrl('kds-action.php?action=get_my_orders'), {
                     method: 'POST',
-                    body: fd,
+                    headers: {
+                        'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
+                        'Accept': 'application/json',
+                        'X-CSRF-Token': posCsrfToken,
+                    },
+                    body: payload.toString(),
                     credentials: 'same-origin'
                 });
-                const j = await r.json();
-                if (!j.ok) return;
+                if (!r.ok) return;
+                const j = await r.json().catch(() => null);
+                if (!j || !j.ok) return;
                 _myOrdersLast = Array.isArray(j.orders) ? j.orders : [];
                 renderMyOrders(_myOrdersLast);
             } catch (e) {
@@ -4692,7 +4707,7 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
                 fd.append('order_id', String(tab.orderId));
                 fd.append('cancel_reason', reason);
                 try {
-                    const resp = await fetch('/api/cancel-order.php', {
+                    const resp = await fetch(posApiUrl('cancel-order.php'), {
                         method: 'POST',
                         body: fd,
                         credentials: 'include'
@@ -4760,7 +4775,7 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
                 fd.append('void_reason', reason);
                 fd.append('void_notes', notes);
                 try {
-                    const resp = await fetch('/api/void-order.php', {
+                    const resp = await fetch(posApiUrl('void-order.php'), {
                         method: 'POST',
                         body: fd,
                         credentials: 'include'
@@ -5169,7 +5184,7 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
             fd.append('order_id', orderId);
             fd.append('cancel_reason', reason);
             try {
-                const resp = await fetch('/api/cancel-order.php', {
+                const resp = await fetch(posApiUrl('cancel-order.php'), {
                     method: 'POST',
                     body: fd,
                     credentials: 'include'
@@ -5206,7 +5221,7 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
             fd.append('void_reason', reason);
             fd.append('void_notes', notes);
             try {
-                const resp = await fetch('/api/void-order.php', {
+                const resp = await fetch(posApiUrl('void-order.php'), {
                     method: 'POST',
                     body: fd,
                     credentials: 'include'
@@ -5343,7 +5358,7 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
             overlay.classList.add('show');
             body.innerHTML = '<div style="text-align:center;padding:40px 0;color:#9ca3af;"><i class="fas fa-spinner fa-spin fa-2x"></i></div>';
             try {
-                const resp = await fetch('/api/pos-tab-detail.php?order_id=' + orderId, {
+                const resp = await fetch(posApiUrl('pos-tab-detail.php?order_id=' + encodeURIComponent(String(orderId))), {
                     credentials: 'include'
                 });
                 const data = await resp.json();

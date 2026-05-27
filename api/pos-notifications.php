@@ -27,7 +27,8 @@ if (empty($_SESSION['admin_user'])) pn_err('Not authenticated', 401);
 $user = $_SESSION['admin_user'];
 $userId = (int)$user['id'];
 
-if (!validateCsrfToken($_POST['csrf_token'] ?? '')) pn_err('Invalid CSRF token', 403);
+$csrfToken = (string)($_POST['csrf_token'] ?? ($_SERVER['HTTP_X_CSRF_TOKEN'] ?? ''));
+if (!validateCsrfToken($csrfToken)) pn_err('Invalid CSRF token', 403);
 
 /* Lazy-create notifications table if it doesn't exist yet */
 try {
@@ -49,7 +50,8 @@ try {
     error_log('pos-notifications: table create failed: ' . $e->getMessage());
 }
 
-$action = $_POST['action'] ?? 'poll';
+$action = trim((string)($_POST['action'] ?? ($_GET['action'] ?? 'poll')));
+if ($action === '') $action = 'poll';
 
 if ($action === 'poll') {
     /* Return current business-day notifications that are still valid and unseen for this user. */

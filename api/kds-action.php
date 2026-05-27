@@ -49,7 +49,8 @@ if ($_SERVER['REQUEST_METHOD'] !== 'POST') jerr('POST only', 405);
 if (empty($_SESSION['admin_user'])) jerr('Not authenticated', 401);
 $user = $_SESSION['admin_user'];
 
-if (!validateCsrfToken($_POST['csrf_token'] ?? '')) jerr('Invalid CSRF token', 403);
+$csrfToken = (string)($_POST['csrf_token'] ?? ($_SERVER['HTTP_X_CSRF_TOKEN'] ?? ''));
+if (!validateCsrfToken($csrfToken)) jerr('Invalid CSRF token', 403);
 
 require_once __DIR__ . '/../admin/includes/permissions.php';
 require_once __DIR__ . '/../admin/includes/offline-log.php';
@@ -62,7 +63,7 @@ $isPrivileged = in_array($role, ['admin', 'manager'], true);
 $reqStation = $_POST['station'] ?? null;
 if ($reqStation !== null && !in_array($reqStation, $STATION_ALLOWED, true)) jerr('Invalid station');
 
-$action = $_POST['action'] ?? '';
+$action = trim((string)($_POST['action'] ?? ($_GET['action'] ?? '')));
 
 // Map role -> default station + required permission
 $rolePerm = match ($role) {
