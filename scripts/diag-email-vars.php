@@ -1,4 +1,5 @@
 <?php
+
 /**
  * Diagnostic: check logo, VAT settings and placeholder coverage in DB templates.
  * Run: php scripts/diag-email-vars.php
@@ -41,11 +42,11 @@ $dummyBooking = [
     'total_amount'        => 450000.00,
     'vat_amount'          => null,
     'tourism_levy_amount' => null,
-    'tourism_levy_percent'=> null,
+    'tourism_levy_percent' => null,
 ];
 $dummyRoom = ['id' => 0, 'name' => 'Deluxe Suite'];
 $vars = buildBookingEmailVariables($dummyBooking, $dummyRoom);
-foreach (['logo_html','vat_number','vat_number_html','vat_rate','vat_amount','levy_rate','levy_amount','subtotal_amount','total_amount','address','contact_phone'] as $k) {
+foreach (['logo_html', 'vat_number', 'vat_number_html', 'vat_rate', 'vat_amount', 'levy_rate', 'levy_amount', 'subtotal_amount', 'total_amount', 'address', 'contact_phone'] as $k) {
     $val = $vars[$k] ?? '*** MISSING ***';
     if (strlen((string)$val) > 120) {
         $val = substr((string)$val, 0, 80) . '... [' . strlen((string)$val) . ' chars]';
@@ -55,7 +56,7 @@ foreach (['logo_html','vat_number','vat_number_html','vat_rate','vat_amount','le
 echo PHP_EOL;
 
 echo '=== Template placeholder audit ===' . PHP_EOL;
-$keys = ['payment_invoice','conference_invoice','payment_receipt','booking_confirmed','tentative_booking_created'];
+$keys = ['payment_invoice', 'conference_invoice', 'payment_receipt', 'booking_confirmed', 'tentative_booking_created'];
 foreach ($keys as $key) {
     $tpl  = getBookingEmailTemplateConfig($key, []);
     $html = (string)($tpl['html_body'] ?? '');

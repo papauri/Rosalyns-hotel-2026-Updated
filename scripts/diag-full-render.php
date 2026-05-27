@@ -1,4 +1,5 @@
 <?php
+
 /**
  * Full end-to-end simulation: pick a real booking, run buildBookingEmailVariables(),
  * render the payment_invoice template, and report any unresolved {{placeholders}}.
@@ -48,7 +49,7 @@ $templateVars = buildBookingEmailVariables($booking, $room, [
 ]);
 
 echo '=== Resolved vars (invoice) ===' . PHP_EOL;
-foreach (['logo_html','site_name','vat_rate','vat_amount','vat_number','vat_number_html','levy_rate','levy_amount','subtotal_amount','total_amount','address','contact_phone','invoice_number','check_out','guest_name','booking_reference'] as $k) {
+foreach (['logo_html', 'site_name', 'vat_rate', 'vat_amount', 'vat_number', 'vat_number_html', 'levy_rate', 'levy_amount', 'subtotal_amount', 'total_amount', 'address', 'contact_phone', 'invoice_number', 'check_out', 'guest_name', 'booking_reference'] as $k) {
     $v = (string)($templateVars[$k] ?? '*** MISSING ***');
     if (strlen($v) > 100) {
         $v = substr($v, 0, 60) . '... [' . strlen($v) . ' chars]';
