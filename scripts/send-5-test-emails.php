@@ -44,6 +44,27 @@ $baseVars = [
     'payment_policy'  => 'A 50% deposit is required to confirm your booking. The balance is due on arrival.',
 ];
 
+// ── Tax / VAT common vars (read from live DB settings) ─────────────────────
+$vatNumber    = (string)getSetting('vat_number', '');
+$vatRate      = (float)getSetting('vat_rate', 16.5);
+$levyRate     = 1.0;   // standard tourism levy %
+$subtotal     = 379310.00;
+$levyAmt      = round($subtotal * $levyRate / 100, 2);
+$vatAmt       = round($subtotal * $vatRate / 100, 2);
+$totalWithTax = $subtotal + $levyAmt + $vatAmt;
+$vatNumberHtml = $vatNumber !== ''
+    ? '<p style="margin:8px 0 0;font-size:11px;color:#9b8f7e;text-align:center;">VAT Reg. No.: ' . htmlspecialchars($vatNumber, ENT_QUOTES, 'UTF-8') . '</p>'
+    : '';
+$taxVars = [
+    'subtotal_amount' => 'MWK ' . number_format($subtotal, 2),
+    'levy_rate'       => number_format($levyRate, 1),
+    'levy_amount'     => 'MWK ' . number_format($levyAmt, 2),
+    'vat_rate'        => number_format($vatRate, 1),
+    'vat_amount'      => 'MWK ' . number_format($vatAmt, 2),
+    'vat_number'      => $vatNumber,
+    'vat_number_html' => $vatNumberHtml,
+];
+
 // ── Tests to send ──────────────────────────────────────────────────────────
 $tests = [
 
@@ -93,25 +114,24 @@ $tests = [
     // 4. Room Invoice Email
     [
         'key'  => 'payment_invoice',
-        'vars' => $baseVars + [
+        'vars' => $baseVars + $taxVars + [
             'booking_reference' => 'LSH2026-INV-001',
             'invoice_number'    => 'INV-2026-TEST-001',
             'check_out'         => 'June 6, 2026',
-            'total_amount'      => 'MWK 450,000',
-            'invoice_link'      => 'http://127.0.0.1:8089/invoices/?ref=LSH2026-INV-001',
+            'total_amount'      => 'MWK ' . number_format($totalWithTax, 2),
         ],
     ],
 
     // 5. Payment Receipt
     [
         'key'  => 'payment_receipt',
-        'vars' => $baseVars + [
+        'vars' => $baseVars + $taxVars + [
             'receipt_number'    => 'RCP-2026-TEST-001',
             'payment_reference' => 'PAY-2026-TEST-001',
             'booking_type'      => 'Room Booking',
             'payment_date'      => 'May 27, 2026',
-            'total_amount'      => 'MWK 225,000',
-            'payment_amount'    => 'MWK 225,000',
+            'total_amount'      => 'MWK ' . number_format($totalWithTax / 2, 2),
+            'payment_amount'    => 'MWK ' . number_format($totalWithTax / 2, 2),
         ],
     ],
 ];

@@ -1109,8 +1109,8 @@ if (!function_exists('hotel_premium_email_html')) {
         string $guest_email_tag = '{{guest_email}}'
     ): string {
         $fonts  = 'https://fonts.googleapis.com/css2?family=DM+Serif+Display:ital@0;1'
-                . '&family=DM+Sans:ital,opsz,wght@0,9..40,300..700;1,9..40,300..700'
-                . '&family=Noto+Serif+JP:wght@300;400&display=swap';
+            . '&family=DM+Sans:ital,opsz,wght@0,9..40,300..700;1,9..40,300..700'
+            . '&family=Noto+Serif+JP:wght@300;400&display=swap';
         return '<!DOCTYPE html>'
             . '<html lang="en"><head><meta charset="UTF-8">'
             . '<meta name="viewport" content="width=device-width,initial-scale=1.0">'
@@ -1201,20 +1201,21 @@ function ensureBookingEmailTemplateDefaults()
             'subject' => 'Booking Received — {{site_name}} · {{booking_reference}}',
             'html'    => hotel_premium_email_html(
                 'Your booking request has been received — Reference: {{booking_reference}}',
-                hotel_premium_email_body('{{guest_name}}',
+                hotel_premium_email_body(
+                    '{{guest_name}}',
                     '<p style="margin:0 0 16px;">Thank you for choosing <strong>{{site_name}}</strong>. We have received your booking request for <strong>{{room_name}}</strong> and will confirm it shortly.</p>'
-                    . '<p style="margin:0;">We will be in touch within 24 hours. For immediate assistance contact us at <a href="mailto:{{contact_email}}" style="color:#524b3f;">{{contact_email}}</a>.</p>'
+                        . '<p style="margin:0;">We will be in touch within 24 hours. For immediate assistance contact us at <a href="mailto:{{contact_email}}" style="color:#524b3f;">{{contact_email}}</a>.</p>'
                 )
-                . hotel_premium_email_summary_rows('Booking Summary', [
-                    ['Reference',  '{{booking_reference}}'],
-                    ['Room',       '{{room_name}}'],
-                    ['Check-in',   '{{check_in_date_formatted}}'],
-                    ['Check-out',  '{{check_out_date_formatted}}'],
-                    ['Nights',     '{{number_of_nights}}'],
-                    ['Guests',     '{{number_of_guests}}'],
-                    ['Total',      '{{currency_symbol}} {{total_amount_formatted}}', true],
-                ])
-                . '<tr><td style="padding:0 48px 48px;font-size:12px;line-height:1.8;color:#9b8f7e;text-align:center;font-style:italic;">{{payment_policy}}</td></tr>'
+                    . hotel_premium_email_summary_rows('Booking Summary', [
+                        ['Reference',  '{{booking_reference}}'],
+                        ['Room',       '{{room_name}}'],
+                        ['Check-in',   '{{check_in_date_formatted}}'],
+                        ['Check-out',  '{{check_out_date_formatted}}'],
+                        ['Nights',     '{{number_of_nights}}'],
+                        ['Guests',     '{{number_of_guests}}'],
+                        ['Total',      '{{currency_symbol}} {{total_amount_formatted}}', true],
+                    ])
+                    . '<tr><td style="padding:0 48px 48px;font-size:12px;line-height:1.8;color:#9b8f7e;text-align:center;font-style:italic;">{{payment_policy}}</td></tr>'
             ),
         ],
         'booking_confirmed' => [
@@ -1222,20 +1223,21 @@ function ensureBookingEmailTemplateDefaults()
             'subject' => 'Booking Confirmed — {{site_name}} · {{booking_reference}}',
             'html'    => hotel_premium_email_html(
                 'Your booking is confirmed — Reference: {{booking_reference}}',
-                hotel_premium_email_body('{{guest_name}}',
+                hotel_premium_email_body(
+                    '{{guest_name}}',
                     '<p style="margin:0 0 16px;">Your booking at <strong>{{site_name}}</strong> is confirmed. We look forward to welcoming you to <strong>{{room_name}}</strong>.</p>'
-                    . '<p style="margin:0;">Check-in from <strong>{{check_in_time}}</strong> &middot; Check-out by <strong>{{check_out_time}}</strong>.</p>'
+                        . '<p style="margin:0;">Check-in from <strong>{{check_in_time}}</strong> &middot; Check-out by <strong>{{check_out_time}}</strong>.</p>'
                 )
-                . hotel_premium_email_summary_rows('Confirmed Booking', [
-                    ['Reference',  '{{booking_reference}}'],
-                    ['Room',       '{{room_name}}'],
-                    ['Check-in',   '{{check_in_date_formatted}}'],
-                    ['Check-out',  '{{check_out_date_formatted}}'],
-                    ['Nights',     '{{number_of_nights}}'],
-                    ['Guests',     '{{number_of_guests}}'],
-                    ['Total',      '{{currency_symbol}} {{total_amount_formatted}}', true],
-                ])
-                . '<tr><td style="padding:0 48px 48px;font-size:12px;line-height:1.8;color:#9b8f7e;text-align:center;font-style:italic;">{{payment_policy}}</td></tr>'
+                    . hotel_premium_email_summary_rows('Confirmed Booking', [
+                        ['Reference',  '{{booking_reference}}'],
+                        ['Room',       '{{room_name}}'],
+                        ['Check-in',   '{{check_in_date_formatted}}'],
+                        ['Check-out',  '{{check_out_date_formatted}}'],
+                        ['Nights',     '{{number_of_nights}}'],
+                        ['Guests',     '{{number_of_guests}}'],
+                        ['Total',      '{{currency_symbol}} {{total_amount_formatted}}', true],
+                    ])
+                    . '<tr><td style="padding:0 48px 48px;font-size:12px;line-height:1.8;color:#9b8f7e;text-align:center;font-style:italic;">{{payment_policy}}</td></tr>'
             ),
         ],
         'booking_cancelled' => [
@@ -1243,17 +1245,18 @@ function ensureBookingEmailTemplateDefaults()
             'subject' => 'Booking Cancelled — {{booking_reference}}',
             'html'    => hotel_premium_email_html(
                 'Your booking {{booking_reference}} has been cancelled',
-                hotel_premium_email_body('{{guest_name}}',
+                hotel_premium_email_body(
+                    '{{guest_name}}',
                     '<p style="margin:0 0 16px;"><span style="color:#b0552b;font-weight:600;">Your booking has been cancelled.</span> If you believe this is an error or wish to rebook, please contact us.</p>'
-                    . '<p style="margin:0;">We apologise for any inconvenience. For assistance: <a href="mailto:{{contact_email}}" style="color:#524b3f;">{{contact_email}}</a> &middot; {{phone_main}}.</p>'
+                        . '<p style="margin:0;">We apologise for any inconvenience. For assistance: <a href="mailto:{{contact_email}}" style="color:#524b3f;">{{contact_email}}</a> &middot; {{phone_main}}.</p>'
                 )
-                . hotel_premium_email_summary_rows('Cancelled Booking', [
-                    ['Reference',  '{{booking_reference}}'],
-                    ['Room',       '{{room_name}}'],
-                    ['Check-in',   '{{check_in_date_formatted}}'],
-                    ['Check-out',  '{{check_out_date_formatted}}'],
-                    ['Reason',     '{{cancellation_reason}}'],
-                ])
+                    . hotel_premium_email_summary_rows('Cancelled Booking', [
+                        ['Reference',  '{{booking_reference}}'],
+                        ['Room',       '{{room_name}}'],
+                        ['Check-in',   '{{check_in_date_formatted}}'],
+                        ['Check-out',  '{{check_out_date_formatted}}'],
+                        ['Reason',     '{{cancellation_reason}}'],
+                    ])
             ),
         ],
         /* ── Invoice emails ──────────────────────────────────────── */
@@ -1262,21 +1265,22 @@ function ensureBookingEmailTemplateDefaults()
             'subject' => 'Your Invoice {{invoice_number}} — {{site_name}}',
             'html'    => hotel_premium_email_html(
                 'Your invoice {{invoice_number}} from {{site_name}} is ready',
-                hotel_premium_email_body('{{guest_name}}',
+                hotel_premium_email_body(
+                    '{{guest_name}}',
                     '<p style="margin:0 0 16px;">Thank you for choosing to stay with us. We hope you had a wonderful experience. Please find attached the official invoice (<strong>{{invoice_number}}</strong>) for your recent stay.</p>'
-                    . '<p style="margin:0;">A brief summary is shown below. The full invoice PDF is attached to this email.</p>'
+                        . '<p style="margin:0;">A brief summary is shown below. The full invoice PDF is attached to this email.</p>'
                 )
-                . hotel_premium_email_summary_rows('Stay Summary', [
-                    ['Booking Reference',              '{{booking_reference}}'],
-                    ['Invoice Number',                 '{{invoice_number}}'],
-                    ['Check-out',                      '{{check_out}}'],
-                    ['Sub-total',                      '{{subtotal_amount}}'],
-                    ['Tourism Levy ({{levy_rate}}%)',   '{{levy_amount}}'],
-                    ['VAT ({{vat_rate}}%)',             '{{vat_amount}}'],
-                    ['Total Due',                      '{{total_amount}}', true],
-                ])
-                . '<tr><td style="padding:0 48px 8px;text-align:center;">{{vat_number_html}}</td></tr>'
-                . hotel_premium_email_cta('{{invoice_link}}', 'View Full Invoice')
+                    . hotel_premium_email_summary_rows('Stay Summary', [
+                        ['Booking Reference',              '{{booking_reference}}'],
+                        ['Invoice Number',                 '{{invoice_number}}'],
+                        ['Check-out',                      '{{check_out}}'],
+                        ['Sub-total',                      '{{subtotal_amount}}'],
+                        ['Tourism Levy ({{levy_rate}}%)',   '{{levy_amount}}'],
+                        ['VAT ({{vat_rate}}%)',             '{{vat_amount}}'],
+                        ['Total Due',                      '{{total_amount}}', true],
+                    ])
+                    . '<tr><td style="padding:0 48px 8px;text-align:center;">{{vat_number_html}}</td></tr>'
+
             ),
         ],
         'conference_invoice' => [
@@ -1284,21 +1288,22 @@ function ensureBookingEmailTemplateDefaults()
             'subject' => 'Conference Invoice — {{site_name}} · {{inquiry_reference}}',
             'html'    => hotel_premium_email_html(
                 'Conference invoice for {{inquiry_reference}} — {{site_name}}',
-                hotel_premium_email_body('{{contact_person}}',
+                hotel_premium_email_body(
+                    '{{contact_person}}',
                     '<p style="margin:0 0 16px;">Thank you for hosting with us. Your conference invoice PDF is attached for your records.</p>'
-                    . '<p style="margin:0;">For any adjustments, contact us at <a href="mailto:{{contact_email}}" style="color:#524b3f;">{{contact_email}}</a> or {{contact_phone}}.</p>'
+                        . '<p style="margin:0;">For any adjustments, contact us at <a href="mailto:{{contact_email}}" style="color:#524b3f;">{{contact_email}}</a> or {{contact_phone}}.</p>'
                 )
-                . hotel_premium_email_summary_rows('Conference Summary', [
-                    ['Reference',             '{{inquiry_reference}}'],
-                    ['Company',               '{{company_name}}'],
-                    ['Conference Room',        '{{conference_room}}'],
-                    ['Event Date',             '{{event_date}}'],
-                    ['Event Time',             '{{event_time}}'],
-                    ['Sub-total',              '{{subtotal_amount}}'],
-                    ['VAT ({{vat_rate}}%)',    '{{vat_amount}}'],
-                    ['Total',                  '{{total_amount}}', true],
-                ])
-                . '<tr><td style="padding:0 48px 8px;text-align:center;">{{vat_number_html}}</td></tr>',
+                    . hotel_premium_email_summary_rows('Conference Summary', [
+                        ['Reference',             '{{inquiry_reference}}'],
+                        ['Company',               '{{company_name}}'],
+                        ['Conference Room',        '{{conference_room}}'],
+                        ['Event Date',             '{{event_date}}'],
+                        ['Event Time',             '{{event_time}}'],
+                        ['Sub-total',              '{{subtotal_amount}}'],
+                        ['VAT ({{vat_rate}}%)',    '{{vat_amount}}'],
+                        ['Total',                  '{{total_amount}}', true],
+                    ])
+                    . '<tr><td style="padding:0 48px 8px;text-align:center;">{{vat_number_html}}</td></tr>',
                 '{{contact_email}}'
             ),
         ],
@@ -1308,19 +1313,20 @@ function ensureBookingEmailTemplateDefaults()
             'subject' => 'Tentative Hold Confirmed — {{site_name}} · {{booking_reference}}',
             'html'    => hotel_premium_email_html(
                 'Your room is on tentative hold — Reference: {{booking_reference}}',
-                hotel_premium_email_body('{{guest_name}}',
+                hotel_premium_email_body(
+                    '{{guest_name}}',
                     '<p style="margin:0 0 16px;">Your room has been placed on a tentative hold with <strong>{{site_name}}</strong>. Please confirm your booking before the hold expires to secure your stay.</p>'
-                    . '<p style="margin:0;">Contact us at <a href="mailto:{{contact_email}}" style="color:#524b3f;">{{contact_email}}</a> or {{phone_main}} to confirm.</p>'
+                        . '<p style="margin:0;">Contact us at <a href="mailto:{{contact_email}}" style="color:#524b3f;">{{contact_email}}</a> or {{phone_main}} to confirm.</p>'
                 )
-                . hotel_premium_email_summary_rows('Tentative Hold', [
-                    ['Reference',    '{{booking_reference}}'],
-                    ['Room',         '{{room_name}}'],
-                    ['Check-in',     '{{check_in_date_formatted}}'],
-                    ['Check-out',    '{{check_out_date_formatted}}'],
-                    ['Nights',       '{{number_of_nights}}'],
-                    ['Hold Expires', '{{tentative_expires_at_formatted}}'],
-                    ['Total',        '{{currency_symbol}} {{total_amount_formatted}}', true],
-                ])
+                    . hotel_premium_email_summary_rows('Tentative Hold', [
+                        ['Reference',    '{{booking_reference}}'],
+                        ['Room',         '{{room_name}}'],
+                        ['Check-in',     '{{check_in_date_formatted}}'],
+                        ['Check-out',    '{{check_out_date_formatted}}'],
+                        ['Nights',       '{{number_of_nights}}'],
+                        ['Hold Expires', '{{tentative_expires_at_formatted}}'],
+                        ['Total',        '{{currency_symbol}} {{total_amount_formatted}}', true],
+                    ])
             ),
         ],
         'tentative_booking_reminder' => [
@@ -1328,15 +1334,16 @@ function ensureBookingEmailTemplateDefaults()
             'subject' => 'Reminder: Your Tentative Hold Expires Soon — {{booking_reference}}',
             'html'    => hotel_premium_email_html(
                 'Reminder: Your tentative hold expires soon — {{booking_reference}}',
-                hotel_premium_email_body('{{guest_name}}',
+                hotel_premium_email_body(
+                    '{{guest_name}}',
                     '<p style="margin:0 0 16px;">This is a friendly reminder that your tentative booking hold at <strong>{{site_name}}</strong> is expiring soon. Please confirm to secure your stay.</p>'
-                    . '<p style="margin:0;">Contact us at <a href="mailto:{{contact_email}}" style="color:#524b3f;">{{contact_email}}</a> or {{phone_main}} to confirm.</p>'
+                        . '<p style="margin:0;">Contact us at <a href="mailto:{{contact_email}}" style="color:#524b3f;">{{contact_email}}</a> or {{phone_main}} to confirm.</p>'
                 )
-                . hotel_premium_email_summary_rows('Hold Reminder', [
-                    ['Reference',    '{{booking_reference}}'],
-                    ['Room',         '{{room_name}}'],
-                    ['Hold Expires', '{{tentative_expires_at_formatted}}', true],
-                ])
+                    . hotel_premium_email_summary_rows('Hold Reminder', [
+                        ['Reference',    '{{booking_reference}}'],
+                        ['Room',         '{{room_name}}'],
+                        ['Hold Expires', '{{tentative_expires_at_formatted}}', true],
+                    ])
             ),
         ],
         'tentative_booking_expired' => [
@@ -1344,16 +1351,17 @@ function ensureBookingEmailTemplateDefaults()
             'subject' => 'Tentative Hold Expired — {{booking_reference}}',
             'html'    => hotel_premium_email_html(
                 'Your tentative hold for {{booking_reference}} has expired',
-                hotel_premium_email_body('{{guest_name}}',
+                hotel_premium_email_body(
+                    '{{guest_name}}',
                     '<p style="margin:0 0 16px;">Your tentative booking hold has expired and the room has been released. We hope to see you again soon.</p>'
-                    . '<p style="margin:0;">To make a new booking, please contact us at <a href="mailto:{{contact_email}}" style="color:#524b3f;">{{contact_email}}</a> or {{phone_main}}.</p>'
+                        . '<p style="margin:0;">To make a new booking, please contact us at <a href="mailto:{{contact_email}}" style="color:#524b3f;">{{contact_email}}</a> or {{phone_main}}.</p>'
                 )
-                . hotel_premium_email_summary_rows('Expired Hold', [
-                    ['Reference',    '{{booking_reference}}'],
-                    ['Room',         '{{room_name}}'],
-                    ['Was Check-in', '{{check_in_date_formatted}}'],
-                    ['Was Check-out','{{check_out_date_formatted}}'],
-                ])
+                    . hotel_premium_email_summary_rows('Expired Hold', [
+                        ['Reference',    '{{booking_reference}}'],
+                        ['Room',         '{{room_name}}'],
+                        ['Was Check-in', '{{check_in_date_formatted}}'],
+                        ['Was Check-out', '{{check_out_date_formatted}}'],
+                    ])
             ),
         ],
         'tentative_booking_converted' => [
@@ -1361,19 +1369,20 @@ function ensureBookingEmailTemplateDefaults()
             'subject' => 'Booking Now Confirmed — {{site_name}} · {{booking_reference}}',
             'html'    => hotel_premium_email_html(
                 'Your booking is now confirmed — Reference: {{booking_reference}}',
-                hotel_premium_email_body('{{guest_name}}',
+                hotel_premium_email_body(
+                    '{{guest_name}}',
                     '<p style="margin:0 0 16px;">Great news — your tentative booking has been confirmed at <strong>{{site_name}}</strong>. We look forward to welcoming you.</p>'
-                    . '<p style="margin:0;">Check-in from <strong>{{check_in_time}}</strong> &middot; Check-out by <strong>{{check_out_time}}</strong>.</p>'
+                        . '<p style="margin:0;">Check-in from <strong>{{check_in_time}}</strong> &middot; Check-out by <strong>{{check_out_time}}</strong>.</p>'
                 )
-                . hotel_premium_email_summary_rows('Confirmed Stay', [
-                    ['Reference',  '{{booking_reference}}'],
-                    ['Room',       '{{room_name}}'],
-                    ['Check-in',   '{{check_in_date_formatted}}'],
-                    ['Check-out',  '{{check_out_date_formatted}}'],
-                    ['Nights',     '{{number_of_nights}}'],
-                    ['Total',      '{{currency_symbol}} {{total_amount_formatted}}', true],
-                ])
-                . '<tr><td style="padding:0 48px 48px;font-size:12px;line-height:1.8;color:#9b8f7e;text-align:center;font-style:italic;">{{payment_policy}}</td></tr>'
+                    . hotel_premium_email_summary_rows('Confirmed Stay', [
+                        ['Reference',  '{{booking_reference}}'],
+                        ['Room',       '{{room_name}}'],
+                        ['Check-in',   '{{check_in_date_formatted}}'],
+                        ['Check-out',  '{{check_out_date_formatted}}'],
+                        ['Nights',     '{{number_of_nights}}'],
+                        ['Total',      '{{currency_symbol}} {{total_amount_formatted}}', true],
+                    ])
+                    . '<tr><td style="padding:0 48px 48px;font-size:12px;line-height:1.8;color:#9b8f7e;text-align:center;font-style:italic;">{{payment_policy}}</td></tr>'
             ),
         ],
         /* ── Quotation emails ────────────────────────────────────── */
@@ -1382,19 +1391,20 @@ function ensureBookingEmailTemplateDefaults()
             'subject' => 'Your Stay Quotation — {{site_name}} · {{quotation_reference}}',
             'html'    => hotel_premium_email_html(
                 'Your stay quotation {{quotation_reference}} from {{site_name}} is ready',
-                hotel_premium_email_body('{{guest_name}}',
+                hotel_premium_email_body(
+                    '{{guest_name}}',
                     '<p style="margin:0 0 16px;">Please find your stay quotation from <strong>{{site_name}}</strong>. Your quotation PDF is attached for review.</p>'
-                    . '<p style="margin:0;">{{quotation_notes}}</p>'
+                        . '<p style="margin:0;">{{quotation_notes}}</p>'
                 )
-                . hotel_premium_email_summary_rows('Quotation Summary', [
-                    ['Quote Reference',   '{{quotation_reference}}'],
-                    ['Booking Reference', '{{booking_reference}}'],
-                    ['Room',              '{{room_name}}'],
-                    ['Check-in',          '{{check_in_date}}'],
-                    ['Check-out',         '{{check_out_date}}'],
-                    ['Valid Until',        '{{valid_until}}'],
-                    ['Total',             '{{total_amount}}', true],
-                ])
+                    . hotel_premium_email_summary_rows('Quotation Summary', [
+                        ['Quote Reference',   '{{quotation_reference}}'],
+                        ['Booking Reference', '{{booking_reference}}'],
+                        ['Room',              '{{room_name}}'],
+                        ['Check-in',          '{{check_in_date}}'],
+                        ['Check-out',         '{{check_out_date}}'],
+                        ['Valid Until',        '{{valid_until}}'],
+                        ['Total',             '{{total_amount}}', true],
+                    ])
             ),
         ],
         'tentative_quotation_document' => [
@@ -1407,20 +1417,21 @@ function ensureBookingEmailTemplateDefaults()
             'subject' => 'Conference Quotation — {{site_name}} · {{inquiry_reference}}',
             'html'    => hotel_premium_email_html(
                 'Conference quotation {{quotation_reference}} from {{site_name}}',
-                hotel_premium_email_body('{{contact_person}}',
+                hotel_premium_email_body(
+                    '{{contact_person}}',
                     '<p style="margin:0 0 16px;">Your conference quotation from <strong>{{site_name}}</strong> is ready. The quotation PDF is attached for your records.</p>'
-                    . '<p style="margin:0;">{{quotation_notes}}</p>'
+                        . '<p style="margin:0;">{{quotation_notes}}</p>'
                 )
-                . hotel_premium_email_summary_rows('Conference Quotation', [
-                    ['Inquiry Reference', '{{inquiry_reference}}'],
-                    ['Quote Reference',   '{{quotation_reference}}'],
-                    ['Company',           '{{company_name}}'],
-                    ['Conference Room',   '{{conference_room}}'],
-                    ['Event Date',        '{{event_date}}'],
-                    ['Attendees',         '{{attendees}}'],
-                    ['Valid Until',        '{{valid_until}}'],
-                    ['Total',             '{{total_amount}}', true],
-                ]),
+                    . hotel_premium_email_summary_rows('Conference Quotation', [
+                        ['Inquiry Reference', '{{inquiry_reference}}'],
+                        ['Quote Reference',   '{{quotation_reference}}'],
+                        ['Company',           '{{company_name}}'],
+                        ['Conference Room',   '{{conference_room}}'],
+                        ['Event Date',        '{{event_date}}'],
+                        ['Attendees',         '{{attendees}}'],
+                        ['Valid Until',        '{{valid_until}}'],
+                        ['Total',             '{{total_amount}}', true],
+                    ]),
                 '{{contact_email}}'
             ),
         ],
@@ -1434,20 +1445,21 @@ function ensureBookingEmailTemplateDefaults()
             'subject' => 'Event Quotation — {{site_name}} · {{quotation_reference}}',
             'html'    => hotel_premium_email_html(
                 'Your event quotation {{quotation_reference}} from {{site_name}}',
-                hotel_premium_email_body('{{recipient_name}}',
+                hotel_premium_email_body(
+                    '{{recipient_name}}',
                     '<p style="margin:0 0 16px;">Your event quotation from <strong>{{site_name}}</strong> is ready. Please find the quotation PDF attached.</p>'
-                    . '<p style="margin:0;">{{quotation_notes}}</p>'
+                        . '<p style="margin:0;">{{quotation_notes}}</p>'
                 )
-                . hotel_premium_email_summary_rows('Event Quotation', [
-                    ['Quote Reference', '{{quotation_reference}}'],
-                    ['Event',           '{{event_title}}'],
-                    ['Date',            '{{event_date}}'],
-                    ['Time',            '{{event_time}}'],
-                    ['Location',        '{{event_location}}'],
-                    ['Attendees',       '{{attendee_count}}'],
-                    ['Valid Until',      '{{valid_until}}'],
-                    ['Total',           '{{total_amount}}', true],
-                ]),
+                    . hotel_premium_email_summary_rows('Event Quotation', [
+                        ['Quote Reference', '{{quotation_reference}}'],
+                        ['Event',           '{{event_title}}'],
+                        ['Date',            '{{event_date}}'],
+                        ['Time',            '{{event_time}}'],
+                        ['Location',        '{{event_location}}'],
+                        ['Attendees',       '{{attendee_count}}'],
+                        ['Valid Until',      '{{valid_until}}'],
+                        ['Total',           '{{total_amount}}', true],
+                    ]),
                 '{{guest_email}}'
             ),
         ],
@@ -1462,17 +1474,18 @@ function ensureBookingEmailTemplateDefaults()
             'subject' => 'Credit Note {{credit_note_number}} — {{site_name}}',
             'html'    => hotel_premium_email_html(
                 'Credit note {{credit_note_number}} has been issued to your account',
-                hotel_premium_email_body('{{guest_name}}',
+                hotel_premium_email_body(
+                    '{{guest_name}}',
                     '<p style="margin:0 0 16px;">A credit note has been issued to your account with <strong>{{site_name}}</strong>. The credit note PDF is attached for your records.</p>'
-                    . '<p style="margin:0;">Please quote <strong>{{credit_note_number}}</strong> when making your next booking. This credit note is non-transferable and cannot be exchanged for cash.</p>'
+                        . '<p style="margin:0;">Please quote <strong>{{credit_note_number}}</strong> when making your next booking. This credit note is non-transferable and cannot be exchanged for cash.</p>'
                 )
-                . hotel_premium_email_summary_rows('Credit Note Summary', [
-                    ['Credit Note No.',   '{{credit_note_number}}'],
-                    ['Face Value',        '{{amount}}'],
-                    ['Reason',            '{{reason}}'],
-                    ['Valid Until',        '{{expires_at}}'],
-                    ['Available Balance', '{{balance}}', true],
-                ])
+                    . hotel_premium_email_summary_rows('Credit Note Summary', [
+                        ['Credit Note No.',   '{{credit_note_number}}'],
+                        ['Face Value',        '{{amount}}'],
+                        ['Reason',            '{{reason}}'],
+                        ['Valid Until',        '{{expires_at}}'],
+                        ['Available Balance', '{{balance}}', true],
+                    ])
             ),
         ],
         'credit_note_document' => [
@@ -1486,19 +1499,20 @@ function ensureBookingEmailTemplateDefaults()
             'subject' => 'Payment Receipt {{receipt_number}} — {{site_name}}',
             'html'    => hotel_premium_email_html(
                 'Your payment receipt {{receipt_number}} from {{site_name}}',
-                hotel_premium_email_body('{{guest_name}}',
+                hotel_premium_email_body(
+                    '{{guest_name}}',
                     '<p style="margin:0 0 16px;">Thank you for your payment. Your receipt PDF is attached for your records.</p>'
-                    . '<p style="margin:0;">Questions? Contact us at <a href="mailto:{{contact_email}}" style="color:#524b3f;">{{contact_email}}</a>.</p>'
+                        . '<p style="margin:0;">Questions? Contact us at <a href="mailto:{{contact_email}}" style="color:#524b3f;">{{contact_email}}</a>.</p>'
                 )
-                . hotel_premium_email_summary_rows('Payment Summary', [
-                    ['Receipt No.',       '{{receipt_number}}'],
-                    ['Reference',         '{{payment_reference}}'],
-                    ['Type',              '{{booking_type}}'],
-                    ['Payment Date',      '{{payment_date}}'],
-                    ['VAT Incl.',         '{{vat_amount}}'],
-                    ['Amount Received',   '{{total_amount}}', true],
-                ])
-                . '<tr><td style="padding:0 48px 8px;text-align:center;">{{vat_number_html}}</td></tr>'
+                    . hotel_premium_email_summary_rows('Payment Summary', [
+                        ['Receipt No.',       '{{receipt_number}}'],
+                        ['Reference',         '{{payment_reference}}'],
+                        ['Type',              '{{booking_type}}'],
+                        ['Payment Date',      '{{payment_date}}'],
+                        ['VAT Incl.',         '{{vat_amount}}'],
+                        ['Amount Received',   '{{total_amount}}', true],
+                    ])
+                    . '<tr><td style="padding:0 48px 8px;text-align:center;">{{vat_number_html}}</td></tr>'
             ),
         ],
         'payment_receipt_document' => [
@@ -1594,6 +1608,15 @@ function buildBookingEmailVariables(array $booking, ?array $room = null, array $
     $vars['vat_number_html'] = $vatNumVal !== ''
         ? '<p style="margin:8px 0 0;font-size:11px;color:#9b8f7e;text-align:center;">VAT Reg. No.: ' . htmlspecialchars($vatNumVal, ENT_QUOTES, 'UTF-8') . '</p>'
         : '';
+
+    // ── Logo / address vars ─────────────────────────────────────────────
+    $logoSrc  = function_exists('hotel_invoice_logo_src') ? hotel_invoice_logo_src() : '';
+    $logoHtml = $logoSrc !== ''
+        ? '<img src="' . htmlspecialchars($logoSrc, ENT_QUOTES, 'UTF-8') . '" alt="' . htmlspecialchars((string)$email_site_name, ENT_QUOTES, 'UTF-8') . '" style="max-width:160px;height:auto;display:block;margin:0 auto;">'
+        : '';
+    $vars['logo_html']     = $logoHtml;
+    $vars['address']       = htmlspecialchars((string)getSetting('hotel_address', getSetting('address', '')), ENT_QUOTES, 'UTF-8');
+    $vars['contact_phone'] = htmlspecialchars((string)getSetting('phone_main', ''), ENT_QUOTES, 'UTF-8');
 
     return array_merge($vars, $extra);
 }
@@ -3854,6 +3877,13 @@ function getHotelLogoUrl()
 function wrapEmailTemplate(string $content, string $title = '')
 {
     global $email_site_name, $email_site_url, $email_from_email;
+
+    // If content is already a complete HTML document (e.g. from hotel_premium_email_html()),
+    // return it as-is — the template already contains its own header and footer.
+    $trimmedContent = ltrim($content);
+    if (stripos($trimmedContent, '<!DOCTYPE html') === 0 || stripos($trimmedContent, '<html') === 0) {
+        return $content;
+    }
 
     $site_name     = $email_site_name ?: getSetting('site_name', 'Our Hotel');
     $site_url      = $email_site_url  ?: getSetting('site_url', '');

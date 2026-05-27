@@ -311,6 +311,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['booking_email_templat
             '{{address}}'                  => $ajaxAddress,
             '{{hotel_phone}}'              => (string)getSetting('phone_main', ''),
             '{{hotel_address}}'            => $ajaxAddress,
+            '{{logo_html}}'                => (function (): string {
+                $url      = function_exists('getHotelLogoUrl') ? getHotelLogoUrl() : '';
+                $siteName = (string)getSetting('site_name', 'Hotel');
+                return $url !== '' ? '<img src="' . htmlspecialchars($url, ENT_QUOTES, 'UTF-8') . '" alt="' . htmlspecialchars($siteName, ENT_QUOTES, 'UTF-8') . '" style="max-width:160px;height:auto;display:block;margin:0 auto;">' : '';
+            })(),
+            '{{subtotal_amount}}'          => (string)getSetting('currency_symbol', 'ZAR') . number_format(4500, 2),
+            '{{vat_number}}'               => (string)getSetting('vat_number', ''),
+            '{{vat_number_html}}'          => (function (): string {
+                $n = (string)getSetting('vat_number', '');
+                return $n !== '' ? '<p style="margin:8px 0 0;font-size:11px;color:#9b8f7e;text-align:center;">VAT Reg. No.: ' . htmlspecialchars($n, ENT_QUOTES, 'UTF-8') . '</p>' : '';
+            })(),
+            '{{levy_rate}}'                => '1.0',
+            '{{levy_amount}}'              => (string)getSetting('currency_symbol', 'ZAR') . number_format(45, 2),
         ];
 
         $ajaxResSubject  = strtr($ajaxSubject,  $ajaxVars);
@@ -755,6 +768,20 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 '{{expires_at}}'               => date('F j, Y', strtotime('+90 days')),
                 '{{hotel_phone}}'              => (string)getSetting('phone_main', ''),
                 '{{hotel_address}}'            => (string)getSetting('hotel_address', getSetting('address', 'Beachfront Road, Cape Maclear')),
+                '{{address}}'                  => (string)getSetting('hotel_address', getSetting('address', 'Beachfront Road, Cape Maclear')),
+                '{{logo_html}}'                => (function () use ($currencySymbol): string {
+                    $url      = function_exists('getHotelLogoUrl') ? getHotelLogoUrl() : '';
+                    $siteName = (string)getSetting('site_name', 'Hotel');
+                    return $url !== '' ? '<img src="' . htmlspecialchars($url, ENT_QUOTES, 'UTF-8') . '" alt="' . htmlspecialchars($siteName, ENT_QUOTES, 'UTF-8') . '" style="max-width:160px;height:auto;display:block;margin:0 auto;">' : '';
+                })(),
+                '{{subtotal_amount}}'          => $currencySymbol . number_format(4500, 2),
+                '{{vat_number}}'               => (string)getSetting('vat_number', ''),
+                '{{vat_number_html}}'          => (function (): string {
+                    $n = (string)getSetting('vat_number', '');
+                    return $n !== '' ? '<p style="margin:8px 0 0;font-size:11px;color:#9b8f7e;text-align:center;">VAT Reg. No.: ' . htmlspecialchars($n, ENT_QUOTES, 'UTF-8') . '</p>' : '';
+                })(),
+                '{{levy_rate}}'                => '1.0',
+                '{{levy_amount}}'              => $currencySymbol . number_format(45, 2),
             ];
 
             $resolvedSubject  = strtr($subjectRaw,  $previewVars);
@@ -1383,6 +1410,7 @@ $tplDefaults = [
             <script>
                 // Inject CSRF token into all POST forms on this page (anti-CSRF protection)
                 window._bsCsrf = <?php echo json_encode($csrf_token); ?>;
+
                 function injectBookingSettingsCsrfTokens() {
                     document.querySelectorAll('form[method="POST"], form[method="post"], form[action="booking-settings.php"]').forEach(function(f) {
                         if (!f.querySelector('[name="csrf_token"]')) {

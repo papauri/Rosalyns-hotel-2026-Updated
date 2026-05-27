@@ -1973,9 +1973,15 @@ function sendConferenceInvoiceEmailToClient(array $enquiry, string $invoice_file
         $ciVatNumHtml = $ciVatNum !== ''
             ? '<p style="margin:8px 0 0;font-size:11px;color:#9b8f7e;text-align:center;">VAT Reg. No.: ' . htmlspecialchars($ciVatNum, ENT_QUOTES, 'UTF-8') . '</p>'
             : '';
+        $ciLogoSrc  = function_exists('hotel_invoice_logo_src') ? hotel_invoice_logo_src() : '';
+        $ciLogoHtml = $ciLogoSrc !== ''
+            ? '<img src="' . htmlspecialchars($ciLogoSrc, ENT_QUOTES, 'UTF-8') . '" alt="' . htmlspecialchars((string)$email_site_name, ENT_QUOTES, 'UTF-8') . '" style="max-width:160px;height:auto;display:block;margin:0 auto;">'
+            : '';
 
         $templateVars = [
             'site_name' => htmlspecialchars((string)$email_site_name, ENT_QUOTES, 'UTF-8'),
+            'logo_html' => $ciLogoHtml,
+            'address'   => htmlspecialchars((string)getSetting('hotel_address', getSetting('address', '')), ENT_QUOTES, 'UTF-8'),
             'inquiry_reference' => htmlspecialchars((string)($enquiry['inquiry_reference'] ?? ''), ENT_QUOTES, 'UTF-8'),
             'company_name' => htmlspecialchars((string)($enquiry['company_name'] ?? ''), ENT_QUOTES, 'UTF-8'),
             'contact_person' => htmlspecialchars((string)($enquiry['contact_person'] ?? ''), ENT_QUOTES, 'UTF-8'),

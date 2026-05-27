@@ -191,6 +191,10 @@ if (!function_exists('receipt_placeholders')) {
         $vatNumHtml  = $vatNumStr !== ''
             ? '<p style="margin:8px 0 0;font-size:11px;color:#9b8f7e;text-align:center;">VAT Reg. No.: ' . htmlspecialchars($vatNumStr, ENT_QUOTES, 'UTF-8') . '</p>'
             : '';
+        $logoSrc  = function_exists('hotel_invoice_logo_src') ? hotel_invoice_logo_src() : '';
+        $logoHtml = $logoSrc !== ''
+            ? '<img src="' . htmlspecialchars($logoSrc, ENT_QUOTES, 'UTF-8') . '" alt="' . htmlspecialchars($siteName, ENT_QUOTES, 'UTF-8') . '" style="max-width:160px;height:auto;display:block;margin:0 auto;">'
+            : '';
 
         return [
             '{{site_name}}' => htmlspecialchars($siteName, ENT_QUOTES, 'UTF-8'),
@@ -216,6 +220,7 @@ if (!function_exists('receipt_placeholders')) {
             '{{vat_number}}'      => htmlspecialchars($vatNumStr, ENT_QUOTES, 'UTF-8'),
             '{{vat_rate}}'        => $vatRateNum > 0.0 ? number_format($vatRateNum, 1) : '0',
             '{{vat_number_html}}' => $vatNumHtml,
+            '{{logo_html}}'       => $logoHtml,
         ];
     }
 }
