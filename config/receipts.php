@@ -191,7 +191,8 @@ if (!function_exists('receipt_placeholders')) {
         $vatNumHtml  = $vatNumStr !== ''
             ? '<p style="margin:8px 0 0;font-size:11px;color:#9b8f7e;text-align:center;">VAT Reg. No.: ' . htmlspecialchars($vatNumStr, ENT_QUOTES, 'UTF-8') . '</p>'
             : '';
-        $logoSrc  = function_exists('hotel_invoice_logo_src') ? hotel_invoice_logo_src() : '';
+        // Use public HTTPS URL — email clients (Gmail/Outlook) block data: URIs
+        $logoSrc  = function_exists('hotel_email_logo_url') ? hotel_email_logo_url() : '';
         $logoHtml = $logoSrc !== ''
             ? '<img src="' . htmlspecialchars($logoSrc, ENT_QUOTES, 'UTF-8') . '" alt="' . htmlspecialchars($siteName, ENT_QUOTES, 'UTF-8') . '" style="max-width:160px;height:auto;display:block;margin:0 auto;">'
             : '';
@@ -335,8 +336,8 @@ if (!function_exists('receipt_generate_pdf')) {
             : '';
 
         $templateVars = [
-            'logo_html' => (function_exists('hotel_invoice_logo_src') && hotel_invoice_logo_src() !== '')
-                ? '<img src="' . htmlspecialchars(hotel_invoice_logo_src(), ENT_QUOTES, 'UTF-8') . '" alt="' . htmlspecialchars($siteName, ENT_QUOTES, 'UTF-8') . '" height="88" style="height:88px;width:auto;display:block;margin:0 auto;">'
+            'logo_html' => (function_exists('hotel_email_logo_url') && hotel_email_logo_url() !== '')
+                ? '<img src="' . htmlspecialchars(hotel_email_logo_url(), ENT_QUOTES, 'UTF-8') . '" alt="' . htmlspecialchars($siteName, ENT_QUOTES, 'UTF-8') . '" height="88" style="height:88px;width:auto;display:block;margin:0 auto;">'
                 : '',
             'site_name' => htmlspecialchars($siteName, ENT_QUOTES, 'UTF-8'),
             'address' => htmlspecialchars($address, ENT_QUOTES, 'UTF-8'),

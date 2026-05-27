@@ -521,6 +521,41 @@ if (!function_exists('hotel_invoice_logo_src')) {
     }
 }
 
+/**
+ * Returns a public HTTPS URL for the hotel logo suitable for use in emails.
+ * Email clients (Gmail, Outlook) block data: URIs so base64 embedding does not work.
+ */
+if (!function_exists('hotel_email_logo_url')) {
+    function hotel_email_logo_url(): string
+    {
+        $siteUrl = trim((string)getSetting('site_url', ''));
+        $candidates = [
+            (string)getSetting('site_logo', ''),
+            (string)getSetting('logo_url', ''),
+            (string)getSetting('hotel_logo', ''),
+            'images/logo/logo.png',
+        ];
+
+        foreach ($candidates as $candidate) {
+            $candidate = trim($candidate);
+            if ($candidate === '') {
+                continue;
+            }
+            if (preg_match('#^https?://#i', $candidate)) {
+                return $candidate;
+            }
+            $relative  = ltrim($candidate, '/');
+            $localPath = __DIR__ . '/../' . $relative;
+            if (is_file($localPath)) {
+                $base = $siteUrl !== '' ? $siteUrl : (defined('BASE_URL') ? (string)BASE_URL : '');
+                return $base !== '' ? rtrim($base, '/') . '/' . $relative : $relative;
+            }
+        }
+
+        return '';
+    }
+}
+
 if (!function_exists('hotel_japandi_key_value_rows')) {
     function hotel_japandi_key_value_rows(array $rows, string $labelWidth = '30%', string $valueColor = '#6d6455', string $valueWeight = '500'): string
     {
@@ -1592,11 +1627,17 @@ function buildBookingEmailVariables(array $booking, ?array $room = null, array $
 
     // ── VAT / Levy tax vars ─────────────────────────────────────────────
     $vatEnabled   = in_array(getSetting('vat_enabled'), ['1', 1, true, 'true', 'on'], true);
+    $levyEnabled  = in_array(getSetting('tourism_levy_enabled'), ['1', 1, true, 'true', 'on'], true);
     $vatRateVal   = $vatEnabled ? (float)getSetting('vat_rate') : 0.0;
     $vatNumVal    = (string)getSetting('vat_number', '');
     $vatAmtVal    = (float)($booking['vat_amount'] ?? ($vatEnabled && isset($booking['total_amount']) ? (float)$booking['total_amount'] * $vatRateVal / 100.0 : 0.0));
+    // Use booking levy percent, fall back to site setting when levy is enabled
+    $levyPctVal   = (float)($booking['tourism_levy_percent'] ?? ($levyEnabled ? (float)getSetting('tourism_levy_percent', 0) : 0.0));
+    // Compute levy amount from subtotal when the booking has a rate but amount was 0
     $levyAmtVal   = (float)($booking['tourism_levy_amount'] ?? 0.0);
-    $levyPctVal   = (float)($booking['tourism_levy_percent'] ?? 0.0);
+    if ($levyAmtVal === 0.0 && $levyPctVal > 0.0) {
+        $levyAmtVal = (float)($booking['total_amount'] ?? 0) * $levyPctVal / 100.0;
+    }
     $totalTaxVal  = (float)($booking['total_with_vat'] ?? ((float)($booking['total_amount'] ?? 0) + $vatAmtVal + $levyAmtVal));
     $vars['vat_number']      = $vatNumVal;
     $vars['vat_rate']        = $vatRateVal > 0.0 ? number_format($vatRateVal, 1) : '0';
@@ -1610,7 +1651,8 @@ function buildBookingEmailVariables(array $booking, ?array $room = null, array $
         : '';
 
     // ── Logo / address vars ─────────────────────────────────────────────
-    $logoSrc  = function_exists('hotel_invoice_logo_src') ? hotel_invoice_logo_src() : '';
+    // Use public HTTPS URL — email clients (Gmail/Outlook) block data: URIs
+    $logoSrc  = function_exists('hotel_email_logo_url') ? hotel_email_logo_url() : '';
     $logoHtml = $logoSrc !== ''
         ? '<img src="' . htmlspecialchars($logoSrc, ENT_QUOTES, 'UTF-8') . '" alt="' . htmlspecialchars((string)$email_site_name, ENT_QUOTES, 'UTF-8') . '" style="max-width:160px;height:auto;display:block;margin:0 auto;">'
         : '';
