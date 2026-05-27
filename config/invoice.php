@@ -787,7 +787,7 @@ function sendPaymentInvoiceEmail(int $booking_id)
         }
 
         // Send invoice to guest with CC recipients
-        $result = sendInvoiceEmailToGuestWithCC($booking, $invoice_file, $cc_recipients);
+        $result = sendInvoiceEmailToGuestWithCC($booking, $invoice_file, $cc_recipients, $invoice_number);
 
         return [
             'success' => $result['success'],
@@ -884,7 +884,7 @@ function sendPaymentInvoiceEmailWithCC(int $booking_id, array $ccRecipients = []
         }
 
         // Send invoice to guest with custom CC recipients
-        $result = sendInvoiceEmailToGuestWithCC($booking, $invoice_file, $ccRecipients);
+        $result = sendInvoiceEmailToGuestWithCC($booking, $invoice_file, $ccRecipients, $invoice_number);
 
         return [
             'success' => $result['success'],
@@ -906,7 +906,7 @@ function sendPaymentInvoiceEmailWithCC(int $booking_id, array $ccRecipients = []
 /**
  * Send invoice email to guest with CC recipients
  */
-function sendInvoiceEmailToGuestWithCC(array $booking, string $invoice_file, array $cc_recipients = [])
+function sendInvoiceEmailToGuestWithCC(array $booking, string $invoice_file, array $cc_recipients = [], string $invoice_number = '')
 {
     global $pdo, $email_from_name, $email_from_email, $email_site_name, $email_site_url;
 
@@ -916,8 +916,15 @@ function sendInvoiceEmailToGuestWithCC(array $booking, string $invoice_file, arr
         $stmt->execute([$booking['room_id']]);
         $room = $stmt->fetch(PDO::FETCH_ASSOC);
 
+        $checkOut = !empty($booking['check_out_date']) ? date('F j, Y', strtotime((string)$booking['check_out_date'])) : '';
+        $siteUrl  = rtrim((string)($email_site_url ?? ''), '/');
+        $invoiceLink = $siteUrl . '/booking-lookup.php?ref=' . urlencode((string)($booking['booking_reference'] ?? ''));
         $templateVars = function_exists('buildBookingEmailVariables')
-            ? buildBookingEmailVariables($booking, $room)
+            ? buildBookingEmailVariables($booking, $room, [
+                'invoice_number' => $invoice_number,
+                'check_out'      => $checkOut,
+                'invoice_link'   => $invoiceLink,
+            ])
             : [];
         $dbTemplate = function_exists('renderBookingEmailTemplate')
             ? renderBookingEmailTemplate('payment_invoice', $templateVars)
@@ -1657,6 +1664,39 @@ function buildConferenceInvoiceHTML(array $enquiry, string $invoice_number, stri
                     <span class="invoice-value">' . htmlspecialchars($vatNumber) . '</span>
                 </div>';
         }
+
+        if (function_exists('hotel_default_conference_invoice_document_html') && function_exists('renderBookingDocumentTemplate')) {
+            $logoSrc = function_exists('hotel_invoice_logo_src') ? hotel_invoice_logo_src() : getInvoiceLogoUrl();
+            $logoHtml = $logoSrc !== ''
+                ? '<img src="' . htmlspecialchars($logoSrc, ENT_QUOTES, 'UTF-8') . '" alt="' . htmlspecialchars($site_name, ENT_QUOTES, 'UTF-8') . '" height="96" style="height:96px;width:auto;display:block;margin:0 auto;">'
+                : '';
+            $amountPaid = (float)($enquiry['amount_paid'] ?? $totalWithVat);
+            $balanceDue = (float)($enquiry['amount_due'] ?? max(0, $totalWithVat - $amountPaid));
+
+            return renderBookingDocumentTemplate('conference_invoice_document', [
+                'logo_html' => $logoHtml,
+                'site_name' => htmlspecialchars($site_name, ENT_QUOTES, 'UTF-8'),
+                'address' => htmlspecialchars($address, ENT_QUOTES, 'UTF-8'),
+                'contact_email' => htmlspecialchars($email_address, ENT_QUOTES, 'UTF-8'),
+                'contact_phone' => htmlspecialchars($phone_number, ENT_QUOTES, 'UTF-8'),
+                'invoice_number' => htmlspecialchars($invoice_number, ENT_QUOTES, 'UTF-8'),
+                'issued_date' => htmlspecialchars(date('j F Y'), ENT_QUOTES, 'UTF-8'),
+                'status_text' => htmlspecialchars($balanceDue > 0 ? 'BALANCE DUE' : 'PAID IN FULL', ENT_QUOTES, 'UTF-8'),
+                'inquiry_reference' => htmlspecialchars((string)($enquiry['inquiry_reference'] ?? ''), ENT_QUOTES, 'UTF-8'),
+                'company_name' => htmlspecialchars((string)($enquiry['company_name'] ?? ''), ENT_QUOTES, 'UTF-8'),
+                'contact_person' => htmlspecialchars((string)($enquiry['contact_person'] ?? ''), ENT_QUOTES, 'UTF-8'),
+                'client_email' => htmlspecialchars((string)($enquiry['email'] ?? ''), ENT_QUOTES, 'UTF-8'),
+                'client_phone' => htmlspecialchars((string)($enquiry['phone'] ?? ''), ENT_QUOTES, 'UTF-8'),
+                'conference_room' => htmlspecialchars((string)($enquiry['room_name'] ?? ''), ENT_QUOTES, 'UTF-8'),
+                'event_date' => htmlspecialchars($event_date, ENT_QUOTES, 'UTF-8'),
+                'event_time' => htmlspecialchars(date('H:i', strtotime((string)$enquiry['start_time'])) . ' - ' . date('H:i', strtotime((string)$enquiry['end_time'])), ENT_QUOTES, 'UTF-8'),
+                'attendees' => (string)((int)($enquiry['number_of_attendees'] ?? 0)),
+                'event_type' => htmlspecialchars((string)($enquiry['event_type'] ?? 'Conference'), ENT_QUOTES, 'UTF-8'),
+                'total_amount' => htmlspecialchars($currency_symbol . ' ' . number_format($totalWithVat, 2), ENT_QUOTES, 'UTF-8'),
+                'amount_paid' => htmlspecialchars($currency_symbol . ' ' . number_format($amountPaid, 2), ENT_QUOTES, 'UTF-8'),
+                'balance_due' => htmlspecialchars($currency_symbol . ' ' . number_format($balanceDue, 2), ENT_QUOTES, 'UTF-8'),
+            ], hotel_default_conference_invoice_document_html());
+        }
     }
 
     return '
@@ -1923,7 +1963,41 @@ function sendConferenceInvoiceEmailToClient(array $enquiry, string $invoice_file
 
         $currency_symbol = getSetting('currency_symbol');
 
+        // VAT / tax vars for conference invoice email
+        $ciVatEnabled = in_array(getSetting('vat_enabled'), ['1', 1, true, 'true', 'on'], true);
+        $ciVatRate    = $ciVatEnabled ? (float)getSetting('vat_rate') : 0.0;
+        $ciVatNum     = (string)getSetting('vat_number', '');
+        $ciSubtotal   = (float)($enquiry['total_amount'] ?? 0);
+        $ciVatAmt     = $ciVatEnabled ? ($ciSubtotal * $ciVatRate / 100.0) : 0.0;
+        $ciTotalWithVat = $ciSubtotal + $ciVatAmt;
+        $ciVatNumHtml = $ciVatNum !== ''
+            ? '<p style="margin:8px 0 0;font-size:11px;color:#9b8f7e;text-align:center;">VAT Reg. No.: ' . htmlspecialchars($ciVatNum, ENT_QUOTES, 'UTF-8') . '</p>'
+            : '';
+
+        $templateVars = [
+            'site_name' => htmlspecialchars((string)$email_site_name, ENT_QUOTES, 'UTF-8'),
+            'inquiry_reference' => htmlspecialchars((string)($enquiry['inquiry_reference'] ?? ''), ENT_QUOTES, 'UTF-8'),
+            'company_name' => htmlspecialchars((string)($enquiry['company_name'] ?? ''), ENT_QUOTES, 'UTF-8'),
+            'contact_person' => htmlspecialchars((string)($enquiry['contact_person'] ?? ''), ENT_QUOTES, 'UTF-8'),
+            'conference_room' => htmlspecialchars((string)($room['name'] ?? ''), ENT_QUOTES, 'UTF-8'),
+            'event_date' => htmlspecialchars(date('F j, Y', strtotime((string)$enquiry['event_date'])), ENT_QUOTES, 'UTF-8'),
+            'event_time' => htmlspecialchars(date('H:i', strtotime((string)$enquiry['start_time'])) . ' - ' . date('H:i', strtotime((string)$enquiry['end_time'])), ENT_QUOTES, 'UTF-8'),
+            'attendees' => (string)((int)($enquiry['number_of_attendees'] ?? 0)),
+            'subtotal_amount' => htmlspecialchars($currency_symbol . ' ' . number_format($ciSubtotal, 2), ENT_QUOTES, 'UTF-8'),
+            'vat_rate' => $ciVatRate > 0.0 ? number_format($ciVatRate, 1) : '0',
+            'vat_amount' => $ciVatAmt > 0.0 ? htmlspecialchars($currency_symbol . ' ' . number_format($ciVatAmt, 2), ENT_QUOTES, 'UTF-8') : '—',
+            'total_amount' => htmlspecialchars($currency_symbol . ' ' . number_format($ciTotalWithVat, 2), ENT_QUOTES, 'UTF-8'),
+            'vat_number' => htmlspecialchars($ciVatNum, ENT_QUOTES, 'UTF-8'),
+            'vat_number_html' => $ciVatNumHtml,
+            'contact_email' => htmlspecialchars((string)$email_from_email, ENT_QUOTES, 'UTF-8'),
+            'contact_phone' => htmlspecialchars((string)getSetting('phone_main', ''), ENT_QUOTES, 'UTF-8'),
+        ];
+        $dbTemplate = function_exists('renderBookingEmailTemplate')
+            ? renderBookingEmailTemplate('conference_invoice', $templateVars)
+            : null;
+
         // Prepare email content
+        $subject = 'Conference Payment Invoice - ' . htmlspecialchars($email_site_name) . ' [' . $enquiry['inquiry_reference'] . ']';
         $htmlBody = '
         <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
             <div style="background: linear-gradient(135deg, #1A1A1A 0%, #2A2A2A 100%); padding: 30px; text-align: center; border-radius: 10px 10px 0 0;">
@@ -1985,14 +2059,20 @@ function sendConferenceInvoiceEmailToClient(array $enquiry, string $invoice_file
             </div>
         </div>';
 
+        if ($dbTemplate) {
+            $subject = $dbTemplate['subject'];
+            $htmlBody = $dbTemplate['html_body'];
+        }
+
         // Send email with attachment and CC recipients
         return sendEmailWithAttachmentAndCC(
             $enquiry['email'],
             $enquiry['contact_person'],
-            'Conference Payment Invoice - ' . htmlspecialchars($email_site_name) . ' [' . $enquiry['inquiry_reference'] . ']',
+            $subject,
             $htmlBody,
             $invoice_file,
-            $cc_recipients
+            $cc_recipients,
+            $dbTemplate['text_body'] ?? ''
         );
     } catch (Exception $e) {
         error_log("Send Conference Invoice to Client Error: " . $e->getMessage());

@@ -1,5 +1,44 @@
 <?php
 
+require_once __DIR__ . '/../config/email.php';
+
+if (!function_exists('quotationPdfLogoHtml')) {
+    function quotationPdfLogoHtml(): string
+    {
+        $logoSrc = function_exists('hotel_invoice_logo_src') ? hotel_invoice_logo_src() : '';
+        if ($logoSrc === '') {
+            return '';
+        }
+
+        return '<img src="' . htmlspecialchars($logoSrc, ENT_QUOTES, 'UTF-8') . '" alt="Logo" height="88" style="height:88px;width:auto;display:block;margin:0 auto;">';
+    }
+}
+
+if (!function_exists('quotationPdfRenderDocument')) {
+    function quotationPdfRenderDocument(string $templateKey, string $fallbackHtml, array $vars, string $title): string
+    {
+        $html = function_exists('renderBookingDocumentTemplate')
+            ? renderBookingDocumentTemplate($templateKey, $vars, $fallbackHtml)
+            : strtr($fallbackHtml, function_exists('bookingTemplateReplaceMap') ? bookingTemplateReplaceMap($vars) : []);
+
+        if (function_exists('bookingRenderPdfFromHtml')) {
+            return bookingRenderPdfFromHtml($html, $title);
+        }
+
+        require_once __DIR__ . '/../vendor/autoload.php';
+        $pdf = new TCPDF('P', 'mm', 'A4', true, 'UTF-8', false);
+        $pdf->setPrintHeader(false);
+        $pdf->setPrintFooter(false);
+        $pdf->SetMargins(12, 12, 12);
+        $pdf->SetAutoPageBreak(true, 14);
+        $pdf->SetTitle($title);
+        $pdf->AddPage();
+        $pdf->writeHTML($html, true, false, true, false, '');
+
+        return $pdf->Output('', 'S');
+    }
+}
+
 /**
  * Quotation PDF Generator
  * Generates a premium TCPDF quotation for tentative bookings.
@@ -63,6 +102,43 @@ function generateQuotationPDF(array $booking, array $room, array $options = []):
     $fmt = static function (float $v) use ($currency): string {
         return $currency . number_format($v, 0);
     };
+
+    if (function_exists('hotel_default_room_quotation_document_html')) {
+        $guestsLabel = $adults . ' adult' . ($adults !== 1 ? 's' : '');
+        if ($children > 0) {
+            $guestsLabel .= ', ' . $children . ' child' . ($children !== 1 ? 'ren' : '');
+        }
+
+        return quotationPdfRenderDocument(
+            'tentative_quotation_document',
+            hotel_default_room_quotation_document_html(),
+            [
+                'logo_html' => quotationPdfLogoHtml(),
+                'site_name' => htmlspecialchars($site_name, ENT_QUOTES, 'UTF-8'),
+                'address' => htmlspecialchars($site_address, ENT_QUOTES, 'UTF-8'),
+                'contact_phone' => htmlspecialchars($site_phone, ENT_QUOTES, 'UTF-8'),
+                'contact_email' => htmlspecialchars($site_email, ENT_QUOTES, 'UTF-8'),
+                'quotation_reference' => htmlspecialchars($quote_ref, ENT_QUOTES, 'UTF-8'),
+                'valid_until' => htmlspecialchars($valid_until->format('F j, Y'), ENT_QUOTES, 'UTF-8'),
+                'guest_name' => htmlspecialchars((string)($booking['guest_name'] ?? ''), ENT_QUOTES, 'UTF-8'),
+                'booking_reference' => htmlspecialchars((string)($booking['booking_reference'] ?? ''), ENT_QUOTES, 'UTF-8'),
+                'room_name' => htmlspecialchars((string)($room['name'] ?? ''), ENT_QUOTES, 'UTF-8'),
+                'check_in_date' => htmlspecialchars(!empty($booking['check_in_date']) ? date('l, F j, Y', strtotime((string)$booking['check_in_date'])) : '', ENT_QUOTES, 'UTF-8'),
+                'check_out_date' => htmlspecialchars(!empty($booking['check_out_date']) ? date('l, F j, Y', strtotime((string)$booking['check_out_date'])) : '', ENT_QUOTES, 'UTF-8'),
+                'nights' => (string)$nights,
+                'guests' => htmlspecialchars($guestsLabel, ENT_QUOTES, 'UTF-8'),
+                'rate_per_night' => htmlspecialchars($fmt($rate_per_night), ENT_QUOTES, 'UTF-8'),
+                'room_subtotal' => htmlspecialchars($fmt($room_subtotal), ENT_QUOTES, 'UTF-8'),
+                'vat_amount' => htmlspecialchars($fmt($vat_amount), ENT_QUOTES, 'UTF-8'),
+                'deposit_amount' => htmlspecialchars($fmt($deposit_amt), ENT_QUOTES, 'UTF-8'),
+                'total_amount' => htmlspecialchars($fmt($total), ENT_QUOTES, 'UTF-8'),
+                'balance_due' => htmlspecialchars($fmt(max(0, $total - $deposit_amt)), ENT_QUOTES, 'UTF-8'),
+                'payment_policy' => nl2br(htmlspecialchars($payment_policy, ENT_QUOTES, 'UTF-8')),
+                'quotation_notes' => nl2br(htmlspecialchars($notes, ENT_QUOTES, 'UTF-8')),
+            ],
+            'Quotation ' . $quote_ref
+        );
+    }
 
     // ── Colours & fonts ───────────────────────────────────────────────────────
     // Warm wood brown (primary)
@@ -468,6 +544,35 @@ function generateConferenceQuotationPDF(array $enquiry, array $room, array $opti
         return htmlspecialchars((string)$value, ENT_QUOTES, 'UTF-8');
     };
 
+    if (function_exists('hotel_default_conference_quotation_document_html')) {
+        return quotationPdfRenderDocument(
+            'conference_quotation_document',
+            hotel_default_conference_quotation_document_html(),
+            [
+                'logo_html' => quotationPdfLogoHtml(),
+                'site_name' => $esc($siteName),
+                'address' => $esc($siteAddress),
+                'contact_phone' => $esc($sitePhone),
+                'contact_email' => $esc($siteEmail),
+                'quotation_reference' => $esc($quoteRef),
+                'valid_until' => $esc($validUntil->format('F j, Y')),
+                'inquiry_reference' => $esc((string)($enquiry['inquiry_reference'] ?? '')),
+                'company_name' => $esc((string)($enquiry['company_name'] ?? '')),
+                'contact_person' => $esc((string)($enquiry['contact_person'] ?? '')),
+                'conference_room' => $esc($roomName),
+                'event_date' => $esc($eventDate),
+                'event_time' => $esc($eventTime),
+                'attendees' => (string)$attendees,
+                'total_amount' => $esc($fmt($totalAmount)),
+                'vat_amount' => $esc($fmt($vatAmount)),
+                'deposit_amount' => $esc($fmt($depositRequired)),
+                'payment_policy' => nl2br($esc($paymentPolicy)),
+                'quotation_notes' => nl2br($esc($notes)),
+            ],
+            'Conference Quotation ' . $quoteRef
+        );
+    }
+
     $pdf = new TCPDF('P', 'mm', 'A4', true, 'UTF-8', false);
     $pdf->setPrintHeader(false);
     $pdf->setPrintFooter(false);
@@ -616,6 +721,32 @@ function generateEventQuotationPDF(array $event, array $recipient, array $option
     $esc = static function (mixed $value): string {
         return htmlspecialchars((string)$value, ENT_QUOTES, 'UTF-8');
     };
+
+    if (function_exists('hotel_default_event_quotation_document_html')) {
+        return quotationPdfRenderDocument(
+            'event_quotation_document',
+            hotel_default_event_quotation_document_html(),
+            [
+                'logo_html' => quotationPdfLogoHtml(),
+                'site_name' => $esc($siteName),
+                'address' => '',
+                'contact_phone' => $esc($sitePhone),
+                'contact_email' => $esc($siteEmail),
+                'quotation_reference' => $esc($quoteRef),
+                'valid_until' => $esc($validUntil->format('F j, Y')),
+                'recipient_name' => $esc((string)($recipient['name'] ?? 'Guest')),
+                'event_title' => $esc((string)($event['title'] ?? 'Event')),
+                'event_date' => $esc($eventDate),
+                'event_time' => $esc($eventTime),
+                'event_location' => $esc($location),
+                'attendee_count' => (string)$attendeeCount,
+                'rate_per_attendee' => $esc($fmt($unitPrice)),
+                'total_amount' => $esc($fmt($totalAmount)),
+                'quotation_notes' => nl2br($esc($notes)),
+            ],
+            'Event Quotation ' . $quoteRef
+        );
+    }
 
     $pdf = new TCPDF('P', 'mm', 'A4', true, 'UTF-8', false);
     $pdf->setPrintHeader(false);

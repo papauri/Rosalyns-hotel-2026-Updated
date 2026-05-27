@@ -15,6 +15,61 @@ $message = '';
 $error = '';
 $template_preview = null;
 $default_site_maintenance_message = 'Our website is temporarily unavailable while we complete scheduled maintenance. Please check back shortly.';
+$booking_template_defs_master = [
+    'booking_received' => 'Booking Received Email',
+    'booking_confirmed' => 'Booking Confirmed Email',
+    'booking_cancelled' => 'Booking Cancelled Email',
+    'payment_invoice' => 'Room Invoice Email',
+    'payment_invoice_document' => 'Room Invoice PDF',
+    'conference_invoice' => 'Conference Invoice Email',
+    'conference_invoice_document' => 'Conference Invoice PDF',
+    'tentative_booking_created' => 'Tentative Booking Created Email',
+    'tentative_booking_reminder' => 'Tentative Booking Reminder Email',
+    'tentative_booking_expired' => 'Tentative Booking Expired Email',
+    'tentative_booking_converted' => 'Tentative Booking Confirmed Email',
+    'tentative_quotation' => 'Room Quotation Email',
+    'tentative_quotation_document' => 'Room Quotation PDF',
+    'conference_quotation' => 'Conference Quotation Email',
+    'conference_quotation_document' => 'Conference Quotation PDF',
+    'event_quotation' => 'Event Quotation Email',
+    'event_quotation_document' => 'Event Quotation PDF',
+    'credit_note' => 'Credit Note Email',
+    'credit_note_document' => 'Credit Note PDF',
+    'payment_receipt' => 'Payment Receipt Email',
+    'payment_receipt_document' => 'Payment Receipt PDF',
+];
+$booking_document_template_keys = [
+    'payment_invoice_document',
+    'conference_invoice_document',
+    'tentative_quotation_document',
+    'conference_quotation_document',
+    'event_quotation_document',
+    'credit_note_document',
+    'payment_receipt_document',
+];
+$booking_template_short_names = [
+    'booking_received' => 'Received Email',
+    'booking_confirmed' => 'Confirmed Email',
+    'booking_cancelled' => 'Cancelled Email',
+    'payment_invoice' => 'Room Invoice Email',
+    'payment_invoice_document' => 'Room Invoice PDF',
+    'conference_invoice' => 'Conference Invoice Email',
+    'conference_invoice_document' => 'Conference Invoice PDF',
+    'tentative_booking_created' => 'Tentative New',
+    'tentative_booking_reminder' => 'Tentative Reminder',
+    'tentative_booking_expired' => 'Tentative Expired',
+    'tentative_booking_converted' => 'Tentative Confirmed',
+    'tentative_quotation' => 'Room Quote Email',
+    'tentative_quotation_document' => 'Room Quote PDF',
+    'conference_quotation' => 'Conference Quote Email',
+    'conference_quotation_document' => 'Conference Quote PDF',
+    'event_quotation' => 'Event Quote Email',
+    'event_quotation_document' => 'Event Quote PDF',
+    'credit_note' => 'Credit Note Email',
+    'credit_note_document' => 'Credit Note PDF',
+    'payment_receipt' => 'Receipt Email',
+    'payment_receipt_document' => 'Receipt PDF',
+];
 
 // Handle enable/disable via GET parameter
 if (isset($_GET['enable'])) {
@@ -136,21 +191,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['booking_email_templat
     header('Content-Type: application/json; charset=utf-8');
     try {
         $ajaxKey = trim((string)($_POST['booking_email_template_preview'] ?? ''));
-        $ajaxValidKeys = [
-            'booking_received',
-            'booking_confirmed',
-            'booking_cancelled',
-            'payment_invoice',
-            'payment_invoice_document',
-            'tentative_booking_created',
-            'tentative_booking_reminder',
-            'tentative_booking_expired',
-            'tentative_booking_converted',
-            'tentative_quotation',
-            'conference_quotation',
-            'event_quotation',
-            'credit_note',
-        ];
+        $ajaxValidKeys = array_keys($booking_template_defs_master);
         if (!in_array($ajaxKey, $ajaxValidKeys, true)) {
             throw new Exception('Invalid template key');
         }
@@ -242,6 +283,24 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['booking_email_templat
             '{{total_due}}'                => (string)getSetting('currency_symbol', 'ZAR') . number_format(5175, 2),
             '{{amount_paid}}'              => (string)getSetting('currency_symbol', 'ZAR') . number_format(1000, 2),
             '{{balance_due}}'              => (string)getSetting('currency_symbol', 'ZAR') . number_format(4175, 2),
+            '{{invoice_number}}'           => 'INV-2026-000001',
+            '{{issued_date}}'              => date('j F Y'),
+            '{{status_text}}'              => 'BALANCE DUE',
+            '{{client_email}}'             => 'events@example.com',
+            '{{client_phone}}'             => '+27 82 444 2211',
+            '{{event_type}}'               => 'Corporate Seminar',
+            '{{rate_per_attendee}}'        => (string)getSetting('currency_symbol', 'ZAR') . number_format(750, 2),
+            '{{payment_reference}}'        => 'PAY-2026-PREVIEW-001',
+            '{{payment_date}}'             => date('d M Y'),
+            '{{payment_method}}'           => 'Bank Transfer',
+            '{{payment_type}}'             => 'Full Payment',
+            '{{payment_status}}'           => 'Completed',
+            '{{payment_amount}}'           => (string)getSetting('currency_symbol', 'ZAR') . number_format(4500, 2),
+            '{{receipt_number}}'           => 'RCP-2026-000042',
+            '{{booking_type}}'             => 'Restaurant',
+            '{{description}}'              => 'Restaurant order preview for table service payment.',
+            '{{bank_details_html}}'        => '<div style="background:#FCFAF7;padding:7px 10px;border-top:2px solid #D5B37C;"><p style="margin:0 0 4px;font-size:6px;letter-spacing:1px;text-transform:uppercase;color:#20303E;font-weight:700;">Bank Details</p><p style="margin:0;font-size:6px;color:#1E2430;">Bank: Preview Bank<br>Account No.: 00123456789</p></div>',
+            '{{receipt_terms}}'            => '<p style="margin:0;font-size:6px;line-height:1.5;color:#5F655F;">Thank you for your payment. Please retain this receipt for your records.</p>',
             '{{credit_note_number}}'       => 'CN-RBH-2026-001',
             '{{amount}}'                   => (string)getSetting('currency_symbol', 'ZAR') . number_format(1200, 2),
             '{{balance}}'                  => (string)getSetting('currency_symbol', 'ZAR') . number_format(850, 2),
@@ -371,7 +430,22 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['booking_email_templat
             ]));
 
             $ajaxFullHtml = '<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1"><style>body{margin:0;padding:18px;background:#F4EFE8;}img{max-width:100%;}</style></head><body>' . $invoicePreviewHtml . '</body></html>';
-            echo json_encode(['success' => true, 'full_html' => $ajaxFullHtml, 'subject' => $ajaxResSubject, 'text_body' => $ajaxResTextBody]);
+            echo json_encode(['success' => true, 'full_html' => $ajaxFullHtml, 'subject' => $ajaxResSubject, 'text_body' => $ajaxResTextBody, 'html_body' => $invoicePreviewHtml, 'is_document' => true]);
+            exit;
+        }
+
+        if (in_array($ajaxKey, $booking_document_template_keys, true)) {
+            $documentLogoUrl = function_exists('hotel_invoice_logo_src')
+                ? hotel_invoice_logo_src()
+                : '';
+            $documentLogoHtml = $documentLogoUrl !== ''
+                ? '<img src="' . htmlspecialchars($documentLogoUrl, ENT_QUOTES, 'UTF-8') . '" alt="' . htmlspecialchars((string)getSetting('site_name', 'Hotel'), ENT_QUOTES, 'UTF-8') . '" height="96" style="height:96px;width:auto;display:block;margin:0 auto;">'
+                : '';
+            $documentPreviewHtml = strtr($ajaxHtmlBody, array_merge($ajaxVars, [
+                '{{logo_html}}' => $documentLogoHtml,
+            ]));
+            $ajaxFullHtml = '<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1"><style>body{margin:0;padding:18px;background:#F4EFE8;}img{max-width:100%;}</style></head><body>' . $documentPreviewHtml . '</body></html>';
+            echo json_encode(['success' => true, 'full_html' => $ajaxFullHtml, 'subject' => $ajaxResSubject, 'text_body' => $ajaxResTextBody, 'html_body' => $documentPreviewHtml, 'is_document' => true]);
             exit;
         }
 
@@ -379,7 +453,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['booking_email_templat
             ? wrapEmailTemplate($ajaxResHtmlBody, $ajaxResSubject)
             : $ajaxResHtmlBody;
 
-        echo json_encode(['success' => true, 'full_html' => $ajaxFullHtml, 'subject' => $ajaxResSubject, 'text_body' => $ajaxResTextBody]);
+        echo json_encode(['success' => true, 'full_html' => $ajaxFullHtml, 'subject' => $ajaxResSubject, 'text_body' => $ajaxResTextBody, 'html_body' => $ajaxResHtmlBody, 'is_document' => false]);
     } catch (Exception $e) {
         echo json_encode(['success' => false, 'error' => $e->getMessage()]);
     }
@@ -395,16 +469,40 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['send_test_email'], $_
         $ajaxTestEmail   = trim((string)($_POST['test_email_address'] ?? ''));
         $ajaxTestSubject = trim((string)($_POST['test_subject'] ?? 'Test Email Preview'));
         $ajaxTestHtml    = trim((string)($_POST['test_html'] ?? ''));
+        $ajaxTestText    = trim((string)($_POST['test_text_body'] ?? ''));
+        $ajaxTestTemplateKey = trim((string)($_POST['test_template_key'] ?? ''));
+        $ajaxIsDocument = in_array(strtolower(trim((string)($_POST['test_is_document'] ?? '0'))), ['1', 'true', 'yes'], true);
         if (!filter_var($ajaxTestEmail, FILTER_VALIDATE_EMAIL)) {
             throw new Exception('Invalid email address');
         }
         if (empty($ajaxTestHtml)) {
             throw new Exception('No preview HTML to send');
         }
-        if (!function_exists('sendEmail')) {
+        if (!$ajaxIsDocument && !function_exists('sendEmail')) {
             throw new Exception('Email sending not available');
         }
-        $result = sendEmail($ajaxTestEmail, $ajaxTestEmail, '[TEST] ' . $ajaxTestSubject, $ajaxTestHtml);
+        if ($ajaxIsDocument) {
+            if (!function_exists('sendEmailWithAttachments') || !function_exists('bookingRenderPdfFromHtml')) {
+                throw new Exception('PDF attachment test sending is not available');
+            }
+            $attachmentStem = $ajaxTestTemplateKey !== '' ? $ajaxTestTemplateKey : 'document-preview';
+            $attachmentStem = preg_replace('/[^A-Za-z0-9._-]+/', '-', $attachmentStem) ?: 'document-preview';
+            $emailBody = '<p>Please find attached the PDF preview for <strong>' . htmlspecialchars($ajaxTestSubject, ENT_QUOTES, 'UTF-8') . '</strong>.</p>';
+            $result = sendEmailWithAttachments(
+                $ajaxTestEmail,
+                $ajaxTestEmail,
+                '[TEST] ' . $ajaxTestSubject,
+                $emailBody,
+                [[
+                    'name' => $attachmentStem . '.pdf',
+                    'content' => bookingRenderPdfFromHtml($ajaxTestHtml, $ajaxTestSubject),
+                    'mime' => 'application/pdf',
+                ]],
+                'Attached is the PDF preview for ' . $ajaxTestSubject . '.'
+            );
+        } else {
+            $result = sendEmail($ajaxTestEmail, $ajaxTestEmail, '[TEST] ' . $ajaxTestSubject, $ajaxTestHtml, $ajaxTestText);
+        }
         if (!empty($result['success'])) {
             echo json_encode(['success' => true, 'message' => "Test email sent to {$ajaxTestEmail}"]);
         } else {
@@ -545,21 +643,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         } elseif (isset($_POST['booking_email_template_preview'])) {
             $templateKey = trim((string)($_POST['booking_email_template_preview'] ?? ''));
 
-            $templateDefs = [
-                'booking_received'      => 'Booking Received (Customer)',
-                'booking_confirmed'     => 'Booking Confirmed (Customer)',
-                'booking_cancelled'     => 'Booking Cancelled (Customer)',
-                'payment_invoice'       => 'Payment Invoice (Customer)',
-                'payment_invoice_document' => 'Invoice Document (PDF Attachment)',
-                'tentative_booking_created' => 'Tentative Booking Created',
-                'tentative_booking_reminder' => 'Tentative Booking Reminder',
-                'tentative_booking_expired' => 'Tentative Booking Expired',
-                'tentative_booking_converted' => 'Tentative Booking Converted',
-                'tentative_quotation'   => 'Tentative Booking — Quotation',
-                'conference_quotation'  => 'Conference Quotation',
-                'event_quotation'       => 'Event Quotation',
-                'credit_note'           => 'Credit Note (Guest)',
-            ];
+            $templateDefs = $booking_template_defs_master;
 
             if (!isset($templateDefs[$templateKey])) {
                 throw new Exception('Invalid template selected for preview');
@@ -644,6 +728,24 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 '{{child_supplement}}'         => $currencySymbol . '0',
                 '{{deposit_amount}}'           => $currencySymbol . number_format(1000, 2),
                 '{{balance_due}}'              => $currencySymbol . number_format(3500, 2),
+                '{{invoice_number}}'           => 'INV-2026-000001',
+                '{{issued_date}}'              => date('j F Y'),
+                '{{status_text}}'              => 'BALANCE DUE',
+                '{{client_email}}'             => 'events@example.com',
+                '{{client_phone}}'             => '+27 82 444 2211',
+                '{{event_type}}'               => 'Corporate Seminar',
+                '{{rate_per_attendee}}'        => $currencySymbol . number_format(750, 2),
+                '{{payment_reference}}'        => 'PAY-2026-PREVIEW-001',
+                '{{payment_date}}'             => date('d M Y'),
+                '{{payment_method}}'           => 'Bank Transfer',
+                '{{payment_type}}'             => 'Full Payment',
+                '{{payment_status}}'           => 'Completed',
+                '{{payment_amount}}'           => $currencySymbol . number_format(4500, 2),
+                '{{receipt_number}}'           => 'RCP-2026-000042',
+                '{{booking_type}}'             => 'Restaurant',
+                '{{description}}'              => 'Restaurant order preview for table service payment.',
+                '{{bank_details_html}}'        => '<div style="background:#FCFAF7;padding:7px 10px;border-top:2px solid #D5B37C;"><p style="margin:0 0 4px;font-size:6px;letter-spacing:1px;text-transform:uppercase;color:#20303E;font-weight:700;">Bank Details</p><p style="margin:0;font-size:6px;color:#1E2430;">Bank: Preview Bank<br>Account No.: 00123456789</p></div>',
+                '{{receipt_terms}}'            => '<p style="margin:0;font-size:6px;line-height:1.5;color:#5F655F;">Thank you for your payment. Please retain this receipt for your records.</p>',
                 '{{credit_note_number}}'       => 'CN-RBH-2026-001',
                 '{{amount}}'                   => $currencySymbol . number_format(1200, 2),
                 '{{balance}}'                  => $currencySymbol . number_format(850, 2),
@@ -699,20 +801,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 throw new Exception('Booking template storage is not available');
             }
 
-            $templateDefs = [
-                'booking_received'    => 'Booking Received (Customer)',
-                'booking_confirmed'   => 'Booking Confirmed (Customer)',
-                'booking_cancelled'   => 'Booking Cancelled (Customer)',
-                'payment_invoice'     => 'Payment Invoice (Customer)',
-                'payment_invoice_document' => 'Invoice Document (PDF Attachment)',
-                'tentative_booking_created' => 'Tentative Booking Created',
-                'tentative_booking_reminder' => 'Tentative Booking Reminder',
-                'tentative_booking_expired' => 'Tentative Booking Expired',
-                'tentative_booking_converted' => 'Tentative Booking Converted',
-                'tentative_quotation' => 'Tentative Booking — Quotation',
-                'conference_quotation' => 'Conference Quotation',
-                'event_quotation' => 'Event Quotation',
-            ];
+            $templateDefs = $booking_template_defs_master;
 
             foreach ($templateDefs as $templateKey => $templateName) {
                 $subject = trim($_POST[$templateKey . '_subject'] ?? '');
@@ -810,21 +899,7 @@ $current_conference_email = getSetting('conference_email', getSetting('email_res
 $current_gym_email = getSetting('gym_email', getSetting('email_reservations', ''));
 $current_restaurant_email = getSetting('email_restaurant', getSetting('email_reservations', ''));
 
-$booking_template_defs = [
-    'booking_received'    => 'Booking Received (Customer)',
-    'booking_confirmed'   => 'Booking Confirmed (Customer)',
-    'booking_cancelled'   => 'Booking Cancelled (Customer)',
-    'payment_invoice'     => 'Payment Invoice (Customer)',
-    'payment_invoice_document' => 'Invoice Document (PDF Attachment)',
-    'tentative_booking_created' => 'Tentative Booking Created',
-    'tentative_booking_reminder' => 'Tentative Booking Reminder',
-    'tentative_booking_expired' => 'Tentative Booking Expired',
-    'tentative_booking_converted' => 'Tentative Booking Converted',
-    'tentative_quotation' => 'Tentative Booking — Quotation',
-    'conference_quotation' => 'Conference Quotation',
-    'event_quotation' => 'Event Quotation',
-    'credit_note'         => 'Credit Note (Guest)',
-];
+$booking_template_defs = $booking_template_defs_master;
 
 $booking_templates = [];
 foreach ($booking_template_defs as $template_key => $template_name) {
@@ -1039,6 +1114,74 @@ $tplDefaults = [
 <p>{{quotation_notes}}</p>
 <p>Contact: <a href="mailto:{{contact_email}}">{{contact_email}}</a> | {{contact_phone}}</p>',
     ],
+    'conference_invoice' => [
+        'subject' => 'Conference Invoice - {{site_name}} [{{inquiry_reference}}]',
+        'html' => '<h1 style="color:#1A1A1A;text-align:center;">Conference Invoice</h1>
+<p>Dear {{contact_person}},</p>
+<p>Your conference invoice is ready. A PDF copy is attached for your records.</p>
+<table style="width:100%;border-collapse:collapse;margin:16px 0;">
+  <tr><td style="padding:8px;border:1px solid #e0e0e0;font-weight:bold;">Invoice Number</td><td style="padding:8px;border:1px solid #e0e0e0;">{{invoice_number}}</td></tr>
+  <tr><td style="padding:8px;border:1px solid #e0e0e0;font-weight:bold;">Inquiry Reference</td><td style="padding:8px;border:1px solid #e0e0e0;">{{inquiry_reference}}</td></tr>
+  <tr><td style="padding:8px;border:1px solid #e0e0e0;font-weight:bold;">Conference Room</td><td style="padding:8px;border:1px solid #e0e0e0;">{{conference_room}}</td></tr>
+  <tr><td style="padding:8px;border:1px solid #e0e0e0;font-weight:bold;">Event Date</td><td style="padding:8px;border:1px solid #e0e0e0;">{{event_date}}</td></tr>
+  <tr><td style="padding:8px;border:1px solid #e0e0e0;font-weight:bold;">Total</td><td style="padding:8px;border:1px solid #e0e0e0;font-weight:bold;">{{total_amount}}</td></tr>
+  <tr><td style="padding:8px;border:1px solid #e0e0e0;font-weight:bold;">Balance Due</td><td style="padding:8px;border:1px solid #e0e0e0;font-weight:bold;color:#A63A3A;">{{balance_due}}</td></tr>
+</table>
+<p>Contact: <a href="mailto:{{contact_email}}">{{contact_email}}</a> | {{contact_phone}}</p>',
+    ],
+    'conference_invoice_document' => [
+        'subject' => 'Conference Invoice Document',
+        'html' => function_exists('hotel_default_conference_invoice_document_html') ? hotel_default_conference_invoice_document_html() : '',
+    ],
+    'tentative_quotation_document' => [
+        'subject' => 'Room Quotation Document',
+        'html' => function_exists('hotel_default_room_quotation_document_html') ? hotel_default_room_quotation_document_html() : '',
+    ],
+    'conference_quotation_document' => [
+        'subject' => 'Conference Quotation Document',
+        'html' => function_exists('hotel_default_conference_quotation_document_html') ? hotel_default_conference_quotation_document_html() : '',
+    ],
+    'event_quotation_document' => [
+        'subject' => 'Event Quotation Document',
+        'html' => function_exists('hotel_default_event_quotation_document_html') ? hotel_default_event_quotation_document_html() : '',
+    ],
+    'credit_note' => [
+        'subject' => 'Credit Note - {{site_name}} [{{credit_note_number}}]',
+        'html' => '<h1 style="color:#8B7355;text-align:center;">Credit Note</h1>
+<p>Dear {{guest_name}},</p>
+<p>Your credit note has been issued and the PDF copy is attached.</p>
+<p><strong>Credit Note Number:</strong> {{credit_note_number}}<br>
+<strong>Booking Reference:</strong> {{booking_reference}}<br>
+<strong>Amount:</strong> {{amount}}<br>
+<strong>Amount Used:</strong> {{amount_used}}<br>
+<strong>Balance:</strong> {{balance}}<br>
+<strong>Reason:</strong> {{reason}}<br>
+<strong>Expires:</strong> {{expires_at}}</p>
+<p>{{reason_notes}}</p>
+<p>Contact: <a href="mailto:{{contact_email}}">{{contact_email}}</a> | {{contact_phone}}</p>',
+    ],
+    'credit_note_document' => [
+        'subject' => 'Credit Note Document',
+        'html' => function_exists('hotel_default_credit_note_document_html') ? hotel_default_credit_note_document_html() : '',
+    ],
+    'payment_receipt' => [
+        'subject' => 'Payment Receipt - {{site_name}} [{{receipt_number}}]',
+        'html' => '<h1 style="color:#1A1A1A;text-align:center;">Payment Receipt</h1>
+<p>Dear {{guest_name}},</p>
+<p>Your payment receipt is attached for your records.</p>
+<table style="width:100%;border-collapse:collapse;margin:16px 0;">
+  <tr><td style="padding:8px;border:1px solid #e0e0e0;font-weight:bold;">Receipt Number</td><td style="padding:8px;border:1px solid #e0e0e0;">{{receipt_number}}</td></tr>
+  <tr><td style="padding:8px;border:1px solid #e0e0e0;font-weight:bold;">Booking Type</td><td style="padding:8px;border:1px solid #e0e0e0;">{{booking_type}}</td></tr>
+  <tr><td style="padding:8px;border:1px solid #e0e0e0;font-weight:bold;">Payment Reference</td><td style="padding:8px;border:1px solid #e0e0e0;">{{payment_reference}}</td></tr>
+  <tr><td style="padding:8px;border:1px solid #e0e0e0;font-weight:bold;">Amount Paid</td><td style="padding:8px;border:1px solid #e0e0e0;font-weight:bold;color:#065f46;">{{payment_amount}}</td></tr>
+</table>
+<p>{{description}}</p>
+<p>Contact: <a href="mailto:{{contact_email}}">{{contact_email}}</a> | {{contact_phone}}</p>',
+    ],
+    'payment_receipt_document' => [
+        'subject' => 'Payment Receipt Document',
+        'html' => function_exists('hotel_default_receipt_document_html') ? hotel_default_receipt_document_html() : '',
+    ],
 ];
 ?>
 <!DOCTYPE html>
@@ -1240,15 +1383,23 @@ $tplDefaults = [
             <script>
                 // Inject CSRF token into all POST forms on this page (anti-CSRF protection)
                 window._bsCsrf = <?php echo json_encode($csrf_token); ?>;
-                document.querySelectorAll('form[method="POST"], form[method="post"], form[action="booking-settings.php"]').forEach(function(f) {
-                    if (!f.querySelector('[name="csrf_token"]')) {
-                        var inp = document.createElement('input');
-                        inp.type = 'hidden';
-                        inp.name = 'csrf_token';
-                        inp.value = window._bsCsrf;
-                        f.appendChild(inp);
-                    }
-                });
+                function injectBookingSettingsCsrfTokens() {
+                    document.querySelectorAll('form[method="POST"], form[method="post"], form[action="booking-settings.php"]').forEach(function(f) {
+                        if (!f.querySelector('[name="csrf_token"]')) {
+                            var inp = document.createElement('input');
+                            inp.type = 'hidden';
+                            inp.name = 'csrf_token';
+                            inp.value = window._bsCsrf;
+                            f.appendChild(inp);
+                        }
+                    });
+                }
+
+                if (document.readyState === 'loading') {
+                    document.addEventListener('DOMContentLoaded', injectBookingSettingsCsrfTokens);
+                } else {
+                    injectBookingSettingsCsrfTokens();
+                }
 
                 function toggleSiteMaintenance() {
                     const form = document.getElementById('site-maintenance-toggle-form');
@@ -1725,6 +1876,7 @@ $tplDefaults = [
                 '{{vat_rate}}',
                 '{{child_supplement}}',
                 '{{deposit_amount}}',
+                '{{total_due}}',
                 '{{balance_due}}',
                 '{{inquiry_reference}}',
                 '{{company_name}}',
@@ -1733,6 +1885,8 @@ $tplDefaults = [
                 '{{event_date}}',
                 '{{event_time}}',
                 '{{attendees}}',
+                '{{event_type}}',
+                '{{rate_per_attendee}}',
                 '{{recipient_name}}',
                 '{{event_title}}',
                 '{{event_location}}',
@@ -1749,14 +1903,32 @@ $tplDefaults = [
                 '{{reason}}',
                 '{{reason_notes}}',
                 '{{expires_at}}',
+                '{{logo_html}}',
+                '{{invoice_number}}',
+                '{{issued_date}}',
+                '{{status_text}}',
+                '{{client_email}}',
+                '{{client_phone}}',
+                '{{payment_reference}}',
+                '{{payment_date}}',
+                '{{payment_method}}',
+                '{{payment_type}}',
+                '{{payment_status}}',
+                '{{payment_amount}}',
+                '{{receipt_number}}',
+                '{{booking_type}}',
+                '{{description}}',
+                '{{bank_details_html}}',
+                '{{receipt_terms}}',
+                '{{address}}',
                 '{{hotel_phone}}',
                 '{{hotel_address}}',
             ];
             ?>
             <div class="settings-card tpl-editor-card" id="email-templates" style="scroll-margin-top:18px;">
                 <div style="margin-bottom:14px;">
-                    <h2 style="margin:0 0 4px;"><i class="fas fa-envelope-open-text" style="color:#8B7355;"></i> Booking Email Templates</h2>
-                    <p class="help-text" style="margin:0;">Edit each template's subject and body. Preview updates live while you type with full wrapped email rendering and placeholder replacement.</p>
+                    <h2 style="margin:0 0 4px;"><i class="fas fa-envelope-open-text" style="color:#8B7355;"></i> Booking Email &amp; PDF Templates</h2>
+                    <p class="help-text" style="margin:0;">Email tabs preview wrapped emails. PDF tabs preview document HTML and the test-send action emails a real PDF attachment generated from the preview.</p>
                 </div>
 
                 <!-- Tab bar -->
@@ -1765,26 +1937,11 @@ $tplDefaults = [
                         $tBadge = $booking_templates[$tkey];
                         $tIsActive  = (int)($tBadge['is_active'] ?? 1) === 1;
                         $tHasContent = !empty($tBadge['html_body']);
-                        $shortNames = [
-                            'booking_received' => 'Received',
-                            'booking_confirmed' => 'Confirmed',
-                            'booking_cancelled' => 'Cancelled',
-                            'payment_invoice' => 'Invoice Email',
-                            'payment_invoice_document' => 'Invoice PDF',
-                            'tentative_booking_created' => 'Tentative New',
-                            'tentative_booking_reminder' => 'Tentative Reminder',
-                            'tentative_booking_expired' => 'Tentative Expired',
-                            'tentative_booking_converted' => 'Tentative Confirmed',
-                            'tentative_quotation' => 'Room Quote',
-                            'conference_quotation' => 'Conference Quote',
-                            'event_quotation' => 'Event Quote',
-                            'credit_note' => 'Credit Note',
-                        ];
                     ?>
                         <button class="tpl-tab <?php echo $tkey === $activeTabKey ? 'active' : ''; ?>"
                             type="button" data-tpl="<?php echo $tkey; ?>" role="tab"
                             aria-selected="<?php echo $tkey === $activeTabKey ? 'true' : 'false'; ?>">
-                            <?php echo htmlspecialchars($shortNames[$tkey] ?? $tname); ?>
+                            <?php echo htmlspecialchars($booking_template_short_names[$tkey] ?? $tname); ?>
                             <span class="tpl-dot <?php echo $tIsActive ? 'dot-active' : 'dot-inactive'; ?>"
                                 title="<?php echo $tIsActive ? 'Active' : 'Inactive'; ?>"></span>
                             <?php if (!$tHasContent): ?><span class="tpl-dot dot-warn" title="Not configured"></span><?php endif; ?>
@@ -2220,8 +2377,10 @@ $tplDefaults = [
                             if (subjectLbl) subjectLbl.textContent = data.subject;
                             if (sendArea) {
                                 sendArea.style.display = 'block';
-                                sendArea._previewHtml = data.full_html;
+                                sendArea._previewHtml = data.html_body || '';
                                 sendArea._previewSubject = data.subject;
+                                sendArea._previewTextBody = data.text_body || '';
+                                sendArea._previewIsDocument = !!data.is_document;
                                 if (feedback) feedback.style.display = 'none';
                             }
                         } else {
@@ -2333,6 +2492,8 @@ $tplDefaults = [
                             }
                             var html = sendArea ? sendArea._previewHtml : null;
                             var subject = sendArea ? sendArea._previewSubject : 'Test Email';
+                            var textBody = sendArea ? (sendArea._previewTextBody || '') : '';
+                            var isDocument = sendArea ? !!sendArea._previewIsDocument : false;
                             if (!html) {
                                 if (feedback) {
                                     feedback.textContent = 'Generate a preview first.';
@@ -2349,6 +2510,9 @@ $tplDefaults = [
                             fd.set('test_email_address', email);
                             fd.set('test_subject', subject);
                             fd.set('test_html', html);
+                            fd.set('test_text_body', textBody);
+                            fd.set('test_template_key', key);
+                            fd.set('test_is_document', isDocument ? '1' : '0');
 
                             btn.disabled = true;
                             btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i>';

@@ -1,0 +1,167 @@
+<div style="font-family:'DM Sans',Arial,Helvetica,sans-serif;color:#3e3930;background:#d5cfc4;padding:40px 20px;margin:0;">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display:ital@0;1&family=DM+Sans:ital,opsz,wght@0,9..40,300..700;1,9..40,300..700&family=Noto+Serif+JP:wght@300;400&display=swap" rel="stylesheet">
+
+<!-- MAIN PAPER INVOICE -->
+<table style="width:100%;max-width:720px;margin:0 auto;border-collapse:collapse;
+  background-color:#f5f2eb;
+  background-image:
+    url(&quot;data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.75' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.055'/%3E%3C/svg%3E&quot;),
+    radial-gradient(100% 150% at 50% 0%, rgba(255,255,255,0.7) 0%, rgba(230,224,212,0.4) 100%);
+  border-radius:1px;
+  box-shadow: 0 16px 40px rgba(70,60,50,0.15), 0 4px 12px rgba(70,60,50,0.08);
+  border: 1px solid rgba(190,175,155,0.5);" cellpadding="0" cellspacing="0">
+
+  <!-- HEADER AREA -->
+  <tr>
+    <td style="padding:0;">
+      <table style="width:100%;border-collapse:collapse;" cellpadding="0" cellspacing="0">
+        <tr>
+          <td style="padding:48px 48px 36px;vertical-align:top;">
+            <div style="max-width:120px;margin-bottom:16px;color:#9b8f7e;">{{logo_html}}</div>
+            <div style="font-family:'Noto Serif JP','DM Serif Display',Georgia,serif;font-size:24px;color:#3e3930;letter-spacing:0.04em;line-height:1;font-weight:400;">{{site_name}}</div>
+            <div style="width:30px;height:1px;background:#c2b8a6;margin:16px 0;"></div>
+            <div style="font-size:10px;color:#6d6455;letter-spacing:0.08em;line-height:1.7;">{{address}}</div>
+            <div style="font-size:10px;color:#6d6455;letter-spacing:0.04em;margin-top:4px;">{{contact_phone}} &nbsp;·&nbsp; {{contact_email}}</div>
+            <div style="font-size:10px;color:#9b8f7e;letter-spacing:0.04em;margin-top:4px;">{{vat_number_html}}</div>
+          </td>
+          <td style="padding:48px 48px 36px;vertical-align:top;text-align:right;">
+            <div style="font-size:9px;letter-spacing:0.25em;text-transform:uppercase;color:#9b8f7e;font-weight:600;margin-bottom:12px;">Invoice</div>
+            <div style="font-family:'Noto Serif JP','DM Serif Display',Georgia,serif;font-size:24px;color:#3e3930;letter-spacing:0.04em;line-height:1.1;font-weight:400;">{{invoice_number}}</div>
+            <div style="font-size:11px;color:#6d6455;margin-top:12px;letter-spacing:0.06em;">Issued {{issued_date}}</div>
+            <div style="margin-top:16px;">
+              <span style="display:inline-block;padding:6px 16px;background:#ece5db;color:#5b5246;font-size:9px;letter-spacing:0.15em;text-transform:uppercase;font-weight:700;border-radius:2px;border:1px solid rgba(0,0,0,0.05);box-shadow:0 1px 2px rgba(0,0,0,0.02);">{{status_text}}</span>
+            </div>
+          </td>
+        </tr>
+      </table>
+    </td>
+  </tr>
+
+  <!-- THIN EDITORIAL SEPARATOR -->
+  <tr>
+    <td style="padding:0 48px;">
+      <div style="height:1px;background:linear-gradient(90deg, #d3cbc0 0%, #d3cbc0 100%);"></div>
+    </td>
+  </tr>
+
+  <!-- 2-COLUMN META GRID (Bill To & Stay Summary) -->
+  <tr>
+    <td style="padding:0;">
+      <table style="width:100%;border-collapse:collapse;" cellpadding="0" cellspacing="0">
+        <tr>
+          <!-- Bill To col -->
+          <td style="width:50%;padding:32px 48px;vertical-align:top;border-right:1px solid #d3cbc0;">
+            <div style="font-size:9px;letter-spacing:0.2em;text-transform:uppercase;color:#9b8f7e;font-weight:600;margin-bottom:20px;">Bill To</div>
+            <table style="width:100%;border-collapse:collapse;font-size:11px;line-height:1.8;" cellpadding="0" cellspacing="0">
+              <tr>
+                <td style="width:30%;color:#9b8f7e;font-weight:600;text-transform:uppercase;letter-spacing:0.1em;font-size:8px;">Name</td>
+                <td style="color:#3e3930;font-weight:500;">{{guest_name}}</td>
+              </tr>
+              <tr>
+                <td style="color:#9b8f7e;font-weight:600;text-transform:uppercase;letter-spacing:0.1em;font-size:8px;padding-top:6px;">Email</td>
+                <td style="color:#6d6455;padding-top:6px;">{{guest_email}}</td>
+              </tr>
+              <tr>
+                <td style="color:#9b8f7e;font-weight:600;text-transform:uppercase;letter-spacing:0.1em;font-size:8px;padding-top:6px;">Phone</td>
+                <td style="color:#6d6455;padding-top:6px;">{{guest_phone}}</td>
+              </tr>
+            </table>
+          </td>
+
+          <!-- Stay Summary col -->
+          <td style="width:50%;padding:32px 48px;vertical-align:top;">
+            <div style="font-size:9px;letter-spacing:0.2em;text-transform:uppercase;color:#9b8f7e;font-weight:600;margin-bottom:20px;">Stay Summary</div>
+            <table style="width:100%;border-collapse:collapse;font-size:11px;line-height:1.8;" cellpadding="0" cellspacing="0">
+              <tr>
+                <td style="width:35%;color:#9b8f7e;font-weight:600;text-transform:uppercase;letter-spacing:0.1em;font-size:8px;">Reference</td>
+                <td style="color:#6d6455;">{{booking_reference}}</td>
+              </tr>
+              <tr>
+                <td style="color:#9b8f7e;font-weight:600;text-transform:uppercase;letter-spacing:0.1em;font-size:8px;padding-top:4px;">Room</td>
+                <td style="color:#6d6455;padding-top:4px;">{{room_name}}</td>
+              </tr>
+              <tr>
+                <td style="color:#9b8f7e;font-weight:600;text-transform:uppercase;letter-spacing:0.1em;font-size:8px;padding-top:4px;">Check-in</td>
+                <td style="color:#6d6455;padding-top:4px;">{{check_in}}</td>
+              </tr>
+              <tr>
+                <td style="color:#9b8f7e;font-weight:600;text-transform:uppercase;letter-spacing:0.1em;font-size:8px;padding-top:4px;">Check-out</td>
+                <td style="color:#6d6455;padding-top:4px;">{{check_out}}</td>
+              </tr>
+              <tr>
+                <td style="color:#9b8f7e;font-weight:600;text-transform:uppercase;letter-spacing:0.1em;font-size:8px;padding-top:4px;">Guests</td>
+                <td style="color:#6d6455;padding-top:4px;">{{guests}}</td>
+              </tr>
+              <tr>
+                <td style="color:#9b8f7e;font-weight:600;text-transform:uppercase;letter-spacing:0.1em;font-size:8px;padding-top:4px;">Duration</td>
+                <td style="color:#6d6455;padding-top:4px;">{{nights}} night(s)</td>
+              </tr>
+            </table>
+          </td>
+        </tr>
+      </table>
+    </td>
+  </tr>
+
+  <!-- THIN EDITORIAL SEPARATOR -->
+  <tr>
+    <td style="padding:0 48px;">
+      <div style="height:1px;background:linear-gradient(90deg, #d3cbc0 0%, #d3cbc0 100%);"></div>
+    </td>
+  </tr>
+
+  <!-- ITEMS TABLE -->
+  <tr>
+    <td style="padding:36px 48px 36px;background:transparent;">
+      <div style="font-size:9px;letter-spacing:0.2em;text-transform:uppercase;color:#9b8f7e;font-weight:600;margin-bottom:20px;">Invoice Items</div>
+      <table style="width:100%;border-collapse:collapse;" cellpadding="0" cellspacing="0">
+        <tr>
+          <td width="54%" style="padding:14px 12px 14px 0;border-bottom:1px solid #d3cbc0;color:#9b8f7e;font-size:9px;letter-spacing:0.12em;text-transform:uppercase;font-weight:600;">Description</td>
+          <td width="10%" style="padding:14px 12px;border-bottom:1px solid #d3cbc0;color:#9b8f7e;font-size:9px;letter-spacing:0.12em;text-transform:uppercase;font-weight:600;text-align:center;">Qty</td>
+          <td width="18%" style="padding:14px 12px;border-bottom:1px solid #d3cbc0;color:#9b8f7e;font-size:9px;letter-spacing:0.12em;text-transform:uppercase;font-weight:600;text-align:right;">Unit Rate</td>
+          <td width="18%" style="padding:14px 0 14px 12px;border-bottom:1px solid #d3cbc0;color:#9b8f7e;font-size:9px;letter-spacing:0.12em;text-transform:uppercase;font-weight:600;text-align:right;">Line Total</td>
+        </tr>
+        {{charges_table_rows}}
+        {{totals_rows}}
+      </table>
+    </td>
+  </tr>
+
+  <!-- THIN EDITORIAL SEPARATOR -->
+  <tr><td style="padding:0 48px;"><div style="height:1px;background:#d3cbc0;"></div></td></tr>
+
+  <!-- Payment history -->
+  <tr><td style="padding:0 48px;background:transparent;">{{payment_history_section}}</td></tr>
+
+  <!-- THIN EDITORIAL SEPARATOR -->
+  <tr><td style="padding:0 48px;"><div style="height:1px;background:#d3cbc0;"></div></td></tr>
+
+  <!-- Bank details -->
+  <tr><td style="padding:0 48px;background:transparent;">{{bank_details}}</td></tr>
+
+  <!-- THIN EDITORIAL SEPARATOR -->
+  <tr><td style="padding:0 48px;"><div style="height:1px;background:#d3cbc0;"></div></td></tr>
+
+  <!-- Terms -->
+  <tr><td style="padding:0 48px;background:transparent;">{{invoice_terms}}</td></tr>
+
+  <!-- FOOTER -->
+  <tr>
+    <td style="padding:0;">
+      <table style="width:100%;border-collapse:collapse;background:rgba(211,203,192,0.25);" cellpadding="0" cellspacing="0">
+        <tr>
+          <td style="padding:28px 48px;vertical-align:middle;">
+            <span style="font-family:'Noto Serif JP','DM Serif Display',Georgia,serif;font-size:15px;color:#3e3930;font-weight:400;letter-spacing:0.06em;">{{site_name}}</span>
+          </td>
+          <td style="padding:28px 48px;text-align:right;vertical-align:middle;">
+            <span style="font-size:9px;color:#9b8f7e;letter-spacing:0.18em;text-transform:uppercase;">Thank you for choosing us</span>
+          </td>
+        </tr>
+      </table>
+    </td>
+  </tr>
+
+</table>
+</div>

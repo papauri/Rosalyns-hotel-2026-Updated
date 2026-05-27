@@ -1,0 +1,136 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Your Invoice</title>
+<!--[if !mso]><!-->
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display:ital@0;1&family=DM+Sans:ital,opsz,wght@0,9..40,300..700;1,9..40,300..700&family=Noto+Serif+JP:wght@300;400&display=swap" rel="stylesheet">
+<!--<![endif]-->
+<style>
+  body { margin: 0; padding: 0; background-color: #d5cfc4; -webkit-text-size-adjust: 100%; -ms-text-size-adjust: 100%; }
+  table, td { border-collapse: collapse; }
+  img { border: 0; height: auto; line-height: 100%; outline: none; text-decoration: none; -ms-interpolation-mode: bicubic; }
+</style>
+</head>
+<body style="margin:0;padding:0;background-color:#d5cfc4;">
+
+<div style="font-family:'DM Sans',Arial,Helvetica,sans-serif;color:#3e3930;background-color:#d5cfc4;padding:40px 20px;margin:0;">
+
+  <!-- Preheader text (hidden) -->
+  <div style="display:none;font-size:1px;color:#d5cfc4;line-height:1px;max-height:0px;max-width:0px;opacity:0;overflow:hidden;">
+    Thank you for your stay. Your invoice {{invoice_number}} from {{site_name}} is ready.
+  </div>
+
+  <table width="100%" border="0" cellspacing="0" cellpadding="0" style="background-color:#d5cfc4;">
+    <tr>
+      <td align="center" style="padding: 20px 0;">
+
+        <!-- MAIN EMAIL CARD -->
+        <table width="100%" border="0" cellspacing="0" cellpadding="0" style="max-width:600px;width:100%;margin:0 auto;background-color:#f5f2eb;background-image:url(&quot;data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.75' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.055'/%3E%3C/svg%3E&quot;);border-radius:1px;box-shadow:0 16px 40px rgba(70,60,50,0.15), 0 4px 12px rgba(70,60,50,0.08);border:1px solid rgba(190,175,155,0.5);">
+
+          <!-- HEADER -->
+          <tr>
+            <td align="center" style="padding:48px 48px 32px;">
+              <div style="margin-bottom:16px;color:#9b8f7e;">{{logo_html}}</div>
+              <div style="font-family:'Noto Serif JP','DM Serif Display',Georgia,serif;font-size:24px;color:#3e3930;letter-spacing:0.04em;line-height:1;font-weight:400;">{{site_name}}</div>
+              <div style="width:30px;height:1px;background:#c2b8a6;margin:16px auto;"></div>
+            </td>
+          </tr>
+
+          <!-- GREETING & MESSAGE -->
+          <tr>
+            <td style="padding:0 48px 32px;font-size:14px;line-height:1.8;color:#5c5549;">
+              <p style="margin:0 0 16px;">Dear {{guest_name}},</p>
+              <p style="margin:0 0 16px;">Thank you for choosing to stay with us. We hope you had a wonderful experience. Please find attached the official invoice (<strong>{{invoice_number}}</strong>) for your recent stay.</p>
+              <p style="margin:0;">Below is a brief summary of your booking. You can also view and download your full invoice online.</p>
+            </td>
+          </tr>
+
+          <!-- SUMMARY BOX -->
+          <tr>
+            <td style="padding:0 48px 36px;">
+              <table width="100%" border="0" cellspacing="0" cellpadding="0" style="border:1px solid #d3cbc0;background:rgba(211,203,192,0.15);">
+                <tr>
+                  <td style="padding:24px;">
+                    <div style="font-size:9px;letter-spacing:0.2em;text-transform:uppercase;color:#9b8f7e;font-weight:600;margin-bottom:16px;text-align:center;">Stay Summary</div>
+                    <table width="100%" border="0" cellspacing="0" cellpadding="0" style="font-size:12px;line-height:1.8;">
+                      <tr>
+                        <td width="40%" style="color:#9b8f7e;font-weight:600;text-transform:uppercase;letter-spacing:0.1em;font-size:9px;padding-bottom:8px;">Reference</td>
+                        <td width="60%" style="color:#3e3930;font-weight:500;padding-bottom:8px;text-align:right;">{{booking_reference}}</td>
+                      </tr>
+                      <tr>
+                        <td style="color:#9b8f7e;font-weight:600;text-transform:uppercase;letter-spacing:0.1em;font-size:9px;padding-bottom:8px;border-top:1px solid #e1dbce;padding-top:8px;">Check-out</td>
+                        <td style="color:#6d6455;padding-bottom:8px;text-align:right;border-top:1px solid #e1dbce;padding-top:8px;">{{check_out}}</td>
+                      </tr>
+                      <tr>
+                        <td style="color:#9b8f7e;font-weight:600;text-transform:uppercase;letter-spacing:0.1em;font-size:9px;padding-bottom:4px;border-top:1px solid #e1dbce;padding-top:8px;">Total Due</td>
+                        <td style="color:#3e3930;font-weight:600;font-size:14px;padding-bottom:4px;text-align:right;border-top:1px solid #e1dbce;padding-top:8px;">{{total_amount}}</td>
+                      </tr>
+                    </table>
+                  </td>
+                </tr>
+              </table>
+            </td>
+          </tr>
+
+          <!-- CTA BUTTON -->
+          <tr>
+            <td align="center" style="padding:0 48px 48px;">
+              <table border="0" cellspacing="0" cellpadding="0">
+                <tr>
+                  <td align="center" style="border-radius:2px;background-color:#524b3f;">
+                    <a href="{{invoice_link}}" target="_blank" style="font-size:11px;font-family:'DM Sans',Arial,sans-serif;color:#ffffff;text-decoration:none;padding:14px 28px;border:1px solid #524b3f;display:inline-block;letter-spacing:0.15em;text-transform:uppercase;font-weight:600;">View Full Invoice</a>
+                  </td>
+                </tr>
+              </table>
+            </td>
+          </tr>
+
+          <!-- THIN EDITORIAL SEPARATOR -->
+          <tr>
+            <td style="padding:0 48px;">
+              <div style="height:1px;background:#d3cbc0;line-height:1px;font-size:1px;">&nbsp;</div>
+            </td>
+          </tr>
+
+          <!-- FOOTER -->
+          <tr>
+            <td style="padding:32px 48px;background:rgba(211,203,192,0.25);">
+              <table width="100%" border="0" cellspacing="0" cellpadding="0">
+                <tr>
+                  <td align="center" style="padding-bottom:12px;">
+                    <span style="font-family:'Noto Serif JP','DM Serif Display',Georgia,serif;font-size:14px;color:#3e3930;font-weight:400;letter-spacing:0.06em;">{{site_name}}</span>
+                  </td>
+                </tr>
+                <tr>
+                  <td align="center" style="font-size:10px;color:#6d6455;line-height:1.6;letter-spacing:0.04em;">
+                    {{address}}<br>
+                    {{contact_phone}} &nbsp;|&nbsp; <a href="mailto:{{contact_email}}" style="color:#6d6455;text-decoration:none;">{{contact_email}}</a>
+                  </td>
+                </tr>
+              </table>
+            </td>
+          </tr>
+
+        </table>
+
+        <!-- UNSUBSCRIBE / LEGAL (Outside the card) -->
+        <table width="100%" border="0" cellspacing="0" cellpadding="0" style="max-width:600px;width:100%;margin:0 auto;">
+          <tr>
+            <td align="center" style="padding:24px 20px;font-size:9px;color:#8a8376;letter-spacing:0.06em;line-height:1.6;">
+              This email was sent to {{guest_email}}.<br>
+              If you have any questions regarding this invoice, please contact our reservations team.
+            </td>
+          </tr>
+        </table>
+
+      </td>
+    </tr>
+  </table>
+</div>
+
+</body>
+</html>

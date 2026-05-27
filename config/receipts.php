@@ -184,10 +184,21 @@ if (!function_exists('receipt_placeholders')) {
         $siteName = getSetting('site_name', 'Hotel');
         $contactEmail = getEmailSetting('email_from_email', '') ?: getEmailSetting('smtp_username', '');
         $receiptNumber = (string)($payment['receipt_number'] ?? '');
+
+        $vatEnabled  = in_array(getSetting('vat_enabled'), ['1', 1, true, 'true', 'on'], true);
+        $vatRateNum  = $vatEnabled ? (float)getSetting('vat_rate') : 0.0;
+        $vatNumStr   = (string)getSetting('vat_number', '');
+        $vatNumHtml  = $vatNumStr !== ''
+            ? '<p style="margin:8px 0 0;font-size:11px;color:#9b8f7e;text-align:center;">VAT Reg. No.: ' . htmlspecialchars($vatNumStr, ENT_QUOTES, 'UTF-8') . '</p>'
+            : '';
+
         return [
             '{{site_name}}' => htmlspecialchars($siteName, ENT_QUOTES, 'UTF-8'),
             '{{guest_name}}' => htmlspecialchars((string)$context['guest_name'], ENT_QUOTES, 'UTF-8'),
+            '{{guest_email}}' => htmlspecialchars((string)$context['guest_email'], ENT_QUOTES, 'UTF-8'),
+            '{{guest_phone}}' => htmlspecialchars((string)$context['guest_phone'], ENT_QUOTES, 'UTF-8'),
             '{{receipt_number}}' => htmlspecialchars($receiptNumber, ENT_QUOTES, 'UTF-8'),
+            '{{booking_type}}' => htmlspecialchars(ucwords(str_replace('_', ' ', (string)($payment['booking_type'] ?? ''))), ENT_QUOTES, 'UTF-8'),
             '{{payment_reference}}' => htmlspecialchars((string)($payment['payment_reference'] ?? ''), ENT_QUOTES, 'UTF-8'),
             '{{booking_reference}}' => htmlspecialchars((string)($payment['booking_reference'] ?? ''), ENT_QUOTES, 'UTF-8'),
             '{{payment_date}}' => !empty($payment['payment_date']) ? date('d M Y', strtotime((string)$payment['payment_date'])) : '',
@@ -199,6 +210,12 @@ if (!function_exists('receipt_placeholders')) {
             '{{total_amount}}' => htmlspecialchars(receipt_format_money((float)($payment['total_amount'] ?? 0), $currency), ENT_QUOTES, 'UTF-8'),
             '{{description}}' => htmlspecialchars((string)$context['description'], ENT_QUOTES, 'UTF-8'),
             '{{contact_email}}' => htmlspecialchars($contactEmail, ENT_QUOTES, 'UTF-8'),
+            '{{contact_phone}}' => htmlspecialchars((string)getSetting('phone_main', ''), ENT_QUOTES, 'UTF-8'),
+            '{{address}}' => htmlspecialchars((string)getSetting('hotel_address', getSetting('address', '')), ENT_QUOTES, 'UTF-8'),
+            '{{hotel_address}}' => htmlspecialchars((string)getSetting('hotel_address', getSetting('address', '')), ENT_QUOTES, 'UTF-8'),
+            '{{vat_number}}'      => htmlspecialchars($vatNumStr, ENT_QUOTES, 'UTF-8'),
+            '{{vat_rate}}'        => $vatRateNum > 0.0 ? number_format($vatRateNum, 1) : '0',
+            '{{vat_number_html}}' => $vatNumHtml,
         ];
     }
 }
@@ -287,7 +304,64 @@ if (!function_exists('receipt_generate_pdf')) {
         $pdf->SetAutoPageBreak(true, 16);
         $pdf->AddPage();
 
-        $html = '<style>
+        $receiptBankRows = [];
+        $receiptBankName = trim((string)getSetting('bank_name', ''));
+        $receiptBankAccountName = trim((string)getSetting('bank_account_name', ''));
+        $receiptBankAccountNumber = trim((string)getSetting('bank_account_number', ''));
+        $receiptBankBranch = trim((string)getSetting('bank_branch', ''));
+        if ($receiptBankName !== '') {
+            $receiptBankRows[] = '<tr><td style="padding:1px 0;font-size:6px;color:#1E2430;"><span style="color:#7C6E5B;font-weight:700;">Bank:</span> ' . htmlspecialchars($receiptBankName, ENT_QUOTES, 'UTF-8') . '</td></tr>';
+        }
+        if ($receiptBankAccountName !== '') {
+            $receiptBankRows[] = '<tr><td style="padding:1px 0;font-size:6px;color:#1E2430;"><span style="color:#7C6E5B;font-weight:700;">Account Name:</span> ' . htmlspecialchars($receiptBankAccountName, ENT_QUOTES, 'UTF-8') . '</td></tr>';
+        }
+        if ($receiptBankAccountNumber !== '') {
+            $receiptBankRows[] = '<tr><td style="padding:1px 0;font-size:6px;color:#1E2430;"><span style="color:#7C6E5B;font-weight:700;">Account No.:</span> ' . htmlspecialchars($receiptBankAccountNumber, ENT_QUOTES, 'UTF-8') . '</td></tr>';
+        }
+        if ($receiptBankBranch !== '') {
+            $receiptBankRows[] = '<tr><td style="padding:1px 0;font-size:6px;color:#1E2430;"><span style="color:#7C6E5B;font-weight:700;">Branch:</span> ' . htmlspecialchars($receiptBankBranch, ENT_QUOTES, 'UTF-8') . '</td></tr>';
+        }
+        $receiptBankDetailsHtml = $receiptBankRows !== []
+            ? '<div style="background:#FCFAF7;padding:7px 10px;border-top:2px solid #D5B37C;"><p style="margin:0 0 4px;font-size:6px;letter-spacing:1px;text-transform:uppercase;color:#20303E;font-weight:700;">Bank Details</p><table style="width:100%;border-collapse:collapse;" cellpadding="0" cellspacing="0">' . implode('', $receiptBankRows) . '</table></div>'
+            : '';
+        $receiptTermsText = trim((string)getSetting('receipt_terms', getSetting('payment_terms', '')));
+        $receiptTermsHtml = $receiptTermsText !== ''
+            ? '<p style="margin:0;font-size:6px;line-height:1.5;color:#5F655F;">' . nl2br(htmlspecialchars($receiptTermsText, ENT_QUOTES, 'UTF-8')) . '</p>'
+            : '';
+
+        $templateVars = [
+            'logo_html' => (function_exists('hotel_invoice_logo_src') && hotel_invoice_logo_src() !== '')
+                ? '<img src="' . htmlspecialchars(hotel_invoice_logo_src(), ENT_QUOTES, 'UTF-8') . '" alt="' . htmlspecialchars($siteName, ENT_QUOTES, 'UTF-8') . '" height="88" style="height:88px;width:auto;display:block;margin:0 auto;">'
+                : '',
+            'site_name' => htmlspecialchars($siteName, ENT_QUOTES, 'UTF-8'),
+            'address' => htmlspecialchars($address, ENT_QUOTES, 'UTF-8'),
+            'hotel_address' => htmlspecialchars($address, ENT_QUOTES, 'UTF-8'),
+            'contact_email' => htmlspecialchars((string)(getEmailSetting('email_from_email', '') ?: getEmailSetting('smtp_username', '')), ENT_QUOTES, 'UTF-8'),
+            'contact_phone' => htmlspecialchars($phone, ENT_QUOTES, 'UTF-8'),
+            'guest_name' => htmlspecialchars((string)$context['guest_name'], ENT_QUOTES, 'UTF-8'),
+            'guest_email' => htmlspecialchars((string)$context['guest_email'], ENT_QUOTES, 'UTF-8'),
+            'guest_phone' => htmlspecialchars((string)$context['guest_phone'], ENT_QUOTES, 'UTF-8'),
+            'booking_type' => htmlspecialchars(ucwords(str_replace('_', ' ', (string)($payment['booking_type'] ?? ''))), ENT_QUOTES, 'UTF-8'),
+            'receipt_number' => htmlspecialchars($receiptNumber, ENT_QUOTES, 'UTF-8'),
+            'payment_reference' => htmlspecialchars((string)($payment['payment_reference'] ?? ''), ENT_QUOTES, 'UTF-8'),
+            'booking_reference' => htmlspecialchars((string)($payment['booking_reference'] ?? ''), ENT_QUOTES, 'UTF-8'),
+            'payment_date' => htmlspecialchars(date('d M Y', strtotime((string)($payment['payment_date'] ?? 'now'))), ENT_QUOTES, 'UTF-8'),
+            'payment_method' => htmlspecialchars(ucwords(str_replace('_', ' ', (string)($payment['payment_method'] ?? ''))), ENT_QUOTES, 'UTF-8'),
+            'payment_type' => htmlspecialchars(ucwords(str_replace('_', ' ', (string)($payment['payment_type'] ?? ''))), ENT_QUOTES, 'UTF-8'),
+            'payment_status' => htmlspecialchars(ucwords(str_replace('_', ' ', (string)($payment['payment_status'] ?? ''))), ENT_QUOTES, 'UTF-8'),
+            'payment_amount' => htmlspecialchars(receipt_format_money((float)$payment['payment_amount'], $currency), ENT_QUOTES, 'UTF-8'),
+            'vat_amount' => htmlspecialchars(receipt_format_money((float)($payment['vat_amount'] ?? 0), $currency), ENT_QUOTES, 'UTF-8'),
+            'total_amount' => htmlspecialchars(receipt_format_money((float)$payment['total_amount'], $currency), ENT_QUOTES, 'UTF-8'),
+            'description' => htmlspecialchars((string)$context['description'], ENT_QUOTES, 'UTF-8'),
+            'bank_details_html' => $receiptBankDetailsHtml,
+            'receipt_terms' => $receiptTermsHtml,
+        ];
+
+        if (function_exists('hotel_default_receipt_document_html') && function_exists('renderBookingDocumentTemplate') && function_exists('bookingRenderPdfFromHtml')) {
+            $documentHtml = renderBookingDocumentTemplate('payment_receipt_document', $templateVars, hotel_default_receipt_document_html());
+            file_put_contents($path, bookingRenderPdfFromHtml($documentHtml, 'Receipt ' . $receiptNumber));
+        } else {
+            $html = '<style>
             body{font-family:dejavusans;color:#2A2723;font-size:10pt;}
             .head{background-color:#231F1C;color:#B18247;padding:18px;text-align:center;}
             .small{color:#5E554D;font-size:8pt;}
@@ -310,8 +384,9 @@ if (!function_exists('receipt_generate_pdf')) {
         <p class="small">Payment reference: ' . htmlspecialchars((string)$payment['payment_reference'], ENT_QUOTES, 'UTF-8') . '</p>
         <p class="small">' . htmlspecialchars(trim($address . ' ' . $phone), ENT_QUOTES, 'UTF-8') . '</p>';
 
-        $pdf->writeHTML($html, true, false, true, false, '');
-        $pdf->Output($path, 'F');
+            $pdf->writeHTML($html, true, false, true, false, '');
+            $pdf->Output($path, 'F');
+        }
 
         $pdo->prepare('UPDATE payments SET receipt_path = ?, receipt_generated = 1, receipt_generated_at = NOW(), updated_at = NOW() WHERE id = ?')
             ->execute([$relativePath, $paymentId]);
@@ -339,8 +414,20 @@ if (!function_exists('receipt_send_email')) {
         }
 
         $placeholders = receipt_placeholders($pdo, $payment, $context);
-        $subject = str_replace(array_keys($placeholders), array_values($placeholders), getSetting('receipt_email_subject', 'Receipt {{receipt_number}}'));
-        $body = str_replace(array_keys($placeholders), array_values($placeholders), getSetting('receipt_email_template', 'Your receipt is attached.'));
+        $receiptTemplate = function_exists('getBookingEmailTemplateConfig')
+            ? getBookingEmailTemplateConfig('payment_receipt', [])
+            : [];
+        if (!empty($receiptTemplate['subject']) && !empty($receiptTemplate['html_body']) && (int)($receiptTemplate['is_active'] ?? 1) === 1) {
+            $subject = str_replace(array_keys($placeholders), array_values($placeholders), (string)$receiptTemplate['subject']);
+            $body = str_replace(array_keys($placeholders), array_values($placeholders), (string)$receiptTemplate['html_body']);
+            $textBody = !empty($receiptTemplate['text_body'])
+                ? str_replace(array_keys($placeholders), array_values($placeholders), (string)$receiptTemplate['text_body'])
+                : '';
+        } else {
+            $subject = str_replace(array_keys($placeholders), array_values($placeholders), getSetting('receipt_email_subject', 'Receipt {{receipt_number}}'));
+            $body = str_replace(array_keys($placeholders), array_values($placeholders), getSetting('receipt_email_template', 'Your receipt is attached.'));
+            $textBody = '';
+        }
 
         $fromEmail = getEmailSetting('email_from_email', '') ?: getEmailSetting('smtp_username', '');
         $fromName = getEmailSetting('email_from_name', '') ?: getSetting('site_name', 'Hotel');
@@ -375,7 +462,9 @@ if (!function_exists('receipt_send_email')) {
         $mail->isHTML(true);
         $mail->Subject = html_entity_decode($subject, ENT_QUOTES, 'UTF-8');
         $mail->Body = $body;
-        $mail->AltBody = strip_tags(str_replace(['<br>', '<br/>', '<br />'], "\n", $body));
+        $mail->AltBody = $textBody !== ''
+            ? html_entity_decode($textBody, ENT_QUOTES, 'UTF-8')
+            : strip_tags(str_replace(['<br>', '<br/>', '<br />'], "\n", $body));
         $mail->addAttachment($pdf['path'], $pdf['receipt_number'] . '.pdf', PHPMailer::ENCODING_BASE64, 'application/pdf');
         $mail->send();
 

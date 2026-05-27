@@ -2,7 +2,7 @@
 
 /**
  * docs/guides/12-email-templates.php
- * Email Template Variables & HTML Tags Reference Guide
+ * Email and PDF Template Variables & HTML Tags Reference Guide
  * Searchable via ?q= GET parameter.
  */
 
@@ -14,7 +14,8 @@ try {
     require_once __DIR__ . '/../../../config/database.php';
     require_once __DIR__ . '/../../../config/cache.php';
     $_guide_site_name = getSetting('site_name') ?: 'Hotel';
-} catch (Throwable $e) { /* fail silently — fallback text stays */ }
+} catch (Throwable $e) { /* fail silently — fallback text stays */
+}
 
 // ── Search query ──────────────────────────────────────────────────────────────
 $query     = trim(strip_tags($_GET['q'] ?? ''));
@@ -535,6 +536,255 @@ $all_vars = [
         'example' => '+265 999 888 777',
         'tpl' => 'conference_quotation, event_quotation, tentative_quotation'
     ],
+
+    /* ── PDF Documents ─────────────────────────────────────────── */
+    [
+        'cat' => 'PDF Documents',
+        'tag' => '{{logo_html}}',
+        'desc' => 'Rendered hotel logo HTML used in PDF document headers.',
+        'example' => '<img src="..." alt="Hotel">',
+        'tpl' => 'All *_document templates'
+    ],
+
+    [
+        'cat' => 'PDF Documents',
+        'tag' => '{{address}}',
+        'desc' => 'Formatted hotel address shown in Japandi PDF document headers.',
+        'example' => 'Matuwi Village, Mangochi, Malawi',
+        'tpl' => 'All *_document templates'
+    ],
+
+    [
+        'cat' => 'PDF Documents',
+        'tag' => '{{invoice_number}}',
+        'desc' => 'Generated invoice number for room and conference invoices.',
+        'example' => 'INV-2026-000042',
+        'tpl' => 'payment_invoice_document, conference_invoice_document'
+    ],
+
+    [
+        'cat' => 'PDF Documents',
+        'tag' => '{{issued_date}}',
+        'desc' => 'Human-readable issue date for invoices and credit notes.',
+        'example' => '27 May 2026',
+        'tpl' => 'payment_invoice_document, conference_invoice_document, credit_note_document'
+    ],
+
+    [
+        'cat' => 'PDF Documents',
+        'tag' => '{{status_text}}',
+        'desc' => 'Status label shown on invoice PDFs.',
+        'example' => 'BALANCE DUE',
+        'tpl' => 'payment_invoice_document, conference_invoice_document'
+    ],
+
+    [
+        'cat' => 'PDF Documents',
+        'tag' => '{{status_bg}}',
+        'desc' => 'Background color token for the room invoice status badge.',
+        'example' => '#E8F0E9',
+        'tpl' => 'payment_invoice_document'
+    ],
+
+    [
+        'cat' => 'PDF Documents',
+        'tag' => '{{status_fg}}',
+        'desc' => 'Foreground/text color token for the room invoice status badge.',
+        'example' => '#1F5130',
+        'tpl' => 'payment_invoice_document'
+    ],
+
+    [
+        'cat' => 'PDF Documents',
+        'tag' => '{{vat_number_html}}',
+        'desc' => 'Pre-rendered VAT registration HTML line for invoice headers.',
+        'example' => 'VAT Reg: 12345678',
+        'tpl' => 'payment_invoice_document'
+    ],
+
+    [
+        'cat' => 'PDF Documents',
+        'tag' => '{{charges_table_rows}}',
+        'desc' => 'Pre-built invoice line-item table rows for room invoices.',
+        'example' => '<tr>...</tr>',
+        'tpl' => 'payment_invoice_document'
+    ],
+
+    [
+        'cat' => 'PDF Documents',
+        'tag' => '{{totals_rows}}',
+        'desc' => 'Pre-built totals rows for room invoice PDFs.',
+        'example' => '<tr>...</tr>',
+        'tpl' => 'payment_invoice_document'
+    ],
+
+    [
+        'cat' => 'PDF Documents',
+        'tag' => '{{payment_history_section}}',
+        'desc' => 'Pre-rendered payment history block for the room invoice PDF.',
+        'example' => '<div>Payment history...</div>',
+        'tpl' => 'payment_invoice_document'
+    ],
+
+    [
+        'cat' => 'PDF Documents',
+        'tag' => '{{bank_details}}',
+        'desc' => 'Pre-rendered bank details block for invoice PDFs.',
+        'example' => '<div>Bank details...</div>',
+        'tpl' => 'payment_invoice_document'
+    ],
+
+    [
+        'cat' => 'PDF Documents',
+        'tag' => '{{invoice_terms}}',
+        'desc' => 'Pre-rendered invoice terms block used on the room invoice PDF.',
+        'example' => '<div>Terms...</div>',
+        'tpl' => 'payment_invoice_document'
+    ],
+
+    [
+        'cat' => 'PDF Documents',
+        'tag' => '{{client_email}}',
+        'desc' => 'Email address of the conference invoice recipient/client.',
+        'example' => 'events@example.com',
+        'tpl' => 'conference_invoice_document'
+    ],
+
+    [
+        'cat' => 'PDF Documents',
+        'tag' => '{{client_phone}}',
+        'desc' => 'Phone number of the conference invoice recipient/client.',
+        'example' => '+265 999 222 333',
+        'tpl' => 'conference_invoice_document'
+    ],
+
+    [
+        'cat' => 'PDF Documents',
+        'tag' => '{{event_type}}',
+        'desc' => 'Conference or event type label shown on invoice and quotation PDFs.',
+        'example' => 'Corporate Retreat',
+        'tpl' => 'conference_invoice_document, conference_quotation_document'
+    ],
+
+    [
+        'cat' => 'PDF Documents',
+        'tag' => '{{deposit_amount}}',
+        'desc' => 'Deposit value quoted or required on quotation PDFs.',
+        'example' => 'MWK 150,000',
+        'tpl' => 'tentative_quotation_document, conference_quotation_document'
+    ],
+
+    [
+        'cat' => 'PDF Documents',
+        'tag' => '{{amount_paid}}',
+        'desc' => 'Amount already paid against the invoice total.',
+        'example' => 'MWK 350,000',
+        'tpl' => 'conference_invoice_document'
+    ],
+
+    [
+        'cat' => 'PDF Documents',
+        'tag' => '{{balance_due}}',
+        'desc' => 'Outstanding balance remaining on an invoice or quotation.',
+        'example' => 'MWK 125,000',
+        'tpl' => 'payment_invoice_document, conference_invoice_document, tentative_quotation_document'
+    ],
+
+    [
+        'cat' => 'PDF Documents',
+        'tag' => '{{rate_per_attendee}}',
+        'desc' => 'Per-attendee rate used on event quotation PDFs.',
+        'example' => 'MWK 25,000',
+        'tpl' => 'event_quotation_document'
+    ],
+
+    [
+        'cat' => 'PDF Documents',
+        'tag' => '{{receipt_number}}',
+        'desc' => 'Generated receipt number for receipt email/PDF flows.',
+        'example' => 'RCP-2026-000042',
+        'tpl' => 'payment_receipt, payment_receipt_document'
+    ],
+
+    [
+        'cat' => 'PDF Documents',
+        'tag' => '{{payment_reference}}',
+        'desc' => 'Payment reference captured against the receipt/invoice.',
+        'example' => 'PAY-2026-000051',
+        'tpl' => 'payment_receipt, payment_receipt_document, payment_invoice_document'
+    ],
+
+    [
+        'cat' => 'PDF Documents',
+        'tag' => '{{payment_date}}',
+        'desc' => 'Payment date shown on receipt PDFs.',
+        'example' => '27 May 2026',
+        'tpl' => 'payment_receipt, payment_receipt_document'
+    ],
+
+    [
+        'cat' => 'PDF Documents',
+        'tag' => '{{payment_method}}',
+        'desc' => 'Method used to make the recorded payment.',
+        'example' => 'Bank Transfer',
+        'tpl' => 'payment_receipt_document'
+    ],
+
+    [
+        'cat' => 'PDF Documents',
+        'tag' => '{{payment_type}}',
+        'desc' => 'Payment type label stored on the payment record.',
+        'example' => 'Deposit',
+        'tpl' => 'payment_receipt_document'
+    ],
+
+    [
+        'cat' => 'PDF Documents',
+        'tag' => '{{payment_status}}',
+        'desc' => 'Current payment status used on receipt badges and summaries.',
+        'example' => 'Completed',
+        'tpl' => 'payment_receipt_document'
+    ],
+
+    [
+        'cat' => 'PDF Documents',
+        'tag' => '{{payment_amount}}',
+        'desc' => 'Primary amount received on a receipt.',
+        'example' => 'MWK 450,000',
+        'tpl' => 'payment_receipt, payment_receipt_document'
+    ],
+
+    [
+        'cat' => 'PDF Documents',
+        'tag' => '{{booking_type}}',
+        'desc' => 'Booking/payment source type for the receipt (room, conference, restaurant, etc.).',
+        'example' => 'Restaurant',
+        'tpl' => 'payment_receipt, payment_receipt_document'
+    ],
+
+    [
+        'cat' => 'PDF Documents',
+        'tag' => '{{description}}',
+        'desc' => 'Summary description of what the payment or receipt covers.',
+        'example' => 'Restaurant order payment for table service',
+        'tpl' => 'payment_receipt, payment_receipt_document'
+    ],
+
+    [
+        'cat' => 'PDF Documents',
+        'tag' => '{{bank_details_html}}',
+        'desc' => 'Pre-rendered bank details block for the receipt PDF.',
+        'example' => '<div>Bank details...</div>',
+        'tpl' => 'payment_receipt_document'
+    ],
+
+    [
+        'cat' => 'PDF Documents',
+        'tag' => '{{receipt_terms}}',
+        'desc' => 'Receipt terms or notes block rendered below the receipt summary.',
+        'example' => '<p>Thank you for your payment...</p>',
+        'tpl' => 'payment_receipt_document'
+    ],
 ];
 
 // ── Filter by search query ────────────────────────────────────────────────────
@@ -581,9 +831,30 @@ $templates = [
 
     [
         'key' => 'payment_invoice',
-        'name' => 'Payment Invoice (Customer)',
+        'name' => 'Room Invoice Email',
         'desc' => 'Sent with a PDF invoice attachment after a payment is recorded.',
         'triggers' => 'Admin → Payments → Add Payment (if email invoice enabled)'
+    ],
+
+    [
+        'key' => 'payment_invoice_document',
+        'name' => 'Room Invoice PDF',
+        'desc' => 'Editable Japandi PDF layout used for room payment invoices and document previews.',
+        'triggers' => 'Attached whenever the room invoice PDF is generated or previewed'
+    ],
+
+    [
+        'key' => 'conference_invoice',
+        'name' => 'Conference Invoice Email',
+        'desc' => 'Sent with the conference invoice PDF attached after conference payment processing.',
+        'triggers' => 'Admin → Conference Management / invoices → Send invoice'
+    ],
+
+    [
+        'key' => 'conference_invoice_document',
+        'name' => 'Conference Invoice PDF',
+        'desc' => 'Editable Japandi PDF layout used for conference invoices.',
+        'triggers' => 'Rendered whenever a conference invoice PDF is generated or previewed'
     ],
 
     [
@@ -616,30 +887,72 @@ $templates = [
 
     [
         'key' => 'tentative_quotation',
-        'name' => 'Tentative Booking Quotation',
+        'name' => 'Room Quotation Email',
         'desc' => 'A formal quotation email sent for a tentative booking.',
         'triggers' => 'Admin → Quotations → Send to guest'
     ],
 
     [
+        'key' => 'tentative_quotation_document',
+        'name' => 'Room Quotation PDF',
+        'desc' => 'Editable Japandi PDF layout used for room quotation documents.',
+        'triggers' => 'Attached to room quotation emails and used in document previews'
+    ],
+
+    [
         'key' => 'conference_quotation',
-        'name' => 'Conference Quotation',
+        'name' => 'Conference Quotation Email',
         'desc' => 'Quotation email sent to a conference/event client.',
         'triggers' => 'Admin → Conference Management → Send Quotation'
     ],
 
     [
+        'key' => 'conference_quotation_document',
+        'name' => 'Conference Quotation PDF',
+        'desc' => 'Editable Japandi PDF layout used for conference quotation documents.',
+        'triggers' => 'Attached to conference quotation emails and used in document previews'
+    ],
+
+    [
         'key' => 'event_quotation',
-        'name' => 'Event Quotation',
+        'name' => 'Event Quotation Email',
         'desc' => 'Quotation email for a general event enquiry.',
         'triggers' => 'Admin → Events Management → Send Quotation'
     ],
 
     [
+        'key' => 'event_quotation_document',
+        'name' => 'Event Quotation PDF',
+        'desc' => 'Editable Japandi PDF layout used for event quotation documents.',
+        'triggers' => 'Attached to event quotation emails and used in document previews'
+    ],
+
+    [
         'key' => 'credit_note',
-        'name' => 'Credit Note (Guest)',
+        'name' => 'Credit Note Email',
         'desc' => 'Sent with a credit note PDF when a credit note is issued to a guest.',
         'triggers' => 'Admin → Credit Notes → Issue & Send'
+    ],
+
+    [
+        'key' => 'credit_note_document',
+        'name' => 'Credit Note PDF',
+        'desc' => 'Editable Japandi PDF layout used for generated credit notes.',
+        'triggers' => 'Rendered whenever a credit note PDF is generated or previewed'
+    ],
+
+    [
+        'key' => 'payment_receipt',
+        'name' => 'Payment Receipt Email',
+        'desc' => 'Sent when a receipt is emailed to the guest with the receipt PDF attached.',
+        'triggers' => 'Admin → Receipts / Payments → Send receipt email'
+    ],
+
+    [
+        'key' => 'payment_receipt_document',
+        'name' => 'Payment Receipt PDF',
+        'desc' => 'Editable Japandi PDF layout used for payment receipt documents.',
+        'triggers' => 'Rendered whenever a receipt PDF is generated or previewed'
     ],
 ];
 ?>
@@ -649,7 +962,7 @@ $templates = [
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Email Template Reference — <?php echo htmlspecialchars($_guide_site_name, ENT_QUOTES, 'UTF-8'); ?></title>
+    <title>Email and PDF Template Reference — <?php echo htmlspecialchars($_guide_site_name, ENT_QUOTES, 'UTF-8'); ?></title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@400;500;600;700&family=Jost:wght@300;400;500;600&display=swap" rel="stylesheet">
@@ -951,12 +1264,12 @@ $templates = [
     <header class="hero">
         <div class="deck">
             <div class="eyebrow">Guide 12 &middot; Admin Reference</div>
-            <h1>Email Template Tags</h1>
-            <p class="lead">Every <code>{{variable}}</code> tag available in email templates — searchable, with live examples and the templates they apply to. Plus an HTML tag reference for building well-formatted emails.</p>
+            <h1>Email and PDF Template Tags</h1>
+            <p class="lead">Every <code>{{variable}}</code> tag available in booking email templates and PDF document templates — searchable, with live examples and the templates they apply to. Includes the Japandi PDF theme document slots and the HTML tag reference used for email editing.</p>
             <div class="meta">
                 <span>Location <strong>/admin/booking-settings.php → Email Templates</strong></span>
                 <span>Tags <strong><?php echo count($all_vars) === $totalFound ? $totalFound : $totalFound; ?> defined</strong></span>
-                <span>Read time <strong>8 min</strong></span>
+                <span>Read time <strong>10 min</strong></span>
             </div>
         </div>
     </header>
@@ -970,8 +1283,8 @@ $templates = [
                 <ul class="toc">
                     <li><a href="#how-to-use">How template tags work <span>↓</span></a></li>
                     <li><a href="#variables">Variable reference (searchable) <span>↓</span></a></li>
-                    <li><a href="#templates">Available email templates <span>↓</span></a></li>
-                    <li><a href="#html-tags">HTML tags for email <span>↓</span></a></li>
+                    <li><a href="#templates">Available email and PDF templates <span>↓</span></a></li>
+                    <li><a href="#html-tags">HTML tags for email editing <span>↓</span></a></li>
                     <li><a href="#best-practices">Best practices <span>↓</span></a></li>
                 </ul>
             </section>
@@ -979,7 +1292,7 @@ $templates = [
             <!-- ── How to use ──────────────────────────────────────────── -->
             <section id="how-to-use">
                 <h2>How template tags work</h2>
-                <p>Email templates live in the database and are editable from <strong>Booking Settings → Email Templates</strong>. Each template contains a subject line and an HTML body. Inside both, you can place <strong>double-curly-brace tags</strong> and the system will replace them with real data when the email is sent.</p>
+                <p>Booking templates live in the database and are editable from <strong>Booking Settings → Email Templates</strong>. Email templates store a subject line and HTML body. PDF document templates also store HTML, but that HTML is rendered into a PDF using the shared Japandi document theme. Inside each template you can place <strong>double-curly-brace tags</strong> and the system will replace them with real data when the email or PDF is generated.</p>
 
                 <div class="copy-tip">
                     <strong>Syntax:</strong> wrap the tag name in double curly braces — <code>{{guest_name}}</code><br>
@@ -1091,8 +1404,8 @@ Total: {{currency_symbol}} {{total_amount_formatted}}.</code></pre>
 
             <!-- ── Available templates ─────────────────────────────────── -->
             <section id="templates">
-                <h2>Available email templates</h2>
-                <p>These are the 12 template slots stored in the <code>booking_email_templates</code> table. Each has a <strong>template key</strong> (immutable), a display name, and a purpose. Edit their HTML body and subject from <strong>Admin → Booking Settings → Email Templates</strong>.</p>
+                <h2>Available email and PDF templates</h2>
+                <p>These are the <?php echo count($templates); ?> template slots stored in the <code>booking_email_templates</code> table. Each has a <strong>template key</strong> (immutable), a display name, and a purpose. Email rows control outgoing email copy; <code>*_document</code> rows control the Japandi PDF layouts used for invoices, quotations, credit notes, receipts, previews, and test sends.</p>
                 <table>
                     <thead>
                         <tr>
@@ -1398,7 +1711,7 @@ Nights: {{number_of_nights}}</code></pre>
     <footer class="guide-footer">
         <div class="deck">
             <div class="crest">— R H —</div>
-            <p><?php echo htmlspecialchars($_guide_site_name, ENT_QUOTES, 'UTF-8'); ?> Management System &middot; Email Template Reference</p>
+            <p><?php echo htmlspecialchars($_guide_site_name, ENT_QUOTES, 'UTF-8'); ?> Management System &middot; Email and PDF Template Reference</p>
             <p><a href="99-admin-dashboard-full-guide.html">Admin Bible →</a> &nbsp;&middot;&nbsp; <a href="index.html">All Guides →</a></p>
         </div>
     </footer>

@@ -108,9 +108,21 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 if ($subject === '' || $html === '' || $whatsapp === '') {
                     throw new RuntimeException('All receipt template fields are required.');
                 }
+                if (function_exists('upsertBookingEmailTemplateConfig')) {
+                    $existingReceiptTemplate = getBookingEmailTemplateConfig('payment_receipt', [
+                        'text_body' => '',
+                        'is_active' => 1,
+                    ]);
+                    upsertBookingEmailTemplateConfig(
+                        'payment_receipt',
+                        'Payment Receipt Email',
+                        $subject,
+                        $html,
+                        (string)($existingReceiptTemplate['text_body'] ?? ''),
+                        (int)($existingReceiptTemplate['is_active'] ?? 1)
+                    );
+                }
                 $stmt = $pdo->prepare("INSERT INTO site_settings (setting_key, setting_value, setting_group) VALUES (?, ?, 'finance') ON DUPLICATE KEY UPDATE setting_value = VALUES(setting_value), updated_at = NOW()");
-                $stmt->execute(['receipt_email_subject', $subject]);
-                $stmt->execute(['receipt_email_template', $html]);
                 $stmt->execute(['receipt_whatsapp_template', $whatsapp]);
                 rh_log_event('receipts', 'info', 'Receipt templates updated', ['by' => $user['username'] ?? null]);
                 $message = 'Receipt templates saved.';
@@ -188,8 +200,17 @@ $payments = $listStmt->fetchAll(PDO::FETCH_ASSOC);
 $eventsStmt = $pdo->query("SELECT re.*, p.payment_reference FROM receipt_events re LEFT JOIN payments p ON p.id = re.payment_id ORDER BY re.created_at DESC, re.id DESC LIMIT 20");
 $recentEvents = $eventsStmt ? $eventsStmt->fetchAll(PDO::FETCH_ASSOC) : [];
 
-$templateSubject = getSetting('receipt_email_subject', 'Receipt {{receipt_number}} - {{site_name}}');
-$templateHtml = getSetting('receipt_email_template', '');
+$receiptEmailTemplate = function_exists('getBookingEmailTemplateConfig')
+    ? getBookingEmailTemplateConfig('payment_receipt', [
+        'subject' => 'Receipt {{receipt_number}} - {{site_name}}',
+        'html_body' => '',
+    ])
+    : [
+        'subject' => 'Receipt {{receipt_number}} - {{site_name}}',
+        'html_body' => '',
+    ];
+$templateSubject = (string)($receiptEmailTemplate['subject'] ?? 'Receipt {{receipt_number}} - {{site_name}}');
+$templateHtml = (string)($receiptEmailTemplate['html_body'] ?? '');
 $templateWhatsapp = getSetting('receipt_whatsapp_template', '');
 $site_name = getSetting('site_name', 'Admin');
 $templatePreviewMap = [

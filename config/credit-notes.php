@@ -1,4 +1,5 @@
 <?php
+
 /**
  * Credit Notes — Core Business Logic
  *
@@ -58,14 +59,14 @@ if (!function_exists('issueCreditNote')) {
                 throw new RuntimeException('Guest name is required.');
             }
 
-            $validReasons = ['cancellation','service_issue','early_checkout','overpayment','goodwill','pricing_error','other'];
+            $validReasons = ['cancellation', 'service_issue', 'early_checkout', 'overpayment', 'goodwill', 'pricing_error', 'other'];
             $reason = trim((string)($data['reason'] ?? 'other'));
             if (!in_array($reason, $validReasons, true)) {
                 throw new RuntimeException('Invalid credit note reason.');
             }
 
             $bookingType = trim((string)($data['booking_type'] ?? 'goodwill'));
-            if (!in_array($bookingType, ['room','conference','restaurant','goodwill'], true)) {
+            if (!in_array($bookingType, ['room', 'conference', 'restaurant', 'goodwill'], true)) {
                 $bookingType = 'goodwill';
             }
 
@@ -121,8 +122,10 @@ if (!function_exists('issueCreditNote')) {
                 $bookingType,
                 $guestName,
                 $data['guest_email'] ?? null,
-                $amount, $amount,          // original_amount, balance
-                $vatRate, $vatAmount,
+                $amount,
+                $amount,          // original_amount, balance
+                $vatRate,
+                $vatAmount,
                 $reason,
                 $data['reason_notes'] ?? null,
                 $issuedBy,
@@ -217,7 +220,7 @@ if (!function_exists('applyCreditNote')) {
 
             $bookingId   = (int)($bookingData['booking_id'] ?? 0);
             $bookingType = trim((string)($bookingData['booking_type'] ?? ''));
-            if (!in_array($bookingType, ['room','conference','restaurant'], true)) {
+            if (!in_array($bookingType, ['room', 'conference', 'restaurant'], true)) {
                 throw new RuntimeException('Invalid booking type for credit note application.');
             }
             if ($bookingId <= 0) {
@@ -258,13 +261,17 @@ if (!function_exists('applyCreditNote')) {
                     $bookingReference = (string)($refRow->fetchColumn() ?: '');
                 } elseif ($bookingType === 'conference') {
                     // Try common column names
-                    foreach (['reference_number','enquiry_reference','conference_reference','id'] as $col) {
+                    foreach (['reference_number', 'enquiry_reference', 'conference_reference', 'id'] as $col) {
                         try {
                             $refRow = $pdo->prepare("SELECT {$col} FROM conference_inquiries WHERE id = ?");
                             $refRow->execute([$bookingId]);
                             $val = $refRow->fetchColumn();
-                            if ($val !== false) { $bookingReference = (string)$val; break; }
-                        } catch (Throwable $ignored) {}
+                            if ($val !== false) {
+                                $bookingReference = (string)$val;
+                                break;
+                            }
+                        } catch (Throwable $ignored) {
+                        }
                     }
                 }
             }
@@ -312,8 +319,14 @@ if (!function_exists('applyCreditNote')) {
                 )
             ");
             $payStmt->execute([
-                $payRef, $bookingType, $bookingId, $bookingReference,
-                $netAmount, $vatRate, $vatAmount, $amountToApply,
+                $payRef,
+                $bookingType,
+                $bookingId,
+                $bookingReference,
+                $netAmount,
+                $vatRate,
+                $vatAmount,
+                $amountToApply,
                 $paymentType,
                 $creditNoteId,
                 $notes ?: "Credit note {$cn['credit_note_number']} applied",
@@ -337,9 +350,13 @@ if (!function_exists('applyCreditNote')) {
                 ) VALUES (?, ?, ?, ?, ?, ?, ?, NOW(), ?)
             ");
             $appStmt->execute([
-                $creditNoteId, $paymentId, $bookingId,
-                $bookingReference, $bookingType,
-                $amountToApply, $adminUserId,
+                $creditNoteId,
+                $paymentId,
+                $bookingId,
+                $bookingReference,
+                $bookingType,
+                $amountToApply,
+                $adminUserId,
                 $notes ?: null,
             ]);
 
@@ -391,7 +408,9 @@ if (!function_exists('applyCreditNote')) {
                 'error'             => null,
             ];
         } catch (Throwable $e) {
-            if ($pdo->inTransaction()) { $pdo->rollBack(); }
+            if ($pdo->inTransaction()) {
+                $pdo->rollBack();
+            }
             error_log('[credit-notes] applyCreditNote: ' . $e->getMessage());
             return ['success' => false, 'payment_id' => null, 'remaining_balance' => 0.0, 'error' => $e->getMessage()];
         }
@@ -471,9 +490,15 @@ if (!function_exists('getCreditNoteBalance')) {
         $stmt = $pdo->prepare("SELECT balance, status, expires_at FROM credit_notes WHERE id = ?");
         $stmt->execute([$creditNoteId]);
         $row = $stmt->fetch(PDO::FETCH_ASSOC);
-        if (!$row) { return 0.0; }
-        if (!in_array((string)$row['status'], ['active','partially_applied'], true)) { return 0.0; }
-        if ($row['expires_at'] !== null && $row['expires_at'] < date('Y-m-d')) { return 0.0; }
+        if (!$row) {
+            return 0.0;
+        }
+        if (!in_array((string)$row['status'], ['active', 'partially_applied'], true)) {
+            return 0.0;
+        }
+        if ($row['expires_at'] !== null && $row['expires_at'] < date('Y-m-d')) {
+            return 0.0;
+        }
         return max(0.0, (float)$row['balance']);
     }
 }
@@ -534,7 +559,9 @@ if (!function_exists('generateCreditNotePDF')) {
             $cn = $pdo->prepare("SELECT * FROM credit_notes WHERE id = ?");
             $cn->execute([$creditNoteId]);
             $cn = $cn->fetch(PDO::FETCH_ASSOC);
-            if (!$cn) { throw new RuntimeException('Credit note not found.'); }
+            if (!$cn) {
+                throw new RuntimeException('Credit note not found.');
+            }
 
             // Site info
             $siteName    = getSetting('site_name')    ?: 'The Hotel';
@@ -565,6 +592,38 @@ if (!function_exists('generateCreditNotePDF')) {
             ");
             $appStmt->execute([$creditNoteId]);
             $applications = $appStmt->fetchAll(PDO::FETCH_ASSOC);
+
+            if ($tcpdfAvailable && function_exists('hotel_default_credit_note_document_html') && function_exists('renderBookingDocumentTemplate') && function_exists('bookingRenderPdfFromHtml')) {
+                $logoSrc = function_exists('hotel_invoice_logo_src') ? hotel_invoice_logo_src() : '';
+                $logoHtml = $logoSrc !== ''
+                    ? '<img src="' . htmlspecialchars($logoSrc, ENT_QUOTES, 'UTF-8') . '" alt="' . htmlspecialchars($siteName, ENT_QUOTES, 'UTF-8') . '" height="96" style="height:96px;width:auto;display:block;margin:0 auto;">'
+                    : '';
+
+                $html = renderBookingDocumentTemplate('credit_note_document', [
+                    'logo_html' => $logoHtml,
+                    'site_name' => htmlspecialchars($siteName, ENT_QUOTES, 'UTF-8'),
+                    'address' => htmlspecialchars($siteAddress, ENT_QUOTES, 'UTF-8'),
+                    'contact_email' => htmlspecialchars($siteEmail, ENT_QUOTES, 'UTF-8'),
+                    'contact_phone' => htmlspecialchars($sitePhone, ENT_QUOTES, 'UTF-8'),
+                    'credit_note_number' => htmlspecialchars((string)$cn['credit_note_number'], ENT_QUOTES, 'UTF-8'),
+                    'issued_date' => htmlspecialchars(date('d M Y', strtotime((string)$cn['issued_at'])), ENT_QUOTES, 'UTF-8'),
+                    'guest_name' => htmlspecialchars((string)($cn['guest_name'] ?? ''), ENT_QUOTES, 'UTF-8'),
+                    'guest_email' => htmlspecialchars((string)($cn['guest_email'] ?? ''), ENT_QUOTES, 'UTF-8'),
+                    'booking_reference' => htmlspecialchars((string)($cn['booking_reference'] ?? ''), ENT_QUOTES, 'UTF-8'),
+                    'reason' => htmlspecialchars(ucfirst(str_replace('_', ' ', (string)($cn['reason'] ?? ''))), ENT_QUOTES, 'UTF-8'),
+                    'reason_notes' => nl2br(htmlspecialchars((string)($cn['reason_notes'] ?? ''), ENT_QUOTES, 'UTF-8')),
+                    'expires_at' => htmlspecialchars($cn['expires_at'] ? date('d M Y', strtotime((string)$cn['expires_at'])) : 'No expiry', ENT_QUOTES, 'UTF-8'),
+                    'amount' => htmlspecialchars($currencySymbol . ' ' . number_format((float)$cn['original_amount'], 2), ENT_QUOTES, 'UTF-8'),
+                    'amount_used' => htmlspecialchars($currencySymbol . ' ' . number_format((float)$cn['amount_used'], 2), ENT_QUOTES, 'UTF-8'),
+                    'balance' => htmlspecialchars($currencySymbol . ' ' . number_format((float)$cn['balance'], 2), ENT_QUOTES, 'UTF-8'),
+                ], hotel_default_credit_note_document_html());
+
+                file_put_contents($fullPath, bookingRenderPdfFromHtml($html, 'Credit Note ' . (string)$cn['credit_note_number']));
+                $pdo->prepare("UPDATE credit_notes SET pdf_path=?, pdf_generated=1, updated_at=NOW() WHERE id=?")
+                    ->execute([$relativePath, $creditNoteId]);
+
+                return ['pdf_path' => $fullPath, 'relative_path' => $relativePath];
+            }
 
             if (!$tcpdfAvailable) {
                 // Fallback: plain HTML→text file if TCPDF unavailable
@@ -693,7 +752,7 @@ if (!function_exists('generateCreditNotePDF')) {
             $reasonLabels = [
                 'cancellation'  => 'Booking Cancellation',
                 'service_issue' => 'Service Issue / Complaint',
-                'early_checkout'=> 'Early Checkout',
+                'early_checkout' => 'Early Checkout',
                 'overpayment'   => 'Overpayment',
                 'goodwill'      => 'Goodwill Gesture',
                 'pricing_error' => 'Pricing / Billing Error',
@@ -795,14 +854,22 @@ if (!function_exists('sendCreditNoteEmail')) {
             $cn = $pdo->prepare("SELECT * FROM credit_notes WHERE id = ?");
             $cn->execute([$creditNoteId]);
             $cn = $cn->fetch(PDO::FETCH_ASSOC);
-            if (!$cn) { throw new RuntimeException('Credit note not found.'); }
-            if (empty($cn['guest_email'])) { throw new RuntimeException('No guest email address on record for this credit note.'); }
-            if (!filter_var($cn['guest_email'], FILTER_VALIDATE_EMAIL)) { throw new RuntimeException('Guest email address is invalid.'); }
+            if (!$cn) {
+                throw new RuntimeException('Credit note not found.');
+            }
+            if (empty($cn['guest_email'])) {
+                throw new RuntimeException('No guest email address on record for this credit note.');
+            }
+            if (!filter_var($cn['guest_email'], FILTER_VALIDATE_EMAIL)) {
+                throw new RuntimeException('Guest email address is invalid.');
+            }
 
             // Regenerate PDF if missing
             if (empty($cn['pdf_path']) || !file_exists(__DIR__ . '/../' . $cn['pdf_path'])) {
                 $pdfResult = generateCreditNotePDF($pdo, $creditNoteId);
-                if (!$pdfResult) { throw new RuntimeException('Unable to generate credit note PDF for email.'); }
+                if (!$pdfResult) {
+                    throw new RuntimeException('Unable to generate credit note PDF for email.');
+                }
                 $cn2 = $pdo->prepare("SELECT pdf_path FROM credit_notes WHERE id = ?");
                 $cn2->execute([$creditNoteId]);
                 $cn['pdf_path'] = (string)$cn2->fetchColumn();

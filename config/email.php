@@ -164,6 +164,112 @@ function sendEmail(string $to, ?string $toName, string $subject, string $htmlBod
 }
 
 /**
+ * Send email with optional attachments using the shared SMTP configuration.
+ *
+ * Each attachment may include either:
+ * - ['path' => '/abs/file.pdf', 'name' => 'file.pdf', 'mime' => 'application/pdf']
+ * - ['content' => '<binary>', 'name' => 'file.pdf', 'mime' => 'application/pdf']
+ */
+function sendEmailWithAttachments(string $to, ?string $toName, string $subject, string $htmlBody, array $attachments = [], string $textBody = ''): array
+{
+    global $email_from_name, $email_from_email, $email_admin_email, $email_site_name;
+    global $smtp_host, $smtp_port, $smtp_username, $smtp_password, $smtp_secure, $smtp_timeout, $smtp_debug;
+    global $email_bcc_admin, $development_mode, $email_log_enabled, $email_preview_enabled;
+
+    if ($development_mode && (empty($smtp_password) || $email_preview_enabled)) {
+        $preview = createEmailPreview($to, $toName, $subject, $htmlBody, $textBody);
+        if (!empty($preview['success'])) {
+            $preview['attachment_names'] = array_values(array_filter(array_map(static function (array $attachment): string {
+                return trim((string)($attachment['name'] ?? ''));
+            }, $attachments)));
+        }
+        return $preview;
+    }
+
+    try {
+        $mail = new PHPMailer(true);
+
+        $smtpSecureNormalized = strtolower(trim((string)$smtp_secure));
+        if ($smtpSecureNormalized === '' && (int)$smtp_port === 587) {
+            $smtpSecureNormalized = 'tls';
+        } elseif ($smtpSecureNormalized === '' && (int)$smtp_port === 465) {
+            $smtpSecureNormalized = 'ssl';
+        }
+        $fromAddress = $smtp_username;
+
+        $mail->isSMTP();
+        $mail->Host = $smtp_host;
+        $mail->SMTPAuth = true;
+        $mail->Username = $smtp_username;
+        $mail->Password = $smtp_password;
+        if ($smtpSecureNormalized !== '') {
+            $mail->SMTPSecure = $smtpSecureNormalized;
+        }
+        $mail->Port = $smtp_port;
+        $mail->Timeout = $smtp_timeout;
+
+        if ($smtp_debug > 0) {
+            $mail->SMTPDebug = $smtp_debug;
+        }
+
+        $mail->setFrom($fromAddress, $email_from_name ?: $email_site_name);
+        $mail->addAddress($to, $toName ?? '');
+        if (!empty($email_from_email) && filter_var($email_from_email, FILTER_VALIDATE_EMAIL)) {
+            $mail->addReplyTo($email_from_email, $email_from_name ?: $email_site_name);
+        }
+        if ($email_bcc_admin && !empty($email_admin_email)) {
+            $mail->addBCC($email_admin_email);
+        }
+
+        foreach ($attachments as $attachment) {
+            $attachmentName = trim((string)($attachment['name'] ?? 'attachment.bin'));
+            $attachmentMime = trim((string)($attachment['mime'] ?? 'application/octet-stream'));
+            $attachmentPath = trim((string)($attachment['path'] ?? ''));
+            if ($attachmentPath !== '') {
+                $mail->addAttachment($attachmentPath, $attachmentName, PHPMailer::ENCODING_BASE64, $attachmentMime);
+                continue;
+            }
+
+            if (array_key_exists('content', $attachment)) {
+                $mail->addStringAttachment((string)$attachment['content'], $attachmentName, PHPMailer::ENCODING_BASE64, $attachmentMime);
+            }
+        }
+
+        $mail->CharSet  = PHPMailer::CHARSET_UTF8;
+        $mail->Encoding = PHPMailer::ENCODING_BASE64;
+        $mail->isHTML(true);
+        $mail->Subject = $subject;
+        $mail->Body = wrapEmailTemplate($htmlBody, $subject);
+        $mail->AltBody = $textBody !== '' ? $textBody : strip_tags($htmlBody);
+        $mail->send();
+
+        if ($email_log_enabled) {
+            logEmail($to, $toName, $subject, 'sent', '', 'attachments=' . count($attachments));
+        }
+
+        return [
+            'success' => true,
+            'message' => 'Email sent successfully via SMTP',
+        ];
+    } catch (Exception $e) {
+        error_log('PHPMailer Error (attachments): ' . $e->getMessage());
+
+        if ($email_log_enabled) {
+            logEmail($to, $toName, $subject, 'failed', $e->getMessage(), 'attachments=' . count($attachments));
+        }
+
+        if ($development_mode) {
+            return createEmailPreview($to, $toName, $subject, $htmlBody, $textBody);
+        }
+
+        return [
+            'success' => false,
+            'message' => 'Failed to send email: ' . $e->getMessage(),
+        ];
+    }
+}
+
+/**
  * Send simple status update email for booking status changes.
  * Consolidated here so all email logic uses a single runtime file.
  */
@@ -415,106 +521,663 @@ if (!function_exists('hotel_invoice_logo_src')) {
     }
 }
 
+if (!function_exists('hotel_japandi_key_value_rows')) {
+    function hotel_japandi_key_value_rows(array $rows, string $labelWidth = '30%', string $valueColor = '#6d6455', string $valueWeight = '500'): string
+    {
+        $html = '<table style="width:100%;border-collapse:collapse;font-size:11px;line-height:1.8;" cellpadding="0" cellspacing="0">';
+        foreach ($rows as $index => $row) {
+            $label = (string)($row['label'] ?? '');
+            $value = (string)($row['value'] ?? '');
+            $topPadding = $index === 0 ? '0' : '6px';
+            $html .= '<tr>'
+                . '<td style="width:' . $labelWidth . ';color:#9b8f7e;font-weight:600;text-transform:uppercase;letter-spacing:0.1em;font-size:8px;padding-top:' . $topPadding . ';">' . htmlspecialchars($label, ENT_QUOTES, 'UTF-8') . '</td>'
+                . '<td style="color:' . $valueColor . ';font-weight:' . $valueWeight . ';padding-top:' . $topPadding . ';">' . $value . '</td>'
+                . '</tr>';
+        }
+        $html .= '</table>';
+
+        return $html;
+    }
+}
+
+if (!function_exists('hotel_japandi_summary_table')) {
+    function hotel_japandi_summary_table(array $rows, string $labelHeading = 'Description', string $valueHeading = 'Amount'): string
+    {
+        $html = '<table style="width:100%;border-collapse:collapse;" cellpadding="0" cellspacing="0">'
+            . '<tr>'
+            . '<td style="padding:14px 10px 14px 0;border-bottom:1px solid #d3cbc0;color:#9b8f7e;font-size:9px;letter-spacing:0.12em;text-transform:uppercase;font-weight:600;">' . htmlspecialchars($labelHeading, ENT_QUOTES, 'UTF-8') . '</td>'
+            . '<td style="padding:14px 0 14px 10px;border-bottom:1px solid #d3cbc0;color:#9b8f7e;font-size:9px;letter-spacing:0.12em;text-transform:uppercase;font-weight:600;text-align:right;">' . htmlspecialchars($valueHeading, ENT_QUOTES, 'UTF-8') . '</td>'
+            . '</tr>';
+
+        foreach ($rows as $row) {
+            $label = htmlspecialchars((string)($row['label'] ?? ''), ENT_QUOTES, 'UTF-8');
+            $value = (string)($row['value'] ?? '');
+            $tone = (string)($row['tone'] ?? '');
+
+            $rowStyle = '';
+            $labelStyle = 'padding:12px 10px 12px 0;border-bottom:1px solid #d3cbc0;font-size:11px;color:#6d6455;';
+            $valueStyle = 'padding:12px 0 12px 10px;border-bottom:1px solid #d3cbc0;font-size:11px;color:#3e3930;text-align:right;font-weight:500;';
+
+            if ($tone === 'accent') {
+                $labelStyle = 'padding:12px 10px 12px 0;border-bottom:1px solid #d3cbc0;font-size:11px;color:#3e3930;font-weight:700;';
+                $valueStyle = 'padding:12px 0 12px 10px;border-bottom:1px solid #d3cbc0;font-size:11px;color:#3e3930;text-align:right;font-weight:700;';
+            } elseif ($tone === 'alert') {
+                $labelStyle = 'padding:12px 10px 12px 0;border-bottom:1px solid #d3cbc0;font-size:11px;color:#8a5646;font-weight:700;';
+                $valueStyle = 'padding:12px 0 12px 10px;border-bottom:1px solid #d3cbc0;font-size:11px;color:#8a5646;text-align:right;font-weight:700;';
+            } elseif ($tone === 'total') {
+                $rowStyle = 'background:rgba(62,57,48,0.94);';
+                $labelStyle = 'padding:12px 10px 12px 0;font-size:11px;color:#f5f2eb;font-weight:700;';
+                $valueStyle = 'padding:12px 0 12px 10px;font-size:11px;color:#f5f2eb;text-align:right;font-weight:700;';
+            }
+
+            $html .= '<tr' . ($rowStyle !== '' ? ' style="' . $rowStyle . '"' : '') . '>'
+                . '<td style="' . $labelStyle . '">' . $label . '</td>'
+                . '<td style="' . $valueStyle . '">' . $value . '</td>'
+                . '</tr>';
+        }
+
+        $html .= '</table>';
+
+        return $html;
+    }
+}
+
+if (!function_exists('hotel_japandi_document_shell')) {
+    function hotel_japandi_document_shell(
+        string $documentLabel,
+        string $documentNumber,
+        string $dateLabel,
+        string $dateValue,
+        string $statusHtml,
+        string $leftHeading,
+        string $leftContentHtml,
+        string $rightHeading,
+        string $rightContentHtml,
+        string $contentHeading,
+        string $contentHtml,
+        array $extraSections = [],
+        string $footerNote = 'Thank you for choosing us',
+        string $headerExtraHtml = ''
+    ): string {
+        $dateLine = trim($dateLabel . ' ' . $dateValue);
+        $headerExtra = trim($headerExtraHtml) !== ''
+            ? '<div style="font-size:10px;color:#9b8f7e;letter-spacing:0.04em;margin-top:4px;">' . $headerExtraHtml . '</div>'
+            : '';
+
+        $extraHtml = '';
+        foreach ($extraSections as $sectionHtml) {
+            $section = trim((string)$sectionHtml);
+            if ($section === '') {
+                continue;
+            }
+
+            $extraHtml .= '<tr><td style="padding:0 48px;"><div style="height:1px;background:#d3cbc0;"></div></td></tr>'
+                . '<tr><td style="padding:0 48px;background:transparent;">' . $section . '</td></tr>';
+        }
+
+        return '<div style="font-family:Helvetica,Arial,sans-serif;color:#3e3930;background:#d5cfc4;padding:40px 20px;margin:0;">'
+            . '<table style="width:100%;max-width:720px;margin:0 auto;border-collapse:collapse;background-color:#f5f2eb;border-radius:1px;box-shadow:0 16px 40px rgba(70,60,50,0.15),0 4px 12px rgba(70,60,50,0.08);border:1px solid rgba(190,175,155,0.5);" cellpadding="0" cellspacing="0">'
+            . '<tr><td style="padding:0;"><table style="width:100%;border-collapse:collapse;" cellpadding="0" cellspacing="0"><tr>'
+            . '<td style="padding:48px 48px 36px;vertical-align:top;">'
+            . '<div style="max-width:120px;margin-bottom:16px;color:#9b8f7e;">{{logo_html}}</div>'
+            . '<div style="font-family:Georgia,\'Times New Roman\',serif;font-size:24px;color:#3e3930;letter-spacing:0.04em;line-height:1;font-weight:400;">{{site_name}}</div>'
+            . '<div style="width:30px;height:1px;background:#c2b8a6;margin:16px 0;"></div>'
+            . '<div style="font-size:10px;color:#6d6455;letter-spacing:0.08em;line-height:1.7;">{{address}}</div>'
+            . '<div style="font-size:10px;color:#6d6455;letter-spacing:0.04em;margin-top:4px;">{{contact_phone}} &nbsp;&middot;&nbsp; {{contact_email}}</div>'
+            . $headerExtra
+            . '</td>'
+            . '<td style="padding:48px 48px 36px;vertical-align:top;text-align:right;">'
+            . '<div style="font-size:9px;letter-spacing:0.25em;text-transform:uppercase;color:#9b8f7e;font-weight:600;margin-bottom:12px;">' . htmlspecialchars($documentLabel, ENT_QUOTES, 'UTF-8') . '</div>'
+            . '<div style="font-family:Georgia,\'Times New Roman\',serif;font-size:24px;color:#3e3930;letter-spacing:0.04em;line-height:1.1;font-weight:400;">' . $documentNumber . '</div>'
+            . '<div style="font-size:11px;color:#6d6455;margin-top:12px;letter-spacing:0.06em;">' . htmlspecialchars($dateLine, ENT_QUOTES, 'UTF-8') . '</div>'
+            . $statusHtml
+            . '</td>'
+            . '</tr></table></td></tr>'
+            . '<tr><td style="padding:0 48px;"><div style="height:1px;background:linear-gradient(90deg, #d3cbc0 0%, #d3cbc0 100%);"></div></td></tr>'
+            . '<tr><td style="padding:0;"><table style="width:100%;border-collapse:collapse;" cellpadding="0" cellspacing="0"><tr>'
+            . '<td style="width:50%;padding:32px 48px;vertical-align:top;border-right:1px solid #d3cbc0;">'
+            . '<div style="font-size:9px;letter-spacing:0.2em;text-transform:uppercase;color:#9b8f7e;font-weight:600;margin-bottom:20px;">' . htmlspecialchars($leftHeading, ENT_QUOTES, 'UTF-8') . '</div>'
+            . $leftContentHtml
+            . '</td>'
+            . '<td style="width:50%;padding:32px 48px;vertical-align:top;">'
+            . '<div style="font-size:9px;letter-spacing:0.2em;text-transform:uppercase;color:#9b8f7e;font-weight:600;margin-bottom:20px;">' . htmlspecialchars($rightHeading, ENT_QUOTES, 'UTF-8') . '</div>'
+            . $rightContentHtml
+            . '</td>'
+            . '</tr></table></td></tr>'
+            . '<tr><td style="padding:0 48px;"><div style="height:1px;background:linear-gradient(90deg, #d3cbc0 0%, #d3cbc0 100%);"></div></td></tr>'
+            . '<tr><td style="padding:36px 48px 36px;background:transparent;">'
+            . '<div style="font-size:9px;letter-spacing:0.2em;text-transform:uppercase;color:#9b8f7e;font-weight:600;margin-bottom:20px;">' . htmlspecialchars($contentHeading, ENT_QUOTES, 'UTF-8') . '</div>'
+            . $contentHtml
+            . '</td></tr>'
+            . $extraHtml
+            . '<tr><td style="padding:0;"><table style="width:100%;border-collapse:collapse;background:rgba(211,203,192,0.25);" cellpadding="0" cellspacing="0"><tr>'
+            . '<td style="padding:28px 48px;vertical-align:middle;"><span style="font-family:Georgia,\'Times New Roman\',serif;font-size:15px;color:#3e3930;font-weight:400;letter-spacing:0.06em;">{{site_name}}</span></td>'
+            . '<td style="padding:28px 48px;text-align:right;vertical-align:middle;"><span style="font-size:9px;color:#9b8f7e;letter-spacing:0.18em;text-transform:uppercase;">' . htmlspecialchars($footerNote, ENT_QUOTES, 'UTF-8') . '</span></td>'
+            . '</tr></table></td></tr>'
+            . '</table>'
+            . '</div>';
+    }
+}
+
 if (!function_exists('hotel_default_payment_invoice_document_html')) {
     function hotel_default_payment_invoice_document_html(): string
     {
-        return <<<'HTML'
-<div style="font-family:Arial,Helvetica,sans-serif;color:#1E2430;background:#FFFFFF;padding:0;">
-    <table style="width:100%;border-collapse:collapse;background:#FFFFFF;" cellpadding="0" cellspacing="0">
-        <tr>
-            <td style="padding:0 18px 0;">
-                <div style="height:1px;background:#20303E;"></div>
-            </td>
-        </tr>
-        <tr>
-            <td style="padding:0 18px 1px;text-align:center;">
-                <div style="max-width:360px;margin:0 auto 0;">{{logo_html}}</div>
-                <p style="margin:2px 0 0;font-size:8px;letter-spacing:1.6px;text-transform:uppercase;color:#20303E;font-weight:700;">{{site_name}}</p>
-                <p style="margin:1px 0 0;font-size:6px;line-height:1.2;color:#5F655F;">{{address}}</p>
-                <p style="margin:1px 0 0;font-size:6px;color:#5F655F;">{{contact_phone}} | {{contact_email}}</p>
-                {{vat_number_html}}
-            </td>
-        </tr>
-        <tr>
-            <td style="padding:0 18px 2px;">
-                    <div style="background:#F8F4EE;padding:8px 6px 5px;border-top:2px solid #D5B37C;">
-                        <table style="width:100%;border-collapse:collapse;" cellpadding="0" cellspacing="0">
-                            <tr>
-                                <td style="width:26%;padding:0 6px 0 0;vertical-align:top;border-right:1px solid #E7DED3;text-align:center;"><span style="display:inline-block;font-size:6px;letter-spacing:1px;text-transform:uppercase;color:#7C6E5B;font-weight:700;">Invoice</span></td>
-                                <td style="width:37%;padding:0 6px;vertical-align:top;border-right:1px solid #E7DED3;text-align:center;"><span style="display:inline-block;font-size:6px;letter-spacing:1px;text-transform:uppercase;color:#7C6E5B;font-weight:700;">Bill To</span></td>
-                                <td style="width:37%;padding:0 0 0 6px;vertical-align:top;text-align:center;"><span style="display:inline-block;font-size:6px;letter-spacing:1px;text-transform:uppercase;color:#7C6E5B;font-weight:700;">Stay Summary</span></td>
-                            </tr>
-                            <tr>
-                                <td style="width:26%;padding:6px 6px 0 0;vertical-align:top;border-right:1px solid #E7DED3;text-align:center;">
-                                    <div style="font-size:10px;line-height:1;color:#1E2430;font-weight:700;">{{invoice_number}}</div>
-                                </td>
-                                <td style="width:37%;padding:6px 6px 0;vertical-align:top;border-right:1px solid #E7DED3;text-align:center;">
-                                    <div style="font-size:6px;color:#5F655F;line-height:1.2;">Name: {{guest_name}}</div>
-                                </td>
-                                <td style="width:37%;padding:6px 0 0 6px;vertical-align:top;text-align:center;">
-                                    <div style="font-size:6px;color:#5F655F;line-height:1.2;">Reference: {{booking_reference}}</div>
-                                </td>
-                            </tr>
-                            <tr>
-                                <td style="width:26%;padding:2px 6px 0 0;vertical-align:top;border-right:1px solid #E7DED3;text-align:center;">
-                                    <div style="font-size:6px;color:#5F655F;line-height:1.2;">Issued {{issued_date}}</div>
-                                    <div style="margin-top:3px;">
-                                        <div style="display:inline-block;padding:2px 4px;background:{{status_bg}};color:{{status_fg}};font-size:6px;letter-spacing:0.7px;text-transform:uppercase;font-weight:700;border-radius:999px;">{{status_text}}</div>
-                                    </div>
-                                </td>
-                                <td style="width:37%;padding:1px 6px 0;vertical-align:top;border-right:1px solid #E7DED3;text-align:center;">
-                                    <div style="font-size:6px;color:#5F655F;line-height:1.2;">Email: {{guest_email}}</div>
-                                    <div style="font-size:6px;color:#5F655F;line-height:1.2;">Phone: {{guest_phone}}</div>
-                                </td>
-                                <td style="width:37%;padding:1px 0 0 6px;vertical-align:top;text-align:center;">
-                                    <div style="font-size:6px;color:#5F655F;line-height:1.2;">Room: {{room_name}}</div>
-                                    <div style="font-size:6px;color:#5F655F;line-height:1.2;">Check-in: {{check_in}}</div>
-                                    <div style="font-size:6px;color:#5F655F;line-height:1.2;">Check-out: {{check_out}}</div>
-                                    <div style="font-size:6px;color:#5F655F;line-height:1.2;">Guests: {{guests}}</div>
-                                    <div style="font-size:6px;color:#5F655F;line-height:1.2;">Duration: {{nights}} night(s)</div>
-                                </td>
-                            </tr>
-                        </table>
-                    </div>
-            </td>
-        </tr>
-        <tr>
-            <td style="padding:0 18px;">
-                <div style="background:#FCFAF7;padding:4px 6px;border-top:2px solid #20303E;">
-                    <p style="margin:0 0 2px;font-size:6px;letter-spacing:0.7px;text-transform:uppercase;color:#20303E;font-weight:700;">Invoice Items (Description, Qty, Unit Rate, Line Total)</p>
-                    <table style="width:100%;border-collapse:collapse;" cellpadding="0" cellspacing="0">
-                        <tr>
-                            <td width="58%" style="padding:3px 5px;background:#314654;color:#FFFFFF;font-size:7px;letter-spacing:0.2px;text-transform:none;font-weight:700;">Description</td>
-                            <td width="8%" style="padding:3px 5px;background:#314654;color:#FFFFFF;font-size:7px;letter-spacing:0.2px;text-transform:none;font-weight:700;text-align:center;">Qty</td>
-                            <td width="16%" style="padding:3px 5px;background:#314654;color:#FFFFFF;font-size:7px;letter-spacing:0.2px;text-transform:none;font-weight:700;text-align:right;">Unit Rate</td>
-                            <td width="18%" style="padding:3px 5px;background:#314654;color:#FFFFFF;font-size:7px;letter-spacing:0.2px;text-transform:none;font-weight:700;text-align:right;">Line Total</td>
-                        </tr>
-                        {{charges_table_rows}}
-                        {{totals_rows}}
-                    </table>
-                </div>
-            </td>
-        </tr>
-        <tr>
-            <td style="padding:3px 18px 0;">{{payment_history_section}}</td>
-        </tr>
-        <tr>
-            <td style="padding:2px 18px 0;">{{bank_details}}</td>
-        </tr>
-        <tr>
-            <td style="padding:2px 18px 0;">{{invoice_terms}}</td>
-        </tr>
-        <tr>
-            <td style="padding:2px 18px 3px;">
-                <div style="background:#F8F4EE;padding:6px 8px;text-align:center;border-top:2px solid #D5B37C;">
-                    <p style="margin:0;font-size:7px;letter-spacing:1.8px;text-transform:uppercase;color:#20303E;font-weight:700;">{{site_name}}</p>
-                    <p style="margin:2px 0 0;font-size:6px;line-height:1.2;color:#6D655C;">Thank you for choosing us</p>
-                </div>
-            </td>
-        </tr>
-    </table>
-</div>
-HTML;
+        $statusHtml = '<div style="margin-top:16px;"><span style="display:inline-block;padding:6px 16px;background:{{status_bg}};color:{{status_fg}};font-size:9px;letter-spacing:0.15em;text-transform:uppercase;font-weight:700;border-radius:2px;border:1px solid rgba(0,0,0,0.05);box-shadow:0 1px 2px rgba(0,0,0,0.02);">{{status_text}}</span></div>';
+        $leftContentHtml = hotel_japandi_key_value_rows([
+            ['label' => 'Name', 'value' => '{{guest_name}}'],
+            ['label' => 'Email', 'value' => '{{guest_email}}'],
+            ['label' => 'Phone', 'value' => '{{guest_phone}}'],
+        ], '30%', '#3e3930', '500');
+        $rightContentHtml = hotel_japandi_key_value_rows([
+            ['label' => 'Reference', 'value' => '{{booking_reference}}'],
+            ['label' => 'Room', 'value' => '{{room_name}}'],
+            ['label' => 'Check-in', 'value' => '{{check_in}}'],
+            ['label' => 'Check-out', 'value' => '{{check_out}}'],
+            ['label' => 'Guests', 'value' => '{{guests}}'],
+            ['label' => 'Duration', 'value' => '{{nights}} night(s)'],
+        ], '35%', '#6d6455', '500');
+        $contentHtml = '<table style="width:100%;border-collapse:collapse;" cellpadding="0" cellspacing="0">'
+            . '<tr>'
+            . '<td width="54%" style="padding:14px 12px 14px 0;border-bottom:1px solid #d3cbc0;color:#9b8f7e;font-size:9px;letter-spacing:0.12em;text-transform:uppercase;font-weight:600;">Description</td>'
+            . '<td width="10%" style="padding:14px 12px;border-bottom:1px solid #d3cbc0;color:#9b8f7e;font-size:9px;letter-spacing:0.12em;text-transform:uppercase;font-weight:600;text-align:center;">Qty</td>'
+            . '<td width="18%" style="padding:14px 12px;border-bottom:1px solid #d3cbc0;color:#9b8f7e;font-size:9px;letter-spacing:0.12em;text-transform:uppercase;font-weight:600;text-align:right;">Unit Rate</td>'
+            . '<td width="18%" style="padding:14px 0 14px 12px;border-bottom:1px solid #d3cbc0;color:#9b8f7e;font-size:9px;letter-spacing:0.12em;text-transform:uppercase;font-weight:600;text-align:right;">Line Total</td>'
+            . '</tr>'
+            . '{{charges_table_rows}}'
+            . '{{totals_rows}}'
+            . '</table>';
+
+        return hotel_japandi_document_shell(
+            'Invoice',
+            '{{invoice_number}}',
+            'Issued',
+            '{{issued_date}}',
+            $statusHtml,
+            'Bill To',
+            $leftContentHtml,
+            'Stay Summary',
+            $rightContentHtml,
+            'Invoice Items',
+            $contentHtml,
+            ['{{payment_history_section}}', '{{bank_details}}', '{{invoice_terms}}'],
+            'Thank you for choosing us',
+            '{{vat_number_html}}'
+        );
+    }
+}
+
+if (!function_exists('hotel_default_conference_invoice_document_html')) {
+    function hotel_default_conference_invoice_document_html(): string
+    {
+        $statusHtml = '<div style="margin-top:16px;"><span style="display:inline-block;padding:6px 16px;background:#ece5db;color:#5b5246;font-size:9px;letter-spacing:0.15em;text-transform:uppercase;font-weight:700;border-radius:2px;border:1px solid rgba(0,0,0,0.05);">{{status_text}}</span></div>';
+        $leftContentHtml = hotel_japandi_key_value_rows([
+            ['label' => 'Company', 'value' => '{{company_name}}'],
+            ['label' => 'Contact', 'value' => '{{contact_person}}'],
+            ['label' => 'Client Email', 'value' => '{{client_email}}'],
+            ['label' => 'Client Phone', 'value' => '{{client_phone}}'],
+        ], '34%', '#3e3930', '500');
+        $rightContentHtml = hotel_japandi_key_value_rows([
+            ['label' => 'Reference', 'value' => '{{inquiry_reference}}'],
+            ['label' => 'Room', 'value' => '{{conference_room}}'],
+            ['label' => 'Date', 'value' => '{{event_date}}'],
+            ['label' => 'Time', 'value' => '{{event_time}}'],
+            ['label' => 'Attendees', 'value' => '{{attendees}}'],
+            ['label' => 'Type', 'value' => '{{event_type}}'],
+        ], '32%', '#6d6455', '500');
+        $contentHtml = hotel_japandi_summary_table([
+            ['label' => 'Event Type', 'value' => '{{event_type}}'],
+            ['label' => 'Total Amount', 'value' => '{{total_amount}}', 'tone' => 'accent'],
+            ['label' => 'Amount Paid', 'value' => '{{amount_paid}}'],
+            ['label' => 'Balance Due', 'value' => '{{balance_due}}', 'tone' => 'alert'],
+        ], 'Line Item', 'Amount');
+
+        return hotel_japandi_document_shell(
+            'Invoice',
+            '{{invoice_number}}',
+            'Issued',
+            '{{issued_date}}',
+            $statusHtml,
+            'Bill To',
+            $leftContentHtml,
+            'Event Summary',
+            $rightContentHtml,
+            'Invoice Summary',
+            $contentHtml,
+            [],
+            'We appreciate your business'
+        );
+    }
+}
+
+if (!function_exists('hotel_default_room_quotation_document_html')) {
+    function hotel_default_room_quotation_document_html(): string
+    {
+        $leftContentHtml = hotel_japandi_key_value_rows([
+            ['label' => 'Guest', 'value' => '{{guest_name}}'],
+            ['label' => 'Reference', 'value' => '{{booking_reference}}'],
+            ['label' => 'Valid Until', 'value' => '{{valid_until}}'],
+        ], '32%', '#3e3930', '500');
+        $rightContentHtml = hotel_japandi_key_value_rows([
+            ['label' => 'Room', 'value' => '{{room_name}}'],
+            ['label' => 'Check-in', 'value' => '{{check_in_date}}'],
+            ['label' => 'Check-out', 'value' => '{{check_out_date}}'],
+            ['label' => 'Guests', 'value' => '{{guests}}'],
+            ['label' => 'Duration', 'value' => '{{nights}} night(s)'],
+        ], '35%', '#6d6455', '500');
+        $contentHtml = hotel_japandi_summary_table([
+            ['label' => 'Rate Per Night', 'value' => '{{rate_per_night}}'],
+            ['label' => 'Room Subtotal', 'value' => '{{room_subtotal}}'],
+            ['label' => 'VAT', 'value' => '{{vat_amount}}'],
+            ['label' => 'Deposit', 'value' => '{{deposit_amount}}'],
+            ['label' => 'Total Quotation', 'value' => '{{total_amount}}', 'tone' => 'total'],
+            ['label' => 'Balance Due', 'value' => '{{balance_due}}', 'tone' => 'alert'],
+        ], 'Line Item', 'Amount')
+            . '<div style="margin-top:18px;font-size:10px;line-height:1.8;color:#6d6455;">{{payment_policy}}</div>'
+            . '<div style="margin-top:12px;font-size:10px;line-height:1.8;color:#6d6455;">{{quotation_notes}}</div>';
+
+        return hotel_japandi_document_shell(
+            'Quotation',
+            '{{quotation_reference}}',
+            'Valid Until',
+            '{{valid_until}}',
+            '',
+            'Prepared For',
+            $leftContentHtml,
+            'Stay Summary',
+            $rightContentHtml,
+            'Quotation Summary',
+            $contentHtml,
+            [],
+            'Prepared for your review'
+        );
+    }
+}
+
+if (!function_exists('hotel_default_conference_quotation_document_html')) {
+    function hotel_default_conference_quotation_document_html(): string
+    {
+        $leftContentHtml = hotel_japandi_key_value_rows([
+            ['label' => 'Company', 'value' => '{{company_name}}'],
+            ['label' => 'Contact', 'value' => '{{contact_person}}'],
+            ['label' => 'Inquiry', 'value' => '{{inquiry_reference}}'],
+            ['label' => 'Valid Until', 'value' => '{{valid_until}}'],
+        ], '34%', '#3e3930', '500');
+        $rightContentHtml = hotel_japandi_key_value_rows([
+            ['label' => 'Room', 'value' => '{{conference_room}}'],
+            ['label' => 'Date', 'value' => '{{event_date}}'],
+            ['label' => 'Time', 'value' => '{{event_time}}'],
+            ['label' => 'Attendees', 'value' => '{{attendees}}'],
+        ], '32%', '#6d6455', '500');
+        $contentHtml = hotel_japandi_summary_table([
+            ['label' => 'Total Amount', 'value' => '{{total_amount}}', 'tone' => 'total'],
+            ['label' => 'VAT', 'value' => '{{vat_amount}}'],
+            ['label' => 'Deposit Required', 'value' => '{{deposit_amount}}', 'tone' => 'accent'],
+        ], 'Line Item', 'Amount')
+            . '<div style="margin-top:18px;font-size:10px;line-height:1.8;color:#6d6455;">{{payment_policy}}</div>'
+            . '<div style="margin-top:12px;font-size:10px;line-height:1.8;color:#6d6455;">{{quotation_notes}}</div>';
+
+        return hotel_japandi_document_shell(
+            'Quotation',
+            '{{quotation_reference}}',
+            'Valid Until',
+            '{{valid_until}}',
+            '',
+            'Client',
+            $leftContentHtml,
+            'Event Summary',
+            $rightContentHtml,
+            'Quotation Summary',
+            $contentHtml,
+            [],
+            'Prepared for your review'
+        );
+    }
+}
+
+if (!function_exists('hotel_default_event_quotation_document_html')) {
+    function hotel_default_event_quotation_document_html(): string
+    {
+        $leftContentHtml = hotel_japandi_key_value_rows([
+            ['label' => 'Recipient', 'value' => '{{recipient_name}}'],
+            ['label' => 'Reference', 'value' => '{{quotation_reference}}'],
+            ['label' => 'Valid Until', 'value' => '{{valid_until}}'],
+        ], '34%', '#3e3930', '500');
+        $rightContentHtml = hotel_japandi_key_value_rows([
+            ['label' => 'Event', 'value' => '{{event_title}}'],
+            ['label' => 'Date', 'value' => '{{event_date}}'],
+            ['label' => 'Time', 'value' => '{{event_time}}'],
+            ['label' => 'Location', 'value' => '{{event_location}}'],
+            ['label' => 'Attendees', 'value' => '{{attendee_count}}'],
+        ], '32%', '#6d6455', '500');
+        $contentHtml = hotel_japandi_summary_table([
+            ['label' => 'Rate Per Attendee', 'value' => '{{rate_per_attendee}}'],
+            ['label' => 'Attendee Count', 'value' => '{{attendee_count}} attendees'],
+            ['label' => 'Total Quotation', 'value' => '{{total_amount}}', 'tone' => 'total'],
+        ], 'Line Item', 'Amount')
+            . '<div style="margin-top:18px;font-size:10px;line-height:1.8;color:#6d6455;">{{quotation_notes}}</div>';
+
+        return hotel_japandi_document_shell(
+            'Quotation',
+            '{{quotation_reference}}',
+            'Valid Until',
+            '{{valid_until}}',
+            '',
+            'Prepared For',
+            $leftContentHtml,
+            'Event Summary',
+            $rightContentHtml,
+            'Quotation Summary',
+            $contentHtml,
+            [],
+            'Prepared for your review'
+        );
+    }
+}
+
+if (!function_exists('hotel_default_credit_note_document_html')) {
+    function hotel_default_credit_note_document_html(): string
+    {
+        $leftContentHtml = hotel_japandi_key_value_rows([
+            ['label' => 'Guest', 'value' => '{{guest_name}}'],
+            ['label' => 'Email', 'value' => '{{guest_email}}'],
+            ['label' => 'Booking Ref', 'value' => '{{booking_reference}}'],
+        ], '34%', '#3e3930', '500');
+        $rightContentHtml = hotel_japandi_key_value_rows([
+            ['label' => 'Reason', 'value' => '{{reason}}'],
+            ['label' => 'Issued', 'value' => '{{issued_date}}'],
+            ['label' => 'Expires', 'value' => '{{expires_at}}'],
+        ], '30%', '#6d6455', '500');
+        $contentHtml = hotel_japandi_summary_table([
+            ['label' => 'Original Value', 'value' => '{{amount}}'],
+            ['label' => 'Amount Used', 'value' => '{{amount_used}}'],
+            ['label' => 'Available Balance', 'value' => '{{balance}}', 'tone' => 'total'],
+        ], 'Line Item', 'Amount')
+            . '<div style="margin-top:18px;font-size:10px;line-height:1.8;color:#6d6455;">{{reason_notes}}</div>';
+
+        return hotel_japandi_document_shell(
+            'Credit Note',
+            '{{credit_note_number}}',
+            'Issued',
+            '{{issued_date}}',
+            '',
+            'Issued To',
+            $leftContentHtml,
+            'Reference',
+            $rightContentHtml,
+            'Credit Summary',
+            $contentHtml,
+            [],
+            'Issued for your records'
+        );
+    }
+}
+
+if (!function_exists('hotel_default_receipt_document_html')) {
+    function hotel_default_receipt_document_html(): string
+    {
+        $statusHtml = '<div style="margin-top:16px;"><span style="display:inline-block;padding:6px 16px;background:#ece5db;color:#5b5246;font-size:9px;letter-spacing:0.15em;text-transform:uppercase;font-weight:700;border-radius:2px;border:1px solid rgba(0,0,0,0.05);">{{payment_status}}</span></div>';
+        $leftContentHtml = hotel_japandi_key_value_rows([
+            ['label' => 'Guest', 'value' => '{{guest_name}}'],
+            ['label' => 'Email', 'value' => '{{guest_email}}'],
+            ['label' => 'Phone', 'value' => '{{guest_phone}}'],
+        ], '30%', '#3e3930', '500');
+        $rightContentHtml = hotel_japandi_key_value_rows([
+            ['label' => 'Type', 'value' => '{{booking_type}}'],
+            ['label' => 'Booking Ref', 'value' => '{{booking_reference}}'],
+            ['label' => 'Payment Ref', 'value' => '{{payment_reference}}'],
+            ['label' => 'Method', 'value' => '{{payment_method}}'],
+        ], '34%', '#6d6455', '500');
+        $contentHtml = '<div style="margin:0 0 18px;font-size:10px;line-height:1.8;color:#6d6455;">{{description}}</div>'
+            . hotel_japandi_summary_table([
+                ['label' => 'Payment Amount', 'value' => '{{payment_amount}}'],
+                ['label' => 'VAT Component', 'value' => '{{vat_amount}}'],
+                ['label' => 'Total Received', 'value' => '{{total_amount}}', 'tone' => 'total'],
+            ], 'Description', 'Amount');
+
+        return hotel_japandi_document_shell(
+            'Receipt',
+            '{{receipt_number}}',
+            'Received',
+            '{{payment_date}}',
+            $statusHtml,
+            'Received From',
+            $leftContentHtml,
+            'Payment Summary',
+            $rightContentHtml,
+            'Receipt Summary',
+            $contentHtml,
+            ['{{bank_details_html}}', '{{receipt_terms}}'],
+            'Payment received with thanks'
+        );
+    }
+}
+
+if (!function_exists('bookingTemplateReplaceMap')) {
+    function bookingTemplateReplaceMap(array $vars): array
+    {
+        $replace = [];
+        foreach ($vars as $key => $value) {
+            if (!is_string($key) || $key === '') {
+                continue;
+            }
+            $replace['{{' . $key . '}}'] = (string)$value;
+        }
+
+        return $replace;
+    }
+}
+
+if (!function_exists('renderBookingDocumentTemplate')) {
+    function renderBookingDocumentTemplate(string $templateKey, array $vars, string $fallbackHtml = ''): string
+    {
+        $templateHtml = $fallbackHtml;
+        if (function_exists('getBookingEmailTemplateConfig')) {
+            $template = getBookingEmailTemplateConfig($templateKey, []);
+            if (!empty($template['html_body']) && (int)($template['is_active'] ?? 1) === 1) {
+                $templateHtml = (string)$template['html_body'];
+            }
+        }
+
+        return strtr($templateHtml, bookingTemplateReplaceMap($vars));
+    }
+}
+
+if (!function_exists('bookingRenderPdfFromHtml')) {
+    function bookingRenderPdfFromHtml(string $html, string $title = 'Document'): string
+    {
+        if (!class_exists('TCPDF')) {
+            $vendorTcpdf = __DIR__ . '/../vendor/tecnickcom/tcpdf/tcpdf.php';
+            $legacyTcpdf = __DIR__ . '/../TCPDF/tcpdf.php';
+            if (is_file($vendorTcpdf)) {
+                require_once $vendorTcpdf;
+            } elseif (is_file($legacyTcpdf)) {
+                require_once $legacyTcpdf;
+            }
+        }
+
+        if (!class_exists('TCPDF')) {
+            throw new RuntimeException('TCPDF is required to render PDF templates.');
+        }
+
+        $pdf = new TCPDF('P', 'mm', 'A4', true, 'UTF-8', false);
+        $pdf->setPrintHeader(false);
+        $pdf->setPrintFooter(false);
+        $pdf->SetMargins(12, 12, 12);
+        $pdf->SetAutoPageBreak(true, 14);
+        $pdf->SetTitle($title);
+        $pdf->AddPage();
+        $pdf->writeHTML($html, true, false, true, false, '');
+
+        return $pdf->Output('', 'S');
+    }
+}
+
+/* ═══════════════════════════════════════════════════════════════════════
+ * Premium Email Theme Helpers
+ * Shared helpers that build the Japandi-premium HTML email shell used
+ * by all transactional email templates.
+ * ═══════════════════════════════════════════════════════════════════════ */
+
+if (!function_exists('hotel_premium_email_summary_rows')) {
+    /**
+     * Build a summary box table section (a <tr> block) for the premium email shell.
+     *
+     * @param string  $heading  Short heading shown above the rows (all-caps label style).
+     * @param array[] $rows     Each row: [label, value] or [label, value, bool $large_value].
+     */
+    function hotel_premium_email_summary_rows(string $heading, array $rows): string
+    {
+        $rowsHtml = '';
+        foreach ($rows as $i => $row) {
+            $label = (string)($row[0] ?? '');
+            $value = (string)($row[1] ?? '');
+            $large = !empty($row[2]);
+            $border = $i > 0 ? 'border-top:1px solid #e1dbce;padding-top:8px;' : '';
+            $valStyle = $large
+                ? 'color:#3e3930;font-weight:600;font-size:14px;'
+                : 'color:#6d6455;font-weight:500;';
+            $rowsHtml .=
+                '<tr>'
+                . '<td width="40%" style="color:#9b8f7e;font-weight:600;text-transform:uppercase;'
+                . 'letter-spacing:0.1em;font-size:9px;padding-bottom:8px;' . $border . '">' . $label . '</td>'
+                . '<td width="60%" style="' . $valStyle . 'padding-bottom:8px;text-align:right;' . $border . '">'
+                . $value . '</td>'
+                . '</tr>';
+        }
+        return '<tr><td style="padding:0 48px 36px;">'
+            . '<table width="100%" border="0" cellspacing="0" cellpadding="0"'
+            . ' style="border:1px solid #d3cbc0;background:rgba(211,203,192,0.15);">'
+            . '<tr><td style="padding:24px;">'
+            . '<div style="font-size:9px;letter-spacing:0.2em;text-transform:uppercase;'
+            . 'color:#9b8f7e;font-weight:600;margin-bottom:16px;text-align:center;">' . $heading . '</div>'
+            . '<table width="100%" border="0" cellspacing="0" cellpadding="0"'
+            . ' style="font-size:12px;line-height:1.8;">' . $rowsHtml . '</table>'
+            . '</td></tr></table>'
+            . '</td></tr>';
+    }
+}
+
+if (!function_exists('hotel_premium_email_cta')) {
+    /**
+     * Build a CTA button row for the premium email shell.
+     *
+     * @param string $url_tag   A {{placeholder}} or literal URL.
+     * @param string $label     Button label text.
+     */
+    function hotel_premium_email_cta(string $url_tag, string $label): string
+    {
+        return '<tr><td align="center" style="padding:0 48px 48px;">'
+            . '<table border="0" cellspacing="0" cellpadding="0"><tr>'
+            . '<td align="center" style="border-radius:2px;background-color:#524b3f;">'
+            . '<a href="' . $url_tag . '" target="_blank" style="font-size:11px;'
+            . "font-family:'DM Sans',Arial,sans-serif;"
+            . 'color:#ffffff;text-decoration:none;padding:14px 28px;border:1px solid #524b3f;'
+            . 'display:inline-block;letter-spacing:0.15em;text-transform:uppercase;font-weight:600;">'
+            . $label . '</a>'
+            . '</td></tr></table>'
+            . '</td></tr>';
+    }
+}
+
+if (!function_exists('hotel_premium_email_body')) {
+    /**
+     * Build the greeting + body text row for the premium email shell.
+     *
+     * @param string $name_tag    Placeholder for the recipient name, e.g. {{guest_name}}.
+     * @param string $message_html Inner <p> tags with the email message.
+     */
+    function hotel_premium_email_body(string $name_tag, string $message_html): string
+    {
+        return '<tr><td style="padding:0 48px 32px;font-size:14px;line-height:1.8;color:#5c5549;">'
+            . '<p style="margin:0 0 16px;">Dear ' . $name_tag . ',</p>'
+            . $message_html
+            . '</td></tr>';
+    }
+}
+
+if (!function_exists('hotel_premium_email_html')) {
+    /**
+     * Wrap inner HTML rows inside the full Japandi-premium email shell.
+     *
+     * @param string $preheader       Hidden preview text (may contain {{placeholders}}).
+     * @param string $inner_html      The <tr> blocks between the header separator and card footer.
+     * @param string $guest_email_tag Placeholder for the recipient email address shown in legal footer.
+     */
+    function hotel_premium_email_html(
+        string $preheader,
+        string $inner_html,
+        string $guest_email_tag = '{{guest_email}}'
+    ): string {
+        $fonts  = 'https://fonts.googleapis.com/css2?family=DM+Serif+Display:ital@0;1'
+                . '&family=DM+Sans:ital,opsz,wght@0,9..40,300..700;1,9..40,300..700'
+                . '&family=Noto+Serif+JP:wght@300;400&display=swap';
+        return '<!DOCTYPE html>'
+            . '<html lang="en"><head><meta charset="UTF-8">'
+            . '<meta name="viewport" content="width=device-width,initial-scale=1.0">'
+            . '<!--[if !mso]><!-->'
+            . '<link rel="preconnect" href="https://fonts.googleapis.com">'
+            . '<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>'
+            . '<link href="' . $fonts . '" rel="stylesheet">'
+            . '<!--<![endif]-->'
+            . '<style>'
+            . 'body{margin:0;padding:0;background-color:#d5cfc4;-webkit-text-size-adjust:100%;-ms-text-size-adjust:100%;}'
+            . 'table,td{border-collapse:collapse;}'
+            . 'img{border:0;height:auto;line-height:100%;outline:none;text-decoration:none;}'
+            . '</style>'
+            . '</head>'
+            . '<body style="margin:0;padding:0;background-color:#d5cfc4;">'
+            . '<div style="font-family:\'DM Sans\',Arial,Helvetica,sans-serif;color:#3e3930;'
+            . 'background-color:#d5cfc4;padding:40px 20px;margin:0;">'
+            . '<div style="display:none;font-size:1px;color:#d5cfc4;line-height:1px;'
+            . 'max-height:0px;max-width:0px;opacity:0;overflow:hidden;">' . $preheader . '</div>'
+            . '<table width="100%" border="0" cellspacing="0" cellpadding="0" style="background-color:#d5cfc4;">'
+            . '<tr><td align="center" style="padding:20px 0;">'
+            /* ── card ── */
+            . '<table width="100%" border="0" cellspacing="0" cellpadding="0" style="max-width:600px;width:100%;'
+            . 'margin:0 auto;background-color:#f5f2eb;border-radius:1px;'
+            . 'box-shadow:0 16px 40px rgba(70,60,50,0.15),0 4px 12px rgba(70,60,50,0.08);'
+            . 'border:1px solid rgba(190,175,155,0.5);">'
+            /* ── card header ── */
+            . '<tr><td align="center" style="padding:48px 48px 32px;">'
+            . '<div style="margin-bottom:16px;color:#9b8f7e;">{{logo_html}}</div>'
+            . '<div style="font-family:\'Noto Serif JP\',\'DM Serif Display\',Georgia,serif;'
+            . 'font-size:24px;color:#3e3930;letter-spacing:0.04em;line-height:1;font-weight:400;">{{site_name}}</div>'
+            . '<div style="width:30px;height:1px;background:#c2b8a6;margin:16px auto;"></div>'
+            . '</td></tr>'
+            /* ── injected inner content ── */
+            . $inner_html
+            /* ── separator ── */
+            . '<tr><td style="padding:0 48px;">'
+            . '<div style="height:1px;background:#d3cbc0;line-height:1px;font-size:1px;">&nbsp;</div>'
+            . '</td></tr>'
+            /* ── card footer ── */
+            . '<tr><td style="padding:32px 48px;background:rgba(211,203,192,0.25);">'
+            . '<table width="100%" border="0" cellspacing="0" cellpadding="0">'
+            . '<tr><td align="center" style="padding-bottom:12px;">'
+            . '<span style="font-family:\'Noto Serif JP\',\'DM Serif Display\',Georgia,serif;'
+            . 'font-size:14px;color:#3e3930;font-weight:400;letter-spacing:0.06em;">{{site_name}}</span>'
+            . '</td></tr>'
+            . '<tr><td align="center" style="font-size:10px;color:#6d6455;line-height:1.6;letter-spacing:0.04em;">'
+            . '{{address}}<br>'
+            . '{{contact_phone}}&nbsp;|&nbsp;'
+            . '<a href="mailto:{{contact_email}}" style="color:#6d6455;text-decoration:none;">{{contact_email}}</a>'
+            . '</td></tr>'
+            . '</table>'
+            . '</td></tr>'
+            /* ── end card ── */
+            . '</table>'
+            /* ── outer legal footer ── */
+            . '<table width="100%" border="0" cellspacing="0" cellpadding="0"'
+            . ' style="max-width:600px;width:100%;margin:0 auto;">'
+            . '<tr><td align="center" style="padding:24px 20px;font-size:9px;color:#8a8376;'
+            . 'letter-spacing:0.06em;line-height:1.6;">'
+            . 'This email was sent to ' . $guest_email_tag . '.<br>'
+            . 'If you have any questions, please contact our reservations team.'
+            . '</td></tr>'
+            . '</table>'
+            . '</td></tr></table>'
+            . '</div>'
+            . '</body></html>';
     }
 }
 
@@ -532,70 +1195,326 @@ function ensureBookingEmailTemplateDefaults()
     }
 
     $defaults = [
+        /* ── Room booking emails ─────────────────────────────────── */
         'booking_received' => [
-            'name' => 'Booking Received (Customer)',
-            'subject' => 'Booking Received - {{site_name}} [{{booking_reference}}]',
-            'html' => '<h1 style="color:#1A1A1A;text-align:center;">Booking Received - Awaiting Confirmation</h1><p>Dear {{guest_name}},</p><p>Thank you for your booking request with <strong>{{site_name}}</strong>.</p><p><strong>Reference:</strong> {{booking_reference}}<br><strong>Room:</strong> {{room_name}}<br><strong>Check-in:</strong> {{check_in_date_formatted}}<br><strong>Check-out:</strong> {{check_out_date_formatted}}<br><strong>Nights:</strong> {{number_of_nights}}<br><strong>Guests:</strong> {{number_of_guests}}<br><strong>Total:</strong> {{currency_symbol}} {{total_amount_formatted}}</p><p>{{payment_policy}}</p><p>Contact: <a href="mailto:{{contact_email}}">{{contact_email}}</a> | {{phone_main}}</p>',
+            'name'    => 'Booking Received (Customer)',
+            'subject' => 'Booking Received — {{site_name}} · {{booking_reference}}',
+            'html'    => hotel_premium_email_html(
+                'Your booking request has been received — Reference: {{booking_reference}}',
+                hotel_premium_email_body('{{guest_name}}',
+                    '<p style="margin:0 0 16px;">Thank you for choosing <strong>{{site_name}}</strong>. We have received your booking request for <strong>{{room_name}}</strong> and will confirm it shortly.</p>'
+                    . '<p style="margin:0;">We will be in touch within 24 hours. For immediate assistance contact us at <a href="mailto:{{contact_email}}" style="color:#524b3f;">{{contact_email}}</a>.</p>'
+                )
+                . hotel_premium_email_summary_rows('Booking Summary', [
+                    ['Reference',  '{{booking_reference}}'],
+                    ['Room',       '{{room_name}}'],
+                    ['Check-in',   '{{check_in_date_formatted}}'],
+                    ['Check-out',  '{{check_out_date_formatted}}'],
+                    ['Nights',     '{{number_of_nights}}'],
+                    ['Guests',     '{{number_of_guests}}'],
+                    ['Total',      '{{currency_symbol}} {{total_amount_formatted}}', true],
+                ])
+                . '<tr><td style="padding:0 48px 48px;font-size:12px;line-height:1.8;color:#9b8f7e;text-align:center;font-style:italic;">{{payment_policy}}</td></tr>'
+            ),
         ],
         'booking_confirmed' => [
-            'name' => 'Booking Confirmed (Customer)',
-            'subject' => 'Booking Confirmed - {{site_name}} [{{booking_reference}}]',
-            'html' => '<h1 style="color:#1A1A1A;text-align:center;">Booking Confirmed!</h1><p>Dear {{guest_name}},</p><p>Your booking with <strong>{{site_name}}</strong> is confirmed.</p><p><strong>Reference:</strong> {{booking_reference}}<br><strong>Room:</strong> {{room_name}}<br><strong>Check-in:</strong> {{check_in_date_formatted}}<br><strong>Check-out:</strong> {{check_out_date_formatted}}<br><strong>Nights:</strong> {{number_of_nights}}<br><strong>Guests:</strong> {{number_of_guests}}<br><strong>Total:</strong> {{currency_symbol}} {{total_amount_formatted}}</p><p>{{payment_policy}}</p><p>Check-in: {{check_in_time}} | Check-out: {{check_out_time}}</p><p>Contact: <a href="mailto:{{contact_email}}">{{contact_email}}</a> | {{phone_main}}</p>',
+            'name'    => 'Booking Confirmed (Customer)',
+            'subject' => 'Booking Confirmed — {{site_name}} · {{booking_reference}}',
+            'html'    => hotel_premium_email_html(
+                'Your booking is confirmed — Reference: {{booking_reference}}',
+                hotel_premium_email_body('{{guest_name}}',
+                    '<p style="margin:0 0 16px;">Your booking at <strong>{{site_name}}</strong> is confirmed. We look forward to welcoming you to <strong>{{room_name}}</strong>.</p>'
+                    . '<p style="margin:0;">Check-in from <strong>{{check_in_time}}</strong> &middot; Check-out by <strong>{{check_out_time}}</strong>.</p>'
+                )
+                . hotel_premium_email_summary_rows('Confirmed Booking', [
+                    ['Reference',  '{{booking_reference}}'],
+                    ['Room',       '{{room_name}}'],
+                    ['Check-in',   '{{check_in_date_formatted}}'],
+                    ['Check-out',  '{{check_out_date_formatted}}'],
+                    ['Nights',     '{{number_of_nights}}'],
+                    ['Guests',     '{{number_of_guests}}'],
+                    ['Total',      '{{currency_symbol}} {{total_amount_formatted}}', true],
+                ])
+                . '<tr><td style="padding:0 48px 48px;font-size:12px;line-height:1.8;color:#9b8f7e;text-align:center;font-style:italic;">{{payment_policy}}</td></tr>'
+            ),
         ],
         'booking_cancelled' => [
-            'name' => 'Booking Cancelled (Customer)',
-            'subject' => 'Booking Cancelled - {{site_name}} [{{booking_reference}}]',
-            'html' => '<h1 style="color:#dc3545;text-align:center;">Booking Cancelled</h1><p>Dear {{guest_name}},</p><p>Your booking with <strong>{{site_name}}</strong> has been cancelled.</p><p><strong>Reference:</strong> {{booking_reference}}<br><strong>Room:</strong> {{room_name}}<br><strong>Check-in:</strong> {{check_in_date_formatted}}<br><strong>Check-out:</strong> {{check_out_date_formatted}}<br><strong>Total:</strong> {{currency_symbol}} {{total_amount_formatted}}</p><p><strong>Reason:</strong> {{cancellation_reason}}</p><p>Contact: <a href="mailto:{{contact_email}}">{{contact_email}}</a> | {{phone_main}}</p>',
+            'name'    => 'Booking Cancelled (Customer)',
+            'subject' => 'Booking Cancelled — {{booking_reference}}',
+            'html'    => hotel_premium_email_html(
+                'Your booking {{booking_reference}} has been cancelled',
+                hotel_premium_email_body('{{guest_name}}',
+                    '<p style="margin:0 0 16px;"><span style="color:#b0552b;font-weight:600;">Your booking has been cancelled.</span> If you believe this is an error or wish to rebook, please contact us.</p>'
+                    . '<p style="margin:0;">We apologise for any inconvenience. For assistance: <a href="mailto:{{contact_email}}" style="color:#524b3f;">{{contact_email}}</a> &middot; {{phone_main}}.</p>'
+                )
+                . hotel_premium_email_summary_rows('Cancelled Booking', [
+                    ['Reference',  '{{booking_reference}}'],
+                    ['Room',       '{{room_name}}'],
+                    ['Check-in',   '{{check_in_date_formatted}}'],
+                    ['Check-out',  '{{check_out_date_formatted}}'],
+                    ['Reason',     '{{cancellation_reason}}'],
+                ])
+            ),
         ],
+        /* ── Invoice emails ──────────────────────────────────────── */
         'payment_invoice' => [
-            'name' => 'Payment Invoice (Customer)',
-            'subject' => 'Payment Invoice - {{site_name}} [{{booking_reference}}]',
-            'html' => '<h1 style="color:#1A1A1A;text-align:center;">Payment Confirmed</h1><p>Dear {{guest_name}},</p><p>Thank you. Your payment has been received for booking <strong>{{booking_reference}}</strong>.</p><p><strong>Room:</strong> {{room_name}}<br><strong>Check-in:</strong> {{check_in_date_formatted}}<br><strong>Check-out:</strong> {{check_out_date_formatted}}<br><strong>Total Paid:</strong> {{currency_symbol}} {{total_amount_formatted}}</p><p>Your invoice is attached to this email.</p><p>Contact: <a href="mailto:{{contact_email}}">{{contact_email}}</a> | {{phone_main}}</p>',
+            'name'    => 'Room Invoice Email',
+            'subject' => 'Your Invoice {{invoice_number}} — {{site_name}}',
+            'html'    => hotel_premium_email_html(
+                'Your invoice {{invoice_number}} from {{site_name}} is ready',
+                hotel_premium_email_body('{{guest_name}}',
+                    '<p style="margin:0 0 16px;">Thank you for choosing to stay with us. We hope you had a wonderful experience. Please find attached the official invoice (<strong>{{invoice_number}}</strong>) for your recent stay.</p>'
+                    . '<p style="margin:0;">A brief summary is shown below. The full invoice PDF is attached to this email.</p>'
+                )
+                . hotel_premium_email_summary_rows('Stay Summary', [
+                    ['Booking Reference',              '{{booking_reference}}'],
+                    ['Invoice Number',                 '{{invoice_number}}'],
+                    ['Check-out',                      '{{check_out}}'],
+                    ['Sub-total',                      '{{subtotal_amount}}'],
+                    ['Tourism Levy ({{levy_rate}}%)',   '{{levy_amount}}'],
+                    ['VAT ({{vat_rate}}%)',             '{{vat_amount}}'],
+                    ['Total Due',                      '{{total_amount}}', true],
+                ])
+                . '<tr><td style="padding:0 48px 8px;text-align:center;">{{vat_number_html}}</td></tr>'
+                . hotel_premium_email_cta('{{invoice_link}}', 'View Full Invoice')
+            ),
         ],
+        'conference_invoice' => [
+            'name'    => 'Conference Invoice Email',
+            'subject' => 'Conference Invoice — {{site_name}} · {{inquiry_reference}}',
+            'html'    => hotel_premium_email_html(
+                'Conference invoice for {{inquiry_reference}} — {{site_name}}',
+                hotel_premium_email_body('{{contact_person}}',
+                    '<p style="margin:0 0 16px;">Thank you for hosting with us. Your conference invoice PDF is attached for your records.</p>'
+                    . '<p style="margin:0;">For any adjustments, contact us at <a href="mailto:{{contact_email}}" style="color:#524b3f;">{{contact_email}}</a> or {{contact_phone}}.</p>'
+                )
+                . hotel_premium_email_summary_rows('Conference Summary', [
+                    ['Reference',             '{{inquiry_reference}}'],
+                    ['Company',               '{{company_name}}'],
+                    ['Conference Room',        '{{conference_room}}'],
+                    ['Event Date',             '{{event_date}}'],
+                    ['Event Time',             '{{event_time}}'],
+                    ['Sub-total',              '{{subtotal_amount}}'],
+                    ['VAT ({{vat_rate}}%)',    '{{vat_amount}}'],
+                    ['Total',                  '{{total_amount}}', true],
+                ])
+                . '<tr><td style="padding:0 48px 8px;text-align:center;">{{vat_number_html}}</td></tr>',
+                '{{contact_email}}'
+            ),
+        ],
+        /* ── Tentative booking emails ─────────────────────────────── */
         'tentative_booking_created' => [
-            'name' => 'Tentative Booking Created',
-            'subject' => 'Tentative Booking Created - {{site_name}} [{{booking_reference}}]',
-            'html' => '<h1 style="color:#8B7355;text-align:center;">Tentative Booking Created</h1><p>Dear {{guest_name}},</p><p>Your room has been placed on tentative hold.</p><p><strong>Reference:</strong> {{booking_reference}}<br><strong>Room:</strong> {{room_name}}<br><strong>Check-in:</strong> {{check_in_date_formatted}}<br><strong>Check-out:</strong> {{check_out_date_formatted}}<br><strong>Total:</strong> {{currency_symbol}} {{total_amount_formatted}}<br><strong>Hold Expires:</strong> {{tentative_expires_at_formatted}}</p><p>Please confirm before the hold expiry date.</p><p>Contact: <a href="mailto:{{contact_email}}">{{contact_email}}</a> | {{phone_main}}</p>',
+            'name'    => 'Tentative Booking Created',
+            'subject' => 'Tentative Hold Confirmed — {{site_name}} · {{booking_reference}}',
+            'html'    => hotel_premium_email_html(
+                'Your room is on tentative hold — Reference: {{booking_reference}}',
+                hotel_premium_email_body('{{guest_name}}',
+                    '<p style="margin:0 0 16px;">Your room has been placed on a tentative hold with <strong>{{site_name}}</strong>. Please confirm your booking before the hold expires to secure your stay.</p>'
+                    . '<p style="margin:0;">Contact us at <a href="mailto:{{contact_email}}" style="color:#524b3f;">{{contact_email}}</a> or {{phone_main}} to confirm.</p>'
+                )
+                . hotel_premium_email_summary_rows('Tentative Hold', [
+                    ['Reference',    '{{booking_reference}}'],
+                    ['Room',         '{{room_name}}'],
+                    ['Check-in',     '{{check_in_date_formatted}}'],
+                    ['Check-out',    '{{check_out_date_formatted}}'],
+                    ['Nights',       '{{number_of_nights}}'],
+                    ['Hold Expires', '{{tentative_expires_at_formatted}}'],
+                    ['Total',        '{{currency_symbol}} {{total_amount_formatted}}', true],
+                ])
+            ),
         ],
         'tentative_booking_reminder' => [
-            'name' => 'Tentative Booking Reminder',
-            'subject' => 'Reminder: Tentative Booking Expires Soon - {{booking_reference}}',
-            'html' => '<h1 style="color:#8B7355;text-align:center;">Tentative Hold Reminder</h1><p>Dear {{guest_name}},</p><p>This is a reminder that your tentative booking will expire soon.</p><p><strong>Reference:</strong> {{booking_reference}}<br><strong>Room:</strong> {{room_name}}<br><strong>Hold Expires:</strong> {{tentative_expires_at_formatted}}</p><p>Reply to this email or contact us to confirm the booking.</p><p>Contact: <a href="mailto:{{contact_email}}">{{contact_email}}</a> | {{phone_main}}</p>',
+            'name'    => 'Tentative Booking Reminder',
+            'subject' => 'Reminder: Your Tentative Hold Expires Soon — {{booking_reference}}',
+            'html'    => hotel_premium_email_html(
+                'Reminder: Your tentative hold expires soon — {{booking_reference}}',
+                hotel_premium_email_body('{{guest_name}}',
+                    '<p style="margin:0 0 16px;">This is a friendly reminder that your tentative booking hold at <strong>{{site_name}}</strong> is expiring soon. Please confirm to secure your stay.</p>'
+                    . '<p style="margin:0;">Contact us at <a href="mailto:{{contact_email}}" style="color:#524b3f;">{{contact_email}}</a> or {{phone_main}} to confirm.</p>'
+                )
+                . hotel_premium_email_summary_rows('Hold Reminder', [
+                    ['Reference',    '{{booking_reference}}'],
+                    ['Room',         '{{room_name}}'],
+                    ['Hold Expires', '{{tentative_expires_at_formatted}}', true],
+                ])
+            ),
         ],
         'tentative_booking_expired' => [
-            'name' => 'Tentative Booking Expired',
-            'subject' => 'Tentative Booking Expired - {{booking_reference}}',
-            'html' => '<h1 style="color:#6c757d;text-align:center;">Tentative Booking Expired</h1><p>Dear {{guest_name}},</p><p>Your tentative booking has expired and the hold has been released.</p><p><strong>Reference:</strong> {{booking_reference}}<br><strong>Room:</strong> {{room_name}}<br><strong>Check-in:</strong> {{check_in_date_formatted}}<br><strong>Check-out:</strong> {{check_out_date_formatted}}</p><p>You can make a new booking at any time.</p><p>Contact: <a href="mailto:{{contact_email}}">{{contact_email}}</a> | {{phone_main}}</p>',
+            'name'    => 'Tentative Booking Expired',
+            'subject' => 'Tentative Hold Expired — {{booking_reference}}',
+            'html'    => hotel_premium_email_html(
+                'Your tentative hold for {{booking_reference}} has expired',
+                hotel_premium_email_body('{{guest_name}}',
+                    '<p style="margin:0 0 16px;">Your tentative booking hold has expired and the room has been released. We hope to see you again soon.</p>'
+                    . '<p style="margin:0;">To make a new booking, please contact us at <a href="mailto:{{contact_email}}" style="color:#524b3f;">{{contact_email}}</a> or {{phone_main}}.</p>'
+                )
+                . hotel_premium_email_summary_rows('Expired Hold', [
+                    ['Reference',    '{{booking_reference}}'],
+                    ['Room',         '{{room_name}}'],
+                    ['Was Check-in', '{{check_in_date_formatted}}'],
+                    ['Was Check-out','{{check_out_date_formatted}}'],
+                ])
+            ),
         ],
         'tentative_booking_converted' => [
-            'name' => 'Tentative Booking Converted',
-            'subject' => 'Booking Confirmed - {{site_name}} [{{booking_reference}}]',
-            'html' => '<h1 style="color:#8B7355;text-align:center;">Booking Confirmed</h1><p>Dear {{guest_name}},</p><p>Your tentative booking has now been confirmed.</p><p><strong>Reference:</strong> {{booking_reference}}<br><strong>Room:</strong> {{room_name}}<br><strong>Check-in:</strong> {{check_in_date_formatted}} from {{check_in_time}}<br><strong>Check-out:</strong> {{check_out_date_formatted}} by {{check_out_time}}<br><strong>Total:</strong> {{currency_symbol}} {{total_amount_formatted}}</p><p>{{payment_policy}}</p><p>Contact: <a href="mailto:{{contact_email}}">{{contact_email}}</a> | {{phone_main}}</p>',
+            'name'    => 'Tentative Booking Converted',
+            'subject' => 'Booking Now Confirmed — {{site_name}} · {{booking_reference}}',
+            'html'    => hotel_premium_email_html(
+                'Your booking is now confirmed — Reference: {{booking_reference}}',
+                hotel_premium_email_body('{{guest_name}}',
+                    '<p style="margin:0 0 16px;">Great news — your tentative booking has been confirmed at <strong>{{site_name}}</strong>. We look forward to welcoming you.</p>'
+                    . '<p style="margin:0;">Check-in from <strong>{{check_in_time}}</strong> &middot; Check-out by <strong>{{check_out_time}}</strong>.</p>'
+                )
+                . hotel_premium_email_summary_rows('Confirmed Stay', [
+                    ['Reference',  '{{booking_reference}}'],
+                    ['Room',       '{{room_name}}'],
+                    ['Check-in',   '{{check_in_date_formatted}}'],
+                    ['Check-out',  '{{check_out_date_formatted}}'],
+                    ['Nights',     '{{number_of_nights}}'],
+                    ['Total',      '{{currency_symbol}} {{total_amount_formatted}}', true],
+                ])
+                . '<tr><td style="padding:0 48px 48px;font-size:12px;line-height:1.8;color:#9b8f7e;text-align:center;font-style:italic;">{{payment_policy}}</td></tr>'
+            ),
         ],
+        /* ── Quotation emails ────────────────────────────────────── */
         'tentative_quotation' => [
-            'name' => 'Tentative Booking Quotation',
-            'subject' => 'Quotation for Your Stay - {{site_name}} [{{quotation_reference}}]',
-            'html' => '<h1 style="color:#8B7355;text-align:center;">Your Stay Quotation</h1><p>Dear {{guest_name}},</p><p>Please find your quotation details below:</p><p><strong>Quote Ref:</strong> {{quotation_reference}}<br><strong>Booking Ref:</strong> {{booking_reference}}<br><strong>Room:</strong> {{room_name}}<br><strong>Check-in:</strong> {{check_in_date}}<br><strong>Check-out:</strong> {{check_out_date}}<br><strong>Total:</strong> {{total_amount}}<br><strong>Valid Until:</strong> {{valid_until}}</p><p>{{quotation_notes}}</p><p>Contact: <a href="mailto:{{contact_email}}">{{contact_email}}</a> | {{contact_phone}}</p>',
+            'name'    => 'Room Quotation Email',
+            'subject' => 'Your Stay Quotation — {{site_name}} · {{quotation_reference}}',
+            'html'    => hotel_premium_email_html(
+                'Your stay quotation {{quotation_reference}} from {{site_name}} is ready',
+                hotel_premium_email_body('{{guest_name}}',
+                    '<p style="margin:0 0 16px;">Please find your stay quotation from <strong>{{site_name}}</strong>. Your quotation PDF is attached for review.</p>'
+                    . '<p style="margin:0;">{{quotation_notes}}</p>'
+                )
+                . hotel_premium_email_summary_rows('Quotation Summary', [
+                    ['Quote Reference',   '{{quotation_reference}}'],
+                    ['Booking Reference', '{{booking_reference}}'],
+                    ['Room',              '{{room_name}}'],
+                    ['Check-in',          '{{check_in_date}}'],
+                    ['Check-out',         '{{check_out_date}}'],
+                    ['Valid Until',        '{{valid_until}}'],
+                    ['Total',             '{{total_amount}}', true],
+                ])
+            ),
+        ],
+        'tentative_quotation_document' => [
+            'name'    => 'Room Quotation PDF',
+            'subject' => 'Room Quotation Document',
+            'html'    => hotel_default_room_quotation_document_html(),
         ],
         'conference_quotation' => [
-            'name' => 'Conference Quotation',
-            'subject' => 'Conference Quotation - {{site_name}} [{{inquiry_reference}}]',
-            'html' => '<h1 style="color:#8B7355;text-align:center;">Conference Quotation</h1><p>Dear {{contact_person}},</p><p>Your conference quotation is ready.</p><p><strong>Inquiry Ref:</strong> {{inquiry_reference}}<br><strong>Quotation Ref:</strong> {{quotation_reference}}<br><strong>Company:</strong> {{company_name}}<br><strong>Room:</strong> {{conference_room}}<br><strong>Date:</strong> {{event_date}}<br><strong>Time:</strong> {{event_time}}<br><strong>Attendees:</strong> {{attendees}}<br><strong>Total:</strong> {{total_amount}}<br><strong>Valid Until:</strong> {{valid_until}}</p><p>{{quotation_notes}}</p><p>Contact: <a href="mailto:{{contact_email}}">{{contact_email}}</a> | {{contact_phone}}</p>',
+            'name'    => 'Conference Quotation Email',
+            'subject' => 'Conference Quotation — {{site_name}} · {{inquiry_reference}}',
+            'html'    => hotel_premium_email_html(
+                'Conference quotation {{quotation_reference}} from {{site_name}}',
+                hotel_premium_email_body('{{contact_person}}',
+                    '<p style="margin:0 0 16px;">Your conference quotation from <strong>{{site_name}}</strong> is ready. The quotation PDF is attached for your records.</p>'
+                    . '<p style="margin:0;">{{quotation_notes}}</p>'
+                )
+                . hotel_premium_email_summary_rows('Conference Quotation', [
+                    ['Inquiry Reference', '{{inquiry_reference}}'],
+                    ['Quote Reference',   '{{quotation_reference}}'],
+                    ['Company',           '{{company_name}}'],
+                    ['Conference Room',   '{{conference_room}}'],
+                    ['Event Date',        '{{event_date}}'],
+                    ['Attendees',         '{{attendees}}'],
+                    ['Valid Until',        '{{valid_until}}'],
+                    ['Total',             '{{total_amount}}', true],
+                ]),
+                '{{contact_email}}'
+            ),
+        ],
+        'conference_quotation_document' => [
+            'name'    => 'Conference Quotation PDF',
+            'subject' => 'Conference Quotation Document',
+            'html'    => hotel_default_conference_quotation_document_html(),
         ],
         'event_quotation' => [
-            'name' => 'Event Quotation',
-            'subject' => 'Event Quotation - {{site_name}} [{{quotation_reference}}]',
-            'html' => '<h1 style="color:#8B7355;text-align:center;">Event Quotation</h1><p>Dear {{recipient_name}},</p><p>Your event quotation is ready.</p><p><strong>Quotation Ref:</strong> {{quotation_reference}}<br><strong>Event:</strong> {{event_title}}<br><strong>Date:</strong> {{event_date}}<br><strong>Time:</strong> {{event_time}}<br><strong>Location:</strong> {{event_location}}<br><strong>Attendees:</strong> {{attendee_count}}<br><strong>Total:</strong> {{total_amount}}<br><strong>Valid Until:</strong> {{valid_until}}</p><p>{{quotation_notes}}</p><p>Contact: <a href="mailto:{{contact_email}}">{{contact_email}}</a> | {{contact_phone}}</p>',
+            'name'    => 'Event Quotation Email',
+            'subject' => 'Event Quotation — {{site_name}} · {{quotation_reference}}',
+            'html'    => hotel_premium_email_html(
+                'Your event quotation {{quotation_reference}} from {{site_name}}',
+                hotel_premium_email_body('{{recipient_name}}',
+                    '<p style="margin:0 0 16px;">Your event quotation from <strong>{{site_name}}</strong> is ready. Please find the quotation PDF attached.</p>'
+                    . '<p style="margin:0;">{{quotation_notes}}</p>'
+                )
+                . hotel_premium_email_summary_rows('Event Quotation', [
+                    ['Quote Reference', '{{quotation_reference}}'],
+                    ['Event',           '{{event_title}}'],
+                    ['Date',            '{{event_date}}'],
+                    ['Time',            '{{event_time}}'],
+                    ['Location',        '{{event_location}}'],
+                    ['Attendees',       '{{attendee_count}}'],
+                    ['Valid Until',      '{{valid_until}}'],
+                    ['Total',           '{{total_amount}}', true],
+                ]),
+                '{{guest_email}}'
+            ),
         ],
+        'event_quotation_document' => [
+            'name'    => 'Event Quotation PDF',
+            'subject' => 'Event Quotation Document',
+            'html'    => hotel_default_event_quotation_document_html(),
+        ],
+        /* ── Credit note ─────────────────────────────────────────── */
         'credit_note' => [
-            'name' => 'Credit Note (Guest)',
+            'name'    => 'Credit Note Email',
             'subject' => 'Credit Note {{credit_note_number}} — {{site_name}}',
-            'html' => '<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head><body style="font-family:Segoe UI,Tahoma,Geneva,Verdana,sans-serif;background:#F7F3EE;margin:0;padding:20px;"><div style="max-width:600px;margin:0 auto;background:#fff;border-radius:10px;overflow:hidden;box-shadow:0 4px 12px rgba(0,0,0,.1);"><div style="background:#231F1C;padding:32px 40px;text-align:center;"><p style="font-family:Georgia,serif;font-size:28px;color:#B18247;margin:0;letter-spacing:.05em;">{{site_name}}</p><p style="color:#C8C0B8;font-size:12px;margin:6px 0 0;letter-spacing:.08em;text-transform:uppercase;">Credit Note</p><div style="display:inline-block;background:#B18247;color:#fff;border-radius:4px;padding:6px 18px;font-size:12px;font-weight:600;letter-spacing:.06em;margin-top:16px;">CREDIT NOTE {{credit_note_number}}</div></div><div style="padding:32px 40px;"><p style="font-size:17px;color:#2A2723;margin:0 0 16px;">Dear {{guest_name}},</p><p style="color:#5E554D;font-size:15px;line-height:1.6;margin:0 0 24px;">A credit note has been issued to your account. The details are outlined below and the PDF is attached for your records.</p><div style="background:#F7F3EE;border-radius:8px;padding:20px 24px;margin-bottom:24px;"><table style="width:100%;border-collapse:collapse;"><tr><td style="padding:6px 0;color:#5E554D;font-size:14px;">Credit Note No.</td><td style="text-align:right;font-weight:600;color:#2A2723;font-size:14px;">{{credit_note_number}}</td></tr><tr><td style="padding:6px 0;color:#5E554D;font-size:14px;">Face Value</td><td style="text-align:right;font-weight:600;color:#2A2723;font-size:14px;">{{amount}}</td></tr><tr><td style="padding:6px 0;color:#5E554D;font-size:14px;border-top:1px solid #EAE1D8;">Available Balance</td><td style="text-align:right;font-weight:700;color:#1f7a42;font-size:15px;border-top:1px solid #EAE1D8;">{{balance}}</td></tr><tr><td style="padding:6px 0;color:#5E554D;font-size:14px;">Reason</td><td style="text-align:right;font-weight:500;color:#2A2723;font-size:14px;">{{reason}}</td></tr><tr><td style="padding:6px 0;color:#5E554D;font-size:14px;">Valid Until</td><td style="text-align:right;font-weight:500;color:#2A2723;font-size:14px;">{{expires_at}}</td></tr></table></div><p style="color:#5E554D;font-size:14px;line-height:1.6;margin:0 0 20px;">Please quote <strong>{{credit_note_number}}</strong> when making your next booking. This credit note is non-transferable and cannot be exchanged for cash.</p><div style="background:#231F1C;border-radius:8px;padding:16px 20px;text-align:center;"><p style="color:#B18247;font-size:18px;font-weight:700;margin:0;">Available Balance: {{balance}}</p></div><p style="margin:24px 0 0;color:#5E554D;font-size:13px;">Questions? Contact us at <a href="mailto:{{contact_email}}" style="color:#B18247;">{{contact_email}}</a>.</p></div><div style="background:#F7F3EE;padding:16px 40px;text-align:center;border-top:1px solid #EAE1D8;"><p style="color:#8A775F;font-size:12px;margin:0;">{{site_name}}</p></div></div></body></html>',
+            'html'    => hotel_premium_email_html(
+                'Credit note {{credit_note_number}} has been issued to your account',
+                hotel_premium_email_body('{{guest_name}}',
+                    '<p style="margin:0 0 16px;">A credit note has been issued to your account with <strong>{{site_name}}</strong>. The credit note PDF is attached for your records.</p>'
+                    . '<p style="margin:0;">Please quote <strong>{{credit_note_number}}</strong> when making your next booking. This credit note is non-transferable and cannot be exchanged for cash.</p>'
+                )
+                . hotel_premium_email_summary_rows('Credit Note Summary', [
+                    ['Credit Note No.',   '{{credit_note_number}}'],
+                    ['Face Value',        '{{amount}}'],
+                    ['Reason',            '{{reason}}'],
+                    ['Valid Until',        '{{expires_at}}'],
+                    ['Available Balance', '{{balance}}', true],
+                ])
+            ),
+        ],
+        'credit_note_document' => [
+            'name'    => 'Credit Note PDF',
+            'subject' => 'Credit Note Document',
+            'html'    => hotel_default_credit_note_document_html(),
+        ],
+        /* ── Receipt ─────────────────────────────────────────────── */
+        'payment_receipt' => [
+            'name'    => 'Payment Receipt Email',
+            'subject' => 'Payment Receipt {{receipt_number}} — {{site_name}}',
+            'html'    => hotel_premium_email_html(
+                'Your payment receipt {{receipt_number}} from {{site_name}}',
+                hotel_premium_email_body('{{guest_name}}',
+                    '<p style="margin:0 0 16px;">Thank you for your payment. Your receipt PDF is attached for your records.</p>'
+                    . '<p style="margin:0;">Questions? Contact us at <a href="mailto:{{contact_email}}" style="color:#524b3f;">{{contact_email}}</a>.</p>'
+                )
+                . hotel_premium_email_summary_rows('Payment Summary', [
+                    ['Receipt No.',       '{{receipt_number}}'],
+                    ['Reference',         '{{payment_reference}}'],
+                    ['Type',              '{{booking_type}}'],
+                    ['Payment Date',      '{{payment_date}}'],
+                    ['VAT Incl.',         '{{vat_amount}}'],
+                    ['Amount Received',   '{{total_amount}}', true],
+                ])
+                . '<tr><td style="padding:0 48px 8px;text-align:center;">{{vat_number_html}}</td></tr>'
+            ),
+        ],
+        'payment_receipt_document' => [
+            'name'    => 'Payment Receipt PDF',
+            'subject' => 'Payment Receipt Document',
+            'html'    => hotel_default_receipt_document_html(),
         ],
         'payment_invoice_document' => [
-            'name' => 'Invoice Document (PDF Attachment)',
+            'name'    => 'Room Invoice PDF',
             'subject' => 'Invoice Document',
-            'html' => hotel_default_payment_invoice_document_html(),
+            'html'    => hotel_default_payment_invoice_document_html(),
+        ],
+        'conference_invoice_document' => [
+            'name'    => 'Conference Invoice PDF',
+            'subject' => 'Conference Invoice Document',
+            'html'    => hotel_default_conference_invoice_document_html(),
         ],
     ];
 
@@ -656,6 +1575,25 @@ function buildBookingEmailVariables(array $booking, ?array $room = null, array $
         'package_total_formatted' => isset($booking['package_total']) && (float)$booking['package_total'] > 0
             ? number_format((float)$booking['package_total'], 0) : '',
     ];
+
+    // ── VAT / Levy tax vars ─────────────────────────────────────────────
+    $vatEnabled   = in_array(getSetting('vat_enabled'), ['1', 1, true, 'true', 'on'], true);
+    $vatRateVal   = $vatEnabled ? (float)getSetting('vat_rate') : 0.0;
+    $vatNumVal    = (string)getSetting('vat_number', '');
+    $vatAmtVal    = (float)($booking['vat_amount'] ?? ($vatEnabled && isset($booking['total_amount']) ? (float)$booking['total_amount'] * $vatRateVal / 100.0 : 0.0));
+    $levyAmtVal   = (float)($booking['tourism_levy_amount'] ?? 0.0);
+    $levyPctVal   = (float)($booking['tourism_levy_percent'] ?? 0.0);
+    $totalTaxVal  = (float)($booking['total_with_vat'] ?? ((float)($booking['total_amount'] ?? 0) + $vatAmtVal + $levyAmtVal));
+    $vars['vat_number']      = $vatNumVal;
+    $vars['vat_rate']        = $vatRateVal > 0.0 ? number_format($vatRateVal, 1) : '0';
+    $vars['vat_amount']      = $vatAmtVal > 0.0 ? ($currency . ' ' . number_format($vatAmtVal, 2)) : '—';
+    $vars['levy_rate']       = $levyPctVal > 0.0 ? number_format($levyPctVal, 1) : '0';
+    $vars['levy_amount']     = $levyAmtVal > 0.0 ? ($currency . ' ' . number_format($levyAmtVal, 2)) : '—';
+    $vars['subtotal_amount'] = $currency . ' ' . number_format((float)($booking['total_amount'] ?? 0), 2);
+    $vars['total_amount']    = $currency . ' ' . number_format($totalTaxVal, 2);
+    $vars['vat_number_html'] = $vatNumVal !== ''
+        ? '<p style="margin:8px 0 0;font-size:11px;color:#9b8f7e;text-align:center;">VAT Reg. No.: ' . htmlspecialchars($vatNumVal, ENT_QUOTES, 'UTF-8') . '</p>'
+        : '';
 
     return array_merge($vars, $extra);
 }
