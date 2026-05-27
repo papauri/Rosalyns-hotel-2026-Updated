@@ -281,9 +281,9 @@ body {
    BADGES
    ============================================ */
 
-.badge,
-.badge-sm,
-.status-badge {
+.finance-page .badge,
+.finance-page .badge-sm,
+.finance-page .status-badge {
     border-radius: 999px;
     padding: 5px 11px;
     font-size: 11px;
@@ -294,35 +294,35 @@ body {
     display: inline-block;
 }
 
-.badge-pending,
-.badge-partial {
+.finance-page .badge-pending,
+.finance-page .badge-partial {
     background: var(--finance-warning-bg);
     color: #9a3412;
     border-color: var(--finance-warning-border);
 }
 
-.badge-paid,
-.badge-completed {
+.finance-page .badge-paid,
+.finance-page .badge-completed {
     background: var(--finance-success-bg);
     color: #166534;
     border-color: var(--finance-success-border);
 }
 
-.badge-refunded,
-.badge-cancelled,
-.badge-failed {
+.finance-page .badge-refunded,
+.finance-page .badge-cancelled,
+.finance-page .badge-failed {
     background: var(--finance-danger-bg);
     color: #991b1b;
     border-color: var(--finance-danger-border);
 }
 
-.badge-room {
+.finance-page .badge-room {
     background: var(--finance-info-bg);
     color: #1e40af;
     border-color: var(--finance-info-border);
 }
 
-.badge-conference {
+.finance-page .badge-conference {
     background: #f5f3ff;
     color: #5b21b6;
     border-color: #ddd6fe;
@@ -332,12 +332,12 @@ body {
    BUTTONS
    ============================================ */
 
-.btn,
-.btn-action,
-.btn-primary,
-.btn-secondary,
-.btn-filter,
-.btn-reset {
+.finance-page .btn,
+.finance-page .btn-action,
+.finance-page .btn-primary,
+.finance-page .btn-secondary,
+.finance-page .btn-filter,
+.finance-page .btn-reset {
     border-radius: 10px;
     padding: 10px 16px;
     font-size: 13px;
@@ -348,30 +348,30 @@ body {
     gap: 6px;
 }
 
-.btn-primary {
+.finance-page .btn-primary {
     background: var(--finance-accent);
     color: white;
     border: none;
 }
 
-.btn-primary:hover {
+.finance-page .btn-primary:hover {
     background: var(--finance-accent-2);
     transform: translateY(-1px);
     box-shadow: var(--finance-shadow-sm);
 }
 
-.btn-secondary {
+.finance-page .btn-secondary {
     background: white;
     color: var(--finance-text);
     border: 1px solid var(--finance-border);
 }
 
-.btn-secondary:hover {
+.finance-page .btn-secondary:hover {
     background: #faf9f6;
     border-color: var(--finance-accent);
 }
 
-.btn-sm {
+.finance-page .btn-sm {
     padding: 6px 12px;
     font-size: 11px;
 }
@@ -380,25 +380,25 @@ body {
    QUICK ACTIONS
    ============================================ */
 
-.quick-actions,
-.action-buttons {
+.finance-page .quick-actions,
+.finance-page .action-buttons {
     display: flex;
     flex-wrap: wrap;
     gap: 10px;
     margin-bottom: 20px;
 }
 
-.quick-actions .btn,
-.action-buttons .btn,
-.action-buttons .btn-action {
+.finance-page .quick-actions .btn,
+.finance-page .action-buttons .btn,
+.finance-page .action-buttons .btn-action {
     border: 1px solid var(--finance-border);
     box-shadow: var(--finance-shadow-sm);
     padding: 10px 18px;
 }
 
-.quick-actions .btn:hover,
-.action-buttons .btn:hover,
-.action-buttons .btn-action:hover {
+.finance-page .quick-actions .btn:hover,
+.finance-page .action-buttons .btn:hover,
+.finance-page .action-buttons .btn-action:hover {
     transform: translateY(-1px);
     box-shadow: var(--finance-shadow);
 }
@@ -813,7 +813,7 @@ body {
     font-size: max(16px, 1rem);
 }
 
-.btn-filter {
+.finance-page .btn-filter {
     justify-content: center;
     min-height: 44px;
     border: 1px solid var(--finance-border);
@@ -823,17 +823,17 @@ body {
     cursor: pointer;
 }
 
-.btn-filter-primary,
-.btn-filter:hover,
-.btn-filter:focus-visible {
+.finance-page .btn-filter-primary,
+.finance-page .btn-filter:hover,
+.finance-page .btn-filter:focus-visible {
     background: var(--finance-accent);
     border-color: var(--finance-accent);
     color: var(--finance-surface);
     outline: none;
 }
 
-.btn-filter-secondary,
-.btn-filter-outline {
+.finance-page .btn-filter-secondary,
+.finance-page .btn-filter-outline {
     background: var(--finance-bg);
     color: var(--finance-text);
 }
@@ -1245,7 +1245,7 @@ body {
     .rx-kpi,
     .report-section,
     .rx-section,
-    .btn-filter,
+    .finance-page .btn-filter,
     .reports-container .report-tab {
         transition: transform 0.2s ease, box-shadow 0.2s ease, border-color 0.2s ease, background 0.2s ease, color 0.2s ease;
     }
@@ -1459,6 +1459,22 @@ body {
     box-shadow: var(--finance-shadow-sm);
 }
 
+.acct-kpi--interactive {
+    cursor: pointer;
+    transition: transform 0.16s ease, box-shadow 0.16s ease, border-color 0.16s ease;
+}
+
+.acct-kpi--interactive:hover {
+    transform: translateY(-2px);
+    box-shadow: var(--finance-shadow);
+    border-color: color-mix(in srgb, var(--finance-accent) 42%, var(--finance-border));
+}
+
+.acct-kpi--interactive:focus-visible {
+    outline: 2px solid color-mix(in srgb, var(--finance-accent) 72%, white);
+    outline-offset: 2px;
+}
+
 .acct-kpi--receivables {
     border-left-color: var(--finance-warning);
 }
@@ -1531,6 +1547,20 @@ body {
 
 .acct-kpi__meta a:hover {
     text-decoration: underline;
+}
+
+.acct-kpi__hint {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    margin-top: 0.6rem;
+    font-size: 0.72rem;
+    font-weight: 600;
+    color: var(--finance-accent);
+}
+
+.acct-kpi__hint i {
+    font-size: 0.76rem;
 }
 
 /* ----------- Panels (table containers) ------------ */
@@ -2159,6 +2189,10 @@ body {
     font: 400 0.88rem 'Jost', sans-serif;
 }
 
+.finance-page .acct-table.mobile-enhanced {
+    --mobile-card-min-width: 19rem;
+}
+
 .acct-table thead th {
     text-align: left;
     padding: 0.7rem 1rem;
@@ -2176,6 +2210,11 @@ body {
 .acct-table td.num {
     text-align: right;
     white-space: nowrap;
+}
+
+.finance-page .acct-table.mobile-enhanced td.num {
+    white-space: normal;
+    overflow-wrap: anywhere;
 }
 
 .acct-table tbody td {
@@ -3422,6 +3461,110 @@ body {
     text-decoration: underline;
 }
 
+.acct-link--button {
+    border: 0;
+    background: transparent;
+    padding: 0;
+    font: inherit;
+    text-align: left;
+    cursor: pointer;
+}
+
+.acct-insight-modal {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.acct-insight-modal__container {
+    width: min(94vw, 860px);
+    max-width: 860px;
+}
+
+.acct-insight-modal__body {
+    padding-top: 1rem;
+}
+
+.acct-insight-intro {
+    margin: 0 0 0.85rem;
+    color: var(--finance-muted);
+    font-size: 0.9rem;
+    line-height: 1.55;
+}
+
+.acct-insight-table {
+    width: 100%;
+    border-collapse: collapse;
+    margin-bottom: 0.85rem;
+    border: 1px solid var(--finance-border);
+    border-radius: 10px;
+    overflow: hidden;
+}
+
+.acct-insight-table th,
+.acct-insight-table td {
+    padding: 0.62rem 0.72rem;
+    border-bottom: 1px solid var(--finance-border);
+    font-size: 0.84rem;
+    vertical-align: top;
+}
+
+.acct-insight-table thead th {
+    background: #f8f4ed;
+    color: var(--finance-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    font-size: 0.7rem;
+    font-weight: 700;
+}
+
+.acct-insight-table tbody tr:last-child td {
+    border-bottom: 0;
+}
+
+.acct-insight-table td.num,
+.acct-insight-table th.num {
+    text-align: right;
+    white-space: nowrap;
+}
+
+.acct-insight-note {
+    margin: 0 0 0.85rem;
+    padding: 0.62rem 0.72rem;
+    border-radius: 8px;
+    background: #f9f4e9;
+    border: 1px solid #eadfcb;
+    color: #5f5343;
+    font-size: 0.82rem;
+    line-height: 1.5;
+}
+
+.acct-insight-actions {
+    display: flex;
+    justify-content: flex-end;
+    align-items: center;
+    gap: 0.55rem;
+    flex-wrap: wrap;
+}
+
+@media (max-width: 640px) {
+
+    .acct-insight-table td.num,
+    .acct-insight-table th.num {
+        white-space: normal;
+        text-align: left;
+    }
+
+    .acct-insight-actions {
+        justify-content: stretch;
+    }
+
+    .acct-insight-actions .acct-btn {
+        width: 100%;
+        justify-content: center;
+    }
+}
+
 .acct-muted {
     color: var(--finance-muted);
     font-size: 0.78rem;
@@ -3519,6 +3662,10 @@ body {
 .report-tab[title],
 .acct-table td[title] {
     cursor: help;
+}
+
+.acct-kpi--interactive[title] {
+    cursor: pointer;
 }
 
 .acct-kpi[title] .acct-kpi__label::after {

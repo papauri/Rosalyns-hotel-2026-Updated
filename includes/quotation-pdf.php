@@ -669,6 +669,10 @@ body { font-family: helvetica; color: #2A2723; font-size: 10.5px; }
     This quotation is valid until ' . $esc($validUntil->format('F j, Y')) . '. Availability and rates are subject to confirmation at acceptance.
 </div>';
 
+    if (function_exists('bookingRenderPdfFromHtml')) {
+        return bookingRenderPdfFromHtml($html, 'Conference Quotation ' . $quoteRef);
+    }
+
     $pdf->writeHTML($html, true, false, true, false, '');
 
     return $pdf->Output('', 'S');
@@ -713,6 +717,11 @@ function generateEventQuotationPDF(array $event, array $recipient, array $option
     $eventTime = trim($startTime . ($endTime !== '' ? ' - ' . $endTime : ''));
     if ($eventTime === '') {
         $eventTime = 'To be confirmed';
+    }
+
+    $location = (string)($event['location'] ?? 'To be confirmed');
+    if ($location === '') {
+        $location = 'To be confirmed';
     }
 
     $fmt = static function (float $value) use ($currency): string {
@@ -762,11 +771,6 @@ function generateEventQuotationPDF(array $event, array $recipient, array $option
         $notesBlock = '<div class="note">'
             . '<strong>Notes</strong><br>' . nl2br($esc($notes))
             . '</div>';
-    }
-
-    $location = (string)($event['location'] ?? 'To be confirmed');
-    if ($location === '') {
-        $location = 'To be confirmed';
     }
 
     $html = '
@@ -821,6 +825,10 @@ body { font-family: helvetica; color: #2A2723; font-size: 10.5px; }
 <div class="foot">
     This quotation is valid until ' . $esc($validUntil->format('F j, Y')) . '. Please confirm before the validity date to secure your event booking.
 </div>';
+
+    if (function_exists('bookingRenderPdfFromHtml')) {
+        return bookingRenderPdfFromHtml($html, 'Event Quotation ' . $quoteRef);
+    }
 
     $pdf->writeHTML($html, true, false, true, false, '');
 

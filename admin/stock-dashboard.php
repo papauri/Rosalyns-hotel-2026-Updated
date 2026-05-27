@@ -162,15 +162,99 @@ function recipe_coverage_pct(int $with, int $total): string {
 
         <?php if ($metrics): ?>
         <div class="metric-grid">
-            <div class="metric"><div class="label">Inventory value</div><div class="value"><?php echo $currency_symbol . ' ' . number_format($metrics['total_inventory_value'], 0); ?></div><div class="sub"><?php echo $metrics['ingredient_count']; ?> ingredient(s)</div></div>
-            <div class="metric <?php echo $metrics['critical_stock']>0?'danger':''; ?>"><div class="label">Out of stock</div><div class="value"><?php echo $metrics['critical_stock']; ?></div></div>
-            <div class="metric <?php echo $metrics['low_stock']>0?'warning':''; ?>"><div class="label">Low stock</div><div class="value"><?php echo $metrics['low_stock']; ?></div></div>
-            <div class="metric <?php echo $metrics['expiring_3d']>0?'danger':''; ?>"><div class="label">Expiring ≤3d</div><div class="value"><?php echo $metrics['expiring_3d']; ?></div><div class="sub"><?php echo $metrics['expiring_7d']; ?> in 4–7d</div></div>
-            <div class="metric"><div class="label">Today's orders</div><div class="value"><?php echo $metrics['orders_today']; ?></div><div class="sub"><?php echo $currency_symbol . ' ' . number_format($metrics['revenue_today'], 2); ?> revenue</div></div>
-            <div class="metric warning"><div class="label">Wastage (30d)</div><div class="value"><?php echo $currency_symbol . ' ' . number_format($metrics['wastage_30d'], 0); ?></div></div>
-            <div class="metric"><div class="label">Recipes coverage</div><div class="value"><?php echo recipe_coverage_pct($metrics['food_with_recipe']??0, $metrics['food_total']??0); ?> · <?php echo recipe_coverage_pct($metrics['drink_with_recipe']??0, $metrics['drink_total']??0); ?></div><div class="sub">Food · Drinks</div></div>
-            <?php if (($metrics['pending_reconcile']??0) > 0): ?>
-            <div class="metric warning"><div class="label">Pending reconcile</div><div class="value"><?php echo $metrics['pending_reconcile']; ?></div><div class="sub">Charges without stock impact</div></div>
+            <div class="metric metric--interactive js-stock-dashboard-insight-trigger"
+                role="button"
+                tabindex="0"
+                data-insight-key="inventory-value"
+                data-insight-title="Inventory Value Snapshot"
+                aria-label="Open inventory value snapshot">
+                <div class="label">Inventory value</div>
+                <div class="value"><?php echo $currency_symbol . ' ' . number_format($metrics['total_inventory_value'], 0); ?></div>
+                <div class="sub"><?php echo $metrics['ingredient_count']; ?> ingredient(s)</div>
+                <div class="metric__hint"><i class="fas fa-table-list"></i> Open detail</div>
+            </div>
+
+            <div class="metric <?php echo $metrics['critical_stock'] > 0 ? 'danger' : ''; ?> metric--interactive js-stock-dashboard-insight-trigger"
+                role="button"
+                tabindex="0"
+                data-insight-key="out-of-stock"
+                data-insight-title="Out-of-Stock Watchlist"
+                aria-label="Open out of stock watchlist">
+                <div class="label">Out of stock</div>
+                <div class="value"><?php echo $metrics['critical_stock']; ?></div>
+                <div class="metric__hint"><i class="fas fa-table-list"></i> Open detail</div>
+            </div>
+
+            <div class="metric <?php echo $metrics['low_stock'] > 0 ? 'warning' : ''; ?> metric--interactive js-stock-dashboard-insight-trigger"
+                role="button"
+                tabindex="0"
+                data-insight-key="low-stock"
+                data-insight-title="Low-Stock Follow-up"
+                aria-label="Open low stock follow up">
+                <div class="label">Low stock</div>
+                <div class="value"><?php echo $metrics['low_stock']; ?></div>
+                <div class="metric__hint"><i class="fas fa-table-list"></i> Open detail</div>
+            </div>
+
+            <div class="metric <?php echo $metrics['expiring_3d'] > 0 ? 'danger' : ''; ?> metric--interactive js-stock-dashboard-insight-trigger"
+                role="button"
+                tabindex="0"
+                data-insight-key="expiring"
+                data-insight-title="Expiry Risk Timeline"
+                aria-label="Open expiry risk timeline">
+                <div class="label">Expiring ≤3d</div>
+                <div class="value"><?php echo $metrics['expiring_3d']; ?></div>
+                <div class="sub"><?php echo $metrics['expiring_7d']; ?> in 4–7d</div>
+                <div class="metric__hint"><i class="fas fa-table-list"></i> Open detail</div>
+            </div>
+
+            <div class="metric metric--interactive js-stock-dashboard-insight-trigger"
+                role="button"
+                tabindex="0"
+                data-insight-key="todays-orders"
+                data-insight-title="Today's Orders Pulse"
+                aria-label="Open today's orders pulse">
+                <div class="label">Today's orders</div>
+                <div class="value"><?php echo $metrics['orders_today']; ?></div>
+                <div class="sub"><?php echo $currency_symbol . ' ' . number_format($metrics['revenue_today'], 2); ?> revenue</div>
+                <div class="metric__hint"><i class="fas fa-table-list"></i> Open detail</div>
+            </div>
+
+            <div class="metric warning metric--interactive js-stock-dashboard-insight-trigger"
+                role="button"
+                tabindex="0"
+                data-insight-key="wastage-30d"
+                data-insight-title="Wastage Cost Trend"
+                aria-label="Open wastage cost trend">
+                <div class="label">Wastage (30d)</div>
+                <div class="value"><?php echo $currency_symbol . ' ' . number_format($metrics['wastage_30d'], 0); ?></div>
+                <div class="metric__hint"><i class="fas fa-table-list"></i> Open detail</div>
+            </div>
+
+            <div class="metric metric--interactive js-stock-dashboard-insight-trigger"
+                role="button"
+                tabindex="0"
+                data-insight-key="recipes-coverage"
+                data-insight-title="Recipe Coverage Readiness"
+                aria-label="Open recipe coverage readiness">
+                <div class="label">Recipes coverage</div>
+                <div class="value"><?php echo recipe_coverage_pct($metrics['food_with_recipe'] ?? 0, $metrics['food_total'] ?? 0); ?> · <?php echo recipe_coverage_pct($metrics['drink_with_recipe'] ?? 0, $metrics['drink_total'] ?? 0); ?></div>
+                <div class="sub">Food · Drinks</div>
+                <div class="metric__hint"><i class="fas fa-table-list"></i> Open detail</div>
+            </div>
+
+            <?php if (($metrics['pending_reconcile'] ?? 0) > 0): ?>
+            <div class="metric warning metric--interactive js-stock-dashboard-insight-trigger"
+                role="button"
+                tabindex="0"
+                data-insight-key="pending-reconcile"
+                data-insight-title="Pending Reconciliation Queue"
+                aria-label="Open pending reconciliation queue">
+                <div class="label">Pending reconcile</div>
+                <div class="value"><?php echo $metrics['pending_reconcile']; ?></div>
+                <div class="sub">Charges without stock impact</div>
+                <div class="metric__hint"><i class="fas fa-table-list"></i> Open detail</div>
+            </div>
             <?php endif; ?>
         </div>
         <?php endif; ?>
@@ -196,6 +280,185 @@ function recipe_coverage_pct(int $with, int $total): string {
             <a class="quick-link" href="stock-wastage.php"><i class="fas fa-trash-alt"></i><div class="nm">Wastage</div></a>
             <a class="quick-link" href="stock-reports.php"><i class="fas fa-chart-area"></i><div class="nm">Reports</div></a>
         </div>
+
+        <?php if ($metrics): ?>
+        <div class="modal-overlay" id="stockDashboardInsightModal-overlay" data-modal-overlay aria-hidden="true"></div>
+        <div class="modal-overlay modal-lg" id="stockDashboardInsightModal" role="dialog" aria-modal="true" aria-labelledby="stockDashboardInsightTitle" data-modal data-close-on-escape="true" data-close-on-overlay="true">
+            <div class="modal-container">
+                <div class="modal-header">
+                    <h3 class="modal-title" id="stockDashboardInsightTitle">Stock Insight</h3>
+                    <button type="button" class="modal-close" data-modal-close aria-label="Close stock insight modal"><i class="fas fa-times"></i></button>
+                </div>
+                <div class="modal-body" id="stockDashboardInsightBody"></div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-modal-close>Close</button>
+                </div>
+            </div>
+        </div>
+
+        <template id="stock-dashboard-insight-template-inventory-value">
+            <p class="stock-insight-note">Inventory value estimates the replacement value of active ingredient stock at current recorded cost.</p>
+            <table class="stock-insight-table">
+                <tbody>
+                    <tr><th>Total inventory value</th><td><?php echo $currency_symbol . ' ' . number_format((float)$metrics['total_inventory_value'], 2); ?></td></tr>
+                    <tr><th>Active ingredients</th><td><?php echo number_format((int)$metrics['ingredient_count']); ?></td></tr>
+                    <tr><th>Low stock items</th><td><?php echo number_format((int)$metrics['low_stock']); ?></td></tr>
+                    <tr><th>Out-of-stock items</th><td><?php echo number_format((int)$metrics['critical_stock']); ?></td></tr>
+                </tbody>
+            </table>
+            <div class="stock-insight-actions">
+                <a href="stock-ingredients.php" class="btn btn-primary">Open ingredients ledger</a>
+            </div>
+        </template>
+
+        <template id="stock-dashboard-insight-template-out-of-stock">
+            <p class="stock-insight-note">Out-of-stock items can block menu production and should be replenished or substituted quickly.</p>
+            <table class="stock-insight-table">
+                <tbody>
+                    <tr><th>Out-of-stock count</th><td><?php echo number_format((int)$metrics['critical_stock']); ?></td></tr>
+                    <tr><th>Low stock backlog</th><td><?php echo number_format((int)$metrics['low_stock']); ?></td></tr>
+                    <tr><th>Active ingredients</th><td><?php echo number_format((int)$metrics['ingredient_count']); ?></td></tr>
+                </tbody>
+            </table>
+            <div class="stock-insight-actions">
+                <a href="stock-ingredients.php" class="btn btn-primary">Review ingredient levels</a>
+            </div>
+        </template>
+
+        <template id="stock-dashboard-insight-template-low-stock">
+            <p class="stock-insight-note">Low-stock count highlights items near minimum threshold before they become stock-outs.</p>
+            <table class="stock-insight-table">
+                <tbody>
+                    <tr><th>Low-stock items</th><td><?php echo number_format((int)$metrics['low_stock']); ?></td></tr>
+                    <tr><th>Out-of-stock items</th><td><?php echo number_format((int)$metrics['critical_stock']); ?></td></tr>
+                    <tr><th>Total active ingredients</th><td><?php echo number_format((int)$metrics['ingredient_count']); ?></td></tr>
+                </tbody>
+            </table>
+            <div class="stock-insight-actions">
+                <a href="stock-ingredients.php" class="btn btn-primary">Open low-stock follow-up</a>
+            </div>
+        </template>
+
+        <template id="stock-dashboard-insight-template-expiring">
+            <p class="stock-insight-note">Expiry exposure tracks active batches nearing expiry so kitchen and purchasing can minimize write-offs.</p>
+            <table class="stock-insight-table">
+                <tbody>
+                    <tr><th>Expiring in 3 days or less</th><td><?php echo number_format((int)$metrics['expiring_3d']); ?></td></tr>
+                    <tr><th>Expiring in 4-7 days</th><td><?php echo number_format((int)$metrics['expiring_7d']); ?></td></tr>
+                    <tr><th>Active batches</th><td><?php echo number_format((int)$metrics['active_batches']); ?></td></tr>
+                </tbody>
+            </table>
+            <div class="stock-insight-actions">
+                <a href="stock-batches.php?expiry=critical" class="btn btn-primary">Open critical batches</a>
+                <a href="stock-batches.php?expiry=soon" class="btn btn-secondary">Open 4-7 day batches</a>
+            </div>
+        </template>
+
+        <template id="stock-dashboard-insight-template-todays-orders">
+            <p class="stock-insight-note">Today's order pulse combines transaction count and recognized revenue from non-cancelled/voided orders.</p>
+            <table class="stock-insight-table">
+                <tbody>
+                    <tr><th>Orders today</th><td><?php echo number_format((int)$metrics['orders_today']); ?></td></tr>
+                    <tr><th>Revenue today</th><td><?php echo $currency_symbol . ' ' . number_format((float)$metrics['revenue_today'], 2); ?></td></tr>
+                    <tr><th>Average ticket</th><td><?php echo (int)$metrics['orders_today'] > 0 ? $currency_symbol . ' ' . number_format((float)$metrics['revenue_today'] / (int)$metrics['orders_today'], 2) : $currency_symbol . ' 0.00'; ?></td></tr>
+                </tbody>
+            </table>
+            <div class="stock-insight-actions">
+                <a href="stock-orders.php?date=today" class="btn btn-primary">Open today's orders</a>
+            </div>
+        </template>
+
+        <template id="stock-dashboard-insight-template-wastage-30d">
+            <p class="stock-insight-note">30-day wastage cost is an early signal of inventory leakage and process discipline.</p>
+            <table class="stock-insight-table">
+                <tbody>
+                    <tr><th>Wastage cost (30 days)</th><td><?php echo $currency_symbol . ' ' . number_format((float)$metrics['wastage_30d'], 2); ?></td></tr>
+                    <tr><th>Active ingredients</th><td><?php echo number_format((int)$metrics['ingredient_count']); ?></td></tr>
+                    <tr><th>Expiring ≤ 3 days</th><td><?php echo number_format((int)$metrics['expiring_3d']); ?></td></tr>
+                </tbody>
+            </table>
+            <div class="stock-insight-actions">
+                <a href="stock-wastage.php" class="btn btn-primary">Open wastage log</a>
+            </div>
+        </template>
+
+        <template id="stock-dashboard-insight-template-recipes-coverage">
+            <p class="stock-insight-note">Recipe coverage indicates how much of the menu can automatically drive ingredient deductions and cost visibility.</p>
+            <table class="stock-insight-table">
+                <tbody>
+                    <tr><th>Food coverage</th><td><?php echo recipe_coverage_pct((int)($metrics['food_with_recipe'] ?? 0), (int)($metrics['food_total'] ?? 0)); ?> (<?php echo (int)($metrics['food_with_recipe'] ?? 0); ?>/<?php echo (int)($metrics['food_total'] ?? 0); ?>)</td></tr>
+                    <tr><th>Drink coverage</th><td><?php echo recipe_coverage_pct((int)($metrics['drink_with_recipe'] ?? 0), (int)($metrics['drink_total'] ?? 0)); ?> (<?php echo (int)($metrics['drink_with_recipe'] ?? 0); ?>/<?php echo (int)($metrics['drink_total'] ?? 0); ?>)</td></tr>
+                </tbody>
+            </table>
+            <div class="stock-insight-actions">
+                <a href="stock-recipes.php" class="btn btn-primary">Open recipe mapping</a>
+            </div>
+        </template>
+
+        <template id="stock-dashboard-insight-template-pending-reconcile">
+            <p class="stock-insight-note">Pending reconciliation counts charge records that still need stock impact backfilled for accurate inventory and COGS.</p>
+            <table class="stock-insight-table">
+                <tbody>
+                    <tr><th>Pending reconciliation rows</th><td><?php echo number_format((int)($metrics['pending_reconcile'] ?? 0)); ?></td></tr>
+                    <tr><th>Linked to adjustments report</th><td>Yes</td></tr>
+                    <tr><th>Recommended action</th><td>Process oldest unreconciled charges first</td></tr>
+                </tbody>
+            </table>
+            <div class="stock-insight-actions">
+                <a href="stock-reports.php?tab=adjustments" class="btn btn-primary">Open adjustments report</a>
+                <a href="stock-orders.php?health=review" class="btn btn-secondary">Open review queue</a>
+            </div>
+        </template>
+
+        <script>
+            (function() {
+                var modalId = 'stockDashboardInsightModal';
+
+                function openStockDashboardInsight(triggerEl) {
+                    var key = triggerEl ? triggerEl.getAttribute('data-insight-key') : '';
+                    if (!key) return;
+
+                    var template = document.getElementById('stock-dashboard-insight-template-' + key);
+                    var body = document.getElementById('stockDashboardInsightBody');
+                    var title = document.getElementById('stockDashboardInsightTitle');
+                    var modal = document.getElementById(modalId);
+                    var overlay = document.getElementById(modalId + '-overlay');
+                    if (!template || !body || !title || !modal) return;
+
+                    title.textContent = triggerEl.getAttribute('data-insight-title') || 'Stock Insight';
+                    body.innerHTML = template.innerHTML;
+
+                    if (window.Modal && typeof window.Modal.open === 'function') {
+                        window.Modal.open(modalId);
+                        return;
+                    }
+
+                    modal.classList.add('active');
+                    if (overlay) overlay.classList.add('active');
+                    document.body.classList.add('modal-open');
+                }
+
+                if (!window.__stockDashboardInsightHandlersBound) {
+                    document.addEventListener('click', function(e) {
+                        var trigger = e.target.closest('.js-stock-dashboard-insight-trigger');
+                        if (!trigger) return;
+                        e.preventDefault();
+                        openStockDashboardInsight(trigger);
+                    });
+
+                    document.addEventListener('keydown', function(e) {
+                        if (e.key !== 'Enter' && e.key !== ' ') return;
+                        var trigger = e.target && e.target.closest ? e.target.closest('.js-stock-dashboard-insight-trigger') : null;
+                        if (!trigger) return;
+                        e.preventDefault();
+                        openStockDashboardInsight(trigger);
+                    });
+
+                    window.__stockDashboardInsightHandlersBound = true;
+                }
+            })();
+        </script>
+        <?php endif; ?>
     </div>
 
     <?php require_once 'includes/admin-footer.php'; ?>

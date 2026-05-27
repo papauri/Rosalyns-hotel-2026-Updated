@@ -1,19 +1,17 @@
 <?php
+
 /**
  * Get user permissions API endpoint
  *
  * GET /admin/api/user-permissions.php?user_id=<id>
  * Returns JSON with user's current permissions
  */
-require_once '../admin-init.php';
+require_once __DIR__ . '/api-init.php';
 /** @var array $user */
 
-// Check permission
-if (!hasPermission($user['id'], 'user_permissions')) {
-    http_response_code(403);
-    echo json_encode(['success' => false, 'error' => 'Permission denied']);
-    exit;
-}
+header('Content-Type: application/json');
+
+requireApiPermission('user_permissions');
 
 $user_id = (int)($_GET['user_id'] ?? 0);
 if ($user_id <= 0) {
@@ -32,7 +30,6 @@ if (!canManageUser($user['id'], $user_id)) {
 // Get user's permissions
 $permissions = getUserPermissions($user_id);
 
-header('Content-Type: application/json');
 echo json_encode([
     'success' => true,
     'permissions' => $permissions

@@ -14,11 +14,7 @@ if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
     exit;
 }
 
-if (!in_array($user['role'] ?? '', ['admin', 'manager'], true)) {
-    http_response_code(403);
-    echo json_encode(['success' => false, 'error' => 'Insufficient permissions.']);
-    exit;
-}
+requireApiPermission('edit_booking');
 
 $raw  = file_get_contents('php://input');
 $body = json_decode($raw ?: '', true);

@@ -213,7 +213,7 @@ $csrf_token = generateCsrfToken();
 <body>
     <?php require_once 'includes/admin-header.php'; ?>
 
-    <div class="content">
+    <div class="content stock-recipes-page">
         <div class="page-header">
             <h2 class="page-title"><i class="fas fa-book-open" style="color:#8B7355;"></i> Recipes</h2>
             <a href="stock-ingredients.php" class="btn-add"><i class="fas fa-carrot"></i> Manage Ingredients</a>

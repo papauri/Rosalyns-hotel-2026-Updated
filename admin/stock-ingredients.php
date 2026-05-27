@@ -409,7 +409,7 @@ function expiry_badge(?string $next, int $alert): string
 <body>
     <?php require_once 'includes/admin-header.php'; ?>
 
-    <div class="content">
+    <div class="content stock-ingredients-page">
         <div class="page-header">
             <h2 class="page-title"><i class="fas fa-carrot" style="color:var(--color-primary,#8A775F);"></i> Ingredients</h2>
             <button class="btn-add" onclick="openIngredientModal()"><i class="fas fa-plus"></i> Add Ingredient</button>

@@ -1332,24 +1332,45 @@ $csrf_token = generateCsrfToken();
             <!-- ── KPI Row with yesterday deltas ──────────────────── -->
             <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(155px,1fr));gap:10px;margin-bottom:16px;">
 
-                <div class="shift-card" style="flex-direction:column;align-items:flex-start;">
+                <div class="shift-card shift-card--interactive js-stock-orders-insight-trigger"
+                    style="flex-direction:column;align-items:flex-start;"
+                    role="button"
+                    tabindex="0"
+                    data-insight-key="revenue-today"
+                    data-insight-title="Revenue Today Breakdown"
+                    aria-label="Open revenue today breakdown">
                     <div class="lbl">Revenue Today</div>
                     <div class="val" style="font-size:22px;"><?php echo $currency_symbol . ' ' . number_format($revToday, 2); ?></div>
                     <?php echo insightsDelta($revDelta); ?>
                     <div style="font-size:11px;color:#6c757d;margin-top:3px;">Yesterday: <?php echo $currency_symbol . ' ' . number_format($revYday, 2); ?></div>
+                    <div class="shift-card__hint"><i class="fas fa-table-list"></i> Open detail</div>
                 </div>
 
-                <div class="shift-card" style="flex-direction:column;align-items:flex-start;">
+                <div class="shift-card shift-card--interactive js-stock-orders-insight-trigger"
+                    style="flex-direction:column;align-items:flex-start;"
+                    role="button"
+                    tabindex="0"
+                    data-insight-key="orders-today"
+                    data-insight-title="Orders Today Throughput"
+                    aria-label="Open orders today throughput">
                     <div class="lbl">Orders Today</div>
                     <div class="val" style="font-size:22px;"><?php echo $ordToday; ?></div>
                     <?php echo insightsDelta($ordDelta); ?>
                     <div style="font-size:11px;color:#6c757d;margin-top:3px;">Yesterday: <?php echo $ordYday; ?></div>
+                    <div class="shift-card__hint"><i class="fas fa-table-list"></i> Open detail</div>
                 </div>
 
-                <div class="shift-card" style="flex-direction:column;align-items:flex-start;">
+                <div class="shift-card shift-card--interactive js-stock-orders-insight-trigger"
+                    style="flex-direction:column;align-items:flex-start;"
+                    role="button"
+                    tabindex="0"
+                    data-insight-key="avg-ticket"
+                    data-insight-title="Average Ticket Quality"
+                    aria-label="Open average ticket quality">
                     <div class="lbl">Avg Ticket</div>
                     <div class="val" style="font-size:22px;"><?php echo $currency_symbol . ' ' . number_format((float)($operationsSnapshot['avg_ticket_today'] ?? 0), 2); ?></div>
                     <div style="font-size:11px;color:#6c757d;margin-top:3px;">Across <?php echo (int)($operationsSnapshot['settled_today'] ?? 0); ?> settled today</div>
+                    <div class="shift-card__hint"><i class="fas fa-table-list"></i> Open detail</div>
                 </div>
 
                 <div class="shift-card<?php echo ((int)($operationsSnapshot['awaiting_payment'] ?? 0) > 0) ? ' warn' : ''; ?>"
@@ -1382,26 +1403,52 @@ $csrf_token = generateCsrfToken();
                     </div>
                 </div>
 
-                <div class="shift-card" style="flex-direction:column;align-items:flex-start;">
+                <div class="shift-card shift-card--interactive js-stock-orders-insight-trigger"
+                    style="flex-direction:column;align-items:flex-start;"
+                    role="button"
+                    tabindex="0"
+                    data-insight-key="cash-collected"
+                    data-insight-title="Cash Collection Summary"
+                    aria-label="Open cash collection summary">
                     <div class="lbl">Cash Collected</div>
                     <div class="val" style="font-size:22px;"><?php echo $currency_symbol . ' ' . number_format((float)($shift['cash_today'] ?? 0), 2); ?></div>
                     <div style="font-size:11px;color:#6c757d;margin-top:3px;">Today's cash drawer total</div>
+                    <div class="shift-card__hint"><i class="fas fa-table-list"></i> Open detail</div>
                 </div>
 
-                <div class="shift-card" style="flex-direction:column;align-items:flex-start;">
+                <div class="shift-card shift-card--interactive js-stock-orders-insight-trigger"
+                    style="flex-direction:column;align-items:flex-start;"
+                    role="button"
+                    tabindex="0"
+                    data-insight-key="mobile-money"
+                    data-insight-title="Mobile Money Collection"
+                    aria-label="Open mobile money collection">
                     <div class="lbl">Mobile Money</div>
                     <div class="val" style="font-size:22px;"><?php echo $currency_symbol . ' ' . number_format((float)($shift['mobile_today'] ?? 0), 2); ?></div>
                     <div style="font-size:11px;color:#6c757d;margin-top:3px;">Today's mobile transactions</div>
+                    <div class="shift-card__hint"><i class="fas fa-table-list"></i> Open detail</div>
                 </div>
 
-                <div class="shift-card" style="flex-direction:column;align-items:flex-start;">
+                <div class="shift-card shift-card--interactive js-stock-orders-insight-trigger"
+                    style="flex-direction:column;align-items:flex-start;"
+                    role="button"
+                    tabindex="0"
+                    data-insight-key="card-payments"
+                    data-insight-title="Card Payments Summary"
+                    aria-label="Open card payments summary">
                     <div class="lbl">Card Payments</div>
                     <div class="val" style="font-size:22px;"><?php echo $currency_symbol . ' ' . number_format((float)($shift['card_today'] ?? 0), 2); ?></div>
                     <div style="font-size:11px;color:#6c757d;margin-top:3px;">Card manual + POS</div>
+                    <div class="shift-card__hint"><i class="fas fa-table-list"></i> Open detail</div>
                 </div>
 
-                <div class="shift-card<?php echo $totalVoidedToday > 0 ? ' warn' : ''; ?>"
-                    style="flex-direction:column;align-items:flex-start;">
+                <div class="shift-card shift-card--interactive js-stock-orders-insight-trigger<?php echo $totalVoidedToday > 0 ? ' warn' : ''; ?>"
+                    style="flex-direction:column;align-items:flex-start;"
+                    role="button"
+                    tabindex="0"
+                    data-insight-key="voids-today"
+                    data-insight-title="Voids Monitoring"
+                    aria-label="Open voids monitoring">
                     <div class="lbl">Voids Today</div>
                     <div class="val" style="font-size:22px;"><?php echo $totalVoidedToday; ?></div>
                     <div style="font-size:11px;color:#6c757d;margin-top:3px;">
@@ -1409,10 +1456,17 @@ $csrf_token = generateCsrfToken();
                             ? $currency_symbol . ' ' . number_format($totalVoidedAmt, 2) . ' lost'
                             : 'No voids — clean shift'; ?>
                     </div>
+                    <div class="shift-card__hint"><i class="fas fa-table-list"></i> Open detail</div>
                 </div>
 
                 <?php if ($peakHour): ?>
-                    <div class="shift-card" style="flex-direction:column;align-items:flex-start;background:#fff7e6;border-color:#ffc107;">
+                    <div class="shift-card shift-card--interactive js-stock-orders-insight-trigger"
+                        style="flex-direction:column;align-items:flex-start;background:#fff7e6;border-color:#ffc107;"
+                        role="button"
+                        tabindex="0"
+                        data-insight-key="peak-hour"
+                        data-insight-title="Peak Hour Snapshot"
+                        aria-label="Open peak hour snapshot">
                         <div class="lbl">Peak Hour</div>
                         <?php
                         $ph = (int)$peakHour['hour'];
@@ -1423,11 +1477,18 @@ $csrf_token = generateCsrfToken();
                             <?php echo (int)$peakHour['orders_count']; ?> orders &middot;
                             <?php echo $currency_symbol . ' ' . number_format((float)$peakHour['revenue'], 2); ?>
                         </div>
+                        <div class="shift-card__hint"><i class="fas fa-table-list"></i> Open detail</div>
                     </div>
                 <?php endif; ?>
 
                 <?php if (!empty($cashierStats)): ?>
-                    <div class="shift-card" style="flex-direction:column;align-items:flex-start;min-width:180px;">
+                    <div class="shift-card shift-card--interactive js-stock-orders-insight-trigger"
+                        style="flex-direction:column;align-items:flex-start;min-width:180px;"
+                        role="button"
+                        tabindex="0"
+                        data-insight-key="cashier-performance"
+                        data-insight-title="Cashier Performance Snapshot"
+                        aria-label="Open cashier performance snapshot">
                         <div class="lbl"><i class="fas fa-user-check" style="color:#8B7355;font-size:11px;"></i> Revenue by Cashier</div>
                         <div style="margin-top:6px;width:100%;display:flex;flex-direction:column;gap:5px;">
                             <?php foreach ($cashierStats as $cs):
@@ -1446,6 +1507,7 @@ $csrf_token = generateCsrfToken();
                                 </div>
                             <?php endforeach; ?>
                         </div>
+                        <div class="shift-card__hint"><i class="fas fa-table-list"></i> Open detail</div>
                     </div>
                 <?php endif; ?>
 
@@ -2361,6 +2423,178 @@ $csrf_token = generateCsrfToken();
                 </span>
             </nav>
         <?php endif; ?>
+
+        <div class="modal-overlay" id="stockOrdersInsightModal-overlay" data-modal-overlay aria-hidden="true"></div>
+        <div class="modal-overlay modal-lg" id="stockOrdersInsightModal" role="dialog" aria-modal="true" aria-labelledby="stockOrdersInsightTitle" data-modal data-close-on-escape="true" data-close-on-overlay="true">
+            <div class="modal-container">
+                <div class="modal-header">
+                    <h3 class="modal-title" id="stockOrdersInsightTitle">Operational Insight</h3>
+                    <button type="button" class="modal-close" data-modal-close aria-label="Close stock orders insight"><i class="fas fa-times"></i></button>
+                </div>
+                <div class="modal-body" id="stockOrdersInsightBody"></div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-modal-close>Close</button>
+                </div>
+            </div>
+        </div>
+
+        <template id="stock-orders-insight-template-revenue-today">
+            <p class="stock-insight-note">Revenue today compares gross settled revenue against yesterday to show shift momentum.</p>
+            <table class="stock-insight-table">
+                <tbody>
+                    <tr><th>Revenue today</th><td><?php echo $currency_symbol . ' ' . number_format($revToday, 2); ?></td></tr>
+                    <tr><th>Revenue yesterday</th><td><?php echo $currency_symbol . ' ' . number_format($revYday, 2); ?></td></tr>
+                    <tr><th>Delta vs yesterday</th><td><?php echo $revDelta === null ? 'No prior data' : (($revDelta >= 0 ? '+' : '-') . number_format(abs($revDelta), 1) . '%'); ?></td></tr>
+                </tbody>
+            </table>
+            <div class="stock-insight-actions">
+                <a href="stock-orders.php?date=today" class="btn btn-primary">Open today's orders</a>
+                <a href="accounting-dashboard.php" class="btn btn-secondary">Open accounting dashboard</a>
+            </div>
+        </template>
+
+        <template id="stock-orders-insight-template-orders-today">
+            <p class="stock-insight-note">Orders throughput compares completed volume against yesterday to flag operational acceleration or slowdown.</p>
+            <table class="stock-insight-table">
+                <tbody>
+                    <tr><th>Orders today</th><td><?php echo number_format($ordToday); ?></td></tr>
+                    <tr><th>Orders yesterday</th><td><?php echo number_format($ordYday); ?></td></tr>
+                    <tr><th>Delta vs yesterday</th><td><?php echo $ordDelta === null ? 'No prior data' : (($ordDelta >= 0 ? '+' : '-') . number_format(abs($ordDelta), 1) . '%'); ?></td></tr>
+                    <tr><th>Revenue today</th><td><?php echo $currency_symbol . ' ' . number_format($revToday, 2); ?></td></tr>
+                </tbody>
+            </table>
+            <div class="stock-insight-actions">
+                <a href="stock-orders.php?date=today" class="btn btn-primary">Open today's queue</a>
+            </div>
+        </template>
+
+        <template id="stock-orders-insight-template-avg-ticket">
+            <p class="stock-insight-note">Average ticket tracks spend-per-order efficiency based on settled transactions.</p>
+            <table class="stock-insight-table">
+                <tbody>
+                    <tr><th>Average ticket</th><td><?php echo $currency_symbol . ' ' . number_format((float)($operationsSnapshot['avg_ticket_today'] ?? 0), 2); ?></td></tr>
+                    <tr><th>Settled orders today</th><td><?php echo number_format((int)($operationsSnapshot['settled_today'] ?? 0)); ?></td></tr>
+                    <tr><th>Revenue today</th><td><?php echo $currency_symbol . ' ' . number_format((float)($shift['revenue_today'] ?? 0), 2); ?></td></tr>
+                </tbody>
+            </table>
+            <div class="stock-insight-actions">
+                <a href="stock-orders.php?date=today&status=paid" class="btn btn-primary">Open settled orders</a>
+            </div>
+        </template>
+
+        <template id="stock-orders-insight-template-cash-collected">
+            <p class="stock-insight-note">Cash collection supports drawer reconciliation and should align with cash settlement records.</p>
+            <table class="stock-insight-table">
+                <tbody>
+                    <tr><th>Cash collected today</th><td><?php echo $currency_symbol . ' ' . number_format((float)($shift['cash_today'] ?? 0), 2); ?></td></tr>
+                    <tr><th>Total revenue today</th><td><?php echo $currency_symbol . ' ' . number_format((float)($shift['revenue_today'] ?? 0), 2); ?></td></tr>
+                    <tr><th>Cash share of revenue</th><td><?php echo (float)($shift['revenue_today'] ?? 0) > 0 ? number_format(((float)($shift['cash_today'] ?? 0) / (float)$shift['revenue_today']) * 100, 1) . '%' : '0.0%'; ?></td></tr>
+                </tbody>
+            </table>
+            <div class="stock-insight-actions">
+                <a href="stock-orders.php?date=today&payment_method=cash" class="btn btn-primary">Open cash orders</a>
+            </div>
+        </template>
+
+        <template id="stock-orders-insight-template-mobile-money">
+            <p class="stock-insight-note">Mobile money totals should match provider references and cashier closure sheets.</p>
+            <table class="stock-insight-table">
+                <tbody>
+                    <tr><th>Mobile money today</th><td><?php echo $currency_symbol . ' ' . number_format((float)($shift['mobile_today'] ?? 0), 2); ?></td></tr>
+                    <tr><th>Total revenue today</th><td><?php echo $currency_symbol . ' ' . number_format((float)($shift['revenue_today'] ?? 0), 2); ?></td></tr>
+                    <tr><th>Mobile share of revenue</th><td><?php echo (float)($shift['revenue_today'] ?? 0) > 0 ? number_format(((float)($shift['mobile_today'] ?? 0) / (float)$shift['revenue_today']) * 100, 1) . '%' : '0.0%'; ?></td></tr>
+                </tbody>
+            </table>
+            <div class="stock-insight-actions">
+                <a href="stock-orders.php?date=today&payment_method=mobile_money" class="btn btn-primary">Open mobile money orders</a>
+            </div>
+        </template>
+
+        <template id="stock-orders-insight-template-card-payments">
+            <p class="stock-insight-note">Card totals include manual and POS card settlements and should be reviewed with slips or gateway reports.</p>
+            <table class="stock-insight-table">
+                <tbody>
+                    <tr><th>Card payments today</th><td><?php echo $currency_symbol . ' ' . number_format((float)($shift['card_today'] ?? 0), 2); ?></td></tr>
+                    <tr><th>Total revenue today</th><td><?php echo $currency_symbol . ' ' . number_format((float)($shift['revenue_today'] ?? 0), 2); ?></td></tr>
+                    <tr><th>Card share of revenue</th><td><?php echo (float)($shift['revenue_today'] ?? 0) > 0 ? number_format(((float)($shift['card_today'] ?? 0) / (float)$shift['revenue_today']) * 100, 1) . '%' : '0.0%'; ?></td></tr>
+                </tbody>
+            </table>
+            <div class="stock-insight-actions">
+                <a href="stock-orders.php?date=today&payment_method=card_manual" class="btn btn-primary">Open manual card orders</a>
+                <a href="stock-orders.php?date=today&payment_method=card_pos" class="btn btn-secondary">Open POS card orders</a>
+            </div>
+        </template>
+
+        <template id="stock-orders-insight-template-voids-today">
+            <p class="stock-insight-note">Void activity highlights leakage risk and exceptions that need manager review and reason quality checks.</p>
+            <table class="stock-insight-table">
+                <tbody>
+                    <tr><th>Voids today</th><td><?php echo number_format($totalVoidedToday); ?></td></tr>
+                    <tr><th>Voided amount</th><td><?php echo $currency_symbol . ' ' . number_format($totalVoidedAmt, 2); ?></td></tr>
+                    <tr><th>Needs-review orders</th><td><?php echo number_format((int)($healthSummary['unbalanced'] ?? 0)); ?></td></tr>
+                </tbody>
+            </table>
+            <div class="stock-insight-actions">
+                <a href="stock-orders.php?date=today&status=voided" class="btn btn-primary">Open voided orders</a>
+                <a href="stock-orders.php?health=review" class="btn btn-secondary">Open review queue</a>
+            </div>
+        </template>
+
+        <?php if ($peakHour): ?>
+            <template id="stock-orders-insight-template-peak-hour">
+                <p class="stock-insight-note">Peak hour pinpoints the busiest period for staffing and prep balancing.</p>
+                <table class="stock-insight-table">
+                    <tbody>
+                        <tr>
+                            <th>Peak hour label</th>
+                            <td>
+                                <?php
+                                $peakHourNum = (int)$peakHour['hour'];
+                                $peakHourLabel = $peakHourNum === 0 ? '12am' : ($peakHourNum < 12 ? $peakHourNum . 'am' : ($peakHourNum === 12 ? '12pm' : ($peakHourNum - 12) . 'pm'));
+                                echo htmlspecialchars($peakHourLabel);
+                                ?>
+                            </td>
+                        </tr>
+                        <tr><th>Orders in peak hour</th><td><?php echo number_format((int)$peakHour['orders_count']); ?></td></tr>
+                        <tr><th>Revenue in peak hour</th><td><?php echo $currency_symbol . ' ' . number_format((float)$peakHour['revenue'], 2); ?></td></tr>
+                    </tbody>
+                </table>
+                <div class="stock-insight-actions">
+                    <a href="stock-orders.php?date=today&hour=<?php echo (int)$peakHour['hour']; ?>" class="btn btn-primary">Open peak-hour orders</a>
+                </div>
+            </template>
+        <?php endif; ?>
+
+        <template id="stock-orders-insight-template-cashier-performance">
+            <p class="stock-insight-note">Cashier performance view helps monitor ownership of open orders and revenue concentration.</p>
+            <table class="stock-insight-table">
+                <thead>
+                    <tr>
+                        <th>Cashier</th>
+                        <th>Revenue</th>
+                        <th>Open Orders</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <?php if (empty($cashierStats)): ?>
+                        <tr>
+                            <td colspan="3">No cashier data for today.</td>
+                        </tr>
+                    <?php else: ?>
+                        <?php foreach ($cashierStats as $cs): ?>
+                            <tr>
+                                <td><?php echo htmlspecialchars((string)($cs['cashier'] ?? 'Unknown')); ?></td>
+                                <td><?php echo $currency_symbol . ' ' . number_format((float)($cs['revenue'] ?? 0), 2); ?></td>
+                                <td><?php echo number_format((int)($cs['orders_open'] ?? 0)); ?></td>
+                            </tr>
+                        <?php endforeach; ?>
+                    <?php endif; ?>
+                </tbody>
+            </table>
+            <div class="stock-insight-actions">
+                <a href="stock-orders.php?date=today" class="btn btn-primary">Open today's orders</a>
+            </div>
+        </template>
     </div>
 
     <?php require_once 'includes/admin-footer.php'; ?>
@@ -2424,6 +2658,55 @@ $csrf_token = generateCsrfToken();
             soCloseVoid(false);
             _soVoidForm = null;
             form.submit();
+        }
+
+        function openStockOrdersInsight(triggerEl) {
+            const key = triggerEl ? triggerEl.getAttribute('data-insight-key') : '';
+            if (!key) return;
+
+            const template = document.getElementById('stock-orders-insight-template-' + key);
+            const body = document.getElementById('stockOrdersInsightBody');
+            const title = document.getElementById('stockOrdersInsightTitle');
+            const modal = document.getElementById('stockOrdersInsightModal');
+            const overlay = document.getElementById('stockOrdersInsightModal-overlay');
+            if (!template || !body || !title || !modal) return;
+
+            title.textContent = triggerEl.getAttribute('data-insight-title') || 'Operational Insight';
+            body.innerHTML = template.innerHTML;
+
+            if (window.Modal && typeof window.Modal.open === 'function') {
+                window.Modal.open('stockOrdersInsightModal');
+                return;
+            }
+
+            modal.classList.add('active');
+            if (overlay) overlay.classList.add('active');
+            document.body.classList.add('modal-open');
+        }
+
+        if (!window.__stockOrdersInsightHandlersBound) {
+            document.addEventListener('click', function(e) {
+                const trigger = e.target.closest('.js-stock-orders-insight-trigger');
+                if (!trigger) return;
+
+                const nestedLink = e.target.closest('a');
+                if (nestedLink && trigger.contains(nestedLink)) {
+                    return;
+                }
+
+                e.preventDefault();
+                openStockOrdersInsight(trigger);
+            });
+
+            document.addEventListener('keydown', function(e) {
+                if (e.key !== 'Enter' && e.key !== ' ') return;
+                const trigger = e.target && e.target.closest ? e.target.closest('.js-stock-orders-insight-trigger') : null;
+                if (!trigger) return;
+                e.preventDefault();
+                openStockOrdersInsight(trigger);
+            });
+
+            window.__stockOrdersInsightHandlersBound = true;
         }
     </script>
     <?php require __DIR__ . '/includes/offline-banner.php'; ?>

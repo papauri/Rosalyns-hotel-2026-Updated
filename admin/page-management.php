@@ -1,4 +1,5 @@
 <?php
+
 /**
  * Page Management
  * Enable, disable, and reorder public website pages via the admin panel.
@@ -21,18 +22,21 @@ if (!hasPermission((int)$user['id'], 'pages')) {
 $message = '';
 $error   = '';
 
-function normalizePageKey(string $value): string {
+function normalizePageKey(string $value): string
+{
     return preg_replace('/[^a-z0-9_-]/', '', strtolower(trim($value)));
 }
 
-function normalizePageFilePath(string $value): string {
+function normalizePageFilePath(string $value): string
+{
     $value = trim(str_replace('\\', '/', $value));
     $value = ltrim($value, '/');
     $value = preg_replace('/\s+/', '', $value);
     return preg_replace('/\.\.+/', '.', $value);
 }
 
-function normalizePageIcon(string $value): string {
+function normalizePageIcon(string $value): string
+{
     $value = trim($value);
     if ($value === '') {
         return 'fa-file';
@@ -40,7 +44,8 @@ function normalizePageIcon(string $value): string {
     return preg_match('/^[a-z0-9\- ]+$/i', $value) ? $value : 'fa-file';
 }
 
-function isValidPageFilePath(string $value): bool {
+function isValidPageFilePath(string $value): bool
+{
     if ($value === '' || strlen($value) > 255) {
         return false;
     }
@@ -50,7 +55,8 @@ function isValidPageFilePath(string $value): bool {
     return (bool)preg_match('/^[a-zA-Z0-9._\/-]+$/', $value);
 }
 
-function ensureSitePagesTable(PDO $pdo): bool {
+function ensureSitePagesTable(PDO $pdo): bool
+{
     $existsStmt = $pdo->query("SHOW TABLES LIKE 'site_pages'");
     $alreadyExisted = $existsStmt && $existsStmt->rowCount() > 0;
 
@@ -343,7 +349,7 @@ PHP;
                             break;
                         }
 
-                        $stmt = $pdo->prepare(" 
+                        $stmt = $pdo->prepare("
                             UPDATE site_pages SET title = ?, file_path = ?, icon = ?, description = ? WHERE id = ?
                         ");
                         $stmt->execute([$title, $file_path, $icon, $desc, $id]);
@@ -367,7 +373,6 @@ PHP;
                 }
                 rh_log_event('page_management', 'info', 'Page management action completed', ['action' => $action, 'message' => $message]);
             }
-
         } catch (PDOException $ex) {
             $error = 'Database error: ' . $ex->getMessage();
             error_log("Page management error: " . $ex->getMessage());
@@ -388,6 +393,7 @@ try {
 ?>
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -399,10 +405,11 @@ try {
     <link rel="stylesheet" href="css/admin-components.css">
     <link rel="stylesheet" href="css/page-management.css">
 </head>
+
 <body>
     <?php require_once 'includes/admin-header.php'; ?>
 
-    <div class="content">
+    <div class="content page-management-page">
         <div class="page-header">
             <h2 class="page-title">
                 <i class="fas fa-file-alt"></i> Page Management
@@ -434,107 +441,107 @@ try {
                 <p style="color:#666; text-align:center; padding:30px 0;">No pages found. Add your first page below.</p>
             <?php else: ?>
 
-            <form method="POST" id="orderForm">
-                <input type="hidden" name="action" value="save_order">
-                <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf_token); ?>">
-                <input type="hidden" name="page_order" id="pageOrderInput">
-            </form>
+                <form method="POST" id="orderForm">
+                    <input type="hidden" name="action" value="save_order">
+                    <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf_token); ?>">
+                    <input type="hidden" name="page_order" id="pageOrderInput">
+                </form>
 
-            <div style="overflow-x: auto;">
-            <table class="pm-table" id="pagesTable">
-                <thead>
-                    <tr>
-                        <th style="width:40px"></th>
-                        <th>Page</th>
-                        <th>Status</th>
-                        <th>Navigation</th>
-                        <th>Order</th>
-                        <th>Actions</th>
-                    </tr>
-                </thead>
-                <tbody id="pagesTbody">
-                    <?php foreach ($pages as $page): ?>
-                    <tr data-id="<?php echo $page['id']; ?>">
-                        <td data-label="">
-                            <span class="drag-handle" title="Drag to reorder"><i class="fas fa-grip-vertical"></i></span>
-                        </td>
-                        <td data-label="Page">
-                            <div class="page-info">
-                                <span class="page-icon-preview"><i class="fas <?php echo htmlspecialchars($page['icon']); ?>"></i></span>
-                                <div>
-                                    <div class="page-title"><?php echo htmlspecialchars($page['title']); ?></div>
-                                    <div class="page-file"><?php echo htmlspecialchars($page['file_path']); ?></div>
-                                    <?php if ($page['description']): ?>
-                                        <div style="font-size:12px;color:#888;margin-top:2px;"><?php echo htmlspecialchars($page['description']); ?></div>
-                                    <?php endif; ?>
-                                </div>
-                            </div>
-                        </td>
-                        <td data-label="Status">
-                            <?php if ($page['is_enabled']): ?>
-                                <span class="badge badge-enabled"><i class="fas fa-check-circle"></i> Enabled</span>
-                            <?php else: ?>
-                                <span class="badge badge-disabled"><i class="fas fa-times-circle"></i> Disabled</span>
-                            <?php endif; ?>
-                        </td>
-                        <td data-label="Navigation">
-                            <?php if ($page['show_in_nav']): ?>
-                                <span class="badge badge-nav-yes"><i class="fas fa-eye"></i> Visible</span>
-                            <?php else: ?>
-                                <span class="badge badge-nav-no"><i class="fas fa-eye-slash"></i> Hidden</span>
-                            <?php endif; ?>
-                        </td>
-                        <td data-label="Order">
-                            <?php echo (int)$page['nav_position']; ?>
-                        </td>
-                        <td data-label="Actions">
-                            <div class="action-group">
-                                <!-- Toggle Enable/Disable -->
-                                <form method="POST" style="display:inline;" class="form-toggle-enabled">
-                                    <input type="hidden" name="action" value="toggle_enabled">
-                                    <input type="hidden" name="page_id" value="<?php echo $page['id']; ?>">
-                                    <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf_token); ?>">
-                                    <?php if ($page['is_enabled']): ?>
-                                        <button type="button" class="btn-toggle btn-disable" title="Disable this page"
-                                            onclick="openDisableConfirm(<?php echo htmlspecialchars(json_encode($page['title']), ENT_QUOTES, 'UTF-8'); ?>, this.closest('form'))">
-                                            <i class="fas fa-power-off"></i>
-                                        </button>
-                                    <?php else: ?>
-                                        <button type="submit" class="btn-toggle btn-enable" title="Enable this page">
-                                            <i class="fas fa-power-off"></i>
-                                        </button>
-                                    <?php endif; ?>
-                                </form>
+                <div style="overflow-x: auto;">
+                    <table class="pm-table" id="pagesTable">
+                        <thead>
+                            <tr>
+                                <th style="width:40px"></th>
+                                <th>Page</th>
+                                <th>Status</th>
+                                <th>Navigation</th>
+                                <th>Order</th>
+                                <th>Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody id="pagesTbody">
+                            <?php foreach ($pages as $page): ?>
+                                <tr data-id="<?php echo $page['id']; ?>">
+                                    <td data-label="">
+                                        <span class="drag-handle" title="Drag to reorder"><i class="fas fa-grip-vertical"></i></span>
+                                    </td>
+                                    <td data-label="Page">
+                                        <div class="page-info">
+                                            <span class="page-icon-preview"><i class="fas <?php echo htmlspecialchars($page['icon']); ?>"></i></span>
+                                            <div>
+                                                <div class="page-title"><?php echo htmlspecialchars($page['title']); ?></div>
+                                                <div class="page-file"><?php echo htmlspecialchars($page['file_path']); ?></div>
+                                                <?php if ($page['description']): ?>
+                                                    <div style="font-size:12px;color:#888;margin-top:2px;"><?php echo htmlspecialchars($page['description']); ?></div>
+                                                <?php endif; ?>
+                                            </div>
+                                        </div>
+                                    </td>
+                                    <td data-label="Status">
+                                        <?php if ($page['is_enabled']): ?>
+                                            <span class="badge badge-enabled"><i class="fas fa-check-circle"></i> Enabled</span>
+                                        <?php else: ?>
+                                            <span class="badge badge-disabled"><i class="fas fa-times-circle"></i> Disabled</span>
+                                        <?php endif; ?>
+                                    </td>
+                                    <td data-label="Navigation">
+                                        <?php if ($page['show_in_nav']): ?>
+                                            <span class="badge badge-nav-yes"><i class="fas fa-eye"></i> Visible</span>
+                                        <?php else: ?>
+                                            <span class="badge badge-nav-no"><i class="fas fa-eye-slash"></i> Hidden</span>
+                                        <?php endif; ?>
+                                    </td>
+                                    <td data-label="Order">
+                                        <?php echo (int)$page['nav_position']; ?>
+                                    </td>
+                                    <td data-label="Actions">
+                                        <div class="action-group">
+                                            <!-- Toggle Enable/Disable -->
+                                            <form method="POST" style="display:inline;" class="form-toggle-enabled">
+                                                <input type="hidden" name="action" value="toggle_enabled">
+                                                <input type="hidden" name="page_id" value="<?php echo $page['id']; ?>">
+                                                <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf_token); ?>">
+                                                <?php if ($page['is_enabled']): ?>
+                                                    <button type="button" class="btn-toggle btn-disable" title="Disable this page"
+                                                        onclick="openDisableConfirm(<?php echo htmlspecialchars(json_encode($page['title']), ENT_QUOTES, 'UTF-8'); ?>, this.closest('form'))">
+                                                        <i class="fas fa-power-off"></i>
+                                                    </button>
+                                                <?php else: ?>
+                                                    <button type="submit" class="btn-toggle btn-enable" title="Enable this page">
+                                                        <i class="fas fa-power-off"></i>
+                                                    </button>
+                                                <?php endif; ?>
+                                            </form>
 
-                                <!-- Toggle Nav Visibility -->
-                                <form method="POST" style="display:inline;">
-                                    <input type="hidden" name="action" value="toggle_nav">
-                                    <input type="hidden" name="page_id" value="<?php echo $page['id']; ?>">
-                                    <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf_token); ?>">
-                                    <button type="submit" class="btn-toggle btn-nav-toggle" title="<?php echo $page['show_in_nav'] ? 'Hide from navigation' : 'Show in navigation'; ?>">
-                                        <i class="fas <?php echo $page['show_in_nav'] ? 'fa-eye-slash' : 'fa-eye'; ?>"></i>
-                                    </button>
-                                </form>
+                                            <!-- Toggle Nav Visibility -->
+                                            <form method="POST" style="display:inline;">
+                                                <input type="hidden" name="action" value="toggle_nav">
+                                                <input type="hidden" name="page_id" value="<?php echo $page['id']; ?>">
+                                                <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf_token); ?>">
+                                                <button type="submit" class="btn-toggle btn-nav-toggle" title="<?php echo $page['show_in_nav'] ? 'Hide from navigation' : 'Show in navigation'; ?>">
+                                                    <i class="fas <?php echo $page['show_in_nav'] ? 'fa-eye-slash' : 'fa-eye'; ?>"></i>
+                                                </button>
+                                            </form>
 
-                                <!-- Edit -->
-                                <button type="button" class="btn-toggle btn-edit" title="Edit page details"
-                                    onclick='openEditModal(<?php echo htmlspecialchars(json_encode($page), ENT_QUOTES, "UTF-8"); ?>)'>
-                                    <i class="fas fa-pencil-alt"></i>
-                                </button>
-                            </div>
-                        </td>
-                    </tr>
-                    <?php endforeach; ?>
-                </tbody>
-            </table>
-            </div>
+                                            <!-- Edit -->
+                                            <button type="button" class="btn-toggle btn-edit" title="Edit page details"
+                                                onclick='openEditModal(<?php echo htmlspecialchars(json_encode($page), ENT_QUOTES, "UTF-8"); ?>)'>
+                                                <i class="fas fa-pencil-alt"></i>
+                                            </button>
+                                        </div>
+                                    </td>
+                                </tr>
+                            <?php endforeach; ?>
+                        </tbody>
+                    </table>
+                </div>
 
-            <div style="margin-top: 16px; display: flex; gap: 12px; align-items: center;">
-                <button type="button" class="btn-save-order" onclick="saveOrder()">
-                    <i class="fas fa-sort-amount-down"></i> Save Order
-                </button>
-                <span style="font-size: 13px; color: #888;">Drag rows to reorder, then click Save Order</span>
-            </div>
+                <div style="margin-top: 16px; display: flex; gap: 12px; align-items: center;">
+                    <button type="button" class="btn-save-order" onclick="saveOrder()">
+                        <i class="fas fa-sort-amount-down"></i> Save Order
+                    </button>
+                    <span style="font-size: 13px; color: #888;">Drag rows to reorder, then click Save Order</span>
+                </div>
 
             <?php endif; ?>
         </div>
@@ -551,8 +558,8 @@ try {
                     <div>
                         <label for="page_key">Page Key (slug) <span style="color:#dc3545">*</span></label>
                         <input type="text" id="page_key" name="page_key" placeholder="e.g. spa" required
-                               pattern="[a-z0-9_-]+" title="Lowercase letters, numbers, hyphens, and underscores only"
-                               oninput="autoFillFilePath(this.value)">
+                            pattern="[a-z0-9_-]+" title="Lowercase letters, numbers, hyphens, and underscores only"
+                            oninput="autoFillFilePath(this.value)">
                     </div>
                     <div>
                         <label for="add_title">Nav Title <span style="color:#dc3545">*</span></label>
@@ -593,146 +600,156 @@ try {
 
     <!-- Edit Modal -->
     <?php renderAdminModalStart('editPageModal', 'Edit Page', 'page-management-modal-content'); ?>
-        <form method="POST" id="editForm">
-            <input type="hidden" name="action" value="edit_page">
-            <input type="hidden" name="page_id" id="edit_page_id">
-            <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf_token); ?>">
+    <form method="POST" id="editForm">
+        <input type="hidden" name="action" value="edit_page">
+        <input type="hidden" name="page_id" id="edit_page_id">
+        <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf_token); ?>">
 
-            <div class="form-group">
-                <label>Page Key</label>
-                <input type="text" id="edit_page_key" disabled style="background:#f0f0f0; cursor:not-allowed;">
-            </div>
-            <div class="form-group">
-                <label for="edit_title">Nav Title <span style="color:#dc3545">*</span></label>
-                <input type="text" id="edit_title" name="title" required>
-            </div>
-            <div class="form-group">
-                <label for="edit_file_path">File Path <span style="color:#dc3545">*</span></label>
-                <input type="text" id="edit_file_path" name="file_path" required>
-            </div>
-            <div class="form-group">
-                <label for="edit_icon">Icon (Font Awesome)</label>
-                <input type="text" id="edit_icon" name="icon">
-            </div>
-            <div class="form-group">
-                <label for="edit_description">Description</label>
-                <textarea id="edit_description" name="description" rows="2"></textarea>
-            </div>
+        <div class="form-group">
+            <label>Page Key</label>
+            <input type="text" id="edit_page_key" disabled style="background:#f0f0f0; cursor:not-allowed;">
+        </div>
+        <div class="form-group">
+            <label for="edit_title">Nav Title <span style="color:#dc3545">*</span></label>
+            <input type="text" id="edit_title" name="title" required>
+        </div>
+        <div class="form-group">
+            <label for="edit_file_path">File Path <span style="color:#dc3545">*</span></label>
+            <input type="text" id="edit_file_path" name="file_path" required>
+        </div>
+        <div class="form-group">
+            <label for="edit_icon">Icon (Font Awesome)</label>
+            <input type="text" id="edit_icon" name="icon">
+        </div>
+        <div class="form-group">
+            <label for="edit_description">Description</label>
+            <textarea id="edit_description" name="description" rows="2"></textarea>
+        </div>
 
-            <div class="modal-actions">
-                <button type="button" class="btn-cancel" onclick="closeEditModal()">Cancel</button>
-                <button type="submit" class="btn-submit"><i class="fas fa-save"></i> Save Changes</button>
-            </div>
-        </form>
+        <div class="modal-actions">
+            <button type="button" class="btn-cancel" onclick="closeEditModal()">Cancel</button>
+            <button type="submit" class="btn-submit"><i class="fas fa-save"></i> Save Changes</button>
+        </div>
+    </form>
     <?php renderAdminModalEnd(); ?>
-    
+
     <!-- Disable Confirm Modal -->
     <?php renderAdminModalStart('confirmDisableModal', 'Disable Page'); ?>
-        <p>Are you sure you want to disable <strong id="confirmDisablePageName"></strong>?</p>
-        <p style="color:#888;font-size:13px;">Visitors will be redirected to the home page until it is re-enabled.</p>
-        <div class="modal-actions">
-            <button type="button" class="btn-cancel" onclick="closeAdminModal('confirmDisableModal')">Cancel</button>
-            <button type="button" class="btn-submit" style="background:var(--color-danger,#dc3545);" onclick="execDisableConfirm()">
-                <i class="fas fa-power-off"></i> Disable Page
-            </button>
-        </div>
+    <p>Are you sure you want to disable <strong id="confirmDisablePageName"></strong>?</p>
+    <p style="color:#888;font-size:13px;">Visitors will be redirected to the home page until it is re-enabled.</p>
+    <div class="modal-actions">
+        <button type="button" class="btn-cancel" onclick="closeAdminModal('confirmDisableModal')">Cancel</button>
+        <button type="button" class="btn-submit" style="background:var(--color-danger,#dc3545);" onclick="execDisableConfirm()">
+            <i class="fas fa-power-off"></i> Disable Page
+        </button>
+    </div>
     <?php renderAdminModalEnd(); ?>
 
     <?php renderAdminModalScript(); ?>
 
     <script>
-    // ── Edit Modal ─────────────────────────────────────────
-    function openEditModal(page) {
-        document.getElementById('edit_page_id').value   = page.id;
-        document.getElementById('edit_page_key').value   = page.page_key;
-        document.getElementById('edit_title').value      = page.title;
-        document.getElementById('edit_file_path').value  = page.file_path;
-        document.getElementById('edit_icon').value       = page.icon || 'fa-file';
-        document.getElementById('edit_description').value = page.description || '';
-        openAdminModal('editPageModal');
-    }
-    function closeEditModal() {
-        closeAdminModal('editPageModal');
-    }
-    bindAdminModal('editPageModal');
-
-    // ── Drag & Drop Reorder ────────────────────────────────
-    (function() {
-        var tbody = document.getElementById('pagesTbody');
-        if (!tbody) return;
-
-        var dragging = null;
-
-        tbody.querySelectorAll('.drag-handle').forEach(function(handle) {
-            var row = handle.closest('tr');
-            row.setAttribute('draggable', 'true');
-
-            row.addEventListener('dragstart', function(e) {
-                dragging = this;
-                this.style.opacity = '0.4';
-                e.dataTransfer.effectAllowed = 'move';
-            });
-
-            row.addEventListener('dragend', function() {
-                this.style.opacity = '1';
-                dragging = null;
-                tbody.querySelectorAll('tr').forEach(function(r) { r.style.borderTop = ''; });
-            });
-
-            row.addEventListener('dragover', function(e) {
-                e.preventDefault();
-                e.dataTransfer.dropEffect = 'move';
-                if (dragging && dragging !== this) {
-                    this.style.borderTop = '3px solid var(--gold, #8B7355)';
-                }
-            });
-
-            row.addEventListener('dragleave', function() {
-                this.style.borderTop = '';
-            });
-
-            row.addEventListener('drop', function(e) {
-                e.preventDefault();
-                this.style.borderTop = '';
-                if (dragging && dragging !== this) {
-                    tbody.insertBefore(dragging, this);
-                }
-            });
-        });
-    })();
-
-    // ── Auto-fill file path from page key ─────────────────
-    var _filePathTouched = false;
-    document.getElementById('add_file_path').addEventListener('input', function() {
-        _filePathTouched = true;
-    });
-    function autoFillFilePath(slug) {
-        if (_filePathTouched) return;
-        var fp = document.getElementById('add_file_path');
-        if (fp) { fp.value = slug.replace(/[^a-z0-9-]/g, '-').replace(/-+/g, '-').replace(/^-|-$/g, '') + '.php'; }
-    }
-
-    function saveOrder() {
-        var rows = document.querySelectorAll('#pagesTbody tr');
-        var order = [];
-        rows.forEach(function(row) { order.push(row.dataset.id); });
-        document.getElementById('pageOrderInput').value = JSON.stringify(order);
-        document.getElementById('orderForm').submit();
-    }
-
-    // ── Disable Confirm Modal ──────────────────────────────
-    var _pendingDisableForm = null;
-    function openDisableConfirm(pageTitle, formEl) {
-        _pendingDisableForm = formEl;
-        document.getElementById('confirmDisablePageName').textContent = '\u201c' + pageTitle + '\u201d';
-        openAdminModal('confirmDisableModal');
-    }
-    function execDisableConfirm() {
-        closeAdminModal('confirmDisableModal');
-        if (_pendingDisableForm) {
-            _pendingDisableForm.submit();
+        // ── Edit Modal ─────────────────────────────────────────
+        function openEditModal(page) {
+            document.getElementById('edit_page_id').value = page.id;
+            document.getElementById('edit_page_key').value = page.page_key;
+            document.getElementById('edit_title').value = page.title;
+            document.getElementById('edit_file_path').value = page.file_path;
+            document.getElementById('edit_icon').value = page.icon || 'fa-file';
+            document.getElementById('edit_description').value = page.description || '';
+            openAdminModal('editPageModal');
         }
-    }
-    bindAdminModal('confirmDisableModal');
+
+        function closeEditModal() {
+            closeAdminModal('editPageModal');
+        }
+        bindAdminModal('editPageModal');
+
+        // ── Drag & Drop Reorder ────────────────────────────────
+        (function() {
+            var tbody = document.getElementById('pagesTbody');
+            if (!tbody) return;
+
+            var dragging = null;
+
+            tbody.querySelectorAll('.drag-handle').forEach(function(handle) {
+                var row = handle.closest('tr');
+                row.setAttribute('draggable', 'true');
+
+                row.addEventListener('dragstart', function(e) {
+                    dragging = this;
+                    this.style.opacity = '0.4';
+                    e.dataTransfer.effectAllowed = 'move';
+                });
+
+                row.addEventListener('dragend', function() {
+                    this.style.opacity = '1';
+                    dragging = null;
+                    tbody.querySelectorAll('tr').forEach(function(r) {
+                        r.style.borderTop = '';
+                    });
+                });
+
+                row.addEventListener('dragover', function(e) {
+                    e.preventDefault();
+                    e.dataTransfer.dropEffect = 'move';
+                    if (dragging && dragging !== this) {
+                        this.style.borderTop = '3px solid var(--gold, #8B7355)';
+                    }
+                });
+
+                row.addEventListener('dragleave', function() {
+                    this.style.borderTop = '';
+                });
+
+                row.addEventListener('drop', function(e) {
+                    e.preventDefault();
+                    this.style.borderTop = '';
+                    if (dragging && dragging !== this) {
+                        tbody.insertBefore(dragging, this);
+                    }
+                });
+            });
+        })();
+
+        // ── Auto-fill file path from page key ─────────────────
+        var _filePathTouched = false;
+        document.getElementById('add_file_path').addEventListener('input', function() {
+            _filePathTouched = true;
+        });
+
+        function autoFillFilePath(slug) {
+            if (_filePathTouched) return;
+            var fp = document.getElementById('add_file_path');
+            if (fp) {
+                fp.value = slug.replace(/[^a-z0-9-]/g, '-').replace(/-+/g, '-').replace(/^-|-$/g, '') + '.php';
+            }
+        }
+
+        function saveOrder() {
+            var rows = document.querySelectorAll('#pagesTbody tr');
+            var order = [];
+            rows.forEach(function(row) {
+                order.push(row.dataset.id);
+            });
+            document.getElementById('pageOrderInput').value = JSON.stringify(order);
+            document.getElementById('orderForm').submit();
+        }
+
+        // ── Disable Confirm Modal ──────────────────────────────
+        var _pendingDisableForm = null;
+
+        function openDisableConfirm(pageTitle, formEl) {
+            _pendingDisableForm = formEl;
+            document.getElementById('confirmDisablePageName').textContent = '\u201c' + pageTitle + '\u201d';
+            openAdminModal('confirmDisableModal');
+        }
+
+        function execDisableConfirm() {
+            closeAdminModal('confirmDisableModal');
+            if (_pendingDisableForm) {
+                _pendingDisableForm.submit();
+            }
+        }
+        bindAdminModal('confirmDisableModal');
     </script>
-<?php require_once 'includes/admin-footer.php'; ?>
+    <?php require_once 'includes/admin-footer.php'; ?>

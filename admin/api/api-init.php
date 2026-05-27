@@ -1,10 +1,11 @@
 <?php
+
 /**
  * API Initialization
  * Lightweight initialization for admin API endpoints (no HTML output, no redirects)
- * 
+ *
  * This file MUST be included by API endpoints BEFORE any output
- * 
+ *
  * Features:
  * - Secure session management
  * - CSRF token generation
@@ -51,4 +52,45 @@ require_once __DIR__ . '/../includes/permissions.php';
 
 // Load audit logging functions
 require_once __DIR__ . '/../includes/audit-functions.php';
-?>
+
+if (!function_exists('api_json_forbidden')) {
+    function api_json_forbidden(string $message = 'Permission denied'): void
+    {
+        http_response_code(403);
+        header('Content-Type: application/json');
+        echo json_encode(['success' => false, 'error' => $message]);
+        exit;
+    }
+}
+
+if (!function_exists('requireApiPermission')) {
+    function requireApiPermission(string $permissionKey): void
+    {
+        global $user;
+
+        $userId = (int)($user['id'] ?? 0);
+        if ($userId <= 0 || !hasPermission($userId, $permissionKey)) {
+            api_json_forbidden();
+        }
+    }
+}
+
+if (!function_exists('requireApiAnyPermission')) {
+    function requireApiAnyPermission(array $permissionKeys): void
+    {
+        global $user;
+
+        $userId = (int)($user['id'] ?? 0);
+        if ($userId <= 0) {
+            api_json_forbidden();
+        }
+
+        foreach ($permissionKeys as $permissionKey) {
+            if (is_string($permissionKey) && $permissionKey !== '' && hasPermission($userId, $permissionKey)) {
+                return;
+            }
+        }
+
+        api_json_forbidden();
+    }
+}

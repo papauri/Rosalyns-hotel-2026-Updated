@@ -16,6 +16,7 @@ header('Content-Type: application/json');
 require_once __DIR__ . '/../../config/database.php';
 require_once __DIR__ . '/../../config/security.php';
 require_once __DIR__ . '/../../config/cache.php';
+require_once __DIR__ . '/../includes/permissions.php';
 
 function json_success(array $data = [], string $message = 'OK', int $code = 200): never
 {
@@ -817,6 +818,10 @@ if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
 
 if (!isset($_SESSION['admin_user_id'])) {
     json_error('Authentication required', 401);
+}
+
+if (!hasPermission((int)$_SESSION['admin_user_id'], 'reviews')) {
+    json_error('Access denied', 403);
 }
 
 $input = read_json_input();

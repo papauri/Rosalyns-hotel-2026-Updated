@@ -258,7 +258,7 @@ if (($payment['payment_type'] ?? '') === 'refund' && !empty($payment['original_p
 
     <?php require_once 'includes/admin-header.php'; ?>
 
-    <div class="content">
+    <div class="content finance-page">
         <div class="acct-page-header">
             <div class="acct-page-header__copy">
                 <h1 class="acct-page-header__title">

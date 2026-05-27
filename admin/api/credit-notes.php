@@ -13,6 +13,8 @@ require_once __DIR__ . '/api-init.php';
 /** @var PDO $pdo */
 header('Content-Type: application/json');
 
+requireApiPermission('invoices');
+
 $action = trim($_GET['action'] ?? '');
 
 // ── POST actions (regenerate_pdf, resend_email) ───────────────────────────────

@@ -191,7 +191,7 @@ foreach ($active as $bk) {
 
     <?php require_once 'includes/admin-header.php'; ?>
 
-    <div class="content">
+    <div class="content finance-page">
 
         <!-- Page header -->
         <div class="acct-page-header">
@@ -810,7 +810,9 @@ foreach ($active as $bk) {
                                 var fb = document.createElement('div');
                                 btn.parentNode.appendChild(fb);
                                 showFeedback(fb, false, 'Failed: ' + err);
-                                setTimeout(function() { fb.remove(); }, 4000);
+                                setTimeout(function() {
+                                    fb.remove();
+                                }, 4000);
                                 btn.disabled = false;
                                 btn.innerHTML = orig;
                             }

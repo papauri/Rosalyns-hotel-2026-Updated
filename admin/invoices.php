@@ -311,7 +311,7 @@ $totalAging = (float)$aging['bucket_0_30'] + (float)$aging['bucket_31_60'] + (fl
 
     <?php require_once 'includes/admin-header.php'; ?>
 
-    <div class="invoices-container">
+    <div class="invoices-container finance-page">
         <div class="acct-page-header">
             <div class="acct-page-header__copy">
                 <h1 class="acct-page-header__title">Invoices &amp; Credit Notes</h1>

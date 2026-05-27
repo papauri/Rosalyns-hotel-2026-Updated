@@ -10,21 +10,15 @@ error_reporting(E_ALL);
 ini_set('display_errors', 0);
 ini_set('log_errors', 1);
 
-session_start();
+require_once __DIR__ . '/api-init.php';
+require_once __DIR__ . '/../includes/finance-schema.php';
 
-// Check authentication
-if (!isset($_SESSION['admin_user_id'])) {
-    header('Content-Type: application/json');
-    http_response_code(401);
-    echo json_encode(['error' => 'Unauthorized']);
-    exit;
-}
+/** @var PDO $pdo */
+
+requireApiAnyPermission(['payment_add', 'payments']);
 
 // DIAGNOSTIC: Log to help identify the issue
 error_log("search-bookings.php: Starting - Request: " . $_SERVER['REQUEST_URI']);
-
-require_once '../../config/database.php';
-require_once '../includes/finance-schema.php';
 
 $conferenceFields = finance_conference_fields($pdo);
 

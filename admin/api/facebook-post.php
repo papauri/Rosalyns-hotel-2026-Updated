@@ -4,20 +4,12 @@
  * Admin API — Post to Facebook Page
  * Accepts: type (room|event), id (int), message (string), include_image (bool)
  *
- * Permission required: rooms_write (for rooms) or events (for events).
+ * Permission required: content-specific permission by post type.
  * CSRF validated on every request.
  */
 
-require_once __DIR__ . '/../../config/database.php';
-require_once __DIR__ . '/../../config/security.php';
+require_once __DIR__ . '/api-init.php';
 require_once __DIR__ . '/../../includes/facebook-functions.php';
-
-// Must be called from admin context
-if (!defined('ADMIN_CONTEXT')) {
-    define('ADMIN_CONTEXT', true);
-}
-
-require_once __DIR__ . '/../admin-init.php';
 /** @var array $user */
 /** @var string $csrf_token */
 
@@ -62,16 +54,16 @@ if (!in_array($type, ['rooms_all', 'conferences_all', 'gym_packages_all', 'menu_
 
 // ── Permission check ───────────────────────────────────────────────────────
 $required_permission = match ($type) {
-    'room'             => 'rooms_write',
-    'rooms_all'        => 'rooms_write',
+    'room'             => 'rooms',
+    'rooms_all'        => 'rooms',
     'conferences_all'  => 'conference',
     'event'            => 'events',
     'conference'       => 'conference',
-    'menu_item'        => 'menu_management',
-    'menu_share'       => 'menu_management',
+    'menu_item'        => 'menu',
+    'menu_share'       => 'menu',
     'gym_package'      => 'gym',
     'gym_packages_all' => 'gym',
-    default            => 'admin',
+    default            => 'facebook_settings',
 };
 if (function_exists('hasPermission') && !hasPermission($user['id'] ?? 0, $required_permission)) {
     http_response_code(403);

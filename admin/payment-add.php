@@ -516,7 +516,7 @@ function updateConferenceEnquiryPayments(PDO $pdo, int $enquiryId)
 
     <?php require_once 'includes/admin-header.php'; ?>
 
-    <div class="content">
+    <div class="content finance-page">
         <div class="form-container">
             <h2 class="section-title"><?php echo $editId ? 'Edit Payment' : 'Record New Payment'; ?></h2>
 

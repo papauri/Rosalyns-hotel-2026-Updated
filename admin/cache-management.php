@@ -507,7 +507,7 @@ $cache_types = [
 <body>
     <?php require_once 'includes/admin-header.php'; ?>
 
-    <div class="content">
+    <div class="content cache-management-page">
         <div class="page-header">
             <h2 class="page-title">
                 <i class="fas fa-bolt"></i> Cache Management

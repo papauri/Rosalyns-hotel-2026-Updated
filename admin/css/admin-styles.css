@@ -841,7 +841,7 @@ table.mobile-enhanced col {
 
 table.mobile-enhanced tbody {
     display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(min(18rem, 100%), 1fr));
+    grid-template-columns: repeat(auto-fit, minmax(min(var(--mobile-card-min-width, 19rem), 100%), 1fr));
     gap: 0.75rem;
 }
 
@@ -1016,9 +1016,21 @@ table.mobile-enhanced td[data-label="Actions"]>button:last-child {
     overflow-y: visible !important;
 }
 
-@media (max-width: 560px) {
+@media (max-width: 768px) {
     table.mobile-enhanced tbody {
         grid-template-columns: 1fr;
+    }
+}
+
+/* Guard narrow phones against stale wide column counts injected at runtime. */
+@media (max-width: 48rem) {
+    table.mobile-enhanced tbody tr {
+        --mobile-card-cols: 1;
+    }
+
+    table.mobile-enhanced td.num {
+        white-space: normal;
+        overflow-wrap: anywhere;
     }
 }
 

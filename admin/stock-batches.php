@@ -237,24 +237,122 @@ function expiry_tier(?string $expiry, ?int $days): array
         }
         ?>
         <div class="summary-cards">
-            <div class="summary-card critical">
+            <div class="summary-card critical summary-card--interactive js-stock-batches-insight-trigger"
+                role="button"
+                tabindex="0"
+                data-insight-key="critical"
+                data-insight-title="Critical Expiry (3 Days or Less)"
+                aria-label="Open critical expiry insight">
                 <div class="label">Expiring ≤ 3 days</div>
                 <div class="value"><?php echo $cntCritical; ?></div>
                 <div style="font-size:12px;color:#6c757d;margin-top:4px;">Value at risk: <?php echo $currency_symbol . ' ' . number_format($valueAtRisk, 2); ?></div>
+                <div class="summary-card__hint"><i class="fas fa-table-list"></i> Open detail</div>
             </div>
-            <div class="summary-card soon">
+
+            <div class="summary-card soon summary-card--interactive js-stock-batches-insight-trigger"
+                role="button"
+                tabindex="0"
+                data-insight-key="soon"
+                data-insight-title="Expiry Watchlist (4-7 Days)"
+                aria-label="Open expiry watchlist insight">
                 <div class="label">Expiring 4–7 days</div>
                 <div class="value"><?php echo $cntSoon; ?></div>
+                <div class="summary-card__hint"><i class="fas fa-table-list"></i> Open detail</div>
             </div>
-            <div class="summary-card upcoming">
+
+            <div class="summary-card upcoming summary-card--interactive js-stock-batches-insight-trigger"
+                role="button"
+                tabindex="0"
+                data-insight-key="upcoming"
+                data-insight-title="Upcoming Expiry Horizon (8-30 Days)"
+                aria-label="Open upcoming expiry horizon insight">
                 <div class="label">Expiring 8–30 days</div>
                 <div class="value"><?php echo $cntUpcoming; ?></div>
+                <div class="summary-card__hint"><i class="fas fa-table-list"></i> Open detail</div>
             </div>
-            <div class="summary-card">
+
+            <div class="summary-card summary-card--interactive js-stock-batches-insight-trigger"
+                role="button"
+                tabindex="0"
+                data-insight-key="active"
+                data-insight-title="Active Batch Capacity"
+                aria-label="Open active batch capacity insight">
                 <div class="label">Total active batches</div>
                 <div class="value"><?php echo $cntActive; ?></div>
+                <div class="summary-card__hint"><i class="fas fa-table-list"></i> Open detail</div>
             </div>
         </div>
+
+        <div class="modal-overlay" id="stockBatchesInsightModal" style="align-items:flex-start; padding-top:60px;">
+            <div class="stock-insight-modal-box">
+                <div class="stock-insight-modal-head">
+                    <h3 id="stockBatchesInsightTitle" style="margin:0;font-size:18px;">Batch Insight</h3>
+                    <button type="button" class="stock-insight-close" onclick="closeM('stockBatchesInsightModal')" aria-label="Close stock batch insight">&times;</button>
+                </div>
+                <div id="stockBatchesInsightBody"></div>
+                <div style="display:flex;justify-content:flex-end;margin-top:12px;">
+                    <button type="button" onclick="closeM('stockBatchesInsightModal')" style="padding:9px 16px; background:#e9ecef; border:none; border-radius:6px; cursor:pointer;">Close</button>
+                </div>
+            </div>
+        </div>
+
+        <template id="stock-batches-insight-template-critical">
+            <p class="stock-insight-note">Critical batches are at immediate risk of expiry and should be used first, discounted, or removed based on quality.</p>
+            <table class="stock-insight-table">
+                <tbody>
+                    <tr><th>Expiring in 3 days or less</th><td><?php echo number_format($cntCritical); ?></td></tr>
+                    <tr><th>Estimated value at risk</th><td><?php echo $currency_symbol . ' ' . number_format($valueAtRisk, 2); ?></td></tr>
+                    <tr><th>Total active batches</th><td><?php echo number_format($cntActive); ?></td></tr>
+                </tbody>
+            </table>
+            <div class="stock-insight-actions">
+                <a class="stock-insight-action" href="stock-batches.php?expiry=critical">Open critical batches</a>
+                <a class="stock-insight-action stock-insight-action--ghost" href="stock-batches.php?status=active">Open all active batches</a>
+            </div>
+        </template>
+
+        <template id="stock-batches-insight-template-soon">
+            <p class="stock-insight-note">Soon-to-expire batches should be planned into production before they enter the critical window.</p>
+            <table class="stock-insight-table">
+                <tbody>
+                    <tr><th>Expiring in 4-7 days</th><td><?php echo number_format($cntSoon); ?></td></tr>
+                    <tr><th>Critical (<=3 days)</th><td><?php echo number_format($cntCritical); ?></td></tr>
+                    <tr><th>Active batches total</th><td><?php echo number_format($cntActive); ?></td></tr>
+                </tbody>
+            </table>
+            <div class="stock-insight-actions">
+                <a class="stock-insight-action" href="stock-batches.php?expiry=soon">Open 4-7 day batches</a>
+            </div>
+        </template>
+
+        <template id="stock-batches-insight-template-upcoming">
+            <p class="stock-insight-note">Upcoming batches (8-30 days) help forecast prep sequencing and purchasing cadence.</p>
+            <table class="stock-insight-table">
+                <tbody>
+                    <tr><th>Expiring in 8-30 days</th><td><?php echo number_format($cntUpcoming); ?></td></tr>
+                    <tr><th>Expiring in 4-7 days</th><td><?php echo number_format($cntSoon); ?></td></tr>
+                    <tr><th>Expiring in <=3 days</th><td><?php echo number_format($cntCritical); ?></td></tr>
+                </tbody>
+            </table>
+            <div class="stock-insight-actions">
+                <a class="stock-insight-action" href="stock-batches.php?expiry=upcoming">Open 8-30 day batches</a>
+            </div>
+        </template>
+
+        <template id="stock-batches-insight-template-active">
+            <p class="stock-insight-note">Active batch capacity represents the inventory currently available for kitchen deductions and sales fulfillment.</p>
+            <table class="stock-insight-table">
+                <tbody>
+                    <tr><th>Active batches</th><td><?php echo number_format($cntActive); ?></td></tr>
+                    <tr><th>Critical expiry count</th><td><?php echo number_format($cntCritical); ?></td></tr>
+                    <tr><th>Soon expiry count</th><td><?php echo number_format($cntSoon); ?></td></tr>
+                </tbody>
+            </table>
+            <div class="stock-insight-actions">
+                <a class="stock-insight-action" href="stock-batches.php?status=active">Open active batches</a>
+                <a class="stock-insight-action stock-insight-action--ghost" href="stock-ingredients.php">Open ingredient stock</a>
+            </div>
+        </template>
 
         <form method="GET" class="stock-toolbar">
             <select name="ingredient_id" onchange="this.form.submit()">
@@ -427,6 +525,39 @@ function expiry_tier(?string $expiry, ?int $days): array
             document.getElementById('rm_batch').textContent = batch;
             openM('recallModal');
         };
+
+        window.openStockBatchesInsight = function(triggerEl) {
+            const key = triggerEl ? triggerEl.getAttribute('data-insight-key') : '';
+            if (!key) return;
+
+            const template = document.getElementById('stock-batches-insight-template-' + key);
+            const body = document.getElementById('stockBatchesInsightBody');
+            const title = document.getElementById('stockBatchesInsightTitle');
+            if (!template || !body || !title) return;
+
+            title.textContent = triggerEl.getAttribute('data-insight-title') || 'Batch Insight';
+            body.innerHTML = template.innerHTML;
+            openM('stockBatchesInsightModal');
+        };
+
+        if (!window.__stockBatchesInsightHandlersBound) {
+            document.addEventListener('click', function(e) {
+                const trigger = e.target.closest('.js-stock-batches-insight-trigger');
+                if (!trigger) return;
+                e.preventDefault();
+                openStockBatchesInsight(trigger);
+            });
+
+            document.addEventListener('keydown', function(e) {
+                if (e.key !== 'Enter' && e.key !== ' ') return;
+                const trigger = e.target && e.target.closest ? e.target.closest('.js-stock-batches-insight-trigger') : null;
+                if (!trigger) return;
+                e.preventDefault();
+                openStockBatchesInsight(trigger);
+            });
+
+            window.__stockBatchesInsightHandlersBound = true;
+        }
     </script>
 </body>
 

@@ -11,14 +11,14 @@
     }
 }
 
-.card {
+.stock-count-page .card {
     background: var(--color-white, #fff);
     border-radius: 10px;
     border: 1px solid var(--admin-surface-border, #eaecef);
     padding: 16px;
 }
 
-.card h3 {
+.stock-count-page .card h3 {
     margin: 0 0 12px;
     font-size: 16px;
 }
@@ -47,7 +47,7 @@
     font-size: 13px;
 }
 
-.btn-primary {
+.stock-count-page .btn-primary {
     background: var(--color-primary, #8A775F);
     color: #fff;
     border: none;
@@ -57,7 +57,7 @@
     font-weight: 600;
 }
 
-.btn-secondary {
+.stock-count-page .btn-secondary {
     background: var(--color-white, #fff);
     color: #495057;
     border: 1px solid #d6d8db;
@@ -67,7 +67,7 @@
     font-size: 13px;
 }
 
-.btn-danger {
+.stock-count-page .btn-danger {
     background: var(--color-white, #fff);
     color: #c82333;
     border: 1px solid #f1b0b7;
@@ -77,7 +77,7 @@
     font-size: 13px;
 }
 
-.btn-success {
+.stock-count-page .btn-success {
     background: #28a745;
     color: #fff;
     border: none;
@@ -276,7 +276,7 @@ table.count-list th {
 }
 
 @media (max-width: 64rem) {
-    .card {
+    .stock-count-page .card {
         padding: 14px;
         border-radius: 12px;
     }

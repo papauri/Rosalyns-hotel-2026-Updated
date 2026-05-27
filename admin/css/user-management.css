@@ -345,7 +345,7 @@
     gap: 6px;
 }
 
-.btn-sm {
+.user-management-container .btn-sm {
     padding: 6px 12px;
     border-radius: 6px;
     font-size: 11px;
@@ -359,37 +359,37 @@
     gap: 4px;
 }
 
-.btn-edit {
+.user-management-container .btn-edit {
     background: #e3f2fd;
     color: #1565c0;
 }
 
-.btn-edit:hover {
+.user-management-container .btn-edit:hover {
     background: #1565c0;
     color: white;
 }
 
-.btn-permissions {
+.user-management-container .btn-permissions {
     background: #fff3e0;
     color: #e65100;
 }
 
-.btn-permissions:hover {
+.user-management-container .btn-permissions:hover {
     background: #e65100;
     color: white;
 }
 
-.btn-delete {
+.user-management-container .btn-delete {
     background: #ffebee;
     color: #c62828;
 }
 
-.btn-delete:hover {
+.user-management-container .btn-delete:hover {
     background: #c62828;
     color: white;
 }
 
-.btn-add {
+.user-management-container .btn-add {
     background: linear-gradient(135deg, var(--gold) 0%, #c49b2e 100%);
     color: white;
     padding: 10px 20px;
@@ -403,7 +403,7 @@
     transition: all 0.2s;
 }
 
-.btn-add:hover {
+.user-management-container .btn-add:hover {
     transform: translateY(-2px);
     box-shadow: 0 4px 12px rgba(212, 168, 67, 0.3);
 }
@@ -456,9 +456,9 @@
     flex-wrap: wrap;
 }
 
-.btn-select-all,
-.btn-select-none,
-.btn-select-defaults {
+.user-management-container .btn-select-all,
+.user-management-container .btn-select-none,
+.user-management-container .btn-select-defaults {
     padding: 8px 16px;
     border-radius: 8px;
     font-size: 12px;
@@ -469,17 +469,17 @@
     transition: all 0.2s;
 }
 
-.btn-select-all:hover {
+.user-management-container .btn-select-all:hover {
     background: #d4edda;
     border-color: #28a745;
 }
 
-.btn-select-none:hover {
+.user-management-container .btn-select-none:hover {
     background: #f8d7da;
     border-color: #dc3545;
 }
 
-.btn-select-defaults:hover {
+.user-management-container .btn-select-defaults:hover {
     background: #fff3cd;
     border-color: #ffc107;
 }
@@ -577,7 +577,7 @@
     border-top: 1px solid #f0f0f0;
 }
 
-.btn-cancel {
+.user-management-container .btn-cancel {
     padding: 10px 20px;
     border-radius: 8px;
     font-weight: 600;
@@ -591,7 +591,7 @@
     gap: 8px;
 }
 
-.btn-save-perms {
+.user-management-container .btn-save-perms {
     padding: 10px 24px;
     border-radius: 8px;
     font-weight: 600;
@@ -700,7 +700,7 @@
     box-shadow: 0 4px 14px rgba(177, 130, 71, 0.32);
 }
 
-.btn-delete-confirm {
+.user-management-container .btn-delete-confirm {
     padding: 0 1.25rem;
     min-height: 40px;
     border-radius: 8px;
@@ -716,7 +716,7 @@
     transition: box-shadow 0.18s, transform 0.15s;
 }
 
-.btn-delete-confirm:hover {
+.user-management-container .btn-delete-confirm:hover {
     transform: translateY(-1px);
     box-shadow: 0 4px 14px rgba(198, 40, 40, 0.32);
 }

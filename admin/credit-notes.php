@@ -1,4 +1,5 @@
 <?php
+
 /**
  * Credit Notes Management — Admin
  *
@@ -41,15 +42,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $reasonNotes = trim($_POST['reason_notes'] ?? '');
             $sendEmail   = !empty($_POST['send_email_to_guest']);
 
-            if ($guestName === '') { throw new RuntimeException('Guest name is required.'); }
-            if ($amount <= 0)      { throw new RuntimeException('Credit note amount must be greater than zero.'); }
+            if ($guestName === '') {
+                throw new RuntimeException('Guest name is required.');
+            }
+            if ($amount <= 0) {
+                throw new RuntimeException('Credit note amount must be greater than zero.');
+            }
 
             $issueBkId   = (int)($_POST['booking_id']       ?? 0);
             $issueBkRef  = trim($_POST['booking_reference']  ?? '');
             $issueBkType = trim($_POST['booking_type']        ?? '');
 
             $result = issueCreditNote($pdo, [
-                'booking_type'      => in_array($issueBkType, ['room','conference'], true) ? $issueBkType : 'goodwill',
+                'booking_type'      => in_array($issueBkType, ['room', 'conference'], true) ? $issueBkType : 'goodwill',
                 'booking_id'        => $issueBkId > 0 ? $issueBkId : null,
                 'booking_reference' => $issueBkRef !== '' ? $issueBkRef : null,
                 'guest_name'        => $guestName,
@@ -62,7 +67,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 'generate_pdf'      => true,
             ]);
 
-            if (!$result['success']) { throw new RuntimeException($result['error'] ?? 'Unknown error.'); }
+            if (!$result['success']) {
+                throw new RuntimeException($result['error'] ?? 'Unknown error.');
+            }
             $message = 'Credit note ' . htmlspecialchars((string)$result['credit_note_number']) . ' issued successfully.';
         }
 
@@ -74,16 +81,24 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $amount      = (float)($_POST['amount']       ?? 0);
             $notes       = trim($_POST['notes']           ?? '');
 
-            if ($cnId <= 0)      { throw new RuntimeException('Credit note ID is required.'); }
-            if ($bookingId <= 0) { throw new RuntimeException('A valid booking must be selected.'); }
-            if ($amount <= 0)    { throw new RuntimeException('Amount to apply must be greater than zero.'); }
+            if ($cnId <= 0) {
+                throw new RuntimeException('Credit note ID is required.');
+            }
+            if ($bookingId <= 0) {
+                throw new RuntimeException('A valid booking must be selected.');
+            }
+            if ($amount <= 0) {
+                throw new RuntimeException('Amount to apply must be greater than zero.');
+            }
 
             $result = applyCreditNote($pdo, $cnId, [
                 'booking_id'   => $bookingId,
                 'booking_type' => $bookingType,
             ], $amount, (int)$user['id'], $notes);
 
-            if (!$result['success']) { throw new RuntimeException($result['error'] ?? 'Unknown error.'); }
+            if (!$result['success']) {
+                throw new RuntimeException($result['error'] ?? 'Unknown error.');
+            }
             $message = 'Credit note applied. Remaining balance: ' . getSetting('currency_symbol') . ' ' . number_format($result['remaining_balance'], 2);
         }
 
@@ -92,32 +107,45 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $cnId       = (int)($_POST['credit_note_id'] ?? 0);
             $voidReason = trim($_POST['void_reason']     ?? '');
 
-            if ($cnId <= 0)          { throw new RuntimeException('Credit note ID is required.'); }
-            if ($voidReason === '')  { throw new RuntimeException('A void reason is required.'); }
+            if ($cnId <= 0) {
+                throw new RuntimeException('Credit note ID is required.');
+            }
+            if ($voidReason === '') {
+                throw new RuntimeException('A void reason is required.');
+            }
 
             $result = voidCreditNote($pdo, $cnId, $voidReason, (int)$user['id']);
-            if (!$result['success']) { throw new RuntimeException($result['error'] ?? 'Unknown error.'); }
+            if (!$result['success']) {
+                throw new RuntimeException($result['error'] ?? 'Unknown error.');
+            }
             $message = 'Credit note voided.';
         }
 
         // ── Regenerate PDF ────────────────────────────────────────────────────
         if ($action === 'regenerate_pdf') {
             $cnId = (int)($_POST['credit_note_id'] ?? 0);
-            if ($cnId <= 0) { throw new RuntimeException('Credit note ID is required.'); }
+            if ($cnId <= 0) {
+                throw new RuntimeException('Credit note ID is required.');
+            }
             $result = generateCreditNotePDF($pdo, $cnId);
-            if (!$result)   { throw new RuntimeException('PDF generation failed.'); }
+            if (!$result) {
+                throw new RuntimeException('PDF generation failed.');
+            }
             $message = 'PDF regenerated.';
         }
 
         // ── Resend email ──────────────────────────────────────────────────────
         if ($action === 'resend_email') {
             $cnId = (int)($_POST['credit_note_id'] ?? 0);
-            if ($cnId <= 0) { throw new RuntimeException('Credit note ID is required.'); }
+            if ($cnId <= 0) {
+                throw new RuntimeException('Credit note ID is required.');
+            }
             $result = sendCreditNoteEmail($pdo, $cnId);
-            if (!$result['success']) { throw new RuntimeException($result['message']); }
+            if (!$result['success']) {
+                throw new RuntimeException($result['message']);
+            }
             $message = 'Email sent: ' . $result['message'];
         }
-
     } catch (Throwable $e) {
         $error = $e->getMessage();
     }
@@ -362,6 +390,7 @@ $modalsHtml = ob_get_clean();
 ?>
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -377,11 +406,12 @@ $modalsHtml = ob_get_clean();
     <link rel="stylesheet" href="css/admin-finance.css">
     <link rel="stylesheet" href="css/credit-notes.css">
 </head>
+
 <body>
 
     <?php require_once 'includes/admin-header.php'; ?>
 
-    <div class="admin-container">
+    <div class="admin-container finance-page credit-notes-page">
 
         <?php if ($message): ?>
             <div class="alert alert--success"><i class="fas fa-check-circle"></i> <?php echo htmlspecialchars($message); ?></div>
@@ -437,21 +467,21 @@ $modalsHtml = ob_get_clean();
             <form method="get" action="credit-notes.php" class="filter-bar">
                 <input type="text" name="search" class="filter-input" placeholder="Search CN#, guest name, email, booking ref..." value="<?php echo htmlspecialchars($search); ?>">
                 <select name="status" class="filter-select">
-                    <option value="all"<?php if ($filterStatus === 'all') echo ' selected'; ?>>All Statuses</option>
-                    <option value="active"<?php if ($filterStatus === 'active') echo ' selected'; ?>>Active</option>
-                    <option value="partially_applied"<?php if ($filterStatus === 'partially_applied') echo ' selected'; ?>>Partially Applied</option>
-                    <option value="fully_applied"<?php if ($filterStatus === 'fully_applied') echo ' selected'; ?>>Fully Applied</option>
-                    <option value="voided"<?php if ($filterStatus === 'voided') echo ' selected'; ?>>Voided</option>
-                    <option value="expired"<?php if ($filterStatus === 'expired') echo ' selected'; ?>>Expired</option>
+                    <option value="all" <?php if ($filterStatus === 'all') echo ' selected'; ?>>All Statuses</option>
+                    <option value="active" <?php if ($filterStatus === 'active') echo ' selected'; ?>>Active</option>
+                    <option value="partially_applied" <?php if ($filterStatus === 'partially_applied') echo ' selected'; ?>>Partially Applied</option>
+                    <option value="fully_applied" <?php if ($filterStatus === 'fully_applied') echo ' selected'; ?>>Fully Applied</option>
+                    <option value="voided" <?php if ($filterStatus === 'voided') echo ' selected'; ?>>Voided</option>
+                    <option value="expired" <?php if ($filterStatus === 'expired') echo ' selected'; ?>>Expired</option>
                 </select>
                 <select name="type" class="filter-select">
-                    <option value="all"<?php if ($filterType === 'all') echo ' selected'; ?>>All Types</option>
-                    <option value="room"<?php if ($filterType === 'room') echo ' selected'; ?>>Room Booking</option>
-                    <option value="conference"<?php if ($filterType === 'conference') echo ' selected'; ?>>Conference</option>
-                    <option value="goodwill"<?php if ($filterType === 'goodwill') echo ' selected'; ?>>Goodwill</option>
+                    <option value="all" <?php if ($filterType === 'all') echo ' selected'; ?>>All Types</option>
+                    <option value="room" <?php if ($filterType === 'room') echo ' selected'; ?>>Room Booking</option>
+                    <option value="conference" <?php if ($filterType === 'conference') echo ' selected'; ?>>Conference</option>
+                    <option value="goodwill" <?php if ($filterType === 'goodwill') echo ' selected'; ?>>Goodwill</option>
                 </select>
                 <input type="date" name="date_from" class="filter-input" value="<?php echo htmlspecialchars($filterDateFrom); ?>" placeholder="From">
-                <input type="date" name="date_to"   class="filter-input" value="<?php echo htmlspecialchars($filterDateTo); ?>" placeholder="To">
+                <input type="date" name="date_to" class="filter-input" value="<?php echo htmlspecialchars($filterDateTo); ?>" placeholder="To">
                 <button type="submit" class="btn btn--primary btn--sm"><i class="fas fa-search"></i> Search</button>
                 <?php if ($filterStatus !== 'all' || $filterType !== 'all' || $search !== '' || $filterDateFrom !== '' || $filterDateTo !== ''): ?>
                     <a href="credit-notes.php" class="btn btn--ghost btn--sm">Clear</a>
@@ -468,423 +498,479 @@ $modalsHtml = ob_get_clean();
                     <button class="btn btn--primary" data-modal-open="modal-issue-cn">Issue First Credit Note</button>
                 </div>
             <?php else: ?>
-            <table class="admin-table cn-table">
-                <thead>
-                    <tr>
-                        <th>CN Number</th>
-                        <th>Guest</th>
-                        <th>Type / Booking</th>
-                        <th>Reason</th>
-                        <th class="text-right">Face Value</th>
-                        <th class="text-right">Used</th>
-                        <th class="text-right">Balance</th>
-                        <th>Status</th>
-                        <th>Issued</th>
-                        <th>Expires</th>
-                        <th class="text-center">Actions</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    <?php foreach ($creditNotes as $cn): ?>
-                    <?php
-                        $isActive    = in_array($cn['status'], ['active', 'partially_applied'], true);
-                        $isVoided    = $cn['status'] === 'voided';
-                        $isExpired   = $cn['status'] === 'expired';
-                        $isFull      = $cn['status'] === 'fully_applied';
-                        $balance     = max(0.0, (float)$cn['balance']);
-                        $expiresSoon = $isActive && $cn['expires_at'] && $cn['expires_at'] <= date('Y-m-d', strtotime('+30 days'));
-                        $reasonLabels = [
-                            'cancellation'  => 'Cancellation',
-                            'service_issue' => 'Service Issue',
-                            'early_checkout'=> 'Early Checkout',
-                            'overpayment'   => 'Overpayment',
-                            'goodwill'      => 'Goodwill',
-                            'pricing_error' => 'Pricing Error',
-                            'other'         => 'Other',
-                        ];
-                    ?>
-                    <tr class="cn-row<?php echo $isVoided ? ' cn-row--voided' : ($isExpired ? ' cn-row--expired' : ($isFull ? ' cn-row--used' : '')); ?>">
-                        <td>
-                            <strong class="cn-number"><?php echo htmlspecialchars((string)$cn['credit_note_number']); ?></strong>
-                            <?php if ($cn['email_sent']): ?>
-                                <span class="cn-badge cn-badge--emailed" title="Email sent"><i class="fas fa-envelope-check"></i></span>
-                            <?php endif; ?>
-                        </td>
-                        <td>
-                            <div class="cn-guest"><?php echo htmlspecialchars((string)$cn['guest_name']); ?></div>
-                            <?php if ($cn['guest_email']): ?>
-                                <small class="text-muted"><?php echo htmlspecialchars((string)$cn['guest_email']); ?></small>
-                            <?php endif; ?>
-                        </td>
-                        <td>
-                            <span class="cn-type-badge cn-type-badge--<?php echo htmlspecialchars((string)$cn['booking_type']); ?>">
-                                <?php echo htmlspecialchars(ucfirst((string)$cn['booking_type'])); ?>
-                            </span>
-                            <?php if ($cn['booking_reference']): ?>
-                                <br><small><?php echo htmlspecialchars((string)$cn['booking_reference']); ?></small>
-                            <?php endif; ?>
-                        </td>
-                        <td>
-                            <span title="<?php echo htmlspecialchars((string)($cn['reason_notes'] ?? '')); ?>">
-                                <?php echo htmlspecialchars($reasonLabels[$cn['reason']] ?? ucfirst((string)$cn['reason'])); ?>
-                            </span>
-                        </td>
-                        <td class="text-right"><?php echo htmlspecialchars($currencySymbol); ?> <?php echo number_format((float)$cn['original_amount'], 2); ?></td>
-                        <td class="text-right"><?php echo htmlspecialchars($currencySymbol); ?> <?php echo number_format((float)$cn['amount_used'], 2); ?></td>
-                        <td class="text-right<?php echo $balance > 0 && $isActive ? ' cn-balance--available' : ''; ?>">
-                            <strong><?php echo htmlspecialchars($currencySymbol); ?> <?php echo number_format($balance, 2); ?></strong>
-                        </td>
-                        <td>
+                <table class="admin-table cn-table">
+                    <thead>
+                        <tr>
+                            <th>CN Number</th>
+                            <th>Guest</th>
+                            <th>Type / Booking</th>
+                            <th>Reason</th>
+                            <th class="text-right">Face Value</th>
+                            <th class="text-right">Used</th>
+                            <th class="text-right">Balance</th>
+                            <th>Status</th>
+                            <th>Issued</th>
+                            <th>Expires</th>
+                            <th class="text-center">Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <?php foreach ($creditNotes as $cn): ?>
                             <?php
-                            $statusLabels = ['active'=>'Active','partially_applied'=>'Partial','fully_applied'=>'Used','voided'=>'Voided','expired'=>'Expired'];
-                            $statusClass  = ['active'=>'success','partially_applied'=>'warning','fully_applied'=>'info','voided'=>'danger','expired'=>'muted'];
+                            $isActive    = in_array($cn['status'], ['active', 'partially_applied'], true);
+                            $isVoided    = $cn['status'] === 'voided';
+                            $isExpired   = $cn['status'] === 'expired';
+                            $isFull      = $cn['status'] === 'fully_applied';
+                            $balance     = max(0.0, (float)$cn['balance']);
+                            $expiresSoon = $isActive && $cn['expires_at'] && $cn['expires_at'] <= date('Y-m-d', strtotime('+30 days'));
+                            $reasonLabels = [
+                                'cancellation'  => 'Cancellation',
+                                'service_issue' => 'Service Issue',
+                                'early_checkout' => 'Early Checkout',
+                                'overpayment'   => 'Overpayment',
+                                'goodwill'      => 'Goodwill',
+                                'pricing_error' => 'Pricing Error',
+                                'other'         => 'Other',
+                            ];
                             ?>
-                            <span class="status-badge status-badge--<?php echo $statusClass[$cn['status']] ?? 'info'; ?>">
-                                <?php echo $statusLabels[$cn['status']] ?? ucfirst((string)$cn['status']); ?>
-                            </span>
-                            <?php if ($expiresSoon): ?>
-                                <br><span class="cn-badge cn-badge--warn" title="Expires soon"><i class="fas fa-clock"></i></span>
-                            <?php endif; ?>
-                        </td>
-                        <td><?php echo date('d M Y', strtotime((string)$cn['issued_at'])); ?></td>
-                        <td>
-                            <?php if ($cn['expires_at']): ?>
-                                <span class="<?php echo $expiresSoon ? 'text-warning' : 'text-muted'; ?>">
-                                    <?php echo date('d M Y', strtotime((string)$cn['expires_at'])); ?>
-                                </span>
-                            <?php else: ?>
-                                <span class="text-muted">—</span>
-                            <?php endif; ?>
-                        </td>
-                        <td class="text-center">
-                            <div class="action-buttons">
-                                <?php if ($isActive && $balance > 0): ?>
-                                    <button class="btn btn--sm btn--success"
-                                            onclick="openApplyCN(<?php echo (int)$cn['id']; ?>, '<?php echo htmlspecialchars((string)$cn['credit_note_number']); ?>', <?php echo number_format($balance, 2, '.', ''); ?>)"
-                                            title="Apply to booking">
-                                        <i class="fas fa-check-double"></i>
-                                    </button>
-                                <?php endif; ?>
-                                <button class="btn btn--sm btn--ghost"
-                                        onclick="openCNHistory(<?php echo (int)$cn['id']; ?>, '<?php echo htmlspecialchars((string)$cn['credit_note_number']); ?>')"
-                                        title="Redemption history">
-                                    <i class="fas fa-history"></i>
-                                </button>
-                                <form method="post" style="display:inline;">
-                                    <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf_token, ENT_QUOTES, 'UTF-8'); ?>">
-                                    <input type="hidden" name="action" value="regenerate_pdf">
-                                    <input type="hidden" name="credit_note_id" value="<?php echo (int)$cn['id']; ?>">
-                                    <button type="button" class="btn btn--sm btn--ghost" title="Regenerate PDF"
-                                            onclick="cnPdfAction(this,<?php echo (int)$cn['id']; ?>)"><i class="fas fa-file-pdf"></i></button>
-                                </form>
-                                <?php if ($cn['guest_email']): ?>
-                                <form method="post" style="display:inline;">
-                                    <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf_token, ENT_QUOTES, 'UTF-8'); ?>">
-                                    <input type="hidden" name="action" value="resend_email">
-                                    <input type="hidden" name="credit_note_id" value="<?php echo (int)$cn['id']; ?>">
-                                    <button type="button" class="btn btn--sm btn--ghost" title="Resend email"
-                                            onclick="cnEmailAction(this,<?php echo (int)$cn['id']; ?>)"><i class="fas fa-envelope"></i></button>
-                                </form>
-                                <?php endif; ?>
-                                <a href="api/credit-notes.php?action=view_pdf&id=<?php echo (int)$cn['id']; ?>" target="_blank" class="btn btn--sm btn--ghost" title="View PDF"><i class="fas fa-eye"></i></a>
-                                <?php if ($isActive): ?>
-                                    <button class="btn btn--sm btn--danger"
-                                            onclick="openVoidCN(<?php echo (int)$cn['id']; ?>, '<?php echo htmlspecialchars((string)$cn['credit_note_number']); ?>')"
-                                            title="Void this credit note">
-                                        <i class="fas fa-ban"></i>
-                                    </button>
-                                <?php endif; ?>
-                            </div>
-                        </td>
-                    </tr>
-                    <?php endforeach; ?>
-                </tbody>
-            </table>
+                            <tr class="cn-row<?php echo $isVoided ? ' cn-row--voided' : ($isExpired ? ' cn-row--expired' : ($isFull ? ' cn-row--used' : '')); ?>">
+                                <td>
+                                    <strong class="cn-number"><?php echo htmlspecialchars((string)$cn['credit_note_number']); ?></strong>
+                                    <?php if ($cn['email_sent']): ?>
+                                        <span class="cn-badge cn-badge--emailed" title="Email sent"><i class="fas fa-envelope-check"></i></span>
+                                    <?php endif; ?>
+                                </td>
+                                <td>
+                                    <div class="cn-guest"><?php echo htmlspecialchars((string)$cn['guest_name']); ?></div>
+                                    <?php if ($cn['guest_email']): ?>
+                                        <small class="text-muted"><?php echo htmlspecialchars((string)$cn['guest_email']); ?></small>
+                                    <?php endif; ?>
+                                </td>
+                                <td>
+                                    <span class="cn-type-badge cn-type-badge--<?php echo htmlspecialchars((string)$cn['booking_type']); ?>">
+                                        <?php echo htmlspecialchars(ucfirst((string)$cn['booking_type'])); ?>
+                                    </span>
+                                    <?php if ($cn['booking_reference']): ?>
+                                        <br><small><?php echo htmlspecialchars((string)$cn['booking_reference']); ?></small>
+                                    <?php endif; ?>
+                                </td>
+                                <td>
+                                    <span title="<?php echo htmlspecialchars((string)($cn['reason_notes'] ?? '')); ?>">
+                                        <?php echo htmlspecialchars($reasonLabels[$cn['reason']] ?? ucfirst((string)$cn['reason'])); ?>
+                                    </span>
+                                </td>
+                                <td class="text-right"><?php echo htmlspecialchars($currencySymbol); ?> <?php echo number_format((float)$cn['original_amount'], 2); ?></td>
+                                <td class="text-right"><?php echo htmlspecialchars($currencySymbol); ?> <?php echo number_format((float)$cn['amount_used'], 2); ?></td>
+                                <td class="text-right<?php echo $balance > 0 && $isActive ? ' cn-balance--available' : ''; ?>">
+                                    <strong><?php echo htmlspecialchars($currencySymbol); ?> <?php echo number_format($balance, 2); ?></strong>
+                                </td>
+                                <td>
+                                    <?php
+                                    $statusLabels = ['active' => 'Active', 'partially_applied' => 'Partial', 'fully_applied' => 'Used', 'voided' => 'Voided', 'expired' => 'Expired'];
+                                    $statusClass  = ['active' => 'success', 'partially_applied' => 'warning', 'fully_applied' => 'info', 'voided' => 'danger', 'expired' => 'muted'];
+                                    ?>
+                                    <span class="status-badge status-badge--<?php echo $statusClass[$cn['status']] ?? 'info'; ?>">
+                                        <?php echo $statusLabels[$cn['status']] ?? ucfirst((string)$cn['status']); ?>
+                                    </span>
+                                    <?php if ($expiresSoon): ?>
+                                        <br><span class="cn-badge cn-badge--warn" title="Expires soon"><i class="fas fa-clock"></i></span>
+                                    <?php endif; ?>
+                                </td>
+                                <td><?php echo date('d M Y', strtotime((string)$cn['issued_at'])); ?></td>
+                                <td>
+                                    <?php if ($cn['expires_at']): ?>
+                                        <span class="<?php echo $expiresSoon ? 'text-warning' : 'text-muted'; ?>">
+                                            <?php echo date('d M Y', strtotime((string)$cn['expires_at'])); ?>
+                                        </span>
+                                    <?php else: ?>
+                                        <span class="text-muted">—</span>
+                                    <?php endif; ?>
+                                </td>
+                                <td class="text-center">
+                                    <div class="action-buttons">
+                                        <?php if ($isActive && $balance > 0): ?>
+                                            <button class="btn btn--sm btn--success"
+                                                onclick="openApplyCN(<?php echo (int)$cn['id']; ?>, '<?php echo htmlspecialchars((string)$cn['credit_note_number']); ?>', <?php echo number_format($balance, 2, '.', ''); ?>)"
+                                                title="Apply to booking">
+                                                <i class="fas fa-check-double"></i>
+                                            </button>
+                                        <?php endif; ?>
+                                        <button class="btn btn--sm btn--ghost"
+                                            onclick="openCNHistory(<?php echo (int)$cn['id']; ?>, '<?php echo htmlspecialchars((string)$cn['credit_note_number']); ?>')"
+                                            title="Redemption history">
+                                            <i class="fas fa-history"></i>
+                                        </button>
+                                        <form method="post" style="display:inline;">
+                                            <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf_token, ENT_QUOTES, 'UTF-8'); ?>">
+                                            <input type="hidden" name="action" value="regenerate_pdf">
+                                            <input type="hidden" name="credit_note_id" value="<?php echo (int)$cn['id']; ?>">
+                                            <button type="button" class="btn btn--sm btn--ghost" title="Regenerate PDF"
+                                                onclick="cnPdfAction(this,<?php echo (int)$cn['id']; ?>)"><i class="fas fa-file-pdf"></i></button>
+                                        </form>
+                                        <?php if ($cn['guest_email']): ?>
+                                            <form method="post" style="display:inline;">
+                                                <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf_token, ENT_QUOTES, 'UTF-8'); ?>">
+                                                <input type="hidden" name="action" value="resend_email">
+                                                <input type="hidden" name="credit_note_id" value="<?php echo (int)$cn['id']; ?>">
+                                                <button type="button" class="btn btn--sm btn--ghost" title="Resend email"
+                                                    onclick="cnEmailAction(this,<?php echo (int)$cn['id']; ?>)"><i class="fas fa-envelope"></i></button>
+                                            </form>
+                                        <?php endif; ?>
+                                        <a href="api/credit-notes.php?action=view_pdf&id=<?php echo (int)$cn['id']; ?>" target="_blank" class="btn btn--sm btn--ghost" title="View PDF"><i class="fas fa-eye"></i></a>
+                                        <?php if ($isActive): ?>
+                                            <button class="btn btn--sm btn--danger"
+                                                onclick="openVoidCN(<?php echo (int)$cn['id']; ?>, '<?php echo htmlspecialchars((string)$cn['credit_note_number']); ?>')"
+                                                title="Void this credit note">
+                                                <i class="fas fa-ban"></i>
+                                            </button>
+                                        <?php endif; ?>
+                                    </div>
+                                </td>
+                            </tr>
+                        <?php endforeach; ?>
+                    </tbody>
+                </table>
 
-            <!-- Pagination -->
-            <?php if ($totalPages > 1): ?>
-            <div class="pagination-bar">
-                <?php
-                $q = http_build_query(array_filter([
-                    'status'    => $filterStatus !== 'all' ? $filterStatus : '',
-                    'type'      => $filterType !== 'all' ? $filterType : '',
-                    'date_from' => $filterDateFrom,
-                    'date_to'   => $filterDateTo,
-                    'search'    => $search,
-                ]));
-                for ($p = 1; $p <= $totalPages; $p++): ?>
-                    <a href="credit-notes.php?page=<?php echo $p; ?>&<?php echo $q; ?>"
-                       class="pagination-item<?php echo $p === $page ? ' pagination-item--active' : ''; ?>">
-                        <?php echo $p; ?>
-                    </a>
-                <?php endfor; ?>
-            </div>
-            <?php endif; ?>
+                <!-- Pagination -->
+                <?php if ($totalPages > 1): ?>
+                    <div class="pagination-bar">
+                        <?php
+                        $q = http_build_query(array_filter([
+                            'status'    => $filterStatus !== 'all' ? $filterStatus : '',
+                            'type'      => $filterType !== 'all' ? $filterType : '',
+                            'date_from' => $filterDateFrom,
+                            'date_to'   => $filterDateTo,
+                            'search'    => $search,
+                        ]));
+                        for ($p = 1; $p <= $totalPages; $p++): ?>
+                            <a href="credit-notes.php?page=<?php echo $p; ?>&<?php echo $q; ?>"
+                                class="pagination-item<?php echo $p === $page ? ' pagination-item--active' : ''; ?>">
+                                <?php echo $p; ?>
+                            </a>
+                        <?php endfor; ?>
+                    </div>
+                <?php endif; ?>
 
-            <div class="table-footer-info">
-                Showing <?php echo count($creditNotes); ?> of <?php echo $total; ?> credit notes
-            </div>
+                <div class="table-footer-info">
+                    Showing <?php echo count($creditNotes); ?> of <?php echo $total; ?> credit notes
+                </div>
             <?php endif; ?>
         </div><!-- .table-container -->
 
     </div><!-- .admin-container -->
 
-<?php echo $modalsHtml; ?>
+    <?php echo $modalsHtml; ?>
 
-<script>
-window._rhCsrf = <?php echo json_encode($csrf_token); ?>;
+    <script>
+        window._rhCsrf = <?php echo json_encode($csrf_token); ?>;
 
-// ── Open Apply CN modal ──────────────────────────────────────────────────────
-function openApplyCN(id, number, balance) {
-    document.getElementById('apply-cn-id').value = id;
-    document.getElementById('apply-cn-number').textContent = number;
-    document.getElementById('apply-cn-balance').textContent = balance.toFixed(2);
-    document.getElementById('apply-cn-amount').max = balance;
-    document.getElementById('apply-cn-amount').value = '';
-    document.getElementById('apply-booking-search').value = '';
-    document.getElementById('apply-booking-results').innerHTML = '';
-    document.getElementById('apply-booking-id').value = '';
-    document.getElementById('apply-booking-selected').style.display = 'none';
-    if (window.Modal) Modal.open('modal-apply-cn');
-}
-
-// ── Open Void CN modal ───────────────────────────────────────────────────────
-function openVoidCN(id, number) {
-    document.getElementById('void-cn-id').value = id;
-    document.getElementById('void-cn-number').textContent = number;
-    document.querySelector('#void-cn-form textarea[name="void_reason"]').value = '';
-    if (window.Modal) Modal.open('modal-void-cn');
-}
-
-// ── Load CN history ──────────────────────────────────────────────────────────
-function openCNHistory(id, number) {
-    const modal = document.getElementById('modal-cn-history');
-    const content = document.getElementById('cn-history-content');
-    if (!modal || !content) return;
-    content.innerHTML = '<p class="text-muted">Loading...</p>';
-    if (window.Modal) Modal.open('modal-cn-history');
-    document.querySelector('#modal-cn-history .modal__title').textContent = 'Redemption History — ' + number;
-
-    fetch('api/credit-notes.php?action=get_history&credit_note_id=' + encodeURIComponent(id), {
-        headers: { 'X-Requested-With': 'XMLHttpRequest' }
-    })
-    .then(res => res.json())
-    .then(data => {
-        if (!data.success) {
-            content.innerHTML = '<p class="text-muted">No redemption history found.</p>';
-            return;
+        // ── Open Apply CN modal ──────────────────────────────────────────────────────
+        function openApplyCN(id, number, balance) {
+            document.getElementById('apply-cn-id').value = id;
+            document.getElementById('apply-cn-number').textContent = number;
+            document.getElementById('apply-cn-balance').textContent = balance.toFixed(2);
+            document.getElementById('apply-cn-amount').max = balance;
+            document.getElementById('apply-cn-amount').value = '';
+            document.getElementById('apply-booking-search').value = '';
+            document.getElementById('apply-booking-results').innerHTML = '';
+            document.getElementById('apply-booking-id').value = '';
+            document.getElementById('apply-booking-selected').style.display = 'none';
+            if (window.Modal) Modal.open('modal-apply-cn');
         }
-        const apps = data.data.applications;
-        if (!apps || apps.length === 0) {
-            content.innerHTML = '<p class="text-muted">This credit note has not been applied yet.</p>';
-            return;
-        }
-        let html = '<table class="admin-table"><thead><tr><th>Date</th><th>Booking</th><th>Type</th><th class="text-right">Amount Applied</th><th>Processed By</th></tr></thead><tbody>';
-        apps.forEach(function(a) {
-            html += '<tr><td>' + (a.applied_at || '—') + '</td>'
-                + '<td>' + (a.applied_to_booking_reference || 'N/A') + '</td>'
-                + '<td>' + (a.applied_to_booking_type || '') + '</td>'
-                + '<td class="text-right"><strong>' + (a.amount_applied || '0.00') + '</strong></td>'
-                + '<td>' + (a.applied_by_name || 'Admin') + '</td></tr>';
-        });
-        html += '</tbody></table>';
-        content.innerHTML = html;
-    })
-    .catch(function() {
-        content.innerHTML = '<p class="text-muted">Failed to load history.</p>';
-    });
-}
 
-// ── Booking search for Apply modal ──────────────────────────────────────────
-let cnSearchTimer = null;
-function cnSearchBooking() {
-    clearTimeout(cnSearchTimer);
-    const q    = document.getElementById('apply-booking-search').value.trim();
-    const type = document.getElementById('apply-booking-type').value;
-    const box  = document.getElementById('apply-booking-results');
-    if (q.length < 2) { box.innerHTML = ''; return; }
-    cnSearchTimer = setTimeout(function() {
-        fetch('api/credit-notes.php?action=search_booking&q=' + encodeURIComponent(q) + '&booking_type=' + encodeURIComponent(type), {
-            headers: { 'X-Requested-With': 'XMLHttpRequest' }
-        })
-        .then(res => res.json())
-        .then(data => {
-            box.innerHTML = '';
-            if (!data.success || !data.data.length) {
-                box.innerHTML = '<div class="cn-booking-result-item cn-booking-result-item--empty">No matching bookings found</div>';
+        // ── Open Void CN modal ───────────────────────────────────────────────────────
+        function openVoidCN(id, number) {
+            document.getElementById('void-cn-id').value = id;
+            document.getElementById('void-cn-number').textContent = number;
+            document.querySelector('#void-cn-form textarea[name="void_reason"]').value = '';
+            if (window.Modal) Modal.open('modal-void-cn');
+        }
+
+        // ── Load CN history ──────────────────────────────────────────────────────────
+        function openCNHistory(id, number) {
+            const modal = document.getElementById('modal-cn-history');
+            const content = document.getElementById('cn-history-content');
+            if (!modal || !content) return;
+            content.innerHTML = '<p class="text-muted">Loading...</p>';
+            if (window.Modal) Modal.open('modal-cn-history');
+            document.querySelector('#modal-cn-history .modal__title').textContent = 'Redemption History — ' + number;
+
+            fetch('api/credit-notes.php?action=get_history&credit_note_id=' + encodeURIComponent(id), {
+                    headers: {
+                        'X-Requested-With': 'XMLHttpRequest'
+                    }
+                })
+                .then(res => res.json())
+                .then(data => {
+                    if (!data.success) {
+                        content.innerHTML = '<p class="text-muted">No redemption history found.</p>';
+                        return;
+                    }
+                    const apps = data.data.applications;
+                    if (!apps || apps.length === 0) {
+                        content.innerHTML = '<p class="text-muted">This credit note has not been applied yet.</p>';
+                        return;
+                    }
+                    let html = '<table class="admin-table"><thead><tr><th>Date</th><th>Booking</th><th>Type</th><th class="text-right">Amount Applied</th><th>Processed By</th></tr></thead><tbody>';
+                    apps.forEach(function(a) {
+                        html += '<tr><td>' + (a.applied_at || '—') + '</td>' +
+                            '<td>' + (a.applied_to_booking_reference || 'N/A') + '</td>' +
+                            '<td>' + (a.applied_to_booking_type || '') + '</td>' +
+                            '<td class="text-right"><strong>' + (a.amount_applied || '0.00') + '</strong></td>' +
+                            '<td>' + (a.applied_by_name || 'Admin') + '</td></tr>';
+                    });
+                    html += '</tbody></table>';
+                    content.innerHTML = html;
+                })
+                .catch(function() {
+                    content.innerHTML = '<p class="text-muted">Failed to load history.</p>';
+                });
+        }
+
+        // ── Booking search for Apply modal ──────────────────────────────────────────
+        let cnSearchTimer = null;
+
+        function cnSearchBooking() {
+            clearTimeout(cnSearchTimer);
+            const q = document.getElementById('apply-booking-search').value.trim();
+            const type = document.getElementById('apply-booking-type').value;
+            const box = document.getElementById('apply-booking-results');
+            if (q.length < 2) {
+                box.innerHTML = '';
                 return;
             }
-            data.data.forEach(function(b) {
-                const item = document.createElement('div');
-                item.className = 'cn-booking-result-item';
-                item.innerHTML = '<strong>' + (b.reference || '') + '</strong> — ' + (b.guest_name || '')
-                    + (b.guest_email ? '<br><small class="text-muted">' + b.guest_email + (b.meta ? ' &middot; ' + b.meta : '') + '</small>' : '')
-                    + (b.balance ? ' <span class="text-muted" style="float:right;font-size:.85em;">' + b.balance + '</span>' : '');
-                item.addEventListener('click', function() {
-                    document.getElementById('apply-booking-id').value = b.id;
-                    document.getElementById('apply-booking-search').value = (b.reference || '') + ' — ' + (b.guest_name || '');
-                    document.getElementById('apply-selected-booking-info').innerHTML =
-                        '<i class="fas fa-check-circle" style="color:var(--finance-success,#1f7a42)"></i> '
-                        + '<strong>' + (b.reference || '') + '</strong> &nbsp;|&nbsp; ' + (b.guest_name || '')
-                        + (b.guest_email ? ' <small class="text-muted">&nbsp;' + b.guest_email + '</small>' : '')
-                        + (b.balance ? ' &nbsp;|&nbsp; Balance: <strong>' + b.balance + '</strong>' : '');
-                    document.getElementById('apply-booking-selected').style.display = 'block';
-                    box.innerHTML = '';
-                });
-                box.appendChild(item);
-            });
-        })
-        .catch(function() { box.innerHTML = ''; });
-    }, 350);
-}
-
-// ── AJAX quick-actions: PDF regenerate + email resend ───────────────────────
-function cnToast(msg, type) {
-    var t = document.getElementById('cn-toast');
-    if (t) t.remove();
-    t = document.createElement('div');
-    t.id = 'cn-toast';
-    t.className = 'alert alert--' + (type === 'success' ? 'success' : 'danger');
-    t.style.cssText = 'position:fixed;top:76px;right:20px;z-index:9999;min-width:260px;max-width:440px;padding:12px 16px;border-radius:6px;box-shadow:0 4px 16px rgba(0,0,0,.18);';
-    t.innerHTML = '<i class="fas fa-' + (type === 'success' ? 'check-circle' : 'exclamation-triangle') + '"></i> ' + msg;
-    document.body.appendChild(t);
-    setTimeout(function() { if (t.parentNode) t.parentNode.removeChild(t); }, 4000);
-}
-
-function cnPdfAction(btn, id) {
-    var origHTML = btn.innerHTML;
-    btn.disabled = true;
-    btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i>';
-    fetch('api/credit-notes.php', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
-        body: JSON.stringify({ action: 'regenerate_pdf', credit_note_id: id, csrf_token: window._rhCsrf || '' })
-    })
-    .then(function(r) { return r.json(); })
-    .then(function(d) {
-        btn.disabled = false; btn.innerHTML = origHTML;
-        d.success ? cnToast('PDF regenerated.', 'success') : cnToast(d.error || 'PDF generation failed.', 'error');
-    })
-    .catch(function() { btn.disabled = false; btn.innerHTML = origHTML; cnToast('Network error. Please try again.', 'error'); });
-}
-
-function cnEmailAction(btn, id) {
-    var origHTML = btn.innerHTML;
-    btn.disabled = true;
-    btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i>';
-    fetch('api/credit-notes.php', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
-        body: JSON.stringify({ action: 'resend_email', credit_note_id: id, csrf_token: window._rhCsrf || '' })
-    })
-    .then(function(r) { return r.json(); })
-    .then(function(d) {
-        btn.disabled = false;
-        if (d.success) {
-            btn.innerHTML = '<i class="fas fa-check"></i>';
-            btn.classList.add('btn--success'); btn.classList.remove('btn--ghost');
-            setTimeout(function() { btn.innerHTML = origHTML; btn.classList.remove('btn--success'); btn.classList.add('btn--ghost'); }, 3000);
-            cnToast('<i class="fas fa-envelope-check"></i> ' + (d.message || 'Email sent successfully.'), 'success');
-        } else {
-            btn.innerHTML = origHTML;
-            cnToast(d.error || 'Email send failed.', 'error');
+            cnSearchTimer = setTimeout(function() {
+                fetch('api/credit-notes.php?action=search_booking&q=' + encodeURIComponent(q) + '&booking_type=' + encodeURIComponent(type), {
+                        headers: {
+                            'X-Requested-With': 'XMLHttpRequest'
+                        }
+                    })
+                    .then(res => res.json())
+                    .then(data => {
+                        box.innerHTML = '';
+                        if (!data.success || !data.data.length) {
+                            box.innerHTML = '<div class="cn-booking-result-item cn-booking-result-item--empty">No matching bookings found</div>';
+                            return;
+                        }
+                        data.data.forEach(function(b) {
+                            const item = document.createElement('div');
+                            item.className = 'cn-booking-result-item';
+                            item.innerHTML = '<strong>' + (b.reference || '') + '</strong> — ' + (b.guest_name || '') +
+                                (b.guest_email ? '<br><small class="text-muted">' + b.guest_email + (b.meta ? ' &middot; ' + b.meta : '') + '</small>' : '') +
+                                (b.balance ? ' <span class="text-muted" style="float:right;font-size:.85em;">' + b.balance + '</span>' : '');
+                            item.addEventListener('click', function() {
+                                document.getElementById('apply-booking-id').value = b.id;
+                                document.getElementById('apply-booking-search').value = (b.reference || '') + ' — ' + (b.guest_name || '');
+                                document.getElementById('apply-selected-booking-info').innerHTML =
+                                    '<i class="fas fa-check-circle" style="color:var(--finance-success,#1f7a42)"></i> ' +
+                                    '<strong>' + (b.reference || '') + '</strong> &nbsp;|&nbsp; ' + (b.guest_name || '') +
+                                    (b.guest_email ? ' <small class="text-muted">&nbsp;' + b.guest_email + '</small>' : '') +
+                                    (b.balance ? ' &nbsp;|&nbsp; Balance: <strong>' + b.balance + '</strong>' : '');
+                                document.getElementById('apply-booking-selected').style.display = 'block';
+                                box.innerHTML = '';
+                            });
+                            box.appendChild(item);
+                        });
+                    })
+                    .catch(function() {
+                        box.innerHTML = '';
+                    });
+            }, 350);
         }
-    })
-    .catch(function() { btn.disabled = false; btn.innerHTML = origHTML; cnToast('Network error. Please try again.', 'error'); });
-}
 
-// ── Open Issue CN modal (reset state) ──────────────────────────────────────
-function openIssueCN() {
-    document.getElementById('issue-link-booking-toggle').checked = false;
-    document.getElementById('issue-booking-search-wrap').style.display = 'none';
-    document.getElementById('issue-booking-id').value = '';
-    document.getElementById('issue-booking-type-hidden').value = '';
-    document.getElementById('issue-booking-ref').value = '';
-    document.getElementById('issue-booking-selected').style.display = 'none';
-    document.getElementById('issue-booking-search').value = '';
-    document.getElementById('issue-booking-results').innerHTML = '';
-    document.getElementById('issue-cn-form').reset();
-    if (window.Modal) Modal.open('modal-issue-cn');
-}
+        // ── AJAX quick-actions: PDF regenerate + email resend ───────────────────────
+        function cnToast(msg, type) {
+            var t = document.getElementById('cn-toast');
+            if (t) t.remove();
+            t = document.createElement('div');
+            t.id = 'cn-toast';
+            t.className = 'alert alert--' + (type === 'success' ? 'success' : 'danger');
+            t.style.cssText = 'position:fixed;top:76px;right:20px;z-index:9999;min-width:260px;max-width:440px;padding:12px 16px;border-radius:6px;box-shadow:0 4px 16px rgba(0,0,0,.18);';
+            t.innerHTML = '<i class="fas fa-' + (type === 'success' ? 'check-circle' : 'exclamation-triangle') + '"></i> ' + msg;
+            document.body.appendChild(t);
+            setTimeout(function() {
+                if (t.parentNode) t.parentNode.removeChild(t);
+            }, 4000);
+        }
 
-// ── Toggle issue modal booking search ──────────────────────────────────────
-function cnToggleIssueBookingSearch() {
-    var checked = document.getElementById('issue-link-booking-toggle').checked;
-    document.getElementById('issue-booking-search-wrap').style.display = checked ? 'block' : 'none';
-    if (!checked) {
-        document.getElementById('issue-booking-id').value = '';
-        document.getElementById('issue-booking-type-hidden').value = '';
-        document.getElementById('issue-booking-ref').value = '';
-        document.getElementById('issue-booking-selected').style.display = 'none';
-        document.getElementById('issue-booking-search').value = '';
-        document.getElementById('issue-booking-results').innerHTML = '';
-    }
-}
+        function cnPdfAction(btn, id) {
+            var origHTML = btn.innerHTML;
+            btn.disabled = true;
+            btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i>';
+            fetch('api/credit-notes.php', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-Requested-With': 'XMLHttpRequest'
+                    },
+                    body: JSON.stringify({
+                        action: 'regenerate_pdf',
+                        credit_note_id: id,
+                        csrf_token: window._rhCsrf || ''
+                    })
+                })
+                .then(function(r) {
+                    return r.json();
+                })
+                .then(function(d) {
+                    btn.disabled = false;
+                    btn.innerHTML = origHTML;
+                    d.success ? cnToast('PDF regenerated.', 'success') : cnToast(d.error || 'PDF generation failed.', 'error');
+                })
+                .catch(function() {
+                    btn.disabled = false;
+                    btn.innerHTML = origHTML;
+                    cnToast('Network error. Please try again.', 'error');
+                });
+        }
 
-// ── Booking search in Issue CN modal ───────────────────────────────────────
-var cnIssueSearchTimer = null;
-function cnIssueSearchBooking() {
-    clearTimeout(cnIssueSearchTimer);
-    var q    = document.getElementById('issue-booking-search').value.trim();
-    var type = document.getElementById('issue-search-booking-type').value;
-    var box  = document.getElementById('issue-booking-results');
-    if (q.length < 2) { box.innerHTML = ''; return; }
-    cnIssueSearchTimer = setTimeout(function() {
-        fetch('api/credit-notes.php?action=search_booking&q=' + encodeURIComponent(q) + '&booking_type=' + encodeURIComponent(type), {
-            headers: { 'X-Requested-With': 'XMLHttpRequest' }
-        })
-        .then(function(r) { return r.json(); })
-        .then(function(data) {
-            box.innerHTML = '';
-            if (!data.success || !data.data.length) {
-                box.innerHTML = '<div class="cn-booking-result-item cn-booking-result-item--empty">No matching bookings found</div>';
+        function cnEmailAction(btn, id) {
+            var origHTML = btn.innerHTML;
+            btn.disabled = true;
+            btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i>';
+            fetch('api/credit-notes.php', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-Requested-With': 'XMLHttpRequest'
+                    },
+                    body: JSON.stringify({
+                        action: 'resend_email',
+                        credit_note_id: id,
+                        csrf_token: window._rhCsrf || ''
+                    })
+                })
+                .then(function(r) {
+                    return r.json();
+                })
+                .then(function(d) {
+                    btn.disabled = false;
+                    if (d.success) {
+                        btn.innerHTML = '<i class="fas fa-check"></i>';
+                        btn.classList.add('btn--success');
+                        btn.classList.remove('btn--ghost');
+                        setTimeout(function() {
+                            btn.innerHTML = origHTML;
+                            btn.classList.remove('btn--success');
+                            btn.classList.add('btn--ghost');
+                        }, 3000);
+                        cnToast('<i class="fas fa-envelope-check"></i> ' + (d.message || 'Email sent successfully.'), 'success');
+                    } else {
+                        btn.innerHTML = origHTML;
+                        cnToast(d.error || 'Email send failed.', 'error');
+                    }
+                })
+                .catch(function() {
+                    btn.disabled = false;
+                    btn.innerHTML = origHTML;
+                    cnToast('Network error. Please try again.', 'error');
+                });
+        }
+
+        // ── Open Issue CN modal (reset state) ──────────────────────────────────────
+        function openIssueCN() {
+            document.getElementById('issue-link-booking-toggle').checked = false;
+            document.getElementById('issue-booking-search-wrap').style.display = 'none';
+            document.getElementById('issue-booking-id').value = '';
+            document.getElementById('issue-booking-type-hidden').value = '';
+            document.getElementById('issue-booking-ref').value = '';
+            document.getElementById('issue-booking-selected').style.display = 'none';
+            document.getElementById('issue-booking-search').value = '';
+            document.getElementById('issue-booking-results').innerHTML = '';
+            document.getElementById('issue-cn-form').reset();
+            if (window.Modal) Modal.open('modal-issue-cn');
+        }
+
+        // ── Toggle issue modal booking search ──────────────────────────────────────
+        function cnToggleIssueBookingSearch() {
+            var checked = document.getElementById('issue-link-booking-toggle').checked;
+            document.getElementById('issue-booking-search-wrap').style.display = checked ? 'block' : 'none';
+            if (!checked) {
+                document.getElementById('issue-booking-id').value = '';
+                document.getElementById('issue-booking-type-hidden').value = '';
+                document.getElementById('issue-booking-ref').value = '';
+                document.getElementById('issue-booking-selected').style.display = 'none';
+                document.getElementById('issue-booking-search').value = '';
+                document.getElementById('issue-booking-results').innerHTML = '';
+            }
+        }
+
+        // ── Booking search in Issue CN modal ───────────────────────────────────────
+        var cnIssueSearchTimer = null;
+
+        function cnIssueSearchBooking() {
+            clearTimeout(cnIssueSearchTimer);
+            var q = document.getElementById('issue-booking-search').value.trim();
+            var type = document.getElementById('issue-search-booking-type').value;
+            var box = document.getElementById('issue-booking-results');
+            if (q.length < 2) {
+                box.innerHTML = '';
                 return;
             }
-            data.data.forEach(function(b) {
-                var item = document.createElement('div');
-                item.className = 'cn-booking-result-item';
-                item.innerHTML = '<strong>' + (b.reference || '') + '</strong> — ' + (b.guest_name || '')
-                    + (b.guest_email ? '<br><small class="text-muted">' + b.guest_email + '</small>' : '');
-                item.addEventListener('click', function() {
-                    document.getElementById('issue-booking-id').value = b.id;
-                    document.getElementById('issue-booking-type-hidden').value = type;
-                    document.getElementById('issue-booking-ref').value = b.reference || '';
-                    var nameField  = document.querySelector('#issue-cn-form input[name="guest_name"]');
-                    var emailField = document.querySelector('#issue-cn-form input[name="guest_email"]');
-                    if (nameField  && !nameField.value)  nameField.value  = b.guest_name  || '';
-                    if (emailField && !emailField.value) emailField.value = b.guest_email || '';
-                    document.getElementById('issue-booking-search').value = (b.reference || '') + ' — ' + (b.guest_name || '');
-                    document.getElementById('issue-selected-booking-info').innerHTML =
-                        '<i class="fas fa-check-circle" style="color:var(--finance-success,#1f7a42)"></i> '
-                        + '<strong>' + (b.reference || '') + '</strong> &nbsp;|&nbsp; ' + (b.guest_name || '')
-                        + (b.guest_email ? ' <small class="text-muted">&nbsp;' + b.guest_email + '</small>' : '');
-                    document.getElementById('issue-booking-selected').style.display = 'block';
-                    box.innerHTML = '';
-                });
-                box.appendChild(item);
-            });
-        })
-        .catch(function() { box.innerHTML = ''; });
-    }, 350);
-}
+            cnIssueSearchTimer = setTimeout(function() {
+                fetch('api/credit-notes.php?action=search_booking&q=' + encodeURIComponent(q) + '&booking_type=' + encodeURIComponent(type), {
+                        headers: {
+                            'X-Requested-With': 'XMLHttpRequest'
+                        }
+                    })
+                    .then(function(r) {
+                        return r.json();
+                    })
+                    .then(function(data) {
+                        box.innerHTML = '';
+                        if (!data.success || !data.data.length) {
+                            box.innerHTML = '<div class="cn-booking-result-item cn-booking-result-item--empty">No matching bookings found</div>';
+                            return;
+                        }
+                        data.data.forEach(function(b) {
+                            var item = document.createElement('div');
+                            item.className = 'cn-booking-result-item';
+                            item.innerHTML = '<strong>' + (b.reference || '') + '</strong> — ' + (b.guest_name || '') +
+                                (b.guest_email ? '<br><small class="text-muted">' + b.guest_email + '</small>' : '');
+                            item.addEventListener('click', function() {
+                                document.getElementById('issue-booking-id').value = b.id;
+                                document.getElementById('issue-booking-type-hidden').value = type;
+                                document.getElementById('issue-booking-ref').value = b.reference || '';
+                                var nameField = document.querySelector('#issue-cn-form input[name="guest_name"]');
+                                var emailField = document.querySelector('#issue-cn-form input[name="guest_email"]');
+                                if (nameField && !nameField.value) nameField.value = b.guest_name || '';
+                                if (emailField && !emailField.value) emailField.value = b.guest_email || '';
+                                document.getElementById('issue-booking-search').value = (b.reference || '') + ' — ' + (b.guest_name || '');
+                                document.getElementById('issue-selected-booking-info').innerHTML =
+                                    '<i class="fas fa-check-circle" style="color:var(--finance-success,#1f7a42)"></i> ' +
+                                    '<strong>' + (b.reference || '') + '</strong> &nbsp;|&nbsp; ' + (b.guest_name || '') +
+                                    (b.guest_email ? ' <small class="text-muted">&nbsp;' + b.guest_email + '</small>' : '');
+                                document.getElementById('issue-booking-selected').style.display = 'block';
+                                box.innerHTML = '';
+                            });
+                            box.appendChild(item);
+                        });
+                    })
+                    .catch(function() {
+                        box.innerHTML = '';
+                    });
+            }, 350);
+        }
 
-// ── Submit-button spinner for modal forms ──────────────────────────────────
-document.addEventListener('DOMContentLoaded', function() {
-    [['issue-cn-form','#modal-issue-cn .modal__footer .btn--primary'],
-     ['apply-cn-form','#modal-apply-cn .modal__footer .btn--primary'],
-     ['void-cn-form', '#modal-void-cn .modal__footer .btn--danger']].forEach(function(pair) {
-        var form = document.getElementById(pair[0]);
-        if (!form) return;
-        form.addEventListener('submit', function() {
-            var btn = document.querySelector(pair[1]);
-            if (btn && !btn.disabled) {
-                btn._origLabel = btn.innerHTML;
-                btn.innerHTML  = '<i class="fas fa-spinner fa-spin"></i> Saving…';
-                btn.disabled   = true;
-            }
+        // ── Submit-button spinner for modal forms ──────────────────────────────────
+        document.addEventListener('DOMContentLoaded', function() {
+            [
+                ['issue-cn-form', '#modal-issue-cn .modal__footer .btn--primary'],
+                ['apply-cn-form', '#modal-apply-cn .modal__footer .btn--primary'],
+                ['void-cn-form', '#modal-void-cn .modal__footer .btn--danger']
+            ].forEach(function(pair) {
+                var form = document.getElementById(pair[0]);
+                if (!form) return;
+                form.addEventListener('submit', function() {
+                    var btn = document.querySelector(pair[1]);
+                    if (btn && !btn.disabled) {
+                        btn._origLabel = btn.innerHTML;
+                        btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Saving…';
+                        btn.disabled = true;
+                    }
+                });
+            });
         });
-    });
-});
-</script>
-<script src="js/admin-components.js"></script>
-<?php require_once 'includes/admin-footer.php'; ?>
+    </script>
+    <script src="js/admin-components.js"></script>
+    <?php require_once 'includes/admin-footer.php'; ?>

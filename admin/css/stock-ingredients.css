@@ -43,7 +43,7 @@
     opacity: 0.55;
 }
 
-.badge {
+.stock-ingredients-page .badge {
     display: inline-block;
     padding: 3px 10px;
     border-radius: 20px;
@@ -52,22 +52,22 @@
     letter-spacing: 0.4px;
 }
 
-.badge-ok {
+.stock-ingredients-page .badge-ok {
     background: #d4edda;
     color: #155724;
 }
 
-.badge-low {
+.stock-ingredients-page .badge-low {
     background: #fff3cd;
     color: #856404;
 }
 
-.badge-critical {
+.stock-ingredients-page .badge-critical {
     background: #f8d7da;
     color: #721c24;
 }
 
-.badge-archived {
+.stock-ingredients-page .badge-archived {
     background: #e9ecef;
     color: #495057;
 }
@@ -177,7 +177,7 @@
     margin-top: 18px;
 }
 
-.btn-primary {
+.stock-ingredients-page .btn-primary {
     background: var(--color-primary, #8A775F);
     color: #fff;
     border: none;
@@ -186,7 +186,7 @@
     cursor: pointer;
 }
 
-.btn-secondary {
+.stock-ingredients-page .btn-secondary {
     background: #e9ecef;
     color: #3f4654;
     border: none;

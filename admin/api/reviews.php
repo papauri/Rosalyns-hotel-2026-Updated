@@ -1,4 +1,5 @@
 <?php
+
 /**
  * Reviews API
  * Hotel Website - Admin API for managing guest reviews
@@ -25,19 +26,22 @@ header('Content-Type: application/json');
 
 // Include database configuration - FIXED PATH
 require_once __DIR__ . '/../../config/database.php';
+require_once __DIR__ . '/../includes/permissions.php';
 
 // Include cache configuration - FIXED PATH
 require_once __DIR__ . '/../../config/cache.php';
 
 // Helper function to send JSON response
-function sendResponse(mixed $data, int $statusCode = 200): never {
+function sendResponse(mixed $data, int $statusCode = 200): never
+{
     http_response_code($statusCode);
     echo json_encode($data);
     exit;
 }
 
 // Helper function to send error response
-function sendError(string $message, int $statusCode = 400, mixed $details = null): never {
+function sendError(string $message, int $statusCode = 400, mixed $details = null): never
+{
     $response = [
         'success' => false,
         'message' => $message
@@ -49,7 +53,8 @@ function sendError(string $message, int $statusCode = 400, mixed $details = null
 }
 
 // Helper function to validate review data
-function validateReviewData(array $data, bool $isUpdate = false): array {
+function validateReviewData(array $data, bool $isUpdate = false): array
+{
     $errors = [];
 
     // Required fields for new reviews
@@ -130,6 +135,10 @@ $method = $_SERVER['REQUEST_METHOD'];
 // Require admin authentication for all operations
 if (!isset($_SESSION['admin_user_id'])) {
     sendError('Authentication required', 401);
+}
+
+if (!hasPermission((int)$_SESSION['admin_user_id'], 'reviews')) {
+    sendError('Access denied', 403);
 }
 
 // Parse request body for PUT/POST requests
@@ -289,8 +298,18 @@ try {
             ";
             $stmt = $pdo->prepare($sql);
             $stmt->execute([
-                $booking_id, $room_id, $review_type, $guest_name, $guest_email, $rating, $title, $comment,
-                $service_rating, $cleanliness_rating, $location_rating, $value_rating
+                $booking_id,
+                $room_id,
+                $review_type,
+                $guest_name,
+                $guest_email,
+                $rating,
+                $title,
+                $comment,
+                $service_rating,
+                $cleanliness_rating,
+                $location_rating,
+                $value_rating
             ]);
 
             $review_id = $pdo->lastInsertId();
@@ -400,7 +419,6 @@ try {
             sendError('Method not allowed', 405);
             break;
     }
-
 } catch (PDOException $e) {
     error_log("Database error in reviews.php: " . $e->getMessage());
     sendError('Database error occurred', 500, $e->getMessage());

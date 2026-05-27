@@ -208,7 +208,7 @@ body>footer {
 }
 
 /* --- Touch target ergonomics for stations --------------------------- */
-@media (hover: none) and (pointer: coarse) {
+@media (hover: none) and (pointer: coarse) and (max-width: 1024px) {
 
     .admin-content button,
     .admin-content .btn,
@@ -220,8 +220,8 @@ body>footer {
     .filter button,
     .cat-btn,
     .menu-btn {
-        min-height: 44px;
-        min-width: 44px;
+        min-height: 40px;
+        min-width: 40px;
         touch-action: manipulation;
     }
 
@@ -235,7 +235,7 @@ body>footer {
     .admin-content textarea,
     .admin-content select {
         font-size: 16px;
-        min-height: 44px;
+        min-height: 40px;
     }
 
     /* Stop accidental long-press selection on POS/KDS chrome */

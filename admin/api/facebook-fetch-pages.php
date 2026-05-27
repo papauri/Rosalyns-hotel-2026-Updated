@@ -6,11 +6,13 @@
  * POST only — CSRF protected.
  */
 
-require_once '../admin-init.php';
+require_once __DIR__ . '/api-init.php';
 /** @var array $user */
 /** @var string $csrf_token */
 
 header('Content-Type: application/json');
+
+requireApiPermission('facebook_settings');
 
 if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
     http_response_code(405);

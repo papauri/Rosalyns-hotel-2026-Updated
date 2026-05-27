@@ -84,7 +84,9 @@ function sendReportEmail(array $recipients, string $subject, string $htmlBody, a
         $mail->Encoding = PHPMailer::ENCODING_BASE64;
         $mail->isHTML(true);
         $mail->Subject  = $subject;
-        $mail->Body     = function_exists('wrapEmailTemplate') ? wrapEmailTemplate($htmlBody, $subject) : $htmlBody;
+        $mail->Body     = function_exists('hotel_embed_logo_cid')
+            ? hotel_embed_logo_cid($mail, function_exists('wrapEmailTemplate') ? wrapEmailTemplate($htmlBody, $subject) : $htmlBody)
+            : (function_exists('wrapEmailTemplate') ? wrapEmailTemplate($htmlBody, $subject) : $htmlBody);
         $mail->AltBody  = $textBody !== '' ? $textBody : strip_tags($htmlBody);
 
         foreach ($attachments as $att) {

@@ -316,19 +316,19 @@ if (!function_exists('receipt_generate_pdf')) {
         $receiptBankAccountNumber = trim((string)getSetting('bank_account_number', ''));
         $receiptBankBranch = trim((string)getSetting('bank_branch', ''));
         if ($receiptBankName !== '') {
-            $receiptBankRows[] = '<tr><td style="padding:1px 0;font-size:6px;color:#1E2430;"><span style="color:#7C6E5B;font-weight:700;">Bank:</span> ' . htmlspecialchars($receiptBankName, ENT_QUOTES, 'UTF-8') . '</td></tr>';
+            $receiptBankRows[] = '<tr><td style="padding:3px 0;font-size:10px;line-height:1.45;color:#1E2430;"><span style="color:#7C6E5B;font-weight:700;">Bank:</span> ' . htmlspecialchars($receiptBankName, ENT_QUOTES, 'UTF-8') . '</td></tr>';
         }
         if ($receiptBankAccountName !== '') {
-            $receiptBankRows[] = '<tr><td style="padding:1px 0;font-size:6px;color:#1E2430;"><span style="color:#7C6E5B;font-weight:700;">Account Name:</span> ' . htmlspecialchars($receiptBankAccountName, ENT_QUOTES, 'UTF-8') . '</td></tr>';
+            $receiptBankRows[] = '<tr><td style="padding:3px 0;font-size:10px;line-height:1.45;color:#1E2430;"><span style="color:#7C6E5B;font-weight:700;">Account Name:</span> ' . htmlspecialchars($receiptBankAccountName, ENT_QUOTES, 'UTF-8') . '</td></tr>';
         }
         if ($receiptBankAccountNumber !== '') {
-            $receiptBankRows[] = '<tr><td style="padding:1px 0;font-size:6px;color:#1E2430;"><span style="color:#7C6E5B;font-weight:700;">Account No.:</span> ' . htmlspecialchars($receiptBankAccountNumber, ENT_QUOTES, 'UTF-8') . '</td></tr>';
+            $receiptBankRows[] = '<tr><td style="padding:3px 0;font-size:10px;line-height:1.45;color:#1E2430;"><span style="color:#7C6E5B;font-weight:700;">Account No.:</span> ' . htmlspecialchars($receiptBankAccountNumber, ENT_QUOTES, 'UTF-8') . '</td></tr>';
         }
         if ($receiptBankBranch !== '') {
-            $receiptBankRows[] = '<tr><td style="padding:1px 0;font-size:6px;color:#1E2430;"><span style="color:#7C6E5B;font-weight:700;">Branch:</span> ' . htmlspecialchars($receiptBankBranch, ENT_QUOTES, 'UTF-8') . '</td></tr>';
+            $receiptBankRows[] = '<tr><td style="padding:3px 0;font-size:10px;line-height:1.45;color:#1E2430;"><span style="color:#7C6E5B;font-weight:700;">Branch:</span> ' . htmlspecialchars($receiptBankBranch, ENT_QUOTES, 'UTF-8') . '</td></tr>';
         }
         $receiptBankDetailsHtml = $receiptBankRows !== []
-            ? '<div style="background:#FCFAF7;padding:7px 10px;border-top:2px solid #D5B37C;"><p style="margin:0 0 4px;font-size:6px;letter-spacing:1px;text-transform:uppercase;color:#20303E;font-weight:700;">Bank Details</p><table style="width:100%;border-collapse:collapse;" cellpadding="0" cellspacing="0">' . implode('', $receiptBankRows) . '</table></div>'
+            ? '<div style="background:#FCFAF7;padding:7px 10px;border-top:2px solid #D5B37C;"><p style="margin:0 0 6px;font-size:10px;letter-spacing:1px;text-transform:uppercase;color:#20303E;font-weight:700;">Bank Details</p><table style="width:100%;border-collapse:collapse;" cellpadding="0" cellspacing="0">' . implode('', $receiptBankRows) . '</table></div>'
             : '';
         $receiptTermsText = trim((string)getSetting('receipt_terms', getSetting('payment_terms', '')));
         $receiptTermsHtml = $receiptTermsText !== ''
@@ -336,8 +336,8 @@ if (!function_exists('receipt_generate_pdf')) {
             : '';
 
         $templateVars = [
-            'logo_html' => (function_exists('hotel_email_logo_url') && hotel_email_logo_url() !== '')
-                ? '<img src="' . htmlspecialchars(hotel_email_logo_url(), ENT_QUOTES, 'UTF-8') . '" alt="' . htmlspecialchars($siteName, ENT_QUOTES, 'UTF-8') . '" height="88" style="height:88px;width:auto;display:block;margin:0 auto;">'
+            'logo_html' => (function_exists('hotel_invoice_logo_src') && hotel_invoice_logo_src() !== '')
+                ? '<img src="' . htmlspecialchars(hotel_invoice_logo_src(), ENT_QUOTES, 'UTF-8') . '" alt="' . htmlspecialchars($siteName, ENT_QUOTES, 'UTF-8') . '" height="88" style="height:88px;width:auto;display:block;margin:0 auto;">'
                 : '',
             'site_name' => htmlspecialchars($siteName, ENT_QUOTES, 'UTF-8'),
             'address' => htmlspecialchars($address, ENT_QUOTES, 'UTF-8'),
@@ -465,9 +465,35 @@ if (!function_exists('receipt_send_email')) {
                 $mail->addCC($cc);
             }
         }
+        // Build full receipt document HTML and append to email body
+        $receiptDocHtml = '';
+        if (function_exists('renderBookingDocumentTemplate') && function_exists('hotel_default_receipt_document_html')) {
+            try {
+                $docVars = [];
+                foreach ($placeholders as $k => $v) {
+                    $docVars[trim((string)$k, '{}')] = (string)$v;
+                }
+                $receiptDocHtml = renderBookingDocumentTemplate('payment_receipt_document', $docVars, hotel_default_receipt_document_html());
+            } catch (Throwable $e) {
+                error_log('receipt_send_email: failed to build receipt doc HTML: ' . $e->getMessage());
+            }
+        }
+        if ($receiptDocHtml !== '') {
+            $docSection = '<div style="background:#d5cfc4;padding:24px 20px 0;">'
+                . '<div style="max-width:720px;margin:0 auto;">'
+                . '<p style="font-family:Helvetica,Arial,sans-serif;font-size:10px;letter-spacing:2px;text-transform:uppercase;color:#9b8f7e;margin:0 0 12px;text-align:center;">Full Receipt</p>'
+                . $receiptDocHtml
+                . '</div></div>';
+            if (stripos($body, '</body>') !== false) {
+                $body = (string)preg_replace('/<\/body>/i', $docSection . '</body>', $body, 1);
+            } else {
+                $body .= $docSection;
+            }
+        }
+
         $mail->isHTML(true);
         $mail->Subject = html_entity_decode($subject, ENT_QUOTES, 'UTF-8');
-        $mail->Body = $body;
+        $mail->Body = hotel_embed_logo_cid($mail, $body);
         $mail->AltBody = $textBody !== ''
             ? html_entity_decode($textBody, ENT_QUOTES, 'UTF-8')
             : strip_tags(str_replace(['<br>', '<br/>', '<br />'], "\n", $body));

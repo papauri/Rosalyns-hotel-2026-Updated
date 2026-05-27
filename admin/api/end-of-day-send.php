@@ -20,6 +20,8 @@ header('Content-Type: application/json');
 /** @var PDO $pdo */
 /** @var array $user */
 
+requireApiPermission('reports');
+
 if (($_SERVER['REQUEST_METHOD'] ?? '') !== 'POST') {
     echo json_encode(['success' => false, 'error' => 'POST required']);
     exit;

@@ -20,8 +20,24 @@ $thisYear = date('Y');
 
 // Get date filters - support "all" for no date filtering
 $showAll = isset($_GET['show_all']) && $_GET['show_all'] === '1';
-$startDate = isset($_GET['start_date']) ? $_GET['start_date'] : ($showAll ? '2000-01-01' : date('Y-m-01'));
-$endDate = isset($_GET['end_date']) ? $_GET['end_date'] : ($showAll ? '2099-12-31' : date('Y-m-t'));
+$startDateInput = isset($_GET['start_date']) ? trim((string)$_GET['start_date']) : '';
+$endDateInput = isset($_GET['end_date']) ? trim((string)$_GET['end_date']) : '';
+
+// Validate and sanitize date inputs
+$startDate = $showAll ? '2000-01-01' : date('Y-m-01');
+$endDate = $showAll ? '2099-12-31' : date('Y-m-t');
+
+if (!$showAll && $startDateInput !== '' && preg_match('/^\d{4}-\d{2}-\d{2}$/', $startDateInput) && strtotime($startDateInput)) {
+    $startDate = $startDateInput;
+}
+if (!$showAll && $endDateInput !== '' && preg_match('/^\d{4}-\d{2}-\d{2}$/', $endDateInput) && strtotime($endDateInput)) {
+    $endDate = $endDateInput;
+}
+
+// Ensure end date is not before start date
+if (strtotime($endDate) < strtotime($startDate)) {
+    $endDate = $startDate;
+}
 
 $financialSummary = [
     'total_payments' => 0,
@@ -390,6 +406,11 @@ try {
     // Non-fatal — quotations table may not exist yet
 }
 
+$quotationExpiredDeclinedCount = (int)$quotationStats['expired'] + (int)$quotationStats['declined'];
+$quotationConversionRate = (int)$quotationStats['total'] > 0
+    ? (int)round(((int)$quotationStats['accepted'] / (int)$quotationStats['total']) * 100)
+    : 0;
+
 // ── Credit Note stats ─────────────────────────────────────────────────────────
 $cnStats = ['count_issued' => 0, 'total_issued' => 0.0, 'total_redeemed' => 0.0, 'total_outstanding' => 0.0];
 try {
@@ -450,7 +471,7 @@ if (!isset($dailyTrend)) {
 
     <?php require_once 'includes/admin-header.php'; ?>
 
-    <div class="content">
+    <div class="content finance-page">
         <?php
         // -----------------------------------------------------------------
         // Pre-computed values used in the redesigned layout.
@@ -477,6 +498,19 @@ if (!isset($dailyTrend)) {
             $cashStmt->execute();
             $cat_cash_today = (float)$cashStmt->fetchColumn();
         } catch (Throwable $e) { /* ignore */
+        }
+
+        $cat_cash_period = 0.0;
+        $cat_mobile_period = 0.0;
+        foreach ($paymentMethods as $methodRow) {
+            $methodKey = strtolower((string)($methodRow['payment_method'] ?? ''));
+            $methodTotal = (float)($methodRow['total'] ?? 0);
+            if ($methodKey === 'cash') {
+                $cat_cash_period += $methodTotal;
+            }
+            if ($methodKey === 'mobile_money') {
+                $cat_mobile_period += $methodTotal;
+            }
         }
 
         $cat_voids_value = 0;
@@ -701,37 +735,41 @@ if (!isset($dailyTrend)) {
 
         <!-- KPI strip — 4 headline numbers only (no card overload) -->
         <div class="acct-kpis">
-            <div class="acct-kpi acct-kpi--revenue" title="Net Revenue — total money collected after deducting refunds. This is what the business actually kept.">
+            <div class="acct-kpi acct-kpi--revenue acct-kpi--interactive js-acct-insight-trigger" title="Net Revenue — total money collected after deducting refunds. This is what the business actually kept." role="button" tabindex="0" data-insight-key="net-revenue" data-insight-title="Net Revenue Breakdown" aria-label="Open net revenue breakdown">
                 <div class="acct-kpi__label">Net Revenue</div>
                 <div class="acct-kpi__value"><?php echo '<span class="acct-kpi__currency">' . $currency_symbol . '</span>' . number_format($cat_revenue_net, 2); ?></div>
                 <div class="acct-kpi__meta">
                     <span>Gross <?php echo $currency_symbol . number_format($cat_revenue_gross, 2); ?></span>
                     <span>Refunds &minus;<?php echo $currency_symbol . number_format($cat_refunds, 2); ?></span>
                 </div>
+                <div class="acct-kpi__hint"><i class="fas fa-table-list"></i> Open detail</div>
             </div>
-            <div class="acct-kpi acct-kpi--receivables" title="Receivables — money that guests/clients owe but have not yet paid. These are open invoices or partial bookings that still need collection.">
+            <div class="acct-kpi acct-kpi--receivables acct-kpi--interactive js-acct-insight-trigger" title="Receivables — money that guests/clients owe but have not yet paid. These are open invoices or partial bookings that still need collection." role="button" tabindex="0" data-insight-key="receivables" data-insight-title="Receivables Follow-up" aria-label="Open receivables follow-up">
                 <div class="acct-kpi__label">Receivables</div>
                 <div class="acct-kpi__value"><?php echo '<span class="acct-kpi__currency">' . $currency_symbol . '</span>' . number_format($cat_recv_total, 2); ?></div>
                 <div class="acct-kpi__meta">
                     <span><?php echo (int)$cat_recv_count; ?> open invoices</span>
                     <span>Pending <?php echo $currency_symbol . number_format($cat_pending, 2); ?></span>
                 </div>
+                <div class="acct-kpi__hint"><i class="fas fa-table-list"></i> Open detail</div>
             </div>
-            <div class="acct-kpi acct-kpi--cash" title="Cash Position (Today) — the total of all cash and mobile money payments received today. Does not include card, bank transfer, or credit.">
+            <div class="acct-kpi acct-kpi--cash acct-kpi--interactive js-acct-insight-trigger" title="Cash Position (Today) — the total of all cash and mobile money payments received today. Does not include card, bank transfer, or credit." role="button" tabindex="0" data-insight-key="cash-today" data-insight-title="Cash Position Detail" aria-label="Open cash position detail">
                 <div class="acct-kpi__label">Cash Position (Today)</div>
                 <div class="acct-kpi__value"><?php echo '<span class="acct-kpi__currency">' . $currency_symbol . '</span>' . number_format($cat_cash_today, 2); ?></div>
                 <div class="acct-kpi__meta">
                     <span>Cash + Mobile Money</span>
                     <a href="payments.php?date=<?php echo $today; ?>">Today's payments &rarr;</a>
                 </div>
+                <div class="acct-kpi__hint"><i class="fas fa-table-list"></i> Open detail</div>
             </div>
-            <div class="acct-kpi acct-kpi--vat" title="VAT Collected — Value Added Tax (VAT) is the tax portion collected on top of the sale price. This amount must be reported and paid to the tax authority (MRA). It is not the hotel&#39;s income.">
+            <div class="acct-kpi acct-kpi--vat acct-kpi--interactive js-acct-insight-trigger" title="VAT Collected — Value Added Tax (VAT) is the tax portion collected on top of the sale price. This amount must be reported and paid to the tax authority (MRA). It is not the hotel&#39;s income." role="button" tabindex="0" data-insight-key="vat-collected" data-insight-title="VAT Compliance Snapshot" aria-label="Open VAT compliance snapshot">
                 <div class="acct-kpi__label">VAT Collected</div>
                 <div class="acct-kpi__value"><?php echo '<span class="acct-kpi__currency">' . $currency_symbol . '</span>' . number_format($cat_vat, 2); ?></div>
                 <div class="acct-kpi__meta">
                     <span><?php echo $vatEnabled ? 'Enabled @ ' . htmlspecialchars($vatRate) . '%' : 'Disabled'; ?></span>
                     <?php if ($vatEnabled && $vatNumber): ?><span>VAT&nbsp;# <?php echo htmlspecialchars($vatNumber); ?></span><?php endif; ?>
                 </div>
+                <div class="acct-kpi__hint"><i class="fas fa-table-list"></i> Open detail</div>
             </div>
         </div>
 
@@ -745,31 +783,33 @@ if (!isset($dailyTrend)) {
                 </a>
             </header>
             <div style="display:flex;flex-wrap:wrap;gap:14px;padding:0 0 20px;">
-                <div class="acct-kpi" style="flex:1;min-width:120px;" title="Total quotations issued in this period">
+                <div class="acct-kpi acct-kpi--interactive js-acct-insight-trigger" style="flex:1;min-width:120px;" title="Total quotations issued in this period" role="button" tabindex="0" data-insight-key="quotation-total" data-insight-title="Quotation Volume Overview" aria-label="Open quotation volume overview">
                     <div class="acct-kpi__label">Total Issued</div>
                     <div class="acct-kpi__value" style="font-size:1.4rem;"><?php echo (int)$quotationStats['total']; ?></div>
                     <div class="acct-kpi__meta"><span><?php echo $currency_symbol . ' ' . number_format((float)$quotationStats['total_value'], 2); ?> quoted</span></div>
+                    <div class="acct-kpi__hint"><i class="fas fa-table-list"></i> Open detail</div>
                 </div>
-                <div class="acct-kpi" style="flex:1;min-width:120px;" title="Quotations sent and awaiting response">
+                <div class="acct-kpi acct-kpi--receivables acct-kpi--interactive js-acct-insight-trigger" style="flex:1;min-width:120px;" title="Quotations sent and awaiting response" role="button" tabindex="0" data-insight-key="quotation-sent" data-insight-title="Open Quotations Follow-up" aria-label="Open sent quotations follow-up">
                     <div class="acct-kpi__label">Active / Sent</div>
                     <div class="acct-kpi__value" style="font-size:1.4rem;color:#2F4F78;"><?php echo (int)$quotationStats['sent']; ?></div>
                     <div class="acct-kpi__meta"><span><?php echo $currency_symbol . ' ' . number_format((float)$quotationStats['sent_value'], 2); ?> outstanding</span></div>
+                    <div class="acct-kpi__hint"><i class="fas fa-table-list"></i> Open detail</div>
                 </div>
-                <div class="acct-kpi" style="flex:1;min-width:120px;" title="Quotations accepted by the guest — indicates conversion">
+                <div class="acct-kpi acct-kpi--cash acct-kpi--interactive js-acct-insight-trigger" style="flex:1;min-width:120px;" title="Quotations accepted by the guest — indicates conversion" role="button" tabindex="0" data-insight-key="quotation-accepted" data-insight-title="Accepted Quotations Performance" aria-label="Open accepted quotations performance">
                     <div class="acct-kpi__label">Accepted</div>
                     <div class="acct-kpi__value" style="font-size:1.4rem;color:#155724;"><?php echo (int)$quotationStats['accepted']; ?></div>
                     <div class="acct-kpi__meta"><span><?php echo $currency_symbol . ' ' . number_format((float)$quotationStats['accepted_value'], 2); ?></span></div>
+                    <div class="acct-kpi__hint"><i class="fas fa-table-list"></i> Open detail</div>
                 </div>
-                <div class="acct-kpi" style="flex:1;min-width:120px;" title="Quotations that passed their validity date without a response">
+                <div class="acct-kpi acct-kpi--vat acct-kpi--interactive js-acct-insight-trigger" style="flex:1;min-width:120px;" title="Quotations that passed their validity date without a response" role="button" tabindex="0" data-insight-key="quotation-expired-declined" data-insight-title="Expired &amp; Declined Quotations" aria-label="Open expired and declined quotations detail">
                     <div class="acct-kpi__label">Expired / Declined</div>
-                    <div class="acct-kpi__value" style="font-size:1.4rem;color:#888;"><?php echo (int)$quotationStats['expired'] + (int)$quotationStats['declined']; ?></div>
+                    <div class="acct-kpi__value" style="font-size:1.4rem;color:#888;"><?php echo $quotationExpiredDeclinedCount; ?></div>
                     <div class="acct-kpi__meta">
-                        <?php if ((int)$quotationStats['total'] > 0):
-                            $convRate = round(((int)$quotationStats['accepted'] / (int)$quotationStats['total']) * 100);
-                        ?>
-                            <span>Conversion <?php echo $convRate; ?>%</span>
+                        <?php if ((int)$quotationStats['total'] > 0): ?>
+                            <span>Conversion <?php echo $quotationConversionRate; ?>%</span>
                         <?php else: ?><span>No data</span><?php endif; ?>
                     </div>
+                    <div class="acct-kpi__hint"><i class="fas fa-table-list"></i> Open detail</div>
                 </div>
             </div>
         </section>
@@ -784,20 +824,23 @@ if (!isset($dailyTrend)) {
                 </a>
             </header>
             <div style="display:flex;flex-wrap:wrap;gap:14px;padding:0 0 20px;">
-                <div class="acct-kpi" style="flex:1;min-width:140px;" title="Total number and face value of credit notes issued in this period">
+                <div class="acct-kpi acct-kpi--interactive js-acct-insight-trigger" style="flex:1;min-width:140px;" title="Total number and face value of credit notes issued in this period" role="button" tabindex="0" data-insight-key="cn-issued" data-insight-title="Credit Notes Issued" aria-label="Open credit notes issued details">
                     <div class="acct-kpi__label">CN Issued</div>
                     <div class="acct-kpi__value" style="font-size:1.4rem;"><?php echo (int)$cnStats['count_issued']; ?></div>
                     <div class="acct-kpi__meta"><span><?php echo '<span class="acct-kpi__currency">' . $currency_symbol . '</span>' . number_format((float)$cnStats['total_issued'], 2); ?> face value</span></div>
+                    <div class="acct-kpi__hint"><i class="fas fa-table-list"></i> Open detail</div>
                 </div>
-                <div class="acct-kpi acct-kpi--cash" style="flex:1;min-width:140px;" title="Total value of credit notes redeemed against bookings">
+                <div class="acct-kpi acct-kpi--cash acct-kpi--interactive js-acct-insight-trigger" style="flex:1;min-width:140px;" title="Total value of credit notes redeemed against bookings" role="button" tabindex="0" data-insight-key="cn-redeemed" data-insight-title="Credit Notes Redeemed" aria-label="Open credit notes redeemed details">
                     <div class="acct-kpi__label">CN Redeemed</div>
                     <div class="acct-kpi__value"><?php echo '<span class="acct-kpi__currency">' . $currency_symbol . '</span>' . number_format((float)$cnStats['total_redeemed'], 2); ?></div>
                     <div class="acct-kpi__meta"><span>Applied to bookings</span></div>
+                    <div class="acct-kpi__hint"><i class="fas fa-table-list"></i> Open detail</div>
                 </div>
-                <div class="acct-kpi acct-kpi--receivables" style="flex:1;min-width:140px;" title="Outstanding credit note liability — the value guests can still redeem">
+                <div class="acct-kpi acct-kpi--receivables acct-kpi--interactive js-acct-insight-trigger" style="flex:1;min-width:140px;" title="Outstanding credit note liability — the value guests can still redeem" role="button" tabindex="0" data-insight-key="cn-outstanding" data-insight-title="Credit Notes Outstanding Liability" aria-label="Open credit notes outstanding liability details">
                     <div class="acct-kpi__label">CN Outstanding</div>
                     <div class="acct-kpi__value"><?php echo '<span class="acct-kpi__currency">' . $currency_symbol . '</span>' . number_format((float)$cnStats['total_outstanding'], 2); ?></div>
                     <div class="acct-kpi__meta"><span>Unredeemed liability</span></div>
+                    <div class="acct-kpi__hint"><i class="fas fa-table-list"></i> Open detail</div>
                 </div>
             </div>
         </section>
@@ -814,22 +857,72 @@ if (!isset($dailyTrend)) {
                             <th>Check</th>
                             <th class="num">Count</th>
                             <th>Status</th>
+                            <th>Action</th>
                         </tr>
                     </thead>
                     <tbody>
                         <?php
+                        $periodPaymentsLink = 'payments.php?start_date=' . urlencode($startDate) . '&end_date=' . urlencode($endDate);
                         $complianceRows = [
-                            ['label' => 'Completed sales', 'count' => (int)($complianceSummary['completed_sales'] ?? 0), 'warn' => false],
-                            ['label' => 'Completed sales missing receipt number', 'count' => (int)($complianceSummary['missing_receipts'] ?? 0), 'warn' => true],
-                            ['label' => 'Generated invoices missing invoice number', 'count' => (int)($complianceSummary['generated_invoices_missing_numbers'] ?? 0), 'warn' => true],
-                            ['label' => 'Paid POS orders missing payments ledger row', 'count' => (int)($complianceSummary['paid_pos_without_ledger'] ?? 0), 'warn' => true],
-                            ['label' => $mraColumnsAvailable ? 'MRA pending/unsubmitted sales' : 'MRA readiness fields not installed', 'count' => $mraColumnsAvailable ? (int)($complianceSummary['mra_pending_or_unsubmitted'] ?? 0) : 1, 'warn' => true],
+                            [
+                                'key' => 'compliance-completed-sales',
+                                'insight_title' => 'Completed Sales Coverage',
+                                'label' => 'Completed sales',
+                                'count' => (int)($complianceSummary['completed_sales'] ?? 0),
+                                'warn' => false,
+                                'action_link' => $periodPaymentsLink . '&payment_status=completed',
+                                'action_label' => 'Open payments ledger',
+                            ],
+                            [
+                                'key' => 'compliance-missing-receipts',
+                                'insight_title' => 'Receipt Number Compliance',
+                                'label' => 'Completed sales missing receipt number',
+                                'count' => (int)($complianceSummary['missing_receipts'] ?? 0),
+                                'warn' => true,
+                                'action_link' => $periodPaymentsLink,
+                                'action_label' => 'Review affected payments',
+                            ],
+                            [
+                                'key' => 'compliance-missing-invoice-numbers',
+                                'insight_title' => 'Invoice Number Integrity',
+                                'label' => 'Generated invoices missing invoice number',
+                                'count' => (int)($complianceSummary['generated_invoices_missing_numbers'] ?? 0),
+                                'warn' => true,
+                                'action_link' => 'invoices.php',
+                                'action_label' => 'Open invoices workspace',
+                            ],
+                            [
+                                'key' => 'compliance-pos-ledger-gap',
+                                'insight_title' => 'POS to Payments Ledger Gap',
+                                'label' => 'Paid POS orders missing payments ledger row',
+                                'count' => (int)($complianceSummary['paid_pos_without_ledger'] ?? 0),
+                                'warn' => true,
+                                'action_link' => 'stock-orders.php',
+                                'action_label' => 'Open POS orders',
+                            ],
+                            [
+                                'key' => 'compliance-mra-pending',
+                                'insight_title' => $mraColumnsAvailable ? 'MRA Submission Readiness' : 'MRA Fields Installation Check',
+                                'label' => $mraColumnsAvailable ? 'MRA pending/unsubmitted sales' : 'MRA readiness fields not installed',
+                                'count' => $mraColumnsAvailable ? (int)($complianceSummary['mra_pending_or_unsubmitted'] ?? 0) : 1,
+                                'warn' => true,
+                                'action_link' => $mraColumnsAvailable ? ('reports.php?start_date=' . urlencode($startDate) . '&end_date=' . urlencode($endDate)) : 'booking-settings.php#invoice-settings',
+                                'action_label' => $mraColumnsAvailable ? 'Open MRA-focused reports' : 'Open settings & install fields',
+                            ],
                         ];
                         foreach ($complianceRows as $row):
                             $hasGap = $row['warn'] && (int)$row['count'] > 0;
                         ?>
                             <tr>
-                                <td><?php echo htmlspecialchars($row['label']); ?></td>
+                                <td>
+                                    <button
+                                        type="button"
+                                        class="acct-link acct-link--button js-acct-insight-trigger"
+                                        data-insight-key="<?php echo htmlspecialchars($row['key']); ?>"
+                                        data-insight-title="<?php echo htmlspecialchars($row['insight_title']); ?>">
+                                        <?php echo htmlspecialchars($row['label']); ?>
+                                    </button>
+                                </td>
                                 <td class="num"><strong><?php echo number_format((int)$row['count']); ?></strong></td>
                                 <td>
                                     <?php if ($hasGap): ?>
@@ -838,12 +931,560 @@ if (!isset($dailyTrend)) {
                                         <span class="acct-pill acct-pill--paid">Clear</span>
                                     <?php endif; ?>
                                 </td>
+                                <td>
+                                    <a href="<?php echo htmlspecialchars($row['action_link']); ?>" class="acct-link">
+                                        <?php echo htmlspecialchars($row['action_label']); ?> &rarr;
+                                    </a>
+                                </td>
                             </tr>
                         <?php endforeach; ?>
                     </tbody>
                 </table>
             </div>
         </section>
+
+        <div class="modal-overlay" id="acctInsightModal-overlay" data-modal-overlay aria-hidden="true"></div>
+        <div
+            class="modal-overlay modal-lg acct-insight-modal"
+            id="acctInsightModal"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="acctInsightTitle"
+            data-modal
+            data-close-on-escape="true"
+            data-close-on-overlay="true">
+            <div class="modal-container acct-insight-modal__container">
+                <div class="modal-header acct-insight-modal__header">
+                    <h3 class="modal-title" id="acctInsightTitle">Accounting Insight</h3>
+                    <button type="button" class="modal-close" data-modal-close aria-label="Close insight modal">
+                        <i class="fas fa-times"></i>
+                    </button>
+                </div>
+                <div class="modal-body acct-insight-modal__body" id="acctInsightBody"></div>
+                <div class="modal-footer acct-insight-modal__footer">
+                    <button type="button" class="acct-btn acct-btn--ghost" data-modal-close>Close</button>
+                </div>
+            </div>
+        </div>
+
+        <template id="acct-insight-template-net-revenue">
+            <p class="acct-insight-intro">Net revenue is gross collection minus refunds. It shows the money the business actually retained.</p>
+            <table class="acct-insight-table">
+                <thead>
+                    <tr>
+                        <th>Metric</th>
+                        <th class="num">Value</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td>Gross collected</td>
+                        <td class="num"><strong><?php echo $currency_symbol . number_format($cat_revenue_gross, 2); ?></strong></td>
+                    </tr>
+                    <tr>
+                        <td>Refunds issued</td>
+                        <td class="num">&minus;<?php echo $currency_symbol . number_format($cat_refunds, 2); ?></td>
+                    </tr>
+                    <tr>
+                        <td>Net retained revenue</td>
+                        <td class="num"><strong><?php echo $currency_symbol . number_format($cat_revenue_net, 2); ?></strong></td>
+                    </tr>
+                    <tr>
+                        <td>VAT collected in period</td>
+                        <td class="num"><?php echo $currency_symbol . number_format($cat_vat, 2); ?></td>
+                    </tr>
+                </tbody>
+            </table>
+            <div class="acct-insight-actions">
+                <a href="reports.php?start_date=<?php echo urlencode($startDate); ?>&end_date=<?php echo urlencode($endDate); ?>" class="acct-btn acct-btn--primary">Open financial reports</a>
+                <a href="payments.php?start_date=<?php echo urlencode($startDate); ?>&end_date=<?php echo urlencode($endDate); ?>" class="acct-btn acct-btn--ghost">Open payment ledger</a>
+            </div>
+        </template>
+
+        <template id="acct-insight-template-receivables">
+            <p class="acct-insight-intro">Receivables are outstanding balances still owed by guests or clients and should guide collection priorities.</p>
+            <table class="acct-insight-table">
+                <thead>
+                    <tr>
+                        <th>Follow-up Metric</th>
+                        <th class="num">Value</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td>Total receivables</td>
+                        <td class="num"><strong><?php echo $currency_symbol . number_format($cat_recv_total, 2); ?></strong></td>
+                    </tr>
+                    <tr>
+                        <td>Open invoices / balances</td>
+                        <td class="num"><?php echo number_format((int)$cat_recv_count); ?></td>
+                    </tr>
+                    <tr>
+                        <td>Pending (payments table)</td>
+                        <td class="num"><?php echo $currency_symbol . number_format($cat_pending, 2); ?></td>
+                    </tr>
+                    <tr>
+                        <td>Room balances outstanding</td>
+                        <td class="num"><?php echo $currency_symbol . number_format((float)($roomSummary['total_room_outstanding'] ?? 0), 2); ?></td>
+                    </tr>
+                    <tr>
+                        <td>Conference balances outstanding</td>
+                        <td class="num"><?php echo $currency_symbol . number_format((float)($confSummary['total_conf_outstanding'] ?? 0), 2); ?></td>
+                    </tr>
+                </tbody>
+            </table>
+            <div class="acct-insight-note">Direction: start with oldest/highest balances, then update payment records so receivables age and risk are always visible.</div>
+            <div class="acct-insight-actions">
+                <a href="invoices.php" class="acct-btn acct-btn--primary">Open invoices</a>
+                <a href="payments.php?start_date=<?php echo urlencode($startDate); ?>&end_date=<?php echo urlencode($endDate); ?>" class="acct-btn acct-btn--ghost">Open payments</a>
+            </div>
+        </template>
+
+        <template id="acct-insight-template-cash-today">
+            <p class="acct-insight-intro">Cash position combines cash and mobile money entries and helps finance teams reconcile tills and settlement channels.</p>
+            <table class="acct-insight-table">
+                <thead>
+                    <tr>
+                        <th>Cash Snapshot</th>
+                        <th class="num">Value</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td>Cash + Mobile Money (today)</td>
+                        <td class="num"><strong><?php echo $currency_symbol . number_format($cat_cash_today, 2); ?></strong></td>
+                    </tr>
+                    <tr>
+                        <td>Cash in selected period</td>
+                        <td class="num"><?php echo $currency_symbol . number_format($cat_cash_period, 2); ?></td>
+                    </tr>
+                    <tr>
+                        <td>Mobile money in selected period</td>
+                        <td class="num"><?php echo $currency_symbol . number_format($cat_mobile_period, 2); ?></td>
+                    </tr>
+                    <tr>
+                        <td>Pending refunds (to settle)</td>
+                        <td class="num"><?php echo $currency_symbol . number_format($cat_pending_refunds, 2); ?></td>
+                    </tr>
+                </tbody>
+            </table>
+            <div class="acct-insight-actions">
+                <a href="payments.php?date=<?php echo urlencode($today); ?>" class="acct-btn acct-btn--primary">Open today's payments</a>
+                <a href="pos-accounting.php" class="acct-btn acct-btn--ghost">Open POS accounting</a>
+            </div>
+        </template>
+
+        <template id="acct-insight-template-vat-collected">
+            <p class="acct-insight-intro">VAT collected is tax held on behalf of MRA. Keep these figures aligned with configuration and submission status.</p>
+            <table class="acct-insight-table">
+                <thead>
+                    <tr>
+                        <th>VAT Control Point</th>
+                        <th class="num">Value</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td>VAT status</td>
+                        <td class="num"><?php echo $vatEnabled ? 'Enabled' : 'Disabled'; ?></td>
+                    </tr>
+                    <tr>
+                        <td>Configured VAT rate</td>
+                        <td class="num"><?php echo htmlspecialchars((string)$vatRate); ?>%</td>
+                    </tr>
+                    <tr>
+                        <td>VAT registration number</td>
+                        <td class="num"><?php echo $vatNumber !== '' ? htmlspecialchars((string)$vatNumber) : 'Not set'; ?></td>
+                    </tr>
+                    <tr>
+                        <td>VAT collected in selected period</td>
+                        <td class="num"><strong><?php echo $currency_symbol . number_format($cat_vat, 2); ?></strong></td>
+                    </tr>
+                </tbody>
+            </table>
+            <div class="acct-insight-actions">
+                <a href="#vat-settings" class="acct-btn acct-btn--primary">Open VAT settings</a>
+                <a href="reports.php?start_date=<?php echo urlencode($startDate); ?>&end_date=<?php echo urlencode($endDate); ?>" class="acct-btn acct-btn--ghost">Open reporting</a>
+            </div>
+        </template>
+
+        <template id="acct-insight-template-quotation-total">
+            <p class="acct-insight-intro">This is the full quotation volume created during the selected period and acts as the pipeline baseline.</p>
+            <table class="acct-insight-table">
+                <thead>
+                    <tr>
+                        <th>Quotation Volume Metric</th>
+                        <th class="num">Value</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td>Total quotations issued</td>
+                        <td class="num"><strong><?php echo number_format((int)$quotationStats['total']); ?></strong></td>
+                    </tr>
+                    <tr>
+                        <td>Total quoted value</td>
+                        <td class="num"><?php echo $currency_symbol . ' ' . number_format((float)$quotationStats['total_value'], 2); ?></td>
+                    </tr>
+                    <tr>
+                        <td>Average quote value</td>
+                        <td class="num"><?php echo (int)$quotationStats['total'] > 0 ? $currency_symbol . ' ' . number_format((float)$quotationStats['total_value'] / (int)$quotationStats['total'], 2) : $currency_symbol . '0.00'; ?></td>
+                    </tr>
+                    <tr>
+                        <td>Conversion rate</td>
+                        <td class="num"><?php echo $quotationConversionRate; ?>%</td>
+                    </tr>
+                </tbody>
+            </table>
+            <div class="acct-insight-actions">
+                <a href="quotations.php" class="acct-btn acct-btn--primary">Open quotations workspace</a>
+            </div>
+        </template>
+
+        <template id="acct-insight-template-quotation-sent">
+            <p class="acct-insight-intro">Sent quotations are active opportunities awaiting client response and should drive follow-up cadence.</p>
+            <table class="acct-insight-table">
+                <thead>
+                    <tr>
+                        <th>Open Pipeline Metric</th>
+                        <th class="num">Value</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td>Active / sent quotations</td>
+                        <td class="num"><strong><?php echo number_format((int)$quotationStats['sent']); ?></strong></td>
+                    </tr>
+                    <tr>
+                        <td>Outstanding open value</td>
+                        <td class="num"><?php echo $currency_symbol . ' ' . number_format((float)$quotationStats['sent_value'], 2); ?></td>
+                    </tr>
+                    <tr>
+                        <td>Share of total quotations</td>
+                        <td class="num"><?php echo (int)$quotationStats['total'] > 0 ? number_format(((int)$quotationStats['sent'] / (int)$quotationStats['total']) * 100, 1) . '%' : '0.0%'; ?></td>
+                    </tr>
+                    <tr>
+                        <td>Recommended next step</td>
+                        <td class="num">Prioritize oldest sent quotes</td>
+                    </tr>
+                </tbody>
+            </table>
+            <div class="acct-insight-actions">
+                <a href="quotations.php?status=sent" class="acct-btn acct-btn--primary">Open sent quotations</a>
+                <a href="quotations.php" class="acct-btn acct-btn--ghost">Open all quotations</a>
+            </div>
+        </template>
+
+        <template id="acct-insight-template-quotation-accepted">
+            <p class="acct-insight-intro">Accepted quotations indicate conversion into confirmed business and should be reconciled against fulfillment and billing.</p>
+            <table class="acct-insight-table">
+                <thead>
+                    <tr>
+                        <th>Acceptance Metric</th>
+                        <th class="num">Value</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td>Accepted quotations</td>
+                        <td class="num"><strong><?php echo number_format((int)$quotationStats['accepted']); ?></strong></td>
+                    </tr>
+                    <tr>
+                        <td>Accepted quotation value</td>
+                        <td class="num"><?php echo $currency_symbol . ' ' . number_format((float)$quotationStats['accepted_value'], 2); ?></td>
+                    </tr>
+                    <tr>
+                        <td>Acceptance ratio</td>
+                        <td class="num"><?php echo (int)$quotationStats['total'] > 0 ? number_format(((int)$quotationStats['accepted'] / (int)$quotationStats['total']) * 100, 1) . '%' : '0.0%'; ?></td>
+                    </tr>
+                    <tr>
+                        <td>Average accepted value</td>
+                        <td class="num"><?php echo (int)$quotationStats['accepted'] > 0 ? $currency_symbol . ' ' . number_format((float)$quotationStats['accepted_value'] / (int)$quotationStats['accepted'], 2) : $currency_symbol . '0.00'; ?></td>
+                    </tr>
+                </tbody>
+            </table>
+            <div class="acct-insight-actions">
+                <a href="quotations.php?status=accepted" class="acct-btn acct-btn--primary">Open accepted quotations</a>
+                <a href="payments.php?booking_type=conference" class="acct-btn acct-btn--ghost">Open conference payments</a>
+            </div>
+        </template>
+
+        <template id="acct-insight-template-quotation-expired-declined">
+            <p class="acct-insight-intro">Expired and declined quotations highlight pipeline leakage and where offer quality or response timing may need improvement.</p>
+            <table class="acct-insight-table">
+                <thead>
+                    <tr>
+                        <th>Leakage Metric</th>
+                        <th class="num">Value</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td>Expired quotations</td>
+                        <td class="num"><?php echo number_format((int)$quotationStats['expired']); ?></td>
+                    </tr>
+                    <tr>
+                        <td>Declined quotations</td>
+                        <td class="num"><?php echo number_format((int)$quotationStats['declined']); ?></td>
+                    </tr>
+                    <tr>
+                        <td>Total expired + declined</td>
+                        <td class="num"><strong><?php echo number_format($quotationExpiredDeclinedCount); ?></strong></td>
+                    </tr>
+                    <tr>
+                        <td>Leakage share of total</td>
+                        <td class="num"><?php echo (int)$quotationStats['total'] > 0 ? number_format(($quotationExpiredDeclinedCount / (int)$quotationStats['total']) * 100, 1) . '%' : '0.0%'; ?></td>
+                    </tr>
+                </tbody>
+            </table>
+            <div class="acct-insight-actions">
+                <a href="quotations.php?status=expired" class="acct-btn acct-btn--primary">Open expired quotations</a>
+                <a href="quotations.php?status=declined" class="acct-btn acct-btn--ghost">Open declined quotations</a>
+            </div>
+        </template>
+
+        <template id="acct-insight-template-cn-issued">
+            <p class="acct-insight-intro">Issued credit notes represent total liability created for guests in the selected period.</p>
+            <table class="acct-insight-table">
+                <thead>
+                    <tr>
+                        <th>Credit Note Metric</th>
+                        <th class="num">Value</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td>Credit notes issued</td>
+                        <td class="num"><strong><?php echo number_format((int)$cnStats['count_issued']); ?></strong></td>
+                    </tr>
+                    <tr>
+                        <td>Total face value issued</td>
+                        <td class="num"><?php echo $currency_symbol . number_format((float)$cnStats['total_issued'], 2); ?></td>
+                    </tr>
+                    <tr>
+                        <td>Total redeemed so far</td>
+                        <td class="num"><?php echo $currency_symbol . number_format((float)$cnStats['total_redeemed'], 2); ?></td>
+                    </tr>
+                </tbody>
+            </table>
+            <div class="acct-insight-actions">
+                <a href="credit-notes.php" class="acct-btn acct-btn--primary">Open credit notes</a>
+            </div>
+        </template>
+
+        <template id="acct-insight-template-cn-redeemed">
+            <p class="acct-insight-intro">Redeemed credit notes show how much previously issued liability has already been consumed against bookings.</p>
+            <table class="acct-insight-table">
+                <thead>
+                    <tr>
+                        <th>Redemption Metric</th>
+                        <th class="num">Value</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td>Total redeemed</td>
+                        <td class="num"><strong><?php echo $currency_symbol . number_format((float)$cnStats['total_redeemed'], 2); ?></strong></td>
+                    </tr>
+                    <tr>
+                        <td>Total issued</td>
+                        <td class="num"><?php echo $currency_symbol . number_format((float)$cnStats['total_issued'], 2); ?></td>
+                    </tr>
+                    <tr>
+                        <td>Redemption rate</td>
+                        <td class="num"><?php echo ((float)$cnStats['total_issued'] > 0) ? number_format(((float)$cnStats['total_redeemed'] / (float)$cnStats['total_issued']) * 100, 1) . '%' : '0.0%'; ?></td>
+                    </tr>
+                </tbody>
+            </table>
+            <div class="acct-insight-actions">
+                <a href="credit-notes.php" class="acct-btn acct-btn--primary">Open redemption records</a>
+            </div>
+        </template>
+
+        <template id="acct-insight-template-cn-outstanding">
+            <p class="acct-insight-intro">Outstanding credit notes are unredeemed liability and should be monitored to avoid balance surprises.</p>
+            <table class="acct-insight-table">
+                <thead>
+                    <tr>
+                        <th>Outstanding Liability View</th>
+                        <th class="num">Value</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td>Outstanding liability</td>
+                        <td class="num"><strong><?php echo $currency_symbol . number_format((float)$cnStats['total_outstanding'], 2); ?></strong></td>
+                    </tr>
+                    <tr>
+                        <td>Issued value baseline</td>
+                        <td class="num"><?php echo $currency_symbol . number_format((float)$cnStats['total_issued'], 2); ?></td>
+                    </tr>
+                    <tr>
+                        <td>Unredeemed ratio</td>
+                        <td class="num"><?php echo ((float)$cnStats['total_issued'] > 0) ? number_format(((float)$cnStats['total_outstanding'] / (float)$cnStats['total_issued']) * 100, 1) . '%' : '0.0%'; ?></td>
+                    </tr>
+                </tbody>
+            </table>
+            <div class="acct-insight-actions">
+                <a href="credit-notes.php" class="acct-btn acct-btn--primary">Open outstanding credit notes</a>
+            </div>
+        </template>
+
+        <template id="acct-insight-template-compliance-completed-sales">
+            <p class="acct-insight-intro">This is the baseline count of paid/completed sales in period and anchors every other compliance gap ratio.</p>
+            <table class="acct-insight-table">
+                <thead>
+                    <tr>
+                        <th>Coverage Metric</th>
+                        <th class="num">Value</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td>Completed sales (selected period)</td>
+                        <td class="num"><strong><?php echo number_format((int)($complianceSummary['completed_sales'] ?? 0)); ?></strong></td>
+                    </tr>
+                    <tr>
+                        <td>Missing receipt numbers</td>
+                        <td class="num"><?php echo number_format((int)($complianceSummary['missing_receipts'] ?? 0)); ?></td>
+                    </tr>
+                    <tr>
+                        <td>Missing invoice numbers</td>
+                        <td class="num"><?php echo number_format((int)($complianceSummary['generated_invoices_missing_numbers'] ?? 0)); ?></td>
+                    </tr>
+                </tbody>
+            </table>
+            <div class="acct-insight-actions">
+                <a href="<?php echo htmlspecialchars($periodPaymentsLink); ?>" class="acct-btn acct-btn--primary">Open payments ledger</a>
+            </div>
+        </template>
+
+        <template id="acct-insight-template-compliance-missing-receipts">
+            <p class="acct-insight-intro">Every completed sale should have a receipt number for audit trail and customer proof of payment.</p>
+            <table class="acct-insight-table">
+                <thead>
+                    <tr>
+                        <th>Receipt Integrity</th>
+                        <th class="num">Value</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td>Sales missing receipt number</td>
+                        <td class="num"><strong><?php echo number_format((int)($complianceSummary['missing_receipts'] ?? 0)); ?></strong></td>
+                    </tr>
+                    <tr>
+                        <td>Completed sales baseline</td>
+                        <td class="num"><?php echo number_format((int)($complianceSummary['completed_sales'] ?? 0)); ?></td>
+                    </tr>
+                    <tr>
+                        <td>Recommended next step</td>
+                        <td class="num">Backfill receipt references</td>
+                    </tr>
+                </tbody>
+            </table>
+            <div class="acct-insight-actions">
+                <a href="<?php echo htmlspecialchars($periodPaymentsLink); ?>" class="acct-btn acct-btn--primary">Review affected payments</a>
+            </div>
+        </template>
+
+        <template id="acct-insight-template-compliance-missing-invoice-numbers">
+            <p class="acct-insight-intro">Generated invoices without invoice numbers break traceability for accounting and statutory reporting.</p>
+            <table class="acct-insight-table">
+                <thead>
+                    <tr>
+                        <th>Invoice Integrity</th>
+                        <th class="num">Value</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td>Generated invoices missing numbers</td>
+                        <td class="num"><strong><?php echo number_format((int)($complianceSummary['generated_invoices_missing_numbers'] ?? 0)); ?></strong></td>
+                    </tr>
+                    <tr>
+                        <td>Impact</td>
+                        <td class="num">Cannot fully reconcile invoice trail</td>
+                    </tr>
+                    <tr>
+                        <td>Recommended next step</td>
+                        <td class="num">Re-generate or patch invoice IDs</td>
+                    </tr>
+                </tbody>
+            </table>
+            <div class="acct-insight-actions">
+                <a href="invoices.php" class="acct-btn acct-btn--primary">Open invoices workspace</a>
+            </div>
+        </template>
+
+        <template id="acct-insight-template-compliance-pos-ledger-gap">
+            <p class="acct-insight-intro">Paid POS orders must have a corresponding payments ledger row to keep restaurant revenue and finance books aligned.</p>
+            <table class="acct-insight-table">
+                <thead>
+                    <tr>
+                        <th>POS Ledger Alignment</th>
+                        <th class="num">Value</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td>Paid POS orders missing ledger row</td>
+                        <td class="num"><strong><?php echo number_format((int)($complianceSummary['paid_pos_without_ledger'] ?? 0)); ?></strong></td>
+                    </tr>
+                    <tr>
+                        <td>Risk</td>
+                        <td class="num">Revenue may be understated in finance reports</td>
+                    </tr>
+                    <tr>
+                        <td>Recommended next step</td>
+                        <td class="num">Re-sync missing POS payments</td>
+                    </tr>
+                </tbody>
+            </table>
+            <div class="acct-insight-actions">
+                <a href="stock-orders.php" class="acct-btn acct-btn--primary">Open POS orders</a>
+                <a href="payments.php?booking_type=restaurant&start_date=<?php echo urlencode($startDate); ?>&end_date=<?php echo urlencode($endDate); ?>" class="acct-btn acct-btn--ghost">Open restaurant payments</a>
+            </div>
+        </template>
+
+        <template id="acct-insight-template-compliance-mra-pending">
+            <p class="acct-insight-intro">
+                <?php if ($mraColumnsAvailable): ?>
+                    MRA-ready fields are installed. This check tracks completed sales that still need MRA submission work.
+                <?php else: ?>
+                    MRA submission fields are not installed yet, so statutory submission tracking cannot run in this dashboard.
+                <?php endif; ?>
+            </p>
+            <table class="acct-insight-table">
+                <thead>
+                    <tr>
+                        <th>MRA Readiness Check</th>
+                        <th class="num">Value</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td><?php echo $mraColumnsAvailable ? 'Pending or unsubmitted sales' : 'Readiness field status'; ?></td>
+                        <td class="num"><strong><?php echo number_format($mraColumnsAvailable ? (int)($complianceSummary['mra_pending_or_unsubmitted'] ?? 0) : 1); ?></strong></td>
+                    </tr>
+                    <tr>
+                        <td>Columns available</td>
+                        <td class="num"><?php echo $mraColumnsAvailable ? 'Yes' : 'No'; ?></td>
+                    </tr>
+                    <tr>
+                        <td>Recommended next step</td>
+                        <td class="num"><?php echo $mraColumnsAvailable ? 'Process pending MRA submissions' : 'Install MRA tracking fields'; ?></td>
+                    </tr>
+                </tbody>
+            </table>
+            <div class="acct-insight-actions">
+                <?php if ($mraColumnsAvailable): ?>
+                    <a href="reports.php?start_date=<?php echo urlencode($startDate); ?>&end_date=<?php echo urlencode($endDate); ?>" class="acct-btn acct-btn--primary">Open MRA reporting</a>
+                <?php else: ?>
+                    <a href="booking-settings.php#invoice-settings" class="acct-btn acct-btn--primary">Open invoice settings</a>
+                <?php endif; ?>
+            </div>
+        </template>
 
         <!-- Revenue by Source — comprehensive table tying together rooms, conference, POS -->
         <section class="acct-panel">
@@ -1265,6 +1906,7 @@ if (!isset($dailyTrend)) {
                 var editView = document.getElementById('vatEditView');
                 var modal = document.getElementById('vatConfirmModal');
                 var overlay = document.getElementById('vatConfirmModal-overlay');
+                var insightModalId = 'acctInsightModal';
 
                 function openModal() {
                     if (!modal) return;
@@ -1309,6 +1951,64 @@ if (!isset($dailyTrend)) {
                 document.addEventListener('keydown', function(e) {
                     if (e.key === 'Escape' && modal && modal.classList.contains('active')) closeModal();
                 });
+
+                window.__openAccountingDashboardInsight = function(triggerEl) {
+                    var insightKey = triggerEl ? triggerEl.getAttribute('data-insight-key') : '';
+                    if (!insightKey) return;
+
+                    var insightTemplate = document.getElementById('acct-insight-template-' + insightKey);
+                    var insightBody = document.getElementById('acctInsightBody');
+                    var insightTitle = document.getElementById('acctInsightTitle');
+                    var insightModal = document.getElementById(insightModalId);
+                    var insightOverlay = document.getElementById(insightModalId + '-overlay');
+                    if (!insightTemplate || !insightBody || !insightTitle || !insightModal) return;
+
+                    insightTitle.textContent = triggerEl.getAttribute('data-insight-title') || 'Accounting Insight';
+                    insightBody.innerHTML = insightTemplate.innerHTML;
+
+                    if (window.Modal && typeof window.Modal.syncModalTableLabels === 'function') {
+                        window.Modal.syncModalTableLabels(insightModal);
+                    }
+
+                    if (window.Modal && typeof window.Modal.open === 'function') {
+                        window.Modal.open(insightModalId);
+                        return;
+                    }
+
+                    insightModal.classList.add('active');
+                    if (insightOverlay) insightOverlay.classList.add('active');
+                    document.body.classList.add('modal-open');
+                };
+
+                if (!window.__accountingDashboardInsightHandlersBound) {
+                    document.addEventListener('click', function(e) {
+                        var trigger = e.target.closest('.js-acct-insight-trigger');
+                        if (!trigger) return;
+
+                        var nestedLink = e.target.closest('a');
+                        if (nestedLink && trigger.contains(nestedLink)) {
+                            return;
+                        }
+
+                        e.preventDefault();
+                        if (typeof window.__openAccountingDashboardInsight === 'function') {
+                            window.__openAccountingDashboardInsight(trigger);
+                        }
+                    });
+
+                    document.addEventListener('keydown', function(e) {
+                        if (e.key !== 'Enter' && e.key !== ' ') return;
+                        var trigger = e.target && e.target.closest ? e.target.closest('.js-acct-insight-trigger') : null;
+                        if (!trigger) return;
+
+                        e.preventDefault();
+                        if (typeof window.__openAccountingDashboardInsight === 'function') {
+                            window.__openAccountingDashboardInsight(trigger);
+                        }
+                    });
+
+                    window.__accountingDashboardInsightHandlersBound = true;
+                }
 
                 // If there was a save error, re-open the form so admin can fix it
                 <?php if ($vatSettingsError): ?>

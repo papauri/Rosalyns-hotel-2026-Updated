@@ -278,7 +278,7 @@
 
     .filter-bar,
     .admin-header,
-    .alert {
+    .kds-report-page .alert {
         display: none !important;
     }
 

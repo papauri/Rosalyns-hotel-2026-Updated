@@ -14,6 +14,8 @@ require_once __DIR__ . '/api-init.php';
 /** @var PDO $pdo */
 /** @var array $user */
 
+requireApiPermission('reports');
+
 $site_name       = getSetting('site_name') ?: "Rosalyn's Beach Hotel";
 $currency_symbol = getSetting('currency_symbol') ?: 'K ';
 

@@ -1,8 +1,9 @@
 <?php
+
 /**
  * Review Statistics API
  * Hotel Website - Admin API for review statistics and analytics
- * 
+ *
  * Endpoints:
  * - GET: Get comprehensive review statistics
  */
@@ -17,6 +18,7 @@ header('Content-Type: application/json');
 
 // Include database configuration
 require_once __DIR__ . '/../../config/database.php';
+require_once __DIR__ . '/../includes/permissions.php';
 
 // Start session for admin authentication
 if (session_status() === PHP_SESSION_NONE) {
@@ -24,14 +26,16 @@ if (session_status() === PHP_SESSION_NONE) {
 }
 
 // Helper function to send JSON response
-function sendResponse($data, $statusCode = 200) {
+function sendResponse($data, $statusCode = 200)
+{
     http_response_code($statusCode);
     echo json_encode($data);
     exit;
 }
 
 // Helper function to send error response
-function sendError($message, $statusCode = 400, $details = null) {
+function sendError($message, $statusCode = 400, $details = null)
+{
     $response = [
         'success' => false,
         'message' => $message
@@ -46,18 +50,22 @@ function sendError($message, $statusCode = 400, $details = null) {
 $method = $_SERVER['REQUEST_METHOD'];
 
 // Require admin authentication for all operations
-if (!isset($_SESSION['admin_user'])) {
+if (!isset($_SESSION['admin_user_id'])) {
     sendError('Authentication required', 401);
+}
+
+if (!hasPermission((int)$_SESSION['admin_user_id'], 'reviews')) {
+    sendError('Access denied', 403);
 }
 
 try {
     switch ($method) {
         case 'GET':
             // Get comprehensive review statistics
-            
+
             // 1. Total reviews count by status
             $statusSql = "
-                SELECT 
+                SELECT
                     status,
                     COUNT(*) as count
                 FROM reviews
@@ -65,7 +73,7 @@ try {
             ";
             $statusStmt = $pdo->query($statusSql);
             $status_counts = $statusStmt->fetchAll(PDO::FETCH_ASSOC);
-            
+
             // Convert to associative array
             $reviews_by_status = [
                 'pending' => 0,
@@ -76,10 +84,10 @@ try {
                 $reviews_by_status[$row['status']] = (int)$row['count'];
             }
             $total_reviews = array_sum($reviews_by_status);
-            
+
             // 2. Average overall rating (approved reviews only)
             $avgRatingSql = "
-                SELECT 
+                SELECT
                     AVG(rating) as avg_rating,
                     COUNT(*) as count
                 FROM reviews
@@ -87,13 +95,13 @@ try {
             ";
             $avgRatingStmt = $pdo->query($avgRatingSql);
             $avg_rating_data = $avgRatingStmt->fetch(PDO::FETCH_ASSOC);
-            $average_overall_rating = $avg_rating_data['avg_rating'] !== null 
-                ? round((float)$avg_rating_data['avg_rating'], 1) 
+            $average_overall_rating = $avg_rating_data['avg_rating'] !== null
+                ? round((float)$avg_rating_data['avg_rating'], 1)
                 : 0;
-            
+
             // 3. Average ratings by category (approved reviews only)
             $categorySql = "
-                SELECT 
+                SELECT
                     AVG(service_rating) as avg_service,
                     AVG(cleanliness_rating) as avg_cleanliness,
                     AVG(location_rating) as avg_location,
@@ -103,25 +111,25 @@ try {
             ";
             $categoryStmt = $pdo->query($categorySql);
             $category_data = $categoryStmt->fetch(PDO::FETCH_ASSOC);
-            
+
             $average_category_ratings = [
-                'service' => $category_data['avg_service'] !== null 
-                    ? round((float)$category_data['avg_service'], 1) 
+                'service' => $category_data['avg_service'] !== null
+                    ? round((float)$category_data['avg_service'], 1)
                     : 0,
-                'cleanliness' => $category_data['avg_cleanliness'] !== null 
-                    ? round((float)$category_data['avg_cleanliness'], 1) 
+                'cleanliness' => $category_data['avg_cleanliness'] !== null
+                    ? round((float)$category_data['avg_cleanliness'], 1)
                     : 0,
-                'location' => $category_data['avg_location'] !== null 
-                    ? round((float)$category_data['avg_location'], 1) 
+                'location' => $category_data['avg_location'] !== null
+                    ? round((float)$category_data['avg_location'], 1)
                     : 0,
-                'value' => $category_data['avg_value'] !== null 
-                    ? round((float)$category_data['avg_value'], 1) 
+                'value' => $category_data['avg_value'] !== null
+                    ? round((float)$category_data['avg_value'], 1)
                     : 0
             ];
-            
+
             // 4. Rating distribution (1-5 stars)
             $distributionSql = "
-                SELECT 
+                SELECT
                     rating,
                     COUNT(*) as count
                 FROM reviews
@@ -131,7 +139,7 @@ try {
             ";
             $distributionStmt = $pdo->query($distributionSql);
             $distribution_data = $distributionStmt->fetchAll(PDO::FETCH_ASSOC);
-            
+
             $rating_distribution = [
                 5 => 0,
                 4 => 0,
@@ -142,10 +150,10 @@ try {
             foreach ($distribution_data as $row) {
                 $rating_distribution[(int)$row['rating']] = (int)$row['count'];
             }
-            
+
             // 5. Recent reviews (last 5 approved)
             $recentSql = "
-                SELECT 
+                SELECT
                     id,
                     guest_name,
                     rating,
@@ -161,10 +169,10 @@ try {
             ";
             $recentStmt = $pdo->query($recentSql);
             $recent_reviews = $recentStmt->fetchAll(PDO::FETCH_ASSOC);
-            
+
             // 6. Reviews by room (top 5 rooms with most reviews)
             $roomSql = "
-                SELECT 
+                SELECT
                     r.room_id,
                     rm.name as room_name,
                     COUNT(*) as review_count,
@@ -178,18 +186,18 @@ try {
             ";
             $roomStmt = $pdo->query($roomSql);
             $reviews_by_room = $roomStmt->fetchAll(PDO::FETCH_ASSOC);
-            
+
             // Format room data
             foreach ($reviews_by_room as &$room) {
                 $room['review_count'] = (int)$room['review_count'];
-                $room['avg_rating'] = $room['avg_rating'] !== null 
-                    ? round((float)$room['avg_rating'], 1) 
+                $room['avg_rating'] = $room['avg_rating'] !== null
+                    ? round((float)$room['avg_rating'], 1)
                     : 0;
             }
-            
+
             // 7. Reviews over time (last 30 days)
             $timeSql = "
-                SELECT 
+                SELECT
                     DATE(created_at) as date,
                     COUNT(*) as count
                 FROM reviews
@@ -199,14 +207,16 @@ try {
             ";
             $timeStmt = $pdo->query($timeSql);
             $reviews_over_time = $timeStmt->fetchAll(PDO::FETCH_ASSOC);
-            
+
             // 8. Calculate overall average (all categories combined)
             $all_categories = array_values($average_category_ratings);
-            $non_null_categories = array_filter($all_categories, function($val) { return $val > 0; });
-            $overall_category_average = !empty($non_null_categories) 
-                ? round(array_sum($non_null_categories) / count($non_null_categories), 1) 
+            $non_null_categories = array_filter($all_categories, function ($val) {
+                return $val > 0;
+            });
+            $overall_category_average = !empty($non_null_categories)
+                ? round(array_sum($non_null_categories) / count($non_null_categories), 1)
                 : 0;
-            
+
             // Compile all statistics
             $stats = [
                 'total_reviews' => $total_reviews,
@@ -220,18 +230,17 @@ try {
                 'reviews_over_time' => $reviews_over_time,
                 'generated_at' => date('Y-m-d H:i:s')
             ];
-            
+
             sendResponse([
                 'success' => true,
                 'data' => $stats
             ]);
             break;
-            
+
         default:
             sendError('Method not allowed', 405);
             break;
     }
-    
 } catch (PDOException $e) {
     error_log("Database error in review-stats.php: " . $e->getMessage());
     sendError('Database error occurred', 500, $e->getMessage());

@@ -156,6 +156,11 @@ if (!$error || strpos($error, 'not yet') === false) {
     }
 }
 
+$wastageMonthDelta = $totalThisMonth - $totalLastMonth;
+$wastageMonthDeltaPct = $totalLastMonth > 0
+    ? round(($wastageMonthDelta / $totalLastMonth) * 100, 1)
+    : null;
+
 $csrf_token = generateCsrfToken();
 ?>
 <!DOCTYPE html>
@@ -198,19 +203,97 @@ $csrf_token = generateCsrfToken();
         <?php endif; ?>
 
         <div class="summary-cards">
-            <div class="summary-card warning">
+            <div class="summary-card warning summary-card--interactive js-stock-wastage-insight-trigger"
+                role="button"
+                tabindex="0"
+                data-insight-key="this-month"
+                data-insight-title="Current Month Wastage"
+                aria-label="Open current month wastage insight">
                 <div class="label">This month wastage</div>
                 <div class="value"><?php echo $currency_symbol . ' ' . number_format($totalThisMonth, 2); ?></div>
+                <div class="summary-card__hint"><i class="fas fa-table-list"></i> Open detail</div>
             </div>
-            <div class="summary-card">
+
+            <div class="summary-card summary-card--interactive js-stock-wastage-insight-trigger"
+                role="button"
+                tabindex="0"
+                data-insight-key="last-month"
+                data-insight-title="Previous Month Baseline"
+                aria-label="Open previous month baseline insight">
                 <div class="label">Last month</div>
                 <div class="value"><?php echo $currency_symbol . ' ' . number_format($totalLastMonth, 2); ?></div>
+                <div class="summary-card__hint"><i class="fas fa-table-list"></i> Open detail</div>
             </div>
-            <div class="summary-card">
+
+            <div class="summary-card summary-card--interactive js-stock-wastage-insight-trigger"
+                role="button"
+                tabindex="0"
+                data-insight-key="recency"
+                data-insight-title="Logging Recency Health"
+                aria-label="Open wastage logging recency health">
                 <div class="label">Days since last entry</div>
                 <div class="value"><?php echo $daysSinceLast === null ? '—' : $daysSinceLast; ?></div>
+                <div class="summary-card__hint"><i class="fas fa-table-list"></i> Open detail</div>
             </div>
         </div>
+
+        <div class="modal-overlay" id="stockWastageInsightModal" style="align-items:flex-start; padding-top:60px;">
+            <div class="stock-insight-modal-box">
+                <div class="stock-insight-modal-head">
+                    <h3 id="stockWastageInsightTitle" style="margin:0;font-size:18px;">Wastage Insight</h3>
+                    <button type="button" class="stock-insight-close" onclick="closeStockWastageInsight()" aria-label="Close wastage insight">&times;</button>
+                </div>
+                <div id="stockWastageInsightBody"></div>
+                <div style="display:flex;justify-content:flex-end;margin-top:12px;">
+                    <button type="button" onclick="closeStockWastageInsight()" style="padding:9px 16px; background:#e9ecef; border:none; border-radius:6px; cursor:pointer;">Close</button>
+                </div>
+            </div>
+        </div>
+
+        <template id="stock-wastage-insight-template-this-month">
+            <p class="stock-insight-note">Current month wastage should be monitored against last month and top-loss ingredients to catch process drift quickly.</p>
+            <table class="stock-insight-table">
+                <tbody>
+                    <tr><th>This month wastage</th><td><?php echo $currency_symbol . ' ' . number_format($totalThisMonth, 2); ?></td></tr>
+                    <tr><th>Last month reference</th><td><?php echo $currency_symbol . ' ' . number_format($totalLastMonth, 2); ?></td></tr>
+                    <tr><th>Delta vs last month</th><td><?php echo ($wastageMonthDelta >= 0 ? '+' : '') . $currency_symbol . ' ' . number_format($wastageMonthDelta, 2); ?></td></tr>
+                    <tr><th>Delta percent</th><td><?php echo $wastageMonthDeltaPct !== null ? (($wastageMonthDeltaPct >= 0 ? '+' : '') . $wastageMonthDeltaPct . '%') : 'No prior baseline'; ?></td></tr>
+                </tbody>
+            </table>
+            <div class="stock-insight-actions">
+                <a class="stock-insight-action" href="stock-wastage.php#wastageEntries">Review recent entries</a>
+                <a class="stock-insight-action stock-insight-action--ghost" href="stock-wastage.php#wastage-entry-section">Record new wastage</a>
+            </div>
+        </template>
+
+        <template id="stock-wastage-insight-template-last-month">
+            <p class="stock-insight-note">Last month provides the baseline to evaluate whether this month is improving or deteriorating.</p>
+            <table class="stock-insight-table">
+                <tbody>
+                    <tr><th>Last month wastage</th><td><?php echo $currency_symbol . ' ' . number_format($totalLastMonth, 2); ?></td></tr>
+                    <tr><th>This month wastage</th><td><?php echo $currency_symbol . ' ' . number_format($totalThisMonth, 2); ?></td></tr>
+                    <tr><th>Change amount</th><td><?php echo ($wastageMonthDelta >= 0 ? '+' : '') . $currency_symbol . ' ' . number_format($wastageMonthDelta, 2); ?></td></tr>
+                    <tr><th>Change percent</th><td><?php echo $wastageMonthDeltaPct !== null ? (($wastageMonthDeltaPct >= 0 ? '+' : '') . $wastageMonthDeltaPct . '%') : 'No prior baseline'; ?></td></tr>
+                </tbody>
+            </table>
+            <div class="stock-insight-actions">
+                <a class="stock-insight-action" href="stock-wastage.php#wastageEntries">Open history view</a>
+            </div>
+        </template>
+
+        <template id="stock-wastage-insight-template-recency">
+            <p class="stock-insight-note">Recency checks whether wastage logging is consistently maintained for reliable inventory and cost reporting.</p>
+            <table class="stock-insight-table">
+                <tbody>
+                    <tr><th>Days since last wastage entry</th><td><?php echo $daysSinceLast === null ? 'No entries yet' : number_format((int)$daysSinceLast); ?></td></tr>
+                    <tr><th>Current month wastage</th><td><?php echo $currency_symbol . ' ' . number_format($totalThisMonth, 2); ?></td></tr>
+                    <tr><th>Recommended cadence</th><td>Log daily or at each disposal event</td></tr>
+                </tbody>
+            </table>
+            <div class="stock-insight-actions">
+                <a class="stock-insight-action" href="stock-wastage.php#wastage-entry-section">Record new wastage now</a>
+            </div>
+        </template>
 
         <?php if (!empty($topWastedItems)): ?>
             <div class="wastage-card">
@@ -227,7 +310,7 @@ $csrf_token = generateCsrfToken();
             </div>
         <?php endif; ?>
 
-        <div class="wastage-card wastage-entry-card">
+        <div class="wastage-card wastage-entry-card" id="wastage-entry-section">
             <h3 class="wastage-section-title">Record wastage</h3>
             <form method="POST" class="wastage-entry-form">
                 <input type="hidden" name="csrf_token" value="<?php echo $csrf_token; ?>">
@@ -243,7 +326,7 @@ $csrf_token = generateCsrfToken();
             </form>
         </div>
 
-        <h3 class="wastage-section-title wastage-section-title--entries">Recent entries</h3>
+        <h3 class="wastage-section-title wastage-section-title--entries" id="wastageEntries">Recent entries</h3>
         <div class="table-responsive">
             <table class="stock-table">
                 <thead>
@@ -320,6 +403,67 @@ $csrf_token = generateCsrfToken();
             `;
             rows.appendChild(r);
         }
+
+        function closeStockWastageInsight() {
+            const modal = document.getElementById('stockWastageInsightModal');
+            if (!modal) return;
+            modal.classList.remove('active');
+            if (!document.querySelector('.modal-overlay.active')) {
+                document.body.classList.remove('modal-open');
+            }
+        }
+
+        function openStockWastageInsight(triggerEl) {
+            const key = triggerEl ? triggerEl.getAttribute('data-insight-key') : '';
+            if (!key) return;
+
+            const template = document.getElementById('stock-wastage-insight-template-' + key);
+            const body = document.getElementById('stockWastageInsightBody');
+            const title = document.getElementById('stockWastageInsightTitle');
+            const modal = document.getElementById('stockWastageInsightModal');
+            if (!template || !body || !title || !modal) return;
+
+            title.textContent = triggerEl.getAttribute('data-insight-title') || 'Wastage Insight';
+            body.innerHTML = template.innerHTML;
+            modal.classList.add('active');
+            document.body.classList.add('modal-open');
+        }
+
+        const wastageInsightModal = document.getElementById('stockWastageInsightModal');
+        if (wastageInsightModal) {
+            wastageInsightModal.addEventListener('click', function(e) {
+                if (e.target === wastageInsightModal) {
+                    closeStockWastageInsight();
+                }
+            });
+        }
+
+        if (!window.__stockWastageInsightHandlersBound) {
+            document.addEventListener('click', function(e) {
+                const trigger = e.target.closest('.js-stock-wastage-insight-trigger');
+                if (!trigger) return;
+                e.preventDefault();
+                openStockWastageInsight(trigger);
+            });
+
+            document.addEventListener('keydown', function(e) {
+                if (e.key !== 'Enter' && e.key !== ' ') return;
+                const trigger = e.target && e.target.closest ? e.target.closest('.js-stock-wastage-insight-trigger') : null;
+                if (!trigger) return;
+                e.preventDefault();
+                openStockWastageInsight(trigger);
+            });
+
+            document.addEventListener('keydown', function(e) {
+                if (e.key === 'Escape' && document.getElementById('stockWastageInsightModal')?.classList.contains('active')) {
+                    closeStockWastageInsight();
+                }
+            });
+
+            window.__stockWastageInsightHandlersBound = true;
+        }
+
+        window.closeStockWastageInsight = closeStockWastageInsight;
         addRow();
     </script>
 </body>

@@ -16,12 +16,7 @@ if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
     exit;
 }
 
-// Role check
-if (!in_array($user['role'] ?? '', ['admin', 'manager'], true)) {
-    http_response_code(403);
-    echo json_encode(['success' => false, 'error' => 'Insufficient permissions.']);
-    exit;
-}
+requireApiPermission('create_booking');
 
 // Parse JSON body
 $raw  = file_get_contents('php://input');

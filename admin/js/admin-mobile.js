@@ -255,11 +255,12 @@
 
     function getCardFieldColumnCount(table) {
         const availableWidth = getTableAvailableWidth(table);
-        if (availableWidth >= 520) {
+        // Keep card fields readable: only use 3 columns on genuinely wide layouts.
+        if (availableWidth >= 960) {
             return 3;
         }
 
-        if (availableWidth >= 360) {
+        if (availableWidth >= 680) {
             return 2;
         }
 

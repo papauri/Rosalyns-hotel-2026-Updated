@@ -77,6 +77,7 @@ $contact_csrf_token = pub_csrf_generate('contact');
 $formSuccess = false;
 $formError   = '';
 $formReference = '';
+$formEmailWarning = '';
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['contact_form'])) {
     // CSRF validation
@@ -164,24 +165,75 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['contact_form'])) {
 
                 $formSuccess = true;
 
-                // Send notification email to hotel
-                if (function_exists('sendEmail')) {
-                    $adminEmail = $email_main;
-                    if (!empty($adminEmail)) {
-                        $emailBody = "<h2>New Contact Inquiry</h2>";
-                        $emailBody .= "<p><strong>Reference:</strong> {$formReference}</p>";
-                        $emailBody .= "<p><strong>Name:</strong> " . htmlspecialchars($sanitized['name']) . "</p>";
-                        $emailBody .= "<p><strong>Email:</strong> " . htmlspecialchars($sanitized['email']) . "</p>";
-                        $emailBody .= "<p><strong>Phone:</strong> " . htmlspecialchars($sanitized['phone'] ?? 'N/A') . "</p>";
-                        $emailBody .= "<p><strong>Subject:</strong> " . htmlspecialchars($sanitized['subject']) . "</p>";
-                        $emailBody .= "<p><strong>Message:</strong><br>" . nl2br(htmlspecialchars($sanitized['message'])) . "</p>";
+                $guestEmailResult = ['success' => false, 'message' => 'Guest confirmation email was not attempted.'];
+                $adminEmailResult = ['success' => false, 'message' => 'Admin notification email was not attempted.'];
 
-                        sendEmail(
+                // Send customer acknowledgement and admin notification.
+                if (function_exists('sendEmail')) {
+                    $siteName = getSetting('site_name', 'Hotel');
+                    $reservationsEmail = trim((string)getSetting('email_reservations', ''));
+                    $adminEmail = $reservationsEmail !== '' ? $reservationsEmail : trim((string)$email_main);
+                    if ($adminEmail === '') {
+                        $adminEmail = trim((string)getSetting('email_admin_email', ''));
+                    }
+                    $contactEmailForGuest = '';
+                    if (filter_var($adminEmail, FILTER_VALIDATE_EMAIL)) {
+                        $contactEmailForGuest = $adminEmail;
+                    } elseif (filter_var((string)$email_main, FILTER_VALIDATE_EMAIL)) {
+                        $contactEmailForGuest = (string)$email_main;
+                    }
+
+                    $guestBody = '<h2>Inquiry Received</h2>';
+                    $guestBody .= '<p>Dear ' . htmlspecialchars($sanitized['name']) . ',</p>';
+                    $guestBody .= '<p>Thank you for contacting <strong>' . htmlspecialchars($siteName) . '</strong>. We have received your inquiry and our team will reply within 24 hours.</p>';
+                    $guestBody .= '<p><strong>Reference:</strong> ' . htmlspecialchars($formReference) . '<br>';
+                    $guestBody .= '<strong>Subject:</strong> ' . htmlspecialchars($sanitized['subject']) . '</p>';
+                    $guestBody .= '<div style="background:#FAF6F0;border:1px solid #E6DDCF;border-radius:8px;padding:14px;margin:16px 0;">';
+                    $guestBody .= '<p style="margin:0;"><strong>Your message:</strong><br>' . nl2br(htmlspecialchars($sanitized['message'])) . '</p>';
+                    $guestBody .= '</div>';
+                    if ($contactEmailForGuest !== '') {
+                        $guestBody .= '<p>If you need urgent help, please contact us directly at <a href="mailto:' . htmlspecialchars($contactEmailForGuest) . '">' . htmlspecialchars($contactEmailForGuest) . '</a>.</p>';
+                    }
+
+                    $guestEmailResult = sendEmail(
+                        $sanitized['email'],
+                        $sanitized['name'],
+                        'Inquiry Received - ' . $siteName . ' [' . $formReference . ']',
+                        $guestBody
+                    );
+
+                    if (!empty($adminEmail) && filter_var($adminEmail, FILTER_VALIDATE_EMAIL)) {
+                        $adminBody = "<h2>New Contact Inquiry</h2>";
+                        $adminBody .= "<p><strong>Reference:</strong> " . htmlspecialchars($formReference) . "</p>";
+                        $adminBody .= "<p><strong>Name:</strong> " . htmlspecialchars($sanitized['name']) . "</p>";
+                        $adminBody .= "<p><strong>Email:</strong> " . htmlspecialchars($sanitized['email']) . "</p>";
+                        $adminBody .= "<p><strong>Phone:</strong> " . htmlspecialchars($sanitized['phone'] ?? 'N/A') . "</p>";
+                        $adminBody .= "<p><strong>Subject:</strong> " . htmlspecialchars($sanitized['subject']) . "</p>";
+                        $adminBody .= "<p><strong>Message:</strong><br>" . nl2br(htmlspecialchars($sanitized['message'])) . "</p>";
+
+                        $adminEmailResult = sendEmail(
                             $adminEmail,
-                            getSetting('site_name', 'Hotel'),
-                            'New Contact Inquiry [' . $formReference . '] - ' . htmlspecialchars($sanitized['subject']),
-                            $emailBody
+                            $siteName,
+                            'New Contact Inquiry [' . $formReference . '] - ' . $sanitized['subject'],
+                            $adminBody
                         );
+                    } else {
+                        $adminEmailResult = ['success' => false, 'message' => 'No valid admin email configured for contact inquiries.'];
+                    }
+
+                    if (!$guestEmailResult['success'] && !$adminEmailResult['success']) {
+                        $formEmailWarning = 'Your inquiry was saved, but both guest and admin emails could not be sent right now.';
+                    } elseif (!$guestEmailResult['success']) {
+                        $formEmailWarning = 'Your inquiry was saved, but we could not send your confirmation email right now.';
+                    } elseif (!$adminEmailResult['success']) {
+                        $formEmailWarning = 'Your inquiry was saved and your confirmation email was sent, but internal team notification failed.';
+                    }
+
+                    if (!$guestEmailResult['success']) {
+                        error_log('Contact guest acknowledgement failed: ' . ($guestEmailResult['message'] ?? 'Unknown error'));
+                    }
+                    if (!$adminEmailResult['success']) {
+                        error_log('Contact admin notification failed: ' . ($adminEmailResult['message'] ?? 'Unknown error'));
                     }
                 }
             } catch (PDOException $e) {
@@ -345,6 +397,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['contact_form'])) {
                                 <h3>Message Sent Successfully!</h3>
                                 <p>Thank you for reaching out. Our team will get back to you within 24 hours.</p>
                                 <div class="ref-badge">Reference: <?php echo htmlspecialchars($formReference); ?></div>
+                                <?php if (!empty($formEmailWarning)): ?>
+                                    <div class="contact-form-error" style="margin-top:12px;">
+                                        <i class="fas fa-exclamation-triangle"></i> <?php echo htmlspecialchars($formEmailWarning); ?>
+                                    </div>
+                                <?php endif; ?>
                             </div>
                         <?php else: ?>
 

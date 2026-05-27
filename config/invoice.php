@@ -157,38 +157,28 @@ function generateInvoicePDF(int $booking_id)
         $filepath = $invoiceDir . '/' . $filename;
 
         if ($tcpdf_loaded) {
-            // Use TCPDF for professional PDF generation
-            $tcpdfClass = 'TCPDF';
-            $pdf = new $tcpdfClass('P', 'mm', 'A4', true, 'UTF-8', false);
-
-            // Set document information
-            $pdf->SetCreator($site_name);
-            $pdf->SetAuthor($site_name);
-            $pdf->SetTitle('Invoice ' . $invoice_number);
-            $pdf->SetSubject('Payment Invoice');
-
-            // Remove default header/footer
-            $pdf->setPrintHeader(false);
-            $pdf->setPrintFooter(false);
-
-            // Tight margins so invoice fills the A4 page (matches HTML rendering)
-            $pdf->SetMargins(5, 3, 5);
-            $pdf->SetAutoPageBreak(true, 5);
-
-            // Add a page
-            $pdf->AddPage();
-
-            // Default font baseline
-            $pdf->SetFont('helvetica', '', 10);
-
             // Build HTML content
             $html = buildInvoiceHTML($booking, $invoice_number, $site_name, $email_address, $phone_number, $address, $currency_symbol, $group_bookings);
 
-            // Write HTML
-            $pdf->writeHTML($html, true, false, true, false, '');
-
-            // Save PDF
-            $pdf->Output($filepath, 'F');
+            // Use shared renderer so preview and generated PDF follow the same style rules.
+            if (function_exists('bookingRenderPdfFromHtml')) {
+                file_put_contents($filepath, bookingRenderPdfFromHtml($html, 'Invoice ' . $invoice_number));
+            } else {
+                $tcpdfClass = 'TCPDF';
+                $pdf = new $tcpdfClass('P', 'mm', 'A4', true, 'UTF-8', false);
+                $pdf->SetCreator($site_name);
+                $pdf->SetAuthor($site_name);
+                $pdf->SetTitle('Invoice ' . $invoice_number);
+                $pdf->SetSubject('Payment Invoice');
+                $pdf->setPrintHeader(false);
+                $pdf->setPrintFooter(false);
+                $pdf->SetMargins(8, 8, 8);
+                $pdf->SetAutoPageBreak(true, 10);
+                $pdf->SetFont('helvetica', '', 10);
+                $pdf->AddPage();
+                $pdf->writeHTML($html, true, false, true, false, '');
+                $pdf->Output($filepath, 'F');
+            }
         } else {
             // Fallback: Generate HTML invoice and save as file
             $html = buildInvoiceHTML($booking, $invoice_number, $site_name, $email_address, $phone_number, $address, $currency_symbol, $group_bookings);
@@ -406,57 +396,57 @@ function buildInvoiceHTML(array $booking, string $invoice_number, string $site_n
             $grm_subtotal = (float)$grm['total_amount'];
             $night_rate   = $grm_subtotal / max(1, (int)$grm['number_of_nights']);
             $chargeRows .= '<tr style="background:' . $rowBg[$ri++ % 2] . ';">
-                <td width="58%" style="padding:5px 7px; font-size:7px; color:#231F1C; font-family:Helvetica,Arial,sans-serif; border-bottom:1px solid #EDE8E2; line-height:1.3;">' . htmlspecialchars($grm['room_name']) . ' — Accommodation</td>
-                <td width="8%" style="padding:5px 7px; font-size:7px; color:#5E554D; text-align:center; font-family:Helvetica,Arial,sans-serif; border-bottom:1px solid #EDE8E2;">' . (int)$grm['number_of_nights'] . '</td>
-                <td width="16%" style="padding:5px 7px; font-size:7px; color:#5E554D; text-align:right; font-family:Helvetica,Arial,sans-serif; border-bottom:1px solid #EDE8E2;">' . $currency_symbol . ' ' . number_format($night_rate, 2) . '</td>
-                <td width="18%" style="padding:5px 7px; font-size:7px; color:#231F1C; font-weight:600; text-align:right; font-family:Helvetica,Arial,sans-serif; border-bottom:1px solid #EDE8E2;">' . $currency_symbol . ' ' . number_format($grm_subtotal, 2) . '</td>
+                <td width="58%" style="padding:6px 8px; font-size:12px; color:#231F1C; font-family:Helvetica,Arial,sans-serif; border-bottom:1px solid #EDE8E2; line-height:1.35;">' . htmlspecialchars($grm['room_name']) . ' — Accommodation</td>
+                <td width="8%" style="padding:6px 8px; font-size:12px; color:#5E554D; text-align:center; font-family:Helvetica,Arial,sans-serif; border-bottom:1px solid #EDE8E2;">' . (int)$grm['number_of_nights'] . '</td>
+                <td width="16%" style="padding:6px 8px; font-size:12px; color:#5E554D; text-align:right; font-family:Helvetica,Arial,sans-serif; border-bottom:1px solid #EDE8E2;">' . $currency_symbol . ' ' . number_format($night_rate, 2) . '</td>
+                <td width="18%" style="padding:6px 8px; font-size:12px; color:#231F1C; font-weight:600; text-align:right; font-family:Helvetica,Arial,sans-serif; border-bottom:1px solid #EDE8E2;">' . $currency_symbol . ' ' . number_format($grm_subtotal, 2) . '</td>
             </tr>';
         }
     } else {
         $nightRate = $roomSubtotal / max(1, (int)$booking['number_of_nights']);
         $chargeRows .= '<tr style="background:' . $rowBg[$ri++ % 2] . ';">
-            <td width="58%" style="padding:5px 7px; font-size:7px; color:#231F1C; font-family:Helvetica,Arial,sans-serif; border-bottom:1px solid #EDE8E2; line-height:1.3;">' . htmlspecialchars($booking['room_name']) . ' — Accommodation</td>
-            <td width="8%" style="padding:5px 7px; font-size:7px; color:#5E554D; text-align:center; font-family:Helvetica,Arial,sans-serif; border-bottom:1px solid #EDE8E2;">' . (int)$booking['number_of_nights'] . '</td>
-            <td width="16%" style="padding:5px 7px; font-size:7px; color:#5E554D; text-align:right; font-family:Helvetica,Arial,sans-serif; border-bottom:1px solid #EDE8E2;">' . $currency_symbol . ' ' . number_format($nightRate, 2) . '</td>
-            <td width="18%" style="padding:5px 7px; font-size:7px; color:#231F1C; font-weight:600; text-align:right; font-family:Helvetica,Arial,sans-serif; border-bottom:1px solid #EDE8E2;">' . $currency_symbol . ' ' . number_format($roomSubtotal, 2) . '</td>
+            <td width="58%" style="padding:6px 8px; font-size:12px; color:#231F1C; font-family:Helvetica,Arial,sans-serif; border-bottom:1px solid #EDE8E2; line-height:1.35;">' . htmlspecialchars($booking['room_name']) . ' — Accommodation</td>
+            <td width="8%" style="padding:6px 8px; font-size:12px; color:#5E554D; text-align:center; font-family:Helvetica,Arial,sans-serif; border-bottom:1px solid #EDE8E2;">' . (int)$booking['number_of_nights'] . '</td>
+            <td width="16%" style="padding:6px 8px; font-size:12px; color:#5E554D; text-align:right; font-family:Helvetica,Arial,sans-serif; border-bottom:1px solid #EDE8E2;">' . $currency_symbol . ' ' . number_format($nightRate, 2) . '</td>
+            <td width="18%" style="padding:6px 8px; font-size:12px; color:#231F1C; font-weight:600; text-align:right; font-family:Helvetica,Arial,sans-serif; border-bottom:1px solid #EDE8E2;">' . $currency_symbol . ' ' . number_format($roomSubtotal, 2) . '</td>
         </tr>';
     }
 
     if ($childGuests > 0 && $childSuppTotal > 0) {
         $chargeRows .= '<tr style="background:' . $rowBg[$ri++ % 2] . ';">
-            <td width="58%" style="padding:5px 7px; font-size:7px; color:#231F1C; font-family:Helvetica,Arial,sans-serif; border-bottom:1px solid #EDE8E2; line-height:1.3;">Child Supplement &times; ' . $childGuests . '</td>
-            <td width="8%" style="padding:5px 7px; font-size:7px; color:#5E554D; text-align:center; font-family:Helvetica,Arial,sans-serif; border-bottom:1px solid #EDE8E2;">' . $childGuests . '</td>
-            <td width="16%" style="padding:5px 7px; font-size:7px; color:#5E554D; text-align:right; font-family:Helvetica,Arial,sans-serif; border-bottom:1px solid #EDE8E2;">' . $currency_symbol . ' ' . number_format($childSuppTotal / $childGuests, 2) . '</td>
-            <td width="18%" style="padding:5px 7px; font-size:7px; color:#231F1C; font-weight:600; text-align:right; font-family:Helvetica,Arial,sans-serif; border-bottom:1px solid #EDE8E2;">' . $currency_symbol . ' ' . number_format($childSuppTotal, 2) . '</td>
+            <td width="58%" style="padding:6px 8px; font-size:12px; color:#231F1C; font-family:Helvetica,Arial,sans-serif; border-bottom:1px solid #EDE8E2; line-height:1.35;">Child Supplement &times; ' . $childGuests . '</td>
+            <td width="8%" style="padding:6px 8px; font-size:12px; color:#5E554D; text-align:center; font-family:Helvetica,Arial,sans-serif; border-bottom:1px solid #EDE8E2;">' . $childGuests . '</td>
+            <td width="16%" style="padding:6px 8px; font-size:12px; color:#5E554D; text-align:right; font-family:Helvetica,Arial,sans-serif; border-bottom:1px solid #EDE8E2;">' . $currency_symbol . ' ' . number_format($childSuppTotal / $childGuests, 2) . '</td>
+            <td width="18%" style="padding:6px 8px; font-size:12px; color:#231F1C; font-weight:600; text-align:right; font-family:Helvetica,Arial,sans-serif; border-bottom:1px solid #EDE8E2;">' . $currency_symbol . ' ' . number_format($childSuppTotal, 2) . '</td>
         </tr>';
     }
 
     // Rate plan discount row
     if ($ratePlanDiscount > 0 && $ratePlanLabel !== '') {
         $chargeRows .= '<tr style="background:' . $rowBg[$ri++ % 2] . ';">
-            <td width="58%" style="padding:5px 7px; font-size:7px; color:#1a3c2a; font-family:Helvetica,Arial,sans-serif; border-bottom:1px solid #EDE8E2; line-height:1.3;">' . htmlspecialchars($ratePlanLabel) . ' — Rate Discount</td>
-            <td width="8%" style="padding:5px 7px; font-size:7px; color:#5E554D; text-align:center; font-family:Helvetica,Arial,sans-serif; border-bottom:1px solid #EDE8E2;">' . (int)$booking['number_of_nights'] . '</td>
-            <td width="16%" style="padding:5px 7px; font-size:7px; color:#5E554D; text-align:right; font-family:Helvetica,Arial,sans-serif; border-bottom:1px solid #EDE8E2;">—</td>
-            <td width="18%" style="padding:5px 7px; font-size:7px; color:#1a3c2a; font-weight:600; text-align:right; font-family:Helvetica,Arial,sans-serif; border-bottom:1px solid #EDE8E2;">-' . $currency_symbol . ' ' . number_format($ratePlanDiscount, 2) . '</td>
+            <td width="58%" style="padding:6px 8px; font-size:12px; color:#1a3c2a; font-family:Helvetica,Arial,sans-serif; border-bottom:1px solid #EDE8E2; line-height:1.35;">' . htmlspecialchars($ratePlanLabel) . ' — Rate Discount</td>
+            <td width="8%" style="padding:6px 8px; font-size:12px; color:#5E554D; text-align:center; font-family:Helvetica,Arial,sans-serif; border-bottom:1px solid #EDE8E2;">' . (int)$booking['number_of_nights'] . '</td>
+            <td width="16%" style="padding:6px 8px; font-size:12px; color:#5E554D; text-align:right; font-family:Helvetica,Arial,sans-serif; border-bottom:1px solid #EDE8E2;">—</td>
+            <td width="18%" style="padding:6px 8px; font-size:12px; color:#1a3c2a; font-weight:600; text-align:right; font-family:Helvetica,Arial,sans-serif; border-bottom:1px solid #EDE8E2;">-' . $currency_symbol . ' ' . number_format($ratePlanDiscount, 2) . '</td>
         </tr>';
     }
 
     // Package add-on rows
     foreach ($pkgRows as $pkg) {
         $chargeRows .= '<tr style="background:' . $rowBg[$ri++ % 2] . ';">
-            <td width="58%" style="padding:5px 7px; font-size:7px; color:#231F1C; font-family:Helvetica,Arial,sans-serif; border-bottom:1px solid #EDE8E2; line-height:1.3;">' . htmlspecialchars($pkg['package_name']) . ' — Package Add-on</td>
-            <td width="8%" style="padding:5px 7px; font-size:7px; color:#5E554D; text-align:center; font-family:Helvetica,Arial,sans-serif; border-bottom:1px solid #EDE8E2;">' . (int)$pkg['quantity'] . '</td>
-            <td width="16%" style="padding:5px 7px; font-size:7px; color:#5E554D; text-align:right; font-family:Helvetica,Arial,sans-serif; border-bottom:1px solid #EDE8E2;">' . $currency_symbol . ' ' . number_format((float)$pkg['price_amount'], 2) . '</td>
-            <td width="18%" style="padding:5px 7px; font-size:7px; color:#231F1C; font-weight:600; text-align:right; font-family:Helvetica,Arial,sans-serif; border-bottom:1px solid #EDE8E2;">' . $currency_symbol . ' ' . number_format((float)$pkg['total_cost'], 2) . '</td>
+            <td width="58%" style="padding:6px 8px; font-size:12px; color:#231F1C; font-family:Helvetica,Arial,sans-serif; border-bottom:1px solid #EDE8E2; line-height:1.35;">' . htmlspecialchars($pkg['package_name']) . ' — Package Add-on</td>
+            <td width="8%" style="padding:6px 8px; font-size:12px; color:#5E554D; text-align:center; font-family:Helvetica,Arial,sans-serif; border-bottom:1px solid #EDE8E2;">' . (int)$pkg['quantity'] . '</td>
+            <td width="16%" style="padding:6px 8px; font-size:12px; color:#5E554D; text-align:right; font-family:Helvetica,Arial,sans-serif; border-bottom:1px solid #EDE8E2;">' . $currency_symbol . ' ' . number_format((float)$pkg['price_amount'], 2) . '</td>
+            <td width="18%" style="padding:6px 8px; font-size:12px; color:#231F1C; font-weight:600; text-align:right; font-family:Helvetica,Arial,sans-serif; border-bottom:1px solid #EDE8E2;">' . $currency_symbol . ' ' . number_format((float)$pkg['total_cost'], 2) . '</td>
         </tr>';
     }
 
     if ($tourismLevyAmt > 0) {
         $chargeRows .= '<tr style="background:' . $rowBg[$ri++ % 2] . ';">
-            <td width="58%" style="padding:5px 7px; font-size:7px; color:#231F1C; font-family:Helvetica,Arial,sans-serif; border-bottom:1px solid #EDE8E2; line-height:1.3;">Tourism Levy ' . ($tourismLevyPct > 0 ? '(' . number_format($tourismLevyPct, 1) . '%)' : '') . '</td>
-            <td width="8%" style="padding:5px 7px; font-size:7px; color:#5E554D; text-align:center; font-family:Helvetica,Arial,sans-serif; border-bottom:1px solid #EDE8E2;">1</td>
-            <td width="16%" style="padding:5px 7px; font-size:7px; color:#5E554D; text-align:right; font-family:Helvetica,Arial,sans-serif; border-bottom:1px solid #EDE8E2;">—</td>
-            <td width="18%" style="padding:5px 7px; font-size:7px; color:#231F1C; font-weight:600; text-align:right; font-family:Helvetica,Arial,sans-serif; border-bottom:1px solid #EDE8E2;">' . $currency_symbol . ' ' . number_format($tourismLevyAmt, 2) . '</td>
+            <td width="58%" style="padding:6px 8px; font-size:12px; color:#231F1C; font-family:Helvetica,Arial,sans-serif; border-bottom:1px solid #EDE8E2; line-height:1.35;">Tourism Levy ' . ($tourismLevyPct > 0 ? '(' . number_format($tourismLevyPct, 1) . '%)' : '') . '</td>
+            <td width="8%" style="padding:6px 8px; font-size:12px; color:#5E554D; text-align:center; font-family:Helvetica,Arial,sans-serif; border-bottom:1px solid #EDE8E2;">1</td>
+            <td width="16%" style="padding:6px 8px; font-size:12px; color:#5E554D; text-align:right; font-family:Helvetica,Arial,sans-serif; border-bottom:1px solid #EDE8E2;">—</td>
+            <td width="18%" style="padding:6px 8px; font-size:12px; color:#231F1C; font-weight:600; text-align:right; font-family:Helvetica,Arial,sans-serif; border-bottom:1px solid #EDE8E2;">' . $currency_symbol . ' ' . number_format($tourismLevyAmt, 2) . '</td>
         </tr>';
     }
 
@@ -468,10 +458,10 @@ function buildInvoiceHTML(array $booking, string $invoice_number, string $site_n
             default => ucfirst((string)($fc['charge_type'] ?? 'Extra')),
         };
         $chargeRows .= '<tr style="background:' . $rowBg[$ri++ % 2] . ';">
-            <td width="58%" style="padding:3px 5px; font-size:6px; color:#231F1C; font-family:Helvetica,Arial,sans-serif; border-bottom:1px solid #EDE8E2; line-height:1.1;">' . htmlspecialchars($fc['description']) . ' <span style="font-size:5px; color:#B18247; font-style:italic;">' . $typeIcon . '</span></td>
-            <td width="8%" style="padding:5px 7px; font-size:7px; color:#5E554D; text-align:center; font-family:Helvetica,Arial,sans-serif; border-bottom:1px solid #EDE8E2;">' . (int)$fc['quantity'] . '</td>
-            <td width="16%" style="padding:5px 7px; font-size:7px; color:#5E554D; text-align:right; font-family:Helvetica,Arial,sans-serif; border-bottom:1px solid #EDE8E2;">' . $currency_symbol . ' ' . number_format((float)$fc['unit_price'], 2) . '</td>
-            <td width="18%" style="padding:5px 7px; font-size:7px; color:#231F1C; font-weight:600; text-align:right; font-family:Helvetica,Arial,sans-serif; border-bottom:1px solid #EDE8E2;">' . $currency_symbol . ' ' . number_format((float)$fc['line_total'], 2) . '</td>
+            <td width="58%" style="padding:4px 6px; font-size:11px; color:#231F1C; font-family:Helvetica,Arial,sans-serif; border-bottom:1px solid #EDE8E2; line-height:1.25;">' . htmlspecialchars($fc['description']) . ' <span style="font-size:9px; color:#B18247; font-style:italic;">' . $typeIcon . '</span></td>
+            <td width="8%" style="padding:6px 8px; font-size:12px; color:#5E554D; text-align:center; font-family:Helvetica,Arial,sans-serif; border-bottom:1px solid #EDE8E2;">' . (int)$fc['quantity'] . '</td>
+            <td width="16%" style="padding:6px 8px; font-size:12px; color:#5E554D; text-align:right; font-family:Helvetica,Arial,sans-serif; border-bottom:1px solid #EDE8E2;">' . $currency_symbol . ' ' . number_format((float)$fc['unit_price'], 2) . '</td>
+            <td width="18%" style="padding:6px 8px; font-size:12px; color:#231F1C; font-weight:600; text-align:right; font-family:Helvetica,Arial,sans-serif; border-bottom:1px solid #EDE8E2;">' . $currency_symbol . ' ' . number_format((float)$fc['line_total'], 2) . '</td>
         </tr>';
     }
 
@@ -479,9 +469,9 @@ function buildInvoiceHTML(array $booking, string $invoice_number, string $site_n
     $paymentRows = '';
     foreach ($payments as $pmt) {
         $paymentRows .= '<tr>
-            <td style="padding:2px 0; font-size:5px; color:#5E554D; border-bottom:1px solid #EDE8E2;">' . date('j M Y', strtotime($pmt['payment_date'])) . '</td>
-            <td style="padding:2px 0; font-size:5px; color:#5E554D; border-bottom:1px solid #EDE8E2;">' . htmlspecialchars(ucwords(str_replace('_', ' ', $pmt['payment_method']))) . '</td>
-            <td style="padding:2px 0; font-size:5px; color:#231F1C; font-weight:600; text-align:right; border-bottom:1px solid #EDE8E2;">' . $currency_symbol . ' ' . number_format((float)$pmt['total_amount'], 2) . '</td>
+            <td style="padding:4px 0; font-size:11px; color:#5E554D; border-bottom:1px solid #EDE8E2;">' . date('j M Y', strtotime($pmt['payment_date'])) . '</td>
+            <td style="padding:4px 0; font-size:11px; color:#5E554D; border-bottom:1px solid #EDE8E2;">' . htmlspecialchars(ucwords(str_replace('_', ' ', $pmt['payment_method']))) . '</td>
+            <td style="padding:4px 0; font-size:11px; color:#231F1C; font-weight:600; text-align:right; border-bottom:1px solid #EDE8E2;">' . $currency_symbol . ' ' . number_format((float)$pmt['total_amount'], 2) . '</td>
         </tr>';
     }
 
@@ -489,36 +479,36 @@ function buildInvoiceHTML(array $booking, string $invoice_number, string $site_n
 
     // ── TOTALS ROWS (appended directly into charges tbody) ───
     $cSub = number_format($roomSubtotal + $pkgTotal + $folioTotal - $folioVat, 2);
-    $totalsRows  = '<tr><td colspan="3" style="padding:5px 7px 2px 0; text-align:right; font-size:7px; color:#5E554D; font-family:Helvetica,Arial,sans-serif; border-top:1px solid #D8CDBE;">Room &amp; extras subtotal</td><td width="18%" style="padding:5px 7px 2px; text-align:right; font-size:7px; color:#231F1C; font-family:Helvetica,Arial,sans-serif; border-top:1px solid #D8CDBE;">' . $currency_symbol . ' ' . $cSub . '</td></tr>';
+    $totalsRows  = '<tr><td colspan="3" style="padding:6px 8px 3px 0; text-align:right; font-size:12px; color:#5E554D; font-family:Helvetica,Arial,sans-serif; border-top:1px solid #D8CDBE;">Subtotal</td><td width="18%" style="padding:6px 8px 3px; text-align:right; font-size:12px; color:#231F1C; font-family:Helvetica,Arial,sans-serif; border-top:1px solid #D8CDBE;">' . $currency_symbol . ' ' . $cSub . '</td></tr>';
     if ($vatEnabled && $vatAmount > 0) {
-        $totalsRows .= '<tr><td colspan="3" style="padding:2px 7px 2px 0; text-align:right; font-size:7px; color:#5E554D; font-family:Helvetica,Arial,sans-serif; border-bottom:1px solid #EDE8E2;">VAT (' . number_format($vatRate, 1) . '%)</td><td width="18%" style="padding:2px 7px; text-align:right; font-size:7px; color:#231F1C; font-family:Helvetica,Arial,sans-serif; border-bottom:1px solid #EDE8E2;">' . $currency_symbol . ' ' . number_format($vatAmount, 2) . '</td></tr>';
+        $totalsRows .= '<tr><td colspan="3" style="padding:3px 8px 3px 0; text-align:right; font-size:12px; color:#5E554D; font-family:Helvetica,Arial,sans-serif; border-bottom:1px solid #EDE8E2;">VAT (' . number_format($vatRate, 1) . '%)</td><td width="18%" style="padding:3px 8px; text-align:right; font-size:12px; color:#231F1C; font-family:Helvetica,Arial,sans-serif; border-bottom:1px solid #EDE8E2;">' . $currency_symbol . ' ' . number_format($vatAmount, 2) . '</td></tr>';
     }
     if ($tourismLevyAmt > 0) {
-        $totalsRows .= '<tr><td colspan="3" style="padding:2px 7px 2px 0; text-align:right; font-size:7px; color:#5E554D; font-family:Helvetica,Arial,sans-serif; border-bottom:1px solid #EDE8E2;">Tourism levy</td><td width="18%" style="padding:2px 7px; text-align:right; font-size:7px; color:#231F1C; font-family:Helvetica,Arial,sans-serif; border-bottom:1px solid #EDE8E2;">' . $currency_symbol . ' ' . number_format($tourismLevyAmt, 2) . '</td></tr>';
+        $totalsRows .= '<tr><td colspan="3" style="padding:3px 8px 3px 0; text-align:right; font-size:12px; color:#5E554D; font-family:Helvetica,Arial,sans-serif; border-bottom:1px solid #EDE8E2;">Tourism levy</td><td width="18%" style="padding:3px 8px; text-align:right; font-size:12px; color:#231F1C; font-family:Helvetica,Arial,sans-serif; border-bottom:1px solid #EDE8E2;">' . $currency_symbol . ' ' . number_format($tourismLevyAmt, 2) . '</td></tr>';
     }
-    $totalsRows .= '<tr><td colspan="3" bgcolor="#20303E" style="padding:5px 7px; background-color:#20303E; font-size:7px; font-weight:700; color:#F7F3EE; font-family:Helvetica,Arial,sans-serif; text-align:right;">Invoice Total</td><td width="18%" bgcolor="#20303E" style="padding:5px 7px; background-color:#20303E; font-size:7px; font-weight:700; color:#D5B37C; font-family:Helvetica,Arial,sans-serif; text-align:right;">' . $currency_symbol . ' ' . number_format($totalWithVat, 2) . '</td></tr>';
-    $totalsRows .= '<tr><td colspan="3" style="padding:2px 7px 1px 0; text-align:right; font-size:7px; color:#5E554D; font-family:Helvetica,Arial,sans-serif;">Amount paid</td><td width="18%" style="padding:2px 7px 1px; text-align:right; font-size:7px; color:#4a7c5e; font-weight:700; font-family:Helvetica,Arial,sans-serif;">' . $currency_symbol . ' ' . number_format($amountPaid, 2) . '</td></tr>';
+    $totalsRows .= '<tr><td colspan="3" bgcolor="#20303E" style="padding:6px 8px; background-color:#20303E; font-size:12px; font-weight:700; color:#F7F3EE; font-family:Helvetica,Arial,sans-serif; text-align:right;">Invoice Total</td><td width="18%" bgcolor="#20303E" style="padding:6px 8px; background-color:#20303E; font-size:12px; font-weight:700; color:#D5B37C; font-family:Helvetica,Arial,sans-serif; text-align:right;">' . $currency_symbol . ' ' . number_format($totalWithVat, 2) . '</td></tr>';
+    $totalsRows .= '<tr><td colspan="3" style="padding:3px 8px 2px 0; text-align:right; font-size:12px; color:#5E554D; font-family:Helvetica,Arial,sans-serif;">Amount Paid</td><td width="18%" style="padding:3px 8px 2px; text-align:right; font-size:12px; color:#4a7c5e; font-weight:700; font-family:Helvetica,Arial,sans-serif;">' . $currency_symbol . ' ' . number_format($amountPaid, 2) . '</td></tr>';
     $balanceDueDisplayValue = max(0, $balanceDue);
     $balanceDueColor = $balanceDue > 0 ? '#9b2c2c' : '#4a7c5e';
-    $totalsRows .= '<tr><td colspan="3" style="padding:1px 7px 4px 0; text-align:right; font-size:7px; color:' . $balanceDueColor . '; font-weight:700; font-family:Helvetica,Arial,sans-serif;">Balance due</td><td width="18%" style="padding:1px 7px 4px; text-align:right; font-size:7px; color:' . $balanceDueColor . '; font-weight:700; font-family:Helvetica,Arial,sans-serif;">' . $currency_symbol . ' ' . number_format($balanceDueDisplayValue, 2) . '</td></tr>';
+    $totalsRows .= '<tr><td colspan="3" style="padding:2px 8px 5px 0; text-align:right; font-size:12px; color:' . $balanceDueColor . '; font-weight:700; font-family:Helvetica,Arial,sans-serif;">Balance Due</td><td width="18%" style="padding:2px 8px 5px; text-align:right; font-size:12px; color:' . $balanceDueColor . '; font-weight:700; font-family:Helvetica,Arial,sans-serif;">' . $currency_symbol . ' ' . number_format($balanceDueDisplayValue, 2) . '</td></tr>';
 
     // ── DB TEMPLATE OVERRIDE (payment_invoice_document) ────────
     if (function_exists('getBookingEmailTemplateConfig')) {
         $docTemplate = getBookingEmailTemplateConfig('payment_invoice_document', []);
         if (!empty($docTemplate['html_body'])) {
             $vatNumberHtml = $vatNumber
-                ? '<p style="margin:2px 0 0; font-size:6px; color:#8A775F; font-family:Helvetica,Arial,sans-serif; letter-spacing:0.4px;">VAT Reg: ' . htmlspecialchars($vatNumber) . '</p>'
+                ? '<p style="margin:2px 0 0; font-size:10px; color:#8A775F; font-family:Helvetica,Arial,sans-serif; letter-spacing:0.04em;">VAT Reg: ' . htmlspecialchars($vatNumber) . '</p>'
                 : '';
             $roomIconHtml = '<span style="color:#B18247;font-size:11px;vertical-align:middle;">&#9679;</span>';
             $payHistorySection = '';
             if (!empty($payments)) {
-                $payHistorySection = '<div style="background:#FCFAF7;padding:9px 11px;border-top:2px solid #D5B37C;">'
-                    . '<p style="margin:0 0 2px;font-size:5px;letter-spacing:1px;text-transform:uppercase;color:#20303E;font-weight:700;">Payment History</p>'
+                $payHistorySection = '<div style="background:#FCFAF7;padding:10px 12px;border-top:2px solid #D5B37C;">'
+                    . '<p style="margin:0 0 6px;font-size:11px;letter-spacing:0.12em;text-transform:uppercase;color:#20303E;font-weight:700;">Payment History</p>'
                     . '<table style="width:100%; border-collapse:collapse;" cellpadding="0" cellspacing="0">'
                     . '<tr>'
-                    . '<th style="padding:0 0 2px; text-align:left; font-size:5px; letter-spacing:0.7px; text-transform:uppercase; color:#7C6E5B; font-family:Helvetica,Arial,sans-serif; font-weight:700;">Date</th>'
-                    . '<th style="padding:0 0 2px; text-align:left; font-size:5px; letter-spacing:0.7px; text-transform:uppercase; color:#7C6E5B; font-family:Helvetica,Arial,sans-serif; font-weight:700;">Method</th>'
-                    . '<th style="padding:0 0 2px; text-align:right; font-size:5px; letter-spacing:0.7px; text-transform:uppercase; color:#7C6E5B; font-family:Helvetica,Arial,sans-serif; font-weight:700;">Amount</th>'
+                    . '<th style="padding:0 0 4px; text-align:left; font-size:11px; letter-spacing:0.08em; text-transform:uppercase; color:#7C6E5B; font-family:Helvetica,Arial,sans-serif; font-weight:700;">Date</th>'
+                    . '<th style="padding:0 0 4px; text-align:left; font-size:11px; letter-spacing:0.08em; text-transform:uppercase; color:#7C6E5B; font-family:Helvetica,Arial,sans-serif; font-weight:700;">Method</th>'
+                    . '<th style="padding:0 0 4px; text-align:right; font-size:11px; letter-spacing:0.08em; text-transform:uppercase; color:#7C6E5B; font-family:Helvetica,Arial,sans-serif; font-weight:700;">Amount</th>'
                     . '</tr>' . $paymentRows . '</table></div>';
             }
 
@@ -528,20 +518,20 @@ function buildInvoiceHTML(array $booking, string $invoice_number, string $site_n
             $bankAccountNumber = trim((string)getSetting('bank_account_number', ''));
             $bankBranch = trim((string)getSetting('bank_branch', ''));
             if ($bankName !== '') {
-                $bankRows[] = '<tr><td style="padding:1px 0; font-size:6px; color:#1F1C17; line-height:1.3; text-align:left;"><span style="color:#7A6F63; font-weight:700;">Bank:</span> <span style="font-weight:600;">' . htmlspecialchars($bankName, ENT_QUOTES, 'UTF-8') . '</span></td></tr>';
+                $bankRows[] = '<tr><td style="padding:3px 0; font-size:11px; color:#1F1C17; line-height:1.45; text-align:left;"><span style="color:#7A6F63; font-weight:700;">Bank:</span> <span style="font-weight:600;">' . htmlspecialchars($bankName, ENT_QUOTES, 'UTF-8') . '</span></td></tr>';
             }
             if ($bankAccountName !== '') {
-                $bankRows[] = '<tr><td style="padding:1px 0; font-size:6px; color:#1F1C17; line-height:1.3; text-align:left;"><span style="color:#7A6F63; font-weight:700;">Account Name:</span> <span style="font-weight:600;">' . htmlspecialchars($bankAccountName, ENT_QUOTES, 'UTF-8') . '</span></td></tr>';
+                $bankRows[] = '<tr><td style="padding:3px 0; font-size:11px; color:#1F1C17; line-height:1.45; text-align:left;"><span style="color:#7A6F63; font-weight:700;">Account Name:</span> <span style="font-weight:600;">' . htmlspecialchars($bankAccountName, ENT_QUOTES, 'UTF-8') . '</span></td></tr>';
             }
             if ($bankAccountNumber !== '') {
-                $bankRows[] = '<tr><td style="padding:1px 0; font-size:6px; color:#1F1C17; line-height:1.3; text-align:left;"><span style="color:#7A6F63; font-weight:700;">Account No.:</span> <span style="font-weight:600;">' . htmlspecialchars($bankAccountNumber, ENT_QUOTES, 'UTF-8') . '</span></td></tr>';
+                $bankRows[] = '<tr><td style="padding:3px 0; font-size:11px; color:#1F1C17; line-height:1.45; text-align:left;"><span style="color:#7A6F63; font-weight:700;">Account No.:</span> <span style="font-weight:600;">' . htmlspecialchars($bankAccountNumber, ENT_QUOTES, 'UTF-8') . '</span></td></tr>';
             }
             if ($bankBranch !== '') {
-                $bankRows[] = '<tr><td style="padding:1px 0; font-size:6px; color:#1F1C17; line-height:1.3; text-align:left;"><span style="color:#7A6F63; font-weight:700;">Branch:</span> <span style="font-weight:600;">' . htmlspecialchars($bankBranch, ENT_QUOTES, 'UTF-8') . '</span></td></tr>';
+                $bankRows[] = '<tr><td style="padding:3px 0; font-size:11px; color:#1F1C17; line-height:1.45; text-align:left;"><span style="color:#7A6F63; font-weight:700;">Branch:</span> <span style="font-weight:600;">' . htmlspecialchars($bankBranch, ENT_QUOTES, 'UTF-8') . '</span></td></tr>';
             }
             $bankDetailsHtml = $bankRows !== []
-                ? '<div style="background:#FCFAF7;padding:9px 11px;border-top:2px solid #D5B37C;text-align:left;">'
-                . '<p style="margin:0 0 4px;font-size:6px;letter-spacing:1px;text-transform:uppercase;color:#20303E;font-weight:700;">Bank Details</p>'
+                ? '<div style="background:#FCFAF7;padding:10px 12px;border-top:2px solid #D5B37C;text-align:left;">'
+                . '<p style="margin:0 0 7px;font-size:11px;letter-spacing:0.12em;text-transform:uppercase;color:#20303E;font-weight:700;">Bank Details</p>'
                 . '<table style="width:100%;border-collapse:collapse;" cellpadding="0" cellspacing="0">' . implode('', $bankRows) . '</table>'
                 . '</div>'
                 : '';
@@ -556,8 +546,8 @@ function buildInvoiceHTML(array $booking, string $invoice_number, string $site_n
             }
             $invoiceTermsHtml = $invoiceTermsText !== ''
                 ? '<div style="background:#FCFAF7;padding:9px 11px;border-top:2px solid #20303E;">'
-                . '<p style="margin:0 0 4px;font-size:6px;letter-spacing:1px;text-transform:uppercase;color:#20303E;font-weight:700;">Invoice Terms</p>'
-                . '<p style="margin:0;font-size:6px;line-height:1.4;color:#5F5343;">' . nl2br(htmlspecialchars($invoiceTermsText, ENT_QUOTES, 'UTF-8')) . '</p>'
+                . '<p style="margin:0 0 5px;font-size:10px;letter-spacing:0.12em;text-transform:uppercase;color:#20303E;font-weight:700;">Invoice Terms</p>'
+                . '<p style="margin:0;font-size:10px;line-height:1.5;color:#5F5343;">' . nl2br(htmlspecialchars($invoiceTermsText, ENT_QUOTES, 'UTF-8')) . '</p>'
                 . '</div>'
                 : '';
 
@@ -1047,6 +1037,35 @@ function sendInvoiceEmailToGuestWithCC(array $booking, string $invoice_file, arr
             $textBody = $dbTemplate['text_body'] ?? '';
         }
 
+        // Append full invoice document HTML to the email body
+        if (function_exists('buildInvoiceHTML')) {
+            try {
+                $invDocHtml = buildInvoiceHTML(
+                    $booking,
+                    $invoice_number,
+                    getSetting('site_name'),
+                    getSetting('email_from_email'),
+                    getSetting('phone_main'),
+                    implode(', ', array_filter([getSetting('address_line1'), getSetting('address_line2'), getSetting('address_country')])),
+                    getSetting('currency_symbol')
+                );
+                if ($invDocHtml !== '') {
+                    $docSection = '<div style="background:#d5cfc4;padding:24px 20px 0;">'
+                        . '<div style="max-width:720px;margin:0 auto;">'
+                        . '<p style="font-family:Helvetica,Arial,sans-serif;font-size:10px;letter-spacing:2px;text-transform:uppercase;color:#9b8f7e;margin:0 0 12px;text-align:center;">Full Invoice</p>'
+                        . $invDocHtml
+                        . '</div></div>';
+                    if (stripos($htmlBody, '</body>') !== false) {
+                        $htmlBody = (string)preg_replace('/<\/body>/i', $docSection . '</body>', $htmlBody, 1);
+                    } else {
+                        $htmlBody .= $docSection;
+                    }
+                }
+            } catch (Throwable $e) {
+                error_log('sendInvoiceEmailToGuestWithCC: failed to build invoice doc HTML: ' . $e->getMessage());
+            }
+        }
+
         // Send email with attachment and CC recipients
         return sendEmailWithAttachmentAndCC(
             $booking['guest_email'],
@@ -1505,34 +1524,27 @@ function generateConferenceInvoicePDF(int $enquiry_id)
         $filepath = $invoiceDir . '/' . $filename;
 
         if ($tcpdf_loaded) {
-            // Use TCPDF for professional PDF generation
-            $tcpdfClass = 'TCPDF';
-            $pdf = new $tcpdfClass(PDF_PAGE_ORIENTATION, PDF_UNIT, PDF_PAGE_FORMAT, true, 'UTF-8', false);
-
-            // Set document information
-            $pdf->SetCreator($site_name);
-            $pdf->SetAuthor($site_name);
-            $pdf->SetTitle('Invoice ' . $invoice_number);
-            $pdf->SetSubject('Conference Payment Invoice');
-
-            // Remove default header/footer
-            $pdf->setPrintHeader(false);
-            $pdf->setPrintFooter(false);
-
-            // Set margins
-            $pdf->SetMargins(15, 15, 15);
-
-            // Add a page
-            $pdf->AddPage();
-
-            // Build HTML content
             $html = buildConferenceInvoiceHTML($enquiry, $invoice_number, $site_name, $email_address, $phone_number, $address, $currency_symbol);
 
-            // Write HTML
-            $pdf->writeHTML($html, true, false, true, false, '');
-
-            // Save PDF
-            $pdf->Output($filepath, 'F');
+            // Use shared renderer so conference invoice PDFs match HTML preview styling.
+            if (function_exists('bookingRenderPdfFromHtml')) {
+                file_put_contents($filepath, bookingRenderPdfFromHtml($html, 'Invoice ' . $invoice_number));
+            } else {
+                $tcpdfClass = 'TCPDF';
+                $pdf = new $tcpdfClass(PDF_PAGE_ORIENTATION, PDF_UNIT, PDF_PAGE_FORMAT, true, 'UTF-8', false);
+                $pdf->SetCreator($site_name);
+                $pdf->SetAuthor($site_name);
+                $pdf->SetTitle('Invoice ' . $invoice_number);
+                $pdf->SetSubject('Conference Payment Invoice');
+                $pdf->setPrintHeader(false);
+                $pdf->setPrintFooter(false);
+                $pdf->SetMargins(8, 8, 8);
+                $pdf->SetAutoPageBreak(true, 10);
+                $pdf->SetFont('helvetica', '', 10);
+                $pdf->AddPage();
+                $pdf->writeHTML($html, true, false, true, false, '');
+                $pdf->Output($filepath, 'F');
+            }
         } else {
             // Fallback: Generate HTML invoice and save as file
             $html = buildConferenceInvoiceHTML($enquiry, $invoice_number, $site_name, $email_address, $phone_number, $address, $currency_symbol);
@@ -1975,7 +1987,7 @@ function sendConferenceInvoiceEmailToClient(array $enquiry, string $invoice_file
         $ciVatNumHtml = $ciVatNum !== ''
             ? '<p style="margin:8px 0 0;font-size:11px;color:#9b8f7e;text-align:center;">VAT Reg. No.: ' . htmlspecialchars($ciVatNum, ENT_QUOTES, 'UTF-8') . '</p>'
             : '';
-        $ciLogoSrc  = function_exists('hotel_invoice_logo_src') ? hotel_invoice_logo_src() : '';
+        $ciLogoSrc  = function_exists('hotel_email_logo_url') ? hotel_email_logo_url() : '';
         $ciLogoHtml = $ciLogoSrc !== ''
             ? '<img src="' . htmlspecialchars($ciLogoSrc, ENT_QUOTES, 'UTF-8') . '" alt="' . htmlspecialchars((string)$email_site_name, ENT_QUOTES, 'UTF-8') . '" style="max-width:160px;height:auto;display:block;margin:0 auto;">'
             : '';

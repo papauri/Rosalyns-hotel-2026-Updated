@@ -255,7 +255,7 @@ $receiptPlaceholderTokens = array_keys($templatePreviewMap);
 
     <?php require_once 'includes/admin-header.php'; ?>
 
-    <div class="content receipts-page">
+    <div class="content receipts-page finance-page">
         <div class="acct-page-header">
             <div class="acct-page-header__copy">
                 <h1 class="acct-page-header__title">Receipts</h1>

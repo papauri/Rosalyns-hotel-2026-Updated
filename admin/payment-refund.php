@@ -269,7 +269,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $payment
 
     <?php require_once 'includes/admin-header.php'; ?>
 
-    <div class="content">
+    <div class="content finance-page">
         <div class="acct-page-header">
             <div class="acct-page-header__copy">
                 <h1 class="acct-page-header__title">Process Refund</h1>

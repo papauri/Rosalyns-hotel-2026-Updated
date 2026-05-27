@@ -350,6 +350,68 @@ a.shift-card:hover,
     color: #c82333;
 }
 
+.shift-card--interactive {
+    cursor: pointer;
+}
+
+.shift-card--interactive:hover {
+    box-shadow: 0 8px 16px rgba(0, 0, 0, 0.09);
+    border-color: var(--color-primary, #8A775F);
+    transform: translateY(-2px);
+}
+
+.shift-card--interactive:focus-visible {
+    outline: 2px solid var(--color-primary, #8A775F);
+    outline-offset: 2px;
+}
+
+.shift-card__hint {
+    margin-top: 8px;
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--color-primary, #8A775F);
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+}
+
+.stock-insight-note {
+    margin: 0 0 10px;
+    color: #5f6b7a;
+    font-size: 13px;
+    line-height: 1.45;
+}
+
+.stock-insight-table {
+    width: 100%;
+    border-collapse: collapse;
+    margin-bottom: 12px;
+}
+
+.stock-insight-table th,
+.stock-insight-table td {
+    text-align: left;
+    padding: 9px 10px;
+    border-bottom: 1px solid #e8ebef;
+    font-size: 13px;
+}
+
+.stock-insight-table th {
+    color: #5f6b7a;
+    font-weight: 600;
+}
+
+.stock-insight-table td {
+    color: #1d2430;
+    font-weight: 600;
+}
+
+.stock-insight-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+}
+
 .filter-bar {
     background: #eef4ff;
     border: 1px solid #b8daff;

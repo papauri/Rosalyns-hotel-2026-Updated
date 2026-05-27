@@ -272,12 +272,12 @@
     flex: 1;
 }
 
-.btn-primary {
+.cache-management-page .btn-primary {
     background: var(--gold, var(--color-lux-gold, #B18247));
     color: var(--deep-navy, #111827);
 }
 
-.btn-primary:hover {
+.cache-management-page .btn-primary:hover {
     background: var(--color-primary, #8A775F);
     transform: translateY(-2px);
     box-shadow: 0 4px 12px rgba(138, 119, 95, 0.3);
@@ -395,7 +395,7 @@ input:checked+.slider:before {
     background: var(--admin-hover-bg, #f8f9fa);
 }
 
-.badge {
+.cache-management-page .badge {
     display: inline-block;
     padding: 4px 8px;
     font-size: 11px;
@@ -404,27 +404,27 @@ input:checked+.slider:before {
     text-transform: uppercase;
 }
 
-.badge-main {
+.cache-management-page .badge-main {
     background: rgba(138, 119, 95, 0.15);
     color: var(--color-primary, #8A775F);
 }
 
-.badge-image {
+.cache-management-page .badge-image {
     background: rgba(23, 162, 184, 0.15);
     color: #17a2b8;
 }
 
-.badge-page {
+.cache-management-page .badge-page {
     background: rgba(111, 66, 193, 0.15);
     color: #6f42c1;
 }
 
-.badge-active {
+.cache-management-page .badge-active {
     background: rgba(40, 167, 69, 0.15);
     color: #28a745;
 }
 
-.badge-expired {
+.cache-management-page .badge-expired {
     background: rgba(220, 53, 69, 0.15);
     color: #dc3545;
 }
@@ -792,7 +792,7 @@ input:checked+.slider:before {
     color: #334155;
 }
 
-.badge {
+.cache-management-page .badge {
     border-radius: 999px;
     padding: 3px 8px;
     font-size: 10px;

@@ -87,6 +87,7 @@ $gym_csrf_token = pub_csrf_generate('gym');
 $bookingSuccess = false;
 $bookingError = '';
 $bookingReference = '';
+$bookingEmailWarning = '';
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['gym_booking_form'])) {
     // CSRF validation
     if (!pub_csrf_validate($_POST['csrf_token'] ?? '', 'gym')) {
@@ -199,6 +200,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['gym_booking_form'])) 
             // Set success and generate reference after validation passes
             $bookingSuccess = true;
             $bookingReference = 'GYM-' . strtoupper(substr(uniqid(), -8));
+            $booking_data['reference_number'] = $bookingReference;
 
             // Save inquiry to database
             try {
@@ -240,6 +242,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['gym_booking_form'])) 
                 error_log("Failed to send gym admin notification: " . $admin_result['message']);
             } else {
                 error_log("Gym admin notification sent successfully");
+            }
+
+            if (!$customer_result['success'] && !$admin_result['success']) {
+                $bookingEmailWarning = 'Your booking request was saved, but both guest and admin email notifications failed.';
+            } elseif (!$customer_result['success']) {
+                $bookingEmailWarning = 'Your booking request was saved, but we could not send your confirmation email right now.';
+            } elseif (!$admin_result['success']) {
+                $bookingEmailWarning = 'Your booking request was saved and your confirmation email was sent, but internal team notification failed.';
             }
 
             error_log("Gym booking submitted successfully from: " . $sanitized_data['email'] . " with reference: " . $bookingReference);
@@ -321,9 +331,11 @@ try {
                 <p class="modal-reference-label">Your Reference Number:</p>
                 <p class="modal-reference-value">' . htmlspecialchars($bookingReference) . '</p>
             </div>
-            <p class="modal-footer">
-                <i class="fas fa-envelope modal-icon-inline"></i> A confirmation email has been sent to your email address.<br>
-                <i class="fas fa-info-circle modal-icon-inline"></i> Please save this reference number for your records.
+            <p class="modal-footer">' .
+            (empty($bookingEmailWarning)
+                ? '<i class="fas fa-envelope modal-icon-inline"></i> A confirmation email has been sent to your email address.<br>'
+                : '<i class="fas fa-exclamation-triangle modal-icon-inline-error"></i> ' . htmlspecialchars($bookingEmailWarning) . '<br>') .
+            '<i class="fas fa-info-circle modal-icon-inline"></i> Please save this reference number for your records.
             </p>
         </div>';
     } elseif (!empty($bookingError)) {

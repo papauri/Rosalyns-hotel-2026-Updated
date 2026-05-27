@@ -914,6 +914,10 @@ if (!function_exists('sendCreditNoteEmail')) {
             if (function_exists('getBookingEmailTemplateConfig')) {
                 $dbTpl = getBookingEmailTemplateConfig('credit_note', []);
                 if (!empty($dbTpl['html_body'])) {
+                    $cnLogoUrl  = function_exists('hotel_email_logo_url') ? hotel_email_logo_url() : '';
+                    $cnLogoHtml = $cnLogoUrl !== ''
+                        ? '<img src="' . htmlspecialchars($cnLogoUrl, ENT_QUOTES, 'UTF-8') . '" alt="' . htmlspecialchars($site_name, ENT_QUOTES, 'UTF-8') . '" style="max-width:160px;height:auto;display:block;margin:0 auto;">'
+                        : '';
                     $cnPlaceholders = [
                         '{{site_name}}'          => htmlspecialchars($site_name),
                         '{{guest_name}}'         => htmlspecialchars((string)$cn['guest_name']),
@@ -929,6 +933,7 @@ if (!function_exists('sendCreditNoteEmail')) {
                         '{{booking_reference}}'  => htmlspecialchars((string)($cn['booking_reference'] ?? '')),
                         '{{currency_symbol}}'    => htmlspecialchars($currency_symbol),
                         '{{contact_email}}'      => htmlspecialchars($fromEmail),
+                        '{{logo_html}}'          => $cnLogoHtml,
                     ];
                     $htmlBody = str_replace(array_keys($cnPlaceholders), array_values($cnPlaceholders), $dbTpl['html_body']);
                     if (!empty($dbTpl['subject'])) {
@@ -960,7 +965,7 @@ if (!function_exists('sendCreditNoteEmail')) {
 
             $mail->isHTML(true);
             $mail->Subject = $cnEmailSubject;
-            $mail->Body    = $htmlBody;
+            $mail->Body    = hotel_embed_logo_cid($mail, wrapEmailTemplate($htmlBody, $cnEmailSubject));
             $mail->AltBody = "Dear {$cn['guest_name']},\n\nYour credit note {$cn['credit_note_number']} for {$currency_symbol} " . number_format((float)$cn['original_amount'], 2) . " is attached.\n\nPlease quote this reference when making your next booking.\n\nWarm regards,\n{$site_name}";
 
             // Fix: if the stored PDF path is an HTML fallback, regenerate a real PDF first

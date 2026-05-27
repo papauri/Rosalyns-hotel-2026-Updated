@@ -15,7 +15,7 @@
     background: var(--admin-surface, #fff);
     border-radius: 12px;
     border: 1px solid var(--admin-border, #e9ecef);
-    box-shadow: var(--admin-shadow, 0 2px 12px rgba(0,0,0,0.06));
+    box-shadow: var(--admin-shadow, 0 2px 12px rgba(0, 0, 0, 0.06));
     padding: 18px;
     margin-bottom: 18px;
 }
@@ -82,7 +82,7 @@
     cursor: grabbing;
 }
 
-.badge {
+.page-management-page .badge {
     display: inline-flex;
     align-items: center;
     gap: 6px;
@@ -92,17 +92,32 @@
     padding: 4px 10px;
 }
 
-.badge-enabled { background: #e8f7ee; color: #1f7a45; }
-.badge-disabled { background: #fdeced; color: #a8373f; }
-.badge-nav-yes { background: #eaf3ff; color: #245c97; }
-.badge-nav-no { background: #f1f3f5; color: #5f6b7a; }
+.page-management-page .badge-enabled {
+    background: #e8f7ee;
+    color: #1f7a45;
+}
+
+.page-management-page .badge-disabled {
+    background: #fdeced;
+    color: #a8373f;
+}
+
+.page-management-page .badge-nav-yes {
+    background: #eaf3ff;
+    color: #245c97;
+}
+
+.page-management-page .badge-nav-no {
+    background: #f1f3f5;
+    color: #5f6b7a;
+}
 
 .action-group {
     display: inline-flex;
     gap: 6px;
 }
 
-.btn-toggle {
+.page-management-page .btn-toggle {
     border: 0;
     width: 34px;
     height: 34px;
@@ -110,14 +125,29 @@
     cursor: pointer;
 }
 
-.btn-enable { background: #e8f7ee; color: #1f7a45; }
-.btn-disable { background: #fdeced; color: #a8373f; }
-.btn-nav-toggle { background: #eaf3ff; color: #245c97; }
-.btn-edit { background: #f3f5f7; color: #44505f; }
+.page-management-page .btn-enable {
+    background: #e8f7ee;
+    color: #1f7a45;
+}
 
-.btn-save-order,
-.btn-submit,
-.btn-cancel {
+.page-management-page .btn-disable {
+    background: #fdeced;
+    color: #a8373f;
+}
+
+.page-management-page .btn-nav-toggle {
+    background: #eaf3ff;
+    color: #245c97;
+}
+
+.page-management-page .btn-edit {
+    background: #f3f5f7;
+    color: #44505f;
+}
+
+.page-management-page .btn-save-order,
+.page-management-page .btn-submit,
+.page-management-page .btn-cancel {
     border: 0;
     border-radius: 8px;
     padding: 9px 14px;
@@ -125,13 +155,13 @@
     cursor: pointer;
 }
 
-.btn-save-order,
-.btn-submit {
+.page-management-page .btn-save-order,
+.page-management-page .btn-submit {
     background: var(--gold, #8B7355);
     color: #fff;
 }
 
-.btn-cancel {
+.page-management-page .btn-cancel {
     background: #e9ecef;
     color: #344150;
 }

@@ -417,7 +417,7 @@ $quickActive = function ($s, $e) use ($startDate, $endDate) {
 
     <?php require_once 'includes/admin-header.php'; ?>
 
-    <div class="content">
+    <div class="content finance-page">
         <div class="acct-page-header">
             <div class="acct-page-header__copy">
                 <h1 class="acct-page-header__title">Payments Ledger</h1>

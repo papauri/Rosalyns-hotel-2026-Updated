@@ -621,13 +621,13 @@ if (!function_exists('hotel_embed_logo_cid')) {
 if (!function_exists('hotel_japandi_key_value_rows')) {
     function hotel_japandi_key_value_rows(array $rows, string $labelWidth = '30%', string $valueColor = '#6d6455', string $valueWeight = '500'): string
     {
-        $html = '<table style="width:100%;border-collapse:collapse;font-size:11px;line-height:1.8;" cellpadding="0" cellspacing="0">';
+        $html = '<table style="width:100%;border-collapse:collapse;font-size:12px;line-height:1.8;" cellpadding="0" cellspacing="0">';
         foreach ($rows as $index => $row) {
             $label = (string)($row['label'] ?? '');
             $value = (string)($row['value'] ?? '');
             $topPadding = $index === 0 ? '0' : '6px';
             $html .= '<tr>'
-                . '<td style="width:' . $labelWidth . ';color:#9b8f7e;font-weight:600;text-transform:uppercase;letter-spacing:0.1em;font-size:8px;padding-top:' . $topPadding . ';">' . htmlspecialchars($label, ENT_QUOTES, 'UTF-8') . '</td>'
+                . '<td style="width:' . $labelWidth . ';color:#9b8f7e;font-weight:600;text-transform:uppercase;letter-spacing:0.1em;font-size:9px;padding-top:' . $topPadding . ';">' . htmlspecialchars($label, ENT_QUOTES, 'UTF-8') . '</td>'
                 . '<td style="color:' . $valueColor . ';font-weight:' . $valueWeight . ';padding-top:' . $topPadding . ';">' . $value . '</td>'
                 . '</tr>';
         }
@@ -642,8 +642,8 @@ if (!function_exists('hotel_japandi_summary_table')) {
     {
         $html = '<table style="width:100%;border-collapse:collapse;" cellpadding="0" cellspacing="0">'
             . '<tr>'
-            . '<td style="padding:14px 10px 14px 0;border-bottom:1px solid #d3cbc0;color:#9b8f7e;font-size:9px;letter-spacing:0.12em;text-transform:uppercase;font-weight:600;">' . htmlspecialchars($labelHeading, ENT_QUOTES, 'UTF-8') . '</td>'
-            . '<td style="padding:14px 0 14px 10px;border-bottom:1px solid #d3cbc0;color:#9b8f7e;font-size:9px;letter-spacing:0.12em;text-transform:uppercase;font-weight:600;text-align:right;">' . htmlspecialchars($valueHeading, ENT_QUOTES, 'UTF-8') . '</td>'
+            . '<td style="padding:14px 10px 14px 0;border-bottom:1px solid #d3cbc0;color:#9b8f7e;font-size:11px;letter-spacing:0.12em;text-transform:uppercase;font-weight:600;">' . htmlspecialchars($labelHeading, ENT_QUOTES, 'UTF-8') . '</td>'
+            . '<td style="padding:14px 0 14px 10px;border-bottom:1px solid #d3cbc0;color:#9b8f7e;font-size:11px;letter-spacing:0.12em;text-transform:uppercase;font-weight:600;text-align:right;">' . htmlspecialchars($valueHeading, ENT_QUOTES, 'UTF-8') . '</td>'
             . '</tr>';
 
         foreach ($rows as $row) {
@@ -652,25 +652,32 @@ if (!function_exists('hotel_japandi_summary_table')) {
             $tone = (string)($row['tone'] ?? '');
 
             $rowStyle = '';
-            $labelStyle = 'padding:12px 10px 12px 0;border-bottom:1px solid #d3cbc0;font-size:11px;color:#6d6455;';
-            $valueStyle = 'padding:12px 0 12px 10px;border-bottom:1px solid #d3cbc0;font-size:11px;color:#3e3930;text-align:right;font-weight:500;';
+            $labelStyle = 'padding:12px 10px 12px 0;border-bottom:1px solid #d3cbc0;font-size:12px;color:#6d6455;';
+            $valueStyle = 'padding:12px 0 12px 10px;border-bottom:1px solid #d3cbc0;font-size:12px;color:#3e3930;text-align:right;font-weight:500;';
 
             if ($tone === 'accent') {
-                $labelStyle = 'padding:12px 10px 12px 0;border-bottom:1px solid #d3cbc0;font-size:11px;color:#3e3930;font-weight:700;';
-                $valueStyle = 'padding:12px 0 12px 10px;border-bottom:1px solid #d3cbc0;font-size:11px;color:#3e3930;text-align:right;font-weight:700;';
+                $labelStyle = 'padding:12px 10px 12px 0;border-bottom:1px solid #d3cbc0;font-size:12px;color:#3e3930;font-weight:700;';
+                $valueStyle = 'padding:12px 0 12px 10px;border-bottom:1px solid #d3cbc0;font-size:12px;color:#3e3930;text-align:right;font-weight:700;';
             } elseif ($tone === 'alert') {
-                $labelStyle = 'padding:12px 10px 12px 0;border-bottom:1px solid #d3cbc0;font-size:11px;color:#8a5646;font-weight:700;';
-                $valueStyle = 'padding:12px 0 12px 10px;border-bottom:1px solid #d3cbc0;font-size:11px;color:#8a5646;text-align:right;font-weight:700;';
+                $labelStyle = 'padding:12px 10px 12px 0;border-bottom:1px solid #d3cbc0;font-size:12px;color:#8a5646;font-weight:700;';
+                $valueStyle = 'padding:12px 0 12px 10px;border-bottom:1px solid #d3cbc0;font-size:12px;color:#8a5646;text-align:right;font-weight:700;';
             } elseif ($tone === 'total') {
-                $rowStyle = 'background:rgba(62,57,48,0.94);';
-                $labelStyle = 'padding:12px 10px 12px 0;font-size:11px;color:#f5f2eb;font-weight:700;';
-                $valueStyle = 'padding:12px 0 12px 10px;font-size:11px;color:#f5f2eb;text-align:right;font-weight:700;';
+                $rowStyle = '';
+                $labelStyle = 'padding:12px 10px 12px 0;font-size:12px;color:#f5f2eb;font-weight:700;background-color:#3e3930;';
+                $valueStyle = 'padding:12px 0 12px 10px;font-size:12px;color:#f5f2eb;text-align:right;font-weight:700;background-color:#3e3930;';
             }
 
-            $html .= '<tr' . ($rowStyle !== '' ? ' style="' . $rowStyle . '"' : '') . '>'
-                . '<td style="' . $labelStyle . '">' . $label . '</td>'
-                . '<td style="' . $valueStyle . '">' . $value . '</td>'
-                . '</tr>';
+            if ($tone === 'total') {
+                $html .= '<tr>'
+                    . '<td bgcolor="#3e3930" style="' . $labelStyle . '">' . $label . '</td>'
+                    . '<td bgcolor="#3e3930" style="' . $valueStyle . '">' . $value . '</td>'
+                    . '</tr>';
+            } else {
+                $html .= '<tr' . ($rowStyle !== '' ? ' style="' . $rowStyle . '"' : '') . '>'
+                    . '<td style="' . $labelStyle . '">' . $label . '</td>'
+                    . '<td style="' . $valueStyle . '">' . $value . '</td>'
+                    . '</tr>';
+            }
         }
 
         $html .= '</table>';
@@ -712,13 +719,13 @@ if (!function_exists('hotel_japandi_document_shell')) {
                 . '<tr><td style="padding:0 48px;background:transparent;">' . $section . '</td></tr>';
         }
 
-        return '<div style="font-family:Helvetica,Arial,sans-serif;color:#3e3930;background:#d5cfc4;padding:40px 20px;margin:0;">'
-            . '<table style="width:100%;max-width:720px;margin:0 auto;border-collapse:collapse;background-color:#f5f2eb;border-radius:1px;box-shadow:0 16px 40px rgba(70,60,50,0.15),0 4px 12px rgba(70,60,50,0.08);border:1px solid rgba(190,175,155,0.5);" cellpadding="0" cellspacing="0">'
+        return '<table style="width:100%;background-color:#d5cfc4;border-collapse:collapse;" cellpadding="0" cellspacing="0" bgcolor="#d5cfc4"><tr><td style="padding:40px 20px;font-family:Helvetica,Arial,sans-serif;color:#3e3930;">'
+            . '<table style="width:100%;max-width:720px;margin:0 auto;border-collapse:collapse;background-color:#f5f2eb;border-radius:1px;box-shadow:0 16px 40px rgba(70,60,50,0.15),0 4px 12px rgba(70,60,50,0.08);border:1px solid #d3cbc0;" cellpadding="0" cellspacing="0" bgcolor="#f5f2eb">'
             . '<tr><td style="padding:0;"><table style="width:100%;border-collapse:collapse;" cellpadding="0" cellspacing="0"><tr>'
             . '<td style="padding:48px 48px 36px;vertical-align:top;">'
             . '<div style="max-width:120px;margin-bottom:16px;color:#9b8f7e;">{{logo_html}}</div>'
             . '<div style="font-family:Georgia,\'Times New Roman\',serif;font-size:24px;color:#3e3930;letter-spacing:0.04em;line-height:1;font-weight:400;">{{site_name}}</div>'
-            . '<div style="width:30px;height:1px;background:#c2b8a6;margin:16px 0;"></div>'
+            . '<div style="width:30px;height:2px;background-color:#c2b8a6;margin:16px 0;"> </div>'
             . '<div style="font-size:10px;color:#6d6455;letter-spacing:0.08em;line-height:1.7;">{{address}}</div>'
             . '<div style="font-size:10px;color:#6d6455;letter-spacing:0.04em;margin-top:4px;">{{contact_phone}} &nbsp;&middot;&nbsp; {{contact_email}}</div>'
             . $headerExtra
@@ -730,7 +737,7 @@ if (!function_exists('hotel_japandi_document_shell')) {
             . $statusHtml
             . '</td>'
             . '</tr></table></td></tr>'
-            . '<tr><td style="padding:0 48px;"><div style="height:1px;background:linear-gradient(90deg, #d3cbc0 0%, #d3cbc0 100%);"></div></td></tr>'
+            . '<tr><td style="padding:0 48px;"><table width="100%" cellpadding="0" cellspacing="0"><tr><td bgcolor="#d3cbc0" style="background-color:#d3cbc0;height:1px;font-size:1px;line-height:1px;"> </td></tr></table></td></tr>'
             . '<tr><td style="padding:0;"><table style="width:100%;border-collapse:collapse;" cellpadding="0" cellspacing="0"><tr>'
             . '<td style="width:50%;padding:32px 48px;vertical-align:top;border-right:1px solid #d3cbc0;">'
             . '<div style="font-size:9px;letter-spacing:0.2em;text-transform:uppercase;color:#9b8f7e;font-weight:600;margin-bottom:20px;">' . htmlspecialchars($leftHeading, ENT_QUOTES, 'UTF-8') . '</div>'
@@ -741,18 +748,18 @@ if (!function_exists('hotel_japandi_document_shell')) {
             . $rightContentHtml
             . '</td>'
             . '</tr></table></td></tr>'
-            . '<tr><td style="padding:0 48px;"><div style="height:1px;background:linear-gradient(90deg, #d3cbc0 0%, #d3cbc0 100%);"></div></td></tr>'
+            . '<tr><td style="padding:0 48px;"><table width="100%" cellpadding="0" cellspacing="0"><tr><td bgcolor="#d3cbc0" style="background-color:#d3cbc0;height:1px;font-size:1px;line-height:1px;"> </td></tr></table></td></tr>'
             . '<tr><td style="padding:36px 48px 36px;background:transparent;">'
             . '<div style="font-size:9px;letter-spacing:0.2em;text-transform:uppercase;color:#9b8f7e;font-weight:600;margin-bottom:20px;">' . htmlspecialchars($contentHeading, ENT_QUOTES, 'UTF-8') . '</div>'
             . $contentHtml
             . '</td></tr>'
             . $extraHtml
-            . '<tr><td style="padding:0;"><table style="width:100%;border-collapse:collapse;background:rgba(211,203,192,0.25);" cellpadding="0" cellspacing="0"><tr>'
+            . '<tr><td style="padding:0;"><table style="width:100%;border-collapse:collapse;background-color:#ece8e0;" cellpadding="0" cellspacing="0" bgcolor="#ece8e0"><tr>'
             . '<td style="padding:28px 48px;vertical-align:middle;"><span style="font-family:Georgia,\'Times New Roman\',serif;font-size:15px;color:#3e3930;font-weight:400;letter-spacing:0.06em;">{{site_name}}</span></td>'
             . '<td style="padding:28px 48px;text-align:right;vertical-align:middle;"><span style="font-size:9px;color:#9b8f7e;letter-spacing:0.18em;text-transform:uppercase;">' . htmlspecialchars($footerNote, ENT_QUOTES, 'UTF-8') . '</span></td>'
             . '</tr></table></td></tr>'
             . '</table>'
-            . '</div>';
+            . '</td></tr></table>';
     }
 }
 
@@ -775,10 +782,10 @@ if (!function_exists('hotel_default_payment_invoice_document_html')) {
         ], '35%', '#6d6455', '500');
         $contentHtml = '<table style="width:100%;border-collapse:collapse;" cellpadding="0" cellspacing="0">'
             . '<tr>'
-            . '<td width="54%" style="padding:14px 12px 14px 0;border-bottom:1px solid #d3cbc0;color:#9b8f7e;font-size:9px;letter-spacing:0.12em;text-transform:uppercase;font-weight:600;">Description</td>'
-            . '<td width="10%" style="padding:14px 12px;border-bottom:1px solid #d3cbc0;color:#9b8f7e;font-size:9px;letter-spacing:0.12em;text-transform:uppercase;font-weight:600;text-align:center;">Qty</td>'
-            . '<td width="18%" style="padding:14px 12px;border-bottom:1px solid #d3cbc0;color:#9b8f7e;font-size:9px;letter-spacing:0.12em;text-transform:uppercase;font-weight:600;text-align:right;">Unit Rate</td>'
-            . '<td width="18%" style="padding:14px 0 14px 12px;border-bottom:1px solid #d3cbc0;color:#9b8f7e;font-size:9px;letter-spacing:0.12em;text-transform:uppercase;font-weight:600;text-align:right;">Line Total</td>'
+            . '<td width="54%" style="padding:14px 12px 14px 0;border-bottom:1px solid #d3cbc0;color:#9b8f7e;font-size:11px;letter-spacing:0.12em;text-transform:uppercase;font-weight:600;">Description</td>'
+            . '<td width="10%" style="padding:14px 12px;border-bottom:1px solid #d3cbc0;color:#9b8f7e;font-size:11px;letter-spacing:0.12em;text-transform:uppercase;font-weight:600;text-align:center;">Qty</td>'
+            . '<td width="18%" style="padding:14px 12px;border-bottom:1px solid #d3cbc0;color:#9b8f7e;font-size:11px;letter-spacing:0.12em;text-transform:uppercase;font-weight:600;text-align:right;">Unit Rate</td>'
+            . '<td width="18%" style="padding:14px 0 14px 12px;border-bottom:1px solid #d3cbc0;color:#9b8f7e;font-size:11px;letter-spacing:0.12em;text-transform:uppercase;font-weight:600;text-align:right;">Line Total</td>'
             . '</tr>'
             . '{{charges_table_rows}}'
             . '{{totals_rows}}'
@@ -869,8 +876,8 @@ if (!function_exists('hotel_default_room_quotation_document_html')) {
             ['label' => 'Total Quotation', 'value' => '{{total_amount}}', 'tone' => 'total'],
             ['label' => 'Balance Due', 'value' => '{{balance_due}}', 'tone' => 'alert'],
         ], 'Line Item', 'Amount')
-            . '<div style="margin-top:18px;font-size:10px;line-height:1.8;color:#6d6455;">{{payment_policy}}</div>'
-            . '<div style="margin-top:12px;font-size:10px;line-height:1.8;color:#6d6455;">{{quotation_notes}}</div>';
+            . '<div style="margin-top:18px;font-size:12px;line-height:1.8;color:#6d6455;">{{payment_policy}}</div>'
+            . '<div style="margin-top:12px;font-size:12px;line-height:1.8;color:#6d6455;">{{quotation_notes}}</div>';
 
         return hotel_japandi_document_shell(
             'Quotation',
@@ -910,8 +917,8 @@ if (!function_exists('hotel_default_conference_quotation_document_html')) {
             ['label' => 'VAT', 'value' => '{{vat_amount}}'],
             ['label' => 'Deposit Required', 'value' => '{{deposit_amount}}', 'tone' => 'accent'],
         ], 'Line Item', 'Amount')
-            . '<div style="margin-top:18px;font-size:10px;line-height:1.8;color:#6d6455;">{{payment_policy}}</div>'
-            . '<div style="margin-top:12px;font-size:10px;line-height:1.8;color:#6d6455;">{{quotation_notes}}</div>';
+            . '<div style="margin-top:18px;font-size:12px;line-height:1.8;color:#6d6455;">{{payment_policy}}</div>'
+            . '<div style="margin-top:12px;font-size:12px;line-height:1.8;color:#6d6455;">{{quotation_notes}}</div>';
 
         return hotel_japandi_document_shell(
             'Quotation',
@@ -951,7 +958,7 @@ if (!function_exists('hotel_default_event_quotation_document_html')) {
             ['label' => 'Attendee Count', 'value' => '{{attendee_count}} attendees'],
             ['label' => 'Total Quotation', 'value' => '{{total_amount}}', 'tone' => 'total'],
         ], 'Line Item', 'Amount')
-            . '<div style="margin-top:18px;font-size:10px;line-height:1.8;color:#6d6455;">{{quotation_notes}}</div>';
+            . '<div style="margin-top:18px;font-size:12px;line-height:1.8;color:#6d6455;">{{quotation_notes}}</div>';
 
         return hotel_japandi_document_shell(
             'Quotation',
@@ -4984,6 +4991,53 @@ function sendTentativeQuotationEmail(array $booking, array $options = []): array
                 ];
                 $subject  = strtr((string)$tplConfig['subject'],  $tagMap);
                 $htmlBody = strtr((string)$tplConfig['html_body'], $tagMap);
+            }
+        }
+
+        // ── Append full quotation document HTML ───────────────────────────────
+        if (function_exists('renderBookingDocumentTemplate') && function_exists('hotel_default_room_quotation_document_html')) {
+            try {
+                $quotationDocVars = [
+                    'logo_html'            => (function_exists('hotel_invoice_logo_src') && hotel_invoice_logo_src() !== '')
+                        ? '<img src="' . htmlspecialchars(hotel_invoice_logo_src(), ENT_QUOTES, 'UTF-8') . '" alt="' . htmlspecialchars($site_name, ENT_QUOTES, 'UTF-8') . '" height="88" style="height:88px;width:auto;display:block;margin:0 auto;">'
+                        : '',
+                    'site_name'            => htmlspecialchars($site_name, ENT_QUOTES, 'UTF-8'),
+                    'address'              => htmlspecialchars(getSetting('address_line1', '') . (getSetting('address_line2', '') !== '' ? ', ' . getSetting('address_line2', '') : ''), ENT_QUOTES, 'UTF-8'),
+                    'contact_phone'        => htmlspecialchars($contact_phone, ENT_QUOTES, 'UTF-8'),
+                    'contact_email'        => htmlspecialchars($email_from_email ?: getSetting('email_main', ''), ENT_QUOTES, 'UTF-8'),
+                    'quotation_reference'  => htmlspecialchars($quote_ref, ENT_QUOTES, 'UTF-8'),
+                    'valid_until'          => htmlspecialchars($valid_until->format('F j, Y'), ENT_QUOTES, 'UTF-8'),
+                    'guest_name'           => htmlspecialchars((string)($booking['guest_name'] ?? ''), ENT_QUOTES, 'UTF-8'),
+                    'booking_reference'    => htmlspecialchars((string)($booking['booking_reference'] ?? ''), ENT_QUOTES, 'UTF-8'),
+                    'room_name'            => htmlspecialchars((string)($room['name'] ?? ''), ENT_QUOTES, 'UTF-8'),
+                    'check_in_date'        => htmlspecialchars(date('l, F j, Y', strtotime((string)$booking['check_in_date'])), ENT_QUOTES, 'UTF-8'),
+                    'check_out_date'       => htmlspecialchars(date('l, F j, Y', strtotime((string)$booking['check_out_date'])), ENT_QUOTES, 'UTF-8'),
+                    'nights'               => (string)$nights,
+                    'guests'               => htmlspecialchars($guest_label, ENT_QUOTES, 'UTF-8'),
+                    'rate_per_night'       => htmlspecialchars($fmt($rate_per_night), ENT_QUOTES, 'UTF-8'),
+                    'room_subtotal'        => htmlspecialchars($fmt($room_subtotal), ENT_QUOTES, 'UTF-8'),
+                    'vat_amount'           => htmlspecialchars($fmt($vat_amount), ENT_QUOTES, 'UTF-8'),
+                    'deposit_amount'       => htmlspecialchars($fmt($deposit_amt), ENT_QUOTES, 'UTF-8'),
+                    'total_amount'         => htmlspecialchars($fmt($total), ENT_QUOTES, 'UTF-8'),
+                    'balance_due'          => htmlspecialchars($fmt(max(0.0, $total - $deposit_amt)), ENT_QUOTES, 'UTF-8'),
+                    'payment_policy'       => nl2br(htmlspecialchars(getSetting('payment_policy', 'Full payment is due on arrival.'), ENT_QUOTES, 'UTF-8')),
+                    'quotation_notes'      => nl2br(htmlspecialchars($notes, ENT_QUOTES, 'UTF-8')),
+                ];
+                $quotDocHtml = renderBookingDocumentTemplate('tentative_quotation_document', $quotationDocVars, hotel_default_room_quotation_document_html());
+                if ($quotDocHtml !== '') {
+                    $docSection = '<div style="background:#d5cfc4;padding:24px 20px 0;">'
+                        . '<div style="max-width:720px;margin:0 auto;">'
+                        . '<p style="font-family:Helvetica,Arial,sans-serif;font-size:10px;letter-spacing:2px;text-transform:uppercase;color:#9b8f7e;margin:0 0 12px;text-align:center;">Full Quotation</p>'
+                        . $quotDocHtml
+                        . '</div></div>';
+                    if (stripos($htmlBody, '</body>') !== false) {
+                        $htmlBody = (string)preg_replace('/<\/body>/i', $docSection . '</body>', $htmlBody, 1);
+                    } else {
+                        $htmlBody .= $docSection;
+                    }
+                }
+            } catch (Throwable $e) {
+                error_log('sendTentativeQuotationEmail: failed to build quotation doc HTML: ' . $e->getMessage());
             }
         }
 

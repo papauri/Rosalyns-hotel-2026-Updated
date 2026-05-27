@@ -44,6 +44,11 @@ define('RH_HELP_TOOLTIPS_RENDERED', true);
         const bubble = document.getElementById('rhHelpBubble');
         if (!bubble) return;
 
+        function getHelpTarget(node) {
+            if (!(node instanceof Element)) return null;
+            return node.closest(HELP_TARGET_SELECTOR);
+        }
+
         function isElementVisible(el) {
             if (!el) return false;
             const style = window.getComputedStyle(el);
@@ -90,6 +95,8 @@ define('RH_HELP_TOOLTIPS_RENDERED', true);
         let hoverTimer = null;
         let pressTimer = null;
         let activeEl = null;
+        let touchTapArmedEl = null;
+        let touchTapArmedUntil = 0;
 
         // Drag state (floating toggle only)
         let dragArmed = false;
@@ -263,20 +270,25 @@ define('RH_HELP_TOOLTIPS_RENDERED', true);
 
         // ----- Mouse hover (desktop) -----
         document.addEventListener('mouseover', e => {
-            const t = e.target.closest(HELP_TARGET_SELECTOR);
+            const t = getHelpTarget(e.target);
             if (!t) return;
+            const from = getHelpTarget(e.relatedTarget);
+            if (from === t) return;
             const alwaysOn = t.classList.contains('help') && t.hasAttribute('data-tip');
             if (!alwaysOn && !enabled) return;
             clearTimeout(hoverTimer);
             hoverTimer = setTimeout(() => showBubble(t, undefined, undefined, alwaysOn), 500);
         });
         document.addEventListener('mouseout', e => {
-            if (!e.target.closest(HELP_TARGET_SELECTOR)) return;
+            const from = getHelpTarget(e.target);
+            if (!from) return;
+            const to = getHelpTarget(e.relatedTarget);
+            if (from === to) return;
             clearTimeout(hoverTimer);
-            hideBubble();
+            if (activeEl === from) hideBubble();
         });
         document.addEventListener('mousemove', e => {
-            if (activeEl && !e.target.closest(HELP_TARGET_SELECTOR)) hideBubble();
+            if (activeEl && !getHelpTarget(e.target)) hideBubble();
         });
 
         // ----- Long-press (touch) -----
@@ -315,6 +327,31 @@ define('RH_HELP_TOOLTIPS_RENDERED', true);
             clearTimeout(pressTimer);
         });
 
+        // On touch-first devices in help mode: first tap shows help, second tap runs the action.
+        document.addEventListener('click', e => {
+            const t = getHelpTarget(e.target);
+            if (!t || !enabled) return;
+            if (t.classList.contains('rh-help-toggle')) return;
+
+            const touchFirstDevice = window.matchMedia('(hover: none)').matches || window.matchMedia('(pointer: coarse)').matches;
+            if (!touchFirstDevice) return;
+
+            const now = Date.now();
+            if (touchTapArmedEl === t && now < touchTapArmedUntil) {
+                touchTapArmedEl = null;
+                touchTapArmedUntil = 0;
+                return;
+            }
+
+            const r = t.getBoundingClientRect();
+            showBubble(t, r.left + (r.width / 2), r.top + Math.min(r.height, 24), true);
+            touchTapArmedEl = t;
+            touchTapArmedUntil = now + 2500;
+
+            e.preventDefault();
+            e.stopPropagation();
+        }, true);
+
         // ----- Toggle button + keyboard -----
         bindToggleClicks();
         document.addEventListener('keydown', e => {
@@ -332,7 +369,7 @@ define('RH_HELP_TOOLTIPS_RENDERED', true);
             clampToggleTopOnResize();
         });
         document.addEventListener('click', e => {
-            if (!e.target.closest(HELP_TARGET_SELECTOR) && !e.target.closest('.rh-help-toggle')) hideBubble();
+            if (!getHelpTarget(e.target) && !e.target.closest('.rh-help-toggle')) hideBubble();
         }, true);
 
         initToggleDrag();

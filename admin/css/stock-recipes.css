@@ -81,7 +81,7 @@
     flex-wrap: wrap;
 }
 
-.badge {
+.stock-recipes-page .badge {
     display: inline-block;
     padding: 2px 8px;
     border-radius: 12px;
@@ -89,27 +89,27 @@
     font-weight: 600;
 }
 
-.badge-recipe {
+.stock-recipes-page .badge-recipe {
     background: #d4edda;
     color: #155724;
 }
 
-.badge-no-recipe {
+.stock-recipes-page .badge-no-recipe {
     background: #fff3cd;
     color: #856404;
 }
 
-.badge-cost-good {
+.stock-recipes-page .badge-cost-good {
     background: #d4edda;
     color: #155724;
 }
 
-.badge-cost-warn {
+.stock-recipes-page .badge-cost-warn {
     background: #fff3cd;
     color: #856404;
 }
 
-.badge-cost-bad {
+.stock-recipes-page .badge-cost-bad {
     background: #f8d7da;
     color: #721c24;
 }
@@ -306,7 +306,7 @@
     font-weight: 600;
 }
 
-.btn-primary {
+.stock-recipes-page .btn-primary {
     background: var(--color-primary, #8A775F);
     color: #fff;
     border: none;
@@ -315,7 +315,7 @@
     cursor: pointer;
 }
 
-.btn-secondary {
+.stock-recipes-page .btn-secondary {
     background: #e9ecef;
     color: #3f4654;
     border: none;
@@ -324,7 +324,7 @@
     cursor: pointer;
 }
 
-.btn-link {
+.stock-recipes-page .btn-link {
     background: transparent;
     border: none;
     color: #2c7bb2;
@@ -333,7 +333,7 @@
     text-decoration: underline;
 }
 
-.btn-danger {
+.stock-recipes-page .btn-danger {
     background: #c82333;
     color: #fff;
     border: none;

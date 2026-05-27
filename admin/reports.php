@@ -918,7 +918,7 @@ try {
 
     <?php require_once 'includes/admin-header.php'; ?>
 
-    <div class="reports-container">
+    <div class="reports-container finance-page">
 
         <div class="acct-page-header">
             <div class="acct-page-header__copy">

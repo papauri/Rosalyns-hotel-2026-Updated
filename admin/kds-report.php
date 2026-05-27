@@ -247,7 +247,7 @@ $current_page = basename($_SERVER['PHP_SELF']);
 
 <body>
     <?php require_once 'includes/admin-header.php'; ?>
-    <div class="content">
+    <div class="content kds-report-page">
         <div class="page-header">
             <h2 class="page-title">
                 <i class="fas fa-file-chart-line" style="color:var(--admin-accent);"></i>
