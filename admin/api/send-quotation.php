@@ -158,4 +158,8 @@ try {
     error_log('send-quotation PDO error: ' . $e->getMessage());
     http_response_code(500);
     echo json_encode(['success' => false, 'error' => 'Database error. Please try again.']);
+} catch (Throwable $e) {
+    error_log('send-quotation error: ' . $e->getMessage());
+    http_response_code(500);
+    echo json_encode(['success' => false, 'error' => 'Unable to send quotation right now. Please try again.']);
 }

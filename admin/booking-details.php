@@ -906,6 +906,13 @@ if ($checkin_overdue_days > 0) {
     $booking_alert_tone = 'info';
     $booking_alert_message = 'Tentative booking is awaiting conversion to confirmed status.';
 }
+
+$flash_success_message = (string)($_SESSION['success_message'] ?? '');
+$flash_error_message = (string)($_SESSION['error_message'] ?? '');
+if ($flash_error_message === '' && isset($error_message) && (string)$error_message !== '') {
+    $flash_error_message = (string)$error_message;
+}
+unset($_SESSION['success_message'], $_SESSION['error_message']);
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -1846,6 +1853,37 @@ if ($checkin_overdue_days > 0) {
             }
         });
 
+        const bookingFlash = {
+            success: <?php echo json_encode($flash_success_message, JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT); ?>,
+            error: <?php echo json_encode($flash_error_message, JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT); ?>
+        };
+
+        function showBookingActionMessage(message, type) {
+            var text = String(message || '').trim();
+            if (!text) {
+                return;
+            }
+            if (window.Alert && typeof window.Alert.show === 'function') {
+                Alert.show(text, type || 'info', {
+                    timeout: 5200,
+                    position: 'top'
+                });
+                return;
+            }
+            if (type === 'error') {
+                console.error(text);
+            } else {
+                console.log(text);
+            }
+        }
+
+        if (bookingFlash.success) {
+            showBookingActionMessage(bookingFlash.success, 'success');
+        }
+        if (bookingFlash.error) {
+            showBookingActionMessage(bookingFlash.error, 'error');
+        }
+
         function openAddChargeModal() {
             document.getElementById('addChargeModal').classList.add('active');
         }
@@ -2253,6 +2291,7 @@ if ($checkin_overdue_days > 0) {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json',
+                        'Accept': 'application/json',
                         'X-Requested-With': 'XMLHttpRequest'
                     },
                     body: JSON.stringify({
@@ -2262,28 +2301,33 @@ if ($checkin_overdue_days > 0) {
                         quotation_notes: notes
                     })
                 })
-                .then(function(res) {
-                    return res.json();
+                .then(async function(res) {
+                    var contentType = (res.headers.get('content-type') || '').toLowerCase();
+                    if (!contentType.includes('application/json')) {
+                        throw new Error('We could not confirm the quotation send result. Please sign in again and retry.');
+                    }
+                    var data = await res.json();
+                    if (!res.ok || !data.success) {
+                        throw new Error(data.error || data.message || 'We could not send the quotation right now.');
+                    }
+                    return data;
                 })
                 .then(function(data) {
-                    if (data.success) {
-                        fb.style.cssText = 'display:block;background:#D4EDDA;color:#155724;padding:12px 14px;border-radius:4px;font-size:14px;';
-                        fb.innerHTML = '<i class="fas fa-check-circle"></i> ' + _bkQuoteEsc(data.message || 'Quotation sent.');
-                        btn.innerHTML = '<i class="fas fa-check"></i> Sent';
-                        setTimeout(function() {
-                            closeBookingQuoteModal();
-                            location.reload();
-                        }, 1800);
-                    } else {
-                        fb.style.cssText = 'display:block;background:#F8D7DA;color:#721C24;padding:12px 14px;border-radius:4px;font-size:14px;';
-                        fb.innerHTML = '<i class="fas fa-exclamation-circle"></i> ' + _bkQuoteEsc(data.error || 'Failed to send quotation.');
-                        btn.disabled = false;
-                        btn.innerHTML = '<i class="fas fa-paper-plane"></i> Retry';
-                    }
+                    var successMessage = data.message || 'Quotation email sent successfully.';
+                    fb.style.cssText = 'display:block;background:#D4EDDA;color:#155724;padding:12px 14px;border-radius:4px;font-size:14px;';
+                    fb.innerHTML = '<i class="fas fa-check-circle"></i> ' + _bkQuoteEsc(successMessage);
+                    showBookingActionMessage(successMessage, 'success');
+                    btn.innerHTML = '<i class="fas fa-check"></i> Sent';
+                    setTimeout(function() {
+                        closeBookingQuoteModal();
+                        location.reload();
+                    }, 1800);
                 })
-                .catch(function() {
+                .catch(function(err) {
+                    var friendlyMessage = (err && err.message) ? err.message : 'Network error. Please try again.';
                     fb.style.cssText = 'display:block;background:#F8D7DA;color:#721C24;padding:12px 14px;border-radius:4px;font-size:14px;';
-                    fb.innerHTML = '<i class="fas fa-exclamation-circle"></i> Network error. Please try again.';
+                    fb.innerHTML = '<i class="fas fa-exclamation-circle"></i> ' + _bkQuoteEsc(friendlyMessage);
+                    showBookingActionMessage(friendlyMessage, 'error');
                     btn.disabled = false;
                     btn.innerHTML = '<i class="fas fa-paper-plane"></i> Retry';
                 });

@@ -54,9 +54,10 @@ if (!defined('PDF_PAGE_FORMAT')) {
  * Generate PDF invoice for a booking
  *
  * @param int $booking_id Booking ID
+ * @param string|null $invoice_number_override Optional invoice number to reuse when regenerating an existing invoice
  * @return array|false Returns array with keys: filename, path, relative_path, invoice_number — or false on failure
  */
-function generateInvoicePDF(int $booking_id)
+function generateInvoicePDF(int $booking_id, ?string $invoice_number_override = null)
 {
     global $pdo, $tcpdf_loaded;
 
@@ -148,12 +149,22 @@ function generateInvoicePDF(int $booking_id)
             mkdir($invoiceDir, 0755, true);
         }
 
-        // Generate unique invoice filename - use sequential invoice number from settings
-        $invoice_prefix = getSetting('invoice_prefix', 'INV');
-        $invoice_start = (int)getSetting('invoice_start_number', 1000);
+        // Generate unique invoice filename - use sequence unless an existing invoice number is provided
+        $invoice_number_override = trim((string)$invoice_number_override);
+        if ($invoice_number_override !== '') {
+            $invoice_number = $invoice_number_override;
+        } else {
+            $invoice_prefix = getSetting('invoice_prefix', 'INV');
+            $invoice_start = (int)getSetting('invoice_start_number', 1000);
+            $invoice_number = finance_next_invoice_number($pdo, $invoice_prefix, $invoice_start, date('Y-m-d'), 'room');
+        }
 
-        $invoice_number = finance_next_invoice_number($pdo, $invoice_prefix, $invoice_start, date('Y-m-d'), 'room');
-        $filename = $invoice_number . '.pdf';
+        $safeInvoiceNumber = preg_replace('/[^A-Za-z0-9_-]+/', '-', $invoice_number);
+        if ($safeInvoiceNumber === null || $safeInvoiceNumber === '') {
+            $safeInvoiceNumber = 'INV-' . date('YmdHis');
+        }
+
+        $filename = $safeInvoiceNumber . '.pdf';
         $filepath = $invoiceDir . '/' . $filename;
 
         if ($tcpdf_loaded) {
@@ -227,6 +238,32 @@ function generateInvoicePDF(int $booking_id)
     } catch (Exception $e) {
         error_log("Generate Invoice PDF Error: " . $e->getMessage());
         return false;
+    }
+}
+
+if (!function_exists('getBookingDocumentTemplateUpdatedTimestamp')) {
+    function getBookingDocumentTemplateUpdatedTimestamp(string $templateKey): ?int
+    {
+        global $pdo;
+
+        if (!function_exists('bookingEmailTemplatesTableExists') || !bookingEmailTemplatesTableExists()) {
+            return null;
+        }
+
+        try {
+            $stmt = $pdo->prepare('SELECT updated_at FROM booking_email_templates WHERE template_key = ? LIMIT 1');
+            $stmt->execute([$templateKey]);
+            $updatedAt = (string)($stmt->fetchColumn() ?: '');
+            if ($updatedAt === '') {
+                return null;
+            }
+
+            $timestamp = strtotime($updatedAt);
+            return $timestamp === false ? null : $timestamp;
+        } catch (Throwable $e) {
+            error_log('Failed to fetch booking document template updated time for ' . $templateKey . ': ' . $e->getMessage());
+            return null;
+        }
     }
 }
 
@@ -748,20 +785,28 @@ function sendPaymentInvoiceEmail(int $booking_id)
             }
         }
 
-        if ($invoice_file === '') {
-            // Generate invoice PDF
-            $invoice_result = generateInvoicePDF($booking_id);
-            if (!$invoice_result) {
+        $needs_regeneration = ($invoice_file === '');
+        if (!$needs_regeneration && function_exists('getBookingDocumentTemplateUpdatedTimestamp')) {
+            $template_updated_ts = getBookingDocumentTemplateUpdatedTimestamp('payment_invoice_document');
+            $file_updated_ts = @filemtime($invoice_file);
+            if ($template_updated_ts !== null && $file_updated_ts !== false && $file_updated_ts < $template_updated_ts) {
+                $needs_regeneration = true;
+            }
+        }
+
+        if ($needs_regeneration) {
+            $invoice_result = generateInvoicePDF($booking_id, $invoice_number !== '' ? $invoice_number : null);
+            if ($invoice_result) {
+                $invoice_file = $invoice_result['filepath'];
+                $invoice_number = $invoice_result['invoice_number'];
+                $invoice_path = $invoice_result['relative_path'];
+
+                // Persist generated invoice against the latest payment row.
+                $update_stmt = $pdo->prepare("\n                UPDATE payments\n                SET invoice_path = ?, invoice_number = ?, invoice_generated = 1\n                WHERE id = ?\n            ");
+                $update_stmt->execute([$invoice_path, $invoice_number, (int)$latestPayment['id']]);
+            } elseif ($invoice_file === '') {
                 throw new Exception("Failed to generate invoice");
             }
-
-            $invoice_file = $invoice_result['filepath'];
-            $invoice_number = $invoice_result['invoice_number'];
-            $invoice_path = $invoice_result['relative_path'];
-
-            // Persist generated invoice against the latest payment row.
-            $update_stmt = $pdo->prepare("\n                UPDATE payments\n                SET invoice_path = ?, invoice_number = ?, invoice_generated = 1\n                WHERE id = ?\n            ");
-            $update_stmt->execute([$invoice_path, $invoice_number, (int)$latestPayment['id']]);
         }
 
         // Get invoice recipients (comma-separated)
@@ -853,24 +898,32 @@ function sendPaymentInvoiceEmailWithCC(int $booking_id, array $ccRecipients = []
             }
         }
 
-        if ($invoice_file === '') {
-            // Generate invoice PDF
-            $invoice_result = generateInvoicePDF($booking_id);
-            if (!$invoice_result) {
-                throw new Exception('Failed to generate invoice');
+        $needs_regeneration = ($invoice_file === '');
+        if (!$needs_regeneration && function_exists('getBookingDocumentTemplateUpdatedTimestamp')) {
+            $template_updated_ts = getBookingDocumentTemplateUpdatedTimestamp('payment_invoice_document');
+            $file_updated_ts = @filemtime($invoice_file);
+            if ($template_updated_ts !== null && $file_updated_ts !== false && $file_updated_ts < $template_updated_ts) {
+                $needs_regeneration = true;
             }
+        }
 
-            $invoice_file = $invoice_result['filepath'];
-            $invoice_number = $invoice_result['invoice_number'];
-            $invoice_path = $invoice_result['relative_path'];
+        if ($needs_regeneration) {
+            $invoice_result = generateInvoicePDF($booking_id, $invoice_number !== '' ? $invoice_number : null);
+            if ($invoice_result) {
+                $invoice_file = $invoice_result['filepath'];
+                $invoice_number = $invoice_result['invoice_number'];
+                $invoice_path = $invoice_result['relative_path'];
 
-            // Persist generated invoice against the latest payment row.
-            $update_stmt = $pdo->prepare("
+                // Persist generated invoice against the latest payment row.
+                $update_stmt = $pdo->prepare("
                 UPDATE payments
                 SET invoice_path = ?, invoice_number = ?, invoice_generated = 1
                 WHERE id = ?
             ");
-            $update_stmt->execute([$invoice_path, $invoice_number, (int)$latestPayment['id']]);
+                $update_stmt->execute([$invoice_path, $invoice_number, (int)$latestPayment['id']]);
+            } elseif ($invoice_file === '') {
+                throw new Exception('Failed to generate invoice');
+            }
         }
 
         // Send invoice to guest with custom CC recipients

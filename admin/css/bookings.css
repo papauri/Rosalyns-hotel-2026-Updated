@@ -691,9 +691,14 @@ body .modal-overlay.active {
 .actions-row .actions-more-menu {
     display: none;
     position: fixed;
-    min-width: 250px;
+    width: min(250px, calc(100vw - 16px));
+    min-width: 0;
+    max-width: calc(100vw - 16px);
     max-height: min(78dvh, 32rem);
     overflow-y: auto;
+    overflow-x: hidden;
+    overscroll-behavior: contain;
+    -webkit-overflow-scrolling: touch;
     background: var(--color-white, #fff);
     border: 1px solid #e2e6ea;
     border-radius: 12px;

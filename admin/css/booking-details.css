@@ -1355,6 +1355,7 @@
 .details-grid {
     grid-template-columns: repeat(auto-fit, minmax(min(18rem, 100%), 1fr));
     gap: clamp(0.85rem, 1.1vw + 0.45rem, 1.25rem);
+    align-items: stretch;
 }
 
 .folio-card,
@@ -1376,6 +1377,27 @@
     font-size: clamp(0.84rem, 0.8rem + 0.12vw, 0.95rem);
     color: var(--color-text-secondary, #5E554D);
     line-height: 1.66;
+}
+
+.details-grid>.info-card:not(.folio-card):not(.invoices-card):not(.timeline-card):not(.notes-card):not(.actions-card):not(.booking-special-card) {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+}
+
+.details-grid>.info-card:not(.folio-card):not(.invoices-card):not(.timeline-card):not(.notes-card):not(.actions-card):not(.booking-special-card) .info-card-body {
+    display: flex;
+    flex-direction: column;
+    flex: 1;
+}
+
+.details-grid>.info-card:not(.folio-card):not(.invoices-card):not(.timeline-card):not(.notes-card):not(.actions-card):not(.booking-special-card) .info-row {
+    min-height: 2.3rem;
+    align-items: center;
+}
+
+.details-grid>.info-card:not(.folio-card):not(.invoices-card):not(.timeline-card):not(.notes-card):not(.actions-card):not(.booking-special-card) .guest-contact-actions {
+    margin-top: auto;
 }
 
 .actions-card .info-card-body {
@@ -1567,6 +1589,10 @@
 }
 
 @media (max-width: 48rem) {
+    .details-grid {
+        grid-template-columns: repeat(auto-fit, minmax(min(10.5rem, 100%), 1fr));
+    }
+
     .booking-hero {
         padding: clamp(1rem, 2.5vw + 0.45rem, 1.25rem);
     }
@@ -1578,5 +1604,11 @@
     .booking-actions-flow>.action-btn,
     .booking-actions-flow>.booking-action-form .action-btn {
         flex: 1 1 100%;
+    }
+}
+
+@media (max-width: 22rem) {
+    .details-grid {
+        grid-template-columns: 1fr;
     }
 }

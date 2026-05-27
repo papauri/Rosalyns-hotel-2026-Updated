@@ -3740,6 +3740,22 @@ $today_str = $today->format('Y-m-d');
             return Promise.resolve(null);
         }
 
+        function showBookingActionMessage(message, type = 'info') {
+            const text = String(message || '').trim();
+            if (!text) {
+                return;
+            }
+            if (window.Alert && typeof window.Alert.show === 'function') {
+                Alert.show(text, type);
+                return;
+            }
+            if (type === 'error') {
+                console.error(text);
+            } else {
+                console.log(text);
+            }
+        }
+
         function postBookingAction(formData, errorMessage) {
             return fetch(window.location.href, {
                 method: 'POST',
@@ -7336,18 +7352,24 @@ $today_str = $today->format('Y-m-d');
                             'X-Requested-With': 'XMLHttpRequest'
                         }
                     })
-                    .then(r => r.json())
+                    .then(async r => {
+                        const contentType = (r.headers.get('content-type') || '').toLowerCase();
+                        if (!contentType.includes('application/json')) {
+                            throw new Error('We could not confirm the invoice send result. Please sign in again and retry.');
+                        }
+                        const data = await r.json();
+                        if (!r.ok || !data.success) {
+                            throw new Error(data.message || 'We could not send the invoice right now.');
+                        }
+                        return data;
+                    })
                     .then(j => {
                         hideLoadingOverlay();
-                        if (j.success) {
-                            Alert.show('Invoice sent to guest successfully.', 'success');
-                        } else {
-                            Alert.show(j.message || 'Failed to send invoice.', 'error');
-                        }
+                        showBookingActionMessage(j.message || 'Invoice email sent to the guest successfully.', 'success');
                     })
-                    .catch(() => {
+                    .catch((error) => {
                         hideLoadingOverlay();
-                        Alert.show('Network error — please try again.', 'error');
+                        showBookingActionMessage((error && error.message) ? error.message : 'Network error. Please try again.', 'error');
                     });
             });
         }
@@ -7362,11 +7384,35 @@ $today_str = $today->format('Y-m-d');
             });
         }
 
+        function _getActionMenuViewport() {
+            const vv = window.visualViewport;
+            if (vv) {
+                return {
+                    left: 0,
+                    top: 0,
+                    right: vv.width,
+                    bottom: vv.height,
+                    width: vv.width,
+                    height: vv.height
+                };
+            }
+            return {
+                left: 0,
+                top: 0,
+                right: window.innerWidth,
+                bottom: window.innerHeight,
+                width: window.innerWidth,
+                height: window.innerHeight
+            };
+        }
+
         function toggleActionsMore(btn, evt) {
             evt.preventDefault();
             evt.stopPropagation();
             const wrap = btn.closest('.actions-more');
+            if (!wrap) return;
             const menu = wrap.querySelector('.actions-more-menu');
+            if (!menu) return;
             const isOpen = wrap.classList.contains('open');
             _closeAllActionMenus(null);
             if (isOpen) return; // was open → now closed, done
@@ -7374,38 +7420,61 @@ $today_str = $today->format('Y-m-d');
             // Position using fixed coords so overflow:auto containers don't clip it.
             const rect = btn.getBoundingClientRect();
             const viewportPad = 8;
+            const menuGap = 6;
+            const viewport = _getActionMenuViewport();
+            const maxMenuW = Math.max(0, Math.floor(viewport.width - (viewportPad * 2)));
+            const maxMenuH = Math.max(180, Math.floor(viewport.height - (viewportPad * 2)));
 
-            menu.style.cssText = 'display:block;position:fixed;visibility:hidden;left:-9999px;top:-9999px;z-index:9999;';
+            menu.style.cssText = 'display:block;position:fixed;visibility:hidden;left:0;top:0;z-index:9999;width:auto;min-width:0;max-width:' + Math.round(maxMenuW) + 'px;';
             const measuredRect = menu.getBoundingClientRect();
-            const menuW = Math.max(250, Math.ceil(measuredRect.width) || 250);
-            const maxMenuH = Math.max(180, window.innerHeight - (viewportPad * 2));
+            const fixedOffsetX = measuredRect.left;
+            const fixedOffsetY = measuredRect.top;
+            const menuW = Math.min(Math.ceil(measuredRect.width) || 250, maxMenuW);
             const menuH = Math.min(Math.ceil(measuredRect.height) || 0, maxMenuH);
 
-            let top = rect.bottom + 6;
+            let top = rect.bottom + menuGap;
             let left = rect.right - menuW;
-            if (left < viewportPad) left = viewportPad;
-            if (left + menuW > window.innerWidth - viewportPad) {
-                left = window.innerWidth - menuW - viewportPad;
-            }
+            const minLeft = viewport.left + viewportPad;
+            const maxLeft = Math.max(minLeft, viewport.right - viewportPad - menuW);
+            left = Math.min(Math.max(left, minLeft), maxLeft);
 
-            if (top + menuH > window.innerHeight - viewportPad) {
-                top = rect.top - menuH - 6; // flip above button
+            if (top + menuH > viewport.bottom - viewportPad) {
+                top = rect.top - menuH - menuGap; // flip above button
             }
-            if (top < viewportPad) {
-                top = viewportPad;
-            }
+            const minTop = viewport.top + viewportPad;
+            const maxTop = Math.max(minTop, viewport.bottom - viewportPad - menuH);
+            top = Math.min(Math.max(top, minTop), maxTop);
 
-            const needsScroll = measuredRect.height > maxMenuH;
-            menu.style.cssText = 'display:block;position:fixed;z-index:9999;top:' + Math.round(top) + 'px;left:' + Math.round(left) + 'px;right:auto;max-height:' + Math.round(maxMenuH) + 'px;overflow-y:' + (needsScroll ? 'auto' : 'visible') + ';';
+            const fixedLeft = left - fixedOffsetX;
+            const fixedTop = top - fixedOffsetY;
+
+            menu.style.cssText = 'display:block;position:fixed;z-index:9999;top:' + Math.round(fixedTop) + 'px;left:' + Math.round(fixedLeft) + 'px;right:auto;width:' + Math.round(menuW) + 'px;max-width:' + Math.round(maxMenuW) + 'px;max-height:' + Math.round(maxMenuH) + 'px;overflow-y:auto;overflow-x:hidden;';
             wrap.classList.add('open');
         }
         document.addEventListener('click', function() {
             _closeAllActionMenus(null);
         });
         // Also close on scroll so the menu doesn't drift away from its button
-        document.addEventListener('scroll', function() {
+        document.addEventListener('scroll', function(event) {
+            const target = event.target;
+            if (target && typeof target.closest === 'function' && (target.closest('.actions-more-menu') || target.closest('.actions-more'))) {
+                return;
+            }
             _closeAllActionMenus(null);
         }, true);
+
+        window.addEventListener('resize', function() {
+            _closeAllActionMenus(null);
+        });
+
+        if (window.visualViewport) {
+            window.visualViewport.addEventListener('resize', function() {
+                _closeAllActionMenus(null);
+            });
+            window.visualViewport.addEventListener('scroll', function() {
+                _closeAllActionMenus(null);
+            });
+        }
 
         // Bind data-action="open-modify"
         document.addEventListener('click', function(event) {
@@ -7464,6 +7533,7 @@ $today_str = $today->format('Y-m-d');
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json',
+                        'Accept': 'application/json',
                         'X-Requested-With': 'XMLHttpRequest'
                     },
                     body: JSON.stringify({
@@ -7473,27 +7543,32 @@ $today_str = $today->format('Y-m-d');
                         quotation_notes: notes
                     })
                 })
-                .then(function(res) {
-                    return res.json();
+                .then(async function(res) {
+                    var contentType = (res.headers.get('content-type') || '').toLowerCase();
+                    if (!contentType.includes('application/json')) {
+                        throw new Error('We could not confirm the quotation send result. Please sign in again and retry.');
+                    }
+                    var data = await res.json();
+                    if (!res.ok || !data.success) {
+                        throw new Error(data.error || data.message || 'We could not send the quotation right now.');
+                    }
+                    return data;
                 })
                 .then(function(data) {
-                    if (data.success) {
-                        fb.style.cssText = 'display:block;background:#D4EDDA;color:#155724;padding:12px 14px;border-radius:4px;font-size:14px;';
-                        fb.innerHTML = '<i class="fas fa-check-circle"></i> ' + _blqEsc(data.message || 'Quotation sent.');
-                        btn.innerHTML = '<i class="fas fa-check"></i> Sent';
-                        setTimeout(function() {
-                            closeBookingListQuoteModal();
-                        }, 1800);
-                    } else {
-                        fb.style.cssText = 'display:block;background:#F8D7DA;color:#721C24;padding:12px 14px;border-radius:4px;font-size:14px;';
-                        fb.innerHTML = '<i class="fas fa-exclamation-circle"></i> ' + _blqEsc(data.error || 'Failed to send quotation.');
-                        btn.disabled = false;
-                        btn.innerHTML = '<i class="fas fa-paper-plane"></i> Retry';
-                    }
+                    var successMessage = data.message || 'Quotation email sent successfully.';
+                    fb.style.cssText = 'display:block;background:#D4EDDA;color:#155724;padding:12px 14px;border-radius:4px;font-size:14px;';
+                    fb.innerHTML = '<i class="fas fa-check-circle"></i> ' + _blqEsc(successMessage);
+                    showBookingActionMessage(successMessage, 'success');
+                    btn.innerHTML = '<i class="fas fa-check"></i> Sent';
+                    setTimeout(function() {
+                        closeBookingListQuoteModal();
+                    }, 1800);
                 })
-                .catch(function() {
+                .catch(function(err) {
+                    var friendlyMessage = (err && err.message) ? err.message : 'Network error. Please try again.';
                     fb.style.cssText = 'display:block;background:#F8D7DA;color:#721C24;padding:12px 14px;border-radius:4px;font-size:14px;';
-                    fb.innerHTML = '<i class="fas fa-exclamation-circle"></i> Network error. Please try again.';
+                    fb.innerHTML = '<i class="fas fa-exclamation-circle"></i> ' + _blqEsc(friendlyMessage);
+                    showBookingActionMessage(friendlyMessage, 'error');
                     btn.disabled = false;
                     btn.innerHTML = '<i class="fas fa-paper-plane"></i> Retry';
                 });
