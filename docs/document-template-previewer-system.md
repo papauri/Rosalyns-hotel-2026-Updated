@@ -1,412 +1,146 @@
-# Document Template Previewer System
+# Booking Email and PDF Template System
 
-This file is the saved reference for the full document previewer system so it can be reapplied if the working files are replaced, reformatted, or rebuilt.
+This document is the current reference for template editing, previewing, test sending, defaults, and full revert behavior.
 
 ## Purpose
 
-The previewer does two jobs:
+The booking template system in admin now handles all of the following in one place:
 
-1. It shows the actual document output for invoice, receipt, room quotation, and conference quotation templates.
-2. It provides a layout studio that edits the raw template HTML stored in `booking_email_templates` and saves those changes back to the database.
+1. Edit email and PDF template content for all booking-related template keys.
+2. Preview rendered template output with realistic sample data.
+3. Send live test emails (or test PDF attachments for document templates).
+4. Reset one template or all templates back to the canonical built-in design.
 
-## Other Saveable Work From Today
+## Primary Admin Surface
 
-These related pieces were also part of today's document work and are worth preserving alongside the previewer itself:
+- `admin/booking-settings.php`
+  - Main editor UI for all booking email and PDF templates.
+  - Per-template `Load Default` action.
+  - Full `Reset All to Defaults` action.
+  - AJAX preview endpoint (`booking_email_template_preview` + `_ajax_preview`).
+  - AJAX test-send endpoint (`send_test_email` + `_ajax_send_test`).
 
-- Shared document standardization now centers on `includes/document-template-defaults.php`
-  - invoice, receipt, room quotation, and conference quotation all draw from the same raw-template pattern
-  - the current direction is minimalist, hotel-oriented, compact, and standardized across document types
+## Canonical Default Source
 
-- Database-backed document content is part of the system design
-  - document HTML should come from `booking_email_templates` when present
-  - database-backed values should win over hardcoded values when settings already exist
-
-- Preview correctness depends on the real production render path
-  - matching browser HTML alone is not enough
-  - the preview must use the same TCPDF output path as the emailed attachments
-
-- Template refresh workflow is part of the operating model
-  - after changing shared defaults, refresh the live template rows with `php scripts/apply-document-template-refresh.php`
-
-- Live document test workflow is also part of the saved system
-  - room/invoice document tests can be sent with `php scripts/send-document-tests.php --email=<target> --booking-id=85`
-  - conference quotation testing may require a synthetic payload when `conference_inquiries` has no suitable record
-
-## Primary Files
-
-### Runtime entry points
-
-- `preview-document-templates.php`
-  - Standalone/public preview route.
-  - Loads real template HTML from DB or shared defaults.
-  - Builds real HTML and real TCPDF output.
-  - Hosts the layout studio save endpoint.
-  - Supports embedded mode for reuse inside admin.
-
-- `admin/document-template-previewer.php`
-  - Admin-shell wrapper around the same previewer.
-  - Defines embedded mode constants before including the standalone preview file.
-  - Renders inside the admin SPA-compatible shell.
-
-### Client assets
-
-- `js/preview-document-templates.js`
-  - Layout studio logic.
-  - Section order controls.
-  - Left/right row nudging.
-  - Logo/reference drag handles.
-  - Save action back to the preview route.
-
-- `css/preview-document-templates-editor.css`
-  - Layout studio styling.
-  - Section cards.
-  - Fixed-height design stage.
-  - Overlay handles and guide lines.
-
-### Shared integration point
-
-- `admin/includes/admin-header.php`
-  - Adds `document-template-previewer.php` under `Configuration`.
-
-## Data and Rendering Dependencies
-
-The previewer is not a fake sample page. It depends on the same surfaces used by live document output:
-
-- `includes/document-template-defaults.php`
-  - Shared raw template HTML defaults.
-
-- `config/database.php`
-  - `getBookingEmailTemplateConfig(...)`
-  - `upsertBookingEmailTemplateConfig(...)`
-
-- `config/invoice.php`
-  - `buildInvoiceHTML(...)`
-
-- `config/receipts.php`
-  - `receipt_hydrate_context(...)`
-  - `receipt_placeholders(...)`
-
-- `includes/quotation-pdf.php`
-  - `generateQuotationPDF(...)`
-  - `generateConferenceQuotationPDF(...)`
+Canonical defaults are defined in:
 
 - `config/email.php`
-  - Shared document helper functions such as logo, bank details, address, terms, contact details.
+
+Key functions:
+
+- `ensureBookingEmailTemplateDefaults()`
+  - Seeds missing template rows in `booking_email_templates`.
+- `hotel_booking_template_defaults_map()`
+  - Exposes the canonical defaults map used by runtime seeding and admin revert actions.
+- `resetBookingEmailTemplatesToDefaults(bool $preserveActivationState = true)`
+  - Force-resets all template keys to built-in subject + HTML defaults.
+  - Preserves each row's `is_active` state when requested.
+
+## Persistence Layer
+
+Templates are stored in the database table:
+
+- `booking_email_templates`
+
+Relevant helpers in `config/database.php`:
+
+- `ensureBookingEmailTemplatesTable(...)`
+- `getBookingEmailTemplateConfig(...)`
+- `upsertBookingEmailTemplateConfig(...)`
 
 ## Supported Template Keys
 
-The previewer currently supports these keys:
+Current booking template keys:
 
+- `booking_received`
+- `booking_confirmed`
+- `booking_cancelled`
 - `payment_invoice`
 - `payment_invoice_document`
-- `payment_receipt_document`
-- `quotation_document`
-- `conference_quotation`
+- `conference_invoice`
+- `conference_invoice_document`
+- `tentative_booking_created`
+- `tentative_booking_reminder`
+- `tentative_booking_expired`
+- `tentative_booking_converted`
 - `tentative_quotation`
+- `tentative_quotation_document`
+- `conference_quotation`
+- `conference_quotation_document`
+- `event_quotation`
+- `event_quotation_document`
+- `credit_note`
+- `credit_note_document`
+- `payment_receipt`
+- `payment_receipt_document`
 
-The layout studio is intended for the PDF-capable keys:
+Document/PDF template keys (rendered as PDF attachments in test-send flow):
 
 - `payment_invoice_document`
+- `conference_invoice_document`
+- `tentative_quotation_document`
+- `conference_quotation_document`
+- `event_quotation_document`
+- `credit_note_document`
 - `payment_receipt_document`
-- `quotation_document`
-- `conference_quotation`
 
-## Route Modes
+## Preview Behavior
 
-### Standalone route
+### Email templates
 
-Path:
+- Preview resolves placeholders against sample data.
+- The rendered body is wrapped with the shared email shell (`wrapEmailTemplate(...)`) for realistic visual output.
 
-- `preview-document-templates.php?template=payment_invoice_document`
+### PDF document templates
 
-Use this when the previewer should run outside admin.
+- Preview resolves placeholders against sample data.
+- The preview body is rendered directly as document HTML and marked as `is_document = true`.
+- Test send for document templates generates a real PDF attachment using `bookingRenderPdfFromHtml(...)` and sends via `sendEmailWithAttachments(...)`.
 
-### Admin route
+## Save and Revert Actions
 
-Path:
+### Save all templates
 
-- `admin/document-template-previewer.php?template=payment_invoice_document`
+- POST key: `booking_email_templates`
+- Writes each template's subject/html/text and activation state through `upsertBookingEmailTemplateConfig(...)`.
 
-Use this when the previewer must live inside the admin header/sidebar layout and participate in admin navigation.
+### Per-template reset
 
-## Embedded Admin Mode
+- UI: `Load Default` button on each template tab.
+- Source: `hotel_booking_template_defaults_map()`
+- Scope: current tab only (subject + HTML in editor).
+- Note: requires `Save All Templates` to persist to DB.
 
-The standalone preview file supports reuse through three constants.
+### Full reset for all templates
 
-These are defined by `admin/document-template-previewer.php` before including the standalone file:
+- POST key: `reset_all_booking_templates_to_defaults`
+- Server action: `resetBookingEmailTemplatesToDefaults(true)`
+- Scope: all template keys (subject + HTML).
+- Activation behavior: existing `is_active` values are preserved.
 
-- `HOTEL_DOCUMENT_PREVIEW_EMBED`
-  - When `true`, the standalone preview file does not emit its own full page shell.
+## Security and Validation Notes
 
-- `HOTEL_DOCUMENT_PREVIEW_ASSET_PREFIX`
-  - Used so CSS/JS asset paths resolve correctly from admin.
-  - Current admin value: `../`
+- CSRF validation is enforced for state-changing POST requests.
+- AJAX preview/send endpoints return JSON and exit early.
+- Empty subject or HTML is rejected during full save.
 
-- `HOTEL_DOCUMENT_PREVIEW_ROUTE`
-  - Used for save and PDF preview URLs.
-  - Current admin value: `document-template-previewer.php`
+## Operational Validation Checklist
 
-## Server-Side Preview Flow
+After any template-system change, validate in this order:
 
-### Template load order
+1. `php -l config/email.php`
+2. `php -l admin/booking-settings.php`
+3. `php -l docs/guides/12-email-templates.php`
+4. Run `get_errors` on changed files and resolve diagnostics.
+5. Browser check in admin on `booking-settings.php`:
+   - Open Email Templates section.
+   - Confirm per-template `Load Default` updates editor content.
+   - Confirm `Reset All to Defaults` succeeds and reports success.
+   - Run at least one email preview and one PDF-template test preview.
 
-`preview-document-templates.php` resolves raw template HTML in this order:
+## Guardrails
 
-1. `getBookingEmailTemplateConfig($currentKey, [])`
-2. direct DB read from `booking_email_templates`
-3. `hotel_document_template_default($currentKey)`
-
-### Placeholder preview data
-
-The preview route builds realistic sample data using:
-
-- room data from `rooms`
-- conference room data from `conference_rooms`
-- latest booking/payment/inquiry data when available
-- site settings for bank, contact, VAT, address, etc.
-
-### Browser-safe HTML rendering
-
-`$makePreviewHtmlBrowserSafe(...)` rewrites local Windows image paths into site URLs so the browser stage can display images that originally came from local file-style sources.
-
-### Actual PDF rendering
-
-The preview route builds real PDF output with TCPDF.
-
-Key pieces:
-
-- `$buildPdfPreviewBinary`
-- `?format=pdf`
-- embedded base64 PDF passed into the page
-- PDF.js module script renders the actual PDF into canvases
-
-This is why the preview matches the email attachment path more closely than the old HTML-only preview.
-
-## Save Endpoint
-
-The preview route accepts a POST save operation directly.
-
-Trigger:
-
-- `save_template_layout=1`
-
-Validation rules:
-
-1. localhost-only request source
-2. session CSRF token match
-3. valid `template_key`
-4. non-empty `html_body`
-5. template storage helpers available
-
-Save action:
-
-- preserves existing template name, subject, text body, and activation state
-- updates only the raw `html_body`
-- writes through `upsertBookingEmailTemplateConfig(...)`
-
-Response format:
-
-```json
-{ "success": true, "message": "Template layout saved successfully.", "template_key": "payment_invoice_document" }
-```
-
-## Layout Studio Data Contract
-
-The preview page injects JSON into:
-
-- `#preview-template-designer-data`
-
-Current payload fields:
-
-- `templateKey`
-- `templateName`
-- `rawTemplateHtml`
-- `sampleMap`
-- `siteBaseUrl`
-- `saveUrl`
-- `pdfPreviewUrl`
-- `csrfToken`
-- `isPdfCapable`
-- `canSave`
-
-The JS file expects this payload to exist for the designer to initialize.
-
-## Client Layout Studio Logic
-
-### Section model
-
-The JS parses the raw template HTML into a DOM model and treats the first outer table rows as reorderable sections.
-
-Key helpers:
-
-- `parseTemplate(...)`
-- `getOuterRows(...)`
-- `buildDescriptors(...)`
-
-Current section labels are inferred from row content, for example:
-
-- `Header`
-- `Details Band`
-- `Primary Content`
-- `Payment History`
-- `Bank Details`
-- `Terms`
-
-Header remains locked.
-
-### Stage rendering
-
-The stage renders placeholder-applied HTML into:
-
-- `#preview-designer-stage`
-
-Handles render into:
-
-- `#preview-designer-handles`
-
-Guide lines render inside:
-
-- `#preview-designer-stage-shell`
-
-### Section movement
-
-The current system supports:
-
-- drag-and-drop row reordering
-- explicit up/down buttons for every movable section
-- explicit left/right nudges for every movable section
-
-Horizontal movement is implemented by adjusting the first cell's padding:
-
-- left shift increases `padding-left` and decreases `padding-right`
-- right shift does the opposite
-
-This is persisted into the raw template HTML.
-
-### Header movement
-
-The current system supports two header handles:
-
-- `Logo Y`
-- `Reference Y`
-
-Important implementation detail:
-
-- Logo movement targets the logo wrapper `div` using `margin-top`
-- Reference movement must target the inner reference card `div` using `margin-top`
-
-Do not move the reference by changing the header cell `padding-top`. That distorts and crops the entire header band.
-
-### Reset and save
-
-- `Reset Draft` restores the last saved raw HTML.
-- `Save Template Layout` posts back to the preview route, then reloads the page so the PDF canvas re-renders from the saved template.
-
-## Critical Guardrails
-
-These are the issues already found and fixed. If the system is reapplied, preserve these rules.
-
-### 1. Do not rerender the entire stage on every image load
-
-Bad behavior:
-
-- the stage keeps rebuilding itself
-- the preview looks like it is constantly loading
-
-Required rule:
-
-- image `load` events should only refresh the overlay handles
-- they must not rerender the entire stage HTML
-
-### 2. Keep the stage shell height fixed
-
-Bad behavior:
-
-- dragging header elements changes the container height
-- the whole editing area appears to shrink or jump
-
-Required rule:
-
-- `.preview-designer__stage-shell` uses fixed `height: clamp(...)`
-- not only `min-height`
-
-### 3. Normalize old reference padding edits
-
-The JS currently includes normalization logic that converts old reference cell `padding-top` edits into inner card `margin-top` edits.
-
-Keep this normalization logic if the system is recreated, otherwise older saved templates can still render broken headers.
-
-### 4. Save only raw template HTML
-
-The editor must persist raw HTML with placeholders intact.
-
-Do not save the rendered browser HTML with placeholder replacements already applied.
-
-## Admin Integration Rules
-
-To reapply the admin version, preserve all of the following:
-
-1. `admin/document-template-previewer.php` must define the three embed constants before including `../preview-document-templates.php`
-2. The page must render inside `#rh-admin-page`
-3. The page must include the same previewer CSS and JS assets with admin-safe relative paths
-4. `admin/includes/admin-header.php` must include `document-template-previewer.php` in the `Configuration` group
-
-## Reapply Checklist
-
-If the previewer has to be reapplied to new files, follow this exact order:
-
-1. Restore or recreate `preview-document-templates.php`
-2. Restore or recreate `js/preview-document-templates.js`
-3. Restore or recreate `css/preview-document-templates-editor.css`
-4. Restore or recreate `admin/document-template-previewer.php`
-5. Re-add the `Document Previewer` menu entry in `admin/includes/admin-header.php`
-6. Confirm the preview route can load raw template HTML from DB/defaults
-7. Confirm `?format=pdf` returns real PDF output
-8. Confirm PDF.js canvas preview renders on the page
-9. Confirm section reorder buttons and left/right nudges work
-10. Confirm logo/reference handle movement works without collapsing the header
-11. Confirm save POST writes back to `booking_email_templates`
-12. Reload and confirm the saved layout affects the PDF preview
-
-## Validation Commands
-
-After reapplying or repairing the system, run these checks:
-
-```powershell
-php -l preview-document-templates.php
-php -l admin/document-template-previewer.php
-php -l admin/includes/admin-header.php
-node --check js/preview-document-templates.js
-```
-
-Then run diagnostics:
-
-```text
-get_errors on touched files
-get_errors on the full workspace
-```
-
-## Current Menu Placement
-
-The previewer is currently placed in admin under:
-
-- `Configuration` -> `Document Previewer`
-
-## Current Save Restrictions
-
-Layout saving is currently restricted to localhost addresses:
-
-- `127.0.0.1`
-- `::1`
-- `::ffff:127.0.0.1`
-
-## If This Has To Be Rebuilt Quickly
-
-Minimum file set to recover first:
-
-- `preview-document-templates.php`
-- `js/preview-document-templates.js`
-- `css/preview-document-templates-editor.css`
-- `admin/document-template-previewer.php`
-
-Then re-add the admin menu item and rerun the validation sequence above.
+- Do not hardcode SMTP credentials in source files.
+- Keep template baseline definitions in `config/email.php` only.
+- Avoid introducing a second hardcoded defaults map in admin files.
+- Keep docs and template key lists synchronized when keys are added or removed.

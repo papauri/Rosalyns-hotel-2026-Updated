@@ -1636,11 +1636,101 @@ function ensureBookingEmailTemplateDefaults()
         ],
     ];
 
+    // Keep an in-memory copy so admin reset/revert actions can use the exact same defaults.
+    $GLOBALS['hotel_booking_template_defaults'] = $defaults;
+
     foreach ($defaults as $key => $def) {
         $existing = getBookingEmailTemplateConfig($key, []);
         if (empty($existing['subject']) || empty($existing['html_body'])) {
             upsertBookingEmailTemplateConfig($key, $def['name'], $def['subject'], $def['html'], '', 1);
         }
+    }
+}
+
+if (!function_exists('hotel_booking_template_defaults_map')) {
+    /**
+     * Return the canonical booking template defaults map used for seeding and resets.
+     *
+     * @return array<string, array{name: string, subject: string, html: string}>
+     */
+    function hotel_booking_template_defaults_map(): array
+    {
+        $defaults = $GLOBALS['hotel_booking_template_defaults'] ?? null;
+        if (is_array($defaults) && $defaults !== []) {
+            return $defaults;
+        }
+
+        if (function_exists('ensureBookingEmailTemplateDefaults')) {
+            ensureBookingEmailTemplateDefaults();
+        }
+
+        $seededDefaults = $GLOBALS['hotel_booking_template_defaults'] ?? [];
+        return is_array($seededDefaults) ? $seededDefaults : [];
+    }
+}
+
+if (!function_exists('resetBookingEmailTemplatesToDefaults')) {
+    /**
+     * Force reset every booking email/PDF template to the built-in defaults.
+     *
+     * @return array{success: bool, message: string, updated?: int}
+     */
+    function resetBookingEmailTemplatesToDefaults(bool $preserveActivationState = true): array
+    {
+        if (!function_exists('ensureBookingEmailTemplatesTable') || !function_exists('upsertBookingEmailTemplateConfig') || !function_exists('getBookingEmailTemplateConfig')) {
+            return [
+                'success' => false,
+                'message' => 'Booking template storage is not available.',
+            ];
+        }
+
+        if (!ensureBookingEmailTemplatesTable()) {
+            return [
+                'success' => false,
+                'message' => 'Booking template table could not be prepared.',
+            ];
+        }
+
+        $defaults = hotel_booking_template_defaults_map();
+        if ($defaults === []) {
+            return [
+                'success' => false,
+                'message' => 'Built-in booking template defaults were not available.',
+            ];
+        }
+
+        $updatedCount = 0;
+        foreach ($defaults as $templateKey => $templateDefaults) {
+            $existing = getBookingEmailTemplateConfig($templateKey, []);
+            $isActive = 1;
+            if ($preserveActivationState && isset($existing['is_active'])) {
+                $isActive = (int)$existing['is_active'] === 1 ? 1 : 0;
+            }
+
+            $saved = upsertBookingEmailTemplateConfig(
+                $templateKey,
+                (string)$templateDefaults['name'],
+                (string)$templateDefaults['subject'],
+                (string)$templateDefaults['html'],
+                '',
+                $isActive
+            );
+
+            if (!$saved) {
+                return [
+                    'success' => false,
+                    'message' => 'Failed to reset template: ' . $templateKey,
+                ];
+            }
+
+            $updatedCount++;
+        }
+
+        return [
+            'success' => true,
+            'message' => 'Booking templates reset to defaults.',
+            'updated' => $updatedCount,
+        ];
     }
 }
 

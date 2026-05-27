@@ -125,6 +125,22 @@ $all_vars = [
 
     [
         'cat' => 'Room & Stay',
+        'tag' => '{{check_in}}',
+        'desc' => 'Compact check-in date label commonly used in invoice emails.',
+        'example' => '1 June 2026',
+        'tpl' => 'payment_invoice'
+    ],
+
+    [
+        'cat' => 'Room & Stay',
+        'tag' => '{{check_out}}',
+        'desc' => 'Compact check-out date label commonly used in invoice emails.',
+        'example' => '4 June 2026',
+        'tpl' => 'payment_invoice'
+    ],
+
+    [
+        'cat' => 'Room & Stay',
         'tag' => '{{check_in_date_formatted}}',
         'desc' => 'Check-in date in short format: Month Day, Year.',
         'example' => 'June 1, 2026',
@@ -234,6 +250,46 @@ $all_vars = [
         'desc' => 'VAT portion of the total booking cost.',
         'example' => '25,000',
         'tpl' => 'booking_received, booking_confirmed'
+    ],
+
+    [
+        'cat' => 'Pricing & Payment',
+        'tag' => '{{vat_number}}',
+        'desc' => 'VAT registration number from site settings.',
+        'example' => 'MW-VAT-123456',
+        'tpl' => 'payment_invoice, conference_invoice, payment_receipt'
+    ],
+
+    [
+        'cat' => 'Pricing & Payment',
+        'tag' => '{{subtotal_amount}}',
+        'desc' => 'Subtotal before VAT and levy additions.',
+        'example' => 'MWK 250,000.00',
+        'tpl' => 'payment_invoice, conference_invoice'
+    ],
+
+    [
+        'cat' => 'Pricing & Payment',
+        'tag' => '{{levy_rate}}',
+        'desc' => 'Tourism levy percentage applied to the booking.',
+        'example' => '1.0',
+        'tpl' => 'payment_invoice'
+    ],
+
+    [
+        'cat' => 'Pricing & Payment',
+        'tag' => '{{levy_amount}}',
+        'desc' => 'Calculated tourism levy amount.',
+        'example' => 'MWK 2,500.00',
+        'tpl' => 'payment_invoice'
+    ],
+
+    [
+        'cat' => 'Pricing & Payment',
+        'tag' => '{{total_due}}',
+        'desc' => 'Amount due after deductions and deposits.',
+        'example' => 'MWK 120,000',
+        'tpl' => 'tentative_quotation_document, conference_quotation_document, event_quotation_document'
     ],
 
     [
@@ -1282,6 +1338,7 @@ $templates = [
                 <h2>Contents</h2>
                 <ul class="toc">
                     <li><a href="#how-to-use">How template tags work <span>↓</span></a></li>
+                    <li><a href="#defaults-and-revert">Default baseline and revert workflow <span>↓</span></a></li>
                     <li><a href="#variables">Variable reference (searchable) <span>↓</span></a></li>
                     <li><a href="#templates">Available email and PDF templates <span>↓</span></a></li>
                     <li><a href="#html-tags">HTML tags for email editing <span>↓</span></a></li>
@@ -1316,6 +1373,29 @@ Total: {{currency_symbol}} {{total_amount_formatted}}.</code></pre>
 
                 <div class="callout warn">
                     Tags are replaced using PHP <code>strtr()</code> — not eval'd or executed. They are safe to use in any part of the HTML body, including inside <code>href</code> attributes for links.
+                </div>
+            </section>
+
+            <section id="defaults-and-revert">
+                <h2>Default baseline and revert workflow</h2>
+                <p>The current premium email and Japandi PDF designs are stored as the canonical defaults in <code>config/email.php</code>. The admin editor and runtime seeding both use the same defaults map, so there is only one source of truth for template baseline content.</p>
+
+                <h3>Where defaults are defined</h3>
+                <ul class="checklist">
+                    <li><code>ensureBookingEmailTemplateDefaults()</code> seeds missing rows in <code>booking_email_templates</code> using canonical defaults.</li>
+                    <li><code>hotel_booking_template_defaults_map()</code> exposes the same defaults to admin tooling and reset flows.</li>
+                    <li><code>resetBookingEmailTemplatesToDefaults()</code> force-resets all template keys to the current built-in design while preserving each template's active/inactive state.</li>
+                </ul>
+
+                <h3>Revert options in admin</h3>
+                <ul class="checklist">
+                    <li><strong>Load Default</strong> on a single tab resets only that tab's subject + HTML editor values.</li>
+                    <li><strong>Reset All to Defaults</strong> applies the canonical design to every email and PDF template key in one action.</li>
+                    <li>After using <strong>Load Default</strong>, click <strong>Save All Templates</strong> to persist changes to the database.</li>
+                </ul>
+
+                <div class="callout">
+                    The reset actions update <code>subject</code> and <code>html_body</code>. Keep <code>text_body</code> current for plaintext fallback coverage on strict email clients.
                 </div>
             </section>
 

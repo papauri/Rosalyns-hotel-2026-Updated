@@ -359,34 +359,106 @@ $receiptHtml = buildReceiptHtml($order, $items, $ctx);
 /* ---------- Print-only mode ---------- */
 if (!empty($_GET['print'])) {
     if (!empty($_GET['kot'])) {
-        // Kitchen Order Ticket — minimal, big text, no prices, prints from kitchen printer.
-        $kotTime = date('Y-m-d H:i');
+        // Kitchen Order Ticket: modernized thermal layout (80mm), no prices.
+        $ticketTimeRaw = (string)($order['fired_at'] ?: ($order['kitchen_printed_at'] ?: ($order['created_at'] ?: '')));
+        $kotTime = $ticketTimeRaw !== '' ? date('Y-m-d H:i', strtotime($ticketTimeRaw)) : date('Y-m-d H:i');
         $isRoomService = ($order['order_type'] ?? '') === 'room_service';
+        $serviceLabel = strtoupper(str_replace('_', ' ', (string)($order['order_type'] ?? 'walk_in')));
         $roomNo = trim((string)($order['room_number'] ?? ''));
         if ($isRoomService && $roomNo === '' && !empty($order['table_number'])) {
             $roomNo = trim(preg_replace('/^Room\s+/i', '', (string)$order['table_number']));
         }
-        $tbl = $isRoomService
-            ? ('Room ' . htmlspecialchars($roomNo ?: 'unlinked'))
-            : ($order['table_number'] ? 'Table ' . htmlspecialchars($order['table_number']) : strtoupper(str_replace('_', ' ', $order['order_type'] ?? 'walk_in')));
-        $cust = $order['customer_name'] ? htmlspecialchars($order['customer_name']) : '';
-        echo '<!DOCTYPE html><html><head><meta charset="UTF-8"><title>KOT ' . htmlspecialchars($order['reference']) . '</title>';
-        echo '<style>body{font-family:Arial,sans-serif;width:80mm;margin:0;padding:8px;font-size:14px;color:#000;}h1{font-size:20px;margin:0 0 4px;text-align:center;border-bottom:2px solid #000;padding-bottom:6px;}h2{font-size:16px;margin:6px 0;}.line{border-bottom:1px dashed #000;padding:6px 0;}.qty{font-size:22px;font-weight:700;}.nm{font-size:16px;font-weight:700;}.note{font-style:italic;font-size:13px;margin-top:2px;}.foot{margin-top:10px;border-top:2px solid #000;padding-top:6px;text-align:center;font-size:11px;}@media print{body{margin:0;padding:0;}}</style>';
-        echo '</head><body>';
-        echo '<h1>KITCHEN TICKET</h1>';
-        echo '<div style="text-align:center;font-size:13px;">' . htmlspecialchars($order['reference']) . '</div>';
-        echo '<h2>' . $tbl . ($cust ? ' · ' . $cust : '') . '</h2>';
-        echo '<div style="font-size:12px;">Cashier: ' . htmlspecialchars($order['cashier_name'] ?? '') . ' · ' . $kotTime . '</div>';
-        if (!empty($order['notes'])) echo '<div class="note" style="margin-top:6px;border:1px solid #000;padding:4px;"><strong>NOTE:</strong> ' . htmlspecialchars($order['notes']) . '</div>';
-        echo '<div style="margin-top:8px;">';
+        $locationLabel = $isRoomService
+            ? 'ROOM ' . strtoupper($roomNo !== '' ? $roomNo : 'UNLINKED')
+            : ($order['table_number'] ? 'TABLE ' . strtoupper((string)$order['table_number']) : $serviceLabel);
+        $cust = trim((string)($order['customer_name'] ?? ''));
+        $cashierName = trim((string)($order['cashier_name'] ?? ''));
+        $itemCount = count($items);
+        $totalQty = 0.0;
         foreach ($items as $it) {
-            $q = rtrim(rtrim(number_format((float)$it['quantity'], 2), '0'), '.');
-            echo '<div class="line"><span class="qty">' . $q . '×</span> <span class="nm">' . htmlspecialchars($it['item_name']) . '</span>';
-            if (!empty($it['notes'])) echo '<div class="note">→ ' . htmlspecialchars($it['notes']) . '</div>';
-            echo '</div>';
+            $totalQty += (float)($it['quantity'] ?? 0);
+        }
+        $totalQtyText = rtrim(rtrim(number_format($totalQty, 2), '0'), '.');
+
+        echo '<!DOCTYPE html><html><head><meta charset="UTF-8"><title>KOT ' . htmlspecialchars($order['reference']) . '</title>';
+        echo '<style>'
+            . '*{box-sizing:border-box;}'
+            . 'body{font-family:Arial,Helvetica,sans-serif;width:80mm;max-width:80mm;margin:0 auto;padding:4mm 3mm;color:#111;background:#fff;}'
+            . '.kot-card{border:1.2px solid #111;padding:2.8mm 2.6mm;}'
+            . '.kot-top{text-align:center;border-bottom:1px solid #111;padding-bottom:2mm;margin-bottom:2mm;}'
+            . '.kot-site{font-size:12px;font-weight:700;letter-spacing:.09em;text-transform:uppercase;line-height:1.2;}'
+            . '.kot-title{font-size:11px;font-weight:700;letter-spacing:.17em;text-transform:uppercase;margin-top:1mm;}'
+            . '.kot-ref{font-size:16px;font-weight:700;letter-spacing:.06em;line-height:1.1;margin-top:1.4mm;}'
+            . '.kot-meta{width:100%;border-collapse:collapse;font-size:11px;line-height:1.25;}'
+            . '.kot-meta td{padding:1.3mm 0;border-bottom:1px dashed #999;vertical-align:top;}'
+            . '.kot-meta td.lbl{width:34%;font-size:9px;font-weight:700;letter-spacing:.11em;text-transform:uppercase;color:#333;}'
+            . '.kot-note{margin-top:2mm;border:1px solid #111;padding:1.8mm;font-size:10.5px;line-height:1.35;}'
+            . '.kot-lines{margin-top:2mm;border-top:1.2px solid #111;}'
+            . '.kot-line{display:flex;gap:2mm;padding:2.1mm 0;border-bottom:1px dashed #999;}'
+            . '.kot-qty{min-width:16mm;max-width:16mm;border:1px solid #111;text-align:center;font-weight:700;font-size:16px;line-height:1;padding:1.6mm 1mm;}'
+            . '.kot-body{flex:1;min-width:0;}'
+            . '.kot-name{font-size:12.8px;font-weight:700;line-height:1.18;text-transform:uppercase;word-break:break-word;}'
+            . '.kot-item-note{font-size:10px;font-style:italic;line-height:1.28;margin-top:1mm;word-break:break-word;}'
+            . '.kot-station{font-size:9px;letter-spacing:.1em;text-transform:uppercase;color:#444;margin-top:1mm;}'
+            . '.kot-empty{padding:3.2mm 0;text-align:center;font-size:11px;color:#444;font-style:italic;}'
+            . '.kot-foot{margin-top:2.4mm;padding-top:2mm;border-top:1.2px solid #111;text-align:center;}'
+            . '.kot-foot-main{font-size:10.8px;font-weight:700;letter-spacing:.09em;text-transform:uppercase;}'
+            . '.kot-foot-sub{font-size:9.5px;color:#333;margin-top:1mm;}'
+            . '.kot-cut{margin-top:2.1mm;border-top:1px dashed #777;padding-top:1.4mm;text-align:center;font-size:8.6px;letter-spacing:.14em;text-transform:uppercase;color:#444;}'
+            . '@media print{body{margin:0 auto;padding:0;} .kot-card{border-width:1px;}}'
+            . '</style>';
+        echo '</head><body>';
+        echo '<div class="kot-card">';
+        echo '<div class="kot-top">';
+        echo '<div class="kot-site">' . htmlspecialchars($siteName) . '</div>';
+        echo '<div class="kot-title">Kitchen Order Ticket</div>';
+        echo '<div class="kot-ref">' . htmlspecialchars($order['reference']) . '</div>';
+        echo '</div>';
+
+        echo '<table class="kot-meta">';
+        echo '<tr><td class="lbl">Time</td><td>' . htmlspecialchars($kotTime) . '</td></tr>';
+        echo '<tr><td class="lbl">Service</td><td>' . htmlspecialchars($serviceLabel) . '</td></tr>';
+        echo '<tr><td class="lbl">Location</td><td>' . htmlspecialchars($locationLabel) . '</td></tr>';
+        if ($cashierName !== '') {
+            echo '<tr><td class="lbl">Cashier</td><td>' . htmlspecialchars($cashierName) . '</td></tr>';
+        }
+        if ($cust !== '') {
+            echo '<tr><td class="lbl">Guest</td><td>' . htmlspecialchars($cust) . '</td></tr>';
+        }
+        echo '</table>';
+
+        if (!empty($order['notes'])) {
+            echo '<div class="kot-note"><strong>Order note:</strong> ' . htmlspecialchars((string)$order['notes']) . '</div>';
+        }
+
+        echo '<div class="kot-lines">';
+        if ($itemCount === 0) {
+            echo '<div class="kot-empty">No line items found.</div>';
+        } else {
+            foreach ($items as $it) {
+                $q = rtrim(rtrim(number_format((float)$it['quantity'], 2), '0'), '.');
+                echo '<div class="kot-line">';
+                echo '<div class="kot-qty">' . htmlspecialchars($q) . 'x</div>';
+                echo '<div class="kot-body">';
+                echo '<div class="kot-name">' . htmlspecialchars((string)$it['item_name']) . '</div>';
+                if (!empty($it['notes'])) {
+                    echo '<div class="kot-item-note">Note: ' . htmlspecialchars((string)$it['notes']) . '</div>';
+                }
+                if (!empty($it['station'])) {
+                    echo '<div class="kot-station">Station: ' . htmlspecialchars(strtoupper((string)$it['station'])) . '</div>';
+                }
+                echo '</div>';
+                echo '</div>';
+            }
         }
         echo '</div>';
-        echo '<div class="foot">' . count($items) . ' items · ' . htmlspecialchars($order['order_type'] ?? '') . '</div>';
+
+        echo '<div class="kot-foot">';
+        echo '<div class="kot-foot-main">' . $itemCount . ' item(s) - ' . htmlspecialchars($totalQtyText !== '' ? $totalQtyText : '0') . ' qty total</div>';
+        echo '<div class="kot-foot-sub">Prep in sequence and mark when complete.</div>';
+        echo '</div>';
+        echo '</div>';
+        echo '<div class="kot-cut">Kitchen copy</div>';
         echo '<script>window.onload=function(){window.print();};</script>';
         echo '</body></html>';
         exit;

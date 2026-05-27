@@ -823,6 +823,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             } else {
                 throw new Exception('Failed to send test email: ' . ($result['message'] ?? 'Unknown error'));
             }
+        } elseif (isset($_POST['reset_all_booking_templates_to_defaults'])) {
+            if (!function_exists('resetBookingEmailTemplatesToDefaults')) {
+                throw new Exception('Booking template reset is not available');
+            }
+
+            $resetResult = resetBookingEmailTemplatesToDefaults(true);
+            if (empty($resetResult['success'])) {
+                throw new Exception((string)($resetResult['message'] ?? 'Failed to reset booking templates.'));
+            }
+
+            $updated = (int)($resetResult['updated'] ?? 0);
+            $message = "All booking email and PDF templates were reset to the default design ({$updated} templates).";
         } elseif (isset($_POST['booking_email_templates'])) {
             if (!function_exists('upsertBookingEmailTemplateConfig')) {
                 throw new Exception('Booking template storage is not available');
@@ -949,267 +961,17 @@ foreach ($booking_template_defs as $template_key => $template_name) {
         ];
 }
 
-// Built-in defaults for the "Load Default" button
-$tplDefaults = [
-    'booking_received' => [
-        'subject' => 'Booking Received - {{site_name}} [{{booking_reference}}]',
-        'html'    => '<h1 style="color:#1A1A1A;text-align:center;">Booking Received — Awaiting Confirmation</h1>
-<p>Dear {{guest_name}},</p>
-<p>Thank you for your booking request with <strong>{{site_name}}</strong>. We have received your booking and it is now pending confirmation.</p>
-<table style="width:100%;border-collapse:collapse;margin:16px 0;">
-  <tr><td style="padding:8px;border:1px solid #e0e0e0;font-weight:bold;">Reference</td><td style="padding:8px;border:1px solid #e0e0e0;">{{booking_reference}}</td></tr>
-  <tr><td style="padding:8px;border:1px solid #e0e0e0;font-weight:bold;">Room</td><td style="padding:8px;border:1px solid #e0e0e0;">{{room_name}}</td></tr>
-  <tr><td style="padding:8px;border:1px solid #e0e0e0;font-weight:bold;">Check-in</td><td style="padding:8px;border:1px solid #e0e0e0;">{{check_in_date_formatted}}</td></tr>
-  <tr><td style="padding:8px;border:1px solid #e0e0e0;font-weight:bold;">Check-out</td><td style="padding:8px;border:1px solid #e0e0e0;">{{check_out_date_formatted}}</td></tr>
-  <tr><td style="padding:8px;border:1px solid #e0e0e0;font-weight:bold;">Nights</td><td style="padding:8px;border:1px solid #e0e0e0;">{{number_of_nights}}</td></tr>
-  <tr><td style="padding:8px;border:1px solid #e0e0e0;font-weight:bold;">Guests</td><td style="padding:8px;border:1px solid #e0e0e0;">{{number_of_guests}}</td></tr>
-  <tr><td style="padding:8px;border:1px solid #e0e0e0;font-weight:bold;">Total</td><td style="padding:8px;border:1px solid #e0e0e0;">{{currency_symbol}} {{total_amount_formatted}}</td></tr>
-</table>
-<p>{{payment_policy}}</p>
-<p>If you have any questions, please contact us at <a href="mailto:{{contact_email}}">{{contact_email}}</a> or call {{phone_main}}.</p>',
-    ],
-    'booking_confirmed' => [
-        'subject' => 'Booking Confirmed - {{site_name}} [{{booking_reference}}]',
-        'html'    => '<h1 style="color:#1A1A1A;text-align:center;">Your Booking is Confirmed!</h1>
-<p>Dear {{guest_name}},</p>
-<p>We are delighted to confirm your booking at <strong>{{site_name}}</strong>. We look forward to welcoming you.</p>
-<table style="width:100%;border-collapse:collapse;margin:16px 0;">
-  <tr><td style="padding:8px;border:1px solid #e0e0e0;font-weight:bold;">Reference</td><td style="padding:8px;border:1px solid #e0e0e0;">{{booking_reference}}</td></tr>
-  <tr><td style="padding:8px;border:1px solid #e0e0e0;font-weight:bold;">Room</td><td style="padding:8px;border:1px solid #e0e0e0;">{{room_name}}</td></tr>
-  <tr><td style="padding:8px;border:1px solid #e0e0e0;font-weight:bold;">Check-in</td><td style="padding:8px;border:1px solid #e0e0e0;">{{check_in_date_formatted}} from {{check_in_time}}</td></tr>
-  <tr><td style="padding:8px;border:1px solid #e0e0e0;font-weight:bold;">Check-out</td><td style="padding:8px;border:1px solid #e0e0e0;">{{check_out_date_formatted}} by {{check_out_time}}</td></tr>
-  <tr><td style="padding:8px;border:1px solid #e0e0e0;font-weight:bold;">Nights</td><td style="padding:8px;border:1px solid #e0e0e0;">{{number_of_nights}}</td></tr>
-  <tr><td style="padding:8px;border:1px solid #e0e0e0;font-weight:bold;">Guests</td><td style="padding:8px;border:1px solid #e0e0e0;">{{number_of_guests}}</td></tr>
-  <tr><td style="padding:8px;border:1px solid #e0e0e0;font-weight:bold;">Total</td><td style="padding:8px;border:1px solid #e0e0e0;">{{currency_symbol}} {{total_amount_formatted}}</td></tr>
-</table>
-<p>{{payment_policy}}</p>
-<p>Questions? <a href="mailto:{{contact_email}}">{{contact_email}}</a> | {{phone_main}}</p>',
-    ],
-    'booking_cancelled' => [
-        'subject' => 'Booking Cancelled - {{site_name}} [{{booking_reference}}]',
-        'html'    => '<h1 style="color:#dc3545;text-align:center;">Booking Cancelled</h1>
-<p>Dear {{guest_name}},</p>
-<p>We regret to inform you that your booking with <strong>{{site_name}}</strong> has been cancelled.</p>
-<table style="width:100%;border-collapse:collapse;margin:16px 0;">
-  <tr><td style="padding:8px;border:1px solid #e0e0e0;font-weight:bold;">Reference</td><td style="padding:8px;border:1px solid #e0e0e0;">{{booking_reference}}</td></tr>
-  <tr><td style="padding:8px;border:1px solid #e0e0e0;font-weight:bold;">Room</td><td style="padding:8px;border:1px solid #e0e0e0;">{{room_name}}</td></tr>
-  <tr><td style="padding:8px;border:1px solid #e0e0e0;font-weight:bold;">Check-in</td><td style="padding:8px;border:1px solid #e0e0e0;">{{check_in_date_formatted}}</td></tr>
-  <tr><td style="padding:8px;border:1px solid #e0e0e0;font-weight:bold;">Check-out</td><td style="padding:8px;border:1px solid #e0e0e0;">{{check_out_date_formatted}}</td></tr>
-  <tr><td style="padding:8px;border:1px solid #e0e0e0;font-weight:bold;">Reason</td><td style="padding:8px;border:1px solid #e0e0e0;">{{cancellation_reason}}</td></tr>
-</table>
-<p>If you believe this is an error or would like to make a new booking, please contact us at <a href="mailto:{{contact_email}}">{{contact_email}}</a> or {{phone_main}}.</p>',
-    ],
-    'payment_invoice' => [
-        'subject' => 'Payment Invoice - {{site_name}} [{{booking_reference}}]',
-        'html'    => '<h1 style="color:#1A1A1A;text-align:center;">Payment Confirmed</h1>
-<p>Dear {{guest_name}},</p>
-<p>Thank you — your payment has been received for booking <strong>{{booking_reference}}</strong> at <strong>{{site_name}}</strong>.</p>
-<table style="width:100%;border-collapse:collapse;margin:16px 0;">
-  <tr><td style="padding:8px;border:1px solid #e0e0e0;font-weight:bold;">Reference</td><td style="padding:8px;border:1px solid #e0e0e0;">{{booking_reference}}</td></tr>
-  <tr><td style="padding:8px;border:1px solid #e0e0e0;font-weight:bold;">Room</td><td style="padding:8px;border:1px solid #e0e0e0;">{{room_name}}</td></tr>
-  <tr><td style="padding:8px;border:1px solid #e0e0e0;font-weight:bold;">Check-in</td><td style="padding:8px;border:1px solid #e0e0e0;">{{check_in_date_formatted}}</td></tr>
-  <tr><td style="padding:8px;border:1px solid #e0e0e0;font-weight:bold;">Check-out</td><td style="padding:8px;border:1px solid #e0e0e0;">{{check_out_date_formatted}}</td></tr>
-  <tr><td style="padding:8px;border:1px solid #e0e0e0;font-weight:bold;">Amount Paid</td><td style="padding:8px;border:1px solid #e0e0e0;font-weight:bold;color:#065f46;">{{currency_symbol}} {{total_amount_formatted}}</td></tr>
-</table>
-<p>Your invoice is attached to this email.</p>
-<p>Thank you for choosing {{site_name}}. We look forward to welcoming you on {{check_in_date_formatted}}.</p>
-<p>Contact: <a href="mailto:{{contact_email}}">{{contact_email}}</a> | {{phone_main}}</p>',
-    ],
-    'payment_invoice_document' => [
-        'subject' => 'Invoice Document',
-        'html'    => hotel_default_payment_invoice_document_html(),
-    ],
-    'tentative_booking_created' => [
-        'subject' => 'Tentative Booking Created - {{site_name}} [{{booking_reference}}]',
-        'html'    => '<h1 style="color:#8B7355;text-align:center;">Tentative Booking Created</h1>
-<p>Dear {{guest_name}},</p>
-<p>Your room has been placed on tentative hold.</p>
-<p><strong>Reference:</strong> {{booking_reference}}<br>
-<strong>Room:</strong> {{room_name}}<br>
-<strong>Check-in:</strong> {{check_in_date_formatted}}<br>
-<strong>Check-out:</strong> {{check_out_date_formatted}}<br>
-<strong>Total:</strong> {{currency_symbol}} {{total_amount_formatted}}<br>
-<strong>Hold Expires:</strong> {{tentative_expires_at_formatted}}</p>
-<p>Please confirm before the hold expiry date.</p>
-<p>Contact: <a href="mailto:{{contact_email}}">{{contact_email}}</a> | {{phone_main}}</p>',
-    ],
-    'tentative_booking_reminder' => [
-        'subject' => 'Reminder: Tentative Booking Expires Soon - {{booking_reference}}',
-        'html'    => '<h1 style="color:#8B7355;text-align:center;">Tentative Booking Reminder</h1>
-<p>Dear {{guest_name}},</p>
-<p>Your tentative hold expires soon.</p>
-<p><strong>Reference:</strong> {{booking_reference}}<br>
-<strong>Room:</strong> {{room_name}}<br>
-<strong>Hold Expires:</strong> {{tentative_expires_at_formatted}}</p>
-<p>Reply to this email to confirm your booking.</p>
-<p>Contact: <a href="mailto:{{contact_email}}">{{contact_email}}</a> | {{phone_main}}</p>',
-    ],
-    'tentative_booking_expired' => [
-        'subject' => 'Tentative Booking Expired - {{booking_reference}}',
-        'html'    => '<h1 style="color:#6c757d;text-align:center;">Tentative Booking Expired</h1>
-<p>Dear {{guest_name}},</p>
-<p>Your tentative hold has expired and the room is now available again.</p>
-<p><strong>Reference:</strong> {{booking_reference}}<br>
-<strong>Room:</strong> {{room_name}}<br>
-<strong>Check-in:</strong> {{check_in_date_formatted}}<br>
-<strong>Check-out:</strong> {{check_out_date_formatted}}</p>
-<p>You can create a new booking at any time.</p>
-<p>Contact: <a href="mailto:{{contact_email}}">{{contact_email}}</a> | {{phone_main}}</p>',
-    ],
-    'tentative_booking_converted' => [
-        'subject' => 'Booking Confirmed - {{site_name}} [{{booking_reference}}]',
-        'html'    => '<h1 style="color:#8B7355;text-align:center;">Booking Confirmed</h1>
-<p>Dear {{guest_name}},</p>
-<p>Your tentative booking has been confirmed.</p>
-<p><strong>Reference:</strong> {{booking_reference}}<br>
-<strong>Room:</strong> {{room_name}}<br>
-<strong>Check-in:</strong> {{check_in_date_formatted}} from {{check_in_time}}<br>
-<strong>Check-out:</strong> {{check_out_date_formatted}} by {{check_out_time}}<br>
-<strong>Total:</strong> {{currency_symbol}} {{total_amount_formatted}}</p>
-<p>{{payment_policy}}</p>
-<p>Contact: <a href="mailto:{{contact_email}}">{{contact_email}}</a> | {{phone_main}}</p>',
-    ],
-    'tentative_quotation' => [
-        'subject' => 'Quotation for Your Stay — {{site_name}} [{{quotation_reference}}]',
-        'html'    => '<h1 style="color:#8B7355;text-align:center;font-family:Georgia,serif;font-weight:400;letter-spacing:1px;">Hotel Quotation</h1>
-<p style="font-family:Tahoma,Verdana,sans-serif;font-size:15px;color:#333;">Dear {{guest_name}},</p>
-<p style="font-family:Tahoma,Verdana,sans-serif;font-size:15px;color:#333;">Thank you for your enquiry. Please find below your formal quotation for your upcoming stay at <strong>{{site_name}}</strong>. A detailed PDF is attached for your reference.</p>
-<div style="background:#FAF6F0;border:2px solid #C8A45A;border-radius:8px;padding:18px 22px;margin:20px 0;">
-<table role="presentation" width="100%" cellspacing="0" cellpadding="0"><tr>
-<td style="font-family:Tahoma,Verdana,sans-serif;"><div style="font-size:11px;text-transform:uppercase;letter-spacing:1px;color:#999;margin-bottom:3px;">Quotation Reference</div><div style="font-size:20px;font-weight:600;color:#8B7355;">{{quotation_reference}}</div></td>
-<td align="right" style="font-family:Tahoma,Verdana,sans-serif;"><div style="font-size:11px;text-transform:uppercase;letter-spacing:1px;color:#999;margin-bottom:3px;">Valid Until</div><div style="font-size:16px;font-weight:600;color:#C0392B;">{{valid_until}}</div></td>
-</tr></table></div>
-<div style="background:#FAF6F0;border-radius:8px;padding:18px 22px;margin:20px 0;">
-<h2 style="color:#8B7355;font-family:Georgia,serif;font-weight:400;margin-top:0;font-size:18px;">Stay Details</h2>
-<table role="presentation" width="100%" cellspacing="0" cellpadding="0">
-<tr><td style="padding:8px 12px 8px 0;color:#555;font-size:14px;border-bottom:1px solid #EDE8E0;width:45%;">Room</td><td style="padding:8px 0;font-size:14px;font-weight:600;color:#1A1A1A;border-bottom:1px solid #EDE8E0;">{{room_name}}</td></tr>
-<tr><td style="padding:8px 12px 8px 0;color:#555;font-size:14px;border-bottom:1px solid #EDE8E0;">Check-in</td><td style="padding:8px 0;font-size:14px;font-weight:600;color:#1A1A1A;border-bottom:1px solid #EDE8E0;">{{check_in_date}} &mdash; from {{check_in_time}}</td></tr>
-<tr><td style="padding:8px 12px 8px 0;color:#555;font-size:14px;border-bottom:1px solid #EDE8E0;">Check-out</td><td style="padding:8px 0;font-size:14px;font-weight:600;color:#1A1A1A;border-bottom:1px solid #EDE8E0;">{{check_out_date}} &mdash; by {{check_out_time}}</td></tr>
-<tr><td style="padding:8px 12px 8px 0;color:#555;font-size:14px;border-bottom:1px solid #EDE8E0;">Duration</td><td style="padding:8px 0;font-size:14px;font-weight:600;color:#1A1A1A;border-bottom:1px solid #EDE8E0;">{{nights}} night(s)</td></tr>
-<tr><td style="padding:8px 12px 8px 0;color:#555;font-size:14px;border-bottom:1px solid #EDE8E0;">Guests</td><td style="padding:8px 0;font-size:14px;font-weight:600;color:#1A1A1A;border-bottom:1px solid #EDE8E0;">{{guests}}</td></tr>
-</table></div>
-<div style="background:#FFF;border:1px solid #DDD;border-radius:8px;padding:18px 22px;margin:20px 0;">
-<h2 style="color:#8B7355;font-family:Georgia,serif;font-weight:400;margin-top:0;font-size:18px;">Pricing</h2>
-<table role="presentation" width="100%" cellspacing="0" cellpadding="0">
-<tr><td style="padding:8px 12px 8px 0;color:#555;font-size:14px;border-bottom:1px solid #EDE8E0;width:55%;">{{room_name}} &times; {{nights}} night(s) @ {{rate_per_night}}/night</td><td style="padding:8px 0;font-size:14px;color:#1A1A1A;border-bottom:1px solid #EDE8E0;">{{room_subtotal}}</td></tr>
-<tr><td style="padding:8px 12px 8px 0;color:#555;font-size:15px;font-weight:600;border-bottom:1px solid #EDE8E0;">Total Amount</td><td style="padding:8px 0;font-size:15px;font-weight:700;color:#8B7355;border-bottom:1px solid #EDE8E0;">{{total_amount}}</td></tr>
-</table></div>
-<div style="background:#FFF8DC;border-left:4px solid #F0A500;border-radius:4px;padding:15px 18px;margin:20px 0;">
-<p style="color:#856404;font-family:Tahoma,Verdana,sans-serif;font-size:14px;margin:0;font-weight:600;">Payment Terms</p>
-<p style="color:#856404;font-family:Tahoma,Verdana,sans-serif;font-size:14px;margin:6px 0 0;">{{payment_policy}}</p></div>
-<div style="background:#F0F7FF;border-left:4px solid #4A90D9;border-radius:4px;padding:15px 18px;margin:20px 0;">
-<p style="color:#1A4A8A;font-family:Tahoma,Verdana,sans-serif;font-size:14px;margin:0;font-weight:600;">Note from our team</p>
-<p style="color:#1A4A8A;font-family:Tahoma,Verdana,sans-serif;font-size:14px;margin:6px 0 0;">{{quotation_notes}}</p></div>
-<div style="text-align:center;margin:30px 0 20px;">
-<p style="font-family:Tahoma,Verdana,sans-serif;font-size:14px;color:#555;margin-bottom:16px;">To confirm this reservation, simply reply to this email or contact us directly.</p>
-<a href="mailto:{{contact_email}}" style="display:inline-block;background:#8B7355;color:#FFF;padding:13px 30px;text-decoration:none;border-radius:4px;font-family:Tahoma,Verdana,sans-serif;font-size:15px;font-weight:600;">Confirm My Booking</a>
-<p style="font-family:Tahoma,Verdana,sans-serif;font-size:13px;color:#888;margin-top:14px;">Or call us: <a href="tel:{{contact_phone}}" style="color:#8B7355;">{{contact_phone}}</a></p>
-</div>
-<p style="font-family:Tahoma,Verdana,sans-serif;font-size:13px;color:#999;text-align:center;">This quotation is valid until <strong>{{valid_until}}</strong>. Rates and availability are subject to change after this date.</p>
-<p style="margin:28px 0 0;font-size:14px;color:#777;text-align:center;font-style:italic;">Warm regards &mdash; we look forward to welcoming you.</p>',
-    ],
-    'conference_quotation' => [
-        'subject' => 'Conference Quotation - {{site_name}} [{{inquiry_reference}}]',
-        'html'    => '<h1 style="color:#8B7355;text-align:center;">Conference Quotation</h1>
-<p>Dear {{contact_person}},</p>
-<p>Your conference quotation is ready.</p>
-<p><strong>Inquiry Ref:</strong> {{inquiry_reference}}<br>
-<strong>Quotation Ref:</strong> {{quotation_reference}}<br>
-<strong>Company:</strong> {{company_name}}<br>
-<strong>Room:</strong> {{conference_room}}<br>
-<strong>Date:</strong> {{event_date}}<br>
-<strong>Time:</strong> {{event_time}}<br>
-<strong>Attendees:</strong> {{attendees}}<br>
-<strong>Total:</strong> {{total_amount}}<br>
-<strong>Valid Until:</strong> {{valid_until}}</p>
-<p>{{quotation_notes}}</p>
-<p>Contact: <a href="mailto:{{contact_email}}">{{contact_email}}</a> | {{contact_phone}}</p>',
-    ],
-    'event_quotation' => [
-        'subject' => 'Event Quotation - {{site_name}} [{{quotation_reference}}]',
-        'html'    => '<h1 style="color:#8B7355;text-align:center;">Event Quotation</h1>
-<p>Dear {{recipient_name}},</p>
-<p>Your event quotation is ready.</p>
-<p><strong>Quotation Ref:</strong> {{quotation_reference}}<br>
-<strong>Event:</strong> {{event_title}}<br>
-<strong>Date:</strong> {{event_date}}<br>
-<strong>Time:</strong> {{event_time}}<br>
-<strong>Location:</strong> {{event_location}}<br>
-<strong>Attendees:</strong> {{attendee_count}}<br>
-<strong>Total:</strong> {{total_amount}}<br>
-<strong>Valid Until:</strong> {{valid_until}}</p>
-<p>{{quotation_notes}}</p>
-<p>Contact: <a href="mailto:{{contact_email}}">{{contact_email}}</a> | {{contact_phone}}</p>',
-    ],
-    'conference_invoice' => [
-        'subject' => 'Conference Invoice - {{site_name}} [{{inquiry_reference}}]',
-        'html' => '<h1 style="color:#1A1A1A;text-align:center;">Conference Invoice</h1>
-<p>Dear {{contact_person}},</p>
-<p>Your conference invoice is ready. A PDF copy is attached for your records.</p>
-<table style="width:100%;border-collapse:collapse;margin:16px 0;">
-  <tr><td style="padding:8px;border:1px solid #e0e0e0;font-weight:bold;">Invoice Number</td><td style="padding:8px;border:1px solid #e0e0e0;">{{invoice_number}}</td></tr>
-  <tr><td style="padding:8px;border:1px solid #e0e0e0;font-weight:bold;">Inquiry Reference</td><td style="padding:8px;border:1px solid #e0e0e0;">{{inquiry_reference}}</td></tr>
-  <tr><td style="padding:8px;border:1px solid #e0e0e0;font-weight:bold;">Conference Room</td><td style="padding:8px;border:1px solid #e0e0e0;">{{conference_room}}</td></tr>
-  <tr><td style="padding:8px;border:1px solid #e0e0e0;font-weight:bold;">Event Date</td><td style="padding:8px;border:1px solid #e0e0e0;">{{event_date}}</td></tr>
-  <tr><td style="padding:8px;border:1px solid #e0e0e0;font-weight:bold;">Total</td><td style="padding:8px;border:1px solid #e0e0e0;font-weight:bold;">{{total_amount}}</td></tr>
-  <tr><td style="padding:8px;border:1px solid #e0e0e0;font-weight:bold;">Balance Due</td><td style="padding:8px;border:1px solid #e0e0e0;font-weight:bold;color:#A63A3A;">{{balance_due}}</td></tr>
-</table>
-<p>Contact: <a href="mailto:{{contact_email}}">{{contact_email}}</a> | {{contact_phone}}</p>',
-    ],
-    'conference_invoice_document' => [
-        'subject' => 'Conference Invoice Document',
-        'html' => function_exists('hotel_default_conference_invoice_document_html') ? hotel_default_conference_invoice_document_html() : '',
-    ],
-    'tentative_quotation_document' => [
-        'subject' => 'Room Quotation Document',
-        'html' => function_exists('hotel_default_room_quotation_document_html') ? hotel_default_room_quotation_document_html() : '',
-    ],
-    'conference_quotation_document' => [
-        'subject' => 'Conference Quotation Document',
-        'html' => function_exists('hotel_default_conference_quotation_document_html') ? hotel_default_conference_quotation_document_html() : '',
-    ],
-    'event_quotation_document' => [
-        'subject' => 'Event Quotation Document',
-        'html' => function_exists('hotel_default_event_quotation_document_html') ? hotel_default_event_quotation_document_html() : '',
-    ],
-    'credit_note' => [
-        'subject' => 'Credit Note - {{site_name}} [{{credit_note_number}}]',
-        'html' => '<h1 style="color:#8B7355;text-align:center;">Credit Note</h1>
-<p>Dear {{guest_name}},</p>
-<p>Your credit note has been issued and the PDF copy is attached.</p>
-<p><strong>Credit Note Number:</strong> {{credit_note_number}}<br>
-<strong>Booking Reference:</strong> {{booking_reference}}<br>
-<strong>Amount:</strong> {{amount}}<br>
-<strong>Amount Used:</strong> {{amount_used}}<br>
-<strong>Balance:</strong> {{balance}}<br>
-<strong>Reason:</strong> {{reason}}<br>
-<strong>Expires:</strong> {{expires_at}}</p>
-<p>{{reason_notes}}</p>
-<p>Contact: <a href="mailto:{{contact_email}}">{{contact_email}}</a> | {{contact_phone}}</p>',
-    ],
-    'credit_note_document' => [
-        'subject' => 'Credit Note Document',
-        'html' => function_exists('hotel_default_credit_note_document_html') ? hotel_default_credit_note_document_html() : '',
-    ],
-    'payment_receipt' => [
-        'subject' => 'Payment Receipt - {{site_name}} [{{receipt_number}}]',
-        'html' => '<h1 style="color:#1A1A1A;text-align:center;">Payment Receipt</h1>
-<p>Dear {{guest_name}},</p>
-<p>Your payment receipt is attached for your records.</p>
-<table style="width:100%;border-collapse:collapse;margin:16px 0;">
-  <tr><td style="padding:8px;border:1px solid #e0e0e0;font-weight:bold;">Receipt Number</td><td style="padding:8px;border:1px solid #e0e0e0;">{{receipt_number}}</td></tr>
-  <tr><td style="padding:8px;border:1px solid #e0e0e0;font-weight:bold;">Booking Type</td><td style="padding:8px;border:1px solid #e0e0e0;">{{booking_type}}</td></tr>
-  <tr><td style="padding:8px;border:1px solid #e0e0e0;font-weight:bold;">Payment Reference</td><td style="padding:8px;border:1px solid #e0e0e0;">{{payment_reference}}</td></tr>
-  <tr><td style="padding:8px;border:1px solid #e0e0e0;font-weight:bold;">Amount Paid</td><td style="padding:8px;border:1px solid #e0e0e0;font-weight:bold;color:#065f46;">{{payment_amount}}</td></tr>
-</table>
-<p>{{description}}</p>
-<p>Contact: <a href="mailto:{{contact_email}}">{{contact_email}}</a> | {{contact_phone}}</p>',
-    ],
-    'payment_receipt_document' => [
-        'subject' => 'Payment Receipt Document',
-        'html' => function_exists('hotel_default_receipt_document_html') ? hotel_default_receipt_document_html() : '',
-    ],
-];
+// Built-in defaults for the "Load Default" button (canonical source from config/email.php)
+$tplDefaults = [];
+$canonicalTemplateDefaults = function_exists('hotel_booking_template_defaults_map')
+    ? hotel_booking_template_defaults_map()
+    : [];
+foreach ($canonicalTemplateDefaults as $templateKey => $templateDefaults) {
+    $tplDefaults[$templateKey] = [
+        'subject' => (string)($templateDefaults['subject'] ?? ''),
+        'html' => (string)($templateDefaults['html'] ?? ''),
+    ];
+}
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -2096,10 +1858,20 @@ $tplDefaults = [
                         </div><!-- /tpl-panel -->
                     <?php endforeach; ?>
 
-                    <div style="padding-top:14px;border-top:1px solid #e8e3d7;margin-top:14px;">
+                    <div style="padding-top:14px;border-top:1px solid #e8e3d7;margin-top:14px;display:flex;gap:10px;flex-wrap:wrap;align-items:center;">
                         <button type="submit" class="btn-submit">
                             <i class="fas fa-save"></i> Save All Templates
                         </button>
+                        <button
+                            type="submit"
+                            name="reset_all_booking_templates_to_defaults"
+                            value="1"
+                            class="btn-submit"
+                            style="background:#6b7280;"
+                            onclick="return confirm('Reset all booking email and PDF templates to the current built-in defaults? This will overwrite all subject lines and HTML bodies.');">
+                            <i class="fas fa-rotate-left"></i> Reset All to Defaults
+                        </button>
+                        <span class="help-text" style="margin:0;color:#6b7280;">Uses the same canonical defaults that power runtime seeding and per-template Load Default.</span>
                     </div>
                 </form>
             </div><!-- /tpl-editor-card -->
