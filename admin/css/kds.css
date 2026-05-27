@@ -10,6 +10,8 @@
 :root {
     --station-topbar-height: 52px;
     --station-bottom-height: 148px;
+    --station-board-gap: clamp(6px, 0.8vw, 14px);
+    --station-board-top-gap: clamp(14px, 1.1vw, 22px);
 }
 
 html,
@@ -346,8 +348,9 @@ body {
     grid-auto-flow: row;
     grid-auto-rows: max-content;
     align-items: stretch;
-    gap: clamp(6px, 0.8vw, 14px);
-    padding: clamp(6px, 0.8vw, 14px);
+    gap: var(--station-board-gap);
+    padding: var(--station-board-gap);
+    padding-top: var(--station-board-top-gap);
     overflow-y: auto;
     height: calc(100dvh - var(--station-topbar-height) - var(--station-bottom-height));
     min-height: 0;
@@ -1790,6 +1793,7 @@ body {
 }
 
 @media (prefers-reduced-motion: reduce) {
+
     .station-panel__sound-test:hover,
     .station-control__pause:hover,
     .station-control__save:hover,
@@ -2072,6 +2076,7 @@ body {
 }
 
 @media (prefers-reduced-motion: reduce) {
+
     .item-actions button:not(:disabled):hover,
     .t-foot button:not(:disabled):hover,
     .t-foot .b-log:hover,
@@ -2204,6 +2209,7 @@ body {
         grid-auto-rows: max-content;
         gap: 8px;
         padding: 8px;
+        padding-top: 16px;
     }
 
     .ticket {
@@ -2280,6 +2286,7 @@ body {
         grid-template-columns: repeat(auto-fill, minmax(min(360px, 100%), 1fr));
         grid-auto-rows: max-content;
         padding: 8px;
+        padding-top: 16px;
         gap: 8px;
         height: calc(100dvh - var(--station-topbar-height) - var(--station-bottom-height));
     }
@@ -2741,7 +2748,7 @@ body {
 }
 
 body.closed-banner-active .board {
-    padding-top: calc(clamp(6px, 0.8vw, 14px) + 83px);
+    padding-top: calc(var(--station-board-top-gap) + 83px);
 }
 
 .sc-icon {
@@ -2791,7 +2798,7 @@ body.closed-banner-active .board {
     }
 
     body.closed-banner-active .board {
-        padding-top: calc(clamp(6px, 0.8vw, 14px) + 103px);
+        padding-top: calc(var(--station-board-top-gap) + 103px);
     }
 }
 
@@ -2819,7 +2826,7 @@ body.closed-banner-active .board {
     }
 
     body.closed-banner-active .board {
-        padding-top: calc(clamp(6px, 0.8vw, 14px) + 116px);
+        padding-top: calc(var(--station-board-top-gap) + 116px);
     }
 }
 
@@ -3919,6 +3926,7 @@ body.closed-banner-active .board {
     }
 
     body.kds-desktop-mode .board {
+        margin-top: var(--station-topbar-height);
         margin-left: var(--kds-sidebar-effective-width);
         width: calc(100% - var(--kds-sidebar-effective-width));
     }

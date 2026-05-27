@@ -2530,6 +2530,39 @@ a.recent-toggle span {
     color: #5E554D;
 }
 
+.pos-action-loader.pos-action-loader--subtle {
+    background: rgba(15, 15, 20, .38);
+    backdrop-filter: blur(2px);
+}
+
+.pos-action-loader.pos-action-loader--subtle .pos-action-loader__card {
+    min-width: min(300px, calc(100vw - 42px));
+    padding: 15px 16px;
+    border-radius: 14px;
+    box-shadow: 0 16px 36px rgba(0, 0, 0, .32);
+}
+
+.pos-action-loader.pos-action-loader--subtle .pos-action-loader__brand,
+.pos-action-loader.pos-action-loader--subtle .pos-action-loader__divider {
+    display: none;
+}
+
+.pos-action-loader.pos-action-loader--subtle .pos-action-loader__spinner {
+    width: 32px;
+    height: 32px;
+    margin: 0 auto 10px;
+    border-width: 3px;
+}
+
+.pos-action-loader.pos-action-loader--subtle .pos-action-loader__title {
+    font-size: 14px;
+    margin: 0 0 3px;
+}
+
+.pos-action-loader.pos-action-loader--subtle .pos-action-loader__text {
+    font-size: 12px;
+}
+
 .pos-mobile-quick-view-modal {
     width: min(760px, calc(100vw - 24px));
     overflow: hidden;

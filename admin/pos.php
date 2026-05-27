@@ -949,6 +949,52 @@ if (in_array($user['role'] ?? '', ['admin', 'manager'], true)) {
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <meta name="apple-mobile-web-app-title" content="RH POS">
+    <style>
+        html,
+        body {
+            background: #f7f0e8;
+        }
+
+        .pos-action-loader {
+            position: fixed;
+            inset: 0;
+            z-index: 100000;
+            display: none;
+            align-items: center;
+            justify-content: center;
+            background: rgba(15, 15, 20, 0.38);
+        }
+
+        .pos-action-loader.show {
+            display: flex;
+        }
+
+        .pos-action-loader__card {
+            min-width: min(300px, calc(100vw - 40px));
+            padding: 16px 18px;
+            border-radius: 14px;
+            background: rgba(253, 250, 245, 0.97);
+            border: 1px solid rgba(138, 119, 95, 0.22);
+            box-shadow: 0 16px 42px rgba(0, 0, 0, 0.28);
+            text-align: center;
+        }
+
+        .pos-action-loader__spinner {
+            width: 34px;
+            height: 34px;
+            margin: 0 auto 10px;
+            border-radius: 50%;
+            border: 3px solid rgba(138, 119, 95, 0.22);
+            border-top-color: #8a775f;
+            animation: pos-loader-boot-spin .7s linear infinite;
+        }
+
+        @keyframes pos-loader-boot-spin {
+            to {
+                transform: rotate(360deg);
+            }
+        }
+    </style>
     <link rel="manifest" href="manifest.php">
     <link href="https://fonts.googleapis.com/css2?family=Jost:wght@400;500;600;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.7.2/css/all.min.css">
@@ -970,6 +1016,47 @@ if (in_array($user['role'] ?? '', ['admin', 'manager'], true)) {
             <p class="pos-action-loader__text" id="posActionLoaderText">Please wait.</p>
         </div>
     </div>
+    <script>
+        (function() {
+            const key = 'rh_pos_nav_loader';
+            try {
+                const raw = sessionStorage.getItem(key);
+                if (!raw) return;
+                const state = JSON.parse(raw);
+                if (!state || typeof state !== 'object' || Number(state.expiresAt || 0) <= Date.now()) {
+                    sessionStorage.removeItem(key);
+                    return;
+                }
+                window.__rhPosNavLoaderState = {
+                    title: typeof state.title === 'string' ? state.title : '',
+                    text: typeof state.text === 'string' ? state.text : '',
+                    subtle: state.subtle !== false
+                };
+                sessionStorage.removeItem(key);
+
+                const loader = document.getElementById('posActionLoader');
+                if (!loader) return;
+                const titleEl = document.getElementById('posActionLoaderTitle');
+                const textEl = document.getElementById('posActionLoaderText');
+                if (titleEl && window.__rhPosNavLoaderState.title) {
+                    titleEl.textContent = window.__rhPosNavLoaderState.title;
+                }
+                if (textEl && window.__rhPosNavLoaderState.text) {
+                    textEl.textContent = window.__rhPosNavLoaderState.text;
+                }
+                if (window.__rhPosNavLoaderState.subtle) {
+                    loader.classList.add('pos-action-loader--subtle');
+                }
+                loader.classList.add('show');
+            } catch (_) {
+                try {
+                    sessionStorage.removeItem(key);
+                } catch (__unused) {
+                    // Ignore storage cleanup errors.
+                }
+            }
+        })();
+    </script>
     <div class="till-wrap">
         <div class="till-bar">
 
@@ -3241,6 +3328,7 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
            Opt out with data-no-lock or anchors that lead elsewhere (links inside
            widgets are already lockable; we exclude tab/category buttons). */
         const _posClickLocks = new WeakMap();
+        const POS_NAV_LOADER_KEY = 'rh_pos_nav_loader';
         document.addEventListener('click', (e) => {
             const btn = e.target.closest('button, a, [role="button"], [data-lock-click]');
             if (!btn) return;
@@ -3263,11 +3351,27 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
             }, 1200);
         }, true);
 
-        function showPosActionLoader(title, text) {
+        function primePosNavigationLoader(title, text, options = {}) {
+            const ttlMs = Math.max(2500, Number(options.ttlMs) || 9000);
+            const payload = {
+                title: String(title || 'Loading...').slice(0, 96),
+                text: String(text || 'Please wait.').slice(0, 180),
+                subtle: options.subtle !== false,
+                expiresAt: Date.now() + ttlMs
+            };
+            try {
+                sessionStorage.setItem(POS_NAV_LOADER_KEY, JSON.stringify(payload));
+            } catch (_) {
+                // Ignore storage failures.
+            }
+        }
+
+        function showPosActionLoader(title, text, options = {}) {
             const loader = document.getElementById('posActionLoader');
             if (!loader) return;
             document.getElementById('posActionLoaderTitle').textContent = title || 'Loading…';
             document.getElementById('posActionLoaderText').textContent = text || 'Please wait.';
+            loader.classList.toggle('pos-action-loader--subtle', !!options.subtle);
             loader.classList.add('show');
             // Safety net — auto-dismiss after 12s to prevent stuck overlay
             clearTimeout(window._posLoaderSafetyTimer);
@@ -3276,7 +3380,19 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
 
         function hidePosActionLoader() {
             clearTimeout(window._posLoaderSafetyTimer);
-            document.getElementById('posActionLoader')?.classList.remove('show');
+            const loader = document.getElementById('posActionLoader');
+            if (!loader) return;
+            loader.classList.remove('show');
+            loader.classList.remove('pos-action-loader--subtle');
+        }
+
+        if (window.__rhPosNavLoaderState) {
+            const navLoaderState = window.__rhPosNavLoaderState;
+            showPosActionLoader(navLoaderState.title || 'Refreshing till...', navLoaderState.text || 'Loading the latest order details.', {
+                subtle: navLoaderState.subtle !== false
+            });
+            window.__rhPosNavLoaderState = null;
+            setTimeout(() => hidePosActionLoader(), 900);
         }
 
         function initPosCatsResizer() {
@@ -4320,9 +4436,15 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
         }
 
         function doParkSubmit() {
+            if (window._posParkSubmitInFlight) return;
+            window._posParkSubmitInFlight = true;
             document.getElementById('payment_method').value = '';
             injectCartHidden('payHiddenItems');
             const f = document.getElementById('payForm');
+            if (!f) {
+                window._posParkSubmitInFlight = false;
+                return;
+            }
             let actionInput = f.querySelector('input[name="action"]');
             if (!actionInput) {
                 actionInput = document.createElement('input');
@@ -4332,7 +4454,13 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
             }
             actionInput.value = 'park';
             posEnsureClientUuid(f);
-            showPosActionLoader('Firing order...', 'Sending the ticket to the station display.');
+            primePosNavigationLoader('Sending order...', 'Refreshing your till with the new station ticket.', {
+                subtle: true,
+                ttlMs: 12000
+            });
+            showPosActionLoader('Sending order...', 'Firing your ticket to the station display.', {
+                subtle: true
+            });
             f.submit();
         }
 
