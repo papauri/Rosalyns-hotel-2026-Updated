@@ -1,4 +1,5 @@
 <?php
+
 /**
  * api/pos-notifications.php — POS ready-order notification endpoint.
  *
@@ -19,8 +20,17 @@ require_once __DIR__ . '/../config/security.php';
 require_once __DIR__ . '/../includes/station-hours.php';
 if (session_status() !== PHP_SESSION_ACTIVE) session_start();
 
-function pn_err(string $m, int $code = 400): void { http_response_code($code); echo json_encode(['ok'=>false,'error'=>$m]); exit; }
-function pn_ok(array $extra = []): void { echo json_encode(array_merge(['ok'=>true], $extra)); exit; }
+function pn_err(string $m, int $code = 400): void
+{
+    http_response_code($code);
+    echo json_encode(['ok' => false, 'error' => $m]);
+    exit;
+}
+function pn_ok(array $extra = []): void
+{
+    echo json_encode(array_merge(['ok' => true], $extra));
+    exit;
+}
 
 if ($_SERVER['REQUEST_METHOD'] !== 'POST') pn_err('POST only', 405);
 if (empty($_SESSION['admin_user'])) pn_err('Not authenticated', 401);
@@ -59,7 +69,7 @@ if ($action === 'poll') {
         $notificationWindow = rh_station_union_business_window();
         $windowStart = (string)$notificationWindow['start_sql'];
         $windowEnd = (string)$notificationWindow['end_sql'];
-                $st = $pdo->prepare("SELECT n.id, n.order_id, n.`reference`, n.table_label, n.station, n.placed_by, n.message, n.seen_by,
+        $st = $pdo->prepare("SELECT n.id, n.order_id, n.`reference`, n.table_label, n.station, n.placed_by, n.message, n.seen_by,
                                 (SELECT COUNT(*)
                                      FROM stock_order_items soi
                                     WHERE soi.order_id = n.order_id
@@ -81,7 +91,7 @@ if ($action === 'poll') {
                                              AND pending.kds_status NOT IN ('ready','collection','served','void')
                             )
                         ORDER BY n.id ASC");
-                $st->execute([$windowStart, $windowEnd]);
+        $st->execute([$windowStart, $windowEnd]);
         $rows = $st->fetchAll(PDO::FETCH_ASSOC);
 
         $unseen = [];
@@ -97,7 +107,7 @@ if ($action === 'poll') {
                 'station'     => $row['station'],
                 'message'     => $row['message'],
                 'item_count'   => (int)($row['item_count'] ?? 0),
-                'items_summary'=> (string)($row['items_summary'] ?? ''),
+                'items_summary' => (string)($row['items_summary'] ?? ''),
                 'vibrate'     => ((int)$row['placed_by'] === $userId), // vibrate only for the order's cashier
             ];
             $seenIds[] = (int)$row['id'];

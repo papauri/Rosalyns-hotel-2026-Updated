@@ -2776,10 +2776,10 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
         setTimeout(pollStationReplies, 400); /* initial check shortly after load */
         /* ── End station inbox ────────────────────────────────────────── */
 
-/* ── My Orders live tracker ──────────────────────────────────────
-    Polls ../api/kds-action.php?action=get_my_orders every few seconds and renders the
-    current cashier's orders with kitchen + payment status, table/customer
-    info, age, and total. Click an order to open its receipt. */
+        /* ── My Orders live tracker ──────────────────────────────────────
+            Polls ../api/kds-action.php?action=get_my_orders every few seconds and renders the
+            current cashier's orders with kitchen + payment status, table/customer
+            info, age, and total. Click an order to open its receipt. */
         let _myOrdersVisible = false;
         let _myOrdersPollInFlight = false;
         let _myOrdersLast = [];
