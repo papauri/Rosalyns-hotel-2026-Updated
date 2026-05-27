@@ -37,6 +37,7 @@ const URGENT_SOUNDS = [
 let _ctx = null;
 let _settings = { enabled: true, volume: 0.75, normal: 'chime', urgent: 'alarm' };
 let _toggleCbs = [];
+let _interactionUnlocked = false;
 
 /* ─── Persistence ───────────────────────────────────────────────────── */
 function _load() {
@@ -54,18 +55,33 @@ function _save() {
 
 /* ─── AudioContext ──────────────────────────────────────────────────── */
 function _getCtx() {
+    if (!_interactionUnlocked) return null;
+    if (!global.AudioContext && !global.webkitAudioContext) return null;
     if (!_ctx || _ctx.state === 'closed') {
         _ctx = new (global.AudioContext || global.webkitAudioContext)();
     }
-    if (_ctx.state === 'suspended') _ctx.resume();
+    if (_ctx.state === 'suspended') {
+        try {
+            const resumePromise = _ctx.resume();
+            if (resumePromise && typeof resumePromise.catch === 'function') {
+                resumePromise.catch(() => {});
+            }
+        } catch (e) {}
+    }
     return _ctx;
 }
-function unlockAudio() {
+function unlockAudio(force) {
+    if (!_interactionUnlocked && !force) return;
     try { _getCtx(); } catch (e) {}
 }
-['click', 'touchstart', 'keydown'].forEach(ev => {
-    document.addEventListener(ev, unlockAudio, { once: true, passive: true });
-});
+function _markInteractionUnlocked() {
+    _interactionUnlocked = true;
+    unlockAudio(true);
+}
+document.addEventListener('pointerdown', _markInteractionUnlocked, { once: true, passive: true, capture: true });
+document.addEventListener('click', _markInteractionUnlocked, { once: true, capture: true });
+document.addEventListener('touchstart', _markInteractionUnlocked, { once: true, passive: true, capture: true });
+document.addEventListener('keydown', _markInteractionUnlocked, { once: true, capture: true });
 
 /* ─── Low-level oscillator helpers ─────────────────────────────────── */
 function _tone(ctx, type, freq, t, dur, vol) {
@@ -161,6 +177,7 @@ function play(type) {
     if (!_settings.enabled) return;
     try {
         const ctx = _getCtx();
+        if (!ctx || ctx.state !== 'running') return;
         const now = ctx.currentTime;
         if (type === 'urgent') (_urgent[_settings.urgent] || _urgent.alarm)(ctx, now);
         else                   (_normal[_settings.normal] || _normal.chime)(ctx, now);
@@ -170,6 +187,7 @@ function play(type) {
 function preview(type, id) {
     try {
         const ctx = _getCtx();
+        if (!ctx || ctx.state !== 'running') return;
         const now = ctx.currentTime;
         if (type === 'urgent') (_urgent[id] || _urgent.alarm)(ctx, now);
         else                   (_normal[id] || _normal.chime)(ctx, now);
@@ -179,6 +197,7 @@ function preview(type, id) {
 /* ─── Getters / setters ─────────────────────────────────────────────── */
 const isEnabled  = () => _settings.enabled;
 const getVolume  = () => Math.round(_settings.volume * 100);
+const isInteractionUnlocked = () => _interactionUnlocked;
 function setEnabled(v) {
     _settings.enabled = !!v;
     _save();
@@ -487,7 +506,7 @@ function show(opts) {
     }
 
     // Vibrate for urgent
-    if (type === 'urgent' && navigator.vibrate) navigator.vibrate([250, 80, 250, 80, 500]);
+    if (type === 'urgent' && _interactionUnlocked && navigator.vibrate) navigator.vibrate([250, 80, 250, 80, 500]);
 
     return id;
 }
@@ -533,7 +552,7 @@ function init() {
 global.RHSounds = {
     init, play, preview, unlockAudio,
     openSettings, closeSettings,
-    isEnabled, getVolume, setEnabled, setVolume, onToggle,
+    isEnabled, getVolume, setEnabled, setVolume, onToggle, isInteractionUnlocked,
     _onNormalChange, _onUrgentChange, _toggleMute, _sendTest,
 };
 global.RHNotif = {

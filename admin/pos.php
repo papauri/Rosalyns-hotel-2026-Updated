@@ -2097,7 +2097,9 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
         }
 
         function posShowNotification(title, body, vibrate) {
-            if (vibrate && navigator.vibrate) navigator.vibrate([300, 100, 300, 100, 600]);
+            if (vibrate && navigator.vibrate && (!window.RHSounds || typeof RHSounds.isInteractionUnlocked !== 'function' || RHSounds.isInteractionUnlocked())) {
+                navigator.vibrate([300, 100, 300, 100, 600]);
+            }
             RHNotif.show({
                 title,
                 body,
@@ -2118,12 +2120,26 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
             return parts.slice(0, maxItems).join(', ') + ' +' + (parts.length - maxItems) + ' more';
         }
 
+        function posReadyLocationLabel(notification) {
+            const raw = String(notification.table_label || '').trim();
+            if (!raw) return '';
+            if (/^table\s+/i.test(raw)) return raw;
+            if (/^\d+$/.test(raw)) return 'Table ' + raw;
+            return raw;
+        }
+
         function posReadyNotificationBody(notification) {
+            const message = String(notification.message || '').trim();
+            const tableLabel = posReadyLocationLabel(notification);
             const itemSummary = posCompactItemsSummary(notification.items_summary || '', 4);
             const itemCount = parseInt(notification.item_count || 0, 10) || 0;
-            if (!itemSummary) return notification.message || '';
+            const lines = [];
+            if (message) lines.push(message);
+            if (tableLabel) lines.push('Table/Location: ' + tableLabel);
+            if (!itemSummary) return lines.join('\n');
             const countLabel = itemCount > 0 ? itemCount + ' item' + (itemCount === 1 ? '' : 's') : 'Items';
-            return (notification.message || '') + '\n' + countLabel + ': ' + itemSummary;
+            lines.push(countLabel + ': ' + itemSummary);
+            return lines.join('\n');
         }
 
         let _notifInFlight = false;
@@ -2784,6 +2800,16 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
         let _myOrdersPollInFlight = false;
         let _myOrdersLast = [];
 
+        function clampMyOrdersWidgetIntoView() {
+            if (typeof window.__posClampFloatingWidgets !== 'function') return;
+            window.__posClampFloatingWidgets();
+            setTimeout(() => {
+                if (typeof window.__posClampFloatingWidgets === 'function') {
+                    window.__posClampFloatingWidgets();
+                }
+            }, 60);
+        }
+
         function toggleMyOrders(forceState = null) {
             const opening = typeof forceState === 'boolean' ? forceState : !_myOrdersVisible;
             _myOrdersVisible = opening;
@@ -2791,7 +2817,10 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
             const panel = document.getElementById('myOrdersPanel');
             if (widget) widget.classList.toggle('is-mobile-open', _myOrdersVisible && window.innerWidth <= 640);
             if (panel) panel.style.display = _myOrdersVisible ? 'block' : 'none';
-            if (_myOrdersVisible) pollMyOrders();
+            if (_myOrdersVisible) {
+                pollMyOrders();
+                clampMyOrdersWidgetIntoView();
+            }
         }
 
         async function openMyOrdersCurrentDetail() {
@@ -2931,6 +2960,7 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
             }
             if (!orders.length) {
                 list.innerHTML = '<p style="text-align:center;color:#9ca3af;padding:30px 18px;font-size:13px;">No orders fired yet today. Tap items in the menu to start a new order.</p>';
+                if (_myOrdersVisible) clampMyOrdersWidgetIntoView();
                 return;
             }
             list.innerHTML = orders.map(o => {
@@ -2973,6 +3003,7 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
         </a>`;
             }).join('');
             _syncPosMobileBadges();
+            if (_myOrdersVisible) clampMyOrdersWidgetIntoView();
         }
 
         async function pollMyOrders(force = false) {
@@ -5359,11 +5390,38 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
             body.innerHTML = '<div style="text-align:center;padding:40px 0;color:#9ca3af;"><i class="fas fa-spinner fa-spin fa-2x"></i></div>';
             try {
                 const resp = await fetch(posApiUrl('pos-tab-detail.php?order_id=' + encodeURIComponent(String(orderId))), {
-                    credentials: 'include'
+                    credentials: 'include',
+                    cache: 'no-store',
+                    headers: {
+                        'Accept': 'application/json',
+                        'X-Requested-With': 'XMLHttpRequest'
+                    }
                 });
-                const data = await resp.json();
-                if (!data.success) {
-                    body.innerHTML = '<p style="color:#c82333;padding:20px;">' + (data.error || 'Failed to load') + '</p>';
+
+                const contentType = String(resp.headers.get('content-type') || '').toLowerCase();
+                let data = null;
+
+                if (contentType.includes('application/json')) {
+                    data = await resp.json().catch(() => null);
+                } else {
+                    const raw = await resp.text();
+                    const trimmed = String(raw || '').trim();
+                    if (trimmed.startsWith('{') || trimmed.startsWith('[')) {
+                        try {
+                            data = JSON.parse(trimmed);
+                        } catch (e) {
+                            data = null;
+                        }
+                    }
+                }
+
+                if (!data) {
+                    body.innerHTML = '<p style="color:#c82333;padding:20px;">Order details are temporarily unavailable. Please refresh POS and try again.</p>';
+                    return;
+                }
+
+                if (!resp.ok || !data.success) {
+                    body.innerHTML = '<p style="color:#c82333;padding:20px;">' + escH(data.error || ('Failed to load (HTTP ' + resp.status + ')')) + '</p>';
                     return;
                 }
                 title.innerHTML = '<i class="fas fa-receipt"></i> ' + escH(data.order.reference);
