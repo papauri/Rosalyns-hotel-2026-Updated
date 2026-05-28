@@ -20,10 +20,12 @@ $user = [
 // Load it once, early, so it is always defined no matter which branch runs.
 $currency_symbol = getSetting('currency_symbol');
 
-$booking_id = filter_var($_GET['id'] ?? 0, FILTER_VALIDATE_INT);
+$raw_booking_id = $_GET['id'] ?? ($_GET['booking_id'] ?? 0);
+$booking_id = filter_var($raw_booking_id, FILTER_VALIDATE_INT);
 
 if (!$booking_id) {
-    header('Location: dashboard.php');
+    $_SESSION['error_message'] = 'Invalid booking details request.';
+    header('Location: bookings.php');
     exit;
 }
 
@@ -573,8 +575,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['booking_action'])) {
 try {
     $stmt = $pdo->prepare("
         SELECT b.*,
-               r.name as room_name,
-               r.price_per_night,
+               COALESCE(r.name, 'Unknown room type') as room_name,
+               COALESCE(r.price_per_night, (b.total_amount / NULLIF(b.number_of_nights, 0)), 0) as price_per_night,
                COALESCE(p.payment_status, b.payment_status) as actual_payment_status,
                p.payment_reference,
                p.payment_date as last_payment_date,
@@ -588,7 +590,7 @@ try {
                ir.status as individual_room_status,
                rt.name as room_type_name
         FROM bookings b
-        JOIN rooms r ON b.room_id = r.id
+        LEFT JOIN rooms r ON b.room_id = r.id
         LEFT JOIN payments p ON b.id = p.booking_id AND p.booking_type = 'room' AND p.status = 'completed'
         LEFT JOIN individual_rooms ir ON b.individual_room_id = ir.id
         LEFT JOIN rooms rt ON ir.room_type_id = rt.id
@@ -599,7 +601,7 @@ try {
 
     if (!$booking) {
         $_SESSION['error_message'] = 'Booking not found.';
-        header('Location: dashboard.php');
+        header('Location: bookings.php');
         exit;
     }
 
@@ -665,7 +667,7 @@ try {
     }
 } catch (PDOException $e) {
     $_SESSION['error_message'] = 'Unable to load booking details.';
-    header('Location: dashboard.php');
+    header('Location: bookings.php');
     exit;
 }
 

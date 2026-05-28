@@ -336,6 +336,12 @@ define('RH_HELP_TOOLTIPS_RENDERED', true);
             const touchFirstDevice = window.matchMedia('(hover: none)').matches || window.matchMedia('(pointer: coarse)').matches;
             if (!touchFirstDevice) return;
 
+            // Do not require double-tap for real action controls.
+            // Long-press still shows contextual help for these elements.
+            if (t.closest('button, a[href], input, select, textarea, summary, [role="button"], [data-action], .quick-action, .actions-more-toggle')) {
+                return;
+            }
+
             const now = Date.now();
             if (touchTapArmedEl === t && now < touchTapArmedUntil) {
                 touchTapArmedEl = null;

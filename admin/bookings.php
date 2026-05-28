@@ -25,6 +25,13 @@ function isAjaxRequest(): bool
         && strtolower($_SERVER['HTTP_X_REQUESTED_WITH']) === 'xmlhttprequest';
 }
 
+function getSignedDateDiffDays(DateTimeInterface $fromDate, DateTimeInterface $toDate): int
+{
+    $diff = $fromDate->diff($toDate);
+    $days = (int)($diff->days ?? 0);
+    return ((int)$diff->invert === 1) ? -$days : $days;
+}
+
 // Handle booking actions
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if (!validateCsrfToken($_POST['csrf_token'] ?? '')) {
@@ -1160,11 +1167,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 exit;
             }
 
-            $today_a      = new DateTime('today');
-            $checkIn_a    = new DateTime($abk['check_in_date']);
+            $today_a            = new DateTime('today');
+            $checkIn_a          = new DateTime((string)$abk['check_in_date']);
+            $scheduledCheckoutA = new DateTime((string)$abk['check_out_date']);
+            $checkIn_a->setTime(0, 0, 0);
+            $scheduledCheckoutA->setTime(0, 0, 0);
             $actualNights = max(1, (int)$today_a->diff($checkIn_a)->days);
-            $schedNights  = max(1, (int)$abk['number_of_nights']);
-            $nightDiff    = $actualNights - $schedNights; // positive = overdue, negative = early
+            $schedNights  = max(1, (int)$scheduledCheckoutA->diff($checkIn_a)->days);
+            // positive = late checkout days, negative = early checkout days
+            $nightDiff    = getSignedDateDiffDays($scheduledCheckoutA, $today_a);
 
             $occupancy_a  = $abk['occupancy_type'] ?? 'single';
             if ($occupancy_a === 'double' && !empty($abk['price_double_occupancy'])) {
@@ -1180,7 +1191,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $guest_name_a  = trim($abk['guest_name'] ?? '');
             $room_label_a  = trim($abk['individual_room_number'] ?? $abk['room_type_name'] ?? 'N/A');
             $check_in_fmt  = date('d M Y', strtotime($abk['check_in_date']));
-            $sched_out_fmt = date('d M Y', strtotime($abk['check_out_date']));
+            $sched_out_fmt = $scheduledCheckoutA->format('d M Y');
 
             if ($nightDiff === 0) {
                 header('Content-Type: application/json');
@@ -1273,12 +1284,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 exit;
             }
 
-            $today_s      = new DateTime('today');
-            $todayStr_s   = $today_s->format('Y-m-d');
-            $checkIn_s    = new DateTime($sbk['check_in_date']);
+            $today_s            = new DateTime('today');
+            $todayStr_s         = $today_s->format('Y-m-d');
+            $checkIn_s          = new DateTime((string)$sbk['check_in_date']);
+            $scheduledCheckoutS = new DateTime((string)$sbk['check_out_date']);
+            $checkIn_s->setTime(0, 0, 0);
+            $scheduledCheckoutS->setTime(0, 0, 0);
             $actualNights_s = max(1, (int)$today_s->diff($checkIn_s)->days);
-            $schedNights_s  = max(1, (int)$sbk['number_of_nights']);
-            $nightDiff_s    = $actualNights_s - $schedNights_s;
+            $schedNights_s  = max(1, (int)$scheduledCheckoutS->diff($checkIn_s)->days);
+            // positive = late checkout days, negative = early checkout days
+            $nightDiff_s    = getSignedDateDiffDays($scheduledCheckoutS, $today_s);
 
             $occupancy_s = $sbk['occupancy_type'] ?? 'single';
             if ($occupancy_s === 'double' && !empty($sbk['price_double_occupancy'])) {
@@ -2902,7 +2917,7 @@ $today_str = $today->format('Y-m-d');
     <link rel="stylesheet" href="css/admin-styles.css">
     <link rel="stylesheet" href="css/admin-responsive-enhancements.css">
     <link rel="stylesheet" href="css/admin-components.css">
-    <link rel="stylesheet" href="css/bookings.css?v=20260524h">
+    <link rel="stylesheet" href="css/bookings.css?v=20260528a">
 </head>
 
 <body>
@@ -2970,6 +2985,7 @@ $today_str = $today->format('Y-m-d');
                 <div class="bookings-alert-banner__copy">
                     <h3 class="bookings-alert-banner__title">Missed Check-ins!</h3>
                     <p class="bookings-alert-banner__text"><?php echo count($missed_checkins); ?> confirmed bookings have passed their check-in date without checking in.</p>
+                    <p class="bookings-alert-banner__helper"><i class="fas fa-circle-info" aria-hidden="true"></i><span>Helper: Open details to review each booking and update arrival status immediately.</span></p>
                 </div>
                 <button class="btn btn-secondary bookings-alert-banner__action" type="button" onclick="openMissedCheckinsModal()">
                     <i class="fas fa-eye" aria-hidden="true"></i>
@@ -2987,6 +3003,7 @@ $today_str = $today->format('Y-m-d');
                 <div class="bookings-alert-banner__copy">
                     <h3 class="bookings-alert-banner__title">Overdue Checkouts!</h3>
                     <p class="bookings-alert-banner__text"><?php echo count($overdue_checkouts); ?> checked-in guests have passed their checkout date.</p>
+                    <p class="bookings-alert-banner__helper"><i class="fas fa-circle-info" aria-hidden="true"></i><span>Helper: Open details to process checkout updates and release room availability.</span></p>
                 </div>
                 <button class="btn btn-secondary bookings-alert-banner__action" type="button" onclick="openOverdueCheckoutsModal()">
                     <i class="fas fa-eye" aria-hidden="true"></i>
@@ -3303,7 +3320,7 @@ $today_str = $today->format('Y-m-d');
                                             $_perm_pay      = $_user_permissions['payment_add']    ?? false;
                                             ?>
                                             <div class="actions-row">
-                                                <button class="quick-action view" title="View booking summary" aria-label="View booking summary" onclick="openViewBookingModal(<?php echo $booking['id']; ?>, '<?php echo htmlspecialchars($booking['booking_reference'], ENT_QUOTES); ?>')">
+                                                <button type="button" class="quick-action view" title="View booking summary" aria-label="View booking summary" data-booking-id="<?php echo (int)$booking['id']; ?>" data-booking-ref="<?php echo htmlspecialchars($booking['booking_reference'], ENT_QUOTES); ?>" data-guest-name="<?php echo htmlspecialchars((string)($booking['guest_name'] ?? ''), ENT_QUOTES); ?>" data-guest-email="<?php echo htmlspecialchars((string)($booking['guest_email'] ?? ''), ENT_QUOTES); ?>" data-guest-phone="<?php echo htmlspecialchars((string)($booking['guest_phone'] ?? ''), ENT_QUOTES); ?>" data-room-name="<?php echo htmlspecialchars((string)($booking['room_name'] ?? ''), ENT_QUOTES); ?>" data-individual-room-name="<?php echo htmlspecialchars((string)($booking['individual_room_name'] ?? ''), ENT_QUOTES); ?>" data-individual-room-number="<?php echo htmlspecialchars((string)($booking['individual_room_number'] ?? ''), ENT_QUOTES); ?>" data-check-in-date="<?php echo htmlspecialchars((string)($booking['check_in_date'] ?? ''), ENT_QUOTES); ?>" data-check-out-date="<?php echo htmlspecialchars((string)($booking['check_out_date'] ?? ''), ENT_QUOTES); ?>" data-number-of-nights="<?php echo htmlspecialchars((string)($booking['number_of_nights'] ?? ''), ENT_QUOTES); ?>" data-number-of-guests="<?php echo htmlspecialchars((string)($booking['number_of_guests'] ?? ''), ENT_QUOTES); ?>" data-total-display="<?php echo htmlspecialchars($currency_symbol . ' ' . number_format((float)($booking['total_amount'] ?? 0), 2), ENT_QUOTES); ?>" data-status-label="<?php echo htmlspecialchars(ucwords(str_replace('-', ' ', (string)($booking['status'] ?? ''))), ENT_QUOTES); ?>" data-payment-status-label="<?php echo htmlspecialchars(ucwords(str_replace('-', ' ', (string)($booking['actual_payment_status'] ?? ($booking['payment_status'] ?? '')))), ENT_QUOTES); ?>" data-created-at-label="<?php echo htmlspecialchars(!empty($booking['created_at']) ? date('M j, Y H:i', strtotime((string)$booking['created_at'])) : '', ENT_QUOTES); ?>" data-special-requests="<?php echo htmlspecialchars((string)($booking['special_requests'] ?? ''), ENT_QUOTES); ?>" onclick="openViewBookingModal(<?php echo $booking['id']; ?>, '<?php echo htmlspecialchars($booking['booking_reference'], ENT_QUOTES); ?>', this, typeof event !== 'undefined' ? event : null)">
                                                     <i class="fas fa-circle-info"></i>
                                                 </button>
                                                 <?php if ($is_tentative): ?>
@@ -3352,18 +3369,18 @@ $today_str = $today->format('Y-m-d');
                                                     ?>
                                                     <?php if ($is_missed_checkin): ?>
                                                         <?php if ($_perm_checkin): ?>
-                                                            <button class="quick-action checkin--urgent <?php echo $can_checkin ? '' : 'disabled'; ?>" data-action="check-in" data-booking-id="<?php echo $booking['id']; ?>" data-booking-ref="<?php echo htmlspecialchars($booking['booking_reference'], ENT_QUOTES); ?>" data-guest-name="<?php echo $guest_name; ?>" data-check-in-date="<?php echo $check_in_date; ?>" data-payment-status="<?php echo $payment_status; ?>" data-room-assigned="<?php echo $room_assigned_bool; ?>" data-booking-status="<?php echo $booking_status; ?>" <?php if (!$can_checkin): ?> title="<?php echo htmlspecialchars($checkin_error); ?>" <?php else: ?> title="Late check-in" <?php endif; ?> aria-label="Late check-in">
+                                                            <button type="button" class="quick-action checkin--urgent <?php echo $can_checkin ? '' : 'disabled'; ?>" data-action="check-in" data-booking-id="<?php echo $booking['id']; ?>" data-booking-ref="<?php echo htmlspecialchars($booking['booking_reference'], ENT_QUOTES); ?>" data-guest-name="<?php echo $guest_name; ?>" data-check-in-date="<?php echo $check_in_date; ?>" data-payment-status="<?php echo $payment_status; ?>" data-room-assigned="<?php echo $room_assigned_bool; ?>" data-booking-status="<?php echo $booking_status; ?>" <?php if (!$can_checkin): ?> title="<?php echo htmlspecialchars($checkin_error); ?>" <?php else: ?> title="Late check-in" <?php endif; ?> aria-label="Late check-in">
                                                                 <i class="fas fa-right-to-bracket"></i>
                                                             </button>
                                                         <?php endif; ?>
                                                         <?php if ($_perm_cancel): ?>
-                                                            <button class="quick-action noshow--urgent" data-action="no-show" data-booking-id="<?php echo $booking['id']; ?>" data-booking-ref="<?php echo htmlspecialchars($booking['booking_reference'], ENT_QUOTES); ?>" data-guest-name="<?php echo $guest_name; ?>" data-check-in-date="<?php echo $check_in_date; ?>" data-payment-status="<?php echo $payment_status; ?>" data-room-assigned="<?php echo $room_assigned_bool; ?>" data-booking-status="<?php echo $booking_status; ?>" title="Mark no-show" aria-label="Mark no-show">
+                                                            <button type="button" class="quick-action noshow--urgent" data-action="no-show" data-booking-id="<?php echo $booking['id']; ?>" data-booking-ref="<?php echo htmlspecialchars($booking['booking_reference'], ENT_QUOTES); ?>" data-guest-name="<?php echo $guest_name; ?>" data-check-in-date="<?php echo $check_in_date; ?>" data-payment-status="<?php echo $payment_status; ?>" data-room-assigned="<?php echo $room_assigned_bool; ?>" data-booking-status="<?php echo $booking_status; ?>" title="Mark no-show" aria-label="Mark no-show">
                                                                 <i class="fas fa-user-slash"></i>
                                                             </button>
                                                         <?php endif; ?>
                                                     <?php else: ?>
                                                         <?php if ($_perm_checkin): ?>
-                                                            <button class="quick-action checkin <?php echo $can_checkin ? '' : 'disabled'; ?>" data-action="check-in" data-booking-id="<?php echo $booking['id']; ?>" data-booking-ref="<?php echo htmlspecialchars($booking['booking_reference'], ENT_QUOTES); ?>" data-guest-name="<?php echo $guest_name; ?>" data-check-in-date="<?php echo $check_in_date; ?>" data-payment-status="<?php echo $payment_status; ?>" data-room-assigned="<?php echo $room_assigned_bool; ?>" data-booking-status="<?php echo $booking_status; ?>" <?php if (!$can_checkin): ?> title="<?php echo htmlspecialchars($checkin_error); ?>" <?php else: ?> title="Check in guest" <?php endif; ?> aria-label="Check in guest">
+                                                            <button type="button" class="quick-action checkin <?php echo $can_checkin ? '' : 'disabled'; ?>" data-action="check-in" data-booking-id="<?php echo $booking['id']; ?>" data-booking-ref="<?php echo htmlspecialchars($booking['booking_reference'], ENT_QUOTES); ?>" data-guest-name="<?php echo $guest_name; ?>" data-check-in-date="<?php echo $check_in_date; ?>" data-payment-status="<?php echo $payment_status; ?>" data-room-assigned="<?php echo $room_assigned_bool; ?>" data-booking-status="<?php echo $booking_status; ?>" <?php if (!$can_checkin): ?> title="<?php echo htmlspecialchars($checkin_error); ?>" <?php else: ?> title="Check in guest" <?php endif; ?> aria-label="Check in guest">
                                                                 <i class="fas fa-right-to-bracket"></i>
                                                             </button>
                                                         <?php endif; ?>
@@ -3426,7 +3443,7 @@ $today_str = $today->format('Y-m-d');
                                                     </button>
                                                 <?php endif; ?>
                                                 <div class="actions-more">
-                                                    <button type="button" class="quick-action actions-more-toggle" title="More actions" aria-label="More actions" onclick="toggleActionsMore(this, event)">
+                                                    <button type="button" class="quick-action actions-more-toggle" title="More actions" aria-label="More actions" onclick="toggleActionsMore(this, typeof event !== 'undefined' ? event : null)">
                                                         <i class="fas fa-ellipsis-vertical"></i>
                                                     </button>
                                                     <div class="actions-more-menu">
@@ -3462,13 +3479,13 @@ $today_str = $today->format('Y-m-d');
                                                         <?php endif; ?>
                                                         <hr class="menu-divider">
                                                         <button type="button" onclick="openResendEmailModal(<?php echo $booking['id']; ?>, '<?php echo htmlspecialchars($booking['booking_reference'], ENT_QUOTES); ?>', '<?php echo htmlspecialchars($booking['status']); ?>')"><i class="fas fa-envelope"></i> Resend email</button>
-                                                        <button type="button" onclick="sendInvoiceEmail(<?php echo $booking['id']; ?>, '<?php echo htmlspecialchars($booking['booking_reference'], ENT_QUOTES); ?>', this, event)"><i class="fas fa-file-invoice"></i> Send invoice</button>
-                                                        <button type="button" onclick="event.stopPropagation(); openBookingListQuoteModal(<?php echo $booking['id']; ?>, '<?php echo htmlspecialchars($booking['booking_reference'], ENT_QUOTES); ?>', '<?php echo htmlspecialchars($booking['guest_name'], ENT_QUOTES); ?>', '<?php echo htmlspecialchars($booking['guest_email'] ?? '', ENT_QUOTES); ?>')"><i class="fas fa-file-invoice-dollar"></i> Send quotation</button>
+                                                        <button type="button" onclick="sendInvoiceEmail(<?php echo $booking['id']; ?>, '<?php echo htmlspecialchars($booking['booking_reference'], ENT_QUOTES); ?>', this)"><i class="fas fa-file-invoice"></i> Send invoice</button>
+                                                        <button type="button" onclick="openBookingListQuoteModal(<?php echo $booking['id']; ?>, '<?php echo htmlspecialchars($booking['booking_reference'], ENT_QUOTES); ?>', '<?php echo htmlspecialchars($booking['guest_name'], ENT_QUOTES); ?>', '<?php echo htmlspecialchars($booking['guest_email'] ?? '', ENT_QUOTES); ?>')"><i class="fas fa-file-invoice-dollar"></i> Send quotation</button>
                                                         <?php if (!empty($booking['guest_phone'])): ?>
-                                                            <button type="button" onclick="event.stopPropagation(); openBookingListQuotationWhatsApp('<?php echo htmlspecialchars($booking['booking_reference'], ENT_QUOTES); ?>', '<?php echo htmlspecialchars($booking['guest_name'], ENT_QUOTES); ?>', '<?php echo htmlspecialchars($booking['guest_phone'], ENT_QUOTES); ?>')"><i class="fab fa-whatsapp"></i> Send via WhatsApp</button>
+                                                            <button type="button" onclick="openBookingListQuotationWhatsApp('<?php echo htmlspecialchars($booking['booking_reference'], ENT_QUOTES); ?>', '<?php echo htmlspecialchars($booking['guest_name'], ENT_QUOTES); ?>', '<?php echo htmlspecialchars($booking['guest_phone'], ENT_QUOTES); ?>')"><i class="fab fa-whatsapp"></i> Send via WhatsApp</button>
                                                         <?php endif; ?>
                                                         <hr class="menu-divider">
-                                                        <button type="button" onclick="event.stopPropagation(); viewBookingAuditLog(<?php echo $booking['id']; ?>, '<?php echo htmlspecialchars($booking['booking_reference'], ENT_QUOTES); ?>')"><i class="fas fa-clock-rotate-left"></i> Audit log</button>
+                                                        <button type="button" onclick="viewBookingAuditLog(<?php echo $booking['id']; ?>, '<?php echo htmlspecialchars($booking['booking_reference'], ENT_QUOTES); ?>')"><i class="fas fa-clock-rotate-left"></i> Audit log</button>
                                                     </div>
                                                 </div>
                                             </div>
@@ -3754,6 +3771,54 @@ $today_str = $today->format('Y-m-d');
             } else {
                 console.log(text);
             }
+        }
+
+        const BOOKING_ACTION_MESSAGE_STORAGE_KEY = 'rh_booking_action_message';
+
+        function queueBookingActionMessage(message, type = 'success') {
+            const text = String(message || '').trim();
+            if (!text) {
+                return;
+            }
+            try {
+                sessionStorage.setItem(BOOKING_ACTION_MESSAGE_STORAGE_KEY, JSON.stringify({
+                    message: text,
+                    type: type || 'success'
+                }));
+            } catch (e) {
+                console.warn('Unable to persist booking action message', e);
+            }
+        }
+
+        function restoreQueuedBookingActionMessage() {
+            try {
+                const raw = sessionStorage.getItem(BOOKING_ACTION_MESSAGE_STORAGE_KEY);
+                if (!raw) {
+                    return;
+                }
+                sessionStorage.removeItem(BOOKING_ACTION_MESSAGE_STORAGE_KEY);
+                const payload = JSON.parse(raw);
+                if (!payload || !payload.message) {
+                    return;
+                }
+                showBookingActionMessage(payload.message, payload.type || 'success');
+            } catch (e) {
+                sessionStorage.removeItem(BOOKING_ACTION_MESSAGE_STORAGE_KEY);
+            }
+        }
+
+        function reloadWithBookingActionMessage(responseData, fallbackMessage = 'Action completed successfully.') {
+            const message = responseData && responseData.message ? responseData.message : fallbackMessage;
+            queueBookingActionMessage(message, 'success');
+            window.location.reload();
+        }
+
+        if (document.readyState === 'loading') {
+            document.addEventListener('DOMContentLoaded', restoreQueuedBookingActionMessage, {
+                once: true
+            });
+        } else {
+            restoreQueuedBookingActionMessage();
         }
 
         function postBookingAction(formData, errorMessage) {
@@ -4243,7 +4308,7 @@ $today_str = $today->format('Y-m-d');
             formData.append('id', id);
 
             postBookingAction(formData, 'Error converting booking to tentative')
-                .then(() => window.location.reload())
+                .then(data => reloadWithBookingActionMessage(data, 'Booking moved to tentative successfully.'))
                 .catch(error => {
                     hideLoadingOverlay();
                     if (button) {
@@ -4277,7 +4342,7 @@ $today_str = $today->format('Y-m-d');
             formData.append('id', id);
 
             postBookingAction(formData, 'Error converting booking')
-                .then(() => window.location.reload())
+                .then(data => reloadWithBookingActionMessage(data, 'Tentative booking confirmed successfully.'))
                 .catch(error => {
                     hideLoadingOverlay();
                     if (isQuickAction) {
@@ -4313,7 +4378,7 @@ $today_str = $today->format('Y-m-d');
             formData.append('id', id);
 
             postBookingAction(formData, 'Error converting booking to tentative')
-                .then(() => window.location.reload())
+                .then(data => reloadWithBookingActionMessage(data, 'Booking converted to tentative successfully.'))
                 .catch(error => {
                     hideLoadingOverlay();
                     if (isQuickAction) {
@@ -4342,7 +4407,7 @@ $today_str = $today->format('Y-m-d');
             formData.append('status', status);
 
             postBookingAction(formData, 'Error updating status')
-                .then(() => window.location.reload())
+                .then(data => reloadWithBookingActionMessage(data, 'Booking status updated successfully.'))
                 .catch(error => {
                     hideLoadingOverlay();
                     if (isQuickAction) {
@@ -4367,7 +4432,7 @@ $today_str = $today->format('Y-m-d');
             formData.append('payment_status', payment_status);
 
             postBookingAction(formData, 'Error updating payment')
-                .then(() => window.location.reload())
+                .then(data => reloadWithBookingActionMessage(data, 'Payment status updated successfully.'))
                 .catch(error => {
                     hideLoadingOverlay();
                     if (isQuickAction) {
@@ -4407,7 +4472,7 @@ $today_str = $today->format('Y-m-d');
             formData.append('cancellation_reason', reason || 'Cancelled by admin');
 
             postBookingAction(formData, 'Error cancelling booking')
-                .then(() => window.location.reload())
+                .then(data => reloadWithBookingActionMessage(data, 'Booking cancelled successfully.'))
                 .catch(error => {
                     hideLoadingOverlay();
                     if (isQuickAction) {
@@ -4458,7 +4523,7 @@ $today_str = $today->format('Y-m-d');
                 formData.append('action', 'checkout');
                 formData.append('id', id);
                 postBookingAction(formData, 'Error checking out booking')
-                    .then(() => window.location.reload())
+                    .then(data => reloadWithBookingActionMessage(data, 'Booking checked out successfully.'))
                     .catch(error => {
                         hideLoadingOverlay();
                         if (isQuickAction) setButtonLoading(activeBtn, false);
@@ -5307,9 +5372,25 @@ $today_str = $today->format('Y-m-d');
     <!-- View Booking Details Modal -->
     <div id="viewBookingModal" class="modal-overlay" aria-hidden="true">
         <div class="modal-content" style="max-width: 700px;">
-            <div class="modal-header">
-                <h3><i class="fas fa-eye"></i> Booking Details</h3>
-                <button class="close-modal" onclick="closeViewBookingModal()">&times;</button>
+            <div class="modal-header bookings-view-modal__header">
+                <div class="bookings-view-modal__title-block">
+                    <h3><i class="fas fa-eye" aria-hidden="true"></i> Booking Details</h3>
+                    <div class="bookings-view-modal__meta" aria-label="Booking quick summary">
+                        <span class="bookings-view-modal__pill">
+                            <span class="bookings-view-modal__pill-label">Ref</span>
+                            <span id="view_booking_header_ref">—</span>
+                        </span>
+                        <span class="bookings-view-modal__pill">
+                            <span class="bookings-view-modal__pill-label">Status</span>
+                            <span id="view_booking_header_status">—</span>
+                        </span>
+                        <span class="bookings-view-modal__pill">
+                            <span class="bookings-view-modal__pill-label">Payment</span>
+                            <span id="view_booking_header_payment">—</span>
+                        </span>
+                    </div>
+                </div>
+                <button type="button" class="close-modal" onclick="closeViewBookingModal()" aria-label="Close booking details modal"><i class="fas fa-times" aria-hidden="true"></i></button>
             </div>
             <div class="modal-body">
                 <div class="details-grid" style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 16px;">
@@ -5451,64 +5532,219 @@ $today_str = $today->format('Y-m-d');
     </div>
 
     <script>
-        function openViewBookingModal(bookingId, bookingReference) {
+        let viewBookingRequestController = null;
+        let viewBookingActiveTrigger = null;
+
+        function setViewBookingTriggerLoading(button, isLoading) {
+            if (!(button instanceof HTMLElement)) {
+                return;
+            }
+
+            if (isLoading) {
+                if (!button.dataset.originalContent) {
+                    button.dataset.originalContent = button.innerHTML;
+                }
+                if (!button.dataset.originalAriaLabel) {
+                    button.dataset.originalAriaLabel = button.getAttribute('aria-label') || '';
+                }
+
+                button.disabled = true;
+                button.classList.add('btn-loading');
+                button.setAttribute('aria-busy', 'true');
+                button.setAttribute('aria-label', 'Loading booking details');
+                button.innerHTML = '<i class="fas fa-spinner fa-spin" aria-hidden="true"></i>';
+                return;
+            }
+
+            button.disabled = false;
+            button.classList.remove('btn-loading');
+            button.removeAttribute('aria-busy');
+            if (button.dataset.originalAriaLabel) {
+                button.setAttribute('aria-label', button.dataset.originalAriaLabel);
+            }
+            if (button.dataset.originalContent) {
+                button.innerHTML = button.dataset.originalContent;
+            }
+            delete button.dataset.originalAriaLabel;
+            delete button.dataset.originalContent;
+        }
+
+        function buildViewBookingFallback(triggerButton, bookingId, bookingReference) {
+            const dataset = (triggerButton instanceof HTMLElement && triggerButton.dataset) ? triggerButton.dataset : {};
+
+            const fallbackRef = String(bookingReference || dataset.bookingRef || bookingId || '').trim();
+            const fallbackRoomName = String(dataset.roomName || '').trim();
+            const fallbackIndividualRoomName = String(dataset.individualRoomName || '').trim();
+            const fallbackIndividualRoomNumber = String(dataset.individualRoomNumber || '').trim();
+            const fallbackIndividualRoom = fallbackIndividualRoomName ?
+                (fallbackIndividualRoomNumber ? (fallbackIndividualRoomName + ' (#' + fallbackIndividualRoomNumber + ')') : fallbackIndividualRoomName) :
+                (fallbackIndividualRoomNumber || 'Not assigned');
+
+            return {
+                booking_reference: fallbackRef,
+                guest_name: String(dataset.guestName || '').trim(),
+                guest_email: String(dataset.guestEmail || '').trim(),
+                guest_phone: String(dataset.guestPhone || '').trim(),
+                room_name: fallbackRoomName,
+                individual_room_name: fallbackIndividualRoomName,
+                individual_room_number: fallbackIndividualRoomNumber,
+                check_in_date_formatted: String(dataset.checkInDate || '').trim(),
+                check_out_date_formatted: String(dataset.checkOutDate || '').trim(),
+                number_of_nights: String(dataset.numberOfNights || '').trim(),
+                number_of_guests: String(dataset.numberOfGuests || '').trim(),
+                total_formatted: String(dataset.totalDisplay || '').trim(),
+                status_label: String(dataset.statusLabel || '').trim(),
+                payment_status_label: String(dataset.paymentStatusLabel || '').trim(),
+                created_at_formatted: String(dataset.createdAtLabel || '').trim(),
+                special_requests: String(dataset.specialRequests || '').trim(),
+                __fallbackIndividualRoomDisplay: fallbackIndividualRoom
+            };
+        }
+
+        function populateViewBookingModalFields(booking) {
+            const setText = function(id, value, emptyValue = '—') {
+                const element = document.getElementById(id);
+                if (!element) return;
+                const normalized = String(value ?? '').trim();
+                element.textContent = normalized !== '' ? normalized : emptyValue;
+            };
+
+            const individualRoom = String(booking.__fallbackIndividualRoomDisplay || '').trim() ||
+                (booking.individual_room_name ?
+                    (booking.individual_room_number ? (booking.individual_room_name + ' (#' + booking.individual_room_number + ')') : booking.individual_room_name) :
+                    (booking.individual_room_number || 'Not assigned'));
+
+            setText('view_booking_ref', booking.booking_reference, '—');
+            setText('view_guest_name', booking.guest_name, '—');
+            setText('view_guest_email', booking.guest_email, '—');
+            setText('view_guest_phone', booking.guest_phone, '—');
+            setText('view_room_name', booking.room_name, '—');
+            setText('view_individual_room', individualRoom, 'Not assigned');
+            setText('view_check_in', booking.check_in_date_formatted || booking.check_in_date, '—');
+            setText('view_check_out', booking.check_out_date_formatted || booking.check_out_date, '—');
+            setText('view_nights', booking.number_of_nights, '—');
+            setText('view_guests', booking.number_of_guests, '—');
+            setText('view_total', booking.total_formatted || booking.total_amount, '—');
+            setText('view_status', booking.status_label || booking.status, '—');
+            setText('view_payment', booking.payment_status_label || booking.payment_status, '—');
+            setText('view_created', booking.created_at_formatted || booking.created_at, '—');
+            setText('view_special_requests', booking.special_requests, 'None');
+
+            setText('view_booking_header_ref', booking.booking_reference, '—');
+            setText('view_booking_header_status', booking.status_label || booking.status, '—');
+            setText('view_booking_header_payment', booking.payment_status_label || booking.payment_status, '—');
+        }
+
+        function openViewBookingModal(bookingId, bookingReference, triggerButton = null, clickEvent = null) {
+            if (clickEvent) {
+                clickEvent.preventDefault();
+                clickEvent.stopPropagation();
+            }
+
+            let normalizedBookingId = Number.parseInt(String(bookingId || ''), 10);
+            if (!Number.isFinite(normalizedBookingId) || normalizedBookingId <= 0) {
+                const triggerBookingId = triggerButton instanceof HTMLElement ? Number.parseInt(String(triggerButton.dataset.bookingId || ''), 10) : NaN;
+                if (Number.isFinite(triggerBookingId) && triggerBookingId > 0) {
+                    normalizedBookingId = triggerBookingId;
+                }
+            }
+
+            if (!Number.isFinite(normalizedBookingId) || normalizedBookingId <= 0) {
+                showAlert('Unable to open booking details because the booking ID is invalid.', 'error');
+                return;
+            }
+
+            if (viewBookingRequestController && typeof viewBookingRequestController.abort === 'function') {
+                viewBookingRequestController.abort();
+            }
+
+            if (viewBookingActiveTrigger && viewBookingActiveTrigger !== triggerButton) {
+                setViewBookingTriggerLoading(viewBookingActiveTrigger, false);
+            }
+
+            viewBookingActiveTrigger = triggerButton instanceof HTMLElement ? triggerButton : null;
+            if (viewBookingActiveTrigger) {
+                setViewBookingTriggerLoading(viewBookingActiveTrigger, true);
+            }
+
             const modal = document.getElementById('viewBookingModal');
             setBookingPageModalOpen(modal, true);
             // Set full details link
             const fullDetailsLink = document.getElementById('view_full_details_link');
-            fullDetailsLink.href = `booking-details.php?id=${bookingId}`;
+            fullDetailsLink.href = `booking-details.php?id=${normalizedBookingId}`;
 
-            // Show loading state
-            document.querySelectorAll('#viewBookingModal .detail-value').forEach(el => {
-                el.innerHTML = '<span class="loading">...</span>';
-            });
+            // Immediately hydrate with row-level fallback values so the modal is
+            // still useful even if the network request is slow or fails.
+            const fallbackBooking = buildViewBookingFallback(viewBookingActiveTrigger, normalizedBookingId, bookingReference);
+            populateViewBookingModalFields(fallbackBooking);
 
             // Fetch booking details via AJAX
             const formData = new FormData();
             formData.append('action', 'get_booking_details');
-            formData.append('booking_id', bookingId);
+            formData.append('booking_id', String(normalizedBookingId));
+            const csrfMeta = document.querySelector('meta[name="csrf-token"]');
+            const csrfToken = window._rhCsrf || (csrfMeta ? (csrfMeta.getAttribute('content') || '') : '');
+            if (csrfToken && !formData.has('csrf_token')) {
+                formData.append('csrf_token', csrfToken);
+            }
+
+            viewBookingRequestController = typeof AbortController !== 'undefined' ? new AbortController() : null;
+            const requestSignal = viewBookingRequestController ? viewBookingRequestController.signal : undefined;
 
             fetch(window.location.href, {
                     method: 'POST',
                     body: formData,
+                    signal: requestSignal,
                     headers: {
                         'X-Requested-With': 'XMLHttpRequest'
                     }
                 })
-                .then(response => response.json())
-                .then(data => {
-                    if (data.success && data.data) {
-                        const booking = data.data;
-                        // Populate fields
-                        document.getElementById('view_booking_ref').textContent = booking.booking_reference || '';
-                        document.getElementById('view_guest_name').textContent = booking.guest_name || '';
-                        document.getElementById('view_guest_email').textContent = booking.guest_email || '';
-                        document.getElementById('view_guest_phone').textContent = booking.guest_phone || '';
-                        document.getElementById('view_room_name').textContent = booking.room_name || '';
-                        const individualRoom = booking.individual_room_name ?
-                            (booking.individual_room_number ? `${booking.individual_room_name} (#${booking.individual_room_number})` : booking.individual_room_name) :
-                            (booking.individual_room_number ? booking.individual_room_number : 'Not assigned');
-                        document.getElementById('view_individual_room').textContent = individualRoom;
-                        document.getElementById('view_check_in').textContent = booking.check_in_date_formatted || booking.check_in_date;
-                        document.getElementById('view_check_out').textContent = booking.check_out_date_formatted || booking.check_out_date;
-                        document.getElementById('view_nights').textContent = booking.number_of_nights || '';
-                        document.getElementById('view_guests').textContent = booking.number_of_guests || '';
-                        document.getElementById('view_total').textContent = booking.total_formatted || booking.total_amount;
-                        document.getElementById('view_status').textContent = booking.status_label || booking.status;
-                        document.getElementById('view_payment').textContent = booking.payment_status_label || booking.payment_status;
-                        document.getElementById('view_created').textContent = booking.created_at_formatted || booking.created_at;
-                        document.getElementById('view_special_requests').textContent = booking.special_requests || 'None';
-                    } else {
-                        Alert.show('Failed to load booking details: ' + (data.message || 'Unknown error'), 'error');
+                .then(async response => {
+                    const payloadText = await response.text();
+                    let data;
+                    try {
+                        data = JSON.parse(payloadText);
+                    } catch (parseError) {
+                        throw new Error('Received an invalid booking details response.');
                     }
+
+                    if (!response.ok || !data.success || !data.data) {
+                        throw new Error(data.message || 'Failed to load booking details.');
+                    }
+
+                    return data.data;
                 })
-                .catch(() => {
-                    Alert.show('Error loading booking details. Please try again.', 'error');
+                .then(booking => {
+                    populateViewBookingModalFields(booking);
+                })
+                .catch((error) => {
+                    if (error && error.name === 'AbortError') {
+                        return;
+                    }
+                    const message = (error && error.message) ? error.message : 'Error loading booking details. Please try again.';
+                    Alert.show(message, 'error');
+                })
+                .finally(() => {
+                    if (viewBookingRequestController && viewBookingRequestController.signal === requestSignal) {
+                        viewBookingRequestController = null;
+                    }
+                    if (viewBookingActiveTrigger) {
+                        setViewBookingTriggerLoading(viewBookingActiveTrigger, false);
+                        viewBookingActiveTrigger = null;
+                    }
                 });
         }
 
         function closeViewBookingModal() {
             const modal = document.getElementById('viewBookingModal');
+            if (viewBookingRequestController && typeof viewBookingRequestController.abort === 'function') {
+                viewBookingRequestController.abort();
+                viewBookingRequestController = null;
+            }
+            if (viewBookingActiveTrigger) {
+                setViewBookingTriggerLoading(viewBookingActiveTrigger, false);
+                viewBookingActiveTrigger = null;
+            }
             setBookingPageModalOpen(modal, false);
         }
 
@@ -5517,6 +5753,17 @@ $today_str = $today->format('Y-m-d');
             if (event.target === this) {
                 closeViewBookingModal();
             }
+        });
+
+        document.addEventListener('keydown', function(event) {
+            if (event.key !== 'Escape') {
+                return;
+            }
+            const modal = document.getElementById('viewBookingModal');
+            if (!modal || !modal.classList.contains('active')) {
+                return;
+            }
+            closeViewBookingModal();
         });
 
         function openResendEmailModal(bookingId, bookingReference, bookingStatus) {
@@ -5595,9 +5842,7 @@ $today_str = $today->format('Y-m-d');
                                 submitBtn.innerHTML = originalLabel;
                             }
                             closeResendEmailModal();
-                            if (window.Alert && typeof window.Alert.show === 'function') {
-                                Alert.show(data.message || 'Email sent successfully.', 'success');
-                            }
+                            showBookingActionMessage(data.message || 'Email sent successfully.', 'success');
                         } else {
                             const errDiv = document.createElement('div');
                             errDiv.id = 'resendEmailError';
@@ -5855,7 +6100,9 @@ $today_str = $today->format('Y-m-d');
                 .then(response => response.json())
                 .then(data => {
                     if (data.success) {
-                        Alert.show('Room assigned successfully!', 'success');
+                        const successMessage = data.message || 'Room assigned successfully!';
+                        showBookingActionMessage(successMessage, 'success');
+                        queueBookingActionMessage(successMessage, 'success');
                         closeQuickRoomAssignModal();
                         setTimeout(() => {
                             window.location.reload();
@@ -6042,7 +6289,7 @@ $today_str = $today->format('Y-m-d');
             showLoadingOverlay('Making booking tentative...');
 
             postBookingAction(formData, 'Error making booking tentative')
-                .then(() => window.location.reload())
+                .then(data => reloadWithBookingActionMessage(data, 'Booking moved to tentative successfully.'))
                 .catch(error => {
                     hideLoadingOverlay();
                     if (submitBtn) setButtonLoading(submitBtn, false);
@@ -6064,7 +6311,7 @@ $today_str = $today->format('Y-m-d');
             showLoadingOverlay(mode === 'noshow' ? 'Marking booking as No-Show...' : 'Checking in guest...');
 
             postBookingAction(formData, mode === 'noshow' ? 'Error marking booking as no-show' : 'Error checking in guest')
-                .then(() => window.location.reload())
+                .then(data => reloadWithBookingActionMessage(data, mode === 'noshow' ? 'Booking marked as no-show successfully.' : 'Guest checked in successfully.'))
                 .catch(error => {
                     hideLoadingOverlay();
                     if (submitBtn) setButtonLoading(submitBtn, false);
@@ -6085,7 +6332,7 @@ $today_str = $today->format('Y-m-d');
             showLoadingOverlay('Cancelling booking...');
 
             postBookingAction(formData, 'Error cancelling booking')
-                .then(() => window.location.reload())
+                .then(data => reloadWithBookingActionMessage(data, 'Booking cancelled successfully.'))
                 .catch(error => {
                     hideLoadingOverlay();
                     if (submitBtn) setButtonLoading(submitBtn, false);
@@ -6596,7 +6843,9 @@ $today_str = $today->format('Y-m-d');
                 .then(response => response.json())
                 .then(data => {
                     if (data.success) {
-                        Alert.show(data.message || 'Room type upgraded successfully!', 'success');
+                        const successMessage = data.message || 'Room type upgraded successfully!';
+                        showBookingActionMessage(successMessage, 'success');
+                        queueBookingActionMessage(successMessage, 'success');
                         closeUpgradeRoomModal();
                         setTimeout(() => {
                             window.location.reload();
@@ -6622,10 +6871,14 @@ $today_str = $today->format('Y-m-d');
         });
 
         // Delegated event listeners for action buttons
-        document.addEventListener('DOMContentLoaded', function() {
+        function bindBookingsActionDelegates() {
+            if (window.__bookingsActionDelegatesBound) return;
+            window.__bookingsActionDelegatesBound = true;
+
             // Close modal when clicking outside for quickRoomAssignModal
             const quickRoomAssignModal = document.getElementById('quickRoomAssignModal');
-            if (quickRoomAssignModal) {
+            if (quickRoomAssignModal && !quickRoomAssignModal.dataset.overlayCloseBound) {
+                quickRoomAssignModal.dataset.overlayCloseBound = '1';
                 quickRoomAssignModal.addEventListener('click', function(event) {
                     if (event.target === this) {
                         closeQuickRoomAssignModal();
@@ -6671,6 +6924,8 @@ $today_str = $today->format('Y-m-d');
                             openMakeTentativeModal(bookingId, bookingRef, tentativeType);
                         }
                     } else if (action === 'check-in') {
+                        event.preventDefault();
+                        event.stopPropagation();
                         const guestName = button.dataset.guestName;
                         const checkInDate = button.dataset.checkInDate;
                         const paymentStatus = button.dataset.paymentStatus;
@@ -6680,6 +6935,8 @@ $today_str = $today->format('Y-m-d');
                             openCheckInModal(bookingId, bookingRef, guestName, checkInDate, paymentStatus, roomAssigned, bookingStatus);
                         }
                     } else if (action === 'no-show') {
+                        event.preventDefault();
+                        event.stopPropagation();
                         const guestName = button.dataset.guestName;
                         const checkInDate = button.dataset.checkInDate;
                         const paymentStatus = button.dataset.paymentStatus;
@@ -6707,7 +6964,13 @@ $today_str = $today->format('Y-m-d');
                     }
                 }
             });
-        });
+        }
+
+        if (document.readyState === 'loading') {
+            document.addEventListener('DOMContentLoaded', bindBookingsActionDelegates);
+        } else {
+            bindBookingsActionDelegates();
+        }
     </script>
     <script src="js/admin-components.js"></script>
 
@@ -7407,8 +7670,12 @@ $today_str = $today->format('Y-m-d');
         }
 
         function toggleActionsMore(btn, evt) {
-            evt.preventDefault();
-            evt.stopPropagation();
+            if (evt && typeof evt.preventDefault === 'function') {
+                evt.preventDefault();
+            }
+            if (evt && typeof evt.stopPropagation === 'function') {
+                evt.stopPropagation();
+            }
             const wrap = btn.closest('.actions-more');
             if (!wrap) return;
             const menu = wrap.querySelector('.actions-more-menu');
@@ -7425,7 +7692,7 @@ $today_str = $today->format('Y-m-d');
             const maxMenuW = Math.max(0, Math.floor(viewport.width - (viewportPad * 2)));
             const maxMenuH = Math.max(180, Math.floor(viewport.height - (viewportPad * 2)));
 
-            menu.style.cssText = 'display:block;position:fixed;visibility:hidden;left:0;top:0;z-index:9999;width:auto;min-width:0;max-width:' + Math.round(maxMenuW) + 'px;';
+            menu.style.cssText = 'display:block;position:fixed;visibility:hidden;left:0;top:0;z-index:12050;width:auto;min-width:0;max-width:' + Math.round(maxMenuW) + 'px;';
             const measuredRect = menu.getBoundingClientRect();
             const fixedOffsetX = measuredRect.left;
             const fixedOffsetY = measuredRect.top;
@@ -7436,22 +7703,101 @@ $today_str = $today->format('Y-m-d');
             let left = rect.right - menuW;
             const minLeft = viewport.left + viewportPad;
             const maxLeft = Math.max(minLeft, viewport.right - viewportPad - menuW);
+
+            // On narrow mobile screens, keep overflow menus closer to center so
+            // they do not feel pinned against the left edge.
+            if (viewport.width <= 640) {
+                const centeredLeft = viewport.left + ((viewport.width - menuW) / 2);
+                left = centeredLeft;
+            }
+
             left = Math.min(Math.max(left, minLeft), maxLeft);
 
-            if (top + menuH > viewport.bottom - viewportPad) {
+            const spaceBelow = (viewport.bottom - viewportPad) - (rect.bottom + menuGap);
+            const spaceAbove = (rect.top - menuGap) - (viewport.top + viewportPad);
+            if (viewport.width <= 640 && spaceAbove > spaceBelow) {
+                top = rect.top - menuH - menuGap;
+            } else if (top + menuH > viewport.bottom - viewportPad) {
                 top = rect.top - menuH - menuGap; // flip above button
             }
             const minTop = viewport.top + viewportPad;
             const maxTop = Math.max(minTop, viewport.bottom - viewportPad - menuH);
             top = Math.min(Math.max(top, minTop), maxTop);
 
-            const fixedLeft = left - fixedOffsetX;
-            const fixedTop = top - fixedOffsetY;
+            const applyMenuPosition = function(posLeft, posTop) {
+                menu.style.cssText = 'display:block;position:fixed;z-index:12050;top:' + Math.round(posTop) + 'px;left:' + Math.round(posLeft) + 'px;right:auto;width:' + Math.round(menuW) + 'px;max-width:' + Math.round(maxMenuW) + 'px;max-height:' + Math.round(maxMenuH) + 'px;overflow-y:auto;overflow-x:hidden;';
+            };
 
-            menu.style.cssText = 'display:block;position:fixed;z-index:9999;top:' + Math.round(fixedTop) + 'px;left:' + Math.round(fixedLeft) + 'px;right:auto;width:' + Math.round(menuW) + 'px;max-width:' + Math.round(maxMenuW) + 'px;max-height:' + Math.round(maxMenuH) + 'px;overflow-y:auto;overflow-x:hidden;';
+            const desiredRect = {
+                left: minLeft,
+                right: viewport.right - viewportPad,
+                top: minTop,
+                bottom: viewport.bottom - viewportPad
+            };
+
+            const nudgeIntoViewport = function(rect) {
+                let deltaX = 0;
+                let deltaY = 0;
+
+                if (rect.left < desiredRect.left) {
+                    deltaX = desiredRect.left - rect.left;
+                } else if (rect.right > desiredRect.right) {
+                    deltaX = desiredRect.right - rect.right;
+                }
+
+                if (rect.top < desiredRect.top) {
+                    deltaY = desiredRect.top - rect.top;
+                } else if (rect.bottom > desiredRect.bottom) {
+                    deltaY = desiredRect.bottom - rect.bottom;
+                }
+
+                return {
+                    x: deltaX,
+                    y: deltaY
+                };
+            };
+
+            let posLeft = left - fixedOffsetX;
+            let posTop = top - fixedOffsetY;
+
+            applyMenuPosition(posLeft, posTop);
+
+            let positionedRect = menu.getBoundingClientRect();
+            let nudge = nudgeIntoViewport(positionedRect);
+            if (Math.abs(nudge.x) > 0.5 || Math.abs(nudge.y) > 0.5) {
+                posLeft += nudge.x;
+                posTop += nudge.y;
+                applyMenuPosition(posLeft, posTop);
+                positionedRect = menu.getBoundingClientRect();
+            }
+
+            const outsideViewport =
+                positionedRect.left < (viewport.left + viewportPad - 1) ||
+                positionedRect.right > (viewport.right - viewportPad + 1) ||
+                positionedRect.top < (viewport.top + viewportPad - 1) ||
+                positionedRect.bottom > (viewport.bottom - viewportPad + 1);
+
+            if (outsideViewport) {
+                // Some mobile layouts can report a non-zero probe offset but still position
+                // fixed elements in the viewport coordinate space; fall back to raw viewport coords,
+                // then nudge one more time based on the measured viewport rect.
+                posLeft = left;
+                posTop = top;
+                applyMenuPosition(posLeft, posTop);
+                positionedRect = menu.getBoundingClientRect();
+                nudge = nudgeIntoViewport(positionedRect);
+                if (Math.abs(nudge.x) > 0.5 || Math.abs(nudge.y) > 0.5) {
+                    applyMenuPosition(posLeft + nudge.x, posTop + nudge.y);
+                }
+            }
+
             wrap.classList.add('open');
         }
-        document.addEventListener('click', function() {
+        document.addEventListener('click', function(event) {
+            const target = event.target;
+            if (target && typeof target.closest === 'function' && target.closest('.actions-more')) {
+                return;
+            }
             _closeAllActionMenus(null);
         });
         // Also close on scroll so the menu doesn't drift away from its button
@@ -7587,7 +7933,12 @@ $today_str = $today->format('Y-m-d');
             ].join('\n\n');
 
             var waUrl = 'https://wa.me/' + phone + '?text=' + encodeURIComponent(message);
-            window.open(waUrl, '_blank', 'noopener,noreferrer');
+            var waWindow = window.open(waUrl, '_blank', 'noopener,noreferrer');
+            if (waWindow) {
+                showBookingActionMessage('Opening WhatsApp with the quotation draft message.', 'success');
+            } else {
+                showBookingActionMessage('WhatsApp window was blocked by your browser. Please allow pop-ups and try again.', 'warning');
+            }
         }
         document.addEventListener('DOMContentLoaded', function() {
             var _blModal = document.getElementById('bl-quotation-modal');

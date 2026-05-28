@@ -5036,98 +5036,41 @@ function sendTentativeQuotationEmail(array $booking, array $options = []): array
         </p>';
 
         // ── Build subject & body (DB template takes priority) ─────────────────
-        $subject  = 'Quotation for Your Stay — ' . $site_name . ' [' . $quote_ref . ']';
-        $useDbTpl = false;
+        $subject = 'Quotation for Your Stay — ' . $site_name . ' [' . $quote_ref . ']';
+        $textBody = '';
 
-        if (function_exists('getBookingEmailTemplateConfig')) {
-            $tplConfig = getBookingEmailTemplateConfig('tentative_quotation', []);
-            if (!empty($tplConfig['subject']) && !empty($tplConfig['html_body'])) {
-                $useDbTpl = true;
-                $tagMap = [
-                    '{{guest_name}}'               => htmlspecialchars($booking['guest_name']),
-                    '{{booking_reference}}'        => htmlspecialchars($booking['booking_reference']),
-                    '{{quotation_reference}}'      => htmlspecialchars($quote_ref),
-                    '{{quote_reference}}'          => htmlspecialchars($quote_ref),
-                    '{{room_name}}'                => htmlspecialchars((string)$room['name']),
-                    '{{check_in_date}}'            => date('l, F j, Y', strtotime($booking['check_in_date'])),
-                    '{{check_out_date}}'           => date('l, F j, Y', strtotime($booking['check_out_date'])),
-                    '{{check_in_date_formatted}}'  => date('F j, Y', strtotime($booking['check_in_date'])),
-                    '{{check_out_date_formatted}}' => date('F j, Y', strtotime($booking['check_out_date'])),
-                    '{{number_of_nights}}'         => (string)$nights,
-                    '{{nights}}'                   => (string)$nights,
-                    '{{adult_guests}}'             => (string)$adults,
-                    '{{child_guests}}'             => (string)$children,
-                    '{{number_of_guests}}'         => (string)($adults + $children),
-                    '{{guests}}'                   => $guest_label,
-                    '{{total_amount}}'             => $fmt($total),
-                    '{{total_amount_formatted}}'   => $fmt($total),
-                    '{{currency_symbol}}'          => htmlspecialchars($currency),
-                    '{{rate_per_night}}'           => $fmt($rate_per_night),
-                    '{{room_subtotal}}'            => $fmt($room_subtotal),
-                    '{{vat_amount}}'               => $fmt($vat_amount),
-                    '{{vat_rate}}'                 => number_format($vat_rate, 0),
-                    '{{child_supplement}}'         => $fmt($child_supp),
-                    '{{deposit_amount}}'           => $fmt($deposit_amt),
-                    '{{balance_due}}'              => $deposit_amt > 0 ? $fmt($total - $deposit_amt) : $fmt($total),
-                    '{{payment_policy}}'           => htmlspecialchars((string)(getSetting('payment_policy') ?: 'Full payment is due on arrival.')),
-                    '{{valid_until}}'              => $valid_until->format('F j, Y'),
-                    '{{quotation_notes}}'          => nl2br(htmlspecialchars($notes)),
-                    '{{site_name}}'                => htmlspecialchars($site_name),
-                    '{{check_in_time}}'            => htmlspecialchars($check_in_time),
-                    '{{check_out_time}}'           => htmlspecialchars($check_out_time),
-                    '{{contact_phone}}'            => htmlspecialchars($contact_phone),
-                    '{{phone_main}}'               => htmlspecialchars($contact_phone),
-                    '{{contact_email}}'            => htmlspecialchars($email_from_email ?: getSetting('email_main', '')),
-                ];
-                $subject  = strtr((string)$tplConfig['subject'],  $tagMap);
-                $htmlBody = strtr((string)$tplConfig['html_body'], $tagMap);
-            }
-        }
-
-        // ── Append full quotation document HTML ───────────────────────────────
-        if (function_exists('renderBookingDocumentTemplate') && function_exists('hotel_default_room_quotation_document_html')) {
-            try {
-                $quotationDocVars = [
-                    'logo_html'            => (function_exists('hotel_invoice_logo_src') && hotel_invoice_logo_src() !== '')
-                        ? '<img src="' . htmlspecialchars(hotel_invoice_logo_src(), ENT_QUOTES, 'UTF-8') . '" alt="' . htmlspecialchars($site_name, ENT_QUOTES, 'UTF-8') . '" height="88" style="height:88px;width:auto;display:block;margin:0 auto;">'
-                        : '',
-                    'site_name'            => htmlspecialchars($site_name, ENT_QUOTES, 'UTF-8'),
-                    'address'              => htmlspecialchars(getSetting('address_line1', '') . (getSetting('address_line2', '') !== '' ? ', ' . getSetting('address_line2', '') : ''), ENT_QUOTES, 'UTF-8'),
-                    'contact_phone'        => htmlspecialchars($contact_phone, ENT_QUOTES, 'UTF-8'),
-                    'contact_email'        => htmlspecialchars($email_from_email ?: getSetting('email_main', ''), ENT_QUOTES, 'UTF-8'),
-                    'quotation_reference'  => htmlspecialchars($quote_ref, ENT_QUOTES, 'UTF-8'),
-                    'valid_until'          => htmlspecialchars($valid_until->format('F j, Y'), ENT_QUOTES, 'UTF-8'),
-                    'guest_name'           => htmlspecialchars((string)($booking['guest_name'] ?? ''), ENT_QUOTES, 'UTF-8'),
-                    'booking_reference'    => htmlspecialchars((string)($booking['booking_reference'] ?? ''), ENT_QUOTES, 'UTF-8'),
-                    'room_name'            => htmlspecialchars((string)($room['name'] ?? ''), ENT_QUOTES, 'UTF-8'),
-                    'check_in_date'        => htmlspecialchars(date('l, F j, Y', strtotime((string)$booking['check_in_date'])), ENT_QUOTES, 'UTF-8'),
-                    'check_out_date'       => htmlspecialchars(date('l, F j, Y', strtotime((string)$booking['check_out_date'])), ENT_QUOTES, 'UTF-8'),
-                    'nights'               => (string)$nights,
-                    'guests'               => htmlspecialchars($guest_label, ENT_QUOTES, 'UTF-8'),
-                    'rate_per_night'       => htmlspecialchars($fmt($rate_per_night), ENT_QUOTES, 'UTF-8'),
-                    'room_subtotal'        => htmlspecialchars($fmt($room_subtotal), ENT_QUOTES, 'UTF-8'),
-                    'vat_amount'           => htmlspecialchars($fmt($vat_amount), ENT_QUOTES, 'UTF-8'),
-                    'deposit_amount'       => htmlspecialchars($fmt($deposit_amt), ENT_QUOTES, 'UTF-8'),
-                    'total_amount'         => htmlspecialchars($fmt($total), ENT_QUOTES, 'UTF-8'),
-                    'balance_due'          => htmlspecialchars($fmt(max(0.0, $total - $deposit_amt)), ENT_QUOTES, 'UTF-8'),
-                    'payment_policy'       => nl2br(htmlspecialchars(getSetting('payment_policy', 'Full payment is due on arrival.'), ENT_QUOTES, 'UTF-8')),
-                    'quotation_notes'      => nl2br(htmlspecialchars($notes, ENT_QUOTES, 'UTF-8')),
-                ];
-                $quotDocHtml = renderBookingDocumentTemplate('tentative_quotation_document', $quotationDocVars, hotel_default_room_quotation_document_html());
-                if ($quotDocHtml !== '') {
-                    $docSection = '<div style="background:#d5cfc4;padding:24px 20px 0;">'
-                        . '<div style="max-width:720px;margin:0 auto;">'
-                        . '<p style="font-family:Helvetica,Arial,sans-serif;font-size:10px;letter-spacing:2px;text-transform:uppercase;color:#9b8f7e;margin:0 0 12px;text-align:center;">Full Quotation</p>'
-                        . $quotDocHtml
-                        . '</div></div>';
-                    if (stripos($htmlBody, '</body>') !== false) {
-                        $htmlBody = (string)preg_replace('/<\/body>/i', $docSection . '</body>', $htmlBody, 1);
-                    } else {
-                        $htmlBody .= $docSection;
-                    }
-                }
-            } catch (Throwable $e) {
-                error_log('sendTentativeQuotationEmail: failed to build quotation doc HTML: ' . $e->getMessage());
+        if (function_exists('buildBookingEmailVariables') && function_exists('renderBookingEmailTemplate')) {
+            $templateVars = buildBookingEmailVariables($booking, $room, [
+                'quotation_reference' => $quote_ref,
+                'quote_reference' => $quote_ref,
+                'check_in_date' => date('l, F j, Y', strtotime((string)$booking['check_in_date'])),
+                'check_out_date' => date('l, F j, Y', strtotime((string)$booking['check_out_date'])),
+                'check_in_date_formatted' => date('F j, Y', strtotime((string)$booking['check_in_date'])),
+                'check_out_date_formatted' => date('F j, Y', strtotime((string)$booking['check_out_date'])),
+                'nights' => (string)$nights,
+                'number_of_nights' => (string)$nights,
+                'adult_guests' => (string)$adults,
+                'child_guests' => (string)$children,
+                'number_of_guests' => (string)($adults + $children),
+                'guests' => $guest_label,
+                'total_amount' => $fmt($total),
+                'total_amount_formatted' => $fmt($total),
+                'rate_per_night' => $fmt($rate_per_night),
+                'room_subtotal' => $fmt($room_subtotal),
+                'vat_amount' => $fmt($vat_amount),
+                'vat_rate' => number_format($vat_rate, 0),
+                'child_supplement' => $fmt($child_supp),
+                'deposit_amount' => $fmt($deposit_amt),
+                'balance_due' => $deposit_amt > 0 ? $fmt($total - $deposit_amt) : $fmt($total),
+                'payment_policy' => (string)(getSetting('payment_policy') ?: 'Full payment is due on arrival.'),
+                'valid_until' => $valid_until->format('F j, Y'),
+                'quotation_notes' => nl2br(htmlspecialchars($notes, ENT_QUOTES, 'UTF-8')),
+            ]);
+            $renderedTemplate = renderBookingEmailTemplate('tentative_quotation', $templateVars);
+            if ($renderedTemplate) {
+                $subject = (string)$renderedTemplate['subject'];
+                $htmlBody = (string)$renderedTemplate['html_body'];
+                $textBody = (string)($renderedTemplate['text_body'] ?? '');
             }
         }
 
@@ -5146,11 +5089,11 @@ function sendTentativeQuotationEmail(array $booking, array $options = []): array
         // ── Send ──────────────────────────────────────────────────────────────
         if ($pdfContent === null) {
             // No attachment — use the standard sendEmail helper
-            $result = sendEmail($booking['guest_email'], $booking['guest_name'], $subject, $htmlBody);
+            $result = sendEmail($booking['guest_email'], $booking['guest_name'], $subject, $htmlBody, $textBody);
         } else {
             // Has attachment — must use PHPMailer directly
             if ($development_mode && (empty($smtp_password) || $email_preview_enabled)) {
-                return createEmailPreview($booking['guest_email'], $booking['guest_name'], $subject, $htmlBody, '');
+                return createEmailPreview($booking['guest_email'], $booking['guest_name'], $subject, $htmlBody, $textBody);
             }
             $mail = new PHPMailer(true);
             $smtpSec = strtolower(trim((string)$smtp_secure));
@@ -5185,7 +5128,9 @@ function sendTentativeQuotationEmail(array $booking, array $options = []): array
             $mail->isHTML(true);
             $mail->Subject  = $subject;
             $mail->Body     = hotel_embed_logo_cid($mail, wrapEmailTemplate($htmlBody, $subject));
-            $mail->AltBody  = 'Please see the attached PDF quotation for your stay at ' . $site_name . '.';
+            $mail->AltBody  = $textBody !== ''
+                ? $textBody
+                : ('Please see the attached PDF quotation for your stay at ' . $site_name . '.');
             $mail->addStringAttachment($pdfContent, 'Quotation-' . $quote_ref . '.pdf', 'base64', 'application/pdf');
             $mail->send();
             $result = ['success' => true, 'message' => 'Quotation email sent.'];

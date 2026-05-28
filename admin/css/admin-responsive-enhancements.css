@@ -886,6 +886,168 @@ body.admin-dynamic-layout #rh-admin-page>main {
     }
 }
 
+/* --- Global mobile card-grid density (2-3 columns on phone/tablet) --- */
+@media (max-width: 900px) {
+
+    body #rh-admin-page :is(.analytics-container,
+        .content,
+        .admin-content,
+        .admin-container,
+        .admin-wrapper,
+        .invoices-container,
+        .booking-details-container,
+        .booking-details-page,
+        .reports-container,
+        .payments-container,
+        .payment-details-container,
+        .payment-add-container,
+        .payment-refund-container,
+        .room-dashboard,
+        .tentative-page,
+        .user-management-container,
+        .wrap,
+        main):has(>:is(.stats-grid,
+            .summary-cards,
+            .details-grid,
+            .summary-grid,
+            .metric-grid,
+            .kpi-grid,
+            .acct-grid,
+            .acct-grid--2,
+            .acct-kpis,
+            .acct-kpi-grid,
+            .analytics-grid,
+            .conference-cards-grid,
+            .gym-cards-grid,
+            .room-cards-grid,
+            .events-grid,
+            .section-grid,
+            .headers-grid,
+            .menu-grid,
+            .ops-grid,
+            .guide-menu-grid,
+            .vat-current-grid,
+            [style*="grid-template-columns: repeat(auto-fit"],
+            [style*="grid-template-columns: repeat(auto-fill"])) {
+        min-width: 0 !important;
+        grid-template-columns: minmax(0, 1fr) !important;
+    }
+
+    body #rh-admin-page :is(.stats-grid,
+        .summary-cards,
+        .details-grid,
+        .summary-grid,
+        .metric-grid,
+        .kpi-grid,
+        .acct-grid,
+        .acct-grid--2,
+        .acct-kpis,
+        .acct-kpi-grid,
+        .analytics-grid,
+        .conference-cards-grid,
+        .gym-cards-grid,
+        .room-cards-grid,
+        .events-grid,
+        .section-grid,
+        .headers-grid,
+        .menu-grid,
+        .ops-grid,
+        .guide-menu-grid,
+        .vat-current-grid,
+        [style*="grid-template-columns: repeat(auto-fit"],
+        [style*="grid-template-columns: repeat(auto-fill"]) {
+        width: 100% !important;
+        max-width: 100% !important;
+        min-width: 0 !important;
+        grid-template-columns: repeat(auto-fit, minmax(min(12rem, 100%), 1fr)) !important;
+        gap: clamp(0.5rem, 1.9vw, 0.8rem) !important;
+    }
+
+    body #rh-admin-page :is(.stats-grid,
+        .summary-cards,
+        .details-grid,
+        .summary-grid,
+        .metric-grid,
+        .kpi-grid,
+        .acct-grid,
+        .acct-grid--2,
+        .acct-kpis,
+        .acct-kpi-grid,
+        .analytics-grid,
+        .conference-cards-grid,
+        .gym-cards-grid,
+        .room-cards-grid,
+        .events-grid,
+        .section-grid,
+        .headers-grid,
+        .menu-grid,
+        .ops-grid,
+        .guide-menu-grid,
+        .vat-current-grid,
+        [style*="grid-template-columns: repeat(auto-fit"],
+        [style*="grid-template-columns: repeat(auto-fill"])>* {
+        min-width: 0 !important;
+    }
+}
+
+@media (max-width: 430px) {
+
+    body #rh-admin-page :is(.stats-grid,
+        .summary-cards,
+        .details-grid,
+        .summary-grid,
+        .metric-grid,
+        .kpi-grid,
+        .acct-grid,
+        .acct-grid--2,
+        .acct-kpis,
+        .acct-kpi-grid,
+        .analytics-grid,
+        .conference-cards-grid,
+        .gym-cards-grid,
+        .room-cards-grid,
+        .events-grid,
+        .section-grid,
+        .headers-grid,
+        .menu-grid,
+        .ops-grid,
+        .guide-menu-grid,
+        .vat-current-grid,
+        [style*="grid-template-columns: repeat(auto-fit"],
+        [style*="grid-template-columns: repeat(auto-fill"]) {
+        grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+    }
+}
+
+@media (max-width: 340px) {
+
+    body #rh-admin-page :is(.stats-grid,
+        .summary-cards,
+        .details-grid,
+        .summary-grid,
+        .metric-grid,
+        .kpi-grid,
+        .acct-grid,
+        .acct-grid--2,
+        .acct-kpis,
+        .acct-kpi-grid,
+        .analytics-grid,
+        .conference-cards-grid,
+        .gym-cards-grid,
+        .room-cards-grid,
+        .events-grid,
+        .section-grid,
+        .headers-grid,
+        .menu-grid,
+        .ops-grid,
+        .guide-menu-grid,
+        .vat-current-grid,
+        [style*="grid-template-columns: repeat(auto-fit"],
+        [style*="grid-template-columns: repeat(auto-fill"]) {
+        grid-template-columns: 1fr !important;
+    }
+}
+
 /* --- Reduced motion ------------------------------------------------- */
 @media (prefers-reduced-motion: reduce) {
 

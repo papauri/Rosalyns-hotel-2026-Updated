@@ -255,12 +255,11 @@
 
     function getCardFieldColumnCount(table) {
         const availableWidth = getTableAvailableWidth(table);
-        // Keep card fields readable: only use 3 columns on genuinely wide layouts.
-        if (availableWidth >= 960) {
-            return 3;
-        }
-
-        if (availableWidth >= 680) {
+        // Standardized card-field density: use 2 columns when it comfortably fits.
+        const usableWidth = Math.max(0, availableWidth - 20);
+        const minFieldColumnWidth = 150;
+        const fieldGap = 12;
+        if (usableWidth >= ((minFieldColumnWidth * 2) + fieldGap)) {
             return 2;
         }
 
@@ -453,6 +452,12 @@
             const actionCells = document.querySelectorAll('td:last-child');
 
             actionCells.forEach(cell => {
+                // Pages with a native More-menu system (for example bookings)
+                // must keep their original DOM structure intact.
+                if (cell.querySelector('.actions-more, .actions-more-toggle, .actions-more-menu')) {
+                    return;
+                }
+
                 const buttons = cell.querySelectorAll('.quick-action, .btn');
 
                 if (buttons.length > 3) {
@@ -468,6 +473,9 @@
     function createActionsDropdown(cell, buttons) {
         // Check if already converted
         if (cell.querySelector('.actions-dropdown')) return;
+
+        // Do not interfere with custom action overflow menus.
+        if (cell.querySelector('.actions-more, .actions-more-toggle, .actions-more-menu')) return;
 
         // Create dropdown container
         const dropdown = document.createElement('div');
