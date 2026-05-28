@@ -2185,8 +2185,7 @@ body.modal-open {
    STANDARD MODAL TOP DESIGN (GLOBAL)
    ============================================ */
 
-:is(.modal-overlay, .overlay, .modal, .admin-modal, .modal-wrapper, .modal__wrapper, .modal-container, .modal__container)
-    :is(.modal-header, .modal__header, .admin-modal__header, .modal-head) {
+:is(.modal-overlay, .overlay, .modal, .admin-modal, .modal-wrapper, .modal__wrapper, .modal-container, .modal__container) :is(.modal-header, .modal__header, .admin-modal__header, .modal-head) {
     position: relative !important;
     display: flex !important;
     align-items: flex-start !important;
@@ -2199,8 +2198,7 @@ body.modal-open {
     color: var(--rh-modal-title-color) !important;
 }
 
-:is(.modal-overlay, .overlay, .modal, .admin-modal, .modal-wrapper, .modal__wrapper, .modal-container, .modal__container)
-    :is(.modal-header, .modal__header, .admin-modal__header, .modal-head)::after {
+:is(.modal-overlay, .overlay, .modal, .admin-modal, .modal-wrapper, .modal__wrapper, .modal-container, .modal__container) :is(.modal-header, .modal__header, .admin-modal__header, .modal-head)::after {
     content: '';
     position: absolute;
     left: 1rem;
@@ -2211,8 +2209,7 @@ body.modal-open {
     pointer-events: none;
 }
 
-:is(.modal-overlay, .overlay, .modal, .admin-modal, .modal-wrapper, .modal__wrapper, .modal-container, .modal__container)
-    :is(.modal-header h1, .modal-header h2, .modal-header h3, .modal-head h1, .modal-head h2, .modal-head h3, .modal__title, .admin-modal__title) {
+:is(.modal-overlay, .overlay, .modal, .admin-modal, .modal-wrapper, .modal__wrapper, .modal-container, .modal__container) :is(.modal-header h1, .modal-header h2, .modal-header h3, .modal-head h1, .modal-head h2, .modal-head h3, .modal__title, .admin-modal__title) {
     margin: 0 !important;
     display: inline-flex !important;
     align-items: center !important;
@@ -2226,8 +2223,7 @@ body.modal-open {
     color: var(--rh-modal-title-color) !important;
 }
 
-:is(.modal-overlay, .overlay, .modal, .admin-modal, .modal-wrapper, .modal__wrapper, .modal-container, .modal__container)
-    :is(.modal-header h1 i, .modal-header h2 i, .modal-header h3 i, .modal-head h1 i, .modal-head h2 i, .modal-head h3 i, .modal__title i, .admin-modal__title i) {
+:is(.modal-overlay, .overlay, .modal, .admin-modal, .modal-wrapper, .modal__wrapper, .modal-container, .modal__container) :is(.modal-header h1 i, .modal-header h2 i, .modal-header h3 i, .modal-head h1 i, .modal-head h2 i, .modal-head h3 i, .modal__title i, .admin-modal__title i) {
     width: 1.66rem;
     height: 1.66rem;
     border-radius: 999px;
@@ -2241,9 +2237,7 @@ body.modal-open {
     box-shadow: 0 2px 10px rgba(15, 23, 42, 0.12);
 }
 
-:is(.modal-overlay, .overlay, .modal, .admin-modal, .modal-wrapper, .modal__wrapper, .modal-container, .modal__container)
-    :is(.modal-header, .modal__header, .admin-modal__header, .modal-head)
-    :is(.close-modal, .modal-close, .close, .modal__close) {
+:is(.modal-overlay, .overlay, .modal, .admin-modal, .modal-wrapper, .modal__wrapper, .modal-container, .modal__container) :is(.modal-header, .modal__header, .admin-modal__header, .modal-head) :is(.close-modal, .modal-close, .close, .modal__close) {
     position: static !important;
     inset: auto !important;
     flex: 0 0 auto;
@@ -2265,37 +2259,29 @@ body.modal-open {
     transition: background-color 0.18s ease, color 0.18s ease, border-color 0.18s ease, transform 0.16s ease !important;
 }
 
-:is(.modal-overlay, .overlay, .modal, .admin-modal, .modal-wrapper, .modal__wrapper, .modal-container, .modal__container)
-    :is(.modal-header, .modal__header, .admin-modal__header, .modal-head)
-    :is(.close-modal, .modal-close, .close, .modal__close):hover {
+:is(.modal-overlay, .overlay, .modal, .admin-modal, .modal-wrapper, .modal__wrapper, .modal-container, .modal__container) :is(.modal-header, .modal__header, .admin-modal__header, .modal-head) :is(.close-modal, .modal-close, .close, .modal__close):hover {
     transform: translateY(-1px) !important;
     border-color: var(--rh-modal-close-hover-border) !important;
     background: var(--rh-modal-close-hover-bg) !important;
     color: var(--rh-modal-close-hover-color) !important;
 }
 
-:is(.modal-overlay, .overlay, .modal, .admin-modal, .modal-wrapper, .modal__wrapper, .modal-container, .modal__container)
-    :is(.modal-header, .modal__header, .admin-modal__header, .modal-head)
-    :is(.close-modal, .modal-close, .close, .modal__close):focus-visible {
+:is(.modal-overlay, .overlay, .modal, .admin-modal, .modal-wrapper, .modal__wrapper, .modal-container, .modal__container) :is(.modal-header, .modal__header, .admin-modal__header, .modal-head) :is(.close-modal, .modal-close, .close, .modal__close):focus-visible {
     outline: 2px solid var(--color-primary, #B18247) !important;
     outline-offset: 1px !important;
 }
 
 @media (max-width: 48rem) {
-    :is(.modal-overlay, .overlay, .modal, .admin-modal, .modal-wrapper, .modal__wrapper, .modal-container, .modal__container)
-        :is(.modal-header, .modal__header, .admin-modal__header, .modal-head) {
+    :is(.modal-overlay, .overlay, .modal, .admin-modal, .modal-wrapper, .modal__wrapper, .modal-container, .modal__container) :is(.modal-header, .modal__header, .admin-modal__header, .modal-head) {
         gap: 0.58rem !important;
         padding: 0.84rem 0.86rem 0.8rem !important;
     }
 
-    :is(.modal-overlay, .overlay, .modal, .admin-modal, .modal-wrapper, .modal__wrapper, .modal-container, .modal__container)
-        :is(.modal-header h1, .modal-header h2, .modal-header h3, .modal-head h1, .modal-head h2, .modal-head h3, .modal__title, .admin-modal__title) {
+    :is(.modal-overlay, .overlay, .modal, .admin-modal, .modal-wrapper, .modal__wrapper, .modal-container, .modal__container) :is(.modal-header h1, .modal-header h2, .modal-header h3, .modal-head h1, .modal-head h2, .modal-head h3, .modal__title, .admin-modal__title) {
         font-size: clamp(0.96rem, 0.92rem + 0.16vw, 1.08rem) !important;
     }
 
-    :is(.modal-overlay, .overlay, .modal, .admin-modal, .modal-wrapper, .modal__wrapper, .modal-container, .modal__container)
-        :is(.modal-header, .modal__header, .admin-modal__header, .modal-head)
-        :is(.close-modal, .modal-close, .close, .modal__close) {
+    :is(.modal-overlay, .overlay, .modal, .admin-modal, .modal-wrapper, .modal__wrapper, .modal-container, .modal__container) :is(.modal-header, .modal__header, .admin-modal__header, .modal-head) :is(.close-modal, .modal-close, .close, .modal__close) {
         width: 1.9rem !important;
         height: 1.9rem !important;
         min-width: 1.9rem !important;
