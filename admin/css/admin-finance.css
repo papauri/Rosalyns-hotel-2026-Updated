@@ -1872,14 +1872,45 @@ body {
 }
 
 @media (max-width: 768px) {
+    .finance-page .section-card,
+    .finance-page .table-container,
+    .finance-page .invoices-table,
+    .finance-page .filter-section,
+    .finance-page .filters-card,
+    .finance-page .payment-summary-card,
+    .finance-page .vat-info,
+    .finance-page .form-container {
+        padding: 14px;
+        border-radius: 14px;
+    }
+
+    .finance-page .section-card h3 {
+        margin-bottom: 0.75rem;
+        font-size: 0.96rem;
+        line-height: 1.25;
+    }
+
+    .pos-acct-section-head {
+        gap: 0.65rem;
+        margin-bottom: 0.8rem;
+    }
+
     .pos-acct-bulk-actions {
         width: 100%;
         align-items: stretch;
+        gap: 0.6rem;
     }
 
     .pos-acct-bulk-actions input,
-    .pos-acct-bulk-actions button {
+    .pos-acct-bulk-actions button,
+    .pos-acct-bulk-actions .acct-btn {
         width: 100%;
+    }
+
+    .pos-acct-close-form table.mobile-enhanced .pos-acct-drawer-toggle,
+    .pos-acct-close-form table.mobile-enhanced .pos-acct-row-close-btn {
+        width: 100%;
+        justify-content: center;
     }
 }
 
@@ -2128,6 +2159,72 @@ body {
     cursor: default;
 }
 
+/* Per-sale details dropdown inside drawer rows */
+.pos-acct-sale-details {
+    min-width: 180px;
+}
+
+.pos-acct-sale-details summary {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    cursor: pointer;
+    list-style: none;
+    color: var(--finance-primary, #8A775F);
+    font-size: clamp(0.7rem, 0.66rem + 0.14vw, 0.78rem);
+    font-weight: 600;
+}
+
+.pos-acct-sale-details summary::-webkit-details-marker {
+    display: none;
+}
+
+.pos-acct-sale-details__list {
+    margin: 0.4rem 0 0;
+    padding: 0.4rem 0.5rem;
+    border: 1px solid color-mix(in srgb, var(--finance-border, #e3ddd5) 80%, transparent);
+    border-radius: 8px;
+    background: #fff;
+    list-style: none;
+    display: grid;
+    gap: 0.35rem;
+    max-width: 280px;
+}
+
+.pos-acct-sale-details__list li {
+    line-height: 1.35;
+}
+
+.pos-acct-sale-details__qty {
+    color: var(--finance-primary, #8A775F);
+    font-weight: 600;
+    margin-right: 0.25rem;
+}
+
+.pos-acct-sale-details__name {
+    color: var(--finance-ink, #231f1c);
+    font-weight: 500;
+}
+
+.pos-acct-sale-details__meta {
+    display: inline-block;
+    margin-left: 0.4rem;
+    color: var(--finance-muted, #8a8178);
+    font-size: 0.82em;
+}
+
+.pos-acct-sale-details__note {
+    margin-top: 0.15rem;
+    color: var(--finance-muted, #8a8178);
+    font-style: italic;
+    font-size: 0.82em;
+}
+
+.pos-acct-sale-details__empty {
+    color: var(--finance-muted, #8a8178);
+    font-size: clamp(0.7rem, 0.66rem + 0.14vw, 0.78rem);
+}
+
 .pos-acct-drawer__time {
     font-family: var(--font-body, 'Jost', sans-serif);
     font-variant-numeric: tabular-nums;
@@ -2170,9 +2267,33 @@ body {
         padding: 0 0.35rem 0.75rem;
     }
 
+    .pos-acct-drawer__head {
+        align-items: flex-start;
+        flex-wrap: wrap;
+        gap: 0.55rem;
+    }
+
+    .pos-acct-drawer-tick-all {
+        margin-left: auto;
+    }
+
     .pos-acct-drawer__table th,
     .pos-acct-drawer__table td {
         padding: 0.35rem 0.35rem;
+    }
+}
+
+@media (max-width: 430px) {
+    .pos-acct-drawer-tick-all {
+        width: 100%;
+        margin-left: 0;
+        justify-content: center;
+    }
+
+    .pos-acct-sale-details,
+    .pos-acct-sale-details__list {
+        min-width: 0;
+        max-width: 100%;
     }
 }
 

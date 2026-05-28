@@ -1019,6 +1019,25 @@ body.admin-dynamic-layout #rh-admin-page>main {
     }
 }
 
+@media (max-width: 430px) {
+
+    body #rh-admin-page :is(.details-grid,
+        .acct-grid,
+        .acct-grid--2,
+        .analytics-grid,
+        .conference-cards-grid,
+        .gym-cards-grid,
+        .room-cards-grid,
+        .events-grid,
+        .section-grid,
+        .headers-grid,
+        .menu-grid,
+        .ops-grid,
+        .guide-menu-grid) {
+        grid-template-columns: 1fr !important;
+    }
+}
+
 @media (max-width: 340px) {
 
     body #rh-admin-page :is(.stats-grid,

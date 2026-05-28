@@ -1005,14 +1005,20 @@ unset($_SESSION['success_message'], $_SESSION['error_message']);
             </div>
         <?php endif; ?>
 
+        <div class="booking-story-intro">
+            <h2>Booking Story</h2>
+            <p>Follow the booking from guest details to stay, room setup, and payment before operational actions.</p>
+        </div>
+
         <!-- Details Grid -->
         <div class="details-grid">
 
             <!-- Guest Information Card -->
-            <div class="info-card">
+            <div class="info-card story-card story-card--guest">
                 <div class="info-card-header">
                     <div class="icon guest"><i class="fas fa-user"></i></div>
                     <h3>Guest Information</h3>
+                    <span class="story-pill">Step 1</span>
                 </div>
                 <div class="info-card-body">
                     <div class="info-row">
@@ -1056,11 +1062,42 @@ unset($_SESSION['success_message'], $_SESSION['error_message']);
                 </div>
             </div>
 
+            <!-- Stay Duration Card -->
+            <div class="info-card story-card story-card--stay">
+                <div class="info-card-header">
+                    <div class="icon stay"><i class="fas fa-calendar-alt"></i></div>
+                    <h3>Stay Duration</h3>
+                    <span class="story-pill">Step 2</span>
+                </div>
+                <div class="info-card-body">
+                    <div class="stay-duration-display">
+                        <div class="date-range">
+                            <div class="date-box">
+                                <div class="day"><?php echo date('d', strtotime($booking['check_in_date'])); ?></div>
+                                <div class="month-year"><?php echo date('M Y', strtotime($booking['check_in_date'])); ?></div>
+                                <div class="label">Check-in</div>
+                            </div>
+                            <div class="date-arrow"><i class="fas fa-arrow-right"></i></div>
+                            <div class="date-box">
+                                <div class="day"><?php echo date('d', strtotime($booking['check_out_date'])); ?></div>
+                                <div class="month-year"><?php echo date('M Y', strtotime($booking['check_out_date'])); ?></div>
+                                <div class="label">Check-out</div>
+                            </div>
+                        </div>
+                        <div class="nights-display">
+                            <i class="fas fa-moon"></i>
+                            <?php echo $booking['number_of_nights']; ?> night<?php echo $booking['number_of_nights'] == 1 ? '' : 's'; ?>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
             <!-- Room Information Card -->
-            <div class="info-card">
+            <div class="info-card story-card story-card--room">
                 <div class="info-card-header">
                     <div class="icon room"><i class="fas fa-bed"></i></div>
                     <h3>Room Details</h3>
+                    <span class="story-pill">Step 3</span>
                 </div>
                 <div class="info-card-body">
                     <div class="room-info-display">
@@ -1101,40 +1138,12 @@ unset($_SESSION['success_message'], $_SESSION['error_message']);
                 </div>
             </div>
 
-            <!-- Stay Duration Card -->
-            <div class="info-card">
-                <div class="info-card-header">
-                    <div class="icon stay"><i class="fas fa-calendar-alt"></i></div>
-                    <h3>Stay Duration</h3>
-                </div>
-                <div class="info-card-body">
-                    <div class="stay-duration-display">
-                        <div class="date-range">
-                            <div class="date-box">
-                                <div class="day"><?php echo date('d', strtotime($booking['check_in_date'])); ?></div>
-                                <div class="month-year"><?php echo date('M Y', strtotime($booking['check_in_date'])); ?></div>
-                                <div class="label">Check-in</div>
-                            </div>
-                            <div class="date-arrow"><i class="fas fa-arrow-right"></i></div>
-                            <div class="date-box">
-                                <div class="day"><?php echo date('d', strtotime($booking['check_out_date'])); ?></div>
-                                <div class="month-year"><?php echo date('M Y', strtotime($booking['check_out_date'])); ?></div>
-                                <div class="label">Check-out</div>
-                            </div>
-                        </div>
-                        <div class="nights-display">
-                            <i class="fas fa-moon"></i>
-                            <?php echo $booking['number_of_nights']; ?> night<?php echo $booking['number_of_nights'] == 1 ? '' : 's'; ?>
-                        </div>
-                    </div>
-                </div>
-            </div>
-
             <!-- Payment Information Card -->
-            <div class="info-card">
+            <div class="info-card story-card story-card--payment">
                 <div class="info-card-header">
                     <div class="icon payment"><i class="fas fa-credit-card"></i></div>
                     <h3>Payment Information</h3>
+                    <span class="story-pill">Step 4</span>
                 </div>
                 <div class="info-card-body">
                     <div class="payment-summary">

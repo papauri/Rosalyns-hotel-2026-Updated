@@ -1352,25 +1352,122 @@
     color: var(--color-lux-ink, #231F1C);
 }
 
+.booking-story-intro {
+    display: flex;
+    align-items: flex-end;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 0.6rem;
+    margin-bottom: clamp(0.6rem, 0.82vw + 0.28rem, 0.95rem);
+}
+
+.booking-story-intro h2 {
+    margin: 0;
+    font-size: clamp(1.02rem, 0.94rem + 0.25vw, 1.24rem);
+    color: var(--color-lux-ink, #231F1C);
+    line-height: 1.2;
+}
+
+.booking-story-intro p {
+    margin: 0;
+    max-width: 52rem;
+    font-size: clamp(0.74rem, 0.71rem + 0.11vw, 0.86rem);
+    color: var(--color-text-secondary, #5E554D);
+}
+
 .details-grid {
-    grid-template-columns: repeat(auto-fit, minmax(min(18rem, 100%), 1fr));
+    grid-template-columns: repeat(12, minmax(0, 1fr));
     gap: clamp(0.85rem, 1.1vw + 0.45rem, 1.25rem);
     align-items: stretch;
 }
 
+.story-card {
+    grid-column: span 6;
+}
+
+.story-card--guest {
+    order: 1;
+}
+
+.story-card--stay {
+    order: 2;
+}
+
+.story-card--room {
+    order: 3;
+}
+
+.story-card--payment {
+    order: 4;
+}
+
+.story-pill {
+    margin-left: auto;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0.24rem 0.5rem;
+    border-radius: 999px;
+    font-size: clamp(0.64rem, 0.62rem + 0.06vw, 0.72rem);
+    font-weight: 600;
+    letter-spacing: 0.03em;
+    text-transform: uppercase;
+    color: var(--color-primary, #8A775F);
+    background: color-mix(in srgb, var(--color-primary, #8A775F) 14%, var(--color-white, #fff));
+    border: 1px solid color-mix(in srgb, var(--color-primary, #8A775F) 28%, var(--admin-surface-border, #d9dee7));
+}
+
+.folio-card {
+    order: 5;
+}
+
+.invoices-card {
+    order: 6;
+}
+
+.timeline-card {
+    order: 7;
+}
+
+.notes-card {
+    order: 8;
+}
+
+.booking-special-card {
+    order: 9;
+}
+
+.actions-card {
+    order: 10;
+}
+
 .folio-card,
 .invoices-card,
+.timeline-card,
+.notes-card,
 .actions-card,
 .booking-special-card {
     grid-column: 1 / -1;
 }
 
-.timeline-card {
-    grid-column: span 2;
+.info-card-header {
+    padding: clamp(0.66rem, 0.66vw + 0.35rem, 0.9rem) clamp(0.78rem, 0.8vw + 0.4rem, 1rem);
+    gap: 0.58rem;
 }
 
-.notes-card {
-    grid-column: span 1;
+.info-card-header .icon {
+    width: 2.1rem;
+    height: 2.1rem;
+    border-radius: 0.62rem;
+    font-size: 0.95rem;
+}
+
+.info-card-header h3 {
+    font-size: clamp(0.86rem, 0.82rem + 0.13vw, 0.98rem);
+}
+
+.info-card-body {
+    padding: clamp(0.72rem, 0.8vw + 0.35rem, 0.96rem) clamp(0.78rem, 0.8vw + 0.4rem, 1rem);
 }
 
 .booking-special-card__content {
@@ -1392,12 +1489,110 @@
 }
 
 .details-grid>.info-card:not(.folio-card):not(.invoices-card):not(.timeline-card):not(.notes-card):not(.actions-card):not(.booking-special-card) .info-row {
-    min-height: 2.3rem;
+    min-height: 2rem;
     align-items: center;
 }
 
 .details-grid>.info-card:not(.folio-card):not(.invoices-card):not(.timeline-card):not(.notes-card):not(.actions-card):not(.booking-special-card) .guest-contact-actions {
     margin-top: auto;
+}
+
+.story-card .info-row {
+    padding: 0.35rem 0;
+    min-height: 0;
+}
+
+.story-card .info-label {
+    font-size: clamp(0.7rem, 0.68rem + 0.08vw, 0.76rem);
+}
+
+.story-card .info-value {
+    font-size: clamp(0.74rem, 0.71rem + 0.1vw, 0.82rem);
+}
+
+.story-card .guest-contact-actions {
+    margin-top: 0.66rem;
+    padding-top: 0.58rem;
+    gap: 0.48rem;
+}
+
+.story-card .guest-contact-actions a {
+    padding: 0.46rem 0.54rem;
+    font-size: clamp(0.66rem, 0.65rem + 0.06vw, 0.74rem);
+    border-radius: 0.56rem;
+}
+
+.story-card .room-info-display,
+.story-card .stay-duration-display,
+.story-card .payment-summary {
+    padding: 0.18rem 0;
+}
+
+.story-card .room-name-display {
+    font-size: clamp(0.94rem, 0.88rem + 0.24vw, 1.08rem);
+    margin-bottom: 0.18rem;
+}
+
+.story-card .room-type-display {
+    font-size: clamp(0.7rem, 0.68rem + 0.08vw, 0.76rem);
+    margin-bottom: 0.55rem;
+}
+
+.story-card .assigned-room-badge {
+    padding: 0.38rem 0.62rem;
+    border-radius: 0.58rem;
+    font-size: clamp(0.64rem, 0.62rem + 0.07vw, 0.72rem);
+    gap: 0.32rem;
+}
+
+.story-card .date-range {
+    gap: 0.62rem;
+    margin-bottom: 0.56rem;
+}
+
+.story-card .date-box .day {
+    font-size: clamp(1.35rem, 1.18rem + 0.58vw, 1.72rem);
+}
+
+.story-card .date-box .month-year {
+    font-size: clamp(0.66rem, 0.65rem + 0.05vw, 0.72rem);
+    margin-top: 0.12rem;
+}
+
+.story-card .date-box .label {
+    font-size: 0.58rem;
+    margin-top: 0.3rem;
+}
+
+.story-card .date-arrow {
+    font-size: 0.9rem;
+}
+
+.story-card .nights-display {
+    padding: 0.3rem 0.56rem;
+    gap: 0.3rem;
+    font-size: clamp(0.66rem, 0.64rem + 0.08vw, 0.74rem);
+}
+
+.story-card .payment-amount {
+    font-size: clamp(1.58rem, 1.32rem + 0.8vw, 2rem);
+    line-height: 1.08;
+    margin-bottom: 0.15rem;
+}
+
+.story-card .payment-amount .currency {
+    font-size: clamp(0.8rem, 0.76rem + 0.16vw, 0.94rem);
+}
+
+.story-card .payment-reference {
+    font-size: clamp(0.62rem, 0.61rem + 0.05vw, 0.7rem);
+    margin-top: 0.34rem;
+}
+
+.story-card .info-value.status-badge {
+    font-size: clamp(0.62rem, 0.61rem + 0.05vw, 0.7rem);
+    padding: 0.24rem 0.52rem;
+    gap: 0.3rem;
 }
 
 .actions-card .info-card-body {
@@ -1580,6 +1775,372 @@
     font-size: clamp(1.3rem, 1.2rem + 0.36vw, 1.7rem);
 }
 
+.folio-card .empty-state,
+.invoices-card .empty-state {
+    padding: 1.32rem 0.74rem;
+}
+
+.folio-card .empty-state i,
+.invoices-card .empty-state i {
+    font-size: clamp(1.5rem, 1.34rem + 0.46vw, 1.9rem);
+    margin-bottom: 0.42rem;
+}
+
+.folio-card .empty-state p,
+.invoices-card .empty-state p {
+    font-size: clamp(0.8rem, 0.77rem + 0.1vw, 0.88rem);
+}
+
+.folio-card .empty-state small,
+.invoices-card .empty-state small {
+    font-size: clamp(0.68rem, 0.66rem + 0.08vw, 0.76rem);
+}
+
+.folio-card .info-card-header,
+.invoices-card .info-card-header,
+.timeline-card .info-card-header,
+.notes-card .info-card-header,
+.actions-card .info-card-header {
+    padding: clamp(0.52rem, 0.45vw + 0.34rem, 0.72rem) clamp(0.64rem, 0.6vw + 0.38rem, 0.86rem);
+}
+
+.folio-card .info-card-body,
+.invoices-card .info-card-body,
+.timeline-card .info-card-body,
+.notes-card .info-card-body,
+.actions-card .info-card-body {
+    padding: clamp(0.54rem, 0.52vw + 0.3rem, 0.74rem) clamp(0.64rem, 0.6vw + 0.38rem, 0.86rem);
+}
+
+.folio-card .folio-header,
+.invoices-card .folio-header {
+    margin-bottom: 0.46rem;
+    gap: 0.45rem;
+}
+
+.folio-card .folio-actions,
+.invoices-card .folio-actions {
+    gap: 0.36rem;
+}
+
+.folio-card .folio-btn,
+.invoices-card .folio-btn {
+    padding: 0.34rem 0.56rem;
+    font-size: clamp(0.64rem, 0.62rem + 0.08vw, 0.72rem);
+    border-radius: 0.5rem;
+    gap: 0.28rem;
+}
+
+.folio-card .empty-state,
+.invoices-card .empty-state {
+    padding: 0.88rem 0.56rem;
+}
+
+.folio-card .empty-state i,
+.invoices-card .empty-state i {
+    font-size: clamp(1.2rem, 1.12rem + 0.28vw, 1.45rem);
+    margin-bottom: 0.3rem;
+}
+
+.folio-card .empty-state p,
+.invoices-card .empty-state p {
+    font-size: clamp(0.74rem, 0.72rem + 0.09vw, 0.82rem);
+}
+
+.folio-card .empty-state small,
+.invoices-card .empty-state small {
+    font-size: clamp(0.64rem, 0.62rem + 0.07vw, 0.71rem);
+}
+
+.folio-card .folio-table th {
+    padding: 0.44rem 0.52rem;
+    font-size: clamp(0.6rem, 0.58rem + 0.07vw, 0.68rem);
+}
+
+.folio-card .folio-table td {
+    padding: 0.48rem 0.52rem;
+    font-size: clamp(0.68rem, 0.66rem + 0.08vw, 0.76rem);
+}
+
+.folio-card .folio-summary {
+    gap: 0.95rem;
+    margin-top: 0.55rem;
+    padding-top: 0.52rem;
+}
+
+.folio-card .folio-summary-value {
+    font-size: clamp(0.86rem, 0.82rem + 0.14vw, 0.98rem);
+}
+
+.folio-card .folio-summary-value.total {
+    font-size: clamp(1rem, 0.94rem + 0.18vw, 1.14rem);
+}
+
+.invoices-card .invoice-list {
+    margin-top: 0.58rem;
+}
+
+.invoices-card .invoice-item {
+    padding: 0.5rem 0.56rem;
+    margin-bottom: 0.4rem;
+    border-radius: 0.58rem;
+}
+
+.invoices-card .invoice-number {
+    font-size: clamp(0.73rem, 0.71rem + 0.09vw, 0.8rem);
+    margin-bottom: 0.15rem;
+}
+
+.invoices-card .invoice-date {
+    font-size: clamp(0.64rem, 0.62rem + 0.07vw, 0.7rem);
+}
+
+.invoices-card .invoice-btn {
+    padding: 0.3rem 0.5rem;
+    border-radius: 0.45rem;
+    font-size: clamp(0.63rem, 0.62rem + 0.06vw, 0.7rem);
+}
+
+.timeline-card .timeline-list {
+    max-height: 15rem;
+}
+
+.timeline-card .timeline-item {
+    gap: 0.45rem;
+    padding: 0.42rem 0;
+}
+
+.timeline-card .timeline-icon {
+    width: 1.65rem;
+    height: 1.65rem;
+    font-size: 0.68rem;
+}
+
+.timeline-card .timeline-title {
+    font-size: clamp(0.7rem, 0.68rem + 0.09vw, 0.78rem);
+}
+
+.timeline-card .timeline-meta,
+.timeline-card .timeline-time {
+    font-size: clamp(0.61rem, 0.6rem + 0.06vw, 0.67rem);
+}
+
+.timeline-card .empty-state--compact,
+.notes-card .empty-state--compact {
+    padding: 0.78rem 0.48rem;
+}
+
+.notes-card .notes-form {
+    margin-bottom: 0.6rem;
+}
+
+.notes-card .notes-form textarea {
+    padding: 0.52rem 0.58rem;
+    min-height: 3.1rem;
+    font-size: clamp(0.7rem, 0.68rem + 0.09vw, 0.78rem);
+    border-radius: 0.54rem;
+}
+
+.notes-card .notes-form button {
+    margin-top: 0.42rem;
+    padding: 0.4rem 0.56rem;
+    border-radius: 0.5rem;
+    font-size: clamp(0.67rem, 0.66rem + 0.08vw, 0.74rem);
+}
+
+.notes-card .notes-list {
+    max-height: 13rem;
+}
+
+.notes-card .note-item {
+    padding: 0.5rem 0.56rem;
+    margin-bottom: 0.4rem;
+    border-radius: 0.56rem;
+}
+
+.notes-card .note-header {
+    margin-bottom: 0.24rem;
+}
+
+.notes-card .note-author {
+    font-size: clamp(0.68rem, 0.67rem + 0.07vw, 0.74rem);
+}
+
+.notes-card .note-time {
+    font-size: clamp(0.61rem, 0.6rem + 0.05vw, 0.66rem);
+}
+
+.notes-card .note-text {
+    font-size: clamp(0.67rem, 0.65rem + 0.09vw, 0.75rem);
+    line-height: 1.34;
+}
+
+.actions-card .booking-actions-grid {
+    gap: 0.55rem;
+}
+
+.actions-card .booking-actions-group {
+    padding: 0.55rem 0.58rem;
+    border-radius: 0.72rem;
+}
+
+.actions-card .booking-actions-group__title {
+    margin: 0 0 0.35rem;
+    font-size: clamp(0.68rem, 0.67rem + 0.07vw, 0.74rem);
+}
+
+.actions-card .booking-actions-flow {
+    gap: 0.35rem;
+}
+
+.actions-card .booking-actions-flow>.action-btn,
+.actions-card .booking-actions-flow>.booking-action-form .action-btn {
+    flex: 1 1 clamp(8.6rem, 18vw, 11.2rem);
+}
+
+.actions-card .action-btn {
+    min-height: 36px;
+    padding: 0.38rem 0.55rem;
+    border-radius: 0.52rem;
+    font-size: clamp(0.64rem, 0.62rem + 0.08vw, 0.72rem);
+}
+
+.actions-card .booking-action-inline-hint {
+    font-size: clamp(0.62rem, 0.61rem + 0.07vw, 0.69rem);
+}
+
+.actions-card .booking-actions-meta {
+    margin-top: 0.4rem;
+    font-size: clamp(0.63rem, 0.62rem + 0.07vw, 0.7rem);
+}
+
+/* Final compact button polish */
+.booking-details-page {
+    --bd-btn-height: 36px;
+    --bd-btn-radius: 0.54rem;
+    --bd-btn-font-size: clamp(0.63rem, 0.61rem + 0.08vw, 0.72rem);
+    --bd-btn-text: color-mix(in srgb, var(--color-lux-ink, #231F1C) 84%, var(--color-primary, #8A775F));
+    --bd-btn-text-soft: color-mix(in srgb, var(--color-lux-ink, #231F1C) 74%, var(--color-primary, #8A775F));
+    --bd-btn-danger-text: color-mix(in srgb, var(--color-error, #b9201d) 82%, var(--color-lux-ink, #231F1C));
+}
+
+.booking-details-page .folio-btn,
+.booking-details-page .invoice-btn,
+.booking-details-page .notes-card .notes-form button,
+.booking-details-page .actions-card .action-btn,
+.booking-details-page .guest-contact-actions a {
+    min-height: var(--bd-btn-height);
+    min-width: 0;
+    border-radius: var(--bd-btn-radius);
+    font-size: var(--bd-btn-font-size);
+    line-height: 1.12;
+    letter-spacing: 0.01em;
+    padding: 0.34rem 0.6rem;
+    box-shadow: 0 1px 2px color-mix(in srgb, var(--color-lux-ink, #231F1C) 14%, transparent);
+}
+
+.booking-details-page .folio-btn,
+.booking-details-page .invoice-btn,
+.booking-details-page .notes-card .notes-form button,
+.booking-details-page .actions-card .action-btn {
+    transition: transform 0.16s ease, box-shadow 0.16s ease, border-color 0.16s ease, background-color 0.16s ease;
+}
+
+.booking-details-page .folio-btn i,
+.booking-details-page .invoice-btn i,
+.booking-details-page .notes-card .notes-form button i,
+.booking-details-page .actions-card .action-btn i,
+.booking-details-page .guest-contact-actions a i {
+    font-size: 0.92em;
+}
+
+.booking-details-page .folio-btn {
+    gap: 0.28rem;
+    border: 1px solid color-mix(in srgb, var(--color-primary, #8A775F) 28%, var(--admin-surface-border, #d9dee7));
+}
+
+.booking-details-page .invoice-btn {
+    border: 1px solid color-mix(in srgb, var(--color-primary, #8A775F) 24%, var(--admin-surface-border, #d9dee7));
+}
+
+.booking-details-page .notes-card .notes-form button {
+    min-height: var(--bd-btn-height);
+    min-width: 0;
+}
+
+.booking-details-page .actions-card .action-btn {
+    min-height: var(--bd-btn-height);
+    padding: 0.34rem 0.58rem;
+    box-shadow: 0 1px 2px color-mix(in srgb, var(--color-lux-ink, #231F1C) 10%, transparent);
+    color: var(--bd-btn-text);
+}
+
+.booking-details-page .actions-card .action-btn i {
+    color: var(--bd-btn-text-soft);
+}
+
+.booking-details-page .actions-card .action-btn.confirm,
+.booking-details-page .actions-card .action-btn.convert,
+.booking-details-page .actions-card .action-btn.checkin,
+.booking-details-page .actions-card .action-btn.assign-room,
+.booking-details-page .actions-card .action-btn.change-room,
+.booking-details-page .actions-card .action-btn.checkout,
+.booking-details-page .actions-card .action-btn.adjust-dates,
+.booking-details-page .actions-card .action-btn.edit,
+.booking-details-page .actions-card .action-btn.quote {
+    color: var(--bd-btn-text);
+}
+
+.booking-details-page .actions-card .action-btn.confirm i,
+.booking-details-page .actions-card .action-btn.convert i,
+.booking-details-page .actions-card .action-btn.checkin i,
+.booking-details-page .actions-card .action-btn.assign-room i,
+.booking-details-page .actions-card .action-btn.change-room i,
+.booking-details-page .actions-card .action-btn.checkout i,
+.booking-details-page .actions-card .action-btn.adjust-dates i,
+.booking-details-page .actions-card .action-btn.edit i,
+.booking-details-page .actions-card .action-btn.quote i {
+    color: var(--bd-btn-text-soft);
+}
+
+.booking-details-page .actions-card .action-btn.cancel,
+.booking-details-page .actions-card .action-btn.noshow {
+    color: var(--bd-btn-danger-text);
+}
+
+.booking-details-page .actions-card .action-btn.cancel i,
+.booking-details-page .actions-card .action-btn.noshow i {
+    color: var(--bd-btn-danger-text);
+}
+
+.booking-details-page .actions-card .action-btn.back {
+    color: color-mix(in srgb, var(--color-lux-ink, #231F1C) 88%, var(--color-primary, #8A775F));
+}
+
+.booking-details-page .actions-card .action-btn.back i {
+    color: color-mix(in srgb, var(--color-lux-ink, #231F1C) 76%, var(--color-primary, #8A775F));
+}
+
+.booking-details-page .guest-contact-actions a {
+    min-height: 34px;
+    padding: 0.28rem 0.5rem;
+    box-shadow: none;
+}
+
+.booking-details-page .actions-card .action-btn:hover,
+.booking-details-page .folio-btn:hover,
+.booking-details-page .invoice-btn:hover,
+.booking-details-page .notes-card .notes-form button:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 6px 14px color-mix(in srgb, var(--color-lux-ink, #231F1C) 16%, transparent);
+}
+
+@media (max-width: 64rem) {
+    .story-card {
+        grid-column: 1 / -1;
+    }
+}
+
 @media (max-width: 75rem) {
 
     .timeline-card,
@@ -1590,7 +2151,11 @@
 
 @media (max-width: 48rem) {
     .details-grid {
-        grid-template-columns: repeat(auto-fit, minmax(min(10.5rem, 100%), 1fr));
+        grid-template-columns: 1fr;
+    }
+
+    .story-pill {
+        margin-left: 0;
     }
 
     .booking-hero {
@@ -1608,7 +2173,7 @@
 }
 
 @media (max-width: 22rem) {
-    .details-grid {
-        grid-template-columns: 1fr;
+    .booking-story-intro h2 {
+        font-size: 0.98rem;
     }
 }

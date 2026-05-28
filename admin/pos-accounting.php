@@ -369,6 +369,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 $existingCloses = rh_pos_accounting_existing_closes($pdo, $businessDate);
 $posUsers = [];
 $orders = [];
+$orderItemsByOrder = [];
 $logs = [];
 $summary = ['orders' => 0, 'paid_total' => 0.0, 'cash' => 0.0, 'mobile' => 0.0, 'card' => 0.0, 'voids' => 0, 'voided_total' => 0.0];
 
@@ -430,6 +431,36 @@ try {
             if (!array_key_exists($enOid, $orderNotes)) {
                 $orderNotes[$enOid] = (string)$en['details'];
             }
+        }
+    }
+
+    // Pre-load line items so each sale can expand into a simple order list.
+    if ($orders) {
+        $orderIds = array_map('intval', array_column($orders, 'id'));
+        $itemHolders = implode(',', array_fill(0, count($orderIds), '?'));
+        $orderItemsStmt = $pdo->prepare(
+            "SELECT order_id, item_name, quantity, notes, station, menu_type
+               FROM stock_order_items
+              WHERE order_id IN ($itemHolders)
+              ORDER BY order_id ASC, id ASC"
+        );
+        $orderItemsStmt->execute($orderIds);
+
+        foreach ($orderItemsStmt->fetchAll(PDO::FETCH_ASSOC) as $oi) {
+            $oid = (int)($oi['order_id'] ?? 0);
+            if ($oid <= 0) {
+                continue;
+            }
+            if (!isset($orderItemsByOrder[$oid])) {
+                $orderItemsByOrder[$oid] = [];
+            }
+            $orderItemsByOrder[$oid][] = [
+                'name' => (string)($oi['item_name'] ?? ''),
+                'qty' => (float)($oi['quantity'] ?? 0),
+                'note' => trim((string)($oi['notes'] ?? '')),
+                'station' => trim((string)($oi['station'] ?? '')),
+                'menu_type' => trim((string)($oi['menu_type'] ?? '')),
+            ];
         }
     }
 
@@ -636,6 +667,7 @@ try {
                                                             <th>Table / Guest</th>
                                                             <th>Status</th>
                                                             <th>Method</th>
+                                                            <th>Details</th>
                                                             <th>Note</th>
                                                             <th>Amount</th>
                                                         </tr>
@@ -648,23 +680,63 @@ try {
                                                             $uoStatus = (string)$uo['status'];
                                                             $uoStatusClass = $uoStatus === 'paid' ? 'pos-acct-pill--open' : ($uoStatus === 'voided' ? 'pos-acct-pill--warn' : 'pos-acct-pill--closed');
                                                             $uoMethod = htmlspecialchars(str_replace('_', ' ', (string)$uo['payment_method']));
+                                                            $uoItems = $orderItemsByOrder[(int)$uo['id']] ?? [];
                                                         ?>
                                                             <tr>
-                                                                <td><input type="checkbox" class="pos-acct-order-tick" data-drawer="<?php echo $drawerId; ?>"></td>
-                                                                <td class="pos-acct-drawer__time"><?php echo htmlspecialchars((string)$uoTime); ?></td>
-                                                                <td><code><?php echo htmlspecialchars((string)($uo['reference'] ?? ('#' . $uo['id']))); ?></code></td>
-                                                                <td><?php echo $uoLabel; ?></td>
-                                                                <td class="pos-acct-drawer__guest"><?php echo htmlspecialchars($uoTable !== '' ? $uoTable : '—'); ?></td>
-                                                                <td><span class="pos-acct-pill <?php echo $uoStatusClass; ?>"><?php echo htmlspecialchars($uoStatus); ?></span></td>
-                                                                <td><?php echo $uoMethod; ?></td>
-                                                                <td><input type="text" class="pos-acct-order-note" name="order_notes[<?php echo (int)$uo['id']; ?>]" placeholder="Accountant note…" value="<?php echo htmlspecialchars($orderNotes[(int)$uo['id']] ?? '', ENT_QUOTES, 'UTF-8'); ?>" <?php echo $isClosed ? ' readonly' : ''; ?> title="Add a note to this individual sale"></td>
-                                                                <td><?php echo rh_pos_accounting_money((float)$uo['total_amount'], $currency_symbol); ?></td>
+                                                                <td data-label="✓"><input type="checkbox" class="pos-acct-order-tick" data-drawer="<?php echo $drawerId; ?>"></td>
+                                                                <td class="pos-acct-drawer__time" data-label="Time"><?php echo htmlspecialchars((string)$uoTime); ?></td>
+                                                                <td data-label="Reference"><code><?php echo htmlspecialchars((string)($uo['reference'] ?? ('#' . $uo['id']))); ?></code></td>
+                                                                <td data-label="Type"><?php echo $uoLabel; ?></td>
+                                                                <td class="pos-acct-drawer__guest" data-label="Table / Guest"><?php echo htmlspecialchars($uoTable !== '' ? $uoTable : '—'); ?></td>
+                                                                <td data-label="Status"><span class="pos-acct-pill <?php echo $uoStatusClass; ?>"><?php echo htmlspecialchars($uoStatus); ?></span></td>
+                                                                <td data-label="Method"><?php echo $uoMethod; ?></td>
+                                                                <td data-label="Details">
+                                                                    <?php if ($uoItems): ?>
+                                                                        <details class="pos-acct-sale-details">
+                                                                            <summary><i class="fas fa-list-ul" aria-hidden="true"></i> <?php echo count($uoItems); ?> item<?php echo count($uoItems) !== 1 ? 's' : ''; ?></summary>
+                                                                            <ul class="pos-acct-sale-details__list">
+                                                                                <?php foreach ($uoItems as $line):
+                                                                                    $lineName = trim((string)($line['name'] ?? ''));
+                                                                                    $lineQtyRaw = (float)($line['qty'] ?? 0);
+                                                                                    $lineQty = rtrim(rtrim(number_format($lineQtyRaw, 2, '.', ''), '0'), '.');
+                                                                                    $lineQty = $lineQty !== '' ? $lineQty : '0';
+                                                                                    $lineNote = trim((string)($line['note'] ?? ''));
+                                                                                    $lineStation = trim((string)($line['station'] ?? ''));
+                                                                                    $lineType = trim((string)($line['menu_type'] ?? ''));
+                                                                                    $metaParts = [];
+                                                                                    if ($lineStation !== '') {
+                                                                                        $metaParts[] = ucfirst(str_replace('_', ' ', $lineStation));
+                                                                                    }
+                                                                                    if ($lineType !== '') {
+                                                                                        $metaParts[] = str_replace('_', ' ', $lineType);
+                                                                                    }
+                                                                                    $lineMeta = implode(' · ', $metaParts);
+                                                                                ?>
+                                                                                    <li>
+                                                                                        <span class="pos-acct-sale-details__qty"><?php echo htmlspecialchars($lineQty); ?>x</span>
+                                                                                        <span class="pos-acct-sale-details__name"><?php echo htmlspecialchars($lineName !== '' ? $lineName : 'Unnamed item'); ?></span>
+                                                                                        <?php if ($lineMeta !== ''): ?>
+                                                                                            <span class="pos-acct-sale-details__meta"><?php echo htmlspecialchars($lineMeta); ?></span>
+                                                                                        <?php endif; ?>
+                                                                                        <?php if ($lineNote !== ''): ?>
+                                                                                            <div class="pos-acct-sale-details__note">Note: <?php echo htmlspecialchars($lineNote); ?></div>
+                                                                                        <?php endif; ?>
+                                                                                    </li>
+                                                                                <?php endforeach; ?>
+                                                                            </ul>
+                                                                        </details>
+                                                                    <?php else: ?>
+                                                                        <span class="pos-acct-sale-details__empty">No items</span>
+                                                                    <?php endif; ?>
+                                                                </td>
+                                                                <td data-label="Note"><input type="text" class="pos-acct-order-note" name="order_notes[<?php echo (int)$uo['id']; ?>]" placeholder="Accountant note…" value="<?php echo htmlspecialchars($orderNotes[(int)$uo['id']] ?? '', ENT_QUOTES, 'UTF-8'); ?>" <?php echo $isClosed ? ' readonly' : ''; ?> title="Add a note to this individual sale"></td>
+                                                                <td data-label="Amount"><?php echo rh_pos_accounting_money((float)$uo['total_amount'], $currency_symbol); ?></td>
                                                             </tr>
                                                         <?php endforeach; ?>
                                                     </tbody>
                                                     <tfoot>
                                                         <tr class="pos-acct-drawer__total-row">
-                                                            <td colspan="8" style="text-align:right; font-weight:700;">Total paid</td>
+                                                            <td colspan="9" style="text-align:right; font-weight:700;">Total paid</td>
                                                             <td><?php echo rh_pos_accounting_money((float)$posUser['paid_total'], $currency_symbol); ?></td>
                                                         </tr>
                                                     </tfoot>
@@ -684,7 +756,7 @@ try {
             <div class="section-card">
                 <h3><i class="fas fa-receipt"></i> POS sales log</h3>
                 <div class="table-responsive pos-acct-sales-wrap">
-                    <table class="pos-acct-table pos-acct-table--sales no-card-mobile">
+                    <table class="pos-acct-table pos-acct-table--sales">
                         <thead>
                             <tr>
                                 <th>Time</th>

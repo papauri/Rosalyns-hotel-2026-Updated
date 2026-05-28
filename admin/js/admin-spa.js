@@ -19,6 +19,7 @@
     var FULL_NAV = ['login.php', 'logout.php', 'kds.php', 'bds.php', 'cds.php', 'pos.php'];
 
     var CONTENT_ID = 'rh-admin-page';
+    var PAGINATION_NAV_SELECTOR = '[data-admin-pagination], .bookings-pagination, .pagination, .log-table-pagination, .receipts-pagination, .pagination-bar, .inv-pagination, [data-admin-auto-pagination-nav]';
 
     // ── Loading bar ──────────────────────────────────────────────────────────
     var _loader = null;
@@ -712,7 +713,12 @@
     function _paginationContainerSelector(navEl) {
         if (!navEl) return null;
         if (navEl.matches('[data-admin-pagination]')) return '[data-admin-pagination]';
+        if (navEl.matches('[data-admin-auto-pagination-nav]')) return '[data-admin-auto-pagination-nav]';
         if (navEl.classList.contains('bookings-pagination')) return '.bookings-pagination';
+        if (navEl.classList.contains('log-table-pagination')) return '.log-table-pagination';
+        if (navEl.classList.contains('receipts-pagination')) return '.receipts-pagination';
+        if (navEl.classList.contains('pagination-bar')) return '.pagination-bar';
+        if (navEl.classList.contains('inv-pagination')) return '.inv-pagination';
         if (navEl.classList.contains('pagination')) return '.pagination';
         return null;
     }
@@ -1051,8 +1057,12 @@
         // Ignore download links
         if (a.hasAttribute('download')) return;
 
-        // Honour explicit opt-out
-        if (a.dataset.noSpa !== undefined) return;
+        var paginationNode = a.closest(PAGINATION_NAV_SELECTOR);
+        var isPaginationNavigation = !!paginationNode && _isPaginationLink(a.href);
+
+        // Honour explicit opt-out for regular links, but allow section-scoped
+        // pagination links to use mini loaders instead of full page overlays.
+        if (a.dataset.noSpa !== undefined && !isPaginationNavigation) return;
 
         // Confirmation dialogs — let their handler run first
         if (a.dataset.adminConfirm !== undefined) return;
@@ -1063,8 +1073,10 @@
         e.preventDefault();
         var loaderMessage = a.dataset.adminLoaderText || ('Opening ' + (a.textContent || 'page').trim() + '...');
 
-        var paginationNode = a.closest('[data-admin-pagination], .bookings-pagination, .pagination');
-        if (paginationNode && _isPaginationLink(a.href)) {
+        if (isPaginationNavigation) {
+            if (typeof e.stopImmediatePropagation === 'function') {
+                e.stopImmediatePropagation();
+            }
             _gotoPagination(a.href, true, paginationNode, 'Loading page results...');
             return;
         }

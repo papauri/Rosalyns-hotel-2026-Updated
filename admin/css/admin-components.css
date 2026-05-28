@@ -1829,6 +1829,17 @@ body.modal-open {
     gap: clamp(0.24rem, 0.2rem + 0.1vw, 0.36rem);
 }
 
+:is(.admin-content, #rh-admin-page) table.mobile-enhanced td[data-label="Action"] .actions-row .actions-more,
+:is(.admin-content, #rh-admin-page) table.mobile-enhanced td[data-label="Actions"] .actions-row .actions-more {
+    width: 100%;
+}
+
+:is(.admin-content, #rh-admin-page) table.mobile-enhanced td[data-label="Action"] .actions-row .actions-more-toggle,
+:is(.admin-content, #rh-admin-page) table.mobile-enhanced td[data-label="Actions"] .actions-row .actions-more-toggle {
+    width: 100%;
+    min-width: 0;
+}
+
 @media (max-width: 64rem) {
 
     :is(.admin-content, #rh-admin-page) table.mobile-enhanced td[data-label="Action"] .actions-row .quick-action,
@@ -1887,7 +1898,7 @@ body.modal-open {
     color: var(--au-surface) !important;
 }
 
-@media (max-width: 30rem) {
+@media (max-width: 22rem) {
 
     :is(.admin-content, #rh-admin-page) .action-buttons,
     :is(.admin-content, #rh-admin-page) .quick-actions,

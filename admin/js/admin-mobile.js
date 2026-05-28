@@ -255,6 +255,11 @@
 
     function getCardFieldColumnCount(table) {
         const availableWidth = getTableAvailableWidth(table);
+        const viewportWidth = window.innerWidth || document.documentElement.clientWidth || availableWidth;
+        if (viewportWidth <= 430) {
+            return 1;
+        }
+
         // Standardized card-field density: use 2 columns when it comfortably fits.
         const usableWidth = Math.max(0, availableWidth - 20);
         const minFieldColumnWidth = 150;
@@ -319,8 +324,25 @@
 
         rows.forEach(row => {
             const cells = row.querySelectorAll('td');
+            const firstCell = cells.length === 1 ? cells[0] : null;
+            const firstCellColspan = firstCell ? parseInt(firstCell.getAttribute('colspan') || '1', 10) : 1;
+            const firstCellClass = firstCell ? String(firstCell.className || '') : '';
+            const isEmptyStateRow = !!firstCell && (
+                firstCellColspan > 1 ||
+                /(?:^|\s)(?:no-data|table-empty|empty|no-results)(?:\s|$)/i.test(firstCellClass)
+            );
+
+            row.classList.toggle('mobile-enhanced-empty-row', isEmptyStateRow);
 
             cells.forEach((cell, index) => {
+                if (isEmptyStateRow) {
+                    cell.classList.add('mobile-enhanced-empty-cell');
+                    cell.removeAttribute('data-label');
+                    return;
+                }
+
+                cell.classList.remove('mobile-enhanced-empty-cell');
+
                 // Get header text for this column
                 let labelText = '';
                 if (headers[index]) {
@@ -350,6 +372,15 @@
         table.classList.remove('mobile-enhanced');
         table.style.removeProperty('--mobile-card-cols');
         setCardModeWrappers(table, false);
+
+        const tbody = table.querySelector('tbody');
+        if (!tbody) return;
+        tbody.querySelectorAll('tr.mobile-enhanced-empty-row').forEach((row) => {
+            row.classList.remove('mobile-enhanced-empty-row');
+        });
+        tbody.querySelectorAll('td.mobile-enhanced-empty-cell').forEach((cell) => {
+            cell.classList.remove('mobile-enhanced-empty-cell');
+        });
     }
 
     /**
@@ -365,7 +396,20 @@
             const rows = tbody.querySelectorAll('tr');
             rows.forEach(row => {
                 const cells = row.querySelectorAll('td');
+                const firstCell = cells.length === 1 ? cells[0] : null;
+                const firstCellColspan = firstCell ? parseInt(firstCell.getAttribute('colspan') || '1', 10) : 1;
+                const firstCellClass = firstCell ? String(firstCell.className || '') : '';
+                const isEmptyStateRow = !!firstCell && (
+                    firstCellColspan > 1 ||
+                    /(?:^|\s)(?:no-data|table-empty|empty|no-results)(?:\s|$)/i.test(firstCellClass)
+                );
+
                 cells.forEach((cell, index) => {
+                    if (isEmptyStateRow) {
+                        cell.removeAttribute('data-label');
+                        return;
+                    }
+
                     if (headers[index] && !cell.getAttribute('data-label')) {
                         const labelText = headers[index].textContent.trim();
                         if (labelText) cell.setAttribute('data-label', labelText);

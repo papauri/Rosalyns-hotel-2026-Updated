@@ -3322,6 +3322,7 @@ $today_str = $today->format('Y-m-d');
                                             <div class="actions-row">
                                                 <button type="button" class="quick-action view" title="View booking summary" aria-label="View booking summary" data-booking-id="<?php echo (int)$booking['id']; ?>" data-booking-ref="<?php echo htmlspecialchars($booking['booking_reference'], ENT_QUOTES); ?>" data-guest-name="<?php echo htmlspecialchars((string)($booking['guest_name'] ?? ''), ENT_QUOTES); ?>" data-guest-email="<?php echo htmlspecialchars((string)($booking['guest_email'] ?? ''), ENT_QUOTES); ?>" data-guest-phone="<?php echo htmlspecialchars((string)($booking['guest_phone'] ?? ''), ENT_QUOTES); ?>" data-room-name="<?php echo htmlspecialchars((string)($booking['room_name'] ?? ''), ENT_QUOTES); ?>" data-individual-room-name="<?php echo htmlspecialchars((string)($booking['individual_room_name'] ?? ''), ENT_QUOTES); ?>" data-individual-room-number="<?php echo htmlspecialchars((string)($booking['individual_room_number'] ?? ''), ENT_QUOTES); ?>" data-check-in-date="<?php echo htmlspecialchars((string)($booking['check_in_date'] ?? ''), ENT_QUOTES); ?>" data-check-out-date="<?php echo htmlspecialchars((string)($booking['check_out_date'] ?? ''), ENT_QUOTES); ?>" data-number-of-nights="<?php echo htmlspecialchars((string)($booking['number_of_nights'] ?? ''), ENT_QUOTES); ?>" data-number-of-guests="<?php echo htmlspecialchars((string)($booking['number_of_guests'] ?? ''), ENT_QUOTES); ?>" data-total-display="<?php echo htmlspecialchars($currency_symbol . ' ' . number_format((float)($booking['total_amount'] ?? 0), 2), ENT_QUOTES); ?>" data-status-label="<?php echo htmlspecialchars(ucwords(str_replace('-', ' ', (string)($booking['status'] ?? ''))), ENT_QUOTES); ?>" data-payment-status-label="<?php echo htmlspecialchars(ucwords(str_replace('-', ' ', (string)($booking['actual_payment_status'] ?? ($booking['payment_status'] ?? '')))), ENT_QUOTES); ?>" data-created-at-label="<?php echo htmlspecialchars(!empty($booking['created_at']) ? date('M j, Y H:i', strtotime((string)$booking['created_at'])) : '', ENT_QUOTES); ?>" data-special-requests="<?php echo htmlspecialchars((string)($booking['special_requests'] ?? ''), ENT_QUOTES); ?>" onclick="openViewBookingModal(<?php echo $booking['id']; ?>, '<?php echo htmlspecialchars($booking['booking_reference'], ENT_QUOTES); ?>', this, typeof event !== 'undefined' ? event : null)">
                                                     <i class="fas fa-circle-info"></i>
+                                                    <span class="label">View details</span>
                                                 </button>
                                                 <?php if ($is_tentative): ?>
                                                     <button class="quick-action confirm" title="Convert to confirmed" aria-label="Convert to confirmed" onclick="convertTentativeBooking(<?php echo $booking['id']; ?>)">
@@ -3445,6 +3446,7 @@ $today_str = $today->format('Y-m-d');
                                                 <div class="actions-more">
                                                     <button type="button" class="quick-action actions-more-toggle" title="More actions" aria-label="More actions" onclick="toggleActionsMore(this, typeof event !== 'undefined' ? event : null)">
                                                         <i class="fas fa-ellipsis-vertical"></i>
+                                                        <span class="label">More</span>
                                                     </button>
                                                     <div class="actions-more-menu">
                                                         <a href="booking-details.php?id=<?php echo $booking['id']; ?>"><i class="fas fa-circle-info"></i> Full details</a>
@@ -4078,7 +4080,7 @@ $today_str = $today->format('Y-m-d');
 
         function shortQuickActionLabel(button, helpText) {
             const classMap = {
-                view: 'View',
+                view: 'View details',
                 email: 'Email',
                 whatsapp: 'WhatsApp',
                 assign: 'Assign',
@@ -4146,6 +4148,17 @@ $today_str = $today->format('Y-m-d');
                     button.appendChild(labelSpan);
                 }
                 labelSpan.textContent = labelText;
+            });
+        }
+
+        if (!window.__bookingsQuickActionHydratorBound) {
+            window.__bookingsQuickActionHydratorBound = true;
+            document.addEventListener('rh:content-updated', function() {
+                if (!/\/admin\/bookings\.php$/i.test(window.location.pathname)) {
+                    return;
+                }
+                const bookingResults = document.getElementById('booking-results');
+                hydrateQuickActionButtons(bookingResults || document);
             });
         }
 
@@ -7759,6 +7772,12 @@ $today_str = $today->format('Y-m-d');
 
             let posLeft = left - fixedOffsetX;
             let posTop = top - fixedOffsetY;
+
+            // Some transformed admin layouts can produce negative fixed offsets,
+            // which leaves the menu clipped on the left edge. Keep style coords
+            // within a safe visible minimum.
+            posLeft = Math.max(posLeft, viewportPad);
+            posTop = Math.max(posTop, viewportPad);
 
             applyMenuPosition(posLeft, posTop);
 
