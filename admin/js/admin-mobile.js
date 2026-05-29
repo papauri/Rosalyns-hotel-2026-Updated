@@ -256,19 +256,17 @@
     function getCardFieldColumnCount(table) {
         const availableWidth = getTableAvailableWidth(table);
         const viewportWidth = window.innerWidth || document.documentElement.clientWidth || availableWidth;
-        if (viewportWidth <= 430) {
-            return 1;
-        }
+        const effectiveWidth = Math.min(availableWidth, viewportWidth);
 
-        // Standardized card-field density: use 2 columns when it comfortably fits.
-        const usableWidth = Math.max(0, availableWidth - 20);
-        const minFieldColumnWidth = 150;
+        // Keep the card treatment compact on narrow phones, then expand to
+        // wider multi-column grids on tablet-sized widths when space allows.
+        const minFieldColumnWidth = 220;
         const fieldGap = 12;
-        if (usableWidth >= ((minFieldColumnWidth * 2) + fieldGap)) {
-            return 2;
-        }
+        const maxColumns = 3;
+        const usableWidth = Math.max(0, effectiveWidth - 20);
 
-        return 1;
+        const estimatedColumns = Math.floor((usableWidth + fieldGap) / (minFieldColumnWidth + fieldGap));
+        return Math.min(maxColumns, Math.max(1, estimatedColumns));
     }
 
     function enhanceMobileTables() {
