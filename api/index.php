@@ -58,6 +58,44 @@ function rh_api_log_current_response(int $responseCode): void {
     $GLOBALS['rh_api_usage_logged'] = true;
 }
 
+
+function rh_api_get_header_value(string $name): ?string {
+    $target = strtolower($name);
+
+    if (function_exists('getallheaders')) {
+        $headers = getallheaders();
+        if (is_array($headers)) {
+            foreach ($headers as $headerName => $value) {
+                if (strtolower((string)$headerName) === $target && $value !== '') {
+                    return (string)$value;
+                }
+            }
+        }
+    }
+
+    $serverKey = 'HTTP_' . strtoupper(str_replace('-', '_', $name));
+    if (isset($_SERVER[$serverKey]) && $_SERVER[$serverKey] !== '') {
+        return (string)$_SERVER[$serverKey];
+    }
+
+    return null;
+}
+
+function rh_api_endpoint_from_path(string $path): string {
+    $path = '/' . trim($path, '/');
+
+    if ($path === '/api') {
+        return '';
+    }
+
+    $apiPosition = strpos($path . '/', '/api/');
+    if ($apiPosition === false) {
+        return trim($path, '/');
+    }
+
+    return trim(substr($path, $apiPosition + strlen('/api/')), '/');
+}
+
 // API Authentication class
 class ApiAuth {
     private PDO $pdo;
@@ -122,17 +160,15 @@ class ApiAuth {
      * Get API key from request
      */
     private function getApiKey() {
-        // Check headers first
-        $headers = getallheaders();
-        if (isset($headers['X-API-Key'])) {
-            return $headers['X-API-Key'];
+        $headerKey = rh_api_get_header_value('X-API-Key');
+        if ($headerKey !== null) {
+            return $headerKey;
         }
-        
-        // Check query parameter
-        if (isset($_GET['api_key'])) {
-            return $_GET['api_key'];
+
+        if (isset($_GET['api_key']) && $_GET['api_key'] !== '') {
+            return (string)$_GET['api_key'];
         }
-        
+
         return null;
     }
     
@@ -311,8 +347,8 @@ try {
     
     // Get request method and path
     $method = $_SERVER['REQUEST_METHOD'];
-    $path = parse_url($_SERVER['REQUEST_URI'], PHP_URL_PATH);
-    $endpoint = trim(str_replace('/api/', '', $path), '/');
+    $path = parse_url($_SERVER['REQUEST_URI'], PHP_URL_PATH) ?: '/';
+    $endpoint = rh_api_endpoint_from_path($path);
     $GLOBALS['rh_api_method'] = $method;
     $GLOBALS['rh_api_endpoint'] = $endpoint;
     
