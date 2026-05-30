@@ -231,7 +231,7 @@
             }
             return availableWidth < requiredWidth;
         }
-        if (viewportWidth <= 1024) {
+        if (viewportWidth <= 768) {
             return true;
         }
 
@@ -241,12 +241,12 @@
         const bodyColumnCount = firstRow ? firstRow.querySelectorAll('td').length : 0;
         const columnCount = Math.max(headerCount, bodyColumnCount);
 
-        if (columnCount >= 6 && availableWidth <= 980) {
+        if (columnCount >= 6 && availableWidth <= 720) {
             return true;
         }
 
         const hasHorizontalOverflow = table.scrollWidth > availableWidth + 8;
-        if (hasHorizontalOverflow && availableWidth <= 1100) {
+        if (hasHorizontalOverflow && availableWidth <= 768) {
             return true;
         }
 
@@ -258,9 +258,9 @@
         const viewportWidth = window.innerWidth || document.documentElement.clientWidth || availableWidth;
         const effectiveWidth = Math.min(availableWidth, viewportWidth);
 
-        // Keep the card treatment compact on narrow phones, then expand to
-        // wider multi-column grids on tablet-sized widths when space allows.
-        const minFieldColumnWidth = 220;
+        // Scale card grid density based on available space. Narrow phones stay at 1 column,
+        // but compact tablets can still show 2 columns even on tighter containers.
+        const minFieldColumnWidth = 120;
         const fieldGap = 12;
         const maxColumns = 3;
         const usableWidth = Math.max(0, effectiveWidth - 20);

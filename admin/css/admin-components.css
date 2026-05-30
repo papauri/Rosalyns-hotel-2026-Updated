@@ -1962,6 +1962,30 @@ body.modal-open {
     margin-bottom: 5px;
 }
 
+/* Form section title styling */
+.form-section-title {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    margin: 1.5rem 0 1rem;
+    padding-bottom: 0.5rem;
+    border-bottom: 1px solid var(--admin-surface-border, #d7dde6);
+    font-family: var(--font-body, 'Jost', sans-serif);
+    font-size: clamp(0.98rem, 0.93rem + 0.18vw, 1.08rem);
+    font-weight: 600;
+    color: var(--admin-text, var(--color-text-primary, #2A2723));
+    letter-spacing: 0.01em;
+}
+
+.form-section-title:first-child {
+    margin-top: 0;
+}
+
+.form-section-title i {
+    font-size: 0.9em;
+    opacity: 0.7;
+}
+
 .admin-content .form-control,
 .admin-content .form-select,
 .admin-content input[type="text"],

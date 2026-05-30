@@ -1677,9 +1677,10 @@ table.mobile-enhanced td[data-label="Actions"] .actions-row .actions-more-toggle
 }
 
 .modal-content {
+    --rh-modal-shell-pad: 32px;
     background: white;
     border-radius: var(--radius-lg);
-    padding: 32px;
+    padding: var(--rh-modal-shell-pad);
     max-width: min(96vw, 60rem);
     width: min(96vw, 60rem);
     max-height: 90vh;
@@ -1696,6 +1697,14 @@ table.mobile-enhanced td[data-label="Actions"] .actions-row .actions-more-toggle
     justify-content: space-between;
     align-items: center;
     gap: 10px;
+}
+
+.modal-content > .modal-header {
+    margin-top: calc(var(--rh-modal-shell-pad, 0px) * -1);
+    margin-right: calc(var(--rh-modal-shell-pad, 0px) * -1);
+    margin-left: calc(var(--rh-modal-shell-pad, 0px) * -1);
+    padding: var(--rh-modal-shell-pad, 0px) var(--rh-modal-shell-pad, 0px) 16px;
+    border-bottom: 1px solid var(--admin-surface-border, #e5e7eb);
 }
 
 .modal-header h3 {

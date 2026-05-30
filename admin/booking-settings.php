@@ -200,8 +200,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['booking_email_templat
         $ajaxHtmlBody = trim((string)($_POST[$ajaxKey . '_html_body'] ?? ''));
         $ajaxTextBody = trim((string)($_POST[$ajaxKey . '_text_body'] ?? ''));
 
+        // Check for unsaved changes by comparing with DB template
+        $existing = function_exists('getBookingEmailTemplateConfig') ? getBookingEmailTemplateConfig($ajaxKey, []) : [];
+        $hasUnsavedChanges = false;
+
         if ($ajaxSubject === '' || $ajaxHtmlBody === '') {
-            $existing = function_exists('getBookingEmailTemplateConfig') ? getBookingEmailTemplateConfig($ajaxKey, []) : [];
             if (!empty($existing['subject'])) {
                 $ajaxSubject  = $existing['subject'];
             }
@@ -211,7 +214,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['booking_email_templat
             if ($ajaxTextBody === '' && !empty($existing['text_body'])) {
                 $ajaxTextBody = $existing['text_body'];
             }
+        } else {
+            // Form has content - check if it differs from saved template
+            $savedSubject = trim((string)($existing['subject'] ?? ''));
+            $savedHtml = trim((string)($existing['html_body'] ?? ''));
+            $savedText = trim((string)($existing['text_body'] ?? ''));
+
+            if ($savedSubject !== $ajaxSubject || $savedHtml !== $ajaxHtmlBody || $savedText !== $ajaxTextBody) {
+                $hasUnsavedChanges = true;
+            }
         }
+
         if ($ajaxSubject === '' || $ajaxHtmlBody === '') {
             throw new Exception('No content to preview — fill in the fields or save the template first.');
         }
@@ -443,7 +456,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['booking_email_templat
             ]));
 
             $ajaxFullHtml = '<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1"><style>body{margin:0;padding:18px;background:#F4EFE8;}img{max-width:100%;}</style></head><body>' . $invoicePreviewHtml . '</body></html>';
-            echo json_encode(['success' => true, 'full_html' => $ajaxFullHtml, 'subject' => $ajaxResSubject, 'text_body' => $ajaxResTextBody, 'html_body' => $invoicePreviewHtml, 'is_document' => true]);
+            echo json_encode(['success' => true, 'full_html' => $ajaxFullHtml, 'subject' => $ajaxResSubject, 'text_body' => $ajaxResTextBody, 'html_body' => $invoicePreviewHtml, 'is_document' => true, 'has_unsaved_changes' => $hasUnsavedChanges]);
             exit;
         }
 
@@ -458,7 +471,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['booking_email_templat
                 '{{logo_html}}' => $documentLogoHtml,
             ]));
             $ajaxFullHtml = '<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1"><style>body{margin:0;padding:18px;background:#F4EFE8;}img{max-width:100%;}</style></head><body>' . $documentPreviewHtml . '</body></html>';
-            echo json_encode(['success' => true, 'full_html' => $ajaxFullHtml, 'subject' => $ajaxResSubject, 'text_body' => $ajaxResTextBody, 'html_body' => $documentPreviewHtml, 'is_document' => true]);
+            echo json_encode(['success' => true, 'full_html' => $ajaxFullHtml, 'subject' => $ajaxResSubject, 'text_body' => $ajaxResTextBody, 'html_body' => $documentPreviewHtml, 'is_document' => true, 'has_unsaved_changes' => $hasUnsavedChanges]);
             exit;
         }
 
@@ -466,7 +479,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['booking_email_templat
             ? wrapEmailTemplate($ajaxResHtmlBody, $ajaxResSubject)
             : $ajaxResHtmlBody;
 
-        echo json_encode(['success' => true, 'full_html' => $ajaxFullHtml, 'subject' => $ajaxResSubject, 'text_body' => $ajaxResTextBody, 'html_body' => $ajaxResHtmlBody, 'is_document' => false]);
+        echo json_encode(['success' => true, 'full_html' => $ajaxFullHtml, 'subject' => $ajaxResSubject, 'text_body' => $ajaxResTextBody, 'html_body' => $ajaxResHtmlBody, 'is_document' => false, 'has_unsaved_changes' => $hasUnsavedChanges]);
     } catch (Exception $e) {
         echo json_encode(['success' => false, 'error' => $e->getMessage()]);
     }
@@ -2165,6 +2178,15 @@ foreach ($canonicalTemplateDefaults as $templateKey => $templateDefaults) {
 
                         if (data.success) {
                             wrapper.innerHTML = '';
+
+                            // Show warning banner if preview contains unsaved changes
+                            if (data.has_unsaved_changes) {
+                                var warningBanner = document.createElement('div');
+                                warningBanner.style.cssText = 'background:#FEF3C7;border:1px solid #F59E0B;color:#92400E;padding:12px 16px;margin-bottom:12px;border-radius:6px;font-size:13px;line-height:1.5;';
+                                warningBanner.innerHTML = '<i class="fas fa-exclamation-triangle" style="color:#F59E0B;margin-right:8px;"></i><strong>Unsaved Changes:</strong> This preview shows your current edits. Click <strong>Save Template</strong> below to apply these changes to actual emails/PDFs sent to guests.';
+                                wrapper.appendChild(warningBanner);
+                            }
+
                             var iframe = document.createElement('iframe');
                             iframe.style.cssText = 'width:100%;min-height:500px;border:none;border-radius:0 0 8px 8px;display:block;';
                             iframe.setAttribute('frameborder', '0');

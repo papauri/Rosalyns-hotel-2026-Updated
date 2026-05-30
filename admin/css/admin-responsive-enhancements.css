@@ -84,6 +84,29 @@
     max-width: 100%;
 }
 
+/* Keep admin table headers visually consistent across legacy and newer pages. */
+:is(#rh-admin-page, .admin-content, .content) :is(.table, .admin-table, .booking-table, .report-table, .users-table, .visitors-table, .portal-table, .menu-table, .pm-table, .cache-table, .folio-table, .acct-table) thead th,
+:is(#rh-admin-page, .admin-content, .content) .table-card table thead th {
+    height: auto !important;
+    padding: 0.48rem 0.6rem !important;
+    vertical-align: top !important;
+    line-height: 1.18 !important;
+    white-space: nowrap;
+}
+
+:is(#rh-admin-page, .admin-content, .content) th.admin-auto-sortable {
+    position: relative;
+}
+
+:is(#rh-admin-page, .admin-content, .content) th.admin-auto-sortable .admin-sort-icon {
+    display: inline-flex !important;
+    align-items: center;
+    margin-left: 0.32rem !important;
+    vertical-align: 0.02em;
+    font-size: 0.78em;
+    line-height: 1;
+}
+
 /* Compact th/td padding as screens narrow — applied globally with
    !important so per-page CSS doesn't fight it. mobile-enhanced tables
    opt out because they switch to card view and need normal whitespace. */

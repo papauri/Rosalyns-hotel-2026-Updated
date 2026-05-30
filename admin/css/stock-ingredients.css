@@ -134,6 +134,7 @@
 }
 
 .modal-content {
+    --rh-modal-shell-pad: 24px;
     background: var(--color-white, #fff);
     border-radius: 12px;
     width: 95%;

@@ -9,6 +9,8 @@ require_once '../config/base-url.php';
 // Load per-user granular permissions for action-button visibility
 $_user_permissions = getUserPermissions($user['id']);
 $_is_admin_user = in_array($user['role'] ?? '', ['admin', 'manager'], true);
+$_perm_quick_modify = $_user_permissions['quick_modify_booking'] ?? false;
+$_perm_edit_financials = $_user_permissions['edit_booking_financials'] ?? false;
 
 require_once '../includes/modal.php';
 require_once '../includes/alert.php';
@@ -756,6 +758,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             }
         } elseif ($action === 'modify_booking') {
             // Comprehensive modify-booking handler used by the Modify modal.
+            $actorId = (int)($user['id'] ?? 0);
+            if ($actorId <= 0 || !hasPermission($actorId, 'edit_booking') || !hasPermission($actorId, 'quick_modify_booking')) {
+                throw new Exception('You do not have permission to quick modify bookings.');
+            }
+
+            $canEditBookingFinancials = hasPermission($actorId, 'edit_booking_financials');
             $booking_id = (int)($_POST['id'] ?? 0);
             if ($booking_id <= 0) throw new Exception('Invalid booking id');
 
@@ -778,10 +786,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 'special_requests'  => 'string',
                 'status'            => 'string',
                 'payment_status'    => 'string',
-                'total_amount'      => 'float',
-                'amount_paid'       => 'float',
                 'individual_room_id' => 'int',
             ];
+            if ($canEditBookingFinancials) {
+                $allowed['total_amount'] = 'float';
+            }
             $updates = [];
             $newValues = [];
             foreach ($allowed as $field => $type) {
@@ -820,6 +829,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $allowedPayment = ['unpaid', 'partial', 'paid', 'completed', 'refunded', 'partially_refunded', 'failed', 'pending'];
             if (isset($updates['payment_status']) && !in_array($updates['payment_status'], $allowedPayment, true)) {
                 throw new Exception('Invalid payment status.');
+            }
+
+            if (!$canEditBookingFinancials && array_key_exists('total_amount', $_POST)) {
+                throw new Exception('You do not have permission to change booking amounts.');
             }
 
             // Recompute number_of_nights when dates changed
@@ -865,6 +878,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 exit;
             }
         } elseif ($action === 'get_booking_for_modify') {
+            $actorId = (int)($user['id'] ?? 0);
+            if ($actorId <= 0 || !hasPermission($actorId, 'edit_booking') || !hasPermission($actorId, 'quick_modify_booking')) {
+                header('Content-Type: application/json');
+                echo json_encode(['success' => false, 'message' => 'You do not have permission to quick modify bookings.']);
+                exit;
+            }
+
             $bid = (int)($_POST['booking_id'] ?? 0);
             $stmt = $pdo->prepare("SELECT b.*, r.name AS room_name FROM bookings b LEFT JOIN rooms r ON b.room_id = r.id WHERE b.id = ?");
             $stmt->execute([$bid]);
@@ -2315,6 +2335,8 @@ $total_bookings = $pending = $tentative = $confirmed = $checked_in = 0;
 $checked_out = $cancelled = $no_show = $paid = $unpaid = 0;
 $today_checkins = $today_checkouts = $today_bookings = 0;
 $week_bookings = $month_bookings = $expiring_soon = 0;
+$list_count = 0;
+$current_page_count = 0;
 $total_pages = 1;
 $offset      = 0;
 $bookings_stats_insights = [];
@@ -2503,8 +2525,13 @@ try {
         $params = array_merge($params, array_fill(0, 12, $search_param));
     }
 
-    // Snapshot where clauses BEFORE filter_status so stats badge counts are never scoped to the
-    // current tab filter — every badge must always reflect the true global count.
+    // Snapshot where clauses for insights (respects search/date filters but not status filter)
+    // so insight cards show filtered data matching the current search/date scope.
+    $insights_where_clauses = $where_clauses;
+    $insights_params        = $params;
+
+    // Stats badge counts must respect search and date filters so badge counts match displayed results,
+    // but exclude status filter so all tabs show accurate counts for the current filters.
     $stats_where_clauses = $where_clauses;
     $stats_params        = $params;
 
@@ -2514,25 +2541,21 @@ try {
     }
 
     if (!empty($filter_date_from)) {
-        $where_clauses[]       = "b.check_in_date >= ?";
-        $params[]              = $filter_date_from;
-        $stats_where_clauses[] = "b.check_in_date >= ?";
-        $stats_params[]        = $filter_date_from;
+        $where_clauses[] = "b.check_in_date >= ?";
+        $params[]        = $filter_date_from;
     }
 
     if (!empty($filter_date_to)) {
-        $where_clauses[]       = "b.check_out_date <= ?";
-        $params[]              = $filter_date_to;
-        $stats_where_clauses[] = "b.check_out_date <= ?";
-        $stats_params[]        = $filter_date_to;
+        $where_clauses[] = "b.check_out_date <= ?";
+        $params[]        = $filter_date_to;
     }
 
     $where_sql       = !empty($where_clauses)       ? 'WHERE ' . implode(' AND ', $where_clauses)       : '';
     $stats_where_sql = !empty($stats_where_clauses) ? 'WHERE ' . implode(' AND ', $stats_where_clauses) : '';
 
     // ── Stats: single query for all tab-badge counts (no payments join to avoid row duplication) ──
-    // Uses $stats_where_sql which intentionally excludes filter_status so badges always show the
-    // real picture regardless of which tab the user is currently viewing.
+    // Uses $stats_where_sql which includes search/date filters but excludes filter_status so badges
+    // show accurate counts for the current search/date scope regardless of which tab is active.
     $stats_stmt = $pdo->prepare("
         SELECT
             COUNT(*)                                                                                      AS total,
@@ -2616,10 +2639,10 @@ try {
         ];
     };
 
-    $fetch_bookings_stats_rows = static function (array $extra_clauses, array $extra_params, string $order_by) use ($pdo, $stats_where_clauses, $stats_params, $bookings_stats_insight_limit, $map_bookings_stats_row): array {
-        $insight_where_clauses = array_merge($stats_where_clauses, $extra_clauses);
+    $fetch_bookings_stats_rows = static function (array $extra_clauses, array $extra_params, string $order_by) use ($pdo, $insights_where_clauses, $insights_params, $bookings_stats_insight_limit, $map_bookings_stats_row): array {
+        $insight_where_clauses = array_merge($insights_where_clauses, $extra_clauses);
         $insight_where_sql = !empty($insight_where_clauses) ? 'WHERE ' . implode(' AND ', $insight_where_clauses) : '';
-        $insight_params = array_merge($stats_params, $extra_params);
+        $insight_params = array_merge($insights_params, $extra_params);
 
         $insight_stmt = $pdo->prepare("
             SELECT b.id,
@@ -2764,9 +2787,10 @@ try {
     $list_where_clauses = array_merge($where_clauses, $tab_extra_clauses);
     $list_where_sql = !empty($list_where_clauses) ? 'WHERE ' . implode(' AND ', $list_where_clauses) : '';
 
-    // Re-count for pagination when the list is further filtered by the tab override
-    // or by a status filter — the stats query intentionally ignores filter_status.
-    if (!empty($tab_extra_clauses) || $filter_status !== '') {
+    // Re-count for pagination when the list is filtered by tab override, status filter, search, or date filters.
+    // Use a separate variable so $total_bookings remains the global count for the "All" tab badge.
+    $list_count = $total_bookings;
+    if (!empty($tab_extra_clauses) || $filter_status !== '' || $search_query !== '' || $filter_date_from !== '' || $filter_date_to !== '') {
         $cnt_stmt = $pdo->prepare("
             SELECT COUNT(*)
             FROM bookings b
@@ -2775,11 +2799,11 @@ try {
             {$list_where_sql}
         ");
         $cnt_stmt->execute($params);
-        $total_bookings = (int)$cnt_stmt->fetchColumn();
+        $list_count = (int)$cnt_stmt->fetchColumn();
     }
 
     // Clamp current page to valid range and compute offset
-    $total_pages  = $total_bookings > 0 ? (int)ceil($total_bookings / $per_page) : 1;
+    $total_pages  = $list_count > 0 ? (int)ceil($list_count / $per_page) : 1;
     $current_page = min($current_page, $total_pages);
     $offset       = ($current_page - 1) * $per_page;
 
@@ -2813,6 +2837,7 @@ try {
     ");
     $stmt->execute(array_merge($params, [$per_page, $offset]));
     $bookings = $stmt->fetchAll(PDO::FETCH_ASSOC);
+    $current_page_count = count($bookings);
 
     // Also fetch conference inquiries
     $conf_stmt = $pdo->query("
@@ -3068,7 +3093,7 @@ $today_str = $today->format('Y-m-d');
                         <strong>Search filtered results</strong>
                     </div>
                     <div style="color: #2f3a63; font-size: 13px;">
-                        Showing <?php echo number_format($total_bookings); ?> matching room booking<?php echo $total_bookings === 1 ? '' : 's'; ?><?php if ($search_query !== ''): ?> for &ldquo;<?php echo htmlspecialchars($search_query); ?>&rdquo;<?php endif; ?>.
+                        Showing <?php echo number_format($list_count); ?> matching room booking<?php echo $list_count === 1 ? '' : 's'; ?><?php if ($search_query !== ''): ?> for &ldquo;<?php echo htmlspecialchars($search_query); ?>&rdquo;<?php endif; ?>.
                     </div>
                 </div>
             <?php endif; ?>
@@ -3164,7 +3189,11 @@ $today_str = $today->format('Y-m-d');
                 <h3 class="section-title">
                     <i class="fas fa-bed"></i> Room Bookings
                     <span style="font-size: 14px; font-weight: normal; color: #666;">
-                        (<?php echo $total_bookings; ?> <?php echo $has_active_room_filters ? 'matching' : 'total'; ?><?php if ($total_pages > 1): ?> &mdash; page <?php echo $current_page; ?> of <?php echo $total_pages; ?><?php endif; ?>)
+                        <?php if ($total_pages > 1): ?>
+                            (<?php echo $current_page_count; ?> of <?php echo number_format($list_count); ?> <?php echo $has_active_room_filters ? 'matching' : 'total'; ?> &mdash; page <?php echo $current_page; ?> of <?php echo $total_pages; ?>)
+                        <?php else: ?>
+                            (<?php echo number_format($list_count); ?> <?php echo $has_active_room_filters ? 'matching' : 'total'; ?>)
+                        <?php endif; ?>
                     </span>
                 </h3>
 
@@ -3453,7 +3482,7 @@ $today_str = $today->format('Y-m-d');
                                                         <?php if ($_perm_edit): ?>
                                                             <a href="edit-booking.php?id=<?php echo $booking['id']; ?>"><i class="fas fa-pen-to-square"></i> Full edit page</a>
                                                         <?php endif; ?>
-                                                        <?php if ($can_modify && $_perm_edit): ?>
+                                                        <?php if ($can_modify && $_perm_edit && $_perm_quick_modify): ?>
                                                             <button type="button" data-action="open-modify" data-booking-id="<?php echo $booking['id']; ?>" data-booking-ref="<?php echo htmlspecialchars($booking['booking_reference'], ENT_QUOTES); ?>"><i class="fas fa-sliders"></i> Quick modify</button>
                                                         <?php endif; ?>
                                                         <hr class="menu-divider">
@@ -3521,7 +3550,7 @@ $today_str = $today->format('Y-m-d');
                     ?>
                     <nav class="bookings-pagination" data-admin-pagination>
                         <?php if ($current_page > 1): ?>
-                            <a href="<?php echo htmlspecialchars($pg_base . 'page=' . ($current_page - 1), ENT_QUOTES); ?>" class="pg-btn" data-no-spa="1">&lsaquo; Prev</a>
+                            <a href="<?php echo htmlspecialchars($pg_base . 'page=' . ($current_page - 1), ENT_QUOTES); ?>" class="pg-btn" data-page-nav data-no-spa="1">&lsaquo; Prev</a>
                         <?php endif; ?>
 
                         <?php
@@ -3536,20 +3565,20 @@ $today_str = $today->format('Y-m-d');
                             <?php if ($pg === $current_page): ?>
                                 <span class="pg-current"><?php echo $pg; ?></span>
                             <?php else: ?>
-                                <a href="<?php echo htmlspecialchars($pg_base . 'page=' . $pg, ENT_QUOTES); ?>" class="pg-btn" data-no-spa="1"><?php echo $pg; ?></a>
+                                <a href="<?php echo htmlspecialchars($pg_base . 'page=' . $pg, ENT_QUOTES); ?>" class="pg-btn" data-page-nav data-no-spa="1"><?php echo $pg; ?></a>
                             <?php endif; ?>
                         <?php endfor; ?>
 
                         <?php if ($pg_end < $total_pages): ?>
                             <?php if ($pg_end < $total_pages - 1): ?><span class="pg-ellipsis">&hellip;</span><?php endif; ?>
-                            <a href="<?php echo htmlspecialchars($pg_base . 'page=' . $total_pages, ENT_QUOTES); ?>" class="pg-btn" data-no-spa="1"><?php echo $total_pages; ?></a>
+                            <a href="<?php echo htmlspecialchars($pg_base . 'page=' . $total_pages, ENT_QUOTES); ?>" class="pg-btn" data-page-nav data-no-spa="1"><?php echo $total_pages; ?></a>
                         <?php endif; ?>
 
                         <?php if ($current_page < $total_pages): ?>
-                            <a href="<?php echo htmlspecialchars($pg_base . 'page=' . ($current_page + 1), ENT_QUOTES); ?>" class="pg-btn" data-no-spa="1">Next &rsaquo;</a>
+                            <a href="<?php echo htmlspecialchars($pg_base . 'page=' . ($current_page + 1), ENT_QUOTES); ?>" class="pg-btn" data-page-nav data-no-spa="1">Next &rsaquo;</a>
                         <?php endif; ?>
 
-                        <span class="pg-summary">Showing <?php echo (($current_page - 1) * $per_page) + 1; ?>–<?php echo min($current_page * $per_page, $total_bookings); ?> of <?php echo $total_bookings; ?></span>
+                        <span class="pg-summary">Showing <?php echo (($current_page - 1) * $per_page) + 1; ?>–<?php echo min($current_page * $per_page, $list_count); ?> of <?php echo $list_count; ?></span>
                     </nav>
                 <?php endif; ?>
             </div>
@@ -3971,7 +4000,12 @@ $today_str = $today->format('Y-m-d');
             // Update count in section title
             const countSpan = document.querySelector('.section-title span');
             if (countSpan) {
-                countSpan.textContent = `(${visibleCount} shown)`;
+                const totalRows = rows.length;
+                if (visibleCount === totalRows) {
+                    countSpan.textContent = `(${visibleCount} shown)`;
+                } else {
+                    countSpan.textContent = `(${visibleCount} of ${totalRows} shown)`;
+                }
             }
         }
 
@@ -4170,7 +4204,32 @@ $today_str = $today->format('Y-m-d');
                 return;
             }
 
-            container.style.opacity = '0.5';
+            // Create and show minimal loader within the table section
+            let loader = container.querySelector('.minimal-loader');
+            if (!loader) {
+                loader = document.createElement('div');
+                loader.className = 'minimal-loader';
+                loader.style.cssText = `
+                    position: absolute;
+                    top: 50%;
+                    left: 50%;
+                    transform: translate(-50%, -50%);
+                    background: rgba(255, 255, 255, 0.95);
+                    padding: 20px 30px;
+                    border-radius: 10px;
+                    box-shadow: 0 4px 16px rgba(0,0,0,0.15);
+                    z-index: 100;
+                    display: none;
+                    align-items: center;
+                    gap: 12px;
+                    pointer-events: none;
+                `;
+                loader.innerHTML = '<i class="fas fa-spinner fa-spin" style="font-size: 20px; color: var(--gold, #8B7355);"></i><span style="font-size: 14px; color: #444; font-weight: 500;">Loading...</span>';
+                container.style.position = 'relative';
+                container.appendChild(loader);
+            }
+            loader.style.display = 'flex';
+            container.style.opacity = '0.6';
             container.style.pointerEvents = 'none';
             container.style.transition = 'opacity 0.15s ease';
 
@@ -4224,6 +4283,7 @@ $today_str = $today->format('Y-m-d');
             } catch (_) {
                 window.location.href = url;
             } finally {
+                if (loader) loader.style.display = 'none';
                 container.style.opacity = '';
                 container.style.pointerEvents = '';
             }
@@ -7076,13 +7136,17 @@ $today_str = $today->format('Y-m-d');
                                 <option value="pending">Pending</option>
                             </select>
                         </div>
-                        <div class="form-group">
+                        <div class="form-group <?php echo $_perm_edit_financials ? '' : 'is-financial-locked'; ?>">
                             <label>Total amount</label>
-                            <input type="number" step="0.01" name="total_amount" id="mb_total" class="form-control">
+                            <input type="number" step="0.01" name="total_amount" id="mb_total" class="form-control" <?php echo $_perm_edit_financials ? '' : 'readonly disabled aria-disabled="true"'; ?>>
+                            <?php if (!$_perm_edit_financials): ?>
+                                <small class="field-lock-hint">Only admin users or users with the Edit Booking Financials permission can change booking amounts.</small>
+                            <?php endif; ?>
                         </div>
-                        <div class="form-group">
+                        <div class="form-group is-financial-locked">
                             <label>Amount paid</label>
-                            <input type="number" step="0.01" name="amount_paid" id="mb_paid" class="form-control">
+                            <input type="number" step="0.01" name="amount_paid" id="mb_paid" class="form-control" readonly disabled aria-disabled="true">
+                            <small class="field-lock-hint">Amount paid is calculated from payment records and cannot be edited here.</small>
                         </div>
                     </div>
 
@@ -7200,6 +7264,17 @@ $today_str = $today->format('Y-m-d');
         document.getElementById('modifyBookingForm').addEventListener('submit', async function(e) {
             e.preventDefault();
             const fd = new FormData(this);
+            const getFieldValue = (fieldName, fieldId, fallback = '-') => {
+                const posted = fd.get(fieldName);
+                if (posted !== null && posted !== '') {
+                    return posted;
+                }
+                const el = document.getElementById(fieldId);
+                if (el && el.value !== '') {
+                    return el.value;
+                }
+                return fallback;
+            };
             const ref = document.getElementById('mb_ref').value || ('Booking #' + (fd.get('id') || ''));
             const confirmed = await confirmAdminAction({
                 title: 'Confirm booking changes',
@@ -7209,8 +7284,8 @@ $today_str = $today->format('Y-m-d');
                     'Guests: ' + (fd.get('number_of_guests') || '-') + ' total, ' + (fd.get('adult_guests') || '-') + ' adult(s), ' + (fd.get('child_guests') || '0') + ' child guest(s)',
                     'Status: ' + (fd.get('status') || '-'),
                     'Payment status: ' + (fd.get('payment_status') || '-'),
-                    'Total amount: ' + (fd.get('total_amount') || '0'),
-                    'Amount paid: ' + (fd.get('amount_paid') || '0')
+                    'Total amount: ' + getFieldValue('total_amount', 'mb_total', '0'),
+                    'Amount paid: ' + getFieldValue('amount_paid', 'mb_paid', '0')
                 ],
                 confirmText: 'Save Changes',
                 icon: 'fa-pen-to-square'

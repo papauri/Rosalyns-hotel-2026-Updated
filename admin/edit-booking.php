@@ -8,6 +8,7 @@
 require_once __DIR__ . '/admin-init.php';
 require_once __DIR__ . '/../includes/validation.php';
 require_once __DIR__ . '/../includes/pricing.php';
+require_once __DIR__ . '/../includes/alert.php';
 
 /** @var PDO $pdo */
 /** @var array $user */
@@ -154,6 +155,7 @@ try {
 $currency_symbol = getSetting('currency_symbol');
 $vatEnabled = in_array(getSetting('vat_enabled'), ['1', 'true', 'on']);
 $vatRate = (float)getSetting('vat_rate', 0);
+$can_edit_booking_financials = hasPermission((int)($user['id'] ?? 0), 'edit_booking_financials');
 
 // Handle form submission
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && $booking) {
@@ -173,11 +175,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $booking) {
         $adult_guests = max(1, $number_of_guests - $child_guests);
         $occupancy_type = $_POST['occupancy_type'] ?? 'single';
         $special_requests = trim($_POST['special_requests'] ?? '');
-        $total_amount = floatval($_POST['total_amount'] ?? 0);
+        $posted_total_amount = isset($_POST['total_amount']) ? (float)$_POST['total_amount'] : (float)($booking['total_amount'] ?? 0);
+        $total_amount = $can_edit_booking_financials ? $posted_total_amount : (float)($booking['total_amount'] ?? 0);
         $admin_notes = trim($_POST['booking_notes'] ?? '');
 
         // Validate
-        if (empty($guest_name) || empty($guest_email) || empty($check_in) || empty($check_out)) {
+        if (!$can_edit_booking_financials && isset($_POST['total_amount']) && abs($posted_total_amount - (float)($booking['total_amount'] ?? 0)) > 0.01) {
+            $error = 'You do not have permission to change booking amounts.';
+        } elseif (empty($guest_name) || empty($guest_email) || empty($check_in) || empty($check_out)) {
             $error = 'Guest name, email, check-in and check-out dates are required.';
         } elseif (strtotime($check_out) <= strtotime($check_in)) {
             $error = 'Check-out date must be after check-in date.';
@@ -623,35 +628,35 @@ if (!$booking) {
     <?php require_once 'includes/admin-header.php'; ?>
 
     <div class="content">
-        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 24px;">
-            <div>
-                <h1 style="font-family: 'Cormorant Garamond', Georgia, serif; color: var(--navy); margin: 0;">
-                    Edit Booking
+        <div class="page-header">
+            <div class="page-header-content">
+                <h1 class="page-title">
+                    <i class="fas fa-pen-to-square"></i>
+                    Edit Booking <?php echo htmlspecialchars($booking['booking_reference']); ?>
                 </h1>
-                <span class="booking-ref">
-                    <?php echo htmlspecialchars($booking['booking_reference']); ?> &mdash;
+                <p class="page-subtitle">
+                    Modify booking details, room assignment, dates, and guest information.
+                </p>
+                <div class="page-meta">
                     <span class="badge badge-<?php echo htmlspecialchars($booking['status']); ?>">
                         <?php echo ucfirst(htmlspecialchars($booking['status'])); ?>
                     </span>
-                </span>
+                </div>
             </div>
-            <div style="display: flex; gap: 8px;">
-                <a href="booking-details.php?id=<?php echo $booking_id; ?>" class="btn-back" onclick="if(history.length>1){history.back();return false;}">
-                    <i class="fas fa-arrow-left"></i> Back
+            <div class="page-header-actions">
+                <a href="booking-details.php?id=<?php echo $booking_id; ?>" class="btn btn-secondary btn-sm" onclick="if(history.length>1){history.back();return false;}">
+                    <i class="fas fa-arrow-left"></i>
+                    <span>Back</span>
                 </a>
             </div>
         </div>
 
         <?php if ($message): ?>
-            <div style="background: #d4edda; color: #155724; padding: 12px 20px; border-radius: 8px; margin-bottom: 20px;">
-                <i class="fas fa-check-circle"></i> <?php echo htmlspecialchars($message); ?>
-            </div>
+            <?php showAlert($message, 'success'); ?>
         <?php endif; ?>
 
         <?php if ($error): ?>
-            <div style="background: #f8d7da; color: #721c24; padding: 12px 20px; border-radius: 8px; margin-bottom: 20px;">
-                <i class="fas fa-exclamation-circle"></i> <?php echo htmlspecialchars($error); ?>
-            </div>
+            <?php showAlert($error, 'error'); ?>
         <?php endif; ?>
 
         <div class="edit-form">
@@ -665,7 +670,7 @@ if (!$booking) {
                 data-admin-submit-text="Saving...">
                 <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf_token, ENT_QUOTES, 'UTF-8'); ?>">
 
-                <h3 style="margin-top: 0; color: var(--navy); border-bottom: 2px solid var(--gold, #d4a843); padding-bottom: 8px;">
+                <h3 class="form-section-title">
                     <i class="fas fa-user"></i> Guest Information
                 </h3>
                 <div class="form-grid">
@@ -691,7 +696,7 @@ if (!$booking) {
                     </div>
                 </div>
 
-                <h3 style="color: var(--navy); border-bottom: 2px solid var(--gold, #d4a843); padding-bottom: 8px;">
+                <h3 class="form-section-title">
                     <i class="fas fa-bed"></i> Room & Dates
                 </h3>
                 <div class="form-grid">
@@ -756,7 +761,10 @@ if (!$booking) {
                     <div class="form-group">
                         <label for="total_amount">Total Amount (<?php echo $currency_symbol; ?>)</label>
                         <input type="number" id="total_amount" name="total_amount" step="0.01" min="0"
-                            value="<?php echo $booking['total_amount']; ?>">
+                            value="<?php echo $booking['total_amount']; ?>" <?php echo $can_edit_booking_financials ? '' : 'readonly disabled aria-disabled="true"'; ?>>
+                        <?php if (!$can_edit_booking_financials): ?>
+                            <small style="color: #888;">Only admin users or users with the Edit Booking Financials permission can change this amount.</small>
+                        <?php endif; ?>
                     </div>
                 </div>
 
@@ -830,7 +838,7 @@ if (!$booking) {
                     </small>
                 </div>
 
-                <h3 style="color: var(--navy); border-bottom: 2px solid var(--gold, #d4a843); padding-bottom: 8px; margin-top: 24px;">
+                <h3 class="form-section-title">
                     <i class="fas fa-sticky-note"></i> Additional Details
                 </h3>
                 <div class="form-group form-full">

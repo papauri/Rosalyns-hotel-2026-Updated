@@ -285,6 +285,22 @@ function getAllPermissions()
             'page' => 'edit-booking.php',
             'group' => 'bookings_write'
         ],
+        'quick_modify_booking' => [
+            'label' => 'Quick Modify Bookings',
+            'description' => 'Use quick modify actions from the bookings list',
+            'icon' => 'fa-sliders-h',
+            'category' => 'Reservations',
+            'page' => 'bookings.php',
+            'group' => 'bookings_write'
+        ],
+        'edit_booking_financials' => [
+            'label' => 'Edit Booking Financials',
+            'description' => 'Change booking amounts in quick modify and full edit screens',
+            'icon' => 'fa-file-invoice-dollar',
+            'category' => 'Reservations',
+            'page' => 'edit-booking.php',
+            'group' => 'bookings_write'
+        ],
         'cancel_booking' => [
             'label' => 'Cancel Bookings',
             'description' => 'Cancel confirmed bookings',

@@ -14,7 +14,7 @@
 <!-- Global table-section pagination (10 rows max + inline loader) -->
 <script src="js/admin-section-pagination.js?v=<?php echo filemtime(__DIR__ . '/../js/admin-section-pagination.js'); ?>"></script>
 <!-- Admin Mobile Enhancements -->
-<script src="js/admin-mobile.js"></script>
+<script src="js/admin-mobile.js?v=<?php echo filemtime(__DIR__ . '/../js/admin-mobile.js'); ?>"></script>
 <!-- PWA install prompt — shows "Install App" banner on Chrome/Edge desktop + Android -->
 <script src="js/pwa-install.js" defer></script>
 <!-- Universal offline queue + connectivity banner. Only intercepts forms with
