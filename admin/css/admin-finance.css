@@ -377,6 +377,7 @@ body {
 }
 
 @media (max-width: 768px) {
+
     .finance-page .btn-sm,
     .finance-page .actions-dropdown-toggle {
         min-height: 36px;

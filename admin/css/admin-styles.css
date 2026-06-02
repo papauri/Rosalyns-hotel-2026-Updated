@@ -1699,7 +1699,7 @@ table.mobile-enhanced td[data-label="Actions"] .actions-row .actions-more-toggle
     gap: 10px;
 }
 
-.modal-content > .modal-header {
+.modal-content>.modal-header {
     margin-top: calc(var(--rh-modal-shell-pad, 0px) * -1);
     margin-right: calc(var(--rh-modal-shell-pad, 0px) * -1);
     margin-left: calc(var(--rh-modal-shell-pad, 0px) * -1);
