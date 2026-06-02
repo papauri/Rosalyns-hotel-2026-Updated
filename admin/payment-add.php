@@ -185,7 +185,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $params[] = $paymentVatAmount;
                 $params[] = $totalAmount;
 
-                $needsReceiptNumber = $paymentStatus === 'completed' && $payment['payment_status'] !== 'completed' && !$payment['receipt_number'];
+                $needsReceiptNumber = in_array($paymentStatus, ['completed', 'paid'], true)
+                    && !in_array((string)$payment['payment_status'], ['completed', 'paid'], true)
+                    && !$payment['receipt_number'];
 
                 $pdo->beginTransaction();
 
@@ -240,7 +242,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
                 $pdo->beginTransaction();
 
-                $receiptNumber = $paymentStatus === 'completed'
+                $receiptNumber = in_array($paymentStatus, ['completed', 'paid'], true)
                     ? finance_next_receipt_number($pdo, $paymentDate)
                     : null;
 
@@ -304,7 +306,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 unset($_SESSION['admin_payment_add_uuid']);
 
                 // Send payment confirmation email for room bookings
-                if ($bookingType === 'room' && $paymentStatus === 'completed') {
+                if ($bookingType === 'room' && in_array($paymentStatus, ['completed', 'paid'], true)) {
                     try {
                         // Merge default CC recipients with additional CCs from form
                         $defaultCcRecipients = getEmailSetting('invoice_recipients', '');
@@ -353,7 +355,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 }
 
                 // Send invoice email for conference bookings
-                if ($bookingType === 'conference' && $paymentStatus === 'completed') {
+                if ($bookingType === 'conference' && in_array($paymentStatus, ['completed', 'paid'], true)) {
                     try {
                         // Merge default CC recipients with additional CCs from form
                         $defaultCcRecipients = getEmailSetting('invoice_recipients', '');

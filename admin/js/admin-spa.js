@@ -1044,7 +1044,7 @@
 
                         var y = scope.element.getBoundingClientRect().top + window.scrollY - 80;
                         if (y < 0) y = 0;
-                        window.scrollTo({ top: y, behavior: 'instant' });
+                        window.scrollTo({ top: y, behavior: 'smooth' });
 
                         _notifyContentUpdated(fullHref, 'pagination');
 

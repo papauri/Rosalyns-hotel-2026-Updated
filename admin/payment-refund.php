@@ -183,9 +183,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $payment
                 $_SESSION['admin_user_id'] ?? null
             ]);
 
-            // Update original payment status if full refund
-            // Update original payment status when cumulative refunds fully cover original payment.
-            $totalRefundedAfterThis = round($lockedAlreadyRefunded + $refund_amount, 2);
+            // Update original payment status only when settled refunds fully cover the original payment.
+            // Pending refunds reserve refundable balance but should not finalize original payment status.
+            $settledRefundedStmt = $pdo->prepare("\n                    SELECT COALESCE(SUM(CASE WHEN refund_status IN ('completed','processing') THEN COALESCE(refund_amount, total_amount) ELSE 0 END), 0)\n                    FROM payments\n                    WHERE original_payment_id = ? AND payment_type = 'refund' AND deleted_at IS NULL\n                ");
+            $settledRefundedStmt->execute([$payment_id]);
+            $totalRefundedAfterThis = round((float)$settledRefundedStmt->fetchColumn(), 2);
             $originalTotal = round((float)$lockedPayment['total_amount'], 2);
             if ($totalRefundedAfterThis >= $originalTotal) {
                 $updateStmt = $pdo->prepare("

@@ -1540,7 +1540,7 @@ hr.menu-divider {
 }
 
 #rh-admin-page .bookings-section table.mobile-enhanced tbody tr {
-    grid-template-columns: repeat(var(--mobile-card-cols, 1), minmax(0, 1fr));
+    grid-template-columns: repeat(auto-fit, minmax(max(7rem, min(100%, (100% - 0.68rem) / 2)), 1fr));
     gap: clamp(0.48rem, 0.4rem + 0.24vw, 0.68rem);
 }
 
@@ -1562,8 +1562,7 @@ hr.menu-divider {
 
 @media (max-width: 20rem) {
     #rh-admin-page .bookings-section table.mobile-enhanced tbody tr {
-        --mobile-card-cols: 1;
-        grid-template-columns: minmax(0, 1fr);
+        grid-template-columns: 1fr;
     }
 }
 
@@ -2013,7 +2012,7 @@ hr.menu-divider {
 .bookings-checkin-modal__subtitle {
     margin: 0.32rem 0 0;
     font-size: clamp(0.78rem, 0.74rem + 0.14vw, 0.88rem);
-    color: color-mix(in srgb, var(--color-white, #fff) 90%, transparent);
+    color: color-mix(in srgb, var(--color-text-primary, #2A2723) 76%, rgba(0, 0, 0, 0.1));
 }
 
 .bookings-checkin-modal__body {
@@ -2358,6 +2357,17 @@ hr.menu-divider {
     white-space: nowrap;
 }
 
+/* Override desktop widths for mobile-enhanced grid layout */
+@media (max-width: 600px) {
+
+    .bookings-stats-insight-modal .bookings-alert-modal__table.mobile-enhanced th,
+    .bookings-stats-insight-modal .bookings-alert-modal__table.mobile-enhanced td {
+        width: auto !important;
+        text-align: left;
+        white-space: normal;
+    }
+}
+
 .bookings-alert-modal__table tr:last-child td {
     border-bottom: none;
 }
@@ -2528,25 +2538,26 @@ hr.menu-divider {
         gap: 0.82rem;
     }
 
-    /* Use standard mobile card 2-column layout where space permits */
+    /* Responsive cell wrapping: allow 2 columns where space permits */
     .bookings-alert-modal__table.mobile-enhanced tbody tr {
-        --mobile-card-cols: 2;
+        grid-template-columns: repeat(auto-fit, minmax(max(7rem, min(100%, (100% - 0.6rem) / 2)), 1fr));
     }
 
-    /* On tablets/larger phones, use 2 columns for better density */
+    /* Override desktop percentage widths for grid layout */
+    .bookings-alert-modal__table.mobile-enhanced td {
+        width: auto !important;
+    }
+
+    /* Allow cells to wrap naturally */
     .bookings-alert-modal__table.mobile-enhanced tbody tr>td {
         min-width: 0;
+        overflow-wrap: break-word;
+        word-break: break-word;
     }
 
     .bookings-alert-modal__actions {
-        min-width: 9rem;
-    }
-}
-
-/* Ultra-narrow phones: collapse to single column */
-@media (max-width: 28rem) {
-    .bookings-alert-modal__table.mobile-enhanced tbody tr {
-        --mobile-card-cols: 1 !important;
+        grid-column: 1 / -1;
+        min-width: auto;
     }
 }
 

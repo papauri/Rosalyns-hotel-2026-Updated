@@ -710,7 +710,7 @@ function updatePayment(PDO $pdo, int $paymentId)
         // Update booking payment totals
         if ($existingPayment['booking_type'] === 'room') {
             updateRoomBookingPayments($pdo, $existingPayment['booking_id']);
-        } else {
+        } elseif ($existingPayment['booking_type'] === 'conference') {
             updateConferenceEnquiryPayments($pdo, $existingPayment['booking_id']);
         }
 
@@ -770,7 +770,7 @@ function deletePayment(PDO $pdo, int $paymentId)
         // Update booking payment totals
         if ($payment['booking_type'] === 'room') {
             updateRoomBookingPayments($pdo, $payment['booking_id']);
-        } else {
+        } elseif ($payment['booking_type'] === 'conference') {
             updateConferenceEnquiryPayments($pdo, $payment['booking_id']);
         }
 

@@ -869,10 +869,12 @@ table.mobile-enhanced tbody tr {
     list-style: none;
     height: auto;
     display: grid;
-    grid-template-columns: repeat(var(--mobile-card-cols, 1), minmax(0, 1fr));
+    grid-template-columns: repeat(auto-fit, minmax(max(7rem, min(100%, (100% - 0.6rem) / 2)), 1fr));
     gap: 0.6rem;
     align-items: start;
+    justify-items: stretch;
     overflow: hidden;
+    min-width: 0;
 }
 
 /* Pagination and filtered views mark rows with [hidden]. In card mode,
@@ -903,13 +905,17 @@ table.mobile-enhanced td {
 
 /* Keep side-by-side card fields visually uniform in each row. */
 table.mobile-enhanced tbody tr>td {
+    display: block;
     align-self: stretch;
-    height: 100%;
+    height: auto;
+    width: 100%;
+    min-width: 0;
     background: #ffffff;
     border: 1px solid color-mix(in srgb, var(--border-color, #dee2e6) 86%, #edf1f6 14%);
     border-radius: 10px;
     padding: 0.48rem 0.58rem;
     box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.8);
+    overflow-wrap: break-word;
 }
 
 /* Control-only cells should not render as boxed data tiles. */
@@ -1119,17 +1125,25 @@ table.mobile-enhanced td[data-label="Actions"] .actions-row .actions-more-toggle
     }
 }
 
-/* Guard ultra-narrow phones against stale wide column counts injected at runtime. */
-@media (max-width: 20rem) {
-    table.mobile-enhanced tbody tr {
-        --mobile-card-cols: 1;
-    }
-}
+/* Ensure no hardcoded column limits at any screen size. Grid adapts naturally. */
 
 @media (max-width: 48rem) {
     table.mobile-enhanced td.num {
-        white-space: normal;
-        overflow-wrap: anywhere;
+        display: flex;
+        flex-direction: column;
+        align-items: flex-end;
+        gap: 0.12rem;
+        white-space: nowrap;
+        overflow-wrap: normal;
+        word-break: keep-all;
+    }
+
+    table.mobile-enhanced td.num[data-label]::before {
+        float: none;
+        display: block;
+        width: 100%;
+        margin-bottom: 0.22rem;
+        text-align: left;
     }
 }
 

@@ -230,7 +230,13 @@
             host.parentNode.appendChild(nav);
         }
 
-        function renderPage(targetPage) {
+        function scrollHostIntoView() {
+            var y = host.getBoundingClientRect().top + window.scrollY - 80;
+            if (y < 0) y = 0;
+            window.scrollTo({ top: y, behavior: 'smooth' });
+        }
+
+        function renderPage(targetPage, shouldScroll) {
             currentPage = Math.max(1, Math.min(totalPages, targetPage));
             var from = (currentPage - 1) * PAGE_SIZE;
             var to = from + PAGE_SIZE;
@@ -243,7 +249,7 @@
 
             nav.appendChild(createButton('‹ Prev', function () {
                 withInlineLoader(nav, 'Loading previous page...', function () {
-                    renderPage(currentPage - 1);
+                    renderPage(currentPage - 1, true);
                 });
             }, currentPage <= 1));
 
@@ -267,14 +273,14 @@
                 nav.appendChild(createButton(String(item), function () {
                     var target = item;
                     withInlineLoader(nav, 'Loading page ' + target + '...', function () {
-                        renderPage(target);
+                        renderPage(target, true);
                     });
                 }, false));
             });
 
             nav.appendChild(createButton('Next ›', function () {
                 withInlineLoader(nav, 'Loading next page...', function () {
-                    renderPage(currentPage + 1);
+                    renderPage(currentPage + 1, true);
                 });
             }, currentPage >= totalPages));
 
@@ -282,9 +288,13 @@
             summary.className = 'pg-summary';
             summary.textContent = 'Showing ' + (from + 1) + '–' + Math.min(to, totalRows) + ' of ' + totalRows;
             nav.appendChild(summary);
+
+            if (shouldScroll) {
+                window.requestAnimationFrame(scrollHostIntoView);
+            }
         }
 
-        renderPage(1);
+        renderPage(1, false);
     }
 
     function initGlobalSectionPagination() {
