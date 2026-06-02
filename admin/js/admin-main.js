@@ -1650,6 +1650,7 @@
 
     function shouldSuppressBeforeUnloadForLink(link, event) {
         if (!link || event.defaultPrevented) return false;
+        if (isSectionPaginationLink(link)) return true;
         if (link.dataset.noAdminLoader === '1') return true;
         if (link.dataset.noSpa !== undefined) return true;
         if (link.hasAttribute('download')) return true;
@@ -1664,6 +1665,7 @@
 
     function shouldLoadForLink(link, event) {
         if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey || event.button !== 0) return false;
+        if (isSectionPaginationLink(link)) return false;
         if (link.dataset.noAdminLoader === '1' || link.closest('[data-no-admin-loader="1"]')) return false;
         if (link.hasAttribute('download')) return false;
         const target = (link.getAttribute('target') || '').toLowerCase();
@@ -1680,6 +1682,47 @@
         if (url.origin !== window.location.origin) return false;
         if (url.pathname === window.location.pathname && url.search === window.location.search && url.hash) return false;
         return true;
+    }
+
+    function isSectionPaginationLink(link) {
+        if (!link || typeof link.closest !== 'function') return false;
+
+        var href = link.getAttribute('href') || '';
+        if (!href || href === '#' || href.charAt(0) === '#') return false;
+
+        try {
+            var target = new URL(href, window.location.href);
+            var current = new URL(window.location.href);
+            if (target.origin !== current.origin || target.pathname !== current.pathname) return false;
+
+            var paginationHost = link.closest('[data-admin-pagination], [data-admin-auto-pagination-nav], .bookings-pagination, .pagination, .log-table-pagination, .receipts-pagination, .pagination-bar, .inv-pagination');
+            if (paginationHost) return true;
+
+            var hasPaginationParam = false;
+            target.searchParams.forEach(function (_value, key) {
+                var normalized = String(key || '').toLowerCase();
+                if (
+                    normalized === 'page' ||
+                    normalized === 'p' ||
+                    normalized === 'offset' ||
+                    normalized === 'start' ||
+                    normalized === 'cursor' ||
+                    normalized.endsWith('_page') ||
+                    normalized.endsWith('_offset') ||
+                    normalized.endsWith('_cursor')
+                ) {
+                    hasPaginationParam = true;
+                }
+            });
+            if (!hasPaginationParam) return false;
+
+            if (!link.closest('#rh-admin-page, .content, .admin-content')) return false;
+            if (link.closest('.admin-nav, .admin-header, .admin-sidebar, .breadcrumbs')) return false;
+
+            return true;
+        } catch (err) {
+            return false;
+        }
     }
 
     function queueFormLoader(event, form, submitter) {

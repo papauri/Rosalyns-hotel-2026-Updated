@@ -1050,7 +1050,7 @@ table.mobile-enhanced td[data-label="Actions"] button {
     width: 100%;
     justify-content: center;
     margin: 0 !important;
-    min-height: clamp(2.2rem, 2.08rem + 0.24vw, 2.5rem);
+    min-height: clamp(2.55rem, 2.46rem + 0.2vw, 2.85rem);
     border-radius: 0.7rem;
 }
 
@@ -3369,7 +3369,7 @@ body {
     .btn-sm {
         font-size: 11.5px;
         padding: 5px 10px;
-        min-height: 28px;
+        min-height: 36px;
     }
 
     .occupancy-overview {
@@ -4534,8 +4534,8 @@ a.ops-card:focus-visible {
         right: 7px;
         top: 50%;
         transform: translateY(-50%);
-        width: 24px;
-        height: 24px;
+        width: 28px;
+        height: 28px;
         border: 0;
         border-radius: 6px;
         background: transparent;
@@ -5135,8 +5135,8 @@ a.ops-card:focus-visible {
         right: 8px;
         top: 50%;
         transform: translateY(-50%);
-        width: 30px;
-        height: 30px;
+        width: 36px;
+        height: 36px;
         border: 0;
         border-radius: 7px;
         background: transparent;

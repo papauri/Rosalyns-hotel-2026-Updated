@@ -6,26 +6,110 @@
 
     var PAGE_SIZE = 10;
 
+    function getLoaderBrandName() {
+        var brand = document.querySelector('.admin-header-brand h1');
+        if (brand && brand.textContent.trim()) return brand.textContent.trim();
+
+        var navBrand = document.querySelector('.admin-nav-title-sub');
+        if (navBrand && navBrand.textContent.trim()) return navBrand.textContent.trim();
+
+        var title = document.title || '';
+        if (title.indexOf('|') !== -1) {
+            return title.split('|').slice(-1)[0].replace(/\s+Admin\s*$/i, '').trim() || 'Hotel Admin';
+        }
+
+        return 'Hotel Admin';
+    }
+
+    function ensureScopedLoaderApi() {
+        if (window.AdminScopedSectionLoader && typeof window.AdminScopedSectionLoader.show === 'function') {
+            return;
+        }
+
+        window.AdminScopedSectionLoader = {
+            show: function (container, text, options) {
+                if (!container) return function () { return; };
+
+                var shownAt = Date.now();
+                var minVisibleMs = 320;
+                // Use fixed-position overlay so overflow:hidden on container cannot clip it
+                var rect = container.getBoundingClientRect();
+                var fixedTop = Math.max(0, rect.top);
+                var fixedHeight = Math.min(rect.bottom, window.innerHeight) - fixedTop;
+                if (fixedHeight < 60) { fixedTop = Math.max(0, (window.innerHeight - 180) / 2); fixedHeight = 180; }
+                var loader = document.createElement('div');
+                loader.className = 'admin-section-scoped-loader';
+                if (options && options.placement === 'near-end') {
+                    loader.classList.add('admin-section-scoped-loader--near-end');
+                }
+                loader.setAttribute('role', 'status');
+                loader.setAttribute('aria-live', 'polite');
+                loader.setAttribute('aria-label', text || 'Loading section');
+                loader.style.cssText = 'position:fixed !important;left:' + Math.round(rect.left) + 'px;top:' + Math.round(fixedTop) + 'px;width:' + Math.round(rect.width) + 'px;height:' + Math.round(fixedHeight) + 'px;right:auto !important;bottom:auto !important;z-index:9998 !important;';
+                loader.innerHTML = [
+                    '<div class="admin-section-scoped-loader__card">',
+                    '<div class="admin-section-scoped-loader__brand"><i class="fas fa-hotel" aria-hidden="true"></i><span>' + getLoaderBrandName() + '</span></div>',
+                    '<div class="admin-section-scoped-loader__body">',
+                    '<span class="admin-pagination-loader__spinner" aria-hidden="true"></span>',
+                    '<span class="admin-pagination-loader__text">' + (text || 'Loading next page...') + '</span>',
+                    '</div>',
+                    '</div>'
+                ].join('');
+
+                container.classList.add('admin-section-loading');
+                document.body.appendChild(loader);
+
+                return function () {
+                    var elapsed = Date.now() - shownAt;
+                    var wait = elapsed >= minVisibleMs ? 0 : (minVisibleMs - elapsed);
+                    window.setTimeout(function () {
+                        container.classList.remove('admin-section-loading');
+                        if (loader.parentNode) loader.parentNode.removeChild(loader);
+                    }, wait);
+                };
+            }
+        };
+    }
+
     function isPaginationNav(el) {
         if (!el || el.nodeType !== 1) return false;
         return el.matches('[data-admin-pagination], .bookings-pagination, .pagination, .log-table-pagination, .receipts-pagination, .pagination-bar, .inv-pagination, [data-admin-auto-pagination-nav]');
     }
 
+    function isExplicitPaginationNav(el) {
+        return isPaginationNav(el) && !el.matches('[data-admin-auto-pagination-nav], .admin-auto-pagination');
+    }
+
+    function resolveTableHost(table) {
+        if (!table) return null;
+        return table.closest('.table-responsive, .table-wrapper, .table-container, .acct-table-wrap, .invoices-table, .report-table-wrap, [style*="overflow-x:auto"]') || table;
+    }
+
+    function resolveSectionScope(table) {
+        if (!table) return null;
+        return table.closest('[data-admin-pagination-scope], .acct-panel, .section-card, .widget, .dashboard-section, .table-container, .table-wrapper, .table-responsive, .content') || table.parentElement;
+    }
+
     function findExistingPaginationNear(table) {
         if (!table) return false;
 
-        var host = table.closest('.table-responsive, .table-wrapper, .table-container, [style*="overflow-x:auto"]') || table;
+        var host = resolveTableHost(table);
         var next = host.nextElementSibling;
         var checks = 0;
 
         while (next && checks < 5) {
-            if (isPaginationNav(next)) return true;
+            if (isExplicitPaginationNav(next)) return true;
             if (next.matches('.admin-pagination-loader-wrap, .log-table-pagination-loader-wrap')) {
                 next = next.nextElementSibling;
                 checks++;
                 continue;
             }
             break;
+        }
+
+        var sectionScope = resolveSectionScope(table);
+        if (sectionScope && sectionScope.querySelector('[data-admin-pagination], .bookings-pagination:not(.admin-auto-pagination), .pagination:not(.admin-auto-pagination), .log-table-pagination:not(.admin-auto-pagination), .receipts-pagination:not(.admin-auto-pagination), .pagination-bar:not(.admin-auto-pagination), .inv-pagination:not(.admin-auto-pagination)')) {
+            return true;
         }
 
         return false;
@@ -77,25 +161,43 @@
             return;
         }
 
+        ensureScopedLoaderApi();
         nav.classList.add('is-loading');
+        var tableHostSelector = '.table-responsive, .table-wrapper, .table-container, .acct-table-wrap, .invoices-table, .report-table-wrap';
+        var scopedContainer = nav.closest(tableHostSelector);
 
-        var loaderWrap = document.createElement('div');
-        loaderWrap.className = 'admin-pagination-loader-wrap';
-        loaderWrap.innerHTML = [
-            '<div class="admin-pagination-loader" role="status" aria-live="polite" aria-label="' + (message || 'Loading results') + '">',
-            '<span class="admin-pagination-loader__spinner" aria-hidden="true"></span>',
-            '<span class="admin-pagination-loader__text">' + (message || 'Loading next page...') + '</span>',
-            '</div>'
-        ].join('');
+        if (!scopedContainer) {
+            var prevSib = nav.previousElementSibling;
+            while (prevSib && !scopedContainer) {
+                if (prevSib.matches && prevSib.matches(tableHostSelector)) {
+                    scopedContainer = prevSib;
+                }
+                prevSib = prevSib.previousElementSibling;
+            }
+        }
 
-        nav.insertAdjacentElement('afterend', loaderWrap);
+        if (!scopedContainer) {
+            var nextSib = nav.nextElementSibling;
+            while (nextSib && !scopedContainer) {
+                if (nextSib.matches && nextSib.matches(tableHostSelector)) {
+                    scopedContainer = nextSib;
+                }
+                nextSib = nextSib.nextElementSibling;
+            }
+        }
+
+        if (!scopedContainer) {
+            scopedContainer = nav.closest('[data-admin-pagination-scope], .section-card, .widget, .dashboard-section, .content') || nav.parentElement || nav;
+        }
+
+        var hideScopedLoader = window.AdminScopedSectionLoader.show(scopedContainer, message || 'Loading next page...');
 
         window.setTimeout(function () {
             try {
                 renderFn();
             } finally {
                 nav.classList.remove('is-loading');
-                if (loaderWrap.parentNode) loaderWrap.parentNode.removeChild(loaderWrap);
+                hideScopedLoader();
             }
         }, 170);
     }
@@ -121,7 +223,7 @@
         nav.setAttribute('data-admin-auto-pagination-nav', '1');
         nav.setAttribute('aria-label', 'Table pagination');
 
-        var host = table.closest('.table-responsive, .table-wrapper, .table-container, [style*="overflow-x:auto"]') || table;
+        var host = resolveTableHost(table);
         if (host.nextSibling) {
             host.parentNode.insertBefore(nav, host.nextSibling);
         } else {

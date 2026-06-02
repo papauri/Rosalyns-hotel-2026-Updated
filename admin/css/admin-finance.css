@@ -376,6 +376,13 @@ body {
     font-size: 11px;
 }
 
+@media (max-width: 768px) {
+    .finance-page .btn-sm,
+    .finance-page .actions-dropdown-toggle {
+        min-height: 36px;
+    }
+}
+
 /* ============================================
    QUICK ACTIONS
    ============================================ */

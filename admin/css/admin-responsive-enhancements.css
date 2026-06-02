@@ -96,13 +96,20 @@
 
 :is(#rh-admin-page, .admin-content, .content) th.admin-auto-sortable {
     position: relative;
+    vertical-align: middle !important;
+    padding-right: 1.45rem !important;
 }
 
 :is(#rh-admin-page, .admin-content, .content) th.admin-auto-sortable .admin-sort-icon {
     display: inline-flex !important;
     align-items: center;
-    margin-left: 0.32rem !important;
-    vertical-align: 0.02em;
+    justify-content: center;
+    position: absolute;
+    right: 0.5rem;
+    top: 50%;
+    transform: translateY(-50%);
+    margin-left: 0 !important;
+    vertical-align: middle;
     font-size: 0.78em;
     line-height: 1;
 }

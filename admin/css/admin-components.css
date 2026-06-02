@@ -1255,6 +1255,56 @@ body.modal-open {
     margin: 0;
 }
 
+.admin-section-loading {
+    pointer-events: none;
+}
+
+.admin-section-scoped-loader {
+    position: absolute;
+    inset: 0;
+    z-index: 12;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 12px;
+    background: color-mix(in srgb, var(--color-background, #fff) 80%, transparent);
+    backdrop-filter: blur(1px);
+}
+
+.admin-section-scoped-loader__card {
+    display: inline-flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 8px;
+    min-width: min(92%, 280px);
+    padding: 10px 14px;
+    border-radius: 12px;
+    border: 1px solid rgba(138, 119, 95, 0.22);
+    background: rgba(247, 243, 238, 0.96);
+    box-shadow: 0 10px 24px rgba(35, 31, 28, 0.1);
+}
+
+.admin-section-scoped-loader__brand {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: color-mix(in srgb, var(--color-text-secondary, #5E554D) 90%, #000 10%);
+}
+
+.admin-section-scoped-loader__brand i {
+    color: var(--color-lux-gold, #d4a843);
+}
+
+.admin-section-scoped-loader__body {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+}
+
 :is(.admin-content, #rh-admin-page) :is(.bookings-pagination, .pagination, .log-table-pagination, .receipts-pagination, .pagination-bar, .inv-pagination).is-loading {
     opacity: 0.72;
     pointer-events: none;
@@ -1636,6 +1686,18 @@ body.modal-open {
     border-radius: 0.62rem;
 }
 
+@media (max-width: 768px) {
+    :is(.admin-content, #rh-admin-page) .btn {
+        min-height: 40px;
+    }
+
+    :is(.admin-content, #rh-admin-page) .btn-sm {
+        min-height: 36px;
+        font-size: 0.78rem;
+        padding: 0.42rem 0.72rem;
+    }
+}
+
 :is(.admin-content, #rh-admin-page) .btn-lg {
     padding: clamp(0.56rem, 0.5rem + 0.18vw, 0.74rem) clamp(0.96rem, 0.86rem + 0.28vw, 1.24rem);
     font-size: clamp(0.84rem, 0.8rem + 0.12vw, 0.98rem);
@@ -1768,6 +1830,16 @@ body.modal-open {
     min-inline-size: clamp(1.9rem, 1.84rem + 0.18vw, 2.2rem);
 }
 
+@media (max-width: 768px) {
+    :is(.admin-content, #rh-admin-page) .table .actions .btn,
+    :is(.admin-content, #rh-admin-page) .table .quick-actions .btn,
+    :is(.admin-content, #rh-admin-page) .table .action-buttons .btn,
+    :is(.admin-content, #rh-admin-page) .table td .quick-actions .btn {
+        min-height: 36px;
+        min-inline-size: 36px;
+    }
+}
+
 :is(.admin-content, #rh-admin-page) .btn-group,
 :is(.admin-content, #rh-admin-page) .table td .btn-group {
     display: inline-flex;
@@ -1799,22 +1871,39 @@ body.modal-open {
 :is(.admin-content, #rh-admin-page) table.mobile-enhanced td[data-label="Actions"] .btn,
 :is(.admin-content, #rh-admin-page) table.mobile-enhanced td[data-label="Action"] .button,
 :is(.admin-content, #rh-admin-page) table.mobile-enhanced td[data-label="Actions"] .button,
+:is(.admin-content, #rh-admin-page) table.mobile-enhanced td[data-label="Action"] button,
+:is(.admin-content, #rh-admin-page) table.mobile-enhanced td[data-label="Actions"] button,
 :is(.admin-content, #rh-admin-page) table.mobile-enhanced td[data-label="Action"] button.btn,
 :is(.admin-content, #rh-admin-page) table.mobile-enhanced td[data-label="Actions"] button.btn {
+    display: inline-flex;
+    align-items: center;
     width: 100%;
     justify-content: center;
+    gap: clamp(0.26rem, 0.22rem + 0.1vw, 0.38rem);
+    line-height: 1.2;
+    text-align: center;
 }
 
 :is(.admin-content, #rh-admin-page) table.mobile-enhanced td[data-label="Action"]>.btn,
 :is(.admin-content, #rh-admin-page) table.mobile-enhanced td[data-label="Actions"]>.btn,
 :is(.admin-content, #rh-admin-page) table.mobile-enhanced td[data-label="Action"]>.button,
 :is(.admin-content, #rh-admin-page) table.mobile-enhanced td[data-label="Actions"]>.button,
+:is(.admin-content, #rh-admin-page) table.mobile-enhanced td[data-label="Action"]>button,
+:is(.admin-content, #rh-admin-page) table.mobile-enhanced td[data-label="Actions"]>button,
 :is(.admin-content, #rh-admin-page) table.mobile-enhanced td[data-label="Action"]>button.btn,
 :is(.admin-content, #rh-admin-page) table.mobile-enhanced td[data-label="Actions"]>button.btn {
     width: auto;
     min-width: clamp(5.6rem, 5.1rem + 1.2vw, 7.1rem);
     max-width: 100%;
     padding-inline: clamp(0.7rem, 0.62rem + 0.2vw, 0.95rem);
+    justify-content: center;
+}
+
+:is(.admin-content, #rh-admin-page) table.mobile-enhanced td[data-label="Action"] button i,
+:is(.admin-content, #rh-admin-page) table.mobile-enhanced td[data-label="Actions"] button i {
+    line-height: 1;
+    display: inline-flex;
+    align-items: center;
     justify-content: center;
 }
 

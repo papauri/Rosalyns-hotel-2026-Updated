@@ -650,7 +650,12 @@ a.shift-card:hover,
     border-radius: 5px;
     text-decoration: none;
     font-size: 12px;
-    display: inline-block;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.34rem;
+    line-height: 1.2;
+    text-align: center;
     margin: 2px 4px 2px 0;
     cursor: pointer;
 }

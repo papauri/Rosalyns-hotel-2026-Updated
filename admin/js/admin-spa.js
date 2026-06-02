@@ -359,44 +359,88 @@
     function _showScopedPaginationLoader(scopeElement, message, navEl) {
         if (!scopeElement) return function () { return; };
 
-        var host = navEl && navEl.parentNode ? navEl.parentNode : scopeElement;
-        var anchor = navEl && navEl.parentNode ? navEl.nextSibling : null;
+        if (!window.AdminScopedSectionLoader || typeof window.AdminScopedSectionLoader.show !== 'function') {
+            window.AdminScopedSectionLoader = {
+                show: function (container, text, options) {
+                    if (!container) return function () { return; };
 
-        var loader = document.createElement('div');
-        loader.className = 'admin-pagination-loader is-visible';
-        loader.setAttribute('role', 'status');
-        loader.setAttribute('aria-live', 'polite');
-        loader.setAttribute('aria-label', message || 'Loading results');
-        loader.innerHTML = [
-            '<span class="admin-pagination-loader__spinner" aria-hidden="true"></span>',
-            '<span class="admin-pagination-loader__text">' + (message || 'Loading next page...') + '</span>'
-        ].join('');
+                    var shownAt = Date.now();
+                    var minVisibleMs = 320;
+                    // Use fixed-position overlay so overflow:hidden on container cannot clip it
+                    var rect = container.getBoundingClientRect();
+                    var fixedTop = Math.max(0, rect.top);
+                    var fixedHeight = Math.min(rect.bottom, window.innerHeight) - fixedTop;
+                    if (fixedHeight < 60) { fixedTop = Math.max(0, (window.innerHeight - 180) / 2); fixedHeight = 180; }
+                    var loader = document.createElement('div');
+                    loader.className = 'admin-section-scoped-loader';
+                    if (options && options.placement === 'near-end') {
+                        loader.classList.add('admin-section-scoped-loader--near-end');
+                    }
+                    loader.setAttribute('role', 'status');
+                    loader.setAttribute('aria-live', 'polite');
+                    loader.setAttribute('aria-label', text || 'Loading section');
+                    loader.style.cssText = 'position:fixed !important;left:' + Math.round(rect.left) + 'px;top:' + Math.round(fixedTop) + 'px;width:' + Math.round(rect.width) + 'px;height:' + Math.round(fixedHeight) + 'px;right:auto !important;bottom:auto !important;z-index:9998 !important;';
+                    loader.innerHTML = [
+                        '<div class="admin-section-scoped-loader__card">',
+                        '<div class="admin-section-scoped-loader__brand"><i class="fas fa-hotel" aria-hidden="true"></i><span>' + _getLoaderBrandName() + '</span></div>',
+                        '<div class="admin-section-scoped-loader__body">',
+                        '<span class="admin-pagination-loader__spinner" aria-hidden="true"></span>',
+                        '<span class="admin-pagination-loader__text">' + (text || 'Loading next page...') + '</span>',
+                        '</div>',
+                        '</div>'
+                    ].join('');
 
-        if (anchor) {
-            host.insertBefore(loader, anchor);
-        } else {
-            host.appendChild(loader);
+                    container.classList.add('admin-section-loading');
+                    document.body.appendChild(loader);
+
+                    return function () {
+                        var elapsed = Date.now() - shownAt;
+                        var wait = elapsed >= minVisibleMs ? 0 : (minVisibleMs - elapsed);
+                        window.setTimeout(function () {
+                            container.classList.remove('admin-section-loading');
+                            if (loader.parentNode) loader.parentNode.removeChild(loader);
+                        }, wait);
+                    };
+                }
+            };
         }
 
-        var spinner = loader.querySelector('.admin-pagination-loader__spinner');
-        var spinnerAnimation = null;
-        if (spinner && typeof spinner.animate === 'function') {
-            spinnerAnimation = spinner.animate([
-                { transform: 'rotate(0deg)' },
-                { transform: 'rotate(360deg)' }
-            ], {
-                duration: 720,
-                iterations: Infinity,
-                easing: 'linear'
-            });
-        }
+        var tableHostSelector = '.table-responsive, .table-wrapper, .table-container, .acct-table-wrap, .invoices-table, .report-table-wrap';
+        var targetContainer = null;
 
-        return function () {
-            if (spinnerAnimation) spinnerAnimation.cancel();
-            if (loader.parentNode) {
-                loader.parentNode.removeChild(loader);
+        if (navEl && typeof navEl.closest === 'function') {
+            targetContainer = navEl.closest(tableHostSelector);
+            if (!targetContainer) {
+                // Walk back through all preceding siblings
+                var prevSibLoader = navEl.previousElementSibling;
+                while (prevSibLoader && !targetContainer) {
+                    if (prevSibLoader.matches && prevSibLoader.matches(tableHostSelector)) {
+                        targetContainer = prevSibLoader;
+                    }
+                    prevSibLoader = prevSibLoader.previousElementSibling;
+                }
             }
-        };
+            if (!targetContainer) {
+                // Walk forward through all following siblings
+                var nextSibLoader = navEl.nextElementSibling;
+                while (nextSibLoader && !targetContainer) {
+                    if (nextSibLoader.matches && nextSibLoader.matches(tableHostSelector)) {
+                        targetContainer = nextSibLoader;
+                    }
+                    nextSibLoader = nextSibLoader.nextElementSibling;
+                }
+            }
+        }
+
+        if (!targetContainer && scopeElement.querySelector) {
+            targetContainer = scopeElement.querySelector(tableHostSelector);
+        }
+
+        if (!targetContainer) {
+            targetContainer = scopeElement;
+        }
+
+        return window.AdminScopedSectionLoader.show(targetContainer, message || 'Loading next page...');
     }
 
     // ── CSS injection ────────────────────────────────────────────────────────
@@ -688,17 +732,38 @@
         });
     }
 
-    function _isPaginationLink(href) {
+    function _isPaginationLink(href, linkEl) {
         try {
             var target = new URL(href);
             var current = new URL(window.location.href);
             if (target.origin !== current.origin) return false;
             if (target.pathname !== current.pathname) return false;
 
+            if (linkEl) {
+                if (linkEl.dataset.pageLink !== undefined || linkEl.dataset.page !== undefined) return true;
+                var rel = (linkEl.getAttribute('rel') || '').toLowerCase();
+                if (rel.indexOf('next') !== -1 || rel.indexOf('prev') !== -1) return true;
+                var className = (linkEl.className || '').toLowerCase();
+                if (/(\bnext\b|\bprev\b|\bprevious\b|\bpagination\b)/.test(className)) return true;
+                var ariaLabel = (linkEl.getAttribute('aria-label') || '').toLowerCase();
+                if (/(next|previous|prev|page)/.test(ariaLabel)) return true;
+                var text = (linkEl.textContent || '').trim().toLowerCase();
+                if (text === 'next' || text === 'prev' || text === 'previous' || text === 'next ›' || text === '‹ prev') return true;
+            }
+
             var hasPaginationParam = false;
             target.searchParams.forEach(function (_value, key) {
                 var normalized = String(key || '').toLowerCase();
-                if (normalized === 'page' || normalized.endsWith('_page')) {
+                if (
+                    normalized === 'page' ||
+                    normalized === 'p' ||
+                    normalized === 'offset' ||
+                    normalized === 'start' ||
+                    normalized === 'cursor' ||
+                    normalized.endsWith('_page') ||
+                    normalized.endsWith('_offset') ||
+                    normalized.endsWith('_cursor')
+                ) {
                     hasPaginationParam = true;
                 }
             });
@@ -708,6 +773,29 @@
         } catch (e) {
             return false;
         }
+    }
+
+    function _isLikelySectionPaginationAnchor(linkEl) {
+        if (!linkEl || typeof linkEl.closest !== 'function') return false;
+
+        var contentRoot = document.getElementById(CONTENT_ID);
+        if (!contentRoot || !contentRoot.contains(linkEl)) return false;
+
+        if (linkEl.closest('.admin-nav, .admin-header, .admin-sidebar, .admin-toolbar, .breadcrumbs')) {
+            return false;
+        }
+
+        if (linkEl.closest('nav, .table-responsive, .table-wrapper, .table-container, .acct-table-wrap, .invoices-table, .report-table-wrap, .content')) {
+            return true;
+        }
+
+        var text = (linkEl.textContent || '').replace(/\s+/g, ' ').trim().toLowerCase();
+        if (/^(next|prev|previous|\d+)$/.test(text)) return true;
+
+        var ariaLabel = (linkEl.getAttribute('aria-label') || '').toLowerCase();
+        if (/(next|prev|previous|page)/.test(ariaLabel)) return true;
+
+        return false;
     }
 
     function _paginationContainerSelector(navEl) {
@@ -725,6 +813,39 @@
 
     function _findPaginationScope(root, navEl) {
         if (!root || !navEl) return null;
+
+        var siblingSelectors = ['.table-responsive', '.table-wrapper', '.table-container', '.acct-table-wrap', '.invoices-table', '.report-table-wrap'];
+        var siblingTableHost = '.table-responsive, .table-wrapper, .table-container, .acct-table-wrap, .invoices-table, .report-table-wrap';
+        // Walk backwards through all preceding siblings
+        var prevSib = navEl.previousElementSibling;
+        while (prevSib) {
+            if (prevSib.nodeType === 1 && prevSib.matches(siblingTableHost)) {
+                for (var ss = 0; ss < siblingSelectors.length; ss++) {
+                    if (!prevSib.matches(siblingSelectors[ss])) continue;
+                    var siblingList = root.querySelectorAll(siblingSelectors[ss]);
+                    var siblingIndex = Array.prototype.indexOf.call(siblingList, prevSib);
+                    if (siblingIndex >= 0) {
+                        return { element: prevSib, selector: siblingSelectors[ss], index: siblingIndex };
+                    }
+                }
+            }
+            prevSib = prevSib.previousElementSibling;
+        }
+        // Walk forwards through all following siblings
+        var nextSib = navEl.nextElementSibling;
+        while (nextSib) {
+            if (nextSib.nodeType === 1 && nextSib.matches(siblingTableHost)) {
+                for (var ss2 = 0; ss2 < siblingSelectors.length; ss2++) {
+                    if (!nextSib.matches(siblingSelectors[ss2])) continue;
+                    var nextSibList = root.querySelectorAll(siblingSelectors[ss2]);
+                    var nextSibIndex = Array.prototype.indexOf.call(nextSibList, nextSib);
+                    if (nextSibIndex >= 0) {
+                        return { element: nextSib, selector: siblingSelectors[ss2], index: nextSibIndex };
+                    }
+                }
+            }
+            nextSib = nextSib.nextElementSibling;
+        }
 
         var scoped = navEl.closest('[data-admin-pagination-scope]');
         if (scoped) {
@@ -758,6 +879,51 @@
         return null;
     }
 
+    function _syncPaginationNav(currentContent, newContent, scope, navEl, navSelector, navIndex) {
+        if (!currentContent || !newContent || !scope || !scope.element || !navEl) return;
+
+        var currentNav = null;
+        if (navEl.matches && navEl.matches('nav')) {
+            currentNav = navEl;
+        } else if (typeof navEl.closest === 'function') {
+            currentNav = navEl.closest('nav');
+        }
+        if (!currentNav) return;
+
+        // If nav is inside swapped scope, it is already refreshed.
+        if (scope.element.contains(currentNav)) return;
+
+        var replacementNav = null;
+
+        if (navSelector && navIndex >= 0) {
+            var newNavList = newContent.querySelectorAll(navSelector);
+            replacementNav = newNavList[navIndex] || null;
+        }
+
+        if (!replacementNav) {
+            var newScopes = newContent.querySelectorAll(scope.selector);
+            var newScope = newScopes[scope.index] || null;
+            if (!newScope) return;
+
+            if (currentNav.previousElementSibling === scope.element) {
+                var nextNav = newScope.nextElementSibling;
+                if (nextNav && nextNav.matches && nextNav.matches('nav')) {
+                    replacementNav = nextNav;
+                }
+            } else if (currentNav.nextElementSibling === scope.element) {
+                var prevNav = newScope.previousElementSibling;
+                if (prevNav && prevNav.matches && prevNav.matches('nav')) {
+                    replacementNav = prevNav;
+                }
+            }
+        }
+
+        if (!replacementNav) return;
+
+        var replacementClone = replacementNav.cloneNode(true);
+        currentNav.replaceWith(replacementClone);
+    }
+
     function _gotoPagination(href, pushState, navEl, loaderMessage) {
         if (typeof pushState === 'undefined') pushState = true;
 
@@ -770,17 +936,20 @@
 
         var currentContent = document.getElementById(CONTENT_ID);
         var navSelector = _paginationContainerSelector(navEl);
+        var navIndex = -1;
         var scope = _findPaginationScope(currentContent, navEl);
-        if (!currentContent || !navSelector || !scope) {
+        if (!currentContent || !scope) {
             _goto(href, pushState, loaderMessage);
             return;
         }
 
-        var navList = currentContent.querySelectorAll(navSelector);
-        var navIndex = Array.prototype.indexOf.call(navList, navEl);
-        if (navIndex < 0) {
-            _goto(href, pushState, loaderMessage);
-            return;
+        if (navSelector) {
+            var navList = currentContent.querySelectorAll(navSelector);
+            navIndex = Array.prototype.indexOf.call(navList, navEl);
+            if (navIndex < 0) {
+                _goto(href, pushState, loaderMessage);
+                return;
+            }
         }
 
         // Abort any in-flight request
@@ -791,6 +960,10 @@
 
         _navigating = true;
         _cleanup();
+        _hideLoader();
+        if (window.AdminPageLoader && typeof window.AdminPageLoader.hide === 'function') {
+            window.AdminPageLoader.hide();
+        }
         var hideScopedLoader = _showScopedPaginationLoader(scope.element, loaderMessage || 'Loading next page...', navEl);
 
         var controller = null;
@@ -856,6 +1029,7 @@
                 }
 
                 scope.element.innerHTML = newScope.innerHTML;
+                _syncPaginationNav(currentContent, newContent, scope, navEl, navSelector, navIndex);
 
                 _runScripts(scope.element)
                     .catch(function () { /* non-fatal script errors are ignored here */ })
@@ -1058,7 +1232,7 @@
         if (a.hasAttribute('download')) return;
 
         var paginationNode = a.closest(PAGINATION_NAV_SELECTOR);
-        var isPaginationNavigation = !!paginationNode && _isPaginationLink(a.href);
+        var isPaginationNavigation = _isPaginationLink(a.href, a) && (!!paginationNode || _isLikelySectionPaginationAnchor(a));
 
         // Honour explicit opt-out for regular links, but allow section-scoped
         // pagination links to use mini loaders instead of full page overlays.
@@ -1077,7 +1251,7 @@
             if (typeof e.stopImmediatePropagation === 'function') {
                 e.stopImmediatePropagation();
             }
-            _gotoPagination(a.href, true, paginationNode, 'Loading page results...');
+            _gotoPagination(a.href, true, paginationNode || a.closest('nav') || a, 'Loading page results...');
             return;
         }
 
