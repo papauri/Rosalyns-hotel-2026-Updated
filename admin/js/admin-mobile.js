@@ -253,22 +253,6 @@
         return false;
     }
 
-    function getCardFieldColumnCount(table) {
-        const availableWidth = getTableAvailableWidth(table);
-        const viewportWidth = window.innerWidth || document.documentElement.clientWidth || availableWidth;
-        const effectiveWidth = Math.min(availableWidth, viewportWidth);
-
-        // Scale card grid density based on available space. Narrow phones stay at 1 column,
-        // but compact tablets can still show 2 columns even on tighter containers.
-        const minFieldColumnWidth = 120;
-        const fieldGap = 12;
-        const maxColumns = 3;
-        const usableWidth = Math.max(0, effectiveWidth - 20);
-
-        const estimatedColumns = Math.floor((usableWidth + fieldGap) / (minFieldColumnWidth + fieldGap));
-        return Math.min(maxColumns, Math.max(1, estimatedColumns));
-    }
-
     function enhanceMobileTables() {
         const apply = () => {
             const tables = getCardableTables();
@@ -359,7 +343,6 @@
 
         // Mark table as mobile-enhanced
         table.classList.add('mobile-enhanced');
-        table.style.setProperty('--mobile-card-cols', String(getCardFieldColumnCount(table)));
         setCardModeWrappers(table, true);
     }
 
@@ -368,7 +351,6 @@
      */
     function restoreTableFromCards(table) {
         table.classList.remove('mobile-enhanced');
-        table.style.removeProperty('--mobile-card-cols');
         setCardModeWrappers(table, false);
 
         const tbody = table.querySelector('tbody');

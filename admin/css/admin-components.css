@@ -331,8 +331,10 @@
 .modal-body,
 .admin-modal__body {
     min-height: 0;
-    overflow: auto;
+    overflow-y: auto;
+    overflow-x: hidden;
     overscroll-behavior: contain;
+    -webkit-overflow-scrolling: touch;
 }
 
 .modal__body table,

@@ -1540,7 +1540,8 @@ hr.menu-divider {
 }
 
 #rh-admin-page .bookings-section table.mobile-enhanced tbody tr {
-    grid-template-columns: repeat(auto-fit, minmax(max(7rem, min(100%, (100% - 0.68rem) / 2)), 1fr));
+    display: flex;
+    flex-direction: column;
     gap: clamp(0.48rem, 0.4rem + 0.24vw, 0.68rem);
 }
 
@@ -2538,9 +2539,10 @@ hr.menu-divider {
         gap: 0.82rem;
     }
 
-    /* Responsive cell wrapping: allow 2 columns where space permits */
+    /* Responsive cell wrapping: force single column on mobile */
     .bookings-alert-modal__table.mobile-enhanced tbody tr {
-        grid-template-columns: repeat(auto-fit, minmax(max(7rem, min(100%, (100% - 0.6rem) / 2)), 1fr));
+        display: flex;
+        flex-direction: column;
     }
 
     /* Override desktop percentage widths for grid layout */

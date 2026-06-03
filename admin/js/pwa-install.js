@@ -31,11 +31,14 @@
     let bannerEl = null;
 
     window.addEventListener('beforeinstallprompt', function (e) {
+        if (isDismissed()) {
+            // If the banner is in dismiss cooldown, do not intercept the native prompt lifecycle.
+            return;
+        }
         e.preventDefault();
         deferredPrompt = e;
-        if (isDismissed()) return;
-        // Delay slightly so page content loads first
-        setTimeout(showBanner, 2500);
+        // Show quickly to avoid losing the prompt event on short-lived page visits.
+        requestAnimationFrame(showBanner);
     });
 
     window.addEventListener('appinstalled', function () {

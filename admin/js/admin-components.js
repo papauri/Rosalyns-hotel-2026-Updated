@@ -291,6 +291,149 @@
     window.Alert = Alert;
 
     // ============================================
+    // ADMIN CONFIRM / PROMPT DIALOG
+    // ============================================
+    // Provides window.AdminConfirm.request(options) → Promise<boolean>
+    // and window.AdminConfirm.prompt(options) → Promise<string|null>
+
+    (function buildAdminConfirm() {
+        let _overlay = null;
+
+        function _getOverlay() {
+            if (_overlay) return _overlay;
+            const el = document.createElement('div');
+            el.id = 'adminConfirmOverlay';
+            el.style.cssText = [
+                'display:none',
+                'position:fixed',
+                'inset:0',
+                'z-index:99999',
+                'background:rgba(15,23,42,0.54)',
+                'align-items:center',
+                'justify-content:center',
+                'padding:1rem',
+                'box-sizing:border-box',
+                '-webkit-overflow-scrolling:touch'
+            ].join(';');
+            el.innerHTML = [
+                '<div id="adminConfirmBox" role="dialog" aria-modal="true" style="',
+                    'background:#fff;border-radius:16px;max-width:400px;width:100%;',
+                    'box-shadow:0 20px 48px rgba(15,23,42,.22);overflow:hidden;',
+                    'display:flex;flex-direction:column;max-height:90dvh;',
+                '">',
+                    '<div id="adminConfirmHeader" style="padding:1.1rem 1.3rem 0.7rem;display:flex;align-items:center;gap:0.7rem;">',
+                        '<span id="adminConfirmIcon" style="font-size:1.25rem;"></span>',
+                        '<strong id="adminConfirmTitle" style="font-size:1rem;flex:1;"></strong>',
+                    '</div>',
+                    '<div id="adminConfirmBody" style="padding:0 1.3rem 0.6rem;overflow-y:auto;-webkit-overflow-scrolling:touch;flex:1;font-size:0.88rem;color:#374151;"></div>',
+                    '<div id="adminConfirmInputWrap" style="display:none;padding:0 1.3rem 0.4rem;">',
+                        '<label id="adminConfirmInputLabel" style="font-size:0.8rem;font-weight:600;color:#6b7280;display:block;margin-bottom:0.35rem;text-transform:uppercase;letter-spacing:.04em;"></label>',
+                        '<input id="adminConfirmInput" type="text" style="width:100%;border:1px solid #d1d5db;border-radius:8px;padding:0.55rem 0.75rem;font-size:0.88rem;box-sizing:border-box;outline:none;" />',
+                    '</div>',
+                    '<div id="adminConfirmFooter" style="padding:0.8rem 1.3rem 1rem;display:flex;gap:0.6rem;justify-content:flex-end;flex-wrap:wrap;">',
+                        '<button id="adminConfirmCancel" type="button" style="',
+                            'padding:0.5rem 1.1rem;border-radius:8px;border:1px solid #d1d5db;',
+                            'background:#f9fafb;color:#374151;font-size:0.85rem;font-weight:600;cursor:pointer;',
+                        '">Cancel</button>',
+                        '<button id="adminConfirmOk" type="button" style="',
+                            'padding:0.5rem 1.2rem;border-radius:8px;border:1px solid transparent;',
+                            'color:#fff;font-size:0.85rem;font-weight:600;cursor:pointer;background:#1e2938;',
+                        '"></button>',
+                    '</div>',
+                '</div>'
+            ].join('');
+            document.body.appendChild(el);
+            _overlay = el;
+            return el;
+        }
+
+        function _open(options, hasInput) {
+            return new Promise(function(resolve) {
+                const overlay = _getOverlay();
+                const title   = document.getElementById('adminConfirmTitle');
+                const icon    = document.getElementById('adminConfirmIcon');
+                const body    = document.getElementById('adminConfirmBody');
+                const inputWrap = document.getElementById('adminConfirmInputWrap');
+                const inputLabel = document.getElementById('adminConfirmInputLabel');
+                const input   = document.getElementById('adminConfirmInput');
+                const okBtn   = document.getElementById('adminConfirmOk');
+                const cancelBtn = document.getElementById('adminConfirmCancel');
+
+                const tone = options.tone || 'default';
+                const toneColors = { danger: '#b91c1c', warning: '#92400e', success: '#166534', default: '#1e2938' };
+                const toneBg = { danger: '#fef2f2', warning: '#fffbeb', success: '#f0fdf4', default: '#f0f4ff' };
+
+                title.textContent = options.title || 'Confirm';
+                icon.innerHTML = options.icon ? '<i class="fas ' + options.icon + '"></i>' : '';
+                icon.style.color = toneColors[tone] || toneColors.default;
+                document.getElementById('adminConfirmHeader').style.background = toneBg[tone] || toneBg.default;
+
+                let bodyHtml = '';
+                if (options.message) bodyHtml += '<p style="margin:0 0 0.5rem;">' + String(options.message).replace(/</g,'&lt;') + '</p>';
+                if (Array.isArray(options.details) && options.details.length) {
+                    bodyHtml += '<ul style="margin:0;padding-left:1.1rem;list-style:disc;">';
+                    options.details.forEach(function(d) {
+                        bodyHtml += '<li style="margin-bottom:0.25rem;">' + String(d).replace(/</g,'&lt;') + '</li>';
+                    });
+                    bodyHtml += '</ul>';
+                }
+                body.innerHTML = bodyHtml;
+
+                okBtn.textContent = options.confirmText || 'Confirm';
+                okBtn.style.background = toneColors[tone] || toneColors.default;
+                okBtn.style.borderColor = toneColors[tone] || toneColors.default;
+
+                if (hasInput) {
+                    inputWrap.style.display = 'block';
+                    inputLabel.textContent = options.inputLabel || 'Enter value';
+                    input.placeholder = options.inputPlaceholder || '';
+                    input.value = '';
+                    setTimeout(function(){ input.focus(); }, 80);
+                } else {
+                    inputWrap.style.display = 'none';
+                }
+
+                overlay.style.display = 'flex';
+                document.getElementById('adminConfirmBox').setAttribute('aria-label', options.title || 'Confirm');
+
+                function cleanup() {
+                    overlay.style.display = 'none';
+                    okBtn.removeEventListener('click', onOk);
+                    cancelBtn.removeEventListener('click', onCancel);
+                    overlay.removeEventListener('click', onBackdrop);
+                    document.removeEventListener('keydown', onKey);
+                }
+
+                function onOk() {
+                    cleanup();
+                    resolve(hasInput ? (input.value || '') : true);
+                }
+                function onCancel() {
+                    cleanup();
+                    resolve(hasInput ? null : false);
+                }
+                function onBackdrop(e) {
+                    if (e.target === overlay) onCancel();
+                }
+                function onKey(e) {
+                    if (e.key === 'Escape') onCancel();
+                    if (e.key === 'Enter' && !hasInput) onOk();
+                }
+
+                okBtn.addEventListener('click', onOk);
+                cancelBtn.addEventListener('click', onCancel);
+                overlay.addEventListener('click', onBackdrop);
+                document.addEventListener('keydown', onKey);
+            });
+        }
+
+        window.AdminConfirm = {
+            request: function(options) { return _open(options, false); },
+            prompt:  function(options) { return _open(options, true);  }
+        };
+    })();
+
+    // ============================================
     // CALENDAR BOOKING TOOLTIP
     // ============================================
 

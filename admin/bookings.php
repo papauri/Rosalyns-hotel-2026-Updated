@@ -1328,9 +1328,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
             $pdo->beginTransaction();
             try {
+                $settlementPaymentReference = null;
+
                 if ($settlement_action === 'charge' && $nightDiff_s > 0) {
                     // Add folio charge for extra nights
                     $extraNights_s = $nightDiff_s;
+                    $chargeAmount_s = round($extraNights_s * $ppn_s, 2);
                     $chargeDesc    = "Late checkout: {$extraNights_s} extra night(s) at {$currency_symbol} "
                         . number_format($ppn_s, 2) . "/night"
                         . ($settle_notes ? '. ' . $settle_notes : '');
@@ -1351,6 +1354,39 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         UPDATE bookings SET check_out_date = ?, number_of_nights = ?, updated_at = NOW() WHERE id = ?
                     ")->execute([$todayStr_s, $actualNights_s, $booking_id]);
                     // Recalculate so amount_due reflects the new folio charge
+                    recalculateBookingFinancials($booking_id);
+
+                    // Record immediate payment for extra-night settlement.
+                    $paymentRefBase = 'PAY-EC-' . date('Y') . '-' . str_pad((string)$booking_id, 6, '0', STR_PAD_LEFT);
+                    $settlementPaymentReference = $paymentRefBase;
+                    $paymentRefSuffix = 1;
+                    $paymentRefCheck = $pdo->prepare('SELECT COUNT(*) FROM payments WHERE payment_reference = ?');
+                    $paymentRefCheck->execute([$settlementPaymentReference]);
+                    while ((int)$paymentRefCheck->fetchColumn() > 0) {
+                        $paymentRefSuffix++;
+                        $settlementPaymentReference = $paymentRefBase . '-' . $paymentRefSuffix;
+                        $paymentRefCheck->execute([$settlementPaymentReference]);
+                    }
+
+                    $settlementReceipt = finance_next_receipt_number($pdo, $todayStr_s);
+                    $settlementNotes = 'Overdue checkout settlement: ' . $extraNights_s . ' extra night(s)';
+                    if ($settle_notes !== '') {
+                        $settlementNotes .= '. ' . $settle_notes;
+                    }
+
+                    $pdo->prepare("\n                        INSERT INTO payments (\n                            payment_reference, booking_type, booking_id, booking_reference,\n                            payment_date, payment_amount, vat_rate, vat_amount, total_amount,\n                            payment_method, payment_type, payment_status, invoice_generated,\n                            receipt_number, status, notes, recorded_by\n                        ) VALUES (?, 'room', ?, ?, CURDATE(), ?, 0, 0, ?, ?, 'partial_payment', 'completed', 1, ?, 'completed', ?, ?)\n                    ")->execute([
+                        $settlementPaymentReference,
+                        $booking_id,
+                        $sbk['booking_reference'],
+                        $chargeAmount_s,
+                        $chargeAmount_s,
+                        $payment_method,
+                        $settlementReceipt,
+                        $settlementNotes,
+                        (int)($user['id'] ?? 0),
+                    ]);
+
+                    // Re-sync booking financials after settlement payment insert.
                     recalculateBookingFinancials($booking_id);
                 } elseif ($settlement_action === 'refund' && $nightDiff_s < 0) {
                     // Issue refund for unused nights
@@ -1446,7 +1482,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $pdo->commit();
 
                 header('Content-Type: application/json');
-                echo json_encode(['success' => true, 'message' => 'Checkout completed successfully.']);
+                $checkoutMessage = 'Checkout completed successfully.';
+                if (!empty($settlementPaymentReference)) {
+                    $checkoutMessage .= ' Extra-night payment recorded (' . $settlementPaymentReference . ').';
+                }
+                echo json_encode(['success' => true, 'message' => $checkoutMessage]);
                 exit;
             } catch (Throwable $e) {
                 if ($pdo->inTransaction()) {
@@ -1747,6 +1787,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 } else {
                     $error = 'Booking not found.';
                 }
+            }
+
+            if (isAjaxRequest()) {
+                header('Content-Type: application/json');
+                if (!empty($error)) {
+                    echo json_encode(['success' => false, 'message' => $error]);
+                } else {
+                    echo json_encode(['success' => true, 'message' => $message ?? 'Booking marked as no-show.']);
+                }
+                exit;
             }
         } elseif ($action === 'get_booking_details') {
             if (!isAjaxRequest()) {
@@ -3853,6 +3903,14 @@ $today_str = $today->format('Y-m-d');
         }
 
         function postBookingAction(formData, errorMessage) {
+            if (formData instanceof FormData && !formData.has('csrf_token')) {
+                const csrfMeta = document.querySelector('meta[name="csrf-token"]');
+                const csrfToken = window._rhCsrf || (csrfMeta ? (csrfMeta.getAttribute('content') || '') : '');
+                if (csrfToken) {
+                    formData.append('csrf_token', csrfToken);
+                }
+            }
+
             return fetch(window.location.href, {
                 method: 'POST',
                 body: formData,
@@ -3877,6 +3935,38 @@ $today_str = $today->format('Y-m-d');
                     success: true
                 };
             });
+        }
+
+        function setModalActionLoading(form, isLoading, loadingText) {
+            if (!form || !(form instanceof HTMLElement)) {
+                return;
+            }
+            const modalContent = form.closest('.modal-content');
+            if (!modalContent) {
+                return;
+            }
+
+            let loader = modalContent.querySelector('.modal-inline-loader');
+            if (!loader) {
+                loader = document.createElement('div');
+                loader.className = 'modal-inline-loader';
+                loader.setAttribute('hidden', 'hidden');
+                loader.innerHTML = '<span class="modal-inline-loader__spinner" aria-hidden="true"></span><span class="modal-inline-loader__text">Processing...</span>';
+                modalContent.appendChild(loader);
+            }
+
+            const textNode = loader.querySelector('.modal-inline-loader__text');
+            if (textNode && loadingText) {
+                textNode.textContent = loadingText;
+            }
+
+            if (isLoading) {
+                loader.removeAttribute('hidden');
+                modalContent.classList.add('is-modal-busy');
+            } else {
+                loader.setAttribute('hidden', 'hidden');
+                modalContent.classList.remove('is-modal-busy');
+            }
         }
 
         // Tab switching functionality
@@ -4817,9 +4907,15 @@ $today_str = $today->format('Y-m-d');
             }
         }
 
-        document.getElementById('checkoutSettlementForm')?.addEventListener('submit', async function(e) {
+        async function handleCheckoutSettlementSubmit(e) {
             e.preventDefault();
+            const form = e.target;
+            if (!form || form.id !== 'checkoutSettlementForm') {
+                return;
+            }
+
             const bookingId = document.getElementById('cs_booking_id').value;
+            const bookingRef = document.getElementById('cs_booking_ref').value;
             const settleType = document.getElementById('cs_settlement_type').value;
             const payMethod = document.getElementById('cs_payment_method').value;
             const refPayMethod = document.getElementById('cs_refund_payment_method').value;
@@ -4828,32 +4924,51 @@ $today_str = $today->format('Y-m-d');
 
             let settlementAction = skipToggle ? 'skip' : settleType;
 
-            const formData = new FormData();
-            formData.append('action', 'checkout_settle');
-            formData.append('id', bookingId);
-            formData.append('settlement_action', settlementAction);
-            formData.append('payment_method', settleType === 'charge' ? payMethod : refPayMethod);
-            formData.append('notes', notes);
+            const formData = new FormData(form);
+            formData.set('action', 'checkout_settle');
+            formData.set('id', bookingId);
+            formData.set('settlement_action', settlementAction);
+            formData.set('payment_method', settleType === 'charge' ? payMethod : refPayMethod);
+            formData.set('notes', notes);
 
-            const submitBtn = this.querySelector('button[type="submit"]');
+            const submitBtn = form.querySelector('#cs_proceed_btn') || form.querySelector('button[type="submit"]');
+            const confirmed = await confirmAdminAction({
+                title: 'Confirm checkout',
+                message: 'Complete checkout for booking ' + (bookingRef || ('#' + bookingId)) + '?',
+                details: [
+                    'Settlement option: ' + (settlementAction === 'skip' ? 'No financial adjustment' : settlementAction),
+                    'This will mark the booking as checked out and update room status.'
+                ],
+                confirmText: 'Complete Checkout',
+                icon: 'fa-right-from-bracket'
+            });
+            if (!confirmed) {
+                return;
+            }
+
             if (submitBtn) setButtonLoading(submitBtn, true);
-            showLoadingOverlay('Processing settlement and checkout...');
+            setModalActionLoading(form, true, 'Processing settlement and checkout...');
 
             try {
                 const data = await postBookingAction(formData, 'Checkout failed');
                 if (data.success) {
                     closeCheckoutSettlementModal();
-                    Alert.show(data.message, 'success');
-                    setTimeout(() => window.location.reload(), 1200);
+                    reloadWithBookingActionMessage(data, 'Checkout completed successfully.');
                 } else {
-                    hideLoadingOverlay();
+                    setModalActionLoading(form, false);
                     if (submitBtn) setButtonLoading(submitBtn, false);
                     Alert.show(data.message || 'Checkout failed.', 'error');
                 }
             } catch (err) {
-                hideLoadingOverlay();
+                setModalActionLoading(form, false);
                 if (submitBtn) setButtonLoading(submitBtn, false);
                 Alert.show(err.message || 'Checkout failed.', 'error');
+            }
+        }
+
+        document.addEventListener('submit', function(e) {
+            if (e.target && e.target.id === 'checkoutSettlementForm') {
+                handleCheckoutSettlementSubmit(e);
             }
         });
 
@@ -5277,7 +5392,8 @@ $today_str = $today->format('Y-m-d');
                 <h3><i class="fas fa-calendar-plus"></i> Extend Stay</h3>
                 <button class="close-modal" onclick="closeExtendStayModal()" style="color: #fff;">&times;</button>
             </div>
-            <form id="extendStayForm">
+            <form id="extendStayForm" method="POST" action="bookings.php">
+                <input type="hidden" name="csrf_token" value="<?= htmlspecialchars($csrf_token, ENT_QUOTES) ?>">
                 <input type="hidden" name="action" value="extend_stay">
                 <input type="hidden" name="booking_id" id="extend_booking_id" value="">
 
@@ -5316,7 +5432,8 @@ $today_str = $today->format('Y-m-d');
                 <h3><i class="fas fa-calendar-pen"></i> Admin: Change Checkout Date</h3>
                 <button class="close-modal" onclick="closeAdminChangeDateModal()" style="color: #fff;">&times;</button>
             </div>
-            <form id="adminChangeDateForm">
+            <form id="adminChangeDateForm" method="POST" action="bookings.php">
+                <input type="hidden" name="csrf_token" value="<?= htmlspecialchars($csrf_token, ENT_QUOTES) ?>">
                 <input type="hidden" name="action" value="admin_update_checkout_date">
                 <input type="hidden" name="booking_id" id="acd_booking_id" value="">
                 <div class="modal-body">
@@ -5361,10 +5478,13 @@ $today_str = $today->format('Y-m-d');
                 <h3 id="cs_title"><i class="fas fa-receipt"></i> Checkout Settlement</h3>
                 <button class="close-modal" onclick="closeCheckoutSettlementModal()">&times;</button>
             </div>
-            <form id="checkoutSettlementForm">
-                <input type="hidden" id="cs_booking_id" name="booking_id" value="">
+            <form id="checkoutSettlementForm" method="POST" action="bookings.php">
+                <input type="hidden" name="csrf_token" value="<?= htmlspecialchars($csrf_token, ENT_QUOTES) ?>">
+                <input type="hidden" name="action" value="checkout_settle">
+                <input type="hidden" id="cs_booking_id" name="id" value="">
                 <input type="hidden" id="cs_booking_ref" value="">
                 <input type="hidden" id="cs_settlement_type" value="">
+                <input type="hidden" id="cs_settlement_action" name="settlement_action" value="skip">
 
                 <div class="modal-body">
                     <!-- Dynamic summary injected by JS -->
@@ -5416,7 +5536,7 @@ $today_str = $today->format('Y-m-d');
 
                 <div class="modal-footer">
                     <button type="button" class="btn btn-secondary" onclick="closeCheckoutSettlementModal()">Cancel</button>
-                    <button type="submit" id="cs_proceed_btn" class="btn btn-primary" style="background:#dc3545;border-color:#dc3545;">Proceed & Checkout</button>
+                    <button type="button" id="cs_proceed_btn" class="btn btn-primary" style="background:#dc3545;border-color:#dc3545;" onclick="const f=document.getElementById('checkoutSettlementForm'); if(f){ f.dispatchEvent(new Event('submit',{bubbles:true,cancelable:true})); } return false;">Proceed & Checkout</button>
                 </div>
             </form>
         </div>
@@ -5439,6 +5559,49 @@ $today_str = $today->format('Y-m-d');
             font-weight: 700;
             background: #f7f3ee;
             border-top: 2px solid #c0a882;
+        }
+
+        .modal-content {
+            position: relative;
+        }
+
+        .modal-inline-loader {
+            position: absolute;
+            inset: 0;
+            background: rgba(255, 255, 255, 0.76);
+            backdrop-filter: blur(1.5px);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 0.58rem;
+            border-radius: inherit;
+            z-index: 40;
+            color: #1f2937;
+            font-size: 0.86rem;
+            font-weight: 600;
+        }
+
+        .modal-inline-loader__spinner {
+            width: 1rem;
+            height: 1rem;
+            border: 2px solid rgba(31, 41, 55, 0.18);
+            border-top-color: #1f2937;
+            border-radius: 999px;
+            animation: modal-inline-spin 0.72s linear infinite;
+        }
+
+        .modal-content.is-modal-busy {
+            pointer-events: none;
+        }
+
+        @keyframes modal-inline-spin {
+            from {
+                transform: rotate(0deg);
+            }
+
+            to {
+                transform: rotate(360deg);
+            }
         }
     </style>
 
@@ -6381,12 +6544,12 @@ $today_str = $today->format('Y-m-d');
 
             const submitBtn = this.querySelector('button[type="submit"]');
             if (submitBtn) setButtonLoading(submitBtn, true);
-            showLoadingOverlay(mode === 'noshow' ? 'Marking booking as No-Show...' : 'Checking in guest...');
+            setModalActionLoading(this, true, mode === 'noshow' ? 'Marking booking as No-Show...' : 'Checking in guest...');
 
             postBookingAction(formData, mode === 'noshow' ? 'Error marking booking as no-show' : 'Error checking in guest')
                 .then(data => reloadWithBookingActionMessage(data, mode === 'noshow' ? 'Booking marked as no-show successfully.' : 'Guest checked in successfully.'))
                 .catch(error => {
-                    hideLoadingOverlay();
+                    setModalActionLoading(this, false);
                     if (submitBtn) setButtonLoading(submitBtn, false);
                     Alert.show(error.message || (mode === 'noshow' ? 'Error marking booking as no-show' : 'Error checking in guest'), 'error');
                 });
@@ -6402,12 +6565,12 @@ $today_str = $today->format('Y-m-d');
 
             const submitBtn = this.querySelector('button[type="submit"]');
             if (submitBtn) setButtonLoading(submitBtn, true);
-            showLoadingOverlay('Cancelling booking...');
+            setModalActionLoading(this, true, 'Cancelling booking...');
 
             postBookingAction(formData, 'Error cancelling booking')
                 .then(data => reloadWithBookingActionMessage(data, 'Booking cancelled successfully.'))
                 .catch(error => {
-                    hideLoadingOverlay();
+                    setModalActionLoading(this, false);
                     if (submitBtn) setButtonLoading(submitBtn, false);
                     Alert.show(error.message || 'Error cancelling booking', 'error');
                 });
@@ -6571,66 +6734,81 @@ $today_str = $today->format('Y-m-d');
         document.getElementById('adminChangeDateForm')?.addEventListener('submit', function(e) {
             e.preventDefault();
             const formData = new FormData(this);
+            const bookingRef = document.getElementById('acd_booking_ref')?.value || '';
+            const currentCheckout = document.getElementById('acd_current_checkout')?.value || '';
+            const newCheckout = document.getElementById('acd_new_checkout')?.value || '';
             const submitBtn = this.querySelector('button[type="submit"]');
-            if (submitBtn) setButtonLoading(submitBtn, true);
-            showLoadingOverlay('Updating checkout date...');
+            const form = this;
+            confirmAdminAction({
+                    title: 'Confirm checkout date change',
+                    message: 'Update checkout date for booking ' + (bookingRef || 'this booking') + '?',
+                    details: [
+                        'Current: ' + (currentCheckout || '—'),
+                        'New: ' + (newCheckout || '—')
+                    ],
+                    confirmText: 'Save Change',
+                    icon: 'fa-calendar-pen',
+                    tone: 'warning'
+                })
+                .then(confirmed => {
+                    if (!confirmed) {
+                        return;
+                    }
 
-            fetch(window.location.href, {
-                    method: 'POST',
-                    body: formData,
-                    headers: {
-                        'X-Requested-With': 'XMLHttpRequest'
-                    }
-                })
-                .then(res => res.json())
-                .then(data => {
-                    if (data.success) {
-                        closeAdminChangeDateModal();
-                        Alert.show(data.message, 'success');
-                        setTimeout(() => window.location.reload(), 1500);
-                    } else {
-                        hideLoadingOverlay();
-                        if (submitBtn) setButtonLoading(submitBtn, false);
-                        Alert.show(data.message || 'Failed to update checkout date.', 'error');
-                    }
-                })
-                .catch(() => {
-                    hideLoadingOverlay();
-                    if (submitBtn) setButtonLoading(submitBtn, false);
-                    Alert.show('An error occurred. Please try again.', 'error');
+                    if (submitBtn) setButtonLoading(submitBtn, true);
+                    setModalActionLoading(form, true, 'Updating checkout date...');
+
+                    return postBookingAction(formData, 'Failed to update checkout date.')
+                        .then(data => {
+                            closeAdminChangeDateModal();
+                            reloadWithBookingActionMessage(data, 'Checkout date updated successfully.');
+                        })
+                        .catch(error => {
+                            setModalActionLoading(form, false);
+                            if (submitBtn) setButtonLoading(submitBtn, false);
+                            Alert.show(error.message || 'An error occurred. Please try again.', 'error');
+                        });
                 });
         });
 
         document.getElementById('extendStayForm')?.addEventListener('submit', function(e) {
             e.preventDefault();
             const formData = new FormData(this);
+            const bookingRef = document.getElementById('extend_booking_ref')?.value || '';
+            const oldCheckout = document.getElementById('extend_current_checkout')?.value || '';
+            const newCheckout = document.getElementById('new_checkout')?.value || '';
             const submitBtn = this.querySelector('button[type="submit"]');
+            const form = this;
 
-            if (submitBtn) setButtonLoading(submitBtn, true);
-            showLoadingOverlay('Extending stay...');
+            confirmAdminAction({
+                    title: 'Confirm stay extension',
+                    message: 'Extend stay for booking ' + (bookingRef || 'this booking') + '?',
+                    details: [
+                        'Current checkout: ' + (oldCheckout || '—'),
+                        'New checkout: ' + (newCheckout || '—')
+                    ],
+                    confirmText: 'Extend Stay',
+                    icon: 'fa-calendar-plus',
+                    tone: 'success'
+                })
+                .then(confirmed => {
+                    if (!confirmed) {
+                        return;
+                    }
 
-            fetch(window.location.href, {
-                    method: 'POST',
-                    body: formData,
-                    headers: {
-                        'X-Requested-With': 'XMLHttpRequest'
-                    }
-                })
-                .then(res => res.json())
-                .then(data => {
-                    if (data.success) {
-                        Alert.show(data.message, 'success');
-                        setTimeout(() => window.location.reload(), 1500);
-                    } else {
-                        hideLoadingOverlay();
-                        if (submitBtn) setButtonLoading(submitBtn, false);
-                        Alert.show(data.message || 'Failed to extend stay.', 'error');
-                    }
-                })
-                .catch(() => {
-                    hideLoadingOverlay();
-                    if (submitBtn) setButtonLoading(submitBtn, false);
-                    Alert.show('An error occurred while extending the stay.', 'error');
+                    if (submitBtn) setButtonLoading(submitBtn, true);
+                    setModalActionLoading(form, true, 'Extending stay...');
+
+                    return postBookingAction(formData, 'Failed to extend stay.')
+                        .then(data => {
+                            closeExtendStayModal();
+                            reloadWithBookingActionMessage(data, 'Stay extended successfully.');
+                        })
+                        .catch(error => {
+                            setModalActionLoading(form, false);
+                            if (submitBtn) setButtonLoading(submitBtn, false);
+                            Alert.show(error.message || 'An error occurred while extending the stay.', 'error');
+                        });
                 });
         });
 
@@ -7778,7 +7956,10 @@ $today_str = $today->format('Y-m-d');
             const menuGap = 6;
             const viewport = _getActionMenuViewport();
             const maxMenuW = Math.max(0, Math.floor(viewport.width - (viewportPad * 2)));
-            const maxMenuH = Math.max(180, Math.floor(viewport.height - (viewportPad * 2)));
+            // On mobile cap the menu height so it never fills the whole screen and stays scrollable.
+            const maxMenuH = viewport.width <= 640
+                ? Math.max(180, Math.floor(Math.min(viewport.height * 0.58, viewport.height - (viewportPad * 2))))
+                : Math.max(180, Math.floor(viewport.height - (viewportPad * 2)));
 
             menu.style.cssText = 'display:block;position:fixed;visibility:hidden;left:0;top:0;z-index:12050;width:auto;min-width:0;max-width:' + Math.round(maxMenuW) + 'px;';
             const measuredRect = menu.getBoundingClientRect();

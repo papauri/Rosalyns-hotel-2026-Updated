@@ -1768,6 +1768,24 @@ body {
     }
 }
 
+/* Override column widths for mobile card layout */
+@media (max-width: 600px) {
+    .pos-acct-table--sales.mobile-enhanced th:nth-child(1),
+    .pos-acct-table--sales.mobile-enhanced td:nth-child(1),
+    .pos-acct-table--sales.mobile-enhanced th:nth-child(2),
+    .pos-acct-table--sales.mobile-enhanced td:nth-child(2),
+    .pos-acct-table--sales.mobile-enhanced th:nth-child(3),
+    .pos-acct-table--sales.mobile-enhanced td:nth-child(3),
+    .pos-acct-table--sales.mobile-enhanced th:nth-child(4),
+    .pos-acct-table--sales.mobile-enhanced td:nth-child(4),
+    .pos-acct-table--sales.mobile-enhanced th:nth-child(5),
+    .pos-acct-table--sales.mobile-enhanced td:nth-child(5),
+    .pos-acct-table--sales.mobile-enhanced th:nth-child(6),
+    .pos-acct-table--sales.mobile-enhanced td:nth-child(6) {
+        width: 100%;
+    }
+}
+
 .pos-acct-pill {
     display: inline-flex;
     align-items: center;
@@ -1920,6 +1938,155 @@ body {
     .pos-acct-close-form table.mobile-enhanced .pos-acct-row-close-btn {
         width: 100%;
         justify-content: center;
+    }
+}
+
+/* Keep POS card tables readable on mobile/tablet by using a single field column. */
+@media (max-width: 64rem) {
+
+    /* Constrain form to fit viewport */
+    .pos-acct-close-form {
+        width: calc(100vw - 20px) !important;
+        max-width: calc(100vw - 20px) !important;
+        overflow: hidden !important;
+        min-width: 0 !important;
+    }
+
+    /* Constrain form and table container widths */
+    .pos-acct-close-form .table-responsive {
+        width: 100% !important;
+        max-width: 100% !important;
+        overflow: hidden !important;
+        min-width: 0 !important;
+    }
+
+    /* Constrain table to container, not intrinsic width */
+    .pos-acct-close-form table.mobile-enhanced {
+        display: block !important;
+        width: 100% !important;
+        max-width: 100% !important;
+        min-width: 0 !important;
+        border-collapse: collapse !important;
+        overflow: hidden !important;
+    }
+
+    .pos-acct-close-form table.mobile-enhanced thead {
+        display: none !important;
+    }
+
+    /* Use flex on tbody to stack rows and constrain width */
+    .pos-acct-close-form table.mobile-enhanced tbody {
+        display: flex !important;
+        flex-direction: column !important;
+        width: 100% !important;
+        min-width: 0 !important;
+        gap: 0.82rem !important;
+    }
+
+    /* Header rows: always visible as block cards */
+    .pos-acct-close-form table.mobile-enhanced tbody tr.pos-acct-header-row,
+    .pos-acct-sales-wrap table.mobile-enhanced tbody tr.pos-acct-header-row {
+        display: block !important;
+        width: 100% !important;
+        min-width: 0 !important;
+        box-sizing: border-box !important;
+    }
+
+    /* Details rows: hidden by default, shown only with is-open class */
+    .pos-acct-close-form table.mobile-enhanced tbody tr.pos-acct-details-row:not(.is-open),
+    .pos-acct-sales-wrap table.mobile-enhanced tbody tr.pos-acct-details-row:not(.is-open) {
+        display: none !important;
+    }
+
+    .pos-acct-close-form table.mobile-enhanced tbody tr.pos-acct-details-row.is-open,
+    .pos-acct-sales-wrap table.mobile-enhanced tbody tr.pos-acct-details-row.is-open {
+        display: block !important;
+        width: 100% !important;
+        min-width: 0 !important;
+        box-sizing: border-box !important;
+    }
+
+    /* All tbody rows (except drawers, headers, details): block layout, full width */
+    .pos-acct-close-form table.mobile-enhanced tbody tr:not(.pos-acct-drawer):not(.pos-acct-header-row):not(.pos-acct-details-row) {
+        display: block !important;
+        width: 100% !important;
+        min-width: 0 !important;
+        overflow: hidden !important;
+        box-sizing: border-box !important;
+        background: linear-gradient(180deg, #ffffff 0%, #fcfbf9 100%);
+        border: 1px solid color-mix(in srgb, var(--border-color, #dee2e6) 88%, #c9d2dc 12%);
+        border-radius: 14px;
+        padding: 11px;
+        margin: 0;
+    }
+
+    /* Data row cells (not drawers, headers, details): display as block, full width */
+    .pos-acct-close-form table.mobile-enhanced tbody tr:not(.pos-acct-drawer):not(.pos-acct-header-row):not(.pos-acct-details-row) td {
+        display: block !important;
+        width: 100% !important;
+        min-width: 0 !important;
+        overflow-wrap: break-word !important;
+    }
+
+    /* Drawer cells when expanded: preserve table cell display */
+    .pos-acct-close-form table.mobile-enhanced tbody tr.pos-acct-drawer.is-open td {
+        display: table-cell !important;
+    }
+
+    /* Data row cells: full width, wrap normally */
+    .finance-page .pos-acct-close-form table.mobile-enhanced tbody tr:not(.pos-acct-drawer):not(.pos-acct-header-row):not(.pos-acct-details-row)[data-pos-acct-row]>td,
+    .finance-page .pos-acct-sales-wrap table.mobile-enhanced tbody tr:not(.pos-acct-drawer):not(.pos-acct-header-row):not(.pos-acct-details-row)>td {
+        width: 100% !important;
+        min-width: 0 !important;
+        white-space: normal;
+        word-break: normal;
+        overflow-wrap: anywhere;
+    }
+
+    /* Drawer rows only when expanded: show as block */
+    .finance-page .pos-acct-close-form table.mobile-enhanced tbody tr.pos-acct-drawer.is-open,
+    .finance-page .pos-acct-sales-wrap table.mobile-enhanced tbody tr.pos-acct-drawer.is-open {
+        display: block !important;
+        width: 100% !important;
+    }
+
+    /* Drawer rows hidden by default (unless is-open) */
+    .finance-page .pos-acct-close-form table.mobile-enhanced tbody tr.pos-acct-drawer:not(.is-open),
+    .finance-page .pos-acct-sales-wrap table.mobile-enhanced tbody tr.pos-acct-drawer:not(.is-open) {
+        display: none !important;
+    }
+
+    .finance-page .pos-acct-close-form table.mobile-enhanced tbody tr.pos-acct-drawer>td,
+    .finance-page .pos-acct-sales-wrap table.mobile-enhanced tbody tr.pos-acct-drawer>td {
+        display: block !important;
+        width: 100% !important;
+        padding: 0 !important;
+        border: none !important;
+        background: transparent !important;
+    }
+
+    /* Data label pseudo-elements: normal wrapping */
+    .finance-page .pos-acct-close-form table.mobile-enhanced td[data-label]::before,
+    .finance-page .pos-acct-sales-wrap table.mobile-enhanced td[data-label]::before {
+        white-space: normal;
+        word-break: normal;
+        overflow-wrap: normal;
+    }
+
+    /* Text content inside cells: wrap and break naturally */
+    .finance-page .pos-acct-close-form table.mobile-enhanced td code,
+    .finance-page .pos-acct-sales-wrap table.mobile-enhanced td code,
+    .finance-page .pos-acct-close-form table.mobile-enhanced .finance-money,
+    .finance-page .pos-acct-sales-wrap table.mobile-enhanced .finance-money {
+        white-space: normal;
+        word-break: normal;
+        overflow-wrap: anywhere;
+    }
+
+    /* Button sizing: don't force full width on drawer toggle */
+    .finance-page .pos-acct-close-form table.mobile-enhanced tbody tr[data-pos-acct-row] .pos-acct-drawer-toggle {
+        width: auto;
+        display: inline-flex;
     }
 }
 
@@ -2290,6 +2457,33 @@ body {
     .pos-acct-drawer__table td {
         padding: 0.35rem 0.35rem;
     }
+
+    /* Mobile: allow horizontal scroll for drawer table */
+    .pos-acct-drawer__inner {
+        overflow-x: auto;
+        -webkit-overflow-scrolling: touch;
+    }
+}
+
+/* Tablet and up: optimize drawer table for wider screens */
+@media (min-width: 768px) {
+    .pos-acct-drawer__inner {
+        overflow-x: visible;
+        -webkit-overflow-scrolling: auto;
+    }
+
+    .pos-acct-drawer__table {
+        font-size: clamp(0.75rem, 0.7rem + 0.18vw, 0.88rem);
+    }
+
+    .pos-acct-drawer__table th {
+        padding: 0.5rem 0.65rem;
+        font-size: clamp(0.72rem, 0.67rem + 0.18vw, 0.82rem);
+    }
+
+    .pos-acct-drawer__table td {
+        padding: 0.45rem 0.65rem;
+    }
 }
 
 @media (max-width: 430px) {
@@ -2303,6 +2497,174 @@ body {
     .pos-acct-sale-details__list {
         min-width: 0;
         max-width: 100%;
+    }
+}
+
+/* Collapsible cashier rows - Mobile/Tablet */
+.pos-acct-header-row {
+    display: table-row;
+    background: linear-gradient(180deg, #ffffff 0%, #fcfbf9 100%);
+    border: 1px solid color-mix(in srgb, var(--border-color, #dee2e6) 88%, #c9d2dc 12%);
+    border-radius: 14px;
+    margin: 0;
+    padding: 0;
+    box-shadow: 0 8px 20px rgba(15, 23, 42, 0.06);
+    transition: box-shadow 0.22s ease;
+}
+
+.pos-acct-header-row:hover {
+    box-shadow: 0 10px 24px rgba(15, 23, 42, 0.10);
+}
+
+.pos-acct-header-cell {
+    padding: 11px;
+    border: none;
+}
+
+.pos-acct-header-wrap {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+}
+
+.pos-acct-row-toggle {
+    background: none;
+    border: none;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0;
+    min-width: 28px;
+    height: 28px;
+    color: var(--admin-text, #1f2a37);
+    font-size: 14px;
+    transition: transform 0.22s ease;
+    flex-shrink: 0;
+}
+
+.pos-acct-row-toggle[aria-expanded="true"] .pos-acct-row-toggle-chevron {
+    transform: rotate(90deg);
+}
+
+.pos-acct-header-info {
+    flex: 1;
+    min-width: 0;
+}
+
+.pos-acct-header-info strong {
+    display: block;
+    font-weight: 600;
+    font-size: 14px;
+    color: var(--admin-text, #1f2a37);
+}
+
+.pos-acct-header-info .stat-sub {
+    font-size: 12px;
+    color: #6b7280;
+    margin-top: 2px;
+}
+
+.pos-acct-header-status {
+    display: flex;
+    gap: 0.4rem;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    flex-shrink: 0;
+}
+
+/* Details row - hidden by default on mobile/tablet, visible on desktop */
+.pos-acct-details-row {
+    display: none;
+    background: #ffffff;
+    border-bottom: 1px solid var(--finance-border, #e3ddd5);
+}
+
+.pos-acct-details-row.is-open {
+    display: table-row;
+}
+
+.pos-acct-details-row td {
+    padding: 0;
+    border: none;
+}
+
+.pos-acct-details-wrap {
+    padding: 0.75rem;
+}
+
+.pos-acct-detail-grid {
+    display: grid;
+    gap: 0.75rem;
+    margin-bottom: 0.75rem;
+}
+
+.pos-acct-detail-cell {
+    display: flex;
+    flex-direction: column;
+    gap: 0.35rem;
+}
+
+.pos-acct-detail-label {
+    font-size: 10.5px;
+    font-weight: 600;
+    color: #6b7280;
+    text-transform: uppercase;
+    letter-spacing: 0.42px;
+}
+
+.pos-acct-detail-value {
+    font-size: 14px;
+    color: var(--admin-text, #1f2a37);
+}
+
+.pos-acct-input {
+    padding: 0.5rem;
+    border: 1px solid var(--admin-surface-border, #d7dde6);
+    border-radius: 6px;
+    font-size: 14px;
+    font-family: inherit;
+}
+
+.pos-acct-input:focus {
+    outline: none;
+    border-color: var(--primary-color, #3b82f6);
+    box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.05);
+}
+
+/* Drawer toggle button inside details section */
+.pos-acct-details-wrap .pos-acct-drawer-toggle {
+    display: block;
+    width: 100%;
+    margin-top: 0.5rem;
+}
+
+/* Desktop: show header+details as single expanded row */
+@media (min-width: 769px) {
+    .pos-acct-header-row {
+        display: none;
+    }
+
+    .pos-acct-details-row {
+        display: table-row;
+    }
+
+    .pos-acct-details-row td {
+        padding: 0.75rem;
+    }
+
+    .pos-acct-detail-grid {
+        display: none;
+    }
+
+    .pos-acct-details-wrap {
+        padding: 0;
+        display: contents;
+    }
+
+    .pos-acct-input {
+        padding: 0.5rem 0.4rem;
+        font-size: 13px;
     }
 }
 

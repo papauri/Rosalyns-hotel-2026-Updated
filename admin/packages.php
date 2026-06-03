@@ -365,6 +365,43 @@ $priceTypeLabels = [
             background: #f8f9fa;
         }
 
+        /* ── Package card mobile ─────────────────────────────────────────────── */
+        @media (max-width: 600px) {
+            .pkg-card {
+                display: grid;
+                grid-template-columns: auto 1fr;
+                grid-template-rows: auto auto auto;
+                gap: 12px;
+            }
+
+            .pkg-card__icon {
+                grid-row: 1 / 3;
+                grid-column: 1;
+                width: 52px;
+                height: 52px;
+            }
+
+            .pkg-card__body {
+                grid-row: 1;
+                grid-column: 2;
+                display: flex;
+                flex-direction: column;
+                min-width: 0;
+            }
+
+            .pkg-card__meta {
+                word-break: break-word;
+                overflow-wrap: break-word;
+            }
+
+            .pkg-card__actions {
+                grid-row: 2;
+                grid-column: 2;
+                align-self: flex-start;
+                justify-self: flex-end;
+            }
+        }
+
         /* ── Form layout ─────────────────────────────────────────────────────── */
         .form-row {
             display: grid;

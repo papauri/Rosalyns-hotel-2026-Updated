@@ -828,9 +828,12 @@ footer {
 table.mobile-enhanced {
     display: block;
     width: 100%;
+    max-width: 100%;
     border: none !important;
     background: transparent !important;
     box-shadow: none !important;
+    box-sizing: border-box;
+    table-layout: fixed;
 }
 
 table.mobile-enhanced thead,
@@ -853,8 +856,9 @@ table.mobile-enhanced col {
 }
 
 table.mobile-enhanced tbody {
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(min(var(--mobile-card-min-width, 19rem), 100%), 1fr));
+    display: block;
+    width: 100%;
+    box-sizing: border-box;
     gap: 0.82rem;
 }
 
@@ -868,13 +872,12 @@ table.mobile-enhanced tbody tr {
     box-shadow: 0 8px 20px rgba(15, 23, 42, 0.06);
     list-style: none;
     height: auto;
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(max(7rem, min(100%, (100% - 0.6rem) / 2)), 1fr));
+    display: flex;
+    flex-direction: column;
     gap: 0.6rem;
-    align-items: start;
-    justify-items: stretch;
-    overflow: hidden;
+    align-items: stretch;
     min-width: 0;
+}
 }
 
 /* Pagination and filtered views mark rows with [hidden]. In card mode,
@@ -899,6 +902,8 @@ table.mobile-enhanced td {
     position: relative;
     white-space: normal;
     word-break: break-word;
+    overflow-wrap: break-word;
+    hyphens: auto;
     min-height: 0;
     min-width: 0;
 }
@@ -909,6 +914,7 @@ table.mobile-enhanced tbody tr>td {
     align-self: stretch;
     height: auto;
     width: 100%;
+    box-sizing: border-box;
     min-width: 0;
     background: #ffffff;
     border: 1px solid color-mix(in srgb, var(--border-color, #dee2e6) 86%, #edf1f6 14%);

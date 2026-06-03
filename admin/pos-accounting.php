@@ -570,7 +570,7 @@ try {
                 </div>
             </div>
             <div class="table-responsive">
-                <table class="pos-acct-table" id="pos-acct-match-table">
+                <table class="pos-acct-table mobile-enhanced" id="pos-acct-match-table">
                     <thead>
                         <tr>
                             <th style="width:48px;text-align:center;" title="Select / deselect all eligible cashiers">
@@ -605,48 +605,80 @@ try {
                                 $userOrders = $ordersByUser[$uid] ?? [];
                                 $userOrderCount = count($userOrders);
                                 $drawerId = 'drawer-' . $uid;
+                                $rowId = 'row-' . $uid;
                             ?>
-                                <tr data-pos-acct-row
+                                <!-- Collapsible header row (visible on mobile/tablet by default) -->
+                                <tr class="pos-acct-header-row" id="<?php echo $rowId; ?>-header" data-uid="<?php echo $uid; ?>" aria-expanded="false">
+                                    <td colspan="10" class="pos-acct-header-cell">
+                                        <div class="pos-acct-header-wrap">
+                                            <label class="pos-acct-check-wrap" title="Select this cashier for shift close">
+                                                <input type="checkbox" class="pos-acct-main-check" name="user_ids[]" value="<?php echo $uid; ?>" <?php echo $isClosed ? 'disabled' : ''; ?>>
+                                            </label>
+                                            <button type="button" class="pos-acct-row-toggle" data-uid="<?php echo $uid; ?>" aria-expanded="false" aria-controls="<?php echo $rowId; ?>-details" title="Expand to view/edit details">
+                                                <i class="fas fa-chevron-right pos-acct-row-toggle-chevron"></i>
+                                            </button>
+                                            <div class="pos-acct-header-info">
+                                                <strong><?php echo htmlspecialchars((string)$posUser['display_name']); ?></strong>
+                                                <div class="stat-sub">@<?php echo htmlspecialchars((string)$posUser['username']); ?></div>
+                                            </div>
+                                            <div class="pos-acct-header-status">
+                                                <?php if ($isClosed): ?><span class="pos-acct-pill pos-acct-pill--closed">Closed</span><?php elseif ($hasOpenTabs): ?><span class="pos-acct-pill pos-acct-pill--open">Ready</span> <span class="pos-acct-pill pos-acct-pill--warn" title="<?php echo (int)$posUser['open_tabs']; ?> order(s) still in progress"><?php echo (int)$posUser['open_tabs']; ?> open</span><?php else: ?><span class="pos-acct-pill pos-acct-pill--open">Ready</span><?php endif; ?>
+                                            </div>
+                                        </div>
+                                    </td>
+                                </tr>
+
+                                <!-- Detailed fields row (hidden by default, expanded on click) -->
+                                <tr class="pos-acct-details-row" id="<?php echo $rowId; ?>-details" data-pos-acct-row
                                     data-expected-cash="<?php echo htmlspecialchars((string)$expectedCash); ?>"
                                     data-expected-mobile="<?php echo htmlspecialchars((string)$expectedMobile); ?>"
-                                    data-expected-card="<?php echo htmlspecialchars((string)$expectedCard); ?>">
-                                    <td>
-                                        <label class="pos-acct-check-wrap" title="Select this cashier for shift close">
-                                            <input type="checkbox" class="pos-acct-main-check" name="user_ids[]" value="<?php echo $uid; ?>" <?php echo $isClosed ? 'disabled' : ''; ?>>
-                                        </label>
+                                    data-expected-card="<?php echo htmlspecialchars((string)$expectedCard); ?>" aria-hidden="true">
+                                    <td colspan="10">
+                                        <div class="pos-acct-details-wrap">
+                                            <div class="pos-acct-detail-grid">
+                                                <div class="pos-acct-detail-cell">
+                                                    <label class="pos-acct-detail-label">Orders</label>
+                                                    <div class="pos-acct-detail-value"><?php echo (int)$posUser['order_count']; ?><div class="stat-sub">Voids: <?php echo (int)$posUser['voided_count']; ?></div></div>
+                                                </div>
+                                                <div class="pos-acct-detail-cell">
+                                                    <label class="pos-acct-detail-label">Expected</label>
+                                                    <div class="pos-acct-detail-value"><?php echo rh_pos_accounting_money((float)$posUser['paid_total'], $currency_symbol); ?><div class="stat-sub">Cash <?php echo rh_pos_accounting_money($expectedCash, $currency_symbol); ?></div></div>
+                                                </div>
+                                                <div class="pos-acct-detail-cell">
+                                                    <label class="pos-acct-detail-label">Declared cash</label>
+                                                    <input type="number" step="0.01" min="0" class="pos-acct-input" name="declared_cash[<?php echo $uid; ?>]" value="<?php echo htmlspecialchars(number_format($expectedCash, 2, '.', '')); ?>" data-declared="cash" title="Enter actual cash counted in the drawer">
+                                                </div>
+                                                <div class="pos-acct-detail-cell">
+                                                    <label class="pos-acct-detail-label">Declared mobile</label>
+                                                    <input type="number" step="0.01" min="0" class="pos-acct-input" name="declared_mobile[<?php echo $uid; ?>]" value="<?php echo htmlspecialchars(number_format($expectedMobile, 2, '.', '')); ?>" data-declared="mobile" title="Enter actual mobile money total">
+                                                </div>
+                                                <div class="pos-acct-detail-cell">
+                                                    <label class="pos-acct-detail-label">Declared card</label>
+                                                    <input type="number" step="0.01" min="0" class="pos-acct-input" name="declared_card[<?php echo $uid; ?>]" value="<?php echo htmlspecialchars(number_format($expectedCard, 2, '.', '')); ?>" data-declared="card" title="Enter actual card payment total">
+                                                </div>
+                                                <div class="pos-acct-detail-cell">
+                                                    <label class="pos-acct-detail-label">Variance</label>
+                                                    <div class="pos-acct-detail-value"><span class="pos-acct-variance" title="Difference between expected and declared totals">0.00</span></div>
+                                                </div>
+                                                <div class="pos-acct-detail-cell">
+                                                    <label class="pos-acct-detail-label">Notes</label>
+                                                    <input type="text" class="pos-acct-input" name="notes[<?php echo $uid; ?>]" placeholder="Count note" title="Optional note for this shift close (e.g. reason for any variance)">
+                                                </div>
+                                            </div>
+                                            <?php if ($userOrderCount > 0): ?>
+                                                <button type="button" class="pos-acct-drawer-toggle"
+                                                    data-drawer="<?php echo $drawerId; ?>"
+                                                    data-total="<?php echo $userOrderCount; ?>"
+                                                    aria-expanded="false"
+                                                    aria-controls="<?php echo $drawerId; ?>"
+                                                    title="Review individual sales before closing — click to expand">
+                                                    <i class="fas fa-chevron-right pos-acct-drawer-chevron"></i>
+                                                    <span class="pos-acct-drawer-label"><?php echo $userOrderCount; ?> sale<?php echo $userOrderCount !== 1 ? 's' : ''; ?></span>
+                                                    <span class="pos-acct-drawer-verified" style="display:none"> · <span class="pos-acct-drawer-verified-count">0</span> verified</span>
+                                                </button>
+                                            <?php endif; ?>
+                                        </div>
                                     </td>
-                                    <td>
-                                        <strong><?php echo htmlspecialchars((string)$posUser['display_name']); ?></strong>
-                                        <div class="stat-sub">@<?php echo htmlspecialchars((string)$posUser['username']); ?></div>
-                                        <?php if ($userOrderCount > 0): ?>
-                                            <button type="button" class="pos-acct-drawer-toggle"
-                                                data-drawer="<?php echo $drawerId; ?>"
-                                                data-total="<?php echo $userOrderCount; ?>"
-                                                aria-expanded="false"
-                                                aria-controls="<?php echo $drawerId; ?>"
-                                                title="Review individual sales before closing — click to expand">
-                                                <i class="fas fa-chevron-right pos-acct-drawer-chevron"></i>
-                                                <span class="pos-acct-drawer-label"><?php echo $userOrderCount; ?> sale<?php echo $userOrderCount !== 1 ? 's' : ''; ?></span>
-                                                <span class="pos-acct-drawer-verified" style="display:none"> · <span class="pos-acct-drawer-verified-count">0</span> verified</span>
-                                            </button>
-                                            <button type="button" class="pos-acct-row-close-btn"
-                                                data-uid="<?php echo $uid; ?>"
-                                                title="Auto-select this cashier and submit for closing"
-                                                style="display:none">
-                                                <i class="fas fa-lock"></i> Close shift
-                                            </button>
-                                        <?php endif; ?>
-                                    </td>
-                                    <td><?php echo (int)$posUser['order_count']; ?><div class="stat-sub">Voids: <?php echo (int)$posUser['voided_count']; ?></div>
-                                    </td>
-                                    <td><?php echo rh_pos_accounting_money((float)$posUser['paid_total'], $currency_symbol); ?><div class="stat-sub">Cash <?php echo rh_pos_accounting_money($expectedCash, $currency_symbol); ?></div>
-                                    </td>
-                                    <td><input type="number" step="0.01" min="0" name="declared_cash[<?php echo $uid; ?>]" value="<?php echo htmlspecialchars(number_format($expectedCash, 2, '.', '')); ?>" data-declared="cash" title="Enter actual cash counted in the drawer"></td>
-                                    <td><input type="number" step="0.01" min="0" name="declared_mobile[<?php echo $uid; ?>]" value="<?php echo htmlspecialchars(number_format($expectedMobile, 2, '.', '')); ?>" data-declared="mobile" title="Enter actual mobile money total"></td>
-                                    <td><input type="number" step="0.01" min="0" name="declared_card[<?php echo $uid; ?>]" value="<?php echo htmlspecialchars(number_format($expectedCard, 2, '.', '')); ?>" data-declared="card" title="Enter actual card payment total"></td>
-                                    <td><span class="pos-acct-variance" title="Difference between expected and declared totals">0.00</span></td>
-                                    <td><?php if ($isClosed): ?><span class="pos-acct-pill pos-acct-pill--closed">Closed</span><?php elseif ($hasOpenTabs): ?><span class="pos-acct-pill pos-acct-pill--open">Ready</span> <span class="pos-acct-pill pos-acct-pill--warn" title="<?php echo (int)$posUser['open_tabs']; ?> order(s) still in progress — you can still close"><?php echo (int)$posUser['open_tabs']; ?> open</span><?php else: ?><span class="pos-acct-pill pos-acct-pill--open">Ready</span><?php endif; ?></td>
-                                    <td><input type="text" name="notes[<?php echo $uid; ?>]" placeholder="Count note" title="Optional note for this shift close (e.g. reason for any variance)"></td>
                                 </tr>
                                 <?php if ($userOrderCount > 0): ?>
                                     <tr class="pos-acct-drawer" id="<?php echo $drawerId; ?>" aria-hidden="true">
@@ -756,7 +788,7 @@ try {
             <div class="section-card">
                 <h3><i class="fas fa-receipt"></i> POS sales log</h3>
                 <div class="table-responsive pos-acct-sales-wrap">
-                    <table class="pos-acct-table pos-acct-table--sales">
+                    <table class="pos-acct-table pos-acct-table--sales mobile-enhanced">
                         <thead>
                             <tr>
                                 <th>Time</th>
@@ -836,6 +868,23 @@ try {
                     });
                 });
                 updateVariance(row);
+            });
+
+            // ── Collapsible cashier row toggle ──────────────────────────────────
+            document.querySelectorAll('.pos-acct-row-toggle').forEach(function(btn) {
+                btn.addEventListener('click', function(e) {
+                    e.preventDefault();
+                    var uid = btn.dataset.uid;
+                    var detailsRow = document.getElementById('row-' + uid + '-details');
+                    if (!detailsRow) return;
+                    var isOpen = detailsRow.classList.toggle('is-open');
+                    btn.setAttribute('aria-expanded', isOpen ? 'true' : 'false');
+                    detailsRow.setAttribute('aria-hidden', isOpen ? 'false' : 'true');
+                    var headerRow = document.getElementById('row-' + uid + '-header');
+                    if (headerRow) {
+                        headerRow.setAttribute('aria-expanded', isOpen ? 'true' : 'false');
+                    }
+                });
             });
 
             // ── Sales drawer toggle ─────────────────────────────────────────────

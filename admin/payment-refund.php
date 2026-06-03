@@ -406,11 +406,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $payment
                                 <div class="filter-group">
                                     <label for="refund_amount">Refund Amount *</label>
                                     <div style="position: relative;">
-                                        <span style="position: absolute; left: 12px; top: 50%; transform: translateY(-50%); color: #666;"><?php echo $currency_symbol; ?></span>
+                                        <span id="refund_currency_prefix" style="position: absolute; left: 10px; top: 50%; transform: translateY(-50%); color: #666; font-size: 12px; white-space: nowrap; pointer-events: none;"><?php echo htmlspecialchars($currency_symbol); ?></span>
                                         <input type="number" id="refund_amount" name="refund_amount"
                                             step="0.01" min="0.01" max="<?php echo $maxRefundable; ?>"
                                             value="<?php echo $maxRefundable; ?>" required
-                                            style="padding-left: 30px;">
+                                            style="padding-left: var(--refund-prefix-w, 52px);">
                                     </div>
                                     <small style="color: #666;">Maximum: <?php echo $currency_symbol; ?><?php echo number_format($maxRefundable, 2); ?></small>
                                 </div>
@@ -499,6 +499,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $payment
         const vatRate = <?php echo $payment['vat_rate'] ?? 0; ?>;
         const currencySymbol = '<?php echo $currency_symbol; ?>';
 
+        function applyRefundPrefixPadding() {
+            const refundInput = document.getElementById('refund_amount');
+            const prefix = document.getElementById('refund_currency_prefix');
+            if (!refundInput || !prefix) {
+                return;
+            }
+            const prefixWidth = Math.ceil(prefix.offsetWidth || 0);
+            const padding = prefixWidth > 0 ? (prefixWidth + 16) : 52;
+            refundInput.style.setProperty('--refund-prefix-w', padding + 'px');
+        }
+
         function updateSummary() {
             const refundEl = document.getElementById('refund_amount');
             if (!refundEl) return; // form not rendered (fully refunded)
@@ -529,9 +540,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $payment
 
         const refundEl = document.getElementById('refund_amount');
         if (refundEl) {
+            applyRefundPrefixPadding();
             refundEl.addEventListener('input', updateSummary);
             updateSummary(); // Initial calculation
         }
+
+        window.addEventListener('resize', applyRefundPrefixPadding);
     </script>
 </body>
 

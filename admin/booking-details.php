@@ -793,11 +793,29 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['update_payment'])) {
 
     try {
         $vatEnabled = in_array(getSetting('vat_enabled'), ['1', 1, true, 'true', 'on'], true);
-        $vatRate = $vatEnabled ? (float) getSetting('vat_rate') : 0;
+        $configuredVatRate = $vatEnabled ? (float) getSetting('vat_rate') : 0;
 
-        $totalAmount = (float) $booking['total_amount'];
-        $vatAmount = $vatEnabled ? ($totalAmount * ($vatRate / 100)) : 0;
-        $totalWithVat = $totalAmount + $vatAmount;
+        $summaryForPayment = getBookingFolioSummary($booking_id);
+        $extrasSubtotal = (float)($summaryForPayment['extras_subtotal'] ?? 0);
+        $extrasVat = (float)($summaryForPayment['extras_vat'] ?? 0);
+
+        $baseSubtotal = (float)($booking['total_amount'] ?? 0);
+        $baseVat = (float)($booking['vat_amount'] ?? 0);
+        if ($baseVat <= 0.0 && $configuredVatRate > 0.0) {
+            $baseVat = round($baseSubtotal * ($configuredVatRate / 100), 2);
+        }
+
+        $paymentSubtotal = $baseSubtotal + $extrasSubtotal;
+        $paymentVatAmount = $baseVat + $extrasVat;
+        $paymentTotalWithVat = $paymentSubtotal + $paymentVatAmount;
+        $paymentVatRate = $paymentSubtotal > 0 ? round(($paymentVatAmount / $paymentSubtotal) * 100, 2) : $configuredVatRate;
+
+        $levyAmount = (float)($booking['tourism_levy_amount'] ?? 0);
+        $levyPercent = (float)($booking['tourism_levy_percent'] ?? 0);
+        $paymentNotes = 'Full settlement from booking details page.';
+        if ($levyAmount > 0) {
+            $paymentNotes .= ' Tourism levy included' . ($levyPercent > 0 ? ' (' . number_format($levyPercent, 2) . '%).' : '.');
+        }
 
         $update_stmt = $pdo->prepare("UPDATE bookings SET payment_status = ?, updated_at = NOW() WHERE id = ?");
         $update_stmt->execute([$payment_status, $booking_id]);
@@ -811,28 +829,34 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['update_payment'])) {
                     payment_reference, booking_type, booking_id, booking_reference,
                     payment_date, payment_amount, vat_rate, vat_amount, total_amount,
                     payment_method, payment_type, payment_status, invoice_generated,
-                    receipt_number, status, recorded_by
-                ) VALUES (?, 'room', ?, ?, CURDATE(), ?, ?, ?, ?, 'cash', 'full_payment', 'completed', 1, ?, 'completed', ?)
+                    receipt_number, status, notes, recorded_by
+                ) VALUES (?, 'room', ?, ?, CURDATE(), ?, ?, ?, ?, 'cash', 'full_payment', 'completed', 1, ?, 'completed', ?, ?)
             ");
             $insert_payment->execute([
                 $payment_reference,
                 $booking_id,
                 $booking['booking_reference'],
-                $totalAmount,
-                $vatRate,
-                $vatAmount,
-                $totalWithVat,
+                $paymentSubtotal,
+                $paymentVatRate,
+                $paymentVatAmount,
+                $paymentTotalWithVat,
                 $receipt_number,
+                $paymentNotes,
                 $user['id']
             ]);
 
-            logBookingPayment($booking_id, $booking['booking_reference'], $totalWithVat, 'full_payment', 'cash', 'completed', $user['id'], $payment_reference);
+            logBookingPayment($booking_id, $booking['booking_reference'], $paymentTotalWithVat, 'full_payment', 'cash', 'completed', $user['id'], $payment_reference);
 
             $update_amounts = $pdo->prepare("
-                UPDATE bookings SET amount_paid = ?, amount_due = 0, vat_rate = ?, vat_amount = ?,
-                    total_with_vat = ?, last_payment_date = CURDATE() WHERE id = ?
+                UPDATE bookings
+                SET vat_rate = ?, vat_amount = ?, total_with_vat = ?, last_payment_date = CURDATE(), updated_at = NOW()
+                WHERE id = ?
             ");
-            $update_amounts->execute([$totalWithVat, $vatRate, $vatAmount, $totalWithVat, $booking_id]);
+            $update_amounts->execute([$paymentVatRate, $paymentVatAmount, $paymentTotalWithVat, $booking_id]);
+
+            if (function_exists('recalculateBookingFinancials')) {
+                recalculateBookingFinancials($booking_id);
+            }
 
             $auto_assign_msg = '';
             if (($booking['status'] ?? '') === 'confirmed' && empty($booking['individual_room_id'])) {
@@ -875,9 +899,25 @@ $status_colors = [
 ];
 $current_status = $status_colors[$booking['status']] ?? ['bg' => '#f5f5f5', 'color' => '#666', 'icon' => 'fa-question'];
 
-$folio_total_amount = (float)($folio_summary['grand_total'] ?? $booking['total_amount']);
+$vat_enabled = in_array(getSetting('vat_enabled'), ['1', 1, true, 'true', 'on'], true);
+$configured_vat_rate = $vat_enabled ? (float)getSetting('vat_rate') : 0.0;
+
+$folio_extras_subtotal = (float)($folio_summary['extras_subtotal'] ?? 0);
+$folio_extras_vat = (float)($folio_summary['extras_vat'] ?? 0);
+$booking_base_subtotal = (float)($booking['total_amount'] ?? 0);
+$booking_base_vat = (float)($booking['vat_amount'] ?? 0);
+if ($booking_base_vat <= 0.0 && $configured_vat_rate > 0.0) {
+    $booking_base_vat = round($booking_base_subtotal * ($configured_vat_rate / 100), 2);
+}
+
+$folio_subtotal_before_vat = $booking_base_subtotal + $folio_extras_subtotal;
+$folio_total_vat = $booking_base_vat + $folio_extras_vat;
+$folio_total_amount = $folio_subtotal_before_vat + $folio_total_vat;
 $folio_amount_paid = (float)($folio_summary['amount_paid'] ?? $booking['amount_paid'] ?? 0);
-$folio_balance_due = (float)($folio_summary['balance_due'] ?? max(0, (float)($booking['amount_due'] ?? 0)));
+$folio_balance_due = max(0.0, $folio_total_amount - $folio_amount_paid);
+$booking_levy_amount = (float)($booking['tourism_levy_amount'] ?? 0);
+$booking_levy_percent = (float)($booking['tourism_levy_percent'] ?? 0);
+$booking_room_total_with_tax = $booking_base_subtotal + $booking_base_vat;
 $room_status_label = ucfirst(str_replace('_', ' ', (string)($booking['derived_room_status'] ?? 'available')));
 
 $today_status_date = new DateTime('today');
@@ -983,6 +1023,10 @@ unset($_SESSION['success_message'], $_SESSION['error_message']);
             <div class="booking-kpi-card">
                 <span class="booking-kpi-card__label">Folio Total</span>
                 <strong class="booking-kpi-card__value"><?php echo $currency_symbol; ?><?php echo number_format($folio_total_amount, 2); ?></strong>
+            </div>
+            <div class="booking-kpi-card">
+                <span class="booking-kpi-card__label">VAT + Levy</span>
+                <strong class="booking-kpi-card__value"><?php echo $currency_symbol; ?><?php echo number_format($folio_total_vat + $booking_levy_amount, 2); ?></strong>
             </div>
             <div class="booking-kpi-card">
                 <span class="booking-kpi-card__label">Amount Paid</span>
@@ -1148,7 +1192,7 @@ unset($_SESSION['success_message'], $_SESSION['error_message']);
                 <div class="info-card-body">
                     <div class="payment-summary">
                         <?php
-                        $display_total = $folio_summary['grand_total'] ?? $booking['total_amount'];
+                        $display_total = $folio_total_amount;
                         ?>
                         <div class="payment-amount">
                             <span class="currency"><?php echo $currency_symbol; ?></span>
@@ -1176,6 +1220,27 @@ unset($_SESSION['success_message'], $_SESSION['error_message']);
                                 <i class="fas fa-receipt"></i> <?php echo htmlspecialchars($booking['payment_reference']); ?>
                             </div>
                         <?php endif; ?>
+
+                        <div class="payment-tax-breakdown">
+                            <div class="payment-tax-row">
+                                <span>Subtotal</span>
+                                <strong><?php echo $currency_symbol; ?><?php echo number_format($folio_subtotal_before_vat, 2); ?></strong>
+                            </div>
+                            <?php if ($booking_levy_amount > 0): ?>
+                                <div class="payment-tax-row">
+                                    <span>Tourism Levy<?php echo $booking_levy_percent > 0 ? ' (' . number_format($booking_levy_percent, 2) . '%)' : ''; ?></span>
+                                    <strong><?php echo $currency_symbol; ?><?php echo number_format($booking_levy_amount, 2); ?></strong>
+                                </div>
+                            <?php endif; ?>
+                            <div class="payment-tax-row">
+                                <span>VAT</span>
+                                <strong><?php echo $currency_symbol; ?><?php echo number_format($folio_total_vat, 2); ?></strong>
+                            </div>
+                            <div class="payment-tax-row payment-tax-row--total">
+                                <span>Total Due</span>
+                                <strong><?php echo $currency_symbol; ?><?php echo number_format($folio_total_amount, 2); ?></strong>
+                            </div>
+                        </div>
                     </div>
 
                     <?php if ($booking['payment_status'] !== 'paid'): ?>
@@ -1295,20 +1360,30 @@ unset($_SESSION['success_message'], $_SESSION['error_message']);
                                 <div class="folio-summary-label">Extras</div>
                                 <div class="folio-summary-value"><?php echo $currency_symbol; ?><?php echo number_format($folio_summary['extras_total'] ?? 0, 2); ?></div>
                             </div>
-                            <div class="folio-summary-item">
-                                <div class="folio-summary-label">Total Due</div>
-                                <div class="folio-summary-value total"><?php echo $currency_symbol; ?><?php echo number_format($folio_summary['grand_total'] ?? $booking['total_amount'], 2); ?></div>
-                            </div>
-                            <?php if (($folio_summary['balance_due'] ?? 0) > 0): ?>
+                            <?php if ($booking_levy_amount > 0): ?>
                                 <div class="folio-summary-item">
-                                    <div class="folio-summary-label">Balance Due</div>
-                                    <div class="folio-summary-value balance"><?php echo $currency_symbol; ?><?php echo number_format($folio_summary['balance_due'], 2); ?></div>
+                                    <div class="folio-summary-label">Tourism Levy<?php echo $booking_levy_percent > 0 ? ' (' . number_format($booking_levy_percent, 2) . '%)' : ''; ?></div>
+                                    <div class="folio-summary-value"><?php echo $currency_symbol; ?><?php echo number_format($booking_levy_amount, 2); ?></div>
                                 </div>
                             <?php endif; ?>
-                            <?php if (($folio_summary['amount_paid'] ?? 0) > 0): ?>
+                            <div class="folio-summary-item">
+                                <div class="folio-summary-label">VAT</div>
+                                <div class="folio-summary-value"><?php echo $currency_symbol; ?><?php echo number_format($folio_total_vat, 2); ?></div>
+                            </div>
+                            <div class="folio-summary-item">
+                                <div class="folio-summary-label">Total Due</div>
+                                <div class="folio-summary-value total"><?php echo $currency_symbol; ?><?php echo number_format($folio_total_amount, 2); ?></div>
+                            </div>
+                            <?php if ($folio_balance_due > 0): ?>
+                                <div class="folio-summary-item">
+                                    <div class="folio-summary-label">Balance Due</div>
+                                    <div class="folio-summary-value balance"><?php echo $currency_symbol; ?><?php echo number_format($folio_balance_due, 2); ?></div>
+                                </div>
+                            <?php endif; ?>
+                            <?php if ($folio_amount_paid > 0): ?>
                                 <div class="folio-summary-item">
                                     <div class="folio-summary-label">Amount Paid</div>
-                                    <div class="folio-summary-value paid"><?php echo $currency_symbol; ?><?php echo number_format($folio_summary['amount_paid'], 2); ?></div>
+                                    <div class="folio-summary-value paid"><?php echo $currency_symbol; ?><?php echo number_format($folio_amount_paid, 2); ?></div>
                                 </div>
                             <?php endif; ?>
                         </div>
@@ -2035,9 +2110,14 @@ unset($_SESSION['success_message'], $_SESSION['error_message']);
             e.preventDefault();
             handleFolioFormSubmit('voidChargeForm', 'voidChargeSaveBtn', 'voidChargeFeedback', null);
         });
-        document.getElementById('dateAdjustForm').addEventListener('submit', function(e) {
-            e.preventDefault();
-            handleFolioFormSubmit('dateAdjustForm', 'dateAdjustSubmitBtn', 'dateAdjustFeedback', null);
+        document.getElementById('dateAdjustForm').addEventListener('submit', function() {
+            var submitBtn = document.getElementById('dateAdjustSubmitBtn');
+            var fb = document.getElementById('dateAdjustFeedback');
+            submitBtn.disabled = true;
+            submitBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Saving...';
+            fb.className = 'admin-modal-feedback';
+            fb.innerHTML = '';
+            // Allow normal POST+redirect for date adjustments so the full booking state refreshes.
         });
 
         function refreshFolioSection() {
@@ -2057,10 +2137,11 @@ unset($_SESSION['success_message'], $_SESSION['error_message']);
         const currentCheckIn = '<?php echo htmlspecialchars($booking['check_in_date']); ?>';
         const currentCheckOut = '<?php echo htmlspecialchars($booking['check_out_date']); ?>';
         const currentNights = <?php echo (int) $booking['number_of_nights']; ?>;
-        const currentTotal = <?php echo (float) $booking['total_amount']; ?>;
+        const currentTotal = <?php echo (float) $booking_room_total_with_tax; ?>;
         const currentChildSupplement = <?php echo (float)($booking['child_supplement_total'] ?? 0); ?>;
         const pricePerNight = <?php echo (float)($booking['price_per_night'] ?? 0); ?>;
-        const vatRate = <?php echo (float) getSetting('vat_enabled') === '1' ? (float) getSetting('vat_rate') : 0; ?>;
+        const vatRate = <?php echo $vat_enabled ? (float) getSetting('vat_rate') : 0; ?>;
+        const levyRate = <?php echo $booking_levy_percent; ?>;
 
         function openDateAdjustModal() {
             document.getElementById('dateAdjustModal').classList.add('active');
@@ -2146,7 +2227,6 @@ unset($_SESSION['success_message'], $_SESSION['error_message']);
 
             // Calculate new total with child supplement
             const newBaseAmount = pricePerNight * newNights;
-            const newVatAmount = newBaseAmount * (vatRate / 100);
 
             // Calculate child supplement adjustment (proportional to nights change)
             let newChildSupplement = 0;
@@ -2155,7 +2235,10 @@ unset($_SESSION['success_message'], $_SESSION['error_message']);
                 newChildSupplement = currentChildSupplement * nightRatio;
             }
 
-            const newTotal = newBaseAmount + newVatAmount + newChildSupplement;
+            const newLevyAmount = levyRate > 0 ? ((newBaseAmount + newChildSupplement) * (levyRate / 100)) : 0;
+            const newSubtotal = newBaseAmount + newChildSupplement + newLevyAmount;
+            const newVatAmount = newSubtotal * (vatRate / 100);
+            const newTotal = newSubtotal + newVatAmount;
             const amountDelta = newTotal - currentTotal;
             const nightsDelta = newNights - currentNights;
 
