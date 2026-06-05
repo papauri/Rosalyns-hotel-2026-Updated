@@ -1770,6 +1770,7 @@ body {
 
 /* Override column widths for mobile card layout */
 @media (max-width: 600px) {
+
     .pos-acct-table--sales.mobile-enhanced th:nth-child(1),
     .pos-acct-table--sales.mobile-enhanced td:nth-child(1),
     .pos-acct-table--sales.mobile-enhanced th:nth-child(2),

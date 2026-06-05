@@ -7957,9 +7957,9 @@ $today_str = $today->format('Y-m-d');
             const viewport = _getActionMenuViewport();
             const maxMenuW = Math.max(0, Math.floor(viewport.width - (viewportPad * 2)));
             // On mobile cap the menu height so it never fills the whole screen and stays scrollable.
-            const maxMenuH = viewport.width <= 640
-                ? Math.max(180, Math.floor(Math.min(viewport.height * 0.58, viewport.height - (viewportPad * 2))))
-                : Math.max(180, Math.floor(viewport.height - (viewportPad * 2)));
+            const maxMenuH = viewport.width <= 640 ?
+                Math.max(180, Math.floor(Math.min(viewport.height * 0.58, viewport.height - (viewportPad * 2)))) :
+                Math.max(180, Math.floor(viewport.height - (viewportPad * 2)));
 
             menu.style.cssText = 'display:block;position:fixed;visibility:hidden;left:0;top:0;z-index:12050;width:auto;min-width:0;max-width:' + Math.round(maxMenuW) + 'px;';
             const measuredRect = menu.getBoundingClientRect();

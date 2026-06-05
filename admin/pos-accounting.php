@@ -638,11 +638,13 @@ try {
                                             <div class="pos-acct-detail-grid">
                                                 <div class="pos-acct-detail-cell">
                                                     <label class="pos-acct-detail-label">Orders</label>
-                                                    <div class="pos-acct-detail-value"><?php echo (int)$posUser['order_count']; ?><div class="stat-sub">Voids: <?php echo (int)$posUser['voided_count']; ?></div></div>
+                                                    <div class="pos-acct-detail-value"><?php echo (int)$posUser['order_count']; ?><div class="stat-sub">Voids: <?php echo (int)$posUser['voided_count']; ?></div>
+                                                    </div>
                                                 </div>
                                                 <div class="pos-acct-detail-cell">
                                                     <label class="pos-acct-detail-label">Expected</label>
-                                                    <div class="pos-acct-detail-value"><?php echo rh_pos_accounting_money((float)$posUser['paid_total'], $currency_symbol); ?><div class="stat-sub">Cash <?php echo rh_pos_accounting_money($expectedCash, $currency_symbol); ?></div></div>
+                                                    <div class="pos-acct-detail-value"><?php echo rh_pos_accounting_money((float)$posUser['paid_total'], $currency_symbol); ?><div class="stat-sub">Cash <?php echo rh_pos_accounting_money($expectedCash, $currency_symbol); ?></div>
+                                                    </div>
                                                 </div>
                                                 <div class="pos-acct-detail-cell">
                                                     <label class="pos-acct-detail-label">Declared cash</label>

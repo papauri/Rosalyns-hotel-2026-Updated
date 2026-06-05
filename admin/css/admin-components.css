@@ -1833,6 +1833,7 @@ body.modal-open {
 }
 
 @media (max-width: 768px) {
+
     :is(.admin-content, #rh-admin-page) .table .actions .btn,
     :is(.admin-content, #rh-admin-page) .table .quick-actions .btn,
     :is(.admin-content, #rh-admin-page) .table .action-buttons .btn,
