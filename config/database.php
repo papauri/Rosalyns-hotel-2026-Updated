@@ -7182,7 +7182,11 @@ function deductStockForMenuItem(int $menuItemId, string $menuType, float $portio
         $sourceType = 'manual';
     }
 
+    $ownTx = !$pdo->inTransaction();
+
     try {
+        if ($ownTx) $pdo->beginTransaction();
+
         // Fetch recipe + ingredients
         $stmt = $pdo->prepare("
             SELECT sri.ingredient_id, sri.quantity_per_portion, sri.yield_percent
@@ -7195,6 +7199,7 @@ function deductStockForMenuItem(int $menuItemId, string $menuType, float $portio
 
         if (empty($rows)) {
             // No recipe — order is allowed, just no stock impact
+            if ($ownTx) $pdo->commit();
             return true;
         }
 
@@ -7245,8 +7250,10 @@ function deductStockForMenuItem(int $menuItemId, string $menuType, float $portio
             deductStockBatchFIFO((int)$row['ingredient_id'], $rawNeeded, $sourceType, $sourceId, $doneBy);
         }
 
+        if ($ownTx) $pdo->commit();
         return true;
     } catch (Throwable $e) {
+        if ($ownTx && $pdo->inTransaction()) $pdo->rollBack();
         error_log("deductStockForMenuItem error (item {$menuItemId}/{$menuType}): " . $e->getMessage());
         return false;
     }
@@ -7680,16 +7687,29 @@ function generateStockOrderReference(): string
 {
     global $pdo;
     $prefix = 'ORD-' . date('Ymd') . '-';
-    try {
-        $stmt = $pdo->prepare("SELECT reference FROM stock_orders WHERE reference LIKE ? ORDER BY id DESC LIMIT 1");
-        $stmt->execute([$prefix . '%']);
-        $last = $stmt->fetchColumn();
-        if ($last) {
-            $n = (int)substr($last, strlen($prefix));
-            return $prefix . str_pad((string)($n + 1), 3, '0', STR_PAD_LEFT);
+    // Retry up to 5 times to handle concurrent inserts that grab the same candidate number
+    for ($attempt = 0; $attempt < 5; $attempt++) {
+        try {
+            $stmt = $pdo->prepare("SELECT reference FROM stock_orders WHERE reference LIKE ? ORDER BY id DESC LIMIT 1");
+            $stmt->execute([$prefix . '%']);
+            $last = $stmt->fetchColumn();
+            if ($last) {
+                $n = (int)substr($last, strlen($prefix));
+                $candidate = $prefix . str_pad((string)($n + 1), 3, '0', STR_PAD_LEFT);
+            } else {
+                $candidate = $prefix . '001';
+            }
+            // Confirm candidate is still unused before returning it
+            $chk = $pdo->prepare("SELECT 1 FROM stock_orders WHERE reference = ? LIMIT 1");
+            $chk->execute([$candidate]);
+            if (!$chk->fetchColumn()) {
+                return $candidate;
+            }
+        } catch (Throwable $e) {
+            error_log('generateStockOrderReference error: ' . $e->getMessage());
+            break;
         }
-    } catch (Throwable $e) {
-        error_log('generateStockOrderReference fallback: ' . $e->getMessage());
     }
-    return $prefix . '001';
+    // Last-resort: append microseconds to ensure uniqueness
+    return $prefix . 'X' . substr((string)round(microtime(true) * 1000), -6);
 }

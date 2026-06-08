@@ -376,6 +376,25 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 }, array_column($stnStmt->fetchAll(PDO::FETCH_ASSOC), 'station'));
                 $stationLabel = implode(' & ', $stnNames) ?: 'Station';
                 $message = "Fired to {$stationLabel}: {$reference} — {$currency_symbol} " . number_format($totalAmount, 2) . " · open tab.";
+                // AJAX path: return JSON so the POS can show inline confirmation without a page reload
+                $isXhr = !empty($_SERVER['HTTP_X_REQUESTED_WITH']) && strtolower((string)$_SERVER['HTTP_X_REQUESTED_WITH']) === 'xmlhttprequest';
+                if ($isXhr) {
+                    // Fetch line items for the confirmation modal
+                    $lineStmt = $pdo->prepare("SELECT item_name, quantity FROM stock_order_items WHERE order_id = ? ORDER BY id");
+                    $lineStmt->execute([$orderId]);
+                    $lines = $lineStmt->fetchAll(PDO::FETCH_ASSOC);
+                    header('Content-Type: application/json; charset=utf-8');
+                    echo json_encode([
+                        'ok' => true,
+                        'order_id' => $orderId,
+                        'reference' => $reference,
+                        'total' => $totalAmount,
+                        'station_label' => $stationLabel,
+                        'message' => $message,
+                        'lines' => $lines,
+                    ]);
+                    exit;
+                }
                 pos_redirectWithFlash([
                     'message' => $message,
                     'last_order_id' => $lastOrderId,
@@ -584,6 +603,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         } catch (Throwable $e) {
             if ($pdo->inTransaction()) $pdo->rollBack();
             $error = $e->getMessage();
+            // Return JSON error for XHR park requests so the JS can show an inline message
+            $isXhrErr = !empty($_SERVER['HTTP_X_REQUESTED_WITH']) && strtolower((string)$_SERVER['HTTP_X_REQUESTED_WITH']) === 'xmlhttprequest';
+            if ($isXhrErr && ($_POST['action'] ?? '') === 'park') {
+                header('Content-Type: application/json; charset=utf-8');
+                echo json_encode(['ok' => false, 'error' => $error]);
+                exit;
+            }
         }
     }
 }
@@ -1632,7 +1658,7 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
         <div class="modal modal-content" style="width:880px; max-width:96vw;">
             <div class="modal-head modal-header">
                 <h3 id="tdiTitle"><i class="fas fa-receipt"></i> Tab details</h3>
-                <button class="close modal-close" onclick="document.getElementById('tabDetailOverlay').classList.remove('show')">&times;</button>
+                <button class="close modal-close" onclick="closeTabDetailOverlay()">&times;</button>
             </div>
             <div class="modal-body" id="tdiBody" style="max-height:78vh; overflow-y:auto;">
                 <div style="text-align:center; padding:40px 0; color:#9ca3af;"><i class="fas fa-spinner fa-spin fa-2x"></i></div>
@@ -2340,23 +2366,64 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
             _inboxBadgeUpdate(posInboxPendingCount(messages));
         }
 
-        function posInboxReplyComposerHtml(message, includeReplyAndAction = false) {
+        const POS_QUICK_REPLIES = ['On it!', 'Coming right up', '5 minutes', 'Almost ready', 'Noted, thanks', 'One moment please'];
+
+        function posInboxReplyComposerHtml(message, _unused = false) {
             const msgId = parseInt(message.id, 10) || 0;
             if (msgId <= 0) return '';
             const stationLabel = posInboxStationLabel(message.station);
             const inputId = 'posInboxReplyInput-' + msgId;
-            const replyButton = `<button type="button" data-pos-reply="${msgId}" onclick="sendPosInboxReply(${msgId}, this)" style="min-height:40px;padding:7px 10px;border:1px solid #8B7355;background:#8B7355;color:#fff;border-radius:7px;font-size:12px;font-weight:700;cursor:pointer;">` +
-                `<i class="fas fa-paper-plane" style="margin-right:5px;"></i>Reply</button>`;
-            const replyAndActionButton = includeReplyAndAction ?
-                `<button type="button" data-pos-reply-ack="${msgId}" onclick="sendPosInboxReply(${msgId}, this, true)" style="min-height:40px;padding:7px 10px;border:1px solid #1d4a2e;background:#1d6a3e;color:#fff;border-radius:7px;font-size:12px;font-weight:700;cursor:pointer;">` +
-                `<i class="fas fa-check" style="margin-right:5px;"></i>Reply + Actioned</button>` :
-                '';
+            const draft = _posReplyDrafts[String(msgId)] || '';
+            const quickChips = POS_QUICK_REPLIES.map(r =>
+                `<button type="button" onclick="quickSendPosReply(${msgId},'${r.replace(/'/g,"\\'")}',this)" ` +
+                `style="background:#f5f0ea;border:1px solid #c9b99a;border-radius:14px;padding:4px 10px;font-size:11px;font-weight:600;color:#6b4f2a;cursor:pointer;white-space:nowrap;transition:background .12s;"` +
+                ` onmouseover="this.style.background='#e8ddd0'" onmouseout="this.style.background='#f5f0ea'">${escHtml(r)}</button>`
+            ).join('');
             return `<div style="margin-top:8px;display:grid;gap:6px;">` +
-                `<input type="text" id="${inputId}" maxlength="255" placeholder="Reply to ${escHtml(stationLabel)}..." ` +
+                `<div style="display:flex;flex-wrap:wrap;gap:5px;">${quickChips}</div>` +
+                `<div style="display:flex;gap:6px;align-items:stretch;">` +
+                `<input type="text" id="${inputId}" maxlength="255" placeholder="Or type a custom reply…" ` +
+                `value="${escHtml(draft)}" ` +
+                `oninput="_posReplyDrafts['${msgId}'] = this.value;" ` +
                 `onkeydown="if(event.key==='Enter'){event.preventDefault();sendPosInboxReply(${msgId});}" ` +
-                `style="min-height:40px;border:1px solid #d1d5db;border-radius:7px;padding:7px 10px;font-size:12px;color:#111;">` +
-                `<div style="display:grid;grid-template-columns:${includeReplyAndAction ? '1fr 1fr' : '1fr'};gap:6px;">${replyButton}${replyAndActionButton}</div>` +
+                `style="flex:1;min-width:0;min-height:38px;border:1px solid #d1d5db;border-radius:7px;padding:7px 10px;font-size:12px;color:#111;">` +
+                `<button type="button" data-pos-reply="${msgId}" onclick="sendPosInboxReply(${msgId}, this)" style="min-height:38px;padding:6px 12px;border:1px solid #8B7355;background:#8B7355;color:#fff;border-radius:7px;font-size:12px;font-weight:700;cursor:pointer;white-space:nowrap;">` +
+                `<i class="fas fa-paper-plane" style="margin-right:5px;"></i>Send</button>` +
+                `</div>` +
+                `<button type="button" data-pos-ack="${msgId}" onclick="ackPosInboxMessage(${msgId}, this)" ` +
+                `style="min-height:34px;padding:6px 12px;background:transparent;border:1px solid #d1d5db;border-radius:7px;font-size:12px;color:#6c757d;cursor:pointer;font-weight:600;display:flex;align-items:center;gap:6px;transition:background .12s,color .12s;" ` +
+                `onmouseover="this.style.background='#fee2e2';this.style.color='#b91c1c';this.style.borderColor='#fca5a5'" ` +
+                `onmouseout="this.style.background='transparent';this.style.color='#6c757d';this.style.borderColor='#d1d5db'">` +
+                `<i class="fas fa-times-circle"></i> Dismiss</button>` +
                 `</div>`;
+        }
+
+        async function quickSendPosReply(msgId, text, triggerEl = null) {
+            const input = document.getElementById('posInboxReplyInput-' + msgId);
+            if (input) input.value = text;
+            _posReplyDrafts[String(msgId)] = text;
+            return sendPosInboxReply(msgId, triggerEl);
+        }
+
+        function dismissPosInboxThread(messageIds) {
+            const ids = new Set((messageIds || []).map(id => parseInt(id, 10) || 0).filter(Boolean));
+            if (!ids.size) return;
+            _inboxLastMsgs = (_inboxLastMsgs || []).filter(m => !ids.has(parseInt(m.id, 10) || 0));
+            if (_inboxVisible) renderPosInbox(_inboxLastMsgs);
+            updatePosInboxBadgesFromMessages(_inboxLastMsgs);
+            _syncPosMobileBadges();
+        }
+
+        function posInboxMarkReadBtn(messageIds, label = 'Mark as read') {
+            // IDs are integers — JSON.stringify produces e.g. [123,456], no HTML-unsafe chars
+            const idsJson = JSON.stringify((messageIds || []).map(id => parseInt(id, 10) || 0).filter(Boolean));
+            return `<button type="button" onclick="dismissPosInboxThread(${idsJson})" ` +
+                `style="margin-top:8px;display:inline-flex;align-items:center;gap:6px;padding:6px 14px;` +
+                `background:#f3f4f6;border:1px solid #d1d5db;border-radius:7px;font-size:12px;font-weight:600;` +
+                `color:#6c757d;cursor:pointer;transition:background .12s,color .12s;" ` +
+                `onmouseover="this.style.background='#e5e7eb';this.style.color='#374151'" ` +
+                `onmouseout="this.style.background='#f3f4f6';this.style.color='#6c757d'">` +
+                `<i class="fas fa-check"></i> ${escHtml(label)}</button>`;
         }
 
         function togglePosInbox(forceState = null) {
@@ -2415,9 +2482,16 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
             }, urgent ? 12000 : 8000);
         }
 
+        const _posReplyDrafts = {};
+
         function renderPosInbox(messages) {
             const list = document.getElementById('posInboxList');
             if (!list) return;
+            // Preserve any in-progress typed replies before rebuilding
+            list.querySelectorAll('[id^="posInboxReplyInput-"]').forEach(el => {
+                const id = el.id.replace('posInboxReplyInput-', '');
+                if (id && el.value) _posReplyDrafts[id] = el.value;
+            });
             if (!messages.length) {
                 list.innerHTML = '<p style="text-align:center;color:#888;padding:20px;font-size:13px;">No active station notes right now.</p>';
                 return;
@@ -2477,7 +2551,7 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
                     ${dishSummary}
                     ${threadMessagesHtml}
                     ${replyComposer}
-                    ${!latestPending && leadId > 0 ? '<div style="margin-top:7px;font-size:11px;color:#166534;"><i class="fas fa-check-circle"></i> This order thread is fully actioned.</div>' : ''}
+                    ${!latestPending && leadId > 0 ? posInboxMarkReadBtn(thread.map(m => m.id), 'Remove from list') : ''}
                 </div>`;
             }).join('');
 
@@ -2520,7 +2594,8 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
                 } else {
                     statusHtml = `<div style="margin-top:4px;font-size:11px;color:#f59e0b;"><i class="fas fa-hourglass-half"></i> Not yet seen by station</div>`;
                 }
-                const replyComposer = posInboxReplyComposerHtml(m, false);
+                const isPending = !m.reply_message && parseInt(m.is_acknowledged || 0, 10) !== 1;
+                const replyComposer = isPending ? posInboxReplyComposerHtml(m, false) : posInboxMarkReadBtn([m.id]);
                 return `<div style="padding:10px 14px;border-bottom:1px solid #f3f4f6;">
             <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:3px;">
                 <span style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.04em;color:${isUrgent ? '#c82333' : '#6c757d'};">${escHtml(stn)}${isUrgent ? ' · <i class="fas fa-exclamation-triangle"></i> URGENT' : ''}</span>
@@ -2534,6 +2609,11 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
             }).join('');
 
             list.innerHTML = directHtml + otherHtml;
+            // Restore any in-progress drafts that survived the rebuild
+            Object.entries(_posReplyDrafts).forEach(([id, val]) => {
+                const el = list.querySelector('#posInboxReplyInput-' + id);
+                if (el && !el.value) el.value = val;
+            });
         }
 
         async function sendPosInboxReply(messageId, triggerButton = null, markActioned = false) {
@@ -2603,6 +2683,7 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
                 posInboxApplyLocalReply(msgId, reply);
 
                 if (input) input.value = '';
+                delete _posReplyDrafts[String(msgId)];
                 const stationName = posInboxStationLabel(message.station);
 
                 if (markActioned && isPosInboxDirectPending(message)) {
@@ -2641,54 +2722,45 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
             const skipRepoll = !!(options && options.skipRepoll);
             const msgId = parseInt(messageId, 10) || 0;
             if (msgId <= 0) return false;
-            const btn = triggerButton || document.querySelector('[data-pos-ack="' + msgId + '"]');
-            if (btn) {
-                btn.classList.add('is-loading');
-                btn.disabled = true;
-                btn.setAttribute('aria-busy', 'true');
-            }
+
+            // Optimistic: mark acknowledged locally right away
+            const prevMsgs = (_inboxLastMsgs || []).slice();
+            const ts = new Date().toISOString().slice(0, 19).replace('T', ' ');
+            _inboxLastMsgs = prevMsgs.map(m => {
+                if ((parseInt(m.id, 10) || 0) !== msgId) return m;
+                return { ...m, pos_acknowledged: 1, pos_acknowledged_at: ts, pos_acknowledged_by: posUserId };
+            });
+            if (_inboxVisible) renderPosInbox(_inboxLastMsgs);
+            updatePosInboxBadgesFromMessages(_inboxLastMsgs);
+            _syncPosMobileBadges();
+
+            const fd = new FormData();
+            fd.append('csrf_token', posCsrfToken);
+            fd.append('action', 'ack_pos_message');
+            fd.append('station', 'kitchen');
+            fd.append('message_id', String(msgId));
             try {
-                const fd = new FormData();
-                fd.append('csrf_token', posCsrfToken);
-                fd.append('action', 'ack_pos_message');
-                fd.append('station', 'kitchen');
-                fd.append('message_id', String(msgId));
-                const r = await fetch('../api/kds-action.php', {
-                    method: 'POST',
-                    body: fd,
-                    credentials: 'same-origin'
-                });
+                const r = await fetch('../api/kds-action.php', { method: 'POST', body: fd, credentials: 'same-origin' });
                 const j = await r.json();
                 if (!j.ok) {
-                    if (!suppressToast) posToastReady(j.error || 'Could not save action.', true);
+                    // Rollback
+                    _inboxLastMsgs = prevMsgs;
+                    if (_inboxVisible) renderPosInbox(_inboxLastMsgs);
+                    updatePosInboxBadgesFromMessages(_inboxLastMsgs);
+                    _syncPosMobileBadges();
+                    if (!suppressToast) posToastReady(j.error || 'Could not save action — restored.', true);
                     return false;
                 }
-                const ts = new Date().toISOString().slice(0, 19).replace('T', ' ');
-                _inboxLastMsgs = (_inboxLastMsgs || []).map(m => {
-                    if ((parseInt(m.id, 10) || 0) !== msgId) return m;
-                    return {
-                        ...m,
-                        pos_acknowledged: 1,
-                        pos_acknowledged_at: ts,
-                        pos_acknowledged_by: posUserId,
-                    };
-                });
-                renderPosInbox(_inboxLastMsgs);
-                markInboxMessagesSeen(_inboxLastMsgs);
-                updatePosInboxBadgesFromMessages(_inboxLastMsgs);
-                _syncPosMobileBadges();
                 if (!suppressToast) posToastReady('FOH action recorded.', false);
                 if (!skipRepoll) setTimeout(pollStationReplies, 300);
                 return true;
             } catch (e) {
-                if (!suppressToast) posToastReady('Network error while recording action.', true);
+                _inboxLastMsgs = prevMsgs;
+                if (_inboxVisible) renderPosInbox(_inboxLastMsgs);
+                updatePosInboxBadgesFromMessages(_inboxLastMsgs);
+                _syncPosMobileBadges();
+                if (!suppressToast) posToastReady('Network error — action not saved.', true);
                 return false;
-            } finally {
-                if (btn) {
-                    btn.classList.remove('is-loading');
-                    btn.disabled = false;
-                    btn.removeAttribute('aria-busy');
-                }
             }
         }
 
@@ -2824,22 +2896,14 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
         }
 
         async function openMyOrdersCurrentDetail() {
-            showPosActionLoader('Loading orders…', 'Fetching your current order details.');
+            showPosActionLoader('Loading orders…', 'Fetching your orders for today.');
             try {
                 await pollMyOrders(true);
             } finally {
                 hidePosActionLoader();
             }
-
             toggleMyOrders(true);
-
-            const orders = Array.isArray(_myOrdersLast) ? _myOrdersLast : [];
-            if (!orders.length) return;
-
-            const currentOrder = orders[0];
-            if (currentOrder && parseInt(currentOrder.id || 0, 10) > 0) {
-                await openTabDetail(parseInt(currentOrder.id, 10));
-            }
+            // List is now visible — user taps a row to open its detail
         }
 
         function myOrderStatusPill(o) {
@@ -4481,7 +4545,7 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
             doParkSubmit();
         }
 
-        function doParkSubmit() {
+        async function doParkSubmit() {
             if (window._posParkSubmitInFlight) return;
             window._posParkSubmitInFlight = true;
             document.getElementById('payment_method').value = '';
@@ -4500,15 +4564,67 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
             }
             actionInput.value = 'park';
             posEnsureClientUuid(f);
-            primePosNavigationLoader('Sending order...', 'Refreshing your till with the new station ticket.', {
-                subtle: true,
-                ttlMs: 12000
-            });
-            showPosActionLoader('Sending order...', 'Firing your ticket to the station display.', {
-                subtle: true
-            });
-            f.submit();
+            showPosActionLoader('Firing order...', 'Sending your ticket to the station display.', { subtle: true });
+            try {
+                const fd = new FormData(f);
+                const r = await fetch('pos.php', {
+                    method: 'POST',
+                    body: fd,
+                    credentials: 'same-origin',
+                    headers: { 'X-Requested-With': 'XMLHttpRequest' }
+                });
+                const j = await r.json();
+                hidePosActionLoader();
+                if (!j.ok) {
+                    posToastReady(j.error || 'Failed to fire order — please retry.', true);
+                    return;
+                }
+                showPosParkSuccess(j);
+            } catch (e) {
+                hidePosActionLoader();
+                posToastReady('Network error — could not reach the server. Please retry.', true);
+            } finally {
+                window._posParkSubmitInFlight = false;
+            }
         }
+
+        function showPosParkSuccess(j) {
+            // Clear the cart first
+            cart = [];
+            renderCart();
+            const ref = escHtml(j.reference || '');
+            const stn = escHtml(j.station_label || 'Station');
+            const total = parseFloat(j.total || 0);
+            const linesHtml = (j.lines || []).map(l =>
+                `<div style="display:flex;justify-content:space-between;padding:4px 0;border-bottom:1px solid #f3f4f6;font-size:13px;">` +
+                `<span>${escHtml(l.item_name)}</span><span style="font-weight:600;">${escHtml(String(l.quantity))}×</span></div>`
+            ).join('');
+            // Inject inline success overlay
+            const existing = document.getElementById('posParkSuccessOverlay');
+            if (existing) existing.remove();
+            const html = `<div class="overlay modal-overlay show" id="posParkSuccessOverlay" data-modal data-dismissible="1">
+                <div class="success-modal modal-content" style="position:relative;max-width:440px;width:100%;">
+                    <button type="button" class="close modal-close" aria-label="Close" onclick="document.getElementById('posParkSuccessOverlay').remove()"
+                        style="position:absolute;top:10px;right:14px;background:transparent;border:none;font-size:26px;line-height:1;cursor:pointer;color:#6c757d;">&times;</button>
+                    <div class="icon" style="color:#e85d04;"><i class="fas fa-fire"></i></div>
+                    <h2>Order Fired!</h2>
+                    <div class="ref">${ref}</div>
+                    <div style="font-size:13px;color:#155724;margin-bottom:10px;">Sent to ${stn} · ${currencySymbol} ${fmtMoney(total)} · open tab</div>
+                    ${linesHtml ? `<div style="max-height:180px;overflow-y:auto;margin:10px 0;border:1px solid #f3f4f6;border-radius:8px;padding:6px 10px;">${linesHtml}</div>` : ''}
+                    <div class="actions">
+                        <a class="a-print" href="stock-receipt.php?id=${encodeURIComponent(j.order_id)}&print=1&kot=1" target="_blank"><i class="fas fa-print"></i> Print KOT</a>
+                        <button class="a-receipt" onclick="document.getElementById('posParkSuccessOverlay').remove(); openTabsTray();"><i class="fas fa-list"></i> View Tabs</button>
+                        <button class="a-new" onclick="document.getElementById('posParkSuccessOverlay').remove();"><i class="fas fa-plus-circle"></i> New order</button>
+                    </div>
+                </div>
+            </div>`;
+            document.body.insertAdjacentHTML('beforeend', html);
+            if (typeof posModalBridgeApply === 'function') {
+                const el = document.getElementById('posParkSuccessOverlay');
+                if (el) posModalBridgeApply(el);
+            }
+        }
+
 
         function openTabsTray() {
             const overlay = document.getElementById('tabsOverlay');
@@ -5383,9 +5499,14 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
         };
 
         async function openTabDetail(orderId) {
+            // Close the My Orders panel — it sits at z-index 99990 (above the modal) and intercepts clicks
+            toggleMyOrders(false);
+
             const overlay = document.getElementById('tabDetailOverlay');
             const body = document.getElementById('tdiBody');
             const title = document.getElementById('tdiTitle');
+            // Raise above floating widgets (z 99990) so its backdrop and content receive pointer events
+            overlay.style.zIndex = '100001';
             overlay.classList.add('show');
             body.innerHTML = '<div style="text-align:center;padding:40px 0;color:#9ca3af;"><i class="fas fa-spinner fa-spin fa-2x"></i></div>';
             try {
@@ -5888,6 +6009,13 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
 
         initPosSharedModalBridge();
 
+        function closeTabDetailOverlay() {
+            const ov = document.getElementById('tabDetailOverlay');
+            if (!ov) return;
+            ov.classList.remove('show');
+            ov.style.zIndex = ''; // reset elevated z-index
+        }
+
         // ----- Global modal-close behaviour -----
         // 1. ESC closes the topmost open .overlay.show
         document.addEventListener('keydown', e => {
@@ -5903,6 +6031,10 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
                 closeTabsTray();
                 return;
             }
+            if (top.id === 'tabDetailOverlay') {
+                closeTabDetailOverlay();
+                return;
+            }
             top.classList.remove('show');
         });
         // 2. Click on the dimmed backdrop (not on the modal body) closes the overlay
@@ -5915,6 +6047,10 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
                 }
                 if (ov.id === 'tabsOverlay') {
                     closeTabsTray();
+                    return;
+                }
+                if (ov.id === 'tabDetailOverlay') {
+                    closeTabDetailOverlay();
                     return;
                 }
                 ov.classList.remove('show');

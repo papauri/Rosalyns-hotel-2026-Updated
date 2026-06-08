@@ -43,8 +43,10 @@ if (!$error && $_SERVER['REQUEST_METHOD'] === 'POST') {
                 INSERT INTO stock_wastage (ingredient_id, batch_id, quantity, cost_per_unit, wastage_cost, reason, recorded_date, recorded_by)
                 VALUES (?, NULL, ?, ?, ?, ?, ?, ?)
             ");
-            // Preserve the operator reason on the stock_adjustments record created by deductStockBatchFIFO.
-            $adjReasonUpd = $pdo->prepare('UPDATE stock_adjustments SET reason = ?, cost_at_time = ? WHERE id = ?');
+            // Update only the reason on the stock_adjustments record — cost_at_time is already set
+            // correctly by deductStockBatchFIFO using actual FIFO batch weighted average.
+            $adjReasonUpd = $pdo->prepare('UPDATE stock_adjustments SET reason = ? WHERE id = ?');
+            $wastageActualCostUpd = $pdo->prepare('UPDATE stock_wastage SET cost_per_unit = ?, wastage_cost = quantity * ? WHERE id = ?');
 
             for ($k = 0; $k < $count; $k++) {
                 $iid = (int)($ingIds[$k] ?? 0);
@@ -82,7 +84,12 @@ if (!$error && $_SERVER['REQUEST_METHOD'] === 'POST') {
                 if ($adjId <= 0) {
                     throw new RuntimeException('Failed to apply wastage deduction for ingredient #' . $iid . '.');
                 }
-                $adjReasonUpd->execute([mb_substr($rs, 0, 255), $cost, $adjId]);
+                $adjReasonUpd->execute([mb_substr($rs, 0, 255), $adjId]);
+                // Backfill wastage record with actual FIFO weighted cost (more accurate than ingredient average)
+                $actualCostStmt = $pdo->prepare('SELECT cost_at_time FROM stock_adjustments WHERE id = ? LIMIT 1');
+                $actualCostStmt->execute([$adjId]);
+                $actualCost = (float)($actualCostStmt->fetchColumn() ?: $cost);
+                $wastageActualCostUpd->execute([$actualCost, $actualCost, $wastageId]);
                 $saved++;
             }
             $pdo->commit();

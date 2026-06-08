@@ -890,13 +890,17 @@ $bootstrap['fingerprint'] = md5(
                 <div class="t-foh-msg__reply"><i class="fas fa-reply"></i> ${escHtml(m.replied_by_name || 'You')}: ${escHtml(m.reply_message)} <span style="opacity:.7;">${rt}</span></div>
             </div>`;
             }
+            const ticketQuickChips = KDS_QUICK_REPLIES.map(r =>
+                `<button type="button" class="kds-quick-reply-chip kds-quick-reply-chip--sm" data-loader-manual onclick="quickReplyFromTicket(${m.id},'${escJsSingle(r)}',this)">${escHtml(r)}</button>`
+            ).join('');
             return `<div class="t-foh-msg${isUrgent ? ' is-urgent' : ''}" onclick="event.stopPropagation();">
             <div class="t-foh-msg__from"><i class="fas fa-user-tie"></i> ${escHtml(m.sent_by_name || 'FOH')} · ${escHtml(fmtTime(m.created_at))}${isUrgent ? ' · <span class="t-foh-msg__urgent">URGENT</span>' : ''}</div>
             <div class="t-foh-msg__body">${escHtml(m.message)}</div>
+            <div class="t-foh-msg__quick-replies">${ticketQuickChips}</div>
             <div class="t-foh-msg__actions">
-                <input type="text" class="t-foh-msg__input" id="ticket-reply-${m.id}" placeholder="Type reply…" maxlength="255" value="${escHtml(draft)}" oninput="_replyDrafts[${m.id}] = this.value;" onkeydown="if(event.key==='Enter'){event.preventDefault();replyFromTicket(${m.id}, this.closest('.t-foh-msg__actions')?.querySelector('.t-foh-msg__send'));}">
-                <button type="button" class="t-foh-msg__send" data-loader-manual onclick="replyFromTicket(${m.id}, this)"><i class="fas fa-paper-plane"></i></button>
-                <button type="button" class="t-foh-msg__ack" data-loader-manual onclick="ackStationMessage(${m.id}, this)" title="Clear without reply"><i class="fas fa-check"></i></button>
+                <input type="text" class="t-foh-msg__input" id="ticket-reply-${m.id}" placeholder="Custom reply…" maxlength="255" value="${escHtml(draft)}" oninput="_replyDrafts[${m.id}] = this.value;" onkeydown="if(event.key==='Enter'){event.preventDefault();replyFromTicket(${m.id}, this.closest('.t-foh-msg__actions')?.querySelector('.t-foh-msg__send'));}">
+                <button type="button" class="t-foh-msg__send" data-loader-manual onclick="replyFromTicket(${m.id}, this)" title="Send reply"><i class="fas fa-paper-plane"></i></button>
+                <button type="button" class="t-foh-msg__ack t-foh-msg__ack--dismiss" data-loader-manual onclick="ackStationMessage(${m.id}, this)" title="Dismiss"><i class="fas fa-times"></i></button>
             </div>
         </div>`;
         }
@@ -1147,18 +1151,24 @@ $bootstrap['fingerprint'] = md5(
                     replySection = `<div class="station-note__station-reply"><i class="fas fa-reply"></i> ${escHtml(msg.replied_by_name || 'Station')}: ${escHtml(msg.reply_message)} <span style="color:#6c757d;">${rt}</span></div>`;
                 } else {
                     const draft = _replyDrafts[msg.id] || '';
-                    replySection = `<div class="station-note__reply-row">
-                    <input type="text" class="station-note__reply-input" id="reply-${msg.id}" placeholder="Reply to FOH…" maxlength="255" value="${escHtml(draft)}" oninput="_replyDrafts[${msg.id}] = this.value;" onkeydown="if(event.key==='Enter'){event.preventDefault();replyToMessage(${msg.id});}">
-                    <button type="button" class="station-note__reply-btn" data-loader-manual onclick="replyToMessage(${msg.id}, this)"><i class="fas fa-reply"></i> Reply</button>
+                    const quickChips = KDS_QUICK_REPLIES.map(r =>
+                        `<button type="button" class="kds-quick-reply-chip" data-loader-manual onclick="quickReplyToMessage(${msg.id},'${escJsSingle(r)}',this)">${escHtml(r)}</button>`
+                    ).join('');
+                    replySection = `<div class="station-note__quick-replies">${quickChips}</div>
+                <div class="station-note__reply-row">
+                    <input type="text" class="station-note__reply-input" id="reply-${msg.id}" placeholder="Or type a custom reply…" maxlength="255" value="${escHtml(draft)}" oninput="_replyDrafts[${msg.id}] = this.value;" onkeydown="if(event.key==='Enter'){event.preventDefault();replyToMessage(${msg.id});}">
+                    <button type="button" class="station-note__reply-btn" data-loader-manual onclick="replyToMessage(${msg.id}, this)"><i class="fas fa-paper-plane"></i> Send</button>
+                </div>
+                <div class="station-note__dismiss-row">
+                    <button type="button" class="station-note__dismiss-btn" data-loader-manual onclick="ackStationMessage(${msg.id}, this)"><i class="fas fa-times-circle"></i> Dismiss</button>
                 </div>`;
                 }
                 return `<div class="station-note${isUrgent ? ' station-note--urgent' : ''}" data-msg-id="${msg.id}">
-                <div style="min-width:0;">
+                <div style="min-width:0;width:100%;">
                     <div class="station-note__message">${urgentBadge}${escHtml(msg.message)}</div>
                     <div class="station-note__meta">${escHtml(msg.sent_by_name || 'FOH')} · ${escHtml(fmtTime(msg.created_at))}${orderBadge ? ' · ' + orderBadge : ''}</div>
                     ${replySection}
                 </div>
-                <button type="button" data-loader-manual onclick="ackStationMessage(${msg.id}, this)" title="Clear note" style="align-self:start;"><i class="fas fa-check"></i></button>
             </div>`;
             }).join('') : '<div class="station-empty-line">No active notes.</div>';
             updateTabTitle();
@@ -1341,11 +1351,53 @@ $bootstrap['fingerprint'] = md5(
         }
 
         const _stationActionLocks = new Set();
+
+        /* Apply an optimistic local state change so the UI responds instantly.
+           Returns a snapshot of the pre-change state so callers can roll back. */
+        function applyOptimisticAction(action, orderId, itemId) {
+            const snap = JSON.parse(JSON.stringify(state));
+            const oid = parseInt(orderId, 10) || 0;
+            const iid = parseInt(itemId, 10) || 0;
+
+            if (action === 'bump_ticket' && oid > 0) {
+                state.tickets.forEach(t => {
+                    if (parseInt(t.id, 10) !== oid) return;
+                    (t.items || []).forEach(i => {
+                        if (i.is_mine == 1 || i.is_mine === true) i.kds_status = 'served';
+                    });
+                    t.kitchen_status = 'served';
+                });
+                // Remove fully-served tickets (all my items served) from the live board
+                state.tickets = state.tickets.filter(t => {
+                    if (parseInt(t.id, 10) !== oid) return true;
+                    return (t.items || []).some(i => (i.is_mine == 1 || i.is_mine === true) && !['served','void'].includes(i.kds_status));
+                });
+            } else if (action === 'start_ticket' && oid > 0) {
+                const t = state.tickets.find(t => parseInt(t.id, 10) === oid);
+                if (t) {
+                    (t.items || []).forEach(i => { if ((i.is_mine == 1 || i.is_mine === true) && i.kds_status === 'pending') i.kds_status = 'preparing'; });
+                    t.kitchen_status = 'in_progress';
+                }
+            } else if (iid > 0) {
+                const newStatus = { start_item: 'preparing', ready_item: 'ready', collect_item: 'collection', serve_item: 'served' }[action];
+                if (newStatus) {
+                    state.tickets.forEach(t => { (t.items || []).forEach(i => { if (parseInt(i.id, 10) === iid) i.kds_status = newStatus; }); });
+                }
+            }
+            return snap;
+        }
+
         async function act(action, orderId = null, itemId = null, triggerButton = null) {
             const lockKey = `${action}:${orderId || ''}:${itemId || ''}`;
             if (_stationActionLocks.has(lockKey)) return;
             _stationActionLocks.add(lockKey);
+
+            // Optimistic: apply state immediately so the board reacts before the network round-trip
+            const rollback = applyOptimisticAction(action, orderId, itemId);
+            render();
+            // Flash the button into loading state AFTER render (so it stays briefly visible on item actions)
             const loadingButton = setStationClickerLoading(triggerButton, true);
+
             const fd = new FormData();
             fd.append('csrf_token', csrf);
             fd.append('action', action);
@@ -1359,18 +1411,28 @@ $bootstrap['fingerprint'] = md5(
                     credentials: 'same-origin'
                 });
                 const j = await r.json();
-                if (!j.ok) showStationIssue(j.error || 'Action failed', {
-                    modal: true
-                });
-                else {
-                    toast(stationActionSuccessMessage(action));
+                if (!j.ok) {
+                    // Rollback optimistic change then show the error
+                    state = rollback;
+                    render();
+                    showStationIssue(j.error || 'Action failed', { modal: true });
+                } else {
+                    const msg = stationActionSuccessMessage(action);
+                    toast(msg);
+                    if (action === 'bump_ticket') {
+                        if (soundOn) RHSounds.play('normal');
+                        if (typeof RHNotif !== 'undefined' && RHNotif.show) {
+                            RHNotif.show({ title: 'Ticket bumped', body: 'Cleared from board — delivered to the table.', type: 'success', source: STATION_LABEL, duration: 3500, sound: false });
+                        }
+                    }
                     lastFeedFingerprint = '';
-                    await poll();
+                    // Background poll — don't await, just sync external changes
+                    poll().catch(() => {});
                 }
             } catch (e) {
-                showStationIssue('Network error while updating the ticket. Please try again.', {
-                    modal: false
-                });
+                state = rollback;
+                render();
+                showStationIssue('Network error while updating the ticket. Please try again.', { modal: false });
             } finally {
                 _stationActionLocks.delete(lockKey);
                 setStationClickerLoading(loadingButton, false);
@@ -1572,44 +1634,70 @@ $bootstrap['fingerprint'] = md5(
         });
 
         async function ackStationMessage(messageId, triggerButton = null) {
-            const loadingButton = setStationClickerLoading(triggerButton, true);
+            const mid = parseInt(messageId, 10);
+            // Optimistic: remove immediately so UI feels instant
+            const prevMessages = (state.messages || []).slice();
+            state.messages = prevMessages.filter(m => parseInt(m.id, 10) !== mid);
+            knownMessageIds.delete(messageId);
+            knownMessageIds.delete(String(messageId));
+            delete _replyDrafts[messageId];
+            _seenTicketMsgIds.delete(mid);
+            render();
+
             const fd = new FormData();
             fd.append('csrf_token', csrf);
             fd.append('action', 'ack_message');
             fd.append('station', STATION);
             fd.append('message_id', messageId);
             try {
-                const r = await fetch(apiUrl, {
-                    method: 'POST',
-                    body: fd,
-                    credentials: 'same-origin'
-                });
+                const r = await fetch(apiUrl, { method: 'POST', body: fd, credentials: 'same-origin' });
                 const j = await r.json();
                 if (!j.ok) {
-                    toast(j.error || 'Note clear failed', true);
-                    return;
+                    // Rollback
+                    state.messages = prevMessages;
+                    render();
+                    toast(j.error || 'Dismiss failed — note restored', true);
                 }
-                state.messages = (state.messages || []).filter(m => parseInt(m.id, 10) !== parseInt(messageId, 10));
-                knownMessageIds.delete(messageId);
-                knownMessageIds.delete(String(messageId));
-                delete _replyDrafts[messageId];
-                _seenTicketMsgIds.delete(parseInt(messageId, 10));
-                render();
             } catch (e) {
-                toast('Network error', true);
-            } finally {
-                setStationClickerLoading(loadingButton, false);
+                state.messages = prevMessages;
+                render();
+                toast('Network error — note restored', true);
             }
         }
 
-        async function replyToMessage(messageId, triggerButton = null) {
+        const KDS_QUICK_REPLIES = [
+            'On it!',
+            '5 minutes',
+            '10 minutes',
+            'Ready soon',
+            'Out of stock',
+            'Need clarification',
+        ];
+
+        /* Send a quick reply without needing an input element. */
+        async function quickReplyToMessage(messageId, text, triggerEl = null) {
             const input = document.getElementById('reply-' + messageId);
-            const reply = (input?.value || '').trim().slice(0, 255);
+            if (input) input.value = text;
+            _replyDrafts[messageId] = text;
+            await replyToMessage(messageId, triggerEl, text);
+        }
+
+        async function quickReplyFromTicket(messageId, text, triggerEl = null) {
+            const tInput = document.getElementById('ticket-reply-' + messageId);
+            if (tInput) tInput.value = text;
+            _replyDrafts[messageId] = text;
+            await replyFromTicket(messageId, triggerEl);
+        }
+
+        async function replyToMessage(messageId, triggerButton = null, directText = null) {
+            const input = document.getElementById('reply-' + messageId);
+            const reply = (directText || input?.value || _replyDrafts[messageId] || '').trim().slice(0, 255);
             if (!reply) {
                 toast('Type a reply first', true);
+                if (input) input.focus();
                 return;
             }
-            const loadingButton = setStationClickerLoading(triggerButton || input.closest('.station-note__reply-row')?.querySelector('.station-note__reply-btn'), true);
+            const loadingButton = setStationClickerLoading(triggerButton || input?.closest('.station-note__reply-row')?.querySelector('.station-note__reply-btn'), true);
             const fd = new FormData();
             fd.append('csrf_token', csrf);
             fd.append('action', 'ack_message');
@@ -1632,7 +1720,7 @@ $bootstrap['fingerprint'] = md5(
                 knownMessageIds.delete(String(messageId));
                 delete _replyDrafts[messageId];
                 _seenTicketMsgIds.delete(parseInt(messageId, 10));
-                toast('Reply sent');
+                toast('Reply sent to FOH');
                 render();
             } catch (e) {
                 toast('Network error', true);
@@ -2228,7 +2316,7 @@ $bootstrap['fingerprint'] = md5(
         tickClock();
         setTimeout(poll, 500);
         setInterval(tickClock, 1000);
-        RHPoll.every(poll, 2000);
+        RHPoll.every(poll, 1000);
 
         /* ---- Reminder: re-ring for old unacknowledged urgent messages every 2 minutes ---- */
         RHPoll.every(() => {

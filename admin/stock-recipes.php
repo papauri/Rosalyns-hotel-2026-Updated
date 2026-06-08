@@ -138,11 +138,13 @@ if (!$error && $_SERVER['REQUEST_METHOD'] === 'POST') {
                 $pdo->commit();
             } elseif ($action === 'delete_recipe') {
                 $itemId = (int)($_POST['menu_item_id'] ?? 0);
-                $typeRaw3 = trim($_POST['menu_type'] ?? 'food');
-                $catChk3 = $pdo->prepare("SELECT slug FROM menu_categories WHERE slug = ? AND is_active = 1 LIMIT 1");
-                $catChk3->execute([$typeRaw3]);
-                $type = (string)($catChk3->fetchColumn() ?: 'food');
-                $pdo->prepare("DELETE FROM stock_recipes WHERE menu_item_id = ? AND menu_type = ?")->execute([$itemId, $type]);
+                $typeRaw3 = trim($_POST['menu_type'] ?? '');
+                if ($typeRaw3 === '' || $itemId <= 0) {
+                    throw new RuntimeException('Invalid recipe delete request.');
+                }
+                // Use the raw type directly — no fallback. A recipe only exists for its actual type,
+                // so falling back to 'food' would silently delete the wrong recipe.
+                $pdo->prepare("DELETE FROM stock_recipes WHERE menu_item_id = ? AND menu_type = ?")->execute([$itemId, $typeRaw3]);
                 $message = 'Recipe deleted.';
             }
         } catch (Throwable $e) {
