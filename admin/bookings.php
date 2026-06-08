@@ -1,4 +1,4 @@
-﻿<?php
+<?php
 // Include admin initialization (PHP-only, no HTML output)
 require_once 'admin-init.php';
 require_once '../config/base-url.php';
@@ -2987,8 +2987,6 @@ $today_str = $today->format('Y-m-d');
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,300;0,400;0,500;0,600;1,300;1,400;1,500&family=Jost:wght@300;400;500;600&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.7.2/css/all.min.css">
-    <link rel="stylesheet" href="../css/main.css">
     <link rel="stylesheet" href="css/admin-styles.css">
     <link rel="stylesheet" href="css/admin-responsive-enhancements.css">
     <link rel="stylesheet" href="css/admin-components.css">
@@ -3249,21 +3247,21 @@ $today_str = $today->format('Y-m-d');
 
                 <?php if (!empty($bookings)): ?>
                     <div class="table-responsive">
-                        <table class="booking-table bookings-table">
+                        <table class="booking-table bookings-table tablet-table">
                             <thead>
                                 <tr>
-                                    <th style="width: 120px;">Ref</th>
-                                    <th style="width: 200px;">Guest Name</th>
-                                    <th style="width: 210px;">Room</th>
-                                    <th style="width: 140px;">Check In</th>
-                                    <th style="width: 140px;">Check Out</th>
-                                    <th style="width: 80px;">Nights</th>
-                                    <th style="width: 80px;">Guests</th>
-                                    <th style="width: 120px;">Total</th>
-                                    <th style="width: 120px;">Status</th>
-                                    <th style="width: 120px;">Payment</th>
-                                    <th style="width: 150px;">Created</th>
-                                    <th style="width: 180px;">Actions</th>
+                                    <th>Ref</th>
+                                    <th>Guest Name</th>
+                                    <th>Room</th>
+                                    <th>Check In</th>
+                                    <th>Check Out</th>
+                                    <th>Nights</th>
+                                    <th>Guests</th>
+                                    <th>Total</th>
+                                    <th>Status</th>
+                                    <th>Payment</th>
+                                    <th>Created</th>
+                                    <th>Actions</th>
                                 </tr>
                             </thead>
                             <tbody>
@@ -3645,7 +3643,7 @@ $today_str = $today->format('Y-m-d');
 
             <?php if (!empty($conference_inquiries)): ?>
                 <div class="table-responsive">
-                    <table class="booking-table">
+                    <table class="booking-table tablet-table">
                         <thead>
                             <tr>
                                 <th style="width: 140px;">Date Received</th>

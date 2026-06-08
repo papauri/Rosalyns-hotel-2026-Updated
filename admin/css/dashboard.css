@@ -355,7 +355,7 @@ body.dashboard-insight-open {
 }
 
 .dashboard-insight-modal__table-wrap {
-    border: 1px solid var(--admin-surface-border, #eaecef);
+    border: 1px solid var(--tbl-border, #E8E0D6);
     border-radius: 0.8rem;
     overflow: auto;
 }

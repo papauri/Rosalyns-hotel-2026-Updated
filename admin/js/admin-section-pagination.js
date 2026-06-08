@@ -87,7 +87,9 @@
 
     function resolveSectionScope(table) {
         if (!table) return null;
-        return table.closest('[data-admin-pagination-scope], .acct-panel, .section-card, .widget, .dashboard-section, .table-container, .table-wrapper, .table-responsive, .content') || table.parentElement;
+        // Intentionally excludes broad containers (.content, .table-container, .table-responsive)
+        // to avoid false-positive "existing pagination" detection across unrelated sections.
+        return table.closest('[data-admin-pagination-scope], .acct-panel, .section-card, .widget, .dashboard-section, .log-section') || table.parentElement;
     }
 
     function findExistingPaginationNear(table) {
@@ -187,7 +189,7 @@
         }
 
         if (!scopedContainer) {
-            scopedContainer = nav.closest('[data-admin-pagination-scope], .section-card, .widget, .dashboard-section, .content') || nav.parentElement || nav;
+            scopedContainer = nav.closest('[data-admin-pagination-scope], .section-card, .widget, .dashboard-section') || nav.parentElement || nav;
         }
 
         var hideScopedLoader = window.AdminScopedSectionLoader.show(scopedContainer, message || 'Loading next page...');

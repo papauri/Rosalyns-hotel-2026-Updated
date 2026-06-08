@@ -241,8 +241,6 @@ $receiptPlaceholderTokens = array_keys($templatePreviewMap);
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,300;0,400;0,500;0,600;1,300;1,400;1,500&family=Jost:wght@300;400;500;600&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.7.2/css/all.min.css">
-    <link rel="stylesheet" href="../css/main.css">
     <link rel="stylesheet" href="css/admin-styles.css">
     <link rel="stylesheet" href="css/admin-responsive-enhancements.css">
     <link rel="stylesheet" href="css/admin-components.css">
@@ -255,79 +253,96 @@ $receiptPlaceholderTokens = array_keys($templatePreviewMap);
 
     <?php require_once 'includes/admin-header.php'; ?>
 
-    <div class="content receipts-page finance-page">
-        <div class="acct-page-header">
-            <div class="acct-page-header__copy">
-                <h1 class="acct-page-header__title">Receipts</h1>
-                <p class="acct-page-header__subtitle">Track every receipt from room, conference, restaurant, POS, credit-note and adjustment payments.</p>
+    <div class="admin-container finance-page receipts-page">
+
+        <!-- Page header -->
+        <div class="cn-page-header">
+            <div class="cn-page-header__left">
+                <h2 class="section-title"><i class="fas fa-receipt"></i> Receipts</h2>
+                <p class="cn-page-header__sub">Track every receipt from room, conference, restaurant and POS payments.</p>
             </div>
-            <form method="get" class="acct-filter-form">
-                <label class="acct-filter-field"><span>Type</span><select name="type">
-                        <option value="all">All</option>
-                        <option value="room" <?php echo $filters['type'] === 'room' ? 'selected' : ''; ?>>Rooms</option>
-                        <option value="conference" <?php echo $filters['type'] === 'conference' ? 'selected' : ''; ?>>Conference</option>
-                        <option value="restaurant" <?php echo $filters['type'] === 'restaurant' ? 'selected' : ''; ?>>Restaurant/POS</option>
-                    </select></label>
-                <label class="acct-filter-field"><span>Status</span><select name="status">
-                        <option value="all">All</option>
-                        <option value="missing" <?php echo $filters['status'] === 'missing' ? 'selected' : ''; ?>>Missing No.</option>
-                        <option value="generated" <?php echo $filters['status'] === 'generated' ? 'selected' : ''; ?>>Generated</option>
-                        <option value="emailed" <?php echo $filters['status'] === 'emailed' ? 'selected' : ''; ?>>Emailed</option>
-                    </select></label>
-                <label class="acct-filter-field"><span>From</span><input type="date" name="date_from" value="<?php echo htmlspecialchars($filters['date_from']); ?>"></label>
-                <label class="acct-filter-field"><span>To</span><input type="date" name="date_to" value="<?php echo htmlspecialchars($filters['date_to']); ?>"></label>
-                <label class="acct-filter-field"><span>Search</span><input type="text" name="search" value="<?php echo htmlspecialchars($filters['search']); ?>" placeholder="Receipt, payment, booking"></label>
-                <button class="acct-btn acct-btn--primary" type="submit"><i class="fas fa-filter"></i> Apply</button>
-                <a class="acct-btn acct-btn--ghost" href="receipts.php"><i class="fas fa-times"></i> Clear</a>
+            <div class="cn-page-header__actions">
+                <form method="post" style="display:inline;">
+                    <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf_token, ENT_QUOTES, 'UTF-8'); ?>">
+                    <input type="hidden" name="action" value="backfill_receipts">
+                    <button class="btn btn--primary" type="submit"><i class="fas fa-wand-magic-sparkles"></i> Generate Missing</button>
+                </form>
+                <a class="btn btn--ghost" href="receipts.php?<?php echo htmlspecialchars(http_build_query(array_merge($filters, ['export' => 'csv'])), ENT_QUOTES, 'UTF-8'); ?>"><i class="fas fa-file-csv"></i> Export CSV</a>
+            </div>
+        </div>
+
+        <?php if ($message): ?>
+            <div class="alert alert--success"><i class="fas fa-check-circle"></i> <?php echo htmlspecialchars($message); ?></div>
+        <?php endif; ?>
+        <?php if ($error): ?>
+            <div class="alert alert--danger"><i class="fas fa-exclamation-triangle"></i> <?php echo htmlspecialchars($error); ?></div>
+        <?php endif; ?>
+
+        <!-- KPI Strip -->
+        <div class="acct-kpis">
+            <div class="acct-kpi">
+                <div class="acct-kpi__label">Total Receipts</div>
+                <div class="acct-kpi__value"><?php echo number_format((int)($summary['total_receipts'] ?? 0)); ?></div>
+                <div class="acct-kpi__meta">payment records</div>
+            </div>
+            <div class="acct-kpi acct-kpi--pending">
+                <div class="acct-kpi__label">Missing Numbers</div>
+                <div class="acct-kpi__value"><?php echo number_format((int)($summary['missing_receipts'] ?? 0)); ?></div>
+                <div class="acct-kpi__meta">need generation</div>
+            </div>
+            <div class="acct-kpi acct-kpi--paid">
+                <div class="acct-kpi__label">Generated PDFs</div>
+                <div class="acct-kpi__value"><?php echo number_format((int)($summary['generated_receipts'] ?? 0)); ?></div>
+                <div class="acct-kpi__meta"><?php echo number_format((int)($summary['emailed_receipts'] ?? 0)); ?> emailed</div>
+            </div>
+            <div class="acct-kpi acct-kpi--revenue">
+                <div class="acct-kpi__label">Receipt Value</div>
+                <div class="acct-kpi__value"><span class="acct-kpi__currency"><?php echo htmlspecialchars($currency_symbol); ?></span><?php echo number_format((float)($summary['receipt_value'] ?? 0), 2); ?></div>
+                <div class="acct-kpi__meta">all matched payments</div>
+            </div>
+        </div>
+
+        <!-- Filter bar -->
+        <div class="filter-section">
+            <form method="get" action="receipts.php" class="filter-bar">
+                <input type="text" name="search" class="filter-input" placeholder="Receipt #, payment ref, booking ref..." value="<?php echo htmlspecialchars($filters['search']); ?>">
+                <select name="type" class="filter-select">
+                    <option value="all">All Types</option>
+                    <option value="room" <?php echo $filters['type'] === 'room' ? 'selected' : ''; ?>>Rooms</option>
+                    <option value="conference" <?php echo $filters['type'] === 'conference' ? 'selected' : ''; ?>>Conference</option>
+                    <option value="restaurant" <?php echo $filters['type'] === 'restaurant' ? 'selected' : ''; ?>>Restaurant/POS</option>
+                </select>
+                <select name="status" class="filter-select">
+                    <option value="all">All Statuses</option>
+                    <option value="missing" <?php echo $filters['status'] === 'missing' ? 'selected' : ''; ?>>Missing No.</option>
+                    <option value="generated" <?php echo $filters['status'] === 'generated' ? 'selected' : ''; ?>>Generated</option>
+                    <option value="emailed" <?php echo $filters['status'] === 'emailed' ? 'selected' : ''; ?>>Emailed</option>
+                </select>
+                <input type="date" name="date_from" class="filter-input" value="<?php echo htmlspecialchars($filters['date_from']); ?>">
+                <input type="date" name="date_to" class="filter-input" value="<?php echo htmlspecialchars($filters['date_to']); ?>">
+                <button type="submit" class="btn btn--primary btn--sm"><i class="fas fa-search"></i> Search</button>
+                <?php if ($filters['type'] !== 'all' || $filters['status'] !== 'all' || $filters['search'] !== '' || $filters['date_from'] !== '' || $filters['date_to'] !== ''): ?>
+                    <a href="receipts.php" class="btn btn--ghost btn--sm">Clear</a>
+                <?php endif; ?>
             </form>
         </div>
 
-        <?php if ($message): ?><div class="pos-acct-alert pos-acct-alert--success"><?php echo htmlspecialchars($message); ?></div><?php endif; ?>
-        <?php if ($error): ?><div class="pos-acct-alert pos-acct-alert--danger"><?php echo htmlspecialchars($error); ?></div><?php endif; ?>
-
-        <div class="acct-kpi-grid">
-            <div class="acct-kpi">
-                <div class="acct-kpi__label">Receipt rows</div>
-                <div class="acct-kpi__value"><?php echo number_format((int)($summary['total_receipts'] ?? 0)); ?></div>
-            </div>
-            <div class="acct-kpi acct-kpi--receivables">
-                <div class="acct-kpi__label">Missing numbers</div>
-                <div class="acct-kpi__value"><?php echo number_format((int)($summary['missing_receipts'] ?? 0)); ?></div>
-            </div>
-            <div class="acct-kpi acct-kpi--cash">
-                <div class="acct-kpi__label">Generated PDFs</div>
-                <div class="acct-kpi__value"><?php echo number_format((int)($summary['generated_receipts'] ?? 0)); ?></div>
-            </div>
-            <div class="acct-kpi acct-kpi--vat">
-                <div class="acct-kpi__label">Receipt value</div>
-                <div class="acct-kpi__value"><?php echo receipts_money((float)($summary['receipt_value'] ?? 0), $currency_symbol); ?></div>
-            </div>
-        </div>
-
-        <div class="acct-panel" data-admin-pagination-scope data-receipts-pagination-scope data-page-size="<?php echo (int)$limit; ?>" data-current-page="<?php echo (int)$page; ?>" data-total-pages="<?php echo (int)$totalPages; ?>">
-            <div class="acct-panel__head">
-                <div>
-                    <h3><i class="fas fa-receipt"></i> Receipt Register</h3>
-                    <p>Generate missing receipts, open PDFs, email guests, export CSV and share a manual WhatsApp message.</p>
+        <!-- Receipts Table -->
+        <div class="table-container" data-admin-pagination-scope data-receipts-pagination-scope data-page-size="<?php echo (int)$limit; ?>" data-current-page="<?php echo (int)$page; ?>" data-total-pages="<?php echo (int)$totalPages; ?>">
+            <?php if (!$payments): ?>
+                <div class="empty-state">
+                    <i class="fas fa-receipt"></i>
+                    <p>No receipt rows match the current filters.</p>
                 </div>
-                <div class="pos-acct-bulk-actions">
-                    <form method="post" class="receipts-inline-form">
-                        <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf_token, ENT_QUOTES, 'UTF-8'); ?>">
-                        <input type="hidden" name="action" value="backfill_receipts">
-                        <button class="acct-btn acct-btn--primary" type="submit"><i class="fas fa-wand-magic-sparkles"></i> Generate Missing</button>
-                    </form>
-                    <a class="acct-btn acct-btn--ghost" href="receipts.php?<?php echo htmlspecialchars(http_build_query(array_merge($filters, ['export' => 'csv'])), ENT_QUOTES, 'UTF-8'); ?>"><i class="fas fa-file-csv"></i> Export CSV</a>
-                </div>
-            </div>
-            <div class="acct-table-wrap">
-                <table class="acct-table">
+            <?php else: ?>
+                <table class="table receipts-table">
                     <thead>
                         <tr>
-                            <th>Receipt</th>
+                            <th>Receipt #</th>
                             <th>Payment</th>
                             <th>Source</th>
                             <th>Date</th>
-                            <th class="num">Amount</th>
+                            <th class="text-right">Amount</th>
                             <th>Status</th>
                             <th>Actions</th>
                         </tr>
@@ -340,73 +355,140 @@ $receiptPlaceholderTokens = array_keys($templatePreviewMap);
                             $waMessage = html_entity_decode(str_replace(array_keys($waPlaceholders), array_values($waPlaceholders), $templateWhatsapp), ENT_QUOTES, 'UTF-8');
                             $waPhone = preg_replace('/[^0-9]+/', '', (string)$waContext['guest_phone']);
                             $waUrl = ($waPhone !== '' ? 'https://wa.me/' . $waPhone : 'https://wa.me/') . '?text=' . rawurlencode($waMessage);
+                            $guestEmail = htmlspecialchars((string)($waContext['guest_email'] ?? ''), ENT_QUOTES, 'UTF-8');
                             ?>
                             <tr data-receipts-row data-page-index="<?php echo (int)floor($index / max(1, $limit)) + 1; ?>">
-                                <td data-label="Receipt"><strong><?php echo htmlspecialchars((string)($payment['receipt_number'] ?: 'Missing')); ?></strong><small><?php echo !empty($payment['receipt_path']) ? htmlspecialchars((string)$payment['receipt_path']) : 'No PDF stored yet'; ?></small></td>
-                                <td data-label="Payment"><span class="acct-row-label"><i class="fas fa-money-check"></i><?php echo htmlspecialchars((string)$payment['payment_reference']); ?></span><small><?php echo htmlspecialchars((string)($payment['recorded_by_name'] ?? 'System')); ?></small></td>
-                                <td data-label="Source"><?php echo htmlspecialchars(ucfirst((string)$payment['booking_type'])); ?><small><?php echo htmlspecialchars((string)$payment['booking_reference']); ?></small></td>
-                                <td data-label="Date"><?php echo htmlspecialchars(date('d M Y', strtotime((string)$payment['payment_date']))); ?></td>
-                                <td data-label="Amount" class="num"><?php echo receipts_money((float)$payment['total_amount'], $currency_symbol); ?></td>
-                                <td data-label="Status"><span class="pos-acct-pill <?php echo !empty($payment['receipt_generated']) ? 'pos-acct-pill--closed' : 'pos-acct-pill--warn'; ?>"><?php echo !empty($payment['receipt_generated']) ? 'PDF ready' : 'Needs PDF'; ?></span><?php if (!empty($payment['receipt_emailed_at'])): ?><small>Emailed <?php echo htmlspecialchars(date('d M Y H:i', strtotime((string)$payment['receipt_emailed_at']))); ?></small><?php endif; ?></td>
-                                <td data-label="Actions">
-                                    <form method="post" class="receipts-inline-form receipts-inline-form--row">
+                                <td>
+                                    <strong class="tbl-ref"><?php echo htmlspecialchars((string)($payment['receipt_number'] ?: '—')); ?></strong>
+                                    <?php if (empty($payment['receipt_number'])): ?>
+                                        <span class="status-badge status-badge--warning" style="margin-top:3px;display:inline-block;">Missing</span>
+                                    <?php endif; ?>
+                                </td>
+                                <td>
+                                    <div><?php echo htmlspecialchars((string)$payment['payment_reference']); ?></div>
+                                    <small class="text-muted"><?php echo htmlspecialchars((string)($payment['recorded_by_name'] ?? 'System')); ?></small>
+                                </td>
+                                <td>
+                                    <span class="status-badge status-badge--info"><?php echo htmlspecialchars(ucfirst((string)$payment['booking_type'])); ?></span>
+                                    <small class="text-muted" style="display:block;margin-top:2px;"><?php echo htmlspecialchars((string)$payment['booking_reference']); ?></small>
+                                </td>
+                                <td><?php echo htmlspecialchars(date('d M Y', strtotime((string)$payment['payment_date']))); ?></td>
+                                <td class="text-right"><strong><?php echo receipts_money((float)$payment['total_amount'], $currency_symbol); ?></strong></td>
+                                <td>
+                                    <span class="status-badge <?php echo !empty($payment['receipt_generated']) ? 'status-badge--success' : 'status-badge--warning'; ?>">
+                                        <?php echo !empty($payment['receipt_generated']) ? 'PDF ready' : 'Needs PDF'; ?>
+                                    </span>
+                                    <?php if (!empty($payment['receipt_emailed_at'])): ?>
+                                        <small class="text-muted" style="display:block;margin-top:2px;">Emailed <?php echo htmlspecialchars(date('d M Y', strtotime((string)$payment['receipt_emailed_at']))); ?></small>
+                                    <?php endif; ?>
+                                </td>
+                                <td class="actions-cell">
+                                    <form method="post" class="receipts-generate-form" style="display:inline;">
                                         <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf_token, ENT_QUOTES, 'UTF-8'); ?>">
                                         <input type="hidden" name="payment_id" value="<?php echo (int)$payment['id']; ?>">
-                                        <div class="receipts-action-buttons">
-                                            <button class="btn btn-sm btn-outline" name="action" value="generate_receipt" type="submit"><i class="fas fa-file-pdf"></i> Generate</button>
-                                            <?php if (!empty($payment['receipt_path'])): ?><a class="btn btn-sm btn-outline" href="../<?php echo htmlspecialchars((string)$payment['receipt_path']); ?>" target="_blank"><i class="fas fa-eye"></i> View</a><?php endif; ?>
-                                            <a class="btn btn-sm btn-outline" href="<?php echo htmlspecialchars($waUrl, ENT_QUOTES, 'UTF-8'); ?>" target="_blank" rel="noopener"><i class="fab fa-whatsapp"></i> WhatsApp</a>
-                                        </div>
-                                        <div class="receipts-action-email">
-                                            <input type="email" name="recipient" class="receipts-recipient-input" placeholder="Recipient email (optional)" value="<?php echo htmlspecialchars((string)($waContext['guest_email'] ?? '')); ?>">
-                                            <button class="btn btn-sm btn-outline" name="action" value="email_receipt" type="submit"><i class="fas fa-envelope"></i> Email</button>
-                                        </div>
+                                        <button type="submit" name="action" value="generate_receipt" class="quick-action" title="Generate / Regenerate PDF" style="color:var(--color-primary,#8A775F);">
+                                            <i class="fas fa-file-pdf"></i>
+                                        </button>
                                     </form>
+                                    <?php if (!empty($payment['receipt_path'])): ?>
+                                        <a class="quick-action" href="../<?php echo htmlspecialchars((string)$payment['receipt_path']); ?>" target="_blank" title="View PDF">
+                                            <i class="fas fa-eye"></i>
+                                        </a>
+                                    <?php endif; ?>
+                                    <div class="actions-more">
+                                        <button type="button" class="quick-action actions-more-toggle" title="More actions" aria-label="More actions" onclick="toggleReceiptActionsMore(this, event)">
+                                            <i class="fas fa-ellipsis-vertical"></i>
+                                        </button>
+                                        <div class="actions-more-menu">
+                                            <a href="<?php echo htmlspecialchars($waUrl, ENT_QUOTES, 'UTF-8'); ?>" target="_blank" rel="noopener"><i class="fab fa-whatsapp"></i> Send WhatsApp</a>
+                                            <button type="button" onclick="openReceiptEmailModal(<?php echo (int)$payment['id']; ?>, '<?php echo $guestEmail; ?>')"><i class="fas fa-envelope"></i> Email receipt</button>
+                                        </div>
+                                    </div>
                                 </td>
                             </tr>
                         <?php endforeach; ?>
-                        <?php if (!$payments): ?><tr>
-                                <td colspan="7" class="pos-acct-empty">No receipt rows match the current filters.</td>
-                            </tr><?php endif; ?>
                     </tbody>
                 </table>
-            </div>
-            <?php if ($totalPages > 1): ?><nav class="bookings-pagination receipts-pagination" aria-label="Receipt pagination">
-                    <?php if ($page > 1): ?>
-                        <a class="acct-btn acct-btn--ghost receipts-pagination__link" href="receipts.php?<?php echo htmlspecialchars(http_build_query(array_merge($filters, ['page' => $page - 1])), ENT_QUOTES, 'UTF-8'); ?>"><i class="fas fa-chevron-left"></i> Prev</a>
-                    <?php else: ?>
-                        <span class="acct-btn acct-btn--ghost receipts-pagination__link is-disabled"><i class="fas fa-chevron-left"></i> Prev</span>
-                    <?php endif; ?>
 
-                    <?php for ($i = $windowStart; $i <= $windowEnd; $i++): ?>
-                        <a class="acct-btn receipts-pagination__link <?php echo $i === $page ? 'acct-btn--primary' : 'acct-btn--ghost'; ?>" href="receipts.php?<?php echo htmlspecialchars(http_build_query(array_merge($filters, ['page' => $i])), ENT_QUOTES, 'UTF-8'); ?>"><?php echo $i; ?></a>
-                    <?php endfor; ?>
+                <!-- Pagination -->
+                <?php if ($totalPages > 1): ?>
+                    <div class="pagination-bar">
+                        <?php
+                        $q = http_build_query(array_filter([
+                            'type'      => $filters['type'] !== 'all' ? $filters['type'] : '',
+                            'status'    => $filters['status'] !== 'all' ? $filters['status'] : '',
+                            'date_from' => $filters['date_from'],
+                            'date_to'   => $filters['date_to'],
+                            'search'    => $filters['search'],
+                        ]));
+                        for ($p = $windowStart; $p <= $windowEnd; $p++): ?>
+                            <a href="receipts.php?page=<?php echo $p; ?>&<?php echo $q; ?>"
+                                class="pagination-item<?php echo $p === $page ? ' pagination-item--active' : ''; ?>">
+                                <?php echo $p; ?>
+                            </a>
+                        <?php endfor; ?>
+                    </div>
+                <?php endif; ?>
 
-                    <?php if ($page < $totalPages): ?>
-                        <a class="acct-btn acct-btn--ghost receipts-pagination__link" href="receipts.php?<?php echo htmlspecialchars(http_build_query(array_merge($filters, ['page' => $page + 1])), ENT_QUOTES, 'UTF-8'); ?>">Next <i class="fas fa-chevron-right"></i></a>
-                    <?php else: ?>
-                        <span class="acct-btn acct-btn--ghost receipts-pagination__link is-disabled">Next <i class="fas fa-chevron-right"></i></span>
-                    <?php endif; ?>
-                </nav><?php endif; ?>
+                <div class="table-footer-info">
+                    Showing <?php echo count($payments); ?> of <?php echo $totalRows; ?> receipts
+                </div>
+            <?php endif; ?>
         </div>
 
-        <div class="acct-panel receipts-panel-spacing">
-            <div class="acct-panel__head">
-                <div>
-                    <h3><i class="fas fa-pen-to-square"></i> Editable Receipt Templates</h3>
-                    <p>Placeholders: {{site_name}}, {{guest_name}}, {{receipt_number}}, {{payment_reference}}, {{booking_reference}}, {{payment_date}}, {{payment_method}}, {{payment_type}}, {{total_amount}}, {{contact_email}}.</p>
+        <!-- Email modal -->
+        <div class="modal" id="modal-receipt-email" role="dialog" aria-modal="true" aria-label="Email Receipt" style="display:none;">
+            <div class="modal__backdrop" onclick="closeReceiptEmailModal()"></div>
+            <div class="modal__dialog modal__dialog--md">
+                <div class="modal__header">
+                    <h3 class="modal__title"><i class="fas fa-envelope"></i> Email Receipt</h3>
+                    <button class="modal__close" onclick="closeReceiptEmailModal()" aria-label="Close">&times;</button>
                 </div>
-                <button type="button" class="acct-btn acct-btn--ghost" id="receiptsPreviewToggle"><i class="fas fa-eye"></i> Preview</button>
+                <form method="post" id="receipt-email-form">
+                    <div class="modal__body">
+                        <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf_token, ENT_QUOTES, 'UTF-8'); ?>">
+                        <input type="hidden" name="action" value="email_receipt">
+                        <input type="hidden" name="payment_id" id="receipt-email-payment-id" value="">
+                        <div class="form-group">
+                            <label class="form-label">Recipient Email <span class="required">*</span></label>
+                            <input type="email" name="recipient" id="receipt-email-recipient" class="form-control" placeholder="guest@example.com" required>
+                        </div>
+                    </div>
+                    <div class="modal__footer">
+                        <button type="button" class="btn btn--secondary" onclick="closeReceiptEmailModal()">Cancel</button>
+                        <button type="submit" class="btn btn--primary"><i class="fas fa-envelope"></i> Send Receipt</button>
+                    </div>
+                </form>
             </div>
-            <form method="post" class="vat-edit-form" id="receiptTemplateForm" data-receipt-placeholder-tokens="<?php echo htmlspecialchars((string)json_encode($receiptPlaceholderTokens), ENT_QUOTES, 'UTF-8'); ?>">
+        </div>
+
+        <!-- Templates panel -->
+        <div class="receipts-panel">
+            <div class="receipts-panel__head">
+                <div>
+                    <h3 class="section-title" style="font-size:1.1rem;"><i class="fas fa-pen-to-square"></i> Editable Receipt Templates</h3>
+                    <p class="text-muted" style="font-size:0.85rem;margin:4px 0 0;">Placeholders: {{site_name}}, {{guest_name}}, {{receipt_number}}, {{payment_reference}}, {{booking_reference}}, {{payment_date}}, {{payment_method}}, {{payment_type}}, {{total_amount}}, {{contact_email}}.</p>
+                </div>
+                <button type="button" class="btn btn--ghost btn--sm" id="receiptsPreviewToggle"><i class="fas fa-eye"></i> Preview</button>
+            </div>
+            <form method="post" class="receipts-template-form" id="receiptTemplateForm" data-receipt-placeholder-tokens="<?php echo htmlspecialchars((string)json_encode($receiptPlaceholderTokens), ENT_QUOTES, 'UTF-8'); ?>">
                 <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf_token, ENT_QUOTES, 'UTF-8'); ?>">
                 <input type="hidden" name="action" value="save_templates">
-                <div class="vat-edit-fields">
-                    <label class="vat-field-group vat-field-group--wide"><span class="vat-field-group__label">Email subject</span><input class="vat-field-group__control" id="receiptEmailSubject" name="receipt_email_subject" value="<?php echo htmlspecialchars($templateSubject); ?>"></label>
-                    <label class="vat-field-group vat-field-group--wide"><span class="vat-field-group__label">Email HTML</span><textarea class="vat-field-group__control" id="receiptEmailTemplate" name="receipt_email_template" rows="8"><?php echo htmlspecialchars($templateHtml); ?></textarea></label>
-                    <label class="vat-field-group vat-field-group--wide"><span class="vat-field-group__label">WhatsApp message</span><textarea class="vat-field-group__control" id="receiptWhatsappTemplate" name="receipt_whatsapp_template" rows="3"><?php echo htmlspecialchars($templateWhatsapp); ?></textarea></label>
+                <div class="receipts-template-fields">
+                    <div class="form-group">
+                        <label class="form-label">Email Subject</label>
+                        <input class="form-control" id="receiptEmailSubject" name="receipt_email_subject" value="<?php echo htmlspecialchars($templateSubject); ?>">
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Email HTML Body</label>
+                        <textarea class="form-control" id="receiptEmailTemplate" name="receipt_email_template" rows="8"><?php echo htmlspecialchars($templateHtml); ?></textarea>
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">WhatsApp Message</label>
+                        <textarea class="form-control" id="receiptWhatsappTemplate" name="receipt_whatsapp_template" rows="3"><?php echo htmlspecialchars($templateWhatsapp); ?></textarea>
+                    </div>
                 </div>
-                <button class="acct-btn acct-btn--primary" type="submit"><i class="fas fa-save"></i> Save Templates</button>
+                <button class="btn btn--primary" type="submit"><i class="fas fa-save"></i> Save Templates</button>
             </form>
 
             <div class="receipts-template-preview" id="receiptsTemplatePreview" hidden data-preview-map="<?php echo htmlspecialchars((string)json_encode($templatePreviewMap), ENT_QUOTES, 'UTF-8'); ?>">
@@ -416,7 +498,7 @@ $receiptPlaceholderTokens = array_keys($templatePreviewMap);
                 </div>
                 <div class="receipts-template-preview__section">
                     <h4 class="receipts-template-preview__title">Email Body Preview</h4>
-                    <iframe class="receipts-template-preview__frame" id="receiptPreviewFrame" title="Receipt email preview" sandbox=""></iframe>
+                    <iframe class="receipts-template-preview__frame" id="receiptPreviewFrame" title="Receipt email preview" sandbox="allow-same-origin"></iframe>
                 </div>
                 <div class="receipts-template-preview__section">
                     <h4 class="receipts-template-preview__title">WhatsApp Preview</h4>
@@ -425,21 +507,80 @@ $receiptPlaceholderTokens = array_keys($templatePreviewMap);
             </div>
         </div>
 
-        <div class="acct-panel receipts-panel-spacing">
-            <div class="acct-panel__head">
+        <!-- Recent Activity panel -->
+        <div class="receipts-panel">
+            <div class="receipts-panel__head">
                 <div>
-                    <h3><i class="fas fa-clock-rotate-left"></i> Recent Receipt Activity</h3>
+                    <h3 class="section-title" style="font-size:1.1rem;"><i class="fas fa-clock-rotate-left"></i> Recent Receipt Activity</h3>
                 </div>
             </div>
-            <div class="pos-acct-log-list">
+            <div class="receipts-activity-log">
                 <?php foreach ($recentEvents as $event): ?>
-                    <div class="pos-acct-log-item"><strong><?php echo htmlspecialchars(ucfirst((string)$event['event_type'])); ?></strong> <?php echo htmlspecialchars((string)($event['receipt_number'] ?? $event['payment_reference'] ?? '')); ?><small><?php echo htmlspecialchars((string)$event['created_at']); ?><?php echo $event['recipient'] ? ' - ' . htmlspecialchars((string)$event['recipient']) : ''; ?></small></div>
+                    <div class="receipts-activity-item">
+                        <strong><?php echo htmlspecialchars(ucfirst((string)$event['event_type'])); ?></strong>
+                        <span><?php echo htmlspecialchars((string)($event['receipt_number'] ?? $event['payment_reference'] ?? '')); ?></span>
+                        <small class="text-muted"><?php echo htmlspecialchars((string)$event['created_at']); ?><?php echo $event['recipient'] ? ' &middot; ' . htmlspecialchars((string)$event['recipient']) : ''; ?></small>
+                    </div>
                 <?php endforeach; ?>
-                <?php if (!$recentEvents): ?><div class="pos-acct-empty">No receipt events yet.</div><?php endif; ?>
+                <?php if (!$recentEvents): ?>
+                    <div class="empty-state" style="padding:2rem;"><i class="fas fa-inbox"></i><p>No receipt events yet.</p></div>
+                <?php endif; ?>
             </div>
         </div>
 
     </div>
+
+    <script>
+        // ── Receipt email modal ───────────────────────────────────────────────────────
+        function openReceiptEmailModal(paymentId, email) {
+            document.getElementById('receipt-email-payment-id').value = paymentId;
+            document.getElementById('receipt-email-recipient').value = email || '';
+            var modal = document.getElementById('modal-receipt-email');
+            if (modal) modal.style.display = 'flex';
+        }
+        function closeReceiptEmailModal() {
+            var modal = document.getElementById('modal-receipt-email');
+            if (modal) modal.style.display = 'none';
+        }
+
+        // ── Actions-more dropdown ─────────────────────────────────────────────────
+        function _rcpCloseAllMenus() {
+            document.querySelectorAll('.receipts-table .actions-more.open').forEach(function(el) {
+                el.classList.remove('open');
+            });
+        }
+
+        function toggleReceiptActionsMore(btn, e) {
+            if (e) e.stopPropagation();
+            var wrap = btn.closest('.actions-more');
+            if (!wrap) return;
+            var menu = wrap.querySelector('.actions-more-menu');
+            if (!menu) return;
+            var isOpen = wrap.classList.contains('open');
+            _rcpCloseAllMenus();
+            if (isOpen) return;
+
+            wrap.classList.add('open');
+            var rect = btn.getBoundingClientRect();
+            var menuW = 190;
+            var left = rect.right - menuW;
+            var top = rect.bottom + 4;
+            left = Math.max(8, Math.min(left, window.innerWidth - menuW - 8));
+            top = Math.min(top, window.innerHeight - 120);
+            menu.style.cssText = 'display:block;position:fixed;z-index:12050;top:' + Math.round(top) + 'px;left:' + Math.round(left) + 'px;width:' + menuW + 'px;';
+        }
+
+        document.addEventListener('click', function(e) {
+            if (!e.target.closest('.actions-more')) _rcpCloseAllMenus();
+        });
+        document.addEventListener('scroll', function() { _rcpCloseAllMenus(); }, true);
+        document.addEventListener('keydown', function(e) {
+            if (e.key === 'Escape') {
+                _rcpCloseAllMenus();
+                closeReceiptEmailModal();
+            }
+        });
+    </script>
     <?php require_once 'includes/admin-footer.php'; ?>
 </body>
 

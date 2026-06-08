@@ -301,8 +301,6 @@ if ($stockReady) {
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,300;0,400;0,500;0,600;1,300;1,400;1,500&family=Jost:wght@300;400;500;600&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.7.2/css/all.min.css">
-    <link rel="stylesheet" href="../css/main.css">
     <link rel="stylesheet" href="css/admin-styles.css">
     <link rel="stylesheet" href="css/admin-responsive-enhancements.css">
     <link rel="stylesheet" href="css/admin-components.css">
@@ -628,8 +626,8 @@ if ($stockReady) {
                     </div>
                     <div class="mm-field-row">
                         <div class="mm-field">
-                            <label for="add_price">Price (<?php echo htmlspecialchars(getSetting('currency_symbol')); ?>) *</label>
-                            <input type="number" name="price" id="add_price" step="0.01" required>
+                            <label for="add_price">Price *</label>
+                            <input type="number" name="price" id="add_price" step="0.01" required data-currency="<?php echo htmlspecialchars(getSetting('currency_symbol'), ENT_QUOTES); ?>">
                         </div>
                         <div class="mm-field">
                             <label for="add_order">Display order</label>
@@ -780,8 +778,8 @@ if ($stockReady) {
                 </div>
                 <div class="mm-field-row">
                     <div class="mm-field">
-                        <label for="ig-cost">Cost per unit (<?php echo htmlspecialchars(getSetting('currency_symbol')); ?>)</label>
-                        <input type="number" id="ig-cost" step="0.01" value="0">
+                        <label for="ig-cost">Cost per unit</label>
+                        <input type="number" id="ig-cost" step="0.01" value="0" data-currency="<?php echo htmlspecialchars(getSetting('currency_symbol'), ENT_QUOTES); ?>">
                     </div>
                     <div class="mm-field">
                         <label for="ig-yield">Yield %</label>

@@ -1,4 +1,4 @@
-﻿<?php
+<?php
 // Include admin initialization (PHP-only, no HTML output)
 require_once 'admin-init.php';
 
@@ -244,8 +244,8 @@ $kpiStmt = $pdo->prepare("
         COALESCE(SUM(CASE WHEN payment_status IN ('completed','paid') AND COALESCE(payment_type, '') <> 'refund' THEN vat_amount   ELSE 0 END), 0) AS vat_collected,
         COALESCE(SUM(CASE WHEN payment_status IN ('pending','partial') THEN total_amount ELSE 0 END), 0) AS pending_total,
         COALESCE(SUM(CASE WHEN payment_status IN ('pending','partial') THEN 1 ELSE 0 END), 0) AS pending_count,
-        COALESCE(SUM(CASE WHEN payment_type = 'refund' OR payment_status = 'refunded' THEN total_amount ELSE 0 END), 0) AS refunds_total,
-        COALESCE(SUM(CASE WHEN payment_type = 'refund' OR payment_status = 'refunded' THEN 1 ELSE 0 END), 0) AS refunds_count
+        COALESCE(SUM(CASE WHEN payment_type = 'refund' THEN total_amount ELSE 0 END), 0) AS refunds_total,
+        COALESCE(SUM(CASE WHEN payment_type = 'refund' THEN 1 ELSE 0 END), 0) AS refunds_count
     FROM payments
     $analyticsWhereSql
 ");
@@ -405,8 +405,6 @@ $quickActive = function ($s, $e) use ($startDate, $endDate) {
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,300;0,400;0,500;0,600;1,300;1,400;1,500&family=Jost:wght@300;400;500;600&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.7.2/css/all.min.css">
-    <link rel="stylesheet" href="../css/main.css">
     <link rel="stylesheet" href="css/admin-styles.css">
     <link rel="stylesheet" href="css/admin-responsive-enhancements.css">
     <link rel="stylesheet" href="css/admin-components.css">

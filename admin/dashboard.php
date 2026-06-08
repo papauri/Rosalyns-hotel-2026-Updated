@@ -1652,7 +1652,6 @@ $currency_symbol = getSetting('currency_symbol');
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,300;0,400;0,500;0,600;1,300;1,400;1,500&family=Jost:wght@300;400;500;600&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="../css/main.css">
     <link rel="stylesheet" href="css/admin-styles.css">
     <link rel="stylesheet" href="css/admin-responsive-enhancements.css">
     <link rel="stylesheet" href="css/admin-components.css">
@@ -2013,14 +2012,14 @@ $currency_symbol = getSetting('currency_symbol');
                                 $ageColor = $age >= 30 ? '#c62828' : ($age >= 15 ? '#b45309' : '#2e7d32');
                             ?>
                                 <tr>
-                                    <td><strong><?php echo htmlspecialchars($rs['reference']); ?></strong></td>
-                                    <td><?php echo htmlspecialchars($rs['room_number'] ?? '—'); ?></td>
-                                    <td><?php echo htmlspecialchars($rs['customer_name'] ?? '—'); ?></td>
-                                    <td><?php echo (int)$rs['item_count']; ?></td>
-                                    <td><?php echo '<span class="kpi-currency">' . $currency_symbol . '</span>' . number_format((float)$rs['total_amount'], 2); ?></td>
-                                    <td style="color:<?php echo $ageColor; ?>; font-weight:600;"><?php echo $age; ?> min</td>
-                                    <td><span class="badge badge-<?php echo htmlspecialchars($rs['status']); ?>"><?php echo ucfirst($rs['status']); ?></span></td>
-                                    <td>
+                                    <td data-label="Order Ref"><strong><?php echo htmlspecialchars($rs['reference']); ?></strong></td>
+                                    <td data-label="Room"><?php echo htmlspecialchars($rs['room_number'] ?? '—'); ?></td>
+                                    <td data-label="Guest"><?php echo htmlspecialchars($rs['customer_name'] ?? '—'); ?></td>
+                                    <td data-label="Items"><?php echo (int)$rs['item_count']; ?></td>
+                                    <td data-label="Total"><?php echo '<span class="kpi-currency">' . $currency_symbol . '</span>' . number_format((float)$rs['total_amount'], 2); ?></td>
+                                    <td data-label="Age" style="color:<?php echo $ageColor; ?>; font-weight:600;"><?php echo $age; ?> min</td>
+                                    <td data-label="Status"><span class="badge badge-<?php echo htmlspecialchars($rs['status']); ?>"><?php echo ucfirst($rs['status']); ?></span></td>
+                                    <td data-label="Actions">
                                         <a href="stock-orders.php?id=<?php echo (int)$rs['id']; ?>" class="btn btn-primary btn-sm">View</a>
                                         <a href="pos.php?settle=<?php echo (int)$rs['id']; ?>" class="btn btn-success btn-sm">Take Payment</a>
                                     </td>
@@ -2056,11 +2055,11 @@ $currency_symbol = getSetting('currency_symbol');
                                 $color = $daysLeft < 0 ? '#c62828' : ($daysLeft <= 2 ? '#e65100' : '#b45309');
                             ?>
                                 <tr>
-                                    <td><?php echo htmlspecialchars($b['name']); ?></td>
-                                    <td><?php echo htmlspecialchars($b['batch_number'] ?? '—'); ?></td>
-                                    <td><?php echo number_format((float)$b['quantity_remaining'], 1) . ' ' . htmlspecialchars($b['unit']); ?></td>
-                                    <td><?php echo date('M j, Y', strtotime($b['expiry_date'])); ?></td>
-                                    <td style="color:<?php echo $color; ?>; font-weight:600;">
+                                    <td data-label="Ingredient"><?php echo htmlspecialchars($b['name']); ?></td>
+                                    <td data-label="Batch"><?php echo htmlspecialchars($b['batch_number'] ?? '—'); ?></td>
+                                    <td data-label="Remaining"><?php echo number_format((float)$b['quantity_remaining'], 1) . ' ' . htmlspecialchars($b['unit']); ?></td>
+                                    <td data-label="Expiry"><?php echo date('M j, Y', strtotime($b['expiry_date'])); ?></td>
+                                    <td data-label="Days Left" style="color:<?php echo $color; ?>; font-weight:600;">
                                         <?php echo $daysLeft < 0 ? abs($daysLeft) . ' days OVERDUE' : $daysLeft . ' days'; ?>
                                     </td>
                                 </tr>
@@ -2186,9 +2185,9 @@ $currency_symbol = getSetting('currency_symbol');
                         <tbody>
                             <?php foreach ($checkin_bookings as $booking): ?>
                                 <tr id="checkin-row-<?php echo $booking['id']; ?>">
-                                    <td><strong><?php echo htmlspecialchars($booking['booking_reference']); ?></strong></td>
-                                    <td><?php echo htmlspecialchars($booking['guest_name']); ?></td>
-                                    <td>
+                                    <td data-label="Booking Ref"><strong><?php echo htmlspecialchars($booking['booking_reference']); ?></strong></td>
+                                    <td data-label="Guest Name"><?php echo htmlspecialchars($booking['guest_name']); ?></td>
+                                    <td data-label="Room">
                                         <?php echo htmlspecialchars($booking['room_name']); ?>
                                         <?php if (!empty($booking['individual_room_id'])): ?>
                                             <br><span class="dashboard-room-chip">
@@ -2202,13 +2201,13 @@ $currency_symbol = getSetting('currency_symbol');
                                             <br><small style="color:#bbb;font-style:italic;font-size:10px;">Unassigned</small>
                                         <?php endif; ?>
                                     </td>
-                                    <td><?php echo date('M d, Y', strtotime($booking['check_out_date'])); ?></td>
-                                    <td>
+                                    <td data-label="Check-out"><?php echo date('M d, Y', strtotime($booking['check_out_date'])); ?></td>
+                                    <td data-label="Status">
                                         <span class="badge badge-<?php echo $booking['status']; ?>" id="status-<?php echo $booking['id']; ?>">
                                             <?php echo ucfirst($booking['status']); ?>
                                         </span>
                                     </td>
-                                    <td>
+                                    <td data-label="Payment">
                                         <span class="badge badge-<?php echo $booking['payment_status']; ?>">
                                             <?php echo ucfirst($booking['payment_status']); ?>
                                         </span>
@@ -2219,7 +2218,7 @@ $currency_symbol = getSetting('currency_symbol');
                                             <?php endif; ?>
                                         </small>
                                     </td>
-                                    <td>
+                                    <td data-label="Actions">
                                         <?php if ($booking['status'] !== 'checked-in'): ?>
                                             <?php $can_checkin = ($booking['status'] === 'confirmed' && $booking['payment_status'] === 'paid'); ?>
                                             <button onclick="<?php echo $can_checkin ? "processCheckIn({$booking['id']}, '" . htmlspecialchars(addslashes($booking['guest_name'])) . "')" : "Alert.show('Cannot check in: booking must be CONFIRMED and PAID.', 'error')"; ?>"
@@ -2272,21 +2271,21 @@ $currency_symbol = getSetting('currency_symbol');
                         <tbody>
                             <?php foreach ($today_conference_events as $conf): ?>
                                 <tr>
-                                    <td><strong><?php echo htmlspecialchars($conf['inquiry_reference']); ?></strong></td>
-                                    <td><?php echo htmlspecialchars($conf['company_name']); ?></td>
-                                    <td><?php echo htmlspecialchars($conf['contact_person']); ?></td>
-                                    <td><?php echo htmlspecialchars($conf['room_name'] ?? 'N/A'); ?></td>
-                                    <td>
+                                    <td data-label="Reference"><strong><?php echo htmlspecialchars($conf['inquiry_reference']); ?></strong></td>
+                                    <td data-label="Company"><?php echo htmlspecialchars($conf['company_name']); ?></td>
+                                    <td data-label="Contact"><?php echo htmlspecialchars($conf['contact_person']); ?></td>
+                                    <td data-label="Room"><?php echo htmlspecialchars($conf['room_name'] ?? 'N/A'); ?></td>
+                                    <td data-label="Time">
                                         <?php echo date('H:i', strtotime($conf['start_time'])); ?> -
                                         <?php echo date('H:i', strtotime($conf['end_time'])); ?>
                                     </td>
-                                    <td><?php echo (int) $conf['number_of_attendees']; ?></td>
-                                    <td>
+                                    <td data-label="Attendees"><?php echo (int) $conf['number_of_attendees']; ?></td>
+                                    <td data-label="Status">
                                         <span class="badge badge-<?php echo $conf['status']; ?>">
                                             <?php echo ucfirst($conf['status']); ?>
                                         </span>
                                     </td>
-                                    <td>
+                                    <td data-label="Actions">
                                         <a href="conference-management.php" class="btn btn-primary btn-sm">Manage</a>
                                     </td>
                                 </tr>
@@ -2328,9 +2327,9 @@ $currency_symbol = getSetting('currency_symbol');
                     <?php else: ?>
                         <?php foreach ($upcoming_checkins as $booking): ?>
                             <tr>
-                                <td><strong><?php echo htmlspecialchars($booking['booking_reference']); ?></strong></td>
-                                <td><?php echo htmlspecialchars($booking['guest_name']); ?></td>
-                                <td>
+                                <td data-label="Booking Ref"><strong><?php echo htmlspecialchars($booking['booking_reference']); ?></strong></td>
+                                <td data-label="Guest Name"><?php echo htmlspecialchars($booking['guest_name']); ?></td>
+                                <td data-label="Room">
                                     <?php echo htmlspecialchars($booking['room_name']); ?>
                                     <?php if (!empty($booking['individual_room_id'])): ?>
                                         <br><span class="dashboard-room-chip">
@@ -2344,14 +2343,14 @@ $currency_symbol = getSetting('currency_symbol');
                                         <br><small style="color:#bbb;font-style:italic;font-size:10px;">Unassigned</small>
                                     <?php endif; ?>
                                 </td>
-                                <td><?php echo date('M j, Y', strtotime($booking['check_in_date'])); ?></td>
-                                <td><?php echo $booking['number_of_nights']; ?></td>
-                                <td>
+                                <td data-label="Check-in"><?php echo date('M j, Y', strtotime($booking['check_in_date'])); ?></td>
+                                <td data-label="Nights"><?php echo $booking['number_of_nights']; ?></td>
+                                <td data-label="Status">
                                     <span class="badge badge-<?php echo $booking['status']; ?>">
                                         <?php echo ucfirst($booking['status']); ?>
                                     </span>
                                 </td>
-                                <td>
+                                <td data-label="Payment">
                                     <span class="badge badge-<?php echo $booking['payment_status']; ?>">
                                         <?php echo ucfirst($booking['payment_status']); ?>
                                     </span>
@@ -2362,7 +2361,7 @@ $currency_symbol = getSetting('currency_symbol');
                                         <?php endif; ?>
                                     </small>
                                 </td>
-                                <td>
+                                <td data-label="Actions">
                                     <div class="quick-actions">
                                         <?php if ($booking['status'] == 'pending'): ?>
                                             <a href="booking-details.php?id=<?php echo $booking['id']; ?>&action=confirm" class="btn btn-success btn-sm">Confirm</a>
@@ -2401,9 +2400,9 @@ $currency_symbol = getSetting('currency_symbol');
                 <tbody>
                     <?php foreach ($recent_bookings as $booking): ?>
                         <tr>
-                            <td><strong><?php echo htmlspecialchars($booking['booking_reference']); ?></strong></td>
-                            <td><?php echo htmlspecialchars($booking['guest_name']); ?></td>
-                            <td>
+                            <td data-label="Booking Ref"><strong><?php echo htmlspecialchars($booking['booking_reference']); ?></strong></td>
+                            <td data-label="Guest Name"><?php echo htmlspecialchars($booking['guest_name']); ?></td>
+                            <td data-label="Room">
                                 <?php echo htmlspecialchars($booking['room_name']); ?>
                                 <?php if (!empty($booking['individual_room_id'])): ?>
                                     <br><span class="dashboard-room-chip">
@@ -2417,17 +2416,17 @@ $currency_symbol = getSetting('currency_symbol');
                                     <br><small style="color:#bbb;font-style:italic;font-size:10px;">Unassigned</small>
                                 <?php endif; ?>
                             </td>
-                            <td>
+                            <td data-label="Dates">
                                 <?php echo date('M j', strtotime($booking['check_in_date'])); ?> -
                                 <?php echo date('M j, Y', strtotime($booking['check_out_date'])); ?>
                             </td>
-                            <td><?php echo $currency_symbol; ?><?php echo number_format($booking['total_amount'], 2); ?></td>
-                            <td>
+                            <td data-label="Total"><?php echo $currency_symbol; ?><?php echo number_format($booking['total_amount'], 2); ?></td>
+                            <td data-label="Status">
                                 <span class="badge badge-<?php echo $booking['status']; ?>">
                                     <?php echo ucfirst($booking['status']); ?>
                                 </span>
                             </td>
-                            <td>
+                            <td data-label="Payment">
                                 <span class="badge badge-<?php echo $booking['payment_status']; ?>">
                                     <?php echo ucfirst($booking['payment_status']); ?>
                                 </span>
@@ -2438,7 +2437,7 @@ $currency_symbol = getSetting('currency_symbol');
                                     <?php endif; ?>
                                 </small>
                             </td>
-                            <td>
+                            <td data-label="Actions">
                                 <a href="booking-details.php?id=<?php echo $booking['id']; ?>" class="btn btn-primary btn-sm">View</a>
                             </td>
                         </tr>
@@ -2473,21 +2472,21 @@ $currency_symbol = getSetting('currency_symbol');
                     <?php else: ?>
                         <?php foreach ($upcoming_conferences as $conf): ?>
                             <tr>
-                                <td><strong><?php echo htmlspecialchars($conf['inquiry_reference']); ?></strong></td>
-                                <td><?php echo htmlspecialchars($conf['company_name']); ?></td>
-                                <td><?php echo htmlspecialchars($conf['contact_person']); ?></td>
-                                <td><?php echo date('M j, Y', strtotime($conf['event_date'])); ?></td>
-                                <td>
+                                <td data-label="Reference"><strong><?php echo htmlspecialchars($conf['inquiry_reference']); ?></strong></td>
+                                <td data-label="Company"><?php echo htmlspecialchars($conf['company_name']); ?></td>
+                                <td data-label="Contact"><?php echo htmlspecialchars($conf['contact_person']); ?></td>
+                                <td data-label="Event Date"><?php echo date('M j, Y', strtotime($conf['event_date'])); ?></td>
+                                <td data-label="Time">
                                     <?php echo date('H:i', strtotime($conf['start_time'])); ?> -
                                     <?php echo date('H:i', strtotime($conf['end_time'])); ?>
                                 </td>
-                                <td><?php echo (int) $conf['number_of_attendees']; ?></td>
-                                <td>
+                                <td data-label="Attendees"><?php echo (int) $conf['number_of_attendees']; ?></td>
+                                <td data-label="Status">
                                     <span class="badge badge-<?php echo $conf['status']; ?>">
                                         <?php echo ucfirst($conf['status']); ?>
                                     </span>
                                 </td>
-                                <td>
+                                <td data-label="Actions">
                                     <a href="conference-management.php" class="btn btn-primary btn-sm">Manage</a>
                                 </td>
                             </tr>
@@ -2514,17 +2513,17 @@ $currency_symbol = getSetting('currency_symbol');
                 <tbody>
                     <?php foreach ($recent_conferences as $conf): ?>
                         <tr>
-                            <td><strong><?php echo htmlspecialchars($conf['inquiry_reference']); ?></strong></td>
-                            <td><?php echo htmlspecialchars($conf['company_name']); ?></td>
-                            <td><?php echo htmlspecialchars($conf['contact_person']); ?></td>
-                            <td><?php echo date('M j, Y', strtotime($conf['event_date'])); ?></td>
-                            <td><?php echo (int) $conf['number_of_attendees']; ?></td>
-                            <td>
+                            <td data-label="Reference"><strong><?php echo htmlspecialchars($conf['inquiry_reference']); ?></strong></td>
+                            <td data-label="Company"><?php echo htmlspecialchars($conf['company_name']); ?></td>
+                            <td data-label="Contact"><?php echo htmlspecialchars($conf['contact_person']); ?></td>
+                            <td data-label="Event Date"><?php echo date('M j, Y', strtotime($conf['event_date'])); ?></td>
+                            <td data-label="Attendees"><?php echo (int) $conf['number_of_attendees']; ?></td>
+                            <td data-label="Status">
                                 <span class="badge badge-<?php echo $conf['status']; ?>">
                                     <?php echo ucfirst($conf['status']); ?>
                                 </span>
                             </td>
-                            <td>
+                            <td data-label="Actions">
                                 <a href="conference-management.php" class="btn btn-primary btn-sm">View</a>
                             </td>
                         </tr>
@@ -2571,24 +2570,24 @@ $currency_symbol = getSetting('currency_symbol');
                                     $ac = $action_colors[$log['action']] ?? ['bg' => '#f5f5f5', 'color' => '#666', 'icon' => 'fa-info-circle', 'label' => $log['action']];
                                 ?>
                                     <tr style="border-bottom:1px solid #f0f0f0;">
-                                        <td style="padding:10px 14px; white-space:nowrap; color:#888; font-size:12px;">
+                                        <td data-label="Time" style="padding:10px 14px; white-space:nowrap; color:#888; font-size:12px;">
                                             <?php echo date('M j, g:ia', strtotime($log['created_at'])); ?>
                                         </td>
-                                        <td style="padding:10px 14px;">
+                                        <td data-label="User" style="padding:10px 14px;">
                                             <strong><?php echo htmlspecialchars($log['full_name'] ?? $log['username'] ?? '—'); ?></strong>
                                             <?php if ($log['username']): ?>
                                                 <span style="color:#999; font-size:11px;">(<?php echo htmlspecialchars($log['username']); ?>)</span>
                                             <?php endif; ?>
                                         </td>
-                                        <td style="padding:10px 14px;">
+                                        <td data-label="Action" style="padding:10px 14px;">
                                             <span style="display:inline-flex; align-items:center; gap:5px; padding:3px 10px; border-radius:12px; font-size:11px; font-weight:600; background:<?php echo $ac['bg']; ?>; color:<?php echo $ac['color']; ?>;">
                                                 <i class="fas <?php echo $ac['icon']; ?>"></i> <?php echo $ac['label']; ?>
                                             </span>
                                         </td>
-                                        <td style="padding:10px 14px; color:#555; font-size:12px;">
+                                        <td data-label="Details" style="padding:10px 14px; color:#555; font-size:12px;">
                                             <?php echo htmlspecialchars($log['details'] ?? ''); ?>
                                         </td>
-                                        <td style="padding:10px 14px; font-family:monospace; font-size:12px; color:#888;">
+                                        <td data-label="IP Address" style="padding:10px 14px; font-family:monospace; font-size:12px; color:#888;">
                                             <?php echo htmlspecialchars($log['ip_address'] ?? ''); ?>
                                         </td>
                                     </tr>

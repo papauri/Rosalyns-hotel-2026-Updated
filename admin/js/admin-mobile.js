@@ -34,7 +34,7 @@
 
         // Function to update nav position based on header height
         function updateNavPosition() {
-            if (window.innerWidth <= 768 && adminHeader) {
+            if (window.innerWidth <= 1024 && adminHeader) {
                 const headerHeight = adminHeader.offsetHeight;
                 adminNav.style.top = headerHeight + 'px';
             } else {
@@ -90,7 +90,7 @@
 
         // Close nav when window is resized to desktop
         window.addEventListener('resize', function () {
-            if (window.innerWidth > 768) {
+            if (window.innerWidth > 1024) {
                 adminNav.classList.remove('nav-open');
                 navToggle.setAttribute('aria-expanded', 'false');
 
@@ -194,19 +194,28 @@
 
         // Fallback: clone and measure intrinsic width with nowrap to capture
         // long tokens/URLs that would otherwise clip on constrained devices.
+        // Use detached host to avoid triggering the body MutationObserver.
+        const host = getMeasureHost();
         const clone = table.cloneNode(true);
-        clone.style.position = 'absolute';
-        clone.style.visibility = 'hidden';
-        clone.style.left = '-99999px';
-        clone.style.top = '0';
-        clone.style.width = 'max-content';
-        clone.style.maxWidth = 'none';
-        clone.style.whiteSpace = 'nowrap';
-        clone.style.tableLayout = 'auto';
-        document.body.appendChild(clone);
+        clone.style.cssText = 'position:static;width:max-content;max-width:none;white-space:nowrap;table-layout:auto;';
+        host.appendChild(clone);
         const measured = clone.scrollWidth || clone.offsetWidth || 0;
-        document.body.removeChild(clone);
+        host.removeChild(clone);
         return measured;
+    }
+
+    // Detached container for clone measurement — never touches the live DOM tree,
+    // so the MutationObserver watching body/document cannot be triggered.
+    let _measureHost = null;
+    function getMeasureHost() {
+        if (!_measureHost) {
+            _measureHost = document.createElement('div');
+            _measureHost.style.cssText = 'position:absolute;visibility:hidden;left:-99999px;top:0;pointer-events:none;';
+            // Append once; never removed — stays outside the subtrees the observer watches
+            // (observer targets are .admin-content, .content, main, body children — not this root div itself).
+            document.documentElement.appendChild(_measureHost);
+        }
+        return _measureHost;
     }
 
     function shouldUseCardLayout(table) {
@@ -216,21 +225,31 @@
 
         const viewportWidth = window.innerWidth || document.documentElement.clientWidth || 0;
         if (table.classList.contains('tablet-table')) {
-            const availableWidth = getTableAvailableWidth(table);
-            const headerCount = table.querySelectorAll('thead th').length;
-            const firstRow = table.querySelector('tbody tr');
-            const bodyColumnCount = firstRow ? firstRow.querySelectorAll('td').length : 0;
-            const columnCount = Math.max(headerCount, bodyColumnCount, 1);
-            const measuredRequiredWidth = getRequiredTableWidth(table);
-            const minColumnWidth = columnCount >= 7 ? 150 : (columnCount >= 5 ? 138 : 124);
-            const heuristicWidth = (columnCount * minColumnWidth) + 24;
-            const requiredWidth = Math.max(measuredRequiredWidth, heuristicWidth);
-
+            // Always card on phones
             if (viewportWidth <= 640) {
                 return true;
             }
-            return availableWidth < requiredWidth;
+            const availableWidth = getTableAvailableWidth(table);
+            // Clone-measure intrinsic width using a detached host (avoids triggering
+            // the MutationObserver that watches body subtree).
+            const host = getMeasureHost();
+            const clone = table.cloneNode(true);
+            clone.style.cssText = 'position:static;width:max-content;max-width:none;white-space:nowrap;table-layout:auto;';
+            host.appendChild(clone);
+            const intrinsicWidth = clone.scrollWidth || clone.offsetWidth || 0;
+            host.removeChild(clone);
+            if (intrinsicWidth === 0) {
+                // No data to measure — fall through to heuristic
+                const headerCount = table.querySelectorAll('thead th').length;
+                const firstRow = table.querySelector('tbody tr');
+                const columnCount = Math.max(headerCount, firstRow ? firstRow.querySelectorAll('td').length : 0, 1);
+                return availableWidth < (columnCount * 90) + 24;
+            }
+            return availableWidth < intrinsicWidth;
         }
+        // Non-tablet-table: only force cards on phones/small tablets (≤768px).
+        // Larger screens use overflow detection below so tables are preserved
+        // when they actually fit the available space.
         if (viewportWidth <= 768) {
             return true;
         }
@@ -241,12 +260,12 @@
         const bodyColumnCount = firstRow ? firstRow.querySelectorAll('td').length : 0;
         const columnCount = Math.max(headerCount, bodyColumnCount);
 
-        if (columnCount >= 6 && availableWidth <= 720) {
+        if (columnCount >= 6 && availableWidth <= 960) {
             return true;
         }
 
         const hasHorizontalOverflow = table.scrollWidth > availableWidth + 8;
-        if (hasHorizontalOverflow && availableWidth <= 768) {
+        if (hasHorizontalOverflow && availableWidth <= 1024) {
             return true;
         }
 

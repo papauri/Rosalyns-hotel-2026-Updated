@@ -2641,7 +2641,7 @@ body {
 }
 
 /* Desktop: show header+details as single expanded row */
-@media (min-width: 769px) {
+@media (min-width: 1025px) {
     .pos-acct-header-row {
         display: none;
     }

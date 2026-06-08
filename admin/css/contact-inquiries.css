@@ -120,7 +120,7 @@
 .filter-tab.active,
 .filter-tab:hover {
     background: var(--color-primary, #8A775F);
-    color: #fff;
+    color: var(--admin-text, #1f2a37);
     border-color: var(--color-primary, #8A775F);
 }
 

@@ -1,7 +1,6 @@
 /* Restaurant Tables Management page styles */
 .restaurant-tables-page {
-    max-width: 1180px;
-    margin: 0 auto;
+    width: 100%;
 }
 
 .restaurant-tables-head {
@@ -14,7 +13,7 @@
 
 .restaurant-tables-head h1 {
     margin: 0;
-    font-size: 28px;
+    font-size: clamp(20px, 2.5vw, 28px);
     color: #212529;
 }
 

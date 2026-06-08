@@ -571,29 +571,26 @@
 /* ── Calendar booking tooltip popup ──────────────────────────────────────── */
 .calendar-tooltip-content {
     display: none;
-    position: absolute;
-    left: 0;
-    top: calc(100% + 4px);
+    position: fixed;
+    /* top/left set by JS to viewport coords — escapes overflow-x:auto scroll containers */
     min-width: 210px;
-    max-width: 260px;
+    max-width: 280px;
     background: #ffffff;
     border: 1px solid #e5e7eb;
     border-radius: 8px;
     box-shadow: 0 6px 20px rgba(0, 0, 0, 0.14);
     padding: 10px 12px;
-    z-index: 1200;
+    z-index: 9999;
     font-size: 11px;
     color: #374151;
     line-height: 1.5;
     pointer-events: none;
-    /* keep click-to-navigate working on parent */
     white-space: normal;
 }
 
-/* Flip upward when the indicator is in the bottom half of the calendar */
+/* flip-up handled entirely in JS via style.top — class kept for backward compat */
 .booking-indicator.tooltip-flip-up .calendar-tooltip-content {
-    top: auto;
-    bottom: calc(100% + 4px);
+    /* intentionally empty — JS sets the top value */
 }
 
 /* Show on hover (desktop) */

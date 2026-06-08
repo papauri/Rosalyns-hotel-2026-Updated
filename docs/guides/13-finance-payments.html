@@ -33,9 +33,8 @@
                 manage the full payment lifecycle for every booking.</p>
             <div class="meta">
                 <span>Audience <strong>Receptionist &amp; Manager &amp; Admin</strong></span>
-                <span>Read time <strong>~12 min</strong></span>
-                <span>Pages <strong>payments · payment-add · invoices · receipts · credit-notes ·
-                        quotations</strong></span>
+                <span>Read time <strong>~18 min</strong></span>
+                <span>Pages <strong>payments · payment-add · invoices · receipts · credit-notes · quotations · accounting-dashboard</strong></span>
             </div>
         </div>
     </header>
@@ -55,6 +54,7 @@
                     <li><a href="#quotations">Quotations</a></li>
                     <li><a href="#refunds">Refunds</a></li>
                     <li><a href="#vat">VAT &amp; tax</a></li>
+                    <li><a href="#accounting-dashboard">Accounting Dashboard</a></li>
                 </ul>
             </section>
 
@@ -166,8 +166,49 @@
                     <li><strong>Date range</strong> — filter by payment date.</li>
                     <li><strong>Method</strong> — cash, card, mobile money, bank transfer, credit note.</li>
                     <li><strong>Status</strong> — pending, partial, completed, refunded, cancelled.</li>
-                    <li><strong>Search</strong> — payment reference, booking reference, guest name.</li>
+                    <li><strong>Booking type</strong> — rooms, conference, restaurant/POS.</li>
+                    <li><strong>Search</strong> — payment reference, receipt number, invoice number, booking reference, guest name, email, phone, transaction reference, or amount.</li>
                 </ul>
+
+                <h3>Analytics strip (top of the page)</h3>
+                <p>The four KPI tiles above the table always reflect the <em>current filter set</em>:</p>
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Tile</th>
+                            <th>What it counts</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr>
+                            <td>Gross collected</td>
+                            <td>Sum of <code>total_amount</code> for <em>completed/paid</em> rows where <code>payment_type</code> is not <em>refund</em>.</td>
+                        </tr>
+                        <tr>
+                            <td>VAT collected</td>
+                            <td>Sum of <code>vat_amount</code> on the same completed/paid, non-refund rows.</td>
+                        </tr>
+                        <tr>
+                            <td>Pending / partial</td>
+                            <td>Sum of <code>total_amount</code> on rows with status <em>pending</em> or <em>partial</em>. Does <strong>not</strong> include pending refunds (those are the hotel's liability, not a receivable).</td>
+                        </tr>
+                        <tr>
+                            <td>Refunds</td>
+                            <td>Sum of rows where <code>payment_type = 'refund'</code>. Identified by type, not status — this avoids double-counting rows that carry both a refund type and a refunded status.</td>
+                        </tr>
+                    </tbody>
+                </table>
+
+                <h3>Side panels</h3>
+                <ul class="checklist">
+                    <li><strong>Today / Week / Month</strong> — quick period totals always calculated on the full dataset (independent of the active filter), so you always see current context.</li>
+                    <li><strong>By source</strong> — breakdown of collected amounts by booking type (Rooms / Conference / Restaurant).</li>
+                    <li><strong>By method</strong> — collected amounts by payment method.</li>
+                    <li><strong>Status mix</strong> — proportion bar showing the split of completed vs pending vs refunded transactions.</li>
+                </ul>
+
+                <h3>CSV export</h3>
+                <p>Click <strong>Export CSV</strong> in the header. The export applies all active filters but removes the pagination limit — you receive every matching row. Columns include: Reference, Type, BookingID, BookingRef, Customer, Date, Subtotal, VAT %, VAT, Total, Method, PaymentType, Status, ReceiptNo, InvoiceNo, MRAStatus, TransactionRef, Created, ProcessedBy.</p>
 
                 <h3>Inline actions per row</h3>
                 <ul class="checklist">
@@ -195,25 +236,25 @@
                     <tbody>
                         <tr>
                             <td>Paid &amp; Closed</td>
-                            <td>Total value of completed/paid invoices. Sub-line shows count + MTD total.</td>
+                            <td>Total value of completed/paid invoices (non-refund rows only). Sub-line shows count + month-to-date total.</td>
                         </tr>
                         <tr>
                             <td>Outstanding</td>
-                            <td>Value still owed on pending/partial invoices. Click to filter the list.</td>
+                            <td>Value still owed on <em>pending</em> or <em>partial</em> invoices. Pending refunds (money owed to the guest) are excluded — this figure represents only what guests still owe the hotel.</td>
                         </tr>
                         <tr>
                             <td>Generated</td>
-                            <td>How many have had a PDF created, plus coverage %.</td>
+                            <td>How many invoices have had a PDF created, plus coverage %.</td>
                         </tr>
                         <tr>
                             <td>Refunded / Credit</td>
-                            <td>Refund total + count of credit notes issued from this page.</td>
+                            <td>Total and count of rows where <code>payment_type = 'refund'</code> — identified by type for consistency with the rest of the accounting suite.</td>
                         </tr>
                     </tbody>
                 </table>
 
                 <h3>Receivables aging</h3>
-                <p>Outstanding invoices are bucketed by how old they are:</p>
+                <p>Outstanding (pending/partial, non-refund) invoices are bucketed by how long they have been outstanding. Age is measured from the <strong>invoice creation date</strong> — the date the payment record was first entered in the system — not from any subsequent payment activity. This gives a true picture of how long a balance has gone unpaid.</p>
                 <table>
                     <thead>
                         <tr>
@@ -224,19 +265,19 @@
                     <tbody>
                         <tr>
                             <td>0 – 30 days</td>
-                            <td>Routine — send a polite reminder.</td>
+                            <td>Routine — send a polite reminder if no payment plan is in place.</td>
                         </tr>
                         <tr>
                             <td>31 – 60 days</td>
-                            <td>Follow up by phone.</td>
+                            <td>Follow up by phone; confirm payment commitment.</td>
                         </tr>
                         <tr>
                             <td>61 – 90 days</td>
-                            <td>Escalate to manager.</td>
+                            <td>Escalate to manager; consider a formal demand notice.</td>
                         </tr>
                         <tr>
                             <td>90+ days</td>
-                            <td>Highlighted red — immediate action required.</td>
+                            <td>Highlighted red — immediate action required; consider collections process.</td>
                         </tr>
                     </tbody>
                 </table>
@@ -629,6 +670,142 @@
                 </div>
             </section>
 
+            <!-- ACCOUNTING DASHBOARD -->
+            <section id="accounting-dashboard">
+                <h2>9. Accounting Dashboard</h2>
+                <p><code>/admin/accounting-dashboard.php</code> — the accountant's command centre for any date range.
+                    Defaults to the current calendar month. Use <strong>Show All</strong> to remove date limits.</p>
+
+                <div class="callout note">
+                    <strong>Access:</strong> Requires the <em>Accountant</em> role or Admin. Receptionists cannot see this page.
+                </div>
+
+                <h3>Overall financial summary</h3>
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Field</th>
+                            <th>What it means</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr>
+                            <td>Total payments</td>
+                            <td>All payment rows in the selected range (all types and statuses).</td>
+                        </tr>
+                        <tr>
+                            <td>Gross collected</td>
+                            <td>Sum of completed/paid non-refund payments. This is revenue received.</td>
+                        </tr>
+                        <tr>
+                            <td>Net excl. VAT</td>
+                            <td>Gross collected minus VAT — the pre-tax revenue figure.</td>
+                        </tr>
+                        <tr>
+                            <td>VAT collected</td>
+                            <td>VAT on completed/paid sales, net of VAT returned on completed refunds.</td>
+                        </tr>
+                        <tr>
+                            <td>Pending</td>
+                            <td>Sum owed on unpaid/partial invoices in the range. Refunds pending are tracked separately (see below).</td>
+                        </tr>
+                        <tr>
+                            <td>Refunds issued</td>
+                            <td>Sum of <code>refund_amount</code> on refund-type rows. Tracks money returned to guests.</td>
+                        </tr>
+                        <tr>
+                            <td>Pending refunds</td>
+                            <td>Refunds with <code>refund_status = 'pending'</code> — money owed to guests not yet paid out.</td>
+                        </tr>
+                        <tr>
+                            <td>Completed refunds</td>
+                            <td>Refunds with <code>refund_status = 'completed'</code> — money already returned.</td>
+                        </tr>
+                    </tbody>
+                </table>
+
+                <h3>Revenue by source</h3>
+                <p>Three panels — <strong>Rooms</strong>, <strong>Conference</strong>, <strong>Restaurant &amp; POS</strong> — each showing:</p>
+                <ul class="checklist">
+                    <li>Booking count with payments in the period.</li>
+                    <li>Gross collected for that source.</li>
+                    <li>VAT component.</li>
+                    <li>Outstanding <code>amount_due</code> on bookings that had payments in the period.</li>
+                </ul>
+
+                <h3>POS analytics</h3>
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Panel</th>
+                            <th>What it shows</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr>
+                            <td>Revenue by order type</td>
+                            <td>Walk-in, room service, tab — order count, gross revenue, COGS, voided amount.</td>
+                        </tr>
+                        <tr>
+                            <td>Gross margin</td>
+                            <td>Gross revenue minus COGS (cost of goods sold). COGS is read from <code>stock_orders.total_cost</code>. A zero COGS indicates recipes without ingredient costs set up.</td>
+                        </tr>
+                        <tr>
+                            <td>Daily revenue trend</td>
+                            <td>Last 14 days within the range: room, conference, F&amp;B, and refund amounts per day — useful for spotting unusual spikes or dips.</td>
+                        </tr>
+                    </tbody>
+                </table>
+
+                <h3>Compliance checks</h3>
+                <p>Four counters flag data-quality issues. Address them before filing or exporting reports:</p>
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Alert</th>
+                            <th>What it means</th>
+                            <th>Fix</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr>
+                            <td>Missing receipts</td>
+                            <td>Completed payments with no receipt number yet.</td>
+                            <td><code>receipts.php</code> → <strong>Generate Missing</strong>.</td>
+                        </tr>
+                        <tr>
+                            <td>Invoices without numbers</td>
+                            <td><code>invoice_generated = 1</code> but <code>invoice_number</code> is blank.</td>
+                            <td><code>invoices.php</code> → <strong>Regenerate Invoice</strong> per row.</td>
+                        </tr>
+                        <tr>
+                            <td>POS orders without ledger entry</td>
+                            <td>Paid stock orders not matched to a payment row in the <code>payments</code> table.</td>
+                            <td>Run <code>pos-accounting.php</code> for the affected date and close the shift.</td>
+                        </tr>
+                        <tr>
+                            <td>MRA unsubmitted</td>
+                            <td>Sales not yet submitted to the Malawi Revenue Authority electronic invoicing system.</td>
+                            <td>Open the MRA submission module and submit outstanding rows.</td>
+                        </tr>
+                    </tbody>
+                </table>
+
+                <h3>Quotation pipeline</h3>
+                <p>Shows count and total value for each quotation status (Sent / Accepted / Expired / Declined) in the selected period. Use this to track conversion of proposals into confirmed payments.</p>
+
+                <h3>Credit notes summary</h3>
+                <p>Issued, redeemed, and outstanding CN balance for the period. Outstanding = balance remaining on <em>active</em> and <em>partially applied</em> CNs — representing future discount liability.</p>
+
+                <h3>VAT Settings form</h3>
+                <p>Scroll to the bottom of the page to update:</p>
+                <ul class="checklist">
+                    <li><strong>VAT enabled / disabled</strong> — affects all new payments going forward. Does not retroactively change existing records.</li>
+                    <li><strong>VAT rate (%)</strong> — Malawi standard is 16.5%. Update here when the rate changes.</li>
+                    <li><strong>VAT number</strong> — printed on every invoice and receipt PDF.</li>
+                </ul>
+            </section>
+
             <!-- QUICK REFERENCE -->
             <section>
                 <h2>Quick Reference — Which page to use?</h2>
@@ -687,6 +864,22 @@
                         <tr>
                             <td>Configure VAT rate and VAT number</td>
                             <td><code>accounting-dashboard.php</code> → VAT Settings</td>
+                        </tr>
+                        <tr>
+                            <td>Review gross margin on F&amp;B for the month</td>
+                            <td><code>accounting-dashboard.php</code> → POS Analytics panel</td>
+                        </tr>
+                        <tr>
+                            <td>Check compliance before tax filing</td>
+                            <td><code>accounting-dashboard.php</code> → Compliance section</td>
+                        </tr>
+                        <tr>
+                            <td>Track quotation conversion to paid bookings</td>
+                            <td><code>accounting-dashboard.php</code> → Quotation Pipeline</td>
+                        </tr>
+                        <tr>
+                            <td>Export all payments matching current filters</td>
+                            <td><code>payments.php</code> → Export CSV (header button)</td>
                         </tr>
                     </tbody>
                 </table>

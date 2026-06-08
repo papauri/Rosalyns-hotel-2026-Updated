@@ -522,6 +522,8 @@
             if (existingSrcs[script.src]) return;
             // Skip admin-spa.js itself
             if (script.src.indexOf('admin-spa.js') !== -1) return;
+            // Skip page-specific scripts not meant for global injection
+            if (script.hasAttribute('data-no-spa')) return;
             var s = document.createElement('script');
             s.src = script.src;
             if (script.hasAttribute('defer')) s.defer = true;
@@ -574,8 +576,8 @@
                 });
 
                 if (old.src) {
-                    // External: only add once
-                    if (hasLoadedScript(old.src)) {
+                    // External: only add once; skip page-specific scripts marked data-no-spa
+                    if (hasLoadedScript(old.src) || old.hasAttribute('data-no-spa')) {
                         old.parentNode && old.parentNode.removeChild(old);
                         return;
                     }

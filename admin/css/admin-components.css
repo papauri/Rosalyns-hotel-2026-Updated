@@ -1269,8 +1269,9 @@ body.modal-open {
     align-items: center;
     justify-content: center;
     padding: 12px;
-    background: color-mix(in srgb, var(--color-background, #fff) 80%, transparent);
-    backdrop-filter: blur(1px);
+    /* No full-area background/blur — only the card itself is visible */
+    background: transparent;
+    pointer-events: none;
 }
 
 .admin-section-scoped-loader__card {

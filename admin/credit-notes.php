@@ -278,8 +278,8 @@ ob_start();
         <input type="email" name="guest_email" class="form-control" maxlength="150" placeholder="guest@example.com">
     </div>
     <div class="form-group">
-        <label class="form-label">Credit Note Value (<?php echo htmlspecialchars($currencySymbol); ?>) <span class="required">*</span></label>
-        <input type="number" name="amount" class="form-control" required min="0.01" step="0.01" placeholder="0.00">
+        <label class="form-label">Credit Note Value <span class="required">*</span></label>
+        <input type="number" name="amount" class="form-control" required min="0.01" step="0.01" placeholder="0.00" data-currency="<?php echo htmlspecialchars($currencySymbol, ENT_QUOTES); ?>">
     </div>
     <div class="form-group">
         <label class="form-label">Reason <span class="required">*</span></label>
@@ -339,8 +339,8 @@ ob_start();
         <div class="cn-selected-booking" id="apply-selected-booking-info"></div>
     </div>
     <div class="form-group">
-        <label class="form-label">Amount to Apply (<?php echo htmlspecialchars($currencySymbol); ?>) <span class="required">*</span></label>
-        <input type="number" name="amount" id="apply-cn-amount" class="form-control" required min="0.01" step="0.01" placeholder="0.00">
+        <label class="form-label">Amount to Apply <span class="required">*</span></label>
+        <input type="number" name="amount" id="apply-cn-amount" class="form-control" required min="0.01" step="0.01" placeholder="0.00" data-currency="<?php echo htmlspecialchars($currencySymbol, ENT_QUOTES); ?>">
     </div>
     <div class="form-group">
         <label class="form-label">Notes (optional)</label>
@@ -395,11 +395,9 @@ $modalsHtml = ob_get_clean();
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Credit Notes — Admin</title>
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.7.2/css/all.min.css">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,300;0,400;0,500;0,600;1,300;1,400;1,500&family=Jost:wght@300;400;500;600&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="../css/main.css">
     <link rel="stylesheet" href="css/admin-styles.css">
     <link rel="stylesheet" href="css/admin-responsive-enhancements.css">
     <link rel="stylesheet" href="css/admin-components.css">
@@ -511,7 +509,7 @@ $modalsHtml = ob_get_clean();
                             <th>Status</th>
                             <th>Issued</th>
                             <th>Expires</th>
-                            <th class="text-center">Actions</th>
+                            <th>Actions</th>
                         </tr>
                     </thead>
                     <tbody>
@@ -586,44 +584,30 @@ $modalsHtml = ob_get_clean();
                                         <span class="text-muted">—</span>
                                     <?php endif; ?>
                                 </td>
-                                <td class="text-center">
-                                    <div class="action-buttons">
-                                        <?php if ($isActive && $balance > 0): ?>
-                                            <button class="btn btn--sm btn--success"
-                                                onclick="openApplyCN(<?php echo (int)$cn['id']; ?>, '<?php echo htmlspecialchars((string)$cn['credit_note_number']); ?>', <?php echo number_format($balance, 2, '.', ''); ?>)"
-                                                title="Apply to booking">
-                                                <i class="fas fa-check-double"></i>
-                                            </button>
-                                        <?php endif; ?>
-                                        <button class="btn btn--sm btn--ghost"
-                                            onclick="openCNHistory(<?php echo (int)$cn['id']; ?>, '<?php echo htmlspecialchars((string)$cn['credit_note_number']); ?>')"
-                                            title="Redemption history">
-                                            <i class="fas fa-history"></i>
+                                <td class="actions-cell">
+                                    <?php if ($isActive && $balance > 0): ?>
+                                        <button class="quick-action"
+                                            onclick="openApplyCN(<?php echo (int)$cn['id']; ?>, '<?php echo htmlspecialchars((string)$cn['credit_note_number']); ?>', <?php echo number_format($balance, 2, '.', ''); ?>)"
+                                            title="Apply to booking" style="color:var(--color-success,#1f7a42);">
+                                            <i class="fas fa-check-double"></i>
                                         </button>
-                                        <form method="post" style="display:inline;">
-                                            <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf_token, ENT_QUOTES, 'UTF-8'); ?>">
-                                            <input type="hidden" name="action" value="regenerate_pdf">
-                                            <input type="hidden" name="credit_note_id" value="<?php echo (int)$cn['id']; ?>">
-                                            <button type="button" class="btn btn--sm btn--ghost" title="Regenerate PDF"
-                                                onclick="cnPdfAction(this,<?php echo (int)$cn['id']; ?>)"><i class="fas fa-file-pdf"></i></button>
-                                        </form>
-                                        <?php if ($cn['guest_email']): ?>
-                                            <form method="post" style="display:inline;">
-                                                <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf_token, ENT_QUOTES, 'UTF-8'); ?>">
-                                                <input type="hidden" name="action" value="resend_email">
-                                                <input type="hidden" name="credit_note_id" value="<?php echo (int)$cn['id']; ?>">
-                                                <button type="button" class="btn btn--sm btn--ghost" title="Resend email"
-                                                    onclick="cnEmailAction(this,<?php echo (int)$cn['id']; ?>)"><i class="fas fa-envelope"></i></button>
-                                            </form>
-                                        <?php endif; ?>
-                                        <a href="api/credit-notes.php?action=view_pdf&id=<?php echo (int)$cn['id']; ?>" target="_blank" class="btn btn--sm btn--ghost" title="View PDF"><i class="fas fa-eye"></i></a>
-                                        <?php if ($isActive): ?>
-                                            <button class="btn btn--sm btn--danger"
-                                                onclick="openVoidCN(<?php echo (int)$cn['id']; ?>, '<?php echo htmlspecialchars((string)$cn['credit_note_number']); ?>')"
-                                                title="Void this credit note">
-                                                <i class="fas fa-ban"></i>
-                                            </button>
-                                        <?php endif; ?>
+                                    <?php endif; ?>
+                                    <div class="actions-more">
+                                        <button type="button" class="quick-action actions-more-toggle" title="More actions" aria-label="More actions" onclick="toggleCNActionsMore(this, event)">
+                                            <i class="fas fa-ellipsis-vertical"></i>
+                                        </button>
+                                        <div class="actions-more-menu">
+                                            <a href="api/credit-notes.php?action=view_pdf&id=<?php echo (int)$cn['id']; ?>" target="_blank"><i class="fas fa-eye"></i> View PDF</a>
+                                            <button type="button" onclick="openCNHistory(<?php echo (int)$cn['id']; ?>, '<?php echo htmlspecialchars((string)$cn['credit_note_number']); ?>')"><i class="fas fa-history"></i> Redemption history</button>
+                                            <button type="button" onclick="cnPdfAction(this,<?php echo (int)$cn['id']; ?>)"><i class="fas fa-file-pdf"></i> Regenerate PDF</button>
+                                            <?php if ($cn['guest_email']): ?>
+                                                <button type="button" onclick="cnEmailAction(this,<?php echo (int)$cn['id']; ?>)"><i class="fas fa-envelope"></i> Resend email</button>
+                                            <?php endif; ?>
+                                            <?php if ($isActive): ?>
+                                                <hr class="menu-divider">
+                                                <button type="button" class="text-danger" onclick="openVoidCN(<?php echo (int)$cn['id']; ?>, '<?php echo htmlspecialchars((string)$cn['credit_note_number']); ?>')"><i class="fas fa-ban"></i> Void credit note</button>
+                                            <?php endif; ?>
+                                        </div>
                                     </div>
                                 </td>
                             </tr>
@@ -951,6 +935,39 @@ $modalsHtml = ob_get_clean();
                     });
             }, 350);
         }
+
+        // ── Actions-more dropdown ─────────────────────────────────────────────────
+        function _cnCloseAllMenus(except) {
+            document.querySelectorAll('.cn-table .actions-more.open').forEach(function(el) {
+                if (el !== except) el.classList.remove('open');
+            });
+        }
+
+        function toggleCNActionsMore(btn, e) {
+            if (e) e.stopPropagation();
+            var wrap = btn.closest('.actions-more');
+            if (!wrap) return;
+            var menu = wrap.querySelector('.actions-more-menu');
+            if (!menu) return;
+            var isOpen = wrap.classList.contains('open');
+            _cnCloseAllMenus(null);
+            if (isOpen) return;
+
+            wrap.classList.add('open');
+            // Position using fixed so overflow doesn't clip it
+            var rect = btn.getBoundingClientRect();
+            var menuW = 200;
+            var left = rect.right - menuW;
+            var top = rect.bottom + 4;
+            left = Math.max(8, Math.min(left, window.innerWidth - menuW - 8));
+            top  = Math.min(top, window.innerHeight - 160);
+            menu.style.cssText = 'display:block;position:fixed;z-index:12050;top:' + Math.round(top) + 'px;left:' + Math.round(left) + 'px;width:' + menuW + 'px;';
+        }
+
+        document.addEventListener('click', function(e) {
+            if (!e.target.closest('.actions-more')) _cnCloseAllMenus(null);
+        });
+        document.addEventListener('scroll', function() { _cnCloseAllMenus(null); }, true);
 
         // ── Submit-button spinner for modal forms ──────────────────────────────────
         document.addEventListener('DOMContentLoaded', function() {

@@ -465,6 +465,173 @@
     color: var(--finance-danger);
 }
 
+/* ── Booking type toggle buttons ──────────────────────────────── */
+.pa-picker__type-row {
+    display: flex;
+    gap: 0.5rem;
+    margin-bottom: 1rem;
+}
+
+.pa-type-btn {
+    flex: 1;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.4rem;
+    padding: 0.65rem 0.85rem;
+    background: var(--finance-bg);
+    border: 1.5px solid var(--finance-border);
+    border-radius: 8px;
+    color: var(--finance-muted);
+    font-size: 0.85rem;
+    font-weight: 600;
+    font-family: inherit;
+    cursor: pointer;
+    transition: border-color 0.15s, background 0.15s, color 0.15s;
+}
+
+.pa-type-btn:hover {
+    border-color: var(--finance-accent);
+    color: var(--finance-accent);
+}
+
+.pa-type-btn.is-active {
+    border-color: var(--finance-accent);
+    background: var(--finance-surface);
+    color: var(--finance-accent);
+    box-shadow: 0 1px 4px rgba(0,0,0,0.07);
+}
+
+/* ── Booking search box ───────────────────────────────────────── */
+.pa-search-wrap {
+    position: relative;
+}
+
+.pa-search-label {
+    display: flex;
+    align-items: center;
+    gap: 0.35rem;
+    margin-bottom: 0.45rem;
+    font-size: 0.82rem;
+    font-weight: 600;
+    color: var(--finance-muted);
+}
+
+.pa-search-input {
+    width: 100%;
+    padding: 0.65rem 0.9rem 0.65rem 2.4rem;
+    border: 1.5px solid var(--finance-border);
+    border-radius: 8px;
+    background: var(--finance-surface);
+    font-size: 0.9rem;
+    color: var(--finance-text);
+    font-family: inherit;
+    transition: border-color 0.15s, box-shadow 0.15s;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%238A775F' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Ccircle cx='11' cy='11' r='8'/%3E%3Cpath d='m21 21-4.35-4.35'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: 0.7rem center;
+}
+
+.pa-search-input:focus {
+    outline: none;
+    border-color: var(--finance-accent);
+    box-shadow: 0 0 0 3px rgba(138,119,95,0.12);
+}
+
+.pa-search-input::placeholder {
+    color: var(--finance-muted);
+    opacity: 0.7;
+}
+
+/* ── Form labels & inputs (pa-*) ──────────────────────────────── */
+.pa-label {
+    display: flex;
+    align-items: center;
+    gap: 0.35rem;
+    margin-bottom: 0.4rem;
+    font-size: 0.82rem;
+    font-weight: 600;
+    color: var(--finance-muted);
+}
+
+.pa-required {
+    color: var(--finance-danger);
+}
+
+.pa-input {
+    width: 100%;
+    padding: 0.62rem 0.9rem;
+    border: 1.5px solid var(--finance-border);
+    border-radius: 8px;
+    background: var(--finance-surface);
+    font-size: 0.9rem;
+    color: var(--finance-text);
+    font-family: inherit;
+    transition: border-color 0.15s, box-shadow 0.15s;
+}
+
+.pa-input:focus {
+    outline: none;
+    border-color: var(--finance-accent);
+    box-shadow: 0 0 0 3px rgba(138,119,95,0.12);
+}
+
+.pa-amount-wrap {
+    display: flex;
+    align-items: stretch;
+    border: 1.5px solid var(--finance-border);
+    border-radius: 8px;
+    overflow: hidden;
+    background: var(--finance-surface);
+    transition: border-color 0.15s, box-shadow 0.15s;
+}
+
+.pa-amount-wrap:focus-within {
+    border-color: var(--finance-accent);
+    box-shadow: 0 0 0 3px rgba(138,119,95,0.12);
+}
+
+.pa-currency {
+    display: flex;
+    align-items: center;
+    padding: 0 0.75rem;
+    background: var(--finance-bg);
+    border-right: 1.5px solid var(--finance-border);
+    font-size: 0.88rem;
+    font-weight: 700;
+    color: var(--finance-muted);
+    white-space: nowrap;
+    user-select: none;
+    flex-shrink: 0;
+}
+
+.pa-input--amount {
+    flex: 1;
+    border: none !important;
+    border-radius: 0 !important;
+    box-shadow: none !important;
+    background: transparent;
+    padding-left: 0.75rem;
+    font-size: 1.1rem;
+    font-weight: 600;
+    min-width: 0;
+}
+
+.pa-textarea {
+    min-height: 5rem;
+    resize: vertical;
+    line-height: 1.5;
+}
+
+select.pa-input {
+    appearance: none;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='14' height='14' viewBox='0 0 24 24' fill='none' stroke='%235E554D' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right 0.75rem center;
+    padding-right: 2.2rem;
+    cursor: pointer;
+}
+
 @media (min-width: 768px) {
     .payment-workspace__hero {
         grid-template-columns: 1fr auto;

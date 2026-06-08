@@ -495,13 +495,9 @@
     border-top: 1px solid var(--finance-border, #EAE1D8);
 }
 
-/* ── action-buttons in table cells ─────────────────────────── */
-.cn-table .action-buttons {
-    display: flex;
-    flex-wrap: nowrap;
-    gap: 3px;
-    justify-content: center;
-    align-items: center;
+/* ── actions-cell in table rows ─────────────────────────────── */
+.cn-table .actions-cell {
+    white-space: nowrap;
 }
 
 /* ── form-check (checkbox rows) ─────────────────────────────── */
@@ -588,11 +584,6 @@
         display: none;
     }
 
-    /* Shrink action buttons */
-    .cn-table .action-buttons .btn--sm {
-        padding: 5px 7px;
-        font-size: 0.7rem;
-    }
 }
 
 /* ≤ 600px — aggressive column hiding, vertical actions */
@@ -612,14 +603,6 @@
     .cn-table th:nth-child(8),
     .cn-table td:nth-child(8) {
         display: none;
-    }
-
-    .cn-table .action-buttons {
-        flex-direction: row;
-        flex-wrap: wrap;
-        align-items: center;
-        justify-content: center;
-        gap: 3px;
     }
 
     /* Ensure table wrapper scrolls; never clips */

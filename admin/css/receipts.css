@@ -1,65 +1,90 @@
-.receipts-page .receipts-inline-form {
-    display: inline-flex;
-    gap: 0.5rem;
-    flex-wrap: wrap;
+/* ── Receipts page layout ──────────────────────────────────────── */
+
+/* Table */
+.receipts-table td small {
+    display: block;
+    font-size: 0.78rem;
+    color: var(--color-muted, #888);
+    margin-top: 2px;
 }
 
-.receipts-page .receipts-inline-form--row {
-    gap: 0.35rem;
-    align-items: center;
+.receipts-table .actions-cell {
+    white-space: nowrap;
 }
 
-.receipts-page .receipts-action-buttons {
-    display: inline-flex;
-    gap: 0.35rem;
-    flex-wrap: wrap;
+/* ── Panels (templates + activity) ───────────────────────────── */
+.receipts-page .receipts-panel {
+    background: #fff;
+    border: 1px solid var(--color-border, #e8e0d6);
+    border-radius: 10px;
+    padding: 1.5rem;
+    margin-top: 1.25rem;
+    box-shadow: 0 2px 8px rgba(0,0,0,.04);
 }
 
-.receipts-page .receipts-action-email {
-    display: inline-flex;
-    gap: 0.35rem;
-    align-items: center;
-    flex-wrap: wrap;
-}
-
-.receipts-page .receipts-recipient-input {
-    min-width: clamp(12rem, 24vw, 14rem);
-}
-
-.receipts-page .receipts-pagination {
+.receipts-page .receipts-panel__head {
     display: flex;
-    gap: 0.35rem;
-    justify-content: center;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: 1rem;
+    margin-bottom: 1.25rem;
+    padding-bottom: 1rem;
+    border-bottom: 1px solid var(--color-border, #e8e0d6);
+}
+
+/* ── Template form ────────────────────────────────────────────── */
+.receipts-page .receipts-template-form {
+    display: grid;
+    gap: 0;
+}
+
+.receipts-page .receipts-template-fields {
+    display: grid;
+    gap: 1rem;
+    margin-bottom: 1rem;
+}
+
+/* ── Activity log ─────────────────────────────────────────────── */
+.receipts-page .receipts-activity-log {
+    display: grid;
+    gap: 0;
+}
+
+.receipts-page .receipts-activity-item {
+    display: flex;
+    align-items: baseline;
+    gap: 0.6rem;
+    padding: 0.55rem 0;
+    border-bottom: 1px solid var(--color-border, #e8e0d6);
+    font-size: 0.875rem;
     flex-wrap: wrap;
-    margin: 1rem 0 0;
-    padding-bottom: clamp(0.6rem, 1vw, 1rem);
-    align-items: center;
 }
 
-.receipts-page .receipts-pagination__link {
-    min-height: 2.5rem;
-    padding-block: 0.55rem;
-    display: inline-flex;
-    align-items: center;
-    gap: 0.4rem;
+.receipts-page .receipts-activity-item:last-child {
+    border-bottom: none;
 }
 
-.receipts-page .receipts-pagination__link.is-disabled {
-    opacity: 0.55;
-    pointer-events: none;
+.receipts-page .receipts-activity-item strong {
+    min-width: 6rem;
+    color: var(--color-primary, #8A775F);
+    font-size: 0.8rem;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
 }
 
-.receipts-page .receipts-panel-spacing {
-    margin-top: 1rem;
+.receipts-page .receipts-activity-item small {
+    margin-left: auto;
+    font-size: 0.78rem;
+    color: var(--color-muted, #888);
 }
 
+/* ── Template preview ─────────────────────────────────────────── */
 .receipts-page .receipts-template-preview {
     margin-top: 1rem;
     padding: 1rem;
-    border: 1px solid var(--finance-border);
-    border-radius: 0.75rem;
-    background: var(--finance-surface);
-    box-shadow: var(--finance-shadow-sm);
+    border: 1px solid var(--color-border, #e8e0d6);
+    border-radius: 8px;
+    background: var(--color-bg, #f9f7f4);
     display: grid;
     gap: 0.9rem;
 }
@@ -71,45 +96,108 @@
 
 .receipts-page .receipts-template-preview__title {
     margin: 0;
-    font-size: clamp(0.9rem, 0.8rem + 0.3vw, 1rem);
-    color: var(--finance-text);
+    font-size: 0.9rem;
+    font-weight: 600;
+    color: var(--color-text, #2A2723);
 }
 
 .receipts-page .receipts-template-preview__subject,
 .receipts-page .receipts-template-preview__whatsapp {
     margin: 0;
     padding: 0.7rem 0.8rem;
-    border-radius: 0.6rem;
-    border: 1px solid var(--finance-border);
-    background: var(--finance-bg);
-    color: var(--finance-text);
-    line-height: 1.45;
-    font-size: clamp(0.82rem, 0.76rem + 0.24vw, 0.92rem);
+    border-radius: 6px;
+    border: 1px solid var(--color-border, #e8e0d6);
+    background: #fff;
+    color: var(--color-text, #2A2723);
+    line-height: 1.5;
+    font-size: 0.875rem;
+    white-space: pre-wrap;
 }
 
 .receipts-page .receipts-template-preview__frame {
     width: 100%;
     min-height: clamp(14rem, 35vw, 21rem);
-    border: 1px solid var(--finance-border);
-    border-radius: 0.6rem;
-    background: var(--finance-surface);
+    border: 1px solid var(--color-border, #e8e0d6);
+    border-radius: 6px;
+    background: #fff;
 }
 
-.receipts-page .fas,
-.receipts-page .far,
-.receipts-page .fab {
-    font-size: clamp(0.78rem, 0.74rem + 0.2vw, 0.9rem);
+/* ── Email modal override ─────────────────────────────────────── */
+#modal-receipt-email {
+    display: none;
+    position: fixed;
+    inset: 0;
+    z-index: 10000;
+    align-items: center;
+    justify-content: center;
+    background: rgba(16,10,5,.45);
+}
+
+#modal-receipt-email .modal__backdrop {
+    position: absolute;
+    inset: 0;
+    cursor: pointer;
+}
+
+#modal-receipt-email .modal__dialog {
+    position: relative;
+    background: #fff;
+    border-radius: 12px;
+    box-shadow: 0 8px 32px rgba(0,0,0,.2);
+    width: min(480px, 94vw);
+    overflow: hidden;
+    z-index: 1;
+}
+
+#modal-receipt-email .modal__header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 1.1rem 1.25rem;
+    border-bottom: 1px solid var(--color-border, #e8e0d6);
+}
+
+#modal-receipt-email .modal__title {
+    margin: 0;
+    font-size: 1.05rem;
+    font-weight: 600;
+    color: var(--color-text, #2A2723);
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+#modal-receipt-email .modal__close {
+    background: none;
+    border: none;
+    font-size: 1.4rem;
+    cursor: pointer;
+    color: var(--color-muted, #888);
     line-height: 1;
+    padding: 0 4px;
 }
 
+#modal-receipt-email .modal__body {
+    padding: 1.25rem;
+}
+
+#modal-receipt-email .modal__footer {
+    display: flex;
+    gap: 0.5rem;
+    justify-content: flex-end;
+    padding: 1rem 1.25rem;
+    border-top: 1px solid var(--color-border, #e8e0d6);
+}
+
+/* ── Autocomplete (from receipts.js) ─────────────────────────── */
 .receipts-autocomplete {
     position: absolute;
     z-index: 1200;
-    background: var(--finance-surface);
-    border: 1px solid var(--finance-border);
-    border-radius: 0.5rem;
-    box-shadow: var(--finance-shadow);
-    max-height: 13.75rem;
+    background: #fff;
+    border: 1px solid var(--color-border, #e8e0d6);
+    border-radius: 6px;
+    box-shadow: 0 4px 16px rgba(0,0,0,.12);
+    max-height: 220px;
     overflow-y: auto;
 }
 
@@ -119,20 +207,25 @@
     border: none;
     background: transparent;
     padding: 0.5rem 0.65rem;
-    font-size: clamp(0.75rem, 0.72rem + 0.16vw, 0.82rem);
-    font-family: 'Courier New', Consolas, monospace;
-    color: var(--finance-text);
+    font-size: 0.825rem;
+    color: var(--color-text, #2A2723);
     cursor: pointer;
 }
 
 .receipts-autocomplete__item:hover,
 .receipts-autocomplete__item.is-active {
-    background: var(--finance-bg);
-    color: var(--finance-accent);
+    background: var(--color-bg, #f9f7f4);
+    color: var(--color-primary, #8A775F);
 }
 
-@media (min-width: 48rem) {
-    .receipts-page .receipts-template-preview {
-        grid-template-columns: 1fr;
+/* ── Responsive ───────────────────────────────────────────────── */
+@media (max-width: 768px) {
+    .receipts-page .receipts-panel__head {
+        flex-direction: column;
+    }
+
+    .receipts-page .receipts-activity-item small {
+        margin-left: 0;
+        width: 100%;
     }
 }

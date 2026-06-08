@@ -1757,3 +1757,67 @@
     // Expose admin navigation to global scope if needed by other scripts
     window.initAdminNavigation = initAdminNavigation;
 })();
+
+/* ── Global currency-prefix input auto-init ─────────────────────────────────
+   Any <input data-currency="MK"> gets automatically wrapped in the shared
+   .input-currency-wrap / .input-currency-prefix markup from admin-styles.css.
+   Call initCurrencyInputs(root) after dynamic DOM insertions.
+   ─────────────────────────────────────────────────────────────────────────── */
+(function () {
+    'use strict';
+
+    function wrapInput(input) {
+        if (input.closest('.input-currency-wrap') || input.dataset.currencyWrapped) return;
+        var symbol = input.dataset.currency || '';
+        if (!symbol) return;
+
+        var wrap = document.createElement('div');
+        wrap.className = 'input-currency-wrap';
+
+        var prefix = document.createElement('span');
+        prefix.className = 'input-currency-prefix';
+        prefix.textContent = symbol;
+        prefix.setAttribute('aria-hidden', 'true');
+
+        input.parentNode.insertBefore(wrap, input);
+        wrap.appendChild(prefix);
+        wrap.appendChild(input);
+        input.dataset.currencyWrapped = '1';
+    }
+
+    function initCurrencyInputs(root) {
+        var container = root || document;
+        container.querySelectorAll('input[data-currency]:not([data-currency-wrapped])').forEach(wrapInput);
+    }
+
+    // Run on DOMContentLoaded
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', function () { initCurrencyInputs(document); });
+    } else {
+        initCurrencyInputs(document);
+    }
+
+    // Re-run when any admin modal opens (covers dynamically populated modals)
+    document.addEventListener('modal:open', function (e) {
+        var modalId = e.detail && e.detail.modalId;
+        var root = modalId ? document.getElementById(modalId) : document;
+        initCurrencyInputs(root || document);
+    });
+
+    // Expose for dynamic content (modals, SPA page loads)
+    window.initCurrencyInputs = initCurrencyInputs;
+
+    // Sync gym currency_code field → prefix text live
+    document.addEventListener('input', function (e) {
+        var currencyField = e.target.closest('[data-gym-currency-input]');
+        if (!currencyField) return;
+        var form = currencyField.closest('form, .modal, .form-row');
+        if (!form) return;
+        var priceInput = form.querySelector('[data-gym-price-input]');
+        if (!priceInput) return;
+        var prefix = priceInput.closest('.input-currency-wrap')
+            ? priceInput.closest('.input-currency-wrap').querySelector('.input-currency-prefix')
+            : null;
+        if (prefix) prefix.textContent = currencyField.value.trim() || 'MWK';
+    });
+}());

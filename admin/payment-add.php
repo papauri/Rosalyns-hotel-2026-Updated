@@ -506,589 +506,781 @@ function updateConferenceEnquiryPayments(PDO $pdo, int $enquiryId)
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,300;0,400;0,500;0,600;1,300;1,400;1,500&family=Jost:wght@300;400;500;600&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.7.2/css/all.min.css">
-    <link rel="stylesheet" href="../css/main.css">
     <link rel="stylesheet" href="css/admin-styles.css">
     <link rel="stylesheet" href="css/admin-responsive-enhancements.css">
     <link rel="stylesheet" href="css/admin-components.css">
     <link rel="stylesheet" href="css/admin-finance.css">
+    <link rel="stylesheet" href="css/payment-add.css">
+    <link rel="stylesheet" href="css/admin-walkme.css" data-no-spa>
 </head>
 
 <body>
 
     <?php require_once 'includes/admin-header.php'; ?>
 
-    <div class="content finance-page">
-        <div class="form-container">
-            <h2 class="section-title"><?php echo $editId ? 'Edit Payment' : 'Record New Payment'; ?></h2>
+    <!-- ══ Payment Workspace ══════════════════════════════════════════════ -->
+    <div class="admin-container payment-add-container">
 
-            <form method="POST" data-offline-queue="1"
-                data-admin-confirm="Record this payment change now?"
-                data-admin-confirm-title="Confirm payment"
-                data-admin-confirm-details="Please verify the booking, amount, method, date, and status before saving.|Receipts and account balances may be updated."
-                data-admin-confirm-ok="<?php echo $editId ? 'Update Payment' : 'Record Payment'; ?>"
-                data-admin-confirm-icon="fa-money-bill-wave"
-                data-admin-loader-text="Saving payment..."
-                data-admin-submit-text="Saving...">
-                <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf_token, ENT_QUOTES, 'UTF-8'); ?>">
-                <?php
-                // Per-render idempotency token. Burned on success below.
-                if (!$editId && empty($_SESSION['admin_payment_add_uuid'])) {
-                    $_SESSION['admin_payment_add_uuid'] = bin2hex(random_bytes(16));
-                }
-                ?>
+        <!-- Hero header -->
+        <div class="payment-workspace__hero" id="pa-hero">
+            <div>
+                <span class="payment-workspace__eyebrow">Finance</span>
+                <h1 class="payment-workspace__title">
+                    <?php echo $editId ? 'Edit Payment' : 'Record New Payment'; ?>
+                </h1>
+                <p class="payment-workspace__subtitle">
+                    <?php if ($editId): ?>
+                        Updating payment record. Receipts and booking balances will be recalculated on save.
+                    <?php else: ?>
+                        Link a booking, choose how the guest paid, enter the amount — done.
+                    <?php endif; ?>
+                </p>
+            </div>
+            <div class="payment-workspace__hero-actions">
+                <a href="payments.php" class="tbl-btn tbl-btn--view">
+                    <i class="fas fa-arrow-left"></i> Back to Payments
+                </a>
                 <?php if (!$editId): ?>
-                    <input type="hidden" name="client_uuid" value="<?php echo htmlspecialchars($_SESSION['admin_payment_add_uuid']); ?>">
+                    <span id="pa-tour-anchor"></span>
                 <?php endif; ?>
-                <!-- Booking Selection -->
-                <div class="form-section">
-                    <h3><i class="fas fa-calendar-check"></i> Booking Information</h3>
+            </div>
+        </div>
 
-                    <?php if ($bookingDetails): ?>
-                        <div class="booking-info">
-                            <h4><?php echo ucfirst($bookingType); ?> Booking Details</h4>
-                            <?php if ($bookingType === 'room'): ?>
-                                <p><strong>Reference:</strong> <?php echo htmlspecialchars($bookingDetails['booking_reference']); ?></p>
-                                <p><strong>Guest:</strong> <?php echo htmlspecialchars($bookingDetails['guest_name']); ?></p>
-                                <p><strong>Email:</strong> <?php echo htmlspecialchars($bookingDetails['guest_email']); ?></p>
-                                <p><strong>Room:</strong> <?php echo htmlspecialchars($bookingDetails['room_name']); ?></p>
-                                <p><strong>Dates:</strong> <?php echo date('M j, Y', strtotime($bookingDetails['check_in_date'])); ?> - <?php echo date('M j, Y', strtotime($bookingDetails['check_out_date'])); ?></p>
-                                <p><strong>Guest Split:</strong>
-                                    <?php
-                                    $payChildGuests = (int)($bookingDetails['child_guests'] ?? 0);
-                                    $payAdultGuests = (int)($bookingDetails['adult_guests'] ?? max(1, ((int)$bookingDetails['number_of_guests']) - $payChildGuests));
-                                    echo $payAdultGuests . ' adult' . ($payAdultGuests === 1 ? '' : 's');
-                                    if ($payChildGuests > 0) {
-                                        echo ' + ' . $payChildGuests . ' child' . ($payChildGuests === 1 ? '' : 'ren');
-                                    }
-                                    ?>
-                                </p>
-                                <?php if ((float)($bookingDetails['child_supplement_total'] ?? 0) > 0): ?>
-                                    <p><strong>Child Supplement:</strong> <?php echo $currency_symbol; ?><?php echo number_format((float)$bookingDetails['child_supplement_total'], 0); ?></p>
-                                <?php endif; ?>
-                                <p><strong>Total Amount:</strong> <?php echo $currency_symbol; ?><?php echo number_format($bookingDetails['total_amount'], 0); ?></p>
-                                <p><strong>Amount Paid:</strong> <?php echo $currency_symbol; ?><?php echo number_format($bookingDetails['amount_paid'], 0); ?></p>
-                                <p><strong>Amount Due:</strong> <span style="color: <?php echo $bookingDetails['amount_due'] > 0 ? '#dc3545' : '#28a745'; ?>; font-weight: 600;"><?php echo $currency_symbol; ?><?php echo number_format($bookingDetails['amount_due'], 0); ?></span></p>
-                            <?php else: ?>
-                                <p><strong>Reference:</strong> <?php echo htmlspecialchars($bookingDetails['enquiry_reference']); ?></p>
-                                <p><strong>Organization:</strong> <?php echo htmlspecialchars($bookingDetails['organization_name']); ?></p>
-                                <p><strong>Contact:</strong> <?php echo htmlspecialchars($bookingDetails['contact_name']); ?></p>
-                                <p><strong>Email:</strong> <?php echo htmlspecialchars($bookingDetails['contact_email']); ?></p>
-                                <p><strong>Dates:</strong> <?php echo date('M j, Y', strtotime($bookingDetails['start_date'])); ?> - <?php echo date('M j, Y', strtotime($bookingDetails['end_date'])); ?></p>
-                                <p><strong>Total Amount:</strong> <?php echo $currency_symbol; ?><?php echo number_format($bookingDetails['total_amount'], 0); ?></p>
-                                <p><strong>Amount Paid:</strong> <?php echo $currency_symbol; ?><?php echo number_format($bookingDetails['amount_paid'], 0); ?></p>
-                                <p><strong>Amount Due:</strong> <span style="color: <?php echo $bookingDetails['amount_due'] > 0 ? '#dc3545' : '#28a745'; ?>; font-weight: 600;"><?php echo $currency_symbol; ?><?php echo number_format($bookingDetails['amount_due'], 0); ?></span></p>
-                                <?php if ($bookingDetails['deposit_required'] > 0): ?>
-                                    <p><strong>Deposit Required:</strong> <?php echo $currency_symbol; ?><?php echo number_format($bookingDetails['deposit_required'], 0); ?> (Paid: <?php echo $currency_symbol; ?><?php echo number_format($bookingDetails['deposit_paid'], 0); ?>)</p>
-                                <?php endif; ?>
+        <form id="pa-form" method="POST" data-offline-queue="1"
+            data-admin-confirm="Record this payment change now?"
+            data-admin-confirm-title="Confirm payment"
+            data-admin-confirm-details="Please verify the booking, amount, method, date, and status before saving.|Receipts and account balances may be updated."
+            data-admin-confirm-ok="<?php echo $editId ? 'Update Payment' : 'Record Payment'; ?>"
+            data-admin-confirm-icon="fa-money-bill-wave"
+            data-admin-loader-text="Saving payment..."
+            data-admin-submit-text="Saving...">
+
+            <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf_token, ENT_QUOTES, 'UTF-8'); ?>">
+            <?php
+            if (!$editId && empty($_SESSION['admin_payment_add_uuid'])) {
+                $_SESSION['admin_payment_add_uuid'] = bin2hex(random_bytes(16));
+            }
+            ?>
+            <?php if (!$editId): ?>
+                <input type="hidden" name="client_uuid" value="<?php echo htmlspecialchars($_SESSION['admin_payment_add_uuid']); ?>">
+            <?php endif; ?>
+            <input type="hidden" name="booking_type" id="hd-booking-type" value="<?php echo htmlspecialchars($bookingType); ?>">
+            <input type="hidden" name="booking_id"   id="hd-booking-id"   value="<?php echo $bookingId; ?>">
+
+            <div class="payment-console">
+
+                <!-- ── MAIN column ──────────────────────────────────── -->
+                <div class="payment-console__main">
+
+                    <!-- Step 1: Booking -->
+                    <div class="payment-panel" id="pa-booking-panel">
+                        <div class="payment-panel__header">
+                            <div>
+                                <span class="payment-panel__kicker">Step 1</span>
+                                <h2 class="payment-panel__title"><i class="fas fa-calendar-check"></i> Booking</h2>
+                            </div>
+                            <?php if ($bookingDetails): ?>
+                                <span class="payment-chip payment-chip--success"><i class="fas fa-check"></i> Linked</span>
                             <?php endif; ?>
                         </div>
 
-                        <input type="hidden" name="booking_type" value="<?php echo htmlspecialchars($bookingType); ?>">
-                        <input type="hidden" name="booking_id" value="<?php echo $bookingId; ?>">
-                    <?php else: ?>
-                        <div class="form-row">
-                            <div class="form-group">
-                                <label>Booking Type <span class="required">*</span></label>
-                                <select name="booking_type" id="booking_type" required>
-                                    <option value="">Select type...</option>
-                                    <option value="room" <?php echo $bookingType === 'room' ? 'selected' : ''; ?>>Room Booking</option>
-                                    <option value="conference" <?php echo $bookingType === 'conference' ? 'selected' : ''; ?>>Conference Booking</option>
-                                </select>
+                        <?php if ($bookingDetails): ?>
+                            <!-- Pre-linked booking card -->
+                            <div class="payment-booking-card" id="pa-linked-card">
+                                <div class="payment-booking-card__summary">
+                                    <div>
+                                        <p class="payment-booking-card__type"><?php echo ucfirst($bookingType); ?> Booking</p>
+                                        <h3>
+                                            <?php if ($bookingType === 'room'): ?>
+                                                <?php echo htmlspecialchars($bookingDetails['guest_name']); ?>
+                                            <?php else: ?>
+                                                <?php echo htmlspecialchars($bookingDetails['organization_name'] ?? $bookingDetails['contact_name']); ?>
+                                            <?php endif; ?>
+                                        </h3>
+                                        <p>
+                                            <?php if ($bookingType === 'room'): ?>
+                                                <?php echo htmlspecialchars($bookingDetails['booking_reference']); ?>
+                                                &bull; <?php echo htmlspecialchars($bookingDetails['room_name']); ?>
+                                            <?php else: ?>
+                                                <?php echo htmlspecialchars($bookingDetails['enquiry_reference']); ?>
+                                            <?php endif; ?>
+                                        </p>
+                                    </div>
+                                    <div class="payment-booking-card__balance">
+                                        <span>Amount Due</span>
+                                        <strong style="color:<?php echo $outstandingAmount > 0 ? 'var(--finance-danger)' : 'var(--finance-success)'; ?>">
+                                            <?php echo $currency_symbol . number_format($outstandingAmount, 0); ?>
+                                        </strong>
+                                    </div>
+                                </div>
+                                <dl class="payment-booking-card__meta">
+                                    <?php if ($bookingType === 'room'): ?>
+                                        <div><dt>Check-in</dt><dd><?php echo date('M j, Y', strtotime($bookingDetails['check_in_date'])); ?></dd></div>
+                                        <div><dt>Check-out</dt><dd><?php echo date('M j, Y', strtotime($bookingDetails['check_out_date'])); ?></dd></div>
+                                        <div><dt>Total</dt><dd><?php echo $currency_symbol . number_format($bookingDetails['total_amount'], 0); ?></dd></div>
+                                        <div><dt>Paid</dt><dd><?php echo $currency_symbol . number_format($bookingDetails['amount_paid'], 0); ?></dd></div>
+                                    <?php else: ?>
+                                        <div><dt>Start</dt><dd><?php echo date('M j, Y', strtotime($bookingDetails['start_date'])); ?></dd></div>
+                                        <div><dt>End</dt><dd><?php echo date('M j, Y', strtotime($bookingDetails['end_date'])); ?></dd></div>
+                                        <div><dt>Total</dt><dd><?php echo $currency_symbol . number_format($bookingDetails['total_amount'], 0); ?></dd></div>
+                                        <div><dt>Paid</dt><dd><?php echo $currency_symbol . number_format($bookingDetails['amount_paid'], 0); ?></dd></div>
+                                    <?php endif; ?>
+                                </dl>
                             </div>
 
-                            <div class="form-group" style="position: relative;">
-                                <label>Booking ID <span class="required">*</span></label>
-                                <div style="display: flex; gap: 8px;">
-                                    <input type="number" name="booking_id" id="booking_id" value="<?php echo $bookingId; ?>" required
-                                        style="flex: 1;" placeholder="Enter booking ID or search...">
-                                    <button type="button" id="search_booking_btn" class="btn btn-secondary" style="padding: 12px 16px;">
-                                        <i class="fas fa-search"></i>
+                        <?php else: ?>
+                            <!-- Booking search picker -->
+                            <div class="pa-picker" id="pa-picker">
+                                <div class="pa-picker__type-row">
+                                    <button type="button" class="pa-type-btn is-active" data-type="room" id="pa-type-room">
+                                        <i class="fas fa-bed"></i> Room Booking
+                                    </button>
+                                    <button type="button" class="pa-type-btn" data-type="conference" id="pa-type-conference">
+                                        <i class="fas fa-users"></i> Conference
                                     </button>
                                 </div>
-                                <div id="booking_search_results" class="booking-search-results" style="display: none;"></div>
-                                <div class="help-text">Enter the booking ID manually or click search to find bookings</div>
+
+                                <div class="pa-search-wrap" id="pa-search-wrap">
+                                    <label class="pa-search-label" for="pa-search-input">
+                                        <i class="fas fa-search"></i>
+                                        Search by guest name, reference, or email
+                                        <button type="button" class="wm-help" data-tooltip="Type at least 2 characters to search. Results show outstanding balance. Click any row to link it." aria-label="Help">?</button>
+                                    </label>
+                                    <input type="text"
+                                        id="pa-search-input"
+                                        class="pa-search-input"
+                                        placeholder="e.g. Smith, RH-2024-001, guest@email.com…"
+                                        autocomplete="off"
+                                        spellcheck="false">
+                                    <div id="pa-search-results" class="booking-search-results" hidden></div>
+                                </div>
                             </div>
-                        </div>
 
-                        <!-- Dynamic Booking Info Section -->
-                        <div id="dynamic_booking_info" class="booking-info" style="display: none;">
-                            <h4 id="booking_info_title">Booking Details</h4>
-                            <div id="booking_info_content"></div>
-                            <button type="button" id="clear_booking_btn" class="btn btn-secondary" style="margin-top: 12px; padding: 8px 16px; font-size: 13px;">
-                                <i class="fas fa-times"></i> Clear Selection
-                            </button>
-                        </div>
-                    <?php endif; ?>
-                </div>
+                            <!-- Selected booking card (hidden until picked) -->
+                            <div class="payment-booking-card" id="pa-selected-card" hidden>
+                                <div class="payment-booking-card__summary">
+                                    <div>
+                                        <p class="payment-booking-card__type" id="psc-type"></p>
+                                        <h3 id="psc-name"></h3>
+                                        <p id="psc-ref"></p>
+                                    </div>
+                                    <div class="payment-booking-card__balance">
+                                        <span>Amount Due</span>
+                                        <strong id="psc-due"></strong>
+                                    </div>
+                                </div>
+                                <dl class="payment-booking-card__meta" id="psc-meta"></dl>
+                                <div style="margin-top:1rem;">
+                                    <button type="button" class="tbl-btn tbl-btn--view" id="pa-clear-btn">
+                                        <i class="fas fa-times"></i> Change Booking
+                                    </button>
+                                </div>
+                            </div>
 
-                <!-- Payment Details -->
-                <div class="form-section">
-                    <h3><i class="fas fa-money-bill-wave"></i> Payment Details</h3>
-
-                    <div class="form-row">
-                        <div class="form-group">
-                            <label>Payment Amount <span class="required">*</span></label>
-                            <input type="number" name="payment_amount" id="payment_amount" step="0.01" min="0" value="<?php echo htmlspecialchars($payment['payment_amount'] ?? ''); ?>" required>
-                            <div class="help-text">Amount before VAT</div>
-                        </div>
-
-                        <div class="form-group">
-                            <label>Payment Date <span class="required">*</span></label>
-                            <input type="date" name="payment_date" value="<?php echo htmlspecialchars($payment['payment_date'] ?? date('Y-m-d')); ?>" required>
-                        </div>
-                    </div>
-
-                    <div class="form-row">
-                        <div class="form-group">
-                            <label>Payment Method <span class="required">*</span></label>
-                            <select name="payment_method" required>
-                                <option value="">Select method...</option>
-                                <option value="cash" <?php echo ($payment['payment_method'] ?? '') === 'cash' ? 'selected' : ''; ?>>Cash</option>
-                                <option value="bank_transfer" <?php echo ($payment['payment_method'] ?? '') === 'bank_transfer' ? 'selected' : ''; ?>>Bank Transfer</option>
-                                <option value="credit_card" <?php echo ($payment['payment_method'] ?? '') === 'credit_card' ? 'selected' : ''; ?>>Credit Card</option>
-                                <option value="debit_card" <?php echo ($payment['payment_method'] ?? '') === 'debit_card' ? 'selected' : ''; ?>>Debit Card</option>
-                                <option value="mobile_money" <?php echo ($payment['payment_method'] ?? '') === 'mobile_money' ? 'selected' : ''; ?>>Mobile Money</option>
-                                <option value="cheque" <?php echo ($payment['payment_method'] ?? '') === 'cheque' ? 'selected' : ''; ?>>Cheque</option>
-                                <option value="other" <?php echo ($payment['payment_method'] ?? '') === 'other' ? 'selected' : ''; ?>>Other</option>
-                            </select>
-                        </div>
-
-                        <div class="form-group">
-                            <label>Payment Status <span class="required">*</span></label>
-                            <select name="payment_status" required>
-                                <option value="pending" <?php echo ($payment['payment_status'] ?? '') === 'pending' ? 'selected' : ''; ?>>Pending</option>
-                                <option value="partial" <?php echo ($payment['payment_status'] ?? '') === 'partial' ? 'selected' : ''; ?>>Partial</option>
-                                <option value="paid" <?php echo ($payment['payment_status'] ?? '') === 'paid' ? 'selected' : ''; ?>>Paid</option>
-                                <option value="completed" <?php echo ($payment['payment_status'] ?? '') === 'completed' ? 'selected' : ''; ?>>Completed</option>
-                                <option value="refunded" <?php echo ($payment['payment_status'] ?? '') === 'refunded' ? 'selected' : ''; ?>>Refunded</option>
-                                <option value="cancelled" <?php echo ($payment['payment_status'] ?? '') === 'cancelled' ? 'selected' : ''; ?>>Cancelled</option>
-                            </select>
-                        </div>
-                    </div>
-
-                    <div class="form-group">
-                        <label>Transaction Reference</label>
-                        <input type="text" name="transaction_reference" value="<?php echo htmlspecialchars($paymentTransactionValue); ?>" placeholder="Bank reference, cheque number, etc.">
-                    </div>
-
-                    <div class="form-group">
-                        <label>Additional CC Emails</label>
-                        <input type="text" name="cc_emails" value="<?php echo htmlspecialchars($payment['cc_emails'] ?? ''); ?>" placeholder="email1@example.com, email2@example.com">
-                        <div class="help-text">Comma-separated email addresses to receive a copy of the payment receipt (in addition to default recipients)</div>
-                    </div>
-
-                    <div class="form-group">
-                        <label>Notes</label>
-                        <textarea name="notes" placeholder="Any additional notes about this payment..."><?php echo htmlspecialchars($payment['notes'] ?? ''); ?></textarea>
-                    </div>
-
-                    <!-- Calculation Preview -->
-                    <div class="calculation-preview" id="calculation-preview">
-                        <h4>Payment Calculation</h4>
-                        <div class="calc-row">
-                            <span>Subtotal:</span>
-                            <span id="subtotal-display"><?php echo $currency_symbol; ?>0.00</span>
-                        </div>
-                        <?php if ($vatEnabled): ?>
-                            <div class="calc-row">
-                                <span>VAT (<?php echo $vatRate; ?>%):</span>
-                                <span id="vat-display"><?php echo $currency_symbol; ?>0.00</span>
+                            <!-- Fully paid warning -->
+                            <div id="pa-fullypaid-warn" style="display:none; margin-top:1rem; padding:1rem; background:var(--finance-warning-bg); border:1px solid var(--finance-warning-border); border-radius:8px;">
+                                <p style="margin:0 0 0.5rem; font-weight:600; color:var(--finance-warning);"><i class="fas fa-exclamation-triangle"></i> Booking fully paid</p>
+                                <p style="margin:0 0 0.75rem; font-size:0.85rem; color:var(--finance-muted);">This booking has no outstanding balance. Recording here will create a credit or overpayment.</p>
+                                <label style="display:flex;align-items:center;gap:0.5rem;font-size:0.85rem;cursor:pointer;">
+                                    <input type="checkbox" id="pa-override-cb"> Allow payment anyway (adjustment / credit)
+                                </label>
                             </div>
                         <?php endif; ?>
-                        <div class="calc-row total">
-                            <span>Total:</span>
-                            <span id="total-display"><?php echo $currency_symbol; ?>0.00</span>
+                    </div>
+
+                    <!-- Step 2: Payment method visual picker -->
+                    <div class="payment-panel" id="pa-method-panel">
+                        <div class="payment-panel__header payment-panel__header--compact">
+                            <div>
+                                <span class="payment-panel__kicker">Step 2</span>
+                                <h2 class="payment-panel__title"><i class="fas fa-wallet"></i> Payment Method</h2>
+                            </div>
+                        </div>
+
+                        <?php
+                        $currentMethod = $payment['payment_method'] ?? '';
+                        $methods = [
+                            ['value' => 'cash',          'label' => 'Cash',          'icon' => 'fa-money-bill-wave'],
+                            ['value' => 'bank_transfer',  'label' => 'Bank Transfer', 'icon' => 'fa-university'],
+                            ['value' => 'credit_card',   'label' => 'Credit Card',   'icon' => 'fa-credit-card'],
+                            ['value' => 'debit_card',    'label' => 'Debit Card',    'icon' => 'fa-credit-card'],
+                            ['value' => 'mobile_money',  'label' => 'Mobile Money',  'icon' => 'fa-mobile-alt'],
+                            ['value' => 'cheque',        'label' => 'Cheque',        'icon' => 'fa-file-invoice'],
+                            ['value' => 'other',         'label' => 'Other',         'icon' => 'fa-ellipsis-h'],
+                        ];
+                        ?>
+                        <div class="payment-method-grid" id="pa-method-grid">
+                            <?php foreach ($methods as $m): ?>
+                                <button type="button"
+                                    class="payment-method-card <?php echo $currentMethod === $m['value'] ? 'is-active' : ''; ?>"
+                                    data-method="<?php echo $m['value']; ?>"
+                                    data-tooltip="<?php echo $m['label']; ?>">
+                                    <i class="fas <?php echo $m['icon']; ?>"></i>
+                                    <strong><?php echo $m['label']; ?></strong>
+                                </button>
+                            <?php endforeach; ?>
+                        </div>
+                        <input type="hidden" name="payment_method" id="pa-method-hidden" value="<?php echo htmlspecialchars($currentMethod); ?>" required>
+                        <p id="pa-method-err" class="pa-field-err" style="display:none; color:var(--finance-danger); font-size:0.82rem; margin-top:0.25rem;">Please choose a payment method.</p>
+
+                        <div class="payment-form-row" style="margin-top:1rem;">
+                            <div>
+                                <label class="pa-label" for="pa-txn-ref">
+                                    Transaction Reference
+                                    <button type="button" class="wm-help" data-tooltip="Bank reference number, cheque number, mobile money transaction ID, etc." aria-label="Help">?</button>
+                                </label>
+                                <input type="text" id="pa-txn-ref" name="transaction_reference"
+                                    value="<?php echo htmlspecialchars($paymentTransactionValue); ?>"
+                                    placeholder="e.g. TXN-2024-00123, CHQ-0047…"
+                                    class="pa-input">
+                            </div>
                         </div>
                     </div>
-                </div>
 
-                <!-- Form Actions -->
-                <div class="form-actions">
-                    <a href="payments.php" class="btn btn-secondary">Cancel</a>
-                    <button type="submit" class="btn btn-primary">
-                        <i class="fas fa-save"></i> <?php echo $editId ? 'Update Payment' : 'Record Payment'; ?>
-                    </button>
-                </div>
-            </form>
-        </div>
-    </div>
-
-    <script>
-        const paymentAmount = document.getElementById('payment_amount');
-        const subtotalDisplay = document.getElementById('subtotal-display');
-        const vatDisplay = document.getElementById('vat-display');
-        const totalDisplay = document.getElementById('total-display');
-        const vatRate = <?php echo $vatRate; ?>;
-        const currencySymbol = '<?php echo $currency_symbol; ?>';
-        const vatEnabled = <?php echo $vatEnabled ? 'true' : 'false'; ?>;
-
-        function updateCalculation() {
-            const amount = parseFloat(paymentAmount.value) || 0;
-            const vatAmount = vatEnabled ? amount * (vatRate / 100) : 0;
-            const total = amount + vatAmount;
-
-            subtotalDisplay.textContent = currencySymbol + Number(amount).toLocaleString('en-US', {
-                minimumFractionDigits: 2,
-                maximumFractionDigits: 2
-            });
-            if (vatEnabled) {
-                vatDisplay.textContent = currencySymbol + Number(vatAmount).toLocaleString('en-US', {
-                    minimumFractionDigits: 2,
-                    maximumFractionDigits: 2
-                });
-            }
-            totalDisplay.textContent = currencySymbol + Number(total).toLocaleString('en-US', {
-                minimumFractionDigits: 2,
-                maximumFractionDigits: 2
-            });
-        }
-
-        paymentAmount.addEventListener('input', updateCalculation);
-
-        // Initial calculation
-        if (paymentAmount.value) {
-            updateCalculation();
-        }
-
-        // Booking Search Functionality
-        const bookingTypeSelect = document.getElementById('booking_type');
-        const bookingIdInput = document.getElementById('booking_id');
-        const searchBtn = document.getElementById('search_booking_btn');
-        const searchResults = document.getElementById('booking_search_results');
-        let searchTimeout = null;
-
-        function searchBookings() {
-            const bookingType = bookingTypeSelect.value;
-            const searchTerm = bookingIdInput.value.trim();
-
-            if (!bookingType) {
-                searchResults.innerHTML = '<div class="booking-search-no-results">Please select a booking type first</div>';
-                searchResults.style.display = 'block';
-                return;
-            }
-
-            if (searchTerm.length < 1) {
-                // Show recent bookings when search is empty
-                loadRecentBookings(bookingType);
-                return;
-            }
-
-            searchResults.innerHTML = '<div class="booking-search-loading"><i class="fas fa-spinner fa-spin"></i> Searching...</div>';
-            searchResults.style.display = 'block';
-
-            // Clear previous timeout
-            if (searchTimeout) {
-                clearTimeout(searchTimeout);
-            }
-
-            // Debounce search
-            searchTimeout = setTimeout(() => {
-                fetch(`api/search-bookings.php?type=${bookingType}&q=${encodeURIComponent(searchTerm)}`)
-                    .then(response => response.json())
-                    .then(data => {
-                        displaySearchResults(data);
-                    })
-                    .catch(error => {
-                        console.error('Search error:', error);
-                        searchResults.innerHTML = '<div class="booking-search-no-results">Error searching bookings</div>';
-                    });
-            }, 300);
-        }
-
-        function loadRecentBookings(bookingType) {
-            searchResults.innerHTML = '<div class="booking-search-loading"><i class="fas fa-spinner fa-spin"></i> Loading recent bookings...</div>';
-            searchResults.style.display = 'block';
-
-            fetch(`api/search-bookings.php?type=${bookingType}&recent=1`)
-                .then(response => response.json())
-                .then(data => {
-                    displaySearchResults(data, true);
-                })
-                .catch(error => {
-                    console.error('Load recent error:', error);
-                    searchResults.innerHTML = '<div class="booking-search-no-results">Error loading recent bookings</div>';
-                });
-        }
-
-        function displaySearchResults(data, isRecent = false) {
-            if (!data.bookings || data.bookings.length === 0) {
-                searchResults.innerHTML = '<div class="booking-search-no-results">' + (isRecent ? 'No recent bookings found' : 'No bookings found matching your search') + '</div>';
-                return;
-            }
-
-            let html = '';
-            data.bookings.forEach(booking => {
-                if (bookingTypeSelect.value === 'room') {
-                    html += `
-                        <div class="booking-search-item" data-id="${booking.id}">
-                            <strong>${booking.booking_reference} - ${booking.guest_name}</strong>
-                            <small>ID: ${booking.id} | Room: ${booking.room_name || 'N/A'} | ${booking.check_in_date} to ${booking.check_out_date}</small>
-                            <small style="color: ${booking.amount_due > 0 ? '#dc3545' : '#28a745'};">Due: ${currencySymbol}${booking.amount_due.toLocaleString()}</small>
+                    <!-- Step 3: Amount & details -->
+                    <div class="payment-panel" id="pa-amount-panel">
+                        <div class="payment-panel__header payment-panel__header--compact">
+                            <div>
+                                <span class="payment-panel__kicker">Step 3</span>
+                                <h2 class="payment-panel__title"><i class="fas fa-coins"></i> Amount & Details</h2>
+                            </div>
                         </div>
-                    `;
-                } else {
-                    html += `
-                        <div class="booking-search-item" data-id="${booking.id}">
-                            <strong>${booking.enquiry_reference} - ${booking.organization_name || booking.contact_name}</strong>
-                            <small>ID: ${booking.id} | Event: ${booking.start_date} to ${booking.end_date}</small>
-                            <small style="color: ${booking.amount_due > 0 ? '#dc3545' : '#28a745'};">Due: ${currencySymbol}${booking.amount_due.toLocaleString()}</small>
-                        </div>
-                    `;
-                }
-            });
 
-            searchResults.innerHTML = html;
-
-            // Add click handlers
-            searchResults.querySelectorAll('.booking-search-item').forEach(item => {
-                item.addEventListener('click', function() {
-                    const bookingId = this.dataset.id;
-                    bookingIdInput.value = bookingId;
-                    searchResults.style.display = 'none';
-
-                    // Auto-populate booking details
-                    fetchBookingDetails(bookingTypeSelect.value, bookingId);
-                });
-            });
-        }
-
-        // Fetch and populate booking details
-        function fetchBookingDetails(bookingType, bookingId) {
-            if (!bookingType || !bookingId) return;
-
-            const dynamicInfo = document.getElementById('dynamic_booking_info');
-            const infoContent = document.getElementById('booking_info_content');
-            const infoTitle = document.getElementById('booking_info_title');
-            const paymentAmountInput = document.getElementById('payment_amount');
-            const paymentDateInput = document.querySelector('input[name="payment_date"]');
-            const paymentMethodSelect = document.querySelector('select[name="payment_method"]');
-            const paymentStatusSelect = document.querySelector('select[name="payment_status"]');
-
-            // Show loading state
-            dynamicInfo.style.display = 'block';
-            infoTitle.textContent = 'Loading...';
-            infoContent.innerHTML = '<div style="text-align: center; padding: 20px;"><i class="fas fa-spinner fa-spin"></i> Loading booking details...</div>';
-
-            // Fetch booking details from API
-            fetch(`api/search-bookings.php?type=${bookingType}&q=${bookingId}`)
-                .then(response => response.json())
-                .then(data => {
-                    if (!data.bookings || data.bookings.length === 0) {
-                        infoTitle.textContent = 'Error';
-                        infoContent.innerHTML = '<p style="color: #dc3545;">Booking not found. Please try again.</p>';
-                        return;
-                    }
-
-                    const booking = data.bookings[0];
-                    const isFullyPaid = booking.amount_due <= 0;
-
-                    // Update booking info styling based on payment status
-                    if (isFullyPaid) {
-                        dynamicInfo.classList.add('fully-paid');
-                    } else {
-                        dynamicInfo.classList.remove('fully-paid');
-                    }
-
-                    if (bookingType === 'room') {
-                        infoTitle.innerHTML = 'Room Booking Details' + (isFullyPaid ? ' <span class="fully-paid-badge">FULLY PAID</span>' : '');
-                        infoContent.innerHTML = `
-                            <p><strong>Reference:</strong> ${booking.booking_reference}</p>
-                            <p><strong>Guest:</strong> ${booking.guest_name}</p>
-                            <p><strong>Email:</strong> ${booking.guest_email || 'N/A'}</p>
-                            <p><strong>Room:</strong> ${booking.room_name || 'N/A'}</p>
-                            <p><strong>Dates:</strong> ${booking.check_in_date} - ${booking.check_out_date}</p>
-                            <p><strong>Total Amount:</strong> ${currencySymbol}${booking.total_amount.toLocaleString()}</p>
-                            <p><strong>Amount Paid:</strong> ${currencySymbol}${booking.amount_paid.toLocaleString()}</p>
-                            <p><strong>Amount Due:</strong> <span style="color: ${booking.amount_due > 0 ? '#dc3545' : '#28a745'}; font-weight: 600;">${currencySymbol}${booking.amount_due.toLocaleString()}</span></p>
-                            <p><strong>Guest Split:</strong> ${booking.adult_guests || Math.max(1, (booking.number_of_guests || 1) - (booking.child_guests || 0))} adult${(booking.adult_guests || Math.max(1, (booking.number_of_guests || 1) - (booking.child_guests || 0))) === 1 ? '' : 's'}${(booking.child_guests || 0) > 0 ? ` + ${booking.child_guests} child${booking.child_guests === 1 ? '' : 'ren'}` : ''}</p>
-                            ${(booking.child_supplement_total || 0) > 0 ? `<p><strong>Child Supplement:</strong> ${currencySymbol}${Number(booking.child_supplement_total).toLocaleString()}</p>` : ''}
-                            ${isFullyPaid ? '<div class="warning-box" style="margin-top: 12px;"><h5><i class="fas fa-exclamation-triangle"></i> Fully Paid Booking</h5><p>This booking has been fully paid. Adding additional payments will create a credit balance.</p></div>' : ''}
-                        `;
-                    } else {
-                        infoTitle.innerHTML = 'Conference Booking Details' + (isFullyPaid ? ' <span class="fully-paid-badge">FULLY PAID</span>' : '');
-                        infoContent.innerHTML = `
-                            <p><strong>Reference:</strong> ${booking.enquiry_reference}</p>
-                            <p><strong>Organization:</strong> ${booking.organization_name || 'N/A'}</p>
-                            <p><strong>Contact:</strong> ${booking.contact_name}</p>
-                            <p><strong>Email:</strong> ${booking.contact_email || 'N/A'}</p>
-                            <p><strong>Dates:</strong> ${booking.start_date} - ${booking.end_date}</p>
-                            <p><strong>Total Amount:</strong> ${currencySymbol}${booking.total_amount.toLocaleString()}</p>
-                            <p><strong>Amount Paid:</strong> ${currencySymbol}${booking.amount_paid.toLocaleString()}</p>
-                            <p><strong>Amount Due:</strong> <span style="color: ${booking.amount_due > 0 ? '#dc3545' : '#28a745'}; font-weight: 600;">${currencySymbol}${booking.amount_due.toLocaleString()}</span></p>
-                            ${isFullyPaid ? '<div class="warning-box" style="margin-top: 12px;"><h5><i class="fas fa-exclamation-triangle"></i> Fully Paid Booking</h5><p>This booking has been fully paid. Adding additional payments will create a credit balance.</p></div>' : ''}
-                        `;
-                    }
-
-                    // Handle fully paid bookings
-                    if (isFullyPaid) {
-                        // Disable payment amount field
-                        paymentAmountInput.disabled = true;
-                        paymentAmountInput.value = '';
-                        updateCalculation();
-
-                        // Add warning and override checkbox
-                        const paymentSection = document.querySelector('.form-section:nth-child(2)');
-                        let warningBox = paymentSection.querySelector('.fully-paid-warning');
-
-                        if (!warningBox) {
-                            warningBox = document.createElement('div');
-                            warningBox.className = 'warning-box fully-paid-warning';
-                            warningBox.innerHTML = `
-                                <h5><i class="fas fa-exclamation-triangle"></i> Warning: Fully Paid Booking</h5>
-                                <p>This booking has been fully paid. The payment amount field has been disabled to prevent accidental overpayment.</p>
-                                <div class="checkbox-wrapper">
-                                    <input type="checkbox" id="allow_manual_payment" name="allow_manual_payment">
-                                    <label for="allow_manual_payment">Allow manual payment entry (for refunds, adjustments, or credit)</label>
+                        <div class="payment-form-row">
+                            <div>
+                                <label class="pa-label" for="pa-amount">
+                                    Payment Amount <span class="pa-required">*</span>
+                                    <button type="button" class="wm-help" data-tooltip="Enter the amount received <?php echo $vatEnabled ? 'before VAT' : ''; ?>. Leave blank if the booking is fully paid and you are recording an adjustment." aria-label="Help">?</button>
+                                </label>
+                                <div class="pa-amount-wrap">
+                                    <span class="pa-currency"><?php echo htmlspecialchars($currency_symbol); ?></span>
+                                    <input type="number" id="pa-amount" name="payment_amount"
+                                        step="0.01" min="0"
+                                        value="<?php echo htmlspecialchars($payment['payment_amount'] ?? ''); ?>"
+                                        class="pa-input pa-input--amount"
+                                        placeholder="0.00"
+                                        required>
                                 </div>
-                            `;
-                            paymentSection.insertBefore(warningBox, paymentSection.querySelector('.form-row'));
+                            </div>
+                            <div>
+                                <label class="pa-label" for="pa-date">
+                                    Payment Date <span class="pa-required">*</span>
+                                </label>
+                                <input type="date" id="pa-date" name="payment_date"
+                                    value="<?php echo htmlspecialchars($payment['payment_date'] ?? date('Y-m-d')); ?>"
+                                    class="pa-input"
+                                    required>
+                            </div>
+                        </div>
 
-                            // Add event listener for override checkbox
-                            document.getElementById('allow_manual_payment').addEventListener('change', function() {
-                                paymentAmountInput.disabled = !this.checked;
-                                if (!this.checked) {
-                                    paymentAmountInput.value = '';
-                                    updateCalculation();
-                                }
-                            });
-                        }
-                    } else {
-                        // Re-enable payment amount field
-                        paymentAmountInput.disabled = false;
+                        <div class="payment-form-row" style="margin-top:1rem;">
+                            <div>
+                                <label class="pa-label" for="pa-status">
+                                    Payment Status <span class="pa-required">*</span>
+                                    <button type="button" class="wm-help" data-tooltip="'Completed' or 'Paid' triggers a receipt email to the guest and updates the booking balance immediately." aria-label="Help">?</button>
+                                </label>
+                                <select id="pa-status" name="payment_status" class="pa-input" required>
+                                    <?php
+                                    $statuses = [
+                                        'pending'   => 'Pending',
+                                        'partial'   => 'Partial',
+                                        'paid'      => 'Paid',
+                                        'completed' => 'Completed',
+                                        'refunded'  => 'Refunded',
+                                        'cancelled' => 'Cancelled',
+                                    ];
+                                    $currentStatus = $payment['payment_status'] ?? 'completed';
+                                    foreach ($statuses as $val => $lbl):
+                                    ?>
+                                        <option value="<?php echo $val; ?>" <?php echo $currentStatus === $val ? 'selected' : ''; ?>>
+                                            <?php echo $lbl; ?>
+                                        </option>
+                                    <?php endforeach; ?>
+                                </select>
+                            </div>
+                        </div>
 
-                        // Remove warning box if exists
-                        const warningBox = document.querySelector('.fully-paid-warning');
-                        if (warningBox) {
-                            warningBox.remove();
-                        }
+                        <div style="margin-top:1rem;">
+                            <label class="pa-label" for="pa-cc">
+                                Additional CC Emails
+                                <button type="button" class="wm-help" data-tooltip="Comma-separated addresses that will receive a copy of the receipt email in addition to default finance recipients." aria-label="Help">?</button>
+                            </label>
+                            <input type="text" id="pa-cc" name="cc_emails"
+                                value="<?php echo htmlspecialchars($payment['cc_emails'] ?? ''); ?>"
+                                placeholder="extra@example.com, manager@hotel.com"
+                                class="pa-input">
+                        </div>
 
-                        // Auto-fill payment amount with outstanding amount
-                        paymentAmountInput.value = booking.amount_due;
-                        updateCalculation();
-                    }
+                        <div style="margin-top:1rem;">
+                            <label class="pa-label" for="pa-notes">Notes</label>
+                            <textarea id="pa-notes" name="notes" class="pa-input pa-textarea"
+                                placeholder="Any additional notes about this payment…"><?php echo htmlspecialchars($payment['notes'] ?? ''); ?></textarea>
+                        </div>
+                    </div>
 
-                    // Auto-fill payment date with today's date
-                    if (!paymentDateInput.value) {
-                        paymentDateInput.value = new Date().toISOString().split('T')[0];
-                    }
+                    <!-- Actions bar -->
+                    <div class="payment-actions-bar" id="pa-actions-bar">
+                        <a href="payments.php" class="tbl-btn tbl-btn--view">Cancel</a>
+                        <button type="submit" class="tbl-btn tbl-btn--confirm" id="pa-submit-btn">
+                            <i class="fas fa-save"></i>
+                            <?php echo $editId ? 'Update Payment' : 'Record Payment'; ?>
+                        </button>
+                    </div>
 
-                    // Auto-fill payment status based on booking payment status
-                    // Default to 'completed' for new payments
-                    if (!paymentStatusSelect.value || paymentStatusSelect.value === 'pending') {
-                        paymentStatusSelect.value = 'completed';
-                    }
+                </div><!-- /.payment-console__main -->
 
-                    // Auto-fill payment method with default or last used
-                    // Try to get last used payment method from localStorage
-                    const lastPaymentMethod = localStorage.getItem('lastPaymentMethod');
-                    if (lastPaymentMethod && paymentMethodSelect.value === '') {
-                        paymentMethodSelect.value = lastPaymentMethod;
-                    } else if (paymentMethodSelect.value === '') {
-                        // Set default to 'cash' if no previous method
-                        paymentMethodSelect.value = 'cash';
-                    }
-                })
-                .catch(error => {
-                    console.error('Error fetching booking details:', error);
-                    infoTitle.textContent = 'Error';
-                    infoContent.innerHTML = '<p style="color: #dc3545;">Failed to load booking details. Please try again.</p>';
+                <!-- ── SIDE column: live summary ─────────────────────── -->
+                <div class="payment-console__side">
+
+                    <div class="payment-summary-card payment-summary-card--sticky" id="pa-summary-card">
+                        <div class="payment-panel__kicker">Live Summary</div>
+                        <h2 class="payment-summary-card__title" style="margin-top:0.25rem; font-size:1.15rem;">
+                            Payment Preview
+                        </h2>
+
+                        <!-- Amount breakdown -->
+                        <div class="payment-total-preview" id="pa-preview">
+                            <div class="payment-total-preview__row">
+                                <span>Subtotal</span>
+                                <strong id="prev-subtotal"><?php echo $currency_symbol; ?>0.00</strong>
+                            </div>
+                            <?php if ($vatEnabled): ?>
+                                <div class="payment-total-preview__row">
+                                    <span>VAT (<?php echo $vatRate; ?>%)</span>
+                                    <strong id="prev-vat"><?php echo $currency_symbol; ?>0.00</strong>
+                                </div>
+                            <?php endif; ?>
+                            <div class="payment-total-preview__row payment-total-preview__row--total">
+                                <span>Total to record</span>
+                                <strong id="prev-total"><?php echo $currency_symbol; ?>0.00</strong>
+                            </div>
+                        </div>
+
+                        <!-- Outstanding meter (shows when booking linked) -->
+                        <div class="payment-summary-card__meter" id="pa-meter" style="display:none;">
+                            <span>Outstanding after this payment</span>
+                            <strong id="pa-meter-val">—</strong>
+                            <div id="pa-meter-bar-wrap" style="margin-top:0.5rem; height:6px; border-radius:4px; background:var(--finance-border); overflow:hidden;">
+                                <div id="pa-meter-bar" style="height:100%; border-radius:4px; background:var(--finance-success); width:0%; transition:width 0.4s;"></div>
+                            </div>
+                        </div>
+
+                        <!-- Method recap -->
+                        <div style="margin-top:1rem; padding:0.75rem; background:var(--finance-bg); border:1px solid var(--finance-border); border-radius:8px; font-size:0.85rem;">
+                            <div style="color:var(--finance-muted); font-size:0.72rem; font-weight:700; letter-spacing:0.06em; text-transform:uppercase; margin-bottom:0.35rem;">Method</div>
+                            <span id="prev-method" style="color:var(--finance-text); font-weight:600;">—</span>
+                        </div>
+
+                        <!-- Status recap -->
+                        <div style="margin-top:0.65rem; padding:0.75rem; background:var(--finance-bg); border:1px solid var(--finance-border); border-radius:8px; font-size:0.85rem;">
+                            <div style="color:var(--finance-muted); font-size:0.72rem; font-weight:700; letter-spacing:0.06em; text-transform:uppercase; margin-bottom:0.35rem;">Status</div>
+                            <span id="prev-status" style="color:var(--finance-text); font-weight:600;">—</span>
+                        </div>
+
+                        <!-- Email notice -->
+                        <div id="pa-email-notice" style="display:none; margin-top:0.65rem; padding:0.75rem; background:var(--finance-info-bg); border:1px solid var(--finance-info-border); border-radius:8px; font-size:0.82rem; color:var(--finance-info);">
+                            <i class="fas fa-envelope"></i> A receipt email will be sent to the guest on save.
+                        </div>
+                    </div>
+
+                </div><!-- /.payment-console__side -->
+
+            </div><!-- /.payment-console -->
+        </form>
+    </div><!-- /.admin-container -->
+
+    <script src="js/admin-walkme.js" data-no-spa></script>
+    <script>
+    (function () {
+        'use strict';
+
+        /* ── PHP data ─────────────────────────────────────────── */
+        const VAT_RATE      = <?php echo (float)$vatRate; ?>;
+        const VAT_ENABLED   = <?php echo $vatEnabled ? 'true' : 'false'; ?>;
+        const CURRENCY      = <?php echo json_encode($currency_symbol); ?>;
+        const IS_EDIT       = <?php echo $editId ? 'true' : 'false'; ?>;
+        const PRE_BOOKING   = <?php echo $bookingDetails ? 'true' : 'false'; ?>;
+        const PRE_DUE       = <?php echo (float)$outstandingAmount; ?>;
+
+        /* ── Element refs ─────────────────────────────────────── */
+        const amountInput   = document.getElementById('pa-amount');
+        const statusSel     = document.getElementById('pa-status');
+        const methodHidden  = document.getElementById('pa-method-hidden');
+        const hdType        = document.getElementById('hd-booking-type');
+        const hdId          = document.getElementById('hd-booking-id');
+
+        /* ── Helpers ──────────────────────────────────────────── */
+        function fmt(n) {
+            return CURRENCY + Number(n || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+        }
+        function el(id) { return document.getElementById(id); }
+
+        /* ── Live calculation preview ─────────────────────────── */
+        function updatePreview() {
+            const amount = parseFloat(amountInput.value) || 0;
+            const vat    = VAT_ENABLED ? amount * (VAT_RATE / 100) : 0;
+            const total  = amount + vat;
+
+            el('prev-subtotal').textContent = fmt(amount);
+            if (VAT_ENABLED && el('prev-vat')) el('prev-vat').textContent = fmt(vat);
+            el('prev-total').textContent    = fmt(total);
+
+            // Outstanding meter
+            const dueEl = el('pa-meter');
+            if (dueEl && _linkedDue !== null) {
+                dueEl.style.display = '';
+                const remaining = Math.max(0, _linkedDue - total);
+                el('pa-meter-val').textContent = remaining <= 0
+                    ? '✓ Fully covered'
+                    : fmt(remaining) + ' remaining';
+                el('pa-meter-val').style.color = remaining <= 0
+                    ? 'var(--finance-success)'
+                    : 'var(--finance-danger)';
+                const pct = _linkedDue > 0 ? Math.min(100, (total / _linkedDue) * 100) : 100;
+                el('pa-meter-bar').style.width = pct + '%';
+                el('pa-meter-bar').style.background = remaining <= 0
+                    ? 'var(--finance-success)'
+                    : 'var(--finance-accent)';
+            }
+
+            // Email notice
+            const emailNotice = el('pa-email-notice');
+            if (emailNotice) {
+                const triggerStatus = ['completed', 'paid'];
+                emailNotice.style.display = triggerStatus.includes(statusSel.value) ? '' : 'none';
+            }
+        }
+
+        /* ── Method card picker ───────────────────────────────── */
+        const methodLabels = {
+            cash: 'Cash', bank_transfer: 'Bank Transfer', credit_card: 'Credit Card',
+            debit_card: 'Debit Card', mobile_money: 'Mobile Money', cheque: 'Cheque', other: 'Other'
+        };
+
+        document.querySelectorAll('#pa-method-grid .payment-method-card').forEach(function (btn) {
+            btn.addEventListener('click', function () {
+                document.querySelectorAll('#pa-method-grid .payment-method-card').forEach(function (b) {
+                    b.classList.remove('is-active');
+                });
+                btn.classList.add('is-active');
+                const val = btn.dataset.method;
+                methodHidden.value = val;
+                localStorage.setItem('lastPaymentMethod', val);
+                el('prev-method').textContent = methodLabels[val] || val;
+                el('pa-method-err').style.display = 'none';
+            });
+        });
+
+        // Restore last method on fresh form
+        if (!IS_EDIT && !methodHidden.value) {
+            const last = localStorage.getItem('lastPaymentMethod');
+            if (last) {
+                const btn = document.querySelector('#pa-method-grid [data-method="' + last + '"]');
+                if (btn) btn.click();
+            }
+        } else if (methodHidden.value) {
+            el('prev-method').textContent = methodLabels[methodHidden.value] || methodHidden.value;
+        }
+
+        /* ── Booking type toggle ──────────────────────────────── */
+        let _activeType = hdType.value || 'room';
+        let _linkedDue  = PRE_BOOKING ? PRE_DUE : null;
+
+        function setActiveType(type) {
+            _activeType = type;
+            hdType.value = type;
+            document.querySelectorAll('.pa-type-btn').forEach(function (b) {
+                b.classList.toggle('is-active', b.dataset.type === type);
+            });
+            // Clear any existing selection when switching type
+            _clearSelection();
+        }
+
+        document.querySelectorAll('.pa-type-btn').forEach(function (btn) {
+            btn.addEventListener('click', function () { setActiveType(btn.dataset.type); });
+        });
+
+        /* ── Booking search ───────────────────────────────────── */
+        let _searchTimer = null;
+        const searchInput   = el('pa-search-input');
+        const searchResults = el('pa-search-results');
+        const selectedCard  = el('pa-selected-card');
+        const pickerEl      = el('pa-picker');
+
+        if (searchInput) {
+            searchInput.addEventListener('input', function () {
+                const q = searchInput.value.trim();
+                clearTimeout(_searchTimer);
+                if (q.length < 2) {
+                    if (searchResults) { searchResults.innerHTML = ''; searchResults.hidden = true; }
+                    return;
+                }
+                _searchTimer = setTimeout(function () { _doSearch(q); }, 280);
+            });
+
+            searchInput.addEventListener('focus', function () {
+                const q = searchInput.value.trim();
+                if (q.length >= 2) _doSearch(q);
+                else _loadRecent();
+            });
+        }
+
+        document.addEventListener('click', function (e) {
+            if (searchResults && !e.target.closest('#pa-search-wrap')) {
+                searchResults.hidden = true;
+            }
+        });
+
+        function _doSearch(q) {
+            if (!searchResults) return;
+            searchResults.innerHTML = '<div class="booking-search-loading"><i class="fas fa-spinner fa-spin"></i> Searching…</div>';
+            searchResults.hidden = false;
+            fetch('api/search-bookings.php?type=' + encodeURIComponent(_activeType) + '&q=' + encodeURIComponent(q))
+                .then(function (r) { return r.json(); })
+                .then(function (data) { _renderResults(data); })
+                .catch(function () {
+                    searchResults.innerHTML = '<div class="booking-search-no-results">Search error — please try again.</div>';
                 });
         }
 
-        // Clear booking selection
-        const clearBookingBtn = document.getElementById('clear_booking_btn');
-        if (clearBookingBtn) {
-            clearBookingBtn.addEventListener('click', function() {
-                const dynamicInfo = document.getElementById('dynamic_booking_info');
-                const paymentAmountInput = document.getElementById('payment_amount');
-
-                // Hide booking info
-                dynamicInfo.style.display = 'none';
-                dynamicInfo.classList.remove('fully-paid');
-
-                // Clear booking ID
-                bookingIdInput.value = '';
-
-                // Re-enable and clear payment amount
-                paymentAmountInput.disabled = false;
-                paymentAmountInput.value = '';
-                updateCalculation();
-
-                // Remove warning box if exists
-                const warningBox = document.querySelector('.fully-paid-warning');
-                if (warningBox) {
-                    warningBox.remove();
-                }
-            });
+        function _loadRecent() {
+            if (!searchResults) return;
+            searchResults.innerHTML = '<div class="booking-search-loading"><i class="fas fa-spinner fa-spin"></i> Loading recent…</div>';
+            searchResults.hidden = false;
+            fetch('api/search-bookings.php?type=' + encodeURIComponent(_activeType) + '&recent=1')
+                .then(function (r) { return r.json(); })
+                .then(function (data) { _renderResults(data, true); })
+                .catch(function () {
+                    searchResults.innerHTML = '<div class="booking-search-no-results">Could not load recent bookings.</div>';
+                });
         }
 
-        // Save payment method to localStorage when changed
-        const paymentMethodSelect = document.querySelector('select[name="payment_method"]');
-        if (paymentMethodSelect) {
-            paymentMethodSelect.addEventListener('change', function() {
-                if (this.value) {
-                    localStorage.setItem('lastPaymentMethod', this.value);
-                }
-            });
-        }
-
-        // Event listeners
-        searchBtn.addEventListener('click', searchBookings);
-
-        bookingIdInput.addEventListener('focus', function() {
-            if (bookingTypeSelect.value) {
-                loadRecentBookings(bookingTypeSelect.value);
+        function _renderResults(data, isRecent) {
+            if (!searchResults) return;
+            const bookings = (data && data.bookings) ? data.bookings : [];
+            if (bookings.length === 0) {
+                searchResults.innerHTML = '<div class="booking-search-no-results">' +
+                    (isRecent ? 'No recent bookings.' : 'No bookings found.') + '</div>';
+                return;
             }
-        });
+            let html = '';
+            bookings.forEach(function (b) {
+                const isDue = b.amount_due > 0;
+                const dueCls = isDue ? 'is-due' : 'is-settled';
+                const dueLabel = isDue ? fmt(b.amount_due) + ' due' : '✓ Settled';
+                let ref, name, sub;
+                if (_activeType === 'room') {
+                    ref  = b.booking_reference || '';
+                    name = b.guest_name || '';
+                    sub  = (b.room_name || '') + ' &bull; ' + (b.check_in_date || '') + ' → ' + (b.check_out_date || '');
+                } else {
+                    ref  = b.enquiry_reference || '';
+                    name = b.organization_name || b.contact_name || '';
+                    sub  = (b.start_date || '') + ' → ' + (b.end_date || '');
+                }
+                html += '<button type="button" class="booking-search-item" data-booking=\'' +
+                    JSON.stringify(b).replace(/'/g, '&#39;') + '\'>' +
+                    '<strong>' + _esc(ref) + ' &mdash; ' + _esc(name) + '</strong>' +
+                    '<small>' + sub + '</small>' +
+                    '<small class="' + dueCls + '">' + dueLabel + '</small>' +
+                    '</button>';
+            });
+            searchResults.innerHTML = html;
+            searchResults.querySelectorAll('.booking-search-item').forEach(function (item) {
+                item.addEventListener('click', function () {
+                    const b = JSON.parse(item.dataset.booking);
+                    _selectBooking(b);
+                    searchResults.hidden = true;
+                });
+            });
+        }
 
-        bookingIdInput.addEventListener('input', function() {
-            if (this.value.trim().length > 0) {
-                searchBookings();
+        function _selectBooking(b) {
+            hdId.value    = b.id;
+            hdType.value  = _activeType;
+            _linkedDue    = parseFloat(b.amount_due) || 0;
+
+            // Populate selected card
+            const typeLabel = _activeType === 'room' ? 'Room Booking' : 'Conference Booking';
+            el('psc-type').textContent = typeLabel;
+
+            if (_activeType === 'room') {
+                el('psc-name').textContent = b.guest_name || '';
+                el('psc-ref').textContent  = (b.booking_reference || '') + ' · ' + (b.room_name || '');
+                el('psc-meta').innerHTML   =
+                    _metaItem('Check-in',  b.check_in_date) +
+                    _metaItem('Check-out', b.check_out_date) +
+                    _metaItem('Total',     fmt(b.total_amount)) +
+                    _metaItem('Paid',      fmt(b.amount_paid));
             } else {
-                // Clear booking info when input is cleared
-                const dynamicInfo = document.getElementById('dynamic_booking_info');
-                const paymentAmountInput = document.getElementById('payment_amount');
+                el('psc-name').textContent = b.organization_name || b.contact_name || '';
+                el('psc-ref').textContent  = b.enquiry_reference || '';
+                el('psc-meta').innerHTML   =
+                    _metaItem('Start', b.start_date) +
+                    _metaItem('End',   b.end_date) +
+                    _metaItem('Total', fmt(b.total_amount)) +
+                    _metaItem('Paid',  fmt(b.amount_paid));
+            }
 
-                dynamicInfo.style.display = 'none';
-                dynamicInfo.classList.remove('fully-paid');
-                paymentAmountInput.disabled = false;
-                paymentAmountInput.value = '';
-                updateCalculation();
+            const dueEl = el('psc-due');
+            dueEl.textContent = fmt(_linkedDue);
+            dueEl.style.color = _linkedDue > 0 ? 'var(--finance-danger)' : 'var(--finance-success)';
 
-                // Remove warning box if exists
-                const warningBox = document.querySelector('.fully-paid-warning');
-                if (warningBox) {
-                    warningBox.remove();
+            // Show card, hide picker
+            if (pickerEl)      pickerEl.style.display = 'none';
+            if (selectedCard)  selectedCard.hidden = false;
+
+            // Fully paid warning
+            const fpWarn = el('pa-fullypaid-warn');
+            if (fpWarn) {
+                if (_linkedDue <= 0) {
+                    fpWarn.style.display = '';
+                    amountInput.disabled = true;
+                    amountInput.value    = '';
+                } else {
+                    fpWarn.style.display = 'none';
+                    amountInput.disabled = false;
+                    // Auto-fill outstanding amount
+                    amountInput.value = _linkedDue.toFixed(2);
                 }
+            } else {
+                amountInput.value = _linkedDue > 0 ? _linkedDue.toFixed(2) : '';
             }
+
+            // Auto-set status to completed
+            if (statusSel.value === 'pending') statusSel.value = 'completed';
+
+            // Show the outstanding meter
+            const meter = el('pa-meter');
+            if (meter) meter.style.display = '';
+
+            updatePreview();
+        }
+
+        function _clearSelection() {
+            hdId.value   = '';
+            _linkedDue   = null;
+            if (selectedCard) selectedCard.hidden = true;
+            if (pickerEl)     pickerEl.style.display = '';
+            if (searchInput)  searchInput.value = '';
+            if (searchResults){ searchResults.innerHTML = ''; searchResults.hidden = true; }
+            amountInput.disabled = false;
+            amountInput.value    = '';
+            const fpWarn = el('pa-fullypaid-warn');
+            if (fpWarn) fpWarn.style.display = 'none';
+            const meter = el('pa-meter');
+            if (meter) meter.style.display = 'none';
+            updatePreview();
+        }
+
+        const clearBtn = el('pa-clear-btn');
+        if (clearBtn) clearBtn.addEventListener('click', _clearSelection);
+
+        // Override checkbox for fully paid
+        const overrideCb = el('pa-override-cb');
+        if (overrideCb) {
+            overrideCb.addEventListener('change', function () {
+                amountInput.disabled = !overrideCb.checked;
+                if (!overrideCb.checked) { amountInput.value = ''; updatePreview(); }
+            });
+        }
+
+        /* ── Status change watcher ────────────────────────────── */
+        statusSel.addEventListener('change', function () {
+            el('prev-status').textContent = statusSel.options[statusSel.selectedIndex].text;
+            updatePreview();
+        });
+        el('prev-status').textContent = statusSel.options[statusSel.selectedIndex].text;
+
+        /* ── Amount watcher ───────────────────────────────────── */
+        amountInput.addEventListener('input', updatePreview);
+
+        /* ── Form submission guard ────────────────────────────── */
+        document.getElementById('pa-form').addEventListener('submit', function (e) {
+            let ok = true;
+            if (!methodHidden.value) {
+                el('pa-method-err').style.display = '';
+                el('pa-method-panel').scrollIntoView({ behavior: 'smooth', block: 'center' });
+                ok = false;
+            }
+            if (!ok) e.preventDefault();
         });
 
-        bookingTypeSelect.addEventListener('change', function() {
-            searchResults.style.display = 'none';
-            bookingIdInput.value = '';
+        /* ── Initial render ───────────────────────────────────── */
+        updatePreview();
 
-            const dynamicInfo = document.getElementById('dynamic_booking_info');
-            const paymentAmountInput = document.getElementById('payment_amount');
+        // Populate outstanding meter for pre-linked bookings
+        if (PRE_BOOKING) {
+            const meter = el('pa-meter');
+            if (meter) meter.style.display = '';
+            updatePreview();
+        }
 
-            dynamicInfo.style.display = 'none';
-            dynamicInfo.classList.remove('fully-paid');
-            paymentAmountInput.disabled = false;
-            paymentAmountInput.value = '';
-            updateCalculation();
+        /* ── Helpers ──────────────────────────────────────────── */
+        function _metaItem(label, value) {
+            return '<div><dt>' + label + '</dt><dd>' + _esc(value || '—') + '</dd></div>';
+        }
+        function _esc(s) {
+            return String(s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+        }
 
-            // Remove warning box if exists
-            const warningBox = document.querySelector('.fully-paid-warning');
-            if (warningBox) {
-                warningBox.remove();
+        /* ══════════════════════════════════════════════════════
+           WalkMe tour registration
+           ══════════════════════════════════════════════════════ */
+        if (window.AdminWalkMe && !IS_EDIT) {
+            AdminWalkMe.registerTour('payment-add', [
+                {
+                    target: '#pa-booking-panel',
+                    icon: 'fa-calendar-check',
+                    label: 'Step 1 of 5',
+                    title: 'Link a Booking',
+                    text: 'Choose <strong>Room</strong> or <strong>Conference</strong>, then type the guest name, reference number, or email address to find the booking. Click any result to link it.',
+                },
+                {
+                    target: '#pa-method-panel',
+                    icon: 'fa-wallet',
+                    label: 'Step 2 of 5',
+                    title: 'Pick the Payment Method',
+                    text: 'Click the card that matches how the guest paid — Cash, Card, Bank Transfer, Mobile Money, etc. The last method you used is remembered automatically.',
+                },
+                {
+                    target: '#pa-amount',
+                    icon: 'fa-coins',
+                    label: 'Step 3 of 5',
+                    title: 'Enter the Amount',
+                    text: 'The outstanding balance is pre-filled for you. You can change it for partial payments. <?php echo $vatEnabled ? 'VAT at ' . $vatRate . '% is added automatically.' : ''; ?>',
+                },
+                {
+                    target: '#pa-status',
+                    icon: 'fa-check-circle',
+                    label: 'Step 4 of 5',
+                    title: 'Set the Status',
+                    text: 'Use <strong>Completed</strong> or <strong>Paid</strong> for received payments — this triggers a receipt email and updates the booking balance. Use <strong>Pending</strong> for payments not yet confirmed.',
+                },
+                {
+                    target: '#pa-summary-card',
+                    icon: 'fa-receipt',
+                    label: 'Step 5 of 5',
+                    title: 'Review & Save',
+                    text: 'The live summary on the right shows the total, remaining balance, and whether an email will be sent. When everything looks right, click <strong>Record Payment</strong>.',
+                    placement: 'left',
+                },
+            ]);
+
+            // Add "Take a tour" button into hero actions
+            const tourAnchor = el('pa-tour-anchor');
+            if (tourAnchor) {
+                AdminWalkMe.addStartButton(tourAnchor, 'payment-add', 'Tour this page');
             }
-        });
 
-        // Close search results when clicking outside
-        document.addEventListener('click', function(e) {
-            if (!e.target.closest('.form-group') || !e.target.closest('[style*="position: relative"]')) {
-                searchResults.style.display = 'none';
-            }
-        });
+            // Auto-start for first-time visitors
+            AdminWalkMe.startTour('payment-add');
+        }
+
+        // Wire all remaining tooltips (including the ? help buttons)
+        if (window.AdminWalkMe) AdminWalkMe.wireTooltips(document);
+
+    }());
     </script>
+
     <?php require_once 'includes/admin-footer.php'; ?>

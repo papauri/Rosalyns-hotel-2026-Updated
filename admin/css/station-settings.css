@@ -1,7 +1,6 @@
 /* Station Settings (Hours) page styles */
 .station-hours-page {
-    max-width: 1180px;
-    margin: 0 auto;
+    width: 100%;
 }
 
 .station-hours-head {
@@ -14,7 +13,7 @@
 
 .station-hours-head h1 {
     margin: 0;
-    font-size: 28px;
+    font-size: clamp(20px, 2.5vw, 28px);
     color: #212529;
 }
 
@@ -156,6 +155,12 @@
 
 .btn-station-save:hover {
     background: var(--color-primary-dark, #6f5c44);
+}
+
+@media (max-width: 768px) {
+    .station-hours-grid {
+        grid-template-columns: 1fr;
+    }
 }
 
 @media (max-width: 640px) {

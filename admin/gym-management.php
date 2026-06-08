@@ -170,8 +170,6 @@ if ($gym_css_version === '' || $gym_css_version === '0') {
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,300;0,400;0,500;0,600;1,300;1,400;1,500&family=Jost:wght@300;400;500;600&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.7.2/css/all.min.css">
-    <link rel="stylesheet" href="../css/main.css">
     <link rel="stylesheet" href="css/admin-styles.css">
     <link rel="stylesheet" href="css/admin-components.css">
     <link rel="stylesheet" href="css/gym-management.css?v=<?php echo urlencode($gym_css_version); ?>">
@@ -415,11 +413,11 @@ if ($gym_css_version === '' || $gym_css_version === '0') {
                     <div class="form-row" style="margin-bottom:14px;">
                         <div class="form-group">
                             <label class="form-label">Price *</label>
-                            <input type="number" name="price" class="form-control" min="0" step="0.01" required placeholder="0.00">
+                            <input type="number" name="price" class="form-control" min="0" step="0.01" required placeholder="0.00" data-currency="MWK" data-gym-price-input>
                         </div>
                         <div class="form-group">
                             <label class="form-label">Currency Code</label>
-                            <input type="text" name="currency_code" class="form-control" value="MWK" maxlength="10">
+                            <input type="text" name="currency_code" class="form-control" value="MWK" maxlength="10" data-gym-currency-input>
                         </div>
                     </div>
                     <div class="form-row" style="margin-bottom:14px;">
@@ -490,11 +488,11 @@ if ($gym_css_version === '' || $gym_css_version === '0') {
                     <div class="form-row" style="margin-bottom:14px;">
                         <div class="form-group">
                             <label class="form-label">Price *</label>
-                            <input type="number" name="price" id="editGymPrice" class="form-control" min="0" step="0.01" required>
+                            <input type="number" name="price" id="editGymPrice" class="form-control" min="0" step="0.01" required data-currency="MWK" data-gym-price-input>
                         </div>
                         <div class="form-group">
                             <label class="form-label">Currency Code</label>
-                            <input type="text" name="currency_code" id="editGymCurrency" class="form-control" maxlength="10">
+                            <input type="text" name="currency_code" id="editGymCurrency" class="form-control" maxlength="10" data-gym-currency-input>
                         </div>
                     </div>
                     <div class="form-row" style="margin-bottom:14px;">

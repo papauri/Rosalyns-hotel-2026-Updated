@@ -189,287 +189,16 @@ try {
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,300;0,400;0,600;1,400&family=Jost:wght@300;400;500;600&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.7.2/css/all.min.css">
-    <link rel="stylesheet" href="../css/main.css">
     <link rel="stylesheet" href="css/admin-styles.css">
     <link rel="stylesheet" href="css/admin-responsive-enhancements.css">
     <link rel="stylesheet" href="css/admin-components.css">
-    <style>
-        .qt-page {
-            padding: 24px;
-        }
-
-        .qt-header {
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            flex-wrap: wrap;
-            gap: 12px;
-            margin-bottom: 24px;
-        }
-
-        .qt-header h1 {
-            font-family: 'Cormorant Garamond', serif;
-            font-size: clamp(1.4rem, 3vw, 1.9rem);
-            font-weight: 600;
-            color: var(--color-lux-ink, #231F1C);
-            display: flex;
-            align-items: center;
-            gap: 10px;
-        }
-
-        .qt-stats {
-            display: flex;
-            flex-wrap: wrap;
-            gap: 14px;
-            margin-bottom: 24px;
-        }
-
-        .qt-stat {
-            background: #fff;
-            border: 1px solid #E8E0D6;
-            border-radius: 8px;
-            padding: 14px 20px;
-            min-width: 130px;
-            flex: 1;
-        }
-
-        .qt-stat__label {
-            font-size: 12px;
-            font-weight: 500;
-            color: #888;
-            text-transform: uppercase;
-            letter-spacing: .06em;
-        }
-
-        .qt-stat__value {
-            font-size: 1.5rem;
-            font-weight: 600;
-            color: var(--color-lux-ink, #231F1C);
-            margin-top: 2px;
-        }
-
-        .qt-stat--value .qt-stat__value {
-            color: #2F4F78;
-        }
-
-        .qt-filters {
-            background: #fff;
-            border: 1px solid #E8E0D6;
-            border-radius: 8px;
-            padding: 16px 20px;
-            margin-bottom: 20px;
-            display: flex;
-            flex-wrap: wrap;
-            gap: 12px;
-            align-items: flex-end;
-        }
-
-        .qt-filters label {
-            font-size: 12px;
-            font-weight: 500;
-            color: #555;
-            display: block;
-            margin-bottom: 4px;
-        }
-
-        .qt-filters input,
-        .qt-filters select {
-            padding: 8px 10px;
-            border: 1px solid #DDD;
-            border-radius: 4px;
-            font-size: 13px;
-            min-width: 140px;
-        }
-
-        .qt-filters .search-field input {
-            min-width: 200px;
-        }
-
-        .qt-filters .filter-actions {
-            display: flex;
-            gap: 8px;
-            align-items: flex-end;
-        }
-
-        .qt-table-wrap {
-            background: #fff;
-            border: 1px solid #E8E0D6;
-            border-radius: 8px;
-            overflow: hidden;
-        }
-
-        .qt-table {
-            width: 100%;
-            border-collapse: collapse;
-            font-size: 13px;
-        }
-
-        .qt-table thead th {
-            background: #F7F3EE;
-            font-weight: 500;
-            color: #444;
-            text-align: left;
-            padding: 10px 14px;
-            border-bottom: 1px solid #E8E0D6;
-            white-space: nowrap;
-        }
-
-        .qt-table tbody tr:hover {
-            background: #FAF6F0;
-        }
-
-        .qt-table td {
-            padding: 11px 14px;
-            border-bottom: 1px solid #F0EBE3;
-            vertical-align: middle;
-        }
-
-        .qt-table tr:last-child td {
-            border-bottom: 0;
-        }
-
-        .qt-ref {
-            font-family: 'Cormorant Garamond', serif;
-            font-size: 15px;
-            font-weight: 600;
-            color: #231F1C;
-        }
-
-        .qt-badge {
-            display: inline-flex;
-            align-items: center;
-            gap: 4px;
-            padding: 3px 8px;
-            border-radius: 20px;
-            font-size: 11px;
-            font-weight: 500;
-            text-transform: uppercase;
-            letter-spacing: .04em;
-        }
-
-        .qt-badge--sent {
-            background: #EBF3FC;
-            color: #2F4F78;
-        }
-
-        .qt-badge--accepted {
-            background: #D4EDDA;
-            color: #155724;
-        }
-
-        .qt-badge--expired {
-            background: #F3EFEB;
-            color: #888;
-        }
-
-        .qt-badge--declined {
-            background: #F8D7DA;
-            color: #721C24;
-        }
-
-        .qt-type-badge {
-            display: inline-block;
-            padding: 2px 7px;
-            border-radius: 4px;
-            font-size: 11px;
-            font-weight: 500;
-            background: #F3ECE4;
-            color: #8A775F;
-            text-transform: capitalize;
-        }
-
-        .qt-actions {
-            display: flex;
-            gap: 6px;
-            flex-wrap: wrap;
-            align-items: center;
-        }
-
-        .qt-btn {
-            display: inline-flex;
-            align-items: center;
-            gap: 5px;
-            padding: 5px 10px;
-            border-radius: 4px;
-            font-size: 12px;
-            font-weight: 500;
-            text-decoration: none;
-            border: 1px solid transparent;
-            cursor: pointer;
-            white-space: nowrap;
-        }
-
-        .qt-btn--download {
-            background: #EBF3FC;
-            color: #2F4F78;
-            border-color: #B8D4F0;
-        }
-
-        .qt-btn--resend {
-            background: #EFF8EE;
-            color: #1F6B2C;
-            border-color: #A8D9AF;
-        }
-
-        .qt-btn--view {
-            background: #F3ECE4;
-            color: #8A775F;
-            border-color: #D9C8B4;
-        }
-
-        .qt-btn--accept {
-            background: #D4EDDA;
-            color: #155724;
-            border-color: #A8D9AF;
-        }
-
-        .qt-btn--decline {
-            background: #F8D7DA;
-            color: #721C24;
-            border-color: #F1B8BE;
-        }
-
-        .qt-empty {
-            text-align: center;
-            padding: 48px 24px;
-            color: #888;
-        }
-
-        .qt-empty i {
-            font-size: 2.5rem;
-            margin-bottom: 12px;
-            display: block;
-            color: #C4B49A;
-        }
-
-        @media (max-width: 768px) {
-            .qt-table thead {
-                display: none;
-            }
-
-            .qt-table td {
-                display: flex;
-                justify-content: space-between;
-                align-items: center;
-                padding: 8px 12px;
-            }
-
-            .qt-table td::before {
-                content: attr(data-label);
-                font-weight: 500;
-                color: #555;
-                font-size: 12px;
-                margin-right: 8px;
-            }
-        }
-    </style>
+    <link rel="stylesheet" href="css/quotations.css">
 </head>
 
 <body>
     <?php require_once 'includes/admin-header.php'; ?>
 
-    <div class="qt-page">
+    <div class="admin-container">
         <div class="qt-header">
             <h1><i class="fas fa-file-invoice-dollar" style="color:#B18247;"></i> Quotations</h1>
             <div style="display:flex;gap:10px;align-items:center;">
@@ -561,9 +290,9 @@ try {
         </form>
 
         <!-- Table -->
-        <div class="qt-table-wrap">
+        <div class="table-container">
             <?php if (!empty($quotations)): ?>
-                <table class="qt-table">
+                <table class="table">
                     <thead>
                         <tr>
                             <th>Quote Ref</th>
@@ -592,7 +321,7 @@ try {
                         ?>
                             <tr>
                                 <td data-label="Quote Ref">
-                                    <span class="qt-ref"><?php echo htmlspecialchars($q['quote_reference']); ?></span>
+                                    <span class="tbl-ref"><?php echo htmlspecialchars($q['quote_reference']); ?></span>
                                 </td>
                                 <td data-label="Guest">
                                     <strong><?php echo htmlspecialchars($q['guest_name'] ?? '—'); ?></strong>
@@ -636,8 +365,8 @@ try {
                                     <?php endif; ?>
                                 </td>
                                 <td data-label="Actions">
-                                    <div class="qt-actions">
-                                        <a href="quotations.php?download=<?php echo (int)$q['id']; ?>" class="qt-btn qt-btn--download" title="Download PDF" data-no-spa="1" data-no-admin-loader="1">
+                                    <div class="tbl-actions">
+                                        <a href="quotations.php?download=<?php echo (int)$q['id']; ?>" class="tbl-btn tbl-btn--download" title="Download PDF" data-no-spa="1" data-no-admin-loader="1">
                                             <i class="fas fa-file-pdf"></i> PDF
                                         </a>
                                         <?php if ($displayStatus !== 'accepted'): ?>
@@ -645,12 +374,12 @@ try {
                                                 <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf_token, ENT_QUOTES, 'UTF-8'); ?>">
                                                 <input type="hidden" name="action" value="resend">
                                                 <input type="hidden" name="quotation_id" value="<?php echo (int)$q['id']; ?>">
-                                                <button type="submit" class="qt-btn qt-btn--resend" title="Resend quotation email">
+                                                <button type="submit" class="tbl-btn tbl-btn--resend" title="Resend quotation email">
                                                     <i class="fas fa-paper-plane"></i> Resend
                                                 </button>
                                             </form>
                                         <?php endif; ?>
-                                        <a href="<?php echo htmlspecialchars($bookingLink); ?>" class="qt-btn qt-btn--view" title="View booking">
+                                        <a href="<?php echo htmlspecialchars($bookingLink); ?>" class="tbl-btn tbl-btn--view" title="View booking">
                                             <i class="fas fa-circle-info"></i> Booking
                                         </a>
                                         <?php if ($q['status'] === 'sent'): ?>
@@ -658,7 +387,7 @@ try {
                                                 <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf_token, ENT_QUOTES, 'UTF-8'); ?>">
                                                 <input type="hidden" name="action" value="mark_accepted">
                                                 <input type="hidden" name="quotation_id" value="<?php echo (int)$q['id']; ?>">
-                                                <button type="submit" class="qt-btn qt-btn--accept" title="Mark accepted">
+                                                <button type="submit" class="tbl-btn tbl-btn--accept" title="Mark accepted">
                                                     <i class="fas fa-check"></i>
                                                 </button>
                                             </form>
@@ -666,7 +395,7 @@ try {
                                                 <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf_token, ENT_QUOTES, 'UTF-8'); ?>">
                                                 <input type="hidden" name="action" value="mark_declined">
                                                 <input type="hidden" name="quotation_id" value="<?php echo (int)$q['id']; ?>">
-                                                <button type="submit" class="qt-btn qt-btn--decline" title="Mark declined">
+                                                <button type="submit" class="tbl-btn tbl-btn--decline" title="Mark declined">
                                                     <i class="fas fa-times"></i>
                                                 </button>
                                             </form>

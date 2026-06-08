@@ -1271,7 +1271,7 @@
 
 .tab-btn.active {
     background: var(--gold, var(--color-lux-gold, #B18247));
-    color: white;
+    color: var(--admin-text, #1f2a37);
 }
 
 .tab-content {

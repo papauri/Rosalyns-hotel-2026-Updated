@@ -1,9 +1,7 @@
 /* User Management — admin/user-management.php */
 
 .user-management-container {
-    padding: 24px;
-    max-width: 1400px;
-    margin: 0 auto;
+    width: 100%;
 }
 
 .page-header {

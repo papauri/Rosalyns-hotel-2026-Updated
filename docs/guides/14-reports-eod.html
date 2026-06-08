@@ -208,8 +208,7 @@
                         </tr>
                         <tr>
                             <td><strong>Aging</strong></td>
-                            <td>Receivables aging: 0–30, 31–60, 61–90, and 90+ day buckets for outstanding invoices.
-                            </td>
+                            <td>Receivables aging: 0–30, 31–60, 61–90, and 90+ day buckets for outstanding (pending/partial, non-refund) invoices. Age is measured from the <strong>invoice creation date</strong> — giving a true picture of how long a balance has remained unpaid regardless of any payment date activity.</td>
                         </tr>
                         <tr>
                             <td><strong>Bookings</strong></td>
@@ -289,27 +288,52 @@
             <section id="accounting-dashboard">
                 <h2>3. Accounting Dashboard</h2>
                 <p><code>/admin/accounting-dashboard.php</code> — the accountant's command centre. Select a date range
-                    (defaults to current month). Use <strong>Show All</strong> to remove date limits.</p>
+                    (defaults to current calendar month). Use <strong>Show All</strong> to remove date limits.</p>
 
-                <h3>What's on this page</h3>
+                <h3>Financial summary panel</h3>
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Metric</th>
+                            <th>Definition</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr>
+                            <td>Gross collected</td>
+                            <td>Sum of completed/paid payments (refunds excluded). Revenue received in the period.</td>
+                        </tr>
+                        <tr>
+                            <td>Net excl. VAT</td>
+                            <td>Gross collected minus the VAT component — pre-tax revenue.</td>
+                        </tr>
+                        <tr>
+                            <td>VAT collected</td>
+                            <td>VAT on all completed/paid sales, net of VAT returned on processed refunds. This is the figure to report to MRA.</td>
+                        </tr>
+                        <tr>
+                            <td>Pending</td>
+                            <td>Amounts on unpaid/partial invoices. Only guest receivables — pending refunds (liability) are tracked separately.</td>
+                        </tr>
+                        <tr>
+                            <td>Refunds issued</td>
+                            <td>Total on refund-type rows. Identified by <code>payment_type = 'refund'</code> for consistency — does not double-count rows that also carry a refunded status.</td>
+                        </tr>
+                        <tr>
+                            <td>Pending refunds</td>
+                            <td>Refunds authorised but not yet paid out. Represents a liability to guests.</td>
+                        </tr>
+                    </tbody>
+                </table>
+
+                <h3>Revenue by source</h3>
+                <p>Three panels — <strong>Rooms</strong>, <strong>Conference</strong>, <strong>Restaurant &amp; POS</strong> — each showing booking count, gross collected, VAT component, and outstanding balance on bookings that had payments in the period.</p>
+
+                <h3>POS analytics</h3>
                 <ul class="checklist">
-                    <li><strong>Overall financial summary</strong> — total payments, gross collected, net excluding VAT,
-                        VAT collected, pending, refunds, pending refunds.</li>
-                    <li><strong>Revenue by source</strong> — Rooms / Conference / Restaurant+POS each with booking
-                        count, gross collected, VAT, and outstanding.</li>
-                    <li><strong>Payment method breakdown</strong> — method, count, and amount (descending).</li>
-                    <li><strong>Refund breakdown</strong> — by reason and amount.</li>
-                    <li><strong>Recent 20 payments</strong> — quick reference list.</li>
-                    <li><strong>Outstanding summary</strong> — room bookings vs conference bookings with
-                        <code>amount_due &gt; 0</code>.
-                    </li>
-                    <li><strong>POS analytics</strong> — revenue split by order type, gross margin, daily revenue trend
-                        (14 days).</li>
-                    <li><strong>Compliance checks</strong> — missing receipts, invoices without numbers, MRA
-                        unsubmitted sales, POS orders without a ledger entry.</li>
-                    <li><strong>Quotation pipeline</strong> — sent, accepted, expired, declined counts and values.</li>
-                    <li><strong>Credit note stats</strong> — issued, redeemed, outstanding for the period.</li>
-                    <li><strong>VAT Settings form</strong> — enable/disable VAT, set rate and VAT number.</li>
+                    <li><strong>Revenue by order type</strong> — walk-in, room service, tab: orders, gross, COGS, voids.</li>
+                    <li><strong>Gross margin</strong> — gross revenue minus COGS from <code>stock_orders.total_cost</code>. If COGS is zero for any type, the margin will be inflated — this usually means ingredient costs have not been entered on those recipes.</li>
+                    <li><strong>Daily revenue trend</strong> — last 14 days: room, conference, F&amp;B, and refunds per day as a visual breakdown.</li>
                 </ul>
 
                 <h3>Compliance checks — what to do</h3>
@@ -317,28 +341,42 @@
                     <thead>
                         <tr>
                             <th>Alert</th>
+                            <th>What it means</th>
                             <th>Action</th>
                         </tr>
                     </thead>
                     <tbody>
                         <tr>
                             <td>Missing receipts</td>
-                            <td>Go to <strong>Receipts</strong> → click <strong>Generate Missing</strong>.</td>
+                            <td>Completed payments with no receipt number.</td>
+                            <td><code>receipts.php</code> → <strong>Generate Missing</strong>.</td>
                         </tr>
                         <tr>
                             <td>Invoices without numbers</td>
-                            <td>Go to <strong>Invoices</strong> → <strong>Regenerate Invoice</strong> on each row.</td>
+                            <td><code>invoice_generated = 1</code> but no invoice number stored.</td>
+                            <td><code>invoices.php</code> → <strong>Regenerate Invoice</strong> per row.</td>
                         </tr>
                         <tr>
                             <td>POS orders without ledger entry</td>
-                            <td>Run POS Accounting for the affected date and close the shift.</td>
+                            <td>Paid stock orders not matched to a payments row.</td>
+                            <td>Run <code>pos-accounting.php</code> for the affected date and close the shift.</td>
                         </tr>
                         <tr>
                             <td>MRA unsubmitted</td>
-                            <td>Open the MRA submission module and submit the outstanding rows.</td>
+                            <td>Sales not submitted to the MRA electronic invoicing system.</td>
+                            <td>Open the MRA submission module and submit outstanding rows.</td>
                         </tr>
                     </tbody>
                 </table>
+
+                <h3>Quotation pipeline</h3>
+                <p>Count and value of quotations in each status (Sent / Accepted / Expired / Declined) for the selected period. Use this to track conversion of proposals into confirmed revenue.</p>
+
+                <h3>Credit notes summary</h3>
+                <p>Issued count and value, total redeemed, and outstanding balance (remaining on active and partially-applied CNs). Outstanding CN balance is a future discount liability — monitor it monthly.</p>
+
+                <h3>Outstanding summary</h3>
+                <p>The <strong>Current Outstanding</strong> panel shows all-time unpaid balances on room and conference bookings (<code>amount_due &gt; 0</code>). This is a current-state snapshot, not filtered by the selected date range — it shows what the hotel is owed right now regardless of when the booking was made.</p>
             </section>
 
             <!-- POS ACCOUNTING -->
@@ -419,6 +457,38 @@
                     <li>Each close is written to <code>stock_shift_closes</code> with variances recorded. An audit
                         event is also logged to <code>stock_order_audit</code>.</li>
                 </ol>
+
+                <h3>Understanding variance colours</h3>
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Colour</th>
+                            <th>Variance range</th>
+                            <th>What to do</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr>
+                            <td style="color:#2e7d32;font-weight:600;">Green</td>
+                            <td>Declared = Expected (or within rounding)</td>
+                            <td>Good — proceed to close.</td>
+                        </tr>
+                        <tr>
+                            <td style="color:#f57c00;font-weight:600;">Amber</td>
+                            <td>Small positive or negative difference</td>
+                            <td>Add a note explaining the difference before closing.</td>
+                        </tr>
+                        <tr>
+                            <td style="color:#c62828;font-weight:600;">Red</td>
+                            <td>Significant shortfall (declared &lt; expected)</td>
+                            <td>Investigate before closing. Ask cashier to recount.</td>
+                        </tr>
+                    </tbody>
+                </table>
+                <p>Variance = <strong>Declared − Expected</strong>. A positive number means the cashier has more than the system expects (overage). A negative number means a shortfall.</p>
+
+                <h3>Settled from tabs</h3>
+                <p>The <em>Settled from tabs</em> count and amount on each cashier row shows orders that were <em>created before</em> the current business date but <em>paid during</em> it — i.e., orders that sat as open tabs overnight and were settled that day. This is informational; the amounts are already included in the Expected totals.</p>
 
                 <div class="callout note">
                     <strong>Open tabs warning:</strong> if a cashier has orders still in <em>placed</em> status, the

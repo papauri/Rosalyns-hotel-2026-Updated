@@ -13,6 +13,12 @@
     scrollbar-width: none;
 }
 
+/* Active/hover sh-tab: dark text on gold for readability */
+.sh-tab--active,
+.sh-tab:hover {
+    color: var(--admin-text, #1f2a37) !important;
+}
+
 .sh-tabs::-webkit-scrollbar {
     display: none;
 }

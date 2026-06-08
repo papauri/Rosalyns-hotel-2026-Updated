@@ -325,20 +325,20 @@
         <section id="payments">
           <h2>5. Payments &amp; invoices</h2>
           <ul class="checklist">
-            <li><code>/admin/payments.php</code> &mdash; every payment row with filters by date, method, status.</li>
-            <li><code>/admin/payment-add.php</code> &mdash; record a payment against a booking.</li>
-            <li><code>/admin/payment-refund.php</code> &mdash; refund a previous payment with reason.</li>
-            <li><code>/admin/payment-details.php?id=…</code> &mdash; full record + invoice download.</li>
-            <li><code>/admin/invoices.php</code> &mdash; list of every generated invoice PDF.</li>
+            <li><code>/admin/payments.php</code> &mdash; every payment row with filters by date, method, status, booking type, and free-text search (searches reference, guest name, email, phone, transaction ID, and amount). Analytics strip shows gross collected, VAT, pending receivables, and refund totals — all reflecting the active filters. CSV export available.</li>
+            <li><code>/admin/payment-add.php</code> &mdash; record a payment against a booking. Supports document generation (invoice, receipt, quotation) at the same time. Idempotency protection prevents accidental duplicate submissions.</li>
+            <li><code>/admin/payment-refund.php</code> &mdash; refund a previous payment with reason. Choose <em>cash refund</em> (money returned) or <em>credit note</em> (issue a CN instead). Booking balance recalculates automatically.</li>
+            <li><code>/admin/payment-details.php?id=…</code> &mdash; full record + invoice download + audit log.</li>
+            <li><code>/admin/invoices.php</code> &mdash; every payment as an invoice. KPI tiles: Paid &amp; Closed (non-refund completed rows), Outstanding (pending/partial excluding pending refunds), Generated count, Refunded (identified by <code>payment_type = 'refund'</code>). Receivables aging panel buckets unpaid invoices by days since creation — 0–30, 31–60, 61–90, and 90+ days.</li>
+            <li><code>/admin/receipts.php</code> &mdash; receipt register with bulk PDF backfill, email, and WhatsApp sending per row. Editable email and WhatsApp templates.</li>
             <li><code>/admin/credit-notes.php</code> &mdash; issue, apply, void, and re-send <strong>Credit
-                Notes</strong>. Credit notes are generated when a refund is owed but cash cannot be returned immediately
+                Notes</strong>. Credit notes are used when a refund is owed but cash cannot be returned immediately
               (e.g. early checkout, service issue, goodwill). Each CN carries a sequential number
               (<code>CN-YYYY-NNNNNN</code>), a face value, a VAT breakdown, an optional expiry date, and a running
-              balance. Applying a CN against a booking inserts a <code>credit_note</code> payment row; the balance
-              decrements automatically. Only active or partially-applied CNs can be voided.</li>
+              balance. Applying a CN against a booking inserts a <code>credit_note</code> payment row and decrements the CN balance — the entire operation is wrapped in a database transaction with a row-level lock to prevent double-application. Only active or partially-applied CNs can be applied or voided.</li>
+            <li><code>/admin/quotations.php</code> &mdash; manage price proposals sent before payment is collected. Statuses: Sent / Accepted / Expired (auto) / Declined. Permanent audit trail — quotes are never deleted.</li>
           </ul>
-          <div class="callout warn">Invoice and credit-note numbers are sequential and never edited directly. Re-sending
-            a document is allowed, but the number is preserved.</div>
+          <div class="callout warn">Invoice and credit-note numbers are sequential and permanent — they can never be edited. Re-sending a document is always allowed; only the file content regenerates, the number is preserved.</div>
           <div class="callout note"><strong>Credit note settings:</strong> expiry period
             (<code>credit_note_expiry_months</code>) and VAT rate live in Booking Settings. Set
             <code>credit_note_expiry_months</code> to <code>0</code> for no expiry.
@@ -750,16 +750,16 @@
           <div class="callout note">Full step-by-step guide: <a href="14-reports-eod.html">→ Guide 14: Reports &amp; End of Day</a></div>
           <ul class="checklist">
             <li><code>/admin/reports.php</code> &mdash; revenue, occupancy, RevPAR, ADR, by date range. CSV export.</li>
-            <li><code>/admin/accounting-dashboard.php</code> &mdash; month-end VAT &amp; revenue breakdown by source
-              (rooms, conference, restaurant); payment method totals; refund tracking.</li>
+            <li><code>/admin/accounting-dashboard.php</code> &mdash; the accountant's command centre for any date range. Panels: overall financial summary (gross collected, net excl. VAT, VAT collected net of returned VAT, pending receivables, refunds issued, pending refunds); revenue by source; payment method breakdown; refund reasons; recent 20 payments; all-time outstanding balances; POS analytics (revenue by order type, gross margin vs COGS, 14-day daily trend); compliance checks (missing receipts, invoices without numbers, POS orders without ledger, MRA unsubmitted); quotation pipeline; credit note stats; VAT Settings form.</li>
             <li><code>/admin/pos-accounting.php</code> &mdash; <strong>POS cashier shift reconciliation</strong>.
               Pick a business date and the system shows every cashier's expected totals (cash, mobile money, card)
               derived from paid orders. The accountant enters the <em>declared</em> amounts from the physical drawer,
-              reviews each individual sale in a collapsible per-cashier drawer (tick sales as verified, add per-order
-              notes), and submits to close selected shifts. Variance is calculated live; a reason is required if
-              the declared total doesn't match. Shift closes are written to <code>pos_shift_closes</code> and
-              audited in <code>stock_order_audit</code>. Re-opening a closed date is not permitted &mdash; contact
-              a developer if correction is needed.</li>
+              reviews each individual sale in a collapsible per-cashier drawer (add per-order notes), and submits
+              to close selected shifts. Variance (Declared − Expected) is colour-coded: green = match, amber = small
+              difference, red = shortfall. A <em>Settled from tabs</em> figure shows orders placed before the
+              business day but paid during it. Shift closes are written to <code>stock_shift_closes</code> and
+              audited in <code>stock_order_audit</code> within a single database transaction. Re-opening a closed
+              date is not permitted &mdash; contact a developer if correction is needed.</li>
             <li><code>/admin/end-of-day-report.php</code> &mdash; daily operations snapshot: arrivals vs completed,
               departures, stayovers, revenue per category, occupancy %, trend vs previous day with colour-coded
               indicators. Designed to be shared with ownership each evening.</li>

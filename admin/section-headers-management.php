@@ -368,9 +368,6 @@ $page_title = 'Section Headers Management';
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,300;0,400;0,500;0,600;1,300;1,400;1,500&family=Jost:wght@300;400;500;600&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.7.2/css/all.min.css">
-    <link rel="stylesheet" href="../css/base/critical.css">
-    <link rel="stylesheet" href="../css/main.css">
     <link rel="stylesheet" href="css/admin-styles.css">
     <link rel="stylesheet" href="css/admin-responsive-enhancements.css">
     <link rel="stylesheet" href="css/admin-components.css">
@@ -405,7 +402,7 @@ $page_title = 'Section Headers Management';
         <!-- Tab Navigation -->
         <div class="sh-tabs" style="display:flex;gap:0;border-bottom:2px solid var(--gold);margin-bottom:24px;">
             <button type="button" class="sh-tab sh-tab--active" data-tab="heroes"
-                style="padding:12px 28px;font-size:14px;font-weight:700;border:none;background:var(--gold);color:white;cursor:pointer;border-radius:6px 6px 0 0;letter-spacing:.04em;">
+                style="padding:12px 28px;font-size:14px;font-weight:700;border:none;background:var(--gold);color:var(--admin-text,#1f2a37);cursor:pointer;border-radius:6px 6px 0 0;letter-spacing:.04em;">
                 <i class="fas fa-image"></i> Page Hero Text
             </button>
             <button type="button" class="sh-tab" data-tab="sections"
@@ -826,7 +823,7 @@ $page_title = 'Section Headers Management';
                 document.querySelectorAll('.sh-tab').forEach(function(t) {
                     var isActive = t.dataset.tab === target;
                     t.style.background = isActive ? 'var(--gold)' : '#f0ede8';
-                    t.style.color = isActive ? 'white' : 'var(--navy)';
+                    t.style.color = isActive ? 'var(--admin-text,#1f2a37)' : 'var(--navy)';
                     t.classList.toggle('sh-tab--active', isActive);
                 });
                 document.querySelectorAll('.sh-tab-panel').forEach(function(p) {

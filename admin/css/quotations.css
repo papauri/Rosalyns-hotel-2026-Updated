@@ -1,0 +1,168 @@
+/* Quotations page — admin/quotations.php */
+/* Container layout handled by .admin-container in admin-styles.css */
+/* Table, actions, and ref styles use shared .table / .tbl-actions / .tbl-btn / .tbl-ref from admin-styles.css */
+
+.qt-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 12px;
+    margin-bottom: 24px;
+}
+
+.qt-header h1 {
+    font-family: 'Cormorant Garamond', serif;
+    font-size: clamp(1.4rem, 3vw, 1.9rem);
+    font-weight: 600;
+    color: var(--color-lux-ink, #231F1C);
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin: 0;
+}
+
+/* ── Stat pills ── */
+.qt-stats {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 14px;
+    margin-bottom: 24px;
+}
+
+.qt-stat {
+    background: #fff;
+    border: 1px solid var(--tbl-border, #E8E0D6);
+    border-radius: 8px;
+    padding: 14px 20px;
+    min-width: 130px;
+    flex: 1;
+}
+
+.qt-stat__label {
+    font-size: 12px;
+    font-weight: 500;
+    color: #888;
+    text-transform: uppercase;
+    letter-spacing: .06em;
+}
+
+.qt-stat__value {
+    font-size: 1.5rem;
+    font-weight: 600;
+    color: var(--tbl-ref-color, #231F1C);
+    margin-top: 2px;
+}
+
+.qt-stat--value .qt-stat__value {
+    color: #2F4F78;
+}
+
+/* ── Filters ── */
+.qt-filters {
+    background: #fff;
+    border: 1px solid var(--tbl-border, #E8E0D6);
+    border-radius: 8px;
+    padding: 16px 20px;
+    margin-bottom: 20px;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 12px;
+    align-items: flex-end;
+}
+
+.qt-filters label {
+    font-size: 12px;
+    font-weight: 500;
+    color: #555;
+    display: block;
+    margin-bottom: 4px;
+}
+
+.qt-filters input,
+.qt-filters select {
+    padding: 8px 10px;
+    border: 1px solid #DDD;
+    border-radius: 4px;
+    font-size: 13px;
+    min-width: 140px;
+}
+
+.qt-filters .search-field input {
+    min-width: 200px;
+}
+
+.qt-filters .filter-actions {
+    display: flex;
+    gap: 8px;
+    align-items: flex-end;
+}
+
+/* ── Status badges ── */
+.qt-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 3px 8px;
+    border-radius: 20px;
+    font-size: 11px;
+    font-weight: 500;
+    text-transform: uppercase;
+    letter-spacing: .04em;
+}
+
+.qt-badge--sent     { background: #EBF3FC; color: #2F4F78; }
+.qt-badge--accepted { background: #D4EDDA; color: #155724; }
+.qt-badge--expired  { background: #F3EFEB; color: #888; }
+.qt-badge--declined { background: #F8D7DA; color: #721C24; }
+.qt-badge--draft    { background: #FFF3CD; color: #856404; }
+
+.qt-type-badge {
+    display: inline-block;
+    padding: 2px 7px;
+    border-radius: 4px;
+    font-size: 11px;
+    font-weight: 500;
+    background: #F3ECE4;
+    color: #8A775F;
+    text-transform: capitalize;
+}
+
+/* ── Empty state ── */
+.qt-empty {
+    text-align: center;
+    padding: 48px 24px;
+    color: #888;
+}
+
+.qt-empty i {
+    font-size: 2.5rem;
+    margin-bottom: 12px;
+    display: block;
+    color: #C4B49A;
+}
+
+/* ── Responsive ── */
+@media (max-width: 1024px) {
+    .qt-stats {
+        gap: 8px;
+    }
+
+    .qt-stat {
+        min-width: 0;
+        padding: 10px 14px;
+    }
+}
+
+@media (max-width: 600px) {
+    .qt-filters {
+        flex-direction: column;
+        align-items: stretch;
+    }
+
+    .qt-filters input,
+    .qt-filters select {
+        width: 100%;
+        min-width: 0;
+    }
+}

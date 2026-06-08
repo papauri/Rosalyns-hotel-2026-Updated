@@ -468,7 +468,7 @@
             };
         },
 
-        // Keep tooltip visible inside the current calendar card bounds
+        // Position tooltip in fixed (viewport) coordinates so it escapes overflow scroll containers
         updateTooltipPlacement: function (trigger) {
             if (!trigger) return;
 
@@ -476,14 +476,13 @@
             if (!tooltip) return;
 
             const edgePadding = 8;
-            const boundsRect = this.getBoundsRect(trigger);
 
             const isHiddenByCss = window.getComputedStyle(tooltip).display === 'none';
             const previousDisplay = tooltip.style.display;
             const previousVisibility = tooltip.style.visibility;
             const previousPointerEvents = tooltip.style.pointerEvents;
 
-            // Temporarily reveal for measurement when hidden by CSS states
+            // Temporarily reveal for measurement
             if (isHiddenByCss) {
                 tooltip.style.display = 'block';
                 tooltip.style.visibility = 'hidden';
@@ -492,31 +491,34 @@
 
             const triggerRect = trigger.getBoundingClientRect();
             const tooltipRect = tooltip.getBoundingClientRect();
+            const vpW = window.innerWidth;
+            const vpH = window.innerHeight;
 
-            const spaceBelow = boundsRect.bottom - triggerRect.bottom;
-            const spaceAbove = triggerRect.top - boundsRect.top;
+            const spaceBelow = vpH - triggerRect.bottom;
+            const spaceAbove = triggerRect.top;
             const shouldFlipUp = spaceBelow < (tooltipRect.height + edgePadding) && spaceAbove > spaceBelow;
 
             trigger.classList.toggle('tooltip-flip-up', shouldFlipUp);
 
-            // Nudge horizontally so tooltip does not leave the visible calendar card area.
-            let offsetLeft = 0;
-            const maxRight = boundsRect.right - edgePadding;
-            const minLeft = boundsRect.left + edgePadding;
-
-            let projectedLeft = triggerRect.left + offsetLeft;
-            let projectedRight = projectedLeft + tooltipRect.width;
-
-            if (projectedRight > maxRight) {
-                offsetLeft -= (projectedRight - maxRight);
+            // Compute fixed top
+            let top;
+            if (shouldFlipUp) {
+                top = triggerRect.top - tooltipRect.height - 4;
+            } else {
+                top = triggerRect.bottom + 4;
             }
 
-            projectedLeft = triggerRect.left + offsetLeft;
-            if (projectedLeft < minLeft) {
-                offsetLeft += (minLeft - projectedLeft);
+            // Compute fixed left, clamped to viewport
+            let left = triggerRect.left;
+            if (left + tooltipRect.width > vpW - edgePadding) {
+                left = vpW - tooltipRect.width - edgePadding;
+            }
+            if (left < edgePadding) {
+                left = edgePadding;
             }
 
-            tooltip.style.left = `${Math.round(offsetLeft)}px`;
+            tooltip.style.top = `${Math.round(top)}px`;
+            tooltip.style.left = `${Math.round(left)}px`;
 
             if (isHiddenByCss) {
                 tooltip.style.display = previousDisplay;

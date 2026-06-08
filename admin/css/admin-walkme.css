@@ -1,0 +1,306 @@
+/* ═══════════════════════════════════════════════════════════════
+   Admin WalkMe — shared tour & tooltip system
+   Usage: include on any page that loads admin-walkme.js
+   ═══════════════════════════════════════════════════════════════ */
+
+/* ── Tooltip anchor ── */
+[data-tooltip] {
+    position: relative;
+}
+
+/* ── Inline help icon trigger ── */
+.wm-help {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 1.15rem;
+    height: 1.15rem;
+    border-radius: 50%;
+    background: var(--finance-border, #EAE1D8);
+    color: var(--finance-muted, #5E554D);
+    font-size: 0.65rem;
+    font-weight: 700;
+    cursor: help;
+    vertical-align: middle;
+    margin-left: 0.3rem;
+    flex-shrink: 0;
+    transition: background 0.15s, color 0.15s;
+    border: none;
+    outline: none;
+    font-family: inherit;
+}
+
+.wm-help:hover,
+.wm-help:focus-visible {
+    background: var(--finance-accent, #8A775F);
+    color: #fff;
+}
+
+/* ── Floating tooltip bubble ── */
+.wm-tooltip {
+    position: fixed;
+    z-index: 9100;
+    max-width: min(22rem, calc(100vw - 2rem));
+    padding: 0.65rem 0.85rem;
+    background: #1e1a16;
+    color: #f5f0e8;
+    font-size: 0.8rem;
+    line-height: 1.45;
+    border-radius: 8px;
+    box-shadow: 0 6px 24px rgba(0,0,0,0.22);
+    pointer-events: none;
+    opacity: 0;
+    transform: translateY(4px);
+    transition: opacity 0.18s ease, transform 0.18s ease;
+}
+
+.wm-tooltip.is-visible {
+    opacity: 1;
+    transform: translateY(0);
+    pointer-events: auto;
+}
+
+.wm-tooltip__arrow {
+    position: absolute;
+    width: 10px;
+    height: 6px;
+    overflow: hidden;
+}
+
+.wm-tooltip__arrow::after {
+    content: '';
+    position: absolute;
+    width: 8px;
+    height: 8px;
+    background: #1e1a16;
+    transform: rotate(45deg);
+    top: -4px;
+    left: 1px;
+}
+
+.wm-tooltip[data-placement="top"] .wm-tooltip__arrow {
+    bottom: -6px;
+    left: 50%;
+    transform: translateX(-50%) rotate(180deg);
+}
+
+.wm-tooltip[data-placement="bottom"] .wm-tooltip__arrow {
+    top: -6px;
+    left: 50%;
+    transform: translateX(-50%);
+}
+
+/* ══════════════════════════════════════════════════════
+   Tour overlay
+   ══════════════════════════════════════════════════════ */
+
+.wm-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 9000;
+    pointer-events: none;
+}
+
+/* SVG cutout layer */
+.wm-overlay__svg {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+}
+
+/* Tour step card */
+.wm-card {
+    position: fixed;
+    z-index: 9200;
+    width: min(22rem, calc(100vw - 2rem));
+    background: #fff;
+    border-radius: 12px;
+    box-shadow: 0 20px 60px rgba(0,0,0,0.18), 0 4px 16px rgba(0,0,0,0.10);
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+    animation: wm-card-in 0.25s cubic-bezier(0.22, 0.61, 0.36, 1) both;
+}
+
+@keyframes wm-card-in {
+    from { opacity: 0; transform: translateY(8px) scale(0.97); }
+    to   { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+.wm-card__accent {
+    height: 4px;
+    background: linear-gradient(90deg, #8A775F 0%, #B9A78F 100%);
+    flex-shrink: 0;
+}
+
+.wm-card__body {
+    padding: 1.1rem 1.25rem 0.75rem;
+    flex: 1;
+}
+
+.wm-card__eyebrow {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    margin-bottom: 0.5rem;
+    color: #8A775F;
+    font-size: 0.7rem;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+}
+
+.wm-card__eyebrow i {
+    font-size: 0.8rem;
+}
+
+.wm-card__title {
+    margin: 0 0 0.45rem;
+    font-family: 'Cormorant Garamond', Georgia, serif;
+    font-size: 1.2rem;
+    font-weight: 600;
+    color: #1e1a16;
+    line-height: 1.2;
+}
+
+.wm-card__text {
+    margin: 0;
+    font-size: 0.85rem;
+    line-height: 1.55;
+    color: #5E554D;
+}
+
+.wm-card__text code {
+    background: #f5f0e8;
+    border-radius: 3px;
+    padding: 0 4px;
+    font-size: 0.8em;
+    color: #8A775F;
+}
+
+.wm-card__footer {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.5rem;
+    padding: 0.7rem 1.25rem;
+    background: #f9f6f1;
+    border-top: 1px solid #ede7dd;
+    flex-shrink: 0;
+}
+
+.wm-card__progress {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+}
+
+.wm-card__dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: #d4c8b8;
+    transition: background 0.2s, transform 0.2s;
+}
+
+.wm-card__dot.is-active {
+    background: #8A775F;
+    transform: scale(1.3);
+}
+
+.wm-card__dot.is-done {
+    background: #B9A78F;
+}
+
+.wm-card__nav {
+    display: flex;
+    gap: 0.4rem;
+    align-items: center;
+}
+
+.wm-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.3rem;
+    padding: 0.38rem 0.8rem;
+    border-radius: 6px;
+    font-size: 0.78rem;
+    font-weight: 600;
+    font-family: inherit;
+    cursor: pointer;
+    border: 1px solid transparent;
+    line-height: 1.2;
+    transition: filter 0.15s, box-shadow 0.15s;
+    text-decoration: none;
+    white-space: nowrap;
+}
+
+.wm-btn:hover { filter: brightness(0.92); }
+
+.wm-btn--primary {
+    background: #8A775F;
+    color: #fff;
+    border-color: #8A775F;
+}
+
+.wm-btn--ghost {
+    background: transparent;
+    color: #8A775F;
+    border-color: #d4c8b8;
+}
+
+.wm-btn--danger {
+    background: transparent;
+    color: #888;
+    border: none;
+    font-size: 0.72rem;
+    padding: 0.38rem 0.4rem;
+}
+
+/* ── Start tour trigger button ── */
+.wm-start-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    padding: 0.42rem 0.9rem;
+    background: #fff;
+    color: #8A775F;
+    border: 1px solid #d4c8b8;
+    border-radius: 20px;
+    font-size: 0.78rem;
+    font-weight: 600;
+    font-family: inherit;
+    cursor: pointer;
+    transition: background 0.15s, box-shadow 0.15s;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.07);
+}
+
+.wm-start-btn:hover {
+    background: #f9f6f1;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.10);
+}
+
+.wm-start-btn i {
+    color: #8A775F;
+}
+
+/* ── Highlight pulse on target element ── */
+.wm-highlight {
+    outline: 2.5px solid #8A775F !important;
+    outline-offset: 3px !important;
+    border-radius: 6px;
+    animation: wm-pulse 1.6s ease infinite;
+}
+
+@keyframes wm-pulse {
+    0%, 100% { outline-color: #8A775F; }
+    50%       { outline-color: #B9A78F; }
+}
+
+/* ── Reduced motion ── */
+@media (prefers-reduced-motion: reduce) {
+    .wm-card { animation: none; }
+    .wm-highlight { animation: none; }
+    .wm-tooltip { transition: none; }
+}

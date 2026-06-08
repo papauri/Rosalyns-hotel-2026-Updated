@@ -553,8 +553,10 @@
       <div>
         <h3>Invoicing</h3>
         <p>Invoices are numbered sequentially <code>INV-YYYY-NNNNNN</code> and can never be reused or deleted. Each invoice shows itemised accommodation + F&amp;B charges, calculates VAT (16.5%) and tourism levy separately, is generated as PDF server-side, can be emailed to the guest directly, and is archived permanently under <strong>Admin &rarr; Invoices</strong>.</p>
-        <h3 style="margin-top:1.5rem;">Refunds</h3>
-        <p>Process at <strong>Admin &rarr; Payment Refund</strong>. Enter amount, reason, and method. The accounting dashboard records the refund against the original payment. Refunds do not auto-cancel bookings &mdash; cancel separately if needed.</p>
+        <p>The <strong>Invoices</strong> page shows a receivables aging panel. Outstanding invoices are bucketed by age since the invoice was created (0–30 days, 31–60, 61–90, 90+). The Outstanding KPI shows only money owed <em>by guests</em> — pending refunds (money owed to guests) are excluded to prevent misreading your receivables position.</p>
+        <h3 style="margin-top:1.5rem;">Refunds &amp; Credit Notes</h3>
+        <p>Process cash refunds at <strong>Admin &rarr; Payment Refund</strong>. Enter amount, reason, and method. The accounting dashboard records the refund against the original payment. Refunds do not auto-cancel bookings &mdash; cancel separately if needed.</p>
+        <p>When cash cannot be returned immediately (early checkout, goodwill, overpayment), issue a <strong>Credit Note</strong> from <strong>Admin &rarr; Credit Notes</strong>. The CN carries a sequential number (<code>CN-YYYY-NNNNNN</code>), a face value, and an optional expiry date. It can be applied to any future booking; when applied, the booking balance decreases and the CN balance decrements atomically. Set credit note expiry months in Booking Settings (0 = no expiry).</p>
         <div class="callout info"><span class="callout-icon">&#8505;</span><p>The server validates all prices. A guest cannot tamper with totals in the browser &mdash; every price calculation happens in PHP, never in JavaScript.</p></div>
       </div>
     </div>
@@ -764,8 +766,12 @@
           <tr><td><strong>ADR</strong></td><td>Admin &rarr; Reports</td><td>Rate plan performance</td><td>CSV</td></tr>
           <tr><td><strong>Revenue by category</strong></td><td>Admin &rarr; Reports</td><td>Rooms vs F&amp;B vs services split</td><td>CSV</td></tr>
           <tr><td><strong>Outstanding folios</strong></td><td>Admin &rarr; Bookings &rarr; filter unpaid</td><td>Front-desk follow-up before checkout</td><td>&mdash;</td></tr>
-          <tr><td><strong>VAT &amp; tourism levy</strong></td><td>Admin &rarr; Accounting Dashboard</td><td>Monthly tax returns</td><td>CSV</td></tr>
-          <tr><td><strong>Payments by method</strong></td><td>Admin &rarr; Payments</td><td>Cash reconciliation, mobile money audit</td><td>CSV</td></tr>
+          <tr><td><strong>VAT &amp; tourism levy</strong></td><td>Admin &rarr; Accounting Dashboard</td><td>Monthly tax returns. VAT shown net of refunds issued.</td><td>CSV</td></tr>
+          <tr><td><strong>Payments by method</strong></td><td>Admin &rarr; Payments</td><td>Cash reconciliation, mobile money audit. Export CSV applies all active filters.</td><td>CSV</td></tr>
+          <tr><td><strong>Receivables aging</strong></td><td>Admin &rarr; Invoices</td><td>How long outstanding balances have been unpaid (0–30, 31–60, 61–90, 90+ days). Aged from invoice creation date.</td><td>&mdash;</td></tr>
+          <tr><td><strong>Credit note liability</strong></td><td>Admin &rarr; Credit Notes</td><td>Outstanding CN balance = future discount obligations to guests.</td><td>&mdash;</td></tr>
+          <tr><td><strong>Compliance check</strong></td><td>Admin &rarr; Accounting Dashboard &rarr; Compliance</td><td>Missing receipts, invoices without numbers, POS orders not in ledger, MRA unsubmitted.</td><td>&mdash;</td></tr>
+          <tr><td><strong>POS shift reconciliation</strong></td><td>Admin &rarr; POS Accounting</td><td>Expected vs declared cash per cashier. Variance flagged in colour (green/amber/red).</td><td>&mdash;</td></tr>
           <tr><td><strong>Stock variance</strong></td><td>Admin &rarr; Stock Reports</td><td>Catch shrinkage, recipe calibration</td><td>CSV</td></tr>
           <tr><td><strong>KDS Production Report</strong></td><td>Admin &rarr; KDS Report</td><td>Prep times, top items, void value per station</td><td>CSV &amp; email</td></tr>
           <tr><td><strong>Top-selling items</strong></td><td>KDS / BDS / CDS daily report</td><td>Menu engineering, up-selling training</td><td>&mdash;</td></tr>
@@ -774,7 +780,7 @@
         </tbody>
       </table>
     </div>
-    <div class="callout tip" style="margin-top:1.5rem;"><span class="callout-icon">&#10003;</span><p>The <strong>Accounting Dashboard</strong> summarises all revenue, VAT, tourism levy, refunds, and outstanding balances for any period. Give your accountant the <em>Accountant</em> role &mdash; they will have everything they need without seeing operational data.</p></div>
+    <div class="callout tip" style="margin-top:1.5rem;"><span class="callout-icon">&#10003;</span><p>The <strong>Accounting Dashboard</strong> summarises all revenue, VAT (net of refunded VAT), refunds, outstanding balances, POS gross margin, compliance alerts, and the quotation pipeline for any date range. Give your accountant the <em>Accountant</em> role &mdash; they will have everything they need without seeing operational data.</p></div>
   </div>
 </section>
 

@@ -591,8 +591,6 @@ $fb_rooms_posting_on = getSetting('facebook_posting_enabled', '0') === '1'
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,300;0,400;0,500;0,600;1,300;1,400;1,500&family=Jost:wght@300;400;500;600&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.7.2/css/all.min.css">
-    <link rel="stylesheet" href="../css/main.css">
     <link rel="stylesheet" href="css/admin-styles.css">
     <link rel="stylesheet" href="css/admin-responsive-enhancements.css">
     <link rel="stylesheet" href="css/admin-components.css">
@@ -802,21 +800,21 @@ $fb_rooms_posting_on = getSetting('facebook_posting_enabled', '0') === '1'
                             <div class="form-row">
                                 <div class="form-group">
                                     <label>Price Per Night *</label>
-                                    <input type="number" name="price_per_night" id="editPrice" step="0.01" required>
+                                    <input type="number" name="price_per_night" id="editPrice" step="0.01" required data-currency="<?php echo $currency; ?>">
                                 </div>
                                 <div class="form-group">
                                     <label>Single Occupancy Price</label>
-                                    <input type="number" name="price_single_occupancy" id="editPriceSingle" step="0.01" placeholder="Optional">
+                                    <input type="number" name="price_single_occupancy" id="editPriceSingle" step="0.01" placeholder="Optional" data-currency="<?php echo $currency; ?>">
                                 </div>
                             </div>
                             <div class="form-row">
                                 <div class="form-group">
                                     <label>Double Occupancy Price</label>
-                                    <input type="number" name="price_double_occupancy" id="editPriceDouble" step="0.01" placeholder="Optional">
+                                    <input type="number" name="price_double_occupancy" id="editPriceDouble" step="0.01" placeholder="Optional" data-currency="<?php echo $currency; ?>">
                                 </div>
                                 <div class="form-group">
                                     <label>Triple Occupancy Price</label>
-                                    <input type="number" name="price_triple_occupancy" id="editPriceTriple" step="0.01" placeholder="Optional">
+                                    <input type="number" name="price_triple_occupancy" id="editPriceTriple" step="0.01" placeholder="Optional" data-currency="<?php echo $currency; ?>">
                                 </div>
                                 <div class="form-group">
                                     <label>Child Supplement (%)</label>
@@ -936,21 +934,21 @@ $fb_rooms_posting_on = getSetting('facebook_posting_enabled', '0') === '1'
                             <div class="form-row">
                                 <div class="form-group">
                                     <label>Price Per Night *</label>
-                                    <input type="number" name="price_per_night" step="0.01" required>
+                                    <input type="number" name="price_per_night" step="0.01" required data-currency="<?php echo $currency; ?>">
                                 </div>
                                 <div class="form-group">
                                     <label>Single Occupancy Price</label>
-                                    <input type="number" name="price_single_occupancy" step="0.01" placeholder="Optional">
+                                    <input type="number" name="price_single_occupancy" step="0.01" placeholder="Optional" data-currency="<?php echo $currency; ?>">
                                 </div>
                             </div>
                             <div class="form-row">
                                 <div class="form-group">
                                     <label>Double Occupancy Price</label>
-                                    <input type="number" name="price_double_occupancy" step="0.01" placeholder="Optional">
+                                    <input type="number" name="price_double_occupancy" step="0.01" placeholder="Optional" data-currency="<?php echo $currency; ?>">
                                 </div>
                                 <div class="form-group">
                                     <label>Triple Occupancy Price</label>
-                                    <input type="number" name="price_triple_occupancy" step="0.01" placeholder="Optional">
+                                    <input type="number" name="price_triple_occupancy" step="0.01" placeholder="Optional" data-currency="<?php echo $currency; ?>">
                                 </div>
                                 <div class="form-group">
                                     <label>Child Supplement (%)</label>
@@ -2200,8 +2198,6 @@ $fb_rooms_posting_on = getSetting('facebook_posting_enabled', '0') === '1'
             </div>
         </div>
 
-        <?php require_once 'includes/admin-footer.php'; ?>
-
         <!-- Facebook Share All Rooms Modal -->
         <div class="modal-overlay" id="fbAllRoomsModal" style="display:none;" onclick="if(event.target===this)closeFbAllRoomsModal()">
             <div class="modal-content" style="max-width:920px;width:96vw;">
@@ -2309,3 +2305,5 @@ $fb_rooms_posting_on = getSetting('facebook_posting_enabled', '0') === '1'
                 </div>
             </div>
         </div>
+
+        <?php require_once 'includes/admin-footer.php'; ?>

@@ -1,4 +1,4 @@
-﻿<?php
+<?php
 
 /**
  * Payment Refund Processing
@@ -259,8 +259,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $payment
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,300;0,400;0,500;0,600;1,300;1,400;1,500&family=Jost:wght@300;400;500;600&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.7.2/css/all.min.css">
-    <link rel="stylesheet" href="../css/main.css">
     <link rel="stylesheet" href="css/admin-styles.css">
     <link rel="stylesheet" href="css/admin-responsive-enhancements.css">
     <link rel="stylesheet" href="css/admin-components.css">
@@ -405,12 +403,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $payment
                             <div class="filter-form">
                                 <div class="filter-group">
                                     <label for="refund_amount">Refund Amount *</label>
-                                    <div style="position: relative;">
-                                        <span id="refund_currency_prefix" style="position: absolute; left: 10px; top: 50%; transform: translateY(-50%); color: #666; font-size: 12px; white-space: nowrap; pointer-events: none;"><?php echo htmlspecialchars($currency_symbol); ?></span>
+                                    <div style="display:flex;align-items:stretch;border:1px solid #ddd;border-radius:6px;overflow:hidden;background:#fff;">
+                                        <span style="display:flex;align-items:center;padding:0 10px;background:#f5f5f5;border-right:1px solid #ddd;font-size:12px;font-weight:700;color:#666;white-space:nowrap;flex-shrink:0;"><?php echo htmlspecialchars($currency_symbol); ?></span>
                                         <input type="number" id="refund_amount" name="refund_amount"
                                             step="0.01" min="0.01" max="<?php echo $maxRefundable; ?>"
                                             value="<?php echo $maxRefundable; ?>" required
-                                            style="padding-left: var(--refund-prefix-w, 52px);">
+                                            style="flex:1;border:none;border-radius:0;padding:8px 10px;min-width:0;font-size:13px;background:transparent;">
                                     </div>
                                     <small style="color: #666;">Maximum: <?php echo $currency_symbol; ?><?php echo number_format($maxRefundable, 2); ?></small>
                                 </div>
@@ -499,17 +497,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $payment
         const vatRate = <?php echo $payment['vat_rate'] ?? 0; ?>;
         const currencySymbol = '<?php echo $currency_symbol; ?>';
 
-        function applyRefundPrefixPadding() {
-            const refundInput = document.getElementById('refund_amount');
-            const prefix = document.getElementById('refund_currency_prefix');
-            if (!refundInput || !prefix) {
-                return;
-            }
-            const prefixWidth = Math.ceil(prefix.offsetWidth || 0);
-            const padding = prefixWidth > 0 ? (prefixWidth + 16) : 52;
-            refundInput.style.setProperty('--refund-prefix-w', padding + 'px');
-        }
-
         function updateSummary() {
             const refundEl = document.getElementById('refund_amount');
             if (!refundEl) return; // form not rendered (fully refunded)
@@ -540,12 +527,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $payment
 
         const refundEl = document.getElementById('refund_amount');
         if (refundEl) {
-            applyRefundPrefixPadding();
             refundEl.addEventListener('input', updateSummary);
-            updateSummary(); // Initial calculation
+            updateSummary();
         }
-
-        window.addEventListener('resize', applyRefundPrefixPadding);
     </script>
 </body>
 

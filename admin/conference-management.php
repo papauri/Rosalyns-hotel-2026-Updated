@@ -1,4 +1,4 @@
-﻿<?php
+<?php
 
 /**
  * Conference Rooms Management - Admin Panel
@@ -539,8 +539,6 @@ if ($facebook_settings_css_version === '' || $facebook_settings_css_version === 
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,300;0,400;0,500;0,600;1,300;1,400;1,500&family=Jost:wght@300;400;500;600&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.7.2/css/all.min.css">
-    <link rel="stylesheet" href="../css/main.css">
     <link rel="stylesheet" href="css/admin-styles.css">
     <link rel="stylesheet" href="css/admin-responsive-enhancements.css">
     <link rel="stylesheet" href="css/admin-components.css">
@@ -865,7 +863,7 @@ if ($facebook_settings_css_version === '' || $facebook_settings_css_version === 
                         <div class="form-row">
                             <div class="form-group">
                                 <label>Full Day Rate *</label>
-                                <input type="number" step="0.01" name="daily_rate" required>
+                                <input type="number" step="0.01" name="daily_rate" required data-currency="<?php echo htmlspecialchars($currency, ENT_QUOTES); ?>">
                             </div>
                             <div class="form-group">
                                 <label>Display Order</label>
@@ -945,7 +943,7 @@ if ($facebook_settings_css_version === '' || $facebook_settings_css_version === 
                         <div class="form-row">
                             <div class="form-group">
                                 <label>Full Day Rate *</label>
-                                <input type="number" step="0.01" name="daily_rate" id="editRate" required>
+                                <input type="number" step="0.01" name="daily_rate" id="editRate" required data-currency="<?php echo htmlspecialchars($currency, ENT_QUOTES); ?>">
                             </div>
                             <div class="form-group">
                                 <label>Display Order</label>
@@ -1286,8 +1284,8 @@ if ($facebook_settings_css_version === '' || $facebook_settings_css_version === 
                         <input type="hidden" name="enquiry_action" value="update_amount">
                         <input type="hidden" name="enquiry_id" value="${enquiry.id}">
                         <div class="form-group" style="margin-bottom: 10px;">
-                            <label>Update Total Amount (<?php echo $currency; ?>):</label>
-                            <input type="number" name="total_amount" step="0.01" value="${enquiry.total_amount || ''}" style="width: 150px;">
+                            <label>Update Total Amount:</label>
+                            <input type="number" name="total_amount" step="0.01" value="${enquiry.total_amount || ''}" data-currency="<?php echo htmlspecialchars($currency, ENT_QUOTES); ?>">
                         </div>
                         <button type="submit" class="btn">Update Amount</button>
                     </form>

@@ -58,14 +58,14 @@
 
 .api-keys-page .api-keys-guide-grid {
     display: grid;
-    grid-template-columns: minmax(0, 1.15fr) minmax(320px, 0.85fr);
+    grid-template-columns: minmax(0, 1.15fr) minmax(0, 0.85fr);
     gap: 16px;
     margin-bottom: 20px;
 }
 
 .api-keys-page .api-keys-layout {
     display: grid;
-    grid-template-columns: minmax(0, 1.75fr) minmax(320px, 1fr);
+    grid-template-columns: minmax(0, 1.75fr) minmax(0, 1fr);
     gap: 16px;
     align-items: start;
 }
@@ -135,11 +135,11 @@
 }
 
 .api-keys-page .api-keys-table {
-    min-width: 960px;
+    min-width: 680px;
 }
 
 .api-keys-page .api-keys-key-cell {
-    min-width: 260px;
+    min-width: 200px;
 }
 
 .api-keys-page .api-key-display {
@@ -199,7 +199,7 @@
 }
 
 .api-keys-page .api-keys-actions {
-    min-width: 250px;
+    min-width: 160px;
 }
 
 .api-keys-page .api-keys-actions-form {
@@ -256,7 +256,15 @@
     font-size: 12px;
 }
 
-@media (max-width: 1200px) {
+/* Narrow 2-column: tighten side panel at mid-range viewports */
+@media (max-width: 1280px) and (min-width: 1025px) {
+    .api-keys-page .api-keys-layout {
+        grid-template-columns: minmax(0, 2fr) minmax(0, 0.85fr);
+    }
+}
+
+/* Stack layout when viewport can no longer fit two useful columns */
+@media (max-width: 1024px) {
     .api-keys-page .api-keys-layout {
         grid-template-columns: 1fr;
     }
@@ -264,15 +272,11 @@
     .api-keys-page .api-keys-layout__side {
         order: -1;
     }
-}
 
-@media (max-width: 980px) {
     .api-keys-page .api-keys-guide-grid {
         grid-template-columns: 1fr;
     }
-}
 
-@media (max-width: 760px) {
     .api-keys-page .api-keys-hero {
         flex-direction: column;
         align-items: stretch;
@@ -283,39 +287,41 @@
     }
 }
 
+/* Compact table layout on small screens — no class requirement */
 @media (max-width: 640px) {
-    .api-keys-page .api-keys-table.mobile-enhanced {
+    .api-keys-page .api-keys-table {
         min-width: 0;
     }
 
-    .api-keys-page .api-keys-table.mobile-enhanced .api-keys-key-cell .api-key-display {
+    .api-keys-page .api-keys-key-cell .api-key-display {
         display: flex;
         flex-direction: column;
         align-items: flex-start;
         width: 100%;
     }
 
-    .api-keys-page .api-keys-table.mobile-enhanced .api-keys-key-cell .api-key-value {
+    .api-keys-page .api-keys-key-cell .api-key-value {
         max-width: 100%;
         white-space: normal;
         word-break: break-all;
     }
 
-    .api-keys-page .api-keys-table.mobile-enhanced .api-keys-actions,
-    .api-keys-page .api-keys-table.mobile-enhanced td[data-label="Actions"] {
+    .api-keys-page .api-keys-actions,
+    .api-keys-page td[data-label="Actions"] {
         display: grid;
-        gap: 8px;
+        gap: 6px;
+        min-width: 0;
     }
 
-    .api-keys-page .api-keys-table.mobile-enhanced .api-keys-actions-form,
-    .api-keys-page .api-keys-table.mobile-enhanced td[data-label="Actions"] .api-keys-actions-form {
+    .api-keys-page .api-keys-actions-form,
+    .api-keys-page td[data-label="Actions"] .api-keys-actions-form {
         width: 100%;
         margin-right: 0;
         margin-bottom: 0;
     }
 
-    .api-keys-page .api-keys-table.mobile-enhanced .api-keys-actions-form .btn,
-    .api-keys-page .api-keys-table.mobile-enhanced td[data-label="Actions"] .btn {
+    .api-keys-page .api-keys-actions-form .btn,
+    .api-keys-page td[data-label="Actions"] .btn {
         width: 100%;
         justify-content: center;
     }
