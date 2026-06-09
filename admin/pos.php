@@ -361,7 +361,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 pos_fireKitchen($pdo, $orderId, $user['id'], $user['full_name']);
                 pos_logAudit($pdo, $orderId, $user['id'], $user['full_name'], 'parked_open_tab', json_encode(['lines' => $count, 'total' => $totalAmount, 'table' => $tableNumber, 'till' => 'pos.php']));
                 $pdo->commit();
-                if (function_exists('deleteCache')) deleteCache('stock_dashboard_metrics_v1');
+                if (function_exists('deleteCache')) deleteCache('stock_dashboard_metrics_v2');
                 $lastOrderId = $orderId;
                 $lastOrderRef = $reference;
                 $justParked = true;
@@ -448,11 +448,39 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $extras = pos_applyPaymentToOrder($pdo, $user, $orderId, $row['reference'], (float)$row['total_amount'], $paymentMethod, $_POST);
                 pos_logAudit($pdo, $orderId, $user['id'], $user['full_name'], 'paid_from_tab', json_encode(['method' => $paymentMethod, 'total' => $row['total_amount'], 'tendered' => $extras['tendered'], 'change' => $extras['change'], 'till' => 'pos.php']));
                 $pdo->commit();
-                if (function_exists('deleteCache')) deleteCache('stock_dashboard_metrics_v1');
+                if (function_exists('deleteCache')) deleteCache('stock_dashboard_metrics_v2');
                 $lastOrderId = $orderId;
                 $lastOrderRef = $row['reference'];
                 $changeMsg = ($paymentMethod === 'cash' && $extras['change'] > 0) ? ' Change: ' . $currency_symbol . ' ' . number_format($extras['change'], 2) . '.' : '';
                 $message = "Paid {$row['reference']} — {$currency_symbol} " . number_format((float)$row['total_amount'], 2) . " · " . str_replace('_', ' ', $paymentMethod) . "." . $changeMsg;
+
+                $isXhr = !empty($_SERVER['HTTP_X_REQUESTED_WITH']) && strtolower((string)$_SERVER['HTTP_X_REQUESTED_WITH']) === 'xmlhttprequest';
+                if ($isXhr) {
+                    // Fetch customer contact + items for the receipt modal
+                    $contactStmt = $pdo->prepare("SELECT customer_name, customer_email, customer_phone FROM stock_orders WHERE id = ?");
+                    $contactStmt->execute([$orderId]);
+                    $contact = $contactStmt->fetch(PDO::FETCH_ASSOC) ?: [];
+                    $itemsStmt2 = $pdo->prepare("SELECT item_name, quantity, unit_price FROM stock_order_items WHERE order_id = ? ORDER BY id");
+                    $itemsStmt2->execute([$orderId]);
+                    $receiptItems = $itemsStmt2->fetchAll(PDO::FETCH_ASSOC);
+                    header('Content-Type: application/json; charset=utf-8');
+                    echo json_encode([
+                        'ok'              => true,
+                        'order_id'        => $orderId,
+                        'reference'       => $row['reference'],
+                        'total'           => (float)$row['total_amount'],
+                        'payment_method'  => $paymentMethod,
+                        'tendered'        => $extras['tendered'],
+                        'change'          => $extras['change'],
+                        'customer_name'   => (string)($contact['customer_name'] ?? ''),
+                        'customer_email'  => (string)($contact['customer_email'] ?? ''),
+                        'customer_phone'  => (string)($contact['customer_phone'] ?? ''),
+                        'items'           => $receiptItems,
+                        'message'         => $message,
+                    ]);
+                    exit;
+                }
+
                 pos_redirectWithFlash([
                     'message' => $message,
                     'last_order_id' => $lastOrderId,
@@ -588,7 +616,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     'till' => 'pos.php'
                 ]));
                 $pdo->commit();
-                if (function_exists('deleteCache')) deleteCache('stock_dashboard_metrics_v1');
+                if (function_exists('deleteCache')) deleteCache('stock_dashboard_metrics_v2');
                 $lastOrderId = $orderId;
                 $lastOrderRef = $reference;
                 $changeMsg = ($paymentMethod === 'cash' && $extras['change'] > 0) ? ' Change: ' . $currency_symbol . ' ' . number_format($extras['change'], 2) . '.' : '';
@@ -603,9 +631,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         } catch (Throwable $e) {
             if ($pdo->inTransaction()) $pdo->rollBack();
             $error = $e->getMessage();
-            // Return JSON error for XHR park requests so the JS can show an inline message
+            // Return JSON error for XHR requests so the JS can show inline messages
             $isXhrErr = !empty($_SERVER['HTTP_X_REQUESTED_WITH']) && strtolower((string)$_SERVER['HTTP_X_REQUESTED_WITH']) === 'xmlhttprequest';
-            if ($isXhrErr && ($_POST['action'] ?? '') === 'park') {
+            if ($isXhrErr && in_array(($_POST['action'] ?? ''), ['park', 'pay_existing'], true)) {
                 header('Content-Type: application/json; charset=utf-8');
                 echo json_encode(['ok' => false, 'error' => $error]);
                 exit;
@@ -1399,12 +1427,12 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
                 <div class="actions">
                     <a class="a-print" href="stock-receipt.php?id=<?php echo (int)$lastOrderId; ?>&print=1&kot=<?php echo $justParked ? '1' : '0'; ?>" target="_blank" data-help="<?php echo $justParked ? 'Print KOT|Kitchen Order Ticket — the chef-side slip listing what to cook. Opens in a new tab so you can keep the till open.' : 'Print receipt|Customer-facing slip with totals, VAT and payment method. Opens in a new tab.'; ?>"><i class="fas fa-print"></i> <?php echo $justParked ? 'Print KOT' : 'Print'; ?></a>
                     <?php if (!$justParked): ?>
-                        <a class="a-receipt" href="stock-receipt.php?id=<?php echo (int)$lastOrderId; ?>" target="_blank" data-help="Email / WhatsApp|Send the receipt to the customer's email or WhatsApp number from the receipt page."><i class="fas fa-envelope"></i> Email / WhatsApp</a>
+                        <button class="a-receipt" onclick="openPosPageModal('stock-receipt.php?id=<?php echo (int)$lastOrderId; ?>','Send Receipt','fas fa-envelope')" data-help="Email / WhatsApp|Send the receipt to the customer's email or WhatsApp number."><i class="fas fa-envelope"></i> Email / WhatsApp</button>
                     <?php else: ?>
                         <button class="a-receipt" onclick="closeSuccess(); openTabsTray();" data-help="View open tabs|Jump to the list of unpaid tickets. From there you can settle this tab when the customer is ready."><i class="fas fa-list"></i> View Tabs</button>
                     <?php endif; ?>
                     <?php if (in_array($user['role'] ?? '', ['admin', 'manager'], true)): ?>
-                        <a class="a-receipt" href="order-lifecycle.php?id=<?php echo (int)$lastOrderId; ?>" target="_blank" data-help="Order lifecycle|See every event for this order — placement, kitchen actions, stock movements, payment — with timestamps and the user who did each." style="background:#3a3a40;"><i class="fas fa-stream"></i> Lifecycle</a>
+                        <button class="a-receipt" onclick="openPosPageModal('order-lifecycle.php?id=<?php echo (int)$lastOrderId; ?>','Timeline','fas fa-stream')" data-help="Order lifecycle|See every event for this order — placement, kitchen actions, stock movements, payment — with timestamps and the user who did each." style="background:#3a3a40;"><i class="fas fa-stream"></i> Lifecycle</button>
                     <?php endif; ?>
                     <button class="a-new" onclick="closeSuccess()" data-help="New order|Close this dialog and start ringing up the next order."><i class="fas fa-plus-circle"></i> New order</button>
                 </div>
@@ -1618,11 +1646,12 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
                                         data-help="View details|See all items, kitchen status, and the full audit trail for this tab.">
                                         <i class="fas fa-receipt"></i> Details
                                     </button>
-                                    <a href="stock-receipt.php?id=<?php echo (int)$t['id']; ?>&print=1&kot=1" target="_blank" rel="noopener"
+                                    <button type="button"
+                                        onclick="openPosPageModal('stock-receipt.php?id=<?php echo (int)$t['id']; ?>&print=1&kot=1','Print KOT','fas fa-print')"
                                         class="tc-btn tc-btn-kot"
                                         data-help="Print KOT|Reprint the kitchen ticket for this open tab.">
                                         <i class="fas fa-print"></i> KOT
-                                    </a>
+                                    </button>
                                     <?php if ($canCancelBeforePrep): ?>
                                         <button type="button"
                                             onclick="cancelOpenOrder(<?php echo (int)$t['id']; ?>, '<?php echo htmlspecialchars($t['reference'], ENT_QUOTES); ?>')"
@@ -1632,11 +1661,12 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
                                         </button>
                                     <?php endif; ?>
                                     <?php if (in_array($user['role'] ?? '', ['admin', 'manager'], true)): ?>
-                                        <a href="order-lifecycle.php?id=<?php echo (int)$t['id']; ?>" target="_blank" rel="noopener"
+                                        <button type="button"
+                                            onclick="openPosPageModal('order-lifecycle.php?id=<?php echo (int)$t['id']; ?>','Timeline','fas fa-stream')"
                                             class="tc-btn tc-btn-log"
                                             data-help="Lifecycle|See every event for this order with full timestamps and user info.">
                                             <i class="fas fa-stream"></i> Lifecycle
-                                        </a>
+                                        </button>
                                         <button type="button"
                                             onclick="adminVoidTab(<?php echo (int)$t['id']; ?>, '<?php echo htmlspecialchars($t['reference'], ENT_QUOTES); ?>')"
                                             class="tc-btn tc-btn-void"
@@ -1745,9 +1775,9 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
     <div class="overlay modal-overlay" data-modal id="payTabOverlay">
         <div class="modal modal-content">
             <div class="modal-head modal-header">
-                <h3><i class="fas fa-credit-card"></i> Settle tab</h3><button class="close modal-close" onclick="document.getElementById('payTabOverlay').classList.remove('show');">&times;</button>
+                <h3><i class="fas fa-credit-card"></i> Settle tab</h3><button class="close modal-close" onclick="closePayTabOverlay()">&times;</button>
             </div>
-            <form method="POST" id="payTabForm" data-offline-queue="1">
+            <form method="POST" id="payTabForm">
                 <input type="hidden" name="csrf_token" value="<?php echo $csrf_token; ?>">
                 <input type="hidden" name="action" value="pay_existing">
                 <input type="hidden" name="order_id" id="payTabOrderId" value="">
@@ -1784,10 +1814,67 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
                     </div>
                 </div>
                 <div class="modal-foot modal-footer">
-                    <button type="button" class="btn-cancel" onclick="document.getElementById('payTabOverlay').classList.remove('show');">Cancel</button>
-                    <button type="submit" class="btn-confirm">Take payment</button>
+                    <button type="button" class="btn-cancel" onclick="closePayTabOverlay()">Cancel</button>
+                    <button type="submit" id="payTabSubmitBtn" class="btn-confirm">Take payment</button>
                 </div>
             </form>
+        </div>
+    </div>
+
+    <!-- Post-payment receipt modal -->
+    <div class="overlay modal-overlay" id="receiptModal" style="z-index:100002;">
+        <div class="modal modal-content" style="width:520px;max-width:96vw;">
+            <div class="modal-head modal-header" style="background:linear-gradient(135deg,#1d6a3e,#22c55e);color:#fff;border-radius:12px 12px 0 0;">
+                <div style="display:flex;align-items:center;gap:12px;">
+                    <div style="width:40px;height:40px;background:rgba(255,255,255,.2);border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:18px;"><i class="fas fa-check"></i></div>
+                    <div>
+                        <h3 style="margin:0;color:#fff;font-size:16px;" id="rmTitle">Payment received</h3>
+                        <div style="font-size:12px;opacity:.85;" id="rmSubtitle">Tab settled</div>
+                    </div>
+                </div>
+                <button class="close modal-close" onclick="closeReceiptModal()" style="color:#fff;opacity:.8;">&times;</button>
+            </div>
+            <div class="modal-body" style="padding:20px;">
+                <!-- Payment summary strip -->
+                <div id="rmSummary" style="background:#f0fdf4;border:1px solid #bbf7d0;border-radius:10px;padding:14px 16px;margin-bottom:16px;display:grid;grid-template-columns:1fr 1fr;gap:8px;font-size:13px;">
+                </div>
+                <!-- Send receipt section -->
+                <div style="font-size:13px;font-weight:700;color:#374151;margin-bottom:10px;display:flex;align-items:center;gap:6px;">
+                    <i class="fas fa-paper-plane" style="color:#8B7355;"></i> Send receipt to guest
+                </div>
+                <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:14px;">
+                    <div>
+                        <label style="font-size:11px;font-weight:600;color:#6c757d;display:block;margin-bottom:4px;">Email</label>
+                        <input type="email" id="rmEmail" placeholder="guest@example.com" style="width:100%;box-sizing:border-box;min-height:36px;border:1px solid #d1d5db;border-radius:7px;padding:7px 10px;font-size:12px;margin-bottom:6px;">
+                        <button type="button" id="rmEmailBtn" onclick="sendPosReceipt('email')" style="width:100%;padding:8px;background:#3b82f6;color:#fff;border:none;border-radius:7px;font-size:12px;font-weight:600;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:6px;"><i class="fas fa-envelope"></i> Send email</button>
+                        <div id="rmEmailStatus" style="font-size:11px;margin-top:4px;min-height:14px;"></div>
+                    </div>
+                    <div>
+                        <label style="font-size:11px;font-weight:600;color:#6c757d;display:block;margin-bottom:4px;">WhatsApp</label>
+                        <input type="tel" id="rmPhone" placeholder="+265 999 123 456" style="width:100%;box-sizing:border-box;min-height:36px;border:1px solid #d1d5db;border-radius:7px;padding:7px 10px;font-size:12px;margin-bottom:6px;">
+                        <button type="button" id="rmWhatsAppBtn" onclick="sendPosReceipt('whatsapp')" style="width:100%;padding:8px;background:#1d6a3e;color:#fff;border:none;border-radius:7px;font-size:12px;font-weight:600;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:6px;"><i class="fab fa-whatsapp"></i> Send WhatsApp</button>
+                        <div id="rmWhatsAppStatus" style="font-size:11px;margin-top:4px;min-height:14px;"></div>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-foot modal-footer" style="gap:8px;">
+                <a id="rmPrintLink" href="#" target="_blank" rel="noopener" class="btn-cancel" style="display:flex;align-items:center;gap:6px;text-decoration:none;"><i class="fas fa-print"></i> Print receipt</a>
+                <button type="button" class="btn-confirm" onclick="closeReceiptModal()"><i class="fas fa-check"></i> Done</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Generic in-app iframe modal: KOT preview, timeline, receipt page, etc. -->
+    <div class="overlay modal-overlay" id="posPageModal" style="z-index:100003;padding:8px;">
+        <div class="modal modal-content" style="width:860px;max-width:98vw;height:90vh;display:flex;flex-direction:column;overflow:hidden;">
+            <div class="modal-head modal-header" style="flex-shrink:0;display:flex;align-items:center;justify-content:space-between;gap:10px;">
+                <h3 id="posPageModalTitle" style="margin:0;font-size:15px;display:flex;align-items:center;gap:8px;"><i id="posPageModalIcon" class="fas fa-file-alt"></i> <span id="posPageModalTitleText">Loading…</span></h3>
+                <div style="display:flex;align-items:center;gap:8px;">
+                    <button type="button" id="posPageModalPrintBtn" onclick="document.getElementById('posPageModalFrame').contentWindow.print()" style="background:#f3f4f6;border:none;border-radius:6px;padding:7px 12px;font-size:12px;font-weight:600;cursor:pointer;display:flex;align-items:center;gap:5px;color:#374151;"><i class="fas fa-print"></i> Print</button>
+                    <button class="close modal-close" onclick="closePosPageModal()">&times;</button>
+                </div>
+            </div>
+            <iframe id="posPageModalFrame" src="about:blank" style="flex:1;border:none;background:#f9fafb;" title="Page viewer"></iframe>
         </div>
     </div>
 
@@ -5010,7 +5097,7 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
                     byOther ? `<span class="tc-meta-pill"><i class="fas fa-user-tie"></i> ${escHtml(t.opened_by || 'staff')}</span>` : `<span class="tc-meta-pill"><i class="fas fa-user-check"></i> You</span>`
                 ].filter(Boolean).join('');
                 const managerTools = posCanManageTabs ? `
-                    <a href="order-lifecycle.php?id=${orderId}" target="_blank" rel="noopener" class="tc-btn tc-btn-log" data-help="Lifecycle|See every event for this order with full timestamps and user info."><i class="fas fa-stream"></i> Lifecycle</a>
+                    <button type="button" onclick="openPosPageModal('order-lifecycle.php?id=${orderId}','Timeline','fas fa-stream')" class="tc-btn tc-btn-log" data-help="Lifecycle|See every event for this order with full timestamps and user info."><i class="fas fa-stream"></i> Lifecycle</button>
                     <button type="button" onclick="adminVoidTab(${orderId}, ${actionRef})" class="tc-btn tc-btn-void" data-help="Void order|Admin/manager only. Cancels the order, restores stock, clears station boards."><i class="fas fa-ban"></i> Void</button>` : '';
                 return `<article class="tab-card${isStale ? ' stale' : ''}" data-order-id="${orderId}" data-is-stale="${isStale ? '1' : '0'}">
                     <div class="tc-row1">
@@ -5033,7 +5120,7 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
                     <div class="tc-actions">
                         <button type="button" onclick="openPayForTab(${orderId}, ${parseFloat(t.total_amount || 0) || 0}, ${actionRef}, ${canSettle ? 'true' : 'false'})" class="tc-btn tc-btn-settle${canSettle ? '' : ' disabled'}" data-help="${canSettle ? 'Settle tab|Close this tab — take payment and mark the order as paid.' : 'Wait for service|All items must be served before the tab can be settled.'}" ${canSettle ? '' : 'disabled'}><i class="fas fa-credit-card"></i> ${canSettle ? 'Settle' : 'Wait to settle'}</button>
                         <button type="button" onclick="openTabDetail(${orderId})" class="tc-btn tc-btn-detail" data-help="View details|See all items, kitchen status, and the full audit trail for this tab."><i class="fas fa-receipt"></i> Details</button>
-                        <a href="stock-receipt.php?id=${orderId}&print=1&kot=1" target="_blank" rel="noopener" class="tc-btn tc-btn-kot" data-help="Print KOT|Reprint the kitchen ticket for this open tab."><i class="fas fa-print"></i> KOT</a>
+                        <button type="button" onclick="openPosPageModal('stock-receipt.php?id=${orderId}&print=1&kot=1','Print KOT','fas fa-print')" class="tc-btn tc-btn-kot" data-help="Print KOT|Reprint the kitchen ticket for this open tab."><i class="fas fa-print"></i> KOT</button>
                         ${canCancelBeforePrep ? `<button type="button" onclick="cancelOpenOrder(${orderId}, ${actionRef})" class="tc-btn tc-btn-cancel" data-help="Cancel before prep|Cancels this order only while all items are still pending. Nothing has been cooked yet."><i class="fas fa-circle-xmark"></i> Cancel</button>` : ''}
                         ${managerTools}
                     </div>
@@ -5659,12 +5746,12 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
 
             const detailActions = [];
             if (canSettle) {
-                detailActions.push(`<button type="button" class="tc-btn tc-btn-settle tdi-action" onclick="openPayForTab(${parseInt(o.id, 10) || 0}, ${grossTotal}, ${JSON.stringify(String(o.reference || 'TAB'))}, true)"><i class="fas fa-credit-card"></i> Settle tab</button>`);
+                detailActions.push(`<button type="button" class="tc-btn tc-btn-settle tdi-action" onclick="settleTabFromDetail(${parseInt(o.id, 10) || 0}, ${grossTotal}, ${JSON.stringify(String(o.reference || 'TAB'))})"><i class="fas fa-credit-card"></i> Settle tab</button>`);
             } else if (settlementBlocked) {
                 detailActions.push(`<button type="button" class="tc-btn tc-btn-settle tdi-action disabled" disabled data-help="Wait for service|All items must be served before the tab can be settled."><i class="fas fa-clock"></i> Wait to settle</button>`);
             }
-            detailActions.push(`<a href="stock-receipt.php?id=${parseInt(o.id, 10) || 0}&print=1&kot=1" target="_blank" rel="noopener" class="tc-btn tc-btn-kot tdi-action"><i class="fas fa-print"></i> Print KOT</a>`);
-            detailActions.push(`<a href="order-lifecycle.php?id=${parseInt(o.id, 10) || 0}" target="_blank" rel="noopener" class="tc-btn tc-btn-log tdi-action"><i class="fas fa-stream"></i> Timeline</a>`);
+            detailActions.push(`<button type="button" class="tc-btn tc-btn-kot tdi-action" onclick="openPosPageModal('stock-receipt.php?id=${parseInt(o.id, 10) || 0}&print=1&kot=1','Print KOT','fas fa-print')"><i class="fas fa-print"></i> Print KOT</button>`);
+            detailActions.push(`<button type="button" class="tc-btn tc-btn-log tdi-action" onclick="openPosPageModal('order-lifecycle.php?id=${parseInt(o.id, 10) || 0}','Timeline','fas fa-stream')"><i class="fas fa-stream"></i> Timeline</button>`);
             if (canCancelBeforePrep) {
                 detailActions.push(`<button type="button" class="tc-btn tc-btn-cancel tdi-action" onclick="cancelOpenOrder(${parseInt(o.id, 10) || 0}, ${JSON.stringify(String(o.reference || 'TAB'))})"><i class="fas fa-circle-xmark"></i> Cancel</button>`);
             }
@@ -6035,6 +6122,18 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
                 closeTabDetailOverlay();
                 return;
             }
+            if (top.id === 'payTabOverlay') {
+                closePayTabOverlay();
+                return;
+            }
+            if (top.id === 'receiptModal') {
+                closeReceiptModal();
+                return;
+            }
+            if (top.id === 'posPageModal') {
+                closePosPageModal();
+                return;
+            }
             top.classList.remove('show');
         });
         // 2. Click on the dimmed backdrop (not on the modal body) closes the overlay
@@ -6053,15 +6152,37 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
                     closeTabDetailOverlay();
                     return;
                 }
+                if (ov.id === 'payTabOverlay') {
+                    closePayTabOverlay();
+                    return;
+                }
+                if (ov.id === 'receiptModal') {
+                    closeReceiptModal();
+                    return;
+                }
+                if (ov.id === 'posPageModal') {
+                    closePosPageModal();
+                    return;
+                }
                 ov.classList.remove('show');
             });
         });
+
+        function closePayTabOverlay() {
+            const ov = document.getElementById('payTabOverlay');
+            if (!ov) return;
+            ov.classList.remove('show');
+            ov.style.zIndex = '';
+        }
 
         function openPayForTab(orderId, total, ref, canSettle = true) {
             if (!canSettle) {
                 posToastReady('Wait until all items are served before settling the tab.', true);
                 return;
             }
+            // Close sibling overlays that would sit above payTabOverlay
+            closeTabsTray();
+
             document.getElementById('payTabOrderId').value = orderId;
             document.getElementById('payTabRef').textContent = ref;
             document.getElementById('payTabTotal').textContent = currencySymbol + ' ' + fmtMoney(total);
@@ -6072,8 +6193,183 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
                 if (e) e.style.display = 'none';
             });
             document.querySelectorAll('#payTabOverlay .pay-method-grid button').forEach(b => b.classList.remove('active'));
-            closeTabsTray();
-            document.getElementById('payTabOverlay').classList.add('show');
+
+            const ov = document.getElementById('payTabOverlay');
+            ov.style.zIndex = '100001';
+            ov.classList.add('show');
+        }
+
+        // AJAX payment submission + receipt modal
+        let _receiptOrderId = 0;
+
+        document.getElementById('payTabForm').addEventListener('submit', async function(e) {
+            e.preventDefault();
+            const method = document.getElementById('payTabMethod').value;
+            if (!method) {
+                posToastReady('Pick a payment method first.', true);
+                return;
+            }
+            const btn = document.getElementById('payTabSubmitBtn');
+            const origTxt = btn.innerHTML;
+            btn.disabled = true;
+            btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Processing…';
+
+            const fd = new FormData(this);
+            try {
+                const r = await fetch('pos.php', {
+                    method: 'POST',
+                    headers: { 'X-Requested-With': 'XMLHttpRequest' },
+                    body: fd,
+                    credentials: 'same-origin',
+                });
+                const j = await r.json();
+                if (!j.ok) {
+                    posToastReady(j.error || 'Payment failed.', true);
+                    btn.disabled = false;
+                    btn.innerHTML = origTxt;
+                    return;
+                }
+                closePayTabOverlay();
+                showReceiptModal(j);
+                // Refresh stats + tab badge in background
+                setTimeout(() => { refreshShiftStats(); refreshOpenTabs(false); }, 400);
+            } catch (err) {
+                posToastReady('Network error — please retry.', true);
+                btn.disabled = false;
+                btn.innerHTML = origTxt;
+            }
+        });
+
+        function showReceiptModal(data) {
+            _receiptOrderId = parseInt(data.order_id, 10) || 0;
+            const sym = currencySymbol;
+            const methodLabel = {
+                cash: 'Cash',
+                mobile_money: 'Mobile Money',
+                card_manual: 'Card (manual)',
+            }[data.payment_method] || data.payment_method;
+
+            document.getElementById('rmTitle').textContent = 'Payment received — ' + (data.reference || '');
+            document.getElementById('rmSubtitle').textContent = methodLabel + ' · ' + sym + ' ' + fmtMoney(data.total);
+
+            let summaryHtml = `
+                <div><span style="color:#6c757d;font-size:11px;font-weight:600;text-transform:uppercase;">Total</span><div style="font-size:20px;font-weight:700;color:#166534;">${sym} ${fmtMoney(data.total)}</div></div>
+                <div><span style="color:#6c757d;font-size:11px;font-weight:600;text-transform:uppercase;">Method</span><div style="font-weight:600;color:#374151;">${escHtml(methodLabel)}</div></div>`;
+            if (data.payment_method === 'cash' && data.change > 0) {
+                summaryHtml += `<div><span style="color:#6c757d;font-size:11px;font-weight:600;text-transform:uppercase;">Tendered</span><div style="font-weight:600;">${sym} ${fmtMoney(data.tendered)}</div></div>
+                <div><span style="color:#6c757d;font-size:11px;font-weight:600;text-transform:uppercase;">Change</span><div style="font-size:16px;font-weight:700;color:#1d4ed8;">${sym} ${fmtMoney(data.change)}</div></div>`;
+            }
+            if (data.customer_name) {
+                summaryHtml += `<div style="grid-column:1/-1"><span style="color:#6c757d;font-size:11px;font-weight:600;text-transform:uppercase;">Guest</span><div style="font-weight:600;">${escHtml(data.customer_name)}</div></div>`;
+            }
+            document.getElementById('rmSummary').innerHTML = summaryHtml;
+
+            // Pre-fill contact fields
+            const emailEl = document.getElementById('rmEmail');
+            const phoneEl = document.getElementById('rmPhone');
+            emailEl.value = data.customer_email || '';
+            phoneEl.value = data.customer_phone || '';
+            document.getElementById('rmEmailStatus').textContent = '';
+            document.getElementById('rmWhatsAppStatus').textContent = '';
+
+            // Reset send buttons
+            ['rmEmailBtn', 'rmWhatsAppBtn'].forEach(id => {
+                const b = document.getElementById(id);
+                if (b) { b.disabled = false; b.style.opacity = '1'; }
+            });
+
+            // Print link
+            const pl = document.getElementById('rmPrintLink');
+            if (pl) pl.href = 'stock-receipt.php?id=' + _receiptOrderId + '&print=1';
+
+            document.getElementById('receiptModal').classList.add('show');
+        }
+
+        function closeReceiptModal() {
+            document.getElementById('receiptModal').classList.remove('show');
+        }
+
+        function openPosPageModal(url, title, iconClass) {
+            const modal = document.getElementById('posPageModal');
+            const frame = document.getElementById('posPageModalFrame');
+            const titleEl = document.getElementById('posPageModalTitleText');
+            const iconEl = document.getElementById('posPageModalIcon');
+            if (!modal || !frame) return;
+            titleEl.textContent = title || 'Loading…';
+            iconEl.className = iconClass || 'fas fa-file-alt';
+            frame.src = url;
+            // Close any lower-level overlays so this one is clearly on top
+            closeTabDetailOverlay();
+            modal.classList.add('show');
+        }
+
+        function closePosPageModal() {
+            const modal = document.getElementById('posPageModal');
+            const frame = document.getElementById('posPageModalFrame');
+            if (!modal) return;
+            modal.classList.remove('show');
+            if (frame) frame.src = 'about:blank';
+        }
+
+        function settleTabFromDetail(orderId, total, ref) {
+            // Close the detail overlay first, then open the pay modal in the next tick
+            // so the DOM transition completes before opening the next overlay.
+            closeTabDetailOverlay();
+            requestAnimationFrame(() => {
+                openPayForTab(orderId, total, ref, true);
+            });
+        }
+
+        async function sendPosReceipt(channel) {
+            if (_receiptOrderId <= 0) return;
+            const isEmail = channel === 'email';
+            const recipient = (isEmail
+                ? document.getElementById('rmEmail').value
+                : document.getElementById('rmPhone').value
+            ).trim();
+            if (!recipient) {
+                posToastReady(isEmail ? 'Enter an email address.' : 'Enter a phone number.', true);
+                return;
+            }
+
+            const btnId = isEmail ? 'rmEmailBtn' : 'rmWhatsAppBtn';
+            const statusId = isEmail ? 'rmEmailStatus' : 'rmWhatsAppStatus';
+            const btn = document.getElementById(btnId);
+            const statusEl = document.getElementById(statusId);
+            btn.disabled = true;
+            btn.style.opacity = '0.6';
+            statusEl.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Sending…';
+            statusEl.style.color = '#6c757d';
+
+            const fd = new FormData();
+            fd.append('csrf_token', posCsrfToken);
+            fd.append('action', isEmail ? 'email_receipt' : 'whatsapp_receipt');
+            fd.append('order_id', String(_receiptOrderId));
+            fd.append('recipient', recipient);
+
+            try {
+                const r = await fetch('stock-receipt.php?id=' + _receiptOrderId, {
+                    method: 'POST',
+                    headers: { 'X-Requested-With': 'XMLHttpRequest' },
+                    body: fd,
+                    credentials: 'same-origin',
+                });
+                const j = await r.json();
+                if (j.ok) {
+                    statusEl.innerHTML = '<i class="fas fa-check-circle" style="color:#16a34a;"></i> ' + escHtml(j.message || 'Sent');
+                    statusEl.style.color = '#16a34a';
+                } else {
+                    statusEl.innerHTML = '<i class="fas fa-times-circle" style="color:#dc2626;"></i> ' + escHtml(j.error || 'Failed');
+                    statusEl.style.color = '#dc2626';
+                    btn.disabled = false;
+                    btn.style.opacity = '1';
+                }
+            } catch (err) {
+                statusEl.innerHTML = '<i class="fas fa-times-circle" style="color:#dc2626;"></i> Network error';
+                statusEl.style.color = '#dc2626';
+                btn.disabled = false;
+                btn.style.opacity = '1';
+            }
         }
 
         function setMethodTab(btn) {

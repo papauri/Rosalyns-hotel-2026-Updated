@@ -317,6 +317,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
 }
 
+// XHR path: return JSON so POS receipt modal can handle responses inline
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && !empty($_SERVER['HTTP_X_REQUESTED_WITH']) && strtolower((string)$_SERVER['HTTP_X_REQUESTED_WITH']) === 'xmlhttprequest') {
+    header('Content-Type: application/json; charset=utf-8');
+    if (!empty($error)) {
+        echo json_encode(['ok' => false, 'error' => $error]);
+    } else {
+        echo json_encode(['ok' => true, 'message' => $message ?? 'Done']);
+    }
+    exit;
+}
+
 /* ---------- Load order for view ---------- */
 $stmt = $pdo->prepare("
     SELECT so.*, au.full_name AS cashier_name, b.booking_reference
