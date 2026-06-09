@@ -5,6 +5,7 @@ require_once 'admin-init.php';
 
 require_once '../includes/alert.php';
 require_once 'includes/finance-schema.php';
+require_once __DIR__ . '/includes/booking-lifecycle.php';
 $message = '';
 $error = '';
 $csrf_token = $csrf_token ?? generateCsrfToken();
@@ -28,6 +29,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
 
             if (!$payment) {
                 throw new Exception('Payment not found. It may have been deleted or does not exist.');
+            }
+
+            // Lifecycle guard
+            if ($payment['booking_type'] === 'room') {
+                $lcStmt = $pdo->prepare("SELECT status, amount_paid, amount_due, total_amount FROM bookings WHERE id = ?");
+                $lcStmt->execute([$payment['booking_id']]);
+                $lcRow = $lcStmt->fetch(PDO::FETCH_ASSOC);
+                if ($lcRow) {
+                    $lcCheck = bookingAllowsAction($lcRow, 'send_invoice');
+                    if (!$lcCheck['allowed']) {
+                        throw new Exception($lcCheck['reason']);
+                    }
+                }
             }
 
             // Resend invoice email based on booking type
@@ -57,6 +71,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
                 throw new Exception('Payment not found. It may have been deleted or does not exist.');
             }
 
+            // Lifecycle guard for payment reminders
+            if ($payment['booking_type'] === 'room') {
+                $lcStmt = $pdo->prepare("SELECT status, amount_paid, amount_due, total_amount FROM bookings WHERE id = ?");
+                $lcStmt->execute([$payment['booking_id']]);
+                $lcRow = $lcStmt->fetch(PDO::FETCH_ASSOC);
+                if ($lcRow) {
+                    $lcCheck = bookingAllowsAction($lcRow, 'send_invoice');
+                    if (!$lcCheck['allowed']) {
+                        throw new Exception($lcCheck['reason']);
+                    }
+                }
+            }
+
             require_once '../config/invoice.php';
 
             if ($payment['booking_type'] === 'room') {
@@ -81,6 +108,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
 
             if (!$payment) {
                 throw new Exception('Payment not found. It may have been deleted or does not exist.');
+            }
+
+            // Lifecycle guard — allow regenerate on checked-out (final invoice), block on tentative/cancelled/no-show
+            if ($payment['booking_type'] === 'room') {
+                $lcStmt = $pdo->prepare("SELECT status, amount_paid, amount_due, total_amount FROM bookings WHERE id = ?");
+                $lcStmt->execute([$payment['booking_id']]);
+                $lcRow = $lcStmt->fetch(PDO::FETCH_ASSOC);
+                if ($lcRow) {
+                    $lcCheck = bookingAllowsAction($lcRow, 'generate_invoice');
+                    if (!$lcCheck['allowed']) {
+                        throw new Exception($lcCheck['reason']);
+                    }
+                }
             }
 
             // Regenerate invoice based on booking type
@@ -121,6 +161,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
 
             if (!$payment) {
                 throw new Exception('Payment not found. It may have been deleted or does not exist.');
+            }
+
+            // Lifecycle guard
+            if ($payment['booking_type'] === 'room') {
+                $lcStmt = $pdo->prepare("SELECT status, amount_paid, amount_due, total_amount FROM bookings WHERE id = ?");
+                $lcStmt->execute([$payment['booking_id']]);
+                $lcRow = $lcStmt->fetch(PDO::FETCH_ASSOC);
+                if ($lcRow) {
+                    $lcCheck = bookingAllowsAction($lcRow, 'generate_credit_note');
+                    if (!$lcCheck['allowed']) {
+                        throw new Exception($lcCheck['reason']);
+                    }
+                }
             }
 
             if ($payment['payment_type'] !== 'refund') {

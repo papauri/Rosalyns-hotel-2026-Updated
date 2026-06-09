@@ -32,6 +32,7 @@ if (!$booking_id) {
 // Include timeline functions
 require_once '../includes/booking-timeline.php';
 require_once '../includes/finance-sequences.php';
+require_once __DIR__ . '/includes/booking-lifecycle.php';
 finance_ensure_sequence_tables($pdo);
 
 // Get folio charges for this booking
@@ -42,6 +43,15 @@ $folio_summary = getBookingFolioSummary($booking_id);
 $food_menu_items = getMenuItemsForFolio('food');
 $drink_menu_items = getMenuItemsForFolio('drink');
 $isAjax = !empty($_SERVER['HTTP_X_REQUESTED_WITH']) && strtolower($_SERVER['HTTP_X_REQUESTED_WITH']) === 'xmlhttprequest';
+
+// Lightweight early booking fetch so action handlers can run lifecycle guards
+// before the full $booking array is populated later.
+$_early_booking = null;
+try {
+    $_eb = $pdo->prepare("SELECT id, status, amount_paid, amount_due, total_amount FROM bookings WHERE id = ?");
+    $_eb->execute([$booking_id]);
+    $_early_booking = $_eb->fetch(PDO::FETCH_ASSOC) ?: null;
+} catch (PDOException $e) { /* will fail gracefully below */ }
 
 // CSRF guard - covers all 5 state-changing POST handlers on this page
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
@@ -60,6 +70,22 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 // Handle charge actions (POST-only)
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['charge_action'])) {
     $action = $_POST['charge_action'];
+
+    // Lifecycle guard — block charge mutations on terminal / closed bookings
+    $lcAction = ($action === 'void_charge') ? 'void_charge' : 'add_charge';
+    if ($_early_booking) {
+        $lcCheck = bookingAllowsAction($_early_booking, $lcAction);
+        if (!$lcCheck['allowed']) {
+            if ($isAjax) {
+                header('Content-Type: application/json; charset=utf-8');
+                echo json_encode(['success' => false, 'message' => $lcCheck['reason']]);
+                exit;
+            }
+            $_SESSION['error_message'] = $lcCheck['reason'];
+            header('Location: booking-details.php?id=' . $booking_id . '#folio');
+            exit;
+        }
+    }
 
     try {
         switch ($action) {
@@ -144,6 +170,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['charge_action'])) {
 // Handle invoice generation
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['invoice_action'])) {
     $invoice_action = $_POST['invoice_action'];
+
+    // Lifecycle guard — block invoice actions on tentative / terminal bookings
+    $lcInvoiceAction = in_array($invoice_action, ['send_invoice', 'send_invoice_whatsapp'], true)
+        ? 'send_invoice' : 'generate_invoice';
+    if ($_early_booking) {
+        $lcCheck = bookingAllowsAction($_early_booking, $lcInvoiceAction);
+        if (!$lcCheck['allowed']) {
+            $_SESSION['error_message'] = $lcCheck['reason'];
+            header('Location: booking-details.php?id=' . $booking_id . '#invoices');
+            exit;
+        }
+    }
 
     try {
         switch ($invoice_action) {
@@ -671,6 +709,9 @@ try {
     exit;
 }
 
+// Build permission map used throughout the template
+$bPerms = getBookingPermissions($booking);
+
 // Handle note submission
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['add_note'])) {
     $note_text = trim($_POST['note_text'] ?? '');
@@ -986,6 +1027,33 @@ unset($_SESSION['success_message'], $_SESSION['error_message']);
 
     <div class="booking-details-page">
 
+        <?php
+        // Status banner for terminal and restricted states
+        $statusBanner = null;
+        switch ($booking['status']) {
+            case 'cancelled':
+                $statusBanner = ['class' => 'booking-status-banner--cancelled', 'icon' => 'fa-ban', 'text' => 'This booking is <strong>cancelled</strong>. Invoice sending, folio changes, and new payments are locked.'];
+                break;
+            case 'no-show':
+                $statusBanner = ['class' => 'booking-status-banner--noshow', 'icon' => 'fa-user-slash', 'text' => 'This booking is marked as <strong>no-show</strong>. Folio changes and new payments are locked.'];
+                break;
+            case 'tentative':
+                $statusBanner = ['class' => 'booking-status-banner--tentative', 'icon' => 'fa-hourglass-half', 'text' => '<strong>Tentative booking</strong> — invoices cannot be sent until this booking is confirmed.'];
+                break;
+            case 'checked-out':
+                if ($folio_balance_due > 0.009) {
+                    $statusBanner = ['class' => 'booking-status-banner--balance', 'icon' => 'fa-exclamation-triangle', 'text' => 'Guest has <strong>checked out</strong> with an outstanding balance of <strong>' . htmlspecialchars($currency_symbol) . number_format($folio_balance_due, 2) . '</strong>. A payment can still be recorded.'];
+                }
+                break;
+        }
+        if ($statusBanner):
+        ?>
+            <div class="booking-status-banner <?php echo $statusBanner['class']; ?>">
+                <i class="fas <?php echo $statusBanner['icon']; ?>"></i>
+                <span><?php echo $statusBanner['text']; ?></span>
+            </div>
+        <?php endif; ?>
+
         <!-- Hero Section -->
         <div class="booking-hero">
             <div class="booking-hero-content">
@@ -1269,12 +1337,19 @@ unset($_SESSION['success_message'], $_SESSION['error_message']);
                 <div class="info-card-body">
                     <div class="folio-header">
                         <div class="folio-actions">
-                            <button class="folio-btn primary" onclick="openAddChargeModal()">
-                                <i class="fas fa-plus"></i> Add Charge
-                            </button>
-                            <button class="folio-btn secondary" onclick="openMenuModal()">
-                                <i class="fas fa-utensils"></i> Add Menu Item
-                            </button>
+                            <?php if ($bPerms['can_add_charge']): ?>
+                                <button class="folio-btn primary" onclick="openAddChargeModal()">
+                                    <i class="fas fa-plus"></i> Add Charge
+                                </button>
+                                <button class="folio-btn secondary" onclick="openMenuModal()">
+                                    <i class="fas fa-utensils"></i> Add Menu Item
+                                </button>
+                            <?php else: ?>
+                                <span class="folio-locked-msg">
+                                    <i class="fas fa-lock"></i>
+                                    <?php echo htmlspecialchars($bPerms['can_add_charge_reason']); ?>
+                                </span>
+                            <?php endif; ?>
                         </div>
                     </div>
 
@@ -1326,10 +1401,14 @@ unset($_SESSION['success_message'], $_SESSION['error_message']);
                                         <td style="text-align: right;"><?php echo $charge['vat_rate'] > 0 ? number_format($charge['vat_amount'], 2) : '-'; ?></td>
                                         <td style="text-align: right; font-weight: 600;"><?php echo $currency_symbol; ?><?php echo number_format($charge['line_total'], 2); ?></td>
                                         <td>
-                                            <?php if (!$charge['voided']): ?>
+                                            <?php if (!$charge['voided'] && $bPerms['can_void_charge']): ?>
                                                 <button class="void-charge-btn" onclick="openVoidChargeModal(<?php echo $charge['id']; ?>, '<?php echo htmlspecialchars($charge['description'], ENT_QUOTES); ?>')">
                                                     <i class="fas fa-ban"></i> Void
                                                 </button>
+                                            <?php elseif (!$charge['voided']): ?>
+                                                <span class="void-charge-btn void-charge-btn--locked" title="<?php echo htmlspecialchars($bPerms['can_void_charge_reason']); ?>">
+                                                    <i class="fas fa-lock"></i> Locked
+                                                </span>
                                             <?php endif; ?>
                                         </td>
                                     </tr>
@@ -1372,16 +1451,32 @@ unset($_SESSION['success_message'], $_SESSION['error_message']);
                                 <div class="folio-summary-label">Total Due</div>
                                 <div class="folio-summary-value total"><?php echo $currency_symbol; ?><?php echo number_format($folio_total_amount, 2); ?></div>
                             </div>
-                            <?php if ($folio_balance_due > 0): ?>
-                                <div class="folio-summary-item">
-                                    <div class="folio-summary-label">Balance Due</div>
-                                    <div class="folio-summary-value balance"><?php echo $currency_symbol; ?><?php echo number_format($folio_balance_due, 2); ?></div>
-                                </div>
-                            <?php endif; ?>
                             <?php if ($folio_amount_paid > 0): ?>
                                 <div class="folio-summary-item">
                                     <div class="folio-summary-label">Amount Paid</div>
                                     <div class="folio-summary-value paid"><?php echo $currency_symbol; ?><?php echo number_format($folio_amount_paid, 2); ?></div>
+                                </div>
+                            <?php endif; ?>
+                            <?php if ($folio_balance_due > 0.009): ?>
+                                <div class="folio-summary-item folio-summary-item--alert">
+                                    <div class="folio-summary-label"><i class="fas fa-exclamation-triangle" style="color:#d97706;"></i> Balance Due</div>
+                                    <div class="folio-summary-value balance"><?php echo $currency_symbol; ?><?php echo number_format($folio_balance_due, 2); ?></div>
+                                </div>
+                            <?php elseif ($folio_amount_paid > $folio_total_amount + 0.009): ?>
+                                <?php $overpaid_amount = $folio_amount_paid - $folio_total_amount; ?>
+                                <div class="folio-summary-item folio-summary-item--overpay">
+                                    <div class="folio-summary-label"><i class="fas fa-coins" style="color:#0369a1;"></i> Overpayment</div>
+                                    <div class="folio-summary-value" style="color:#0369a1;"><?php echo $currency_symbol; ?><?php echo number_format($overpaid_amount, 2); ?></div>
+                                </div>
+                                <p class="folio-overpay-hint">
+                                    <i class="fas fa-info-circle"></i>
+                                    Guest has overpaid by <?php echo $currency_symbol . number_format($overpaid_amount, 2); ?>.
+                                    <a href="credit-notes.php?booking_id=<?php echo $booking_id; ?>">Issue a credit note</a> to apply the excess.
+                                </p>
+                            <?php elseif ($folio_amount_paid >= $folio_total_amount - 0.009 && $folio_total_amount > 0): ?>
+                                <div class="folio-summary-item folio-summary-item--settled">
+                                    <div class="folio-summary-label"><i class="fas fa-circle-check" style="color:#16a34a;"></i> Fully Settled</div>
+                                    <div class="folio-summary-value" style="color:#16a34a;">Paid in full</div>
                                 </div>
                             <?php endif; ?>
                         </div>
@@ -1404,25 +1499,35 @@ unset($_SESSION['success_message'], $_SESSION['error_message']);
                 <div class="info-card-body">
                     <div class="folio-header">
                         <div class="folio-actions">
-                            <form method="POST" style="display: inline;" data-admin-confirm="Generate an invoice PDF for this booking without sending it?" data-admin-confirm-title="Generate invoice" data-admin-confirm-ok="Generate" data-admin-confirm-icon="fa-file-pdf" data-admin-submit-text="Generating...">
-                                <input type="hidden" name="invoice_action" value="generate_invoice">
-                                <button type="submit" class="folio-btn primary">
-                                    <i class="fas fa-file-pdf"></i> Generate Invoice
-                                </button>
-                            </form>
-                            <form method="POST" style="display: inline;" data-admin-confirm="Send this booking invoice to the guest by email?" data-admin-confirm-title="Send invoice email" data-admin-confirm-ok="Send email" data-admin-confirm-icon="fa-envelope-circle-check" data-admin-submit-text="Sending invoice...">
-                                <input type="hidden" name="invoice_action" value="send_invoice">
-                                <button type="submit" class="folio-btn success">
-                                    <i class="fas fa-envelope-circle-check"></i> Send Invoice
-                                </button>
-                            </form>
-                            <?php if (function_exists('isWhatsAppEnabled') && isWhatsAppEnabled()): ?>
-                                <form method="POST" style="display: inline;" data-admin-confirm="Send the invoice link to the guest on WhatsApp? This can use the configured WhatsApp provider." data-admin-confirm-title="Send invoice via WhatsApp" data-admin-confirm-ok="Send WhatsApp" data-admin-confirm-icon="fa-whatsapp" data-admin-submit-text="Sending WhatsApp...">
-                                    <input type="hidden" name="invoice_action" value="send_invoice_whatsapp">
-                                    <button type="submit" class="folio-btn" style="background:#25D366;color:#fff;border-color:#25D366;">
-                                        <i class="fab fa-whatsapp"></i> Send via WhatsApp
+                            <?php if (!$bPerms['can_generate_invoice'] || !$bPerms['can_send_invoice']): ?>
+                                <div class="folio-locked-msg">
+                                    <i class="fas fa-lock"></i>
+                                    <?php echo htmlspecialchars($bPerms['can_generate_invoice_reason'] ?: $bPerms['can_send_invoice_reason']); ?>
+                                </div>
+                            <?php else: ?>
+                                <form method="POST" style="display: inline;" data-admin-confirm="Generate an invoice PDF for this booking without sending it?" data-admin-confirm-title="Generate invoice" data-admin-confirm-ok="Generate" data-admin-confirm-icon="fa-file-pdf" data-admin-submit-text="Generating...">
+                                    <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf_token); ?>">
+                                    <input type="hidden" name="invoice_action" value="generate_invoice">
+                                    <button type="submit" class="folio-btn primary">
+                                        <i class="fas fa-file-pdf"></i> Generate Invoice
                                     </button>
                                 </form>
+                                <form method="POST" style="display: inline;" data-admin-confirm="Send this booking invoice to the guest by email?" data-admin-confirm-title="Send invoice email" data-admin-confirm-ok="Send email" data-admin-confirm-icon="fa-envelope-circle-check" data-admin-submit-text="Sending invoice...">
+                                    <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf_token); ?>">
+                                    <input type="hidden" name="invoice_action" value="send_invoice">
+                                    <button type="submit" class="folio-btn success">
+                                        <i class="fas fa-envelope-circle-check"></i> Send Invoice
+                                    </button>
+                                </form>
+                                <?php if (function_exists('isWhatsAppEnabled') && isWhatsAppEnabled()): ?>
+                                    <form method="POST" style="display: inline;" data-admin-confirm="Send the invoice link to the guest on WhatsApp? This can use the configured WhatsApp provider." data-admin-confirm-title="Send invoice via WhatsApp" data-admin-confirm-ok="Send WhatsApp" data-admin-confirm-icon="fa-whatsapp" data-admin-submit-text="Sending WhatsApp...">
+                                        <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf_token); ?>">
+                                        <input type="hidden" name="invoice_action" value="send_invoice_whatsapp">
+                                        <button type="submit" class="folio-btn" style="background:#25D366;color:#fff;border-color:#25D366;">
+                                            <i class="fab fa-whatsapp"></i> Send via WhatsApp
+                                        </button>
+                                    </form>
+                                <?php endif; ?>
                             <?php endif; ?>
                         </div>
                     </div>
@@ -1675,9 +1780,15 @@ unset($_SESSION['success_message'], $_SESSION['error_message']);
                             <div class="booking-actions-flow">
                                 <a href="bookings.php" class="action-btn back" onclick="if(history.length>1){history.back();return false;}"><i class="fas fa-arrow-left"></i> Back to Bookings</a>
                                 <a href="edit-booking.php?id=<?php echo $booking_id; ?>" class="action-btn edit"><i class="fas fa-edit"></i> Edit Booking</a>
-                                <button type="button" class="action-btn quote" onclick="openBookingQuoteModal(<?php echo (int) $booking_id; ?>, '<?php echo htmlspecialchars($booking['booking_reference'], ENT_QUOTES); ?>', '<?php echo htmlspecialchars($booking['guest_name'], ENT_QUOTES); ?>', '<?php echo htmlspecialchars($booking['guest_email'], ENT_QUOTES); ?>')">
-                                    <i class="fas fa-file-invoice"></i> Send Quotation
-                                </button>
+                                <?php if ($bPerms['can_send_quotation']): ?>
+                                    <button type="button" class="action-btn quote" onclick="openBookingQuoteModal(<?php echo (int) $booking_id; ?>, '<?php echo htmlspecialchars($booking['booking_reference'], ENT_QUOTES); ?>', '<?php echo htmlspecialchars($booking['guest_name'], ENT_QUOTES); ?>', '<?php echo htmlspecialchars($booking['guest_email'], ENT_QUOTES); ?>')">
+                                        <i class="fas fa-file-invoice"></i> Send Quotation
+                                    </button>
+                                <?php else: ?>
+                                    <button type="button" class="action-btn quote action-btn--locked" disabled title="<?php echo htmlspecialchars($bPerms['can_send_quotation_reason']); ?>">
+                                        <i class="fas fa-lock"></i> Send Quotation
+                                    </button>
+                                <?php endif; ?>
                                 <?php if ($can_adjust_dates): ?>
                                     <button type="button" class="action-btn adjust-dates" onclick="openDateAdjustModal()">
                                         <i class="fas fa-calendar-alt"></i> Adjust Stay Dates

@@ -6,6 +6,7 @@ require_once 'admin-init.php';
 require_once '../config/email.php';
 require_once '../config/invoice.php';
 require_once 'includes/finance-schema.php';
+require_once 'includes/booking-lifecycle.php';
 require_once '../includes/idempotency.php';
 require_once '../includes/finance-sequences.php';
 
@@ -228,6 +229,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 exit;
             } else {
                 // Create new payment
+                // Lifecycle guard: block new payments on terminal / fully-settled bookings
+                if ($bookingType === 'room') {
+                    $lcStmt = $pdo->prepare("SELECT status, amount_paid, amount_due, total_amount FROM bookings WHERE id = ?");
+                    $lcStmt->execute([$bookingId]);
+                    $lcRow = $lcStmt->fetch(PDO::FETCH_ASSOC);
+                    if ($lcRow) {
+                        $lcCheck = bookingAllowsAction($lcRow, 'record_payment');
+                        if (!$lcCheck['allowed']) {
+                            throw new Exception($lcCheck['reason']);
+                        }
+                    }
+                }
+
                 $paymentVatRate = $vatRate;
                 $paymentVatAmount = round($paymentAmount * ($paymentVatRate / 100), 2);
                 $totalAmount = round($paymentAmount + $paymentVatAmount, 2);
@@ -304,6 +318,39 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $pdo->commit();
                 // Burn the per-render idempotency token so a fresh one is issued next render.
                 unset($_SESSION['admin_payment_add_uuid']);
+
+                // Overpayment check — auto-issue a credit note if the guest has overpaid
+                $overpayMsg = '';
+                if ($bookingType === 'room' && in_array($paymentStatus, ['completed', 'paid'], true)) {
+                    $overpayResult = detectOverpayment($pdo, $bookingId, $paymentAmount);
+                    if ($overpayResult['overpaid'] && $overpayResult['excess'] > 0) {
+                        $b = $overpayResult['booking'];
+                        try {
+                            require_once __DIR__ . '/../config/credit-notes.php';
+                            $cnResult = issueCreditNote($pdo, [
+                                'booking_type'      => 'room',
+                                'booking_id'        => $bookingId,
+                                'booking_reference' => $b['booking_reference'] ?? '',
+                                'guest_name'        => $b['guest_name'] ?? 'Guest',
+                                'guest_email'       => $b['guest_email'] ?? '',
+                                'amount'            => $overpayResult['excess'],
+                                'reason'            => 'overpayment',
+                                'reason_notes'      => 'Guest overpaid by ' . number_format($overpayResult['excess'], 2) . ' on payment ' . $paymentRef,
+                                'issued_by'         => (int)$user['id'],
+                                'send_email'        => !empty($b['guest_email']),
+                                'generate_pdf'      => false,
+                            ]);
+                            if ($cnResult['success']) {
+                                $overpayMsg = ' Overpayment detected — credit note ' . $cnResult['credit_note_number'] . ' for ' . number_format($overpayResult['excess'], 2) . ' issued and queued under Credit Notes.';
+                            } else {
+                                $overpayMsg = ' Overpayment of ' . number_format($overpayResult['excess'], 2) . ' detected. Credit note could not be auto-created — please issue one manually.';
+                            }
+                        } catch (Throwable $e) {
+                            error_log("Overpayment credit note failed: " . $e->getMessage());
+                            $overpayMsg = ' Overpayment of ' . number_format($overpayResult['excess'], 2) . ' detected — please issue a credit note manually.';
+                        }
+                    }
+                }
 
                 // Send payment confirmation email for room bookings
                 if ($bookingType === 'room' && in_array($paymentStatus, ['completed', 'paid'], true)) {
@@ -403,7 +450,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     }
                 }
 
-                $_SESSION['alert'] = ['type' => 'success', 'message' => 'Payment recorded successfully'];
+                $successMsg = 'Payment recorded successfully.' . ($overpayMsg ?? '');
+                $_SESSION['alert'] = ['type' => 'success', 'message' => $successMsg];
                 header('Location: payment-details.php?id=' . $newPaymentId);
                 exit;
             }

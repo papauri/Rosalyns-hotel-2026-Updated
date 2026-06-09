@@ -6,6 +6,7 @@ require_once 'admin-init.php';
 
 require_once '../includes/quotation-pdf.php';
 require_once '../config/email.php';
+require_once __DIR__ . '/includes/booking-lifecycle.php';
 
 $site_name       = getSetting('site_name');
 $currency_symbol = getSetting('currency_symbol', 'MWK');
@@ -31,6 +32,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     throw new Exception('Quotation not found.');
                 }
 
+                // Lifecycle guard
+                $lcCheck = bookingAllowsAction(['status' => $qRow['status'] ?? 'pending', 'amount_paid' => $qRow['amount_paid'] ?? 0, 'amount_due' => $qRow['amount_due'] ?? 0, 'total_amount' => $qRow['total_amount'] ?? 0], 'send_quotation');
+                if (!$lcCheck['allowed']) {
+                    throw new Exception($lcCheck['reason']);
+                }
+
                 $booking = [];
                 foreach ($qRow as $k => $v) {
                     $booking[$k] = $v;
@@ -54,13 +61,37 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
 
         if ($action === 'mark_accepted' && $quotation_id > 0) {
-            $pdo->prepare("UPDATE quotations SET status = 'accepted', updated_at = NOW() WHERE id = ?")->execute([$quotation_id]);
-            $message = 'Quotation marked as accepted.';
+            $mqStmt = $pdo->prepare("SELECT q.*, b.status as booking_status, b.amount_paid, b.amount_due, b.total_amount FROM quotations q LEFT JOIN bookings b ON q.booking_id = b.id WHERE q.id = ?");
+            $mqStmt->execute([$quotation_id]);
+            $mqRow = $mqStmt->fetch(PDO::FETCH_ASSOC);
+            if ($mqRow) {
+                $lcCheck = bookingAllowsAction(['status' => $mqRow['booking_status'] ?? 'pending', 'amount_paid' => $mqRow['amount_paid'] ?? 0, 'amount_due' => $mqRow['amount_due'] ?? 0, 'total_amount' => $mqRow['total_amount'] ?? 0], 'mark_quotation');
+                if (!$lcCheck['allowed']) {
+                    $error = $lcCheck['reason'];
+                } else {
+                    $pdo->prepare("UPDATE quotations SET status = 'accepted', updated_at = NOW() WHERE id = ?")->execute([$quotation_id]);
+                    $message = 'Quotation marked as accepted.';
+                }
+            } else {
+                $error = 'Quotation not found.';
+            }
         }
 
         if ($action === 'mark_declined' && $quotation_id > 0) {
-            $pdo->prepare("UPDATE quotations SET status = 'declined', updated_at = NOW() WHERE id = ?")->execute([$quotation_id]);
-            $message = 'Quotation marked as declined.';
+            $mdStmt = $pdo->prepare("SELECT q.*, b.status as booking_status, b.amount_paid, b.amount_due, b.total_amount FROM quotations q LEFT JOIN bookings b ON q.booking_id = b.id WHERE q.id = ?");
+            $mdStmt->execute([$quotation_id]);
+            $mdRow = $mdStmt->fetch(PDO::FETCH_ASSOC);
+            if ($mdRow) {
+                $lcCheck = bookingAllowsAction(['status' => $mdRow['booking_status'] ?? 'pending', 'amount_paid' => $mdRow['amount_paid'] ?? 0, 'amount_due' => $mdRow['amount_due'] ?? 0, 'total_amount' => $mdRow['total_amount'] ?? 0], 'mark_quotation');
+                if (!$lcCheck['allowed']) {
+                    $error = $lcCheck['reason'];
+                } else {
+                    $pdo->prepare("UPDATE quotations SET status = 'declined', updated_at = NOW() WHERE id = ?")->execute([$quotation_id]);
+                    $message = 'Quotation marked as declined.';
+                }
+            } else {
+                $error = 'Quotation not found.';
+            }
         }
     }
 }

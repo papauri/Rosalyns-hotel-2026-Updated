@@ -1708,6 +1708,11 @@ hr.menu-divider {
     width: 100%;
 }
 
+/* Settlement and other secondary modals must appear above .bookings-alert-modal (4000) */
+#checkoutSettlementModal {
+    z-index: 4100;
+}
+
 .bookings-alert-modal__dialog {
     width: min(96vw, 72rem) !important;
     max-width: min(96vw, 72rem) !important;

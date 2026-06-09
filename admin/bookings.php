@@ -4644,6 +4644,12 @@ $today_str = $today->format('Y-m-d');
         }
 
         async function checkoutBooking(id, reference) {
+            // Close any open bookings-alert-modal (e.g. overdueCheckoutsModal) so the
+            // settlement modal or confirm dialog is not hidden behind it (z-index: 4000).
+            document.querySelectorAll('.bookings-alert-modal.active').forEach(function(m) {
+                setBookingPageModalOpen(m, false);
+            });
+
             // Step 1: assess whether a financial settlement is needed
             const assessData = new FormData();
             assessData.append('action', 'checkout_assess');
@@ -4675,9 +4681,6 @@ $today_str = $today->format('Y-m-d');
                 });
                 if (!confirmed) return;
 
-                const activeBtn = document.activeElement;
-                const isQuickAction = activeBtn && activeBtn.classList.contains('quick-action');
-                if (isQuickAction) setButtonLoading(activeBtn, true);
                 showLoadingOverlay('Checking out booking...');
 
                 const formData = new FormData();
@@ -4687,7 +4690,6 @@ $today_str = $today->format('Y-m-d');
                     .then(data => reloadWithBookingActionMessage(data, 'Booking checked out successfully.'))
                     .catch(error => {
                         hideLoadingOverlay();
-                        if (isQuickAction) setButtonLoading(activeBtn, false);
                         Alert.show(error.message || 'Error checking out booking', 'error');
                     });
             } else {
