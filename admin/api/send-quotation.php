@@ -155,11 +155,26 @@ try {
         'pdf_saved' => $savedPdfPath !== null,
     ]);
 } catch (PDOException $e) {
-    error_log('send-quotation PDO error: ' . $e->getMessage());
+    $errMsg = $e->getMessage();
+    error_log('send-quotation PDO error: ' . $errMsg);
+    if (function_exists('rh_log_event')) {
+        rh_log_event('send-quotation', 'error', 'PDO error: ' . $errMsg, [
+            'booking_id' => $booking_id ?? 0,
+            'file' => $e->getFile() . ':' . $e->getLine(),
+        ]);
+    }
     http_response_code(500);
     echo json_encode(['success' => false, 'error' => 'Database error. Please try again.']);
 } catch (Throwable $e) {
-    error_log('send-quotation error: ' . $e->getMessage());
+    $errMsg = $e->getMessage();
+    error_log('send-quotation error: ' . $errMsg . ' in ' . $e->getFile() . ':' . $e->getLine());
+    if (function_exists('rh_log_event')) {
+        rh_log_event('send-quotation', 'error', 'Exception: ' . $errMsg, [
+            'booking_id' => $booking_id ?? 0,
+            'file'       => $e->getFile() . ':' . $e->getLine(),
+            'trace'      => substr($e->getTraceAsString(), 0, 800),
+        ]);
+    }
     http_response_code(500);
     echo json_encode(['success' => false, 'error' => 'Unable to send quotation right now. Please try again.']);
 }

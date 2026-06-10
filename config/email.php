@@ -1,4 +1,4 @@
-﻿<?php
+<?php
 
 /**
  * Database-Driven Email Configuration for any hotel
