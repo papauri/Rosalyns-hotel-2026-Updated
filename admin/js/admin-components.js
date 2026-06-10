@@ -6,6 +6,10 @@
 (function () {
     'use strict';
 
+    // Guard: prevent double-init if this script is loaded more than once
+    if (window.__rhComponentsLoaded) return;
+    window.__rhComponentsLoaded = true;
+
     // ============================================
     // MODAL CONTROLLER
     // ============================================
@@ -147,85 +151,106 @@
     };
 
     // ============================================
-    // ALERT CONTROLLER
+    // TOAST / ALERT CONTROLLER
     // ============================================
 
     const Alert = {
         alerts: [],
 
-        // Show an alert
+        // Show a toast notification
         show: function (message, type = 'info', options = {}) {
             const defaults = {
                 dismissible: true,
                 icon: null,
-                timeout: 0,
-                position: 'top',
+                timeout: 5000,
+                position: 'top-right',
                 id: null,
-                class: ''
+                class: '',
+                title: null
             };
 
             const opts = { ...defaults, ...options };
             const alertId = opts.id || 'alert-' + Date.now();
 
-            // Create alert element
-            const alert = this.createAlert(message, type, opts, alertId);
+            const wrapper = this.createAlert(message, type, opts, alertId);
+            this.addAlert(wrapper, opts.position);
 
-            // Add to DOM
-            this.addAlert(alert, opts.position);
+            const el = document.getElementById(alertId);
+            if (el) {
+                setTimeout(() => el.classList.add('show'), 10);
 
-            // Show with animation
-            setTimeout(() => alert.classList.add('show'), 10);
-
-            // Auto-dismiss if timeout is set
-            if (opts.timeout > 0) {
-                setTimeout(() => this.dismiss(alertId), opts.timeout);
+                if (opts.timeout > 0) {
+                    const bar = el.querySelector('.alert-progress-bar');
+                    if (bar) {
+                        bar.style.transition = `width ${opts.timeout}ms linear`;
+                        setTimeout(() => { bar.style.width = '0%'; }, 20);
+                    }
+                    setTimeout(() => this.dismiss(alertId), opts.timeout);
+                }
             }
 
             return alertId;
         },
 
-        // Create alert element
+        // Build the toast DOM node
         createAlert: function (message, type, options, id) {
             const typeConfig = {
-                success: { icon: 'fa-check-circle', bg: 'linear-gradient(135deg, #d4edda 0%, #c3e6cb 100%)', border: '#28a745', color: '#155724' },
-                error: { icon: 'fa-exclamation-circle', bg: 'linear-gradient(135deg, #f8d7da 0%, #f5c6cb 100%)', border: '#dc3545', color: '#721c24' },
-                warning: { icon: 'fa-exclamation-triangle', bg: 'linear-gradient(135deg, #fff3cd 0%, #ffeaa7 100%)', border: '#ffc107', color: '#856404' },
-                info: { icon: 'fa-info-circle', bg: 'linear-gradient(135deg, #d1ecf1 0%, #bee5eb 100%)', border: '#17a2b8', color: '#0c5460' }
+                success: { icon: 'fa-check' },
+                error:   { icon: 'fa-times' },
+                warning: { icon: 'fa-exclamation' },
+                info:    { icon: 'fa-info' }
             };
 
-            const config = typeConfig[type] || typeConfig.info;
-            const icon = options.icon || config.icon;
+            const cfg = typeConfig[type] || typeConfig.info;
+            const icon = options.icon || cfg.icon;
+            const title = options.title || null;
 
             const wrapper = document.createElement('div');
-            wrapper.className = 'alert-wrapper alert-' + options.position;
+            wrapper.className = 'alert-wrapper';
 
             const alert = document.createElement('div');
-            alert.className = 'alert alert-' + type + ' ' + options.class;
+            alert.className = 'alert alert-' + type + (options.class ? ' ' + options.class : '');
             alert.id = id;
-            alert.dataset.alert = '';
-            alert.dataset.alertType = type;
-            alert.style.setProperty('--alert-bg', config.bg);
-            alert.style.setProperty('--alert-border', config.border);
-            alert.style.setProperty('--alert-color', config.color);
+            alert.setAttribute('role', 'alert');
+            alert.setAttribute('aria-live', 'polite');
+
+            const bodyHtml = title
+                ? `<div class="alert-body"><div class="alert-title">${this._esc(title)}</div><div class="alert-content">${message}</div></div>`
+                : `<div class="alert-body"><div class="alert-content">${message}</div></div>`;
+
+            const progressHtml = options.timeout > 0
+                ? `<div class="alert-progress"><div class="alert-progress-bar"></div></div>`
+                : '';
+
+            const closeHtml = options.dismissible
+                ? `<button class="alert-close" data-alert-close aria-label="Dismiss notification"><i class="fas fa-times"></i></button>`
+                : '';
 
             alert.innerHTML = `
-                <div class="alert-icon">
-                    <i class="fas ${icon}"></i>
-                </div>
-                <div class="alert-content">${message}</div>
-                ${options.dismissible ? '<button class="alert-close" data-alert-close aria-label="Close alert"><i class="fas fa-times"></i></button>' : ''}
+                <div class="alert-icon"><i class="fas ${icon}"></i></div>
+                ${bodyHtml}
+                ${closeHtml}
+                ${progressHtml}
             `;
 
             wrapper.appendChild(alert);
             return wrapper;
         },
 
-        // Add alert to DOM
+        // Safely escape for use in HTML
+        _esc: function (text) {
+            const d = document.createElement('div');
+            d.textContent = text;
+            return d.innerHTML;
+        },
+
+        // Add wrapper to the fixed stacking region
         addAlert: function (wrapper, position) {
-            // Find or create wrapper for position
-            let container = document.querySelector('.alert-container-' + position);
+            const containerId = 'rh-alert-container-' + position;
+            let container = document.getElementById(containerId);
             if (!container) {
                 container = document.createElement('div');
+                container.id = containerId;
                 container.className = 'alert-container-' + position;
                 document.body.appendChild(container);
             }
@@ -233,7 +258,6 @@
             this.alerts.push(wrapper);
         },
 
-        // Dismiss an alert
         dismiss: function (id) {
             const alert = document.getElementById(id);
             if (alert) {
@@ -245,28 +269,23 @@
                         wrapper.remove();
                         this.alerts = this.alerts.filter(a => a !== wrapper);
                     }
-                }, 300);
+                }, 260);
             }
         },
 
-        // Dismiss all alerts
         dismissAll: function () {
             [...this.alerts].forEach(wrapper => {
                 const alert = wrapper.querySelector('.alert');
-                if (alert) {
-                    alert.classList.remove('show');
-                    alert.classList.add('hide');
-                }
+                if (alert) { alert.classList.remove('show'); alert.classList.add('hide'); }
             });
             setTimeout(() => {
                 document.querySelectorAll('.alert-wrapper').forEach(w => w.remove());
                 this.alerts = [];
-            }, 300);
+            }, 260);
         },
 
-        // Initialize alert event listeners
         init: function () {
-            // Close button clicks
+            // Close button delegation
             document.addEventListener('click', (e) => {
                 const closeBtn = e.target.closest('[data-alert-close]');
                 if (closeBtn) {
@@ -275,15 +294,10 @@
                 }
             });
 
-            // Initialize existing alerts
-            document.querySelectorAll('[data-alert]').forEach(alert => {
-                const timeout = parseInt(alert.dataset.alertTimeout) || 0;
-                setTimeout(() => alert.classList.add('show'), 10);
-
-                if (timeout > 0) {
-                    setTimeout(() => this.dismiss(alert.id), timeout);
-                }
-            });
+            // Flush any notifications queued before this script loaded
+            const queue = window.__rhToastQueue || [];
+            window.__rhToastQueue = { push: (item) => this.show(item.msg, item.type, item.opts || {}) };
+            queue.forEach(item => this.show(item.msg, item.type, item.opts || {}));
         }
     };
 

@@ -2054,23 +2054,49 @@ unset($_SESSION['success_message'], $_SESSION['error_message']);
             error: <?php echo json_encode($flash_error_message, JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT); ?>
         };
 
+        var _bookingToastTitles = [
+            [/invoice sent.*whatsapp/i,       'Sent via WhatsApp'],
+            [/invoice sent/i,                 'Invoice Sent'],
+            [/invoice generated/i,            'Invoice Generated'],
+            [/invoice regenerated/i,          'Invoice Regenerated'],
+            [/checked.?in/i,                  'Guest Checked In'],
+            [/checked.?out/i,                 'Guest Checked Out'],
+            [/no.?show/i,                     'Marked No-Show'],
+            [/booking cancelled/i,            'Booking Cancelled'],
+            [/booking confirmed/i,            'Booking Confirmed'],
+            [/tentative.*converted/i,         'Booking Confirmed'],
+            [/converted.*confirmed/i,         'Booking Confirmed'],
+            [/payment.*recorded/i,            'Payment Recorded'],
+            [/payment status updated/i,       'Payment Updated'],
+            [/date.*adjust/i,                 'Dates Updated'],
+            [/note added/i,                   'Note Added'],
+            [/charge.*added/i,                'Charge Added'],
+            [/charge.*voided/i,               'Charge Voided'],
+            [/menu item added/i,              'Item Added to Folio'],
+        ];
+
+        function _bookingToastTitle(msg) {
+            for (var i = 0; i < _bookingToastTitles.length; i++) {
+                if (_bookingToastTitles[i][0].test(msg)) return _bookingToastTitles[i][1];
+            }
+            return null;
+        }
+
         function showBookingActionMessage(message, type) {
             var text = String(message || '').trim();
-            if (!text) {
-                return;
-            }
+            if (!text) return;
             if (window.Alert && typeof window.Alert.show === 'function') {
                 Alert.show(text, type || 'info', {
-                    timeout: 5200,
-                    position: 'top'
+                    title:   type === 'error' ? 'Action Failed' : _bookingToastTitle(text),
+                    timeout: 5500,
+                    position: 'top-right'
                 });
                 return;
             }
-            if (type === 'error') {
-                console.error(text);
-            } else {
-                console.log(text);
-            }
+            (window.__rhToastQueue = window.__rhToastQueue || []).push({
+                msg: text, type: type || 'info',
+                opts: { title: type === 'error' ? 'Action Failed' : _bookingToastTitle(text), timeout: 5500 }
+            });
         }
 
         if (bookingFlash.success) {

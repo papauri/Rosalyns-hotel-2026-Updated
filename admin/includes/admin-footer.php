@@ -9,6 +9,8 @@
     </div>
 </footer>
 
+<!-- Admin Components (Modal, Alert/Toast, AdminConfirm, ButtonLoader) — guard prevents double-init -->
+<script src="js/admin-components.js?v=<?php echo filemtime(__DIR__ . '/../js/admin-components.js'); ?>"></script>
 <!-- Admin Core JS (burger menu, nav, modals) -->
 <script src="js/admin-main.js?v=<?php echo filemtime(__DIR__ . '/../js/admin-main.js'); ?>"></script>
 <!-- Global table-section pagination (10 rows max + inline loader) -->
@@ -21,6 +23,8 @@
      data-offline-queue="1" attribute; only displays the banner when offline
      or when there are pending sync items. Safe to include on every admin page. -->
 <?php require __DIR__ . '/offline-banner.php'; ?>
+<!-- Shared session flash toasts — renders any unconsumed success/error session messages -->
+<?php require __DIR__ . '/admin-flash.php'; ?>
 
 </body>
 

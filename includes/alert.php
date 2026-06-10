@@ -18,89 +18,37 @@
  */
 
 if (!function_exists('showAlert')) {
+    /**
+     * Show a toast notification via the JS Alert system.
+     * Queues the call if Alert hasn't loaded yet (script runs mid-body).
+     */
     function showAlert($message, $type = 'info', $options = []) {
-        // Default options
         $defaults = [
             'dismissible' => true,
-            'icon' => null,
-            'timeout' => 0,
-            'position' => 'top',
-            'id' => null,
-            'class' => ''
+            'icon'        => null,
+            'timeout'     => 5000,
+            'position'    => 'top-right',
+            'id'          => null,
+            'class'       => '',
+            'title'       => null,
         ];
-        
         $opts = array_merge($defaults, $options);
-        
-        // Type configurations
-        $typeConfig = [
-            'success' => [
-                'icon' => 'fa-check-circle',
-                'bg' => 'linear-gradient(135deg, #d4edda 0%, #c3e6cb 100%)',
-                'border' => '#28a745',
-                'color' => '#155724'
-            ],
-            'error' => [
-                'icon' => 'fa-exclamation-circle',
-                'bg' => 'linear-gradient(135deg, #f8d7da 0%, #f5c6cb 100%)',
-                'border' => '#dc3545',
-                'color' => '#721c24'
-            ],
-            'warning' => [
-                'icon' => 'fa-exclamation-triangle',
-                'bg' => 'linear-gradient(135deg, #fff3cd 0%, #ffeaa7 100%)',
-                'border' => '#ffc107',
-                'color' => '#856404'
-            ],
-            'info' => [
-                'icon' => 'fa-info-circle',
-                'bg' => 'linear-gradient(135deg, #d1ecf1 0%, #bee5eb 100%)',
-                'border' => '#17a2b8',
-                'color' => '#0c5460'
-            ]
+
+        $jsOpts = [
+            'dismissible' => (bool)$opts['dismissible'],
+            'timeout'     => (int)$opts['timeout'],
+            'position'    => (string)$opts['position'],
         ];
-        
-        $config = $typeConfig[$type] ?? $typeConfig['info'];
-        $icon = $opts['icon'] ?? $config['icon'];
-        $alertId = $opts['id'] ?? 'alert-' . uniqid();
-        
-        // Position classes (BEM modifiers)
-        $positionClasses = [
-            'top' => 'alert--top',
-            'bottom' => 'alert--bottom',
-            'top-left' => 'alert--top-left',
-            'top-right' => 'alert--top-right',
-            'bottom-left' => 'alert--bottom-left',
-            'bottom-right' => 'alert--bottom-right'
-        ];
-        $positionClass = $positionClasses[$opts['position']] ?? 'alert--top';
-        ?>
-        <!-- Alert: <?php echo htmlspecialchars($alertId); ?> -->
-        <div class="alert-wrapper <?php echo $positionClass; ?>">
-            <div class="alert alert--<?php echo htmlspecialchars($type); ?> <?php echo htmlspecialchars($opts['class']); ?>"
-                 id="<?php echo htmlspecialchars($alertId); ?>"
-                 data-alert
-                 data-alert-type="<?php echo htmlspecialchars($type); ?>"
-                 data-alert-timeout="<?php echo (int)$opts['timeout']; ?>"
-                 style="--alert-bg: <?php echo $config['bg']; ?>; --alert-border: <?php echo $config['border']; ?>; --alert-color: <?php echo $config['color']; ?>;"
-                 role="alert"
-                 aria-live="polite">
-                
-                <div class="alert__icon">
-                    <i class="fas <?php echo htmlspecialchars($icon); ?>" aria-hidden="true"></i>
-                </div>
-                
-                <div class="alert__content">
-                    <?php echo $message; ?>
-                </div>
-                
-                <?php if ($opts['dismissible']): ?>
-                    <button class="alert__close" data-alert-close aria-label="Close alert">
-                        <i class="fas fa-times" aria-hidden="true"></i>
-                    </button>
-                <?php endif; ?>
-            </div>
-        </div>
-        <?php
+        if ($opts['class'])  $jsOpts['class']  = (string)$opts['class'];
+        if ($opts['icon'])   $jsOpts['icon']   = (string)$opts['icon'];
+        if ($opts['title'])  $jsOpts['title']  = (string)$opts['title'];
+        if ($opts['id'])     $jsOpts['id']     = (string)$opts['id'];
+
+        $msgJson  = json_encode((string)$message, JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT);
+        $typeJson = json_encode($type);
+        $optsJson = json_encode($jsOpts);
+
+        echo '<script>(window.__rhToastQueue=window.__rhToastQueue||[]).push({msg:' . $msgJson . ',type:' . $typeJson . ',opts:' . $optsJson . '});</script>' . "\n";
     }
 }
 
