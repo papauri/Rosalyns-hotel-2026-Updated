@@ -1168,7 +1168,10 @@
                         var newTitle = doc.querySelector('title');
                         if (newTitle) document.title = newTitle.textContent;
 
-                        // Swap content
+                        // Swap content — clear any page-specific tab handler before the new
+                        // page's scripts run and (optionally) register a new one.
+                        window.__pageTabHandler = null;
+
                         currentContent.innerHTML = newContent.innerHTML;
 
                         return _runScripts(currentContent)

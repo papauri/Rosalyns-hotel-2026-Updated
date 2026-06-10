@@ -665,7 +665,7 @@ if (!function_exists('hotel_japandi_key_value_rows')) {
 if (!function_exists('hotel_japandi_summary_table')) {
     function hotel_japandi_summary_table(array $rows, string $labelHeading = 'Description', string $valueHeading = 'Amount'): string
     {
-        $html = '<table style="width:100%;border-collapse:collapse;border:1px solid #d3cbc0;" cellpadding="0" cellspacing="0">'
+        $html = '<table width="100%" border="1" bordercolor="#d3cbc0" style="width:100%;border-collapse:collapse;" cellpadding="0" cellspacing="0">'
             . '<tr>'
             . '<td width="60%" style="padding:14px 10px 14px 8px;border-bottom:2px solid #c4bbb0;border-right:1px solid #d3cbc0;color:#9b8f7e;font-size:11px;letter-spacing:0.12em;text-transform:uppercase;font-weight:600;">' . htmlspecialchars($labelHeading, ENT_QUOTES, 'UTF-8') . '</td>'
             . '<td width="40%" style="padding:14px 8px 14px 10px;border-bottom:2px solid #c4bbb0;color:#9b8f7e;font-size:11px;letter-spacing:0.12em;text-transform:uppercase;font-weight:600;text-align:right;">' . htmlspecialchars($valueHeading, ENT_QUOTES, 'UTF-8') . '</td>'
@@ -805,12 +805,12 @@ if (!function_exists('hotel_default_payment_invoice_document_html')) {
             ['label' => 'Guests', 'value' => '{{guests}}'],
             ['label' => 'Duration', 'value' => '{{nights}} night(s)'],
         ], '35%', '#6d6455', '500');
-        $contentHtml = '<table style="width:100%;border-collapse:collapse;border:1px solid #C8BEB0;" cellpadding="0" cellspacing="0">'
+        $contentHtml = '<table width="100%" border="1" bordercolor="#C8BEB0" style="width:100%;border-collapse:collapse;" cellpadding="0" cellspacing="0">'
             . '<tr style="background-color:#8A775F;">'
-            . '<td width="50%" style="padding:10px 12px 10px 0;border-bottom:2px solid #9A8E82;border-right:1px solid #9A8E82;color:#FFFFFF;font-size:10px;letter-spacing:1.5px;text-transform:uppercase;font-weight:700;padding-left:12px;">Description</td>'
-            . '<td width="10%" style="padding:10px 8px;border-bottom:2px solid #9A8E82;border-right:1px solid #9A8E82;color:#FFFFFF;font-size:10px;letter-spacing:1.5px;text-transform:uppercase;font-weight:700;text-align:center;">Qty</td>'
-            . '<td width="15%" style="padding:10px 8px;border-bottom:2px solid #9A8E82;border-right:1px solid #9A8E82;color:#FFFFFF;font-size:10px;letter-spacing:1.5px;text-transform:uppercase;font-weight:700;text-align:right;">Unit Rate</td>'
-            . '<td width="25%" style="padding:10px 12px;border-bottom:2px solid #9A8E82;color:#FFFFFF;font-size:10px;letter-spacing:1.5px;text-transform:uppercase;font-weight:700;text-align:right;">Line Total</td>'
+            . '<td width="50%" bgcolor="#8A775F" style="padding:10px 12px;border-bottom:2px solid #9A8E82;border-right:1px solid #9A8E82;color:#FFFFFF;font-size:10px;letter-spacing:1.5px;text-transform:uppercase;font-weight:700;background-color:#8A775F;">Description</td>'
+            . '<td width="10%" bgcolor="#8A775F" style="padding:10px 8px;border-bottom:2px solid #9A8E82;border-right:1px solid #9A8E82;color:#FFFFFF;font-size:10px;letter-spacing:1.5px;text-transform:uppercase;font-weight:700;text-align:center;background-color:#8A775F;">Qty</td>'
+            . '<td width="15%" bgcolor="#8A775F" style="padding:10px 8px;border-bottom:2px solid #9A8E82;border-right:1px solid #9A8E82;color:#FFFFFF;font-size:10px;letter-spacing:1.5px;text-transform:uppercase;font-weight:700;text-align:right;background-color:#8A775F;">Unit Rate</td>'
+            . '<td width="25%" bgcolor="#8A775F" style="padding:10px 12px;border-bottom:2px solid #9A8E82;color:#FFFFFF;font-size:10px;letter-spacing:1.5px;text-transform:uppercase;font-weight:700;text-align:right;background-color:#8A775F;">Line Total</td>'
             . '</tr>'
             . '{{charges_table_rows}}'
             . '{{totals_rows}}'

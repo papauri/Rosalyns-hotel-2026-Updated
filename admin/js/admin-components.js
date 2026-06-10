@@ -909,4 +909,41 @@
         CalendarTooltip.init();
         ButtonLoader.init();
     }
+
+    // ============================================
+    // GLOBAL TAB HANDLER
+    // Handles .tab-button clicks inside .tabs-header on any page.
+    // Pages can register window.__pageTabHandler(tabName, btn) to add
+    // custom behaviour (e.g. server-side filtering) on top of the
+    // built-in visual active-state switching and panel show/hide.
+    // ============================================
+
+    document.addEventListener('click', function (e) {
+        const btn = e.target.closest('.tab-button');
+        if (!btn) return;
+
+        const header = btn.closest('.tabs-header');
+        if (!header) return;
+
+        // Switch active state within this header
+        header.querySelectorAll('.tab-button').forEach(function (b) {
+            b.classList.remove('active');
+        });
+        btn.classList.add('active');
+
+        const tabName = btn.dataset.tab || '';
+
+        // Show/hide panels marked with data-tab-panel="tabName" inside the
+        // nearest ancestor with class tabs-container (or the whole document)
+        const container = btn.closest('.tabs-container') || document;
+        container.querySelectorAll('[data-tab-panel]').forEach(function (panel) {
+            const matches = tabName === 'all' || panel.dataset.tabPanel === tabName;
+            panel.style.display = matches ? '' : 'none';
+        });
+
+        // Delegate to page-registered handler (e.g. bookings.php)
+        if (tabName && typeof window.__pageTabHandler === 'function') {
+            window.__pageTabHandler(tabName, btn);
+        }
+    }, true); // capture phase so page handlers can still stopPropagation if needed
 })();

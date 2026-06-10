@@ -708,12 +708,12 @@ function buildInvoiceHTML(array $booking, string $invoice_number, string $site_n
 
     <!-- ▌ CHARGES TABLE ▐ -->
     <p style="margin:16px 24px 6px; font-size:9px; font-weight:700; letter-spacing:2px; text-transform:uppercase; color:#B18247; font-family:Helvetica,Arial,sans-serif;">Itemised Charges</p>
-    <table width="100%" style="width:100%; border-collapse:collapse; border:1px solid #C8BEB0;" cellpadding="0" cellspacing="0">
+    <table width="100%" border="1" bordercolor="#C8BEB0" style="width:100%; border-collapse:collapse;" cellpadding="0" cellspacing="0">
         <tr>
-            <td width="50%" bgcolor="#8A775F" style="padding:12px 24px; text-align:left; font-size:10px; letter-spacing:1.5px; text-transform:uppercase; color:#FFFFFF; font-family:Helvetica,Arial,sans-serif; font-weight:700; background-color:#8A775F; border-right:1px solid #9A8E82; border-bottom:1px solid #9A8E82;">Description</td>
-            <td width="10%" bgcolor="#8A775F" style="padding:12px 10px; text-align:center; font-size:10px; letter-spacing:1.5px; text-transform:uppercase; color:#FFFFFF; font-family:Helvetica,Arial,sans-serif; font-weight:700; background-color:#8A775F; border-right:1px solid #9A8E82; border-bottom:1px solid #9A8E82;">Qty</td>
-            <td width="15%" bgcolor="#8A775F" style="padding:12px 10px; text-align:right; font-size:10px; letter-spacing:1.5px; text-transform:uppercase; color:#FFFFFF; font-family:Helvetica,Arial,sans-serif; font-weight:700; background-color:#8A775F; border-right:1px solid #9A8E82; border-bottom:1px solid #9A8E82;">Unit Price</td>
-            <td width="25%" bgcolor="#8A775F" style="padding:12px 24px; text-align:right; font-size:10px; letter-spacing:1.5px; text-transform:uppercase; color:#FFFFFF; font-family:Helvetica,Arial,sans-serif; font-weight:700; background-color:#8A775F; border-bottom:1px solid #9A8E82;">Amount</td>
+            <td width="50%" bgcolor="#8A775F" style="padding:12px 24px; text-align:left; font-size:10px; letter-spacing:1.5px; text-transform:uppercase; color:#FFFFFF; font-family:Helvetica,Arial,sans-serif; font-weight:700; background-color:#8A775F; border-right:1px solid #9A8E82; border-bottom:2px solid #9A8E82;">Description</td>
+            <td width="10%" bgcolor="#8A775F" style="padding:12px 10px; text-align:center; font-size:10px; letter-spacing:1.5px; text-transform:uppercase; color:#FFFFFF; font-family:Helvetica,Arial,sans-serif; font-weight:700; background-color:#8A775F; border-right:1px solid #9A8E82; border-bottom:2px solid #9A8E82;">Qty</td>
+            <td width="15%" bgcolor="#8A775F" style="padding:12px 10px; text-align:right; font-size:10px; letter-spacing:1.5px; text-transform:uppercase; color:#FFFFFF; font-family:Helvetica,Arial,sans-serif; font-weight:700; background-color:#8A775F; border-right:1px solid #9A8E82; border-bottom:2px solid #9A8E82;">Unit Price</td>
+            <td width="25%" bgcolor="#8A775F" style="padding:12px 24px; text-align:right; font-size:10px; letter-spacing:1.5px; text-transform:uppercase; color:#FFFFFF; font-family:Helvetica,Arial,sans-serif; font-weight:700; background-color:#8A775F; border-bottom:2px solid #9A8E82;">Amount</td>
         </tr>
         ' . $chargeRows . $totalsRows . '
     </table>

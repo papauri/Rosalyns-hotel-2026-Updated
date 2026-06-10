@@ -4420,37 +4420,31 @@ $today_str = $today->format('Y-m-d');
             loadBookingResults(window.location.href);
         });
 
-        // Initialize — delegated listener handles tabs & pagination inside #booking-results
-        // even after the container is replaced via AJAX.
+        // Initialize — re-runs on every SPA navigation to this page.
         // NOTE: runs immediately when re-executed by admin-spa.js (DOMContentLoaded already fired).
         (function initBookingsPage() {
             const activeTab = <?php echo json_encode($active_tab_override ?: 'all'); ?>;
 
-            // Highlight correct tab on initial load
-            document.querySelectorAll('.tab-button').forEach(function(button) {
-                button.classList.toggle('active', button.dataset.tab === activeTab);
-            });
+            // Register tab handler for the global admin-components.js tab system.
+            // It will be called whenever any .tab-button is clicked on this page.
+            window.__pageTabHandler = function(tabName, tabBtn) {
+                if (tabBtn && !tabBtn.closest('.tabs-header')) return;
+                if (tabName === 'all') {
+                    const params = new URLSearchParams(window.location.search);
+                    params.delete('filter');
+                    params.delete('filter_status');
+                    params.delete('page');
+                    loadBookingResults('bookings.php' + (params.toString() ? '?' + params.toString() : ''));
+                } else if (tabName) {
+                    navigateToTab(tabName);
+                }
+            };
 
-            // Delegated click handler — guard against duplicate registration on SPA re-entry
-            if (!window.__bookingsClickHandlerBound) {
-                window.__bookingsClickHandlerBound = true;
+            // Pagination: delegated listener for .pg-btn links inside #booking-results
+            if (!window.__bookingsPaginationBound) {
+                window.__bookingsPaginationBound = true;
                 document.addEventListener('click', function(e) {
-                    const tabBtn = e.target.closest('.tab-button');
-                    if (tabBtn) {
-                        e.preventDefault();
-                        e.stopPropagation();
-                        const tabName = tabBtn.dataset.tab;
-                        if (tabName === 'all') {
-                            const params = new URLSearchParams(window.location.search);
-                            params.delete('filter');
-                            params.delete('filter_status');
-                            params.delete('page');
-                            loadBookingResults('bookings.php' + (params.toString() ? '?' + params.toString() : ''));
-                        } else if (tabName) {
-                            navigateToTab(tabName);
-                        }
-                        return;
-                    }
+                    if (!/bookings\.php/i.test(window.location.pathname)) return;
                     const pgBtn = e.target.closest('.pg-btn');
                     if (pgBtn && pgBtn.href) {
                         e.preventDefault();
@@ -4458,6 +4452,11 @@ $today_str = $today->format('Y-m-d');
                     }
                 });
             }
+
+            // Highlight correct tab on initial load
+            document.querySelectorAll('.tab-button').forEach(function(button) {
+                button.classList.toggle('active', button.dataset.tab === activeTab);
+            });
 
             // Apply visual filter on loaded rows
             switchTab(activeTab);
