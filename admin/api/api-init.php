@@ -35,6 +35,7 @@ if (!isset($_SESSION['admin_user_id'])) {
 // Include required files
 require_once __DIR__ . '/../../config/database.php';
 require_once __DIR__ . '/../../config/security.php';
+require_once __DIR__ . '/../../includes/system-logger.php';
 
 // Setup user data
 $site_name = getSetting('site_name');
