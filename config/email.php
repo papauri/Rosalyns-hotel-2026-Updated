@@ -1135,6 +1135,9 @@ if (!function_exists('bookingRenderPdfFromHtml')) {
         $pdf->SetAutoPageBreak(true, 14);
         $pdf->SetTitle($title);
         $pdf->AddPage();
+        // Fill entire page with Japandi warm cream so no white shows around content
+        $pdf->SetFillColor(247, 243, 238);
+        $pdf->Rect(0, 0, 210, 297, 'F');
         $pdf->writeHTML($html, true, false, true, false, '');
 
         return $pdf->Output('', 'S');

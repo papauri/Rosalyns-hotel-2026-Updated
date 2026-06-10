@@ -652,6 +652,9 @@ if (!function_exists('generateCreditNotePDF')) {
             $pdf->SetMargins(15, 15, 15);
             $pdf->SetAutoPageBreak(true, 20);
             $pdf->AddPage();
+            // Fill entire page with Japandi warm cream background
+            $pdf->SetFillColor(247, 243, 238);
+            $pdf->Rect(0, 0, 210, 297, 'F');
             $pdf->SetFont('helvetica', '', 9);
 
             $headerBg  = '#231F1C';

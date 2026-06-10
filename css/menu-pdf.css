@@ -266,7 +266,9 @@ body {
 
 @media print {
     body {
-        background: #fff;
+        background: var(--paper);
+        -webkit-print-color-adjust: exact;
+        print-color-adjust: exact;
     }
 
     .no-print {

@@ -33,6 +33,9 @@ if (!function_exists('quotationPdfRenderDocument')) {
         $pdf->SetAutoPageBreak(true, 14);
         $pdf->SetTitle($title);
         $pdf->AddPage();
+        // Fill entire page with Japandi warm cream background
+        $pdf->SetFillColor(247, 243, 238);
+        $pdf->Rect(0, 0, 210, 297, 'F');
         $pdf->writeHTML($html, true, false, true, false, '');
 
         return $pdf->Output('', 'S');
@@ -177,6 +180,9 @@ function generateQuotationPDF(array $booking, array $room, array $options = []):
     $pdf->SetTitle('Quotation ' . $quote_ref);
     $pdf->SetSubject('Hotel Booking Quotation');
     $pdf->AddPage();
+    // Fill entire page with Japandi warm cream background
+    $pdf->SetFillColorArray($c_cream);
+    $pdf->Rect(0, 0, 210, 297, 'F');
 
     $w = 174; // usable width (210 - 18*2)
 
@@ -356,7 +362,7 @@ function generateQuotationPDF(array $booking, array $room, array $options = []):
     }
 
     foreach ($priceRows as [$label, $amount, $isBold]) {
-        $bg = $isAlt ? $c_alt : $c_white;
+        $bg = $isAlt ? $c_alt : $c_cream;
         $pdf->SetFillColorArray($bg);
         $yy = $pdf->GetY();
         $pdf->Rect(18, $yy, $w, $rowH, 'F');
@@ -581,6 +587,8 @@ function generateConferenceQuotationPDF(array $enquiry, array $room, array $opti
     $pdf->SetTitle('Conference Quotation ' . $quoteRef);
     $pdf->SetAuthor($siteName);
     $pdf->AddPage();
+    $pdf->SetFillColor(247, 243, 238);
+    $pdf->Rect(0, 0, 210, 297, 'F');
 
     $vatRow = '';
     if ($vatAmount > 0) {
@@ -603,7 +611,7 @@ function generateConferenceQuotationPDF(array $enquiry, array $room, array $opti
 
     $html = '
 <style>
-body { font-family: helvetica; color: #2A2723; font-size: 10.5px; }
+body { font-family: helvetica; color: #2A2723; font-size: 10.5px; background: #F7F3EE; }
 .header { background: #8A775F; color: #ffffff; padding: 16px; }
 .header h1 { margin: 0 0 4px; font-size: 20px; letter-spacing: 0.8px; }
 .header p { margin: 0; font-size: 10px; color: #E6DBCF; }
@@ -765,6 +773,8 @@ function generateEventQuotationPDF(array $event, array $recipient, array $option
     $pdf->SetTitle('Event Quotation ' . $quoteRef);
     $pdf->SetAuthor($siteName);
     $pdf->AddPage();
+    $pdf->SetFillColor(247, 243, 238);
+    $pdf->Rect(0, 0, 210, 297, 'F');
 
     $notesBlock = '';
     if ($notes !== '') {
@@ -775,7 +785,7 @@ function generateEventQuotationPDF(array $event, array $recipient, array $option
 
     $html = '
 <style>
-body { font-family: helvetica; color: #2A2723; font-size: 10.5px; }
+body { font-family: helvetica; color: #2A2723; font-size: 10.5px; background: #F7F3EE; }
 .head { background: #8A775F; color: #ffffff; padding: 15px; }
 .head h1 { margin: 0 0 4px; font-size: 20px; }
 .head p { margin: 0; font-size: 10px; color: #E6DBCF; }

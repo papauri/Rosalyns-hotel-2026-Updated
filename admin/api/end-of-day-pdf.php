@@ -282,6 +282,9 @@ $pdf->setPrintHeader(false);
 $pdf->setPrintFooter(false);
 $pdf->SetMargins(14, 14, 14);
 $pdf->AddPage();
+// Fill entire page with Japandi warm cream background
+$pdf->SetFillColorArray($LIGHT_BG);
+$pdf->Rect(0, 0, 210, 297, 'F');
 
 $y = 14;  // current Y cursor
 
@@ -392,7 +395,7 @@ $revRows[] = ['Pending',         pdfMoney($currency_symbol, (float)$rev['pending
 $revRows[] = ['Outstanding Folio', pdfMoney($currency_symbol, $outstanding),  false];
 
 foreach ($revRows as $i => $rr) {
-    $bg = $i % 2 === 0 ? $WHITE : $LIGHT_BG;
+    $bg = $i % 2 === 0 ? $LIGHT_BG : $CREAM;
     // Draw only in left column area
     $pdf->SetFillColorArray($bg);
     $pdf->SetDrawColorArray($DIVIDER);
@@ -420,7 +423,7 @@ $foRows = [
     ['Rooms Unsold',         (string)$rooms_unsold . ' of ' . $rooms_total],
 ];
 foreach ($foRows as $i => $fr) {
-    $bg = $i % 2 === 0 ? $WHITE : $LIGHT_BG;
+    $bg = $i % 2 === 0 ? $LIGHT_BG : $CREAM;
     $pdf->SetFillColorArray($bg);
     $pdf->SetDrawColorArray($DIVIDER);
     $pdf->SetFont('helvetica', '', 8);
@@ -445,7 +448,7 @@ $posRows = [
     ['vs Yesterday',      pdfSign($pos_change) . pdfMoney($currency_symbol, abs($pos_change))],
 ];
 foreach ($posRows as $i => $pr2) {
-    $bg = $i % 2 === 0 ? $WHITE : $LIGHT_BG;
+    $bg = $i % 2 === 0 ? $LIGHT_BG : $CREAM;
     $pdf->SetFillColorArray($bg);
     $pdf->SetDrawColorArray($DIVIDER);
     $pdf->SetFont('helvetica', '', 8);
@@ -469,7 +472,7 @@ if (!empty($pos_by_type)) {
     $yR += 5;
     foreach ($pos_by_type as $i => $pt) {
         $typeLabel = $typeLabels[$pt['order_type']] ?? ucfirst((string)$pt['order_type']);
-        $bg = $i % 2 === 0 ? $WHITE : $LIGHT_BG;
+        $bg = $i % 2 === 0 ? $LIGHT_BG : $CREAM;
         $pdf->SetFillColorArray($bg);
         $pdf->SetDrawColorArray($DIVIDER);
         $pdf->SetFont('helvetica', '', 7.5);
@@ -495,7 +498,7 @@ if (!empty($methods)) {
     foreach ($methods as $i => $mRow) {
         $mLabel = ucwords(str_replace('_', ' ', (string)$mRow['method']));
         $mShare = $gross > 0 ? ((float)$mRow['total'] / $gross) * 100 : 0;
-        $bg = $i % 2 === 0 ? $WHITE : $LIGHT_BG;
+        $bg = $i % 2 === 0 ? $LIGHT_BG : $CREAM;
         $pdf->SetFillColorArray($bg);
         $pdf->SetDrawColorArray($DIVIDER);
         $pdf->SetFont('helvetica', '', 7.5);
@@ -548,7 +551,7 @@ if (!empty($top_items)) {
     $pdf->Cell(62, 5, 'Revenue', 'B', 0, 'R', true);
     $y += 5;
     foreach ($top_items as $i => $it) {
-        $bg = $i % 2 === 0 ? $WHITE : $LIGHT_BG;
+        $bg = $i % 2 === 0 ? $LIGHT_BG : $CREAM;
         $pdf->SetFillColorArray($bg);
         $pdf->SetFont('helvetica', '', 7.5);
         $pdf->SetTextColorArray($TEXT2);
@@ -582,7 +585,7 @@ if (!empty($void_reasons)) {
     $pdf->Cell(42, 5, 'Value', 'B', 0, 'R', true);
     $y += 5;
     foreach ($void_reasons as $i => $vr) {
-        $bg = $i % 2 === 0 ? $WHITE : $LIGHT_BG;
+        $bg = $i % 2 === 0 ? $LIGHT_BG : $CREAM;
         $pdf->SetFillColorArray($bg);
         $pdf->SetFont('helvetica', '', 7.5);
         $pdf->SetTextColorArray($TEXT2);
@@ -611,7 +614,7 @@ $hkRevRows = [
     ['Reviews Received',      (int)$reviewRow['cnt'] > 0 ? (string)(int)$reviewRow['cnt'] . ' — avg ' . number_format((float)$reviewRow['avg_rating'], 1) . '/5' : 'None today'],
 ];
 foreach ($hkRevRows as $i => $hr) {
-    $bg = $i % 2 === 0 ? $WHITE : $LIGHT_BG;
+    $bg = $i % 2 === 0 ? $LIGHT_BG : $CREAM;
     $pdf->SetFillColorArray($bg);
     $pdf->SetDrawColorArray($DIVIDER);
     $pdf->SetFont('helvetica', '', 8);
@@ -631,7 +634,7 @@ $tomRows = [
     ['Revenue Forecast',     pdfMoney($currency_symbol, (float)$tom['rev_forecast'])],
 ];
 foreach ($tomRows as $i => $tr) {
-    $bg = $i % 2 === 0 ? $WHITE : $LIGHT_BG;
+    $bg = $i % 2 === 0 ? $LIGHT_BG : $CREAM;
     $pdf->SetFillColorArray($bg);
     $pdf->SetDrawColorArray($DIVIDER);
     $pdf->SetFont('helvetica', '', 8);

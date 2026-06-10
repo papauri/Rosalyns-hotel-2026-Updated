@@ -187,6 +187,9 @@ function generateInvoicePDF(int $booking_id, ?string $invoice_number_override = 
                 $pdf->SetAutoPageBreak(true, 10);
                 $pdf->SetFont('helvetica', '', 10);
                 $pdf->AddPage();
+                // Fill entire page with Japandi warm cream
+                $pdf->SetFillColor(247, 243, 238);
+                $pdf->Rect(0, 0, 210, 297, 'F');
                 $pdf->writeHTML($html, true, false, true, false, '');
                 $pdf->Output($filepath, 'F');
             }
@@ -424,7 +427,7 @@ function buildInvoiceHTML(array $booking, string $invoice_number, string $site_n
 
     // ── CHARGES ROWS ─────────────────────────────────────────
     $chargeRows = '';
-    $rowBg = ['#FFFFFF', '#FAF8F5'];
+    $rowBg = ['#F7F3EE', '#EDE8E0'];
     $ri    = 0;
 
     // Accommodation rows — one per room for group bookings, single row otherwise
@@ -628,7 +631,7 @@ function buildInvoiceHTML(array $booking, string $invoice_number, string $site_n
     //  FINAL HTML
     // ═══════════════════════════════════════════════════════
     return '
-<div style="font-family:Georgia,\'Times New Roman\',serif; color:#231F1C; background:#FFFFFF; max-width:680px; margin:0 auto;">
+<div style="font-family:Georgia,\'Times New Roman\',serif; color:#231F1C; background:#F7F3EE; max-width:680px; margin:0 auto;">
 
     <!-- ▌ HEADER ▐ -->
     <table style="width:100%; background:#231F1C; margin-bottom:0;" cellpadding="0" cellspacing="0">
@@ -1595,6 +1598,9 @@ function generateConferenceInvoicePDF(int $enquiry_id)
                 $pdf->SetAutoPageBreak(true, 10);
                 $pdf->SetFont('helvetica', '', 10);
                 $pdf->AddPage();
+                // Fill entire page with Japandi warm cream
+                $pdf->SetFillColor(247, 243, 238);
+                $pdf->Rect(0, 0, 210, 297, 'F');
                 $pdf->writeHTML($html, true, false, true, false, '');
                 $pdf->Output($filepath, 'F');
             }

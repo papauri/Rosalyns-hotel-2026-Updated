@@ -309,6 +309,9 @@ if (!function_exists('receipt_generate_pdf')) {
         $pdf->SetMargins(14, 14, 14);
         $pdf->SetAutoPageBreak(true, 16);
         $pdf->AddPage();
+        // Fill entire page with Japandi warm cream background
+        $pdf->SetFillColor(247, 243, 238);
+        $pdf->Rect(0, 0, 210, 297, 'F');
 
         $receiptBankRows = [];
         $receiptBankName = trim((string)getSetting('bank_name', ''));
