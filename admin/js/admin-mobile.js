@@ -14,12 +14,16 @@
     }
 
     function init() {
-        initMobileNavToggle();
-        enhanceMobileTables();
-        addTableDataLabels();
-        detectOverflowingTables();
-        addTouchGestures();
-        optimizeQuickActions();
+        // Run layout-reading operations inside rAF so they don't block the first
+        // paint and avoid the "Forced reflow" console violation.
+        initMobileNavToggle();  // has its own rAF guard now
+        requestAnimationFrame(function () {
+            enhanceMobileTables();
+            addTableDataLabels();
+            detectOverflowingTables();
+            addTouchGestures();
+            optimizeQuickActions();
+        });
     }
 
     /**
@@ -32,21 +36,32 @@
 
         if (!navToggle || !adminNav) return;
 
-        // Function to update nav position based on header height
+        // Read layout once, write in rAF to avoid forced reflow
         function updateNavPosition() {
             if (window.innerWidth <= 1024 && adminHeader) {
-                const headerHeight = adminHeader.offsetHeight;
-                adminNav.style.top = headerHeight + 'px';
+                const headerHeight = adminHeader.offsetHeight; // read
+                requestAnimationFrame(function () {
+                    adminNav.style.top = headerHeight + 'px'; // write
+                });
             } else {
-                adminNav.style.top = '';
+                requestAnimationFrame(function () {
+                    adminNav.style.top = '';
+                });
             }
         }
 
-        // Update position on load
-        updateNavPosition();
+        // Debounced resize handler to limit reflow frequency
+        let _navResizeRaf = null;
+        function _debouncedUpdateNavPosition() {
+            if (_navResizeRaf) cancelAnimationFrame(_navResizeRaf);
+            _navResizeRaf = requestAnimationFrame(updateNavPosition);
+        }
+
+        // Update position on load (deferred to after first paint)
+        requestAnimationFrame(updateNavPosition);
 
         // Update position on window resize
-        window.addEventListener('resize', updateNavPosition);
+        window.addEventListener('resize', _debouncedUpdateNavPosition);
 
         navToggle.addEventListener('click', function (e) {
             e.preventDefault();

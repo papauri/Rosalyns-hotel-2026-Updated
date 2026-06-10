@@ -81,6 +81,20 @@
 </IfModule>
 
 # ====================
+# PWA / MANIFEST CORS
+# ====================
+# Allow browsers to fetch images referenced by the Web App Manifest
+# (required by Chrome / Edge in manifest icon contexts since Chromium 93+)
+<IfModule mod_headers.c>
+    <FilesMatch "\.(png|jpg|jpeg|gif|svg|webp|ico)$">
+        Header set Access-Control-Allow-Origin "*"
+    </FilesMatch>
+    <Files "manifest.php">
+        Header set Access-Control-Allow-Origin "*"
+    </Files>
+</IfModule>
+
+# ====================
 # PERFORMANCE
 # ====================
 

@@ -872,6 +872,30 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             rh_log_event('bookings', 'info', 'Booking modified', ['booking_id' => $booking_id, 'fields' => array_keys($newValues), 'by' => $user['username'] ?? null]);
 
             $message = 'Booking updated successfully.';
+
+            // Send guest modification email when meaningful fields changed
+            $notifyFields = ['check_in_date', 'check_out_date', 'number_of_guests', 'adult_guests', 'child_guests',
+                             'room_id', 'total_amount', 'status', 'special_requests', 'guest_email', 'guest_name', 'guest_phone'];
+            $meaningfulChanges = array_intersect_key($newValues, array_flip($notifyFields));
+            if (!empty($meaningfulChanges)) {
+                try {
+                    require_once '../config/email.php';
+                    $modStmt = $pdo->prepare("SELECT b.*, r.name AS room_name FROM bookings b LEFT JOIN rooms r ON b.room_id = r.id WHERE b.id = ?");
+                    $modStmt->execute([$booking_id]);
+                    $modBooking = $modStmt->fetch(PDO::FETCH_ASSOC);
+                    if ($modBooking) {
+                        $modEmailResult = sendBookingModifiedEmail($modBooking, $meaningfulChanges);
+                        if ($modEmailResult['success']) {
+                            $message .= ' Guest notified by email.';
+                        } else {
+                            error_log('Quick-modify guest email failed for booking ' . $booking_id . ': ' . $modEmailResult['message']);
+                        }
+                    }
+                } catch (Throwable $modEmailEx) {
+                    error_log('Quick-modify guest email exception for booking ' . $booking_id . ': ' . $modEmailEx->getMessage());
+                }
+            }
+
             if (isAjaxRequest()) {
                 header('Content-Type: application/json');
                 echo json_encode(['success' => true, 'message' => $message]);
@@ -5179,6 +5203,7 @@ $today_str = $today->format('Y-m-d');
                 <button class="close-modal" onclick="closeCancelBookingModal()">&times;</button>
             </div>
             <form id="cancelBookingForm" method="POST" action="">
+                <input type="hidden" name="csrf_token" value="<?= htmlspecialchars($csrf_token, ENT_QUOTES) ?>">
                 <input type="hidden" name="action" value="update_status">
                 <input type="hidden" name="status" value="cancelled">
                 <input type="hidden" name="id" id="cancel_booking_id" value="">
@@ -5768,6 +5793,26 @@ $today_str = $today->format('Y-m-d');
     </div>
 
     <script>
+        // Ensure setBookingPageModalOpen is available early (full definition also lives in
+        // the third <script> block below; this copy guarantees it is defined before any
+        // onclick handler in this block fires, even if the later block fails to parse).
+        if (typeof setBookingPageModalOpen !== 'function') {
+            window.setBookingPageModalOpen = function setBookingPageModalOpen(modal, isOpen) {
+                if (!modal) return;
+                modal.style.transition = 'none';
+                modal.style.display = isOpen ? 'flex' : 'none';
+                modal.style.opacity = isOpen ? '1' : '0';
+                modal.style.visibility = isOpen ? 'visible' : 'hidden';
+                modal.classList.toggle('active', isOpen);
+                modal.setAttribute('aria-hidden', isOpen ? 'false' : 'true');
+                if (isOpen) {
+                    document.body.classList.add('modal-open');
+                } else if (!document.querySelector('.modal-overlay.active, .modal.active')) {
+                    document.body.classList.remove('modal-open');
+                }
+            };
+        }
+
         let viewBookingRequestController = null;
         let viewBookingActiveTrigger = null;
 
@@ -6558,10 +6603,6 @@ $today_str = $today->format('Y-m-d');
         document.getElementById('cancelBookingForm').addEventListener('submit', function(e) {
             e.preventDefault();
             const formData = new FormData(this);
-            const reason = document.getElementById('cancellation_reason').value;
-            if (reason) {
-                formData.append('cancellation_reason', reason);
-            }
 
             const submitBtn = this.querySelector('button[type="submit"]');
             if (submitBtn) setButtonLoading(submitBtn, true);

@@ -9,13 +9,30 @@ require_once __DIR__ . '/../config/base-url.php';
 
 header('Content-Type: application/manifest+json; charset=utf-8');
 header('Cache-Control: public, max-age=86400');
+header('Access-Control-Allow-Origin: *');
 
 $name       = getSetting('site_name') ?: 'Hotel';
 $short_name = getSetting('site_short_name') ?: getSetting('site_name') ?: 'Hotel';
 $logo       = getSetting('site_logo') ?: '/images/logo/logo.png';
-$icon_url   = (strpos($logo, 'http') === 0)
-    ? $logo
-    : rtrim(BASE_URL, '/') . '/' . ltrim($logo, '/');
+
+// Build absolute icon URL, preferring an already-absolute URL from settings
+if (strpos($logo, 'http') === 0) {
+    $icon_url = $logo;
+} else {
+    $icon_url = rtrim(BASE_URL, '/') . '/' . ltrim($logo, '/');
+}
+
+// Verify the file exists on disk; fall back to a known-good relative path
+if (strpos($logo, 'http') !== 0) {
+    $disk_path = realpath(__DIR__ . '/../' . ltrim($logo, '/'));
+    if (!$disk_path || !file_exists($disk_path)) {
+        // Try the canonical logo path
+        $fallback_disk = realpath(__DIR__ . '/../images/logo/logo.png');
+        if ($fallback_disk && file_exists($fallback_disk)) {
+            $icon_url = rtrim(BASE_URL, '/') . '/images/logo/logo.png';
+        }
+    }
+}
 
 $manifest = [
     'name'             => $name . ' Admin',
