@@ -665,10 +665,10 @@ if (!function_exists('hotel_japandi_key_value_rows')) {
 if (!function_exists('hotel_japandi_summary_table')) {
     function hotel_japandi_summary_table(array $rows, string $labelHeading = 'Description', string $valueHeading = 'Amount'): string
     {
-        $html = '<table style="width:100%;border-collapse:collapse;" cellpadding="0" cellspacing="0">'
+        $html = '<table style="width:100%;border-collapse:collapse;border:1px solid #d3cbc0;" cellpadding="0" cellspacing="0">'
             . '<tr>'
-            . '<td style="padding:14px 10px 14px 0;border-bottom:1px solid #d3cbc0;color:#9b8f7e;font-size:11px;letter-spacing:0.12em;text-transform:uppercase;font-weight:600;">' . htmlspecialchars($labelHeading, ENT_QUOTES, 'UTF-8') . '</td>'
-            . '<td style="padding:14px 0 14px 10px;border-bottom:1px solid #d3cbc0;color:#9b8f7e;font-size:11px;letter-spacing:0.12em;text-transform:uppercase;font-weight:600;text-align:right;">' . htmlspecialchars($valueHeading, ENT_QUOTES, 'UTF-8') . '</td>'
+            . '<td width="60%" style="padding:14px 10px 14px 8px;border-bottom:2px solid #c4bbb0;border-right:1px solid #d3cbc0;color:#9b8f7e;font-size:11px;letter-spacing:0.12em;text-transform:uppercase;font-weight:600;">' . htmlspecialchars($labelHeading, ENT_QUOTES, 'UTF-8') . '</td>'
+            . '<td width="40%" style="padding:14px 8px 14px 10px;border-bottom:2px solid #c4bbb0;color:#9b8f7e;font-size:11px;letter-spacing:0.12em;text-transform:uppercase;font-weight:600;text-align:right;">' . htmlspecialchars($valueHeading, ENT_QUOTES, 'UTF-8') . '</td>'
             . '</tr>';
 
         foreach ($rows as $row) {
@@ -677,30 +677,30 @@ if (!function_exists('hotel_japandi_summary_table')) {
             $tone = (string)($row['tone'] ?? '');
 
             $rowStyle = '';
-            $labelStyle = 'padding:12px 10px 12px 0;border-bottom:1px solid #d3cbc0;font-size:12px;color:#6d6455;';
-            $valueStyle = 'padding:12px 0 12px 10px;border-bottom:1px solid #d3cbc0;font-size:12px;color:#3e3930;text-align:right;font-weight:500;';
+            $labelStyle = 'width:60%;padding:10px 10px 10px 8px;border-bottom:1px solid #d3cbc0;border-right:1px solid #d3cbc0;font-size:12px;color:#6d6455;';
+            $valueStyle = 'width:40%;padding:10px 8px 10px 10px;border-bottom:1px solid #d3cbc0;font-size:12px;color:#3e3930;text-align:right;font-weight:500;white-space:nowrap;';
 
             if ($tone === 'accent') {
-                $labelStyle = 'padding:12px 10px 12px 0;border-bottom:1px solid #d3cbc0;font-size:12px;color:#3e3930;font-weight:700;';
-                $valueStyle = 'padding:12px 0 12px 10px;border-bottom:1px solid #d3cbc0;font-size:12px;color:#3e3930;text-align:right;font-weight:700;';
+                $labelStyle = 'width:60%;padding:10px 10px 10px 8px;border-bottom:1px solid #d3cbc0;border-right:1px solid #d3cbc0;font-size:12px;color:#3e3930;font-weight:700;';
+                $valueStyle = 'width:40%;padding:10px 8px 10px 10px;border-bottom:1px solid #d3cbc0;font-size:12px;color:#3e3930;text-align:right;font-weight:700;white-space:nowrap;';
             } elseif ($tone === 'alert') {
-                $labelStyle = 'padding:12px 10px 12px 0;border-bottom:1px solid #d3cbc0;font-size:12px;color:#8a5646;font-weight:700;';
-                $valueStyle = 'padding:12px 0 12px 10px;border-bottom:1px solid #d3cbc0;font-size:12px;color:#8a5646;text-align:right;font-weight:700;';
+                $labelStyle = 'width:60%;padding:10px 10px 10px 8px;border-bottom:1px solid #d3cbc0;border-right:1px solid #d3cbc0;font-size:12px;color:#8a5646;font-weight:700;';
+                $valueStyle = 'width:40%;padding:10px 8px 10px 10px;border-bottom:1px solid #d3cbc0;font-size:12px;color:#8a5646;text-align:right;font-weight:700;white-space:nowrap;';
             } elseif ($tone === 'total') {
                 $rowStyle = '';
-                $labelStyle = 'padding:12px 10px 12px 0;font-size:12px;color:#f5f2eb;font-weight:700;background-color:#3e3930;';
-                $valueStyle = 'padding:12px 0 12px 10px;font-size:12px;color:#f5f2eb;text-align:right;font-weight:700;background-color:#3e3930;';
+                $labelStyle = 'width:60%;padding:10px 10px 10px 8px;border-top:2px solid #2a2420;font-size:12px;color:#f5f2eb;font-weight:700;background-color:#3e3930;';
+                $valueStyle = 'width:40%;padding:10px 8px 10px 10px;border-top:2px solid #2a2420;font-size:12px;color:#f5f2eb;text-align:right;font-weight:700;background-color:#3e3930;white-space:nowrap;';
             }
 
             if ($tone === 'total') {
                 $html .= '<tr>'
-                    . '<td bgcolor="#3e3930" style="' . $labelStyle . '">' . $label . '</td>'
-                    . '<td bgcolor="#3e3930" style="' . $valueStyle . '">' . $value . '</td>'
+                    . '<td width="60%" bgcolor="#3e3930" style="' . $labelStyle . '">' . $label . '</td>'
+                    . '<td width="40%" bgcolor="#3e3930" style="' . $valueStyle . '">' . $value . '</td>'
                     . '</tr>';
             } else {
                 $html .= '<tr' . ($rowStyle !== '' ? ' style="' . $rowStyle . '"' : '') . '>'
-                    . '<td style="' . $labelStyle . '">' . $label . '</td>'
-                    . '<td style="' . $valueStyle . '">' . $value . '</td>'
+                    . '<td width="60%" style="' . $labelStyle . '">' . $label . '</td>'
+                    . '<td width="40%" style="' . $valueStyle . '">' . $value . '</td>'
                     . '</tr>';
             }
         }
@@ -805,12 +805,12 @@ if (!function_exists('hotel_default_payment_invoice_document_html')) {
             ['label' => 'Guests', 'value' => '{{guests}}'],
             ['label' => 'Duration', 'value' => '{{nights}} night(s)'],
         ], '35%', '#6d6455', '500');
-        $contentHtml = '<table style="width:100%;border-collapse:collapse;" cellpadding="0" cellspacing="0">'
-            . '<tr>'
-            . '<td width="54%" style="padding:14px 12px 14px 0;border-bottom:1px solid #d3cbc0;color:#9b8f7e;font-size:11px;letter-spacing:0.12em;text-transform:uppercase;font-weight:600;">Description</td>'
-            . '<td width="10%" style="padding:14px 12px;border-bottom:1px solid #d3cbc0;color:#9b8f7e;font-size:11px;letter-spacing:0.12em;text-transform:uppercase;font-weight:600;text-align:center;">Qty</td>'
-            . '<td width="18%" style="padding:14px 12px;border-bottom:1px solid #d3cbc0;color:#9b8f7e;font-size:11px;letter-spacing:0.12em;text-transform:uppercase;font-weight:600;text-align:right;">Unit Rate</td>'
-            . '<td width="18%" style="padding:14px 0 14px 12px;border-bottom:1px solid #d3cbc0;color:#9b8f7e;font-size:11px;letter-spacing:0.12em;text-transform:uppercase;font-weight:600;text-align:right;">Line Total</td>'
+        $contentHtml = '<table style="width:100%;border-collapse:collapse;border:1px solid #C8BEB0;" cellpadding="0" cellspacing="0">'
+            . '<tr style="background-color:#8A775F;">'
+            . '<td width="50%" style="padding:10px 12px 10px 0;border-bottom:2px solid #9A8E82;border-right:1px solid #9A8E82;color:#FFFFFF;font-size:10px;letter-spacing:1.5px;text-transform:uppercase;font-weight:700;padding-left:12px;">Description</td>'
+            . '<td width="10%" style="padding:10px 8px;border-bottom:2px solid #9A8E82;border-right:1px solid #9A8E82;color:#FFFFFF;font-size:10px;letter-spacing:1.5px;text-transform:uppercase;font-weight:700;text-align:center;">Qty</td>'
+            . '<td width="15%" style="padding:10px 8px;border-bottom:2px solid #9A8E82;border-right:1px solid #9A8E82;color:#FFFFFF;font-size:10px;letter-spacing:1.5px;text-transform:uppercase;font-weight:700;text-align:right;">Unit Rate</td>'
+            . '<td width="25%" style="padding:10px 12px;border-bottom:2px solid #9A8E82;color:#FFFFFF;font-size:10px;letter-spacing:1.5px;text-transform:uppercase;font-weight:700;text-align:right;">Line Total</td>'
             . '</tr>'
             . '{{charges_table_rows}}'
             . '{{totals_rows}}'

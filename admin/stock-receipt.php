@@ -86,10 +86,10 @@ function buildReceiptHtml(array $order, array $items, array $ctx): string
     foreach ($items as $it) {
         $noteRow = !empty($it['notes']) ? '<div style="font-size:11px;color:#8B7355;font-style:italic;">→ ' . htmlspecialchars($it['notes']) . '</div>' : '';
         $rows .= '<tr>'
-            . '<td style="padding:6px 8px;border-bottom:1px solid #eee;">' . htmlspecialchars($it['item_name']) . $noteRow . '</td>'
-            . '<td style="padding:6px 8px;border-bottom:1px solid #eee;text-align:right;">' . number_format((float)$it['quantity'], 2) . '</td>'
-            . '<td style="padding:6px 8px;border-bottom:1px solid #eee;text-align:right;">' . $cur . ' ' . number_format((float)$it['unit_price'], 2) . '</td>'
-            . '<td style="padding:6px 8px;border-bottom:1px solid #eee;text-align:right;">' . $cur . ' ' . number_format((float)$it['line_total'], 2) . '</td>'
+            . '<td style="padding:6px 8px;border:1px solid #e0d8ce;">' . htmlspecialchars($it['item_name']) . $noteRow . '</td>'
+            . '<td style="padding:6px 8px;border:1px solid #e0d8ce;text-align:right;white-space:nowrap;">' . number_format((float)$it['quantity'], 2) . '</td>'
+            . '<td style="padding:6px 8px;border:1px solid #e0d8ce;text-align:right;white-space:nowrap;">' . $cur . ' ' . number_format((float)$it['unit_price'], 2) . '</td>'
+            . '<td style="padding:6px 8px;border:1px solid #e0d8ce;text-align:right;white-space:nowrap;">' . $cur . ' ' . number_format((float)$it['line_total'], 2) . '</td>'
             . '</tr>';
     }
 
@@ -141,22 +141,22 @@ function buildReceiptHtml(array $order, array $items, array $ctx): string
         . '</table>'
         . '</td></tr>'
         . '<tr><td style="padding:8px 24px 0;">'
-        . '<table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-collapse:collapse;font-size:13px;">'
-        . '<thead><tr style="background:#f5efe8;"><th style="padding:8px;text-align:left;color:#3f3933;">Item</th><th style="padding:8px;text-align:right;color:#3f3933;">Qty</th><th style="padding:8px;text-align:right;color:#3f3933;">Price</th><th style="padding:8px;text-align:right;color:#3f3933;">Line</th></tr></thead>'
+        . '<table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-collapse:collapse;font-size:13px;border:1px solid #d9cec1;">'
+        . '<thead><tr style="background:#8B7355;"><th style="padding:8px 8px 8px 8px;text-align:left;color:#ffffff;border-right:1px solid #9A8775;border-bottom:2px solid #6d5a44;">Item</th><th style="padding:8px;text-align:right;color:#ffffff;border-right:1px solid #9A8775;border-bottom:2px solid #6d5a44;white-space:nowrap;">Qty</th><th style="padding:8px;text-align:right;color:#ffffff;border-right:1px solid #9A8775;border-bottom:2px solid #6d5a44;white-space:nowrap;">Unit Price</th><th style="padding:8px;text-align:right;color:#ffffff;border-bottom:2px solid #6d5a44;white-space:nowrap;">Line Total</th></tr></thead>'
         . '<tbody>' . $rows . '</tbody>'
         . '</table>'
         . '</td></tr>'
         . '<tr><td style="padding:14px 24px 0;">'
-        . '<table role="presentation" align="right" cellspacing="0" cellpadding="0" style="font-size:13px;color:#3f3933;min-width:280px;">'
-        . '<tr><td style="padding:4px 0;">Subtotal</td><td align="right" style="padding:4px 0;">' . $cur . ' ' . number_format($subtotal, 2) . '</td></tr>'
-        . ($discount > 0 ? '<tr><td style="padding:4px 0;">Discount' . ($order['discount_reason'] ? ' (' . htmlspecialchars($order['discount_reason']) . ')' : '') . '</td><td align="right" style="padding:4px 0;color:#b3261e;">−' . $cur . ' ' . number_format($discount, 2) . '</td></tr>' : '')
-        . ($service > 0 ? '<tr><td style="padding:4px 0;">Service charge</td><td align="right" style="padding:4px 0;">' . $cur . ' ' . number_format($service, 2) . '</td></tr>' : '')
-        . ($tax > 0 ? '<tr><td style="padding:4px 0;">Tax</td><td align="right" style="padding:4px 0;">' . $cur . ' ' . number_format($tax, 2) . '</td></tr>' : '')
-        . '<tr><td style="padding:8px 0 0;border-top:1px solid #d9cec1;font-weight:700;">TOTAL</td><td align="right" style="padding:8px 0 0;border-top:1px solid #d9cec1;font-weight:700;font-size:15px;">' . $cur . ' ' . number_format($total, 2) . '</td></tr>'
-        . '<tr><td colspan="2" style="padding:8px 0 0;font-size:12px;color:#5a534c;">Paid via: ' . $method . '</td></tr>'
-        . ($tendered !== null ? '<tr><td style="padding:4px 0;">Tendered</td><td align="right" style="padding:4px 0;">' . $cur . ' ' . number_format($tendered, 2) . '</td></tr>' : '')
-        . ($change !== null && $change > 0 ? '<tr><td style="padding:4px 0;">Change</td><td align="right" style="padding:4px 0;">' . $cur . ' ' . number_format($change, 2) . '</td></tr>' : '')
-        . ($extras ? '<tr><td colspan="2" style="padding:4px 0 0;font-size:11px;color:#5a534c;">' . $extras . '</td></tr>' : '')
+        . '<table role="presentation" align="right" cellspacing="0" cellpadding="0" style="font-size:13px;color:#3f3933;min-width:300px;border-collapse:collapse;border:1px solid #d9cec1;">'
+        . '<tr><td style="padding:6px 10px;border-bottom:1px solid #e8e0d5;border-right:1px solid #d9cec1;">Subtotal</td><td align="right" style="padding:6px 10px;border-bottom:1px solid #e8e0d5;white-space:nowrap;">' . $cur . ' ' . number_format($subtotal, 2) . '</td></tr>'
+        . ($discount > 0 ? '<tr><td style="padding:6px 10px;border-bottom:1px solid #e8e0d5;border-right:1px solid #d9cec1;">Discount' . ($order['discount_reason'] ? ' (' . htmlspecialchars($order['discount_reason']) . ')' : '') . '</td><td align="right" style="padding:6px 10px;border-bottom:1px solid #e8e0d5;color:#b3261e;white-space:nowrap;">−' . $cur . ' ' . number_format($discount, 2) . '</td></tr>' : '')
+        . ($service > 0 ? '<tr><td style="padding:6px 10px;border-bottom:1px solid #e8e0d5;border-right:1px solid #d9cec1;">Service charge</td><td align="right" style="padding:6px 10px;border-bottom:1px solid #e8e0d5;white-space:nowrap;">' . $cur . ' ' . number_format($service, 2) . '</td></tr>' : '')
+        . ($tax > 0 ? '<tr><td style="padding:6px 10px;border-bottom:1px solid #e8e0d5;border-right:1px solid #d9cec1;">Tax</td><td align="right" style="padding:6px 10px;border-bottom:1px solid #e8e0d5;white-space:nowrap;">' . $cur . ' ' . number_format($tax, 2) . '</td></tr>' : '')
+        . '<tr style="background:#3f3933;"><td style="padding:8px 10px;font-weight:700;color:#ffffff;border-right:1px solid #5a534c;">TOTAL</td><td align="right" style="padding:8px 10px;font-weight:700;font-size:15px;color:#D5B37C;white-space:nowrap;">' . $cur . ' ' . number_format($total, 2) . '</td></tr>'
+        . '<tr><td colspan="2" style="padding:6px 10px;font-size:12px;color:#5a534c;border-top:1px solid #d9cec1;">Paid via: ' . $method . '</td></tr>'
+        . ($tendered !== null ? '<tr><td style="padding:4px 10px;border-right:1px solid #d9cec1;">Tendered</td><td align="right" style="padding:4px 10px;white-space:nowrap;">' . $cur . ' ' . number_format($tendered, 2) . '</td></tr>' : '')
+        . ($change !== null && $change > 0 ? '<tr><td style="padding:4px 10px;border-top:1px solid #e8e0d5;border-right:1px solid #d9cec1;">Change</td><td align="right" style="padding:4px 10px;border-top:1px solid #e8e0d5;white-space:nowrap;">' . $cur . ' ' . number_format($change, 2) . '</td></tr>' : '')
+        . ($extras ? '<tr><td colspan="2" style="padding:4px 10px;font-size:11px;color:#5a534c;">' . $extras . '</td></tr>' : '')
         . '</table>'
         . '</td></tr>'
         . ($notes ? '<tr><td style="padding:14px 24px 0;"><div style="font-size:12px;color:#5a534c;background:#faf7f3;border:1px solid #ece3d9;border-radius:8px;padding:9px 10px;"><strong>Notes:</strong> ' . $notes . '</div></td></tr>' : '')
