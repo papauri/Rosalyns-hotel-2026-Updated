@@ -263,7 +263,7 @@ if (!$error && $_SERVER['REQUEST_METHOD'] === 'POST') {
                     ->execute([$user['id'], $countId]);
                 $pdo->commit();
 
-                if (function_exists('deleteCache')) deleteCache('stock_dashboard_metrics_v1');
+                if (function_exists('deleteCache')) deleteCache('stock_dashboard_metrics_v2');
                 $_SESSION['stock_msg'] = "Count " . displayCountReference((string)$count['reference']) . " approved. Variances applied to stock.";
                 header('Location: stock-count.php?id=' . $countId);
                 exit;

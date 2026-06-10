@@ -703,6 +703,32 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['create_booking'])) {
             $email_msg = $email_result['success']
                 ? ' Confirmation email sent.'
                 : ' (Email failed: ' . htmlspecialchars($email_result['message'] ?? 'unknown error') . ')';
+
+            // ── Admin CC: send a copy to the hotel admin for admin-created bookings ──
+            try {
+                $adminCcEmail = trim((string)getEmailSetting('email_admin_email', ''));
+                if (empty($adminCcEmail)) {
+                    $adminCcEmail = trim((string)getEmailSetting('smtp_username', ''));
+                }
+                if (!empty($adminCcEmail) && filter_var($adminCcEmail, FILTER_VALIDATE_EMAIL)) {
+                    $adminCcName      = getSetting('site_name', 'Admin');
+                    $adminBookingUrl  = rtrim((string)getSetting('site_url', ''), '/') . '/admin/booking-details.php?id=' . $primary_id;
+                    $adminCreatedBy   = htmlspecialchars($user['full_name'] ?? $user['username'] ?? 'Admin');
+                    $adminCcSubject   = '[Admin Copy] New Booking Created — ' . htmlspecialchars($primary_ref);
+                    $adminCcBody      = '<h2 style="color:#8B7355;">Admin Copy — Booking Created</h2>'
+                        . '<p>A new booking has been created by <strong>' . $adminCreatedBy . '</strong>.</p>'
+                        . '<p><strong>Reference:</strong> ' . htmlspecialchars($primary_ref) . '<br>'
+                        . '<strong>Guest:</strong> ' . htmlspecialchars($guest_name) . ' (' . htmlspecialchars($guest_email) . ')<br>'
+                        . '<strong>Room(s):</strong> ' . htmlspecialchars($room_name_for_email) . '<br>'
+                        . '<strong>Check-in:</strong> ' . htmlspecialchars($check_in_date) . '<br>'
+                        . '<strong>Check-out:</strong> ' . htmlspecialchars($check_out_date) . '<br>'
+                        . '<strong>Status:</strong> ' . htmlspecialchars($booking_status) . '</p>'
+                        . '<p><a href="' . htmlspecialchars($adminBookingUrl) . '" style="background:#8B7355;color:#fff;padding:10px 20px;text-decoration:none;border-radius:4px;">View Booking</a></p>';
+                    sendEmail($adminCcEmail, $adminCcName, $adminCcSubject, $adminCcBody);
+                }
+            } catch (Throwable $adminCcEx) {
+                error_log('Admin CC email failed for booking ' . $primary_ref . ': ' . $adminCcEx->getMessage());
+            }
         }
 
         // ── Quotation PDF (tentative bookings only) ───────────────────────────

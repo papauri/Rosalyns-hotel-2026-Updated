@@ -198,9 +198,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $payment
                 $updateStmt->execute([$payment_id]);
             }
 
-            $pdo->commit();
-
-            // Recalculate booking balances so amount_paid / amount_due stay accurate after refund
+            // Recalculate booking balances INSIDE the transaction so that amount_paid / amount_due
+            // remain consistent with the refund row. If recalc fails the whole transaction rolls back.
             if ($payment['booking_type'] === 'room') {
                 recalculateBookingFinancials((int)$payment['booking_id']);
             } elseif ($payment['booking_type'] === 'conference') {
@@ -223,7 +222,27 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $payment
                 $cfUpdStmt->execute([$cfAmtPaid, $cfAmtPaid, $payment['booking_id']]);
             }
 
+            $pdo->commit();
+
             $message = 'Refund created successfully! Reference: ' . $refundRef;
+
+            // Send refund notification email to guest — failure must NOT block the response
+            try {
+                require_once __DIR__ . '/../config/email.php';
+                $rfEmailResult = sendRefundNotificationEmail(
+                    $payment,
+                    $refundRef,
+                    $refund_amount,
+                    $refund_reason
+                );
+                if ($rfEmailResult['success']) {
+                    $message .= ' Refund notification emailed to customer.';
+                } else {
+                    error_log('Refund notification email failed for ' . $refundRef . ': ' . $rfEmailResult['message']);
+                }
+            } catch (Throwable $emailEx) {
+                error_log('Refund notification email exception for ' . $refundRef . ': ' . $emailEx->getMessage());
+            }
 
             // Log the action to admin_activity_log
             $logStmt = $pdo->prepare("

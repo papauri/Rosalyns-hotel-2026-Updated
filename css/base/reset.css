@@ -112,6 +112,20 @@ button {
     margin: 0;
 }
 
+/* ============================================
+   FOCUS VISIBLE — Accessibility
+   ============================================ */
+
+:focus {
+    outline: none;
+}
+
+:focus-visible {
+    outline: 2px solid var(--color-lux-gold, #B18247);
+    outline-offset: 3px;
+    border-radius: 3px;
+}
+
 textarea {
     resize: vertical;
     min-height: 100px;

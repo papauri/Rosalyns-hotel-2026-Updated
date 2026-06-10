@@ -32,8 +32,12 @@ function isFacebookPostingEnabled(): bool
  */
 function postFacebookFeed(string $message, ?string $link = null, ?string $imageUrl = null): array
 {
-    $pageId = (string) getSetting('facebook_page_id', '');
-    $token  = (string) getSetting('facebook_page_access_token', '');
+    $pageId   = (string) getSetting('facebook_page_id', '');
+    $rawToken = (string) getSetting('facebook_page_access_token', '');
+    // Decrypt token if stored encrypted (backward-compatible: falls back to raw value)
+    $token = ($rawToken !== '' && function_exists('decryptApiKey'))
+        ? (decryptApiKey($rawToken) ?? $rawToken)
+        : $rawToken;
 
     if ($pageId === '' || $token === '') {
         return [

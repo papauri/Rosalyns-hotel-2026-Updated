@@ -348,6 +348,27 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['enquiry_action'])) {
             } else {
                 $message = 'Conference enquiry confirmed successfully! (Email not sent: ' . $email_result['message'] . ')';
             }
+
+            // Admin CC notification for conference confirmation
+            try {
+                $adminCcAddr = trim((string)getEmailSetting('email_admin_email', ''));
+                if (empty($adminCcAddr)) {
+                    $adminCcAddr = trim((string)getEmailSetting('smtp_username', ''));
+                }
+                if (!empty($adminCcAddr) && filter_var($adminCcAddr, FILTER_VALIDATE_EMAIL)) {
+                    $confSiteName  = getSetting('site_name', 'Hotel');
+                    $confAdminUrl  = rtrim((string)getSetting('site_url', ''), '/') . '/admin/conference-management.php?id=' . $enquiry_id;
+                    $confAdminBody = '<h2 style="color:#8B7355;">Conference Enquiry Confirmed</h2>'
+                        . '<p>Confirmed by: <strong>' . htmlspecialchars($user['full_name'] ?? $user['username'] ?? 'Admin') . '</strong></p>'
+                        . '<p><strong>Reference:</strong> ' . htmlspecialchars($enquiry['inquiry_reference'] ?? '') . '<br>'
+                        . '<strong>Company/Client:</strong> ' . htmlspecialchars($enquiry['company_name'] ?? $enquiry['contact_person'] ?? '') . '<br>'
+                        . '<strong>Email:</strong> ' . htmlspecialchars($enquiry['email'] ?? '') . '</p>'
+                        . '<p><a href="' . htmlspecialchars($confAdminUrl) . '" style="background:#8B7355;color:#fff;padding:10px 20px;text-decoration:none;border-radius:4px;">View Enquiry</a></p>';
+                    sendEmail($adminCcAddr, $confSiteName, '[Admin] Conference Confirmed — ' . htmlspecialchars($enquiry['inquiry_reference'] ?? ''), $confAdminBody);
+                }
+            } catch (Throwable $confCcEx) {
+                error_log('Admin CC for conference confirmation failed: ' . $confCcEx->getMessage());
+            }
         } elseif ($action === 'cancel') {
             $stmt = $pdo->prepare("UPDATE conference_inquiries SET status = 'cancelled', updated_at = NOW() WHERE id = ?");
             $stmt->execute([$enquiry_id]);

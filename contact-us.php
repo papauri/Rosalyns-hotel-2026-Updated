@@ -237,8 +237,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['contact_form'])) {
                     }
                 }
             } catch (PDOException $e) {
-                error_log("Contact form error: " . $e->getMessage());
+                error_log("Contact form DB error: " . $e->getMessage());
                 $formError = 'There was an error submitting your inquiry. Please try again or call us directly.';
+            } catch (Throwable $e) {
+                // Email failure must not undo a successful DB insert — log and continue
+                error_log("Contact form email error: " . $e->getMessage());
             }
         } // end if (!empty($validation_errors)) else
     } // end CSRF/rate-limit else block

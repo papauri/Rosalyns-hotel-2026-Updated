@@ -108,7 +108,7 @@ if (!$error && $_SERVER['REQUEST_METHOD'] === 'POST') {
     }
     if ($message) {
         $_SESSION['stock_msg'] = $message;
-        if (function_exists('deleteCache')) deleteCache('stock_dashboard_metrics_v1');
+        if (function_exists('deleteCache')) deleteCache('stock_dashboard_metrics_v2');
     }
     if ($error)   $_SESSION['stock_err'] = $error;
     header('Location: stock-batches.php' . (!empty($_GET['ingredient_id']) ? '?ingredient_id=' . (int)$_GET['ingredient_id'] : ''));

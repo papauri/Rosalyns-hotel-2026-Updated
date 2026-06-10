@@ -642,7 +642,12 @@ $bootstrap['fingerprint'] = md5(
         }
 
         function elapsedClass(seconds, status) {
-            if (status === 'ready') return '';
+            if (status === 'ready') {
+                // Escalate visually when ticket has been ready but not collected
+                if (seconds > 600) return 'stale-ready late';
+                if (seconds > 300) return 'stale-ready warn';
+                return '';
+            }
             if (seconds > 600) return 'late';
             if (seconds > 300) return 'warn';
             return '';

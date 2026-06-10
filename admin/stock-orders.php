@@ -494,7 +494,7 @@ if (!$error && $_SERVER['REQUEST_METHOD'] === 'POST') {
 
                     $pdo->commit();
 
-                    if (function_exists('deleteCache')) deleteCache('stock_dashboard_metrics_v1');
+                    if (function_exists('deleteCache')) deleteCache('stock_dashboard_metrics_v2');
 
                     $roomLabel = $roomNumber ? 'Room ' . $roomNumber : 'booking ' . ($roomServiceBooking['booking_reference'] ?? '');
                     $message = "Room-service order {$reference} posted to {$roomLabel} ({$currency_symbol} " . number_format($totalAmount, 2) . "). It will appear on the guest folio for checkout accounting.";
@@ -579,7 +579,7 @@ if (!$error && $_SERVER['REQUEST_METHOD'] === 'POST') {
 
                     $pdo->commit();
 
-                    if (function_exists('deleteCache')) deleteCache('stock_dashboard_metrics_v1');
+                    if (function_exists('deleteCache')) deleteCache('stock_dashboard_metrics_v2');
 
                     $changeMsg = '';
                     if ($paymentMethod === 'cash' && $paymentExtras['change_due'] > 0) {
@@ -625,7 +625,7 @@ if (!$error && $_SERVER['REQUEST_METHOD'] === 'POST') {
                 logOrderAudit($pdo, $orderId, $user['id'], $user['full_name'], 'cancelled', null);
                 $pdo->commit();
 
-                if (function_exists('deleteCache')) deleteCache('stock_dashboard_metrics_v1');
+                if (function_exists('deleteCache')) deleteCache('stock_dashboard_metrics_v2');
 
                 $message = "Order {$order['reference']} cancelled" . ($folioVoids > 0 ? " and {$folioVoids} folio charge(s) voided." : ' and stock restored.');
             } elseif ($action === 'void_order') {
@@ -671,7 +671,7 @@ if (!$error && $_SERVER['REQUEST_METHOD'] === 'POST') {
                 logOrderAudit($pdo, $orderId, $user['id'], $user['full_name'], 'voided', $voidReason);
                 $pdo->commit();
 
-                if (function_exists('deleteCache')) deleteCache('stock_dashboard_metrics_v1');
+                if (function_exists('deleteCache')) deleteCache('stock_dashboard_metrics_v2');
 
                 $message = "Order {$order['reference']} voided. " . ($folioVoids > 0 ? "{$folioVoids} folio charge(s) voided and stock restored." : 'Stock restored.') . ' Reason logged.';
             } elseif ($action === 'reconcile_order') {
@@ -681,7 +681,7 @@ if (!$error && $_SERVER['REQUEST_METHOD'] === 'POST') {
                 $orderId = (int)($_POST['order_id'] ?? 0);
                 if ($orderId <= 0) throw new RuntimeException('Invalid order.');
                 $changes = reconcileRestaurantOrder($pdo, $orderId, $user);
-                if (function_exists('deleteCache')) deleteCache('stock_dashboard_metrics_v1');
+                if (function_exists('deleteCache')) deleteCache('stock_dashboard_metrics_v2');
                 $message = 'Order reconciled: ' . implode(', ', $changes) . '.';
             }
         } catch (Throwable $e) {

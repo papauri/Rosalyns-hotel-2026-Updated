@@ -294,6 +294,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 'room_id' => $room_id
             ];
 
+            // Send acknowledgement email — failure must NOT block the redirect
+            try {
+                require_once __DIR__ . '/config/email.php';
+                sendReviewAcknowledgementEmail(
+                    $sanitized_data['guest_name'],
+                    $sanitized_data['guest_email'],
+                    $sanitized_data['review_title'],
+                    (int)$sanitized_data['overall_rating']
+                );
+            } catch (Throwable $reviewEmailEx) {
+                error_log('Review acknowledgement email failed: ' . $reviewEmailEx->getMessage());
+            }
+
             // Redirect to confirmation page
             header('Location: ' . BASE_URL . 'review-confirmation.php');
             exit;

@@ -20,6 +20,11 @@ header('Cache-Control: no-store');
     <meta name="robots" content="noindex, nofollow">
     <title>You're Offline</title>
     <style>
+        /* @import MUST be the first statement inside a <style> block.
+           Previously this was misplaced after :root{} which caused browsers
+           to silently ignore the import and fall back to system fonts. */
+        @import url('https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,400;0,600;1,400&family=Jost:wght@300;400;500;600&display=swap');
+
         *,
         *::before,
         *::after {
@@ -46,9 +51,6 @@ header('Cache-Control: no-store');
             font-weight: 300;
             -webkit-font-smoothing: antialiased;
         }
-
-        /* Fonts — gracefully degrade to system stack if not cached */
-        @import url('https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,400;0,600;1,400&family=Jost:wght@300;400;500;600&display=swap');
 
         body {
             display: flex;

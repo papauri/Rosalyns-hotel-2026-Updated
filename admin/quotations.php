@@ -65,12 +65,22 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $mqStmt->execute([$quotation_id]);
             $mqRow = $mqStmt->fetch(PDO::FETCH_ASSOC);
             if ($mqRow) {
-                $lcCheck = bookingAllowsAction(['status' => $mqRow['booking_status'] ?? 'pending', 'amount_paid' => $mqRow['amount_paid'] ?? 0, 'amount_due' => $mqRow['amount_due'] ?? 0, 'total_amount' => $mqRow['total_amount'] ?? 0], 'mark_quotation');
-                if (!$lcCheck['allowed']) {
-                    $error = $lcCheck['reason'];
+                // Block acceptance of expired quotations
+                $expiryDate = !empty($mqRow['expires_at']) ? $mqRow['expires_at'] : null;
+                if ($expiryDate && $expiryDate < date('Y-m-d')) {
+                    $error = 'Cannot accept an expired quotation (expired ' . $expiryDate . ').';
                 } else {
-                    $pdo->prepare("UPDATE quotations SET status = 'accepted', updated_at = NOW() WHERE id = ?")->execute([$quotation_id]);
-                    $message = 'Quotation marked as accepted.';
+                    $lcCheck = bookingAllowsAction(['status' => $mqRow['booking_status'] ?? 'pending', 'amount_paid' => $mqRow['amount_paid'] ?? 0, 'amount_due' => $mqRow['amount_due'] ?? 0, 'total_amount' => $mqRow['total_amount'] ?? 0], 'mark_quotation');
+                    if (!$lcCheck['allowed']) {
+                        $error = $lcCheck['reason'];
+                    } else {
+                        $pdo->prepare("UPDATE quotations SET status = 'accepted', updated_at = NOW() WHERE id = ?")->execute([$quotation_id]);
+                        // Confirm the underlying booking when quotation is accepted
+                        if (!empty($mqRow['booking_id'])) {
+                            $pdo->prepare("UPDATE bookings SET status = 'confirmed', updated_at = NOW() WHERE id = ? AND status IN ('pending','tentative')")->execute([$mqRow['booking_id']]);
+                        }
+                        $message = 'Quotation marked as accepted and booking confirmed.';
+                    }
                 }
             } else {
                 $error = 'Quotation not found.';

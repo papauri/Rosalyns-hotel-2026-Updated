@@ -63,6 +63,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['inquiry_action'])) {
         }
     } catch (PDOException $e) {
         $error = 'Error: ' . $e->getMessage();
+    } catch (Throwable $e) {
+        error_log('Gym inquiry action error: ' . $e->getMessage());
+        $error = 'An unexpected error occurred. The status may have been updated but the notification email could not be sent.';
     }
 }
 

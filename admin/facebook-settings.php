@@ -50,9 +50,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             'facebook_post_log_enabled'   => isset($_POST['facebook_post_log_enabled']) ? '1' : '0',
         ];
 
-        // Only overwrite the token if a new one was submitted
+        // Only overwrite the token if a new one was submitted — store encrypted
         if ($newToken !== '') {
-            $settings['facebook_page_access_token'] = $newToken;
+            $settings['facebook_page_access_token'] = function_exists('encryptApiKey') ? encryptApiKey($newToken) : $newToken;
         }
 
         $pdo->beginTransaction();

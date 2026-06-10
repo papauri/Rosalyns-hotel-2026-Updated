@@ -1,6 +1,38 @@
 /* KDS (Kitchen/Bar/Coffee Display System) — extracted from kds.php
    Dynamic station colour is supplied by --kds-station-color set inline in the PHP file. */
 
+/* ── Stale-ready escalation — ticket ready but not yet collected ──────── */
+.ticket.t-ready .t-timer.stale-ready.warn {
+    color: #f39c12;
+    animation: kds-pulse-warn 2s ease-in-out infinite;
+}
+.ticket.t-ready .t-timer.stale-ready.late {
+    color: #e74c3c;
+    animation: kds-pulse-urgent 1s ease-in-out infinite;
+}
+@keyframes kds-pulse-warn {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.55; }
+}
+@keyframes kds-pulse-urgent {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.4; }
+}
+
+/* ── Tablet touch targets — filter buttons ≥ 48px on screens ≤ 1024px ── */
+@media (max-width: 1024px) {
+    .filter button {
+        min-height: 48px;
+        padding: 10px clamp(10px, 1.2vw, 16px);
+        font-size: clamp(12px, 1vw, 14px);
+    }
+    .topbar .right button,
+    .topbar .right a {
+        min-height: 48px;
+        min-width: 48px;
+    }
+}
+
 * {
     box-sizing: border-box;
     margin: 0;

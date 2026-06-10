@@ -58,6 +58,15 @@ if (!function_exists('applyDynamicPricing')) {
             return $empty;
         }
 
+        // Guard against a zero base price — dynamic pricing cannot apply a
+        // meaningful adjustment to a £0 rate and would silently produce a
+        // free booking. Log and return immediately so the caller must fix the
+        // room's price configuration before a booking can proceed.
+        if ($base_price <= 0) {
+            error_log("[pricing] applyDynamicPricing called with base_price={$base_price} for room_id={$room_id}. Check room price configuration.");
+            return $empty;
+        }
+
         try {
             $plans = _fetchActiveRatePlans($pdo);
         } catch (PDOException $e) {

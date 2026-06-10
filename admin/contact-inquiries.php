@@ -110,7 +110,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['inquiry_action'])) {
             }
         } catch (PDOException $e) {
             $error = 'Database error: ' . $e->getMessage();
-            error_log('contact-inquiries admin: ' . $e->getMessage());
+            error_log('contact-inquiries admin PDO: ' . $e->getMessage());
+        } catch (Throwable $e) {
+            error_log('contact-inquiries admin error: ' . $e->getMessage());
+            $error = 'An unexpected error occurred: ' . $e->getMessage();
         }
     }
 }

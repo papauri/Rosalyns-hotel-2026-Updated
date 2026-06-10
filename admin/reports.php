@@ -20,6 +20,10 @@ if (!strtotime($start_date) || !strtotime($end_date)) {
     $start_date = date('Y-m-01');
     $end_date = date('Y-m-t');
 }
+// Ensure start is not after end
+if (strtotime($start_date) > strtotime($end_date)) {
+    [$start_date, $end_date] = [$end_date, $start_date];
+}
 
 // Sanitize tab
 $valid_tabs = ['overview', 'revenue', 'vat', 'aging', 'bookings', 'occupancy', 'guests', 'conference', 'fnb', 'stock', 'staff', 'voids'];
@@ -439,7 +443,7 @@ try {
     $overallOccupancy = $overallOccupancyStmt->fetch(PDO::FETCH_ASSOC);
 
     // Total room inventory
-    $totalRoomsStmt = $pdo->query("SELECT COALESCE(SUM(total_rooms), 0) as total FROM rooms WHERE is_active = 1");
+    $totalRoomsStmt = $pdo->query("SELECT COUNT(*) as total FROM individual_rooms WHERE status NOT IN ('out_of_order','maintenance')");
     $totalRoomInventory = $totalRoomsStmt->fetch(PDO::FETCH_ASSOC)['total'];
     $totalRoomNightsAvailable = $totalRoomInventory * $daysInPeriod;
     $overallOccupancyRate = $totalRoomNightsAvailable > 0

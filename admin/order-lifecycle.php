@@ -63,7 +63,7 @@ $isRoomService = ($order['order_type'] ?? '') === 'room_service';
 $locationLabel = lifecycleOrderLocationLabel($order);
 $isVoided     = in_array($order['status'] ?? '', ['voided', 'cancelled'], true);
 $canCancel    = in_array($user['role'] ?? '', ['admin', 'manager'], true)
-             && in_array($order['status'] ?? '', ['placed', 'paid', 'new'], true)
+             && in_array($order['status'] ?? '', ['placed', 'new'], true)
              && !in_array($order['kitchen_status'] ?? '', ['in_progress', 'ready', 'served'], true);
 $canVoid      = ($user['role'] ?? '') === 'admin'
              && in_array($order['status'] ?? '', ['paid', 'completed'], true);
@@ -379,7 +379,7 @@ function fmt_dur(?int $from, ?int $to) { if (!$from || !$to) return '—'; $s = 
         fetch('../api/cancel-order.php', {
             method: 'POST',
             headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'X-Requested-With': 'XMLHttpRequest' },
-            body: new URLSearchParams({ csrf_token: CSRF, order_id: ORDER_ID, details: reason.trim() })
+            body: new URLSearchParams({ csrf_token: CSRF, order_id: ORDER_ID, cancel_reason: reason.trim() })
         })
         .then(r => r.json())
         .then(d => {

@@ -1,11 +1,93 @@
-/*
- * Admin responsive overrides placeholder.
- *
- * This file is intentionally present so the @import in
- * admin-styles.css always resolves without 404s.
- *
- * Page-specific responsive rules are currently maintained in:
- * - admin/css/admin-styles.css
- * - admin/css/admin-components.css
- */
+/* =====================================================================
+   Admin Responsive — global rules for all admin pages
+   ===================================================================== */
+
+/* ── Data tables: horizontal scroll on all viewports ──────────────── */
+.table-responsive,
+.table-scroll,
+.admin-table-wrap {
+    width: 100%;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+}
+
+/* Ensure bare <table> elements inside admin panels don't break layout */
+.admin-card table,
+.card table,
+.panel table {
+    min-width: 600px;
+}
+
+/* ── Stats / metric cards grid ─────────────────────────────────────── */
+@media (max-width: 1023px) {
+    .stats-grid,
+    .dashboard-stats,
+    .metrics-grid {
+        grid-template-columns: repeat(2, 1fr) !important;
+    }
+}
+@media (max-width: 599px) {
+    .stats-grid,
+    .dashboard-stats,
+    .metrics-grid {
+        grid-template-columns: 1fr !important;
+    }
+}
+
+/* ── Admin forms on mobile ─────────────────────────────────────────── */
+@media (max-width: 768px) {
+    .admin-form .form-group,
+    .admin-form .form-row,
+    .form-grid-2,
+    .form-grid-3 {
+        grid-template-columns: 1fr !important;
+    }
+    .admin-form input,
+    .admin-form select,
+    .admin-form textarea {
+        width: 100%;
+        min-height: 44px;
+        font-size: 16px; /* prevents iOS zoom */
+    }
+}
+
+/* ── Sidebar: collapse to drawer on small screens ──────────────────── */
+@media (max-width: 1023px) {
+    .admin-sidebar {
+        position: fixed;
+        left: -280px;
+        top: 0;
+        height: 100%;
+        width: 260px;
+        z-index: 1050;
+        transition: left 280ms cubic-bezier(0.22, 1, 0.36, 1);
+        overflow-y: auto;
+    }
+    .admin-sidebar.open,
+    .admin-sidebar[aria-expanded="true"] {
+        left: 0;
+    }
+    .admin-main,
+    .admin-content {
+        margin-left: 0 !important;
+    }
+}
+
+/* ── POS touch targets ─────────────────────────────────────────────── */
+@media (max-width: 1024px) {
+    .pos-btn,
+    .till-action-btn,
+    .cart-btn {
+        min-height: 48px;
+        min-width: 48px;
+    }
+}
+
+/* ── Focus visible for admin (gold outline) ────────────────────────── */
+.admin-panel :focus-visible,
+#admin-wrapper :focus-visible {
+    outline: 2px solid #B18247;
+    outline-offset: 2px;
+    border-radius: 3px;
+}
 

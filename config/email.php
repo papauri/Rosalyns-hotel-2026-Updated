@@ -83,84 +83,98 @@ function sendEmail(string $to, ?string $toName, string $subject, string $htmlBod
         return createEmailPreview($to, $toName, $subject, $htmlBody, $textBody);
     }
 
-    try {
-        // Create PHPMailer instance
-        $mail = new PHPMailer(true);
+    $maxAttempts = 3; // 1 initial attempt + 2 retries for transient SMTP failures
+    $lastException = null;
+    for ($attempt = 1; $attempt <= $maxAttempts; $attempt++) {
+        try {
+            // Create PHPMailer instance
+            $mail = new PHPMailer(true);
 
-        $smtpSecureNormalized = strtolower(trim((string)$smtp_secure));
-        if ($smtpSecureNormalized === '' && (int)$smtp_port === 587) {
-            $smtpSecureNormalized = 'tls';
-        } elseif ($smtpSecureNormalized === '' && (int)$smtp_port === 465) {
-            $smtpSecureNormalized = 'ssl';
+            $smtpSecureNormalized = strtolower(trim((string)$smtp_secure));
+            if ($smtpSecureNormalized === '' && (int)$smtp_port === 587) {
+                $smtpSecureNormalized = 'tls';
+            } elseif ($smtpSecureNormalized === '' && (int)$smtp_port === 465) {
+                $smtpSecureNormalized = 'ssl';
+            }
+            // Many SMTP relays require From to match authenticated mailbox.
+            $fromAddress = $smtp_username;
+
+            // Server settings
+            $mail->isSMTP();
+            $mail->Host = $smtp_host;
+            $mail->SMTPAuth = true;
+            $mail->Username = $smtp_username;
+            $mail->Password = $smtp_password;
+            if ($smtpSecureNormalized !== '') {
+                $mail->SMTPSecure = $smtpSecureNormalized;
+            }
+            $mail->Port = $smtp_port;
+            $mail->Timeout = $smtp_timeout;
+
+            if ($smtp_debug > 0) {
+                $mail->SMTPDebug = $smtp_debug;
+            }
+
+            // Recipients
+            $mail->setFrom($fromAddress, $email_from_name ?: $email_site_name);
+            $mail->addAddress($to, $toName ?? '');
+            if (!empty($email_from_email) && filter_var($email_from_email, FILTER_VALIDATE_EMAIL)) {
+                $mail->addReplyTo($email_from_email, $email_from_name ?: $email_site_name);
+            }
+
+            // Add BCC for admin if enabled
+            if ($email_bcc_admin && !empty($email_admin_email)) {
+                $mail->addBCC($email_admin_email);
+            }
+
+            // Content — force UTF-8 so em-dashes (—), currency, and accented chars render correctly
+            $mail->CharSet  = PHPMailer::CHARSET_UTF8;
+            $mail->Encoding = PHPMailer::ENCODING_BASE64;
+            $mail->isHTML(true);
+            $mail->Subject = $subject;
+            $mail->Body = hotel_embed_logo_cid($mail, wrapEmailTemplate($htmlBody, $subject));
+            $mail->AltBody = $textBody ?: strip_tags($htmlBody);
+
+            $mail->send();
+
+            // Log email if enabled
+            if ($email_log_enabled) {
+                logEmail($to, $toName, $subject, 'sent');
+            }
+
+            return [
+                'success' => true,
+                'message' => 'Email sent successfully via SMTP'
+            ];
+        } catch (Exception $e) {
+            $lastException = $e;
+            if ($attempt < $maxAttempts) {
+                // Brief pause before retry to allow transient SMTP issues to resolve
+                usleep(500000 * $attempt); // 0.5s, then 1s
+                error_log("PHPMailer transient error (attempt {$attempt}/{$maxAttempts}): " . $e->getMessage() . " — retrying…");
+                continue;
+            }
+            // All attempts exhausted
+            error_log("PHPMailer Error (all {$maxAttempts} attempts failed): " . $e->getMessage());
+
+            // Log error if enabled
+            if ($email_log_enabled) {
+                logEmail($to, $toName, $subject, 'failed', $e->getMessage());
+            }
+
+            // If development mode, show preview instead of failing
+            if ($development_mode) {
+                return createEmailPreview($to, $toName, $subject, $htmlBody, $textBody);
+            }
+
+            return [
+                'success' => false,
+                'message' => 'Failed to send email: ' . $e->getMessage()
+            ];
         }
-        // Many SMTP relays require From to match authenticated mailbox.
-        $fromAddress = $smtp_username;
-
-        // Server settings
-        $mail->isSMTP();
-        $mail->Host = $smtp_host;
-        $mail->SMTPAuth = true;
-        $mail->Username = $smtp_username;
-        $mail->Password = $smtp_password;
-        if ($smtpSecureNormalized !== '') {
-            $mail->SMTPSecure = $smtpSecureNormalized;
-        }
-        $mail->Port = $smtp_port;
-        $mail->Timeout = $smtp_timeout;
-
-        if ($smtp_debug > 0) {
-            $mail->SMTPDebug = $smtp_debug;
-        }
-
-        // Recipients
-        $mail->setFrom($fromAddress, $email_from_name ?: $email_site_name);
-        $mail->addAddress($to, $toName ?? '');
-        if (!empty($email_from_email) && filter_var($email_from_email, FILTER_VALIDATE_EMAIL)) {
-            $mail->addReplyTo($email_from_email, $email_from_name ?: $email_site_name);
-        }
-
-        // Add BCC for admin if enabled
-        if ($email_bcc_admin && !empty($email_admin_email)) {
-            $mail->addBCC($email_admin_email);
-        }
-
-        // Content — force UTF-8 so em-dashes (—), currency, and accented chars render correctly
-        $mail->CharSet  = PHPMailer::CHARSET_UTF8;
-        $mail->Encoding = PHPMailer::ENCODING_BASE64;
-        $mail->isHTML(true);
-        $mail->Subject = $subject;
-        $mail->Body = hotel_embed_logo_cid($mail, wrapEmailTemplate($htmlBody, $subject));
-        $mail->AltBody = $textBody ?: strip_tags($htmlBody);
-
-        $mail->send();
-
-        // Log email if enabled
-        if ($email_log_enabled) {
-            logEmail($to, $toName, $subject, 'sent');
-        }
-
-        return [
-            'success' => true,
-            'message' => 'Email sent successfully via SMTP'
-        ];
-    } catch (Exception $e) {
-        error_log("PHPMailer Error: " . $e->getMessage());
-
-        // Log error if enabled
-        if ($email_log_enabled) {
-            logEmail($to, $toName, $subject, 'failed', $e->getMessage());
-        }
-
-        // If development mode, show preview instead of failing
-        if ($development_mode) {
-            return createEmailPreview($to, $toName, $subject, $htmlBody, $textBody);
-        }
-
-        return [
-            'success' => false,
-            'message' => 'Failed to send email: ' . $e->getMessage()
-        ];
     }
+    // Should not reach here, but satisfy static analysis
+    return ['success' => false, 'message' => 'Unexpected error in sendEmail'];
 }
 
 /**
@@ -186,87 +200,98 @@ function sendEmailWithAttachments(string $to, ?string $toName, string $subject, 
         return $preview;
     }
 
-    try {
-        $mail = new PHPMailer(true);
+    $maxAttempts = 3; // 1 initial attempt + 2 retries for transient SMTP failures
+    $lastExceptionAttach = null;
+    for ($attempt = 1; $attempt <= $maxAttempts; $attempt++) {
+        try {
+            $mail = new PHPMailer(true);
 
-        $smtpSecureNormalized = strtolower(trim((string)$smtp_secure));
-        if ($smtpSecureNormalized === '' && (int)$smtp_port === 587) {
-            $smtpSecureNormalized = 'tls';
-        } elseif ($smtpSecureNormalized === '' && (int)$smtp_port === 465) {
-            $smtpSecureNormalized = 'ssl';
-        }
-        $fromAddress = $smtp_username;
+            $smtpSecureNormalized = strtolower(trim((string)$smtp_secure));
+            if ($smtpSecureNormalized === '' && (int)$smtp_port === 587) {
+                $smtpSecureNormalized = 'tls';
+            } elseif ($smtpSecureNormalized === '' && (int)$smtp_port === 465) {
+                $smtpSecureNormalized = 'ssl';
+            }
+            $fromAddress = $smtp_username;
 
-        $mail->isSMTP();
-        $mail->Host = $smtp_host;
-        $mail->SMTPAuth = true;
-        $mail->Username = $smtp_username;
-        $mail->Password = $smtp_password;
-        if ($smtpSecureNormalized !== '') {
-            $mail->SMTPSecure = $smtpSecureNormalized;
-        }
-        $mail->Port = $smtp_port;
-        $mail->Timeout = $smtp_timeout;
+            $mail->isSMTP();
+            $mail->Host = $smtp_host;
+            $mail->SMTPAuth = true;
+            $mail->Username = $smtp_username;
+            $mail->Password = $smtp_password;
+            if ($smtpSecureNormalized !== '') {
+                $mail->SMTPSecure = $smtpSecureNormalized;
+            }
+            $mail->Port = $smtp_port;
+            $mail->Timeout = $smtp_timeout;
 
-        if ($smtp_debug > 0) {
-            $mail->SMTPDebug = $smtp_debug;
-        }
+            if ($smtp_debug > 0) {
+                $mail->SMTPDebug = $smtp_debug;
+            }
 
-        $mail->setFrom($fromAddress, $email_from_name ?: $email_site_name);
-        $mail->addAddress($to, $toName ?? '');
-        if (!empty($email_from_email) && filter_var($email_from_email, FILTER_VALIDATE_EMAIL)) {
-            $mail->addReplyTo($email_from_email, $email_from_name ?: $email_site_name);
-        }
-        if ($email_bcc_admin && !empty($email_admin_email)) {
-            $mail->addBCC($email_admin_email);
-        }
+            $mail->setFrom($fromAddress, $email_from_name ?: $email_site_name);
+            $mail->addAddress($to, $toName ?? '');
+            if (!empty($email_from_email) && filter_var($email_from_email, FILTER_VALIDATE_EMAIL)) {
+                $mail->addReplyTo($email_from_email, $email_from_name ?: $email_site_name);
+            }
+            if ($email_bcc_admin && !empty($email_admin_email)) {
+                $mail->addBCC($email_admin_email);
+            }
 
-        foreach ($attachments as $attachment) {
-            $attachmentName = trim((string)($attachment['name'] ?? 'attachment.bin'));
-            $attachmentMime = trim((string)($attachment['mime'] ?? 'application/octet-stream'));
-            $attachmentPath = trim((string)($attachment['path'] ?? ''));
-            if ($attachmentPath !== '') {
-                $mail->addAttachment($attachmentPath, $attachmentName, PHPMailer::ENCODING_BASE64, $attachmentMime);
+            foreach ($attachments as $attachment) {
+                $attachmentName = trim((string)($attachment['name'] ?? 'attachment.bin'));
+                $attachmentMime = trim((string)($attachment['mime'] ?? 'application/octet-stream'));
+                $attachmentPath = trim((string)($attachment['path'] ?? ''));
+                if ($attachmentPath !== '') {
+                    $mail->addAttachment($attachmentPath, $attachmentName, PHPMailer::ENCODING_BASE64, $attachmentMime);
+                    continue;
+                }
+
+                if (array_key_exists('content', $attachment)) {
+                    $mail->addStringAttachment((string)$attachment['content'], $attachmentName, PHPMailer::ENCODING_BASE64, $attachmentMime);
+                }
+            }
+
+            $mail->CharSet  = PHPMailer::CHARSET_UTF8;
+            $mail->Encoding = PHPMailer::ENCODING_BASE64;
+            $mail->isHTML(true);
+            $mail->Subject = $subject;
+            $mail->Body = hotel_embed_logo_cid($mail, wrapEmailTemplate($htmlBody, $subject));
+            $mail->AltBody = $textBody !== '' ? $textBody : strip_tags($htmlBody);
+            $mail->send();
+
+            if ($email_log_enabled) {
+                logEmail($to, $toName, $subject, 'sent', '', 'attachments=' . count($attachments));
+            }
+
+            return [
+                'success' => true,
+                'message' => 'Email sent successfully via SMTP',
+            ];
+        } catch (Exception $e) {
+            $lastExceptionAttach = $e;
+            if ($attempt < $maxAttempts) {
+                usleep(500000 * $attempt);
+                error_log("PHPMailer (attachments) transient error (attempt {$attempt}/{$maxAttempts}): " . $e->getMessage() . " — retrying…");
                 continue;
             }
+            error_log('PHPMailer Error (attachments, all ' . $maxAttempts . ' attempts failed): ' . $e->getMessage());
 
-            if (array_key_exists('content', $attachment)) {
-                $mail->addStringAttachment((string)$attachment['content'], $attachmentName, PHPMailer::ENCODING_BASE64, $attachmentMime);
+            if ($email_log_enabled) {
+                logEmail($to, $toName, $subject, 'failed', $e->getMessage(), 'attachments=' . count($attachments));
             }
+
+            if ($development_mode) {
+                return createEmailPreview($to, $toName, $subject, $htmlBody, $textBody);
+            }
+
+            return [
+                'success' => false,
+                'message' => 'Failed to send email: ' . $e->getMessage(),
+            ];
         }
-
-        $mail->CharSet  = PHPMailer::CHARSET_UTF8;
-        $mail->Encoding = PHPMailer::ENCODING_BASE64;
-        $mail->isHTML(true);
-        $mail->Subject = $subject;
-        $mail->Body = hotel_embed_logo_cid($mail, wrapEmailTemplate($htmlBody, $subject));
-        $mail->AltBody = $textBody !== '' ? $textBody : strip_tags($htmlBody);
-        $mail->send();
-
-        if ($email_log_enabled) {
-            logEmail($to, $toName, $subject, 'sent', '', 'attachments=' . count($attachments));
-        }
-
-        return [
-            'success' => true,
-            'message' => 'Email sent successfully via SMTP',
-        ];
-    } catch (Exception $e) {
-        error_log('PHPMailer Error (attachments): ' . $e->getMessage());
-
-        if ($email_log_enabled) {
-            logEmail($to, $toName, $subject, 'failed', $e->getMessage(), 'attachments=' . count($attachments));
-        }
-
-        if ($development_mode) {
-            return createEmailPreview($to, $toName, $subject, $htmlBody, $textBody);
-        }
-
-        return [
-            'success' => false,
-            'message' => 'Failed to send email: ' . $e->getMessage(),
-        ];
     }
+    return ['success' => false, 'message' => 'Unexpected error in sendEmailWithAttachments'];
 }
 
 /**
@@ -3131,10 +3156,20 @@ function sendEmailWithCC(string $to, ?string $toName, string $subject, string $h
             $mail->SMTPDebug = $smtp_debug;
         }
 
-        // Recipients
-        $mail->setFrom($smtp_username, $email_from_name);
+        // Recipients — use smtp_username as From (relay requirement); Reply-To points to hotel address
+        $smtpSecureNormCC = strtolower(trim((string)$smtp_secure));
+        if ($smtpSecureNormCC === '' && (int)$smtp_port === 587) {
+            $smtpSecureNormCC = 'tls';
+            $mail->SMTPSecure = $smtpSecureNormCC;
+        } elseif ($smtpSecureNormCC === '' && (int)$smtp_port === 465) {
+            $smtpSecureNormCC = 'ssl';
+            $mail->SMTPSecure = $smtpSecureNormCC;
+        }
+        $mail->setFrom($smtp_username, $email_from_name ?: getSetting('site_name', ''));
         $mail->addAddress($to, $toName ?? '');
-        $mail->addReplyTo($email_from_email, $email_from_name);
+        if (!empty($email_from_email) && filter_var($email_from_email, FILTER_VALIDATE_EMAIL)) {
+            $mail->addReplyTo($email_from_email, $email_from_name ?: getSetting('site_name', ''));
+        }
 
         // Add CC recipients
         if (!empty($ccEmails)) {
@@ -5531,6 +5566,186 @@ function sendEventQuotationEmail(array $event, array $options = []): array
         return $result;
     } catch (Exception $e) {
         error_log('sendEventQuotationEmail Error: ' . $e->getMessage());
+        return ['success' => false, 'message' => $e->getMessage()];
+    }
+}
+
+/**
+ * Send refund notification email to guest.
+ *
+ * @param array  $payment    Row from payments table (the refund row or original payment row).
+ * @param string $refundRef  The refund payment_reference (e.g. REF-2026-000123).
+ * @param float  $refundAmount The refund amount (total including VAT).
+ * @param string $refundReason Human-readable refund reason.
+ * @return array ['success' => bool, 'message' => string]
+ */
+function sendRefundNotificationEmail(array $payment, string $refundRef, float $refundAmount, string $refundReason = ''): array
+{
+    global $email_from_email, $email_site_name, $pdo;
+
+    try {
+        $currencySymbol = getSetting('currency_symbol', 'K');
+
+        // Resolve guest name and email depending on booking type
+        $guestName  = '';
+        $guestEmail = '';
+
+        if ($payment['booking_type'] === 'room') {
+            $bStmt = $pdo->prepare("SELECT guest_name, guest_email FROM bookings WHERE id = ? LIMIT 1");
+            $bStmt->execute([$payment['booking_id']]);
+            $bRow = $bStmt->fetch(PDO::FETCH_ASSOC);
+            $guestName  = $bRow['guest_name']  ?? '';
+            $guestEmail = $bRow['guest_email'] ?? '';
+        } elseif ($payment['booking_type'] === 'conference') {
+            // Use the customer_name / customer_email if already joined, else re-query
+            $guestName  = $payment['customer_name']  ?? '';
+            $guestEmail = $payment['customer_email'] ?? '';
+            if (empty($guestEmail)) {
+                $cfCompanyField = 'company_name';
+                $cfEmailField   = 'email';
+                if (function_exists('finance_conference_fields')) {
+                    $cfFields       = finance_conference_fields($pdo);
+                    $cfCompanyField = $cfFields['company'] ?? $cfCompanyField;
+                    $cfEmailField   = $cfFields['email']   ?? $cfEmailField;
+                }
+                $cfStmt = $pdo->prepare("SELECT {$cfCompanyField} AS cname, {$cfEmailField} AS cemail FROM conference_inquiries WHERE id = ? LIMIT 1");
+                $cfStmt->execute([$payment['booking_id']]);
+                $cfRow = $cfStmt->fetch(PDO::FETCH_ASSOC);
+                $guestName  = $cfRow['cname']  ?? '';
+                $guestEmail = $cfRow['cemail'] ?? '';
+            }
+        }
+
+        if (empty($guestEmail) || !filter_var($guestEmail, FILTER_VALIDATE_EMAIL)) {
+            return ['success' => false, 'message' => 'No valid guest email found for refund notification'];
+        }
+
+        $reasonLabels = [
+            'early_checkout'        => 'Early Check-Out',
+            'late_checkout_charge'  => 'Late Check-Out Charge Reversal',
+            'cancellation'          => 'Booking Cancellation',
+            'service_issue'         => 'Service Issue',
+            'overpayment'           => 'Overpayment',
+            'other'                 => 'Other',
+        ];
+        $reasonDisplay = $reasonLabels[$refundReason] ?? ucwords(str_replace('_', ' ', $refundReason));
+
+        $bookingRef = htmlspecialchars($payment['booking_reference'] ?? '');
+        $siteName   = htmlspecialchars($email_site_name);
+
+        $htmlBody = '
+        <h1 style="color: #8B7355; text-align: center;">Refund Notification</h1>
+        <p>Dear ' . htmlspecialchars($guestName) . ',</p>
+        <p>We are writing to confirm that a refund has been issued on your account with <strong>' . $siteName . '</strong>.</p>
+
+        <div style="background: #FAF6F0; border: 2px solid #C8A45A; padding: 20px; margin: 20px 0; border-radius: 10px;">
+            <h2 style="color: #8B7355; margin-top: 0; text-align:left;">Refund Details</h2>
+
+            <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="margin:0;">
+                <tr><td style="padding:10px 10px 10px 0;font-weight:bold;color:#1A1A1A;width:44%;vertical-align:top;font-family:\'Segoe UI\',Tahoma,Verdana,sans-serif;border-bottom:1px solid #e8e0d4;">Refund Reference:</td>
+                    <td style="padding:10px 0 10px 6px;color:#8B7355;font-weight:bold;font-size:16px;text-align:left;vertical-align:top;font-family:\'Segoe UI\',Tahoma,Verdana,sans-serif;border-bottom:1px solid #e8e0d4;">' . htmlspecialchars($refundRef) . '</td></tr>
+            </table>
+            ' . ($bookingRef !== '' ? '
+            <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="margin:0;">
+                <tr><td style="padding:10px 10px 10px 0;font-weight:bold;color:#1A1A1A;width:44%;vertical-align:top;font-family:\'Segoe UI\',Tahoma,Verdana,sans-serif;border-bottom:1px solid #e8e0d4;">Booking Reference:</td>
+                    <td style="padding:10px 0 10px 6px;color:#333;text-align:left;vertical-align:top;font-family:\'Segoe UI\',Tahoma,Verdana,sans-serif;border-bottom:1px solid #e8e0d4;">' . $bookingRef . '</td></tr>
+            </table>' : '') . '
+            <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="margin:0;">
+                <tr><td style="padding:10px 10px 10px 0;font-weight:bold;color:#1A1A1A;width:44%;vertical-align:top;font-family:\'Segoe UI\',Tahoma,Verdana,sans-serif;border-bottom:1px solid #e8e0d4;">Refund Amount:</td>
+                    <td style="padding:10px 0 10px 6px;color:#8B7355;font-weight:bold;font-size:18px;text-align:left;vertical-align:top;font-family:\'Segoe UI\',Tahoma,Verdana,sans-serif;border-bottom:1px solid #e8e0d4;">' . htmlspecialchars($currencySymbol) . ' ' . number_format($refundAmount, 2) . '</td></tr>
+            </table>
+            <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="margin:0;">
+                <tr><td style="padding:10px 10px 10px 0;font-weight:bold;color:#1A1A1A;width:44%;vertical-align:top;font-family:\'Segoe UI\',Tahoma,Verdana,sans-serif;border-bottom:1px solid #e8e0d4;">Reason:</td>
+                    <td style="padding:10px 0 10px 6px;color:#333;text-align:left;vertical-align:top;font-family:\'Segoe UI\',Tahoma,Verdana,sans-serif;border-bottom:1px solid #e8e0d4;">' . htmlspecialchars($reasonDisplay) . '</td></tr>
+            </table>
+            <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="margin:0;">
+                <tr><td style="padding:10px 10px 10px 0;font-weight:bold;color:#1A1A1A;width:44%;vertical-align:top;font-family:\'Segoe UI\',Tahoma,Verdana,sans-serif;">Date Issued:</td>
+                    <td style="padding:10px 0 10px 6px;color:#333;text-align:left;vertical-align:top;font-family:\'Segoe UI\',Tahoma,Verdana,sans-serif;">' . date('F j, Y') . '</td></tr>
+            </table>
+        </div>
+
+        <div style="background: #d4edda; padding: 15px; border-left: 4px solid #28a745; border-radius: 5px; margin: 20px 0;">
+            <p style="color: #155724; margin: 0;">
+                The refund will be processed through your original payment method. Please allow 3–5 business days for the funds to appear in your account.
+            </p>
+        </div>
+
+        <p>If you have any questions about this refund, please contact us at <a href="mailto:' . htmlspecialchars($email_from_email) . '">' . htmlspecialchars($email_from_email) . '</a>.</p>
+        <p style="margin:28px 0 0;font-size:14px;color:#777;text-align:center;font-style:italic;">
+            Warm regards &mdash; ' . $siteName . '
+        </p>';
+
+        return sendEmail(
+            $guestEmail,
+            $guestName,
+            'Refund Issued - ' . $siteName . ($bookingRef !== '' ? ' [' . $payment['booking_reference'] . ']' : ''),
+            $htmlBody
+        );
+    } catch (Exception $e) {
+        error_log('sendRefundNotificationEmail Error: ' . $e->getMessage());
+        return ['success' => false, 'message' => $e->getMessage()];
+    }
+}
+
+/**
+ * Send review acknowledgement email to the reviewer.
+ *
+ * @param string $guestName  Reviewer's name.
+ * @param string $guestEmail Reviewer's email.
+ * @param string $reviewTitle The title of the review submitted.
+ * @param int    $rating     Overall star rating (1–5).
+ * @return array ['success' => bool, 'message' => string]
+ */
+function sendReviewAcknowledgementEmail(string $guestName, string $guestEmail, string $reviewTitle, int $rating = 0): array
+{
+    global $email_from_email, $email_site_name;
+
+    try {
+        if (empty($guestEmail) || !filter_var($guestEmail, FILTER_VALIDATE_EMAIL)) {
+            return ['success' => false, 'message' => 'No valid reviewer email provided'];
+        }
+
+        $siteName = htmlspecialchars($email_site_name);
+        $stars    = $rating > 0 ? str_repeat('&#9733;', min(5, $rating)) . str_repeat('&#9734;', max(0, 5 - $rating)) : '';
+
+        $htmlBody = '
+        <h1 style="color: #8B7355; text-align: center;">Thank You for Your Review!</h1>
+        <p>Dear ' . htmlspecialchars($guestName) . ',</p>
+        <p>Thank you for taking the time to share your experience at <strong>' . $siteName . '</strong>. Your feedback is greatly appreciated and helps us continue to improve our services.</p>
+
+        <div style="background: #FAF6F0; border: 2px solid #C8A45A; padding: 20px; margin: 20px 0; border-radius: 10px;">
+            <h2 style="color: #8B7355; margin-top: 0; text-align:left;">Review Received</h2>
+            <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="margin:0;">
+                <tr><td style="padding:10px 10px 10px 0;font-weight:bold;color:#1A1A1A;width:44%;vertical-align:top;font-family:\'Segoe UI\',Tahoma,Verdana,sans-serif;border-bottom:1px solid #e8e0d4;">Review Title:</td>
+                    <td style="padding:10px 0 10px 6px;color:#333;text-align:left;vertical-align:top;font-family:\'Segoe UI\',Tahoma,Verdana,sans-serif;border-bottom:1px solid #e8e0d4;">' . htmlspecialchars($reviewTitle) . '</td></tr>
+            </table>
+            ' . ($stars !== '' ? '
+            <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="margin:0;">
+                <tr><td style="padding:10px 10px 10px 0;font-weight:bold;color:#1A1A1A;width:44%;vertical-align:top;font-family:\'Segoe UI\',Tahoma,Verdana,sans-serif;">Your Rating:</td>
+                    <td style="padding:10px 0 10px 6px;color:#C8A45A;font-size:20px;text-align:left;vertical-align:top;font-family:\'Segoe UI\',Tahoma,Verdana,sans-serif;">' . $stars . '</td></tr>
+            </table>' : '') . '
+        </div>
+
+        <div style="background: #FDF6EC; padding: 15px; border-left: 4px solid #8B7355; border-radius: 5px; margin: 20px 0;">
+            <p style="color: #5C4A32; margin: 0;">
+                Your review is currently being reviewed by our team and will be published on our website shortly. We value honest guest feedback as it helps us deliver the best possible experience.
+            </p>
+        </div>
+
+        <p>We hope to welcome you back to ' . $siteName . ' again soon!</p>
+        <p>If you have any questions, please contact us at <a href="mailto:' . htmlspecialchars($email_from_email) . '">' . htmlspecialchars($email_from_email) . '</a>.</p>
+        <p style="margin:28px 0 0;font-size:14px;color:#777;text-align:center;font-style:italic;">
+            Warm regards &mdash; ' . $siteName . '
+        </p>';
+
+        return sendEmail(
+            $guestEmail,
+            $guestName,
+            'Thank You for Your Review - ' . $siteName,
+            $htmlBody
+        );
+    } catch (Exception $e) {
+        error_log('sendReviewAcknowledgementEmail Error: ' . $e->getMessage());
         return ['success' => false, 'message' => $e->getMessage()];
     }
 }

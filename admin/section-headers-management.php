@@ -17,6 +17,11 @@ $user = [
     'full_name' => $_SESSION['admin_full_name']
 ];
 
+if (!hasPermission((int)$user['id'], 'section_headers') && !in_array($user['role'] ?? '', ['admin', 'manager'], true)) {
+    header('Location: dashboard.php?error=access_denied');
+    exit;
+}
+
 $message = '';
 $error = '';
 $success = false;

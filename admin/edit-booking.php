@@ -155,6 +155,8 @@ try {
 $currency_symbol = getSetting('currency_symbol');
 $vatEnabled = in_array(getSetting('vat_enabled'), ['1', 'true', 'on']);
 $vatRate = (float)getSetting('vat_rate', 0);
+$levyEnabled = getSetting('tourism_levy_enabled', '0') === '1';
+$levyPercent = $levyEnabled ? (float)getSetting('tourism_levy_percent', 0) : 0.0;
 $can_edit_booking_financials = hasPermission((int)($user['id'] ?? 0), 'edit_booking_financials');
 
 // Handle form submission
@@ -300,23 +302,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $booking) {
                     $changes['guest_phone'] = ['old' => $booking['guest_phone'] ?? '', 'new' => $guest_phone];
                 }
 
-                if ($room_changed && in_array($booking['status'], ['confirmed', 'checked-in'])) {
-                    // Restore old room availability
-                    $restore = $pdo->prepare("UPDATE rooms SET rooms_available = rooms_available + 1 WHERE id = ?");
-                    $restore->execute([$old_room_id]);
+                // Always recheck availability when room OR dates change.
+                // Pass exclude_booking_id so the current booking's own slot does not
+                // conflict with itself. This prevents saving dates that are already
+                // fully booked by other guests.
+                $datesChanged = $check_in !== ($booking['check_in_date'] ?? '')
+                    || $check_out !== ($booking['check_out_date'] ?? '');
 
-                    // Check new room availability
-                    $check_avail = $pdo->prepare("SELECT rooms_available FROM rooms WHERE id = ?");
-                    $check_avail->execute([$room_id]);
-                    $new_room = $check_avail->fetch(PDO::FETCH_ASSOC);
-
-                    if ($new_room['rooms_available'] <= 0) {
+                if ($room_changed || $datesChanged) {
+                    $availCheck = checkRoomAvailability($room_id, $check_in, $check_out, $booking_id);
+                    if (empty($availCheck['available'])) {
                         $pdo->rollBack();
-                        $error = 'Selected room is not available.';
-                    } else {
-                        // Decrement new room availability
-                        $decrement = $pdo->prepare("UPDATE rooms SET rooms_available = rooms_available - 1 WHERE id = ?");
-                        $decrement->execute([$room_id]);
+                        $error = 'Selected room is not available for those dates: ' . ($availCheck['error'] ?? 'no rooms remaining.');
                     }
                 }
 
@@ -344,6 +341,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $booking) {
 
                     $vat_amount = (float)($booking['vat_amount'] ?? 0);
                     $child_supplement_total = (float)($booking['child_supplement_total'] ?? 0);
+                    // FIX: Carry existing levy values as defaults; they are recalculated below
+                    // when rateFieldsChanged is true.
+                    $tourism_levy_amount  = (float)($booking['tourism_levy_amount'] ?? 0);
+                    $tourism_levy_percent = (float)($booking['tourism_levy_percent'] ?? 0);
 
                     if ($pricingFieldsChanged && $vatEnabled && $vatRate > 0) {
                         $vat_amount = round($total_amount * ($vatRate / 100), 2);
@@ -367,6 +368,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $booking) {
                             occupancy_type = ?,
                             total_amount = ?,
                             child_supplement_total = ?,
+                            tourism_levy_amount = ?,
+                            tourism_levy_percent = ?,
                             vat_amount = ?,
                             total_with_vat = ?,
                             special_requests = ?,
@@ -413,6 +416,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $booking) {
                                 ? ($ratePerNight * ($child_price_multiplier / 100) * $child_guests * (int)$number_of_nights)
                                 : 0;
                             $total_amount = round(($ratePerNight * (int)$number_of_nights) + $child_supplement_total, 2);
+
+                            // FIX: Recalculate tourism levy when rate-affecting fields change.
+                            // Previously the levy was never updated on edit, causing the stored
+                            // tourism_levy_amount to be stale after any date/room/occupancy change.
+                            if ($levyEnabled && $levyPercent > 0) {
+                                $tourism_levy_amount  = round(($total_amount) * ($levyPercent / 100), 2);
+                                $tourism_levy_percent = $levyPercent;
+                                $total_amount         = round($total_amount + $tourism_levy_amount, 2);
+                            } else {
+                                $tourism_levy_amount  = 0.0;
+                                $tourism_levy_percent = 0.0;
+                            }
+
                             if ($vatEnabled && $vatRate > 0) {
                                 $vat_amount = round($total_amount * ($vatRate / 100), 2);
                             }
@@ -440,6 +456,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $booking) {
                         'occupancy_type' => $booking['occupancy_type'] ?? '',
                         'total_amount' => isset($booking['total_amount']) ? (float)$booking['total_amount'] : null,
                         'child_supplement_total' => isset($booking['child_supplement_total']) ? (float)$booking['child_supplement_total'] : null,
+                        'tourism_levy_amount' => isset($booking['tourism_levy_amount']) ? (float)$booking['tourism_levy_amount'] : null,
                         'vat_amount' => isset($booking['vat_amount']) ? (float)$booking['vat_amount'] : null,
                         'special_requests' => $booking['special_requests'] ?? '',
                         'admin_note' => $latest_booking_note,
@@ -461,6 +478,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $booking) {
                         'occupancy_type' => $occupancy_type,
                         'total_amount' => $total_amount,
                         'child_supplement_total' => $child_supplement_total,
+                        'tourism_levy_amount' => $tourism_levy_amount,
                         'vat_amount' => $vat_amount,
                         'special_requests' => $special_requests,
                         'admin_note' => $adminNoteChanged ? $admin_notes : $latest_booking_note,
@@ -475,6 +493,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $booking) {
                         'child_price_multiplier',
                         'total_amount',
                         'child_supplement_total',
+                        'tourism_levy_amount',
                         'vat_amount'
                     ], true);
                     $auditOldValues = [];
@@ -510,6 +529,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $booking) {
                         $occupancy_type,
                         $total_amount,
                         $child_supplement_total,
+                        $tourism_levy_amount,
+                        $tourism_levy_percent,
                         $vat_amount,
                         $total_with_vat,
                         $special_requests,

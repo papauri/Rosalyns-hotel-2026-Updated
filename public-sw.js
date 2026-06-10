@@ -4,38 +4,73 @@
  * Strategy:
  *  - Static assets (fonts, images): cache-first
  *  - CSS / JS: network-first, cache fallback
- *  - HTML pages: network-first, offline fallback
- *  - POST/non-GET: never intercepted
+ *  - HTML pages: network-first, offline fallback → /offline.php
+ *  - POST/non-GET: NEVER intercepted — pass straight to network
+ *
+ * BUMP SW_VERSION whenever cached assets must be force-refreshed on all clients.
  */
-const SW_VERSION = 'rh-public-v1-2026-05-26-231222-3213';
+const SW_VERSION = 'rh-public-v2-2026-06-10';
 const ASSET_CACHE = `${SW_VERSION}-assets`;
-const PAGE_CACHE = `${SW_VERSION}-pages`;
+const PAGE_CACHE  = `${SW_VERSION}-pages`;
+
+// Maximum number of entries kept in the page / asset caches to prevent unbounded growth.
+const MAX_PAGE_CACHE_ENTRIES  = 40;
+const MAX_ASSET_CACHE_ENTRIES = 80;
 
 const OFFLINE_FALLBACK = '/offline.php';
 
 const isImmutableAsset = url => /\.(?:woff2?|ttf|eot|svg|png|jpe?g|webp|gif|ico)$/i.test(url.pathname);
-const isStyleOrScript = url => /\.(?:css|js)(\?.*)?$/i.test(url.pathname + url.search);
-const isPage = url => /\.php$|^\/$/.test(url.pathname);
+const isStyleOrScript  = url => /\.(?:css|js)(\?.*)?$/i.test(url.pathname + url.search);
+// Match .php pages AND directory-style URLs (e.g. / /rooms/ /about/)
+const isPage           = url => /\.php(\?.*)?$/.test(url.pathname) || /\/$/.test(url.pathname);
 
-self.addEventListener('install', () => self.skipWaiting());
+self.addEventListener('install', e => {
+    // Precache the offline fallback page so it is always available, even on first visit.
+    e.waitUntil(
+        caches.open(PAGE_CACHE)
+            .then(c => c.add(OFFLINE_FALLBACK))
+            .catch(() => { /* non-fatal if server unreachable at install time */ })
+            .then(() => self.skipWaiting())
+    );
+});
 
 self.addEventListener('activate', e => {
     e.waitUntil(
         caches.keys()
             .then(keys => Promise.all(
-                keys.map(k => (k.startsWith('rh-public-') && k !== SW_VERSION + '-assets' && k !== SW_VERSION + '-pages')
-                    ? caches.delete(k) : null)
+                keys.map(k => {
+                    // Delete anything in the 'rh-public-' namespace that isn't our current buckets.
+                    if (k === ASSET_CACHE || k === PAGE_CACHE) return null;
+                    if (k.startsWith('rh-public-')) return caches.delete(k);
+                    return null;
+                })
             ))
+            // LRU eviction: trim current caches to their limits after an SW update
+            // so stale entries from the previous version don't bloat the device.
+            .then(() => trimCache(PAGE_CACHE,  MAX_PAGE_CACHE_ENTRIES))
+            .then(() => trimCache(ASSET_CACHE, MAX_ASSET_CACHE_ENTRIES))
             .then(() => self.clients.claim())
     );
 });
+
+/** Trim a cache to at most `max` entries (oldest-first eviction). */
+async function trimCache(cacheName, max) {
+    const cache = await caches.open(cacheName);
+    const keys  = await cache.keys();
+    if (keys.length > max) {
+        // Delete oldest entries beyond the limit
+        await Promise.all(keys.slice(0, keys.length - max).map(k => cache.delete(k)));
+    }
+}
 
 self.addEventListener('fetch', event => {
     const req = event.request;
     const url = new URL(req.url);
 
-    // Never intercept non-GET or cross-origin or admin paths
+    // POST (and all non-GET) requests MUST NEVER be served from cache.
+    // Pass them directly to the network without any SW interception.
     if (req.method !== 'GET') return;
+    // Never intercept cross-origin, admin, or API paths
     if (url.origin !== self.location.origin) return;
     if (url.pathname.startsWith('/admin/')) return;
     if (url.pathname.startsWith('/api/')) return;
@@ -74,14 +109,20 @@ self.addEventListener('fetch', event => {
             fetch(req)
                 .then(resp => {
                     if (resp && resp.ok) {
-                        caches.open(PAGE_CACHE).then(c => c.put(req, resp.clone())).catch(() => { });
+                        caches.open(PAGE_CACHE).then(c => {
+                            c.put(req, resp.clone()).catch(() => { });
+                            // Evict oldest pages so the cache doesn't grow unbounded
+                            trimCache(PAGE_CACHE, MAX_PAGE_CACHE_ENTRIES).catch(() => { });
+                        }).catch(() => { });
                     }
                     return resp;
                 })
                 .catch(() => caches.match(req)
                     .then(hit => hit || caches.match(OFFLINE_FALLBACK))
+                    .then(hit => hit || Response.error())
                 )
         );
+        return;
     }
 });
 

@@ -99,6 +99,14 @@ try {
     // Ensure audit log tables exist for housekeeping and maintenance (migration 006)
     ensureAuditLogTables($pdo);
 
+    // Auto-expire stale tentative bookings on every request so that:
+    // (a) the availability check inside checkRoomAvailability's WHERE clause
+    //     can rely on status = 'expired' for reporting, and
+    // (b) admin pages other than tentative-bookings.php see current state.
+    // Runs at most once per PHP process (static guard prevents re-run if
+    // database.php is included more than once via require_once).
+    _expireStaleTentativeBookings($pdo);
+
     error_log("Database Connection Successful!");
 } catch (PDOException $e) {
     // Always show a beautiful custom error page (sleeping bear)
@@ -107,6 +115,46 @@ try {
     error_log("Error Code: " . $e->getCode());
     include_once __DIR__ . '/../includes/db-error.php';
     exit;
+}
+
+/**
+ * Silently expire all tentative bookings whose expiry time has passed.
+ * Called once per PHP process immediately after the PDO connection is made,
+ * ensuring every page (public and admin) sees up-to-date booking states
+ * without relying on a cron job or a specific admin page being visited.
+ *
+ * Uses a static flag so that repeated require_once calls in the same request
+ * never fire the UPDATE more than once.
+ */
+function _expireStaleTentativeBookings(PDO $pdo): void
+{
+    static $ran = false;
+    if ($ran) {
+        return;
+    }
+    $ran = true;
+
+    try {
+        $stmt = $pdo->prepare("
+            UPDATE bookings
+            SET    status = 'expired',
+                   is_tentative = 0,
+                   expired_at   = NOW()
+            WHERE  is_tentative          = 1
+              AND  status                = 'tentative'
+              AND  tentative_expires_at IS NOT NULL
+              AND  tentative_expires_at  < NOW()
+        ");
+        $stmt->execute();
+        $count = $stmt->rowCount();
+        if ($count > 0) {
+            error_log("[tentative] Auto-expired {$count} tentative booking(s) on page load.");
+        }
+    } catch (PDOException $e) {
+        // Non-fatal — log and continue; availability queries already filter
+        // expired tentatives inline via the NOT(...) clause.
+        error_log('[tentative] Auto-expire sweep failed: ' . $e->getMessage());
+    }
 }
 
 /**
@@ -4797,7 +4845,7 @@ function checkIndividualRoomAvailability(int $individualRoomId, string $checkIn,
             FROM room_maintenance_schedules
             WHERE individual_room_id = ?
             AND block_room = 1
-            AND status IN ('planned', 'pending', 'in_progress', 'completed')
+            AND status IN ('planned', 'pending', 'in_progress')
             AND NOT (end_date <= ? OR start_date >= ?)
         ");
         $maintenanceStmt->execute([$individualRoomId, $checkIn, $checkOut]);

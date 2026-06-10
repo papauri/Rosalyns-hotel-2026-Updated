@@ -102,10 +102,17 @@
         // Update header pill
         updatePill(navigator.onLine, n);
 
-        // Bottom toast: only show when there are queued items (regardless of online state)
-        if (n > 0) {
-            banner.className = 'syncing'; banner.style.display = 'flex';
-            document.getElementById('rhOfflineLabel').textContent = navigator.onLine ? 'Back online — syncing' : 'Offline — queued';
+        // Bottom toast: show when offline OR when there are queued items pending sync
+        if (!navigator.onLine || n > 0) {
+            banner.className = !navigator.onLine ? '' : 'syncing';
+            banner.style.display = 'flex';
+            if (!navigator.onLine && n === 0) {
+                document.getElementById('rhOfflineLabel').textContent = 'You are offline';
+            } else if (!navigator.onLine && n > 0) {
+                document.getElementById('rhOfflineLabel').textContent = 'Offline — queued';
+            } else {
+                document.getElementById('rhOfflineLabel').textContent = 'Back online — syncing';
+            }
         } else {
             banner.style.display = 'none';
         }
@@ -120,8 +127,25 @@
                 const fd = new FormData();
                 for (const [k, v] of (it.fields || [])) fd.append(k, v);
                 const resp = await fetch(it.url, { method: 'POST', body: fd, credentials: 'include' });
-                if (resp.ok || resp.status === 302) await deleteEntry(it.id);
-            } catch (e) { break; }
+                if (resp.ok || resp.status === 409) {
+                    // 409 Conflict means server already processed this UUID (duplicate) — safe to drop.
+                    await deleteEntry(it.id);
+                } else if (resp.status >= 500) {
+                    // Server error — keep item in queue and stop flushing; retry on next online event.
+                    break;
+                } else if (resp.status === 302 || (resp.status >= 300 && resp.status < 400)) {
+                    // Redirect — treated as success (form handler redirects on success).
+                    await deleteEntry(it.id);
+                }
+                // 4xx errors other than 409 (e.g. 400 bad request, 403 forbidden) — item is
+                // unrecoverable; remove it so it doesn't block the queue forever.
+                else {
+                    await deleteEntry(it.id);
+                }
+            } catch (e) {
+                // Network failure — stop flushing; item stays in queue.
+                break;
+            }
         }
         refreshBanner();
     }
@@ -150,7 +174,18 @@
     }, true);
 
     window.addEventListener('online', () => { flush(); refreshBanner(); });
-    window.addEventListener('offline', refreshBanner);
+    window.addEventListener('offline', () => {
+        refreshBanner();
+        // Register a Background Sync tag so the SW can wake the queue even if the
+        // tab was closed and reopened before connectivity was restored.
+        if ('serviceWorker' in navigator) {
+            navigator.serviceWorker.ready.then(reg => {
+                if (reg.sync) {
+                    reg.sync.register('rh-pos-queue').catch(() => { /* non-fatal */ });
+                }
+            }).catch(() => { });
+        }
+    });
 
     // Register SW — derive path from this script's own URL so subdirectory installs work
     (function () {
@@ -164,6 +199,18 @@
         }
         navigator.serviceWorker.register(swUrl).then(() => refreshBanner()).catch(() => { });
     }());
+
+    // Listen for Background Sync wake-up message from the SW ('rh-pos-queue' sync event).
+    // The SW posts { type: 'RH_FLUSH_QUEUE' } to all controlled clients so we can flush
+    // even if the window.online event fired while the tab was not focused.
+    if ('serviceWorker' in navigator) {
+        navigator.serviceWorker.addEventListener('message', event => {
+            if (event.data && event.data.type === 'RH_FLUSH_QUEUE') {
+                flush();
+            }
+        });
+    }
+
     document.addEventListener('DOMContentLoaded', refreshBanner);
     document.addEventListener('click', e => { if (e.target && e.target.id === 'rhOfflineRetry') flush(); });
 })();

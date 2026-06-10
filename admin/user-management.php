@@ -168,6 +168,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
                         foreach ($all_perms as $key => $info) {
                             if ($key === 'user_management') continue; // Admin-only
+                            // Prevent privilege escalation: non-admins cannot grant perms they don't hold
+                            if ($user['role'] !== 'admin' && !hasPermission($user['id'], $key)) {
+                                continue;
+                            }
                             $perms_to_set[$key] = in_array($key, $granted);
                         }
 

@@ -80,6 +80,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 ");
                 $stmt->execute([$col, $text, $url, $sec, $order]);
                 $message = 'Footer link added.';
+                if (function_exists('clearCache')) clearCache();
                 rh_log_event('footer_management', 'info', 'Footer link added', ['link_text' => $text, 'by' => $user['username']]);
 
             } elseif ($action === 'edit_link') {
@@ -103,6 +104,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 ");
                 $stmt->execute([$col, $text, $url, $sec, $order, $active, $id]);
                 $message = 'Footer link updated.';
+                if (function_exists('clearCache')) clearCache();
                 rh_log_event('footer_management', 'info', 'Footer link updated', ['id' => $id, 'by' => $user['username']]);
 
             } elseif ($action === 'delete_link') {
@@ -112,6 +114,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 }
                 $pdo->prepare("DELETE FROM footer_links WHERE id = ?")->execute([$id]);
                 $message = 'Footer link deleted.';
+                if (function_exists('clearCache')) clearCache();
                 rh_log_event('footer_management', 'info', 'Footer link deleted', ['id' => $id, 'by' => $user['username']]);
 
             } elseif ($action === 'toggle_link') {
