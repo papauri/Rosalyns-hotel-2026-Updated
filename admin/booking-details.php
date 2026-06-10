@@ -1312,11 +1312,12 @@ unset($_SESSION['success_message'], $_SESSION['error_message']);
                     <?php if ($booking['payment_status'] !== 'paid'): ?>
                         <div class="payment-form">
                             <form method="POST" data-admin-confirm="Mark this booking payment as paid and send the payment invoice email?" data-admin-confirm-title="Record payment" data-admin-confirm-ok="Mark paid" data-admin-confirm-icon="fa-money-bill-wave" data-admin-submit-text="Recording payment...">
+                                <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf_token, ENT_QUOTES); ?>">
                                 <input type="hidden" name="update_payment" value="1">
-                                <select name="payment_status" onchange="this.form.requestSubmit()">
-                                    <option value="">Mark as Paid...</option>
-                                    <option value="paid">Mark as Paid</option>
-                                </select>
+                                <input type="hidden" name="payment_status" value="paid">
+                                <button type="submit" class="payment-mark-paid-btn">
+                                    <i class="fas fa-check-circle"></i> Mark as Paid
+                                </button>
                             </form>
                         </div>
                     <?php else: ?>

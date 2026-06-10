@@ -26,16 +26,23 @@ if (!function_exists('quotationPdfRenderDocument')) {
         }
 
         require_once __DIR__ . '/../vendor/autoload.php';
-        $pdf = new TCPDF('P', 'mm', 'A4', true, 'UTF-8', false);
+        if (!class_exists('JapandiTCPDF')) {
+            class JapandiTCPDF extends TCPDF {
+                public function AddPage($orientation = '', $format = '', $keepmargins = false, $tocpage = false): void
+                {
+                    parent::AddPage($orientation, $format, $keepmargins, $tocpage);
+                    $this->SetFillColor(247, 243, 238);
+                    $this->Rect(0, 0, $this->getPageWidth(), $this->getPageHeight(), 'F');
+                }
+            }
+        }
+        $pdf = new JapandiTCPDF('P', 'mm', 'A4', true, 'UTF-8', false);
         $pdf->setPrintHeader(false);
         $pdf->setPrintFooter(false);
         $pdf->SetMargins(12, 12, 12);
         $pdf->SetAutoPageBreak(true, 14);
         $pdf->SetTitle($title);
         $pdf->AddPage();
-        // Fill entire page with Japandi warm cream background
-        $pdf->SetFillColor(247, 243, 238);
-        $pdf->Rect(0, 0, 210, 297, 'F');
         $pdf->writeHTML($html, true, false, true, false, '');
 
         return $pdf->Output('', 'S');
@@ -170,7 +177,17 @@ function generateQuotationPDF(array $booking, array $room, array $options = []):
     $c_light   = [245, 241, 236];
 
     // ── TCPDF setup ───────────────────────────────────────────────────────────
-    $pdf = new TCPDF('P', 'mm', 'A4', true, 'UTF-8', false);
+    if (!class_exists('JapandiTCPDF')) {
+        class JapandiTCPDF extends TCPDF {
+            public function AddPage($orientation = '', $format = '', $keepmargins = false, $tocpage = false): void
+            {
+                parent::AddPage($orientation, $format, $keepmargins, $tocpage);
+                $this->SetFillColor(247, 243, 238);
+                $this->Rect(0, 0, $this->getPageWidth(), $this->getPageHeight(), 'F');
+            }
+        }
+    }
+    $pdf = new JapandiTCPDF('P', 'mm', 'A4', true, 'UTF-8', false);
     $pdf->setPrintHeader(false);
     $pdf->setPrintFooter(false);
     $pdf->SetMargins(18, 18, 18);
@@ -180,9 +197,6 @@ function generateQuotationPDF(array $booking, array $room, array $options = []):
     $pdf->SetTitle('Quotation ' . $quote_ref);
     $pdf->SetSubject('Hotel Booking Quotation');
     $pdf->AddPage();
-    // Fill entire page with Japandi warm cream background
-    $pdf->SetFillColorArray($c_cream);
-    $pdf->Rect(0, 0, 210, 297, 'F');
 
     $w = 174; // usable width (210 - 18*2)
 
@@ -579,7 +593,17 @@ function generateConferenceQuotationPDF(array $enquiry, array $room, array $opti
         );
     }
 
-    $pdf = new TCPDF('P', 'mm', 'A4', true, 'UTF-8', false);
+    if (!class_exists('JapandiTCPDF')) {
+        class JapandiTCPDF extends TCPDF {
+            public function AddPage($orientation = '', $format = '', $keepmargins = false, $tocpage = false): void
+            {
+                parent::AddPage($orientation, $format, $keepmargins, $tocpage);
+                $this->SetFillColor(247, 243, 238);
+                $this->Rect(0, 0, $this->getPageWidth(), $this->getPageHeight(), 'F');
+            }
+        }
+    }
+    $pdf = new JapandiTCPDF('P', 'mm', 'A4', true, 'UTF-8', false);
     $pdf->setPrintHeader(false);
     $pdf->setPrintFooter(false);
     $pdf->SetMargins(16, 16, 16);
@@ -587,8 +611,6 @@ function generateConferenceQuotationPDF(array $enquiry, array $room, array $opti
     $pdf->SetTitle('Conference Quotation ' . $quoteRef);
     $pdf->SetAuthor($siteName);
     $pdf->AddPage();
-    $pdf->SetFillColor(247, 243, 238);
-    $pdf->Rect(0, 0, 210, 297, 'F');
 
     $vatRow = '';
     if ($vatAmount > 0) {
@@ -765,7 +787,17 @@ function generateEventQuotationPDF(array $event, array $recipient, array $option
         );
     }
 
-    $pdf = new TCPDF('P', 'mm', 'A4', true, 'UTF-8', false);
+    if (!class_exists('JapandiTCPDF')) {
+        class JapandiTCPDF extends TCPDF {
+            public function AddPage($orientation = '', $format = '', $keepmargins = false, $tocpage = false): void
+            {
+                parent::AddPage($orientation, $format, $keepmargins, $tocpage);
+                $this->SetFillColor(247, 243, 238);
+                $this->Rect(0, 0, $this->getPageWidth(), $this->getPageHeight(), 'F');
+            }
+        }
+    }
+    $pdf = new JapandiTCPDF('P', 'mm', 'A4', true, 'UTF-8', false);
     $pdf->setPrintHeader(false);
     $pdf->setPrintFooter(false);
     $pdf->SetMargins(16, 16, 16);
@@ -773,8 +805,6 @@ function generateEventQuotationPDF(array $event, array $recipient, array $option
     $pdf->SetTitle('Event Quotation ' . $quoteRef);
     $pdf->SetAuthor($siteName);
     $pdf->AddPage();
-    $pdf->SetFillColor(247, 243, 238);
-    $pdf->Rect(0, 0, 210, 297, 'F');
 
     $notesBlock = '';
     if ($notes !== '') {

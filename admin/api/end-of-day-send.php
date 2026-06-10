@@ -707,7 +707,17 @@ try {
     $pSc = $daily_health_score >= 90 ? [22, 101, 52] : ($daily_health_score >= 75 ? [21, 128, 61] : ($daily_health_score >= 55 ? [146, 64, 14] : [185, 28, 28]));
     $pSb = $daily_health_score >= 90 ? [240, 253, 244] : ($daily_health_score >= 75 ? [240, 253, 244] : ($daily_health_score >= 55 ? [255, 251, 235] : [255, 241, 242]));
 
-    $pa = new TCPDF('P', 'mm', 'A4', true, 'UTF-8', false);
+    if (!class_exists('JapandiTCPDF')) {
+        class JapandiTCPDF extends TCPDF {
+            public function AddPage($orientation = '', $format = '', $keepmargins = false, $tocpage = false): void
+            {
+                parent::AddPage($orientation, $format, $keepmargins, $tocpage);
+                $this->SetFillColor(247, 243, 238);
+                $this->Rect(0, 0, $this->getPageWidth(), $this->getPageHeight(), 'F');
+            }
+        }
+    }
+    $pa = new JapandiTCPDF('P', 'mm', 'A4', true, 'UTF-8', false);
     $pa->SetCreator($site_name);
     $pa->SetAuthor($site_name);
     $pa->SetTitle('End of Day Report — ' . $dateLabel);

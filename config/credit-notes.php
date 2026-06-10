@@ -642,7 +642,17 @@ if (!function_exists('generateCreditNotePDF')) {
             }
 
             // ── TCPDF document ─────────────────────────────────────────────
-            $pdf = new TCPDF(PDF_PAGE_ORIENTATION, PDF_UNIT, PDF_PAGE_FORMAT, true, 'UTF-8', false);
+            if (!class_exists('JapandiTCPDF')) {
+                class JapandiTCPDF extends TCPDF {
+                    public function AddPage($orientation = '', $format = '', $keepmargins = false, $tocpage = false): void
+                    {
+                        parent::AddPage($orientation, $format, $keepmargins, $tocpage);
+                        $this->SetFillColor(247, 243, 238);
+                        $this->Rect(0, 0, $this->getPageWidth(), $this->getPageHeight(), 'F');
+                    }
+                }
+            }
+            $pdf = new JapandiTCPDF(PDF_PAGE_ORIENTATION, PDF_UNIT, PDF_PAGE_FORMAT, true, 'UTF-8', false);
             $pdf->SetCreator($siteName);
             $pdf->SetAuthor($siteName);
             $pdf->SetTitle('Credit Note ' . $cn['credit_note_number']);
@@ -652,9 +662,6 @@ if (!function_exists('generateCreditNotePDF')) {
             $pdf->SetMargins(15, 15, 15);
             $pdf->SetAutoPageBreak(true, 20);
             $pdf->AddPage();
-            // Fill entire page with Japandi warm cream background
-            $pdf->SetFillColor(247, 243, 238);
-            $pdf->Rect(0, 0, 210, 297, 'F');
             $pdf->SetFont('helvetica', '', 9);
 
             $headerBg  = '#231F1C';

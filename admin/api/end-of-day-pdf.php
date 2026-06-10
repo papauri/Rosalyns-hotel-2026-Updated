@@ -272,7 +272,17 @@ $DIVIDER   = [229, 217, 201]; // #E5D9C9
 $score_color = $score >= 90 ? [22, 101, 52] : ($score >= 75 ? [21, 128, 61] : ($score >= 55 ? [146, 64, 14] : [185, 28, 28]));
 
 // ---- PDF setup -------------------------------------------------------------
-$pdf = new TCPDF('P', 'mm', 'A4', true, 'UTF-8', false);
+if (!class_exists('JapandiTCPDF')) {
+    class JapandiTCPDF extends TCPDF {
+        public function AddPage($orientation = '', $format = '', $keepmargins = false, $tocpage = false): void
+        {
+            parent::AddPage($orientation, $format, $keepmargins, $tocpage);
+            $this->SetFillColor(247, 243, 238);
+            $this->Rect(0, 0, $this->getPageWidth(), $this->getPageHeight(), 'F');
+        }
+    }
+}
+$pdf = new JapandiTCPDF('P', 'mm', 'A4', true, 'UTF-8', false);
 $pdf->SetCreator('Rosalyn\'s Hotel System');
 $pdf->SetAuthor($site_name);
 $pdf->SetTitle('End of Day Report — ' . $dateLabel);
@@ -282,9 +292,6 @@ $pdf->setPrintHeader(false);
 $pdf->setPrintFooter(false);
 $pdf->SetMargins(14, 14, 14);
 $pdf->AddPage();
-// Fill entire page with Japandi warm cream background
-$pdf->SetFillColorArray($LIGHT_BG);
-$pdf->Rect(0, 0, 210, 297, 'F');
 
 $y = 14;  // current Y cursor
 

@@ -744,7 +744,7 @@ if (!function_exists('hotel_japandi_document_shell')) {
                 . '<tr><td style="padding:0 48px;background:transparent;">' . $section . '</td></tr>';
         }
 
-        return '<table style="width:100%;background-color:#d5cfc4;border-collapse:collapse;" cellpadding="0" cellspacing="0" bgcolor="#d5cfc4"><tr><td style="padding:40px 20px;font-family:Helvetica,Arial,sans-serif;color:#3e3930;">'
+        return '<table style="width:100%;background-color:#d5cfc4;border-collapse:collapse;" cellpadding="0" cellspacing="0" bgcolor="#d5cfc4"><tr><td bgcolor="#d5cfc4" style="padding:40px 20px;background-color:#d5cfc4;font-family:Helvetica,Arial,sans-serif;color:#3e3930;">'
             . '<table style="width:100%;max-width:720px;margin:0 auto;border-collapse:collapse;background-color:#f5f2eb;border-radius:1px;box-shadow:0 16px 40px rgba(70,60,50,0.15),0 4px 12px rgba(70,60,50,0.08);border:1px solid #d3cbc0;" cellpadding="0" cellspacing="0" bgcolor="#f5f2eb">'
             . '<tr><td style="padding:0;"><table style="width:100%;border-collapse:collapse;" cellpadding="0" cellspacing="0"><tr>'
             . '<td style="padding:48px 48px 36px;vertical-align:top;">'
@@ -1128,16 +1128,22 @@ if (!function_exists('bookingRenderPdfFromHtml')) {
             throw new RuntimeException('TCPDF is required to render PDF templates.');
         }
 
-        $pdf = new TCPDF('P', 'mm', 'A4', true, 'UTF-8', false);
+        // Anonymous subclass fills #D5CFC4 sand on every page — matches the document shell
+        // outer table so no white gap appears in margins or on overflow pages.
+        $pdf = new class('P', 'mm', 'A4', true, 'UTF-8', false) extends TCPDF {
+            public function AddPage($orientation = '', $format = '', $keepmargins = false, $tocpage = false): void
+            {
+                parent::AddPage($orientation, $format, $keepmargins, $tocpage);
+                $this->SetFillColor(213, 207, 196); // #D5CFC4 — Japandi sand, matches outer table
+                $this->Rect(0, 0, $this->getPageWidth(), $this->getPageHeight(), 'F');
+            }
+        };
         $pdf->setPrintHeader(false);
         $pdf->setPrintFooter(false);
         $pdf->SetMargins(12, 12, 12);
         $pdf->SetAutoPageBreak(true, 14);
         $pdf->SetTitle($title);
         $pdf->AddPage();
-        // Fill entire page with Japandi warm cream so no white shows around content
-        $pdf->SetFillColor(247, 243, 238);
-        $pdf->Rect(0, 0, 210, 297, 'F');
         $pdf->writeHTML($html, true, false, true, false, '');
 
         return $pdf->Output('', 'S');

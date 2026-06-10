@@ -175,8 +175,17 @@ function generateInvoicePDF(int $booking_id, ?string $invoice_number_override = 
             if (function_exists('bookingRenderPdfFromHtml')) {
                 file_put_contents($filepath, bookingRenderPdfFromHtml($html, 'Invoice ' . $invoice_number));
             } else {
-                $tcpdfClass = 'TCPDF';
-                $pdf = new $tcpdfClass('P', 'mm', 'A4', true, 'UTF-8', false);
+                if (!class_exists('JapandiTCPDF')) {
+                    class JapandiTCPDF extends TCPDF {
+                        public function AddPage($orientation = '', $format = '', $keepmargins = false, $tocpage = false): void
+                        {
+                            parent::AddPage($orientation, $format, $keepmargins, $tocpage);
+                            $this->SetFillColor(247, 243, 238);
+                            $this->Rect(0, 0, $this->getPageWidth(), $this->getPageHeight(), 'F');
+                        }
+                    }
+                }
+                $pdf = new JapandiTCPDF('P', 'mm', 'A4', true, 'UTF-8', false);
                 $pdf->SetCreator($site_name);
                 $pdf->SetAuthor($site_name);
                 $pdf->SetTitle('Invoice ' . $invoice_number);
@@ -187,9 +196,6 @@ function generateInvoicePDF(int $booking_id, ?string $invoice_number_override = 
                 $pdf->SetAutoPageBreak(true, 10);
                 $pdf->SetFont('helvetica', '', 10);
                 $pdf->AddPage();
-                // Fill entire page with Japandi warm cream
-                $pdf->SetFillColor(247, 243, 238);
-                $pdf->Rect(0, 0, 210, 297, 'F');
                 $pdf->writeHTML($html, true, false, true, false, '');
                 $pdf->Output($filepath, 'F');
             }

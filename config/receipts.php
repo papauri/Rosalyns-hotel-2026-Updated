@@ -302,16 +302,23 @@ if (!function_exists('receipt_generate_pdf')) {
             );
         }
 
-        $pdf = new TCPDF('P', 'mm', 'A4', true, 'UTF-8', false);
+        if (!class_exists('JapandiTCPDF')) {
+            class JapandiTCPDF extends TCPDF {
+                public function AddPage($orientation = '', $format = '', $keepmargins = false, $tocpage = false): void
+                {
+                    parent::AddPage($orientation, $format, $keepmargins, $tocpage);
+                    $this->SetFillColor(247, 243, 238);
+                    $this->Rect(0, 0, $this->getPageWidth(), $this->getPageHeight(), 'F');
+                }
+            }
+        }
+        $pdf = new JapandiTCPDF('P', 'mm', 'A4', true, 'UTF-8', false);
         $pdf->SetCreator($siteName);
         $pdf->SetAuthor($siteName);
         $pdf->SetTitle('Receipt ' . $receiptNumber);
         $pdf->SetMargins(14, 14, 14);
         $pdf->SetAutoPageBreak(true, 16);
         $pdf->AddPage();
-        // Fill entire page with Japandi warm cream background
-        $pdf->SetFillColor(247, 243, 238);
-        $pdf->Rect(0, 0, 210, 297, 'F');
 
         $receiptBankRows = [];
         $receiptBankName = trim((string)getSetting('bank_name', ''));
