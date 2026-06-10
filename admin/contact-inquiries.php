@@ -447,5 +447,6 @@ renderModal('contactInquiryReplyModal', '<i class="fas fa-envelope"></i> Reply t
   </div>
 </div>
 
+<?php require_once 'includes/admin-footer.php'; ?>
 </body>
 </html>
