@@ -591,10 +591,67 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['booking_action'])) {
 
                         updateBookingRoomsStatus($booking_id, 'available', 'Booking cancelled: ' . $cancellation_reason, $user['id'] ?? null);
 
+                        // Refund accounting: if any completed payment exists, create a refund record.
+                        $canPay_stmt = $pdo->prepare("
+                            SELECT SUM(total_amount) as total_paid
+                            FROM payments
+                            WHERE booking_type = 'room' AND booking_id = ?
+                              AND payment_status IN ('completed','paid') AND COALESCE(payment_type, '') != 'refund'
+                              AND deleted_at IS NULL
+                        ");
+                        $canPay_stmt->execute([$booking_id]);
+                        $cancel_paid_total = (float)(($canPay_stmt->fetch(PDO::FETCH_ASSOC))['total_paid'] ?? 0);
+
+                        $cancel_refund_msg = '';
+                        if ($cancel_paid_total > 0) {
+                            do {
+                                $cancel_refund_ref = 'RFD-CAN-' . strtoupper(substr(uniqid(), -8));
+                                $canRefChk = $pdo->prepare("SELECT COUNT(*) FROM payments WHERE payment_reference = ?");
+                                $canRefChk->execute([$cancel_refund_ref]);
+                            } while ((int)$canRefChk->fetchColumn() > 0);
+
+                            $vatEnabled_can = getSetting('vat_enabled') === '1';
+                            $vatRate_can    = $vatEnabled_can ? (float)getSetting('vat_rate') : 0;
+                            $vatAmt_can     = $vatRate_can > 0
+                                ? round($cancel_paid_total * ($vatRate_can / (100 + $vatRate_can)), 2)
+                                : 0;
+                            $netAmt_can     = round($cancel_paid_total - $vatAmt_can, 2);
+
+                            $pdo->prepare("
+                                INSERT INTO payments (
+                                    payment_reference, booking_type, booking_id, booking_reference,
+                                    payment_date, payment_amount, vat_rate, vat_amount, total_amount,
+                                    payment_method, payment_type, payment_status,
+                                    refund_reason, refund_status, refund_amount,
+                                    recorded_by, created_at
+                                ) VALUES (?, 'room', ?, ?, CURDATE(), ?, ?, ?, ?, 'cash', 'refund', 'completed',
+                                          'cancellation', 'completed', ?, ?, NOW())
+                            ")->execute([
+                                $cancel_refund_ref,
+                                $booking_id,
+                                $booking_to_cancel['booking_reference'],
+                                $netAmt_can,
+                                $vatRate_can,
+                                $vatAmt_can,
+                                $cancel_paid_total,
+                                $cancel_paid_total,
+                                (int)($user['id'] ?? 0),
+                            ]);
+
+                            $cancel_refund_msg = ' Refund of ' . ($currency_symbol ?? 'MWK') . ' '
+                                . number_format($cancel_paid_total, 2) . ' recorded (Ref: ' . $cancel_refund_ref . ').';
+                        }
+
+                        recalculateBookingFinancials($booking_id);
+                        if ($cancel_paid_total > 0) {
+                            $pdo->prepare("UPDATE bookings SET payment_status = 'refunded', updated_at = NOW() WHERE id = ?")
+                                ->execute([$booking_id]);
+                        }
+
                         require_once '../config/email.php';
                         $email_result = sendBookingCancelledEmail($booking_to_cancel, $cancellation_reason);
 
-                        $_SESSION['success_message'] = 'Booking cancelled.' .
+                        $_SESSION['success_message'] = 'Booking cancelled.' . $cancel_refund_msg .
                             ($email_result['success'] ? ' Cancellation email sent.' : ' (Email failed)');
                     }
                 }

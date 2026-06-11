@@ -67,7 +67,7 @@ function bookingAllowsAction(array $booking, string $action): array
             if ($closed) {
                 // Allow payment on checked-out if there is still a balance due
                 $balanceDue = (float)($booking['amount_due'] ?? ($booking['total_amount'] ?? 0) - ($booking['amount_paid'] ?? 0));
-                if ($balanceDue <= 0.009) {
+                if ($balanceDue <= BALANCE_TOLERANCE) {
                     return ['allowed' => false, 'reason' =>
                         'This booking is checked-out and fully settled. No further payments can be recorded.'];
                 }
@@ -166,7 +166,7 @@ function detectOverpayment(PDO $pdo, int $bookingId, float $newPaymentAmount): a
     $alreadyPaid  = (float)($b['amount_paid'] ?? 0);
     $afterPayment = $alreadyPaid + $newPaymentAmount;
 
-    if ($afterPayment <= $grandTotal + 0.009) {
+    if ($afterPayment <= $grandTotal + BALANCE_TOLERANCE) {
         return ['overpaid' => false, 'excess' => 0.0, 'booking' => $b];
     }
 

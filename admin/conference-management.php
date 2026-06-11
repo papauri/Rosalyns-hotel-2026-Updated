@@ -373,6 +373,53 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['enquiry_action'])) {
             $stmt = $pdo->prepare("UPDATE conference_inquiries SET status = 'cancelled', updated_at = NOW() WHERE id = ?");
             $stmt->execute([$enquiry_id]);
 
+            // Refund accounting: record a refund row if any completed payment exists.
+            $confCanPay = $pdo->prepare("
+                SELECT SUM(total_amount) as total_paid
+                FROM payments
+                WHERE booking_type = 'conference' AND booking_id = ?
+                  AND payment_status IN ('completed','paid') AND COALESCE(payment_type, '') != 'refund'
+                  AND deleted_at IS NULL
+            ");
+            $confCanPay->execute([$enquiry_id]);
+            $confPaidTotal = (float)(($confCanPay->fetch(PDO::FETCH_ASSOC))['total_paid'] ?? 0);
+            if ($confPaidTotal > 0) {
+                do {
+                    $confRefRef = 'RFD-CONF-' . strtoupper(substr(uniqid(), -8));
+                    $confRefChk = $pdo->prepare("SELECT COUNT(*) FROM payments WHERE payment_reference = ?");
+                    $confRefChk->execute([$confRefRef]);
+                } while ((int)$confRefChk->fetchColumn() > 0);
+                $confVatEnabled = getSetting('vat_enabled') === '1';
+                $confVatRate    = $confVatEnabled ? (float)getSetting('vat_rate') : 0;
+                $confVatAmt     = $confVatRate > 0 ? round($confPaidTotal * ($confVatRate / (100 + $confVatRate)), 2) : 0;
+                $confNetAmt     = round($confPaidTotal - $confVatAmt, 2);
+                $pdo->prepare("
+                    INSERT INTO payments (
+                        payment_reference, booking_type, booking_id, booking_reference,
+                        payment_date, payment_amount, vat_rate, vat_amount, total_amount,
+                        payment_method, payment_type, payment_status,
+                        refund_reason, refund_status, refund_amount,
+                        recorded_by, created_at
+                    ) VALUES (?, 'conference', ?, ?, CURDATE(), ?, ?, ?, ?, 'cash', 'refund', 'completed',
+                              'cancellation', 'completed', ?, ?, NOW())
+                ")->execute([
+                    $confRefRef,
+                    $enquiry_id,
+                    $enquiry['inquiry_reference'] ?? '',
+                    $confNetAmt,
+                    $confVatRate,
+                    $confVatAmt,
+                    $confPaidTotal,
+                    $confPaidTotal,
+                    (int)($user['id'] ?? 0),
+                ]);
+                if (function_exists('updateConferenceEnquiryPayments')) {
+                    updateConferenceEnquiryPayments($pdo, $enquiry_id);
+                }
+                $pdo->prepare("UPDATE conference_inquiries SET payment_status = 'refunded', updated_at = NOW() WHERE id = ?")
+                    ->execute([$enquiry_id]);
+            }
+
             $email_result = sendConferenceCancelledEmail($enquiry);
 
             $email_sent = $email_result['success'];
