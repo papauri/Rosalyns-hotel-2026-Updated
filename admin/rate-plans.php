@@ -966,6 +966,7 @@ $dayNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
             if (e.target === this) this.style.display = 'none';
         });
     </script>
+<?php require_once 'includes/admin-footer.php'; ?>
 </body>
 
 </html>

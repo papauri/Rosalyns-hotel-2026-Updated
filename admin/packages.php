@@ -1067,6 +1067,7 @@ $priceTypeLabels = [
     </div>
 
     <script src="js/admin-components.js" defer></script>
+<?php require_once 'includes/admin-footer.php'; ?>
 </body>
 
 </html>

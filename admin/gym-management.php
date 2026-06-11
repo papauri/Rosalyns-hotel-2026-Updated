@@ -846,11 +846,11 @@ if ($gym_css_version === '' || $gym_css_version === '0') {
                 var fb = document.getElementById('fbGymAllFeedback');
                 fb.className = 'admin-modal-feedback';
                 fb.innerHTML = '';
-                document.getElementById('fbGymAllModal').style.display = 'flex';
+                document.getElementById('fbAllGymModal').style.display = 'flex';
             };
 
             window.closeFbAllGymModal = function() {
-                var m = document.getElementById('fbGymAllModal');
+                var m = document.getElementById('fbAllGymModal');
                 if (m) m.style.display = 'none';
             };
 
