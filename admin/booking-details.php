@@ -1041,7 +1041,7 @@ unset($_SESSION['success_message'], $_SESSION['error_message']);
                 $statusBanner = ['class' => 'booking-status-banner--tentative', 'icon' => 'fa-hourglass-half', 'text' => '<strong>Tentative booking</strong> — invoices cannot be sent until this booking is confirmed.'];
                 break;
             case 'checked-out':
-                if ($folio_balance_due > 0.009) {
+                if ($folio_balance_due > BALANCE_TOLERANCE) {
                     $statusBanner = ['class' => 'booking-status-banner--balance', 'icon' => 'fa-exclamation-triangle', 'text' => 'Guest has <strong>checked out</strong> with an outstanding balance of <strong>' . htmlspecialchars($currency_symbol) . number_format($folio_balance_due, 2) . '</strong>. A payment can still be recorded.'];
                 }
                 break;
@@ -1458,12 +1458,12 @@ unset($_SESSION['success_message'], $_SESSION['error_message']);
                                     <div class="folio-summary-value paid"><?php echo $currency_symbol; ?><?php echo number_format($folio_amount_paid, 2); ?></div>
                                 </div>
                             <?php endif; ?>
-                            <?php if ($folio_balance_due > 0.009): ?>
+                            <?php if ($folio_balance_due > BALANCE_TOLERANCE): ?>
                                 <div class="folio-summary-item folio-summary-item--alert">
                                     <div class="folio-summary-label"><i class="fas fa-exclamation-triangle" style="color:#d97706;"></i> Balance Due</div>
                                     <div class="folio-summary-value balance"><?php echo $currency_symbol; ?><?php echo number_format($folio_balance_due, 2); ?></div>
                                 </div>
-                            <?php elseif ($folio_amount_paid > $folio_total_amount + 0.009): ?>
+                            <?php elseif ($folio_amount_paid > $folio_total_amount + BALANCE_TOLERANCE): ?>
                                 <?php $overpaid_amount = $folio_amount_paid - $folio_total_amount; ?>
                                 <div class="folio-summary-item folio-summary-item--overpay">
                                     <div class="folio-summary-label"><i class="fas fa-coins" style="color:#0369a1;"></i> Overpayment</div>
@@ -1474,7 +1474,7 @@ unset($_SESSION['success_message'], $_SESSION['error_message']);
                                     Guest has overpaid by <?php echo $currency_symbol . number_format($overpaid_amount, 2); ?>.
                                     <a href="credit-notes.php?booking_id=<?php echo $booking_id; ?>">Issue a credit note</a> to apply the excess.
                                 </p>
-                            <?php elseif ($folio_amount_paid >= $folio_total_amount - 0.009 && $folio_total_amount > 0): ?>
+                            <?php elseif ($folio_amount_paid >= $folio_total_amount - BALANCE_TOLERANCE && $folio_total_amount > 0): ?>
                                 <div class="folio-summary-item folio-summary-item--settled">
                                     <div class="folio-summary-label"><i class="fas fa-circle-check" style="color:#16a34a;"></i> Fully Settled</div>
                                     <div class="folio-summary-value" style="color:#16a34a;">Paid in full</div>

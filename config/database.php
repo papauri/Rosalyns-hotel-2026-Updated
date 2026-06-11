@@ -49,6 +49,14 @@ define('DB_USER', $db_user);
 define('DB_PASS', $db_pass);
 define('DB_CHARSET', $db_charset);
 
+// Monetary comparison tolerance — amounts within this range of zero are
+// treated as settled/zero to avoid floating-point rounding artifacts.
+// Use this constant everywhere balance-due and payment-status logic compares
+// a computed amount against zero. Never compare raw float == 0.
+if (!defined('BALANCE_TOLERANCE')) {
+    define('BALANCE_TOLERANCE', 0.01);
+}
+
 // Create PDO connection with performance optimizations
 try {
     // Diagnostic logging
@@ -6175,7 +6183,7 @@ function recalculateBookingFinancials(int $bookingId): bool
         $totalVat = (float)$booking['vat_amount'] + $chargesVat;
         $totalWithVat = $baseTotalWithVat + $chargesTotal; // charges_total already includes VAT
         $amountDue = max(0, $totalWithVat - $amountPaid);
-        $paymentStatus = $amountDue <= 0.01 ? 'paid' : ($amountPaid > 0.01 ? 'partial' : 'unpaid');
+        $paymentStatus = $amountDue <= BALANCE_TOLERANCE ? 'paid' : ($amountPaid > BALANCE_TOLERANCE ? 'partial' : 'unpaid');
 
         // Update booking
         $updateStmt = $pdo->prepare("
@@ -6586,7 +6594,7 @@ function processBookingDateAdjustment(int $bookingId, string $newCheckIn, string
         $newPaymentStatus = $booking['payment_status'];
         $creditBalance = 0.0;
 
-        if ($newAmountDue <= 0.01) {
+        if ($newAmountDue <= BALANCE_TOLERANCE) {
             // Fully paid or overpaid (credit)
             $newPaymentStatus = 'paid';
             $creditBalance = abs($newAmountDue); // Track credit balance separately
@@ -6680,7 +6688,7 @@ function processBookingDateAdjustment(int $bookingId, string $newCheckIn, string
 
         // Add credit note if applicable
         $creditNote = '';
-        if ($creditBalance > 0.01) {
+        if ($creditBalance > BALANCE_TOLERANCE) {
             $creditNote = ' (Credit balance: $' . number_format($creditBalance, 2) . ')';
         }
 
