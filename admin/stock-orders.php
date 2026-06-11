@@ -138,9 +138,15 @@ function addRoomServiceFolioChargeForOrder(PDO $pdo, int $bookingId, int $orderI
 {
     $vatEnabled = in_array(getSetting('vat_enabled'), ['1', 1, true, 'true', 'on'], true);
     $vatRate = $vatEnabled ? (float)getSetting('vat_rate') : 0.0;
-    $lineSubtotal = round($quantity * $unitPrice, 2);
-    $vatAmount = round($lineSubtotal * ($vatRate / 100), 2);
-    $lineTotal = round($lineSubtotal + $vatAmount, 2);
+    // unitPrice is the VAT-inclusive (gross) menu price — extract net and VAT.
+    $lineTotal    = round($quantity * $unitPrice, 2);
+    if ($vatRate > 0) {
+        $lineSubtotal = round($lineTotal / (1 + ($vatRate / 100)), 2);
+        $vatAmount    = round($lineTotal - $lineSubtotal, 2);
+    } else {
+        $lineSubtotal = $lineTotal;
+        $vatAmount    = 0.0;
+    }
     $chargeType = $menuType === 'food' ? 'food' : 'drink';
 
     $columns = [

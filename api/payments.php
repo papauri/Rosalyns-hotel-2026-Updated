@@ -517,10 +517,10 @@ function createPayment(PDO $pdo)
         ApiResponse::validationError(['payment_amount' => 'Payment amount must be greater than zero']);
     }
 
-    // Calculate VAT
+    // payment_amount is the gross (VAT-inclusive) amount — extract VAT portion.
     $vatRate = isset($input['vat_rate']) ? (float)$input['vat_rate'] : $vatRate;
-    $vatAmount = $paymentAmount * ($vatRate / 100);
-    $totalAmount = $paymentAmount + $vatAmount;
+    $vatAmount = $vatRate > 0 ? round($paymentAmount * ($vatRate / (100 + $vatRate)), 2) : 0.0;
+    $totalAmount = $paymentAmount;
 
     // Validate booking exists
     if ($input['booking_type'] === 'room') {
@@ -676,8 +676,8 @@ function updatePayment(PDO $pdo, int $paymentId)
     if (isset($input['payment_amount'])) {
         $newAmount = (float)$input['payment_amount'];
         $vatRate = isset($input['vat_rate']) ? (float)$input['vat_rate'] : (float)$existingPayment['vat_rate'];
-        $vatAmount = $newAmount * ($vatRate / 100);
-        $totalAmount = $newAmount + $vatAmount;
+        $vatAmount = $vatRate > 0 ? round($newAmount * ($vatRate / (100 + $vatRate)), 2) : 0.0;
+        $totalAmount = $newAmount; // gross = what was entered
 
         $updateFields[] = "vat_rate = ?";
         $params[] = $vatRate;

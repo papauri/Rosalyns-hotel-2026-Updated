@@ -5773,10 +5773,16 @@ function addBookingCharge(int $bookingId, string $chargeType, string $descriptio
         $vatEnabled = getSetting('vat_enabled') === '1';
         $vatRate = $vatEnabled ? (float)getSetting('vat_rate') : 0;
 
-        // Calculate line totals
-        $lineSubtotal = $quantity * $unitPrice;
-        $vatAmount = $lineSubtotal * ($vatRate / 100);
-        $lineTotal = $lineSubtotal + $vatAmount;
+        // unitPrice is the VAT-inclusive (gross) price — same convention used everywhere
+        // in the system (room rates, menu items). Extract net and VAT from gross.
+        $lineTotal    = round($quantity * $unitPrice, 2);
+        if ($vatRate > 0) {
+            $lineSubtotal = round($lineTotal / (1 + ($vatRate / 100)), 2);
+            $vatAmount    = round($lineTotal - $lineSubtotal, 2);
+        } else {
+            $lineSubtotal = $lineTotal;
+            $vatAmount    = 0.0;
+        }
 
         // Insert charge
         $stmt = $pdo->prepare("

@@ -175,10 +175,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     $processedBy
                 ];
 
-                // Recalculate VAT
+                // paymentAmount is the gross (VAT-inclusive) amount received — extract VAT portion.
                 $paymentVatRate = $vatRate;
-                $paymentVatAmount = round($paymentAmount * ($paymentVatRate / 100), 2);
-                $totalAmount = round($paymentAmount + $paymentVatAmount, 2);
+                $paymentVatAmount = $paymentVatRate > 0 ? round($paymentAmount * ($paymentVatRate / (100 + $paymentVatRate)), 2) : 0.0;
+                $totalAmount = $paymentAmount; // gross = what was entered
                 $updateFields[] = 'vat_rate = ?';
                 $updateFields[] = 'vat_amount = ?';
                 $updateFields[] = 'total_amount = ?';
@@ -243,8 +243,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 }
 
                 $paymentVatRate = $vatRate;
-                $paymentVatAmount = round($paymentAmount * ($paymentVatRate / 100), 2);
-                $totalAmount = round($paymentAmount + $paymentVatAmount, 2);
+                $paymentVatAmount = $paymentVatRate > 0 ? round($paymentAmount * ($paymentVatRate / (100 + $paymentVatRate)), 2) : 0.0;
+                $totalAmount = $paymentAmount; // gross = what was entered
 
                 // Generate payment reference
                 do {
