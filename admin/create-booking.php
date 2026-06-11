@@ -404,7 +404,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['create_booking'])) {
 
         // Derive payment_status from amount collected vs grand total
         if ($payment_received && $amount_collected > 0) {
-            if ($amount_collected >= ($grand_total_with_vat - 0.01)) {
+            if ($amount_collected >= ($grand_total_with_vat - BALANCE_TOLERANCE)) {
                 $payment_status_val = 'paid';
                 $payment_type_val   = 'full_payment';
             } else {

@@ -223,9 +223,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 throw new Exception('This is not a tentative booking');
             }
 
-            // Convert to confirmed status
-            $update_stmt = $pdo->prepare("UPDATE bookings SET status = 'confirmed', is_tentative = 0 WHERE id = ?");
+            // Convert to confirmed status and clear tentative fields
+            $update_stmt = $pdo->prepare("UPDATE bookings SET status = 'confirmed', is_tentative = 0, tentative_expires_at = NULL WHERE id = ?");
             $update_stmt->execute([$booking_id]);
+
+            // Decrement room availability — tentative bookings don't consume rooms_available,
+            // but confirmed bookings do; apply the same decrement as pending→confirmed.
+            $pdo->prepare("UPDATE rooms SET rooms_available = rooms_available - 1 WHERE id = ? AND rooms_available > 0")
+                ->execute([$booking['room_id']]);
+
             $autoAssignMessage = '';
             if (in_array($booking['payment_status'] ?? '', ['paid', 'completed'], true) && empty($booking['individual_room_id'])) {
                 $autoAssignResult = autoAssignConfirmedPaidBooking($booking_id);
@@ -555,8 +561,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     throw new Exception($transitionValidation['reason']);
                 }
 
-                // Update booking status; if leaving tentative, clear is_tentative flag so badge counts stay accurate
-                $clear_tentative_flag = ($new_status !== 'tentative') ? ', is_tentative = 0' : '';
+                // Update booking status; if leaving tentative, clear tentative fields so badge counts stay accurate
+                $clear_tentative_flag = ($new_status !== 'tentative') ? ', is_tentative = 0, tentative_expires_at = NULL' : '';
                 $stmt = $pdo->prepare("UPDATE bookings SET status = ?{$clear_tentative_flag} WHERE id = ?");
                 $stmt->execute([$new_status, $booking_id]);
                 $message = 'Booking status updated!';
@@ -564,7 +570,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 logBookingAudit($booking_id, $new_status, ['status' => $current_status], ['status' => $new_status], null, $current_booking['booking_reference'] ?? null);
 
                 // Handle room availability changes
-                if ($current_status === 'pending' && $new_status === 'confirmed') {
+                if (in_array($current_status, ['pending', 'tentative'], true) && $new_status === 'confirmed') {
                     // Check availability before confirming
                     $availabilityCheck = checkRoomAvailability($room_id, $current_booking['check_in_date'], $current_booking['check_out_date'], $booking_id);
                     if (!$availabilityCheck['available']) {
@@ -862,6 +868,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $vals[] = $booking_id;
             $stmt = $pdo->prepare("UPDATE bookings SET " . implode(', ', $sets) . " WHERE id = ?");
             $stmt->execute($vals);
+
+            // When total_amount was manually overridden, recompute vat_amount and total_with_vat
+            // so recalculateBookingFinancials sees the correct gross base.
+            if (isset($updates['total_amount'])) {
+                $reVatRate  = (float)($current['vat_rate'] ?? 0);
+                $reNewTotal = (float)$updates['total_amount'];
+                $reVatAmt   = $reVatRate > 0 ? round($reNewTotal * ($reVatRate / 100), 2) : 0.0;
+                $pdo->prepare("UPDATE bookings SET vat_amount = ?, total_with_vat = ? WHERE id = ?")
+                    ->execute([$reVatAmt, round($reNewTotal + $reVatAmt, 2), $booking_id]);
+            }
 
             // Recompute financials from the payments ledger to keep amount_paid / amount_due accurate
             recalculateBookingFinancials($booking_id);
@@ -1355,9 +1371,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $settlementPaymentReference = null;
 
                 if ($settlement_action === 'charge' && $nightDiff_s > 0) {
-                    // Add folio charge for extra nights
-                    $extraNights_s = $nightDiff_s;
-                    $chargeAmount_s = round($extraNights_s * $ppn_s, 2);
+                    // Add folio charge for extra nights.
+                    // ppn_s is the NET room rate; addBookingCharge expects a GROSS price,
+                    // so convert to gross before passing.
+                    $lco_vatEnabled = getSetting('vat_enabled') === '1';
+                    $lco_vatRate    = $lco_vatEnabled ? (float)getSetting('vat_rate') : 0;
+                    $ppn_gross_s    = $lco_vatRate > 0 ? round($ppn_s * (1 + $lco_vatRate / 100), 4) : $ppn_s;
+                    $extraNights_s  = $nightDiff_s;
+                    $chargeAmount_s = round($extraNights_s * $ppn_gross_s, 2);
                     $chargeDesc    = "Late checkout: {$extraNights_s} extra night(s) at {$currency_symbol} "
                         . number_format($ppn_s, 2) . "/night"
                         . ($settle_notes ? '. ' . $settle_notes : '');
@@ -1366,7 +1387,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         'late_checkout',
                         $chargeDesc,
                         (float)$extraNights_s,
-                        $ppn_s,
+                        $ppn_gross_s,
                         null,
                         (int)($user['id'] ?? 0)
                     );
@@ -2008,6 +2029,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $baseAmount     = $pricePerNight * $newNights;
             $childSupplement = $childGuests > 0 ? ($pricePerNight * ($childMultiplier / 100) * $childGuests * $newNights) : 0;
             $newTotal       = $baseAmount + $childSupplement;
+            // Recompute VAT and gross total to keep total_with_vat accurate
+            $extVatRate      = (float)($bk['vat_rate'] ?? 0);
+            $extVatAmount    = $extVatRate > 0 ? round($newTotal * ($extVatRate / 100), 2) : 0.0;
+            $extTotalWithVat = round($newTotal + $extVatAmount, 2);
 
             // Check for conflicts with other bookings on the extended dates
             $blockingStatuses = getBookingStatusesThatBlockAvailability(false);
@@ -2030,17 +2055,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 exit;
             }
 
-            // Update booking
+            // Update booking — include VAT columns so recalculate sees the new gross total
             $upd_stmt = $pdo->prepare("
                 UPDATE bookings
                 SET check_out_date = ?,
                     number_of_nights = ?,
                     total_amount = ?,
                     child_supplement_total = ?,
+                    vat_amount = ?,
+                    total_with_vat = ?,
                     updated_at = NOW()
                 WHERE id = ?
             ");
-            $upd_stmt->execute([$new_checkout, $newNights, $newTotal, $childSupplement, $booking_id]);
+            $upd_stmt->execute([$new_checkout, $newNights, $newTotal, $childSupplement, $extVatAmount, $extTotalWithVat, $booking_id]);
 
             // Recalculate amount_due so it reflects the new total correctly
             recalculateBookingFinancials($booking_id);

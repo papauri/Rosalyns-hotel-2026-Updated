@@ -349,9 +349,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['booking_action'])) {
                 } elseif ($booking_data['status'] !== 'tentative' || $booking_data['is_tentative'] != 1) {
                     $_SESSION['error_message'] = 'This is not a tentative booking.';
                 } else {
-                    // Convert to confirmed
-                    $update = $pdo->prepare("UPDATE bookings SET status = 'confirmed', is_tentative = 0, updated_at = NOW() WHERE id = ?");
+                    // Convert to confirmed and clear tentative fields
+                    $update = $pdo->prepare("UPDATE bookings SET status = 'confirmed', is_tentative = 0, tentative_expires_at = NULL, updated_at = NOW() WHERE id = ?");
                     $update->execute([$booking_id]);
+
+                    // Decrement room availability — tentative bookings don't consume rooms_available,
+                    // but confirmed bookings do; apply the same decrement as pending→confirmed.
+                    $pdo->prepare("UPDATE rooms SET rooms_available = rooms_available - 1 WHERE id = ? AND rooms_available > 0")
+                        ->execute([$booking_data['room_id']]);
+
                     $auto_assign_msg = '';
                     if (in_array($booking_data['payment_status'] ?? '', ['paid', 'completed'], true) && empty($booking_data['individual_room_id'])) {
                         $autoAssignResult = autoAssignConfirmedPaidBooking($booking_id);
