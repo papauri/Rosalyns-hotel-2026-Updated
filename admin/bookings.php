@@ -3898,7 +3898,7 @@ $today_str = $today->format('Y-m-d');
             if (type === 'error') {
                 console.error(text);
             } else {
-                console.log(text);
+                console.warn(text);
             }
         }
 

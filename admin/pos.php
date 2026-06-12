@@ -1593,6 +1593,9 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
                             $canCancelBeforePrep = ($pendingCount > 0)
                                 && ($preparingCount === 0) && ($readyCount === 0)
                                 && ($collectionCount === 0) && ($servedCount === 0);
+                            $canSettle = $totalItems > 0
+                                && $pendingCount === 0 && $preparingCount === 0
+                                && $readyCount === 0 && $collectionCount === 0;
                             $openedByOther = ((int)($t['created_by'] ?? 0) !== (int)$user['id']);
                         ?>
                             <article class="tab-card<?php echo $isStale ? ' stale' : ''; ?>" data-order-id="<?php echo (int)$t['id']; ?>" data-is-stale="<?php echo $isStale ? '1' : '0'; ?>">
@@ -1635,7 +1638,7 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
                                     <?php if ($isStale): ?><div class="tc-stale-warn"><i class="fas fa-triangle-exclamation"></i> Previous shift</div><?php endif; ?>
                                 </div>
                                 <div class="tc-actions">
-                                    <button type="button" onclick="openPayForTab(<?php echo (int)$t['id']; ?>, <?php echo (float)$t['total_amount']; ?>, '<?php echo htmlspecialchars($t['reference'], ENT_QUOTES); ?>')"
+                                    <button type="button" onclick="openPayForTab(<?php echo (int)$t['id']; ?>, <?php echo (float)$t['total_amount']; ?>, <?php echo json_encode((string)$t['reference']); ?>, <?php echo $canSettle ? 'true' : 'false'; ?>)"
                                         class="tc-btn tc-btn-settle"
                                         data-help="Settle tab|Close this tab — take payment and mark the order as paid.">
                                         <i class="fas fa-credit-card"></i> Settle
@@ -1653,7 +1656,7 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
                                     </button>
                                     <?php if ($canCancelBeforePrep): ?>
                                         <button type="button"
-                                            onclick="cancelOpenOrder(<?php echo (int)$t['id']; ?>, '<?php echo htmlspecialchars($t['reference'], ENT_QUOTES); ?>')"
+                                            onclick="cancelOpenOrder(<?php echo (int)$t['id']; ?>, <?php echo json_encode((string)$t['reference']); ?>)"
                                             class="tc-btn tc-btn-cancel"
                                             data-help="Cancel before prep|Cancels this order only while all items are still pending. Nothing has been cooked yet.">
                                             <i class="fas fa-circle-xmark"></i> Cancel
@@ -1667,7 +1670,7 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
                                             <i class="fas fa-stream"></i> Lifecycle
                                         </button>
                                         <button type="button"
-                                            onclick="adminVoidTab(<?php echo (int)$t['id']; ?>, '<?php echo htmlspecialchars($t['reference'], ENT_QUOTES); ?>')"
+                                            onclick="adminVoidTab(<?php echo (int)$t['id']; ?>, <?php echo json_encode((string)$t['reference']); ?>)"
                                             class="tc-btn tc-btn-void"
                                             data-help="Void order|Admin/manager only. Cancels the order, restores stock, clears station boards.">
                                             <i class="fas fa-ban"></i> Void
@@ -5117,7 +5120,7 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
                         ${isStale ? '<div class="tc-stale-warn"><i class="fas fa-triangle-exclamation"></i> Previous shift</div>' : ''}
                     </div>
                     <div class="tc-actions">
-                        <button type="button" onclick="openPayForTab(${orderId}, ${parseFloat(t.total_amount || 0) || 0}, ${actionRef}, ${canSettle ? 'true' : 'false'})" class="tc-btn tc-btn-settle${canSettle ? '' : ' disabled'}" data-help="${canSettle ? 'Settle tab|Close this tab — take payment and mark the order as paid.' : 'Wait for service|All items must be served before the tab can be settled.'}" ${canSettle ? '' : 'disabled'}><i class="fas fa-credit-card"></i> ${canSettle ? 'Settle' : 'Wait to settle'}</button>
+                        <button type="button" onclick="openPayForTab(${orderId}, ${parseFloat(t.total_amount || 0) || 0}, ${actionRef}, ${canSettle ? 'true' : 'false'})" class="tc-btn tc-btn-settle" data-help="Settle tab|Close this tab — take payment and mark the order as paid."><i class="fas fa-credit-card"></i> Settle</button>
                         <button type="button" onclick="openTabDetail(${orderId})" class="tc-btn tc-btn-detail" data-help="View details|See all items, kitchen status, and the full audit trail for this tab."><i class="fas fa-receipt"></i> Details</button>
                         <button type="button" onclick="openPosPageModal('stock-receipt.php?id=${orderId}&print=1&kot=1','Print KOT','fas fa-print')" class="tc-btn tc-btn-kot" data-help="Print KOT|Reprint the kitchen ticket for this open tab."><i class="fas fa-print"></i> KOT</button>
                         ${canCancelBeforePrep ? `<button type="button" onclick="cancelOpenOrder(${orderId}, ${actionRef})" class="tc-btn tc-btn-cancel" data-help="Cancel before prep|Cancels this order only while all items are still pending. Nothing has been cooked yet."><i class="fas fa-circle-xmark"></i> Cancel</button>` : ''}
@@ -5746,8 +5749,6 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
             const detailActions = [];
             if (canSettle) {
                 detailActions.push(`<button type="button" class="tc-btn tc-btn-settle tdi-action" onclick="settleTabFromDetail(${parseInt(o.id, 10) || 0}, ${grossTotal}, ${JSON.stringify(String(o.reference || 'TAB'))})"><i class="fas fa-credit-card"></i> Settle tab</button>`);
-            } else if (settlementBlocked) {
-                detailActions.push(`<button type="button" class="tc-btn tc-btn-settle tdi-action disabled" disabled data-help="Wait for service|All items must be served before the tab can be settled."><i class="fas fa-clock"></i> Wait to settle</button>`);
             }
             detailActions.push(`<button type="button" class="tc-btn tc-btn-kot tdi-action" onclick="openPosPageModal('stock-receipt.php?id=${parseInt(o.id, 10) || 0}&print=1&kot=1','Print KOT','fas fa-print')"><i class="fas fa-print"></i> Print KOT</button>`);
             detailActions.push(`<button type="button" class="tc-btn tc-btn-log tdi-action" onclick="openPosPageModal('order-lifecycle.php?id=${parseInt(o.id, 10) || 0}','Timeline','fas fa-stream')"><i class="fas fa-stream"></i> Timeline</button>`);
