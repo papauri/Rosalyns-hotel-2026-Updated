@@ -2184,7 +2184,11 @@ a.recent-toggle span {
 }
 
 .modal-foot button,
-.modal-footer button {
+.modal-foot a.btn-cancel,
+.modal-foot a.btn-confirm,
+.modal-footer button,
+.modal-footer a.btn-cancel,
+.modal-footer a.btn-confirm {
     flex: 1;
     padding: 14px;
     border-radius: 8px;
@@ -2192,6 +2196,12 @@ a.recent-toggle span {
     font-size: 15px;
     font-weight: 600;
     cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    text-decoration: none;
+    box-sizing: border-box;
 }
 
 .btn-cancel {
@@ -4261,7 +4271,11 @@ a.recent-toggle span {
                         }
 
                         .modal-foot button,
-                        .modal-footer button {
+                        .modal-foot a.btn-cancel,
+                        .modal-foot a.btn-confirm,
+                        .modal-footer button,
+                        .modal-footer a.btn-cancel,
+                        .modal-footer a.btn-confirm {
                             flex: 1 1 calc(50% - 4px);
                             min-height: 48px;
                             font-size: 14px;

@@ -113,6 +113,12 @@ function buildReceiptHtml(array $order, array $items, array $ctx): string
         $voidBanner = '<div style="background:#fde7e9;border:2px solid #c82333;color:#721c24;padding:10px;text-align:center;font-weight:700;letter-spacing:2px;margin:0 0 12px;">VOID / NOT VALID</div>';
     }
 
+    // Logo via public HTTPS URL so hotel_embed_logo_cid() can reference it (prevents orphaned PNG attachment)
+    $logoUrl  = function_exists('hotel_email_logo_url') ? hotel_email_logo_url() : '';
+    $logoHtml = $logoUrl !== ''
+        ? '<img src="' . htmlspecialchars($logoUrl, ENT_QUOTES, 'UTF-8') . '" alt="' . $site . '" style="max-height:60px;width:auto;display:block;margin:0 auto 10px;">'
+        : '';
+
     return '<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Receipt ' . $ref . '</title></head>'
         . '<body style="margin:0;padding:0;background:#f7f3ee;font-family:Arial,Helvetica,sans-serif;color:#1f1c18;">'
         . '<table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-collapse:collapse;background:#f7f3ee;padding:22px 10px;">'
@@ -120,6 +126,7 @@ function buildReceiptHtml(array $order, array $items, array $ctx): string
         . '<table role="presentation" width="640" cellspacing="0" cellpadding="0" style="width:100%;max-width:640px;background:#ffffff;border:1px solid #ece3d9;border-radius:12px;overflow:hidden;">'
         . '<tr><td style="padding:18px 24px 16px;border-bottom:1px solid #ede7df;text-align:center;">'
         . $voidBanner
+        . $logoHtml
         . '<h1 style="margin:0;color:#8B7355;font-size:24px;font-weight:600;">' . $site . '</h1>'
         . ($addr ? '<div style="margin-top:6px;font-size:12px;color:#5a534c;">' . $addr . '</div>' : '')
         . ($phone ? '<div style="margin-top:2px;font-size:12px;color:#5a534c;">Tel: ' . $phone . ($email ? ' · Email: ' . $email : '') . '</div>' : '')

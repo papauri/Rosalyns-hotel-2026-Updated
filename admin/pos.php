@@ -1857,7 +1857,7 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
                 </div>
             </div>
             <div class="modal-foot modal-footer" style="gap:8px;">
-                <a id="rmPrintLink" href="#" target="_blank" rel="noopener" class="btn-cancel" style="display:flex;align-items:center;gap:6px;text-decoration:none;"><i class="fas fa-print"></i> Print receipt</a>
+                <a id="rmPrintLink" href="#" target="_blank" rel="noopener" class="btn-cancel"><i class="fas fa-print"></i> Print receipt</a>
                 <button type="button" class="btn-confirm" onclick="closeReceiptModal()"><i class="fas fa-check"></i> Done</button>
             </div>
         </div>
