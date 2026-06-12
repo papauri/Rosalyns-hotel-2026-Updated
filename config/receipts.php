@@ -248,6 +248,121 @@ if (!function_exists('receipt_log_event')) {
     }
 }
 
+if (!function_exists('receipt_build_pos_style_html')) {
+    /**
+     * Build a clean POS-receipt-style HTML document for a payment record.
+     * Visual design mirrors buildReceiptHtml() in stock-receipt.php.
+     * Used for both the PDF attachment and injecting into the email body.
+     */
+    function receipt_build_pos_style_html(array $payment, array $context, PDO $pdo): string
+    {
+        $currency    = getSetting('currency_symbol', 'MWK');
+        $siteName    = getSetting('site_name', 'Hotel');
+        $address     = trim((string)getSetting('hotel_address', getSetting('address', '')));
+        $phone       = trim((string)getSetting('hotel_phone', getSetting('phone_main', '')));
+        $email       = trim((string)(getEmailSetting('email_from_email', '') ?: getEmailSetting('smtp_username', '')));
+        $footer      = trim((string)getSetting('receipt_footer', getSetting('payment_terms', 'Thank you for your payment.')));
+        $vatEnabled  = in_array(getSetting('vat_enabled'), ['1', 1, true, 'true', 'on'], true);
+        $vatRate     = $vatEnabled ? (float)getSetting('vat_rate') : 0.0;
+        $vatNumber   = trim((string)getSetting('vat_number', ''));
+
+        $receiptNumber = htmlspecialchars((string)($payment['receipt_number'] ?? ''), ENT_QUOTES, 'UTF-8');
+        $payRef        = htmlspecialchars((string)($payment['payment_reference'] ?? ''), ENT_QUOTES, 'UTF-8');
+        $bookingRef    = htmlspecialchars((string)($payment['booking_reference'] ?? ''), ENT_QUOTES, 'UTF-8');
+        $date          = !empty($payment['payment_date']) ? date('d M Y', strtotime((string)$payment['payment_date'])) : date('d M Y');
+        $guestName     = htmlspecialchars((string)($context['guest_name'] ?? 'Guest'), ENT_QUOTES, 'UTF-8');
+        $guestEmail    = htmlspecialchars((string)($context['guest_email'] ?? ''), ENT_QUOTES, 'UTF-8');
+        $guestPhone    = htmlspecialchars((string)($context['guest_phone'] ?? ''), ENT_QUOTES, 'UTF-8');
+        $method        = htmlspecialchars(ucwords(str_replace('_', ' ', (string)($payment['payment_method'] ?? ''))), ENT_QUOTES, 'UTF-8');
+        $recordedBy    = htmlspecialchars((string)($payment['recorded_by_name'] ?? $payment['processed_by'] ?? ''), ENT_QUOTES, 'UTF-8');
+        $description   = htmlspecialchars((string)($context['description'] ?? ''), ENT_QUOTES, 'UTF-8');
+        $netAmount     = (float)($payment['payment_amount'] ?? 0);
+        $vatAmount     = (float)($payment['vat_amount'] ?? 0);
+        $totalAmount   = (float)($payment['total_amount'] ?? 0);
+        $isRefund      = (string)($payment['payment_type'] ?? '') === 'refund';
+
+        // Logo: use public HTTPS URL only — CID/data-URI embedding causes PNG attachment artefact
+        $logoUrl  = function_exists('hotel_email_logo_url') ? hotel_email_logo_url() : '';
+        $logoHtml = $logoUrl !== ''
+            ? '<img src="' . htmlspecialchars($logoUrl, ENT_QUOTES, 'UTF-8') . '" alt="' . htmlspecialchars($siteName, ENT_QUOTES, 'UTF-8') . '" style="max-height:64px;width:auto;display:block;margin:0 auto 10px;">'
+            : '';
+
+        $voidBanner = $isRefund
+            ? '<div style="background:#fde7e9;border:2px solid #c82333;color:#721c24;padding:10px;text-align:center;font-weight:700;letter-spacing:2px;margin:0 0 12px;">REFUND</div>'
+            : '';
+
+        // Detail rows
+        $details = '';
+        $details .= '<tr><td style="padding:4px 0;"><strong>Receipt #</strong></td><td align="right" style="padding:4px 0;">' . $receiptNumber . '</td></tr>';
+        $details .= '<tr><td style="padding:4px 0;"><strong>Date</strong></td><td align="right" style="padding:4px 0;">' . $date . '</td></tr>';
+        if ($bookingRef !== '' && $bookingRef !== $payRef) {
+            $details .= '<tr><td style="padding:4px 0;"><strong>Booking ref</strong></td><td align="right" style="padding:4px 0;">' . $bookingRef . '</td></tr>';
+        }
+        $details .= '<tr><td style="padding:4px 0;"><strong>Payment ref</strong></td><td align="right" style="padding:4px 0;">' . $payRef . '</td></tr>';
+        $details .= '<tr><td style="padding:4px 0;"><strong>Guest</strong></td><td align="right" style="padding:4px 0;">' . $guestName . '</td></tr>';
+        if ($guestEmail !== '') {
+            $details .= '<tr><td style="padding:4px 0;"><strong>Email</strong></td><td align="right" style="padding:4px 0;">' . $guestEmail . '</td></tr>';
+        }
+        if ($guestPhone !== '') {
+            $details .= '<tr><td style="padding:4px 0;"><strong>Phone</strong></td><td align="right" style="padding:4px 0;">' . $guestPhone . '</td></tr>';
+        }
+        if ($description !== '') {
+            $details .= '<tr><td style="padding:4px 0;"><strong>For</strong></td><td align="right" style="padding:4px 0;">' . $description . '</td></tr>';
+        }
+        if ($recordedBy !== '') {
+            $details .= '<tr><td style="padding:4px 0;"><strong>Recorded by</strong></td><td align="right" style="padding:4px 0;">' . $recordedBy . '</td></tr>';
+        }
+
+        // Totals
+        $totalsHtml  = '<tr><td style="padding:6px 10px;border-bottom:1px solid #e8e0d5;border-right:1px solid #d9cec1;">Sub-total (net)</td>';
+        $totalsHtml .= '<td align="right" style="padding:6px 10px;border-bottom:1px solid #e8e0d5;white-space:nowrap;">' . $currency . ' ' . number_format($netAmount, 2) . '</td></tr>';
+        if ($vatAmount > 0) {
+            $vatLabel = 'VAT' . ($vatRate > 0 ? ' (' . number_format($vatRate, 1) . '%)' : '');
+            $totalsHtml .= '<tr><td style="padding:6px 10px;border-bottom:1px solid #e8e0d5;border-right:1px solid #d9cec1;">' . htmlspecialchars($vatLabel, ENT_QUOTES, 'UTF-8') . '</td>';
+            $totalsHtml .= '<td align="right" style="padding:6px 10px;border-bottom:1px solid #e8e0d5;white-space:nowrap;">' . $currency . ' ' . number_format($vatAmount, 2) . '</td></tr>';
+        }
+        $totalsHtml .= '<tr style="background:#3f3933;"><td style="padding:8px 10px;font-weight:700;color:#ffffff;border-right:1px solid #5a534c;">' . ($isRefund ? 'REFUNDED' : 'TOTAL RECEIVED') . '</td>';
+        $totalsHtml .= '<td align="right" style="padding:8px 10px;font-weight:700;font-size:15px;color:#D5B37C;white-space:nowrap;">' . $currency . ' ' . number_format($totalAmount, 2) . '</td></tr>';
+        $totalsHtml .= '<tr><td colspan="2" style="padding:6px 10px;font-size:12px;color:#5a534c;border-top:1px solid #d9cec1;">Paid via: ' . $method . '</td></tr>';
+        if ($vatNumber !== '') {
+            $totalsHtml .= '<tr><td colspan="2" style="padding:4px 10px;font-size:11px;color:#7C6E5B;">VAT Reg. No.: ' . htmlspecialchars($vatNumber, ENT_QUOTES, 'UTF-8') . '</td></tr>';
+        }
+
+        $footerHtml = htmlspecialchars($footer, ENT_QUOTES, 'UTF-8');
+
+        return '<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Receipt ' . $receiptNumber . '</title></head>'
+            . '<body style="margin:0;padding:0;background:#f7f3ee;font-family:Arial,Helvetica,sans-serif;color:#1f1c18;">'
+            . '<table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-collapse:collapse;background:#f7f3ee;padding:22px 10px;">'
+            . '<tr><td align="center">'
+            . '<table role="presentation" width="600" cellspacing="0" cellpadding="0" style="width:100%;max-width:600px;background:#ffffff;border:1px solid #ece3d9;border-radius:12px;overflow:hidden;">'
+            . '<tr><td style="padding:18px 24px 16px;border-bottom:1px solid #ede7df;text-align:center;">'
+            . $voidBanner
+            . $logoHtml
+            . '<h1 style="margin:0;color:#8B7355;font-size:22px;font-weight:600;">' . htmlspecialchars($siteName, ENT_QUOTES, 'UTF-8') . '</h1>'
+            . ($address ? '<div style="margin-top:6px;font-size:12px;color:#5a534c;">' . htmlspecialchars($address, ENT_QUOTES, 'UTF-8') . '</div>' : '')
+            . ($phone ? '<div style="margin-top:2px;font-size:12px;color:#5a534c;">Tel: ' . htmlspecialchars($phone, ENT_QUOTES, 'UTF-8') . ($email ? ' · ' . htmlspecialchars($email, ENT_QUOTES, 'UTF-8') : '') . '</div>' : '')
+            . '<div style="margin-top:10px;font-size:11px;letter-spacing:0.12em;font-weight:700;color:#8B7355;">PAYMENT RECEIPT</div>'
+            . '</td></tr>'
+            . '<tr><td style="padding:16px 24px 10px;">'
+            . '<table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="font-size:12px;color:#3f3933;">'
+            . $details
+            . '</table>'
+            . '</td></tr>'
+            . '<tr><td style="padding:8px 24px 0;">'
+            . '<table role="presentation" align="right" cellspacing="0" cellpadding="0" style="font-size:13px;color:#3f3933;min-width:280px;border-collapse:collapse;border:1px solid #d9cec1;">'
+            . $totalsHtml
+            . '</table>'
+            . '</td></tr>'
+            . '<tr><td style="padding:18px 24px 22px;">'
+            . '<div style="border-top:1px dashed #d9cec1;padding-top:10px;text-align:center;font-size:12px;color:#6a645d;line-height:1.5;">' . $footerHtml . '</div>'
+            . '</td></tr>'
+            . '</table>'
+            . '</td></tr>'
+            . '</table>'
+            . '</body></html>';
+    }
+}
+
 if (!function_exists('receipt_generate_pdf')) {
     function receipt_generate_pdf(PDO $pdo, int $paymentId, ?array $user = null): array
     {
@@ -302,105 +417,55 @@ if (!function_exists('receipt_generate_pdf')) {
             );
         }
 
-        if (!class_exists('JapandiTCPDF')) {
-            class JapandiTCPDF extends TCPDF {
-                public function AddPage($orientation = '', $format = '', $keepmargins = false, $tocpage = false): void
-                {
-                    parent::AddPage($orientation, $format, $keepmargins, $tocpage);
-                    $this->SetFillColor(247, 243, 238);
-                    $this->Rect(0, 0, $this->getPageWidth(), $this->getPageHeight(), 'F');
+        // Build POS-style receipt HTML (same visual design as stock-receipt.php)
+        $receiptHtml = receipt_build_pos_style_html($payment, $context, $pdo);
+
+        if (function_exists('bookingRenderPdfFromHtml')) {
+            file_put_contents($path, bookingRenderPdfFromHtml($receiptHtml, 'Receipt ' . $receiptNumber));
+        } else {
+            // TCPDF fallback
+            $tcpdfVendorPath = dirname(__DIR__) . '/vendor/tecnickcom/tcpdf/tcpdf.php';
+            $tcpdfLegacyPath = dirname(__DIR__) . '/TCPDF/tcpdf.php';
+            if (!class_exists('TCPDF')) {
+                if (is_file($tcpdfVendorPath)) {
+                    require_once $tcpdfVendorPath;
+                } elseif (is_file($tcpdfLegacyPath)) {
+                    require_once $tcpdfLegacyPath;
                 }
             }
-        }
-        $pdf = new JapandiTCPDF('P', 'mm', 'A4', true, 'UTF-8', false);
-        $pdf->SetCreator($siteName);
-        $pdf->SetAuthor($siteName);
-        $pdf->SetTitle('Receipt ' . $receiptNumber);
-        $pdf->SetMargins(14, 14, 14);
-        $pdf->SetAutoPageBreak(true, 16);
-        $pdf->AddPage();
+            if (!class_exists('TCPDF')) {
+                throw new RuntimeException(
+                    'Receipt PDF generation is unavailable because TCPDF was not found. '
+                        . 'Install TCPDF with "composer require tecnickcom/tcpdf" or place tcpdf.php in /TCPDF.'
+                );
+            }
 
-        $receiptBankRows = [];
-        $receiptBankName = trim((string)getSetting('bank_name', ''));
-        $receiptBankAccountName = trim((string)getSetting('bank_account_name', ''));
-        $receiptBankAccountNumber = trim((string)getSetting('bank_account_number', ''));
-        $receiptBankBranch = trim((string)getSetting('bank_branch', ''));
-        if ($receiptBankName !== '') {
-            $receiptBankRows[] = '<tr><td style="padding:3px 0;font-size:10px;line-height:1.45;color:#1E2430;"><span style="color:#7C6E5B;font-weight:700;">Bank:</span> ' . htmlspecialchars($receiptBankName, ENT_QUOTES, 'UTF-8') . '</td></tr>';
-        }
-        if ($receiptBankAccountName !== '') {
-            $receiptBankRows[] = '<tr><td style="padding:3px 0;font-size:10px;line-height:1.45;color:#1E2430;"><span style="color:#7C6E5B;font-weight:700;">Account Name:</span> ' . htmlspecialchars($receiptBankAccountName, ENT_QUOTES, 'UTF-8') . '</td></tr>';
-        }
-        if ($receiptBankAccountNumber !== '') {
-            $receiptBankRows[] = '<tr><td style="padding:3px 0;font-size:10px;line-height:1.45;color:#1E2430;"><span style="color:#7C6E5B;font-weight:700;">Account No.:</span> ' . htmlspecialchars($receiptBankAccountNumber, ENT_QUOTES, 'UTF-8') . '</td></tr>';
-        }
-        if ($receiptBankBranch !== '') {
-            $receiptBankRows[] = '<tr><td style="padding:3px 0;font-size:10px;line-height:1.45;color:#1E2430;"><span style="color:#7C6E5B;font-weight:700;">Branch:</span> ' . htmlspecialchars($receiptBankBranch, ENT_QUOTES, 'UTF-8') . '</td></tr>';
-        }
-        $receiptBankDetailsHtml = $receiptBankRows !== []
-            ? '<div style="background:#FCFAF7;padding:7px 10px;border-top:2px solid #D5B37C;"><p style="margin:0 0 6px;font-size:10px;letter-spacing:1px;text-transform:uppercase;color:#20303E;font-weight:700;">Bank Details</p><table style="width:100%;border-collapse:collapse;" cellpadding="0" cellspacing="0">' . implode('', $receiptBankRows) . '</table></div>'
-            : '';
-        $receiptTermsText = trim((string)getSetting('receipt_terms', getSetting('payment_terms', '')));
-        $receiptTermsHtml = $receiptTermsText !== ''
-            ? '<p style="margin:0;font-size:6px;line-height:1.5;color:#5F655F;">' . nl2br(htmlspecialchars($receiptTermsText, ENT_QUOTES, 'UTF-8')) . '</p>'
-            : '';
+            if (!class_exists('JapandiReceiptTCPDF')) {
+                class JapandiReceiptTCPDF extends TCPDF {
+                    public function AddPage($orientation = '', $format = '', $keepmargins = false, $tocpage = false): void
+                    {
+                        parent::AddPage($orientation, $format, $keepmargins, $tocpage);
+                        $this->SetFillColor(247, 243, 238);
+                        $this->Rect(0, 0, $this->getPageWidth(), $this->getPageHeight(), 'F');
+                    }
+                }
+            }
+            $siteName = getSetting('site_name', 'Hotel');
+            $pdf = new JapandiReceiptTCPDF('P', 'mm', 'A4', true, 'UTF-8', false);
+            $pdf->SetCreator($siteName);
+            $pdf->SetAuthor($siteName);
+            $pdf->SetTitle('Receipt ' . $receiptNumber);
+            $pdf->SetMargins(14, 14, 14);
+            $pdf->SetAutoPageBreak(true, 16);
+            $pdf->AddPage();
 
-        $templateVars = [
-            'logo_html' => (function_exists('hotel_invoice_logo_src') && hotel_invoice_logo_src() !== '')
-                ? '<img src="' . htmlspecialchars(hotel_invoice_logo_src(), ENT_QUOTES, 'UTF-8') . '" alt="' . htmlspecialchars($siteName, ENT_QUOTES, 'UTF-8') . '" height="88" style="height:88px;width:auto;display:block;margin:0 auto;">'
-                : '',
-            'site_name' => htmlspecialchars($siteName, ENT_QUOTES, 'UTF-8'),
-            'address' => htmlspecialchars($address, ENT_QUOTES, 'UTF-8'),
-            'hotel_address' => htmlspecialchars($address, ENT_QUOTES, 'UTF-8'),
-            'contact_email' => htmlspecialchars((string)(getEmailSetting('email_from_email', '') ?: getEmailSetting('smtp_username', '')), ENT_QUOTES, 'UTF-8'),
-            'contact_phone' => htmlspecialchars($phone, ENT_QUOTES, 'UTF-8'),
-            'guest_name' => htmlspecialchars((string)$context['guest_name'], ENT_QUOTES, 'UTF-8'),
-            'guest_email' => htmlspecialchars((string)$context['guest_email'], ENT_QUOTES, 'UTF-8'),
-            'guest_phone' => htmlspecialchars((string)$context['guest_phone'], ENT_QUOTES, 'UTF-8'),
-            'booking_type' => htmlspecialchars(ucwords(str_replace('_', ' ', (string)($payment['booking_type'] ?? ''))), ENT_QUOTES, 'UTF-8'),
-            'receipt_number' => htmlspecialchars($receiptNumber, ENT_QUOTES, 'UTF-8'),
-            'payment_reference' => htmlspecialchars((string)($payment['payment_reference'] ?? ''), ENT_QUOTES, 'UTF-8'),
-            'booking_reference' => htmlspecialchars((string)($payment['booking_reference'] ?? ''), ENT_QUOTES, 'UTF-8'),
-            'payment_date' => htmlspecialchars(date('d M Y', strtotime((string)($payment['payment_date'] ?? 'now'))), ENT_QUOTES, 'UTF-8'),
-            'payment_method' => htmlspecialchars(ucwords(str_replace('_', ' ', (string)($payment['payment_method'] ?? ''))), ENT_QUOTES, 'UTF-8'),
-            'payment_type' => htmlspecialchars(ucwords(str_replace('_', ' ', (string)($payment['payment_type'] ?? ''))), ENT_QUOTES, 'UTF-8'),
-            'payment_status' => htmlspecialchars(ucwords(str_replace('_', ' ', (string)($payment['payment_status'] ?? ''))), ENT_QUOTES, 'UTF-8'),
-            'payment_amount' => htmlspecialchars(receipt_format_money((float)$payment['payment_amount'], $currency), ENT_QUOTES, 'UTF-8'),
-            'vat_amount' => htmlspecialchars(receipt_format_money((float)($payment['vat_amount'] ?? 0), $currency), ENT_QUOTES, 'UTF-8'),
-            'total_amount' => htmlspecialchars(receipt_format_money((float)$payment['total_amount'], $currency), ENT_QUOTES, 'UTF-8'),
-            'description' => htmlspecialchars((string)$context['description'], ENT_QUOTES, 'UTF-8'),
-            'bank_details_html' => $receiptBankDetailsHtml,
-            'receipt_terms' => $receiptTermsHtml,
-        ];
-
-        if (function_exists('hotel_default_receipt_document_html') && function_exists('renderBookingDocumentTemplate') && function_exists('bookingRenderPdfFromHtml')) {
-            $documentHtml = renderBookingDocumentTemplate('payment_receipt_document', $templateVars, hotel_default_receipt_document_html());
-            file_put_contents($path, bookingRenderPdfFromHtml($documentHtml, 'Receipt ' . $receiptNumber));
-        } else {
-            $html = '<style>
-            body{font-family:dejavusans;color:#2A2723;font-size:10pt;}
-            .head{background-color:#231F1C;color:#B18247;padding:18px;text-align:center;}
-            .small{color:#5E554D;font-size:8pt;}
-            .box{border:1px solid #EAE1D8;padding:10px;margin-top:12px;}
-            table{width:100%;border-collapse:collapse;}
-            th{background-color:#F3ECE4;text-align:left;padding:7px;color:#5E554D;}
-            td{padding:7px;border-bottom:1px solid #EAE1D8;}
-            .right{text-align:right;}
-            .total{font-size:13pt;font-weight:bold;color:#231F1C;}
-        </style>
-        <div class="head"><h1>' . htmlspecialchars($siteName, ENT_QUOTES, 'UTF-8') . '</h1><div>PAYMENT RECEIPT</div></div>
-        <table style="margin-top:14px;"><tr><td><strong>Receipt No.</strong><br>' . htmlspecialchars($receiptNumber, ENT_QUOTES, 'UTF-8') . '</td><td class="right"><strong>Date</strong><br>' . htmlspecialchars(date('d M Y', strtotime((string)($payment['payment_date'] ?? 'now'))), ENT_QUOTES, 'UTF-8') . '</td></tr></table>
-        <div class="box"><table><tr><td><strong>Guest / Customer</strong><br>' . htmlspecialchars((string)$context['guest_name'], ENT_QUOTES, 'UTF-8') . '</td><td><strong>Reference</strong><br>' . htmlspecialchars((string)($payment['booking_reference'] ?: $payment['payment_reference']), ENT_QUOTES, 'UTF-8') . '</td></tr><tr><td><strong>Payment Method</strong><br>' . htmlspecialchars(ucwords(str_replace('_', ' ', (string)$payment['payment_method'])), ENT_QUOTES, 'UTF-8') . '</td><td><strong>Recorded By</strong><br>' . htmlspecialchars((string)($payment['recorded_by_name'] ?? $payment['processed_by'] ?? 'System'), ENT_QUOTES, 'UTF-8') . '</td></tr></table></div>
-        <div class="box"><strong>Description</strong><br>' . htmlspecialchars((string)$context['description'], ENT_QUOTES, 'UTF-8') . '</div>
-        <table style="margin-top:14px;"><thead><tr><th>Description</th><th class="right">Amount</th></tr></thead><tbody>
-        <tr><td>Payment amount</td><td class="right">' . htmlspecialchars(receipt_format_money((float)$payment['payment_amount'], $currency), ENT_QUOTES, 'UTF-8') . '</td></tr>
-        <tr><td>VAT</td><td class="right">' . htmlspecialchars(receipt_format_money((float)($payment['vat_amount'] ?? 0), $currency), ENT_QUOTES, 'UTF-8') . '</td></tr>
-        <tr><td class="total">Total received</td><td class="right total">' . htmlspecialchars(receipt_format_money((float)$payment['total_amount'], $currency), ENT_QUOTES, 'UTF-8') . '</td></tr>
-        </tbody></table>
-        <p class="small">Payment reference: ' . htmlspecialchars((string)$payment['payment_reference'], ENT_QUOTES, 'UTF-8') . '</p>
-        <p class="small">' . htmlspecialchars(trim($address . ' ' . $phone), ENT_QUOTES, 'UTF-8') . '</p>';
-
-            $pdf->writeHTML($html, true, false, true, false, '');
+            // Strip warm background colours that confuse TCPDF renderer
+            $tcpdfHtml = str_replace(
+                ['background:#f7f3ee', 'background:#f7f3ee;', 'background:#3f3933', 'background:#3f3933;'],
+                ['background:#ffffff', 'background:#ffffff;', 'background:#333333', 'background:#333333;'],
+                $receiptHtml
+            );
+            $pdf->writeHTML($tcpdfHtml, true, false, true, false, '');
             $pdf->Output($path, 'F');
         }
 
@@ -475,38 +540,15 @@ if (!function_exists('receipt_send_email')) {
                 $mail->addCC($cc);
             }
         }
-        // Build full receipt document HTML and append to email body
-        $receiptDocHtml = '';
-        if (function_exists('renderBookingDocumentTemplate') && function_exists('hotel_default_receipt_document_html')) {
-            try {
-                $docVars = [];
-                foreach ($placeholders as $k => $v) {
-                    $docVars[trim((string)$k, '{}')] = (string)$v;
-                }
-                $receiptDocHtml = renderBookingDocumentTemplate('payment_receipt_document', $docVars, hotel_default_receipt_document_html());
-            } catch (Throwable $e) {
-                error_log('receipt_send_email: failed to build receipt doc HTML: ' . $e->getMessage());
-            }
-        }
-        if ($receiptDocHtml !== '') {
-            $docSection = '<div style="background:#d5cfc4;padding:24px 20px 0;">'
-                . '<div style="max-width:720px;margin:0 auto;">'
-                . '<p style="font-family:Helvetica,Arial,sans-serif;font-size:10px;letter-spacing:2px;text-transform:uppercase;color:#9b8f7e;margin:0 0 12px;text-align:center;">Full Receipt</p>'
-                . $receiptDocHtml
-                . '</div></div>';
-            if (stripos($body, '</body>') !== false) {
-                $body = (string)preg_replace('/<\/body>/i', $docSection . '</body>', $body, 1);
-            } else {
-                $body .= $docSection;
-            }
-        }
+        // Use POS-style receipt HTML as the email body — logo via public HTTPS URL, no CID embedding
+        $emailBody = receipt_build_pos_style_html($payment, $context, $pdo);
 
         $mail->isHTML(true);
         $mail->Subject = html_entity_decode($subject, ENT_QUOTES, 'UTF-8');
-        $mail->Body = hotel_embed_logo_cid($mail, $body);
+        $mail->Body = $emailBody;
         $mail->AltBody = $textBody !== ''
             ? html_entity_decode($textBody, ENT_QUOTES, 'UTF-8')
-            : strip_tags(str_replace(['<br>', '<br/>', '<br />'], "\n", $body));
+            : strip_tags(str_replace(['<br>', '<br/>', '<br />'], "\n", $emailBody));
         $mail->addAttachment($pdf['path'], $pdf['receipt_number'] . '.pdf', PHPMailer::ENCODING_BASE64, 'application/pdf');
         $mail->send();
 
