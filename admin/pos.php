@@ -860,8 +860,20 @@ if (($user['role'] ?? '') === 'restaurant_staff') {
 }
 $tabsSql .= " ORDER BY o.created_at DESC LIMIT 50";
 $tabsStmt = $pdo->prepare($tabsSql);
-$tabsStmt->execute($tabsArgs);
-$openTabs = $tabsStmt->fetchAll(PDO::FETCH_ASSOC);
+try {
+    $tabsStmt->execute($tabsArgs);
+    $openTabs = $tabsStmt->fetchAll(PDO::FETCH_ASSOC);
+} catch (Throwable $tabsEx) {
+    // Migration 043 not yet run — split_count / split_paid_count columns absent; fall back to literals
+    $tabsFallbackSql = str_replace(
+        'COALESCE(o.split_count, 1) AS split_count, COALESCE(o.split_paid_count, 0) AS split_paid_count,',
+        '1 AS split_count, 0 AS split_paid_count,',
+        $tabsSql
+    );
+    $tabsFallback = $pdo->prepare($tabsFallbackSql);
+    $tabsFallback->execute($tabsArgs);
+    $openTabs = $tabsFallback->fetchAll(PDO::FETCH_ASSOC);
+}
 
 if (isset($_GET['ajax']) && $_GET['ajax'] === 'tabs') {
     header('Content-Type: application/json; charset=utf-8');

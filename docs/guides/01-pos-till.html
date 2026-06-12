@@ -94,10 +94,12 @@
                 the Tabs panel and add more items, then settle.</li>
             </ul>
           </li>
+          <li><strong>Optionally split the bill or add a tip</strong> in the payment modal before choosing a method (see sections below).</li>
           <li><strong>Choose payment method:</strong> Cash · Mobile Money · Card.
             <ul>
               <li>Mobile Money requires <strong>provider + transaction reference</strong>.</li>
               <li>Card requires <strong>last 4 digits + authorisation code</strong>.</li>
+              <li>For cash, enter the <strong>tendered amount</strong> — change due is calculated automatically.</li>
             </ul>
           </li>
           <li>The success overlay shows the <strong>order reference</strong>. Print or hand the receipt to the guest.
@@ -112,7 +114,7 @@
           <li>The Tabs tray shows: reference, table/room, order type, item count, total, age timer (turns red after 30
             min), fired time, served time, and current kitchen status (pending / prep / ready / collection / served
             counts).</li>
-          <li>Tap <strong>Settle</strong> to add payment &amp; close.</li>
+          <li>Tap <strong>Settle</strong> to open the payment modal — where you can optionally split the bill and add a tip before choosing a payment method.</li>
           <li>Tap <strong>Details</strong> to open the full order detail modal. Inside you'll see:
             <ul>
               <li><strong>Order Lifecycle track</strong> — five milestone steps (Placed → Fired → Ready → Served → Paid)
@@ -128,6 +130,39 @@
           <li>Admin/manager tab cards also show a <strong>Lifecycle</strong> link that opens
             <code>/admin/order-lifecycle.php</code> in a full page with Cancel and Void actions.
           </li>
+        </ul>
+      </section>
+
+      <section>
+        <h2>Splitting a bill</h2>
+        <p>When a group wants to pay separately, use the <strong>Split Bill</strong> selector inside the Settle / Pay modal before processing any payment.</p>
+        <ol class="steps">
+          <li>Tap <strong>Settle</strong> on the tab (or <strong>Pay &amp; Send</strong> for a new order).</li>
+          <li>In the payment modal, find the <strong>Split Bill</strong> row and choose the number of ways: <strong>2 · 3 · 4 · 5 · 6</strong>. Choose <strong>Off</strong> for a single payer.</li>
+          <li>The modal shows <strong>Person 1 of N</strong> and the share amount (order total ÷ ways).</li>
+          <li>Optionally add a tip for this payer (see Tips section below), then choose a payment method and complete the payment as normal.</li>
+          <li>A green confirmation strip confirms that Person 1's share is paid and the modal advances automatically to <strong>Person 2 of N</strong>.</li>
+          <li>Repeat for each payer — each can use a different payment method and add their own tip.</li>
+          <li>After the last payer the order closes and the receipt is generated.</li>
+        </ol>
+        <div class="callout note">
+          The bill is split <strong>equally</strong> — each person pays the same share of the food total. Tips are per-person on top of the share. You cannot assign specific items to specific payers.
+        </div>
+        <div class="callout warn">
+          Do not close the modal between payers. If the browser is refreshed mid-split the order stays <em>placed</em> and can be re-opened from the Tabs tray to continue from the correct leg.
+        </div>
+      </section>
+
+      <section>
+        <h2>Tips &amp; gratuity</h2>
+        <p>Tips are collected per payer inside the payment modal, on top of the food total (or share).</p>
+        <ul class="checklist">
+          <li>Four preset buttons: <strong>None · 5% · 10% · 15%</strong>. Tap one to apply it instantly.</li>
+          <li>Or type any amount in the <strong>Custom tip</strong> field.</li>
+          <li>The <strong>Amount due</strong> display updates live — share + tip — so the cashier always sees exactly what to collect.</li>
+          <li>For cash payments the tendered field pre-fills to the amount due; adjust it if the guest hands over more.</li>
+          <li>Tips appear as a separate green line on the printed receipt, with a <strong>Grand Total</strong> (food + tip).</li>
+          <li>The full tips total for the shift is shown in the Z-report summary under <strong>Tips collected</strong>.</li>
         </ul>
       </section>
 
@@ -243,11 +278,14 @@
         <h2>Closing your shift (Z-report)</h2>
         <ol class="steps">
           <li>Tap <strong>Close Shift</strong> in the till bar (visible from cashier role and above).</li>
-          <li>Type your <strong>counted cash drawer total</strong>.</li>
+          <li>Type your <strong>counted cash drawer total</strong>. Include any cash tips in this count — the system adds expected tips to the expected cash total automatically.</li>
           <li>The variance is calculated automatically.</li>
           <li>If variance &gt; tolerance, an <strong>admin override + reason ≥ 5 chars</strong> is required.</li>
           <li>Confirm. A Z-report is saved and you are signed out.</li>
         </ol>
+        <div class="callout note">
+          If tips were collected during the shift, the Z-report summary shows a <strong>Tips collected</strong> line with the total. Expected cash, mobile, and card amounts already include tips, so declare your full collected amount including tips.
+        </div>
       </section>
 
       <section>

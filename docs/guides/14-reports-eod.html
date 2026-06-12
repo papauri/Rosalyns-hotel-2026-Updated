@@ -543,15 +543,17 @@
                         <em>Shortfall</em> banner if total variance is negative. Amber <em>Override</em> banner if a
                         manager forced the close.
                     </li>
-                    <li><strong>Summary strip</strong> — Total revenue · Orders · Voids (count + value) · Settled from
-                        tabs.</li>
-                    <li><strong>Variance table</strong> — Cash, Mobile money, Card: Expected vs Declared vs Variance,
-                        each coloured.</li>
+                    <li><strong>Summary strip</strong> — Total revenue · Orders · Voids (count + value) · Settled from tabs · <strong>Tips collected</strong> (shown when tips &gt; 0).</li>
+                    <li><strong>Variance table</strong> — Cash, Mobile money, Card: Expected vs Declared vs Variance, each coloured. <strong>Expected amounts include any tips collected</strong> via that method — cashiers must declare their full collected total including tips.</li>
                     <li><strong>Notes</strong> — cashier or accountant notes.</li>
                     <li><strong>Paid orders table</strong> — every order paid during the shift window.</li>
                     <li><strong>Voided orders table</strong> — voided orders with reasons.</li>
                     <li><strong>Top selling items</strong> — top 10 items by revenue for the shift.</li>
                 </ul>
+
+                <div class="callout note">
+                    <strong>Tips and cash reconciliation:</strong> when a guest leaves a cash tip, the cashier keeps it in the drawer. The system adds expected tips to the Expected Cash total on the variance table, so the declared cash count must include those tips. Mobile money and card tips are reflected in the respective Expected columns the same way.
+                </div>
 
                 <h3>Date summary</h3>
                 <p>Shows every close record for the day side-by-side, plus aggregated totals — total revenue, orders,
