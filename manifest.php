@@ -33,12 +33,15 @@ if (strpos($logo, 'http') === 0) {
 // Chrome/Android require at least one explicit 192px and one 512px entry to trigger
 // the Add-to-Home-Screen / install prompt. A single "sizes: any" entry alone is
 // insufficient. We emit all three: 192, 512, and the catch-all "any".
+$siteRoot = rtrim(BASE_URL, '/') . '/';
+
 $manifest = [
     'name'             => $name,
     'short_name'       => $short_name,
     'description'      => getSetting('site_tagline') ?: 'Luxury hotel.',
-    'start_url'        => '/',
-    'scope'            => '/',
+    'id'               => $siteRoot,
+    'start_url'        => $siteRoot,
+    'scope'            => $siteRoot,
     'display'          => 'standalone',
     'display_override' => ['standalone', 'minimal-ui'],
     'orientation'      => 'any',
@@ -67,16 +70,16 @@ $manifest = [
     ],
     'shortcuts' => [
         [
-            'name'      => 'Book a Room',
+            'name'       => 'Book a Room',
             'short_name' => 'Book',
-            'url'       => '/booking.php',
-            'icons'     => [['src' => $icon_url, 'sizes' => 'any']],
+            'url'        => siteUrl('booking.php'),
+            'icons'      => [['src' => $icon_url, 'sizes' => 'any']],
         ],
         [
-            'name'      => 'Our Rooms',
+            'name'       => 'Our Rooms',
             'short_name' => 'Rooms',
-            'url'       => '/rooms-showcase.php',
-            'icons'     => [['src' => $icon_url, 'sizes' => 'any']],
+            'url'        => siteUrl('rooms-showcase.php'),
+            'icons'      => [['src' => $icon_url, 'sizes' => 'any']],
         ],
     ],
     'categories'   => ['travel', 'food', 'lifestyle'],

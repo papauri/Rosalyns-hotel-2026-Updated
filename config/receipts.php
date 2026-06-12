@@ -400,30 +400,13 @@ if (!function_exists('receipt_generate_pdf')) {
         $path = $dir . '/' . $filename;
         $relativePath = 'invoices/receipts/' . $filename;
 
-        $tcpdfVendorPath = dirname(__DIR__) . '/vendor/tecnickcom/tcpdf/tcpdf.php';
-        $tcpdfLegacyPath = dirname(__DIR__) . '/TCPDF/tcpdf.php';
-        if (!class_exists('TCPDF')) {
-            if (is_file($tcpdfVendorPath)) {
-                require_once $tcpdfVendorPath;
-            } elseif (is_file($tcpdfLegacyPath)) {
-                require_once $tcpdfLegacyPath;
-            }
-        }
-        if (!class_exists('TCPDF')) {
-            throw new RuntimeException(
-                'Receipt PDF generation is unavailable because TCPDF was not found. '
-                    . 'Checked: ' . $tcpdfVendorPath . ' and ' . $tcpdfLegacyPath . '. '
-                    . 'Install TCPDF with "composer require tecnickcom/tcpdf" or place tcpdf.php in /TCPDF.'
-            );
-        }
-
         // Build POS-style receipt HTML (same visual design as stock-receipt.php)
         $receiptHtml = receipt_build_pos_style_html($payment, $context, $pdo);
+        $pdfBytes    = '';
 
         if (function_exists('bookingRenderPdfFromHtml')) {
-            file_put_contents($path, bookingRenderPdfFromHtml($receiptHtml, 'Receipt ' . $receiptNumber));
+            $pdfBytes = bookingRenderPdfFromHtml($receiptHtml, 'Receipt ' . $receiptNumber);
         } else {
-            // TCPDF fallback
             $tcpdfVendorPath = dirname(__DIR__) . '/vendor/tecnickcom/tcpdf/tcpdf.php';
             $tcpdfLegacyPath = dirname(__DIR__) . '/TCPDF/tcpdf.php';
             if (!class_exists('TCPDF')) {
@@ -451,22 +434,24 @@ if (!function_exists('receipt_generate_pdf')) {
                 }
             }
             $siteName = getSetting('site_name', 'Hotel');
-            $pdf = new JapandiReceiptTCPDF('P', 'mm', 'A4', true, 'UTF-8', false);
-            $pdf->SetCreator($siteName);
-            $pdf->SetAuthor($siteName);
-            $pdf->SetTitle('Receipt ' . $receiptNumber);
-            $pdf->SetMargins(14, 14, 14);
-            $pdf->SetAutoPageBreak(true, 16);
-            $pdf->AddPage();
-
-            // Strip warm background colours that confuse TCPDF renderer
+            $tcpdfInst = new JapandiReceiptTCPDF('P', 'mm', 'A4', true, 'UTF-8', false);
+            $tcpdfInst->SetCreator($siteName);
+            $tcpdfInst->SetAuthor($siteName);
+            $tcpdfInst->SetTitle('Receipt ' . $receiptNumber);
+            $tcpdfInst->SetMargins(14, 14, 14);
+            $tcpdfInst->SetAutoPageBreak(true, 16);
+            $tcpdfInst->AddPage();
             $tcpdfHtml = str_replace(
                 ['background:#f7f3ee', 'background:#f7f3ee;', 'background:#3f3933', 'background:#3f3933;'],
                 ['background:#ffffff', 'background:#ffffff;', 'background:#333333', 'background:#333333;'],
                 $receiptHtml
             );
-            $pdf->writeHTML($tcpdfHtml, true, false, true, false, '');
-            $pdf->Output($path, 'F');
+            $tcpdfInst->writeHTML($tcpdfHtml, true, false, true, false, '');
+            $pdfBytes = $tcpdfInst->Output('', 'S');
+        }
+
+        if ($pdfBytes !== '') {
+            file_put_contents($path, $pdfBytes);
         }
 
         $pdo->prepare('UPDATE payments SET receipt_path = ?, receipt_generated = 1, receipt_generated_at = NOW(), updated_at = NOW() WHERE id = ?')
@@ -474,7 +459,7 @@ if (!function_exists('receipt_generate_pdf')) {
         receipt_log_event($pdo, $paymentId, $receiptNumber, 'generated', null, 'pdf', 'Receipt PDF generated', $user);
         rh_log_event('receipts', 'info', 'Receipt generated', ['payment_id' => $paymentId, 'receipt_number' => $receiptNumber]);
 
-        return ['success' => true, 'receipt_number' => $receiptNumber, 'path' => $path, 'relative_path' => $relativePath];
+        return ['success' => true, 'receipt_number' => $receiptNumber, 'path' => $path, 'relative_path' => $relativePath, 'bytes' => $pdfBytes];
     }
 }
 
@@ -549,7 +534,11 @@ if (!function_exists('receipt_send_email')) {
         $mail->AltBody = $textBody !== ''
             ? html_entity_decode($textBody, ENT_QUOTES, 'UTF-8')
             : strip_tags(str_replace(['<br>', '<br/>', '<br />'], "\n", $emailBody));
-        $mail->addAttachment($pdf['path'], $pdf['receipt_number'] . '.pdf', PHPMailer::ENCODING_BASE64, 'application/pdf');
+        if (($pdf['bytes'] ?? '') !== '') {
+            $mail->addStringAttachment($pdf['bytes'], $pdf['receipt_number'] . '.pdf', PHPMailer::ENCODING_BASE64, 'application/pdf');
+        } elseif (!empty($pdf['path']) && is_file($pdf['path'])) {
+            $mail->addAttachment($pdf['path'], $pdf['receipt_number'] . '.pdf', PHPMailer::ENCODING_BASE64, 'application/pdf');
+        }
         $mail->send();
 
         $pdo->prepare('UPDATE payments SET receipt_emailed_at = NOW(), receipt_email_count = receipt_email_count + 1, updated_at = NOW() WHERE id = ?')

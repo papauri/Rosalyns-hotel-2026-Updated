@@ -34,13 +34,16 @@ if (strpos($logo, 'http') !== 0) {
     }
 }
 
+$adminBase = rtrim(siteUrl('admin'), '/') . '/';
+$startUrl  = siteUrl('admin/pos.php');
+
 $manifest = [
     'name'             => $name . ' Admin',
     'short_name'       => $short_name,
     'description'      => $name . ' — admin, POS, KDS & operations.',
-    'id'               => '/admin/',
-    'start_url'        => '/admin/pos.php',
-    'scope'            => '/admin/',
+    'id'               => $adminBase,
+    'start_url'        => $startUrl,
+    'scope'            => $adminBase,
     'display'          => 'fullscreen',
     'orientation'      => 'any',
     'background_color' => '#1f1f24',
@@ -53,22 +56,22 @@ $manifest = [
     ],
     'shortcuts' => [
         [
-            'name'      => 'POS Till',
+            'name'       => 'POS Till',
             'short_name' => 'POS',
-            'url'       => '/admin/pos.php',
-            'icons'     => [['src' => $icon_url, 'sizes' => 'any']],
+            'url'        => siteUrl('admin/pos.php'),
+            'icons'      => [['src' => $icon_url, 'sizes' => 'any']],
         ],
         [
-            'name'      => 'Kitchen Display',
+            'name'       => 'Kitchen Display',
             'short_name' => 'KDS',
-            'url'       => '/admin/kds.php',
-            'icons'     => [['src' => $icon_url, 'sizes' => 'any']],
+            'url'        => siteUrl('admin/kds.php'),
+            'icons'      => [['src' => $icon_url, 'sizes' => 'any']],
         ],
         [
-            'name'      => 'Dashboard',
+            'name'       => 'Dashboard',
             'short_name' => 'Dash',
-            'url'       => '/admin/dashboard.php',
-            'icons'     => [['src' => $icon_url, 'sizes' => 'any']],
+            'url'        => siteUrl('admin/dashboard.php'),
+            'icons'      => [['src' => $icon_url, 'sizes' => 'any']],
         ],
     ],
     'categories' => ['business', 'productivity'],

@@ -272,7 +272,23 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $delIns->execute([$orderId, $to, $user['id']]);
                 $deliveryId = (int)$pdo->lastInsertId();
 
-                $result = sendEmail($to, $toName, $subject, $html);
+                // Attach a PDF copy of the receipt if TCPDF is available
+                $pdfAttachments = [];
+                if (function_exists('bookingRenderPdfFromHtml')) {
+                    try {
+                        $pdfBytes = bookingRenderPdfFromHtml($html, $subject);
+                        if ($pdfBytes !== '') {
+                            $pdfName = preg_replace('/[^A-Za-z0-9_-]+/', '-', $orderRow['invoice_number'] ?: $orderRow['reference']) . '.pdf';
+                            $pdfAttachments = [['content' => $pdfBytes, 'name' => $pdfName, 'mime' => 'application/pdf']];
+                        }
+                    } catch (Throwable $pdfEx) {
+                        error_log('stock-receipt: PDF generation failed: ' . $pdfEx->getMessage());
+                    }
+                }
+
+                $result = !empty($pdfAttachments)
+                    ? sendEmailWithAttachments($to, $toName, $subject, $html, $pdfAttachments)
+                    : sendEmail($to, $toName, $subject, $html);
                 $ok = !empty($result['success']);
                 $statusVal = $ok ? (($result['preview'] ?? false) ? 'preview' : 'sent') : 'failed';
                 $errMsg = $ok ? null : ($result['message'] ?? 'unknown error');
