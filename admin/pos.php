@@ -859,8 +859,8 @@ if (($user['role'] ?? '') === 'restaurant_staff') {
     $tabsArgs[] = $user['id'];
 }
 $tabsSql .= " ORDER BY o.created_at DESC LIMIT 50";
-$tabsStmt = $pdo->prepare($tabsSql);
 try {
+    $tabsStmt = $pdo->prepare($tabsSql);
     $tabsStmt->execute($tabsArgs);
     $openTabs = $tabsStmt->fetchAll(PDO::FETCH_ASSOC);
 } catch (Throwable $tabsEx) {
