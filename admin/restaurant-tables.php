@@ -1317,6 +1317,14 @@ foreach ($tables as $table) {
                 section.classList.toggle('is-active', section.id === 'rt-settle-' + method);
             });
             rtShowSettleValidation('');
+            if (method === 'cash' && rtSettleTendered && rtSettleTotal) {
+                const totalText = String(rtSettleTotal.textContent || '').replace(rtCurrencySymbol, '').replace(/,/g, '').trim();
+                const total = Number(totalText || 0);
+                if (total > 0 && (!rtSettleTendered.value || parseFloat(rtSettleTendered.value) < total)) {
+                    rtSettleTendered.value = total.toFixed(2);
+                }
+                rtSettleTendered.focus();
+            }
             rtUpdateSettleChange();
         }
 
