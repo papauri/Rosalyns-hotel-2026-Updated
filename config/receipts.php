@@ -279,6 +279,7 @@ if (!function_exists('receipt_build_pos_style_html')) {
         $netAmount     = (float)($payment['payment_amount'] ?? 0);
         $vatAmount     = (float)($payment['vat_amount'] ?? 0);
         $totalAmount   = (float)($payment['total_amount'] ?? 0);
+        $tipAmount     = (float)($payment['tip_amount'] ?? 0);
         $isRefund      = (string)($payment['payment_type'] ?? '') === 'refund';
 
         // Logo: use public HTTPS URL only — CID/data-URI embedding causes PNG attachment artefact
@@ -314,6 +315,7 @@ if (!function_exists('receipt_build_pos_style_html')) {
         }
 
         // Totals
+        $grandTotal  = $totalAmount + $tipAmount;
         $totalsHtml  = '<tr><td style="padding:6px 10px;border-bottom:1px solid #e8e0d5;border-right:1px solid #d9cec1;">Sub-total (net)</td>';
         $totalsHtml .= '<td align="right" style="padding:6px 10px;border-bottom:1px solid #e8e0d5;white-space:nowrap;">' . $currency . ' ' . number_format($netAmount, 2) . '</td></tr>';
         if ($vatAmount > 0) {
@@ -321,8 +323,12 @@ if (!function_exists('receipt_build_pos_style_html')) {
             $totalsHtml .= '<tr><td style="padding:6px 10px;border-bottom:1px solid #e8e0d5;border-right:1px solid #d9cec1;">' . htmlspecialchars($vatLabel, ENT_QUOTES, 'UTF-8') . '</td>';
             $totalsHtml .= '<td align="right" style="padding:6px 10px;border-bottom:1px solid #e8e0d5;white-space:nowrap;">' . $currency . ' ' . number_format($vatAmount, 2) . '</td></tr>';
         }
-        $totalsHtml .= '<tr style="background:#3f3933;"><td style="padding:8px 10px;font-weight:700;color:#ffffff;border-right:1px solid #5a534c;">' . ($isRefund ? 'REFUNDED' : 'TOTAL RECEIVED') . '</td>';
-        $totalsHtml .= '<td align="right" style="padding:8px 10px;font-weight:700;font-size:15px;color:#D5B37C;white-space:nowrap;">' . $currency . ' ' . number_format($totalAmount, 2) . '</td></tr>';
+        if ($tipAmount > 0) {
+            $totalsHtml .= '<tr><td style="padding:6px 10px;border-bottom:1px solid #e8e0d5;border-right:1px solid #d9cec1;color:#059669;font-weight:600;">Tip</td>';
+            $totalsHtml .= '<td align="right" style="padding:6px 10px;border-bottom:1px solid #e8e0d5;color:#059669;font-weight:600;white-space:nowrap;">+ ' . $currency . ' ' . number_format($tipAmount, 2) . '</td></tr>';
+        }
+        $totalsHtml .= '<tr style="background:#3f3933;"><td style="padding:8px 10px;font-weight:700;color:#ffffff;border-right:1px solid #5a534c;">' . ($isRefund ? 'REFUNDED' : ($tipAmount > 0 ? 'GRAND TOTAL' : 'TOTAL RECEIVED')) . '</td>';
+        $totalsHtml .= '<td align="right" style="padding:8px 10px;font-weight:700;font-size:15px;color:#D5B37C;white-space:nowrap;">' . $currency . ' ' . number_format($grandTotal, 2) . '</td></tr>';
         $totalsHtml .= '<tr><td colspan="2" style="padding:6px 10px;font-size:12px;color:#5a534c;border-top:1px solid #d9cec1;">Paid via: ' . $method . '</td></tr>';
         if ($vatNumber !== '') {
             $totalsHtml .= '<tr><td colspan="2" style="padding:4px 10px;font-size:11px;color:#7C6E5B;">VAT Reg. No.: ' . htmlspecialchars($vatNumber, ENT_QUOTES, 'UTF-8') . '</td></tr>';

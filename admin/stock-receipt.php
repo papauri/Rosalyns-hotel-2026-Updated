@@ -76,7 +76,8 @@ function buildReceiptHtml(array $order, array $items, array $ctx): string
     }
     $tableNo = htmlspecialchars($rawTableNo);
     $roomNo = htmlspecialchars($roomNumber);
-    $cashier = htmlspecialchars($ctx['cashier'] ?: '');
+    $cashier    = htmlspecialchars($ctx['cashier'] ?: '');
+    $splitLegs  = $ctx['split_legs'] ?? [];
     $notes  = htmlspecialchars($order['notes'] ?: '');
     $method = htmlspecialchars(ucwords(str_replace('_', ' ', $order['payment_method'] ?: '—')));
     $statusLabel = htmlspecialchars(ucfirst($order['status']));
@@ -93,13 +94,16 @@ function buildReceiptHtml(array $order, array $items, array $ctx): string
             . '</tr>';
     }
 
-    $subtotal = (float)$order['subtotal'] ?: array_sum(array_map(fn($i) => (float)$i['line_total'], $items));
-    $discount = (float)$order['discount_amount'];
-    $service  = (float)$order['service_charge'];
-    $tax      = (float)$order['tax_amount'];
-    $total    = (float)$order['total_amount'];
-    $tendered = $order['tendered_amount'] !== null ? (float)$order['tendered_amount'] : null;
-    $change   = $order['change_due'] !== null ? (float)$order['change_due'] : null;
+    $subtotal   = (float)$order['subtotal'] ?: array_sum(array_map(fn($i) => (float)$i['line_total'], $items));
+    $discount   = (float)$order['discount_amount'];
+    $service    = (float)$order['service_charge'];
+    $tax        = (float)$order['tax_amount'];
+    $total      = (float)$order['total_amount'];
+    $tip        = (float)($order['tip_amount'] ?? 0);
+    $splitCount = max(1, (int)($order['split_count'] ?? 1));
+    $grandTotal = $total + $tip;
+    $tendered   = $order['tendered_amount'] !== null ? (float)$order['tendered_amount'] : null;
+    $change     = $order['change_due'] !== null ? (float)$order['change_due'] : null;
 
     $extras = '';
     if ($order['payment_method'] === 'mobile_money' && $order['mobile_wallet_reference']) {
@@ -159,13 +163,34 @@ function buildReceiptHtml(array $order, array $items, array $ctx): string
         . ($discount > 0 ? '<tr><td style="padding:6px 10px;border-bottom:1px solid #e8e0d5;border-right:1px solid #d9cec1;">Discount' . ($order['discount_reason'] ? ' (' . htmlspecialchars($order['discount_reason']) . ')' : '') . '</td><td align="right" style="padding:6px 10px;border-bottom:1px solid #e8e0d5;color:#b3261e;white-space:nowrap;">−' . $cur . ' ' . number_format($discount, 2) . '</td></tr>' : '')
         . ($service > 0 ? '<tr><td style="padding:6px 10px;border-bottom:1px solid #e8e0d5;border-right:1px solid #d9cec1;">Service charge</td><td align="right" style="padding:6px 10px;border-bottom:1px solid #e8e0d5;white-space:nowrap;">' . $cur . ' ' . number_format($service, 2) . '</td></tr>' : '')
         . ($tax > 0 ? '<tr><td style="padding:6px 10px;border-bottom:1px solid #e8e0d5;border-right:1px solid #d9cec1;">Tax</td><td align="right" style="padding:6px 10px;border-bottom:1px solid #e8e0d5;white-space:nowrap;">' . $cur . ' ' . number_format($tax, 2) . '</td></tr>' : '')
-        . '<tr style="background:#3f3933;"><td style="padding:8px 10px;font-weight:700;color:#ffffff;border-right:1px solid #5a534c;">TOTAL</td><td align="right" style="padding:8px 10px;font-weight:700;font-size:15px;color:#D5B37C;white-space:nowrap;">' . $cur . ' ' . number_format($total, 2) . '</td></tr>'
+        . ($tip > 0 ? '<tr><td style="padding:6px 10px;border-bottom:1px solid #e8e0d5;border-right:1px solid #d9cec1;color:#059669;font-weight:600;">Tip</td><td align="right" style="padding:6px 10px;border-bottom:1px solid #e8e0d5;color:#059669;font-weight:600;white-space:nowrap;">+ ' . $cur . ' ' . number_format($tip, 2) . '</td></tr>' : '')
+        . '<tr style="background:#3f3933;"><td style="padding:8px 10px;font-weight:700;color:#ffffff;border-right:1px solid #5a534c;">' . ($tip > 0 ? 'GRAND TOTAL' : 'TOTAL') . '</td><td align="right" style="padding:8px 10px;font-weight:700;font-size:15px;color:#D5B37C;white-space:nowrap;">' . $cur . ' ' . number_format($grandTotal, 2) . '</td></tr>'
+        . ($splitCount > 1 ? '<tr><td colspan="2" style="padding:5px 10px;font-size:12px;color:#5a534c;background:#faf7f3;border-top:1px solid #e8e0d5;"><i class="fas fa-users"></i> Split ' . $splitCount . ' ways — ' . $cur . ' ' . number_format($total / $splitCount, 2) . ' each</td></tr>' : '')
         . '<tr><td colspan="2" style="padding:6px 10px;font-size:12px;color:#5a534c;border-top:1px solid #d9cec1;">Paid via: ' . $method . '</td></tr>'
         . ($tendered !== null ? '<tr><td style="padding:4px 10px;border-right:1px solid #d9cec1;">Tendered</td><td align="right" style="padding:4px 10px;white-space:nowrap;">' . $cur . ' ' . number_format($tendered, 2) . '</td></tr>' : '')
         . ($change !== null && $change > 0 ? '<tr><td style="padding:4px 10px;border-top:1px solid #e8e0d5;border-right:1px solid #d9cec1;">Change</td><td align="right" style="padding:4px 10px;border-top:1px solid #e8e0d5;white-space:nowrap;">' . $cur . ' ' . number_format($change, 2) . '</td></tr>' : '')
         . ($extras ? '<tr><td colspan="2" style="padding:4px 10px;font-size:11px;color:#5a534c;">' . $extras . '</td></tr>' : '')
         . '</table>'
         . '</td></tr>'
+        . (!empty($splitLegs) ? (function() use ($splitLegs, $cur): string {
+            $rows = '';
+            $methodNames = ['cash' => 'Cash', 'mobile_money' => 'Mobile Money', 'card_manual' => 'Card (manual)', 'card_pos' => 'Card POS', 'other' => 'Other'];
+            foreach ($splitLegs as $leg) {
+                $legMethod = htmlspecialchars($methodNames[$leg['payment_method']] ?? ucwords(str_replace('_', ' ', $leg['payment_method'])));
+                $legAmt = (float)$leg['split_amount'] + (float)$leg['tip_amount'];
+                $tipNote = (float)$leg['tip_amount'] > 0 ? ' <span style="color:#059669;">(+tip ' . $cur . ' ' . number_format((float)$leg['tip_amount'], 2) . ')</span>' : '';
+                $changeNote = ($leg['change_due'] !== null && (float)$leg['change_due'] > 0) ? ' · Chg ' . $cur . ' ' . number_format((float)$leg['change_due'], 2) : '';
+                $rows .= '<tr><td style="padding:5px 8px;border-bottom:1px solid #ede7df;">#' . (int)$leg['split_number'] . '</td>'
+                    . '<td style="padding:5px 8px;border-bottom:1px solid #ede7df;">' . $legMethod . '</td>'
+                    . '<td align="right" style="padding:5px 8px;border-bottom:1px solid #ede7df;white-space:nowrap;">' . $cur . ' ' . number_format($legAmt, 2) . $tipNote . $changeNote . '</td></tr>';
+            }
+            return '<tr><td style="padding:10px 24px 0;">'
+                . '<div style="font-size:12px;color:#374151;font-weight:700;margin-bottom:4px;">Split payment breakdown</div>'
+                . '<table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="font-size:12px;color:#3f3933;border-collapse:collapse;border:1px solid #d9cec1;">'
+                . '<thead><tr style="background:#f5f0ea;"><th style="padding:5px 8px;text-align:left;border-bottom:1px solid #d9cec1;">Leg</th><th style="padding:5px 8px;text-align:left;border-bottom:1px solid #d9cec1;">Method</th><th style="padding:5px 8px;text-align:right;border-bottom:1px solid #d9cec1;">Amount</th></tr></thead>'
+                . '<tbody>' . $rows . '</tbody></table>'
+                . '</td></tr>';
+        })() : '')
         . ($notes ? '<tr><td style="padding:14px 24px 0;"><div style="font-size:12px;color:#5a534c;background:#faf7f3;border:1px solid #ece3d9;border-radius:8px;padding:9px 10px;"><strong>Notes:</strong> ' . $notes . '</div></td></tr>' : '')
         . '<tr><td style="padding:18px 24px 22px;">'
         . '<div style="border-top:1px dashed #d9cec1;padding-top:10px;text-align:center;font-size:12px;color:#6a645d;line-height:1.5;">' . $footer . '</div>'
@@ -255,14 +280,24 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $orderRow->execute([$orderId]);
                 $orderRow = $orderRow->fetch(PDO::FETCH_ASSOC);
 
+                // Fetch split legs for split orders
+                $emailSplitLegs = [];
+                if ((int)($orderRow['split_count'] ?? 1) > 1) {
+                    try {
+                        $esl = $pdo->prepare("SELECT * FROM stock_order_splits WHERE order_id = ? ORDER BY split_number");
+                        $esl->execute([$orderId]);
+                        $emailSplitLegs = $esl->fetchAll(PDO::FETCH_ASSOC);
+                    } catch (Throwable $eslEx) { /* pre-migration guard */ }
+                }
                 $html = buildReceiptHtml($orderRow, $items, [
-                    'currency' => $currency,
-                    'site' => $siteName,
-                    'address' => $hotelAddr,
-                    'phone' => $hotelPhone,
-                    'email' => $hotelEmail,
-                    'footer' => $footerLine,
-                    'cashier' => $cashier ?: '',
+                    'currency'   => $currency,
+                    'site'       => $siteName,
+                    'address'    => $hotelAddr,
+                    'phone'      => $hotelPhone,
+                    'email'      => $hotelEmail,
+                    'footer'     => $footerLine,
+                    'cashier'    => $cashier ?: '',
+                    'split_legs' => $emailSplitLegs,
                 ]);
                 $subject = $siteName . ' — Receipt ' . ($orderRow['invoice_number'] ?: $orderRow['reference']);
                 $toName = $orderRow['customer_name'] ?: 'Guest';
@@ -379,18 +414,29 @@ $itemsStmt = $pdo->prepare("SELECT * FROM stock_order_items WHERE order_id = ? O
 $itemsStmt->execute([$orderId]);
 $items = $itemsStmt->fetchAll(PDO::FETCH_ASSOC);
 
+// Fetch split legs for split orders (used in receipt display)
+$splitLegs = [];
+if ((int)($order['split_count'] ?? 1) > 1) {
+    try {
+        $splStmt = $pdo->prepare("SELECT * FROM stock_order_splits WHERE order_id = ? ORDER BY split_number");
+        $splStmt->execute([$orderId]);
+        $splitLegs = $splStmt->fetchAll(PDO::FETCH_ASSOC);
+    } catch (Throwable $e) { /* table may not exist pre-migration */ }
+}
+
 $deliveriesStmt = $pdo->prepare("SELECT * FROM stock_order_deliveries WHERE order_id = ? ORDER BY sent_at DESC");
 $deliveriesStmt->execute([$orderId]);
 $deliveries = $deliveriesStmt->fetchAll(PDO::FETCH_ASSOC);
 
 $ctx = [
-    'currency' => $currency,
-    'site' => $siteName,
-    'address' => $hotelAddr,
-    'phone' => $hotelPhone,
-    'email' => $hotelEmail,
-    'footer' => $footerLine,
-    'cashier' => $order['cashier_name'] ?? '',
+    'currency'   => $currency,
+    'site'       => $siteName,
+    'address'    => $hotelAddr,
+    'phone'      => $hotelPhone,
+    'email'      => $hotelEmail,
+    'footer'     => $footerLine,
+    'cashier'    => $order['cashier_name'] ?? '',
+    'split_legs' => $splitLegs,
 ];
 $receiptHtml = buildReceiptHtml($order, $items, $ctx);
 

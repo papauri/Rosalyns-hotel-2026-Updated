@@ -300,20 +300,29 @@ function pos_fireKitchen(PDO $pdo, int $orderId, int $userId, string $userName):
 /**
  * Apply payment to an existing placed order. Validates method-specific extras.
  */
-function pos_applyPaymentToOrder(PDO $pdo, array $user, int $orderId, string $reference, float $totalAmount, string $paymentMethod, array $post): array
+function pos_applyPaymentToOrder(PDO $pdo, array $user, int $orderId, string $reference, float $totalAmount, string $paymentMethod, array $post, int $splitCount = 1, int $splitNumber = 1): array
 {
-    $tendered = (float)($post['tendered_amount'] ?? 0);
-    $mobileProvider = trim($post['mobile_wallet_provider'] ?? '');
+    $tipAmount       = max(0.0, round((float)($post['tip_amount'] ?? 0), 2));
+    $tendered        = (float)($post['tendered_amount'] ?? 0);
+    $mobileProvider  = trim($post['mobile_wallet_provider'] ?? '');
     $mobileReference = trim($post['mobile_wallet_reference'] ?? '');
-    $cardLast4Raw = preg_replace('/\D/', '', (string)($post['card_last4'] ?? ''));
-    $cardLast4 = strlen($cardLast4Raw) >= 4 ? substr($cardLast4Raw, -4) : null;
-    $cardAuthCode = trim($post['card_auth_code'] ?? '');
+    $cardLast4Raw    = preg_replace('/\D/', '', (string)($post['card_last4'] ?? ''));
+    $cardLast4       = strlen($cardLast4Raw) >= 4 ? substr($cardLast4Raw, -4) : null;
+    $cardAuthCode    = trim($post['card_auth_code'] ?? '');
 
-    $extras = ['tendered' => null, 'change' => null, 'mp' => null, 'mr' => null, 'l4' => null, 'auth' => null];
+    // Each split person pays their equal share of the menu total plus their own tip
+    $splitAmount = $splitCount > 1 ? round($totalAmount / $splitCount, 2) : $totalAmount;
+    $amountDue   = round($splitAmount + $tipAmount, 2);
+
+    $extras = [
+        'tendered' => null, 'change' => null, 'mp' => null, 'mr' => null, 'l4' => null, 'auth' => null,
+        'tip' => $tipAmount, 'split_amount' => $splitAmount, 'amount_due' => $amountDue,
+    ];
+
     if ($paymentMethod === 'cash') {
-        if ($tendered + 0.001 < $totalAmount) throw new RuntimeException('Tendered ' . number_format($tendered, 2) . ' < total ' . number_format($totalAmount, 2));
+        if ($tendered + 0.001 < $amountDue) throw new RuntimeException('Tendered ' . number_format($tendered, 2) . ' < amount due ' . number_format($amountDue, 2));
         $extras['tendered'] = round($tendered, 2);
-        $extras['change']   = round($tendered - $totalAmount, 2);
+        $extras['change']   = round($tendered - $amountDue, 2);
     } elseif ($paymentMethod === 'mobile_money') {
         if ($mobileProvider === '' || $mobileReference === '') throw new RuntimeException('Mobile money requires provider + transaction reference.');
         $extras['mp'] = mb_substr($mobileProvider, 0, 50);
@@ -324,13 +333,34 @@ function pos_applyPaymentToOrder(PDO $pdo, array $user, int $orderId, string $re
         $extras['auth'] = mb_substr($cardAuthCode, 0, 50);
     }
 
-    $pdo->prepare("UPDATE stock_orders SET status='paid', paid_at=NOW(), payment_method=?, tendered_amount=?, change_due=?, mobile_wallet_provider=?, mobile_wallet_reference=?, card_last4=?, card_auth_code=? WHERE id=?")
-        ->execute([$paymentMethod, $extras['tendered'], $extras['change'], $extras['mp'], $extras['mr'], $extras['l4'], $extras['auth'], $orderId]);
+    if ($splitCount > 1) {
+        // Record this split leg
+        $pdo->prepare("INSERT INTO stock_order_splits (order_id, split_number, split_amount, tip_amount, payment_method, tendered_amount, change_due, mobile_wallet_provider, mobile_wallet_reference, card_last4, card_auth_code, paid_by_user_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
+            ->execute([$orderId, $splitNumber, $splitAmount, $tipAmount, $paymentMethod, $extras['tendered'], $extras['change'], $extras['mp'], $extras['mr'], $extras['l4'], $extras['auth'], $user['id']]);
 
-    $cnStmt = $pdo->prepare("SELECT customer_name FROM stock_orders WHERE id = ?");
-    $cnStmt->execute([$orderId]);
-    $syncCustomerName = (string)($cnStmt->fetchColumn() ?: '');
-    pos_syncPayment($pdo, ['id' => $orderId, 'reference' => $reference, 'total_amount' => $totalAmount, 'customer_name' => $syncCustomerName, 'status' => 'paid'], $user['id'], $paymentMethod);
+        $pdo->prepare("UPDATE stock_orders SET split_paid_count = split_paid_count + 1, tip_amount = tip_amount + ? WHERE id = ?")
+            ->execute([$tipAmount, $orderId]);
+
+        if ($splitNumber >= $splitCount) {
+            // Last split: close the order; use last leg's method for the ledger
+            $pdo->prepare("UPDATE stock_orders SET status='paid', paid_at=NOW(), payment_method=? WHERE id=?")
+                ->execute([$paymentMethod, $orderId]);
+            $tipsRow = $pdo->prepare("SELECT COALESCE(SUM(tip_amount),0) FROM stock_order_splits WHERE order_id = ?");
+            $tipsRow->execute([$orderId]);
+            $totalTips = (float)$tipsRow->fetchColumn();
+            $cnStmt = $pdo->prepare("SELECT customer_name FROM stock_orders WHERE id = ?");
+            $cnStmt->execute([$orderId]);
+            pos_syncPayment($pdo, ['id' => $orderId, 'reference' => $reference, 'total_amount' => $totalAmount + $totalTips, 'customer_name' => (string)($cnStmt->fetchColumn() ?: ''), 'status' => 'paid'], $user['id'], $paymentMethod);
+        }
+    } else {
+        // Single payment — store tip on the order row along with payment details
+        $pdo->prepare("UPDATE stock_orders SET status='paid', paid_at=NOW(), payment_method=?, tendered_amount=?, change_due=?, mobile_wallet_provider=?, mobile_wallet_reference=?, card_last4=?, card_auth_code=?, tip_amount=? WHERE id=?")
+            ->execute([$paymentMethod, $extras['tendered'], $extras['change'], $extras['mp'], $extras['mr'], $extras['l4'], $extras['auth'], $tipAmount, $orderId]);
+        $cnStmt = $pdo->prepare("SELECT customer_name FROM stock_orders WHERE id = ?");
+        $cnStmt->execute([$orderId]);
+        pos_syncPayment($pdo, ['id' => $orderId, 'reference' => $reference, 'total_amount' => $totalAmount + $tipAmount, 'customer_name' => (string)($cnStmt->fetchColumn() ?: ''), 'status' => 'paid'], $user['id'], $paymentMethod);
+    }
+
     return $extras;
 }
 
@@ -402,14 +432,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     'just_parked' => true,
                 ]);
             } elseif ($action === 'pay_existing') {
-                /* === Recall a parked order and take payment === */
-                $orderId = (int)($_POST['order_id'] ?? 0);
+                /* === Recall a parked order and take payment (supports split bills + tips) === */
+                $orderId       = (int)($_POST['order_id'] ?? 0);
                 $paymentMethod = $_POST['payment_method'] ?? '';
+                $tipAmount     = max(0.0, round((float)($_POST['tip_amount'] ?? 0), 2));
+                $splitCount    = max(1, min(10, (int)($_POST['split_count'] ?? 1)));
+                $splitNumber   = max(1, min($splitCount, (int)($_POST['split_number'] ?? 1)));
+
                 if (!in_array($paymentMethod, $allowedMethods, true)) throw new RuntimeException('Select a payment method.');
                 if ($paymentMethod === 'card_pos') throw new RuntimeException('Card POS terminal is not enabled yet — use Card (manual).');
 
                 $pdo->beginTransaction();
-                $stmt = $pdo->prepare("SELECT id, reference, total_amount, status, order_type, created_by FROM stock_orders WHERE id=? FOR UPDATE");
+                $stmt = $pdo->prepare("SELECT id, reference, total_amount, status, order_type, created_by, COALESCE(split_count,1) AS split_count, COALESCE(split_paid_count,0) AS split_paid_count FROM stock_orders WHERE id=? FOR UPDATE");
                 $stmt->execute([$orderId]);
                 $row = $stmt->fetch(PDO::FETCH_ASSOC);
                 if (!$row) throw new RuntimeException('Order not found.');
@@ -429,11 +463,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     $byLine = $settledByName !== '' ? ' by ' . $settledByName : '';
                     throw new RuntimeException("This tab is already {$statusLabel}{$byLine}. Refreshing open tabs so it cannot be charged twice.");
                 }
-                // Room-service tabs must be settled via the booking folio at checkout.
                 if (($row['order_type'] ?? '') === 'room_service') {
                     throw new RuntimeException('Room-service orders are settled via the guest folio at check-out — they cannot be paid directly at the till.');
                 }
-                // Restaurant_staff can only pay tabs they themselves opened. Admin/manager can pay any.
                 if (($user['role'] ?? '') === 'restaurant_staff' && (int)$row['created_by'] !== (int)$user['id']) {
                     throw new RuntimeException('You can only settle tabs you opened.');
                 }
@@ -445,42 +477,86 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     throw new RuntimeException('This tab still has ' . $pendingItems . ' item' . ($pendingItems === 1 ? '' : 's') . ' that have not been served yet. In real-world flow, settle the tab after service is complete.');
                 }
 
-                $extras = pos_applyPaymentToOrder($pdo, $user, $orderId, $row['reference'], (float)$row['total_amount'], $paymentMethod, $_POST);
-                pos_logAudit($pdo, $orderId, $user['id'], $user['full_name'], 'paid_from_tab', json_encode(['method' => $paymentMethod, 'total' => $row['total_amount'], 'tendered' => $extras['tendered'], 'change' => $extras['change'], 'till' => 'pos.php']));
+                // Validate split sequence
+                if ($splitCount > 1) {
+                    $dbPaid = (int)$row['split_paid_count'];
+                    $dbCount = (int)$row['split_count'];
+                    if ($splitNumber === 1 && $dbPaid === 0) {
+                        // First split: record the agreed total on the order
+                        $pdo->prepare("UPDATE stock_orders SET split_count = ? WHERE id = ?")->execute([$splitCount, $orderId]);
+                    } elseif ($splitNumber !== $dbPaid + 1) {
+                        throw new RuntimeException('Split sequence error — expected leg ' . ($dbPaid + 1) . ', received ' . $splitNumber . '. Refresh the page.');
+                    } elseif ($dbCount !== $splitCount) {
+                        throw new RuntimeException('Split count changed mid-session (' . $dbCount . ' vs ' . $splitCount . '). Refresh and restart.');
+                    }
+                }
+
+                $extras = pos_applyPaymentToOrder($pdo, $user, $orderId, $row['reference'], (float)$row['total_amount'], $paymentMethod, $_POST, $splitCount, $splitNumber);
+                $isLastSplit = ($splitCount <= 1 || $splitNumber >= $splitCount);
+                $methodLabel = str_replace('_', ' ', $paymentMethod);
+                $amtLabel    = $currency_symbol . ' ' . number_format($extras['amount_due'], 2);
+                $tipLabel    = $tipAmount > 0 ? ' (incl. tip ' . $currency_symbol . ' ' . number_format($tipAmount, 2) . ')' : '';
+                $auditEvent  = $splitCount > 1 ? 'split_paid' : 'paid_from_tab';
+                pos_logAudit($pdo, $orderId, $user['id'], $user['full_name'], $auditEvent, json_encode(['method' => $paymentMethod, 'total' => $row['total_amount'], 'split_count' => $splitCount, 'split_number' => $splitNumber, 'split_amount' => $extras['split_amount'], 'tip' => $tipAmount, 'tendered' => $extras['tendered'], 'change' => $extras['change'], 'till' => 'pos.php']));
                 $pdo->commit();
                 if (function_exists('deleteCache')) deleteCache('stock_dashboard_metrics_v2');
-                $lastOrderId = $orderId;
-                $lastOrderRef = $row['reference'];
-                $changeMsg = ($paymentMethod === 'cash' && $extras['change'] > 0) ? ' Change: ' . $currency_symbol . ' ' . number_format($extras['change'], 2) . '.' : '';
-                $message = "Paid {$row['reference']} — {$currency_symbol} " . number_format((float)$row['total_amount'], 2) . " · " . str_replace('_', ' ', $paymentMethod) . "." . $changeMsg;
 
                 $isXhr = !empty($_SERVER['HTTP_X_REQUESTED_WITH']) && strtolower((string)$_SERVER['HTTP_X_REQUESTED_WITH']) === 'xmlhttprequest';
                 if ($isXhr) {
-                    // Fetch customer contact + items for the receipt modal
-                    $contactStmt = $pdo->prepare("SELECT customer_name, customer_email, customer_phone FROM stock_orders WHERE id = ?");
+                    if (!$isLastSplit) {
+                        // Intermediate split — keep modal open for next person
+                        header('Content-Type: application/json; charset=utf-8');
+                        echo json_encode([
+                            'ok'                => true,
+                            'split_intermediate' => true,
+                            'split_paid'        => $splitNumber,
+                            'split_total'       => $splitCount,
+                            'splits_remaining'  => $splitCount - $splitNumber,
+                            'split_amount'      => $extras['split_amount'],
+                            'tip_amount'        => $tipAmount,
+                            'change'            => $extras['change'],
+                            'payment_method'    => $paymentMethod,
+                            'message'           => "Split {$splitNumber}/{$splitCount} — {$methodLabel} {$amtLabel}{$tipLabel}. Next person ready.",
+                        ]);
+                        exit;
+                    }
+                    // Final split or single payment — show full receipt
+                    $lastOrderId  = $orderId;
+                    $lastOrderRef = $row['reference'];
+                    $contactStmt  = $pdo->prepare("SELECT customer_name, customer_email, customer_phone FROM stock_orders WHERE id = ?");
                     $contactStmt->execute([$orderId]);
                     $contact = $contactStmt->fetch(PDO::FETCH_ASSOC) ?: [];
                     $itemsStmt2 = $pdo->prepare("SELECT item_name, quantity, unit_price FROM stock_order_items WHERE order_id = ? ORDER BY id");
                     $itemsStmt2->execute([$orderId]);
                     $receiptItems = $itemsStmt2->fetchAll(PDO::FETCH_ASSOC);
+                    $changeMsg = ($paymentMethod === 'cash' && ($extras['change'] ?? 0) > 0) ? ' Change: ' . $currency_symbol . ' ' . number_format($extras['change'], 2) . '.' : '';
+                    $message = "Paid {$row['reference']} — {$currency_symbol} " . number_format((float)$row['total_amount'], 2) . " · {$methodLabel}." . $changeMsg;
                     header('Content-Type: application/json; charset=utf-8');
                     echo json_encode([
-                        'ok'              => true,
-                        'order_id'        => $orderId,
-                        'reference'       => $row['reference'],
-                        'total'           => (float)$row['total_amount'],
-                        'payment_method'  => $paymentMethod,
-                        'tendered'        => $extras['tendered'],
-                        'change'          => $extras['change'],
-                        'customer_name'   => (string)($contact['customer_name'] ?? ''),
-                        'customer_email'  => (string)($contact['customer_email'] ?? ''),
-                        'customer_phone'  => (string)($contact['customer_phone'] ?? ''),
-                        'items'           => $receiptItems,
-                        'message'         => $message,
+                        'ok'             => true,
+                        'order_id'       => $orderId,
+                        'reference'      => $row['reference'],
+                        'total'          => (float)$row['total_amount'],
+                        'tip_amount'     => $tipAmount,
+                        'split_count'    => $splitCount,
+                        'payment_method' => $paymentMethod,
+                        'tendered'       => $extras['tendered'],
+                        'change'         => $extras['change'],
+                        'customer_name'  => (string)($contact['customer_name'] ?? ''),
+                        'customer_email' => (string)($contact['customer_email'] ?? ''),
+                        'customer_phone' => (string)($contact['customer_phone'] ?? ''),
+                        'items'          => $receiptItems,
+                        'message'        => $message,
                     ]);
                     exit;
                 }
 
+                $lastOrderId  = $orderId;
+                $lastOrderRef = $row['reference'];
+                $changeMsg = ($paymentMethod === 'cash' && ($extras['change'] ?? 0) > 0) ? ' Change: ' . $currency_symbol . ' ' . number_format($extras['change'], 2) . '.' : '';
+                $message = $isLastSplit
+                    ? "Paid {$row['reference']} — {$currency_symbol} " . number_format((float)$row['total_amount'], 2) . " · {$methodLabel}." . $changeMsg
+                    : "Split {$splitNumber}/{$splitCount} recorded for {$row['reference']}.";
                 pos_redirectWithFlash([
                     'message' => $message,
                     'last_order_id' => $lastOrderId,
@@ -508,20 +584,22 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 // Uses paid_at so tabs created earlier but settled now are included.
                 $windowStart = $restaurantWindow['start_sql'];
                 $windowEnd = $restaurantWindow['end_sql'];
+                // Expected totals include tips; split orders are grouped under their final payment_method
                 $exp = $pdo->prepare("
-                    SELECT COALESCE(SUM(CASE WHEN payment_method='cash' THEN total_amount ELSE 0 END),0) AS cash,
-                           COALESCE(SUM(CASE WHEN payment_method='mobile_money' THEN total_amount ELSE 0 END),0) AS mobile,
-                           COALESCE(SUM(CASE WHEN payment_method IN ('card_manual','card_pos') THEN total_amount ELSE 0 END),0) AS card,
+                    SELECT COALESCE(SUM(CASE WHEN payment_method='cash' THEN total_amount + COALESCE(tip_amount,0) ELSE 0 END),0) AS cash,
+                           COALESCE(SUM(CASE WHEN payment_method='mobile_money' THEN total_amount + COALESCE(tip_amount,0) ELSE 0 END),0) AS mobile,
+                           COALESCE(SUM(CASE WHEN payment_method IN ('card_manual','card_pos') THEN total_amount + COALESCE(tip_amount,0) ELSE 0 END),0) AS card,
+                           COALESCE(SUM(COALESCE(tip_amount,0)),0) AS tips_total,
                            COUNT(*) AS orders_count,
                            COALESCE(SUM(CASE WHEN created_at < ? THEN 1 ELSE 0 END),0) AS settled_from_tabs_count,
-                           COALESCE(SUM(CASE WHEN created_at < ? THEN total_amount ELSE 0 END),0) AS settled_from_tabs_amount
+                           COALESCE(SUM(CASE WHEN created_at < ? THEN total_amount + COALESCE(tip_amount,0) ELSE 0 END),0) AS settled_from_tabs_amount
                     FROM stock_orders
                     WHERE created_by = ?
                       AND status = 'paid'
-                             AND (
-                                     (paid_at IS NOT NULL AND paid_at >= ? AND paid_at < ?)
-                                 OR (paid_at IS NULL AND created_at >= ? AND created_at < ?)
-                             )
+                      AND (
+                              (paid_at IS NOT NULL AND paid_at >= ? AND paid_at < ?)
+                          OR  (paid_at IS NULL AND created_at >= ? AND created_at < ?)
+                      )
                 ");
                 $exp->execute([$windowStart, $windowStart, $user['id'], $windowStart, $windowEnd, $windowStart, $windowEnd]);
                 $E = $exp->fetch(PDO::FETCH_ASSOC) ?: ['cash' => 0, 'mobile' => 0, 'card' => 0, 'orders_count' => 0, 'settled_from_tabs_count' => 0, 'settled_from_tabs_amount' => 0];
@@ -567,7 +645,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $pdo->prepare("INSERT INTO stock_shift_closes (user_id, user_name, shift_date, closed_at, expected_cash, declared_cash, variance_cash, expected_mobile, declared_mobile, variance_mobile, expected_card, declared_card, variance_card, orders_count, voids_count, voids_amount, notes, ip_address) VALUES (?, ?, ?, NOW(), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
                     ->execute([$user['id'], $user['full_name'], $restaurantWindow['business_date'], (float)$E['cash'], $declCash, $vCash, (float)$E['mobile'], $declMobile, $vMobile, (float)$E['card'], $declCard, $vCard, (int)$E['orders_count'], (int)$E['voids_count'], (float)$E['voids_amount'], $shiftNote ?: null, $_SERVER['REMOTE_ADDR'] ?? null]);
                 $closeId = (int)$pdo->lastInsertId();
-                pos_logAudit($pdo, 0, $user['id'], $user['full_name'], 'shift_closed', json_encode(['close_id' => $closeId, 'window_start' => $windowStart, 'window_end' => $windowEnd, 'expected_cash' => $E['cash'], 'declared_cash' => $declCash, 'variance_cash' => $vCash, 'expected_mobile' => $E['mobile'], 'declared_mobile' => $declMobile, 'variance_mobile' => $vMobile, 'expected_card' => $E['card'], 'declared_card' => $declCard, 'variance_card' => $vCard, 'orders' => $E['orders_count'], 'voids' => $E['voids_count'], 'settled_from_tabs_count' => $E['settled_from_tabs_count'], 'settled_from_tabs_amount' => $E['settled_from_tabs_amount'], 'override' => $overrideRequested && $maxVar > $threshold, 'override_reason' => $overrideRequested ? $overrideReason : null]));
+                pos_logAudit($pdo, 0, $user['id'], $user['full_name'], 'shift_closed', json_encode(['close_id' => $closeId, 'window_start' => $windowStart, 'window_end' => $windowEnd, 'expected_cash' => $E['cash'], 'declared_cash' => $declCash, 'variance_cash' => $vCash, 'expected_mobile' => $E['mobile'], 'declared_mobile' => $declMobile, 'variance_mobile' => $vMobile, 'expected_card' => $E['card'], 'declared_card' => $declCard, 'variance_card' => $vCard, 'tips_total' => $E['tips_total'] ?? 0, 'orders' => $E['orders_count'], 'voids' => $E['voids_count'], 'settled_from_tabs_count' => $E['settled_from_tabs_count'], 'settled_from_tabs_amount' => $E['settled_from_tabs_amount'], 'override' => $overrideRequested && $maxVar > $threshold, 'override_reason' => $overrideRequested ? $overrideReason : null]));
 
                 $justClosedShift = [
                     'expected_cash' => (float)$E['cash'],
@@ -581,6 +659,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     'variance_card' => $vCard,
                     'orders_count' => (int)$E['orders_count'],
                     'voids_count' => (int)$E['voids_count'],
+                    'tips_total' => (float)($E['tips_total'] ?? 0),
                     'settled_from_tabs_count' => (int)$E['settled_from_tabs_count'],
                     'settled_from_tabs_amount' => (float)$E['settled_from_tabs_amount'],
                 ];
@@ -763,6 +842,7 @@ $activeLocationLocks = rh_restaurant_active_location_locks($pdo);
  * previous-shift tabs are visible and cannot be left behind. Admins/managers
  * see all tabs; restaurant_staff only see their own. */
 $tabsSql = "SELECT o.id, o.reference, o.total_amount, o.table_number, o.customer_name, o.created_at, o.created_by,
+                   COALESCE(o.split_count, 1) AS split_count, COALESCE(o.split_paid_count, 0) AS split_paid_count,
                    u.full_name AS opened_by,
                    (SELECT COUNT(*) FROM stock_order_items WHERE order_id = o.id) AS line_count,
                    (SELECT COUNT(*) FROM stock_order_items WHERE order_id = o.id AND kds_status = 'pending')                   AS pending_count,
@@ -1491,7 +1571,7 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
                         <?php endforeach; ?>
                     </tbody>
                 </table>
-                <p style="font-size:12px; color:#6c757d; margin-top:14px;">Orders: <?php echo $justClosedShift['orders_count']; ?> · Voids: <?php echo $justClosedShift['voids_count']; ?> · Settled earlier tabs: <?php echo (int)($justClosedShift['settled_from_tabs_count'] ?? 0); ?> (<?php echo $currency_symbol . ' ' . number_format((float)($justClosedShift['settled_from_tabs_amount'] ?? 0), 2); ?>). Recorded in <code>stock_shift_closes</code> for management review.</p>
+                <p style="font-size:12px; color:#6c757d; margin-top:14px;">Orders: <?php echo $justClosedShift['orders_count']; ?> · Voids: <?php echo $justClosedShift['voids_count']; ?><?php if (($justClosedShift['tips_total'] ?? 0) > 0): ?> · Tips collected: <strong><?php echo $currency_symbol . ' ' . number_format((float)$justClosedShift['tips_total'], 2); ?></strong><?php endif; ?> · Settled earlier tabs: <?php echo (int)($justClosedShift['settled_from_tabs_count'] ?? 0); ?> (<?php echo $currency_symbol . ' ' . number_format((float)($justClosedShift['settled_from_tabs_amount'] ?? 0), 2); ?>). Recorded in <code>stock_shift_closes</code> for management review.</p>
                 <div class="actions">
                     <button class="a-print" type="button" onclick="window.print()"><i class="fas fa-print"></i> Print Z-report</button>
                     <a class="a-new" href="pos.php"><i class="fas fa-arrow-right"></i> Continue</a>
@@ -1775,17 +1855,68 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
 
     <!-- Pay-existing-tab modal (small wrapper that points payForm at action=pay_existing) -->
     <div class="overlay modal-overlay" data-modal id="payTabOverlay">
-        <div class="modal modal-content">
-            <div class="modal-head modal-header">
-                <h3><i class="fas fa-credit-card"></i> Settle tab</h3><button class="close modal-close" onclick="closePayTabOverlay()">&times;</button>
+        <div class="modal modal-content" style="max-width:480px;">
+            <div class="modal-head modal-header" style="flex-direction:column;align-items:flex-start;gap:2px;">
+                <div style="display:flex;align-items:center;justify-content:space-between;width:100%;">
+                    <h3 style="margin:0;"><i class="fas fa-credit-card"></i> Settle tab</h3>
+                    <button class="close modal-close" onclick="closePayTabOverlay()">&times;</button>
+                </div>
+                <div id="payTabSplitStep" style="display:none;font-size:12px;color:#8B7355;font-weight:600;padding-left:2px;"></div>
             </div>
             <form method="POST" id="payTabForm">
                 <input type="hidden" name="csrf_token" value="<?php echo $csrf_token; ?>">
                 <input type="hidden" name="action" value="pay_existing">
                 <input type="hidden" name="order_id" id="payTabOrderId" value="">
-                <div class="modal-body">
-                    <div style="font-size:14px; color:#6c757d; text-align:center;" id="payTabRef">—</div>
-                    <div style="font-size:32px; font-weight:700; text-align:center; margin:6px 0 14px;"><span id="payTabTotal"><?php echo $currency_symbol; ?> 0.00</span></div>
+                <input type="hidden" name="split_count" id="payTabSplitCount" value="1">
+                <input type="hidden" name="split_number" id="payTabSplitNumber" value="1">
+                <input type="hidden" name="tip_amount" id="payTabTipHidden" value="0">
+                <div class="modal-body" style="padding-bottom:10px;">
+                    <!-- Reference + order total -->
+                    <div style="font-size:13px;color:#6c757d;text-align:center;" id="payTabRef">—</div>
+                    <div style="font-size:13px;text-align:center;color:#6c757d;margin:2px 0 2px;" id="payTabOrderTotalRow" style="display:none;">
+                        Order total: <span id="payTabTotal" style="font-weight:600;"><?php echo $currency_symbol; ?> 0.00</span>
+                    </div>
+                    <!-- Amount due (= share + tip, what this person pays) -->
+                    <div style="font-size:30px;font-weight:700;text-align:center;margin:6px 0 14px;color:#1f2937;" id="payTabAmountDueDisplay"><?php echo $currency_symbol; ?> 0.00</div>
+
+                    <!-- Intermediate split confirmed strip -->
+                    <div id="payTabSplitConfirmed" style="display:flex;">
+                        <i class="fas fa-check-circle"></i>
+                        <span id="payTabSplitConfirmedText"></span>
+                    </div>
+
+                    <!-- Split bill selector -->
+                    <div style="background:#f8f9fa;border-radius:8px;padding:10px 12px;margin-bottom:10px;">
+                        <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+                            <span style="font-size:13px;font-weight:600;color:#374151;white-space:nowrap;"><i class="fas fa-users" style="color:#8B7355;margin-right:4px;"></i>Split bill</span>
+                            <div style="display:flex;gap:5px;flex-wrap:wrap;" id="payTabSplitWays">
+                                <button type="button" class="split-way-btn active" data-ways="1" onclick="ptSetSplitWays(1)">Off</button>
+                                <button type="button" class="split-way-btn" data-ways="2" onclick="ptSetSplitWays(2)">2</button>
+                                <button type="button" class="split-way-btn" data-ways="3" onclick="ptSetSplitWays(3)">3</button>
+                                <button type="button" class="split-way-btn" data-ways="4" onclick="ptSetSplitWays(4)">4</button>
+                                <button type="button" class="split-way-btn" data-ways="5" onclick="ptSetSplitWays(5)">5</button>
+                                <button type="button" class="split-way-btn" data-ways="6" onclick="ptSetSplitWays(6)">6</button>
+                            </div>
+                        </div>
+                        <div id="payTabShareRow" style="display:none;margin-top:8px;font-size:12px;color:#374151;">
+                            Each person: <strong id="payTabShareAmt"></strong>
+                        </div>
+                    </div>
+
+                    <!-- Tip section -->
+                    <div style="background:#f8f9fa;border-radius:8px;padding:10px 12px;margin-bottom:12px;">
+                        <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:8px;">
+                            <span style="font-size:13px;font-weight:600;color:#374151;white-space:nowrap;"><i class="fas fa-hand-holding-heart" style="color:#059669;margin-right:4px;"></i>Tip</span>
+                            <div style="display:flex;gap:5px;flex-wrap:wrap;" id="payTabTipPresets">
+                                <button type="button" class="tip-preset-btn active" data-pct="0" onclick="ptSetTipPct(0)">None</button>
+                                <button type="button" class="tip-preset-btn" data-pct="5" onclick="ptSetTipPct(5)">5%</button>
+                                <button type="button" class="tip-preset-btn" data-pct="10" onclick="ptSetTipPct(10)">10%</button>
+                                <button type="button" class="tip-preset-btn" data-pct="15" onclick="ptSetTipPct(15)">15%</button>
+                            </div>
+                        </div>
+                        <input type="number" step="0.01" min="0" id="payTabTipInput" placeholder="Custom tip amount" oninput="ptOnTipInput()" style="width:100%;box-sizing:border-box;border:1px solid #d1d5db;border-radius:6px;padding:7px 10px;font-size:13px;">
+                    </div>
+
                     <label>Payment method</label>
                     <div class="pay-method-grid">
                         <button type="button" data-method="cash" onclick="setMethodTab(this)"><i class="fas fa-money-bill-wave"></i> Cash</button>
@@ -1795,7 +1926,7 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
                     </div>
                     <input type="hidden" name="payment_method" id="payTabMethod" value="">
                     <div id="ext-tab-cash" style="display:none;">
-                        <label>Tendered (<?php echo $currency_symbol; ?>)</label>
+                        <label id="payTabTenderedLabel">Tendered (<?php echo $currency_symbol; ?>)</label>
                         <input type="number" step="0.01" min="0" name="tendered_amount" id="payTabTendered" oninput="updTabChange()">
                         <div class="change-banner">Change: <span id="payTabChange"><?php echo $currency_symbol; ?> 0.00</span></div>
                     </div>
@@ -6175,24 +6306,133 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
             ov.style.zIndex = '';
         }
 
+        // Split + tip state for the current settle session
+        const _pt = {
+            orderId: 0, total: 0, ref: '',
+            ways: 1,        // how many ways to split (1 = off)
+            current: 1,     // which split leg we're currently collecting (1-based)
+        };
+
+        function ptUpdateDisplay() {
+            const share = _pt.ways > 1 ? _pt.total / _pt.ways : _pt.total;
+            const tip = Math.max(0, parseFloat(document.getElementById('payTabTipInput').value) || 0);
+            const due = share + tip;
+
+            document.getElementById('payTabTipHidden').value = tip.toFixed(2);
+            document.getElementById('payTabAmountDueDisplay').textContent = currencySymbol + ' ' + fmtMoney(due);
+
+            // Store due in a data attr for updTabChange()
+            document.getElementById('payTabAmountDueDisplay').dataset.due = due;
+
+            // Share display
+            const shareRow = document.getElementById('payTabShareRow');
+            if (_pt.ways > 1) {
+                shareRow.style.display = '';
+                document.getElementById('payTabShareAmt').textContent = currencySymbol + ' ' + fmtMoney(share) + ' × ' + _pt.ways;
+            } else {
+                shareRow.style.display = 'none';
+            }
+
+            // Step indicator
+            const stepEl = document.getElementById('payTabSplitStep');
+            if (_pt.ways > 1) {
+                stepEl.textContent = 'Person ' + _pt.current + ' of ' + _pt.ways + ' — paying ' + currencySymbol + ' ' + fmtMoney(due);
+                stepEl.style.display = '';
+            } else {
+                stepEl.style.display = 'none';
+            }
+
+            // Submit btn label
+            const btn = document.getElementById('payTabSubmitBtn');
+            if (btn) btn.textContent = _pt.ways > 1 ? 'Pay split ' + _pt.current + ' of ' + _pt.ways : 'Take payment';
+
+            // Tendered label
+            const tl = document.getElementById('payTabTenderedLabel');
+            if (tl) tl.textContent = 'Tendered — due: ' + currencySymbol + ' ' + fmtMoney(due);
+
+            // Refresh change calculation
+            updTabChange();
+        }
+
+        function ptSetSplitWays(n) {
+            _pt.ways = n;
+            _pt.current = 1;
+            document.getElementById('payTabSplitCount').value = n;
+            document.getElementById('payTabSplitNumber').value = 1;
+            document.querySelectorAll('#payTabSplitWays .split-way-btn').forEach(b => b.classList.toggle('active', parseInt(b.dataset.ways) === n));
+            // Order total row: show when split active
+            const otr = document.getElementById('payTabOrderTotalRow');
+            if (otr) otr.style.display = n > 1 ? '' : 'none';
+            ptUpdateDisplay();
+        }
+
+        function ptSetTipPct(pct) {
+            const share = _pt.ways > 1 ? _pt.total / _pt.ways : _pt.total;
+            const input = document.getElementById('payTabTipInput');
+            input.value = pct > 0 ? (share * pct / 100).toFixed(2) : '';
+            document.querySelectorAll('#payTabTipPresets .tip-preset-btn').forEach(b => b.classList.toggle('active', parseInt(b.dataset.pct) === pct));
+            ptUpdateDisplay();
+        }
+
+        function ptOnTipInput() {
+            document.querySelectorAll('#payTabTipPresets .tip-preset-btn').forEach(b => b.classList.remove('active'));
+            ptUpdateDisplay();
+        }
+
+        function ptResetForm() {
+            document.getElementById('payTabMethod').value = '';
+            document.getElementById('payTabTipInput').value = '';
+            document.getElementById('payTabTipHidden').value = '0';
+            document.querySelectorAll('#payTabTipPresets .tip-preset-btn').forEach(b => b.classList.toggle('active', b.dataset.pct === '0'));
+            document.querySelectorAll('#payTabOverlay .pay-method-grid button').forEach(b => b.classList.remove('active'));
+            ['cash', 'mobile_money', 'card_manual'].forEach(k => {
+                const e = document.getElementById('ext-tab-' + k);
+                if (e) e.style.display = 'none';
+            });
+            const tEl = document.getElementById('payTabTendered');
+            if (tEl) tEl.value = '';
+            const mrEl = document.querySelector('#ext-tab-mobile_money input[name="mobile_wallet_reference"]');
+            if (mrEl) mrEl.value = '';
+            const mpEl = document.querySelector('#ext-tab-mobile_money select');
+            if (mpEl) mpEl.value = '';
+            const l4El = document.querySelector('#ext-tab-card_manual input[name="card_last4"]');
+            if (l4El) l4El.value = '';
+            const authEl = document.querySelector('#ext-tab-card_manual input[name="card_auth_code"]');
+            if (authEl) authEl.value = '';
+            const confirmed = document.getElementById('payTabSplitConfirmed');
+            if (confirmed) confirmed.style.display = 'none';
+        }
+
         function openPayForTab(orderId, total, ref, canSettle = true) {
             if (!canSettle) {
                 posToastReady('Wait until all items are served before settling the tab.', true);
                 return;
             }
-            // Close sibling overlays that would sit above payTabOverlay
             closeTabsTray();
 
+            // Initialise split state
+            _pt.orderId = orderId;
+            _pt.total = total;
+            _pt.ref = ref;
+            _pt.ways = 1;
+            _pt.current = 1;
+
             document.getElementById('payTabOrderId').value = orderId;
+            document.getElementById('payTabSplitCount').value = 1;
+            document.getElementById('payTabSplitNumber').value = 1;
+
+            // Display
             document.getElementById('payTabRef').textContent = ref;
             document.getElementById('payTabTotal').textContent = currencySymbol + ' ' + fmtMoney(total);
             document.getElementById('payTabTotal').dataset.total = total;
-            document.getElementById('payTabMethod').value = '';
-            ['cash', 'mobile_money', 'card_manual'].forEach(k => {
-                const e = document.getElementById('ext-tab-' + k);
-                if (e) e.style.display = 'none';
-            });
-            document.querySelectorAll('#payTabOverlay .pay-method-grid button').forEach(b => b.classList.remove('active'));
+            const otr = document.getElementById('payTabOrderTotalRow');
+            if (otr) otr.style.display = 'none';
+
+            // Reset split ways to "Off"
+            document.querySelectorAll('#payTabSplitWays .split-way-btn').forEach(b => b.classList.toggle('active', b.dataset.ways === '1'));
+
+            ptResetForm();
+            ptUpdateDisplay();
 
             const ov = document.getElementById('payTabOverlay');
             ov.style.zIndex = '100001';
@@ -6229,9 +6469,43 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
                     btn.innerHTML = origTxt;
                     return;
                 }
+
+                if (j.split_intermediate) {
+                    // Intermediate split: advance to next person, keep modal open
+                    _pt.current = j.split_paid + 1;
+                    document.getElementById('payTabSplitNumber').value = _pt.current;
+
+                    // Show brief confirmation strip
+                    const methodNames = { cash: 'Cash', mobile_money: 'Mobile', card_manual: 'Card' };
+                    const sym = currencySymbol;
+                    const amt = (parseFloat(j.split_amount) || 0) + (parseFloat(j.tip_amount) || 0);
+                    const changeNote = j.change > 0 ? ' · Change ' + sym + ' ' + fmtMoney(j.change) : '';
+                    const stripText = 'Split ' + j.split_paid + '/' + j.split_total + ' paid — ' + (methodNames[j.payment_method] || j.payment_method) + ' ' + sym + ' ' + fmtMoney(amt) + changeNote;
+                    const confirmed = document.getElementById('payTabSplitConfirmed');
+                    const confirmedText = document.getElementById('payTabSplitConfirmedText');
+                    if (confirmed && confirmedText) {
+                        confirmedText.textContent = stripText;
+                        confirmed.style.display = 'flex';
+                    }
+
+                    // Clear payment fields for next person, keep split configuration
+                    ptResetForm();
+                    ptUpdateDisplay();
+                    // Restore the confirmed strip (ptResetForm hides it)
+                    if (confirmed && confirmedText) {
+                        confirmedText.textContent = stripText;
+                        confirmed.style.display = 'flex';
+                    }
+
+                    btn.disabled = false;
+                    btn.innerHTML = origTxt;
+                    setTimeout(() => { refreshShiftStats(); }, 300);
+                    return;
+                }
+
+                // Final payment (single or last split)
                 closePayTabOverlay();
                 showReceiptModal(j);
-                // Refresh stats + tab badge in background
                 setTimeout(() => { refreshShiftStats(); refreshOpenTabs(false); }, 400);
             } catch (err) {
                 posToastReady('Network error — please retry.', true);
@@ -6243,18 +6517,29 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
         function showReceiptModal(data) {
             _receiptOrderId = parseInt(data.order_id, 10) || 0;
             const sym = currencySymbol;
+            const tip = parseFloat(data.tip_amount) || 0;
+            const grandTotal = (parseFloat(data.total) || 0) + tip;
+            const splitCount = parseInt(data.split_count, 10) || 1;
             const methodLabel = {
                 cash: 'Cash',
                 mobile_money: 'Mobile Money',
                 card_manual: 'Card (manual)',
             }[data.payment_method] || data.payment_method;
 
-            document.getElementById('rmTitle').textContent = 'Payment received — ' + (data.reference || '');
-            document.getElementById('rmSubtitle').textContent = methodLabel + ' · ' + sym + ' ' + fmtMoney(data.total);
+            const titleSuffix = splitCount > 1 ? ' — split ×' + splitCount : '';
+            document.getElementById('rmTitle').textContent = 'Payment received — ' + (data.reference || '') + titleSuffix;
+            document.getElementById('rmSubtitle').textContent = methodLabel + ' · ' + sym + ' ' + fmtMoney(grandTotal);
 
             let summaryHtml = `
-                <div><span style="color:#6c757d;font-size:11px;font-weight:600;text-transform:uppercase;">Total</span><div style="font-size:20px;font-weight:700;color:#166534;">${sym} ${fmtMoney(data.total)}</div></div>
+                <div><span style="color:#6c757d;font-size:11px;font-weight:600;text-transform:uppercase;">Order total</span><div style="font-size:20px;font-weight:700;color:#166534;">${sym} ${fmtMoney(data.total)}</div></div>
                 <div><span style="color:#6c757d;font-size:11px;font-weight:600;text-transform:uppercase;">Method</span><div style="font-weight:600;color:#374151;">${escHtml(methodLabel)}</div></div>`;
+            if (tip > 0) {
+                summaryHtml += `<div><span style="color:#6c757d;font-size:11px;font-weight:600;text-transform:uppercase;">Tip</span><div style="font-weight:600;color:#059669;">${sym} ${fmtMoney(tip)}</div></div>
+                <div><span style="color:#6c757d;font-size:11px;font-weight:600;text-transform:uppercase;">Grand total</span><div style="font-size:18px;font-weight:700;color:#166534;">${sym} ${fmtMoney(grandTotal)}</div></div>`;
+            }
+            if (splitCount > 1) {
+                summaryHtml += `<div style="grid-column:1/-1"><span style="color:#6c757d;font-size:11px;font-weight:600;text-transform:uppercase;">Split</span><div style="font-weight:600;color:#374151;">${splitCount} ways · ${sym} ${fmtMoney(data.total / splitCount)} each</div></div>`;
+            }
             if (data.payment_method === 'cash' && data.change > 0) {
                 summaryHtml += `<div><span style="color:#6c757d;font-size:11px;font-weight:600;text-transform:uppercase;">Tendered</span><div style="font-weight:600;">${sym} ${fmtMoney(data.tendered)}</div></div>
                 <div><span style="color:#6c757d;font-size:11px;font-weight:600;text-transform:uppercase;">Change</span><div style="font-size:16px;font-weight:700;color:#1d4ed8;">${sym} ${fmtMoney(data.change)}</div></div>`;
@@ -6383,9 +6668,10 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
             });
             if (m === 'cash') {
                 const tEl = document.getElementById('payTabTendered');
-                const total = parseFloat(document.getElementById('payTabTotal').dataset.total) || 0;
-                if (tEl && total > 0 && (!tEl.value || parseFloat(tEl.value) < total)) {
-                    tEl.value = total.toFixed(2);
+                const dueEl = document.getElementById('payTabAmountDueDisplay');
+                const due = dueEl ? (parseFloat(dueEl.dataset.due) || 0) : (parseFloat(document.getElementById('payTabTotal').dataset.total) || 0);
+                if (tEl && due > 0 && (!tEl.value || parseFloat(tEl.value) < due)) {
+                    tEl.value = due.toFixed(2);
                     updTabChange();
                 }
                 if (tEl) tEl.focus();
@@ -6394,8 +6680,9 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
 
         function updTabChange() {
             const t = parseFloat(document.getElementById('payTabTendered').value) || 0;
-            const total = parseFloat(document.getElementById('payTabTotal').dataset.total) || 0;
-            const ch = Math.max(0, t - total);
+            const dueEl = document.getElementById('payTabAmountDueDisplay');
+            const due = dueEl ? (parseFloat(dueEl.dataset.due) || 0) : (parseFloat(document.getElementById('payTabTotal').dataset.total) || 0);
+            const ch = Math.max(0, t - due);
             document.getElementById('payTabChange').textContent = currencySymbol + ' ' + fmtMoney(ch);
         }
 

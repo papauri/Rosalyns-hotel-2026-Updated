@@ -2175,6 +2175,58 @@ a.recent-toggle span {
     color: var(--color-primary, #8A775F);
 }
 
+/* Split-bill way selector buttons */
+.split-way-btn {
+    padding: 6px 14px;
+    border: 1px solid #d1d5db;
+    border-radius: 20px;
+    background: #fff;
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+    color: #374151;
+    transition: background 0.15s, border-color 0.15s, color 0.15s;
+}
+.split-way-btn.active,
+.split-way-btn:hover {
+    background: var(--color-primary, #8A775F);
+    border-color: var(--color-primary, #8A775F);
+    color: #fff;
+}
+
+/* Tip preset buttons */
+.tip-preset-btn {
+    padding: 5px 12px;
+    border: 1px solid #d1d5db;
+    border-radius: 20px;
+    background: #fff;
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+    color: #374151;
+    transition: background 0.15s, border-color 0.15s, color 0.15s;
+}
+.tip-preset-btn.active,
+.tip-preset-btn:hover {
+    background: #059669;
+    border-color: #059669;
+    color: #fff;
+}
+
+/* Split confirmed inline strip */
+#payTabSplitConfirmed {
+    display: none;
+    background: #f0fdf4;
+    border: 1px solid #bbf7d0;
+    border-radius: 8px;
+    padding: 10px 14px;
+    font-size: 13px;
+    color: #166534;
+    margin-bottom: 10px;
+    align-items: center;
+    gap: 8px;
+}
+
 .modal-foot,
 .modal-footer {
     padding: 14px 20px;
