@@ -214,9 +214,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $pdo->prepare("UPDATE stock_orders SET subtotal = ?, discount_amount = ?, discount_reason = ?, service_charge = ?, tax_amount = ?, total_amount = ?, notes = TRIM(BOTH '\n' FROM CONCAT(COALESCE(notes,''), CASE WHEN COALESCE(notes,'')='' THEN '' ELSE '\n' END, ?)), updated_at = NOW() WHERE id = ?")
                     ->execute([$subtotal, $discount, $reason ?: null, $service, $tax, $newTotal, $extraNotes ? '[Consolidation] ' . $extraNotes : '', $orderId]);
 
-                // Sync payments table to new total
-                $pdo->prepare("UPDATE payments SET payment_amount = ?, total_amount = ?, updated_at = NOW() WHERE booking_type = 'restaurant' AND booking_id = ? AND COALESCE(payment_type, '') != 'refund' AND deleted_at IS NULL")
-                    ->execute([$newTotal, $newTotal, $orderId]);
+                // Sync payments table — recalculate VAT split from the new gross total
+                $vatEnabled = in_array(getSetting('vat_enabled'), ['1', 1, true, 'true', 'on'], true);
+                $vatRate = $vatEnabled ? (float)getSetting('vat_rate') : 0.0;
+                $newNet = ($newTotal > 0 && $vatRate > 0) ? round($newTotal / (1 + ($vatRate / 100)), 2) : round($newTotal, 2);
+                $newVat = round($newTotal - $newNet, 2);
+                $pdo->prepare("UPDATE payments SET payment_amount = ?, vat_rate = ?, vat_amount = ?, total_amount = ?, updated_at = NOW() WHERE booking_type = 'restaurant' AND booking_id = ? AND COALESCE(payment_type, '') != 'refund' AND deleted_at IS NULL")
+                    ->execute([$newNet, $vatEnabled ? $vatRate : 0.0, $newVat, $newTotal, $orderId]);
 
                 // Audit
                 if (function_exists('logOrderAudit')) {

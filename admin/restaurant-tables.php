@@ -58,14 +58,14 @@ function rt_map_payment_method(string $method): string
     };
 }
 
-function rt_sync_payment(PDO $pdo, array $order, int $recordedBy, string $paymentMethod): void
+function rt_sync_payment(PDO $pdo, array $order, int $recordedBy, string $paymentMethod): int
 {
     $orderId = (int)($order['id'] ?? 0);
     $reference = (string)($order['reference'] ?? '');
     $vat = rt_calculate_restaurant_vat_parts((float)($order['total_amount'] ?? 0));
     $mappedMethod = rt_map_payment_method($paymentMethod);
 
-    rh_sync_restaurant_payment(
+    return rh_sync_restaurant_payment(
         $pdo,
         $orderId,
         $reference,
@@ -138,7 +138,7 @@ function rt_apply_payment_to_order(PDO $pdo, array $user, array $order, string $
             $orderId,
         ]);
 
-    rt_sync_payment($pdo, $order, (int)($user['id'] ?? 0), $paymentMethod);
+    $extras['payment_id'] = rt_sync_payment($pdo, $order, (int)($user['id'] ?? 0), $paymentMethod);
 
     return $extras;
 }
@@ -890,7 +890,7 @@ if (!rh_restaurant_tables_exist($pdo)) {
                 }
 
                 $pdo->beginTransaction();
-                $stmt = $pdo->prepare("SELECT id, reference, total_amount, status, order_type, table_number, customer_name FROM stock_orders WHERE id = ? FOR UPDATE");
+                $stmt = $pdo->prepare("SELECT id, reference, total_amount, status, order_type, table_number, customer_name, customer_email, customer_phone FROM stock_orders WHERE id = ? FOR UPDATE");
                 $stmt->execute([$orderId]);
                 $order = $stmt->fetch(PDO::FETCH_ASSOC);
                 if (!$order) {
@@ -933,10 +933,34 @@ if (!rh_restaurant_tables_exist($pdo)) {
                     . 'settled — ' . (string)($order['reference'] ?? 'Order') . ' · '
                     . $currency_symbol . ' ' . number_format((float)$order['total_amount'], 2)
                     . ' · ' . str_replace('_', ' ', $paymentMethod) . '.' . $changeMsg;
+
+                if (!empty($_SERVER['HTTP_X_REQUESTED_WITH']) && strtolower((string)$_SERVER['HTTP_X_REQUESTED_WITH']) === 'xmlhttprequest') {
+                    header('Content-Type: application/json; charset=utf-8');
+                    echo json_encode([
+                        'ok'             => true,
+                        'message'        => $message,
+                        'order_id'       => (int)$order['id'],
+                        'order_ref'      => (string)($order['reference'] ?? ''),
+                        'table_number'   => $tableLabel,
+                        'total'          => (float)$order['total_amount'],
+                        'payment_method' => $paymentMethod,
+                        'tendered'       => $extras['tendered'],
+                        'change'         => $extras['change'],
+                        'customer_name'  => (string)($order['customer_name'] ?? ''),
+                        'customer_email' => (string)($order['customer_email'] ?? ''),
+                        'customer_phone' => (string)($order['customer_phone'] ?? ''),
+                    ]);
+                    exit;
+                }
             }
         } catch (Throwable $e) {
             if ($pdo->inTransaction()) $pdo->rollBack();
             $error = $e->getMessage();
+            if (!empty($_SERVER['HTTP_X_REQUESTED_WITH']) && strtolower((string)$_SERVER['HTTP_X_REQUESTED_WITH']) === 'xmlhttprequest') {
+                header('Content-Type: application/json; charset=utf-8');
+                echo json_encode(['ok' => false, 'error' => $error]);
+                exit;
+            }
         }
     }
 }
@@ -1095,7 +1119,7 @@ foreach ($tables as $table) {
                     <i class="fas fa-times"></i>
                 </button>
             </div>
-            <form method="post" action="restaurant-tables.php" id="rtSettleForm" data-admin-loader-form>
+            <form method="post" action="restaurant-tables.php" id="rtSettleForm">
                 <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf_token); ?>">
                 <input type="hidden" name="action" value="settle_table_order">
                 <input type="hidden" name="order_id" id="rtSettleOrderId" value="">
@@ -1142,6 +1166,46 @@ foreach ($tables as $table) {
             </form>
         </div>
     </div>
+    <!-- Post-settlement receipt modal -->
+    <div class="rt-modal-overlay" id="rtReceiptModal" aria-hidden="true">
+        <div class="rt-modal-card" role="dialog" aria-modal="true" aria-labelledby="rt-receipt-title" style="max-width:540px;">
+            <div class="rt-modal-head" style="background:linear-gradient(135deg,#1d6a3e,#22c55e);color:#fff;border-radius:12px 12px 0 0;">
+                <div style="display:flex;align-items:center;gap:12px;">
+                    <div style="width:38px;height:38px;background:rgba(255,255,255,.2);border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:17px;flex-shrink:0;"><i class="fas fa-check"></i></div>
+                    <div>
+                        <h2 id="rt-receipt-title" style="margin:0;font-size:16px;color:#fff;">Payment recorded</h2>
+                        <div style="font-size:12px;opacity:.85;" id="rtReceiptSubtitle">Table settled</div>
+                    </div>
+                </div>
+                <button type="button" onclick="rtCloseReceiptModal()" style="background:none;border:none;color:#fff;font-size:22px;line-height:1;cursor:pointer;opacity:.8;padding:4px;" aria-label="Close receipt modal">&times;</button>
+            </div>
+            <div class="rt-modal-body">
+                <div id="rtReceiptSummary" style="background:#f0fdf4;border:1px solid #bbf7d0;border-radius:10px;padding:14px 16px;margin-bottom:16px;display:grid;grid-template-columns:1fr 1fr;gap:8px;font-size:13px;"></div>
+                <div style="font-size:13px;font-weight:700;color:#374151;margin-bottom:10px;display:flex;align-items:center;gap:6px;">
+                    <i class="fas fa-paper-plane" style="color:#8B7355;"></i> Send receipt to guest
+                </div>
+                <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:14px;">
+                    <div>
+                        <label style="font-size:11px;font-weight:600;color:#6c757d;display:block;margin-bottom:4px;">Email</label>
+                        <input type="email" id="rtReceiptEmail" placeholder="guest@example.com" style="width:100%;box-sizing:border-box;min-height:36px;border:1px solid #d1d5db;border-radius:7px;padding:7px 10px;font-size:12px;margin-bottom:6px;">
+                        <button type="button" id="rtReceiptEmailBtn" onclick="rtSendReceipt('email')" style="width:100%;padding:8px;background:#3b82f6;color:#fff;border:none;border-radius:7px;font-size:12px;font-weight:600;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:6px;"><i class="fas fa-envelope"></i> Send email</button>
+                        <div id="rtReceiptEmailStatus" style="font-size:11px;margin-top:4px;min-height:14px;"></div>
+                    </div>
+                    <div>
+                        <label style="font-size:11px;font-weight:600;color:#6c757d;display:block;margin-bottom:4px;">WhatsApp</label>
+                        <input type="tel" id="rtReceiptPhone" placeholder="+265 999 123 456" style="width:100%;box-sizing:border-box;min-height:36px;border:1px solid #d1d5db;border-radius:7px;padding:7px 10px;font-size:12px;margin-bottom:6px;">
+                        <button type="button" id="rtReceiptWhatsAppBtn" onclick="rtSendReceipt('whatsapp')" style="width:100%;padding:8px;background:#1d6a3e;color:#fff;border:none;border-radius:7px;font-size:12px;font-weight:600;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:6px;"><i class="fab fa-whatsapp"></i> Send WhatsApp</button>
+                        <div id="rtReceiptWhatsAppStatus" style="font-size:11px;margin-top:4px;min-height:14px;"></div>
+                    </div>
+                </div>
+            </div>
+            <div class="rt-modal-foot">
+                <a id="rtReceiptPrintLink" href="#" target="_blank" rel="noopener" class="btn btn-secondary" style="text-decoration:none;"><i class="fas fa-print"></i> Print receipt</a>
+                <button type="button" class="btn btn-primary" onclick="rtCloseReceiptModal()"><i class="fas fa-check"></i> Done</button>
+            </div>
+        </div>
+    </div>
+
     <div id="admin-page-loader" class="admin-page-loader" role="status" aria-label="Loading">
         <div class="admin-page-loader-card">
             <div class="admin-page-loader-spinner"><span></span><span></span><span></span></div>
@@ -1431,13 +1495,118 @@ foreach ($tables as $table) {
             if (event.target === rtSettleModal) {
                 rtCloseSettleModal();
             }
+
+            if (event.target === document.getElementById('rtReceiptModal')) {
+                rtCloseReceiptModal();
+            }
         });
 
+        let _rtSettleOrderId = 0;
+
+        function rtOpenReceiptModal(data) {
+            _rtSettleOrderId = Number(data.order_id || 0);
+            const sym = rtCurrencySymbol;
+            const methodLabel = String(data.payment_method || '').replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+
+            let summaryHtml = `<div><span style="color:#6c757d;font-size:11px;font-weight:600;text-transform:uppercase;">Order</span><div style="font-weight:700;">${rtEscapeHtml(data.order_ref || '')}</div></div>`;
+            summaryHtml += `<div><span style="color:#6c757d;font-size:11px;font-weight:600;text-transform:uppercase;">Total</span><div style="font-size:18px;font-weight:700;color:#166534;">${sym} ${rtFormatMoney(data.total)}</div></div>`;
+            summaryHtml += `<div><span style="color:#6c757d;font-size:11px;font-weight:600;text-transform:uppercase;">Method</span><div style="font-weight:600;color:#374151;">${rtEscapeHtml(methodLabel)}</div></div>`;
+            if (data.payment_method === 'cash' && Number(data.change) > 0) {
+                summaryHtml += `<div><span style="color:#6c757d;font-size:11px;font-weight:600;text-transform:uppercase;">Change</span><div style="font-size:16px;font-weight:700;color:#1d4ed8;">${sym} ${rtFormatMoney(data.change)}</div></div>`;
+            }
+            if (data.customer_name) {
+                summaryHtml += `<div style="grid-column:1/-1"><span style="color:#6c757d;font-size:11px;font-weight:600;text-transform:uppercase;">Guest</span><div style="font-weight:600;">${rtEscapeHtml(data.customer_name)}</div></div>`;
+            }
+            document.getElementById('rtReceiptSummary').innerHTML = summaryHtml;
+
+            const tableLabel = data.table_number ? 'Table ' + data.table_number + ' settled' : 'Table tab settled';
+            document.getElementById('rtReceiptSubtitle').textContent = tableLabel;
+            document.getElementById('rtReceiptEmail').value = data.customer_email || '';
+            document.getElementById('rtReceiptPhone').value = data.customer_phone || '';
+            document.getElementById('rtReceiptEmailStatus').textContent = '';
+            document.getElementById('rtReceiptWhatsAppStatus').textContent = '';
+
+            ['rtReceiptEmailBtn', 'rtReceiptWhatsAppBtn'].forEach(id => {
+                const b = document.getElementById(id);
+                if (b) { b.disabled = false; b.style.opacity = '1'; }
+            });
+
+            const printLink = document.getElementById('rtReceiptPrintLink');
+            if (printLink && _rtSettleOrderId > 0) {
+                printLink.href = 'stock-receipt.php?id=' + _rtSettleOrderId + '&print=1';
+            }
+
+            const modal = document.getElementById('rtReceiptModal');
+            if (modal) { modal.classList.add('active'); modal.setAttribute('aria-hidden', 'false'); }
+        }
+
+        function rtCloseReceiptModal() {
+            const modal = document.getElementById('rtReceiptModal');
+            if (modal) { modal.classList.remove('active'); modal.setAttribute('aria-hidden', 'true'); }
+        }
+
+        async function rtSendReceipt(channel) {
+            if (_rtSettleOrderId <= 0) return;
+            const isEmail = channel === 'email';
+            const recipient = (isEmail
+                ? document.getElementById('rtReceiptEmail').value
+                : document.getElementById('rtReceiptPhone').value
+            ).trim();
+            if (!recipient) {
+                if (isEmail) {
+                    document.getElementById('rtReceiptEmailStatus').innerHTML = '<span style="color:#dc2626;">Enter an email address.</span>';
+                } else {
+                    document.getElementById('rtReceiptWhatsAppStatus').innerHTML = '<span style="color:#dc2626;">Enter a phone number.</span>';
+                }
+                return;
+            }
+
+            const btnId = isEmail ? 'rtReceiptEmailBtn' : 'rtReceiptWhatsAppBtn';
+            const statusId = isEmail ? 'rtReceiptEmailStatus' : 'rtReceiptWhatsAppStatus';
+            const btn = document.getElementById(btnId);
+            const statusEl = document.getElementById(statusId);
+            btn.disabled = true;
+            btn.style.opacity = '0.6';
+            statusEl.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Sending…';
+            statusEl.style.color = '#6c757d';
+
+            const fd = new FormData();
+            fd.append('csrf_token', <?php echo json_encode($csrf_token); ?>);
+            fd.append('action', isEmail ? 'email_receipt' : 'whatsapp_receipt');
+            fd.append('order_id', String(_rtSettleOrderId));
+            fd.append('recipient', recipient);
+
+            try {
+                const r = await fetch('stock-receipt.php?id=' + _rtSettleOrderId, {
+                    method: 'POST',
+                    headers: { 'X-Requested-With': 'XMLHttpRequest' },
+                    body: fd,
+                    credentials: 'same-origin',
+                });
+                const j = await r.json();
+                if (j.ok) {
+                    statusEl.innerHTML = '<i class="fas fa-check-circle" style="color:#16a34a;"></i> ' + rtEscapeHtml(j.message || 'Sent');
+                    statusEl.style.color = '#16a34a';
+                } else {
+                    statusEl.innerHTML = '<i class="fas fa-times-circle" style="color:#dc2626;"></i> ' + rtEscapeHtml(j.error || 'Failed');
+                    statusEl.style.color = '#dc2626';
+                    btn.disabled = false;
+                    btn.style.opacity = '1';
+                }
+            } catch (err) {
+                statusEl.innerHTML = '<i class="fas fa-times-circle" style="color:#dc2626;"></i> Network error';
+                statusEl.style.color = '#dc2626';
+                btn.disabled = false;
+                btn.style.opacity = '1';
+            }
+        }
+
         if (rtSettleForm) {
-            rtSettleForm.addEventListener('submit', (event) => {
+            rtSettleForm.addEventListener('submit', async (event) => {
+                event.preventDefault();
+
                 const method = String(rtSettleMethod?.value || '').trim();
                 if (!method) {
-                    event.preventDefault();
                     rtShowSettleValidation('Select a payment method before taking payment.');
                     return;
                 }
@@ -1447,13 +1616,37 @@ foreach ($tables as $table) {
                     const totalAmount = Number(totalText || 0);
                     const tendered = Number(rtSettleTendered?.value || 0);
                     if (!Number.isFinite(tendered) || tendered < totalAmount) {
-                        event.preventDefault();
                         rtShowSettleValidation('Tendered cash must cover the full tab total.');
                         return;
                     }
                 }
 
                 rtShowSettleValidation('');
+                document.getElementById('admin-page-loader')?.classList.add('is-visible');
+
+                try {
+                    const fd = new FormData(rtSettleForm);
+                    const resp = await fetch('restaurant-tables.php', {
+                        method: 'POST',
+                        headers: { 'X-Requested-With': 'XMLHttpRequest' },
+                        body: fd,
+                        credentials: 'same-origin',
+                    });
+                    const data = await resp.json();
+                    document.getElementById('admin-page-loader')?.classList.remove('is-visible');
+
+                    if (data.ok) {
+                        rtCloseSettleModal();
+                        rtOpenReceiptModal(data);
+                        // Refresh table statuses to reflect settled state
+                        refreshTableLiveStatuses();
+                    } else {
+                        rtShowSettleValidation(data.error || 'Payment failed. Please try again.');
+                    }
+                } catch (err) {
+                    document.getElementById('admin-page-loader')?.classList.remove('is-visible');
+                    rtShowSettleValidation('Network error — please check your connection and try again.');
+                }
             });
         }
 

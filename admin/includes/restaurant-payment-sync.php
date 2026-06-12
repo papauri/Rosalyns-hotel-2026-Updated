@@ -5,7 +5,7 @@
  *
  * @param array<string,mixed> $vatParts Requires keys: net, vat_rate, vat, gross
  */
-function rh_sync_restaurant_payment(PDO $pdo, int $orderId, string $reference, ?string $customerName, array $vatParts, int $recordedBy, string $mappedMethod): void
+function rh_sync_restaurant_payment(PDO $pdo, int $orderId, string $reference, ?string $customerName, array $vatParts, int $recordedBy, string $mappedMethod): int
 {
     $paymentReference = 'POS-' . $reference;
     $notes = trim('Restaurant order ' . $reference . ($customerName !== null && $customerName !== '' ? ' - ' . $customerName : ''));
@@ -34,7 +34,7 @@ function rh_sync_restaurant_payment(PDO $pdo, int $orderId, string $reference, ?
             $recordedBy,
             $paymentId,
         ]);
-        return;
+        return $paymentId;
     }
 
     $receiptNumber = finance_next_receipt_number($pdo, date('Y-m-d'));
@@ -52,5 +52,6 @@ function rh_sync_restaurant_payment(PDO $pdo, int $orderId, string $reference, ?
         $notes,
         $recordedBy,
     ]);
+    return (int)$pdo->lastInsertId();
 }
 

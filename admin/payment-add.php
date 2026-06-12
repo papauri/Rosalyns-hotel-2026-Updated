@@ -452,7 +452,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
                 $successMsg = 'Payment recorded successfully.' . ($overpayMsg ?? '');
                 $_SESSION['alert'] = ['type' => 'success', 'message' => $successMsg];
-                header('Location: payment-details.php?id=' . $newPaymentId);
+                header('Location: payment-details.php?id=' . $newPaymentId . '&new_payment=1');
                 exit;
             }
         } catch (PDOException $e) {

@@ -282,17 +282,20 @@ if (($payment['payment_type'] ?? '') === 'refund' && !empty($payment['original_p
                         <i class="fas fa-undo"></i> Refund
                     </a>
                 <?php endif; ?>
+                <?php if (in_array($payment['payment_status'], ['completed', 'paid'], true) && ($payment['payment_type'] ?? '') !== 'refund'): ?>
+                    <?php if (($payment['booking_type'] ?? '') === 'restaurant' && !empty($payment['booking_id'])): ?>
+                        <button type="button" class="acct-quick-action" onclick="pdOpenReceiptModal(<?php echo (int)$payment['booking_id']; ?>, 'order')">
+                            <i class="fas fa-paper-plane"></i> Send Receipt
+                        </button>
+                    <?php else: ?>
+                        <button type="button" class="acct-quick-action" onclick="pdOpenReceiptModal(<?php echo $paymentId; ?>, 'payment')">
+                            <i class="fas fa-paper-plane"></i> Send Receipt
+                        </button>
+                    <?php endif; ?>
+                <?php endif; ?>
                 <a href="invoices.php?search=<?php echo urlencode($payment['payment_reference']); ?>" class="acct-quick-action">
                     <i class="fas fa-file-invoice"></i> Invoice
                 </a>
-                <?php if (!empty($payment['customer_phone'])): ?>
-                    <?php $waPhone = preg_replace('/[^0-9]/', '', (string)$payment['customer_phone']); ?>
-                    <?php if ($waPhone !== ''): ?>
-                        <a href="https://wa.me/<?php echo htmlspecialchars($waPhone); ?>?text=<?php echo urlencode('Hello, this is ' . $site_name . ' accounts. Payment reference: ' . ($payment['payment_reference'] ?? '')); ?>" target="_blank" rel="noopener" class="acct-quick-action">
-                            <i class="fab fa-whatsapp"></i> WhatsApp
-                        </a>
-                    <?php endif; ?>
-                <?php endif; ?>
                 <a href="payments.php" class="acct-quick-action" onclick="if(history.length>1){history.back();return false;}">
                     <i class="fas fa-arrow-left"></i> Back
                 </a>
@@ -569,6 +572,160 @@ if (($payment['payment_type'] ?? '') === 'refund' && !empty($payment['original_p
             </div>
         <?php endif; ?>
     </div>
+
+    <!-- Send Receipt Modal -->
+    <div class="modal-overlay" id="pdReceiptModal" aria-hidden="true" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:9999;align-items:center;justify-content:center;">
+        <div style="background:#fff;border-radius:14px;width:min(96vw,500px);overflow:hidden;box-shadow:0 20px 60px rgba(0,0,0,.25);">
+            <div style="background:linear-gradient(135deg,#1d6a3e,#22c55e);color:#fff;padding:18px 22px;display:flex;align-items:center;justify-content:space-between;">
+                <div style="display:flex;align-items:center;gap:12px;">
+                    <div style="width:36px;height:36px;background:rgba(255,255,255,.2);border-radius:50%;display:flex;align-items:center;justify-content:center;"><i class="fas fa-paper-plane"></i></div>
+                    <div>
+                        <div style="font-weight:700;font-size:15px;">Send Receipt</div>
+                        <div style="font-size:12px;opacity:.85;" id="pdReceiptRef"><?php echo htmlspecialchars($payment['payment_reference'] ?? ''); ?></div>
+                    </div>
+                </div>
+                <button type="button" onclick="pdCloseReceiptModal()" style="background:none;border:none;color:#fff;font-size:22px;cursor:pointer;opacity:.8;">&times;</button>
+            </div>
+            <div style="padding:20px;">
+                <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
+                    <div>
+                        <label style="font-size:11px;font-weight:600;color:#6c757d;display:block;margin-bottom:4px;">Email</label>
+                        <input type="email" id="pdReceiptEmail" placeholder="guest@example.com" value="<?php echo htmlspecialchars((string)($payment['customer_email'] ?? '')); ?>" style="width:100%;box-sizing:border-box;border:1px solid #d1d5db;border-radius:7px;padding:8px 10px;font-size:13px;margin-bottom:6px;">
+                        <button type="button" id="pdReceiptEmailBtn" onclick="pdSendReceipt('email')" style="width:100%;padding:9px;background:#3b82f6;color:#fff;border:none;border-radius:7px;font-size:13px;font-weight:600;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:6px;"><i class="fas fa-envelope"></i> Send email</button>
+                        <div id="pdReceiptEmailStatus" style="font-size:11px;margin-top:5px;min-height:14px;"></div>
+                    </div>
+                    <div>
+                        <label style="font-size:11px;font-weight:600;color:#6c757d;display:block;margin-bottom:4px;">WhatsApp</label>
+                        <input type="tel" id="pdReceiptPhone" placeholder="+265 999 123 456" value="<?php echo htmlspecialchars(preg_replace('/[^0-9+]/', '', (string)($payment['customer_phone'] ?? ''))); ?>" style="width:100%;box-sizing:border-box;border:1px solid #d1d5db;border-radius:7px;padding:8px 10px;font-size:13px;margin-bottom:6px;">
+                        <button type="button" id="pdReceiptWhatsAppBtn" onclick="pdSendReceipt('whatsapp')" style="width:100%;padding:9px;background:#1d6a3e;color:#fff;border:none;border-radius:7px;font-size:13px;font-weight:600;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:6px;"><i class="fab fa-whatsapp"></i> Send WhatsApp</button>
+                        <div id="pdReceiptWhatsAppStatus" style="font-size:11px;margin-top:5px;min-height:14px;"></div>
+                    </div>
+                </div>
+            </div>
+            <div style="padding:12px 20px 18px;display:flex;gap:8px;justify-content:flex-end;">
+                <?php if (($payment['booking_type'] ?? '') === 'restaurant' && !empty($payment['booking_id'])): ?>
+                    <a href="stock-receipt.php?id=<?php echo (int)$payment['booking_id']; ?>&print=1" target="_blank" rel="noopener" style="padding:8px 14px;background:#f3f4f6;border:1px solid #d1d5db;border-radius:7px;font-size:13px;font-weight:600;color:#374151;text-decoration:none;display:flex;align-items:center;gap:5px;"><i class="fas fa-print"></i> Print</a>
+                <?php endif; ?>
+                <button type="button" onclick="pdCloseReceiptModal()" style="padding:8px 18px;background:#374151;color:#fff;border:none;border-radius:7px;font-size:13px;font-weight:600;cursor:pointer;">Done</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+    (function () {
+        const pdCsrfToken = <?php echo json_encode(generateCsrfToken()); ?>;
+        let pdReceiptId = 0;
+        let pdReceiptMode = 'payment'; // 'payment' | 'order'
+
+        function pdOpenReceiptModal(id, mode) {
+            pdReceiptId = id;
+            pdReceiptMode = mode || 'payment';
+            document.getElementById('pdReceiptEmailStatus').textContent = '';
+            document.getElementById('pdReceiptWhatsAppStatus').textContent = '';
+            ['pdReceiptEmailBtn', 'pdReceiptWhatsAppBtn'].forEach(function (bid) {
+                const b = document.getElementById(bid);
+                if (b) { b.disabled = false; b.style.opacity = '1'; }
+            });
+            const modal = document.getElementById('pdReceiptModal');
+            if (modal) { modal.style.display = 'flex'; modal.setAttribute('aria-hidden', 'false'); }
+        }
+
+        function pdCloseReceiptModal() {
+            const modal = document.getElementById('pdReceiptModal');
+            if (modal) { modal.style.display = 'none'; modal.setAttribute('aria-hidden', 'true'); }
+        }
+
+        async function pdSendReceipt(channel) {
+            if (!pdReceiptId) return;
+            const isEmail = channel === 'email';
+            const recipient = (isEmail
+                ? document.getElementById('pdReceiptEmail').value
+                : document.getElementById('pdReceiptPhone').value
+            ).trim();
+            if (!recipient) {
+                const sid = isEmail ? 'pdReceiptEmailStatus' : 'pdReceiptWhatsAppStatus';
+                document.getElementById(sid).innerHTML = '<span style="color:#dc2626;">Enter a ' + (isEmail ? 'email address' : 'phone number') + '.</span>';
+                return;
+            }
+
+            const btnId = isEmail ? 'pdReceiptEmailBtn' : 'pdReceiptWhatsAppBtn';
+            const statusId = isEmail ? 'pdReceiptEmailStatus' : 'pdReceiptWhatsAppStatus';
+            const btn = document.getElementById(btnId);
+            const statusEl = document.getElementById(statusId);
+            btn.disabled = true;
+            btn.style.opacity = '0.6';
+            statusEl.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Sending…';
+            statusEl.style.color = '#6c757d';
+
+            try {
+                let url, fd;
+                if (pdReceiptMode === 'order') {
+                    // Restaurant/POS order — use stock-receipt.php
+                    fd = new FormData();
+                    fd.append('csrf_token', pdCsrfToken);
+                    fd.append('action', isEmail ? 'email_receipt' : 'whatsapp_receipt');
+                    fd.append('order_id', String(pdReceiptId));
+                    fd.append('recipient', recipient);
+                    url = 'stock-receipt.php?id=' + pdReceiptId;
+                } else {
+                    // Hotel / conference payment — use ajax-receipt.php
+                    fd = new FormData();
+                    fd.append('csrf_token', pdCsrfToken);
+                    fd.append('payment_id', String(pdReceiptId));
+                    fd.append('action', isEmail ? 'email' : 'whatsapp');
+                    fd.append('recipient', recipient);
+                    url = 'ajax-receipt.php';
+                }
+
+                const r = await fetch(url, {
+                    method: 'POST',
+                    headers: { 'X-Requested-With': 'XMLHttpRequest' },
+                    body: fd,
+                    credentials: 'same-origin',
+                });
+                const j = await r.json();
+
+                if (j.ok) {
+                    if (!isEmail && j.url) {
+                        window.open(j.url, '_blank', 'noopener');
+                    }
+                    statusEl.innerHTML = '<i class="fas fa-check-circle" style="color:#16a34a;"></i> ' + (j.message || 'Sent');
+                    statusEl.style.color = '#16a34a';
+                } else {
+                    statusEl.innerHTML = '<i class="fas fa-times-circle" style="color:#dc2626;"></i> ' + (j.error || 'Failed');
+                    statusEl.style.color = '#dc2626';
+                    btn.disabled = false;
+                    btn.style.opacity = '1';
+                }
+            } catch (err) {
+                statusEl.innerHTML = '<i class="fas fa-times-circle" style="color:#dc2626;"></i> Network error';
+                statusEl.style.color = '#dc2626';
+                btn.disabled = false;
+                btn.style.opacity = '1';
+            }
+        }
+
+        // Close on overlay click
+        document.getElementById('pdReceiptModal').addEventListener('click', function (e) {
+            if (e.target === this) pdCloseReceiptModal();
+        });
+
+        // Expose to inline onclick handlers
+        window.pdOpenReceiptModal = pdOpenReceiptModal;
+        window.pdCloseReceiptModal = pdCloseReceiptModal;
+        window.pdSendReceipt = pdSendReceipt;
+
+        <?php if (!empty($_GET['new_payment'])): ?>
+        // Auto-open receipt modal when redirected here after a new payment
+        document.addEventListener('DOMContentLoaded', function () {
+            pdOpenReceiptModal(
+                <?php echo ($payment['booking_type'] === 'restaurant' && !empty($payment['booking_id'])) ? (int)$payment['booking_id'] : $paymentId; ?>,
+                '<?php echo ($payment['booking_type'] === 'restaurant' && !empty($payment['booking_id'])) ? 'order' : 'payment'; ?>'
+            );
+        });
+        <?php endif; ?>
+    }());
+    </script>
 
     <?php require_once 'includes/admin-footer.php'; ?>
 
