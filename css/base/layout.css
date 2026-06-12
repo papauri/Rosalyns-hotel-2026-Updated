@@ -1561,7 +1561,7 @@ body.privacy-page {
     }
 }
 
-@media (min-width: 769px) {
+@media (min-width: 768px) {
     .hidden-desktop {
         display: none;
     }

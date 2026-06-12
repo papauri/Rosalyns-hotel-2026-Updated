@@ -1011,7 +1011,7 @@
    RESPONSIVE BEHAVIOR
    ============================================ */
 
-@media (max-width: 767px) {
+@media (max-width: 768px) {
     .editorial-experience-grid {
         grid-template-columns: 1fr;
         gap: clamp(1rem, 3vw, 1.25rem);

@@ -2439,7 +2439,7 @@ body {
     }
 }
 
-@media (max-width: 767px) {
+@media (max-width: 768px) {
     .pos-acct-drawer__inner {
         padding: 0 0.35rem 0.75rem;
     }
@@ -2641,7 +2641,7 @@ body {
 }
 
 /* Desktop: show header+details as single expanded row */
-@media (min-width: 1025px) {
+@media (min-width: 1024px) {
     .pos-acct-header-row {
         display: none;
     }

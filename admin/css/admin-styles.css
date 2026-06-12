@@ -38,16 +38,7 @@
     --admin-info-text: #123f67;
     /* Deep navy (used by header gradient) */
     --deep-navy: #111827;
-    /* Lux brand tokens — required by help-tooltips.css and other shared components */
-    --color-lux-ink: #231F1C;
-    --color-lux-clay-50: #F3ECE4;
-    --color-lux-clay-100: #ECE1D6;
-    --color-lux-gold: #B18247;
-    --color-background: #F7F3EE;
-    --color-white: #ffffff;
-    /* Admin header height — used by nav, #rh-admin-page, and any page that
-       needs padding-top to clear the fixed header. Update here if header
-       padding changes. */
+    /* Admin-specific variables — shared design tokens are in /css/base/variables.css */
     --admin-header-height: calc(74px + env(titlebar-area-height, 0px));
 }
 
@@ -98,9 +89,9 @@ footer {
 .admin-header {
     background: linear-gradient(135deg, var(--deep-navy, #111827) 0%, var(--navy, #231F1C) 100%);
     color: white;
-    padding: 16px 32px;
+    padding: 1rem 2rem;
     /* WCO: push content below the OS window-controls strip */
-    padding-top: calc(16px + env(titlebar-area-height, 0px));
+    padding-top: calc(1rem + env(titlebar-area-height, 0px));
     /* Allow dragging the window from the header bar */
     -webkit-app-region: drag;
     app-region: drag;
@@ -296,7 +287,7 @@ footer {
    ADMIN CONTENT AREA
    ============================================ */
 .content {
-    padding: 32px;
+    padding: 2rem;
     max-width: 1800px;
     margin: 0 auto;
     width: 100%;
@@ -322,7 +313,7 @@ footer {
     width: 100%;
     max-width: 1400px;
     margin: 0 auto;
-    padding: 28px 32px;
+    padding: 1.75rem 2rem;
     flex: 1 0 auto;
 }
 
@@ -578,7 +569,7 @@ footer {
     min-height: 44px;
 }
 
-@media (min-width: 1025px) {
+@media (min-width: 1024px) {
     .rh-admin-page-header {
         flex-direction: row;
         align-items: flex-start;
@@ -2744,7 +2735,7 @@ table.mobile-enhanced td[data-label="Actions"] .actions-row .actions-more-toggle
 
 /* Sticky header for desktop (header itself is already sticky in base styles;
    we just add a backdrop blur for the modern look). */
-@media (min-width: 1025px) {
+@media (min-width: 1024px) {
     .admin-header {
         backdrop-filter: blur(8px);
     }
@@ -4404,7 +4395,7 @@ a.ops-card:focus-visible {
     --admin-sidebar-text: #f3f4f6;
 }
 
-@media (min-width: 1025px) {
+@media (min-width: 1024px) {
     body {
         --admin-current-sidebar-width: var(--admin-sidebar-width);
     }
@@ -5265,7 +5256,7 @@ a.ops-card:focus-visible {
     display: none !important;
 }
 
-@media (min-width: 1025px) {
+@media (min-width: 1024px) {
     body.admin-sidebar-collapsed .admin-nav {
         padding: 14px 8px !important;
         /* Keep icon rail controls visually centered even when a vertical
@@ -5728,7 +5719,7 @@ body>:is(.content,
     margin-top: var(--admin-header-height, 74px) !important;
 }
 
-@media (min-width: 1025px) {
+@media (min-width: 1024px) {
     body>#rh-admin-page {
         margin-left: var(--admin-current-sidebar-width) !important;
         width: calc(100% - var(--admin-current-sidebar-width)) !important;

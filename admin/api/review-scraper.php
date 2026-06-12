@@ -953,3 +953,4 @@ if ($action === 'import') {
 }
 
 json_error('Unsupported action', 400);
+

@@ -155,3 +155,4 @@ try {
     error_log('nav-sidebar-state.php: ' . $e->getMessage());
     nsbs_error('Unable to save sidebar preferences', 500);
 }
+

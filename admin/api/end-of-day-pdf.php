@@ -665,3 +665,4 @@ $pdf->Cell(0, 4, $site_name . '  |  EOD Report  |  ' . $date . '  |  Generated '
 $filename = 'eod-report-' . $date . '.pdf';
 $pdf->Output($filename, 'D');
 exit;
+

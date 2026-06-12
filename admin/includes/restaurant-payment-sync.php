@@ -53,3 +53,4 @@ function rh_sync_restaurant_payment(PDO $pdo, int $orderId, string $reference, ?
         $recordedBy,
     ]);
 }
+

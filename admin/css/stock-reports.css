@@ -1,3 +1,7 @@
+/* Page-specific styles only.
+   Shared components (buttons, tables, cards, modals) → admin-components.css
+   Responsive rules → admin-responsive.css
+   Design tokens → /css/base/variables.css */
 /* Stock Reports — admin/stock-reports.php */
 
 .stock-reports__title {
@@ -275,3 +279,4 @@
         text-align: left;
     }
 }
+

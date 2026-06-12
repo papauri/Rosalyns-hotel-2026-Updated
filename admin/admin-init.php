@@ -89,3 +89,4 @@ if ($_required_permission !== null && !hasPermission($user['id'], $_required_per
 require_once __DIR__ . '/includes/audit-functions.php';
 // ---- Offline replay logging helpers (rh_log_offline_replay, rh_stamp_order_offline) ----
 require_once __DIR__ . '/includes/offline-log.php';
+

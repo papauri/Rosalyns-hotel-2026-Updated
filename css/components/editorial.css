@@ -1886,7 +1886,7 @@
 }
 
 /* Mobile (max 767px) */
-@media (max-width: 767px) {
+@media (max-width: 768px) {
     .editorial-about {
         padding: var(--space-12, 3rem) 0;
     }

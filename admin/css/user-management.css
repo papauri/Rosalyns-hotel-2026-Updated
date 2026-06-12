@@ -1,3 +1,7 @@
+/* Page-specific styles only.
+   Shared components (buttons, tables, cards, modals) → admin-components.css
+   Responsive rules → admin-responsive.css
+   Design tokens → /css/base/variables.css */
 /* User Management — admin/user-management.php */
 
 .user-management-container {
@@ -1032,3 +1036,4 @@
         align-items: flex-start;
     }
 }
+

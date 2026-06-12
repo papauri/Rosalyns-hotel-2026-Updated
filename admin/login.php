@@ -467,3 +467,4 @@ $site_name = getSetting('site_name');
 </body>
 
 </html>
+

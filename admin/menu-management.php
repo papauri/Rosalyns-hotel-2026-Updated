@@ -302,7 +302,6 @@ if ($stockReady) {
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,300;0,400;0,500;0,600;1,300;1,400;1,500&family=Jost:wght@300;400;500;600&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="css/admin-styles.css">
-    <link rel="stylesheet" href="css/admin-responsive-enhancements.css">
     <link rel="stylesheet" href="css/admin-components.css">
     <link rel="stylesheet" href="css/menu-management.css">
     <link rel="stylesheet" href="css/facebook-settings.css">
@@ -1722,3 +1721,4 @@ if ($stockReady) {
             }());
         </script>
     <?php endif; ?>
+

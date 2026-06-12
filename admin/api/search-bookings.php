@@ -199,3 +199,4 @@ try {
     error_log("Search Bookings API Error: " . $e->getMessage());
     echo json_encode(['error' => 'Database error', 'bookings' => []]);
 }
+

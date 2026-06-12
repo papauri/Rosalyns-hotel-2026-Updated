@@ -233,7 +233,7 @@ main>div>[class*="hero"]:first-child {
 }
 
 /* Mobile responsive */
-@media (max-width: 1023px) {
+@media (max-width: 1024px) {
     .header__toggle {
         display: flex;
         align-items: center;

@@ -296,25 +296,7 @@ if ($_admin_back_target !== null) {
             }
         } catch (e) {}
     })();
-    // PWA: ensure viewport-fit=cover and iOS standalone meta tags on every admin page
-    (function() {
-        var vp = document.querySelector('meta[name="viewport"]');
-        if (vp && vp.content.indexOf('viewport-fit') === -1) {
-            vp.content += ', viewport-fit=cover';
-        }
-        [
-            ['mobile-web-app-capable', 'yes'],
-            ['apple-mobile-web-app-capable', 'yes'],
-            ['apple-mobile-web-app-status-bar-style', 'black-translucent']
-        ].forEach(function(p) {
-            if (!document.querySelector('meta[name="' + p[0] + '"]')) {
-                var m = document.createElement('meta');
-                m.name = p[0];
-                m.content = p[1];
-                document.head.appendChild(m);
-            }
-        });
-    })();
+    // PWA settings: configure install prompt dismiss period
     window.RH_PWA_DISMISS_DAYS = <?php echo (int)getSetting('pwa_install_dismiss_days', '14'); ?>;
     // Inject manifest link if not already in <head> — required for beforeinstallprompt to fire.
     (function() {
@@ -516,3 +498,4 @@ if ($_admin_back_target !== null) {
     <script>
         window._rhCsrf = <?= json_encode($csrf_token ?? '') ?>;
     </script>
+

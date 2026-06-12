@@ -206,3 +206,4 @@ if (!$isCli042) {
     echo "</pre>";
     echo "<p style='font-family:sans-serif;'><a href='../accounting-dashboard.php'>← Accounting Dashboard</a> &nbsp;|&nbsp; <a href='../credit-notes.php'>→ Credit Notes</a></p>";
 }
+

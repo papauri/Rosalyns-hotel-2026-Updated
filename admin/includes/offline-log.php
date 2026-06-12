@@ -85,3 +85,4 @@ if (!function_exists('rh_stamp_order_offline')) {
         } catch (Throwable $e) { error_log('[offline-log] stamp failed: ' . $e->getMessage()); }
     }
 }
+

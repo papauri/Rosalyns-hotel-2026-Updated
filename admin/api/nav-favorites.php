@@ -133,3 +133,4 @@ try {
     error_log('nav-favorites.php: ' . $e->getMessage());
     nav_favorites_error('Unable to save favorites right now', 500);
 }
+

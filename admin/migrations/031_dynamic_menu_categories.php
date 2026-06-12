@@ -340,3 +340,4 @@ mig_out('=== Migration 031 complete ===');
 if (!$is_cli) {
     echo '</pre>';
 }
+

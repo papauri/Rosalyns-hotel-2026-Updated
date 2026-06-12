@@ -51,3 +51,4 @@ try {
     echo "Migration 038 FAILED: " . $e->getMessage() . "\n";
     exit(1);
 }
+

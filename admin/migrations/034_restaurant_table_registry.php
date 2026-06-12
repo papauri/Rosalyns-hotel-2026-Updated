@@ -79,3 +79,4 @@ try {
     out034('Migration 034 FAILED: ' . $e->getMessage(), 'fail');
     exit(1);
 }
+

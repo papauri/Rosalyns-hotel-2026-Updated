@@ -94,3 +94,4 @@ try {
     out030('FAIL: '.$e->getMessage(), 'err');
     exit(1);
 }
+

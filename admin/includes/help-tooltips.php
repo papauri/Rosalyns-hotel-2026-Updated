@@ -382,3 +382,4 @@ define('RH_HELP_TOOLTIPS_RENDERED', true);
         applyState();
     })();
 </script>
+

@@ -95,3 +95,4 @@ if (!function_exists('requireApiAnyPermission')) {
         api_json_forbidden();
     }
 }
+

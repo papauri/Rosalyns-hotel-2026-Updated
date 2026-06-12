@@ -1052,7 +1052,6 @@ if (in_array($user['role'] ?? '', ['admin', 'manager'], true)) {
     <link rel="manifest" href="manifest.php">
     <link href="https://fonts.googleapis.com/css2?family=Jost:wght@400;500;600;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.7.2/css/all.min.css">
-    <link rel="stylesheet" href="css/admin-responsive-enhancements.css">
     <link rel="stylesheet" href="css/pos-overrides.css">
     <script src="js/station-sounds.js"></script>
 </head>
@@ -6944,3 +6943,4 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
 </body>
 
 </html>
+

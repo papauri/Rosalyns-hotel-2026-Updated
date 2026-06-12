@@ -257,7 +257,7 @@
 }
 
 /* Narrow 2-column: tighten side panel at mid-range viewports */
-@media (max-width: 1280px) and (min-width: 1025px) {
+@media (max-width: 1280px) and (min-width: 1024px) {
     .api-keys-page .api-keys-layout {
         grid-template-columns: minmax(0, 2fr) minmax(0, 0.85fr);
     }

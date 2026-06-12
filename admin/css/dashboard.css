@@ -1,3 +1,7 @@
+/* Page-specific styles only.
+   Shared components (buttons, tables, cards, modals) → admin-components.css
+   Responsive rules → admin-responsive.css
+   Design tokens → /css/base/variables.css */
 /* Dashboard page — stat cards, ops grid, widgets */
 
 /* Interactive stat-cards: clickable anchors that look like the stat cards */
@@ -852,3 +856,4 @@ body.dashboard-insight-open {
         gap: 10px;
     }
 }
+

@@ -20,3 +20,4 @@ try {
     out020('FAIL: ' . $e->getMessage(), 'err');
     exit(1);
 }
+

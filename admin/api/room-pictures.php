@@ -508,3 +508,4 @@ try {
     error_log("Error in room-pictures.php: " . $e->getMessage());
     sendError('An error occurred', 500, $e->getMessage());
 }
+

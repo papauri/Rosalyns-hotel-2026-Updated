@@ -491,7 +491,6 @@ $canConsolidate = in_array($user['role'] ?? '', ['admin', 'manager'], true);
     <title>Receipt — <?php echo htmlspecialchars($order['reference']); ?></title>
     <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@400;500;600&family=Jost:wght@300;400;500;600&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="css/admin-styles.css">
-    <link rel="stylesheet" href="css/admin-responsive-enhancements.css">
     <link rel="stylesheet" href="css/admin-components.css">
     <link rel="stylesheet" href="css/stock-receipt.css">
 </head>
@@ -606,3 +605,4 @@ $canConsolidate = in_array($user['role'] ?? '', ['admin', 'manager'], true);
 </body>
 
 </html>
+

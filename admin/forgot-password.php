@@ -232,3 +232,4 @@ $site_name = getSetting('site_name');
     </div>
 </body>
 </html>
+

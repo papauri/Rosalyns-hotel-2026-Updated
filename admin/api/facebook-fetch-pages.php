@@ -130,3 +130,4 @@ if ($isPageTokenError) {
 $fbError = (string) ($decoded['error']['message'] ?? ('HTTP ' . $httpCode));
 rh_log_event('facebook', 'warning', 'Failed to fetch Facebook pages', ['error' => $fbError]);
 echo json_encode(['success' => false, 'error' => 'Facebook API error: ' . $fbError, 'code' => $httpCode]);
+

@@ -176,3 +176,4 @@ function detectOverpayment(PDO $pdo, int $bookingId, float $newPaymentAmount): a
         'booking'  => $b,
     ];
 }
+

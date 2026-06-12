@@ -91,3 +91,4 @@ $pdo->exec("
 ");
 
 echo "Migration 041 complete: room combinations and booking room ledger are ready.\n";
+

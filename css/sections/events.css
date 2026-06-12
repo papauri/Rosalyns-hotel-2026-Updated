@@ -589,7 +589,7 @@
     }
 }
 
-@media (max-width: 767px) {
+@media (max-width: 768px) {
     .events-showcase__grid,
     .conference-showcase__grid {
         grid-template-columns: 1fr;

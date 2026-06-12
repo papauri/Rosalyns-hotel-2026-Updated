@@ -13,3 +13,4 @@ $STATION_ICON  = 'fa-mug-hot';
 $STATION_COLOR = '#6f4e37';
 $STATION_ROLE  = 'coffee_staff';
 require __DIR__ . '/kds.php';
+

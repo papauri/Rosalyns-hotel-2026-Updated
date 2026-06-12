@@ -32,3 +32,4 @@ unset($_SESSION['admin_full_name']);
 session_destroy();
 header('Location: login.php');
 exit;
+

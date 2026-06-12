@@ -73,3 +73,4 @@ try {
     out025('FAILED: ' . $e->getMessage(), 'err');
     exit(1);
 }
+

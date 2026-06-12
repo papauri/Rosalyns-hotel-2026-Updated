@@ -83,3 +83,4 @@ try {
     echo "<p>Migration failed. Please check the error message above.</p>";
     exit;
 }
+

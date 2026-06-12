@@ -71,3 +71,4 @@ try {
     header('Content-Type: application/json');
     echo json_encode(['error' => 'Failed to load audit history', 'logs' => []]);
 }
+

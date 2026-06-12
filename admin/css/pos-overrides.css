@@ -1,3 +1,7 @@
+/* Page-specific styles only.
+   Shared components (buttons, tables, cards, modals) → admin-components.css
+   Responsive rules → admin-responsive.css
+   Design tokens → /css/base/variables.css */
 /* POS Till — admin/pos.php
    Dark-themed touchscreen POS interface.
    Brand gold = var(--color-primary, #8A775F).
@@ -486,8 +490,8 @@ a.recent-toggle span {
     }
 }
 
-/* 1025px–1540px: tb-actions wraps below brand — always visible, never overlaps brand */
-@media (min-width: 1025px) and (max-width: 1540px) {
+/* 1024px–1540px: tb-actions wraps below brand — always visible, never overlaps brand */
+@media (min-width: 1024px) and (max-width: 1540px) {
     .till-bar .tb-row1 {
         height: auto;
         min-height: 72px;
@@ -4448,3 +4452,4 @@ a.recent-toggle span {
                             border-radius: 999px;
                         }
                     }
+

@@ -34,3 +34,4 @@ echo json_encode([
     'success' => true,
     'permissions' => $permissions
 ]);
+

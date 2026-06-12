@@ -39,3 +39,4 @@ foreach ($rows as [$key, $value]) {
 }
 
 echo "\nDone. $count new row(s) inserted.\n";
+

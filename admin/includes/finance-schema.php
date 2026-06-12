@@ -89,3 +89,4 @@ if (!function_exists('finance_payment_transaction_column')) {
         );
     }
 }
+

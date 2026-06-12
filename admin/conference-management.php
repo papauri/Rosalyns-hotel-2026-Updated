@@ -608,7 +608,6 @@ if ($facebook_settings_css_version === '' || $facebook_settings_css_version === 
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,300;0,400;0,500;0,600;1,300;1,400;1,500&family=Jost:wght@300;400;500;600&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="css/admin-styles.css">
-    <link rel="stylesheet" href="css/admin-responsive-enhancements.css">
     <link rel="stylesheet" href="css/admin-components.css">
     <link rel="stylesheet" href="css/conference-management.css?v=<?php echo urlencode($conference_css_version); ?>">
     <link rel="stylesheet" href="css/facebook-settings.css?v=<?php echo urlencode($facebook_settings_css_version); ?>">
@@ -1975,3 +1974,4 @@ if ($facebook_settings_css_version === '' || $facebook_settings_css_version === 
 </body>
 
 </html>
+

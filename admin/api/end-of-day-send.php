@@ -919,3 +919,4 @@ echo json_encode([
         : ($result['message'] ?? 'Email send failed'),
     'error'   => $result['success'] ? null : ($result['message'] ?? 'Email send failed'),
 ]);
+

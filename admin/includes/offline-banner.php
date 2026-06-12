@@ -17,3 +17,4 @@ if (!isset($GLOBALS['__rh_offline_banner_emitted'])) {
 ?>
 <script src="<?php echo htmlspecialchars($offlineQueueSrc, ENT_QUOTES, 'UTF-8'); ?>" defer></script>
 <?php } ?>
+

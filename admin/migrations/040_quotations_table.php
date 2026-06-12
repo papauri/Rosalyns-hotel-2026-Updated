@@ -39,3 +39,4 @@ $pdo->exec("
 ");
 
 echo "Migration 040 complete: quotations table created.\n";
+

@@ -426,3 +426,4 @@ try {
     error_log("Error in reviews.php: " . $e->getMessage());
     sendError('An error occurred', 500, $e->getMessage());
 }
+

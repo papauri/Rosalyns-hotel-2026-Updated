@@ -13,3 +13,4 @@ $STATION_ICON  = 'fa-cocktail';
 $STATION_COLOR = '#5e35b1';
 $STATION_ROLE  = 'bar_staff';
 require __DIR__ . '/kds.php';
+

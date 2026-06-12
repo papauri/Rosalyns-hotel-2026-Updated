@@ -1,3 +1,7 @@
+/* Page-specific styles only.
+   Shared components (buttons, tables, cards, modals) → admin-components.css
+   Responsive rules → admin-responsive.css
+   Design tokens → /css/base/variables.css */
 /**
  * End of Day Report — admin dashboard styles
  * Refined, responsive, table-safe layout for operations + finance snapshots.
@@ -1217,3 +1221,4 @@
         break-inside: avoid;
     }
 }
+

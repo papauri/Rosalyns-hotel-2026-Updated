@@ -1,4 +1,4 @@
-﻿<?php
+<?php
 /**
  * Order lifecycle viewer.
  *
@@ -410,3 +410,4 @@ function fmt_dur(?int $from, ?int $to) { if (!$from || !$to) return '—'; $s = 
 </script>
 </body>
 </html>
+

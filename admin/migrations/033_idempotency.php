@@ -93,3 +93,4 @@ try {
     out033('Migration 033 FAILED: ' . $e->getMessage(), 'fail');
     exit(1);
 }
+

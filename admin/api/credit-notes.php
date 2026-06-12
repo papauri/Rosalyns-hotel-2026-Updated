@@ -270,3 +270,4 @@ try {
     http_response_code(400);
     echo json_encode(['success' => false, 'error' => $e->getMessage(), 'code' => 400]);
 }
+

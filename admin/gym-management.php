@@ -173,7 +173,6 @@ if ($gym_css_version === '' || $gym_css_version === '0') {
     <link rel="stylesheet" href="css/admin-styles.css">
     <link rel="stylesheet" href="css/admin-components.css">
     <link rel="stylesheet" href="css/gym-management.css?v=<?php echo urlencode($gym_css_version); ?>">
-    <link rel="stylesheet" href="css/admin-responsive-enhancements.css">
     <style>
         /* Final page-scoped fallback so gym cards keep standardized icon sizing. */
         #rh-admin-page .gym-card-icon-area {
@@ -1053,3 +1052,4 @@ if ($gym_css_version === '' || $gym_css_version === '0') {
 </body>
 
 </html>
+

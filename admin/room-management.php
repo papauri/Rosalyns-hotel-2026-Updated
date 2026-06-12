@@ -592,7 +592,6 @@ $fb_rooms_posting_on = getSetting('facebook_posting_enabled', '0') === '1'
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,300;0,400;0,500;0,600;1,300;1,400;1,500&family=Jost:wght@300;400;500;600&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="css/admin-styles.css">
-    <link rel="stylesheet" href="css/admin-responsive-enhancements.css">
     <link rel="stylesheet" href="css/admin-components.css">
     <link rel="stylesheet" href="css/room-management.css">
     <link rel="stylesheet" href="css/facebook-settings.css">
@@ -2307,3 +2306,4 @@ $fb_rooms_posting_on = getSetting('facebook_posting_enabled', '0') === '1'
         </div>
 
         <?php require_once 'includes/admin-footer.php'; ?>
+

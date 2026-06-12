@@ -250,3 +250,4 @@ $site_name = getSetting('site_name');
     </script>
 </body>
 </html>
+
