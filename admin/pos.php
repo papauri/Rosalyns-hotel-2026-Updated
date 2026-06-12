@@ -6581,10 +6581,10 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
 
                     // Clear payment inputs, keep split config, rebuild ledger
                     ptResetForm();
-                    ptUpdateDisplay(); // calls ptBuildLedger() internally
+                    ptUpdateDisplay(); // sets correct btn label + calls ptBuildLedger()
 
                     btn.disabled = false;
-                    btn.innerHTML = origTxt;
+                    // Do NOT restore origTxt — ptUpdateDisplay() already set the correct label
                     setTimeout(() => { refreshShiftStats(); }, 300);
                     return;
                 }
