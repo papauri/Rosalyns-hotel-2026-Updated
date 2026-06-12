@@ -1730,7 +1730,7 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
                                     <?php if ($isStale): ?><div class="tc-stale-warn"><i class="fas fa-triangle-exclamation"></i> Previous shift</div><?php endif; ?>
                                 </div>
                                 <div class="tc-actions">
-                                    <button type="button" onclick="openPayForTab(<?php echo (int)$t['id']; ?>, <?php echo (float)$t['total_amount']; ?>, <?php echo json_encode((string)$t['reference']); ?>, <?php echo $canSettle ? 'true' : 'false'; ?>)"
+                                    <button type="button" onclick="openPayForTab(<?php echo (int)$t['id']; ?>, <?php echo (float)$t['total_amount']; ?>, <?php echo json_encode((string)$t['reference']); ?>, <?php echo $canSettle ? 'true' : 'false'; ?>, <?php echo (int)($t['split_count'] ?? 1); ?>, <?php echo (int)($t['split_paid_count'] ?? 0); ?>)"
                                         class="tc-btn tc-btn-settle"
                                         data-help="Settle tab|Close this tab — take payment and mark the order as paid.">
                                         <i class="fas fa-credit-card"></i> Settle
@@ -1891,11 +1891,8 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
                     <!-- Amount due (= share + tip, what this person pays) -->
                     <div style="font-size:30px;font-weight:700;text-align:center;margin:6px 0 14px;color:#1f2937;" id="payTabAmountDueDisplay"><?php echo $currency_symbol; ?> 0.00</div>
 
-                    <!-- Intermediate split confirmed strip -->
-                    <div id="payTabSplitConfirmed" style="display:flex;">
-                        <i class="fas fa-check-circle"></i>
-                        <span id="payTabSplitConfirmedText"></span>
-                    </div>
+                    <!-- Running split ledger (appends a row per person paid) -->
+                    <div id="payTabSplitLedger" style="display:none;margin-bottom:10px;"></div>
 
                     <!-- Split bill selector -->
                     <div style="background:#f8f9fa;border-radius:8px;padding:10px 12px;margin-bottom:10px;">
@@ -5260,10 +5257,13 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
                             <span class="tc-total-label">Total</span>
                             <div class="tc-total">${currencySymbol} ${fmtMoney(t.total_amount)}</div>
                         </div>
+                        ${(parseInt(t.split_count||1) > 1 && parseInt(t.split_paid_count||0) > 0)
+                            ? `<div style="background:#fffbeb;border:1px solid #fcd34d;border-radius:5px;padding:3px 8px;font-size:11px;font-weight:600;color:#92400e;"><i class="fas fa-users" style="margin-right:3px;"></i>Split ${parseInt(t.split_paid_count||0)}/${parseInt(t.split_count||1)} paid</div>`
+                            : (parseInt(t.split_count||1) > 1 ? `<div style="background:#f0f9ff;border:1px solid #bae6fd;border-radius:5px;padding:3px 8px;font-size:11px;font-weight:600;color:#0369a1;"><i class="fas fa-users" style="margin-right:3px;"></i>Split ×${parseInt(t.split_count||1)}</div>` : '')}
                         ${isStale ? '<div class="tc-stale-warn"><i class="fas fa-triangle-exclamation"></i> Previous shift</div>' : ''}
                     </div>
                     <div class="tc-actions">
-                        <button type="button" onclick="openPayForTab(${orderId}, ${parseFloat(t.total_amount || 0) || 0}, ${actionRef}, ${canSettle ? 'true' : 'false'})" class="tc-btn tc-btn-settle" data-help="Settle tab|Close this tab — take payment and mark the order as paid."><i class="fas fa-credit-card"></i> Settle</button>
+                        <button type="button" onclick="openPayForTab(${orderId}, ${parseFloat(t.total_amount || 0) || 0}, ${actionRef}, ${canSettle ? 'true' : 'false'}, ${parseInt(t.split_count||1)||1}, ${parseInt(t.split_paid_count||0)||0})" class="tc-btn tc-btn-settle" data-help="Settle tab|Close this tab — take payment and mark the order as paid."><i class="fas fa-credit-card"></i> Settle</button>
                         <button type="button" onclick="openTabDetail(${orderId})" class="tc-btn tc-btn-detail" data-help="View details|See all items, kitchen status, and the full audit trail for this tab."><i class="fas fa-receipt"></i> Details</button>
                         <button type="button" onclick="openPosPageModal('stock-receipt.php?id=${orderId}&print=1&kot=1','Print KOT','fas fa-print')" class="tc-btn tc-btn-kot" data-help="Print KOT|Reprint the kitchen ticket for this open tab."><i class="fas fa-print"></i> KOT</button>
                         ${canCancelBeforePrep ? `<button type="button" onclick="cancelOpenOrder(${orderId}, ${actionRef})" class="tc-btn tc-btn-cancel" data-help="Cancel before prep|Cancels this order only while all items are still pending. Nothing has been cooked yet."><i class="fas fa-circle-xmark"></i> Cancel</button>` : ''}
@@ -6323,6 +6323,7 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
             orderId: 0, total: 0, ref: '',
             ways: 1,        // how many ways to split (1 = off)
             current: 1,     // which split leg we're currently collecting (1-based)
+            paid: [],       // { person, method, methodLabel, amount, tip, change } per completed leg
         };
 
         function ptUpdateDisplay() {
@@ -6364,11 +6365,80 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
 
             // Refresh change calculation
             updTabChange();
+            // Rebuild the running ledger
+            ptBuildLedger();
+        }
+
+        function ptBuildLedger() {
+            const ledger = document.getElementById('payTabSplitLedger');
+            if (!ledger) return;
+            if (_pt.ways <= 1) { ledger.style.display = 'none'; return; }
+
+            const sym = currencySymbol;
+            const share = Math.round(_pt.total / _pt.ways * 100) / 100;
+            const mLabel = { cash: 'Cash', mobile_money: 'Mobile', card_manual: 'Card' };
+
+            // Lock / unlock split-way buttons
+            document.querySelectorAll('#payTabSplitWays .split-way-btn').forEach(b => {
+                const lock = _pt.paid.length > 0;
+                b.disabled = lock;
+                b.style.opacity = lock ? '0.45' : '';
+                b.title = lock ? 'Cannot change while split is in progress' : '';
+            });
+
+            // Progress dots
+            let html = '<div style="display:flex;align-items:center;gap:4px;margin-bottom:8px;">';
+            for (let i = 0; i < _pt.ways; i++) {
+                if (i < _pt.paid.length)        html += '<span style="color:#22c55e;font-size:13px;">●</span>';
+                else if (i === _pt.paid.length) html += '<span style="color:#92400e;font-size:13px;">●</span>';
+                else                             html += '<span style="color:#d1d5db;font-size:13px;">○</span>';
+            }
+            const remaining = _pt.ways - _pt.paid.length;
+            html += `<span style="font-size:11px;color:#6c757d;margin-left:6px;">${_pt.paid.length} paid &middot; ${remaining} left</span></div>`;
+
+            // Person rows
+            html += '<div style="border-radius:6px;overflow:hidden;border:1px solid #e5e7eb;">';
+            for (let i = 0; i < _pt.ways; i++) {
+                const pNum = i + 1;
+                const border = i < _pt.ways - 1 ? 'border-bottom:1px solid #e5e7eb;' : '';
+                if (i < _pt.paid.length) {
+                    const p = _pt.paid[i];
+                    const ml = p.methodLabel || (mLabel[p.method] || p.method);
+                    const tipNote = p.tip > 0 ? `<span style="color:#059669;font-size:10px;margin-left:4px;">+tip ${sym} ${fmtMoney(p.tip)}</span>` : '';
+                    const chgNote = p.change > 0 ? `<span style="color:#1d4ed8;font-size:10px;margin-left:4px;">chg ${sym} ${fmtMoney(p.change)}</span>` : '';
+                    html += `<div style="display:flex;align-items:center;gap:6px;padding:8px 10px;background:#f0fdf4;${border}">
+                        <span style="color:#22c55e;flex-shrink:0;">✓</span>
+                        <span style="font-size:12px;font-weight:700;color:#166534;min-width:64px;flex-shrink:0;">Person ${pNum}</span>
+                        <span style="font-size:11px;color:#374151;">${escHtml(ml)}</span>
+                        <span style="margin-left:auto;font-size:12px;font-weight:700;color:#166534;white-space:nowrap;">${sym} ${fmtMoney(p.amount)}</span>
+                        ${tipNote}${chgNote}
+                    </div>`;
+                } else if (i === _pt.paid.length) {
+                    html += `<div style="display:flex;align-items:center;gap:6px;padding:8px 10px;background:#fffbeb;${border}">
+                        <span style="color:#92400e;flex-shrink:0;">→</span>
+                        <span style="font-size:12px;font-weight:700;color:#92400e;min-width:64px;flex-shrink:0;">Person ${pNum}</span>
+                        <span style="font-size:11px;color:#92400e;font-style:italic;">paying now</span>
+                        <span style="margin-left:auto;font-size:12px;color:#92400e;white-space:nowrap;">${sym} ${fmtMoney(share)} + tip</span>
+                    </div>`;
+                } else {
+                    html += `<div style="display:flex;align-items:center;gap:6px;padding:8px 10px;background:#fff;${border}">
+                        <span style="color:#d1d5db;flex-shrink:0;">○</span>
+                        <span style="font-size:12px;color:#9ca3af;min-width:64px;flex-shrink:0;">Person ${pNum}</span>
+                        <span style="font-size:11px;color:#d1d5db;">pending</span>
+                        <span style="margin-left:auto;font-size:12px;color:#d1d5db;white-space:nowrap;">${sym} ${fmtMoney(share)}</span>
+                    </div>`;
+                }
+            }
+            html += '</div>';
+
+            ledger.innerHTML = html;
+            ledger.style.display = '';
         }
 
         function ptSetSplitWays(n) {
             _pt.ways = n;
             _pt.current = 1;
+            _pt.paid = [];
             document.getElementById('payTabSplitCount').value = n;
             document.getElementById('payTabSplitNumber').value = 1;
             document.querySelectorAll('#payTabSplitWays .split-way-btn').forEach(b => b.classList.toggle('active', parseInt(b.dataset.ways) === n));
@@ -6411,11 +6481,9 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
             if (l4El) l4El.value = '';
             const authEl = document.querySelector('#ext-tab-card_manual input[name="card_auth_code"]');
             if (authEl) authEl.value = '';
-            const confirmed = document.getElementById('payTabSplitConfirmed');
-            if (confirmed) confirmed.style.display = 'none';
         }
 
-        function openPayForTab(orderId, total, ref, canSettle = true) {
+        function openPayForTab(orderId, total, ref, canSettle = true, existingSplitCount = 1, existingSplitPaid = 0) {
             if (!canSettle) {
                 posToastReady('Wait until all items are served before settling the tab.', true);
                 return;
@@ -6426,22 +6494,35 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
             _pt.orderId = orderId;
             _pt.total = total;
             _pt.ref = ref;
-            _pt.ways = 1;
-            _pt.current = 1;
+            _pt.paid = [];
 
             document.getElementById('payTabOrderId').value = orderId;
-            document.getElementById('payTabSplitCount').value = 1;
-            document.getElementById('payTabSplitNumber').value = 1;
-
-            // Display
             document.getElementById('payTabRef').textContent = ref;
             document.getElementById('payTabTotal').textContent = currencySymbol + ' ' + fmtMoney(total);
             document.getElementById('payTabTotal').dataset.total = total;
             const otr = document.getElementById('payTabOrderTotalRow');
-            if (otr) otr.style.display = 'none';
 
-            // Reset split ways to "Off"
-            document.querySelectorAll('#payTabSplitWays .split-way-btn').forEach(b => b.classList.toggle('active', b.dataset.ways === '1'));
+            if (existingSplitCount > 1 && existingSplitPaid > 0) {
+                // Tab is already mid-split (e.g. browser was refreshed). Pre-populate.
+                _pt.ways = existingSplitCount;
+                _pt.current = existingSplitPaid + 1;
+                document.getElementById('payTabSplitCount').value = existingSplitCount;
+                document.getElementById('payTabSplitNumber').value = existingSplitPaid + 1;
+                document.querySelectorAll('#payTabSplitWays .split-way-btn').forEach(b => b.classList.toggle('active', parseInt(b.dataset.ways) === existingSplitCount));
+                if (otr) otr.style.display = '';
+                // Populate ledger with placeholder rows for already-paid legs
+                const share = Math.round(total / existingSplitCount * 100) / 100;
+                for (let i = 0; i < existingSplitPaid; i++) {
+                    _pt.paid.push({ person: i + 1, method: '', methodLabel: 'Previously paid', amount: share, tip: 0, change: 0 });
+                }
+            } else {
+                _pt.ways = 1;
+                _pt.current = 1;
+                document.getElementById('payTabSplitCount').value = 1;
+                document.getElementById('payTabSplitNumber').value = 1;
+                document.querySelectorAll('#payTabSplitWays .split-way-btn').forEach(b => b.classList.toggle('active', b.dataset.ways === '1'));
+                if (otr) otr.style.display = 'none';
+            }
 
             ptResetForm();
             ptUpdateDisplay();
@@ -6483,31 +6564,24 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
                 }
 
                 if (j.split_intermediate) {
-                    // Intermediate split: advance to next person, keep modal open
+                    // Push this leg into the running ledger
+                    const mLabel = { cash: 'Cash', mobile_money: 'Mobile', card_manual: 'Card' };
+                    _pt.paid.push({
+                        person:      j.split_paid,
+                        method:      j.payment_method,
+                        methodLabel: mLabel[j.payment_method] || j.payment_method,
+                        amount:      (parseFloat(j.split_amount) || 0) + (parseFloat(j.tip_amount) || 0),
+                        tip:         parseFloat(j.tip_amount) || 0,
+                        change:      parseFloat(j.change) || 0,
+                    });
+
+                    // Advance to next person
                     _pt.current = j.split_paid + 1;
                     document.getElementById('payTabSplitNumber').value = _pt.current;
 
-                    // Show brief confirmation strip
-                    const methodNames = { cash: 'Cash', mobile_money: 'Mobile', card_manual: 'Card' };
-                    const sym = currencySymbol;
-                    const amt = (parseFloat(j.split_amount) || 0) + (parseFloat(j.tip_amount) || 0);
-                    const changeNote = j.change > 0 ? ' · Change ' + sym + ' ' + fmtMoney(j.change) : '';
-                    const stripText = 'Split ' + j.split_paid + '/' + j.split_total + ' paid — ' + (methodNames[j.payment_method] || j.payment_method) + ' ' + sym + ' ' + fmtMoney(amt) + changeNote;
-                    const confirmed = document.getElementById('payTabSplitConfirmed');
-                    const confirmedText = document.getElementById('payTabSplitConfirmedText');
-                    if (confirmed && confirmedText) {
-                        confirmedText.textContent = stripText;
-                        confirmed.style.display = 'flex';
-                    }
-
-                    // Clear payment fields for next person, keep split configuration
+                    // Clear payment inputs, keep split config, rebuild ledger
                     ptResetForm();
-                    ptUpdateDisplay();
-                    // Restore the confirmed strip (ptResetForm hides it)
-                    if (confirmed && confirmedText) {
-                        confirmedText.textContent = stripText;
-                        confirmed.style.display = 'flex';
-                    }
+                    ptUpdateDisplay(); // calls ptBuildLedger() internally
 
                     btn.disabled = false;
                     btn.innerHTML = origTxt;
@@ -6515,7 +6589,20 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
                     return;
                 }
 
-                // Final payment (single or last split)
+                // Final payment (single or last split) — push last leg then show receipt
+                if (_pt.ways > 1) {
+                    const mLabelF = { cash: 'Cash', mobile_money: 'Mobile', card_manual: 'Card' };
+                    const lastShare = Math.round(parseFloat(j.total || 0) / _pt.ways * 100) / 100;
+                    _pt.paid.push({
+                        person:      _pt.current,
+                        method:      j.payment_method,
+                        methodLabel: mLabelF[j.payment_method] || j.payment_method,
+                        amount:      lastShare + (parseFloat(j.tip_amount) || 0),
+                        tip:         parseFloat(j.tip_amount) || 0,
+                        change:      parseFloat(j.change) || 0,
+                    });
+                    j._splitLegs = _pt.paid.slice(); // pass to receipt modal
+                }
                 closePayTabOverlay();
                 showReceiptModal(j);
                 setTimeout(() => { refreshShiftStats(); refreshOpenTabs(false); }, 400);
@@ -6529,30 +6616,57 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
         function showReceiptModal(data) {
             _receiptOrderId = parseInt(data.order_id, 10) || 0;
             const sym = currencySymbol;
-            const tip = parseFloat(data.tip_amount) || 0;
-            const grandTotal = (parseFloat(data.total) || 0) + tip;
             const splitCount = parseInt(data.split_count, 10) || 1;
-            const methodLabel = {
-                cash: 'Cash',
-                mobile_money: 'Mobile Money',
-                card_manual: 'Card (manual)',
-            }[data.payment_method] || data.payment_method;
+            const splitLegs = Array.isArray(data._splitLegs) ? data._splitLegs : [];
+            const mLabel = { cash: 'Cash', mobile_money: 'Mobile Money', card_manual: 'Card (manual)' };
+
+            // For split orders, sum all tips from all legs; for single, use data.tip_amount
+            const totalTips = splitLegs.length > 1
+                ? splitLegs.reduce((s, p) => s + (p.tip || 0), 0)
+                : (parseFloat(data.tip_amount) || 0);
+            const grandTotal = (parseFloat(data.total) || 0) + totalTips;
+
+            // Method label: for split, show "Split ×N" instead of a single method
+            const displayMethod = splitCount > 1 ? `Split ×${splitCount}` : (mLabel[data.payment_method] || data.payment_method);
 
             const titleSuffix = splitCount > 1 ? ' — split ×' + splitCount : '';
             document.getElementById('rmTitle').textContent = 'Payment received — ' + (data.reference || '') + titleSuffix;
-            document.getElementById('rmSubtitle').textContent = methodLabel + ' · ' + sym + ' ' + fmtMoney(grandTotal);
+            document.getElementById('rmSubtitle').textContent = displayMethod + ' · ' + sym + ' ' + fmtMoney(grandTotal);
 
             let summaryHtml = `
                 <div><span style="color:#6c757d;font-size:11px;font-weight:600;text-transform:uppercase;">Order total</span><div style="font-size:20px;font-weight:700;color:#166534;">${sym} ${fmtMoney(data.total)}</div></div>
-                <div><span style="color:#6c757d;font-size:11px;font-weight:600;text-transform:uppercase;">Method</span><div style="font-weight:600;color:#374151;">${escHtml(methodLabel)}</div></div>`;
-            if (tip > 0) {
-                summaryHtml += `<div><span style="color:#6c757d;font-size:11px;font-weight:600;text-transform:uppercase;">Tip</span><div style="font-weight:600;color:#059669;">${sym} ${fmtMoney(tip)}</div></div>
+                <div><span style="color:#6c757d;font-size:11px;font-weight:600;text-transform:uppercase;">Method</span><div style="font-weight:600;color:#374151;">${escHtml(displayMethod)}</div></div>`;
+
+            if (totalTips > 0) {
+                summaryHtml += `<div><span style="color:#6c757d;font-size:11px;font-weight:600;text-transform:uppercase;">Tips</span><div style="font-weight:600;color:#059669;">${sym} ${fmtMoney(totalTips)}</div></div>
                 <div><span style="color:#6c757d;font-size:11px;font-weight:600;text-transform:uppercase;">Grand total</span><div style="font-size:18px;font-weight:700;color:#166534;">${sym} ${fmtMoney(grandTotal)}</div></div>`;
             }
-            if (splitCount > 1) {
+
+            // Split breakdown table — one row per leg
+            if (splitCount > 1 && splitLegs.length > 0) {
+                summaryHtml += `<div style="grid-column:1/-1;margin-top:4px;">
+                    <span style="color:#6c757d;font-size:11px;font-weight:600;text-transform:uppercase;">Split breakdown</span>
+                    <div style="border:1px solid #e5e7eb;border-radius:6px;overflow:hidden;margin-top:4px;">`;
+                splitLegs.forEach((p, idx) => {
+                    const border = idx < splitLegs.length - 1 ? 'border-bottom:1px solid #f3f4f6;' : '';
+                    const tipNote = p.tip > 0 ? ` <span style="color:#059669;font-size:10px;">+tip ${sym} ${fmtMoney(p.tip)}</span>` : '';
+                    const chgNote = p.change > 0 ? ` <span style="color:#1d4ed8;font-size:10px;">chg ${sym} ${fmtMoney(p.change)}</span>` : '';
+                    summaryHtml += `<div style="display:flex;align-items:center;padding:7px 10px;font-size:12px;${border}">
+                        <span style="color:#22c55e;margin-right:6px;">✓</span>
+                        <span style="color:#374151;font-weight:600;min-width:62px;">Person ${p.person}</span>
+                        <span style="color:#6c757d;">${escHtml(p.methodLabel || p.method || '—')}</span>
+                        <span style="margin-left:auto;font-weight:700;color:#166534;white-space:nowrap;">${sym} ${fmtMoney(p.amount)}</span>
+                        ${tipNote}${chgNote}
+                    </div>`;
+                });
+                summaryHtml += '</div></div>';
+            } else if (splitCount > 1) {
+                // Fallback: no legs data, show simple split summary
                 summaryHtml += `<div style="grid-column:1/-1"><span style="color:#6c757d;font-size:11px;font-weight:600;text-transform:uppercase;">Split</span><div style="font-weight:600;color:#374151;">${splitCount} ways · ${sym} ${fmtMoney(data.total / splitCount)} each</div></div>`;
             }
-            if (data.payment_method === 'cash' && data.change > 0) {
+
+            // Cash change for single/last-leg cash payment
+            if (splitCount <= 1 && data.payment_method === 'cash' && data.change > 0) {
                 summaryHtml += `<div><span style="color:#6c757d;font-size:11px;font-weight:600;text-transform:uppercase;">Tendered</span><div style="font-weight:600;">${sym} ${fmtMoney(data.tendered)}</div></div>
                 <div><span style="color:#6c757d;font-size:11px;font-weight:600;text-transform:uppercase;">Change</span><div style="font-size:16px;font-weight:700;color:#1d4ed8;">${sym} ${fmtMoney(data.change)}</div></div>`;
             }
