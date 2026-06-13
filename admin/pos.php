@@ -470,11 +470,20 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     throw new RuntimeException('You can only settle tabs you opened.');
                 }
 
-                $pendingItemsStmt = $pdo->prepare("SELECT COUNT(*) FROM stock_order_items WHERE order_id = ? AND kds_status NOT IN ('served', 'void')");
+                // Bar/coffee drinks are handed over immediately — auto-serve them so settlement is never blocked by the BDS
+                $barAutoStmt = $pdo->prepare("SELECT COUNT(*) FROM stock_order_items WHERE order_id = ? AND station IN ('bar','coffee_bar') AND kds_status NOT IN ('served','void')");
+                $barAutoStmt->execute([$orderId]);
+                $barAutoCount = (int)$barAutoStmt->fetchColumn();
+                if ($barAutoCount > 0) {
+                    $pdo->prepare("UPDATE stock_order_items SET kds_status='served', served_at=NOW() WHERE order_id = ? AND station IN ('bar','coffee_bar') AND kds_status NOT IN ('served','void')")->execute([$orderId]);
+                    pos_logAudit($pdo, $orderId, $user['id'], $user['full_name'], 'bar_items_auto_served', json_encode(['count' => $barAutoCount, 'reason' => 'auto-served on tab settlement']));
+                }
+                // Only block on kitchen (food) items still in progress
+                $pendingItemsStmt = $pdo->prepare("SELECT COUNT(*) FROM stock_order_items WHERE order_id = ? AND station = 'kitchen' AND kds_status NOT IN ('served', 'void')");
                 $pendingItemsStmt->execute([$orderId]);
                 $pendingItems = (int)$pendingItemsStmt->fetchColumn();
                 if ($pendingItems > 0) {
-                    throw new RuntimeException('This tab still has ' . $pendingItems . ' item' . ($pendingItems === 1 ? '' : 's') . ' that have not been served yet. In real-world flow, settle the tab after service is complete.');
+                    throw new RuntimeException('This tab still has ' . $pendingItems . ' food item' . ($pendingItems === 1 ? '' : 's') . ' not yet served — complete kitchen service before settling food tabs.');
                 }
 
                 // Apply discount on first leg only (before any split payments)
@@ -1855,9 +1864,16 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
     <!-- Open tabs tray -->
     <div class="overlay modal-overlay" data-modal id="tabsOverlay">
         <div class="modal modal-content" style="width:760px;">
-            <div class="modal-head modal-header">
-                <h3 id="openTabsTitle"><i class="fas fa-utensils"></i> Open tabs (<?php echo count($openTabs); ?>)</h3>
-                <button class="close modal-close" onclick="closeTabsTray()">&times;</button>
+            <div class="modal-head modal-header" style="flex-wrap:wrap; gap:8px;">
+                <h3 id="openTabsTitle" style="flex:1; min-width:0;"><i class="fas fa-utensils"></i> Open tabs (<?php echo count($openTabs); ?>)</h3>
+                <div style="display:flex; align-items:center; gap:6px;">
+                    <div style="position:relative;">
+                        <i class="fas fa-search" style="position:absolute; left:9px; top:50%; transform:translateY(-50%); color:#9ca3af; font-size:12px; pointer-events:none;"></i>
+                        <input type="text" id="tabsSearchInput" placeholder="Search tabs…" oninput="filterOpenTabCards(this.value)" autocomplete="off"
+                            style="padding:7px 10px 7px 28px; border:1px solid #d1d5db; border-radius:7px; font-size:12px; width:160px; outline:none;">
+                    </div>
+                    <button class="close modal-close" onclick="closeTabsTray()">&times;</button>
+                </div>
             </div>
             <div class="modal-body" id="tabsTrayBody" style="max-height:72vh; overflow-y:auto;">
                 <?php if (empty($openTabs)): ?>
@@ -1945,9 +1961,8 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
                             $canCancelBeforePrep = ($pendingCount > 0)
                                 && ($preparingCount === 0) && ($readyCount === 0)
                                 && ($collectionCount === 0) && ($servedCount === 0);
-                            $canSettle = $totalItems > 0
-                                && $pendingCount === 0 && $preparingCount === 0
-                                && $readyCount === 0 && $collectionCount === 0;
+                            // Bar items auto-serve on settlement; only kitchen items block
+                            $canSettle = $totalItems > 0;
                             $openedByOther = ((int)($t['created_by'] ?? 0) !== (int)$user['id']);
                         ?>
                             <article class="tab-card<?php echo $isStale ? ' stale' : ''; ?>" data-order-id="<?php echo (int)$t['id']; ?>" data-is-stale="<?php echo $isStale ? '1' : '0'; ?>">
@@ -2318,6 +2333,12 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
                         <label id="payTabTenderedLabel">Tendered (<?php echo $currency_symbol; ?>)</label>
                         <input type="number" step="0.01" min="0" name="tendered_amount" id="payTabTendered" oninput="updTabChange()">
                         <div class="change-banner">Change: <span id="payTabChange"><?php echo $currency_symbol; ?> 0.00</span></div>
+                        <div style="display:grid; grid-template-columns:repeat(4,1fr); gap:6px; margin-top:8px;">
+                            <button type="button" onclick="quickTendTab(500)" style="padding:10px;border:1px solid #d6d8db;background:#fff;border-radius:6px;cursor:pointer;font-size:12px;">+500</button>
+                            <button type="button" onclick="quickTendTab(1000)" style="padding:10px;border:1px solid #d6d8db;background:#fff;border-radius:6px;cursor:pointer;font-size:12px;">+1k</button>
+                            <button type="button" onclick="quickTendTab(5000)" style="padding:10px;border:1px solid #d6d8db;background:#fff;border-radius:6px;cursor:pointer;font-size:12px;">+5k</button>
+                            <button type="button" onclick="quickTendTabExact()" style="padding:10px;border:1px solid #28a745;background:#e9f5ee;color:#155724;border-radius:6px;cursor:pointer;font-weight:600;font-size:12px;">Exact</button>
+                        </div>
                     </div>
                     <div id="ext-tab-mobile_money" style="display:none;">
                         <label>Provider</label>
@@ -5639,7 +5660,7 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
                 const collectionCount = parseInt(t.collection_count || 0, 10) || 0;
                 const servedCount = parseInt(t.served_count || 0, 10) || 0;
                 const canCancelBeforePrep = pendingCount > 0 && preparingCount === 0 && readyCount === 0 && collectionCount === 0 && servedCount === 0;
-                const canSettle = (pendingCount + preparingCount + readyCount + collectionCount) === 0 && totalItems > 0;
+                const canSettle = totalItems > 0; // bar items auto-served on settle; server checks kitchen items
                 const isStale = windowStart && String(t.created_at || '') < String(windowStart || '');
                 const byOther = parseInt(t.created_by || 0, 10) !== posUserId;
                 const openedAt = createdSec ? new Date(createdSec * 1000).toLocaleTimeString([], {
@@ -5700,6 +5721,8 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
             tabsSelectionChanged();
             applyTabsTrayToolsState();
             updateTabsTrayUpdatedLabel();
+            // Re-apply any active search filter after the DOM is rebuilt
+            if (_tabsSearchQuery) filterOpenTabCards(_tabsSearchQuery);
         }
 
         async function refreshOpenTabs(force = false, options = {}) {
@@ -5761,6 +5784,34 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
             if (overlay) overlay.classList.remove('show');
             stopTabsAutoRefresh();
             _selectedOpenTabIds.clear();
+            // Clear search so next open starts fresh
+            const si = document.getElementById('tabsSearchInput');
+            if (si) { si.value = ''; _tabsSearchQuery = ''; }
+        }
+
+        let _tabsSearchQuery = '';
+        function filterOpenTabCards(query) {
+            _tabsSearchQuery = (query || '').trim().toLowerCase();
+            const cards = document.querySelectorAll('#tabsCardsList .tab-card');
+            let visible = 0;
+            cards.forEach(card => {
+                if (!_tabsSearchQuery) { card.style.display = ''; visible++; return; }
+                const text = (card.textContent || '').toLowerCase();
+                const match = text.includes(_tabsSearchQuery);
+                card.style.display = match ? '' : 'none';
+                if (match) visible++;
+            });
+            // Show empty state if nothing matches
+            let noMatch = document.getElementById('tabsSearchNoMatch');
+            if (!noMatch) {
+                noMatch = document.createElement('p');
+                noMatch.id = 'tabsSearchNoMatch';
+                noMatch.style.cssText = 'text-align:center;color:#9ca3af;padding:20px 0;font-size:13px;';
+                noMatch.textContent = 'No tabs match your search.';
+                const list = document.getElementById('tabsCardsList');
+                if (list) list.after(noMatch);
+            }
+            noMatch.style.display = (_tabsSearchQuery && visible === 0) ? '' : 'none';
         }
 
         /* POS in-app toast notification (used by cancel/void and station note flows) */
@@ -6674,6 +6725,28 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
 
         // ----- Global modal-close behaviour -----
         // 1. ESC closes the topmost open .overlay.show
+        // Global keyboard shortcuts
+        document.addEventListener('keydown', e => {
+            const tag = (e.target.tagName || '').toLowerCase();
+            const isTyping = tag === 'input' || tag === 'textarea' || tag === 'select' || e.target.isContentEditable;
+            if (isTyping) return;
+            // '/' — focus menu search (no modal open) or tabs search (tabs tray open)
+            if (e.key === '/') {
+                const tabsOpen = document.getElementById('tabsOverlay')?.classList.contains('show');
+                if (tabsOpen) {
+                    e.preventDefault();
+                    document.getElementById('tabsSearchInput')?.focus();
+                    return;
+                }
+                const anyModal = document.querySelector('.overlay.show');
+                if (!anyModal) {
+                    e.preventDefault();
+                    const s = document.getElementById('search');
+                    if (s) { s.focus(); s.select(); }
+                }
+            }
+        });
+
         document.addEventListener('keydown', e => {
             if (e.key !== 'Escape') return;
             const open = Array.from(document.querySelectorAll('.overlay.show'));
@@ -7296,6 +7369,19 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
         function quickTendExact() {
             document.getElementById('tendered').value = effectiveCartTotal().toFixed(2);
             updChange();
+        }
+
+        function quickTendTab(n) {
+            const el = document.getElementById('payTabTendered');
+            el.value = ((parseFloat(el.value) || 0) + n).toFixed(2);
+            updTabChange();
+        }
+
+        function quickTendTabExact() {
+            const dueEl = document.getElementById('payTabAmountDueDisplay');
+            const due = dueEl ? (parseFloat(dueEl.dataset.due) || 0) : (parseFloat(document.getElementById('payTabTotal').dataset.total) || 0);
+            document.getElementById('payTabTendered').value = due.toFixed(2);
+            updTabChange();
         }
 
         function updConfirm() {
