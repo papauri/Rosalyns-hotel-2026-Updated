@@ -1444,18 +1444,18 @@ if (in_array($user['role'] ?? '', ['admin', 'manager'], true)) {
                     <?php endif; ?>
                     <button class="recent-toggle" onclick="openCloseShift()" data-help="Close shift (Z-report)|End-of-shift cash count."><i class="fas fa-cash-register"></i> Close Shift</button>
 
-                    <?php if ($posCanToggle86 || $isManagerOrAdmin): ?>
+                    <?php if ($isManagerOrAdmin): ?>
                         <div class="tb-sep"></div>
-                        <!-- Live screens -->
+                        <!-- Live screens (manager/admin only) -->
                         <a class="recent-toggle" href="kds.php" target="_blank" style="text-decoration:none;"><i class="fas fa-utensils"></i> Kitchen<span id="kitchenBadge" style="<?php echo ($adminStationsInit['counts']['kitchen']['open_total'] ?? 0) > 0 ? '' : 'display:none;'; ?>"><?php echo (int)($adminStationsInit['counts']['kitchen']['open_total'] ?? 0); ?></span></a>
                         <a class="recent-toggle" href="bds.php" target="_blank" style="text-decoration:none;"><i class="fas fa-wine-glass"></i> Bar<span id="barBadge" style="<?php echo ($adminStationsInit['counts']['bar']['open_total'] ?? 0) > 0 ? '' : 'display:none;'; ?>"><?php echo (int)($adminStationsInit['counts']['bar']['open_total'] ?? 0); ?></span></a>
                         <a class="recent-toggle" href="cds.php" target="_blank" style="text-decoration:none;"><i class="fas fa-mug-hot"></i> Coffee<span id="coffeeBadge" style="<?php echo ($adminStationsInit['counts']['coffee_bar']['open_total'] ?? 0) > 0 ? '' : 'display:none;'; ?>"><?php echo (int)($adminStationsInit['counts']['coffee_bar']['open_total'] ?? 0); ?></span></a>
                         <button class="recent-toggle" onclick="openStationsTray()"><i class="fas fa-layer-group"></i> Stations<span id="stationsBadge" style="<?php $tot = ($adminStationsInit['counts']['kitchen']['open_total'] ?? 0) + ($adminStationsInit['counts']['bar']['open_total'] ?? 0) + ($adminStationsInit['counts']['coffee_bar']['open_total'] ?? 0);
                                                                                                                                                                 echo $tot > 0 ? '' : 'display:none;'; ?>"><?php echo $tot; ?></span></button>
                         <a class="recent-toggle" href="stock-orders.php"><i class="fas fa-list"></i> All Orders</a>
-                        <?php if ($posCanToggle86): ?>
+                    <?php endif; ?>
+                    <?php if ($posCanToggle86): ?>
                         <button class="recent-toggle" id="eightySixModeBtn" onclick="toggle86Mode()" data-help="86 Mode|Toggle item availability. When active, click any item to mark it as 86'd (unavailable) or to re-enable it. All sessions reload the menu."><i class="fas fa-ban"></i> 86</button>
-                        <?php endif; ?>
                     <?php endif; ?>
 
                     <div class="tb-sep"></div>
