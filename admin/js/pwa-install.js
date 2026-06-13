@@ -104,7 +104,7 @@
         s.textContent = [
             '#admin-pwa-banner {',
             '  position: fixed;',
-            '  bottom: 20px; right: 20px;',
+            '  top: 20px; right: 20px;',
             '  z-index: 9100;',
             '  display: flex;',
             '  align-items: center;',
@@ -116,7 +116,7 @@
             '  border-radius: 12px;',
             '  box-shadow: 0 8px 32px rgba(0,0,0,0.5);',
             '  max-width: 360px;',
-            '  transform: translateY(20px);',
+            '  transform: translateY(-20px);',
             '  opacity: 0;',
             '  transition: transform 0.3s ease, opacity 0.3s ease;',
             '  font-family: "Inter", system-ui, sans-serif;',
@@ -164,7 +164,7 @@
             '}',
             '.admin-pwa-banner__dismiss:hover { color: rgba(247,243,238,0.8); }',
             '@media (max-width: 480px) {',
-            '  #admin-pwa-banner { bottom: 10px; right: 10px; left: 10px; max-width: none; }',
+            '  #admin-pwa-banner { top: 10px; right: 10px; left: 10px; max-width: none; }',
             '}',
         ].join('\n');
         document.head.appendChild(s);
