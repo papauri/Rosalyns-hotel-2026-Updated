@@ -477,6 +477,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     throw new RuntimeException('This tab still has ' . $pendingItems . ' item' . ($pendingItems === 1 ? '' : 's') . ' that have not been served yet. In real-world flow, settle the tab after service is complete.');
                 }
 
+                // Apply discount on first leg only (before any split payments)
+                $discountAmount = max(0.0, round((float)($_POST['discount_amount'] ?? 0), 2));
+                $discountReason = mb_substr(trim($_POST['discount_reason'] ?? ''), 0, 255);
+                if ($discountAmount > 0 && $splitNumber === 1 && (int)$row['split_paid_count'] === 0 && (float)($row['discount_amount'] ?? 0) == 0) {
+                    $discountedTotal = max(0.01, round((float)$row['total_amount'] - $discountAmount, 2));
+                    $pdo->prepare("UPDATE stock_orders SET total_amount=?, discount_amount=?, discount_reason=? WHERE id=?")
+                        ->execute([$discountedTotal, $discountAmount, $discountReason ?: null, $orderId]);
+                    $row['total_amount'] = $discountedTotal;
+                }
+
                 // Validate split sequence
                 if ($splitCount > 1) {
                     $dbPaid = (int)$row['split_paid_count'];
@@ -668,6 +678,55 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     'message' => $message,
                     'just_closed_shift' => $justClosedShift,
                 ]);
+            } elseif ($action === 'set_float') {
+                /* === Opening float declaration === */
+                $floatAmount = max(0.0, round((float)($_POST['float_amount'] ?? 0), 2));
+                $floatNote   = mb_substr(trim($_POST['float_note'] ?? ''), 0, 255);
+                $pdo->prepare("INSERT INTO stock_shift_opens (user_id, user_name, shift_date, float_amount, notes, ip_address) VALUES (?, ?, ?, ?, ?, ?)")
+                    ->execute([$user['id'], $user['full_name'], $restaurantWindow['business_date'], $floatAmount, $floatNote ?: null, $_SERVER['REMOTE_ADDR'] ?? null]);
+                pos_logAudit($pdo, 0, $user['id'], $user['full_name'], 'float_set', json_encode(['amount' => $floatAmount, 'note' => $floatNote]));
+                $isXhr = !empty($_SERVER['HTTP_X_REQUESTED_WITH']) && strtolower((string)$_SERVER['HTTP_X_REQUESTED_WITH']) === 'xmlhttprequest';
+                if ($isXhr) {
+                    header('Content-Type: application/json; charset=utf-8');
+                    echo json_encode(['ok' => true, 'float_amount' => $floatAmount, 'message' => 'Float set: ' . $currency_symbol . ' ' . number_format($floatAmount, 2)]);
+                    exit;
+                }
+                pos_redirectWithFlash(['message' => 'Opening float recorded: ' . $currency_symbol . ' ' . number_format($floatAmount, 2)]);
+            } elseif ($action === 'refund_order') {
+                /* === Refund a paid order (manager/admin only) === */
+                if (!in_array($user['role'] ?? '', ['admin', 'manager'], true)) throw new RuntimeException('Manager access required to process refunds.');
+                $refundOrderId = (int)($_POST['order_id'] ?? 0);
+                $refundReason  = mb_substr(trim($_POST['refund_reason'] ?? ''), 0, 255);
+                if ($refundOrderId <= 0) throw new RuntimeException('Invalid order ID.');
+                if (mb_strlen($refundReason) < 5) throw new RuntimeException('Refund reason required (minimum 5 characters).');
+
+                $pdo->beginTransaction();
+                $refStmt = $pdo->prepare("SELECT id, reference, status, total_amount, tip_amount, payment_method, created_by FROM stock_orders WHERE id = ? FOR UPDATE");
+                $refStmt->execute([$refundOrderId]);
+                $refRow = $refStmt->fetch(PDO::FETCH_ASSOC);
+                if (!$refRow) throw new RuntimeException('Order not found.');
+                if ($refRow['status'] !== 'paid') throw new RuntimeException('Only paid orders can be refunded. Current status: ' . $refRow['status'] . '.');
+
+                $refundTotal = (float)$refRow['total_amount'] + (float)($refRow['tip_amount'] ?? 0);
+                $pdo->prepare("UPDATE stock_orders SET status='refunded', refunded_at=NOW(), refund_reason=? WHERE id=?")
+                    ->execute([$refundReason, $refundOrderId]);
+                // Create negative payment record for ledger reversal
+                try {
+                    $pdo->prepare("INSERT INTO payments (booking_type, booking_id, payment_type, payment_method, amount, notes, recorded_by, created_at) VALUES ('restaurant', ?, 'refund', ?, ?, ?, ?, NOW())")
+                        ->execute([$refundOrderId, pos_mapMethod($refRow['payment_method'] ?? 'cash'), -abs($refundTotal), 'Refund: ' . $refundReason, $user['id']]);
+                } catch (Throwable $payEx) {
+                    error_log('refund_order payment insert: ' . $payEx->getMessage());
+                }
+                pos_logAudit($pdo, $refundOrderId, $user['id'], $user['full_name'], 'refunded', json_encode(['reason' => $refundReason, 'total' => $refundTotal, 'original_method' => $refRow['payment_method']]));
+                $pdo->commit();
+                if (function_exists('deleteCache')) deleteCache('stock_dashboard_metrics_v2');
+                $isXhr = !empty($_SERVER['HTTP_X_REQUESTED_WITH']) && strtolower((string)$_SERVER['HTTP_X_REQUESTED_WITH']) === 'xmlhttprequest';
+                if ($isXhr) {
+                    header('Content-Type: application/json; charset=utf-8');
+                    echo json_encode(['ok' => true, 'reference' => $refRow['reference'], 'message' => 'Refund processed for ' . $refRow['reference']]);
+                    exit;
+                }
+                pos_redirectWithFlash(['message' => 'Refund processed for ' . $refRow['reference'] . ' — ' . $currency_symbol . ' ' . number_format($refundTotal, 2)]);
             } else {
                 /* === Default: place + pay (single transaction) === */
                 $paymentMethod = $_POST['payment_method'] ?? '';
@@ -681,6 +740,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
                 $pdo->beginTransaction();
                 [$orderId, $reference, $totalAmount, $count] = pos_buildOrderFromPost($pdo, $user, $orderType, $tableNumber, $customerName, $customerEmail, $customerPhone, $orderNote, false);
+                // Apply discount if provided
+                $discountAmount = max(0.0, round((float)($_POST['discount_amount'] ?? 0), 2));
+                $discountReason = mb_substr(trim($_POST['discount_reason'] ?? ''), 0, 255);
+                if ($discountAmount > 0 && $discountAmount < $totalAmount) {
+                    $totalAmount = round($totalAmount - $discountAmount, 2);
+                    $pdo->prepare("UPDATE stock_orders SET total_amount=?, subtotal=?, discount_amount=?, discount_reason=? WHERE id=?")
+                        ->execute([$totalAmount, $totalAmount, $discountAmount, $discountReason ?: null, $orderId]);
+                }
                 $extras = pos_applyPaymentToOrder($pdo, $user, $orderId, $reference, $totalAmount, $paymentMethod, $_POST);
                 // Fire to kitchen for any sit-down/takeaway/room_service flow with food items.
                 if (in_array($orderType, ['dine_in', 'takeaway', 'room_service', 'walk_in'], true)) {
@@ -724,17 +791,21 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 /* ---------------- Load menu, categories, snapshot, recent ----------------
  * Items flagged for EITHER POS or Room Service are loaded from the unified
  * menu_items table. Each item carries `show_pos` / `show_rs` flags so the
- * JS can filter per active mode. Categories are dynamic from menu_categories. */
+ * JS can filter per active mode. Categories are dynamic from menu_categories.
+ * Managers/admins also see unavailable items (is_available=0) with an 86 badge
+ * so they can toggle availability from the till without leaving the POS. */
+$isManagerOrAdmin = in_array($user['role'] ?? '', ['admin', 'manager'], true);
+$menuAvailFilter = $isManagerOrAdmin ? '' : 'AND mi.is_available = 1';
 $allMenuItems = $pdo->query("
     SELECT mi.id, mi.item_name AS name, mi.price,
            COALESCE(mi.category, 'Other') AS sub_category,
-           mi.show_pos, mi.show_room_service,
+           mi.show_pos, mi.show_room_service, mi.is_available,
            mc.name AS cat_name, mc.slug AS menu_type, mc.sort_order AS cat_sort
     FROM menu_items mi
     JOIN menu_categories mc ON mc.id = mi.category_id
-    WHERE mi.is_available = 1
-      AND mc.is_active = 1
+    WHERE mc.is_active = 1
       AND (mi.show_pos = 1 OR mi.show_room_service = 1)
+      $menuAvailFilter
     ORDER BY mc.sort_order ASC, mi.display_order ASC, mi.item_name ASC
 ")->fetchAll(PDO::FETCH_ASSOC);
 
@@ -745,18 +816,23 @@ foreach ($allMenuItems as $item) {
     $cat = $item['cat_name'] . ' · ' . ($item['sub_category'] ?: 'Other');
     $isPos = (int)$item['show_pos'];
     $isRs  = (int)$item['show_room_service'];
-    if ($isPos) {
+    $isAvail = (int)$item['is_available'];
+    if ($isPos && $isAvail) {
         $categories[$cat] = ['label' => $cat, 'count' => ($categories[$cat]['count'] ?? 0) + 1];
         $posVisibleCount++;
+    } elseif ($isPos && !$isAvail && $isManagerOrAdmin) {
+        // Count 86'd items under their category so managers still see the category
+        $categories[$cat] = ['label' => $cat, 'count' => ($categories[$cat]['count'] ?? 0)];
     }
     $menuList[] = [
-        'id'       => (int)$item['id'],
-        'type'     => $item['menu_type'],
-        'name'     => $item['name'],
-        'price'    => (float)$item['price'],
-        'category' => $cat,
-        'show_pos' => $isPos,
-        'show_rs'  => $isRs,
+        'id'          => (int)$item['id'],
+        'type'        => $item['menu_type'],
+        'name'        => $item['name'],
+        'price'       => (float)$item['price'],
+        'category'    => $cat,
+        'show_pos'    => $isPos,
+        'show_rs'     => $isRs,
+        'is_available'=> $isAvail,
     ];
 }
 $categories['__ALL__']['count'] = $posVisibleCount;
@@ -830,7 +906,41 @@ if (isset($_GET['ajax']) && $_GET['ajax'] === 'shift_stats') {
     exit;
 }
 
-$myRecent = $pdo->prepare("SELECT id, reference, total_amount, payment_method, change_due, status, created_at FROM stock_orders WHERE created_by = ? AND created_at >= ? AND created_at < ? ORDER BY created_at DESC LIMIT 10");
+if (isset($_GET['ajax']) && $_GET['ajax'] === 'toggle_item') {
+    header('Content-Type: application/json; charset=utf-8');
+    if (!in_array($user['role'] ?? '', ['admin', 'manager'], true)) {
+        http_response_code(403);
+        echo json_encode(['error' => 'Manager access required.']);
+        exit;
+    }
+    $toggleItemId = (int)($_GET['item_id'] ?? 0);
+    if (!$toggleItemId) {
+        http_response_code(400);
+        echo json_encode(['error' => 'Invalid item ID.']);
+        exit;
+    }
+    try {
+        $currStmt = $pdo->prepare("SELECT id, item_name, is_available FROM menu_items WHERE id = ?");
+        $currStmt->execute([$toggleItemId]);
+        $currItem = $currStmt->fetch(PDO::FETCH_ASSOC);
+        if (!$currItem) {
+            http_response_code(404);
+            echo json_encode(['error' => 'Item not found.']);
+            exit;
+        }
+        $newAvail = $currItem['is_available'] ? 0 : 1;
+        $pdo->prepare("UPDATE menu_items SET is_available = ? WHERE id = ?")->execute([$newAvail, $toggleItemId]);
+        $action86 = $newAvail ? 'item_enabled' : 'item_86d';
+        pos_logAudit($pdo, 0, $user['id'], $user['full_name'], $action86, json_encode(['item_id' => $toggleItemId, 'item_name' => $currItem['item_name']]));
+        echo json_encode(['ok' => true, 'item_id' => $toggleItemId, 'is_available' => $newAvail, 'item_name' => $currItem['item_name']]);
+    } catch (Throwable $e) {
+        http_response_code(500);
+        echo json_encode(['error' => $e->getMessage()]);
+    }
+    exit;
+}
+
+$myRecent = $pdo->prepare("SELECT id, reference, total_amount, payment_method, change_due, status, discount_amount, created_at FROM stock_orders WHERE created_by = ? AND created_at >= ? AND created_at < ? ORDER BY created_at DESC LIMIT 10");
 $myRecent->execute([$user['id'], $restaurantWindow['start_sql'], $restaurantWindow['end_sql']]);
 $recent = $myRecent->fetchAll(PDO::FETCH_ASSOC);
 
@@ -1233,6 +1343,7 @@ if (in_array($user['role'] ?? '', ['admin', 'manager'], true)) {
                     <button class="recent-toggle" onclick="toggleRecent()" data-help="Recent orders|Last 10 orders you rang up."><i class="fas fa-receipt"></i> Recent</button>
                     <button class="recent-toggle" onclick="openTabsTray()" data-help="Open tabs|Unpaid kitchen orders."><i class="fas fa-utensils"></i> Tabs <span id="tabBadge" <?php echo empty($openTabs) ? ' style="display:none;"' : ''; ?>><?php echo count($openTabs); ?></span></button>
                     <button class="recent-toggle" onclick="openStationNoteModal()" data-help="Station note|Quick note to Kitchen/Bar/Coffee."><i class="fas fa-paper-plane"></i> Note</button>
+                    <button class="recent-toggle" onclick="openFloatModal()" data-help="Opening float|Record the opening cash float for your shift."><i class="fas fa-coins"></i> Float</button>
                     <button class="recent-toggle" onclick="openCloseShift()" data-help="Close shift (Z-report)|End-of-shift cash count."><i class="fas fa-cash-register"></i> Close Shift</button>
 
                     <?php if (in_array($user['role'] ?? '', ['admin', 'manager'], true)): ?>
@@ -1244,6 +1355,7 @@ if (in_array($user['role'] ?? '', ['admin', 'manager'], true)) {
                         <button class="recent-toggle" onclick="openStationsTray()"><i class="fas fa-layer-group"></i> Stations<span id="stationsBadge" style="<?php $tot = ($adminStationsInit['counts']['kitchen']['open_total'] ?? 0) + ($adminStationsInit['counts']['bar']['open_total'] ?? 0) + ($adminStationsInit['counts']['coffee_bar']['open_total'] ?? 0);
                                                                                                                                                                 echo $tot > 0 ? '' : 'display:none;'; ?>"><?php echo $tot; ?></span></button>
                         <a class="recent-toggle" href="stock-orders.php"><i class="fas fa-list"></i> All Orders</a>
+                        <button class="recent-toggle" id="eightySixModeBtn" onclick="toggle86Mode()" data-help="86 Mode|Toggle item availability. When active, click any item to mark it as 86'd (unavailable) or to re-enable it. All sessions reload the menu."><i class="fas fa-ban"></i> 86</button>
                     <?php endif; ?>
 
                     <div class="tb-sep"></div>
@@ -1388,11 +1500,25 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
         <?php if (empty($recent)): ?>
             <div style="padding:18px; color:#6c757d; text-align:center;">No orders yet today.</div>
         <?php else: ?>
-            <?php foreach ($recent as $r): ?>
-                <a class="r" href="stock-receipt.php?id=<?php echo (int)$r['id']; ?>" target="_blank">
-                    <div class="ref"><?php echo htmlspecialchars($r['reference']); ?> · <?php echo $currency_symbol . ' ' . number_format((float)$r['total_amount'], 2); ?></div>
-                    <div style="color:#6c757d; font-size:11px;"><?php echo htmlspecialchars(ucfirst(str_replace('_', ' ', $r['payment_method'] ?? '—'))); ?> · <?php echo htmlspecialchars(date('H:i', strtotime($r['created_at']))); ?> · <?php echo htmlspecialchars($r['status']); ?></div>
-                </a>
+            <?php foreach ($recent as $r):
+                $rDiscount = (float)($r['discount_amount'] ?? 0);
+                $rStatus = $r['status'] ?? '';
+                $rStatusColor = match($rStatus) {
+                    'paid'      => '#155724',
+                    'refunded'  => '#6f42c1',
+                    'cancelled', 'voided' => '#c82333',
+                    default     => '#6c757d',
+                };
+            ?>
+                <div class="r" style="display:flex; align-items:center; gap:8px; justify-content:space-between; cursor:default;">
+                    <a href="stock-receipt.php?id=<?php echo (int)$r['id']; ?>" target="_blank" style="flex:1; text-decoration:none; color:inherit;">
+                        <div class="ref"><?php echo htmlspecialchars($r['reference']); ?> · <?php echo $currency_symbol . ' ' . number_format((float)$r['total_amount'], 2); ?><?php if ($rDiscount > 0): ?> <span style="font-size:10px;color:#856404;background:#fffbeb;padding:1px 5px;border-radius:4px;">-<?php echo number_format($rDiscount,2); ?></span><?php endif; ?></div>
+                        <div style="color:#6c757d; font-size:11px;"><?php echo htmlspecialchars(ucfirst(str_replace('_', ' ', $r['payment_method'] ?? '—'))); ?> · <?php echo htmlspecialchars(date('H:i', strtotime($r['created_at']))); ?> · <span style="color:<?php echo $rStatusColor; ?>; font-weight:600;"><?php echo htmlspecialchars($rStatus); ?></span></div>
+                    </a>
+                    <?php if ($isManagerOrAdmin && $rStatus === 'paid'): ?>
+                        <button type="button" onclick="openRefundModal(<?php echo (int)$r['id']; ?>, <?php echo json_encode((string)$r['reference']); ?>, <?php echo (float)$r['total_amount']; ?>)" style="flex-shrink:0; padding:5px 9px; background:#6f42c1; color:#fff; border:none; border-radius:6px; font-size:11px; font-weight:600; cursor:pointer; white-space:nowrap;" title="Process refund"><i class="fas fa-rotate-left"></i> Refund</button>
+                    <?php endif; ?>
+                </div>
             <?php endforeach; ?>
         <?php endif; ?>
     </div>
@@ -1427,6 +1553,40 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
                     </div>
                     <label>Notes</label>
                     <input type="text" name="notes" placeholder="Allergies, special requests…">
+
+                    <!-- Discount section -->
+                    <div style="background:#fffbeb;border:1px solid #fde68a;border-radius:8px;padding:10px 12px;margin-bottom:10px;">
+                        <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:8px;">
+                            <span style="font-size:13px;font-weight:600;color:#374151;white-space:nowrap;"><i class="fas fa-tag" style="color:#d97706;margin-right:4px;"></i>Discount</span>
+                            <div style="display:flex;gap:5px;flex-wrap:wrap;" id="payDiscountPresets">
+                                <button type="button" class="discount-preset-btn active" data-pct="0" onclick="setDiscountPct(this,0)">None</button>
+                                <button type="button" class="discount-preset-btn" data-pct="5" onclick="setDiscountPct(this,5)">5%</button>
+                                <button type="button" class="discount-preset-btn" data-pct="10" onclick="setDiscountPct(this,10)">10%</button>
+                                <button type="button" class="discount-preset-btn" data-pct="15" onclick="setDiscountPct(this,15)">15%</button>
+                                <button type="button" class="discount-preset-btn" data-pct="25" onclick="setDiscountPct(this,25)">25%</button>
+                            </div>
+                        </div>
+                        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">
+                            <div>
+                                <label style="font-size:11px;font-weight:600;color:#6c757d;margin-bottom:3px;display:block;">Amount (<?php echo $currency_symbol; ?>)</label>
+                                <input type="number" step="0.01" min="0" id="payDiscountAmt" placeholder="0.00" oninput="onDiscountAmtInput()" style="width:100%;box-sizing:border-box;border:1px solid #d1d5db;border-radius:6px;padding:7px 10px;font-size:13px;">
+                            </div>
+                            <div>
+                                <label style="font-size:11px;font-weight:600;color:#6c757d;margin-bottom:3px;display:block;">Reason</label>
+                                <select id="payDiscountReason" onchange="syncPayDiscountToForm()" style="width:100%;box-sizing:border-box;border:1px solid #d1d5db;border-radius:6px;padding:7px 10px;font-size:13px;">
+                                    <option value="">Select…</option>
+                                    <option>Staff discount</option>
+                                    <option>Happy hour</option>
+                                    <option>Manager override</option>
+                                    <option>Complimentary</option>
+                                    <option>Loyalty discount</option>
+                                    <option>Event promo</option>
+                                </select>
+                            </div>
+                        </div>
+                        <input type="hidden" name="discount_amount" id="payDiscountAmtHidden" value="0">
+                        <input type="hidden" name="discount_reason" id="payDiscountReasonHidden" value="">
+                    </div>
 
                     <label>Payment method</label>
                     <div class="pay-method-grid">
@@ -1865,6 +2025,64 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
         </div>
     </div>
 
+    <!-- Opening Float modal -->
+    <div class="overlay modal-overlay" data-modal id="floatOverlay">
+        <div class="modal modal-content" style="max-width:400px;">
+            <div class="modal-head modal-header">
+                <h3><i class="fas fa-coins"></i> Set opening float</h3><button class="close modal-close" onclick="closeFloatModal()">&times;</button>
+            </div>
+            <form id="floatForm" onsubmit="submitFloat(event)">
+                <input type="hidden" name="csrf_token" value="<?php echo $csrf_token; ?>">
+                <input type="hidden" name="action" value="set_float">
+                <div class="modal-body">
+                    <p style="font-size:13px;color:#6c757d;margin-top:0;">Record the cash amount placed in the drawer at the start of your shift. This is logged for end-of-shift reconciliation.</p>
+                    <label>Float amount (<?php echo $currency_symbol; ?>)</label>
+                    <input type="number" step="0.01" min="0" name="float_amount" id="floatAmount" required placeholder="e.g. 5000.00" style="font-size:18px; font-weight:600;">
+                    <div style="display:grid; grid-template-columns:repeat(4,1fr); gap:6px; margin:8px 0;">
+                        <button type="button" onclick="document.getElementById('floatAmount').value='2000'" style="padding:10px;border:1px solid #d6d8db;background:#fff;border-radius:6px;cursor:pointer;font-size:12px;">2,000</button>
+                        <button type="button" onclick="document.getElementById('floatAmount').value='5000'" style="padding:10px;border:1px solid #d6d8db;background:#fff;border-radius:6px;cursor:pointer;font-size:12px;">5,000</button>
+                        <button type="button" onclick="document.getElementById('floatAmount').value='10000'" style="padding:10px;border:1px solid #d6d8db;background:#fff;border-radius:6px;cursor:pointer;font-size:12px;">10,000</button>
+                        <button type="button" onclick="document.getElementById('floatAmount').value='20000'" style="padding:10px;border:1px solid #d6d8db;background:#fff;border-radius:6px;cursor:pointer;font-size:12px;">20,000</button>
+                    </div>
+                    <label>Note <span style="font-weight:400;color:#9ca3af;">(optional)</span></label>
+                    <input type="text" name="float_note" placeholder="Float handed over by manager, etc.">
+                </div>
+                <div class="modal-foot modal-footer">
+                    <button type="button" class="btn-cancel" onclick="closeFloatModal()">Cancel</button>
+                    <button type="submit" class="btn-confirm"><i class="fas fa-coins"></i> Record float</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Refund confirm modal (manager only) -->
+    <div class="overlay modal-overlay" data-modal id="refundOverlay">
+        <div class="modal modal-content" style="max-width:420px;">
+            <div class="modal-head modal-header" style="background:#6f42c1;color:#fff;border-radius:12px 12px 0 0;">
+                <h3 style="color:#fff;margin:0;"><i class="fas fa-rotate-left"></i> Process refund</h3>
+                <button class="close modal-close" onclick="closeRefundModal()" style="color:#fff;">&times;</button>
+            </div>
+            <form id="refundForm" onsubmit="submitRefund(event)">
+                <input type="hidden" name="csrf_token" value="<?php echo $csrf_token; ?>">
+                <input type="hidden" name="action" value="refund_order">
+                <input type="hidden" name="order_id" id="refundOrderId" value="">
+                <div class="modal-body">
+                    <div style="background:#f3e8ff;border:1px solid #c4b5fd;border-radius:8px;padding:12px;margin-bottom:14px;font-size:14px;">
+                        <div id="refundOrderRef" style="font-weight:700;color:#6f42c1;margin-bottom:4px;"></div>
+                        <div id="refundOrderAmt" style="color:#374151;"></div>
+                    </div>
+                    <p style="font-size:13px;color:#6c757d;margin-top:0;margin-bottom:12px;">This will mark the order as <strong>refunded</strong> and create a negative payment record. Stock is not automatically restored — reverse any stock adjustments manually if needed.</p>
+                    <label>Reason for refund <span style="color:#c82333;">*</span></label>
+                    <textarea name="refund_reason" id="refundReason" rows="3" placeholder="Guest complaint, overcharge, duplicate order… (min 5 characters)" style="width:100%;box-sizing:border-box;border:1px solid #d1d5db;border-radius:8px;padding:10px;font-size:13px;font-family:inherit;" required minlength="5"></textarea>
+                </div>
+                <div class="modal-foot modal-footer">
+                    <button type="button" class="btn-cancel" onclick="closeRefundModal()">Cancel</button>
+                    <button type="submit" class="btn-confirm" style="background:#6f42c1;"><i class="fas fa-rotate-left"></i> Confirm refund</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
     <!-- Pay-existing-tab modal (small wrapper that points payForm at action=pay_existing) -->
     <div class="overlay modal-overlay" data-modal id="payTabOverlay">
         <div class="modal modal-content" style="max-width:480px;">
@@ -1913,7 +2131,7 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
                     </div>
 
                     <!-- Tip section -->
-                    <div style="background:#f8f9fa;border-radius:8px;padding:10px 12px;margin-bottom:12px;">
+                    <div style="background:#f8f9fa;border-radius:8px;padding:10px 12px;margin-bottom:10px;">
                         <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:8px;">
                             <span style="font-size:13px;font-weight:600;color:#374151;white-space:nowrap;"><i class="fas fa-hand-holding-heart" style="color:#059669;margin-right:4px;"></i>Tip</span>
                             <div style="display:flex;gap:5px;flex-wrap:wrap;" id="payTabTipPresets">
@@ -1924,6 +2142,40 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
                             </div>
                         </div>
                         <input type="number" step="0.01" min="0" id="payTabTipInput" placeholder="Custom tip amount" oninput="ptOnTipInput()" style="width:100%;box-sizing:border-box;border:1px solid #d1d5db;border-radius:6px;padding:7px 10px;font-size:13px;">
+                    </div>
+
+                    <!-- Discount section (first leg only) -->
+                    <div id="payTabDiscountSection" style="background:#fffbeb;border:1px solid #fde68a;border-radius:8px;padding:10px 12px;margin-bottom:10px;">
+                        <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:8px;">
+                            <span style="font-size:13px;font-weight:600;color:#374151;white-space:nowrap;"><i class="fas fa-tag" style="color:#d97706;margin-right:4px;"></i>Discount</span>
+                            <div style="display:flex;gap:5px;flex-wrap:wrap;" id="payTabDiscountPresets">
+                                <button type="button" class="discount-preset-btn active" data-pct="0" onclick="ptSetDiscountPct(this,0)">None</button>
+                                <button type="button" class="discount-preset-btn" data-pct="5" onclick="ptSetDiscountPct(this,5)">5%</button>
+                                <button type="button" class="discount-preset-btn" data-pct="10" onclick="ptSetDiscountPct(this,10)">10%</button>
+                                <button type="button" class="discount-preset-btn" data-pct="15" onclick="ptSetDiscountPct(this,15)">15%</button>
+                                <button type="button" class="discount-preset-btn" data-pct="25" onclick="ptSetDiscountPct(this,25)">25%</button>
+                            </div>
+                        </div>
+                        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">
+                            <div>
+                                <label style="font-size:11px;font-weight:600;color:#6c757d;margin-bottom:3px;display:block;">Amount (<?php echo $currency_symbol; ?>)</label>
+                                <input type="number" step="0.01" min="0" id="payTabDiscountAmt" placeholder="0.00" oninput="ptOnDiscountAmtInput()" style="width:100%;box-sizing:border-box;border:1px solid #d1d5db;border-radius:6px;padding:7px 10px;font-size:13px;">
+                            </div>
+                            <div>
+                                <label style="font-size:11px;font-weight:600;color:#6c757d;margin-bottom:3px;display:block;">Reason</label>
+                                <select id="payTabDiscountReason" onchange="syncTabDiscountToForm()" style="width:100%;box-sizing:border-box;border:1px solid #d1d5db;border-radius:6px;padding:7px 10px;font-size:13px;">
+                                    <option value="">Select…</option>
+                                    <option>Staff discount</option>
+                                    <option>Happy hour</option>
+                                    <option>Manager override</option>
+                                    <option>Complimentary</option>
+                                    <option>Loyalty discount</option>
+                                    <option>Event promo</option>
+                                </select>
+                            </div>
+                        </div>
+                        <input type="hidden" name="discount_amount" id="payTabDiscountAmtHidden" value="0">
+                        <input type="hidden" name="discount_reason" id="payTabDiscountReasonHidden" value="">
                     </div>
 
                     <label>Payment method</label>
@@ -4092,31 +4344,66 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
                 if (!menuItemVisibleInMode(m)) return;
                 if (q && m.name.toLowerCase().indexOf(q) === -1) return;
                 if (activeCat !== '__ALL__' && m.category !== activeCat) return;
+
+                const isAvailable = m.is_available !== 0; // undefined or 1 = available
+                const is86d = !isAvailable && posCanManageTabs;
+                // For non-managers, skip unavailable items entirely
+                if (!isAvailable && !posCanManageTabs) return;
+
                 const max = maxPortions(m.id, m.type);
                 const cartQty = cart.filter(c => c.id === m.id && c.type === m.type).reduce((s, c) => s + c.qty, 0);
                 const remain = max === null ? null : (max - cartQty);
                 const oos = (max !== null && remain <= 0);
                 let stockStr, low = '';
-                if (max === null) stockStr = 'Untracked';
-                else if (remain <= 0) {
+                if (!isAvailable) {
+                    stockStr = '86\'d';
+                    low = 'low';
+                } else if (max === null) {
+                    stockStr = 'Untracked';
+                } else if (remain <= 0) {
                     stockStr = 'Out of stock';
                     low = 'low';
                 } else if (remain <= 5) {
                     stockStr = remain + ' left';
                     low = 'low';
-                } else stockStr = remain + ' avail';
+                } else {
+                    stockStr = remain + ' avail';
+                }
+
                 const div = document.createElement('div');
-                div.className = 'item' + (oos ? ' oos' : '');
-                div.innerHTML = `
-            <div>
-                <div class="badge">${escHtml(m.type)}</div>
-                <div class="nm">${escHtml(m.name)}</div>
-            </div>
-            <div>
-                <div class="pr">${currencySymbol} ${fmtMoney(m.price)}</div>
-                <div class="st ${low}">${stockStr}</div>
-            </div>`;
-                if (!oos) bindMenuItemTap(div, m);
+                const eightySixBadge = is86d ? `<span style="position:absolute;top:4px;right:4px;background:#c82333;color:#fff;font-size:9px;font-weight:800;padding:2px 5px;border-radius:4px;letter-spacing:.05em;">86</span>` : '';
+                div.className = 'item' + ((oos && isAvailable) ? ' oos' : '') + (is86d ? ' oos' : '');
+                div.style.position = 'relative';
+                if (is86d) div.style.opacity = '0.6';
+
+                if (eightySixMode && posCanManageTabs) {
+                    // 86 mode: show toggle button over item
+                    div.innerHTML = `
+                <div>
+                    <div class="badge">${escHtml(m.type)}</div>
+                    <div class="nm">${escHtml(m.name)}</div>
+                </div>
+                <div>
+                    <div class="pr">${currencySymbol} ${fmtMoney(m.price)}</div>
+                    <div class="st low">${isAvailable ? 'Tap to 86' : 'Tap to enable'}</div>
+                </div>
+                ${eightySixBadge}`;
+                    div.style.cursor = 'pointer';
+                    div.style.border = is86d ? '2px solid #22c55e' : '2px dashed #c82333';
+                    div.addEventListener('click', () => doToggleItem(m.id));
+                } else {
+                    div.innerHTML = `
+                <div>
+                    <div class="badge">${escHtml(m.type)}</div>
+                    <div class="nm">${escHtml(m.name)}</div>
+                </div>
+                <div>
+                    <div class="pr">${currencySymbol} ${fmtMoney(m.price)}</div>
+                    <div class="st ${low}">${stockStr}</div>
+                </div>
+                ${eightySixBadge}`;
+                    if (!oos && isAvailable) bindMenuItemTap(div, m);
+                }
                 grid.appendChild(div);
             });
         }
@@ -4564,6 +4851,13 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
         function openPayModal() {
             if (!cart.length) return;
             if (!validateServiceContext()) return;
+            // Reset discount state
+            _payDiscount = 0;
+            const dAmtEl = document.getElementById('payDiscountAmt');
+            if (dAmtEl) dAmtEl.value = '';
+            document.getElementById('payDiscountAmtHidden').value = '0';
+            document.getElementById('payDiscountReasonHidden').value = '';
+            document.querySelectorAll('#payDiscountPresets .discount-preset-btn').forEach(b => b.classList.toggle('active', b.dataset.pct === '0'));
             const t = cartTotal();
             document.getElementById('payTotal').textContent = currencySymbol + ' ' + fmtMoney(t);
             injectCartHidden('payHiddenItems');
@@ -6324,10 +6618,12 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
             ways: 1,        // how many ways to split (1 = off)
             current: 1,     // which split leg we're currently collecting (1-based)
             paid: [],       // { person, method, methodLabel, amount, tip, change } per completed leg
+            discount: 0,    // discount applied before splitting (first leg only)
         };
 
         function ptUpdateDisplay() {
-            const share = _pt.ways > 1 ? _pt.total / _pt.ways : _pt.total;
+            const baseTotal = Math.max(0, _pt.total - (_pt.discount || 0));
+            const share = _pt.ways > 1 ? baseTotal / _pt.ways : baseTotal;
             const tip = Math.max(0, parseFloat(document.getElementById('payTabTipInput').value) || 0);
             const due = share + tip;
 
@@ -6375,7 +6671,8 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
             if (_pt.ways <= 1) { ledger.style.display = 'none'; return; }
 
             const sym = currencySymbol;
-            const share = Math.round(_pt.total / _pt.ways * 100) / 100;
+            const baseTotal = Math.max(0, _pt.total - (_pt.discount || 0));
+            const share = Math.round(baseTotal / _pt.ways * 100) / 100;
             const mLabel = { cash: 'Cash', mobile_money: 'Mobile', card_manual: 'Card' };
 
             // Lock / unlock split-way buttons
@@ -6449,7 +6746,8 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
         }
 
         function ptSetTipPct(pct) {
-            const share = _pt.ways > 1 ? _pt.total / _pt.ways : _pt.total;
+            const baseTotal = Math.max(0, _pt.total - (_pt.discount || 0));
+            const share = _pt.ways > 1 ? baseTotal / _pt.ways : baseTotal;
             const input = document.getElementById('payTabTipInput');
             input.value = pct > 0 ? (share * pct / 100).toFixed(2) : '';
             document.querySelectorAll('#payTabTipPresets .tip-preset-btn').forEach(b => b.classList.toggle('active', parseInt(b.dataset.pct) === pct));
@@ -6466,6 +6764,9 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
             document.getElementById('payTabTipInput').value = '';
             document.getElementById('payTabTipHidden').value = '0';
             document.querySelectorAll('#payTabTipPresets .tip-preset-btn').forEach(b => b.classList.toggle('active', b.dataset.pct === '0'));
+            // Discount can only be changed on first leg — hide section on subsequent legs
+            const discSection = document.getElementById('payTabDiscountSection');
+            if (discSection) discSection.style.display = (_pt.current > 1 || _pt.paid.length > 0) ? 'none' : '';
             document.querySelectorAll('#payTabOverlay .pay-method-grid button').forEach(b => b.classList.remove('active'));
             ['cash', 'mobile_money', 'card_manual'].forEach(k => {
                 const e = document.getElementById('ext-tab-' + k);
@@ -6495,6 +6796,19 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
             _pt.total = total;
             _pt.ref = ref;
             _pt.paid = [];
+            _pt.discount = 0;
+            // Reset discount UI
+            const dAmt = document.getElementById('payTabDiscountAmt');
+            const dHidden = document.getElementById('payTabDiscountAmtHidden');
+            const dReason = document.getElementById('payTabDiscountReason');
+            const dReasonH = document.getElementById('payTabDiscountReasonHidden');
+            if (dAmt) dAmt.value = '';
+            if (dHidden) dHidden.value = '0';
+            if (dReason) dReason.value = '';
+            if (dReasonH) dReasonH.value = '';
+            document.querySelectorAll('#payTabDiscountPresets .discount-preset-btn').forEach(b => b.classList.toggle('active', b.dataset.pct === '0'));
+            const discSection = document.getElementById('payTabDiscountSection');
+            if (discSection) discSection.style.display = '';
 
             document.getElementById('payTabOrderId').value = orderId;
             document.getElementById('payTabRef').textContent = ref;
@@ -6821,10 +7135,10 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
                 const el = document.getElementById('ext-' + k);
                 if (el) el.style.display = (k === m) ? 'block' : 'none';
             });
-            // Auto-fill tendered with full cart total when cashier picks cash (admin/cashier convenience).
+            // Auto-fill tendered with discounted total when cashier picks cash
             if (m === 'cash') {
                 const tEl = document.getElementById('tendered');
-                const total = cartTotal();
+                const total = effectiveCartTotal();
                 if (tEl && total > 0 && (!tEl.value || parseFloat(tEl.value) < total)) {
                     tEl.value = total.toFixed(2);
                     updChange();
@@ -6836,7 +7150,7 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
 
         function updChange() {
             const t = parseFloat(document.getElementById('tendered').value) || 0;
-            const ch = Math.max(0, t - cartTotal());
+            const ch = Math.max(0, t - effectiveCartTotal());
             document.getElementById('changeOut').textContent = currencySymbol + ' ' + fmtMoney(ch);
             updConfirm();
         }
@@ -6848,7 +7162,7 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
         }
 
         function quickTendExact() {
-            document.getElementById('tendered').value = cartTotal().toFixed(2);
+            document.getElementById('tendered').value = effectiveCartTotal().toFixed(2);
             updChange();
         }
 
@@ -6857,7 +7171,7 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
             let ok = !!m && cart.length > 0;
             if (m === 'cash') {
                 const t = parseFloat(document.getElementById('tendered').value) || 0;
-                ok = ok && (t + 0.001 >= cartTotal());
+                ok = ok && (t + 0.001 >= effectiveCartTotal());
             }
             document.getElementById('confirmBtn').disabled = !ok;
         }
@@ -6880,6 +7194,181 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
             }
             showPosActionLoader('Taking payment...', 'Saving the order and sending station tickets.');
         });
+
+        /* ── Discount state (new-order pay modal) ─────────────────────────── */
+        let _payDiscount = 0;
+
+        function effectiveCartTotal() {
+            return Math.max(0, cartTotal() - _payDiscount);
+        }
+
+        function setDiscountPct(btn, pct) {
+            const raw = cartTotal();
+            _payDiscount = pct > 0 ? Math.round(raw * pct / 100 * 100) / 100 : 0;
+            const dEl = document.getElementById('payDiscountAmt');
+            if (dEl) dEl.value = _payDiscount > 0 ? _payDiscount.toFixed(2) : '';
+            document.querySelectorAll('#payDiscountPresets .discount-preset-btn').forEach(b => b.classList.toggle('active', b === btn));
+            syncPayDiscountToForm();
+            document.getElementById('payTotal').textContent = currencySymbol + ' ' + fmtMoney(effectiveCartTotal());
+            updChange();
+            updConfirm();
+        }
+
+        function onDiscountAmtInput() {
+            _payDiscount = Math.max(0, parseFloat(document.getElementById('payDiscountAmt').value) || 0);
+            document.querySelectorAll('#payDiscountPresets .discount-preset-btn').forEach(b => b.classList.remove('active'));
+            const noneBtn = document.querySelector('#payDiscountPresets .discount-preset-btn[data-pct="0"]');
+            if (_payDiscount === 0 && noneBtn) noneBtn.classList.add('active');
+            syncPayDiscountToForm();
+            document.getElementById('payTotal').textContent = currencySymbol + ' ' + fmtMoney(effectiveCartTotal());
+            updChange();
+            updConfirm();
+        }
+
+        function syncPayDiscountToForm() {
+            document.getElementById('payDiscountAmtHidden').value = _payDiscount.toFixed(2);
+            const reason = document.getElementById('payDiscountReason');
+            document.getElementById('payDiscountReasonHidden').value = reason ? reason.value : '';
+        }
+
+        /* ── Discount for settle-tab modal ──────────────────────────────── */
+        function ptSetDiscountPct(btn, pct) {
+            if (_pt.paid.length > 0) { posToastReady('Cannot change discount once payments have started.', true); return; }
+            const base = _pt.total;
+            _pt.discount = pct > 0 ? Math.round(base * pct / 100 * 100) / 100 : 0;
+            const dEl = document.getElementById('payTabDiscountAmt');
+            if (dEl) dEl.value = _pt.discount > 0 ? _pt.discount.toFixed(2) : '';
+            document.querySelectorAll('#payTabDiscountPresets .discount-preset-btn').forEach(b => b.classList.toggle('active', b === btn));
+            syncTabDiscountToForm();
+            ptUpdateDisplay();
+        }
+
+        function ptOnDiscountAmtInput() {
+            if (_pt.paid.length > 0) return;
+            _pt.discount = Math.max(0, parseFloat(document.getElementById('payTabDiscountAmt').value) || 0);
+            document.querySelectorAll('#payTabDiscountPresets .discount-preset-btn').forEach(b => b.classList.remove('active'));
+            const noneBtn = document.querySelector('#payTabDiscountPresets .discount-preset-btn[data-pct="0"]');
+            if (_pt.discount === 0 && noneBtn) noneBtn.classList.add('active');
+            syncTabDiscountToForm();
+            ptUpdateDisplay();
+        }
+
+        function syncTabDiscountToForm() {
+            document.getElementById('payTabDiscountAmtHidden').value = (_pt.discount || 0).toFixed(2);
+            const reason = document.getElementById('payTabDiscountReason');
+            document.getElementById('payTabDiscountReasonHidden').value = reason ? reason.value : '';
+        }
+
+        /* ── 86 Mode (manager item availability toggle) ──────────────────── */
+        let eightySixMode = false;
+
+        function toggle86Mode() {
+            eightySixMode = !eightySixMode;
+            const btn = document.getElementById('eightySixModeBtn');
+            if (btn) btn.classList.toggle('mode-active', eightySixMode);
+            renderMenu();
+            posToastReady(eightySixMode ? '86 Mode ON — tap an item to toggle availability' : '86 Mode OFF', false);
+        }
+
+        async function doToggleItem(itemId) {
+            try {
+                const r = await fetch('pos.php?ajax=toggle_item&item_id=' + encodeURIComponent(itemId), { credentials: 'same-origin' });
+                const j = await r.json();
+                if (j.ok) {
+                    const item = menuList.find(m => m.id === itemId);
+                    if (item) item.is_available = j.is_available;
+                    renderMenu();
+                    posToastReady((j.is_available ? '✓ Re-enabled: ' : '86\'d: ') + (j.item_name || ''), !j.is_available);
+                } else {
+                    posToastReady(j.error || 'Toggle failed.', true);
+                }
+            } catch (e) {
+                posToastReady('Network error toggling item.', true);
+            }
+        }
+
+        /* ── Opening Float modal ─────────────────────────────────────────── */
+        function openFloatModal() {
+            document.getElementById('floatOverlay').classList.add('show');
+            const fa = document.getElementById('floatAmount');
+            if (fa) { fa.value = ''; fa.focus(); }
+        }
+
+        function closeFloatModal() {
+            document.getElementById('floatOverlay').classList.remove('show');
+        }
+
+        async function submitFloat(e) {
+            e.preventDefault();
+            const form = e.target;
+            const btn = form.querySelector('button[type="submit"]');
+            const origHtml = btn.innerHTML;
+            btn.disabled = true;
+            btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Saving…';
+            try {
+                const r = await fetch('pos.php', {
+                    method: 'POST',
+                    headers: { 'X-Requested-With': 'XMLHttpRequest' },
+                    body: new FormData(form),
+                    credentials: 'same-origin',
+                });
+                const j = await r.json();
+                if (j.ok) {
+                    closeFloatModal();
+                    posToastReady(j.message || 'Float recorded.', false);
+                    form.reset();
+                } else {
+                    posToastReady(j.error || 'Error saving float.', true);
+                }
+            } catch (err) {
+                posToastReady('Network error.', true);
+            }
+            btn.disabled = false;
+            btn.innerHTML = origHtml;
+        }
+
+        /* ── Refund modal (manager only) ─────────────────────────────────── */
+        function openRefundModal(orderId, ref, total) {
+            document.getElementById('refundOrderId').value = orderId;
+            document.getElementById('refundOrderRef').textContent = ref;
+            document.getElementById('refundOrderAmt').textContent = currencySymbol + ' ' + fmtMoney(total);
+            document.getElementById('refundReason').value = '';
+            document.getElementById('refundOverlay').classList.add('show');
+            setTimeout(() => { const r = document.getElementById('refundReason'); if (r) r.focus(); }, 80);
+        }
+
+        function closeRefundModal() {
+            document.getElementById('refundOverlay').classList.remove('show');
+        }
+
+        async function submitRefund(e) {
+            e.preventDefault();
+            const form = e.target;
+            const btn = form.querySelector('button[type="submit"]');
+            const origHtml = btn.innerHTML;
+            btn.disabled = true;
+            btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Processing…';
+            try {
+                const r = await fetch('pos.php', {
+                    method: 'POST',
+                    headers: { 'X-Requested-With': 'XMLHttpRequest' },
+                    body: new FormData(form),
+                    credentials: 'same-origin',
+                });
+                const j = await r.json();
+                if (j.ok) {
+                    closeRefundModal();
+                    posToastReady(j.message || 'Refund processed.', false);
+                    setTimeout(() => location.reload(), 1800);
+                } else {
+                    posToastReady(j.error || 'Refund failed.', true);
+                }
+            } catch (err) {
+                posToastReady('Network error.', true);
+            }
+            btn.disabled = false;
+            btn.innerHTML = origHtml;
+        }
 
         // Initial render
         renderMenu();

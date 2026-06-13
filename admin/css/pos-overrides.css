@@ -2227,6 +2227,32 @@ a.recent-toggle span {
     gap: 8px;
 }
 
+/* Discount preset buttons */
+.discount-preset-btn {
+    padding: 5px 12px;
+    border: 1px solid #d1d5db;
+    border-radius: 20px;
+    background: #fff;
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+    color: #374151;
+    transition: background 0.15s, border-color 0.15s, color 0.15s;
+}
+.discount-preset-btn.active,
+.discount-preset-btn:hover {
+    background: #d97706;
+    border-color: #d97706;
+    color: #fff;
+}
+
+/* 86 mode active state */
+#eightySixModeBtn.mode-active {
+    background: #c82333;
+    color: #fff;
+    border-color: #c82333;
+}
+
 .modal-foot,
 .modal-footer {
     padding: 14px 20px;

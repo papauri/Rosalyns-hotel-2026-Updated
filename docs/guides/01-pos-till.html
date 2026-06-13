@@ -289,6 +289,68 @@
       </section>
 
       <section>
+        <h2>Opening float</h2>
+        <p>Record the cash placed in the drawer before your first order so the Z-report variance accounts for it.</p>
+        <ol class="steps">
+          <li>Tap <strong>Float</strong> in the till bar (available to all roles).</li>
+          <li>Enter the float amount — quick-fill buttons for common values (2 000, 5 000, 10 000, 20 000).</li>
+          <li>Optionally add a note (e.g. <em>"Float handed over by manager"</em>).</li>
+          <li>Tap <strong>Record float</strong>. The entry is logged in <code>stock_shift_opens</code> for management review.</li>
+        </ol>
+        <div class="callout note">
+          The float is purely a declaration — it does not affect order processing. When reconciling, expected cash = float + sales. The float record helps explain any surplus in the drawer.
+        </div>
+      </section>
+
+      <section>
+        <h2>Discounts at the till <span class="pill amber">all roles</span></h2>
+        <p>Apply a percentage or fixed discount to an order before taking payment — available on both new orders and tab settlements.</p>
+        <ol class="steps">
+          <li>Open the <strong>Pay</strong> modal (new order) or tap <strong>Settle</strong> on a tab.</li>
+          <li>In the <strong>Discount</strong> section, choose a preset: <strong>None · 5% · 10% · 15% · 25%</strong> — or type a custom amount.</li>
+          <li>Pick a <strong>reason</strong> from the dropdown (Staff discount, Happy hour, Manager override, Complimentary, Loyalty, Event promo).</li>
+          <li>The total display updates live — confirm payment as normal.</li>
+          <li>The discount is saved on the order as <code>discount_amount</code> / <code>discount_reason</code> and printed on the receipt.</li>
+        </ol>
+        <div class="callout warn">
+          For split bills, discounts can only be applied on the <strong>first leg</strong>. Once any split payment has been recorded, the discount section is hidden to prevent changing the agreed total.
+        </div>
+      </section>
+
+      <section>
+        <h2>Quick-86 item toggle <span class="pill amber">manager only</span></h2>
+        <p>Take a menu item off sale instantly — without leaving the POS — when you run out or need to pull it for any reason.</p>
+        <ol class="steps">
+          <li>Tap the <strong>86</strong> button in the till bar (visible to managers and admins only).</li>
+          <li>The menu enters <strong>86 Mode</strong> — the button turns red and all tiles show "Tap to 86" or "Tap to enable".</li>
+          <li>Tap any item tile to toggle its availability:
+            <ul>
+              <li>An <strong>available</strong> item gets an <span style="background:#c82333;color:#fff;font-size:11px;padding:1px 5px;border-radius:4px;">86</span> badge and is greyed out — it disappears from cashier screens.</li>
+              <li>An <strong>86'd</strong> item (highlighted with green border) is re-enabled and returns to all screens.</li>
+            </ul>
+          </li>
+          <li>Tap <strong>86</strong> again to exit 86 Mode. Tapping items goes back to adding them to the cart.</li>
+        </ol>
+        <div class="callout note">
+          Changes take effect immediately — regular cashiers see the item disappear as soon as the page next renders (on their next scroll or order action). No page reload is needed.
+        </div>
+      </section>
+
+      <section>
+        <h2>POS refunds <span class="pill amber">manager only</span></h2>
+        <p>Process a refund for a paid order without voiding it — the audit trail is preserved and a negative payment record is created.</p>
+        <ol class="steps">
+          <li>Open the <strong>Recent</strong> orders panel (till bar).</li>
+          <li>Find the paid order and tap the purple <strong>Refund</strong> button on the right.</li>
+          <li>In the confirmation modal, enter a <strong>reason</strong> (minimum 5 characters).</li>
+          <li>Tap <strong>Confirm refund</strong>. The order status changes to <em>Refunded</em> and a negative payment entry is created in the ledger.</li>
+        </ol>
+        <div class="callout warn">
+          <strong>Stock is not automatically reversed.</strong> If physical stock was already used, record a manual stock adjustment in the Stock section. The negative payment record is sufficient for financial reconciliation.
+        </div>
+      </section>
+
+      <section>
         <h2>Tips</h2>
         <div class="callout tip">
           The Till works <strong>offline</strong> &mdash; your orders queue locally and sync when the internet returns.
