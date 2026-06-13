@@ -194,43 +194,10 @@ function pos_buildOrderFromPost(PDO $pdo, array $user, string $orderType, ?strin
         ]);
     $orderId = (int)$pdo->lastInsertId();
 
-    $itemIns = $pdo->prepare("INSERT INTO stock_order_items (order_id, menu_item_id, menu_type, item_name, quantity, unit_price, line_total, notes, station) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)");
-    $totalAmount = 0;
-    $totalCost = 0;
-    $folioItems  = [];   // populated for room_service orders — folio posted after loop
-    for ($k = 0; $k < $count; $k++) {
-        $itemId = (int)($itemIds[$k] ?? 0);
-        $type = trim((string)($itemTypes[$k] ?? 'food'));
-        $qty = (float)($itemQtys[$k] ?? 0);
-        $lineNote = isset($itemNotes[$k]) ? mb_substr(trim((string)$itemNotes[$k]), 0, 250) : '';
-        if ($itemId <= 0 || $qty <= 0) continue;
-        if ($qty > 1000) throw new RuntimeException('Quantity cap: 1000.');
-        $sel = $pdo->prepare("
-            SELECT mi.id, mi.item_name AS name, mi.price,
-                   COALESCE(mi.station, mc.default_station) AS station,
-                   mc.slug AS menu_type
-            FROM menu_items mi
-            JOIN menu_categories mc ON mc.id = mi.category_id
-            WHERE mi.id = ? AND mi.is_available = 1
-        ");
-        $sel->execute([$itemId]);
-        $row = $sel->fetch(PDO::FETCH_ASSOC);
-        if (!$row) throw new RuntimeException('Menu item not found or unavailable.');
-        $menuType = $row['menu_type']; // dynamic slug from menu_categories
-        $line = round((float)$row['price'] * $qty, 2);
-        $lineCost = pos_calculateMenuItemRecipeCost($pdo, $itemId, $menuType, $qty);
-        $station = in_array($row['station'] ?? '', ['kitchen', 'bar', 'coffee_bar'], true)
-            ? $row['station']
-            : 'kitchen';
-        $itemIns->execute([$orderId, $itemId, $menuType, $row['name'], $qty, (float)$row['price'], $line, $lineNote ?: null, $station]);
-        $soiId = (int)$pdo->lastInsertId();
-        $totalAmount += $line;
-        $totalCost += $lineCost;
-        if ($orderType === 'room_service') {
-            $folioItems[] = ['item_id' => $itemId, 'type' => $menuType, 'qty' => $qty, 'soi_id' => $soiId];
-        }
-        // For non-room-service: stock deduction deferred to KDS ready_item
-    }
+    // Insert cart lines via the shared helper (server-side price lookup, station
+    // routing, recipe cost). Stock deduction stays deferred to the KDS for
+    // non-room-service; room-service folio posting happens just below.
+    [$totalAmount, $totalCost, $count, $folioItems] = pos_appendCartItemsToOrder($pdo, $orderId, $orderType);
     if ($totalAmount <= 0) throw new RuntimeException('Order total must be greater than zero.');
 
     $pdo->prepare("UPDATE stock_orders SET total_amount=?, subtotal=?, total_cost=? WHERE id=?")
@@ -295,6 +262,103 @@ function pos_fireKitchen(PDO $pdo, int $orderId, int $userId, string $userName):
     $ip = $_SERVER['REMOTE_ADDR'] ?? null;
     $pdo->prepare("INSERT INTO stock_kds_events (order_id, event, to_status, user_id, user_name, ip_address) VALUES (?, 'fired', 'new', ?, ?, ?)")
         ->execute([$orderId, $userId, $userName, $ip]);
+}
+
+/**
+ * Insert POSTed cart items into an existing order row. Reuses the same server-side
+ * price lookup / station routing / recipe-cost logic as the place flow so behaviour
+ * is identical whether opening a fresh order or appending to an open tab.
+ *
+ * Does NOT update the order totals — the caller decides whether to set or accumulate.
+ * Returns [addedAmount, addedCost, addedCount, folioItems].
+ */
+function pos_appendCartItemsToOrder(PDO $pdo, int $orderId, string $orderType): array
+{
+    $itemIds   = $_POST['item_id']   ?? [];
+    $itemTypes = $_POST['item_type'] ?? [];
+    $itemQtys  = $_POST['item_qty']  ?? [];
+    $itemNotes = $_POST['item_note'] ?? [];
+    $count = is_array($itemIds) ? count($itemIds) : 0;
+    if ($count === 0) throw new RuntimeException('Cart is empty — tap items to add.');
+
+    $itemIns = $pdo->prepare("INSERT INTO stock_order_items (order_id, menu_item_id, menu_type, item_name, quantity, unit_price, line_total, notes, station) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)");
+    $addedAmount = 0.0;
+    $addedCost   = 0.0;
+    $added       = 0;
+    $folioItems  = [];
+    for ($k = 0; $k < $count; $k++) {
+        $itemId = (int)($itemIds[$k] ?? 0);
+        $qty = (float)($itemQtys[$k] ?? 0);
+        $lineNote = isset($itemNotes[$k]) ? mb_substr(trim((string)$itemNotes[$k]), 0, 250) : '';
+        if ($itemId <= 0 || $qty <= 0) continue;
+        if ($qty > 1000) throw new RuntimeException('Quantity cap: 1000.');
+        $sel = $pdo->prepare("
+            SELECT mi.id, mi.item_name AS name, mi.price,
+                   COALESCE(mi.station, mc.default_station) AS station,
+                   mc.slug AS menu_type
+            FROM menu_items mi
+            JOIN menu_categories mc ON mc.id = mi.category_id
+            WHERE mi.id = ? AND mi.is_available = 1
+        ");
+        $sel->execute([$itemId]);
+        $row = $sel->fetch(PDO::FETCH_ASSOC);
+        if (!$row) throw new RuntimeException('Menu item not found or unavailable.');
+        $menuType = $row['menu_type'];
+        $line = round((float)$row['price'] * $qty, 2);
+        $lineCost = pos_calculateMenuItemRecipeCost($pdo, $itemId, $menuType, $qty);
+        $station = in_array($row['station'] ?? '', ['kitchen', 'bar', 'coffee_bar'], true)
+            ? $row['station']
+            : 'kitchen';
+        $itemIns->execute([$orderId, $itemId, $menuType, $row['name'], $qty, (float)$row['price'], $line, $lineNote ?: null, $station]);
+        $soiId = (int)$pdo->lastInsertId();
+        $addedAmount += $line;
+        $addedCost += $lineCost;
+        $added++;
+        if ($orderType === 'room_service') {
+            $folioItems[] = ['item_id' => $itemId, 'type' => $menuType, 'qty' => $qty, 'soi_id' => $soiId];
+        }
+    }
+    if ($added === 0) throw new RuntimeException('No valid items to add.');
+    return [round($addedAmount, 2), round($addedCost, 4), $added, $folioItems];
+}
+
+/**
+ * Auto-serve bar / coffee-bar items on a tab at settlement time. Drinks are handed
+ * to the customer immediately, so they should not block settling the tab the way
+ * food does. This mirrors the KDS bump: deduct stock for any not-yet-deducted
+ * drink line, then mark the lines served. Returns the number of lines served.
+ */
+function pos_autoServeBarItems(PDO $pdo, int $orderId, array $user): int
+{
+    $sel = $pdo->prepare("SELECT id, menu_item_id, menu_type, quantity, stock_deducted FROM stock_order_items WHERE order_id = ? AND station IN ('bar','coffee_bar') AND kds_status NOT IN ('served','void')");
+    $sel->execute([$orderId]);
+    $rows = $sel->fetchAll(PDO::FETCH_ASSOC);
+    if (!$rows) return 0;
+
+    // Deduct stock for any drink lines that never went through the KDS bump.
+    foreach ($rows as $r) {
+        if ((int)$r['stock_deducted'] === 0) {
+            $ok = deductStockForMenuItem((int)$r['menu_item_id'], (string)$r['menu_type'], (float)$r['quantity'], 'pos_order', (int)$r['id'], (int)$user['id']);
+            if ($ok) {
+                $pdo->prepare("UPDATE stock_order_items SET stock_deducted = 1 WHERE id = ?")->execute([(int)$r['id']]);
+            } else {
+                error_log("pos_autoServeBarItems: stock deduction failed for item #{$r['id']} on order #{$orderId}");
+            }
+        }
+    }
+
+    $pdo->prepare("UPDATE stock_order_items SET kds_status='served', started_at=COALESCE(started_at,NOW()), ready_at=COALESCE(ready_at,NOW()), served_at=NOW(), bumped_by=? WHERE order_id = ? AND station IN ('bar','coffee_bar') AND kds_status NOT IN ('served','void')")
+        ->execute([(int)$user['id'], $orderId]);
+
+    // If everything on the order is now served, mark the order served too.
+    $remain = $pdo->prepare("SELECT COUNT(*) FROM stock_order_items WHERE order_id = ? AND kds_status NOT IN ('served','void')");
+    $remain->execute([$orderId]);
+    if ((int)$remain->fetchColumn() === 0) {
+        $pdo->prepare("UPDATE stock_orders SET kitchen_status='served', served_at=COALESCE(served_at,NOW()) WHERE id = ?")->execute([$orderId]);
+    }
+
+    pos_logAudit($pdo, $orderId, $user['id'], $user['full_name'], 'bar_items_auto_served', json_encode(['count' => count($rows), 'reason' => 'auto-served on tab settlement']));
+    return count($rows);
 }
 
 /**
@@ -364,6 +428,16 @@ function pos_applyPaymentToOrder(PDO $pdo, array $user, int $orderId, string $re
     return $extras;
 }
 
+/* Detect optional columns once so the POS degrades gracefully if migration 045
+ * (stock_orders.covers) has not yet been applied on this database. */
+$posHasCoversCol = false;
+try {
+    $coversChk = $pdo->query("SHOW COLUMNS FROM stock_orders LIKE 'covers'");
+    $posHasCoversCol = $coversChk && $coversChk->fetch(PDO::FETCH_ASSOC) !== false;
+} catch (Throwable $coversChkEx) {
+    $posHasCoversCol = false;
+}
+
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $token = $_POST['csrf_token'] ?? '';
     $action = $_POST['action'] ?? 'pay';
@@ -387,6 +461,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 /* === Fire order to stations, pay later (open tab) === */
                 $pdo->beginTransaction();
                 [$orderId, $reference, $totalAmount, $count] = pos_buildOrderFromPost($pdo, $user, $orderType, $tableNumber, $customerName, $customerEmail, $customerPhone, $orderNote, true);
+                $coversPark = max(0, min(99, (int)($_POST['covers'] ?? 0)));
+                if ($posHasCoversCol && $coversPark > 0) {
+                    $pdo->prepare("UPDATE stock_orders SET covers=? WHERE id=?")->execute([$coversPark, $orderId]);
+                }
                 $pdo->prepare("UPDATE stock_orders SET kitchen_printed_at=NOW() WHERE id=?")->execute([$orderId]);
                 pos_fireKitchen($pdo, $orderId, $user['id'], $user['full_name']);
                 pos_logAudit($pdo, $orderId, $user['id'], $user['full_name'], 'parked_open_tab', json_encode(['lines' => $count, 'total' => $totalAmount, 'table' => $tableNumber, 'till' => 'pos.php']));
@@ -431,6 +509,109 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     'last_order_ref' => $lastOrderRef,
                     'just_parked' => true,
                 ]);
+            } elseif ($action === 'add_to_tab') {
+                /* === Append items (another round) to an existing open tab === */
+                $tabOrderId = (int)($_POST['tab_order_id'] ?? 0);
+                if ($tabOrderId <= 0) throw new RuntimeException('No tab selected to add to.');
+
+                $pdo->beginTransaction();
+                $stmt = $pdo->prepare("SELECT id, reference, status, order_type, booking_id,
+                                              created_by, total_amount, total_cost,
+                                              COALESCE(subtotal, total_amount) AS subtotal,
+                                              COALESCE(split_count, 1) AS split_count,
+                                              COALESCE(split_paid_count, 0) AS split_paid_count
+                                       FROM stock_orders WHERE id = ? FOR UPDATE");
+                $stmt->execute([$tabOrderId]);
+                $tab = $stmt->fetch(PDO::FETCH_ASSOC);
+                if (!$tab) throw new RuntimeException('Tab not found.');
+                if ($tab['status'] !== 'placed') {
+                    throw new RuntimeException('That tab is no longer open (' . str_replace('_', ' ', (string)$tab['status']) . '). Refreshing tabs.');
+                }
+                if ((int)$tab['split_paid_count'] > 0) {
+                    throw new RuntimeException('This tab is mid split-payment — finish settling it before adding more items.');
+                }
+                if (($user['role'] ?? '') === 'restaurant_staff' && (int)$tab['created_by'] !== (int)$user['id']) {
+                    throw new RuntimeException('You can only add to tabs you opened.');
+                }
+
+                $tabType = (string)$tab['order_type'];
+                [$addedAmount, $addedCost, $addedCount, $folioItems] = pos_appendCartItemsToOrder($pdo, $tabOrderId, $tabType);
+
+                // Accumulate the order financials. total_amount already reflects any
+                // earlier discount; we add the new gross to both subtotal and total.
+                $newSubtotal = round((float)$tab['subtotal'] + $addedAmount, 2);
+                $newTotal    = round((float)$tab['total_amount'] + $addedAmount, 2);
+                $newCost     = round((float)$tab['total_cost'] + $addedCost, 4);
+                $pdo->prepare("UPDATE stock_orders SET total_amount=?, subtotal=?, total_cost=? WHERE id=?")
+                    ->execute([$newTotal, $newSubtotal, $newCost, $tabOrderId]);
+
+                // Room-service tab: post the new lines to the guest folio immediately.
+                if ($tabType === 'room_service' && !empty($tab['booking_id'])) {
+                    $rs_booking_id = (int)$tab['booking_id'];
+                    foreach ($folioItems as $fi) {
+                        $charge = addBookingChargeFromMenu($rs_booking_id, $fi['type'], $fi['item_id'], $fi['qty'], (int)$user['id']);
+                        if (!empty($charge['success']) && !empty($charge['charge_id'])) {
+                            $pdo->prepare("UPDATE booking_charges SET stock_order_id = ? WHERE id = ?")
+                                ->execute([$tabOrderId, (int)$charge['charge_id']]);
+                            $pdo->prepare("UPDATE stock_order_items SET stock_deducted = 1 WHERE id = ?")
+                                ->execute([$fi['soi_id']]);
+                        }
+                    }
+                    $pdo->prepare("UPDATE stock_orders SET folio_posted_at = NOW() WHERE id = ?")->execute([$tabOrderId]);
+                    recalculateBookingFinancials($rs_booking_id);
+                }
+
+                // Re-activate the kitchen status so the newly added pending lines show as
+                // fresh work on the station boards, then fire them.
+                $pdo->prepare("UPDATE stock_orders SET kitchen_status='new', kitchen_printed_at=NOW() WHERE id=?")->execute([$tabOrderId]);
+                pos_fireKitchen($pdo, $tabOrderId, $user['id'], $user['full_name']);
+
+                pos_logAudit($pdo, $tabOrderId, $user['id'], $user['full_name'], 'items_added_to_tab', json_encode([
+                    'added_lines'  => $addedCount,
+                    'added_amount' => $addedAmount,
+                    'new_total'    => $newTotal,
+                    'till'         => 'pos.php',
+                ]));
+                logActivity($user['id'], 'pos_add_to_tab', 'Added ' . $addedCount . ' item(s) to tab ' . $tab['reference'] . ' (' . $currency_symbol . ' ' . number_format($addedAmount, 2) . '); new total ' . $currency_symbol . ' ' . number_format($newTotal, 2));
+                $pdo->commit();
+                if (function_exists('deleteCache')) deleteCache('stock_dashboard_metrics_v2');
+
+                // Build station label from the whole order so the user sees where it went
+                $stnStmt = $pdo->prepare("SELECT DISTINCT station FROM stock_order_items WHERE order_id=? ORDER BY station");
+                $stnStmt->execute([$tabOrderId]);
+                $stnNames = array_map(fn($s) => match ($s) {
+                    'kitchen' => 'Kitchen',
+                    'bar' => 'Bar',
+                    'coffee_bar' => 'Coffee Bar',
+                    default => ucfirst($s)
+                }, array_column($stnStmt->fetchAll(PDO::FETCH_ASSOC), 'station'));
+                $stationLabel = implode(' & ', $stnNames) ?: 'Station';
+                $message = "Added {$addedCount} item(s) to {$tab['reference']} — new total {$currency_symbol} " . number_format($newTotal, 2) . '.';
+
+                $isXhr = !empty($_SERVER['HTTP_X_REQUESTED_WITH']) && strtolower((string)$_SERVER['HTTP_X_REQUESTED_WITH']) === 'xmlhttprequest';
+                if ($isXhr) {
+                    $lineStmt = $pdo->prepare("SELECT item_name, quantity FROM stock_order_items WHERE order_id = ? ORDER BY id");
+                    $lineStmt->execute([$tabOrderId]);
+                    $lines = $lineStmt->fetchAll(PDO::FETCH_ASSOC);
+                    header('Content-Type: application/json; charset=utf-8');
+                    echo json_encode([
+                        'ok'            => true,
+                        'order_id'      => $tabOrderId,
+                        'reference'     => $tab['reference'],
+                        'added_count'   => $addedCount,
+                        'new_total'     => $newTotal,
+                        'station_label' => $stationLabel,
+                        'message'       => $message,
+                        'lines'         => $lines,
+                    ]);
+                    exit;
+                }
+                pos_redirectWithFlash([
+                    'message' => $message,
+                    'last_order_id' => $tabOrderId,
+                    'last_order_ref' => $tab['reference'],
+                    'just_parked' => true,
+                ]);
             } elseif ($action === 'pay_existing') {
                 /* === Recall a parked order and take payment (supports split bills + tips) === */
                 $orderId       = (int)($_POST['order_id'] ?? 0);
@@ -470,14 +651,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     throw new RuntimeException('You can only settle tabs you opened.');
                 }
 
-                // Bar/coffee drinks are handed over immediately — auto-serve them so settlement is never blocked by the BDS
-                $barAutoStmt = $pdo->prepare("SELECT COUNT(*) FROM stock_order_items WHERE order_id = ? AND station IN ('bar','coffee_bar') AND kds_status NOT IN ('served','void')");
-                $barAutoStmt->execute([$orderId]);
-                $barAutoCount = (int)$barAutoStmt->fetchColumn();
-                if ($barAutoCount > 0) {
-                    $pdo->prepare("UPDATE stock_order_items SET kds_status='served', served_at=NOW() WHERE order_id = ? AND station IN ('bar','coffee_bar') AND kds_status NOT IN ('served','void')")->execute([$orderId]);
-                    pos_logAudit($pdo, $orderId, $user['id'], $user['full_name'], 'bar_items_auto_served', json_encode(['count' => $barAutoCount, 'reason' => 'auto-served on tab settlement']));
-                }
+                // Bar/coffee drinks are handed over immediately — auto-serve them (with stock
+                // deduction) so settlement is never blocked by an un-bumped BDS ticket.
+                pos_autoServeBarItems($pdo, $orderId, $user);
                 // Only block on kitchen (food) items still in progress
                 $pendingItemsStmt = $pdo->prepare("SELECT COUNT(*) FROM stock_order_items WHERE order_id = ? AND station = 'kitchen' AND kds_status NOT IN ('served', 'void')");
                 $pendingItemsStmt->execute([$orderId]);
@@ -779,6 +955,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
                 $pdo->beginTransaction();
                 [$orderId, $reference, $totalAmount, $count] = pos_buildOrderFromPost($pdo, $user, $orderType, $tableNumber, $customerName, $customerEmail, $customerPhone, $orderNote, false);
+                $coversPay = max(0, min(99, (int)($_POST['covers'] ?? 0)));
+                if ($posHasCoversCol && $coversPay > 0) {
+                    $pdo->prepare("UPDATE stock_orders SET covers=? WHERE id=?")->execute([$coversPay, $orderId]);
+                }
                 // Apply discount if provided
                 $discountAmount = max(0.0, round((float)($_POST['discount_amount'] ?? 0), 2));
                 $discountReason = mb_substr(trim($_POST['discount_reason'] ?? ''), 0, 255);
@@ -821,7 +1001,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $error = $e->getMessage();
             // Return JSON error for XHR requests so the JS can show inline messages
             $isXhrErr = !empty($_SERVER['HTTP_X_REQUESTED_WITH']) && strtolower((string)$_SERVER['HTTP_X_REQUESTED_WITH']) === 'xmlhttprequest';
-            if ($isXhrErr && in_array(($_POST['action'] ?? ''), ['park', 'pay_existing'], true)) {
+            if ($isXhrErr && in_array(($_POST['action'] ?? ''), ['park', 'pay_existing', 'add_to_tab'], true)) {
                 header('Content-Type: application/json; charset=utf-8');
                 echo json_encode(['ok' => false, 'error' => $error]);
                 exit;
@@ -1056,7 +1236,9 @@ $activeLocationLocks = rh_restaurant_active_location_locks($pdo);
 /* Open tabs (placed but not yet paid) — scoped to the last 48 hours so stale
  * previous-shift tabs are visible and cannot be left behind. Admins/managers
  * see all tabs; restaurant_staff only see their own. */
+$tabsCoversSelect = $posHasCoversCol ? 'COALESCE(o.covers, 0) AS covers,' : '0 AS covers,';
 $tabsSql = "SELECT o.id, o.reference, o.total_amount, o.table_number, o.customer_name, o.created_at, o.created_by,
+                   {$tabsCoversSelect}
                    COALESCE(o.split_count, 1) AS split_count, COALESCE(o.split_paid_count, 0) AS split_paid_count,
                    u.full_name AS opened_by,
                    (SELECT COUNT(*) FROM stock_order_items WHERE order_id = o.id) AS line_count,
@@ -1579,7 +1761,21 @@ if (in_array($user['role'] ?? '', ['admin', 'manager'], true)) {
                             </select>
                             <div class="ctx-location-hint" id="ctxLocationHint"></div>
                             <input type="text" id="ctxCustomer" name="customer_name" form="payForm" placeholder="Guest name (optional)" autocomplete="off">
+                            <div class="ctx-covers-row" style="display:flex; align-items:center; gap:8px; margin-top:8px;">
+                                <label for="ctxCovers" style="font-size:12px; color:#6c757d; white-space:nowrap;"><i class="fas fa-users" style="margin-right:4px;"></i>Covers</label>
+                                <input type="number" id="ctxCovers" name="covers" form="payForm" min="0" max="99" step="1" placeholder="0" autocomplete="off" style="width:70px; padding:6px 8px; border:1px solid #d6d8db; border-radius:6px; font-size:13px;">
+                                <span style="font-size:11px; color:#9ca3af;">guests on this tab (optional)</span>
+                            </div>
                         </div>
+                    </div>
+                    <!-- Active-tab banner: shown when adding a round to an existing open tab -->
+                    <div id="activeTabBanner" style="display:none; align-items:center; gap:10px; background:#fff7ed; border:1px solid #fdba74; border-radius:8px; padding:9px 12px; margin-bottom:10px;">
+                        <i class="fas fa-layer-group" style="color:#ea580c;"></i>
+                        <div style="flex:1; min-width:0; font-size:12.5px; color:#9a3412; line-height:1.3;">
+                            Adding to <strong id="activeTabBannerRef">TAB</strong>
+                            <span style="display:block; font-size:11px; color:#c2630f;">Next Fire appends to this tab · current total <span id="activeTabBannerTotal"></span></span>
+                        </div>
+                        <button type="button" onclick="clearActiveTab(true)" title="Stop adding to this tab" style="flex-shrink:0; background:transparent; border:none; color:#c2410c; font-size:16px; cursor:pointer; padding:4px;"><i class="fas fa-times-circle"></i></button>
                     </div>
                     <div class="total-row"><span>Total</span><span id="total"><?php echo $currency_symbol; ?> 0.00</span></div>
                     <div style="display:grid; grid-template-columns: 1fr 1fr; gap:8px;">
@@ -1588,6 +1784,7 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
                         <button class="pay-btn" id="payBtn" onclick="openPayModal()" disabled data-help="Pay now|Take payment AND place the order in one step. Use for walk-in / takeaway / quick-service. The kitchen still receives the ticket automatically."><i class="fas fa-credit-card ico"></i> Pay</button>
                     </div>
                     <div style="font-size:11px; color:#6c757d; margin-top:8px; text-align:center;" id="parkHint">Fire Order = open tab (pay later)</div>
+                    <button type="button" id="repeatRoundBtn" onclick="repeatLastRound()" style="display:none; width:100%; margin-top:8px; padding:9px; background:#f1f5f9; border:1px solid #cbd5e1; border-radius:8px; font-size:12.5px; font-weight:600; color:#334155; cursor:pointer;" data-help="Repeat last round|Re-loads the items from the last order you fired or paid so you can quickly send the same round again."><i class="fas fa-rotate-right"></i> Repeat last round (<span id="repeatRoundCount">0</span>)</button>
                 </div>
             </div>
 
@@ -1979,6 +2176,7 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
                                 <div class="tc-meta">
                                     <?php if (!empty($t['table_number'])): ?><span class="tc-meta-pill"><i class="fas fa-table-cells-large"></i> Table <?php echo htmlspecialchars($t['table_number']); ?></span><?php endif; ?>
                                     <?php if (!empty($t['customer_name'])): ?><span class="tc-meta-pill"><i class="fas fa-user"></i> <?php echo htmlspecialchars($t['customer_name']); ?></span><?php endif; ?>
+                                    <?php if ((int)($t['covers'] ?? 0) > 0): ?><span class="tc-meta-pill"><i class="fas fa-users"></i> <?php echo (int)$t['covers']; ?> cover<?php echo (int)$t['covers'] === 1 ? '' : 's'; ?></span><?php endif; ?>
                                     <span class="tc-meta-pill"><i class="fas fa-list"></i> <?php echo $totalItems; ?> item<?php echo $totalItems === 1 ? '' : 's'; ?></span>
                                     <span class="tc-meta-pill"><i class="fas fa-clock"></i> Opened <?php echo htmlspecialchars(date('H:i', $created)); ?></span>
                                     <?php if ($openedByOther): ?>
@@ -2005,6 +2203,13 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
                                     <?php if ($isStale): ?><div class="tc-stale-warn"><i class="fas fa-triangle-exclamation"></i> Previous shift</div><?php endif; ?>
                                 </div>
                                 <div class="tc-actions">
+                                    <?php if ((int)($t['split_paid_count'] ?? 0) === 0): ?>
+                                    <button type="button" onclick="startAddToTab(<?php echo (int)$t['id']; ?>, <?php echo json_encode((string)$t['reference']); ?>, <?php echo (float)$t['total_amount']; ?>)"
+                                        class="tc-btn tc-btn-add"
+                                        data-help="Add items|Add another round to this tab. Returns you to the menu; the next Fire adds to this tab.">
+                                        <i class="fas fa-plus"></i> Add items
+                                    </button>
+                                    <?php endif; ?>
                                     <button type="button" onclick="openPayForTab(<?php echo (int)$t['id']; ?>, <?php echo (float)$t['total_amount']; ?>, <?php echo json_encode((string)$t['reference']); ?>, <?php echo $canSettle ? 'true' : 'false'; ?>, <?php echo (int)($t['split_count'] ?? 1); ?>, <?php echo (int)($t['split_paid_count'] ?? 0); ?>)"
                                         class="tc-btn tc-btn-settle"
                                         data-help="Settle tab|Close this tab — take payment and mark the order as paid.">
@@ -2621,15 +2826,29 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
             return POS_API_BASE + String(path || '').replace(/^\/+/, '');
         }
 
+        function posNewClientUuidValue() {
+            return (window.crypto && typeof window.crypto.randomUUID === 'function') ?
+                window.crypto.randomUUID() :
+                'pos-' + Date.now() + '-' + Math.random().toString(36).slice(2, 10);
+        }
+
         function posEnsureClientUuid(form) {
             if (!form || form.querySelector('[name="client_uuid"]')) return;
             const field = document.createElement('input');
             field.type = 'hidden';
             field.name = 'client_uuid';
-            field.value = (window.crypto && typeof window.crypto.randomUUID === 'function') ?
-                window.crypto.randomUUID() :
-                'pos-' + Date.now() + '-' + Math.random().toString(36).slice(2, 10);
+            field.value = posNewClientUuidValue();
             form.appendChild(field);
+        }
+
+        /* Force a fresh client_uuid. The AJAX park flow stays on the page, so without
+           this a second "Fire" would reuse the prior UUID and the server's idempotency
+           guard would return the first order instead of opening a new tab. */
+        function posRefreshClientUuid(form) {
+            if (!form) return;
+            const existing = form.querySelector('[name="client_uuid"]');
+            if (existing) existing.parentNode.removeChild(existing);
+            posEnsureClientUuid(form);
         }
 
         document.addEventListener('submit', e => {
@@ -4643,6 +4862,12 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
                 text = 'Fire Order';
                 stationOpen = true;
             }
+            // Override label when appending to an existing tab
+            if (typeof _activeTab !== 'undefined' && _activeTab) {
+                label.innerHTML = `<i class="fas fa-plus"></i> Add to ${escHtml(_activeTab.ref)}${stationOpen ? '' : CLOSED_BADGE}`;
+                if (hint) hint.textContent = 'Appends this round to ' + _activeTab.ref;
+                return;
+            }
             label.innerHTML = `<i class="fas ${icon}"></i> ${text}${stationOpen ? '' : CLOSED_BADGE}`;
             if (hint) hint.textContent = text + ' = open tab (pay later)';
         }
@@ -4967,6 +5192,8 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
             const parkBtn = document.getElementById('parkBtn');
             if (parkBtn) parkBtn.disabled = !cart.length;
             updateFireButton();
+            if (typeof updateRepeatButton === 'function') updateRepeatButton();
+            if (typeof updateActiveTabBanner === 'function') updateActiveTabBanner();
         }
 
         let activeNoteIdx = -1;
@@ -5193,9 +5420,102 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
             txt.textContent = parts.join(' · ');
         }
 
+        /* ===== Active tab (add-to-tab) state ===========================
+           When set, the Fire button appends the cart to an existing open tab
+           instead of opening a new one. Pay-now is disabled in this mode. */
+        let _activeTab = null; // { id, ref, total }
+
+        function startAddToTab(id, ref, total) {
+            setActiveTab(id, ref, total);
+            // Return to the menu so the user can build the next round
+            if (typeof closeTabsTray === 'function') closeTabsTray();
+            const tabsOv = document.getElementById('tabsOverlay');
+            if (tabsOv) tabsOv.classList.remove('show');
+            // Ensure the cart drawer is visible on mobile
+            const mainCart = document.getElementById('mainCart');
+            if (mainCart && window.matchMedia('(max-width: 1024px)').matches && !mainCart.classList.contains('open')) {
+                toggleCartDrawer();
+            }
+            posToastReady('Adding to ' + ref + ' — tap items then Fire to append.', false);
+        }
+
+        function setActiveTab(id, ref, total) {
+            _activeTab = { id: parseInt(id, 10) || 0, ref: String(ref || ''), total: parseFloat(total) || 0 };
+            updateActiveTabBanner();
+            updateFireButton();
+            renderCart();
+        }
+
+        function clearActiveTab(announce = false) {
+            const had = _activeTab;
+            _activeTab = null;
+            updateActiveTabBanner();
+            updateFireButton();
+            renderCart();
+            if (announce && had) posToastReady('Stopped adding to ' + had.ref + '. New orders open a fresh tab.', false);
+        }
+
+        function updateActiveTabBanner() {
+            const banner = document.getElementById('activeTabBanner');
+            if (!banner) return;
+            if (_activeTab) {
+                const refEl = document.getElementById('activeTabBannerRef');
+                const totEl = document.getElementById('activeTabBannerTotal');
+                if (refEl) refEl.textContent = _activeTab.ref;
+                if (totEl) totEl.textContent = currencySymbol + ' ' + fmtMoney(_activeTab.total);
+                banner.style.display = 'flex';
+            } else {
+                banner.style.display = 'none';
+            }
+            // Pay-now is meaningless when appending to a tab — disable it
+            const payBtn = document.getElementById('payBtn');
+            if (payBtn) {
+                if (_activeTab) {
+                    payBtn.disabled = true;
+                    payBtn.title = 'Settle from the Tabs tray when adding to an existing tab';
+                } else {
+                    payBtn.disabled = !cart.length;
+                    payBtn.title = '';
+                }
+            }
+        }
+
+        /* ===== Repeat last round ======================================= */
+        let _lastRoundItems = []; // [{id,type,qty,note,name,price}]
+
+        function rememberLastRound() {
+            if (!cart.length) return;
+            _lastRoundItems = cart.map(l => ({ id: l.id, type: l.type, qty: l.qty, note: l.note || '', name: l.name, price: l.price }));
+            updateRepeatButton();
+        }
+
+        function updateRepeatButton() {
+            const btn = document.getElementById('repeatRoundBtn');
+            if (!btn) return;
+            if (_lastRoundItems.length && !cart.length) {
+                const cnt = document.getElementById('repeatRoundCount');
+                if (cnt) cnt.textContent = String(_lastRoundItems.reduce((s, l) => s + (parseFloat(l.qty) || 0), 0));
+                btn.style.display = 'block';
+            } else {
+                btn.style.display = 'none';
+            }
+        }
+
+        function repeatLastRound() {
+            if (!_lastRoundItems.length) {
+                posToastReady('No previous round to repeat yet.', true);
+                return;
+            }
+            // Re-load the items into the cart so the user can review before firing
+            cart = _lastRoundItems.map(l => ({ id: l.id, type: l.type, qty: l.qty, note: l.note || '', name: l.name, price: l.price }));
+            renderCart();
+            posToastReady('Last round loaded — review then Fire / Add.', false);
+        }
+
         function parkOrder() {
             if (!cart.length) return;
-            if (!validateServiceContext()) return;
+            // When appending to an existing tab the location/customer come from the tab itself.
+            if (!_activeTab && !validateServiceContext()) return;
             const {
                 hasFood,
                 hasDrink
@@ -5231,6 +5551,7 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
                 window._posParkSubmitInFlight = false;
                 return;
             }
+            const addingToTab = !!_activeTab;
             let actionInput = f.querySelector('input[name="action"]');
             if (!actionInput) {
                 actionInput = document.createElement('input');
@@ -5238,9 +5559,27 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
                 actionInput.name = 'action';
                 f.appendChild(actionInput);
             }
-            actionInput.value = 'park';
-            posEnsureClientUuid(f);
-            showPosActionLoader('Firing order...', 'Sending your ticket to the station display.', { subtle: true });
+            // Manage the tab_order_id hidden field
+            let tabIdInput = f.querySelector('input[name="tab_order_id"]');
+            if (addingToTab) {
+                if (!tabIdInput) {
+                    tabIdInput = document.createElement('input');
+                    tabIdInput.type = 'hidden';
+                    tabIdInput.name = 'tab_order_id';
+                    f.appendChild(tabIdInput);
+                }
+                tabIdInput.value = String(_activeTab.id);
+                actionInput.value = 'add_to_tab';
+            } else {
+                if (tabIdInput) tabIdInput.value = '';
+                actionInput.value = 'park';
+            }
+            // New tab → fresh idempotency key each time (AJAX stays on page). Add-to-tab
+            // doesn't use client_uuid server-side, so a fresh value is harmless there too.
+            posRefreshClientUuid(f);
+            // Remember this round for the "Repeat last round" button before the cart is cleared
+            rememberLastRound();
+            showPosActionLoader(addingToTab ? 'Adding to tab...' : 'Firing order...', addingToTab ? 'Appending your items to the open tab.' : 'Sending your ticket to the station display.', { subtle: true });
             try {
                 const fd = new FormData(f);
                 const r = await fetch('pos.php', {
@@ -5252,10 +5591,23 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
                 const j = await r.json();
                 hidePosActionLoader();
                 if (!j.ok) {
-                    posToastReady(j.error || 'Failed to fire order — please retry.', true);
+                    posToastReady(j.error || (addingToTab ? 'Failed to add to tab — please retry.' : 'Failed to fire order — please retry.'), true);
                     return;
                 }
-                showPosParkSuccess(j);
+                if (addingToTab) {
+                    // Keep the tab active so the user can keep adding rounds; update running total
+                    if (_activeTab && typeof j.new_total !== 'undefined') {
+                        _activeTab.total = parseFloat(j.new_total) || _activeTab.total;
+                        updateActiveTabBanner();
+                    }
+                    cart = [];
+                    renderCart();
+                    updateRepeatButton();
+                    posToastReady(j.message || ('Added to ' + (j.reference || 'tab') + '.'), false);
+                    refreshOpenTabs(false);
+                } else {
+                    showPosParkSuccess(j);
+                }
             } catch (e) {
                 hidePosActionLoader();
                 posToastReady('Network error — could not reach the server. Please retry.', true);
@@ -5268,9 +5620,15 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
             // Clear the cart first
             cart = [];
             renderCart();
+            updateRepeatButton();
+            // Reset covers for the next (new) order
+            const coversEl = document.getElementById('ctxCovers');
+            if (coversEl) coversEl.value = '';
             const ref = escHtml(j.reference || '');
+            const refJson = JSON.stringify(String(j.reference || ''));
             const stn = escHtml(j.station_label || 'Station');
             const total = parseFloat(j.total || 0);
+            const orderId = parseInt(j.order_id, 10) || 0;
             const linesHtml = (j.lines || []).map(l =>
                 `<div style="display:flex;justify-content:space-between;padding:4px 0;border-bottom:1px solid #f3f4f6;font-size:13px;">` +
                 `<span>${escHtml(l.item_name)}</span><span style="font-weight:600;">${escHtml(String(l.quantity))}×</span></div>`
@@ -5289,6 +5647,7 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
                     ${linesHtml ? `<div style="max-height:180px;overflow-y:auto;margin:10px 0;border:1px solid #f3f4f6;border-radius:8px;padding:6px 10px;">${linesHtml}</div>` : ''}
                     <div class="actions">
                         <a class="a-print" href="stock-receipt.php?id=${encodeURIComponent(j.order_id)}&print=1&kot=1" target="_blank"><i class="fas fa-print"></i> Print KOT</a>
+                        <button class="a-receipt" onclick="document.getElementById('posParkSuccessOverlay').remove(); startAddToTab(${orderId}, ${refJson}, ${total});"><i class="fas fa-plus"></i> Add more</button>
                         <button class="a-receipt" onclick="document.getElementById('posParkSuccessOverlay').remove(); openTabsTray();"><i class="fas fa-list"></i> View Tabs</button>
                         <button class="a-new" onclick="document.getElementById('posParkSuccessOverlay').remove();"><i class="fas fa-plus-circle"></i> New order</button>
                     </div>
@@ -5678,9 +6037,11 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
                     servedCount > 0 ? `<span class="tc-flow-chip served"><i class="fas fa-check"></i> ${servedCount} served</span>` : '',
                     totalItems > 0 && servedCount === totalItems ? '<span class="tc-flow-chip served-all"><i class="fas fa-circle-check"></i> All served</span>' : ''
                 ].join('');
+                const coversN = parseInt(t.covers || 0, 10) || 0;
                 const metaPills = [
                     t.table_number ? `<span class="tc-meta-pill"><i class="fas fa-table-cells-large"></i> Table ${escHtml(t.table_number)}</span>` : '',
                     t.customer_name ? `<span class="tc-meta-pill"><i class="fas fa-user"></i> ${escHtml(t.customer_name)}</span>` : '',
+                    coversN > 0 ? `<span class="tc-meta-pill"><i class="fas fa-users"></i> ${coversN} cover${coversN === 1 ? '' : 's'}</span>` : '',
                     `<span class="tc-meta-pill"><i class="fas fa-list"></i> ${totalItems} item${totalItems === 1 ? '' : 's'}</span>`,
                     `<span class="tc-meta-pill"><i class="fas fa-clock"></i> Opened ${escHtml(openedAt)}</span>`,
                     byOther ? `<span class="tc-meta-pill"><i class="fas fa-user-tie"></i> ${escHtml(t.opened_by || 'staff')}</span>` : `<span class="tc-meta-pill"><i class="fas fa-user-check"></i> You</span>`
@@ -5710,6 +6071,7 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
                         ${isStale ? '<div class="tc-stale-warn"><i class="fas fa-triangle-exclamation"></i> Previous shift</div>' : ''}
                     </div>
                     <div class="tc-actions">
+                        ${parseInt(t.split_paid_count||0) === 0 ? `<button type="button" onclick="startAddToTab(${orderId}, ${actionRef}, ${parseFloat(t.total_amount || 0) || 0})" class="tc-btn tc-btn-add" data-help="Add items|Add another round to this tab. Returns you to the menu; the next Fire adds to this tab."><i class="fas fa-plus"></i> Add items</button>` : ''}
                         <button type="button" onclick="openPayForTab(${orderId}, ${parseFloat(t.total_amount || 0) || 0}, ${actionRef}, ${canSettle ? 'true' : 'false'}, ${parseInt(t.split_count||1)||1}, ${parseInt(t.split_paid_count||0)||0})" class="tc-btn tc-btn-settle" data-help="Settle tab|Close this tab — take payment and mark the order as paid."><i class="fas fa-credit-card"></i> Settle</button>
                         <button type="button" onclick="openTabDetail(${orderId})" class="tc-btn tc-btn-detail" data-help="View details|See all items, kitchen status, and the full audit trail for this tab."><i class="fas fa-receipt"></i> Details</button>
                         <button type="button" onclick="openPosPageModal('stock-receipt.php?id=${orderId}&print=1&kot=1','Print KOT','fas fa-print')" class="tc-btn tc-btn-kot" data-help="Print KOT|Reprint the kitchen ticket for this open tab."><i class="fas fa-print"></i> KOT</button>
@@ -7122,6 +7484,8 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
                     });
                     j._splitLegs = _pt.paid.slice(); // pass to receipt modal
                 }
+                // If we just settled the tab we were adding to, stop the add-to-tab mode
+                if (_activeTab && parseInt(j.order_id, 10) === _activeTab.id) clearActiveTab(false);
                 closePayTabOverlay();
                 showReceiptModal(j);
                 setTimeout(() => { refreshShiftStats(); refreshOpenTabs(false); }, 400);

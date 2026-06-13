@@ -3345,6 +3345,13 @@ a.recent-toggle span {
     box-shadow: 0 6px 12px rgba(24, 143, 72, .2);
 }
 
+.tc-btn-add {
+    background: linear-gradient(135deg, #ea7317 0%, #c2540b 100%);
+    border-color: #c2540b;
+    color: #fff;
+    box-shadow: 0 6px 12px rgba(234, 115, 23, .2);
+}
+
 .tc-btn-detail {
     background: #f8f6f2;
     border-color: #e2d8cb;
