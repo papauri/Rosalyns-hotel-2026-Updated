@@ -289,13 +289,52 @@
       </section>
 
       <section>
-        <h2>Opening float</h2>
+        <h2>POS permissions overview</h2>
+        <p>Each POS action is controlled by a granular permission key that can be granted or revoked per user in <strong>User Management → Permissions</strong>. The defaults by role are:</p>
+        <table style="width:100%;border-collapse:collapse;font-size:13px;margin-top:8px;">
+          <thead>
+            <tr style="background:#f8fafc;border-bottom:2px solid #e2e8f0;">
+              <th style="text-align:left;padding:8px 10px;">Permission</th>
+              <th style="text-align:center;padding:8px 6px;">Admin</th>
+              <th style="text-align:center;padding:8px 6px;">Manager</th>
+              <th style="text-align:center;padding:8px 6px;">Restaurant Staff</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr style="border-bottom:1px solid #f1f5f9;"><td style="padding:7px 10px;"><code>pos_till</code> — Access POS</td><td style="text-align:center;">✓</td><td style="text-align:center;">✓</td><td style="text-align:center;">✓</td></tr>
+            <tr style="border-bottom:1px solid #f1f5f9;"><td style="padding:7px 10px;"><code>pos_float</code> — Opening float</td><td style="text-align:center;">✓</td><td style="text-align:center;">✓</td><td style="text-align:center;">✓</td></tr>
+            <tr style="border-bottom:1px solid #f1f5f9;"><td style="padding:7px 10px;"><code>pos_discount</code> — Apply discounts</td><td style="text-align:center;">✓</td><td style="text-align:center;">✓</td><td style="text-align:center;">✓</td></tr>
+            <tr style="border-bottom:1px solid #f1f5f9;"><td style="padding:7px 10px;"><code>pos_86</code> — Quick-86 items</td><td style="text-align:center;">✓</td><td style="text-align:center;">✓</td><td style="text-align:center;">—</td></tr>
+            <tr><td style="padding:7px 10px;"><code>pos_refund</code> — Process refunds</td><td style="text-align:center;">✓</td><td style="text-align:center;">✓</td><td style="text-align:center;">—</td></tr>
+          </tbody>
+        </table>
+        <div class="callout note" style="margin-top:12px;">
+          Permissions can be individually overridden per user — a restaurant staff member can be granted <code>pos_refund</code> if needed, or a manager can have it revoked.
+        </div>
+      </section>
+
+      <section>
+        <h2>Manager in-session authorisation</h2>
+        <p>If a logged-in cashier attempts an action they don't have permission for (e.g. a refund), the system shows a <strong>Manager Authorisation overlay</strong> instead of blocking with an error. This lets a manager approve the action on the spot — without requiring the cashier to log out.</p>
+        <ol class="steps">
+          <li>The cashier taps the action button (e.g. <strong>Refund</strong> or <strong>86</strong>).</li>
+          <li>The dark <strong>Manager Authorisation</strong> modal appears, showing which permission is required.</li>
+          <li>A manager (or any user with the required permission) enters <strong>their own username and password</strong>.</li>
+          <li>On success, a one-use session token is issued — valid for 5 minutes — and the action proceeds with both the cashier <em>and</em> the authorising manager recorded in the audit log.</li>
+        </ol>
+        <div class="callout warn">
+          The authorising manager must be a <em>different</em> user account than the cashier — self-authorisation is blocked.
+        </div>
+      </section>
+
+      <section>
+        <h2>Opening float <span class="pill">pos_float</span></h2>
         <p>Record the cash placed in the drawer before your first order so the Z-report variance accounts for it.</p>
         <ol class="steps">
-          <li>Tap <strong>Float</strong> in the till bar (available to all roles).</li>
+          <li>Tap <strong>Float</strong> in the till bar. If you don't have the <code>pos_float</code> permission, the Manager Authorisation overlay appears first.</li>
           <li>Enter the float amount — quick-fill buttons for common values (2 000, 5 000, 10 000, 20 000).</li>
           <li>Optionally add a note (e.g. <em>"Float handed over by manager"</em>).</li>
-          <li>Tap <strong>Record float</strong>. The entry is logged in <code>stock_shift_opens</code> for management review.</li>
+          <li>Tap <strong>Record float</strong>. The entry is saved to <code>stock_shift_opens</code> and written to the system activity log.</li>
         </ol>
         <div class="callout note">
           The float is purely a declaration — it does not affect order processing. When reconciling, expected cash = float + sales. The float record helps explain any surplus in the drawer.
@@ -303,14 +342,14 @@
       </section>
 
       <section>
-        <h2>Discounts at the till <span class="pill amber">all roles</span></h2>
-        <p>Apply a percentage or fixed discount to an order before taking payment — available on both new orders and tab settlements.</p>
+        <h2>Discounts at the till <span class="pill">pos_discount</span></h2>
+        <p>Apply a percentage or fixed discount to an order before taking payment — available on both new orders and tab settlements. The discount section is hidden if the logged-in user lacks <code>pos_discount</code>.</p>
         <ol class="steps">
           <li>Open the <strong>Pay</strong> modal (new order) or tap <strong>Settle</strong> on a tab.</li>
           <li>In the <strong>Discount</strong> section, choose a preset: <strong>None · 5% · 10% · 15% · 25%</strong> — or type a custom amount.</li>
           <li>Pick a <strong>reason</strong> from the dropdown (Staff discount, Happy hour, Manager override, Complimentary, Loyalty, Event promo).</li>
           <li>The total display updates live — confirm payment as normal.</li>
-          <li>The discount is saved on the order as <code>discount_amount</code> / <code>discount_reason</code> and printed on the receipt.</li>
+          <li>The discount is saved on the order as <code>discount_amount</code> / <code>discount_reason</code>, logged to the activity log, and printed on the receipt.</li>
         </ol>
         <div class="callout warn">
           For split bills, discounts can only be applied on the <strong>first leg</strong>. Once any split payment has been recorded, the discount section is hidden to prevent changing the agreed total.
@@ -318,10 +357,10 @@
       </section>
 
       <section>
-        <h2>Quick-86 item toggle <span class="pill amber">manager only</span></h2>
-        <p>Take a menu item off sale instantly — without leaving the POS — when you run out or need to pull it for any reason.</p>
+        <h2>Quick-86 item toggle <span class="pill amber">pos_86 — manager</span></h2>
+        <p>Take a menu item off sale instantly — without leaving the POS — when you run out or need to pull it for any reason. Restaurant staff who lack <code>pos_86</code> will see the Manager Authorisation overlay when they tap the 86 button.</p>
         <ol class="steps">
-          <li>Tap the <strong>86</strong> button in the till bar (visible to managers and admins only).</li>
+          <li>Tap the <strong>86</strong> button in the till bar.</li>
           <li>The menu enters <strong>86 Mode</strong> — the button turns red and all tiles show "Tap to 86" or "Tap to enable".</li>
           <li>Tap any item tile to toggle its availability:
             <ul>
@@ -332,18 +371,19 @@
           <li>Tap <strong>86</strong> again to exit 86 Mode. Tapping items goes back to adding them to the cart.</li>
         </ol>
         <div class="callout note">
-          Changes take effect immediately — regular cashiers see the item disappear as soon as the page next renders (on their next scroll or order action). No page reload is needed.
+          Changes take effect immediately — regular cashiers see the item disappear as soon as the page next renders. Each toggle is written to the order audit log and the system activity log.
         </div>
       </section>
 
       <section>
-        <h2>POS refunds <span class="pill amber">manager only</span></h2>
-        <p>Process a refund for a paid order without voiding it — the audit trail is preserved and a negative payment record is created.</p>
+        <h2>POS refunds <span class="pill amber">pos_refund — manager</span></h2>
+        <p>Process a refund for a paid order without voiding it — the audit trail is preserved and a negative payment record is created. Cashiers without <code>pos_refund</code> will see the Manager Authorisation overlay before the refund modal opens.</p>
         <ol class="steps">
           <li>Open the <strong>Recent</strong> orders panel (till bar).</li>
           <li>Find the paid order and tap the purple <strong>Refund</strong> button on the right.</li>
-          <li>In the confirmation modal, enter a <strong>reason</strong> (minimum 5 characters).</li>
-          <li>Tap <strong>Confirm refund</strong>. The order status changes to <em>Refunded</em> and a negative payment entry is created in the ledger.</li>
+          <li>If you need manager auth, enter the manager's credentials in the overlay that appears first.</li>
+          <li>In the refund modal, enter a <strong>reason</strong> (minimum 5 characters).</li>
+          <li>Tap <strong>Confirm refund</strong>. The order status changes to <em>Refunded</em>, a negative payment entry is created in the ledger, and the event is logged to the system activity log (including the authorising manager's name if applicable).</li>
         </ol>
         <div class="callout warn">
           <strong>Stock is not automatically reversed.</strong> If physical stock was already used, record a manual stock adjustment in the Stock section. The negative payment record is sufficient for financial reconciliation.

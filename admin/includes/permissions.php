@@ -81,6 +81,10 @@ function getAllRoles()
                 'stock_batches',
                 'stock_orders',
                 'pos_till',
+                'pos_float',
+                'pos_discount',
+                'pos_86',
+                'pos_refund',
                 'restaurant_table_settle',
                 'kds_view',
                 'stock_count',
@@ -178,6 +182,8 @@ function getAllRoles()
             'is_system' => true,
             'permissions' => [
                 'pos_till',
+                'pos_float',
+                'pos_discount',
                 'stock_orders',
                 'room_service_view',
                 'room_service_manage'
@@ -497,6 +503,38 @@ function getAllPermissions()
             'label' => 'POS Till (Touch)',
             'description' => 'Modern touchscreen till for restaurant staff',
             'icon' => 'fa-cash-register',
+            'category' => 'Stations',
+            'page' => 'pos.php',
+            'group' => 'stations'
+        ],
+        'pos_float' => [
+            'label' => 'POS Opening Float',
+            'description' => 'Declare an opening cash float at the start of a shift',
+            'icon' => 'fa-coins',
+            'category' => 'Stations',
+            'page' => 'pos.php',
+            'group' => 'stations'
+        ],
+        'pos_discount' => [
+            'label' => 'POS Discounts',
+            'description' => 'Apply a discount (% preset or custom amount) to POS orders and tab settlements',
+            'icon' => 'fa-tag',
+            'category' => 'Stations',
+            'page' => 'pos.php',
+            'group' => 'stations'
+        ],
+        'pos_86' => [
+            'label' => 'POS Quick-86 Items',
+            'description' => 'Toggle menu item availability (86\'d) directly from the POS till',
+            'icon' => 'fa-ban',
+            'category' => 'Stations',
+            'page' => 'pos.php',
+            'group' => 'stations'
+        ],
+        'pos_refund' => [
+            'label' => 'POS Refunds',
+            'description' => 'Process refunds on paid POS orders from the Recent panel',
+            'icon' => 'fa-rotate-left',
             'category' => 'Stations',
             'page' => 'pos.php',
             'group' => 'stations'

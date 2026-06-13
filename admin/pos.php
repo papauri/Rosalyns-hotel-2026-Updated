@@ -481,10 +481,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $discountAmount = max(0.0, round((float)($_POST['discount_amount'] ?? 0), 2));
                 $discountReason = mb_substr(trim($_POST['discount_reason'] ?? ''), 0, 255);
                 if ($discountAmount > 0 && $splitNumber === 1 && (int)$row['split_paid_count'] === 0 && (float)($row['discount_amount'] ?? 0) == 0) {
+                    if (!hasPermission($user['id'], 'pos_discount')) throw new RuntimeException('You do not have permission to apply discounts.');
                     $discountedTotal = max(0.01, round((float)$row['total_amount'] - $discountAmount, 2));
                     $pdo->prepare("UPDATE stock_orders SET total_amount=?, discount_amount=?, discount_reason=? WHERE id=?")
                         ->execute([$discountedTotal, $discountAmount, $discountReason ?: null, $orderId]);
                     $row['total_amount'] = $discountedTotal;
+                    pos_logAudit($pdo, $orderId, $user['id'], $user['full_name'], 'discount_applied', json_encode(['amount' => $discountAmount, 'reason' => $discountReason]));
+                    logActivity($user['id'], 'pos_discount', 'Discount ' . $currency_symbol . ' ' . number_format($discountAmount, 2) . ' on tab ' . $row['reference'] . ($discountReason ? ' — ' . $discountReason : ''));
                 }
 
                 // Validate split sequence
@@ -680,11 +683,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 ]);
             } elseif ($action === 'set_float') {
                 /* === Opening float declaration === */
+                if (!hasPermission($user['id'], 'pos_float')) throw new RuntimeException('You do not have permission to declare an opening float.');
                 $floatAmount = max(0.0, round((float)($_POST['float_amount'] ?? 0), 2));
                 $floatNote   = mb_substr(trim($_POST['float_note'] ?? ''), 0, 255);
                 $pdo->prepare("INSERT INTO stock_shift_opens (user_id, user_name, shift_date, float_amount, notes, ip_address) VALUES (?, ?, ?, ?, ?, ?)")
                     ->execute([$user['id'], $user['full_name'], $restaurantWindow['business_date'], $floatAmount, $floatNote ?: null, $_SERVER['REMOTE_ADDR'] ?? null]);
                 pos_logAudit($pdo, 0, $user['id'], $user['full_name'], 'float_set', json_encode(['amount' => $floatAmount, 'note' => $floatNote]));
+                logActivity($user['id'], 'pos_float_set', 'Opening float declared: ' . $currency_symbol . ' ' . number_format($floatAmount, 2) . ($floatNote ? ' — ' . $floatNote : ''));
                 $isXhr = !empty($_SERVER['HTTP_X_REQUESTED_WITH']) && strtolower((string)$_SERVER['HTTP_X_REQUESTED_WITH']) === 'xmlhttprequest';
                 if ($isXhr) {
                     header('Content-Type: application/json; charset=utf-8');
@@ -693,8 +698,25 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 }
                 pos_redirectWithFlash(['message' => 'Opening float recorded: ' . $currency_symbol . ' ' . number_format($floatAmount, 2)]);
             } elseif ($action === 'refund_order') {
-                /* === Refund a paid order (manager/admin only) === */
-                if (!in_array($user['role'] ?? '', ['admin', 'manager'], true)) throw new RuntimeException('Manager access required to process refunds.');
+                /* === Refund a paid order — requires pos_refund permission or manager auth === */
+                $mgrAuthToken  = trim($_POST['mgr_auth_token'] ?? '');
+                $mgrActorId    = null;
+                $mgrActorName  = null;
+                if (!hasPermission($user['id'], 'pos_refund')) {
+                    // Check manager auth token granted in-session
+                    $mgrAuth = $_SESSION['pos_mgr_auth'] ?? null;
+                    if (!$mgrAuth
+                        || $mgrAuth['token'] !== $mgrAuthToken
+                        || $mgrAuth['expires'] < time()
+                        || !in_array('pos_refund', $mgrAuth['permissions'], true)
+                    ) {
+                        throw new RuntimeException('Refund requires manager authorisation. Please use the manager auth overlay.');
+                    }
+                    $mgrActorId   = $mgrAuth['manager_id'];
+                    $mgrActorName = $mgrAuth['manager_name'];
+                    // Consume token (one-use)
+                    unset($_SESSION['pos_mgr_auth']);
+                }
                 $refundOrderId = (int)($_POST['order_id'] ?? 0);
                 $refundReason  = mb_substr(trim($_POST['refund_reason'] ?? ''), 0, 255);
                 if ($refundOrderId <= 0) throw new RuntimeException('Invalid order ID.');
@@ -717,7 +739,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 } catch (Throwable $payEx) {
                     error_log('refund_order payment insert: ' . $payEx->getMessage());
                 }
-                pos_logAudit($pdo, $refundOrderId, $user['id'], $user['full_name'], 'refunded', json_encode(['reason' => $refundReason, 'total' => $refundTotal, 'original_method' => $refRow['payment_method']]));
+                $auditDetails = ['reason' => $refundReason, 'total' => $refundTotal, 'original_method' => $refRow['payment_method']];
+                if ($mgrActorId) {
+                    $auditDetails['authorised_by_id']   = $mgrActorId;
+                    $auditDetails['authorised_by_name'] = $mgrActorName;
+                }
+                pos_logAudit($pdo, $refundOrderId, $user['id'], $user['full_name'], 'refunded', json_encode($auditDetails));
+                $activityDetail = 'Refund on order ' . $refRow['reference'] . ' (' . $currency_symbol . ' ' . number_format($refundTotal, 2) . '): ' . $refundReason;
+                if ($mgrActorName) $activityDetail .= ' [Authorised by: ' . $mgrActorName . ']';
+                logActivity($user['id'], 'pos_refund', $activityDetail);
                 $pdo->commit();
                 if (function_exists('deleteCache')) deleteCache('stock_dashboard_metrics_v2');
                 $isXhr = !empty($_SERVER['HTTP_X_REQUESTED_WITH']) && strtolower((string)$_SERVER['HTTP_X_REQUESTED_WITH']) === 'xmlhttprequest';
@@ -744,9 +774,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $discountAmount = max(0.0, round((float)($_POST['discount_amount'] ?? 0), 2));
                 $discountReason = mb_substr(trim($_POST['discount_reason'] ?? ''), 0, 255);
                 if ($discountAmount > 0 && $discountAmount < $totalAmount) {
+                    if (!hasPermission($user['id'], 'pos_discount')) throw new RuntimeException('You do not have permission to apply discounts.');
                     $totalAmount = round($totalAmount - $discountAmount, 2);
                     $pdo->prepare("UPDATE stock_orders SET total_amount=?, subtotal=?, discount_amount=?, discount_reason=? WHERE id=?")
                         ->execute([$totalAmount, $totalAmount, $discountAmount, $discountReason ?: null, $orderId]);
+                    pos_logAudit($pdo, $orderId, $user['id'], $user['full_name'], 'discount_applied', json_encode(['amount' => $discountAmount, 'reason' => $discountReason]));
+                    logActivity($user['id'], 'pos_discount', 'Discount ' . $currency_symbol . ' ' . number_format($discountAmount, 2) . ' on order ' . $reference . ($discountReason ? ' — ' . $discountReason : ''));
                 }
                 $extras = pos_applyPaymentToOrder($pdo, $user, $orderId, $reference, $totalAmount, $paymentMethod, $_POST);
                 // Fire to kitchen for any sit-down/takeaway/room_service flow with food items.
@@ -795,7 +828,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
  * Managers/admins also see unavailable items (is_available=0) with an 86 badge
  * so they can toggle availability from the till without leaving the POS. */
 $isManagerOrAdmin = in_array($user['role'] ?? '', ['admin', 'manager'], true);
-$menuAvailFilter = $isManagerOrAdmin ? '' : 'AND mi.is_available = 1';
+$posCanRefund   = hasPermission($user['id'], 'pos_refund');
+$posCanDiscount = hasPermission($user['id'], 'pos_discount');
+$posCanToggle86 = hasPermission($user['id'], 'pos_86');
+$posCanFloat    = hasPermission($user['id'], 'pos_float');
+$menuAvailFilter = $posCanToggle86 ? '' : 'AND mi.is_available = 1';
 $allMenuItems = $pdo->query("
     SELECT mi.id, mi.item_name AS name, mi.price,
            COALESCE(mi.category, 'Other') AS sub_category,
@@ -820,7 +857,7 @@ foreach ($allMenuItems as $item) {
     if ($isPos && $isAvail) {
         $categories[$cat] = ['label' => $cat, 'count' => ($categories[$cat]['count'] ?? 0) + 1];
         $posVisibleCount++;
-    } elseif ($isPos && !$isAvail && $isManagerOrAdmin) {
+    } elseif ($isPos && !$isAvail && $posCanToggle86) {
         // Count 86'd items under their category so managers still see the category
         $categories[$cat] = ['label' => $cat, 'count' => ($categories[$cat]['count'] ?? 0)];
     }
@@ -908,9 +945,9 @@ if (isset($_GET['ajax']) && $_GET['ajax'] === 'shift_stats') {
 
 if (isset($_GET['ajax']) && $_GET['ajax'] === 'toggle_item') {
     header('Content-Type: application/json; charset=utf-8');
-    if (!in_array($user['role'] ?? '', ['admin', 'manager'], true)) {
+    if (!hasPermission($user['id'], 'pos_86')) {
         http_response_code(403);
-        echo json_encode(['error' => 'Manager access required.']);
+        echo json_encode(['error' => 'You do not have permission to toggle item availability.']);
         exit;
     }
     $toggleItemId = (int)($_GET['item_id'] ?? 0);
@@ -932,10 +969,69 @@ if (isset($_GET['ajax']) && $_GET['ajax'] === 'toggle_item') {
         $pdo->prepare("UPDATE menu_items SET is_available = ? WHERE id = ?")->execute([$newAvail, $toggleItemId]);
         $action86 = $newAvail ? 'item_enabled' : 'item_86d';
         pos_logAudit($pdo, 0, $user['id'], $user['full_name'], $action86, json_encode(['item_id' => $toggleItemId, 'item_name' => $currItem['item_name']]));
+        logActivity($user['id'], 'pos_' . $action86, ($newAvail ? 'Enabled' : '86\'d') . ' menu item: ' . $currItem['item_name']);
         echo json_encode(['ok' => true, 'item_id' => $toggleItemId, 'is_available' => $newAvail, 'item_name' => $currItem['item_name']]);
     } catch (Throwable $e) {
         http_response_code(500);
         echo json_encode(['error' => $e->getMessage()]);
+    }
+    exit;
+}
+
+if (isset($_GET['ajax']) && $_GET['ajax'] === 'manager_auth') {
+    /* === Manager in-session authorisation for privileged POS actions ===
+     * Accepts: username, password, required_permission
+     * Returns: { ok, token } or { error }
+     * Token is stored in $_SESSION['pos_mgr_auth'] and consumed on first use. */
+    header('Content-Type: application/json; charset=utf-8');
+    $mgrUsername  = trim($_POST['username'] ?? '');
+    $mgrPassword  = $_POST['password'] ?? '';
+    $requiredPerm = trim($_POST['required_permission'] ?? '');
+    if (!$mgrUsername || !$mgrPassword || !$requiredPerm) {
+        http_response_code(400);
+        echo json_encode(['error' => 'Username, password and required permission are required.']);
+        exit;
+    }
+    // Validate the permission key exists
+    $allPerms = getAllPermissions();
+    if (!isset($allPerms[$requiredPerm])) {
+        http_response_code(400);
+        echo json_encode(['error' => 'Unknown permission key.']);
+        exit;
+    }
+    try {
+        $mgrStmt = $pdo->prepare("SELECT id, full_name, username, password_hash, role, is_active FROM admin_users WHERE username = ? LIMIT 1");
+        $mgrStmt->execute([$mgrUsername]);
+        $mgrUser = $mgrStmt->fetch(PDO::FETCH_ASSOC);
+        if (!$mgrUser || !$mgrUser['is_active'] || !password_verify($mgrPassword, $mgrUser['password_hash'])) {
+            http_response_code(401);
+            echo json_encode(['error' => 'Invalid manager credentials.']);
+            exit;
+        }
+        if ($mgrUser['id'] === $user['id']) {
+            http_response_code(400);
+            echo json_encode(['error' => 'You cannot authorise your own actions — a different manager must approve.']);
+            exit;
+        }
+        if (!hasPermission((int)$mgrUser['id'], $requiredPerm)) {
+            http_response_code(403);
+            echo json_encode(['error' => $mgrUser['full_name'] . ' does not have the ' . ($allPerms[$requiredPerm]['label'] ?? $requiredPerm) . ' permission.']);
+            exit;
+        }
+        // Issue session token (one-use, 5 min expiry)
+        $token = bin2hex(random_bytes(24));
+        $_SESSION['pos_mgr_auth'] = [
+            'token'        => $token,
+            'manager_id'   => (int)$mgrUser['id'],
+            'manager_name' => $mgrUser['full_name'] ?: $mgrUser['username'],
+            'permissions'  => [$requiredPerm],
+            'expires'      => time() + 300,
+        ];
+        logActivity((int)$mgrUser['id'], 'pos_mgr_auth_granted', 'Authorised ' . ($user['full_name'] ?: $user['username']) . ' to perform: ' . $requiredPerm . ' (in-session override, till)');
+        echo json_encode(['ok' => true, 'token' => $token, 'manager_name' => $mgrUser['full_name'] ?: $mgrUser['username']]);
+    } catch (Throwable $e) {
+        http_response_code(500);
+        echo json_encode(['error' => 'Auth error: ' . $e->getMessage()]);
     }
     exit;
 }
@@ -1343,10 +1439,12 @@ if (in_array($user['role'] ?? '', ['admin', 'manager'], true)) {
                     <button class="recent-toggle" onclick="toggleRecent()" data-help="Recent orders|Last 10 orders you rang up."><i class="fas fa-receipt"></i> Recent</button>
                     <button class="recent-toggle" onclick="openTabsTray()" data-help="Open tabs|Unpaid kitchen orders."><i class="fas fa-utensils"></i> Tabs <span id="tabBadge" <?php echo empty($openTabs) ? ' style="display:none;"' : ''; ?>><?php echo count($openTabs); ?></span></button>
                     <button class="recent-toggle" onclick="openStationNoteModal()" data-help="Station note|Quick note to Kitchen/Bar/Coffee."><i class="fas fa-paper-plane"></i> Note</button>
+                    <?php if ($posCanFloat): ?>
                     <button class="recent-toggle" onclick="openFloatModal()" data-help="Opening float|Record the opening cash float for your shift."><i class="fas fa-coins"></i> Float</button>
+                    <?php endif; ?>
                     <button class="recent-toggle" onclick="openCloseShift()" data-help="Close shift (Z-report)|End-of-shift cash count."><i class="fas fa-cash-register"></i> Close Shift</button>
 
-                    <?php if (in_array($user['role'] ?? '', ['admin', 'manager'], true)): ?>
+                    <?php if ($posCanToggle86 || $isManagerOrAdmin): ?>
                         <div class="tb-sep"></div>
                         <!-- Live screens -->
                         <a class="recent-toggle" href="kds.php" target="_blank" style="text-decoration:none;"><i class="fas fa-utensils"></i> Kitchen<span id="kitchenBadge" style="<?php echo ($adminStationsInit['counts']['kitchen']['open_total'] ?? 0) > 0 ? '' : 'display:none;'; ?>"><?php echo (int)($adminStationsInit['counts']['kitchen']['open_total'] ?? 0); ?></span></a>
@@ -1355,7 +1453,9 @@ if (in_array($user['role'] ?? '', ['admin', 'manager'], true)) {
                         <button class="recent-toggle" onclick="openStationsTray()"><i class="fas fa-layer-group"></i> Stations<span id="stationsBadge" style="<?php $tot = ($adminStationsInit['counts']['kitchen']['open_total'] ?? 0) + ($adminStationsInit['counts']['bar']['open_total'] ?? 0) + ($adminStationsInit['counts']['coffee_bar']['open_total'] ?? 0);
                                                                                                                                                                 echo $tot > 0 ? '' : 'display:none;'; ?>"><?php echo $tot; ?></span></button>
                         <a class="recent-toggle" href="stock-orders.php"><i class="fas fa-list"></i> All Orders</a>
+                        <?php if ($posCanToggle86): ?>
                         <button class="recent-toggle" id="eightySixModeBtn" onclick="toggle86Mode()" data-help="86 Mode|Toggle item availability. When active, click any item to mark it as 86'd (unavailable) or to re-enable it. All sessions reload the menu."><i class="fas fa-ban"></i> 86</button>
+                        <?php endif; ?>
                     <?php endif; ?>
 
                     <div class="tb-sep"></div>
@@ -1515,7 +1615,7 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
                         <div class="ref"><?php echo htmlspecialchars($r['reference']); ?> · <?php echo $currency_symbol . ' ' . number_format((float)$r['total_amount'], 2); ?><?php if ($rDiscount > 0): ?> <span style="font-size:10px;color:#856404;background:#fffbeb;padding:1px 5px;border-radius:4px;">-<?php echo number_format($rDiscount,2); ?></span><?php endif; ?></div>
                         <div style="color:#6c757d; font-size:11px;"><?php echo htmlspecialchars(ucfirst(str_replace('_', ' ', $r['payment_method'] ?? '—'))); ?> · <?php echo htmlspecialchars(date('H:i', strtotime($r['created_at']))); ?> · <span style="color:<?php echo $rStatusColor; ?>; font-weight:600;"><?php echo htmlspecialchars($rStatus); ?></span></div>
                     </a>
-                    <?php if ($isManagerOrAdmin && $rStatus === 'paid'): ?>
+                    <?php if ($posCanRefund && $rStatus === 'paid'): ?>
                         <button type="button" onclick="openRefundModal(<?php echo (int)$r['id']; ?>, <?php echo json_encode((string)$r['reference']); ?>, <?php echo (float)$r['total_amount']; ?>)" style="flex-shrink:0; padding:5px 9px; background:#6f42c1; color:#fff; border:none; border-radius:6px; font-size:11px; font-weight:600; cursor:pointer; white-space:nowrap;" title="Process refund"><i class="fas fa-rotate-left"></i> Refund</button>
                     <?php endif; ?>
                 </div>
@@ -1555,7 +1655,7 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
                     <input type="text" name="notes" placeholder="Allergies, special requests…">
 
                     <!-- Discount section -->
-                    <div style="background:#fffbeb;border:1px solid #fde68a;border-radius:8px;padding:10px 12px;margin-bottom:10px;">
+                    <div style="background:#fffbeb;border:1px solid #fde68a;border-radius:8px;padding:10px 12px;margin-bottom:10px;<?php echo $posCanDiscount ? '' : 'display:none;'; ?>">
                         <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:8px;">
                             <span style="font-size:13px;font-weight:600;color:#374151;white-space:nowrap;"><i class="fas fa-tag" style="color:#d97706;margin-right:4px;"></i>Discount</span>
                             <div style="display:flex;gap:5px;flex-wrap:wrap;" id="payDiscountPresets">
@@ -2083,6 +2183,34 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
         </div>
     </div>
 
+    <!-- Manager In-Session Auth Overlay ──────────────────────────────── -->
+    <div class="overlay modal-overlay" data-modal id="mgrAuthOverlay" style="z-index:10001;">
+        <div class="modal modal-content" style="max-width:380px;">
+            <div class="modal-head modal-header" style="background:#1e293b;color:#fff;border-radius:12px 12px 0 0;">
+                <h3 style="color:#fff;margin:0;"><i class="fas fa-shield-alt"></i> Manager Authorisation</h3>
+                <button class="close modal-close" onclick="closeMgrAuthOverlay()" style="color:#fff;">&times;</button>
+            </div>
+            <form id="mgrAuthForm" onsubmit="submitMgrAuth(event)" autocomplete="off">
+                <div class="modal-body">
+                    <p style="font-size:13px;color:#6c757d;margin-top:0;">This action requires a manager or authorised user to approve. Please enter your credentials to proceed.</p>
+                    <div style="background:#f0fdf4;border:1px solid #86efac;border-radius:8px;padding:10px 12px;margin-bottom:14px;font-size:13px;color:#166534;">
+                        <i class="fas fa-key" style="margin-right:6px;"></i>
+                        Permission required: <strong id="mgrAuthPermLabel"></strong>
+                    </div>
+                    <label style="font-size:12px;font-weight:600;color:#374151;display:block;margin-bottom:4px;">Manager username</label>
+                    <input type="text" id="mgrAuthUsername" autocomplete="off" placeholder="Username" style="width:100%;box-sizing:border-box;border:1px solid #d1d5db;border-radius:8px;padding:9px 12px;font-size:14px;margin-bottom:10px;">
+                    <label style="font-size:12px;font-weight:600;color:#374151;display:block;margin-bottom:4px;">Password</label>
+                    <input type="password" id="mgrAuthPassword" autocomplete="new-password" placeholder="Password" style="width:100%;box-sizing:border-box;border:1px solid #d1d5db;border-radius:8px;padding:9px 12px;font-size:14px;margin-bottom:6px;">
+                    <div id="mgrAuthError" style="color:#c82333;font-size:12px;min-height:18px;margin-bottom:4px;"></div>
+                </div>
+                <div class="modal-foot modal-footer">
+                    <button type="button" class="btn-cancel" onclick="closeMgrAuthOverlay()">Cancel</button>
+                    <button type="submit" class="btn-confirm" style="background:#1e293b;"><i class="fas fa-check-circle"></i> Authorise</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
     <!-- Pay-existing-tab modal (small wrapper that points payForm at action=pay_existing) -->
     <div class="overlay modal-overlay" data-modal id="payTabOverlay">
         <div class="modal modal-content" style="max-width:480px;">
@@ -2145,7 +2273,7 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
                     </div>
 
                     <!-- Discount section (first leg only) -->
-                    <div id="payTabDiscountSection" style="background:#fffbeb;border:1px solid #fde68a;border-radius:8px;padding:10px 12px;margin-bottom:10px;">
+                    <div id="payTabDiscountSection" style="background:#fffbeb;border:1px solid #fde68a;border-radius:8px;padding:10px 12px;margin-bottom:10px;<?php echo $posCanDiscount ? '' : 'display:none;'; ?>">
                         <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:8px;">
                             <span style="font-size:13px;font-weight:600;color:#374151;white-space:nowrap;"><i class="fas fa-tag" style="color:#d97706;margin-right:4px;"></i>Discount</span>
                             <div style="display:flex;gap:5px;flex-wrap:wrap;" id="payTabDiscountPresets">
@@ -2453,7 +2581,11 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
         const posCsrfToken = <?php echo json_encode($csrf_token); ?>;
         const posUserId = <?php echo (int)$user['id']; ?>;
         const posCurrentUserName = <?php echo json_encode($user['full_name'] ?: $user['username']); ?>;
-        const posCanManageTabs = <?php echo in_array($user['role'] ?? '', ['admin', 'manager'], true) ? 'true' : 'false'; ?>;
+        const posCanManageTabs = <?php echo $isManagerOrAdmin ? 'true' : 'false'; ?>;
+        const posCanRefund     = <?php echo $posCanRefund ? 'true' : 'false'; ?>;
+        const posCanDiscount   = <?php echo $posCanDiscount ? 'true' : 'false'; ?>;
+        const posCanToggle86   = <?php echo $posCanToggle86 ? 'true' : 'false'; ?>;
+        const posCanFloat      = <?php echo $posCanFloat ? 'true' : 'false'; ?>;
         const posVatEnabled = <?php echo in_array(getSetting('vat_enabled'), ['1', 1, true, 'true', 'on'], true) ? 'true' : 'false'; ?>;
         const posVatRate = <?php echo json_encode((float)getSetting('vat_rate')); ?>;
         const posServerErrorMessage = <?php echo json_encode($error, JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT); ?>;
@@ -4346,9 +4478,9 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
                 if (activeCat !== '__ALL__' && m.category !== activeCat) return;
 
                 const isAvailable = m.is_available !== 0; // undefined or 1 = available
-                const is86d = !isAvailable && posCanManageTabs;
-                // For non-managers, skip unavailable items entirely
-                if (!isAvailable && !posCanManageTabs) return;
+                const is86d = !isAvailable && posCanToggle86;
+                // Users without 86 permission cannot see unavailable items
+                if (!isAvailable && !posCanToggle86) return;
 
                 const max = maxPortions(m.id, m.type);
                 const cartQty = cart.filter(c => c.id === m.id && c.type === m.type).reduce((s, c) => s + c.qty, 0);
@@ -4376,7 +4508,7 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
                 div.style.position = 'relative';
                 if (is86d) div.style.opacity = '0.6';
 
-                if (eightySixMode && posCanManageTabs) {
+                if (eightySixMode && posCanToggle86) {
                     // 86 mode: show toggle button over item
                     div.innerHTML = `
                 <div>
@@ -6764,9 +6896,9 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
             document.getElementById('payTabTipInput').value = '';
             document.getElementById('payTabTipHidden').value = '0';
             document.querySelectorAll('#payTabTipPresets .tip-preset-btn').forEach(b => b.classList.toggle('active', b.dataset.pct === '0'));
-            // Discount can only be changed on first leg — hide section on subsequent legs
+            // Discount can only be changed on first leg — hide section on subsequent legs (and if no permission)
             const discSection = document.getElementById('payTabDiscountSection');
-            if (discSection) discSection.style.display = (_pt.current > 1 || _pt.paid.length > 0) ? 'none' : '';
+            if (discSection) discSection.style.display = (!posCanDiscount || _pt.current > 1 || _pt.paid.length > 0) ? 'none' : '';
             document.querySelectorAll('#payTabOverlay .pay-method-grid button').forEach(b => b.classList.remove('active'));
             ['cash', 'mobile_money', 'card_manual'].forEach(k => {
                 const e = document.getElementById('ext-tab-' + k);
@@ -6808,7 +6940,7 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
             if (dReasonH) dReasonH.value = '';
             document.querySelectorAll('#payTabDiscountPresets .discount-preset-btn').forEach(b => b.classList.toggle('active', b.dataset.pct === '0'));
             const discSection = document.getElementById('payTabDiscountSection');
-            if (discSection) discSection.style.display = '';
+            if (discSection) discSection.style.display = posCanDiscount ? '' : 'none';
 
             document.getElementById('payTabOrderId').value = orderId;
             document.getElementById('payTabRef').textContent = ref;
@@ -7263,6 +7395,10 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
         let eightySixMode = false;
 
         function toggle86Mode() {
+            if (!posCanToggle86) {
+                openMgrAuthOverlay('pos_86', () => { if (!eightySixMode) toggle86Mode(); });
+                return;
+            }
             eightySixMode = !eightySixMode;
             const btn = document.getElementById('eightySixModeBtn');
             if (btn) btn.classList.toggle('mode-active', eightySixMode);
@@ -7287,8 +7423,77 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
             }
         }
 
+        /* ── Manager In-Session Auth Overlay ────────────────────────────── */
+        let _mgrAuthCallback = null; // fn to call after manager authorises
+        let _mgrAuthPermission = '';
+        let _mgrAuthToken = '';     // returned server token, passed in privileged form
+
+        function openMgrAuthOverlay(requiredPermission, onAuthorised) {
+            _mgrAuthPermission = requiredPermission;
+            _mgrAuthCallback   = onAuthorised;
+            _mgrAuthToken      = '';
+            document.getElementById('mgrAuthUsername').value = '';
+            document.getElementById('mgrAuthPassword').value = '';
+            document.getElementById('mgrAuthError').textContent = '';
+            const permLabels = {
+                pos_refund: 'Process Refunds',
+                pos_86: 'Quick-86 Items',
+                pos_float: 'Opening Float',
+                pos_discount: 'Apply Discounts',
+            };
+            document.getElementById('mgrAuthPermLabel').textContent = permLabels[requiredPermission] || requiredPermission;
+            document.getElementById('mgrAuthOverlay').classList.add('show');
+            setTimeout(() => { const u = document.getElementById('mgrAuthUsername'); if (u) u.focus(); }, 80);
+        }
+
+        function closeMgrAuthOverlay() {
+            document.getElementById('mgrAuthOverlay').classList.remove('show');
+            _mgrAuthCallback  = null;
+            _mgrAuthToken     = '';
+        }
+
+        async function submitMgrAuth(e) {
+            e.preventDefault();
+            const form = e.target;
+            const btn  = form.querySelector('button[type="submit"]');
+            const orig = btn.innerHTML;
+            const errEl = document.getElementById('mgrAuthError');
+            btn.disabled = true;
+            btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Verifying…';
+            errEl.textContent = '';
+            try {
+                const fd = new FormData();
+                fd.append('username', document.getElementById('mgrAuthUsername').value.trim());
+                fd.append('password', document.getElementById('mgrAuthPassword').value);
+                fd.append('required_permission', _mgrAuthPermission);
+                const r = await fetch('pos.php?ajax=manager_auth', {
+                    method: 'POST',
+                    headers: { 'X-Requested-With': 'XMLHttpRequest' },
+                    body: fd,
+                    credentials: 'same-origin',
+                });
+                const j = await r.json();
+                if (j.ok) {
+                    _mgrAuthToken = j.token;
+                    closeMgrAuthOverlay();
+                    posToastReady('Authorised by ' + escHtml(j.manager_name), false);
+                    if (typeof _mgrAuthCallback === 'function') _mgrAuthCallback(_mgrAuthToken);
+                } else {
+                    errEl.textContent = j.error || 'Authorisation failed.';
+                }
+            } catch (err) {
+                errEl.textContent = 'Network error.';
+            }
+            btn.disabled = false;
+            btn.innerHTML = orig;
+        }
+
         /* ── Opening Float modal ─────────────────────────────────────────── */
         function openFloatModal() {
+            if (!posCanFloat) {
+                openMgrAuthOverlay('pos_float', () => openFloatModal());
+                return;
+            }
             document.getElementById('floatOverlay').classList.add('show');
             const fa = document.getElementById('floatAmount');
             if (fa) { fa.value = ''; fa.focus(); }
@@ -7327,15 +7532,35 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
             btn.innerHTML = origHtml;
         }
 
-        /* ── Refund modal (manager only) ─────────────────────────────────── */
+        /* ── Refund modal ────────────────────────────────────────────────── */
         function openRefundModal(orderId, ref, total) {
+            if (!posCanRefund) {
+                // Cashier needs manager auth — after approval, re-open the refund modal
+                openMgrAuthOverlay('pos_refund', (token) => {
+                    _pendingRefundToken = token;
+                    openRefundModal(orderId, ref, total);
+                });
+                return;
+            }
             document.getElementById('refundOrderId').value = orderId;
             document.getElementById('refundOrderRef').textContent = ref;
             document.getElementById('refundOrderAmt').textContent = currencySymbol + ' ' + fmtMoney(total);
             document.getElementById('refundReason').value = '';
+            // Attach the manager auth token (if obtained) to the form
+            let tokenField = document.getElementById('refundMgrToken');
+            if (!tokenField) {
+                tokenField = document.createElement('input');
+                tokenField.type = 'hidden';
+                tokenField.id   = 'refundMgrToken';
+                tokenField.name = 'mgr_auth_token';
+                document.getElementById('refundForm').appendChild(tokenField);
+            }
+            tokenField.value = _pendingRefundToken || '';
+            _pendingRefundToken = '';
             document.getElementById('refundOverlay').classList.add('show');
             setTimeout(() => { const r = document.getElementById('refundReason'); if (r) r.focus(); }, 80);
         }
+        let _pendingRefundToken = '';
 
         function closeRefundModal() {
             document.getElementById('refundOverlay').classList.remove('show');
