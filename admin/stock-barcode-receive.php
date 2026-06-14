@@ -299,15 +299,9 @@ a{color:var(--primary);text-decoration:none}
     <div class="topbar-stats"><?php echo $barcodeCount; ?> barcodes<br><?php echo $ingredientCount; ?> ingredients</div>
 </div>
 
-<!-- Camera zone -->
-<div class="camera-zone" id="cameraZone" style="display:none">
-    <video id="camVideo" autoplay playsinline muted></video>
-    <div class="scan-overlay">
-        <div class="scan-frame"></div>
-        <div class="scan-line" id="scanLine"></div>
-        <div class="scan-status" id="scanStatus">Point camera at barcode</div>
-    </div>
-</div>
+<!-- Camera zone (content injected by JS) -->
+<div class="camera-zone" id="cameraZone" style="display:none"></div>
+<video id="camVideo" autoplay playsinline muted style="display:none;position:absolute;pointer-events:none"></video>
 
 <!-- Scanner status strip -->
 <div id="scannerStrip"></div>
@@ -442,6 +436,8 @@ function updateScannerUI() {
 async function toggleCamera() {
     if (!scannerEnabled) return;
     const btn = document.getElementById('camToggle');
+
+    // Turn off
     if (camStream) {
         stopCamera();
         btn.classList.remove('active');
@@ -449,43 +445,124 @@ async function toggleCamera() {
         document.getElementById('cameraZone').style.display = 'none';
         return;
     }
+
+    // Pre-flight checks
     if (!('BarcodeDetector' in window)) {
-        flashMsg('Camera scanning not supported on this browser. Use the input field below.', true);
+        showCameraError(
+            'Camera barcode scanning is not supported on this browser.',
+            'Use Chrome on Android, or type / scan into the input field below.'
+        );
         return;
     }
-    try {
-        camStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
+    if (location.protocol !== 'https:' && location.hostname !== 'localhost') {
+        showCameraError(
+            'Camera requires a secure (HTTPS) connection.',
+            'Use the input field below — a USB or Bluetooth scanner will work there.'
+        );
+        return;
+    }
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+        showCameraError(
+            'Camera API not available.',
+            'Use the input field below instead.'
+        );
+        return;
+    }
+
+    btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i>';
+
+    async function startStream(constraints) {
+        camStream = await navigator.mediaDevices.getUserMedia(constraints);
         const video = document.getElementById('camVideo');
         video.srcObject = camStream;
-        document.getElementById('cameraZone').style.display = 'flex';
+        video.style.display = '';
+        video.style.position = '';
+        const zone = document.getElementById('cameraZone');
+        zone.innerHTML = '';
+        zone.appendChild(video);
+        zone.appendChild(buildScanOverlay());
+        zone.style.display = 'flex';
         btn.classList.add('active');
         btn.innerHTML = '<i class="fas fa-stop"></i> Stop';
         detectLoop();
-    } catch(e) {
-        flashMsg('Camera access denied. Use the input field.', true);
     }
+
+    try {
+        // Prefer rear camera
+        await startStream({ video: { facingMode: { ideal: 'environment' } } });
+    } catch (e) {
+        if (e.name === 'OverconstrainedError' || e.name === 'ConstraintNotSatisfiedError') {
+            // Device only has front camera — retry without constraint
+            try { await startStream({ video: true }); return; } catch (e2) { e = e2; }
+        }
+        btn.innerHTML = '<i class="fas fa-camera"></i> Camera';
+        btn.classList.remove('active');
+        if (e.name === 'NotAllowedError' || e.name === 'PermissionDeniedError') {
+            showCameraError(
+                'Camera permission denied.',
+                'Tap the camera icon in your browser address bar to allow access, then tap Camera again.'
+            );
+        } else if (e.name === 'NotFoundError' || e.name === 'DevicesNotFoundError') {
+            showCameraError(
+                'No camera found on this device.',
+                'Use the input field — a Bluetooth or USB scanner will work there.'
+            );
+        } else if (e.name === 'NotReadableError' || e.name === 'TrackStartError') {
+            showCameraError(
+                'Camera is in use by another app.',
+                'Close the other app and try again.'
+            );
+        } else {
+            showCameraError('Could not start camera.', e.message || 'Try the input field instead.');
+        }
+        document.getElementById('manualInput').focus();
+    }
+}
+
+function buildScanOverlay() {
+    const overlay = document.createElement('div');
+    overlay.className = 'scan-overlay';
+    overlay.innerHTML = '<div class="scan-frame"></div><div class="scan-line" id="scanLine"></div><div class="scan-status" id="scanStatus">Point camera at barcode</div>';
+    return overlay;
+}
+
+function showCameraError(title, hint) {
+    const zone = document.getElementById('cameraZone');
+    zone.innerHTML =
+        '<div style="text-align:center;padding:28px 20px;color:#fff;width:100%">' +
+        '<i class="fas fa-camera-slash" style="font-size:30px;opacity:.4;display:block;margin-bottom:12px"></i>' +
+        '<div style="font-size:13px;font-weight:600;margin-bottom:6px">' + title + '</div>' +
+        '<div style="font-size:12px;opacity:.6;line-height:1.5">' + hint + '</div>' +
+        '</div>';
+    zone.style.display = 'flex';
+    setTimeout(function () { zone.style.display = 'none'; }, 7000);
 }
 
 function stopCamera() {
     camDetecting = false;
     if (camStream) { camStream.getTracks().forEach(t => t.stop()); camStream = null; }
+    // Move video back to its hidden holding spot
+    const video = document.getElementById('camVideo');
+    if (video) { video.srcObject = null; video.style.display = 'none'; video.style.position = 'absolute'; document.body.appendChild(video); }
 }
 
 async function detectLoop() {
     const detector = new BarcodeDetector({ formats: ['ean_13','ean_8','code_128','code_39','upc_a','upc_e','itf','qr_code'] });
-    const video = document.getElementById('camVideo');
     camDetecting = true;
     let lastCode = '', lastCodeAt = 0;
     while (camDetecting && camStream) {
         await new Promise(r => setTimeout(r, 400));
         try {
+            const video = document.getElementById('camVideo');
+            if (!video || !video.readyState || video.readyState < 2) continue;
             const codes = await detector.detect(video);
             if (!codes.length) continue;
             const code = codes[0].rawValue;
             const now = Date.now();
-            if (code === lastCode && now - lastCodeAt < 3000) continue; // debounce same code 3s
+            if (code === lastCode && now - lastCodeAt < 3000) continue;
             lastCode = code; lastCodeAt = now;
-            document.getElementById('scanStatus').textContent = 'Scanned: ' + code;
+            const statusEl = document.getElementById('scanStatus');
+            if (statusEl) statusEl.textContent = 'Scanned: ' + code;
             await processBarcode(code);
         } catch(e) { /* frame not ready */ }
     }

@@ -62,6 +62,12 @@ $manifest = [
             'icons'      => [['src' => $icon_url, 'sizes' => 'any']],
         ],
         [
+            'name'       => 'Receive Stock',
+            'short_name' => 'Receive',
+            'url'        => siteUrl('admin/stock-barcode-receive.php'),
+            'icons'      => [['src' => $icon_url, 'sizes' => 'any']],
+        ],
+        [
             'name'       => 'Kitchen Display',
             'short_name' => 'KDS',
             'url'        => siteUrl('admin/kds.php'),
