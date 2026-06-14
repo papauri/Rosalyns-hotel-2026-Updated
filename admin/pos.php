@@ -1026,6 +1026,7 @@ $allMenuItems = $pdo->query("
     SELECT mi.id, mi.item_name AS name, mi.price,
            COALESCE(mi.category, 'Other') AS sub_category,
            mi.show_pos, mi.show_room_service, mi.is_available,
+           mi.barcode,
            mc.name AS cat_name, mc.slug AS menu_type, mc.sort_order AS cat_sort
     FROM menu_items mi
     JOIN menu_categories mc ON mc.id = mi.category_id
@@ -1059,6 +1060,7 @@ foreach ($allMenuItems as $item) {
         'show_pos'    => $isPos,
         'show_rs'     => $isRs,
         'is_available'=> $isAvail,
+        'barcode'     => $item['barcode'] ?? null,
     ];
 }
 $categories['__ALL__']['count'] = $posVisibleCount;
@@ -1160,6 +1162,61 @@ if (isset($_GET['ajax']) && $_GET['ajax'] === 'toggle_item') {
         pos_logAudit($pdo, 0, $user['id'], $user['full_name'], $action86, json_encode(['item_id' => $toggleItemId, 'item_name' => $currItem['item_name']]));
         logActivity($user['id'], 'pos_' . $action86, ($newAvail ? 'Enabled' : '86\'d') . ' menu item: ' . $currItem['item_name']);
         echo json_encode(['ok' => true, 'item_id' => $toggleItemId, 'is_available' => $newAvail, 'item_name' => $currItem['item_name']]);
+    } catch (Throwable $e) {
+        http_response_code(500);
+        echo json_encode(['error' => $e->getMessage()]);
+    }
+    exit;
+}
+
+if (isset($_GET['ajax']) && $_GET['ajax'] === 'assign_barcode') {
+    /* === Assign or clear a barcode on a menu item ===
+     * Accepts POST: item_id, barcode (empty string = clear)
+     * Requires pos_86 permission (manager-level). */
+    header('Content-Type: application/json; charset=utf-8');
+    if (!hasPermission($user['id'], 'pos_86')) {
+        http_response_code(403);
+        echo json_encode(['error' => 'Manager permission required to assign barcodes.']);
+        exit;
+    }
+    $bcItemId = (int)($_POST['item_id'] ?? 0);
+    $bcValue  = trim((string)($_POST['barcode'] ?? ''));
+    if (!$bcItemId) {
+        http_response_code(400);
+        echo json_encode(['error' => 'Invalid item ID.']);
+        exit;
+    }
+    if (mb_strlen($bcValue) > 100) {
+        http_response_code(400);
+        echo json_encode(['error' => 'Barcode too long (max 100 chars).']);
+        exit;
+    }
+    try {
+        $bcCheck = $pdo->prepare("SELECT id, item_name FROM menu_items WHERE id = ?");
+        $bcCheck->execute([$bcItemId]);
+        $bcItem = $bcCheck->fetch(PDO::FETCH_ASSOC);
+        if (!$bcItem) {
+            http_response_code(404);
+            echo json_encode(['error' => 'Item not found.']);
+            exit;
+        }
+        if ($bcValue !== '') {
+            // check uniqueness
+            $dupCheck = $pdo->prepare("SELECT id FROM menu_items WHERE barcode = ? AND id != ?");
+            $dupCheck->execute([$bcValue, $bcItemId]);
+            if ($dupCheck->fetch()) {
+                http_response_code(409);
+                echo json_encode(['error' => 'That barcode is already assigned to another item.']);
+                exit;
+            }
+        }
+        $pdo->prepare("UPDATE menu_items SET barcode = ? WHERE id = ?")
+            ->execute([$bcValue !== '' ? $bcValue : null, $bcItemId]);
+        pos_logAudit($pdo, 0, $user['id'], $user['full_name'], 'barcode_assigned',
+            json_encode(['item_id' => $bcItemId, 'item_name' => $bcItem['item_name'], 'barcode' => $bcValue]));
+        logActivity($user['id'], 'pos_barcode_assigned',
+            ($bcValue !== '' ? "Assigned barcode '{$bcValue}'" : 'Cleared barcode') . ' on: ' . $bcItem['item_name']);
+        echo json_encode(['ok' => true, 'item_id' => $bcItemId, 'barcode' => $bcValue !== '' ? $bcValue : null]);
     } catch (Throwable $e) {
         http_response_code(500);
         echo json_encode(['error' => $e->getMessage()]);
@@ -1704,8 +1761,20 @@ if (in_array($user['role'] ?? '', ['admin', 'manager'], true)) {
                 <div class="toolbar">
                     <input type="text" id="search" placeholder="Search menu…" oninput="renderMenu()">
                     <button onclick="document.getElementById('search').value='';renderMenu()"><i class="fas fa-times"></i></button>
+                    <?php if ($posCanToggle86): ?>
+                    <button id="barcodeToggleBtn" onclick="posToggleBarcodeScanner()" title="Toggle barcode scanner" style="display:none;" class="barcode-toggle-btn">
+                        <i class="fas fa-barcode"></i>
+                    </button>
+                    <?php endif; ?>
                 </div>
                 <div class="grid" id="grid"></div>
+            </div>
+
+            <!-- Barcode scanner status strip (shown when scanner is active) -->
+            <div id="barcodeScanStrip" style="display:none;position:fixed;bottom:0;left:0;right:0;z-index:9000;background:#1a1a2e;color:#fff;font-size:13px;font-weight:600;padding:8px 16px;align-items:center;gap:10px;pointer-events:none;">
+                <i class="fas fa-barcode" style="color:#4ade80;"></i>
+                <span>Barcode scanner active — scan an item to add it to the cart</span>
+                <span id="barcodeScanLast" style="margin-left:auto;opacity:0.7;font-weight:400;font-size:12px;"></span>
             </div>
 
             <!-- Cart -->
@@ -2812,6 +2881,7 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
         const posCanDiscount   = <?php echo $posCanDiscount ? 'true' : 'false'; ?>;
         const posCanToggle86   = <?php echo $posCanToggle86 ? 'true' : 'false'; ?>;
         const posCanFloat      = <?php echo $posCanFloat ? 'true' : 'false'; ?>;
+        const posCanAssignBarcode = <?php echo $posCanToggle86 ? 'true' : 'false'; ?>;
         const posVatEnabled = <?php echo in_array(getSetting('vat_enabled'), ['1', 1, true, 'true', 'on'], true) ? 'true' : 'false'; ?>;
         const posVatRate = <?php echo json_encode((float)getSetting('vat_rate')); ?>;
         const posServerErrorMessage = <?php echo json_encode($error, JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT); ?>;
@@ -4692,7 +4762,13 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
             tile.addEventListener('pointerup', event => {
                 tile.classList.remove('is-pressing');
                 const dragDistance = Math.max(Math.abs(event.clientX - startX), Math.abs(event.clientY - startY));
-                if (moved || dragDistance > 12 || Date.now() - startAt > 700) return;
+                const held = Date.now() - startAt;
+                if (moved || dragDistance > 12) return;
+                if (held > 700) {
+                    // Long-press → assign barcode (managers only)
+                    if (posCanAssignBarcode) posShowBarcodeAssignModal(menuItem);
+                    return;
+                }
                 const tapKey = menuItem.type + ':' + menuItem.id;
                 const now = Date.now();
                 if (tapKey === lastMenuTapKey && now - lastMenuTapAt < 260) return;
@@ -4744,6 +4820,7 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
 
                 const div = document.createElement('div');
                 const eightySixBadge = is86d ? `<span style="position:absolute;top:4px;right:4px;background:#c82333;color:#fff;font-size:9px;font-weight:800;padding:2px 5px;border-radius:4px;letter-spacing:.05em;">86</span>` : '';
+                const barcodeBadge = (m.barcode && posCanAssignBarcode) ? `<span title="Barcode: ${escHtml(m.barcode)}" style="position:absolute;bottom:4px;right:4px;color:#4ade80;font-size:10px;"><i class="fas fa-barcode"></i></span>` : '';
                 div.className = 'item' + ((oos && isAvailable) ? ' oos' : '') + (is86d ? ' oos' : '');
                 div.style.position = 'relative';
                 if (is86d) div.style.opacity = '0.6';
@@ -4759,7 +4836,7 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
                     <div class="pr">${currencySymbol} ${fmtMoney(m.price)}</div>
                     <div class="st low">${isAvailable ? 'Tap to 86' : 'Tap to enable'}</div>
                 </div>
-                ${eightySixBadge}`;
+                ${eightySixBadge}${barcodeBadge}`;
                     div.style.cursor = 'pointer';
                     div.style.border = is86d ? '2px solid #22c55e' : '2px dashed #c82333';
                     div.addEventListener('click', () => doToggleItem(m.id));
@@ -4773,7 +4850,7 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
                     <div class="pr">${currencySymbol} ${fmtMoney(m.price)}</div>
                     <div class="st ${low}">${stockStr}</div>
                 </div>
-                ${eightySixBadge}`;
+                ${eightySixBadge}${barcodeBadge}`;
                     if (!oos && isAvailable) bindMenuItemTap(div, m);
                 }
                 grid.appendChild(div);
@@ -4790,6 +4867,158 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
             renderCart();
             renderMenu();
         }
+
+        /* ─── Barcode Scanner Engine ─────────────────────────────────────────
+         * USB/Bluetooth barcode scanners appear as HID keyboards: they type the
+         * barcode string very quickly (< 30 ms between chars) then send Enter.
+         * We detect that pattern and match against menuList[].barcode.
+         *
+         * Enabled state is stored per-device in localStorage so each POS
+         * terminal can be configured independently without a settings page.
+         * Managers can assign barcodes via long-press on any menu tile.
+         * ──────────────────────────────────────────────────────────────────── */
+        const LS_BARCODE_KEY = 'pos_barcode_scanner_enabled';
+        let barcodeScannerEnabled = localStorage.getItem(LS_BARCODE_KEY) === '1';
+        let _bcBuffer = '';
+        let _bcLastChar = 0;
+        const BC_SPEED_MS  = 50;  // chars faster than this = scanner (not human typing)
+        const BC_MIN_LEN   = 3;   // ignore strings shorter than this
+
+        function posInitBarcodeUI() {
+            const btn  = document.getElementById('barcodeToggleBtn');
+            const strip = document.getElementById('barcodeScanStrip');
+            const pmLbl = document.getElementById('pmBarcodeLbl');
+            if (btn)  btn.style.display = '';
+            if (barcodeScannerEnabled) {
+                if (btn)   { btn.classList.add('active'); btn.title = 'Barcode scanner ON — click to disable'; }
+                if (strip) { strip.style.display = 'flex'; }
+                if (pmLbl) pmLbl.textContent = 'Scanner: ON';
+            } else {
+                if (btn)   { btn.classList.remove('active'); btn.title = 'Barcode scanner OFF — click to enable'; }
+                if (strip) { strip.style.display = 'none'; }
+                if (pmLbl) pmLbl.textContent = 'Scanner: OFF';
+            }
+        }
+
+        function posToggleBarcodeScanner() {
+            barcodeScannerEnabled = !barcodeScannerEnabled;
+            localStorage.setItem(LS_BARCODE_KEY, barcodeScannerEnabled ? '1' : '0');
+            posInitBarcodeUI();
+            Alert.show(barcodeScannerEnabled ? 'Barcode scanner enabled' : 'Barcode scanner disabled',
+                barcodeScannerEnabled ? 'success' : 'info', 2200);
+        }
+
+        function posHandleBarcodeInput(code) {
+            if (!code || code.length < BC_MIN_LEN) return;
+            const match = menuList.find(m => m.barcode && m.barcode === code);
+            const strip  = document.getElementById('barcodeScanStrip');
+            const lastEl = document.getElementById('barcodeScanLast');
+            if (match) {
+                if (!match.is_available) {
+                    Alert.show('Item is 86\'d: ' + match.name, 'warn', 2500);
+                } else if (!menuItemVisibleInMode(match)) {
+                    Alert.show('Item not available in current mode', 'warn', 2500);
+                } else {
+                    addToCart(match);
+                    Alert.show('Added: ' + match.name, 'success', 1800);
+                }
+                if (lastEl) lastEl.textContent = 'Last scan: ' + code + ' → ' + (match ? match.name : '—');
+            } else {
+                Alert.show('Barcode not recognised: ' + code, 'warn', 2800);
+                if (lastEl) lastEl.textContent = 'Unknown: ' + code;
+            }
+        }
+
+        document.addEventListener('keydown', function(e) {
+            if (!barcodeScannerEnabled) return;
+            // Ignore if focus is inside a text input/textarea/select (user is typing)
+            const tag = (document.activeElement || {}).tagName || '';
+            if (['INPUT', 'TEXTAREA', 'SELECT'].includes(tag)) return;
+            const now = Date.now();
+            if (e.key === 'Enter') {
+                if (_bcBuffer.length >= BC_MIN_LEN && (now - _bcLastChar) < BC_SPEED_MS * 5) {
+                    posHandleBarcodeInput(_bcBuffer);
+                }
+                _bcBuffer = '';
+                return;
+            }
+            if (e.key.length === 1) { // single printable character
+                if (now - _bcLastChar > 500) _bcBuffer = ''; // reset stale buffer
+                _bcBuffer += e.key;
+                _bcLastChar = now;
+            }
+        });
+
+        /* Barcode assign modal (long-press a menu tile) */
+        function posShowBarcodeAssignModal(menuItem) {
+            const existing = menuItem.barcode || '';
+            const modal = document.createElement('div');
+            modal.className = 'pos-modal-overlay';
+            modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:10000;display:flex;align-items:center;justify-content:center;';
+            modal.innerHTML = `
+                <div style="background:#1e1e2e;border-radius:12px;padding:28px 24px;min-width:320px;max-width:90vw;box-shadow:0 8px 40px rgba(0,0,0,.5);">
+                    <h3 style="margin:0 0 6px;color:#f1f5f9;font-size:16px;font-weight:700;">
+                        <i class="fas fa-barcode" style="color:#4ade80;margin-right:8px;"></i>Assign Barcode
+                    </h3>
+                    <p style="margin:0 0 16px;color:#94a3b8;font-size:13px;">${escHtml(menuItem.name)}</p>
+                    <label style="color:#cbd5e1;font-size:13px;display:block;margin-bottom:6px;">Barcode / SKU</label>
+                    <input id="bcAssignInput" type="text" value="${escHtml(existing)}"
+                        placeholder="Scan or type barcode — leave empty to clear"
+                        style="width:100%;box-sizing:border-box;padding:10px 12px;border-radius:8px;border:1px solid #334155;background:#0f172a;color:#f1f5f9;font-size:15px;outline:none;"
+                        autocomplete="off" autocorrect="off" spellcheck="false">
+                    <div style="display:flex;gap:10px;margin-top:18px;">
+                        <button id="bcAssignSave" style="flex:1;padding:11px;border-radius:8px;border:none;background:#22c55e;color:#fff;font-size:14px;font-weight:700;cursor:pointer;">
+                            <i class="fas fa-save"></i> Save
+                        </button>
+                        <button id="bcAssignCancel" style="flex:1;padding:11px;border-radius:8px;border:none;background:#334155;color:#f1f5f9;font-size:14px;cursor:pointer;">
+                            Cancel
+                        </button>
+                    </div>
+                    <div id="bcAssignErr" style="color:#f87171;font-size:12px;margin-top:10px;display:none;"></div>
+                </div>`;
+            document.body.appendChild(modal);
+            const inp = modal.querySelector('#bcAssignInput');
+            inp.focus();
+            inp.select();
+            modal.querySelector('#bcAssignCancel').onclick = () => modal.remove();
+            modal.querySelector('#bcAssignSave').onclick = async () => {
+                const newCode = inp.value.trim();
+                const btn = modal.querySelector('#bcAssignSave');
+                const errEl = modal.querySelector('#bcAssignErr');
+                btn.disabled = true;
+                btn.textContent = 'Saving…';
+                errEl.style.display = 'none';
+                try {
+                    const fd = new FormData();
+                    fd.append('csrf_token', posCsrfToken);
+                    fd.append('item_id', menuItem.id);
+                    fd.append('barcode', newCode);
+                    const res = await fetch('pos.php?ajax=assign_barcode', { method: 'POST', body: fd });
+                    const data = await res.json();
+                    if (data.ok) {
+                        // Update the in-memory menuList so the scanner picks it up immediately
+                        const idx = menuList.findIndex(m => m.id === menuItem.id && m.type === menuItem.type);
+                        if (idx !== -1) menuList[idx].barcode = data.barcode;
+                        menuItem.barcode = data.barcode;
+                        modal.remove();
+                        Alert.show(newCode ? 'Barcode assigned' : 'Barcode cleared', 'success', 2200);
+                    } else {
+                        errEl.textContent = data.error || 'Save failed.';
+                        errEl.style.display = 'block';
+                        btn.disabled = false;
+                        btn.innerHTML = '<i class="fas fa-save"></i> Save';
+                    }
+                } catch(err) {
+                    errEl.textContent = 'Network error. Please try again.';
+                    errEl.style.display = 'block';
+                    btn.disabled = false;
+                    btn.innerHTML = '<i class="fas fa-save"></i> Save';
+                }
+            };
+        }
+
+        // Boot barcode UI after page load
+        document.addEventListener('DOMContentLoaded', posInitBarcodeUI);
 
         function setQty(idx, q) {
             q = Math.max(0, Math.min(1000, parseFloat(q) || 0));
@@ -8506,6 +8735,9 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
             <section>
                 <h3 class="pm-group-title">Tools</h3>
                 <div class="pm-grid">
+                    <?php if ($posCanToggle86): ?>
+                    <button type="button" class="pm-action" id="pmBarcodeToggle" onclick="runPosMobileMenuAction('posToggleBarcodeScanner')"><i class="fas fa-barcode"></i><span id="pmBarcodeLbl">Barcode Scanner</span></button>
+                    <?php endif; ?>
                     <button type="button" class="pm-action" onclick="runPosMobileMenuAction(function () { RHSounds.openSettings(); })"><i class="fas fa-sliders"></i><span>Sound Settings</span></button>
                     <button type="button" class="pm-action" onclick="runPosMobileMenuAction('toggleMobileHelp')"><i class="fas fa-question-circle"></i><span>Help Tooltips</span></button>
                     <a class="pm-action" href="../docs/guides/01-pos-till.html" target="_blank" rel="noopener"><i class="fas fa-book-open"></i><span>POS Guide</span></a>

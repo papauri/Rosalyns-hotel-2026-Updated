@@ -1691,6 +1691,34 @@ a.recent-toggle span {
     cursor: pointer;
 }
 
+/* Barcode toggle button — sits next to the clear button in the toolbar */
+.barcode-toggle-btn {
+    background: #334155 !important;
+    color: #94a3b8 !important;
+    transition: background .2s, color .2s;
+}
+.barcode-toggle-btn.active {
+    background: #166534 !important;
+    color: #4ade80 !important;
+    box-shadow: 0 0 0 2px #22c55e55;
+}
+.barcode-toggle-btn:hover {
+    background: #475569 !important;
+    color: #fff !important;
+}
+
+#barcodeScanStrip {
+    background: #1a1a2e;
+    color: #fff;
+    font-size: 13px;
+    font-weight: 600;
+    padding: 8px 16px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    pointer-events: none;
+}
+
 .grid {
     display: grid;
     grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));

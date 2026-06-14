@@ -34,7 +34,7 @@
       <div class="meta">
         <span>URL <strong>/admin/pos.php</strong></span>
         <span>Role <strong>restaurant_staff · manager · admin</strong></span>
-        <span>Read time <strong>5 min</strong></span>
+        <span>Read time <strong>8 min</strong></span>
       </div>
     </div>
   </header>
@@ -423,6 +423,75 @@
         <div class="callout note">
           Changes take effect immediately — regular cashiers see the item disappear as soon as the page next renders. Each toggle is written to the order audit log and the system activity log.
         </div>
+      </section>
+
+      <section>
+        <h2>Barcode scanner <span class="pill amber">pos_86 — manager/admin</span></h2>
+        <p>Plug in any <strong>USB or Bluetooth barcode scanner</strong> (the kind that appears as a keyboard) and the POS can add items to the cart the moment you scan — no tapping the menu grid required. Each terminal remembers its own on/off preference.</p>
+
+        <h3 style="font-size:1rem;margin:20px 0 8px;">Enable or disable the scanner</h3>
+        <ol class="steps">
+          <li>Tap the <strong>barcode icon</strong> (<i style="font-family:monospace">⊞</i>) button in the search toolbar — it sits just to the right of the red <strong>×</strong> clear button.</li>
+          <li>The button turns <strong>green</strong> and a dark status strip appears at the bottom of the screen: <em>"Barcode scanner active — scan an item to add it to the cart."</em></li>
+          <li>Tap it again to turn the scanner <strong>off</strong>. The strip disappears.</li>
+          <li>You can also toggle from the <strong>hamburger menu → Tools → Scanner: ON / OFF</strong>.</li>
+        </ol>
+        <div class="callout note">
+          The on/off state is saved <strong>per device</strong> in the browser, so a terminal with a scanner stays enabled across logins, and a tablet without one stays off — no settings page needed.
+        </div>
+
+        <h3 style="font-size:1rem;margin:20px 0 8px;">How scanning works</h3>
+        <ol class="steps">
+          <li>Point the scanner at a product barcode and pull the trigger (or it auto-scans).</li>
+          <li>The scanner types the barcode number in under 50 ms and sends Enter — the POS intercepts this as a scan, not human typing.</li>
+          <li>If the barcode matches an item: the item is <strong>instantly added to the cart</strong> and a green toast confirms it (<em>"Added: Heineken"</em>).</li>
+          <li>If nothing matches: a warning toast shows <em>"Barcode not recognised: 12345678"</em> — the item needs its barcode assigned first (see below).</li>
+          <li>The status strip at the bottom always shows the <strong>last scan result</strong>.</li>
+        </ol>
+        <div class="callout note">
+          Normal typing is <strong>not affected</strong>. The scanner only triggers when you are not focused inside a text field (search box, payment amount, customer name, etc.).
+        </div>
+
+        <h3 style="font-size:1rem;margin:20px 0 8px;">Assign a barcode to a menu item <span class="pill amber">manager</span></h3>
+        <p>Before scanning works for a product, a manager must link the barcode to the menu item once.</p>
+        <ol class="steps">
+          <li>Make sure you are logged in as a <strong>manager or admin</strong>.</li>
+          <li>Find the item in the menu grid and <strong>hold your finger (or mouse button) on the tile for about 1 second</strong>. A dark <strong>Assign Barcode</strong> modal opens.</li>
+          <li>Scan the product barcode directly into the input field — or type it manually.</li>
+          <li>Tap <strong>Save</strong>. The barcode is saved to the database instantly and works from that moment — no page refresh needed.</li>
+          <li>Items with a barcode assigned show a small <strong>green barcode icon</strong> in the bottom-right corner of their tile so managers can see which items are wired up.</li>
+        </ol>
+        <div class="callout note">
+          To <strong>remove</strong> a barcode from an item, long-press the tile, clear the barcode field completely, and tap Save.
+        </div>
+        <div class="callout warn">
+          Each barcode can only be assigned to <strong>one item</strong>. If you try to assign a barcode that is already on another item, you will get a duplicate-barcode error.
+        </div>
+
+        <h3 style="font-size:1rem;margin:20px 0 8px;">Quick reference</h3>
+        <table>
+          <thead>
+            <tr><th>Situation</th><th>What to do</th></tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>Scanner is plugged in but nothing happens when I scan</td>
+              <td>Check the barcode icon button — it must be <strong>green (ON)</strong>. Also check you are not clicked inside a text field.</td>
+            </tr>
+            <tr>
+              <td><em>"Barcode not recognised"</em> toast appears</td>
+              <td>The barcode has not been assigned yet. Long-press the correct menu tile, scan into the modal, Save.</td>
+            </tr>
+            <tr>
+              <td>I scan and the wrong item gets added</td>
+              <td>Another item has this barcode assigned. Long-press that item, clear its barcode, Save. Then assign it to the correct item.</td>
+            </tr>
+            <tr>
+              <td>I want to disable the scanner on a tablet that has no scanner</td>
+              <td>Tap the barcode button until it is grey (OFF). The setting is remembered on that device.</td>
+            </tr>
+          </tbody>
+        </table>
       </section>
 
       <section>
