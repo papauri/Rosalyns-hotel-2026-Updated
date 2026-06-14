@@ -124,6 +124,7 @@ $_nav_groups = [
         ['stock-batches.php',     'fas fa-layer-group',    'Batch Tracker',     'stock_batches'],
         ['stock-orders.php',      'fas fa-receipt',        'Restaurant Orders', 'stock_orders'],
         ['restaurant-tables.php', 'fas fa-chair',          'Restaurant Tables', 'stock_management'],
+        ['stock-barcode-receive.php', 'fas fa-barcode',       'Receive Stock',     'stock_management'],
         ['stock-count.php',       'fas fa-clipboard-check', 'Stock Count',       'stock_count'],
         ['stock-wastage.php',     'fas fa-trash-alt',      'Wastage Log',       'stock_wastage'],
         ['stock-reports.php',     'fas fa-chart-area',     'Stock Reports',     'stock_reports'],
