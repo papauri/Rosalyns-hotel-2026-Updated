@@ -92,3 +92,4 @@ echo "OK\n\n";
 
 echo "Live server is up to date.\n";
 exit(0);
+
