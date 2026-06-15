@@ -30,10 +30,11 @@ $siteName      = getSetting('site_name', 'Hotel');
 if (isset($_GET['ajax'])) {
     header('Content-Type: application/json; charset=utf-8');
 
-    // lookup_barcode — find ingredient mapped to a barcode
+    // lookup_barcode — find ingredient OR menu item mapped to a barcode
     if ($_GET['ajax'] === 'lookup_barcode') {
         $barcode = trim($_POST['barcode'] ?? '');
         if ($barcode === '') { echo json_encode(['found' => false]); exit; }
+        // 1. Check stock ingredient barcodes
         $stmt = $pdo->prepare("
             SELECT sib.id AS mapping_id, sib.barcode, sib.pack_size, sib.pack_label,
                    si.id AS ingredient_id, si.name, si.unit, si.current_quantity, si.cost_per_unit
@@ -44,10 +45,24 @@ if (isset($_GET['ajax'])) {
         $stmt->execute([$barcode]);
         $row = $stmt->fetch(PDO::FETCH_ASSOC);
         if ($row) {
-            echo json_encode(['found' => true, 'ingredient' => $row]);
-        } else {
-            echo json_encode(['found' => false, 'barcode' => $barcode]);
+            echo json_encode(['found' => true, 'type' => 'ingredient', 'ingredient' => $row]);
+            exit;
         }
+        // 2. Check POS menu items
+        $stmt2 = $pdo->prepare("
+            SELECT mi.id, mi.item_name AS name, mi.price, mi.barcode,
+                   mc.name AS category_name, mc.slug AS menu_type
+            FROM menu_items mi
+            JOIN menu_categories mc ON mc.id = mi.category_id
+            WHERE mi.barcode = ?
+        ");
+        $stmt2->execute([$barcode]);
+        $menuItem = $stmt2->fetch(PDO::FETCH_ASSOC);
+        if ($menuItem) {
+            echo json_encode(['found' => true, 'type' => 'pos_item', 'item' => $menuItem]);
+            exit;
+        }
+        echo json_encode(['found' => false, 'barcode' => $barcode]);
         exit;
     }
 
@@ -176,6 +191,75 @@ if (isset($_GET['ajax'])) {
         exit;
     }
 
+    // search_categories — menu categories for item registration
+    if ($_GET['ajax'] === 'search_categories') {
+        $q = '%' . trim($_GET['q'] ?? '') . '%';
+        $rows = $pdo->prepare("SELECT id, name, slug FROM menu_categories WHERE is_active = 1 AND name LIKE ? ORDER BY sort_order, name LIMIT 20");
+        $rows->execute([$q]);
+        echo json_encode($rows->fetchAll(PDO::FETCH_ASSOC));
+        exit;
+    }
+
+    // register_item — create a menu_item with this barcode (POS retail item)
+    if ($_GET['ajax'] === 'register_item') {
+        if (!validateCsrfToken($_POST['csrf_token'] ?? '')) {
+            http_response_code(403); echo json_encode(['error' => 'Invalid token.']); exit;
+        }
+        $barcode    = trim($_POST['barcode'] ?? '');
+        $name       = mb_substr(trim($_POST['name'] ?? ''), 0, 200);
+        $price      = round(max(0, (float)($_POST['price'] ?? 0)), 2);
+        $categoryId = (int)($_POST['category_id'] ?? 0);
+        if (!$barcode || !$name) {
+            http_response_code(400); echo json_encode(['error' => 'Barcode and name required.']); exit;
+        }
+        try {
+            // Default to "Retail Items" category if none chosen
+            if (!$categoryId) {
+                $catRow = $pdo->query("SELECT id FROM menu_categories WHERE slug = 'retail' AND is_active = 1 LIMIT 1")->fetch();
+                $categoryId = $catRow ? (int)$catRow['id'] : 0;
+            }
+            if (!$categoryId) {
+                http_response_code(400); echo json_encode(['error' => 'Please select a category.']); exit;
+            }
+            // Check barcode not already on a menu item
+            $dup = $pdo->prepare("SELECT id FROM menu_items WHERE barcode = ?");
+            $dup->execute([$barcode]);
+            if ($dup->fetch()) {
+                http_response_code(409); echo json_encode(['error' => 'This barcode is already registered to a POS item.']); exit;
+            }
+            // Also check ingredient barcodes
+            $dup2 = $pdo->prepare("SELECT id FROM stock_ingredient_barcodes WHERE barcode = ?");
+            $dup2->execute([$barcode]);
+            if ($dup2->fetch()) {
+                http_response_code(409); echo json_encode(['error' => 'This barcode is already registered as a stock ingredient.']); exit;
+            }
+            $maxOrderStmt = $pdo->prepare("SELECT COALESCE(MAX(display_order),0) FROM menu_items WHERE category_id = ?");
+            $maxOrderStmt->execute([$categoryId]);
+            $maxOrder = (int)$maxOrderStmt->fetchColumn();
+            $pdo->prepare("
+                INSERT INTO menu_items (item_name, price, category_id, barcode, show_pos, show_room_service, is_available, display_order)
+                VALUES (?, ?, ?, ?, 1, 0, 1, ?)
+            ")->execute([$name, $price, $categoryId, $barcode, $maxOrder + 10]);
+            $newId = (int)$pdo->lastInsertId();
+            // Get category name for response
+            $cat = $pdo->prepare("SELECT name, slug FROM menu_categories WHERE id = ?");
+            $cat->execute([$categoryId]);
+            $catRow = $cat->fetch(PDO::FETCH_ASSOC);
+            logActivity($user['id'], 'barcode_item_registered', "Registered barcode {$barcode} → POS item: {$name} @ {$currency}{$price}");
+            echo json_encode(['ok' => true, 'item' => [
+                'id'            => $newId,
+                'name'          => $name,
+                'price'         => $price,
+                'barcode'       => $barcode,
+                'category_name' => $catRow['name'] ?? '',
+                'menu_type'     => $catRow['slug'] ?? '',
+            ]]);
+        } catch (Throwable $e) {
+            http_response_code(500); echo json_encode(['error' => $e->getMessage()]);
+        }
+        exit;
+    }
+
     http_response_code(400); echo json_encode(['error' => 'Unknown action.']); exit;
 }
 
@@ -192,6 +276,11 @@ $barcodeCount    = (int)$pdo->query("SELECT COUNT(*) FROM stock_ingredient_barco
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Jost:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+<!-- BarcodeDetector polyfill for desktop Chrome / Firefox / Safari -->
+<script type="module">
+import { BarcodeDetectorPolyfill } from 'https://cdn.jsdelivr.net/npm/@undecaf/barcode-detector-polyfill@0.9.21/dist/es2017/index.js';
+if (!('BarcodeDetector' in window)) { window.BarcodeDetector = BarcodeDetectorPolyfill; }
+</script>
 <style>
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
 :root{
@@ -300,6 +389,13 @@ a{color:var(--primary);text-decoration:none}
 .modal-btn-secondary{background:var(--surface2);color:var(--text);border:1px solid var(--border)}
 .modal-btn:disabled{opacity:.4;cursor:not-allowed}
 .modal-err{color:var(--danger);font-size:13px;margin-top:8px;display:none}
+
+/* ── Type picker cards ── */
+.reg-type-card{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;padding:18px 12px;background:var(--surface2);border:2px solid var(--border);border-radius:12px;cursor:pointer;text-align:center;font-family:inherit;transition:border-color .15s,background .15s}
+.reg-type-card:hover{border-color:var(--primary);background:#f5f2ed}
+.reg-type-card strong{font-size:14px;font-weight:700;color:var(--text)}
+.reg-type-card span{font-size:11px;color:var(--muted);line-height:1.4;margin-top:2px}
+.reg-type-card.selected{border-color:var(--primary);background:#f0ece6}
 </style>
 </head>
 <body>
@@ -371,33 +467,83 @@ a{color:var(--primary);text-decoration:none}
 <div class="modal-overlay" id="registerModal" style="display:none">
     <div class="modal-sheet">
         <div class="modal-handle"></div>
-        <div class="modal-title">Register Barcode</div>
-        <div class="modal-sub" id="registerModalSub">Unknown barcode — link it to an ingredient once and it will be recognised forever.</div>
+        <div class="modal-title">Unknown Barcode</div>
+        <div class="modal-sub" id="registerModalSub" style="font-family:monospace;font-size:12px;background:var(--surface2);padding:6px 10px;border-radius:6px;color:var(--muted)"></div>
 
-        <div class="modal-field">
-            <label>Barcode</label>
-            <input type="text" id="regBarcode" readonly style="opacity:.6">
-        </div>
-        <div class="modal-field">
-            <label>Ingredient</label>
-            <input type="text" id="regIngSearch" placeholder="Search ingredients…" autocomplete="off" oninput="searchIngredients(this.value)">
-            <div class="ing-results" id="ingResults"></div>
-            <input type="hidden" id="regIngId">
-        </div>
-        <div class="modal-field" style="display:flex;gap:10px">
-            <div style="flex:1">
-                <label>Pack Size</label>
-                <input type="number" id="regPackSize" value="1" min="0.001" step="any" placeholder="e.g. 24">
-            </div>
-            <div style="flex:1">
-                <label>Pack Label</label>
-                <input type="text" id="regPackLabel" placeholder="e.g. can, bottle, case">
+        <!-- Step 1: type picker -->
+        <div id="regTypePicker" style="margin-top:16px">
+            <p style="font-size:13px;color:var(--muted);margin-bottom:12px">What is this barcode for?</p>
+            <div style="display:flex;gap:10px">
+                <button class="reg-type-card" id="regTypeIngBtn" onclick="selectRegType('ingredient')">
+                    <i class="fas fa-boxes" style="font-size:22px;color:var(--primary);margin-bottom:8px"></i>
+                    <strong>Ingredient</strong>
+                    <span>Used in recipes &amp; stock management</span>
+                </button>
+                <button class="reg-type-card" id="regTypeItemBtn" onclick="selectRegType('item')">
+                    <i class="fas fa-tag" style="font-size:22px;color:var(--success);margin-bottom:8px"></i>
+                    <strong>Item for Sale</strong>
+                    <span>Scanned at POS for payment (drinks, snacks…)</span>
+                </button>
             </div>
         </div>
-        <div class="modal-err" id="registerErr"></div>
-        <div class="modal-actions">
-            <button class="modal-btn modal-btn-secondary" onclick="closeRegisterModal()">Cancel</button>
-            <button class="modal-btn modal-btn-primary" id="registerSaveBtn" onclick="saveBarcode()">Save &amp; Add</button>
+
+        <!-- Step 2a: Ingredient form -->
+        <div id="regIngForm" style="display:none;margin-top:16px">
+            <div style="display:flex;align-items:center;gap:8px;margin-bottom:14px">
+                <button onclick="selectRegType(null)" style="background:none;border:none;color:var(--muted);cursor:pointer;font-size:13px;padding:0"><i class="fas fa-arrow-left"></i> Back</button>
+                <span style="font-size:13px;font-weight:600;color:var(--text)">Link to Ingredient</span>
+            </div>
+            <div class="modal-field">
+                <label>Ingredient</label>
+                <input type="text" id="regIngSearch" placeholder="Search ingredients…" autocomplete="off" oninput="searchIngredients(this.value)">
+                <div class="ing-results" id="ingResults"></div>
+                <input type="hidden" id="regIngId">
+            </div>
+            <div class="modal-field" style="display:flex;gap:10px">
+                <div style="flex:1">
+                    <label>Pack Size</label>
+                    <input type="number" id="regPackSize" value="1" min="0.001" step="any" placeholder="e.g. 24">
+                </div>
+                <div style="flex:1">
+                    <label>Pack Label</label>
+                    <input type="text" id="regPackLabel" placeholder="e.g. can, bottle, case">
+                </div>
+            </div>
+            <div class="modal-err" id="registerIngErr"></div>
+            <div class="modal-actions">
+                <button class="modal-btn modal-btn-secondary" onclick="closeRegisterModal()">Cancel</button>
+                <button class="modal-btn modal-btn-primary" id="registerIngSaveBtn" onclick="saveBarcode()">Save &amp; Add to Batch</button>
+            </div>
+        </div>
+
+        <!-- Step 2b: POS Item form -->
+        <div id="regItemForm" style="display:none;margin-top:16px">
+            <div style="display:flex;align-items:center;gap:8px;margin-bottom:14px">
+                <button onclick="selectRegType(null)" style="background:none;border:none;color:var(--muted);cursor:pointer;font-size:13px;padding:0"><i class="fas fa-arrow-left"></i> Back</button>
+                <span style="font-size:13px;font-weight:600;color:var(--text)">Register POS Item</span>
+            </div>
+            <div class="modal-field">
+                <label>Item Name</label>
+                <input type="text" id="regItemName" placeholder="e.g. Coca-Cola 330ml" autocomplete="off">
+            </div>
+            <div class="modal-field" style="display:flex;gap:10px">
+                <div style="flex:1">
+                    <label>Sale Price (<?php echo htmlspecialchars($currency); ?>)</label>
+                    <input type="number" id="regItemPrice" min="0" step="0.01" placeholder="0.00">
+                </div>
+                <div style="flex:1">
+                    <label>Category</label>
+                    <input type="text" id="regCatSearch" placeholder="Search or leave blank…" autocomplete="off" oninput="searchCategories(this.value)">
+                    <div class="ing-results" id="catResults"></div>
+                    <input type="hidden" id="regCatId">
+                </div>
+            </div>
+            <p style="font-size:11px;color:var(--muted);margin-top:-6px">Leave category blank to use "Retail Items" automatically.</p>
+            <div class="modal-err" id="registerItemErr"></div>
+            <div class="modal-actions">
+                <button class="modal-btn modal-btn-secondary" onclick="closeRegisterModal()">Cancel</button>
+                <button class="modal-btn modal-btn-primary" id="registerItemSaveBtn" onclick="saveItem()">Register on POS</button>
+            </div>
         </div>
     </div>
 </div>
@@ -523,12 +669,18 @@ async function toggleCamera() {
         return;
     }
 
-    // Feature checks — fail fast before touching camera API
+    // Feature checks — give the polyfill module up to 4 s to inject window.BarcodeDetector
+    if (!('BarcodeDetector' in window)) {
+        await new Promise(r => setTimeout(r, 500));
+    }
+    if (!('BarcodeDetector' in window)) {
+        await new Promise(r => setTimeout(r, 3500));
+    }
     if (!('BarcodeDetector' in window)) {
         showCameraError(
-            'Not supported on this browser',
-            'BarcodeDetector requires Chrome 83+ on Android. Use the input field or a Bluetooth scanner instead.',
-            false
+            'Barcode scanning not available',
+            'Could not load the barcode engine. Try refreshing the page, or use the text input / a Bluetooth scanner instead.',
+            true
         );
         return;
     }
@@ -655,12 +807,19 @@ async function processBarcode(barcode) {
     fd.append('barcode', barcode);
     const res = await fetch(PAGE + '?ajax=lookup_barcode', { method: 'POST', body: fd });
     const data = await res.json();
-    if (data.found) {
+    if (data.found && data.type === 'ingredient') {
         addToBatch(data.ingredient);
         flashMsg('Added: ' + data.ingredient.name);
+    } else if (data.found && data.type === 'pos_item') {
+        const item = data.item;
+        flashMsg('POS Item: ' + item.name + ' — ' + formatPrice(item.price));
     } else {
         openRegisterModal(barcode);
     }
+}
+
+function formatPrice(n) {
+    return (typeof n === 'number' ? n : parseFloat(n) || 0).toFixed(2);
 }
 
 // ── Batch management ──────────────────────────────────────────────────────
@@ -779,28 +938,51 @@ async function submitBatch() {
 
 // ── Register modal ────────────────────────────────────────────────────────
 let _ingSearchTimer = null;
+let _catSearchTimer = null;
 let _selectedIng = null;
+let _regType = null;  // 'ingredient' | 'item'
 
 function openRegisterModal(barcode) {
     pendingBarcode = barcode;
-    document.getElementById('regBarcode').value = barcode;
+    // Reset to type picker
+    selectRegType(null);
+    document.getElementById('registerModalSub').textContent = barcode;
+    // Clear ingredient form
     document.getElementById('regIngSearch').value = '';
     document.getElementById('regIngId').value = '';
     document.getElementById('regPackSize').value = '1';
     document.getElementById('regPackLabel').value = '';
-    document.getElementById('registerErr').style.display = 'none';
+    document.getElementById('registerIngErr').style.display = 'none';
     document.getElementById('ingResults').style.display = 'none';
-    document.getElementById('registerSaveBtn').disabled = false;
+    document.getElementById('registerIngSaveBtn').disabled = false;
+    // Clear item form
+    document.getElementById('regItemName').value = '';
+    document.getElementById('regItemPrice').value = '';
+    document.getElementById('regCatSearch').value = '';
+    document.getElementById('regCatId').value = '';
+    document.getElementById('registerItemErr').style.display = 'none';
+    document.getElementById('catResults').style.display = 'none';
+    document.getElementById('registerItemSaveBtn').disabled = false;
     _selectedIng = null;
     document.getElementById('registerModal').style.display = 'flex';
-    setTimeout(() => document.getElementById('regIngSearch').focus(), 100);
+}
+
+function selectRegType(type) {
+    _regType = type;
+    document.getElementById('regTypePicker').style.display = type ? 'none' : 'block';
+    document.getElementById('regIngForm').style.display  = (type === 'ingredient') ? 'block' : 'none';
+    document.getElementById('regItemForm').style.display = (type === 'item') ? 'block' : 'none';
+    if (type === 'ingredient') setTimeout(() => document.getElementById('regIngSearch').focus(), 80);
+    if (type === 'item')       setTimeout(() => document.getElementById('regItemName').focus(), 80);
 }
 
 function closeRegisterModal() {
     document.getElementById('registerModal').style.display = 'none';
     pendingBarcode = null;
+    _regType = null;
 }
 
+// Ingredient search
 function searchIngredients(q) {
     clearTimeout(_ingSearchTimer);
     const res = document.getElementById('ingResults');
@@ -808,18 +990,17 @@ function searchIngredients(q) {
     _ingSearchTimer = setTimeout(async () => {
         const r = await fetch(PAGE + '?ajax=search_ingredients&q=' + encodeURIComponent(q));
         const items = await r.json();
-        if (!items.length) { res.innerHTML = '<div style="padding:12px 14px;color:var(--muted);font-size:13px;">No ingredients found</div>'; }
-        else {
+        if (!items.length) {
+            res.innerHTML = '<div style="padding:12px 14px;color:var(--muted);font-size:13px;">No ingredients found</div>';
+        } else {
             res.innerHTML = items.map(i =>
-                `<div class="ing-result-item" data-id="${i.id}" data-name="${esc(i.name)}" data-unit="${esc(i.unit)}" data-category="${esc(i.category)}">
-                    <div><div class="ing-name">${esc(i.name)}</div><div class="ing-meta">${esc(i.category)}</div></div>
+                `<div class="ing-result-item" data-id="${i.id}" data-name="${esc(i.name)}" data-unit="${esc(i.unit)}" data-category="${esc(i.category || '')}">
+                    <div><div class="ing-name">${esc(i.name)}</div><div class="ing-meta">${esc(i.category || '')}</div></div>
                     <div class="ing-meta">${esc(i.unit)}</div>
                 </div>`
             ).join('');
             res.querySelectorAll('.ing-result-item').forEach(el => {
-                el.addEventListener('click', () => selectIngredient(
-                    el.dataset.id, el.dataset.name, el.dataset.unit, el.dataset.category
-                ));
+                el.addEventListener('click', () => selectIngredient(el.dataset.id, el.dataset.name, el.dataset.unit, el.dataset.category));
             });
         }
         res.style.display = 'block';
@@ -831,19 +1012,46 @@ function selectIngredient(id, name, unit, category) {
     document.getElementById('regIngId').value = id;
     document.getElementById('regIngSearch').value = name;
     document.getElementById('ingResults').style.display = 'none';
-    if (!document.getElementById('regPackLabel').value) {
-        document.getElementById('regPackLabel').value = unit;
-    }
+    if (!document.getElementById('regPackLabel').value) document.getElementById('regPackLabel').value = unit;
     document.getElementById('regPackSize').focus();
 }
 
+// Category search
+function searchCategories(q) {
+    clearTimeout(_catSearchTimer);
+    const res = document.getElementById('catResults');
+    if (q.length < 1) { res.style.display = 'none'; return; }
+    _catSearchTimer = setTimeout(async () => {
+        const r = await fetch(PAGE + '?ajax=search_categories&q=' + encodeURIComponent(q));
+        const items = await r.json();
+        if (!items.length) {
+            res.innerHTML = '<div style="padding:12px 14px;color:var(--muted);font-size:13px;">No categories found</div>';
+        } else {
+            res.innerHTML = items.map(i =>
+                `<div class="ing-result-item" data-id="${i.id}" data-name="${esc(i.name)}">
+                    <div class="ing-name">${esc(i.name)}</div>
+                </div>`
+            ).join('');
+            res.querySelectorAll('.ing-result-item').forEach(el => {
+                el.addEventListener('click', () => {
+                    document.getElementById('regCatId').value = el.dataset.id;
+                    document.getElementById('regCatSearch').value = el.dataset.name;
+                    res.style.display = 'none';
+                });
+            });
+        }
+        res.style.display = 'block';
+    }, 250);
+}
+
+// Save ingredient barcode
 async function saveBarcode() {
-    const barcode = document.getElementById('regBarcode').value;
-    const ingId   = document.getElementById('regIngId').value;
-    const packSize = parseFloat(document.getElementById('regPackSize').value) || 1;
+    const barcode   = pendingBarcode;
+    const ingId     = document.getElementById('regIngId').value;
+    const packSize  = parseFloat(document.getElementById('regPackSize').value) || 1;
     const packLabel = document.getElementById('regPackLabel').value.trim();
-    const errEl   = document.getElementById('registerErr');
-    const btn     = document.getElementById('registerSaveBtn');
+    const errEl     = document.getElementById('registerIngErr');
+    const btn       = document.getElementById('registerIngSaveBtn');
 
     if (!ingId) { errEl.textContent = 'Please select an ingredient.'; errEl.style.display = 'block'; return; }
     btn.disabled = true; btn.textContent = 'Saving…';
@@ -856,7 +1064,7 @@ async function saveBarcode() {
     fd.append('pack_label', packLabel);
 
     try {
-        const res = await fetch(PAGE + '?ajax=register_barcode', { method: 'POST', body: fd });
+        const res  = await fetch(PAGE + '?ajax=register_barcode', { method: 'POST', body: fd });
         const data = await res.json();
         if (data.ok) {
             closeRegisterModal();
@@ -865,11 +1073,48 @@ async function saveBarcode() {
         } else {
             errEl.textContent = data.error || 'Save failed.';
             errEl.style.display = 'block';
-            btn.disabled = false; btn.textContent = 'Save & Add';
+            btn.disabled = false; btn.textContent = 'Save & Add to Batch';
         }
     } catch(e) {
         errEl.textContent = 'Network error.'; errEl.style.display = 'block';
-        btn.disabled = false; btn.textContent = 'Save & Add';
+        btn.disabled = false; btn.textContent = 'Save & Add to Batch';
+    }
+}
+
+// Save POS item
+async function saveItem() {
+    const barcode  = pendingBarcode;
+    const name     = document.getElementById('regItemName').value.trim();
+    const price    = document.getElementById('regItemPrice').value.trim();
+    const catId    = document.getElementById('regCatId').value;
+    const errEl    = document.getElementById('registerItemErr');
+    const btn      = document.getElementById('registerItemSaveBtn');
+
+    if (!name) { errEl.textContent = 'Please enter an item name.'; errEl.style.display = 'block'; return; }
+    if (price === '' || isNaN(parseFloat(price))) { errEl.textContent = 'Please enter a sale price.'; errEl.style.display = 'block'; return; }
+    btn.disabled = true; btn.textContent = 'Saving…';
+
+    const fd = new FormData();
+    fd.append('csrf_token', CSRF);
+    fd.append('barcode', barcode);
+    fd.append('name', name);
+    fd.append('price', price);
+    fd.append('category_id', catId || '');
+
+    try {
+        const res  = await fetch(PAGE + '?ajax=register_item', { method: 'POST', body: fd });
+        const data = await res.json();
+        if (data.ok) {
+            closeRegisterModal();
+            flashMsg('✓ ' + data.item.name + ' registered on POS at ' + formatPrice(data.item.price));
+        } else {
+            errEl.textContent = data.error || 'Save failed.';
+            errEl.style.display = 'block';
+            btn.disabled = false; btn.textContent = 'Register on POS';
+        }
+    } catch(e) {
+        errEl.textContent = 'Network error.'; errEl.style.display = 'block';
+        btn.disabled = false; btn.textContent = 'Register on POS';
     }
 }
 
