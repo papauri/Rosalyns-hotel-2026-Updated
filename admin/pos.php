@@ -1875,7 +1875,7 @@ if (in_array($user['role'] ?? '', ['admin', 'manager'], true)) {
             </div>
 
             <!-- Barcode scanner status strip (shown when scanner is active) -->
-            <div id="barcodeScanStrip" style="display:none;position:fixed;bottom:0;left:0;right:0;z-index:9000;background:#1a1a2e;color:#fff;font-size:13px;font-weight:600;padding:8px 16px;align-items:center;gap:10px;pointer-events:none;">
+            <div id="barcodeScanStrip" style="display:none;position:fixed;bottom:0;left:0;right:0;z-index:9000;background:#1a1a2e;color:#fff;font-size:13px;font-weight:600;padding:10px 16px calc(10px + env(safe-area-inset-bottom));align-items:center;gap:10px;pointer-events:none;">
                 <i class="fas fa-barcode" style="color:#4ade80;"></i>
                 <span>Barcode scanner active — scan an item to add it to the cart</span>
                 <span id="barcodeScanLast" style="margin-left:auto;opacity:0.7;font-weight:400;font-size:12px;"></span>

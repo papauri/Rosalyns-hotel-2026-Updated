@@ -82,7 +82,7 @@
         document.getElementById('admin-pwa-dismiss').addEventListener('click', dismiss);
         document.getElementById('admin-pwa-minimise').addEventListener('click', toggleMinimise);
 
-        initDrag(bannerEl, document.getElementById('admin-pwa-drag'));
+        initDrag(bannerEl);
     }
 
     var _minimised = false;
@@ -98,32 +98,34 @@
     }
 
     function initDrag(el, handle) {
-        if (!handle) return;
-        var startX, startY, startLeft, startTop, dragging = false;
+        // Make the whole banner draggable (not just the tiny handle) —
+        // any pointerdown that isn't on a button starts a drag.
+        var startX, startY, startLeft, startTop, dragging = false, moved = false;
 
         function onPointerDown(e) {
-            if (e.target.closest('button')) return;
+            if (e.target.closest('button')) return; // don't intercept button taps
             dragging = true;
+            moved = false;
             var rect = el.getBoundingClientRect();
             startLeft = rect.left;
             startTop  = rect.top;
-            startX = e.clientX || 0;
-            startY = e.clientY || 0;
+            startX = e.clientX;
+            startY = e.clientY;
             el.style.transition = 'none';
             el.style.right  = 'auto';
-            el.style.bottom = 'auto'; // clear bottom so top takes effect on mobile
+            el.style.bottom = 'auto'; // clear media-query bottom so top: works on mobile
             el.style.left   = startLeft + 'px';
             el.style.top    = startTop  + 'px';
-            document.addEventListener('pointermove', onPointerMove);
-            document.addEventListener('pointerup',   onPointerUp);
+            el.setPointerCapture(e.pointerId);
+            e.preventDefault();
         }
 
         function onPointerMove(e) {
             if (!dragging) return;
-            var cx = e.clientX || 0;
-            var cy = e.clientY || 0;
-            var dx = cx - startX;
-            var dy = cy - startY;
+            var dx = e.clientX - startX;
+            var dy = e.clientY - startY;
+            if (!moved && Math.abs(dx) < 4 && Math.abs(dy) < 4) return; // dead zone
+            moved = true;
             var newLeft = Math.max(0, Math.min(window.innerWidth  - el.offsetWidth,  startLeft + dx));
             var newTop  = Math.max(0, Math.min(window.innerHeight - el.offsetHeight, startTop  + dy));
             el.style.left = newLeft + 'px';
@@ -131,13 +133,16 @@
         }
 
         function onPointerUp() {
+            if (!moved) { /* treat as tap — nothing extra needed */ }
             dragging = false;
+            moved = false;
             el.style.transition = '';
-            document.removeEventListener('pointermove', onPointerMove);
-            document.removeEventListener('pointerup',   onPointerUp);
         }
 
-        handle.addEventListener('pointerdown', onPointerDown);
+        el.addEventListener('pointerdown',  onPointerDown);
+        el.addEventListener('pointermove',  onPointerMove);
+        el.addEventListener('pointerup',    onPointerUp);
+        el.addEventListener('pointercancel', onPointerUp);
     }
 
     function hideBanner() {
@@ -244,7 +249,9 @@
             '}',
             '.admin-pwa-banner__minimise:hover, .admin-pwa-banner__dismiss:hover { color: rgba(247,243,238,0.85); }',
             '@media (max-width: 480px) {',
-            '  #admin-pwa-banner { top: auto; bottom: 70px; right: 12px; left: auto; max-width: calc(100vw - 24px); }',
+            '  #admin-pwa-banner { top: auto; bottom: 80px; right: 12px; left: auto; max-width: calc(100vw - 24px); padding: 12px 10px; }',
+            '  .admin-pwa-banner__minimise, .admin-pwa-banner__dismiss { padding: 10px 8px; font-size: 14px; }',
+            '  .admin-pwa-banner__drag-handle { padding: 6px 8px; font-size: 14px; }',
             '}',
         ].join('\n');
         document.head.appendChild(s);

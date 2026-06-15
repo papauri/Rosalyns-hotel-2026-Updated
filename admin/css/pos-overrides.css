@@ -643,8 +643,8 @@ a.recent-toggle span {
 
 .pos-mobile-menu-btn .mobile-menu-badge {
     position: absolute;
-    top: -5px;
-    right: -5px;
+    top: 3px;
+    right: 3px;
 }
 
 .pos-mobile-actions {
