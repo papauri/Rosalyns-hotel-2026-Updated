@@ -56,12 +56,18 @@
         bannerEl.setAttribute('role', 'region');
         bannerEl.setAttribute('aria-label', 'Install admin app');
         bannerEl.innerHTML = [
+            '<div class="admin-pwa-banner__drag-handle" id="admin-pwa-drag" title="Drag to move" aria-hidden="true">',
+            '  <i class="fas fa-grip-lines"></i>',
+            '</div>',
             '<i class="fas fa-hotel admin-pwa-banner__icon" aria-hidden="true"></i>',
-            '<div class="admin-pwa-banner__text">',
+            '<div class="admin-pwa-banner__text" id="admin-pwa-body">',
             '  <strong>Install Admin App</strong>',
             '  <span>Run POS &amp; KDS without a browser tab.</span>',
             '</div>',
             '<button class="admin-pwa-banner__install" id="admin-pwa-install" type="button">Install</button>',
+            '<button class="admin-pwa-banner__minimise" id="admin-pwa-minimise" type="button" aria-label="Minimise">',
+            '  <i class="fas fa-minus" aria-hidden="true"></i>',
+            '</button>',
             '<button class="admin-pwa-banner__dismiss" id="admin-pwa-dismiss" type="button" aria-label="Dismiss">',
             '  <i class="fas fa-times" aria-hidden="true"></i>',
             '</button>',
@@ -74,6 +80,63 @@
 
         document.getElementById('admin-pwa-install').addEventListener('click', doInstall);
         document.getElementById('admin-pwa-dismiss').addEventListener('click', dismiss);
+        document.getElementById('admin-pwa-minimise').addEventListener('click', toggleMinimise);
+
+        initDrag(bannerEl, document.getElementById('admin-pwa-drag'));
+    }
+
+    var _minimised = false;
+    function toggleMinimise() {
+        _minimised = !_minimised;
+        if (!bannerEl) return;
+        bannerEl.classList.toggle('is-minimised', _minimised);
+        var btn = document.getElementById('admin-pwa-minimise');
+        if (btn) {
+            btn.setAttribute('aria-label', _minimised ? 'Expand' : 'Minimise');
+            btn.querySelector('i').className = _minimised ? 'fas fa-plus' : 'fas fa-minus';
+        }
+    }
+
+    function initDrag(el, handle) {
+        if (!handle) return;
+        var startX, startY, startLeft, startTop, dragging = false;
+
+        function onPointerDown(e) {
+            if (e.target.closest('button')) return;
+            dragging = true;
+            var rect = el.getBoundingClientRect();
+            startLeft = rect.left;
+            startTop  = rect.top;
+            startX = e.clientX || (e.touches && e.touches[0].clientX) || 0;
+            startY = e.clientY || (e.touches && e.touches[0].clientY) || 0;
+            el.style.transition = 'none';
+            el.style.right = 'auto';
+            el.style.left  = startLeft + 'px';
+            el.style.top   = startTop  + 'px';
+            document.addEventListener('pointermove', onPointerMove);
+            document.addEventListener('pointerup',   onPointerUp);
+        }
+
+        function onPointerMove(e) {
+            if (!dragging) return;
+            var cx = e.clientX || 0;
+            var cy = e.clientY || 0;
+            var dx = cx - startX;
+            var dy = cy - startY;
+            var newLeft = Math.max(0, Math.min(window.innerWidth  - el.offsetWidth,  startLeft + dx));
+            var newTop  = Math.max(0, Math.min(window.innerHeight - el.offsetHeight, startTop  + dy));
+            el.style.left = newLeft + 'px';
+            el.style.top  = newTop  + 'px';
+        }
+
+        function onPointerUp() {
+            dragging = false;
+            el.style.transition = '';
+            document.removeEventListener('pointermove', onPointerMove);
+            document.removeEventListener('pointerup',   onPointerUp);
+        }
+
+        handle.addEventListener('pointerdown', onPointerDown);
     }
 
     function hideBanner() {
@@ -112,7 +175,7 @@
             '  background: #1f1f24;',
             '  border: 1px solid rgba(138,119,95,0.4);',
             '  color: #F7F3EE;',
-            '  padding: 12px 14px;',
+            '  padding: 10px 12px 10px 8px;',
             '  border-radius: 12px;',
             '  box-shadow: 0 8px 32px rgba(0,0,0,0.5);',
             '  max-width: 360px;',
@@ -121,11 +184,24 @@
             '  transition: transform 0.3s ease, opacity 0.3s ease;',
             '  font-family: "Inter", system-ui, sans-serif;',
             '  font-size: 13px;',
+            '  touch-action: none;',
             '}',
             '#admin-pwa-banner.is-visible { transform: translateY(0); opacity: 1; }',
+            '#admin-pwa-banner.is-minimised .admin-pwa-banner__text,',
+            '#admin-pwa-banner.is-minimised .admin-pwa-banner__install { display: none; }',
+            '#admin-pwa-banner.is-minimised { gap: 6px; }',
+            '.admin-pwa-banner__drag-handle {',
+            '  flex-shrink: 0;',
+            '  color: rgba(247,243,238,0.25);',
+            '  font-size: 11px;',
+            '  padding: 4px 2px;',
+            '  cursor: grab;',
+            '  line-height: 1;',
+            '}',
+            '.admin-pwa-banner__drag-handle:active { cursor: grabbing; }',
             '.admin-pwa-banner__icon {',
             '  flex-shrink: 0;',
-            '  font-size: 20px;',
+            '  font-size: 18px;',
             '  color: #8A775F;',
             '}',
             '.admin-pwa-banner__text {',
@@ -151,20 +227,21 @@
             '  transition: opacity 0.15s;',
             '}',
             '.admin-pwa-banner__install:hover { opacity: 0.85; }',
-            '.admin-pwa-banner__dismiss {',
+            '.admin-pwa-banner__minimise, .admin-pwa-banner__dismiss {',
             '  flex-shrink: 0;',
             '  background: transparent;',
             '  border: none;',
-            '  color: rgba(247,243,238,0.4);',
-            '  font-size: 14px;',
-            '  padding: 6px;',
+            '  color: rgba(247,243,238,0.35);',
+            '  font-size: 12px;',
+            '  padding: 6px 5px;',
             '  cursor: pointer;',
             '  border-radius: 5px;',
             '  transition: color 0.15s;',
+            '  line-height: 1;',
             '}',
-            '.admin-pwa-banner__dismiss:hover { color: rgba(247,243,238,0.8); }',
+            '.admin-pwa-banner__minimise:hover, .admin-pwa-banner__dismiss:hover { color: rgba(247,243,238,0.85); }',
             '@media (max-width: 480px) {',
-            '  #admin-pwa-banner { top: 10px; right: 10px; left: 10px; max-width: none; }',
+            '  #admin-pwa-banner { top: auto; bottom: 70px; right: 12px; left: auto; max-width: calc(100vw - 24px); }',
             '}',
         ].join('\n');
         document.head.appendChild(s);

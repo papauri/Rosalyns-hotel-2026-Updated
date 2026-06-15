@@ -195,32 +195,34 @@ $barcodeCount    = (int)$pdo->query("SELECT COUNT(*) FROM stock_ingredient_barco
 <style>
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
 :root{
-  --bg:#0f1117;--surface:#1a1d27;--surface2:#22263a;--border:#2e3350;
-  --primary:#4f8ef7;--success:#22c55e;--warn:#f59e0b;--danger:#ef4444;
-  --text:#f1f5f9;--muted:#64748b;--radius:12px;
+  --bg:#f4f2ef;--surface:#fffdfb;--surface2:#ede9e3;--border:#d7dde6;
+  --primary:#8A775F;--success:#3f8f5a;--warn:#9a7c53;--danger:#956a5b;
+  --text:#1f2a37;--muted:#5f6b7c;--radius:12px;
+  --navy:#111827;--gold:#B18247;
 }
 html,body{height:100%;background:var(--bg);color:var(--text);font-family:'Jost',sans-serif;font-size:15px;overscroll-behavior:none}
 a{color:var(--primary);text-decoration:none}
 
 /* ── Top bar ── */
-.topbar{display:flex;align-items:center;gap:12px;padding:14px 16px;background:var(--surface);border-bottom:1px solid var(--border);position:sticky;top:0;z-index:100}
-.topbar-back{width:38px;height:38px;display:flex;align-items:center;justify-content:center;border-radius:8px;background:var(--surface2);color:var(--text);font-size:16px;border:none;cursor:pointer}
-.topbar-title{flex:1;font-size:16px;font-weight:600}
-.topbar-stats{font-size:12px;color:var(--muted);text-align:right;line-height:1.4}
+.topbar{display:flex;align-items:center;gap:12px;padding:14px 16px;background:var(--navy);border-bottom:3px solid var(--gold);position:sticky;top:0;z-index:100}
+.topbar-back{width:38px;height:38px;display:flex;align-items:center;justify-content:center;border-radius:8px;background:rgba(255,255,255,.1);color:#fff;font-size:16px;border:none;cursor:pointer}
+.topbar-back:hover{background:rgba(255,255,255,.18)}
+.topbar-title{flex:1;font-size:16px;font-weight:600;color:#fff}
+.topbar-stats{font-size:12px;color:rgba(255,255,255,.6);text-align:right;line-height:1.4}
 
 /* ── Camera zone ── */
 .camera-zone{position:relative;background:#000;width:100%;max-height:240px;overflow:hidden;display:flex;align-items:center;justify-content:center}
 .camera-zone video{width:100%;max-height:240px;object-fit:cover;display:block}
 .scan-overlay{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;pointer-events:none}
-.scan-frame{width:200px;height:100px;border:2px solid var(--primary);border-radius:8px;box-shadow:0 0 0 9999px rgba(0,0,0,.45)}
-.scan-line{position:absolute;width:180px;height:2px;background:var(--primary);opacity:.8;animation:scanline 1.8s ease-in-out infinite}
+.scan-frame{width:200px;height:100px;border:2px solid var(--gold);border-radius:8px;box-shadow:0 0 0 9999px rgba(0,0,0,.45)}
+.scan-line{position:absolute;width:180px;height:2px;background:var(--gold);opacity:.8;animation:scanline 1.8s ease-in-out infinite}
 @keyframes scanline{0%{top:calc(50% - 45px)}100%{top:calc(50% + 43px)}}
 .scan-status{position:absolute;bottom:10px;background:rgba(0,0,0,.7);border-radius:20px;padding:4px 14px;font-size:12px;color:#fff}
-.cam-error-msg{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:20px;text-align:center;background:rgba(15,17,23,.92)}
+.cam-error-msg{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:20px;text-align:center;background:rgba(0,0,0,.88)}
 .cam-error-msg i{font-size:28px;opacity:.5;margin-bottom:12px;color:#fff}
 .cam-error-msg .cam-err-title{font-size:13px;font-weight:700;color:#fff;margin-bottom:6px}
-.cam-error-msg .cam-err-hint{font-size:12px;color:rgba(255,255,255,.6);line-height:1.6}
-.cam-error-msg .cam-err-retry{margin-top:14px;padding:8px 20px;background:var(--primary);border:none;border-radius:8px;color:#fff;font-size:13px;font-weight:600;cursor:pointer;font-family:inherit}
+.cam-error-msg .cam-err-hint{font-size:12px;color:rgba(255,255,255,.65);line-height:1.6}
+.cam-error-msg .cam-err-retry{margin-top:14px;padding:8px 20px;background:var(--gold);border:none;border-radius:8px;color:#fff;font-size:13px;font-weight:600;cursor:pointer;font-family:inherit}
 
 /* ── Manual / fallback input ── */
 .manual-row{display:flex;gap:8px;padding:12px 16px;background:var(--surface);border-bottom:1px solid var(--border)}
@@ -235,38 +237,38 @@ a{color:var(--primary);text-decoration:none}
 
 /* ── Toggle buttons ── */
 .cam-btn{display:flex;align-items:center;gap:8px;padding:9px 14px;background:var(--surface2);border:1px solid var(--border);border-radius:8px;color:var(--text);font-size:13px;font-weight:500;cursor:pointer;white-space:nowrap}
-.cam-btn.active{background:#1e3a5f;border-color:var(--primary);color:var(--primary)}
+.cam-btn.active{background:#e8f5ee;border-color:var(--success);color:var(--success)}
 .scanner-toggle-btn{display:flex;align-items:center;gap:8px;padding:9px 14px;background:var(--surface2);border:1px solid var(--border);border-radius:8px;color:var(--muted);font-size:13px;font-weight:600;cursor:pointer;white-space:nowrap;transition:all .2s}
-.scanner-toggle-btn.active{background:#1a2e1a;border-color:var(--success);color:var(--success)}
+.scanner-toggle-btn.active{background:#f0ede8;border-color:var(--primary);color:var(--primary)}
 
 /* ── Scanner status strip ── */
-#scannerStrip{display:none;align-items:center;justify-content:center;gap:8px;padding:8px 16px;background:#0d1f0d;border-bottom:1px solid #1a3a1a;font-size:12px;color:var(--success)}
-#scannerStrip.off{display:flex;background:#1f1a0d;border-color:#3a2a00;color:var(--warn)}
+#scannerStrip{display:none;align-items:center;justify-content:center;gap:8px;padding:8px 16px;background:#e8f5ee;border-bottom:1px solid #b5dcc4;font-size:12px;color:var(--success)}
+#scannerStrip.off{display:flex;background:#f5ede8;border-color:#d7c0b0;color:var(--warn)}
 
 /* ── Batch list ── */
 .section-head{display:flex;align-items:center;justify-content:space-between;padding:12px 16px 6px;font-size:13px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.06em}
 .batch-list{padding:0 16px 120px}
 .batch-empty{text-align:center;padding:40px 20px;color:var(--muted)}
-.batch-empty i{font-size:36px;display:block;margin-bottom:12px;opacity:.4}
-.batch-item{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);margin-bottom:10px;overflow:hidden}
+.batch-empty i{font-size:36px;display:block;margin-bottom:12px;opacity:.3;color:var(--primary)}
+.batch-item{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);margin-bottom:10px;overflow:hidden;box-shadow:0 1px 3px rgba(0,0,0,.05)}
 .batch-item-head{display:flex;align-items:center;gap:10px;padding:12px 14px}
 .batch-item-icon{width:36px;height:36px;background:var(--surface2);border-radius:8px;display:flex;align-items:center;justify-content:center;color:var(--primary);font-size:14px;flex-shrink:0}
 .batch-item-name{flex:1;font-weight:600;font-size:14px;line-height:1.3}
 .batch-item-sub{font-size:11px;color:var(--muted);margin-top:2px}
 .batch-item-remove{width:32px;height:32px;background:none;border:none;color:var(--muted);font-size:16px;cursor:pointer;display:flex;align-items:center;justify-content:center;border-radius:6px}
-.batch-item-remove:hover{color:var(--danger);background:#2a1a1a}
+.batch-item-remove:hover{color:var(--danger);background:#f5e8e8}
 .batch-item-body{padding:0 14px 12px;display:flex;gap:8px;flex-wrap:wrap}
 .batch-field{display:flex;flex-direction:column;gap:4px;flex:1;min-width:90px}
-.batch-field label{font-size:11px;color:var(--muted);font-weight:500}
+.batch-field label{font-size:11px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.04em}
 .batch-field input{background:var(--surface2);border:1px solid var(--border);border-radius:8px;padding:8px 10px;color:var(--text);font-size:14px;font-family:inherit;outline:none;width:100%}
 .batch-field input:focus{border-color:var(--primary)}
-.batch-scan-count{display:inline-flex;align-items:center;gap:6px;background:var(--surface2);border-radius:20px;padding:3px 10px;font-size:12px;color:var(--muted);margin-top:4px}
+.batch-scan-count{display:inline-flex;align-items:center;gap:6px;background:var(--surface2);border-radius:20px;padding:3px 10px;font-size:12px;color:var(--muted);margin-top:4px;border:1px solid var(--border)}
 .batch-scan-count button{background:none;border:none;color:var(--text);font-size:16px;cursor:pointer;width:24px;height:24px;display:flex;align-items:center;justify-content:center;border-radius:50%}
 .batch-scan-count button:hover{background:var(--border)}
 .batch-scan-count .qty-val{min-width:32px;text-align:center;font-weight:700;color:var(--text);font-size:15px}
 
 /* ── Submit bar ── */
-.submit-bar{position:fixed;bottom:0;left:0;right:0;padding:12px 16px;background:var(--surface);border-top:1px solid var(--border);z-index:100;display:flex;gap:10px;align-items:center}
+.submit-bar{position:fixed;bottom:0;left:0;right:0;padding:12px 16px;background:var(--surface);border-top:1px solid var(--border);z-index:100;display:flex;gap:10px;align-items:center;box-shadow:0 -2px 12px rgba(0,0,0,.06)}
 .submit-btn{flex:1;padding:14px;background:var(--success);border:none;border-radius:var(--radius);color:#fff;font-size:16px;font-weight:700;cursor:pointer;font-family:inherit}
 .submit-btn:disabled{opacity:.4;cursor:not-allowed}
 .submit-count{font-size:13px;color:var(--muted);white-space:nowrap}
@@ -277,25 +279,25 @@ a{color:var(--primary);text-decoration:none}
 .scan-flash.error{background:var(--danger)}
 
 /* ── Modal overlay ── */
-.modal-overlay{position:fixed;inset:0;background:rgba(0,0,0,.75);z-index:1000;display:flex;align-items:flex-end;justify-content:center}
+.modal-overlay{position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:1000;display:flex;align-items:flex-end;justify-content:center}
 .modal-sheet{background:var(--surface);border-radius:20px 20px 0 0;width:100%;max-width:520px;max-height:90vh;overflow-y:auto;padding:20px 16px 32px}
 .modal-handle{width:40px;height:4px;background:var(--border);border-radius:2px;margin:0 auto 16px}
-.modal-title{font-size:16px;font-weight:700;margin-bottom:4px}
+.modal-title{font-size:16px;font-weight:700;margin-bottom:4px;color:var(--text)}
 .modal-sub{font-size:13px;color:var(--muted);margin-bottom:16px}
 .modal-field{margin-bottom:14px}
 .modal-field label{display:block;font-size:12px;color:var(--muted);font-weight:600;margin-bottom:6px;text-transform:uppercase;letter-spacing:.05em}
 .modal-field input,.modal-field select{width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:8px;padding:11px 14px;color:var(--text);font-size:15px;font-family:inherit;outline:none}
 .modal-field input:focus,.modal-field select:focus{border-color:var(--primary)}
-.ing-results{background:var(--surface2);border:1px solid var(--border);border-radius:8px;margin-top:4px;max-height:180px;overflow-y:auto;display:none}
+.ing-results{background:var(--surface);border:1px solid var(--border);border-radius:8px;margin-top:4px;max-height:180px;overflow-y:auto;display:none;box-shadow:0 4px 12px rgba(0,0,0,.08)}
 .ing-result-item{padding:10px 14px;cursor:pointer;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between}
 .ing-result-item:last-child{border-bottom:none}
-.ing-result-item:hover{background:var(--border)}
+.ing-result-item:hover{background:var(--surface2)}
 .ing-result-item .ing-name{font-weight:600;font-size:14px}
 .ing-result-item .ing-meta{font-size:12px;color:var(--muted)}
 .modal-actions{display:flex;gap:10px;margin-top:20px}
 .modal-btn{flex:1;padding:13px;border-radius:10px;border:none;font-size:15px;font-weight:700;cursor:pointer;font-family:inherit}
 .modal-btn-primary{background:var(--primary);color:#fff}
-.modal-btn-secondary{background:var(--surface2);color:var(--text)}
+.modal-btn-secondary{background:var(--surface2);color:var(--text);border:1px solid var(--border)}
 .modal-btn:disabled{opacity:.4;cursor:not-allowed}
 .modal-err{color:var(--danger);font-size:13px;margin-top:8px;display:none}
 </style>
@@ -484,15 +486,15 @@ function hideCameraError() {
 
 function permissionDeniedMsg() {
     if (isIOS() && isPWA()) {
-        return 'Go to iOS Settings → scroll to Safari → Camera → Allow.';
+        return 'Go to iOS Settings → scroll to Safari → Camera → Allow, then tap Try Again.';
     }
     if (isIOS()) {
-        return 'Go to iOS Settings → Safari → Camera → Allow.';
+        return 'Tap AA in the address bar → Website Settings → Camera → Allow, then tap Try Again.';
     }
     if (isPWA()) {
         return 'Go to Android Settings → Apps → find this app → Permissions → Camera → Allow, then tap Try Again.';
     }
-    return 'Tap the lock icon in the address bar → Permissions → Camera → Allow, then tap Try Again.';
+    return 'Tap the lock / info icon in the address bar → Permissions → Camera → Allow, then tap Try Again below.';
 }
 
 function stopCamera() {
@@ -547,18 +549,6 @@ async function toggleCamera() {
         return;
     }
 
-    // Check permission state before calling getUserMedia (avoids a flash + instant denial)
-    if (navigator.permissions) {
-        try {
-            const perm = await navigator.permissions.query({ name: 'camera' });
-            if (perm.state === 'denied') {
-                showCameraError('Camera permission denied', permissionDeniedMsg(), false);
-                document.getElementById('manualInput').focus();
-                return;
-            }
-        } catch (e) { /* permissions.query may not support 'camera' on all browsers */ }
-    }
-
     btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i>';
 
     try {
@@ -588,7 +578,7 @@ async function toggleCamera() {
         btn.classList.remove('active');
 
         if (e.name === 'NotAllowedError' || e.name === 'PermissionDeniedError') {
-            showCameraError('Camera permission denied', permissionDeniedMsg(), false);
+            showCameraError('Camera permission denied', permissionDeniedMsg(), true);
         } else if (e.name === 'NotFoundError' || e.name === 'DevicesNotFoundError') {
             showCameraError('No camera found', 'No camera detected on this device. Use the input field instead.', false);
         } else if (e.name === 'NotReadableError' || e.name === 'TrackStartError') {
