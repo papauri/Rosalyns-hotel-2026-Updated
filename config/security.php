@@ -48,6 +48,7 @@ function sendSecurityHeaders() {
     
     // Permissions Policy (formerly Feature-Policy)
     // camera=(self) allows camera use on same-origin pages (required for barcode scanner)
+    // Note: the canonical source for this header is .htaccess line ~80 which overrides this on Apache
     header('Permissions-Policy: geolocation=(), microphone=(), camera=(self)');
     
     // HSTS (only on HTTPS)
