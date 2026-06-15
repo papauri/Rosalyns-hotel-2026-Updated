@@ -107,12 +107,13 @@
             var rect = el.getBoundingClientRect();
             startLeft = rect.left;
             startTop  = rect.top;
-            startX = e.clientX || (e.touches && e.touches[0].clientX) || 0;
-            startY = e.clientY || (e.touches && e.touches[0].clientY) || 0;
+            startX = e.clientX || 0;
+            startY = e.clientY || 0;
             el.style.transition = 'none';
-            el.style.right = 'auto';
-            el.style.left  = startLeft + 'px';
-            el.style.top   = startTop  + 'px';
+            el.style.right  = 'auto';
+            el.style.bottom = 'auto'; // clear bottom so top takes effect on mobile
+            el.style.left   = startLeft + 'px';
+            el.style.top    = startTop  + 'px';
             document.addEventListener('pointermove', onPointerMove);
             document.addEventListener('pointerup',   onPointerUp);
         }
@@ -194,9 +195,11 @@
             '  flex-shrink: 0;',
             '  color: rgba(247,243,238,0.25);',
             '  font-size: 11px;',
-            '  padding: 4px 2px;',
+            '  padding: 4px 6px;',
             '  cursor: grab;',
             '  line-height: 1;',
+            '  touch-action: none;',
+            '  -webkit-user-select: none; user-select: none;',
             '}',
             '.admin-pwa-banner__drag-handle:active { cursor: grabbing; }',
             '.admin-pwa-banner__icon {',

@@ -1657,6 +1657,36 @@ if (in_array($user['role'] ?? '', ['admin', 'manager'], true)) {
         /* Success flash on camera view */
         .pos-cam-view.found-flash { animation: pos-cam-flash .35s ease; }
         @keyframes pos-cam-flash { 0%,100% { filter: none; } 50% { filter: brightness(1.8); } }
+        /* Mini cart panel inside scanner */
+        .pos-cam-cart {
+            background: rgba(15,15,20,0.92); border-top: 1px solid rgba(74,222,128,0.25);
+            flex-shrink: 0; max-height: 220px; overflow: hidden;
+            transition: max-height .3s ease;
+        }
+        .pos-cam-cart.collapsed { max-height: 0; border-top-color: transparent; }
+        .pos-cam-cart-head {
+            display: flex; align-items: center; justify-content: space-between;
+            padding: 8px 14px; cursor: pointer; user-select: none;
+            color: rgba(255,255,255,0.8); font-size: 12px; font-weight: 600;
+            border-bottom: 1px solid rgba(255,255,255,0.06);
+        }
+        .pos-cam-cart-head:hover { background: rgba(255,255,255,0.04); }
+        .pos-cam-cart-head .cc-title { display: flex; align-items: center; gap: 7px; }
+        .pos-cam-cart-head .cc-title i { color: #4ade80; font-size: 13px; }
+        .pos-cam-cart-head .cc-total { color: #4ade80; font-size: 12px; font-weight: 700; }
+        .pos-cam-cart-head .cc-chevron { font-size: 10px; color: rgba(255,255,255,0.4); transition: transform .25s; }
+        .pos-cam-cart.collapsed .cc-chevron { transform: rotate(180deg); }
+        .pos-cam-cart-body { padding: 6px 0; max-height: 162px; overflow-y: auto; }
+        .pos-cam-cart-row {
+            display: flex; align-items: center; justify-content: space-between;
+            padding: 5px 14px; font-size: 12px; color: rgba(255,255,255,0.82);
+            gap: 8px; border-bottom: 1px solid rgba(255,255,255,0.04);
+        }
+        .pos-cam-cart-row:last-child { border-bottom: none; }
+        .pos-cam-cart-row .cc-name { flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .pos-cam-cart-row .cc-qty { color: #4ade80; font-weight: 600; flex-shrink: 0; }
+        .pos-cam-cart-row .cc-price { color: rgba(255,255,255,0.5); flex-shrink: 0; font-size: 11px; }
+        .pos-cam-cart-empty { padding: 10px 14px; font-size: 12px; color: rgba(255,255,255,0.35); text-align:center; }
         /* Scan button in mobile bar */
         .pos-mobile-action.is-scan { color: #4ade80; }
         .pos-mobile-action.is-scan.is-active { background: rgba(74,222,128,0.15); }
@@ -8849,6 +8879,15 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
                 <div class="pos-cam-scan-line"></div>
             </div>
         </div>
+        <!-- Mini cart panel — collapsed by default, expands after first scan -->
+        <div class="pos-cam-cart collapsed" id="posCamCart">
+            <div class="pos-cam-cart-head" onclick="posCamCartToggle()">
+                <span class="cc-title"><i class="fas fa-shopping-cart"></i> Cart</span>
+                <span id="posCamCartTotal" class="cc-total"></span>
+                <i class="fas fa-chevron-up cc-chevron"></i>
+            </div>
+            <div class="pos-cam-cart-body" id="posCamCartBody"></div>
+        </div>
         <div class="pos-cam-footer">
             <span id="posCamStatus">Point camera at a barcode</span>
             <label class="pos-cam-keep-lbl" title="Keep scanner open after each scan to add multiple items">
@@ -8927,6 +8966,9 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
             if (video) video.srcObject = null;
             var torch = document.getElementById('posCamTorch');
             if (torch) { torch.classList.remove('active', 'visible'); }
+            // Collapse mini cart for next open
+            var cartEl = document.getElementById('posCamCart');
+            if (cartEl) cartEl.classList.add('collapsed');
             var overlay = document.getElementById('posCamScanOverlay');
             if (overlay) overlay.style.display = 'none';
             document.getElementById('posCamScanBtn') && document.getElementById('posCamScanBtn').classList.remove('is-active');
@@ -8978,12 +9020,56 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
             _setStatus('Found: ' + code);
             if (typeof posHandleBarcodeInput === 'function') posHandleBarcodeInput(code);
 
+            // Show/refresh mini cart after scan
+            setTimeout(_refreshCart, 120);
+
             var keepOpen = document.getElementById('posCamKeepOpen');
             if (!keepOpen || !keepOpen.checked) {
-                setTimeout(posCamScanClose, 700);
+                setTimeout(posCamScanClose, 900);
             } else {
                 setTimeout(function () { _setStatus('Ready — scan next item'); }, 1000);
             }
+        }
+
+        function _refreshCart() {
+            var cartEl = document.getElementById('posCamCart');
+            var bodyEl = document.getElementById('posCamCartBody');
+            var totalEl = document.getElementById('posCamCartTotal');
+            if (!cartEl || !bodyEl) return;
+            // `cart` is the POS global cart array
+            if (typeof cart === 'undefined' || !cart.length) {
+                bodyEl.innerHTML = '<div class="pos-cam-cart-empty">Cart is empty</div>';
+                if (totalEl) totalEl.textContent = '';
+                return;
+            }
+            var html = '';
+            var grandTotal = 0;
+            for (var i = 0; i < cart.length; i++) {
+                var item = cart[i];
+                var lineTotal = (parseFloat(item.price) || 0) * (parseFloat(item.qty) || 1);
+                grandTotal += lineTotal;
+                html += '<div class="pos-cam-cart-row">'
+                    + '<span class="cc-qty">' + (item.qty || 1) + '×</span>'
+                    + '<span class="cc-name">' + _esc(item.name || '') + '</span>'
+                    + '<span class="cc-price">' + (typeof currencySymbol !== 'undefined' ? currencySymbol : 'MWK') + ' ' + _fmt(lineTotal) + '</span>'
+                    + '</div>';
+            }
+            bodyEl.innerHTML = html;
+            if (totalEl) totalEl.textContent = (typeof currencySymbol !== 'undefined' ? currencySymbol : 'MWK') + ' ' + _fmt(grandTotal);
+            // Expand the cart panel on first scan
+            cartEl.classList.remove('collapsed');
+        }
+
+        window.posCamCartToggle = function () {
+            var cartEl = document.getElementById('posCamCart');
+            if (cartEl) cartEl.classList.toggle('collapsed');
+        };
+
+        function _esc(str) {
+            return String(str).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+        }
+        function _fmt(n) {
+            return Number(n).toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 0 });
         }
 
         function _setStatus(msg) {

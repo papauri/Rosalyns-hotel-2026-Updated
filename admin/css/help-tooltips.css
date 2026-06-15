@@ -3,6 +3,17 @@
    #d4a843 is an intentional POS/KDS gold accent preserved as-is.
 */
 
+/* Fallback values for lux design-token variables.
+   These are used by the floating toggle button. On admin pages the
+   main variables.css is not loaded, so we define safe fallbacks here. */
+:root {
+    --color-lux-ink: var(--deep-navy, #111827);
+    --color-lux-clay-50: #F3ECE4;
+    --color-lux-gold: var(--admin-accent, #8A775F);
+    --color-text-secondary: var(--admin-muted, #5f6b7c);
+    --color-background: var(--admin-bg, #f4f2ef);
+}
+
 .rh-help-bubble {
     position: fixed;
     z-index: 9998;
