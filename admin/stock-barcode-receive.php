@@ -396,6 +396,18 @@ a{color:var(--primary);text-decoration:none}
 .reg-type-card strong{font-size:14px;font-weight:700;color:var(--text)}
 .reg-type-card span{font-size:11px;color:var(--muted);line-height:1.4;margin-top:2px}
 .reg-type-card.selected{border-color:var(--primary);background:#f0ece6}
+
+/* ── Torch button ── */
+.torch-btn{display:none;align-items:center;gap:6px;padding:9px 14px;background:var(--surface2);border:1px solid var(--border);border-radius:8px;color:var(--muted);font-size:13px;font-weight:500;cursor:pointer;white-space:nowrap}
+.torch-btn.active{background:#fef9e7;border-color:#d4a017;color:#a07800}
+.torch-btn.visible{display:flex}
+
+/* ── Batch item pulse on re-scan ── */
+@keyframes pulse-scan{0%{box-shadow:0 0 0 0 rgba(138,119,95,.5)}70%{box-shadow:0 0 0 8px rgba(138,119,95,0)}100%{box-shadow:0 0 0 0 rgba(138,119,95,0)}}
+.batch-item.pulse{animation:pulse-scan .4s ease-out}
+
+/* ── Scan count badge ── */
+.scan-badge{display:inline-flex;align-items:center;gap:3px;background:var(--primary);color:#fff;font-size:10px;font-weight:700;border-radius:10px;padding:2px 7px;margin-left:6px;vertical-align:middle}
 </style>
 </head>
 <body>
@@ -428,6 +440,9 @@ a{color:var(--primary);text-decoration:none}
     </button>
     <button class="cam-btn" id="camToggle" onclick="toggleCamera()" style="display:none">
         <i class="fas fa-camera"></i> Camera
+    </button>
+    <button class="torch-btn" id="torchBtn" onclick="toggleTorch()" title="Toggle flashlight">
+        <i class="fas fa-bolt"></i>
     </button>
     <input type="text" id="manualInput" placeholder="Type or scan barcode here…"
         autocomplete="off" autocorrect="off" spellcheck="false" inputmode="text" style="display:none">
@@ -552,13 +567,50 @@ a{color:var(--primary);text-decoration:none}
 const CSRF = <?php echo json_encode($csrf_token); ?>;
 const PAGE = 'stock-barcode-receive.php';
 const LS_SCANNER_KEY = 'sbr_scanner_enabled';
+const LS_CAM_KEY     = 'sbr_cam_active';
 
 // ── State ─────────────────────────────────────────────────────────────────
-let batch = {};        // ingredient_id → { ingredient, quantity, cost_per_unit }
+let batch = {};
 let camStream = null;
 let camDetecting = false;
 let pendingBarcode = null;
 let scannerEnabled = localStorage.getItem(LS_SCANNER_KEY) === '1';
+let _modalOpen = false;
+
+// ── Barcode cache (eliminates duplicate server round-trips) ───────────────
+const _barcodeCache = new Map(); // barcode → { data, ts }
+const CACHE_TTL = 20 * 60 * 1000; // 20 min
+function cacheGet(bc) {
+    const e = _barcodeCache.get(bc);
+    if (!e) return null;
+    if (Date.now() - e.ts > CACHE_TTL) { _barcodeCache.delete(bc); return null; }
+    return e.data;
+}
+function cacheSet(bc, data) { _barcodeCache.set(bc, { data, ts: Date.now() }); }
+function cacheInvalidate(bc) { _barcodeCache.delete(bc); }
+
+// ── Audio / haptic feedback ───────────────────────────────────────────────
+let _audioCtx = null;
+function _getAudioCtx() {
+    if (!_audioCtx) _audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    return _audioCtx;
+}
+function _beep(freq = 1200, ms = 80, type = 'square') {
+    try {
+        const ctx  = _getAudioCtx();
+        const osc  = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.connect(gain); gain.connect(ctx.destination);
+        osc.frequency.value = freq; osc.type = type;
+        gain.gain.setValueAtTime(0.25, ctx.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + ms / 1000);
+        osc.start(); osc.stop(ctx.currentTime + ms / 1000);
+    } catch(e) {}
+}
+function _vib(pattern) { try { navigator.vibrate && navigator.vibrate(pattern); } catch(e) {} }
+function fbSuccess()  { _vib(40);          _beep(1400, 60);               }
+function fbError()    { _vib([40,20,40]);  _beep(360, 180, 'sawtooth');   }
+function fbUnknown()  { _vib([30,20,30]);  _beep(700, 120, 'triangle');   }
 
 // ── Scanner toggle (persisted per device) ────────────────────────────────
 function toggleScanner() {
@@ -582,10 +634,14 @@ function updateScannerUI() {
         lbl.textContent = 'Scanner: ON';
         strip.style.display = 'flex';
         strip.className = '';
-        strip.innerHTML = '<i class="fas fa-circle" style="font-size:8px"></i> Barcode scanner active — camera or keyboard wedge';
+        strip.innerHTML = '<i class="fas fa-circle" style="font-size:8px"></i> Barcode scanner active — camera or USB wedge';
         cam.style.display = '';
         inp.style.display = '';
         sub.style.display = '';
+        // Auto-resume camera if it was active last session
+        if (localStorage.getItem(LS_CAM_KEY) === '1' && !camStream) {
+            setTimeout(toggleCamera, 400);
+        }
     } else {
         btn.classList.remove('active');
         lbl.textContent = 'Scanner: OFF';
@@ -593,6 +649,7 @@ function updateScannerUI() {
         cam.style.display = 'none';
         cam.classList.remove('active');
         cam.innerHTML = '<i class="fas fa-camera"></i> Camera';
+        document.getElementById('torchBtn').classList.remove('visible','active');
         inp.style.display = 'none';
         sub.style.display = 'none';
         document.getElementById('cameraZone').style.display = 'none';
@@ -656,65 +713,49 @@ function stopCamera() {
 // ── Camera toggle ─────────────────────────────────────────────────────────
 async function toggleCamera() {
     if (!scannerEnabled) return;
-    const btn = document.getElementById('camToggle');
+    const btn  = document.getElementById('camToggle');
     const zone = document.getElementById('cameraZone');
+    const tBtn = document.getElementById('torchBtn');
 
-    // Turn off
     if (camStream) {
         stopCamera();
+        localStorage.setItem(LS_CAM_KEY, '0');
         btn.classList.remove('active');
         btn.innerHTML = '<i class="fas fa-camera"></i> Camera';
+        tBtn.classList.remove('visible','active');
         zone.style.display = 'none';
         hideCameraError();
         return;
     }
 
-    // Feature checks — give the polyfill module up to 4 s to inject window.BarcodeDetector
-    if (!('BarcodeDetector' in window)) {
+    // Wait up to 4 s for polyfill module to inject BarcodeDetector
+    for (let i = 0; i < 8 && !('BarcodeDetector' in window); i++) {
         await new Promise(r => setTimeout(r, 500));
     }
     if (!('BarcodeDetector' in window)) {
-        await new Promise(r => setTimeout(r, 3500));
-    }
-    if (!('BarcodeDetector' in window)) {
-        showCameraError(
-            'Barcode scanning not available',
-            'Could not load the barcode engine. Try refreshing the page, or use the text input / a Bluetooth scanner instead.',
-            true
-        );
+        showCameraError('Barcode engine unavailable',
+            'Could not load the barcode engine. Refresh the page or use the text input / USB scanner instead.', true);
         return;
     }
     if (location.protocol !== 'https:' && location.hostname !== 'localhost') {
-        showCameraError(
-            'HTTPS required',
-            'Camera access only works on secure (https://) connections.',
-            false
-        );
+        showCameraError('HTTPS required', 'Camera access only works on secure (https://) connections.', false);
         return;
     }
     if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-        showCameraError(
-            'Camera API unavailable',
-            'Use the input field or a Bluetooth scanner instead.',
-            false
-        );
+        showCameraError('Camera API unavailable', 'Use the text input or a Bluetooth scanner instead.', false);
         return;
     }
 
     btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i>';
-
     try {
-        // Prefer rear camera; if overconstrained (e.g. desktop), retry with any camera
+        // Lower resolution = faster barcode decode + less CPU
+        const constraints = { video: { facingMode: { ideal: 'environment' }, width: { ideal: 640 }, height: { ideal: 480 } } };
         try {
-            camStream = await navigator.mediaDevices.getUserMedia({
-                video: { facingMode: { ideal: 'environment' }, width: { ideal: 1280 }, height: { ideal: 720 } }
-            });
+            camStream = await navigator.mediaDevices.getUserMedia(constraints);
         } catch (e) {
             if (e.name === 'OverconstrainedError' || e.name === 'ConstraintNotSatisfiedError') {
                 camStream = await navigator.mediaDevices.getUserMedia({ video: true });
-            } else {
-                throw e;
-            }
+            } else { throw e; }
         }
 
         const video = document.getElementById('camVideo');
@@ -723,20 +764,27 @@ async function toggleCamera() {
         zone.style.display = 'flex';
         btn.classList.add('active');
         btn.innerHTML = '<i class="fas fa-stop"></i> Stop';
-        detectLoop();
+        localStorage.setItem(LS_CAM_KEY, '1');
 
+        // Show torch button if device supports it
+        const track = camStream.getVideoTracks()[0];
+        if (track && track.getCapabilities && track.getCapabilities().torch) {
+            tBtn.classList.add('visible');
+        }
+
+        detectLoop();
     } catch (e) {
         btn.innerHTML = '<i class="fas fa-camera"></i> Camera';
         btn.classList.remove('active');
-
+        localStorage.setItem(LS_CAM_KEY, '0');
         if (e.name === 'NotAllowedError' || e.name === 'PermissionDeniedError') {
             showCameraError('Camera permission denied', permissionDeniedMsg(), true);
         } else if (e.name === 'NotFoundError' || e.name === 'DevicesNotFoundError') {
-            showCameraError('No camera found', 'No camera detected on this device. Use the input field instead.', false);
+            showCameraError('No camera found', 'No camera detected on this device. Use the text input instead.', false);
         } else if (e.name === 'NotReadableError' || e.name === 'TrackStartError') {
             showCameraError('Camera busy', 'Camera is in use by another app. Close it and tap Try Again.', true);
         } else {
-            showCameraError('Could not start camera', e.message || 'Try the input field instead.', true);
+            showCameraError('Could not start camera', e.message || 'Try the text input instead.', true);
         }
         document.getElementById('manualInput').focus();
     }
@@ -748,43 +796,61 @@ function retryCamera() {
     toggleCamera();
 }
 
+// Torch toggle — uses MediaStreamTrack constraints
+async function toggleTorch() {
+    if (!camStream) return;
+    const track = camStream.getVideoTracks()[0];
+    if (!track) return;
+    const caps = track.getCapabilities ? track.getCapabilities() : {};
+    if (!caps.torch) { flashMsg('Torch not supported on this device', true); return; }
+    const newTorch = !track.getSettings().torch;
+    try {
+        await track.applyConstraints({ advanced: [{ torch: newTorch }] });
+        document.getElementById('torchBtn').classList.toggle('active', newTorch);
+    } catch(e) { flashMsg('Could not toggle torch', true); }
+}
+
+// ── Detect loop — fire-and-forget (camera never pauses for server lookup) ──
 async function detectLoop() {
     const detector = new BarcodeDetector({
-        formats: ['ean_13','ean_8','code_128','code_39','upc_a','upc_e','itf','qr_code']
+        formats: ['ean_13','ean_8','code_128','code_39','code_93','upc_a','upc_e','qr_code','data_matrix']
     });
     const video = document.getElementById('camVideo');
     camDetecting = true;
     let lastCode = '', lastCodeAt = 0;
     while (camDetecting && camStream) {
-        await new Promise(r => setTimeout(r, 350));
+        await new Promise(r => setTimeout(r, 200)); // 200 ms — fast enough, non-blocking
         try {
             if (!video.readyState || video.readyState < 2) continue;
             const codes = await detector.detect(video);
             if (!codes.length) continue;
             const code = codes[0].rawValue;
             const now = Date.now();
-            if (code === lastCode && now - lastCodeAt < 2500) continue;
+            if (code === lastCode && now - lastCodeAt < 2000) continue; // 2 s same-code cooldown
             lastCode = code; lastCodeAt = now;
             const statusEl = document.getElementById('scanStatus');
             if (statusEl) statusEl.textContent = '✓ ' + code;
-            await processBarcode(code);
-        } catch (e) { /* frame not ready or detector busy */ }
+            processBarcode(code); // ← no await; loop continues immediately
+        } catch(e) { /* frame not ready or detector busy — continue */ }
     }
 }
 
-// ── Keyboard-wedge (fast-type) listener ──────────────────────────────────
+// ── Keyboard-wedge (USB/Bluetooth scanner) listener ──────────────────────
+// Scanners type chars <30 ms apart then send Enter. 300 ms window catches
+// even slower units; 600 ms reset drops keys typed manually.
 let _kwBuf = '', _kwLast = 0;
 document.addEventListener('keydown', e => {
     if (!scannerEnabled) return;
+    if (e.ctrlKey || e.altKey || e.metaKey) return;
     const tag = (document.activeElement || {}).tagName || '';
     if (['INPUT','TEXTAREA','SELECT'].includes(tag)) return;
     const now = Date.now();
     if (e.key === 'Enter') {
-        if (_kwBuf.length >= 3 && now - _kwLast < 250) processBarcode(_kwBuf);
+        if (_kwBuf.length >= 3 && now - _kwLast < 300) processBarcode(_kwBuf);
         _kwBuf = ''; return;
     }
     if (e.key.length === 1) {
-        if (now - _kwLast > 500) _kwBuf = '';
+        if (now - _kwLast > 600) _kwBuf = '';
         _kwBuf += e.key; _kwLast = now;
     }
 });
@@ -801,61 +867,106 @@ function handleManualInput() {
     if (v) { processBarcode(v); inp.value = ''; }
 }
 
-// ── Core barcode processing ───────────────────────────────────────────────
-async function processBarcode(barcode) {
-    const fd = new FormData();
-    fd.append('barcode', barcode);
-    const res = await fetch(PAGE + '?ajax=lookup_barcode', { method: 'POST', body: fd });
-    const data = await res.json();
+// ── Core barcode processing — non-blocking with cache ─────────────────────
+// Only one server request in flight at a time; extras queue behind it.
+// Cache hits are synchronous — zero network cost.
+let _lookupInFlight = false;
+let _lookupQueued   = null;
+
+function processBarcode(barcode) {
+    if (_modalOpen) return; // don't scan while register modal is open
+
+    const cached = cacheGet(barcode);
+    if (cached) { _handleResult(barcode, cached); return; }
+
+    if (_lookupInFlight) { _lookupQueued = barcode; return; } // queue latest, drop older
+    _lookupInFlight = true;
+
+    _fetchLookup(barcode).then(data => {
+        if (!data) return;
+        cacheSet(barcode, data);
+        _handleResult(barcode, data);
+    }).finally(() => {
+        _lookupInFlight = false;
+        if (_lookupQueued) { const q = _lookupQueued; _lookupQueued = null; processBarcode(q); }
+    });
+}
+
+async function _fetchLookup(barcode) {
+    try {
+        const fd = new FormData(); fd.append('barcode', barcode);
+        const res = await fetch(PAGE + '?ajax=lookup_barcode', { method: 'POST', body: fd });
+        return await res.json();
+    } catch(e) { flashMsg('Network error looking up barcode', true); return null; }
+}
+
+function _handleResult(barcode, data) {
     if (data.found && data.type === 'ingredient') {
+        fbSuccess();
         addToBatch(data.ingredient);
-        flashMsg('Added: ' + data.ingredient.name);
+        flashMsg('+ ' + data.ingredient.name);
     } else if (data.found && data.type === 'pos_item') {
-        const item = data.item;
-        flashMsg('POS Item: ' + item.name + ' — ' + formatPrice(item.price));
+        fbSuccess();
+        flashMsg('POS: ' + data.item.name + ' · <?php echo htmlspecialchars($currency); ?>' + formatPrice(data.item.price));
     } else {
+        fbUnknown();
         openRegisterModal(barcode);
     }
 }
 
-function formatPrice(n) {
-    return (typeof n === 'number' ? n : parseFloat(n) || 0).toFixed(2);
-}
+function formatPrice(n) { return (typeof n === 'number' ? n : parseFloat(n) || 0).toFixed(2); }
 
 // ── Batch management ──────────────────────────────────────────────────────
 function addToBatch(ingredient) {
-    const id = ingredient.ingredient_id;
+    const id = String(ingredient.ingredient_id);
     if (batch[id]) {
-        batch[id].quantity += parseFloat(ingredient.pack_size) || 1;
+        // Already in batch — surgical DOM update, no full re-render
+        batch[id].quantity    = Math.round((batch[id].quantity + (parseFloat(ingredient.pack_size) || 1)) * 10000) / 10000;
+        batch[id].scanCount   = (batch[id].scanCount || 1) + 1;
+        const qEl = document.getElementById('qty-' + id);
+        if (qEl) {
+            const q = batch[id].quantity;
+            qEl.textContent = q % 1 === 0 ? q : q.toFixed(3);
+            // Update scan badge
+            const badge = document.getElementById('sbadge-' + id);
+            if (badge) badge.textContent = batch[id].scanCount + '×';
+            // Pulse animation
+            const card = document.getElementById('batch-item-' + id);
+            if (card) { card.classList.remove('pulse'); void card.offsetWidth; card.classList.add('pulse'); }
+        } else { renderBatch(); }
+        _updateTotals();
     } else {
         batch[id] = {
-            ingredient_id: id,
-            name: ingredient.name,
-            unit: ingredient.unit,
-            pack_size: parseFloat(ingredient.pack_size) || 1,
-            pack_label: ingredient.pack_label || ingredient.unit,
-            quantity: parseFloat(ingredient.pack_size) || 1,
-            cost_per_unit: parseFloat(ingredient.cost_per_unit) || 0,
+            ingredient_id: ingredient.ingredient_id,
+            name:          ingredient.name,
+            unit:          ingredient.unit,
+            pack_size:     parseFloat(ingredient.pack_size)    || 1,
+            pack_label:    ingredient.pack_label || ingredient.unit,
+            quantity:      parseFloat(ingredient.pack_size)    || 1,
+            cost_per_unit: parseFloat(ingredient.cost_per_unit)|| 0,
+            scanCount:     1,
         };
+        renderBatch();
     }
-    renderBatch();
+}
+
+function _updateTotals() {
+    const keys = Object.keys(batch);
+    const totalQty = keys.reduce((s,k) => s + batch[k].quantity, 0);
+    document.getElementById('batchTally').textContent    = keys.length + ' item' + (keys.length !== 1 ? 's' : '');
+    document.getElementById('submitCount').textContent   = keys.length + ' line' + (keys.length !== 1 ? 's' : '') + ' · ' + totalQty.toFixed(2) + ' units total';
+    document.getElementById('submitBtn').disabled        = keys.length === 0;
+    document.getElementById('emptyState').style.display = keys.length ? 'none' : 'block';
 }
 
 function renderBatch() {
     const list = document.getElementById('batchList');
-    const keys = Object.keys(batch);
-    document.getElementById('emptyState').style.display = keys.length ? 'none' : 'block';
-    document.getElementById('submitBtn').disabled = keys.length === 0;
-
-    const totalQty = keys.reduce((s, k) => s + batch[k].quantity, 0);
-    document.getElementById('batchTally').textContent = keys.length + ' item' + (keys.length !== 1 ? 's' : '');
-    document.getElementById('submitCount').textContent = keys.length + ' line' + (keys.length !== 1 ? 's' : '') + ' · ' + totalQty.toFixed(2) + ' units total';
-
-    // Remove existing cards (not the empty state)
     list.querySelectorAll('.batch-item').forEach(el => el.remove());
-
+    const keys = Object.keys(batch);
+    _updateTotals();
     keys.forEach(id => {
-        const b = batch[id];
+        const b   = batch[id];
+        const qty = b.quantity % 1 === 0 ? b.quantity : b.quantity.toFixed(3);
         const div = document.createElement('div');
         div.className = 'batch-item';
         div.id = 'batch-item-' + id;
@@ -863,17 +974,17 @@ function renderBatch() {
             <div class="batch-item-head">
                 <div class="batch-item-icon"><i class="fas fa-box"></i></div>
                 <div style="flex:1">
-                    <div class="batch-item-name">${esc(b.name)}</div>
+                    <div class="batch-item-name">${esc(b.name)}<span class="scan-badge" id="sbadge-${id}">${b.scanCount}×</span></div>
                     <div class="batch-item-sub">${esc(b.unit)} · pack: ${b.pack_size} ${esc(b.pack_label)}</div>
                 </div>
                 <button class="batch-item-remove" onclick="removeFromBatch(${id})" title="Remove"><i class="fas fa-times"></i></button>
             </div>
             <div class="batch-item-body">
                 <div class="batch-field" style="flex:0 0 auto">
-                    <label>Quantity (${esc(b.unit)})</label>
+                    <label>Qty (${esc(b.unit)})</label>
                     <div class="batch-scan-count">
                         <button onclick="adjustQty(${id}, -${b.pack_size})">−</button>
-                        <span class="qty-val" id="qty-${id}">${b.quantity % 1 === 0 ? b.quantity : b.quantity.toFixed(3)}</span>
+                        <span class="qty-val" id="qty-${id}">${qty}</span>
                         <button onclick="adjustQty(${id}, ${b.pack_size})">+</button>
                     </div>
                 </div>
@@ -888,14 +999,14 @@ function renderBatch() {
 }
 
 function removeFromBatch(id) { delete batch[id]; renderBatch(); }
+
 function adjustQty(id, delta) {
     batch[id].quantity = Math.max(0.001, Math.round((batch[id].quantity + delta) * 10000) / 10000);
     const el = document.getElementById('qty-' + id);
-    if (el) el.textContent = batch[id].quantity % 1 === 0 ? batch[id].quantity : batch[id].quantity.toFixed(3);
-    const keys = Object.keys(batch);
-    const totalQty = keys.reduce((s, k) => s + batch[k].quantity, 0);
-    document.getElementById('submitCount').textContent = keys.length + ' line' + (keys.length !== 1 ? 's' : '') + ' · ' + totalQty.toFixed(2) + ' units total';
+    if (el) { const q = batch[id].quantity; el.textContent = q % 1 === 0 ? q : q.toFixed(3); }
+    _updateTotals();
 }
+
 function updateCost(id, val) { batch[id].cost_per_unit = parseFloat(val) || 0; }
 
 // ── Submit batch ──────────────────────────────────────────────────────────

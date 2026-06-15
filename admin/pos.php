@@ -1594,12 +1594,83 @@ if (in_array($user['role'] ?? '', ['admin', 'manager'], true)) {
                 transform: rotate(360deg);
             }
         }
+
+        /* ── POS Camera Barcode Scanner ─────────────────────────────────── */
+        #posCamScanOverlay {
+            position: fixed; inset: 0; z-index: 99500;
+            background: #000; flex-direction: column;
+        }
+        .pos-cam-header {
+            display: flex; align-items: center; justify-content: space-between;
+            padding: 14px 16px; background: rgba(0,0,0,0.85); color: #fff;
+            flex-shrink: 0;
+        }
+        .pos-cam-title { font-size: 16px; font-weight: 600; display: flex; align-items: center; gap: 8px; }
+        .pos-cam-close {
+            background: rgba(255,255,255,0.12); border: none; color: #fff;
+            width: 38px; height: 38px; border-radius: 50%; font-size: 16px; cursor: pointer;
+            display: flex; align-items: center; justify-content: center; transition: background .15s;
+        }
+        .pos-cam-close:active { background: rgba(255,255,255,0.25); }
+        .pos-cam-view {
+            flex: 1; position: relative; overflow: hidden;
+            display: flex; align-items: center; justify-content: center; background: #000;
+        }
+        #posCamVideo { width: 100%; height: 100%; object-fit: cover; display: block; }
+        .pos-cam-guide {
+            position: absolute; width: min(72vw, 280px); height: min(72vw, 280px);
+            pointer-events: none;
+        }
+        .pos-cam-corner {
+            position: absolute; width: 30px; height: 30px;
+            border-color: #4ade80; border-style: solid;
+        }
+        .pos-cam-corner.tl { top: 0; left: 0; border-width: 3px 0 0 3px; border-radius: 4px 0 0 0; }
+        .pos-cam-corner.tr { top: 0; right: 0; border-width: 3px 3px 0 0; border-radius: 0 4px 0 0; }
+        .pos-cam-corner.bl { bottom: 0; left: 0; border-width: 0 0 3px 3px; border-radius: 0 0 0 4px; }
+        .pos-cam-corner.br { bottom: 0; right: 0; border-width: 0 3px 3px 0; border-radius: 0 0 4px 0; }
+        .pos-cam-scan-line {
+            position: absolute; left: 10px; right: 10px; height: 2px;
+            background: rgba(74,222,128,0.75);
+            box-shadow: 0 0 8px rgba(74,222,128,0.5);
+            animation: pos-cam-line 2s ease-in-out infinite;
+        }
+        @keyframes pos-cam-line { 0%,100% { top: 12px; } 50% { top: calc(100% - 12px); } }
+        .pos-cam-footer {
+            display: flex; align-items: center; justify-content: space-between;
+            padding: 14px 16px; background: rgba(0,0,0,0.88); color: #fff;
+            font-size: 13px; gap: 12px; flex-shrink: 0;
+        }
+        #posCamStatus { opacity: 0.8; flex: 1; font-size: 13px; }
+        .pos-cam-keep-lbl {
+            display: flex; align-items: center; gap: 6px;
+            font-size: 12px; color: rgba(255,255,255,0.65); cursor: pointer; white-space: nowrap;
+        }
+        .pos-cam-keep-lbl input { cursor: pointer; accent-color: #4ade80; width: 15px; height: 15px; }
+        .pos-cam-torch {
+            background: rgba(255,255,255,0.1); border: 1px solid rgba(255,255,255,0.2);
+            color: #fff; width: 38px; height: 38px; border-radius: 50%; font-size: 16px;
+            cursor: pointer; display: none; align-items: center; justify-content: center; flex-shrink: 0;
+        }
+        .pos-cam-torch.visible { display: flex; }
+        .pos-cam-torch.active { background: #f59e0b; border-color: #f59e0b; color: #000; }
+        /* Success flash on camera view */
+        .pos-cam-view.found-flash { animation: pos-cam-flash .35s ease; }
+        @keyframes pos-cam-flash { 0%,100% { filter: none; } 50% { filter: brightness(1.8); } }
+        /* Scan button in mobile bar */
+        .pos-mobile-action.is-scan { color: #4ade80; }
+        .pos-mobile-action.is-scan.is-active { background: rgba(74,222,128,0.15); }
     </style>
     <link rel="manifest" href="manifest.php">
     <link href="https://fonts.googleapis.com/css2?family=Jost:wght@400;500;600;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.7.2/css/all.min.css">
     <link rel="stylesheet" href="css/pos-overrides.css">
     <script src="js/station-sounds.js"></script>
+    <script type="module">
+        import { BarcodeDetectorPolyfill } from 'https://cdn.jsdelivr.net/npm/@undecaf/barcode-detector-polyfill@0.9.21/dist/es2017/index.js';
+        if (!('BarcodeDetector' in window)) { window.BarcodeDetector = BarcodeDetectorPolyfill; }
+        window._posBarcodeDetectorReady = true;
+    </script>
 </head>
 
 <body class="pos-screen<?php echo in_array($user['role'] ?? '', ['admin', 'manager'], true) ? ' pos-admin' : ''; ?>">
@@ -1766,6 +1837,9 @@ if (in_array($user['role'] ?? '', ['admin', 'manager'], true)) {
                         <i class="fas fa-barcode"></i>
                     </button>
                     <?php endif; ?>
+                    <button onclick="posCamScanOpen()" title="Camera barcode scanner" class="barcode-toggle-btn" style="color:#22c55e;" aria-label="Open camera scanner">
+                        <i class="fas fa-camera"></i>
+                    </button>
                 </div>
                 <div class="grid" id="grid"></div>
             </div>
@@ -8710,6 +8784,7 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
             <section>
                 <h3 class="pm-group-title">Till Actions</h3>
                 <div class="pos-mobile-actions" aria-label="POS mobile actions">
+                    <button type="button" class="pos-mobile-action is-scan" id="posCamScanBtn" onclick="runPosMobileMenuAction('posCamScanOpen')" title="Camera barcode scanner"><i class="fas fa-camera"></i><span>Scan</span></button>
                     <button type="button" class="pos-mobile-action" onclick="runPosMobileMenuAction('openPosMobileRecentView')"><i class="fas fa-receipt"></i><span>Recent</span></button>
                     <button type="button" class="pos-mobile-action" onclick="runPosMobileMenuAction('openTabsTray')"><i class="fas fa-utensils"></i><span>Tabs</span><span class="mobile-action-badge" id="mobileTabBadge" <?php echo empty($openTabs) ? ' style="display:none;"' : ''; ?>><?php echo count($openTabs); ?></span></button>
                     <button type="button" class="pos-mobile-action" onclick="runPosMobileMenuAction('openStationNoteModal')"><i class="fas fa-paper-plane"></i><span>Note</span></button>
@@ -8750,6 +8825,173 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
         </div>
     </div>
     <script src="js/pwa-install.js" defer></script>
+
+    <!-- POS Camera Barcode Scanner Overlay -->
+    <div id="posCamScanOverlay" role="dialog" aria-modal="true" aria-label="Camera barcode scanner" style="display:none;">
+        <div class="pos-cam-header">
+            <span class="pos-cam-title"><i class="fas fa-barcode" style="color:#4ade80;"></i> Scan Item</span>
+            <div style="display:flex;align-items:center;gap:8px;">
+                <button class="pos-cam-torch" id="posCamTorch" onclick="posCamToggleTorch()" aria-label="Toggle torch" title="Flashlight">
+                    <i class="fas fa-bolt"></i>
+                </button>
+                <button class="pos-cam-close" onclick="posCamScanClose()" aria-label="Close scanner">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+        </div>
+        <div class="pos-cam-view" id="posCamView">
+            <video id="posCamVideo" autoplay playsinline muted></video>
+            <div class="pos-cam-guide">
+                <div class="pos-cam-corner tl"></div>
+                <div class="pos-cam-corner tr"></div>
+                <div class="pos-cam-corner bl"></div>
+                <div class="pos-cam-corner br"></div>
+                <div class="pos-cam-scan-line"></div>
+            </div>
+        </div>
+        <div class="pos-cam-footer">
+            <span id="posCamStatus">Point camera at a barcode</span>
+            <label class="pos-cam-keep-lbl" title="Keep scanner open after each scan to add multiple items">
+                <input type="checkbox" id="posCamKeepOpen"> Keep open
+            </label>
+        </div>
+    </div>
+
+    <script>
+    /* ── POS Camera Barcode Scanner ─────────────────────────────────────────── */
+    (function () {
+        'use strict';
+        var _stream = null, _detector = null, _loopId = null, _canvas = null, _ctx = null;
+        var _cooldown = false, _torchOn = false;
+        var COOLDOWN_MS = 2200;
+
+        async function _waitDetector(tries) {
+            for (var i = 0; i < (tries || 12); i++) {
+                if (typeof BarcodeDetector !== 'undefined') return true;
+                await new Promise(function (r) { setTimeout(r, 300); });
+            }
+            return false;
+        }
+
+        window.posCamScanOpen = async function () {
+            var overlay = document.getElementById('posCamScanOverlay');
+            if (!overlay) return;
+            overlay.style.display = 'flex';
+            _setStatus('Starting camera…');
+
+            var ok = await _waitDetector();
+            if (!ok) {
+                _setStatus('Camera scanning not supported on this browser. Use a Bluetooth scanner instead.');
+                return;
+            }
+
+            try {
+                _detector = new BarcodeDetector({
+                    formats: ['ean_13','ean_8','code_128','code_39','upc_a','upc_e','qr_code','data_matrix','itf']
+                });
+            } catch (e) { _setStatus('Scanner init failed: ' + e.message); return; }
+
+            try {
+                _stream = await navigator.mediaDevices.getUserMedia({
+                    video: { facingMode: { ideal: 'environment' }, width: { ideal: 640 }, height: { ideal: 480 } }
+                });
+            } catch (e) {
+                _setStatus('Camera denied. Please allow camera access and try again.');
+                return;
+            }
+
+            var video = document.getElementById('posCamVideo');
+            video.srcObject = _stream;
+            await video.play().catch(function () {});
+
+            // Torch capability
+            var track = _stream.getVideoTracks()[0];
+            if (track && track.getCapabilities && track.getCapabilities().torch) {
+                var torchBtn = document.getElementById('posCamTorch');
+                if (torchBtn) torchBtn.classList.add('visible');
+            }
+
+            _canvas = document.createElement('canvas');
+            _ctx = _canvas.getContext('2d', { willReadFrequently: true });
+            _cooldown = false; _torchOn = false;
+            _loopId = setInterval(_scanFrame, 200);
+            _setStatus('Point camera at a barcode');
+            document.getElementById('posCamScanBtn') && document.getElementById('posCamScanBtn').classList.add('is-active');
+        };
+
+        window.posCamScanClose = function () {
+            clearInterval(_loopId); _loopId = null;
+            _cooldown = false; _torchOn = false;
+            if (_stream) { _stream.getTracks().forEach(function (t) { t.stop(); }); _stream = null; }
+            var video = document.getElementById('posCamVideo');
+            if (video) video.srcObject = null;
+            var torch = document.getElementById('posCamTorch');
+            if (torch) { torch.classList.remove('active', 'visible'); }
+            var overlay = document.getElementById('posCamScanOverlay');
+            if (overlay) overlay.style.display = 'none';
+            document.getElementById('posCamScanBtn') && document.getElementById('posCamScanBtn').classList.remove('is-active');
+        };
+
+        window.posCamToggleTorch = async function () {
+            if (!_stream) return;
+            var track = _stream.getVideoTracks()[0];
+            if (!track) return;
+            _torchOn = !_torchOn;
+            try {
+                await track.applyConstraints({ advanced: [{ torch: _torchOn }] });
+                var btn = document.getElementById('posCamTorch');
+                if (btn) btn.classList.toggle('active', _torchOn);
+            } catch (e) { _torchOn = !_torchOn; }
+        };
+
+        async function _scanFrame() {
+            if (_cooldown || !_stream) return;
+            var video = document.getElementById('posCamVideo');
+            if (!video || video.readyState < 2 || video.paused) return;
+            try {
+                var barcodes = await _detector.detect(video);
+                if (barcodes.length > 0) _onCode(barcodes[0].rawValue);
+            } catch (e) { /* ignore decode errors */ }
+        }
+
+        function _onCode(code) {
+            _cooldown = true;
+            setTimeout(function () { _cooldown = false; }, COOLDOWN_MS);
+
+            // Haptic
+            navigator.vibrate && navigator.vibrate(50);
+            // Beep
+            try {
+                var ac = new (window.AudioContext || window.webkitAudioContext)();
+                var osc = ac.createOscillator(), g = ac.createGain();
+                osc.connect(g); g.connect(ac.destination);
+                osc.type = 'square'; osc.frequency.value = 1400;
+                g.gain.setValueAtTime(0.12, ac.currentTime);
+                g.gain.exponentialRampToValueAtTime(0.001, ac.currentTime + 0.07);
+                osc.start(ac.currentTime); osc.stop(ac.currentTime + 0.08);
+            } catch (e) {}
+
+            // Flash viewfinder
+            var view = document.getElementById('posCamView');
+            if (view) { view.classList.add('found-flash'); setTimeout(function () { view.classList.remove('found-flash'); }, 360); }
+
+            _setStatus('Found: ' + code);
+            if (typeof posHandleBarcodeInput === 'function') posHandleBarcodeInput(code);
+
+            var keepOpen = document.getElementById('posCamKeepOpen');
+            if (!keepOpen || !keepOpen.checked) {
+                setTimeout(posCamScanClose, 700);
+            } else {
+                setTimeout(function () { _setStatus('Ready — scan next item'); }, 1000);
+            }
+        }
+
+        function _setStatus(msg) {
+            var el = document.getElementById('posCamStatus');
+            if (el) el.textContent = msg;
+        }
+    })();
+    </script>
 </body>
 
 </html>
