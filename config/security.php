@@ -47,7 +47,8 @@ function sendSecurityHeaders() {
     header('Referrer-Policy: strict-origin-when-cross-origin');
     
     // Permissions Policy (formerly Feature-Policy)
-    header('Permissions-Policy: geolocation=(), microphone=(), camera=()');
+    // camera=(self) allows camera use on same-origin pages (required for barcode scanner)
+    header('Permissions-Policy: geolocation=(), microphone=(), camera=(self)');
     
     // HSTS (only on HTTPS)
     if (isset($_SERVER['HTTPS']) && $_SERVER['HTTPS'] === 'on') {
