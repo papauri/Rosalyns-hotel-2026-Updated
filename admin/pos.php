@@ -971,7 +971,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     logActivity($user['id'], 'pos_discount', 'Discount ' . $currency_symbol . ' ' . number_format($discountAmount, 2) . ' on order ' . $reference . ($discountReason ? ' — ' . $discountReason : ''));
                 }
                 $extras = pos_applyPaymentToOrder($pdo, $user, $orderId, $reference, $totalAmount, $paymentMethod, $_POST);
-                // Fire to kitchen for any sit-down/takeaway/room_service flow with food items.
+                // Bar/coffee-bar drinks are handed to the customer at payment — auto-serve
+                // them now so stock is deducted immediately (mirrors the pay_existing tab flow).
+                pos_autoServeBarItems($pdo, $orderId, $user);
+                // Fire remaining (food) items to the kitchen. pos_autoServeBarItems already
+                // marked bar items served, so fireKitchen only picks up kitchen-station items.
                 if (in_array($orderType, ['dine_in', 'takeaway', 'room_service', 'walk_in'], true)) {
                     pos_fireKitchen($pdo, $orderId, $user['id'], $user['full_name']);
                 }
@@ -9271,7 +9275,19 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
             if (cartEl) cartEl.classList.toggle('open');
         };
 
-        window.posCamBump = function (idx, d) { bump(idx, d); _refreshCart(); };
+        window.posCamBump = function (idx, d) {
+            if (d > 0 && typeof cart !== 'undefined' && cart[idx]) {
+                var item = cart[idx];
+                var stockKey = item.type + ':' + item.id;
+                var inStock = Object.prototype.hasOwnProperty.call(stockSnapshot, stockKey) ? stockSnapshot[stockKey] : null;
+                if (inStock !== null && item.qty >= inStock) {
+                    posToast('Out of stock: ' + item.name, 'err', 2000);
+                    return;
+                }
+            }
+            bump(idx, d);
+            _refreshCart();
+        };
         window.posCamRm   = function (idx)    { rm(idx);       _refreshCart(); };
 
         window.posCamPayAction = function () {
