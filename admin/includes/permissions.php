@@ -1221,6 +1221,7 @@ function getPermissionForPage(string $page)
         'order-lifecycle.php' => 'stock_orders',
         'station-settings.php' => 'stock_management',
         'restaurant-tables.php' => 'stock_management',
+        'deals.php' => 'stock_management',
         'pos.php' => 'pos_till',
         'kds.php' => 'kds_view',
         'bds.php' => 'bds_view',

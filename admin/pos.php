@@ -662,17 +662,38 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     throw new RuntimeException('This tab still has ' . $pendingItems . ' food item' . ($pendingItems === 1 ? '' : 's') . ' not yet served — complete kitchen service before settling food tabs.');
                 }
 
-                // Apply discount on first leg only (before any split payments)
-                $discountAmount = max(0.0, round((float)($_POST['discount_amount'] ?? 0), 2));
-                $discountReason = mb_substr(trim($_POST['discount_reason'] ?? ''), 0, 255);
-                if ($discountAmount > 0 && $splitNumber === 1 && (int)$row['split_paid_count'] === 0 && (float)($row['discount_amount'] ?? 0) == 0) {
-                    if (!hasPermission($user['id'], 'pos_discount')) throw new RuntimeException('You do not have permission to apply discounts.');
-                    $discountedTotal = max(0.01, round((float)$row['total_amount'] - $discountAmount, 2));
-                    $pdo->prepare("UPDATE stock_orders SET total_amount=?, discount_amount=?, discount_reason=? WHERE id=?")
-                        ->execute([$discountedTotal, $discountAmount, $discountReason ?: null, $orderId]);
-                    $row['total_amount'] = $discountedTotal;
-                    pos_logAudit($pdo, $orderId, $user['id'], $user['full_name'], 'discount_applied', json_encode(['amount' => $discountAmount, 'reason' => $discountReason]));
-                    logActivity($user['id'], 'pos_discount', 'Discount ' . $currency_symbol . ' ' . number_format($discountAmount, 2) . ' on tab ' . $row['reference'] . ($discountReason ? ' — ' . $discountReason : ''));
+                // Apply discounts on first payment leg only (before any split payments)
+                $firstLeg = ($splitNumber === 1 && (int)$row['split_paid_count'] === 0 && (float)($row['discount_amount'] ?? 0) == 0);
+
+                if ($firstLeg) {
+                    // Deal discounts — auto-applied, no pos_discount permission required
+                    $dealDiscountRaw = max(0.0, round((float)($_POST['deal_discount_amount'] ?? 0), 2));
+                    $dealIdsStr      = trim($_POST['deal_ids'] ?? '');
+                    $dealValidation  = ($dealDiscountRaw > 0) ? pos_validate_deal_discount($pdo, $dealIdsStr, (float)$row['total_amount']) : ['amount' => 0.0, 'reason' => ''];
+                    $dealDiscount    = min($dealDiscountRaw, round((float)$row['total_amount'] * 0.90, 2));
+                    if ($dealDiscount > 0 && !empty($dealValidation['reason'])) {
+                        $row['total_amount'] = max(0.01, round((float)$row['total_amount'] - $dealDiscount, 2));
+                        $pdo->prepare("UPDATE stock_orders SET total_amount=?, discount_amount=?, discount_reason=? WHERE id=?")
+                            ->execute([$row['total_amount'], $dealDiscount, $dealValidation['reason'], $orderId]);
+                        pos_logAudit($pdo, $orderId, $user['id'], $user['full_name'], 'deal_discount_applied', json_encode(['amount' => $dealDiscount, 'deals' => $dealValidation['reason']]));
+                    } else {
+                        $dealDiscount = 0.0;
+                    }
+
+                    // Manual staff discount — requires pos_discount permission
+                    $discountAmount = max(0.0, round((float)($_POST['discount_amount'] ?? 0), 2));
+                    $discountReason = mb_substr(trim($_POST['discount_reason'] ?? ''), 0, 255);
+                    if ($discountAmount > 0) {
+                        if (!hasPermission($user['id'], 'pos_discount')) throw new RuntimeException('You do not have permission to apply discounts.');
+                        $discountedTotal = max(0.01, round((float)$row['total_amount'] - $discountAmount, 2));
+                        $combinedDiscount = round($dealDiscount + $discountAmount, 2);
+                        $combinedReason   = trim(($dealValidation['reason'] ? $dealValidation['reason'] . ' + ' : '') . $discountReason);
+                        $pdo->prepare("UPDATE stock_orders SET total_amount=?, discount_amount=?, discount_reason=? WHERE id=?")
+                            ->execute([$discountedTotal, $combinedDiscount, $combinedReason ?: null, $orderId]);
+                        $row['total_amount'] = $discountedTotal;
+                        pos_logAudit($pdo, $orderId, $user['id'], $user['full_name'], 'discount_applied', json_encode(['amount' => $discountAmount, 'reason' => $discountReason]));
+                        logActivity($user['id'], 'pos_discount', 'Discount ' . $currency_symbol . ' ' . number_format($discountAmount, 2) . ' on tab ' . $row['reference'] . ($discountReason ? ' — ' . $discountReason : ''));
+                    }
                 }
 
                 // Validate split sequence
@@ -959,14 +980,34 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 if ($posHasCoversCol && $coversPay > 0) {
                     $pdo->prepare("UPDATE stock_orders SET covers=? WHERE id=?")->execute([$coversPay, $orderId]);
                 }
-                // Apply discount if provided
+                // Deal discounts — auto-applied, no pos_discount permission required
+                $dealDiscountRaw  = max(0.0, round((float)($_POST['deal_discount_amount'] ?? 0), 2));
+                $dealIdsStr       = trim($_POST['deal_ids'] ?? '');
+                $dealValidation   = ($dealDiscountRaw > 0) ? pos_validate_deal_discount($pdo, $dealIdsStr, $totalAmount) : ['amount' => 0.0, 'reason' => ''];
+                // Cap deal discount at 90% of order total — sanity guard
+                $dealDiscount = min($dealDiscountRaw, round($totalAmount * 0.90, 2));
+                if ($dealDiscount > 0 && !empty($dealValidation['reason'])) {
+                    $totalAmount = max(0.01, round($totalAmount - $dealDiscount, 2));
+                    $pdo->prepare("UPDATE stock_orders SET total_amount=?, subtotal=?, discount_amount=?, discount_reason=? WHERE id=?")
+                        ->execute([$totalAmount, $totalAmount, $dealDiscount, $dealValidation['reason'], $orderId]);
+                    pos_logAudit($pdo, $orderId, $user['id'], $user['full_name'], 'deal_discount_applied', json_encode(['amount' => $dealDiscount, 'deals' => $dealValidation['reason']]));
+                } elseif ($dealDiscountRaw > 0) {
+                    // Deal IDs were invalid / expired — ignore silently (don't crash the sale)
+                    $dealDiscount = 0.0;
+                }
+
+                // Manual staff discount — requires pos_discount permission
                 $discountAmount = max(0.0, round((float)($_POST['discount_amount'] ?? 0), 2));
                 $discountReason = mb_substr(trim($_POST['discount_reason'] ?? ''), 0, 255);
                 if ($discountAmount > 0 && $discountAmount < $totalAmount) {
                     if (!hasPermission($user['id'], 'pos_discount')) throw new RuntimeException('You do not have permission to apply discounts.');
-                    $totalAmount = round($totalAmount - $discountAmount, 2);
+                    $totalAmount = max(0.01, round($totalAmount - $discountAmount, 2));
+                    // If a deal already set discount_amount, add to it
+                    $existingDiscount = (float)($dealDiscount);
+                    $combinedDiscount = round($existingDiscount + $discountAmount, 2);
+                    $combinedReason   = trim(($dealValidation['reason'] ? $dealValidation['reason'] . ' + ' : '') . $discountReason);
                     $pdo->prepare("UPDATE stock_orders SET total_amount=?, subtotal=?, discount_amount=?, discount_reason=? WHERE id=?")
-                        ->execute([$totalAmount, $totalAmount, $discountAmount, $discountReason ?: null, $orderId]);
+                        ->execute([$totalAmount, $totalAmount, $combinedDiscount, $combinedReason ?: null, $orderId]);
                     pos_logAudit($pdo, $orderId, $user['id'], $user['full_name'], 'discount_applied', json_encode(['amount' => $discountAmount, 'reason' => $discountReason]));
                     logActivity($user['id'], 'pos_discount', 'Discount ' . $currency_symbol . ' ' . number_format($discountAmount, 2) . ' on order ' . $reference . ($discountReason ? ' — ' . $discountReason : ''));
                 }
@@ -1080,6 +1121,87 @@ $snap = $pdo->query("
     GROUP BY sr.menu_item_id, sr.menu_type
 ")->fetchAll(PDO::FETCH_ASSOC);
 foreach ($snap as $s) $stockSnapshot[$s['menu_type'] . ':' . $s['menu_item_id']] = (int)$s['max_portions'];
+
+/* Active POS deals — loaded once at page time, evaluated in JS per-cart-change. */
+$posDealsRaw = [];
+try {
+    $posDealsRaw = $pdo->query("
+        SELECT id, name, description, deal_type, days_of_week,
+               start_time, end_time, valid_from, valid_to,
+               applies_to, item_types, item_ids,
+               discount_percent, discount_fixed,
+               multi_buy_qty, multi_buy_pay,
+               spend_threshold, combo_requires,
+               max_uses_per_order, exclusive
+        FROM pos_deals
+        WHERE is_active = 1
+        ORDER BY sort_order ASC, id ASC
+    ")->fetchAll(PDO::FETCH_ASSOC);
+    foreach ($posDealsRaw as &$d) {
+        $d['days_of_week']    = $d['days_of_week']    ? json_decode($d['days_of_week'],    true) : null;
+        $d['item_types']      = $d['item_types']      ? json_decode($d['item_types'],      true) : null;
+        $d['item_ids']        = $d['item_ids']        ? json_decode($d['item_ids'],        true) : null;
+        $d['combo_requires']  = $d['combo_requires']  ? json_decode($d['combo_requires'],  true) : null;
+        $d['discount_percent']    = (float)$d['discount_percent'];
+        $d['discount_fixed']      = (float)$d['discount_fixed'];
+        $d['spend_threshold']     = $d['spend_threshold'] !== null ? (float)$d['spend_threshold'] : null;
+        $d['multi_buy_qty']       = $d['multi_buy_qty'] !== null ? (int)$d['multi_buy_qty'] : null;
+        $d['multi_buy_pay']       = $d['multi_buy_pay'] !== null ? (int)$d['multi_buy_pay'] : null;
+        $d['max_uses_per_order']  = $d['max_uses_per_order'] !== null ? (int)$d['max_uses_per_order'] : null;
+        $d['exclusive']           = (bool)$d['exclusive'];
+    }
+    unset($d);
+} catch (Exception $e) {
+    $posDealsRaw = [];
+}
+
+/**
+ * Server-side deal validation: verify submitted deal IDs are genuinely active
+ * right now and return the total capped deal discount to apply.
+ * Deal discounts do NOT require pos_discount permission — they are automatic.
+ */
+function pos_validate_deal_discount(PDO $pdo, string $dealIdsStr, float $totalAmount): array
+{
+    $result = ['amount' => 0.0, 'reason' => ''];
+    if (empty(trim($dealIdsStr))) return $result;
+
+    $ids = array_values(array_filter(array_map('intval', explode(',', $dealIdsStr))));
+    if (empty($ids)) return $result;
+
+    $placeholders = implode(',', array_fill(0, count($ids), '?'));
+    $nowDate = date('Y-m-d');
+    $nowTime = date('H:i:s');
+    $nowDow  = (int)date('N'); // 1=Mon … 7=Sun
+
+    $stmt = $pdo->prepare("
+        SELECT id, name, days_of_week, start_time, end_time, valid_from, valid_to
+        FROM pos_deals
+        WHERE id IN ($placeholders) AND is_active = 1
+          AND (valid_from IS NULL OR valid_from <= ?)
+          AND (valid_to   IS NULL OR valid_to   >= ?)
+    ");
+    $stmt->execute([...$ids, $nowDate, $nowDate]);
+    $deals = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+    $validNames = [];
+    foreach ($deals as $d) {
+        // Check day-of-week window
+        if ($d['days_of_week']) {
+            $days = json_decode($d['days_of_week'], true) ?: [];
+            if (!in_array($nowDow, $days, true)) continue;
+        }
+        // Check time window
+        if ($d['start_time'] && $d['end_time']) {
+            if ($nowTime < $d['start_time'] || $nowTime > $d['end_time']) continue;
+        }
+        $validNames[] = $d['name'];
+    }
+
+    if (empty($validNames)) return $result;
+
+    $result['reason'] = implode(', ', $validNames);
+    return $result;
+}
 
 /* My-shift summary (per-cashier, based on payment time in this restaurant window). */
 function pos_fetch_shift_summary(PDO $pdo, array $restaurantWindow, int $userId): array
@@ -1656,6 +1778,16 @@ if (in_array($user['role'] ?? '', ['admin', 'manager'], true)) {
             animation: pos-cam-line 2s ease-in-out infinite;
         }
         @keyframes pos-cam-line { 0%,100% { top: 12px; } 50% { top: calc(100% - 12px); } }
+        /* ── Deal savings lines (cart + pay modal) ── */
+        .cart-deals-block { padding: 6px 10px 2px; }
+        .cart-deal-line { display: flex; align-items: center; gap: 7px; font-size: 12px; color: #065f46; background: #ecfdf5; border-radius: 7px; padding: 5px 10px; margin-bottom: 4px; }
+        .cart-deal-line i { color: #10b981; flex-shrink: 0; }
+        .cart-deal-line span:nth-child(3) { color: #6b7280; font-size: 11px; flex: 1; }
+        .cdl-saving { margin-left: auto; font-weight: 700; color: #059669; white-space: nowrap; }
+        .pay-deal-line { display: flex; align-items: center; gap: 8px; padding: 3px 0; }
+        .pay-deal-line span:first-child { flex: 1; }
+        .pdl-saving { margin-left: auto; white-space: nowrap; }
+
         .pos-cam-footer {
             display: flex; align-items: center; justify-content: space-between;
             padding: 8px 16px; background: rgba(0,0,0,0.88); color: #fff;
@@ -1713,6 +1845,9 @@ if (in_array($user['role'] ?? '', ['admin', 'manager'], true)) {
         .cc-rm { background: none; border: none; color: rgba(255,255,255,0.25); font-size: 12px; cursor: pointer; padding: 2px 4px; line-height: 1; flex-shrink: 0; }
         .cc-rm:active { color: #f87171; }
         .pos-cam-cart-empty { padding: 10px 14px; font-size: 12px; color: rgba(255,255,255,0.35); text-align:center; }
+        .cc-deal-line { display: flex; align-items: center; gap: 7px; font-size: 11px; color: #4ade80; padding: 5px 14px; background: rgba(74,222,128,0.07); border-top: 1px solid rgba(74,222,128,0.12); }
+        .cc-deal-line i { flex-shrink: 0; }
+        .cc-deal-saving { margin-left: auto; font-weight: 700; }
         /* Action bar */
         .pos-cam-cart-actions {
             display: flex; gap: 7px; padding: 8px 12px 10px;
@@ -2041,6 +2176,7 @@ if (in_array($user['role'] ?? '', ['admin', 'manager'], true)) {
                         </div>
                         <button type="button" onclick="clearActiveTab(true)" title="Stop adding to this tab" style="flex-shrink:0; background:transparent; border:none; color:#c2410c; font-size:16px; cursor:pointer; padding:4px;"><i class="fas fa-times-circle"></i></button>
                     </div>
+                    <div id="cart-deal-lines"></div>
                     <div class="total-row"><span>Total</span><span id="total"><?php echo $currency_symbol; ?> 0.00</span></div>
                     <div style="display:grid; grid-template-columns: 1fr 1fr; gap:8px;">
                         <button class="park-btn" id="parkBtn" onclick="parkOrder()" disabled data-help="Fire order|Sends the order to the relevant station (Kitchen, Bar, or both) and opens it as a TAB (no payment yet). Stock is deducted immediately. Pay later from the Tabs button.
@@ -2113,6 +2249,7 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
                         <span id="payTotal"><?php echo $currency_symbol; ?> 0.00</span>
                     </div>
 
+                    <div id="payDealLines" style="display:none; background:#ecfdf5; border:1px solid #a7f3d0; border-radius:8px; padding:9px 14px; margin-bottom:12px; font-size:13px; color:#065f46;"></div>
                     <div id="payKitchenWarning" style="display:none; align-items:flex-start; gap:10px; background:#fff3cd; border:1px solid #ffc107; border-radius:8px; padding:10px 14px; margin-bottom:14px; font-size:13px; color:#856404; line-height:1.4;">
                         <i class="fas fa-exclamation-triangle" style="flex-shrink:0; margin-top:1px;"></i>
                         <span id="payKitchenWarningText"></span>
@@ -2162,6 +2299,8 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
                         </div>
                         <input type="hidden" name="discount_amount" id="payDiscountAmtHidden" value="0">
                         <input type="hidden" name="discount_reason" id="payDiscountReasonHidden" value="">
+                        <input type="hidden" name="deal_discount_amount" id="payDealDiscountAmtHidden" value="0">
+                        <input type="hidden" name="deal_ids" id="payDealIdsHidden" value="">
                     </div>
 
                     <label>Payment method</label>
@@ -2794,6 +2933,8 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
                         </div>
                         <input type="hidden" name="discount_amount" id="payTabDiscountAmtHidden" value="0">
                         <input type="hidden" name="discount_reason" id="payTabDiscountReasonHidden" value="">
+                        <input type="hidden" name="deal_discount_amount" id="payTabDealDiscountAmtHidden" value="0">
+                        <input type="hidden" name="deal_ids" id="payTabDealIdsHidden" value="">
                     </div>
 
                     <label>Payment method</label>
@@ -3069,6 +3210,7 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
         })();
         const menuList = <?php echo json_encode($menuList); ?>;
         const stockSnapshot = <?php echo json_encode($stockSnapshot); ?>;
+        const posDeals = <?php echo json_encode(array_values($posDealsRaw), JSON_HEX_TAG | JSON_HEX_AMP); ?>;
         const currencySymbol = <?php echo json_encode($currency_symbol); ?>;
         const posKitchenOpen = <?php echo $kitchenWindow['is_open_now'] ? 'true' : 'false'; ?>;
         const posKitchenHours = <?php echo json_encode($kitchenWindow['opens_at'] . ' – ' . $kitchenWindow['closes_at']); ?>;
@@ -5281,6 +5423,170 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
             };
         }
 
+        /* ═══════════════════════════════════════════════════════════════════════
+           DEALS ENGINE  v2
+           Evaluates posDeals against the current cart every time the cart changes.
+           Supports: happy_hour, percent_off, fixed_off, multi_buy, spend_save, combo
+           Handles: exclusive deals, max_uses_per_order, deal stacking cap
+        ═══════════════════════════════════════════════════════════════════════ */
+        let _dealSavings = 0;
+        let _dealLines   = [];  // [{id, name, saving, detail}]
+
+        function _dealNowValid(deal) {
+            const now  = new Date();
+            const dow  = now.getDay() === 0 ? 7 : now.getDay(); // 1=Mon … 7=Sun (ISO)
+            const hhmm = now.getHours().toString().padStart(2,'0') + ':' + now.getMinutes().toString().padStart(2,'0');
+            // YYYY-MM-DD in LOCAL time (not UTC) to avoid midnight boundary bugs
+            const ymd  = now.getFullYear() + '-' +
+                         String(now.getMonth()+1).padStart(2,'0') + '-' +
+                         String(now.getDate()).padStart(2,'0');
+
+            if (deal.valid_from && ymd < deal.valid_from) return false;
+            if (deal.valid_to   && ymd > deal.valid_to)   return false;
+            if (Array.isArray(deal.days_of_week) && deal.days_of_week.length) {
+                if (!deal.days_of_week.some(d => parseInt(d,10) === dow)) return false;
+            }
+            if (deal.start_time && deal.end_time) {
+                const st = deal.start_time.slice(0,5);
+                const et = deal.end_time.slice(0,5);
+                if (hhmm < st || hhmm > et) return false;
+            }
+            return true;
+        }
+
+        function _dealItemQualifies(deal, cartLine) {
+            if (deal.applies_to === 'all') return true;
+            if (deal.applies_to === 'item_types' && Array.isArray(deal.item_types)) {
+                return deal.item_types.includes(String(cartLine.type));
+            }
+            if (deal.applies_to === 'items' && Array.isArray(deal.item_ids)) {
+                return deal.item_ids.map(Number).includes(Number(cartLine.id));
+            }
+            return false;
+        }
+
+        function _expandUnits(lines) {
+            // Expand cart lines into individual units [{price}], integers only for qty
+            const units = [];
+            for (const l of lines) {
+                const intQty = Math.floor(Number(l.qty) || 0);
+                for (let i = 0; i < intQty; i++) units.push(l.price);
+            }
+            return units;
+        }
+
+        function applyDeals() {
+            if (!posDeals || !posDeals.length || !cart.length) {
+                _dealSavings = 0; _dealLines = []; return;
+            }
+            const lines   = [];
+            let totalSave = 0;
+            const gross   = cartTotal();
+            let hasExclusive = false;
+
+            // First pass: find any exclusive deal that fires
+            for (const deal of posDeals) {
+                if (!deal.exclusive) continue;
+                if (!_dealNowValid(deal)) continue;
+                const qualifying = cart.filter(l => _dealItemQualifies(deal, l));
+                if (!qualifying.length && deal.deal_type !== 'spend_save' && deal.deal_type !== 'combo') continue;
+                if (deal.deal_type === 'spend_save' && deal.spend_threshold && gross < deal.spend_threshold) continue;
+                hasExclusive = true;
+                break;
+            }
+
+            for (const deal of posDeals) {
+                if (!_dealNowValid(deal)) continue;
+                // Skip non-exclusive deals if an exclusive deal is active
+                if (hasExclusive && !deal.exclusive) continue;
+                // If there are multiple exclusive deals, only run them (they may stack with each other)
+
+                const qualifying = cart.filter(l => _dealItemQualifies(deal, l));
+                let saving = 0;
+                let detail = '';
+
+                if (deal.deal_type === 'happy_hour' || deal.deal_type === 'percent_off') {
+                    if (!qualifying.length) continue;
+                    const pct  = deal.discount_percent / 100;
+                    const base = qualifying.reduce((s, l) => s + l.price * l.qty, 0);
+                    saving = Math.round(base * pct * 100) / 100;
+                    const scopeLabel = (deal.applies_to === 'all')
+                        ? 'all items'
+                        : qualifying.map(l => l.name).join(', ');
+                    detail = `${deal.discount_percent}% off ${scopeLabel}`;
+                    if (deal.deal_type === 'happy_hour') detail = '⏰ ' + detail;
+
+                } else if (deal.deal_type === 'fixed_off') {
+                    if (!qualifying.length && deal.applies_to !== 'all') continue;
+                    saving = deal.discount_fixed;
+                    detail = `${currencySymbol} ${fmtMoney(saving)} off`;
+                    // Cap: cannot exceed qualifying subtotal
+                    if (qualifying.length) {
+                        const qSub = qualifying.reduce((s, l) => s + l.price * l.qty, 0);
+                        saving = Math.min(saving, qSub);
+                    }
+
+                } else if (deal.deal_type === 'multi_buy') {
+                    if (!qualifying.length) continue;
+                    const units = _expandUnits(qualifying).sort((a, b) => a - b); // cheapest first
+                    const groupSize  = deal.multi_buy_qty || 2;
+                    const payFor     = deal.multi_buy_pay || 1;
+                    const freePerGrp = groupSize - payFor;
+                    const groups     = Math.floor(units.length / groupSize);
+                    if (groups < 1) continue;
+                    // Respect max_uses_per_order cap
+                    const maxFreeGroups = deal.max_uses_per_order ? Math.min(groups, deal.max_uses_per_order) : groups;
+                    const totalFree  = maxFreeGroups * freePerGrp;
+                    saving = Math.round(units.slice(0, totalFree).reduce((s, p) => s + p, 0) * 100) / 100;
+                    detail = `Buy ${groupSize}, pay for ${payFor} — ${totalFree} item${totalFree !== 1 ? 's' : ''} free`;
+
+                } else if (deal.deal_type === 'spend_save') {
+                    const threshold = deal.spend_threshold || 0;
+                    if (gross < threshold) continue;
+                    if (deal.discount_percent > 0) {
+                        const base = qualifying.length
+                            ? qualifying.reduce((s, l) => s + l.price * l.qty, 0)
+                            : gross;
+                        saving = Math.round(base * (deal.discount_percent / 100) * 100) / 100;
+                        detail = `Spend ${currencySymbol} ${fmtMoney(threshold)}+ · ${deal.discount_percent}% off`;
+                    } else if (deal.discount_fixed > 0) {
+                        saving = deal.discount_fixed;
+                        detail = `Spend ${currencySymbol} ${fmtMoney(threshold)}+ · ${currencySymbol} ${fmtMoney(saving)} off`;
+                    }
+
+                } else if (deal.deal_type === 'combo') {
+                    // Requires items from each specified group to be present
+                    const groups = Array.isArray(deal.combo_requires) ? deal.combo_requires : [];
+                    if (!groups.length) continue;
+                    let allGroupsMet = true;
+                    let comboItems   = [];
+                    for (const grp of groups) {
+                        const types    = Array.isArray(grp.item_types) ? grp.item_types : [];
+                        const minQty   = parseInt(grp.min_qty || 1, 10);
+                        const matching = cart.filter(l => types.includes(String(l.type)));
+                        const grpQty   = matching.reduce((s, l) => s + Math.floor(Number(l.qty) || 0), 0);
+                        if (grpQty < minQty) { allGroupsMet = false; break; }
+                        comboItems.push(...matching);
+                    }
+                    if (!allGroupsMet) continue;
+                    // Dedupe comboItems
+                    comboItems = [...new Map(comboItems.map(l => [l.id, l])).values()];
+                    const base = comboItems.reduce((s, l) => s + l.price * l.qty, 0);
+                    saving = Math.round(base * (deal.discount_percent / 100) * 100) / 100;
+                    detail = `Combo: ${groups.map(g => g.item_types.join('+')).join(' & ')} · ${deal.discount_percent}% off`;
+                }
+
+                if (saving <= 0) continue;
+                totalSave += saving;
+                lines.push({ id: String(deal.id), name: deal.name, saving, detail });
+            }
+
+            // Global cap: total deal savings ≤ 90% of cart total (sanity guard)
+            const maxSavings = Math.round(gross * 0.90 * 100) / 100;
+            _dealSavings = Math.min(totalSave, maxSavings);
+            _dealLines   = lines;
+        }
+
         const CLOSED_BADGE = '<span style="background:#c82333;color:#fff;font-size:9px;font-weight:700;padding:2px 5px;border-radius:4px;letter-spacing:.04em;vertical-align:middle;margin-left:4px;">CLOSED</span>';
 
         /** Dynamically updates park button label/icon/CLOSED badge + hint text */
@@ -5635,8 +5941,26 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
                 <button type="button" class="rm" onclick="rm(${i})"><i class="fas fa-times"></i></button>
             </div>`).join('');
             }
+            applyDeals();
+
             const t = cartTotal();
-            document.getElementById('total').textContent = currencySymbol + ' ' + fmtMoney(t);
+            const eff = effectiveCartTotal();
+
+            // Deal savings strip in cart
+            let dealsHtml = '';
+            if (_dealLines.length) {
+                dealsHtml = _dealLines.map(dl =>
+                    `<div class="cart-deal-line"><i class="fas fa-tags"></i> <strong>${escHtml(dl.name)}</strong> <span>${escHtml(dl.detail)}</span><span class="cdl-saving">−${currencySymbol} ${fmtMoney(dl.saving)}</span></div>`
+                ).join('');
+                dealsHtml = `<div class="cart-deals-block">${dealsHtml}</div>`;
+            }
+
+            // Inject deal lines below cart items
+            const dealsEl = document.getElementById('cart-deal-lines');
+            if (dealsEl) dealsEl.innerHTML = dealsHtml;
+
+            const displayTotal = _dealSavings > 0 ? eff : t;
+            document.getElementById('total').textContent = currencySymbol + ' ' + fmtMoney(displayTotal);
             document.getElementById('payBtn').disabled = !cart.length;
             const parkBtn = document.getElementById('parkBtn');
             if (parkBtn) parkBtn.disabled = !cart.length;
@@ -5680,14 +6004,28 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
         function openPayModal() {
             if (!cart.length) return;
             if (!validateServiceContext()) return;
-            // Reset discount state
+            // Reset manual discount (deal savings already computed in renderCart)
             _payDiscount = 0;
             const dAmtEl = document.getElementById('payDiscountAmt');
             if (dAmtEl) dAmtEl.value = '';
-            document.getElementById('payDiscountAmtHidden').value = '0';
-            document.getElementById('payDiscountReasonHidden').value = '';
             document.querySelectorAll('#payDiscountPresets .discount-preset-btn').forEach(b => b.classList.toggle('active', b.dataset.pct === '0'));
-            const t = cartTotal();
+
+            // Show deal savings block in pay modal
+            const dealBlock = document.getElementById('payDealLines');
+            if (dealBlock) {
+                if (_dealLines.length) {
+                    dealBlock.innerHTML = _dealLines.map(dl =>
+                        `<div class="pay-deal-line"><i class="fas fa-tags" style="color:#10b981"></i> <span>${escHtml(dl.name)}</span><span class="pdl-saving" style="color:#10b981;font-weight:600;">−${currencySymbol} ${fmtMoney(dl.saving)}</span></div>`
+                    ).join('');
+                    dealBlock.style.display = 'block';
+                } else {
+                    dealBlock.innerHTML = '';
+                    dealBlock.style.display = 'none';
+                }
+            }
+
+            syncPayDiscountToForm();
+            const t = effectiveCartTotal();
             document.getElementById('payTotal').textContent = currencySymbol + ' ' + fmtMoney(t);
             injectCartHidden('payHiddenItems');
             /* Render the service-context summary inside the modal so the cashier sees what they're paying for */
@@ -8239,7 +8577,7 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
         let _payDiscount = 0;
 
         function effectiveCartTotal() {
-            return Math.max(0, cartTotal() - _payDiscount);
+            return Math.max(0, cartTotal() - _payDiscount - _dealSavings);
         }
 
         function setDiscountPct(btn, pct) {
@@ -8266,9 +8604,14 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
         }
 
         function syncPayDiscountToForm() {
-            document.getElementById('payDiscountAmtHidden').value = _payDiscount.toFixed(2);
+            // Manual discount (requires pos_discount permission on server)
+            document.getElementById('payDiscountAmtHidden').value = Math.max(0, _payDiscount).toFixed(2);
             const reason = document.getElementById('payDiscountReason');
-            document.getElementById('payDiscountReasonHidden').value = reason ? reason.value : '';
+            document.getElementById('payDiscountReasonHidden').value = reason ? reason.value.trim() : '';
+
+            // Auto deal discount (no permission required — validated server-side by deal ID)
+            document.getElementById('payDealDiscountAmtHidden').value = _dealSavings.toFixed(2);
+            document.getElementById('payDealIdsHidden').value = _dealLines.map(dl => dl.id).filter(Boolean).join(',');
         }
 
         /* ── Discount for settle-tab modal ──────────────────────────────── */
@@ -8294,9 +8637,13 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
         }
 
         function syncTabDiscountToForm() {
+            // Manual discount only — deal discount on tabs is passed separately
             document.getElementById('payTabDiscountAmtHidden').value = (_pt.discount || 0).toFixed(2);
             const reason = document.getElementById('payTabDiscountReason');
-            document.getElementById('payTabDiscountReasonHidden').value = reason ? reason.value : '';
+            document.getElementById('payTabDiscountReasonHidden').value = reason ? reason.value.trim() : '';
+            // Tab settlement: no deal discounts (deals applied at order creation)
+            document.getElementById('payTabDealDiscountAmtHidden').value = '0';
+            document.getElementById('payTabDealIdsHidden').value = '';
         }
 
         /* ── 86 Mode (manager item availability toggle) ──────────────────── */
@@ -9266,6 +9613,17 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
                     + '<button class="cc-rm" onclick="posCamRm(' + i + ')" title="Remove"><i class="fas fa-times"></i></button>'
                     + '</div>';
             }
+            // Add deal savings lines
+            applyDeals();
+            if (_dealLines && _dealLines.length) {
+                for (var d = 0; d < _dealLines.length; d++) {
+                    html += '<div class="cc-deal-line"><i class="fas fa-tags"></i> '
+                        + _esc(_dealLines[d].name)
+                        + '<span class="cc-deal-saving">−' + sym + ' ' + _fmt(_dealLines[d].saving) + '</span></div>';
+                }
+                grandTotal = Math.max(0, grandTotal - _dealSavings);
+            }
+
             bodyEl.innerHTML = html;
             if (totalEl) totalEl.textContent = sym + ' ' + _fmt(grandTotal);
             if (actEl) actEl.style.display = 'flex';

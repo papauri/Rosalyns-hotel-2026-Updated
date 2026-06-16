@@ -90,6 +90,7 @@ $_nav_groups = [
         ['room-service-dashboard.php', 'fas fa-bell-concierge',  'Room Service',      'room_service_view', 'color:#0c8d6c;'],
         ['kds-report.php',             'fas fa-file-invoice',    'Station Reports',   'kds_reports'],
         ['station-settings.php',       'fas fa-clock',           'Station Hours',     'stock_management'],
+        ['deals.php',                  'fas fa-tags',            'Deals & Promos',    'stock_management'],
         ['offline-log.php',            'fas fa-cloud-arrow-up',  'Offline Log',       'offline_log_view'],
     ],
     'Guides' => [
