@@ -1716,16 +1716,21 @@ if (in_array($user['role'] ?? '', ['admin', 'manager'], true)) {
             pointer-events: none; flex-shrink: 0; width: 100%;
         }
         #barcodeScanStrip .fas { color: #4ade80; }
-        #barcodeScanLast { margin-left: auto; opacity: 0.65; font-weight: 400; font-size: 12px; }
+        #barcodeScanLast { margin-left: auto; opacity: 0.65; font-weight: 400; font-size: 12px; max-width: 48%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
         /* Scanned items live feed (Facebook Live comment style) */
-        /* Live feed inside the camera view — uses grid stacking so it appears above video on mobile */
+        /* Live feed inside the camera view — shares grid cell with video so it stacks above it.
+           backdrop-filter is the key: Android Chrome renders <video> in a hardware OS overlay plane
+           that sits above all HTML regardless of z-index. Applying backdrop-filter forces Chrome to
+           composite this element ABOVE the video plane for the filter to work — brightness(1) has
+           no visual effect but the compositing side-effect makes the cards visible on mobile. */
         .pos-cam-feed {
-            /* occupies the full grid cell but aligns items to the bottom */
             display: flex; flex-direction: column; justify-content: flex-end;
             gap: 6px; padding: 10px 12px 14px;
             pointer-events: none;
-            /* no position:absolute — CSS grid stacking handles layering */
-            overflow: hidden; /* clip old items that overflow at the top */
+            overflow: hidden;
+            position: relative; z-index: 2;
+            -webkit-backdrop-filter: brightness(1);
+            backdrop-filter: brightness(1);
         }
         .pos-cam-feed-item {
             display: flex; align-items: center; gap: 10px;
@@ -5084,10 +5089,10 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
                     addToCart(match);
                     Alert.show('Added: ' + match.name, 'success', 1800);
                 }
-                if (lastEl) lastEl.textContent = 'Last scan: ' + code + ' → ' + (match ? match.name : '—');
+                if (lastEl) lastEl.textContent = match ? '✓ ' + match.name : '—';
             } else {
                 Alert.show('Barcode not recognised: ' + code, 'warn', 2800);
-                if (lastEl) lastEl.textContent = 'Unknown: ' + code;
+                if (lastEl) lastEl.textContent = '? ' + code;
             }
         }
 
