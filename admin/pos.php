@@ -1765,6 +1765,8 @@ if (in_array($user['role'] ?? '', ['admin', 'manager'], true)) {
             pointer-events: auto; /* re-enable on cards so X button works */
         }
         @keyframes pos-feed-in { from { opacity:0; transform: translateY(10px) scale(.95); } to { opacity:1; transform: none; } }
+        @keyframes pos-feed-bump { 0%,100% { transform:none; } 30% { transform: scale(1.04); box-shadow: 0 0 0 2px #4ade80; } 60% { transform: scale(.98); } }
+        .pos-cam-feed-item.feed-bump { animation: pos-feed-bump .35s cubic-bezier(.22,1,.36,1); }
         .pos-cam-feed-item .fi-icon { color: #4ade80; font-size: 18px; flex-shrink: 0; }
         .fi-body { display: flex; flex-direction: column; gap: 2px; flex: 1; min-width: 0; }
         .fi-body .fi-name { font-weight: 700; font-size: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -9316,11 +9318,28 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
             el.classList.add('is-removed');
         };
 
+        function _buildFeedInner(recognised, name, code, qty, unitPrice, lineTotal, cartTotal, sym) {
+            if (!recognised) {
+                return '<i class="fas fa-exclamation-circle fi-icon fi-icon--warn"></i>'
+                    + '<div class="fi-body">'
+                    +   '<span class="fi-name">' + _esc(code) + '</span>'
+                    +   '<span class="fi-qty-label" style="color:#f87171;">Not registered — long-press a menu item to link</span>'
+                    + '</div>';
+            }
+            return '<i class="fas fa-check-circle fi-icon"></i>'
+                + '<div class="fi-body">'
+                +   '<span class="fi-name">' + _esc(name) + '</span>'
+                +   '<span class="fi-qty-label">' + qty + ' × ' + sym + ' ' + _fmt(unitPrice) + '</span>'
+                +   (cartTotal !== null ? '<span class="fi-cart-total">Total: ' + sym + ' ' + _fmt(cartTotal) + '</span>' : '')
+                + '</div>'
+                + (lineTotal !== null ? '<span class="fi-line-total">' + sym + ' ' + _fmt(lineTotal) + '</span>' : '')
+                + '<button class="fi-rm" onclick="posCamFeedRm(this)" title="Remove from cart"><i class="fas fa-times"></i></button>';
+        }
+
         function _addFeedItem(code) {
             var feed = document.getElementById('posCamFeed');
             if (!feed) return;
 
-            // Resolve item from menuList by barcode
             var matched = (typeof menuList !== 'undefined')
                 ? menuList.find(function (m) { return m.barcode && m.barcode === code; })
                 : null;
@@ -9333,43 +9352,37 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
             var qty       = cartItem ? (parseFloat(cartItem.qty) || 1) : 1;
             var lineTotal = unitPrice !== null ? unitPrice * qty : null;
             var sym       = (typeof currencySymbol !== 'undefined') ? currencySymbol : 'MWK';
-
-            // Running cart grand total
             var cartTotal = null;
             if (typeof cart !== 'undefined' && cart.length) {
                 cartTotal = cart.reduce(function (sum, ci) {
                     return sum + (parseFloat(ci.price) || 0) * (parseFloat(ci.qty) || 1);
                 }, 0);
             }
-
             var recognised = matched !== null;
+
+            // If a card for this barcode already exists, update it in-place (bump animation)
+            var existing = feed.querySelector('[data-barcode="' + CSS.escape(code) + '"]');
+            if (existing && !existing.classList.contains('is-removed')) {
+                existing.innerHTML = _buildFeedInner(recognised, name, code, qty, unitPrice, lineTotal, cartTotal, sym);
+                // Re-play the pop-in animation so the user sees the update
+                existing.classList.remove('feed-bump');
+                void existing.offsetWidth; // reflow
+                existing.classList.add('feed-bump');
+                // Move to bottom so the latest scan is always visible
+                feed.appendChild(existing);
+                feed.scrollTop = feed.scrollHeight;
+                return;
+            }
+
+            // New barcode — create a fresh card
             var el = document.createElement('div');
             el.className = 'pos-cam-feed-item' + (recognised ? '' : ' is-unknown');
             el.dataset.barcode = code;
-            el.innerHTML = recognised
-                ? ('<i class="fas fa-check-circle fi-icon"></i>'
-                    + '<div class="fi-body">'
-                    +   '<span class="fi-name">' + _esc(name) + '</span>'
-                    +   '<span class="fi-qty-label">' + qty + ' × ' + sym + ' ' + _fmt(unitPrice) + '</span>'
-                    +   (cartTotal !== null ? '<span class="fi-cart-total">Total: ' + sym + ' ' + _fmt(cartTotal) + '</span>' : '')
-                    + '</div>'
-                    + (lineTotal !== null ? '<span class="fi-line-total">' + sym + ' ' + _fmt(lineTotal) + '</span>' : '')
-                    + '<button class="fi-rm" onclick="posCamFeedRm(this)" title="Remove from cart"><i class="fas fa-times"></i></button>')
-                : ('<i class="fas fa-exclamation-circle fi-icon fi-icon--warn"></i>'
-                    + '<div class="fi-body">'
-                    +   '<span class="fi-name">' + _esc(code) + '</span>'
-                    +   '<span class="fi-qty-label" style="color:#f87171;">Not registered — long-press a menu item to link</span>'
-                    + '</div>');
-
-            // Append at bottom (newest at bottom, like a chat/live feed)
+            el.innerHTML = _buildFeedInner(recognised, name, code, qty, unitPrice, lineTotal, cartTotal, sym);
             feed.appendChild(el);
 
-            // Cap at 20 items — remove oldest from top
-            while (feed.children.length > 20) {
-                feed.removeChild(feed.firstChild);
-            }
-
-            // Scroll to show the latest item
+            // Cap at 20 unique cards
+            while (feed.children.length > 20) { feed.removeChild(feed.firstChild); }
             feed.scrollTop = feed.scrollHeight;
         }
 
