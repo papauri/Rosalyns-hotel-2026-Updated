@@ -1,4 +1,4 @@
-﻿<?php
+<?php
 
 /**
  * POS Till — Modern Touchscreen Restaurant Till
@@ -1676,34 +1676,57 @@ if (in_array($user['role'] ?? '', ['admin', 'manager'], true)) {
         @keyframes pos-cam-flash { 0%,100% { filter: none; } 50% { filter: brightness(1.8); } }
         /* Mini cart panel inside scanner */
         .pos-cam-cart {
-            background: rgba(15,15,20,0.92); border-top: 1px solid rgba(74,222,128,0.25);
-            flex-shrink: 0; max-height: 220px; overflow: hidden;
+            background: rgba(10,12,18,0.96); border-top: 2px solid rgba(74,222,128,0.3);
+            flex-shrink: 0; max-height: 0; overflow: hidden;
             transition: max-height .3s ease;
         }
-        .pos-cam-cart.collapsed { max-height: 0; border-top-color: transparent; }
+        .pos-cam-cart.open { max-height: 260px; }
         .pos-cam-cart-head {
             display: flex; align-items: center; justify-content: space-between;
-            padding: 8px 14px; cursor: pointer; user-select: none;
-            color: rgba(255,255,255,0.8); font-size: 12px; font-weight: 600;
-            border-bottom: 1px solid rgba(255,255,255,0.06);
+            padding: 9px 14px; cursor: pointer; user-select: none;
+            color: rgba(255,255,255,0.9); font-size: 12px; font-weight: 600;
+            border-bottom: 1px solid rgba(255,255,255,0.07);
         }
-        .pos-cam-cart-head:hover { background: rgba(255,255,255,0.04); }
         .pos-cam-cart-head .cc-title { display: flex; align-items: center; gap: 7px; }
         .pos-cam-cart-head .cc-title i { color: #4ade80; font-size: 13px; }
-        .pos-cam-cart-head .cc-total { color: #4ade80; font-size: 12px; font-weight: 700; }
+        .pos-cam-cart-head .cc-total { color: #4ade80; font-size: 13px; font-weight: 800; }
         .pos-cam-cart-head .cc-chevron { font-size: 10px; color: rgba(255,255,255,0.4); transition: transform .25s; }
-        .pos-cam-cart.collapsed .cc-chevron { transform: rotate(180deg); }
-        .pos-cam-cart-body { padding: 6px 0; max-height: 162px; overflow-y: auto; }
+        .pos-cam-cart:not(.open) .cc-chevron { transform: rotate(180deg); }
+        .pos-cam-cart-body { padding: 4px 0; max-height: 130px; overflow-y: auto; }
         .pos-cam-cart-row {
-            display: flex; align-items: center; justify-content: space-between;
-            padding: 5px 14px; font-size: 12px; color: rgba(255,255,255,0.82);
-            gap: 8px; border-bottom: 1px solid rgba(255,255,255,0.04);
+            display: flex; align-items: center;
+            padding: 5px 10px 5px 14px; font-size: 12px; color: rgba(255,255,255,0.82);
+            gap: 6px; border-bottom: 1px solid rgba(255,255,255,0.04);
         }
         .pos-cam-cart-row:last-child { border-bottom: none; }
         .pos-cam-cart-row .cc-name { flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-        .pos-cam-cart-row .cc-qty { color: #4ade80; font-weight: 600; flex-shrink: 0; }
-        .pos-cam-cart-row .cc-price { color: rgba(255,255,255,0.5); flex-shrink: 0; font-size: 11px; }
+        .pos-cam-cart-row .cc-price { color: rgba(255,255,255,0.5); flex-shrink: 0; font-size: 11px; min-width: 60px; text-align: right; }
+        /* Qty +/- controls */
+        .cc-row-qty { display: flex; align-items: center; gap: 3px; flex-shrink: 0; }
+        .cc-qty-btn { width: 20px; height: 20px; border-radius: 50%; border: 1px solid rgba(255,255,255,0.2); background: rgba(255,255,255,0.07); color: #fff; font-size: 13px; line-height: 1; cursor: pointer; display: flex; align-items: center; justify-content: center; padding: 0; }
+        .cc-qty-btn:active { background: rgba(255,255,255,0.2); }
+        .cc-qty-val { min-width: 20px; text-align: center; font-weight: 700; color: #4ade80; font-size: 12px; }
+        .cc-rm { background: none; border: none; color: rgba(255,255,255,0.25); font-size: 12px; cursor: pointer; padding: 2px 4px; line-height: 1; flex-shrink: 0; }
+        .cc-rm:active { color: #f87171; }
         .pos-cam-cart-empty { padding: 10px 14px; font-size: 12px; color: rgba(255,255,255,0.35); text-align:center; }
+        /* Action bar */
+        .pos-cam-cart-actions {
+            display: flex; gap: 7px; padding: 8px 12px 10px;
+            border-top: 1px solid rgba(255,255,255,0.08);
+        }
+        .cc-act {
+            flex: 1; padding: 8px 6px; border-radius: 9px;
+            border: 1px solid rgba(255,255,255,0.14); background: rgba(255,255,255,0.07);
+            color: rgba(255,255,255,0.85); font-size: 12px; font-weight: 600;
+            cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 5px;
+        }
+        .cc-act:active { background: rgba(255,255,255,0.16); }
+        .cc-act.is-pay { background: #16a34a; border-color: #15803d; color: #fff; flex: 2; font-size: 13px; }
+        .cc-act.is-pay:active { background: #15803d; }
+        /* Feed item X button */
+        .fi-rm { background: none; border: none; color: rgba(255,255,255,0.28); font-size: 13px; cursor: pointer; padding: 4px 2px; line-height: 1; flex-shrink: 0; }
+        .fi-rm:active { color: #f87171; }
+        .pos-cam-feed-item.is-removed { opacity: 0.3; text-decoration: line-through; }
         /* Barcode wedge status footer — lives as a natural .till-wrap grid row */
         #barcodeScanStrip {
             display: none; /* JS switches to flex */
@@ -8948,14 +8971,21 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
             <!-- Feed lives here — CSS grid stacking puts it above the video on mobile -->
             <div class="pos-cam-feed" id="posCamFeed"></div>
         </div>
-        <!-- Mini cart panel — collapsed by default, expands after first scan -->
-        <div class="pos-cam-cart collapsed" id="posCamCart">
+        <!-- Cart panel — slides up after first scan -->
+        <div class="pos-cam-cart" id="posCamCart">
             <div class="pos-cam-cart-head" onclick="posCamCartToggle()">
                 <span class="cc-title"><i class="fas fa-shopping-cart"></i> Cart</span>
                 <span id="posCamCartTotal" class="cc-total"></span>
                 <i class="fas fa-chevron-up cc-chevron"></i>
             </div>
             <div class="pos-cam-cart-body" id="posCamCartBody"></div>
+            <div class="pos-cam-cart-actions" id="posCamCartActions" style="display:none;">
+                <?php if ($posCanDiscount): ?>
+                <button class="cc-act" onclick="posCamDiscountAction()" title="Discount"><i class="fas fa-percent"></i></button>
+                <?php endif; ?>
+                <button class="cc-act" onclick="posCamClearAction()" title="Clear cart"><i class="fas fa-trash-alt"></i></button>
+                <button class="cc-act is-pay" onclick="posCamPayAction()"><i class="fas fa-credit-card"></i> Pay</button>
+            </div>
         </div>
         <div class="pos-cam-footer">
             <span id="posCamStatus">Point camera at a barcode</span>
@@ -9084,7 +9114,7 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
             var torch = document.getElementById('posCamTorch');
             if (torch) { torch.classList.remove('active', 'visible'); }
             var cartEl = document.getElementById('posCamCart');
-            if (cartEl) cartEl.classList.add('collapsed');
+            if (cartEl) cartEl.classList.remove('open');
             var overlay = document.getElementById('posCamScanOverlay');
             if (overlay) overlay.style.display = 'none';
             document.getElementById('posCamScanBtn') && document.getElementById('posCamScanBtn').classList.remove('is-active');
@@ -9157,37 +9187,73 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
         }
 
         function _refreshCart() {
-            var cartEl = document.getElementById('posCamCart');
-            var bodyEl = document.getElementById('posCamCartBody');
+            var cartEl  = document.getElementById('posCamCart');
+            var bodyEl  = document.getElementById('posCamCartBody');
             var totalEl = document.getElementById('posCamCartTotal');
+            var actEl   = document.getElementById('posCamCartActions');
             if (!cartEl || !bodyEl) return;
-            // `cart` is the POS global cart array
+            var sym = (typeof currencySymbol !== 'undefined') ? currencySymbol : 'MWK';
             if (typeof cart === 'undefined' || !cart.length) {
-                bodyEl.innerHTML = '<div class="pos-cam-cart-empty">Cart is empty</div>';
+                bodyEl.innerHTML = '<div class="pos-cam-cart-empty">Cart empty — scan an item</div>';
                 if (totalEl) totalEl.textContent = '';
+                if (actEl) actEl.style.display = 'none';
+                cartEl.classList.remove('open');
                 return;
             }
-            var html = '';
-            var grandTotal = 0;
+            var html = '', grandTotal = 0;
             for (var i = 0; i < cart.length; i++) {
                 var item = cart[i];
                 var lineTotal = (parseFloat(item.price) || 0) * (parseFloat(item.qty) || 1);
                 grandTotal += lineTotal;
                 html += '<div class="pos-cam-cart-row">'
-                    + '<span class="cc-qty">' + (item.qty || 1) + '×</span>'
                     + '<span class="cc-name">' + _esc(item.name || '') + '</span>'
-                    + '<span class="cc-price">' + (typeof currencySymbol !== 'undefined' ? currencySymbol : 'MWK') + ' ' + _fmt(lineTotal) + '</span>'
+                    + '<div class="cc-row-qty">'
+                    +   '<button class="cc-qty-btn" onclick="posCamBump(' + i + ',-1)">−</button>'
+                    +   '<span class="cc-qty-val">' + (item.qty || 1) + '</span>'
+                    +   '<button class="cc-qty-btn" onclick="posCamBump(' + i + ',1)">+</button>'
+                    + '</div>'
+                    + '<span class="cc-price">' + sym + ' ' + _fmt(lineTotal) + '</span>'
+                    + '<button class="cc-rm" onclick="posCamRm(' + i + ')" title="Remove"><i class="fas fa-times"></i></button>'
                     + '</div>';
             }
             bodyEl.innerHTML = html;
-            if (totalEl) totalEl.textContent = (typeof currencySymbol !== 'undefined' ? currencySymbol : 'MWK') + ' ' + _fmt(grandTotal);
-            // Expand the cart panel on first scan
-            cartEl.classList.remove('collapsed');
+            if (totalEl) totalEl.textContent = sym + ' ' + _fmt(grandTotal);
+            if (actEl) actEl.style.display = 'flex';
+            cartEl.classList.add('open');
         }
 
         window.posCamCartToggle = function () {
             var cartEl = document.getElementById('posCamCart');
-            if (cartEl) cartEl.classList.toggle('collapsed');
+            if (cartEl) cartEl.classList.toggle('open');
+        };
+
+        window.posCamBump = function (idx, d) { bump(idx, d); _refreshCart(); };
+        window.posCamRm   = function (idx)    { rm(idx);       _refreshCart(); };
+
+        window.posCamPayAction = function () {
+            posCamScanClose();
+            setTimeout(function () { openPayModal(); }, 120);
+        };
+        window.posCamClearAction = function () {
+            if (typeof cart !== 'undefined') { cart.splice(0); renderCart(); renderMenu(); _refreshCart(); }
+        };
+        window.posCamDiscountAction = function () {
+            posCamScanClose();
+            setTimeout(function () { openPayModal(); }, 120);
+        };
+
+        window.posCamFeedRm = function (btn) {
+            var el = btn.closest('.pos-cam-feed-item');
+            if (!el || el.classList.contains('is-removed')) return;
+            var code = el.dataset.barcode;
+            if (code && typeof menuList !== 'undefined') {
+                var matched = menuList.find(function (m) { return m.barcode && m.barcode === code; });
+                if (matched && typeof cart !== 'undefined') {
+                    var idx = cart.findIndex(function (c) { return c.id === matched.id && c.type === matched.type; });
+                    if (idx !== -1) { rm(idx); _refreshCart(); }
+                }
+            }
+            el.classList.add('is-removed');
         };
 
         function _addFeedItem(code) {
@@ -9219,14 +9285,16 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
             var recognised = matched !== null;
             var el = document.createElement('div');
             el.className = 'pos-cam-feed-item' + (recognised ? '' : ' is-unknown');
+            el.dataset.barcode = code;
             el.innerHTML = recognised
                 ? ('<i class="fas fa-check-circle fi-icon"></i>'
                     + '<div class="fi-body">'
                     +   '<span class="fi-name">' + _esc(name) + '</span>'
-                    +   '<span class="fi-qty-label">' + qty + ' in cart</span>'
-                    +   (cartTotal !== null ? '<span class="fi-cart-total">Cart: ' + sym + ' ' + _fmt(cartTotal) + '</span>' : '')
+                    +   '<span class="fi-qty-label">' + qty + ' × ' + sym + ' ' + _fmt(unitPrice) + '</span>'
+                    +   (cartTotal !== null ? '<span class="fi-cart-total">Total: ' + sym + ' ' + _fmt(cartTotal) + '</span>' : '')
                     + '</div>'
-                    + (lineTotal !== null ? '<span class="fi-line-total">' + sym + ' ' + _fmt(lineTotal) + '</span>' : ''))
+                    + (lineTotal !== null ? '<span class="fi-line-total">' + sym + ' ' + _fmt(lineTotal) + '</span>' : '')
+                    + '<button class="fi-rm" onclick="posCamFeedRm(this)" title="Remove from cart"><i class="fas fa-times"></i></button>')
                 : ('<i class="fas fa-exclamation-circle fi-icon fi-icon--warn"></i>'
                     + '<div class="fi-body">'
                     +   '<span class="fi-name">' + _esc(code) + '</span>'
