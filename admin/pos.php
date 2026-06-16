@@ -1612,14 +1612,31 @@ if (in_array($user['role'] ?? '', ['admin', 'manager'], true)) {
             display: flex; align-items: center; justify-content: center; transition: background .15s;
         }
         .pos-cam-close:active { background: rgba(255,255,255,0.25); }
+        /* CSS Grid stacking: video + feed share the same grid cell so the feed renders
+           above the video without position:absolute — solves mobile GPU-layer z-index issue */
         .pos-cam-view {
-            flex: 1; min-height: 0; position: relative; overflow: hidden;
-            display: flex; align-items: center; justify-content: center; background: #000;
-            max-height: 55vh; /* ensure feed panel is always visible below */
+            flex: 1; min-height: 0;
+            display: grid;
+            grid-template: 1fr / 1fr;
+            position: relative; /* containing block for the guide's absolute corners */
+            background: #000;
+            max-height: 58vh;
+            overflow: hidden;
+        }
+        /* Video and feed share the single grid cell and overlap */
+        #posCamVideo,
+        .pos-cam-feed {
+            grid-column: 1; grid-row: 1;
         }
         #posCamVideo { width: 100%; height: 100%; object-fit: cover; display: block; }
+        /* Guide: absolute (removed from grid flow) so it doesn't push siblings.
+           Centred in .pos-cam-view (which has position:relative).
+           position:relative inside gives corners their containing block. */
         .pos-cam-guide {
-            position: absolute; width: min(72vw, 280px); height: min(72vw, 280px);
+            position: absolute;
+            top: 50%; left: 50%;
+            transform: translate(-50%, -50%);
+            width: min(72vw, 280px); height: min(72vw, 280px);
             pointer-events: none;
         }
         .pos-cam-corner {
@@ -1701,34 +1718,33 @@ if (in_array($user['role'] ?? '', ['admin', 'manager'], true)) {
         #barcodeScanStrip .fas { color: #4ade80; }
         #barcodeScanLast { margin-left: auto; opacity: 0.65; font-weight: 400; font-size: 12px; }
         /* Scanned items live feed (Facebook Live comment style) */
-        /* Scanned items feed — sits BELOW the viewfinder as a scrollable panel */
+        /* Live feed inside the camera view — uses grid stacking so it appears above video on mobile */
         .pos-cam-feed {
-            display: flex; flex-direction: column; gap: 0;
-            flex-shrink: 0;
-            max-height: 220px; overflow-y: auto;
-            background: #080c12;
-            border-top: 1px solid rgba(74,222,128,0.18);
-            scroll-behavior: smooth;
+            /* occupies the full grid cell but aligns items to the bottom */
+            display: flex; flex-direction: column; justify-content: flex-end;
+            gap: 6px; padding: 10px 12px 14px;
+            pointer-events: none;
+            /* no position:absolute — CSS grid stacking handles layering */
+            overflow: hidden; /* clip old items that overflow at the top */
         }
-        .pos-cam-feed:empty { display: none; }
         .pos-cam-feed-item {
-            display: flex; align-items: center; gap: 12px;
-            padding: 10px 14px;
-            border-bottom: 1px solid rgba(255,255,255,0.06);
-            color: #fff;
-            animation: pos-feed-in .2s ease;
-            flex-shrink: 0;
+            display: flex; align-items: center; gap: 10px;
+            background: rgba(6,10,16,0.88);
+            border: 1.5px solid rgba(74,222,128,0.5);
+            border-radius: 12px;
+            padding: 9px 12px; color: #fff;
+            animation: pos-feed-in .22s cubic-bezier(.22,1,.36,1);
+            flex-shrink: 0; width: 100%; box-sizing: border-box;
+            box-shadow: 0 4px 14px rgba(0,0,0,0.6);
         }
-        .pos-cam-feed-item:first-child { animation: none; } /* suppress on clear/re-populate */
-        .pos-cam-feed-item.is-new { animation: pos-feed-in .2s ease; }
-        @keyframes pos-feed-in  { from { opacity:0; transform: translateX(-8px); } to { opacity:1; transform: none; } }
+        @keyframes pos-feed-in { from { opacity:0; transform: translateY(10px) scale(.95); } to { opacity:1; transform: none; } }
         .pos-cam-feed-item .fi-icon { color: #4ade80; font-size: 18px; flex-shrink: 0; }
         .fi-body { display: flex; flex-direction: column; gap: 2px; flex: 1; min-width: 0; }
         .fi-body .fi-name { font-weight: 700; font-size: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-        .fi-body .fi-qty-label { font-size: 11px; color: rgba(255,255,255,0.45); }
+        .fi-body .fi-qty-label { font-size: 11px; color: rgba(255,255,255,0.5); }
         .fi-body .fi-cart-total { font-size: 11px; color: #4ade80; font-weight: 600; }
-        .fi-line-total { flex-shrink: 0; color: #4ade80; font-weight: 800; font-size: 16px; padding-left: 6px; white-space: nowrap; }
-        .pos-cam-feed-item.is-unknown { border-left: 3px solid #f87171; }
+        .fi-line-total { flex-shrink: 0; color: #4ade80; font-weight: 800; font-size: 16px; white-space: nowrap; padding-left: 4px; }
+        .pos-cam-feed-item.is-unknown { border-color: rgba(248,113,113,0.55); }
         .fi-icon--warn { color: #f87171 !important; }
         /* Scan button in mobile bar */
         .pos-mobile-action.is-scan { color: #4ade80; }
@@ -8920,9 +8936,9 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
                 <div class="pos-cam-corner br"></div>
                 <div class="pos-cam-scan-line"></div>
             </div>
+            <!-- Feed lives here — CSS grid stacking puts it above the video on mobile -->
+            <div class="pos-cam-feed" id="posCamFeed"></div>
         </div>
-        <!-- Live scan feed — builds up below the viewfinder like Facebook Live comments -->
-        <div class="pos-cam-feed" id="posCamFeed"></div>
         <!-- Mini cart panel — collapsed by default, expands after first scan -->
         <div class="pos-cam-cart collapsed" id="posCamCart">
             <div class="pos-cam-cart-head" onclick="posCamCartToggle()">
