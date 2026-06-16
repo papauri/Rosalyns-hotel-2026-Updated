@@ -1153,6 +1153,7 @@ try {
     unset($d);
 } catch (Exception $e) {
     $posDealsRaw = [];
+    $posDealsError = $e->getMessage();
 }
 
 /**
@@ -3220,6 +3221,10 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
         const menuList = <?php echo json_encode($menuList); ?>;
         const stockSnapshot = <?php echo json_encode($stockSnapshot); ?>;
         const posDeals = <?php echo json_encode(array_values($posDealsRaw), JSON_HEX_TAG | JSON_HEX_AMP); ?>;
+        <?php if (!empty($posDealsError)): ?>
+        console.error('[POS Deals] DB error loading deals:', <?php echo json_encode($posDealsError); ?>);
+        <?php endif; ?>
+        console.log('[POS Deals] Loaded', posDeals.length, 'deal(s):', posDeals);
         const currencySymbol = <?php echo json_encode($currency_symbol); ?>;
         const posKitchenOpen = <?php echo $kitchenWindow['is_open_now'] ? 'true' : 'false'; ?>;
         const posKitchenHours = <?php echo json_encode($kitchenWindow['opens_at'] . ' – ' . $kitchenWindow['closes_at']); ?>;
@@ -5491,6 +5496,7 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
             const lines   = [];
             let totalSave = 0;
             const gross   = cartTotal();
+            console.log('[applyDeals] cart:', JSON.stringify(cart.map(l=>({id:l.id,qty:l.qty}))), 'deals:', posDeals.length);
             let hasExclusive = false;
 
             // First pass: find any exclusive deal that fires
@@ -5967,10 +5973,12 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
             // Deal progress hints — show near-miss deals so staff know to upsell
             if (cart.length && posDeals && posDeals.length) {
                 const pendingHints = [];
+                const gross = cartTotal();
                 posDeals.forEach(deal => {
                     if (!_dealNowValid(deal)) return;
                     // Already fired
                     if (_dealLines.find(d => d.id === String(deal.id))) return;
+
                     if (deal.deal_type === 'multi_buy') {
                         const qualifying = cart.filter(l => _dealItemQualifies(deal, l));
                         if (!qualifying.length) return;
@@ -5981,6 +5989,31 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
                             const itemNames = [...new Set(qualifying.map(l => l.name))].join(', ');
                             pendingHints.push(`<div class="cart-deal-pending"><i class="fas fa-hourglass-half"></i> <strong>${escHtml(deal.name)}</strong> — add <strong>${needed}</strong> more ${escHtml(itemNames)} to unlock</div>`);
                         }
+
+                    } else if (deal.deal_type === 'spend_save') {
+                        const threshold = deal.spend_threshold || 0;
+                        if (threshold <= 0 || gross >= threshold) return;
+                        const stillNeeded = threshold - gross;
+                        // Only show hint if within 50% of threshold (avoid noise)
+                        if (stillNeeded > threshold * 0.5) return;
+                        pendingHints.push(`<div class="cart-deal-pending"><i class="fas fa-hourglass-half"></i> <strong>${escHtml(deal.name)}</strong> — spend <strong>${currencySymbol} ${fmtMoney(stillNeeded)}</strong> more to unlock</div>`);
+
+                    } else if (deal.deal_type === 'combo') {
+                        const groups = Array.isArray(deal.combo_requires) ? deal.combo_requires : [];
+                        if (!groups.length) return;
+                        const missingGroups = [];
+                        let anyGroupMet = false;
+                        for (const grp of groups) {
+                            const types = Array.isArray(grp.item_types) ? grp.item_types : [];
+                            const minQty = parseInt(grp.min_qty || 1, 10);
+                            const matching = cart.filter(l => types.includes(String(l.type)));
+                            const grpQty = matching.reduce((s, l) => s + Math.floor(Number(l.qty) || 0), 0);
+                            if (grpQty >= minQty) { anyGroupMet = true; }
+                            else { missingGroups.push(`${minQty}× ${types.join('/')}`); }
+                        }
+                        // Only hint if at least one group is already satisfied (near-miss)
+                        if (!anyGroupMet || !missingGroups.length) return;
+                        pendingHints.push(`<div class="cart-deal-pending"><i class="fas fa-hourglass-half"></i> <strong>${escHtml(deal.name)}</strong> — also add ${missingGroups.map(m => escHtml(m)).join(' + ')} to unlock</div>`);
                     }
                 });
                 if (pendingHints.length) {
@@ -9731,8 +9764,7 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
                 dealHtml += '<div class="fi-deals">'
                     + pendingDeals.map(function(pd) {
                         return '<span class="fi-deal-badge fi-deal-pending"><i class="fas fa-hourglass-half"></i> '
-                            + _esc(pd.name) + ' &mdash; add '
-                            + '<strong>' + pd.needed + ' more</strong> to unlock</span>';
+                            + _esc(pd.hint) + '</span>';
                     }).join('')
                     + '</div>';
             }
@@ -9783,26 +9815,59 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
             var pendingDeals = [];
             if (recognised && typeof posDeals !== 'undefined') {
                 var fakeCartLine = { id: matched.id, type: matched.type || matched.menu_type, price: parseFloat(matched.price) || 0, qty: qty };
+                var cartGross = grossTotal || 0;
                 posDeals.forEach(function(deal) {
                     if (typeof _dealNowValid === 'function' && !_dealNowValid(deal)) return;
-                    if (typeof _dealItemQualifies !== 'function' || !_dealItemQualifies(deal, fakeCartLine)) return;
                     var dl = (typeof _dealLines !== 'undefined') ? _dealLines.find(function(d) { return d.id === String(deal.id); }) : null;
-                    if (dl) {
-                        itemDeals.push(dl);
-                    } else if (deal.deal_type === 'multi_buy') {
-                        // Deal qualifies for this item but hasn't fired yet — compute progress
+
+                    if (deal.deal_type === 'multi_buy') {
+                        if (typeof _dealItemQualifies !== 'function' || !_dealItemQualifies(deal, fakeCartLine)) return;
+                        if (dl) { itemDeals.push(dl); return; }
                         var groupSize = deal.multi_buy_qty || 2;
                         var totalQtyInCart = 0;
                         if (typeof cart !== 'undefined') {
                             cart.forEach(function(ci) {
-                                if (typeof _dealItemQualifies === 'function' && _dealItemQualifies(deal, ci)) {
-                                    totalQtyInCart += Math.floor(Number(ci.qty) || 0);
-                                }
+                                if (_dealItemQualifies(deal, ci)) totalQtyInCart += Math.floor(Number(ci.qty) || 0);
                             });
                         }
                         var needed = groupSize - (totalQtyInCart % groupSize);
                         if (needed > 0 && needed < groupSize) {
-                            pendingDeals.push({ name: deal.name, needed: needed, groupSize: groupSize });
+                            pendingDeals.push({ hint: 'Add ' + needed + ' more to unlock ' + deal.name });
+                        }
+
+                    } else if (deal.deal_type === 'spend_save') {
+                        if (dl) { itemDeals.push(dl); return; }
+                        var threshold = deal.spend_threshold || 0;
+                        if (threshold <= 0 || cartGross >= threshold) return;
+                        var stillNeeded = threshold - cartGross;
+                        if (stillNeeded > threshold * 0.5) return; // only near-miss
+                        pendingDeals.push({ hint: 'Spend ' + sym + ' ' + _fmt(stillNeeded) + ' more to unlock ' + deal.name });
+
+                    } else if (deal.deal_type === 'combo') {
+                        if (dl) { itemDeals.push(dl); return; }
+                        var groups = Array.isArray(deal.combo_requires) ? deal.combo_requires : [];
+                        if (!groups.length) return;
+                        var missingGroups = [];
+                        var anyMet = false;
+                        for (var gi = 0; gi < groups.length; gi++) {
+                            var grp = groups[gi];
+                            var types = Array.isArray(grp.item_types) ? grp.item_types : [];
+                            var minQty = parseInt(grp.min_qty || 1, 10);
+                            var grpQty = 0;
+                            if (typeof cart !== 'undefined') {
+                                cart.forEach(function(ci) { if (types.indexOf(String(ci.type)) >= 0) grpQty += Math.floor(Number(ci.qty) || 0); });
+                            }
+                            if (grpQty >= minQty) { anyMet = true; }
+                            else { missingGroups.push(minQty + '× ' + types.join('/')); }
+                        }
+                        if (anyMet && missingGroups.length) {
+                            pendingDeals.push({ hint: 'Also add ' + missingGroups.join(' + ') + ' to unlock ' + deal.name });
+                        }
+
+                    } else {
+                        // percent_off, fixed_off, happy_hour — show if fired
+                        if (dl && typeof _dealItemQualifies === 'function' && _dealItemQualifies(deal, fakeCartLine)) {
+                            itemDeals.push(dl);
                         }
                     }
                 });
