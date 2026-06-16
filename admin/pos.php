@@ -1744,7 +1744,7 @@ if (in_array($user['role'] ?? '', ['admin', 'manager'], true)) {
             position: absolute; bottom: 0; left: 0; right: 0;
             display: flex; flex-direction: column; justify-content: flex-end;
             gap: 6px; padding: 10px 12px 14px;
-            pointer-events: none;
+            pointer-events: none; /* pass touches through to canvas */
             overflow: hidden;
             max-height: 80%;
             z-index: 5;
@@ -1758,6 +1758,7 @@ if (in_array($user['role'] ?? '', ['admin', 'manager'], true)) {
             animation: pos-feed-in .22s cubic-bezier(.22,1,.36,1);
             flex-shrink: 0; width: 100%; box-sizing: border-box;
             box-shadow: 0 4px 14px rgba(0,0,0,0.6);
+            pointer-events: auto; /* re-enable on cards so X button works */
         }
         @keyframes pos-feed-in { from { opacity:0; transform: translateY(10px) scale(.95); } to { opacity:1; transform: none; } }
         .pos-cam-feed-item .fi-icon { color: #4ade80; font-size: 18px; flex-shrink: 0; }
@@ -5104,39 +5105,59 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
         function posHandleBarcodeInput(code) {
             if (!code || code.length < BC_MIN_LEN) return;
             const match = menuList.find(m => m.barcode && m.barcode === code);
-            const strip  = document.getElementById('barcodeScanStrip');
             const lastEl = document.getElementById('barcodeScanLast');
             if (match) {
                 if (!match.is_available) {
-                    posToast('Item is 86\'d: ' + match.name, 'err', 2500);
+                    posToast('86\'d: ' + match.name, 'err', 2500);
+                    if (lastEl) lastEl.textContent = '✗ 86\'d';
                 } else if (!menuItemVisibleInMode(match)) {
-                    posToast('Item not available in current mode', 'err', 2500);
+                    posToast('Not available in this mode: ' + match.name, 'err', 2500);
+                    if (lastEl) lastEl.textContent = '✗ mode';
                 } else {
+                    // Stock-level check using the live snapshot
+                    const stockKey = match.type + ':' + match.id;
+                    const inStock = Object.prototype.hasOwnProperty.call(stockSnapshot, stockKey)
+                        ? stockSnapshot[stockKey] : null;
+                    const inCart = (cart.find(c => c.id === match.id && c.type === match.type) || {}).qty || 0;
+                    if (inStock !== null && inStock - inCart <= 0) {
+                        posToast('Out of stock: ' + match.name, 'err', 2500);
+                        if (lastEl) lastEl.textContent = '✗ no stock';
+                        return;
+                    }
                     addToCart(match);
-                    posToast('Added: ' + match.name, 'ok', 1800);
+                    posToast('+ ' + match.name, 'ok', 1400);
+                    if (lastEl) lastEl.textContent = '✓ ' + match.name;
                 }
-                if (lastEl) lastEl.textContent = match ? '✓ ' + match.name : '—';
             } else {
-                posToast('Barcode not recognised: ' + code, 'err', 2800);
+                posToast('Barcode not registered: ' + code, 'err', 2800);
                 if (lastEl) lastEl.textContent = '? ' + code;
             }
         }
 
+        /* HID/USB barcode scanner listener — active whenever scanner mode is on OR the
+           camera overlay is open. External wedge scanners emit keystrokes very fast
+           (< 50 ms between chars) then send Enter; human typing is much slower. */
         document.addEventListener('keydown', function(e) {
-            if (!barcodeScannerEnabled) return;
-            // Ignore if focus is inside a text input/textarea/select (user is typing)
-            const tag = (document.activeElement || {}).tagName || '';
-            if (['INPUT', 'TEXTAREA', 'SELECT'].includes(tag)) return;
+            const camOverlayOpen = (document.getElementById('posCamScanOverlay') || {}).style &&
+                                   document.getElementById('posCamScanOverlay').style.display === 'flex';
+            if (!barcodeScannerEnabled && !camOverlayOpen) return;
+            // Ignore if focus is inside a text input (unless it's the barcode assign input)
+            const ae = document.activeElement || {};
+            if (['INPUT','TEXTAREA','SELECT'].includes(ae.tagName || '') && ae.id !== 'bcAssignInput') return;
             const now = Date.now();
             if (e.key === 'Enter') {
                 if (_bcBuffer.length >= BC_MIN_LEN && (now - _bcLastChar) < BC_SPEED_MS * 5) {
                     posHandleBarcodeInput(_bcBuffer);
+                    // If camera overlay is open, also trigger the camera feed card
+                    if (camOverlayOpen && typeof window._posCamOnExternalCode === 'function') {
+                        window._posCamOnExternalCode(_bcBuffer);
+                    }
                 }
                 _bcBuffer = '';
                 return;
             }
-            if (e.key.length === 1) { // single printable character
-                if (now - _bcLastChar > 500) _bcBuffer = ''; // reset stale buffer
+            if (e.key.length === 1) {
+                if (now - _bcLastChar > 500) _bcBuffer = '';
                 _bcBuffer += e.key;
                 _bcLastChar = now;
             }
@@ -7999,6 +8020,15 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
             if (pl) pl.href = 'stock-receipt.php?id=' + _receiptOrderId + '&print=1';
 
             document.getElementById('receiptModal').classList.add('show');
+
+            // Auto-print: open receipt page which triggers window.print() on load.
+            // Works with any printer set as default — thermal (ESC/POS), inkjet, PDF, network.
+            // Toggle stored in localStorage so each terminal remembers its own preference.
+            if (localStorage.getItem('pos_auto_print_receipt') === '1' && _receiptOrderId) {
+                setTimeout(function () {
+                    window.open('stock-receipt.php?id=' + _receiptOrderId + '&print=1', '_blank', 'noopener');
+                }, 350);
+            }
         }
 
         function closeReceiptModal() {
@@ -8989,9 +9019,14 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
         </div>
         <div class="pos-cam-footer">
             <span id="posCamStatus">Point camera at a barcode</span>
-            <label class="pos-cam-keep-lbl" title="Keep scanner open after each scan to add multiple items">
-                <input type="checkbox" id="posCamKeepOpen" checked> Keep open
-            </label>
+            <div style="display:flex;align-items:center;gap:10px;flex-shrink:0;">
+                <label class="pos-cam-keep-lbl" title="Keep scanner open after each scan to add multiple items">
+                    <input type="checkbox" id="posCamKeepOpen" checked> Keep open
+                </label>
+                <label class="pos-cam-keep-lbl" title="Auto-print receipt after every payment on this terminal">
+                    <input type="checkbox" id="posCamAutoPrint" onchange="localStorage.setItem('pos_auto_print_receipt', this.checked ? '1' : '0')"> Auto-print
+                </label>
+            </div>
         </div>
     </div>
 
@@ -9062,6 +9097,9 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
             // Clear previous feed
             var feed = document.getElementById('posCamFeed');
             if (feed) feed.innerHTML = '';
+            // Restore auto-print checkbox state
+            var apCb = document.getElementById('posCamAutoPrint');
+            if (apCb) apCb.checked = localStorage.getItem('pos_auto_print_receipt') === '1';
             _setStatus('Starting camera…');
 
             var ok = await _waitDetector();
@@ -9122,6 +9160,12 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
             if (!fromPopstate && history.state && history.state.posCamScanner) {
                 history.back();
             }
+        };
+
+        // Expose so HID/USB scanners can trigger feed cards when overlay is open
+        window._posCamOnExternalCode = function (code) {
+            _refreshCart();
+            _addFeedItem(code);
         };
 
         window.posCamToggleTorch = async function () {
