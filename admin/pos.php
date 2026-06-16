@@ -1612,26 +1612,24 @@ if (in_array($user['role'] ?? '', ['admin', 'manager'], true)) {
             display: flex; align-items: center; justify-content: center; transition: background .15s;
         }
         .pos-cam-close:active { background: rgba(255,255,255,0.25); }
-        /* CSS Grid stacking: video + feed share the same grid cell so the feed renders
-           above the video without position:absolute — solves mobile GPU-layer z-index issue */
+        /* Canvas-based camera view: video frames are drawn to a <canvas> each rAF tick.
+           Canvas has no OS-level hardware overlay, so position:absolute siblings render
+           above it correctly on all Android Chrome versions. The <video> element stays in
+           the DOM (hidden) so BarcodeDetector.detect(video) still works. */
         .pos-cam-view {
             flex: 1; min-height: 0;
-            display: grid;
-            grid-template: 1fr / 1fr;
-            position: relative; /* containing block for the guide's absolute corners */
+            position: relative;
             background: #000;
-            max-height: 58vh;
             overflow: hidden;
         }
-        /* Video and feed share the single grid cell and overlap */
-        #posCamVideo,
-        .pos-cam-feed {
-            grid-column: 1; grid-row: 1;
+        #posCamVideo {
+            /* Hidden — only exists for BarcodeDetector.detect() */
+            position: absolute; width: 1px; height: 1px;
+            opacity: 0; pointer-events: none; top: 0; left: 0;
         }
-        #posCamVideo { width: 100%; height: 100%; object-fit: cover; display: block; }
-        /* Guide: absolute (removed from grid flow) so it doesn't push siblings.
-           Centred in .pos-cam-view (which has position:relative).
-           position:relative inside gives corners their containing block. */
+        #posCamCanvas {
+            display: block; width: 100%; height: 100%;
+        }
         .pos-cam-guide {
             position: absolute;
             top: 50%; left: 50%;
@@ -1658,6 +1656,7 @@ if (in_array($user['role'] ?? '', ['admin', 'manager'], true)) {
             display: flex; align-items: center; justify-content: space-between;
             padding: 14px 16px; background: rgba(0,0,0,0.88); color: #fff;
             font-size: 13px; gap: 12px; flex-shrink: 0;
+            margin-top: auto; /* push to bottom of the flex column overlay */
         }
         #posCamStatus { opacity: 0.8; flex: 1; font-size: 13px; }
         .pos-cam-keep-lbl {
@@ -1718,19 +1717,14 @@ if (in_array($user['role'] ?? '', ['admin', 'manager'], true)) {
         #barcodeScanStrip .fas { color: #4ade80; }
         #barcodeScanLast { margin-left: auto; opacity: 0.65; font-weight: 400; font-size: 12px; max-width: 48%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
         /* Scanned items live feed (Facebook Live comment style) */
-        /* Live feed inside the camera view — shares grid cell with video so it stacks above it.
-           backdrop-filter is the key: Android Chrome renders <video> in a hardware OS overlay plane
-           that sits above all HTML regardless of z-index. Applying backdrop-filter forces Chrome to
-           composite this element ABOVE the video plane for the filter to work — brightness(1) has
-           no visual effect but the compositing side-effect makes the cards visible on mobile. */
         .pos-cam-feed {
+            position: absolute; bottom: 0; left: 0; right: 0;
             display: flex; flex-direction: column; justify-content: flex-end;
             gap: 6px; padding: 10px 12px 14px;
             pointer-events: none;
             overflow: hidden;
-            position: relative; z-index: 2;
-            -webkit-backdrop-filter: brightness(1);
-            backdrop-filter: brightness(1);
+            max-height: 80%;
+            z-index: 5;
         }
         .pos-cam-feed-item {
             display: flex; align-items: center; gap: 10px;
@@ -5071,8 +5065,7 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
             barcodeScannerEnabled = !barcodeScannerEnabled;
             localStorage.setItem(LS_BARCODE_KEY, barcodeScannerEnabled ? '1' : '0');
             posInitBarcodeUI();
-            Alert.show(barcodeScannerEnabled ? 'Barcode scanner enabled' : 'Barcode scanner disabled',
-                barcodeScannerEnabled ? 'success' : 'info', 2200);
+            posToast(barcodeScannerEnabled ? 'Barcode scanner enabled' : 'Barcode scanner disabled', 'ok', 2200);
         }
 
         function posHandleBarcodeInput(code) {
@@ -5082,16 +5075,16 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
             const lastEl = document.getElementById('barcodeScanLast');
             if (match) {
                 if (!match.is_available) {
-                    Alert.show('Item is 86\'d: ' + match.name, 'warn', 2500);
+                    posToast('Item is 86\'d: ' + match.name, 'err', 2500);
                 } else if (!menuItemVisibleInMode(match)) {
-                    Alert.show('Item not available in current mode', 'warn', 2500);
+                    posToast('Item not available in current mode', 'err', 2500);
                 } else {
                     addToCart(match);
-                    Alert.show('Added: ' + match.name, 'success', 1800);
+                    posToast('Added: ' + match.name, 'ok', 1800);
                 }
                 if (lastEl) lastEl.textContent = match ? '✓ ' + match.name : '—';
             } else {
-                Alert.show('Barcode not recognised: ' + code, 'warn', 2800);
+                posToast('Barcode not recognised: ' + code, 'err', 2800);
                 if (lastEl) lastEl.textContent = '? ' + code;
             }
         }
@@ -5168,7 +5161,7 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
                         if (idx !== -1) menuList[idx].barcode = data.barcode;
                         menuItem.barcode = data.barcode;
                         modal.remove();
-                        Alert.show(newCode ? 'Barcode assigned' : 'Barcode cleared', 'success', 2200);
+                        posToast(newCode ? 'Barcode assigned' : 'Barcode cleared', 'ok', 2200);
                     } else {
                         errEl.textContent = data.error || 'Save failed.';
                         errEl.style.display = 'block';
@@ -8934,6 +8927,7 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
         </div>
         <div class="pos-cam-view" id="posCamView">
             <video id="posCamVideo" autoplay playsinline muted></video>
+            <canvas id="posCamCanvas"></canvas>
             <div class="pos-cam-guide">
                 <div class="pos-cam-corner tl"></div>
                 <div class="pos-cam-corner tr"></div>
@@ -8968,6 +8962,32 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
         var _stream = null, _detector = null, _loopId = null, _canvas = null, _ctx = null;
         var _cooldown = false, _torchOn = false;
         var _ac = null; // AudioContext — created once on scanner open (requires user gesture)
+        var _dispCanvas = null, _dispCtx = null, _drawId = null;
+
+        function _startDrawLoop(video) {
+            _dispCanvas = document.getElementById('posCamCanvas');
+            if (!_dispCanvas) return;
+            _dispCtx = _dispCanvas.getContext('2d');
+            function draw() {
+                _drawId = requestAnimationFrame(draw);
+                if (!video || video.readyState < 2) return;
+                var cw = _dispCanvas.offsetWidth, ch = _dispCanvas.offsetHeight;
+                if (_dispCanvas.width !== cw || _dispCanvas.height !== ch) {
+                    _dispCanvas.width = cw; _dispCanvas.height = ch;
+                }
+                if (!cw || !ch || !video.videoWidth || !video.videoHeight) return;
+                // Draw with cover behaviour
+                var scale = Math.max(cw / video.videoWidth, ch / video.videoHeight);
+                var dw = video.videoWidth * scale, dh = video.videoHeight * scale;
+                _dispCtx.drawImage(video, (cw - dw) / 2, (ch - dh) / 2, dw, dh);
+            }
+            draw();
+        }
+        function _stopDrawLoop() {
+            if (_drawId) { cancelAnimationFrame(_drawId); _drawId = null; }
+            if (_dispCtx && _dispCanvas) { _dispCtx.clearRect(0, 0, _dispCanvas.width, _dispCanvas.height); }
+            _dispCanvas = null; _dispCtx = null;
+        }
         var COOLDOWN_MS = 2200;
 
         async function _waitDetector(tries) {
@@ -9024,8 +9044,7 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
             var video = document.getElementById('posCamVideo');
             video.srcObject = _stream;
             await video.play().catch(function () {});
-
-            // Torch capability
+            _startDrawLoop(video);
             var track = _stream.getVideoTracks()[0];
             if (track && track.getCapabilities && track.getCapabilities().torch) {
                 var torchBtn = document.getElementById('posCamTorch');
@@ -9042,6 +9061,7 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
 
         window.posCamScanClose = function (fromPopstate) {
             clearInterval(_loopId); _loopId = null;
+            _stopDrawLoop();
             _cooldown = false; _torchOn = false;
             if (_stream) { _stream.getTracks().forEach(function (t) { t.stop(); }); _stream = null; }
             if (_ac) { try { _ac.close(); } catch(e) {} _ac = null; }
