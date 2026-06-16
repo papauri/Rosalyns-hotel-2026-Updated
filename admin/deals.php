@@ -173,7 +173,7 @@ $site_name  = getSetting('site_name', 'Hotel');
 
 // Load categories and menu items for the item picker
 $menuCatsRaw = $pdo->query("
-    SELECT id, name FROM menu_categories WHERE is_active = 1 ORDER BY sort_order ASC, name ASC
+    SELECT id, name, slug FROM menu_categories WHERE is_active = 1 ORDER BY sort_order ASC, name ASC
 ")->fetchAll(PDO::FETCH_ASSOC);
 
 $menuItemsRaw = $pdo->query("
@@ -245,40 +245,72 @@ $DAY_NAMES = ['','Mon','Tue','Wed','Thu','Fri','Sat','Sun'];
         .deals-empty { text-align:center; padding:60px 20px; color:#9ca3af; }
         .deals-empty i { font-size:40px; margin-bottom:12px; display:block; }
 
-        /* ── Modal ── */
-        .dm-bg { position:fixed; inset:0; background:rgba(0,0,0,.52); z-index:1000; display:none; align-items:center; justify-content:center; padding:16px; }
+        /* ── Modal shell ── */
+        .dm-bg  { position:fixed; inset:0; background:rgba(0,0,0,.52); z-index:1000; display:none; align-items:center; justify-content:center; padding:16px; }
         .dm-bg.show { display:flex; }
-        .dm-box { background:#fff; border-radius:16px; padding:28px; width:100%; max-width:600px; max-height:92vh; overflow-y:auto; position:relative; }
-        .dm-title { font-size:20px; font-weight:600; margin-bottom:20px; }
-        .dm-close { position:absolute; top:16px; right:18px; background:none; border:none; font-size:20px; cursor:pointer; color:#6b7280; line-height:1; }
-        .fm-row   { margin-bottom:15px; }
-        .fm-row label { display:block; font-size:11px; font-weight:700; color:#374151; margin-bottom:5px; text-transform:uppercase; letter-spacing:.04em; }
+        .dm-box { background:#fff; border-radius:18px; width:100%; max-width:640px; max-height:94vh; overflow-y:auto; position:relative; }
+        .dm-header { padding:22px 24px 0; position:sticky; top:0; background:#fff; z-index:2; border-bottom:1px solid #f3f4f6; padding-bottom:14px; }
+        .dm-title  { font-size:19px; font-weight:700; color:#111827; margin:0 32px 4px 0; }
+        .dm-subtitle { font-size:12px; color:#9ca3af; }
+        .dm-close  { position:absolute; top:16px; right:18px; background:none; border:none; font-size:18px; cursor:pointer; color:#9ca3af; line-height:1; }
+        .dm-close:hover { color:#374151; }
+        .dm-body   { padding:20px 24px; }
+        /* Form primitives */
+        .fm-row   { margin-bottom:16px; }
+        .fm-row label,.fm-label { display:block; font-size:11px; font-weight:700; color:#374151; margin-bottom:6px; text-transform:uppercase; letter-spacing:.05em; }
         .fm-row input[type=text],.fm-row input[type=number],.fm-row input[type=time],
         .fm-row input[type=date],.fm-row select,.fm-row textarea {
-            width:100%; box-sizing:border-box; padding:9px 12px; border:1px solid #d1d5db;
-            border-radius:8px; font-size:14px; color:#1f2937; background:#fff; outline:none;
-            transition:border-color .15s;
+            width:100%; box-sizing:border-box; padding:10px 12px; border:1px solid #d1d5db;
+            border-radius:9px; font-size:14px; color:#1f2937; background:#fff; outline:none; transition:border-color .15s;
         }
         .fm-row input:focus,.fm-row select:focus,.fm-row textarea:focus { border-color:#6366f1; box-shadow:0 0 0 3px rgba(99,102,241,.1); }
-        .fm-row textarea { resize:vertical; min-height:56px; }
-        .fm-hint { font-size:11px; color:#9ca3af; margin-top:4px; line-height:1.4; }
-        .fm-2col { display:grid; grid-template-columns:1fr 1fr; gap:12px; }
-        .fm-3col { display:grid; grid-template-columns:1fr 1fr 1fr; gap:10px; }
-        .fm-check-row { display:flex; align-items:center; gap:8px; }
-        .fm-check-row input[type=checkbox] { width:16px; height:16px; cursor:pointer; accent-color:#6366f1; }
-        .fm-check-row label { font-size:14px; font-weight:500; color:#1f2937; margin:0; text-transform:none; letter-spacing:0; }
-        .fm-section { background:#f9fafb; border:1px solid #e5e7eb; border-radius:10px; padding:14px; margin-bottom:14px; display:none; }
+        .fm-row textarea { resize:vertical; min-height:52px; }
+        .fm-hint  { font-size:11px; color:#9ca3af; margin-top:4px; line-height:1.5; }
+        .fm-2col  { display:grid; grid-template-columns:1fr 1fr; gap:12px; }
+        .fm-section { background:#f9fafb; border:1px solid #e5e7eb; border-radius:12px; padding:16px; margin-bottom:14px; display:none; }
         .fm-section.show { display:block; }
-        .fm-section-title { font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:.05em; color:#6b7280; margin-bottom:12px; }
+        .fm-sec-head { font-size:12px; font-weight:700; color:#374151; margin-bottom:12px; display:flex; align-items:center; gap:7px; }
+        .fm-sec-head i { font-size:13px; }
+        .fm-check-row { display:flex; align-items:center; gap:9px; }
+        .fm-check-row input[type=checkbox] { width:17px; height:17px; cursor:pointer; accent-color:#6366f1; flex-shrink:0; }
+        .fm-check-row label { font-size:14px; font-weight:500; color:#1f2937; margin:0; text-transform:none; letter-spacing:0; cursor:pointer; }
+        /* Deal type cards */
+        .dm-type-grid { display:grid; grid-template-columns:repeat(3,1fr); gap:8px; margin-bottom:16px; }
+        .dm-type-card { border:2px solid #e5e7eb; border-radius:12px; padding:12px 10px; cursor:pointer; transition:all .15s; text-align:center; background:#fff; user-select:none; }
+        .dm-type-card:hover { border-color:#a5b4fc; background:#f5f3ff; }
+        .dm-type-card.sel { border-color:#6366f1; background:#f0f0ff; }
+        .dm-type-card .dtc-icon { font-size:20px; margin-bottom:5px; }
+        .dm-type-card .dtc-label { font-size:12px; font-weight:700; color:#374151; line-height:1.2; }
+        .dm-type-card .dtc-eg { font-size:10px; color:#9ca3af; margin-top:3px; line-height:1.3; }
+        .dm-type-card.sel .dtc-label { color:#4338ca; }
+        /* Scope option cards */
+        .dm-scope-opts { display:grid; grid-template-columns:repeat(3,1fr); gap:8px; margin-bottom:12px; }
+        .dm-scope-card { border:2px solid #e5e7eb; border-radius:10px; padding:10px; cursor:pointer; transition:all .15s; text-align:center; background:#fff; user-select:none; }
+        .dm-scope-card:hover { border-color:#a5b4fc; }
+        .dm-scope-card.sel { border-color:#6366f1; background:#f0f0ff; }
+        .dm-scope-card i { font-size:16px; color:#6b7280; margin-bottom:4px; display:block; }
+        .dm-scope-card.sel i { color:#6366f1; }
+        .dm-scope-card .dsc-label { font-size:11px; font-weight:700; color:#374151; }
+        .dm-scope-card .dsc-sub { font-size:10px; color:#9ca3af; margin-top:2px; }
+        /* Day chips */
         .day-chips { display:flex; flex-wrap:wrap; gap:6px; margin-top:6px; }
-        .day-chip  { padding:4px 11px; border-radius:20px; border:1px solid #d1d5db; background:#f9fafb; font-size:12px; font-weight:600; cursor:pointer; color:#374151; user-select:none; }
+        .day-chip  { padding:5px 12px; border-radius:20px; border:1.5px solid #d1d5db; background:#f9fafb; font-size:12px; font-weight:600; cursor:pointer; color:#374151; user-select:none; transition:all .12s; }
         .day-chip.sel { background:#6366f1; border-color:#6366f1; color:#fff; }
-        .dm-footer { display:flex; gap:10px; justify-content:flex-end; margin-top:22px; padding-top:18px; border-top:1px solid #f3f4f6; }
-        .dm-footer .btn-cancel { padding:9px 20px; border-radius:9px; border:1px solid #d1d5db; background:#fff; font-size:14px; cursor:pointer; color:#374151; }
-        .dm-footer .btn-save   { padding:9px 24px; border-radius:9px; border:none; background:#6366f1; color:#fff; font-size:14px; font-weight:600; cursor:pointer; }
+        /* Category type chips (for "by category" scope) */
+        .ct-chips { display:flex; flex-wrap:wrap; gap:7px; margin-top:8px; }
+        .ct-chip  { display:inline-flex; align-items:center; gap:5px; padding:5px 13px; border-radius:20px; border:1.5px solid #d1d5db; background:#f9fafb; font-size:12px; font-weight:600; cursor:pointer; color:#374151; user-select:none; transition:all .12s; }
+        .ct-chip.sel { background:#6366f1; border-color:#6366f1; color:#fff; }
+        .ct-chip i { font-size:10px; }
+        /* Multi-buy preview */
+        .mb-preview { background:#ede9fe; border-radius:8px; padding:9px 13px; font-size:13px; color:#4c1d95; margin-top:10px; display:none; }
+        .mb-preview strong { color:#6d28d9; }
+        /* Footer */
+        .dm-footer { padding:16px 24px; border-top:1px solid #f3f4f6; display:flex; gap:10px; justify-content:flex-end; position:sticky; bottom:0; background:#fff; }
+        .dm-footer .btn-cancel { padding:10px 20px; border-radius:10px; border:1px solid #d1d5db; background:#fff; font-size:14px; cursor:pointer; color:#374151; }
+        .dm-footer .btn-save   { padding:10px 24px; border-radius:10px; border:none; background:#6366f1; color:#fff; font-size:14px; font-weight:600; cursor:pointer; }
         .dm-footer .btn-save:hover { background:#4f46e5; }
-        .dm-footer .btn-save:disabled { opacity:.6; cursor:not-allowed; }
-        @media(max-width:520px) { .fm-2col,.fm-3col { grid-template-columns:1fr; } .dm-box { padding:18px 14px; } }
+        .dm-footer .btn-save:disabled { opacity:.55; cursor:not-allowed; }
+        @media(max-width:560px) { .dm-type-grid,.dm-scope-opts { grid-template-columns:repeat(2,1fr); } .dm-box { border-radius:14px; } .fm-2col { grid-template-columns:1fr; } }
 
         /* ── Item Picker ── */
         .ip-row   { display:grid; grid-template-columns:1fr 1fr auto; gap:8px; align-items:flex-end; margin-bottom:10px; }
@@ -401,152 +433,210 @@ $DAY_NAMES = ['','Mon','Tue','Wed','Thu','Fri','Sat','Sun'];
 <!-- Add / Edit Modal -->
 <div class="dm-bg" id="dmBg">
 <div class="dm-box">
-    <div class="dm-title" id="dmTitle">Add Deal</div>
-    <button class="dm-close" onclick="closeDealModal()"><i class="fas fa-times"></i></button>
 
-    <!-- Core -->
+    <div class="dm-header">
+        <div class="dm-title" id="dmTitle">Add Deal</div>
+        <div class="dm-subtitle">Deals apply automatically at the POS — no staff action needed.</div>
+        <button class="dm-close" onclick="closeDealModal()"><i class="fas fa-times"></i></button>
+    </div>
+
+    <div class="dm-body">
+
+    <!-- 1. Name & description -->
     <div class="fm-row"><label>Deal Name *</label>
-        <input type="text" id="dmName" maxlength="100" placeholder="e.g. Happy Hour Drinks, 3-for-2 Lagers">
+        <input type="text" id="dmName" maxlength="100" placeholder="e.g. Happy Hour, Buy 3 Get 1 Free Coke">
     </div>
-    <div class="fm-row"><label>Description (optional)</label>
-        <textarea id="dmDesc" maxlength="255" placeholder="Shown on receipts and staff screen"></textarea>
-    </div>
-    <div class="fm-2col">
-        <div class="fm-row"><label>Deal Type *</label>
-            <select id="dmType" onchange="onTypeChange()">
-                <option value="happy_hour">Happy Hour — timed % off</option>
-                <option value="percent_off">% Discount — always-on % off</option>
-                <option value="fixed_off">Fixed Amount Off</option>
-                <option value="multi_buy">Multi-Buy (buy X pay Y)</option>
-                <option value="spend_save">Spend &amp; Save — min spend threshold</option>
-                <option value="combo">Combo Deal — mix categories</option>
-            </select>
-        </div>
-        <div class="fm-row"><label>Sort Priority</label>
-            <input type="number" id="dmSort" value="0" min="0" step="1">
-            <div class="fm-hint">Lower = evaluated first</div>
-        </div>
+    <div class="fm-row"><label>Short Description <span style="font-weight:400;text-transform:none;letter-spacing:0;">(optional — shown on receipt)</span></label>
+        <textarea id="dmDesc" maxlength="255" rows="2" placeholder="e.g. Half-price drinks every evening 5–8pm"></textarea>
     </div>
 
-    <!-- % / fixed discount params -->
+    <!-- 2. Deal type visual cards -->
+    <div class="fm-label" style="margin-bottom:8px;">What kind of deal is this? *</div>
+    <div class="dm-type-grid" id="dmTypeGrid">
+        <div class="dm-type-card sel" data-type="happy_hour" onclick="selectDealType('happy_hour')">
+            <div class="dtc-icon">⏰</div>
+            <div class="dtc-label">Happy Hour</div>
+            <div class="dtc-eg">% off during set hours</div>
+        </div>
+        <div class="dm-type-card" data-type="percent_off" onclick="selectDealType('percent_off')">
+            <div class="dtc-icon">%</div>
+            <div class="dtc-label">Percentage Off</div>
+            <div class="dtc-eg">Always-on % discount</div>
+        </div>
+        <div class="dm-type-card" data-type="fixed_off" onclick="selectDealType('fixed_off')">
+            <div class="dtc-icon">🔖</div>
+            <div class="dtc-label">Fixed Amount Off</div>
+            <div class="dtc-eg">e.g. <?php echo htmlspecialchars($sym); ?> 500 off</div>
+        </div>
+        <div class="dm-type-card" data-type="multi_buy" onclick="selectDealType('multi_buy')">
+            <div class="dtc-icon">🎁</div>
+            <div class="dtc-label">Buy X Get Y Free</div>
+            <div class="dtc-eg">e.g. Buy 3, get 1 free</div>
+        </div>
+        <div class="dm-type-card" data-type="spend_save" onclick="selectDealType('spend_save')">
+            <div class="dtc-icon">💰</div>
+            <div class="dtc-label">Spend &amp; Save</div>
+            <div class="dtc-eg">Reward when cart hits a minimum</div>
+        </div>
+        <div class="dm-type-card" data-type="combo" onclick="selectDealType('combo')">
+            <div class="dtc-icon">🍽</div>
+            <div class="dtc-label">Combo Deal</div>
+            <div class="dtc-eg">Buy from different categories together</div>
+        </div>
+    </div>
+    <input type="hidden" id="dmType" value="happy_hour">
+
+    <!-- 3. Happy Hour / % off params -->
     <div class="fm-section" id="dmSecPct">
-        <div class="fm-section-title">Discount Amount</div>
-        <div class="fm-row"><label>Discount %</label>
-            <input type="number" id="dmDiscPct" min="0.1" max="100" step="0.1" placeholder="20">
+        <div class="fm-sec-head"><i class="fas fa-percent" style="color:#f59e0b;"></i> How much off?</div>
+        <div class="fm-row">
+            <label>Discount percentage</label>
+            <input type="number" id="dmDiscPct" min="0.1" max="100" step="0.1" placeholder="e.g. 20 for 20% off">
         </div>
     </div>
+
+    <!-- 4. Fixed amount off -->
     <div class="fm-section" id="dmSecFixed">
-        <div class="fm-section-title">Fixed Discount Amount</div>
-        <div class="fm-row"><label>Amount off (<?php echo htmlspecialchars($sym); ?>)</label>
-            <input type="number" id="dmDiscFixed" min="0.01" step="0.01" placeholder="500.00">
+        <div class="fm-sec-head"><i class="fas fa-tag" style="color:#3b82f6;"></i> How much off?</div>
+        <div class="fm-row">
+            <label>Amount to knock off (<?php echo htmlspecialchars($sym); ?>)</label>
+            <input type="number" id="dmDiscFixed" min="0.01" step="0.01" placeholder="e.g. 500.00">
         </div>
     </div>
 
-    <!-- Multi-buy -->
+    <!-- 5. Multi-buy -->
     <div class="fm-section" id="dmSecMb">
-        <div class="fm-section-title">Multi-Buy Settings</div>
+        <div class="fm-sec-head"><i class="fas fa-gifts" style="color:#8b5cf6;"></i> Buy X, Pay for Y — set the numbers</div>
         <div class="fm-2col">
-            <div class="fm-row"><label>Customer Buys (qty)</label>
-                <input type="number" id="dmMbQty" min="2" max="20" step="1" value="3">
-                <div class="fm-hint">Minimum items in cart to trigger</div>
+            <div class="fm-row">
+                <label>Customer buys this many</label>
+                <input type="number" id="dmMbQty" min="2" max="20" step="1" value="3" oninput="updateMbPreview()">
+                <div class="fm-hint">Total items needed in cart to trigger the deal</div>
             </div>
-            <div class="fm-row"><label>Customer Pays For</label>
-                <input type="number" id="dmMbPay" min="1" max="19" step="1" value="2">
-                <div class="fm-hint">Cheapest items above this are free</div>
+            <div class="fm-row">
+                <label>But only pays for this many</label>
+                <input type="number" id="dmMbPay" min="1" max="19" step="1" value="2" oninput="updateMbPreview()">
+                <div class="fm-hint">The cheapest remaining items are free</div>
             </div>
         </div>
-        <div class="fm-row"><label>Max groups per order (optional)</label>
-            <input type="number" id="dmMaxUses" min="1" max="99" step="1" placeholder="Leave blank = unlimited">
-            <div class="fm-hint">e.g. "3 for 2 — max 1 free item per transaction"</div>
+        <div class="mb-preview" id="mbPreview"></div>
+        <div class="fm-row" style="margin-top:12px;">
+            <label>Limit — max times this deal fires per order <span style="font-weight:400;text-transform:none;letter-spacing:0;">(optional)</span></label>
+            <input type="number" id="dmMaxUses" min="1" max="99" step="1" placeholder="Leave blank for unlimited">
+            <div class="fm-hint">e.g. set to 1 so a customer can only get 1 free item even if they buy 9</div>
         </div>
     </div>
 
-    <!-- Spend & Save -->
+    <!-- 6. Spend & Save -->
     <div class="fm-section" id="dmSecSpend">
-        <div class="fm-section-title">Spend &amp; Save Settings</div>
-        <div class="fm-row"><label>Minimum cart total (<?php echo htmlspecialchars($sym); ?>)</label>
-            <input type="number" id="dmSpendThreshold" min="0.01" step="0.01" placeholder="10000.00">
+        <div class="fm-sec-head"><i class="fas fa-coins" style="color:#ec4899;"></i> Spend threshold &amp; reward</div>
+        <div class="fm-row">
+            <label>Minimum cart total to qualify (<?php echo htmlspecialchars($sym); ?>)</label>
+            <input type="number" id="dmSpendThreshold" min="0.01" step="0.01" placeholder="e.g. 10000.00">
         </div>
-        <div class="fm-row"><label>Reward type</label>
+        <div class="fm-row">
+            <label>Reward type</label>
             <select id="dmSpendRewardType" onchange="onSpendRewardChange()">
-                <option value="pct">Percentage off</option>
-                <option value="fixed">Fixed amount off</option>
+                <option value="pct">Give a percentage off</option>
+                <option value="fixed">Give a fixed amount off</option>
             </select>
         </div>
-        <div id="dmSpendPctRow" class="fm-row"><label>Discount %</label>
-            <input type="number" id="dmSpendPct" min="0.1" max="100" step="0.1" placeholder="10">
+        <div id="dmSpendPctRow" class="fm-row">
+            <label>Percentage off</label>
+            <input type="number" id="dmSpendPct" min="0.1" max="100" step="0.1" placeholder="e.g. 10">
         </div>
-        <div id="dmSpendFixedRow" class="fm-row" style="display:none;"><label>Amount off (<?php echo htmlspecialchars($sym); ?>)</label>
-            <input type="number" id="dmSpendFixed" min="0.01" step="0.01" placeholder="1000.00">
+        <div id="dmSpendFixedRow" class="fm-row" style="display:none;">
+            <label>Amount off (<?php echo htmlspecialchars($sym); ?>)</label>
+            <input type="number" id="dmSpendFixed" min="0.01" step="0.01" placeholder="e.g. 1000.00">
         </div>
     </div>
 
-    <!-- Combo -->
+    <!-- 7. Combo -->
     <div class="fm-section" id="dmSecCombo">
-        <div class="fm-section-title">Combo Requirements</div>
-        <p style="font-size:13px;color:#6b7280;margin:0 0 12px;">Define the groups of items that must ALL be in the cart to trigger this deal.</p>
+        <div class="fm-sec-head"><i class="fas fa-object-group" style="color:#0ea5e9;"></i> What must be in the cart together?</div>
+        <p style="font-size:13px;color:#6b7280;margin:0 0 12px;">Add groups below — ALL groups must be present in the cart for this deal to fire. For example: 1 Food item + 1 Drink.</p>
         <div id="dmComboGroups"></div>
-        <button type="button" onclick="addComboGroup()" style="font-size:12px;padding:5px 12px;border-radius:7px;border:1px dashed #d1d5db;background:#f9fafb;cursor:pointer;color:#374151;margin-bottom:12px;"><i class="fas fa-plus"></i> Add Group</button>
-        <div class="fm-row"><label>Discount %</label>
-            <input type="number" id="dmComboPct" min="0.1" max="100" step="0.1" placeholder="15">
+        <button type="button" onclick="addComboGroup()" style="font-size:12px;padding:6px 14px;border-radius:8px;border:1.5px dashed #d1d5db;background:#f9fafb;cursor:pointer;color:#374151;margin-bottom:14px;"><i class="fas fa-plus"></i> Add another group</button>
+        <div class="fm-row">
+            <label>Discount % to give when all groups are met</label>
+            <input type="number" id="dmComboPct" min="0.1" max="100" step="0.1" placeholder="e.g. 15">
         </div>
     </div>
 
-    <!-- Time window -->
+    <!-- 8. Time window (happy hour) -->
     <div class="fm-section" id="dmSecTime">
-        <div class="fm-section-title">Time Window</div>
+        <div class="fm-sec-head"><i class="fas fa-clock" style="color:#f59e0b;"></i> What hours does this run?</div>
         <div class="fm-2col">
-            <div class="fm-row"><label>Start Time</label>
-                <input type="time" id="dmStartTime">
-            </div>
-            <div class="fm-row"><label>End Time</label>
-                <input type="time" id="dmEndTime">
-            </div>
+            <div class="fm-row"><label>Start time</label><input type="time" id="dmStartTime"></div>
+            <div class="fm-row"><label>End time</label><input type="time" id="dmEndTime"></div>
         </div>
+        <div class="fm-hint">The deal will only fire between these times. Leave blank for all day.</div>
     </div>
 
-    <!-- Scope -->
+    <!-- 9. Which items does it cover? -->
     <div class="fm-section show" id="dmSecScope">
-        <div class="fm-section-title">Applies To</div>
-        <div class="fm-row"><label>Scope</label>
-            <select id="dmAppliesTo" onchange="onScopeChange()">
-                <option value="all">All menu items</option>
-                <option value="item_types">Specific item types</option>
-                <option value="items">Specific items (by menu ID)</option>
-            </select>
+        <div class="fm-sec-head"><i class="fas fa-bullseye" style="color:#10b981;"></i> Which items does this deal cover?</div>
+        <div class="dm-scope-opts">
+            <div class="dm-scope-card sel" data-scope="all" onclick="selectScope('all')">
+                <i class="fas fa-store"></i>
+                <div class="dsc-label">Everything</div>
+                <div class="dsc-sub">All menu items</div>
+            </div>
+            <div class="dm-scope-card" data-scope="item_types" onclick="selectScope('item_types')">
+                <i class="fas fa-th-large"></i>
+                <div class="dsc-label">By Category</div>
+                <div class="dsc-sub">e.g. only Drinks</div>
+            </div>
+            <div class="dm-scope-card" data-scope="items" onclick="selectScope('items')">
+                <i class="fas fa-list-ul"></i>
+                <div class="dsc-label">Specific Items</div>
+                <div class="dsc-sub">Pick exact products</div>
+            </div>
         </div>
-        <div id="dmItemTypesRow" class="fm-row" style="display:none;"><label>Item Types (comma-separated)</label>
-            <input type="text" id="dmItemTypes" placeholder="food, drink">
-            <div class="fm-hint">Type exactly as they appear in the menu category slug: <code>food</code>, <code>drink</code></div>
+        <input type="hidden" id="dmAppliesTo" value="all">
+
+        <!-- By category: chips -->
+        <div id="dmItemTypesRow" style="display:none;">
+            <div class="fm-hint" style="margin-bottom:8px;">Select one or more categories — the deal will only apply to items in those categories.</div>
+            <div class="ct-chips" id="ctChips">
+                <?php foreach ($menuCatsRaw as $cat): ?>
+                <span class="ct-chip" data-slug="<?php echo htmlspecialchars($cat['slug']); ?>" onclick="ctToggle(this)">
+                    <i class="fas fa-tag"></i> <?php echo htmlspecialchars($cat['name']); ?>
+                </span>
+                <?php endforeach; ?>
+            </div>
+            <input type="hidden" id="dmItemTypes" value="">
         </div>
+
+        <!-- Specific items: cascading dropdowns -->
         <div id="dmItemIdsRow" style="display:none;">
-            <label style="display:block;font-size:11px;font-weight:700;color:#374151;margin-bottom:7px;text-transform:uppercase;letter-spacing:.04em;">Add Specific Items</label>
+            <div class="fm-hint" style="margin-bottom:10px;">Choose a category, then pick the specific item to add. You can add as many as you like.</div>
             <div class="ip-row">
                 <div>
                     <div style="font-size:11px;color:#6b7280;margin-bottom:4px;">Category</div>
                     <select id="ipCatSelect" onchange="ipOnCatChange()">
-                        <option value="">— Select category —</option>
+                        <option value="">— Pick a category —</option>
                     </select>
                 </div>
                 <div>
                     <div style="font-size:11px;color:#6b7280;margin-bottom:4px;">Item</div>
                     <select id="ipItemSelect" disabled>
-                        <option value="">— Select item —</option>
+                        <option value="">— Then pick an item —</option>
                     </select>
                 </div>
                 <button type="button" class="ip-add-btn" id="ipAddBtn" disabled onclick="ipAddSelected()">
                     <i class="fas fa-plus"></i> Add
                 </button>
             </div>
-            <div class="ip-chips" id="ipChips"><span class="ip-empty-hint">No items added yet — deal will apply to all items</span></div>
+            <div class="ip-chips" id="ipChips"><span class="ip-empty-hint">No items added yet</span></div>
             <input type="hidden" id="dmItemIds" value="">
         </div>
     </div>
 
-    <!-- Days of week -->
+    <!-- 10. Days active -->
     <div class="fm-section show" id="dmSecDays">
-        <div class="fm-section-title">Days Active</div>
-        <div class="fm-hint" style="margin-bottom:8px;">Leave all unselected = every day</div>
+        <div class="fm-sec-head"><i class="fas fa-calendar-week" style="color:#6366f1;"></i> Which days does it run?</div>
+        <div class="fm-hint" style="margin-bottom:8px;">Leave all unselected and the deal runs every day.</div>
         <div class="day-chips" id="dmDayChips">
             <?php foreach ([1=>'Mon',2=>'Tue',3=>'Wed',4=>'Thu',5=>'Fri',6=>'Sat',7=>'Sun'] as $n=>$lbl): ?>
             <span class="day-chip" data-day="<?php echo $n; ?>" onclick="toggleDay(this)"><?php echo $lbl; ?></span>
@@ -554,29 +644,36 @@ $DAY_NAMES = ['','Mon','Tue','Wed','Thu','Fri','Sat','Sun'];
         </div>
     </div>
 
-    <!-- Date range -->
+    <!-- 11. Date range -->
     <div class="fm-section show" id="dmSecDates">
-        <div class="fm-section-title">Valid Date Range (optional)</div>
+        <div class="fm-sec-head"><i class="fas fa-calendar-alt" style="color:#6366f1;"></i> Run between these dates <span style="font-weight:400;font-size:11px;text-transform:none;color:#9ca3af;">(optional — leave blank to run indefinitely)</span></div>
         <div class="fm-2col">
-            <div class="fm-row"><label>Valid From</label><input type="date" id="dmValidFrom"></div>
-            <div class="fm-row"><label>Valid To</label><input type="date" id="dmValidTo"></div>
+            <div class="fm-row"><label>Start date</label><input type="date" id="dmValidFrom"></div>
+            <div class="fm-row"><label>End date</label><input type="date" id="dmValidTo"></div>
         </div>
     </div>
 
-    <!-- Flags -->
+    <!-- 12. Options -->
     <div class="fm-section show">
-        <div class="fm-section-title">Options</div>
-        <div style="display:flex;flex-wrap:wrap;gap:20px;">
+        <div class="fm-sec-head"><i class="fas fa-sliders-h" style="color:#6366f1;"></i> Options</div>
+        <div style="display:flex;flex-direction:column;gap:12px;">
             <div class="fm-check-row">
                 <input type="checkbox" id="dmIsActive" checked>
-                <label for="dmIsActive">Deal is active</label>
+                <label for="dmIsActive">This deal is active — it will fire at the POS straight away</label>
             </div>
             <div class="fm-check-row">
                 <input type="checkbox" id="dmExclusive">
-                <label for="dmExclusive">Exclusive (cannot stack with other deals)</label>
+                <label for="dmExclusive">Exclusive deal — cannot stack with other deals on the same order</label>
             </div>
         </div>
+        <div class="fm-row" style="margin-top:14px;margin-bottom:0;">
+            <label>Evaluation order <span style="font-weight:400;text-transform:none;letter-spacing:0;">(optional)</span></label>
+            <input type="number" id="dmSort" value="0" min="0" step="1" style="max-width:120px;">
+            <div class="fm-hint">Lower number = evaluated first. Only matters when you have multiple deals and want to control priority.</div>
+        </div>
     </div>
+
+    </div><!-- /.dm-body -->
 
     <div class="dm-footer">
         <button class="btn-cancel" onclick="closeDealModal()">Cancel</button>
@@ -591,15 +688,105 @@ const _dealsCsrf = <?php echo json_encode($csrf_token); ?>;
 let _dmEditId = 0;
 let _comboGroupCount = 0;
 
+/* ── Deal type card selector ─────────────────────────────────────────────── */
+function selectDealType(type) {
+    document.getElementById('dmType').value = type;
+    document.querySelectorAll('.dm-type-card').forEach(c => c.classList.toggle('sel', c.dataset.type === type));
+    _applyTypeVisibility(type);
+}
+
+function _applyTypeVisibility(t) {
+    const show = id => document.getElementById(id).classList.add('show');
+    const hide = id => document.getElementById(id).classList.remove('show');
+    ['dmSecPct','dmSecFixed','dmSecMb','dmSecSpend','dmSecTime','dmSecCombo'].forEach(hide);
+    if (t === 'happy_hour')  { show('dmSecPct'); show('dmSecTime'); }
+    if (t === 'percent_off') { show('dmSecPct'); }
+    if (t === 'fixed_off')   { show('dmSecFixed'); }
+    if (t === 'multi_buy')   { show('dmSecMb'); updateMbPreview(); }
+    if (t === 'spend_save')  { show('dmSecSpend'); }
+    if (t === 'combo')       { show('dmSecCombo'); }
+}
+
+/* ── Scope card selector ─────────────────────────────────────────────────── */
+function selectScope(scope) {
+    document.getElementById('dmAppliesTo').value = scope;
+    document.querySelectorAll('.dm-scope-card').forEach(c => c.classList.toggle('sel', c.dataset.scope === scope));
+    document.getElementById('dmItemTypesRow').style.display = scope === 'item_types' ? '' : 'none';
+    document.getElementById('dmItemIdsRow').style.display   = scope === 'items'      ? '' : 'none';
+}
+
+/* ── Category type chip toggle ───────────────────────────────────────────── */
+function ctToggle(el) {
+    el.classList.toggle('sel');
+    const selected = [...document.querySelectorAll('.ct-chip.sel')].map(c => c.dataset.slug);
+    document.getElementById('dmItemTypes').value = selected.join(',');
+}
+
+function _ctRestoreSlugs(slugs) {
+    document.querySelectorAll('.ct-chip').forEach(c => c.classList.toggle('sel', slugs.includes(c.dataset.slug)));
+    document.getElementById('dmItemTypes').value = slugs.join(',');
+}
+
+/* ── Multi-buy live preview ──────────────────────────────────────────────── */
+function updateMbPreview() {
+    const qty  = parseInt(document.getElementById('dmMbQty').value, 10) || 0;
+    const pay  = parseInt(document.getElementById('dmMbPay').value, 10) || 0;
+    const prev = document.getElementById('mbPreview');
+    if (qty >= 2 && pay >= 1 && pay < qty) {
+        const free = qty - pay;
+        prev.style.display = '';
+        prev.innerHTML = `<strong>How this works:</strong> Customer adds ${qty} qualifying items to their order. They pay for ${pay} — the cheapest ${free} item${free>1?'s are':' is'} free. ✓`;
+    } else {
+        prev.style.display = 'none';
+    }
+}
+
+/* ── Spend reward toggle ─────────────────────────────────────────────────── */
+function onSpendRewardChange() {
+    const v = document.getElementById('dmSpendRewardType').value;
+    document.getElementById('dmSpendPctRow').style.display   = v === 'pct'   ? '' : 'none';
+    document.getElementById('dmSpendFixedRow').style.display = v === 'fixed' ? '' : 'none';
+}
+
+function toggleDay(el) { el.classList.toggle('sel'); }
+
+/* ── Combo group builder (uses category chips) ───────────────────────────── */
+function addComboGroup(data) {
+    _comboGroupCount++;
+    const i = _comboGroupCount;
+    // Build category chip options
+    const cats = <?php echo json_encode(array_values(array_map(fn($c) => ['slug'=>$c['slug'],'name'=>$c['name']], $menuCatsRaw)), JSON_HEX_TAG|JSON_HEX_AMP); ?>;
+    const savedTypes = data && data.item_types ? data.item_types : [];
+    const chipHtml = cats.map(c =>
+        `<span class="ct-chip${savedTypes.includes(c.slug)?' sel':''}" data-slug="${c.slug}" style="font-size:11px;padding:3px 10px;" onclick="this.classList.toggle('sel')">${c.name}</span>`
+    ).join('');
+    const div = document.createElement('div');
+    div.id = 'cmb-grp-' + i;
+    div.style.cssText = 'background:#fff;border:1px solid #e5e7eb;border-radius:10px;padding:12px 14px;margin-bottom:10px;';
+    div.innerHTML = `
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;">
+            <strong style="font-size:12px;color:#374151;">Group ${i}</strong>
+            <button type="button" onclick="this.closest('[id^=cmb-grp]').remove()" style="margin-left:auto;background:none;border:none;color:#9ca3af;cursor:pointer;font-size:15px;line-height:1;" title="Remove group">✕</button>
+        </div>
+        <div style="font-size:11px;color:#6b7280;margin-bottom:6px;">Which categories count for this group?</div>
+        <div class="ct-chips" style="margin-bottom:10px;">${chipHtml}</div>
+        <div class="fm-row" style="margin-bottom:0;">
+            <label>Minimum quantity from this group</label>
+            <input type="number" class="cmb-qty" min="1" value="${data && data.min_qty ? data.min_qty : 1}" style="max-width:100px;">
+        </div>`;
+    document.getElementById('dmComboGroups').appendChild(div);
+}
+
+/* ── Open modal ──────────────────────────────────────────────────────────── */
 function openDealModal(id) {
     _dmEditId = id || 0;
     _comboGroupCount = 0;
     document.getElementById('dmTitle').textContent = id ? 'Edit Deal' : 'Add Deal';
     const d = id ? _dealsData.find(x => +x.id === +id) : null;
+    const type = d ? d.deal_type : 'happy_hour';
 
     document.getElementById('dmName').value      = d ? d.name : '';
     document.getElementById('dmDesc').value      = d ? (d.description || '') : '';
-    document.getElementById('dmType').value      = d ? d.deal_type : 'happy_hour';
     document.getElementById('dmSort').value      = d ? (d.sort_order || 0) : 0;
     document.getElementById('dmDiscPct').value   = d ? (d.discount_percent || '') : '';
     document.getElementById('dmDiscFixed').value = d ? (d.discount_fixed || '') : '';
@@ -612,25 +799,38 @@ function openDealModal(id) {
     document.getElementById('dmEndTime').value   = d ? (d.end_time   ? d.end_time.slice(0,5)   : '') : '';
     document.getElementById('dmValidFrom').value = d ? (d.valid_from || '') : '';
     document.getElementById('dmValidTo').value   = d ? (d.valid_to   || '') : '';
-    document.getElementById('dmAppliesTo').value = d ? (d.applies_to || 'all') : 'all';
-    document.getElementById('dmItemTypes').value = (d && d.item_types) ? (Array.isArray(d.item_types)?d.item_types:JSON.parse(d.item_types)).join(', ') : '';
+    document.getElementById('dmIsActive').checked  = d ? !!+d.is_active : true;
+    document.getElementById('dmExclusive').checked = d ? !!+d.exclusive  : false;
 
-    // Item picker — restore chips from saved IDs
+    // Deal type cards
+    selectDealType(type);
+
+    // Scope cards
+    const scope = d ? (d.applies_to || 'all') : 'all';
+    selectScope(scope);
+
+    // Category type chips
+    const savedSlugs = (d && d.item_types)
+        ? (Array.isArray(d.item_types) ? d.item_types : JSON.parse(d.item_types))
+        : [];
+    _ctRestoreSlugs(savedSlugs);
+
+    // Item picker
     _ipItems = [];
     if (d && d.applies_to === 'items' && d.item_ids) {
         const ids = (Array.isArray(d.item_ids) ? d.item_ids : JSON.parse(d.item_ids)).map(Number);
-        ids.forEach(id => {
-            const mi = _menuItems.find(x => x.id === id);
+        ids.forEach(itemId => {
+            const mi = _menuItems.find(x => x.id === itemId);
             if (mi) _ipItems.push({id: mi.id, name: mi.name, category: mi.catName});
         });
     }
     ipReset();
     ipRender();
-    document.getElementById('dmIsActive').checked  = d ? !!+d.is_active : true;
-    document.getElementById('dmExclusive').checked = d ? !!+d.exclusive  : false;
 
-    // Days
-    const dow = (d && d.days_of_week) ? (Array.isArray(d.days_of_week) ? d.days_of_week : JSON.parse(d.days_of_week)) : [];
+    // Days of week
+    const dow = (d && d.days_of_week)
+        ? (Array.isArray(d.days_of_week) ? d.days_of_week : JSON.parse(d.days_of_week))
+        : [];
     document.querySelectorAll('.day-chip').forEach(c => c.classList.toggle('sel', dow.map(Number).includes(+c.dataset.day)));
 
     // Spend reward type
@@ -650,14 +850,12 @@ function openDealModal(id) {
     if (d && d.combo_requires) {
         const grps = Array.isArray(d.combo_requires) ? d.combo_requires : JSON.parse(d.combo_requires);
         grps.forEach(g => addComboGroup(g));
-    } else if (!d || d.deal_type === 'combo') {
-        addComboGroup(); addComboGroup(); // default 2 groups
+    } else if (!d || type === 'combo') {
+        addComboGroup(); addComboGroup();
     }
 
-    onTypeChange();
-    onScopeChange();
     document.getElementById('dmBg').classList.add('show');
-    setTimeout(() => document.getElementById('dmName').focus(), 50);
+    setTimeout(() => document.getElementById('dmName').focus(), 60);
 }
 
 function closeDealModal() {
@@ -665,60 +863,11 @@ function closeDealModal() {
     _dmEditId = 0;
 }
 
-function onTypeChange() {
-    const t = document.getElementById('dmType').value;
-    const show = id => document.getElementById(id).classList.toggle('show', true);
-    const hide = id => document.getElementById(id).classList.remove('show');
-    // Hide all type-specific sections
-    ['dmSecPct','dmSecFixed','dmSecMb','dmSecSpend','dmSecTime','dmSecCombo'].forEach(hide);
-    if (t === 'happy_hour')  { show('dmSecPct');   show('dmSecTime'); }
-    if (t === 'percent_off') { show('dmSecPct'); }
-    if (t === 'fixed_off')   { show('dmSecFixed'); }
-    if (t === 'multi_buy')   { show('dmSecMb'); }
-    if (t === 'spend_save')  { show('dmSecSpend'); }
-    if (t === 'combo')       { show('dmSecCombo'); }
-}
-
-function onScopeChange() {
-    const v = document.getElementById('dmAppliesTo').value;
-    document.getElementById('dmItemTypesRow').style.display = v === 'item_types' ? '' : 'none';
-    document.getElementById('dmItemIdsRow').style.display   = v === 'items'      ? '' : 'none';
-}
-
-function onSpendRewardChange() {
-    const v = document.getElementById('dmSpendRewardType').value;
-    document.getElementById('dmSpendPctRow').style.display   = v === 'pct'   ? '' : 'none';
-    document.getElementById('dmSpendFixedRow').style.display = v === 'fixed' ? '' : 'none';
-}
-
-function toggleDay(el) { el.classList.toggle('sel'); }
-
-function addComboGroup(data) {
-    _comboGroupCount++;
-    const i   = _comboGroupCount;
-    const div = document.createElement('div');
-    div.id = 'cmb-grp-' + i;
-    div.style.cssText = 'background:#fff;border:1px solid #e5e7eb;border-radius:8px;padding:10px 12px;margin-bottom:10px;position:relative;';
-    div.innerHTML = `
-        <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;">
-            <strong style="font-size:12px;color:#374151;">Group ${i}</strong>
-            <button type="button" onclick="this.closest('[id^=cmb-grp]').remove()" style="margin-left:auto;background:none;border:none;color:#9ca3af;cursor:pointer;font-size:14px;line-height:1;">✕</button>
-        </div>
-        <div class="fm-2col">
-            <div class="fm-row"><label>Item Types (comma-sep)</label>
-                <input type="text" class="cmb-types" placeholder="food" value="${data && data.item_types ? data.item_types.join(', ') : ''}">
-            </div>
-            <div class="fm-row"><label>Min Qty</label>
-                <input type="number" class="cmb-qty" min="1" value="${data && data.min_qty ? data.min_qty : 1}">
-            </div>
-        </div>`;
-    document.getElementById('dmComboGroups').appendChild(div);
-}
-
 function buildComboJson() {
     const groups = [];
     document.querySelectorAll('[id^=cmb-grp-]').forEach(div => {
-        const types = div.querySelector('.cmb-types').value.split(',').map(s=>s.trim()).filter(Boolean);
+        // Read selected category chips inside this group
+        const types = [...div.querySelectorAll('.ct-chip.sel')].map(c => c.dataset.slug).filter(Boolean);
         const qty   = parseInt(div.querySelector('.cmb-qty').value, 10) || 1;
         if (types.length) groups.push({ item_types: types, min_qty: qty });
     });

@@ -1908,6 +1908,12 @@ if (in_array($user['role'] ?? '', ['admin', 'manager'], true)) {
         .fi-body .fi-qty-label { font-size: 11px; color: rgba(255,255,255,0.5); }
         .fi-body .fi-cart-total { font-size: 11px; color: #4ade80; font-weight: 600; }
         .fi-line-total { flex-shrink: 0; color: #4ade80; font-weight: 800; font-size: 16px; white-space: nowrap; padding-left: 4px; }
+        .fi-deals { display: flex; flex-direction: column; gap: 3px; margin-top: 4px; }
+        .fi-deal-badge { display: inline-flex; align-items: center; gap: 5px; font-size: 10px; font-weight: 700;
+                         background: rgba(74,222,128,0.15); color: #4ade80; border-radius: 5px; padding: 3px 7px;
+                         border: 1px solid rgba(74,222,128,0.3); line-height: 1.3; }
+        .fi-deal-badge i { font-size: 9px; flex-shrink: 0; }
+        .fi-deal-badge strong { color: #86efac; }
         .pos-cam-feed-item.is-unknown { border-color: rgba(248,113,113,0.55); }
         .fi-icon--warn { color: #f87171 !important; }
         /* Scan button in mobile bar */
@@ -9676,7 +9682,7 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
             el.classList.add('is-removed');
         };
 
-        function _buildFeedInner(recognised, name, code, qty, unitPrice, lineTotal, cartTotal, sym) {
+        function _buildFeedInner(recognised, name, code, qty, unitPrice, lineTotal, netCartTotal, sym, itemDeals) {
             if (!recognised) {
                 return '<i class="fas fa-exclamation-circle fi-icon fi-icon--warn"></i>'
                     + '<div class="fi-body">'
@@ -9684,11 +9690,22 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
                     +   '<span class="fi-qty-label" style="color:#f87171;">Not registered — long-press a menu item to link</span>'
                     + '</div>';
             }
+            var dealHtml = '';
+            if (itemDeals && itemDeals.length) {
+                dealHtml = '<div class="fi-deals">'
+                    + itemDeals.map(function(dl) {
+                        return '<span class="fi-deal-badge"><i class="fas fa-tags"></i> '
+                            + _esc(dl.name) + ' &mdash; ' + _esc(dl.detail)
+                            + ' <strong>−' + sym + ' ' + _fmt(dl.saving) + '</strong></span>';
+                    }).join('')
+                    + '</div>';
+            }
             return '<i class="fas fa-check-circle fi-icon"></i>'
                 + '<div class="fi-body">'
                 +   '<span class="fi-name">' + _esc(name) + '</span>'
                 +   '<span class="fi-qty-label">' + qty + ' × ' + sym + ' ' + _fmt(unitPrice) + '</span>'
-                +   (cartTotal !== null ? '<span class="fi-cart-total">Total: ' + sym + ' ' + _fmt(cartTotal) + '</span>' : '')
+                +   (netCartTotal !== null ? '<span class="fi-cart-total">Cart: ' + sym + ' ' + _fmt(netCartTotal) + '</span>' : '')
+                +   dealHtml
                 + '</div>'
                 + (lineTotal !== null ? '<span class="fi-line-total">' + sym + ' ' + _fmt(lineTotal) + '</span>' : '')
                 + '<button class="fi-rm" onclick="posCamFeedRm(this)" title="Remove from cart"><i class="fas fa-times"></i></button>';
@@ -9710,18 +9727,38 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
             var qty       = cartItem ? (parseFloat(cartItem.qty) || 1) : 1;
             var lineTotal = unitPrice !== null ? unitPrice * qty : null;
             var sym       = (typeof currencySymbol !== 'undefined') ? currencySymbol : 'MWK';
-            var cartTotal = null;
+            var recognised = matched !== null;
+
+            // Evaluate deals so the card reflects the current savings
+            if (typeof applyDeals === 'function') applyDeals();
+
+            var grossTotal = null;
             if (typeof cart !== 'undefined' && cart.length) {
-                cartTotal = cart.reduce(function (sum, ci) {
+                grossTotal = cart.reduce(function (sum, ci) {
                     return sum + (parseFloat(ci.price) || 0) * (parseFloat(ci.qty) || 1);
                 }, 0);
             }
-            var recognised = matched !== null;
+            var netCartTotal = grossTotal !== null
+                ? Math.max(0, grossTotal - (typeof _dealSavings !== 'undefined' ? _dealSavings : 0))
+                : null;
+
+            // Find deals that are currently active AND apply to this specific item
+            var itemDeals = [];
+            if (recognised && typeof posDeals !== 'undefined' && typeof _dealLines !== 'undefined' && _dealLines.length) {
+                var fakeCartLine = { id: matched.id, type: matched.type || matched.menu_type, price: parseFloat(matched.price) || 0, qty: qty };
+                posDeals.forEach(function(deal) {
+                    var dl = _dealLines.find(function(d) { return d.id === String(deal.id); });
+                    if (!dl) return;
+                    if (typeof _dealItemQualifies === 'function' && _dealItemQualifies(deal, fakeCartLine)) {
+                        itemDeals.push(dl);
+                    }
+                });
+            }
 
             // If a card for this barcode already exists, update it in-place (bump animation)
             var existing = feed.querySelector('[data-barcode="' + CSS.escape(code) + '"]');
             if (existing && !existing.classList.contains('is-removed')) {
-                existing.innerHTML = _buildFeedInner(recognised, name, code, qty, unitPrice, lineTotal, cartTotal, sym);
+                existing.innerHTML = _buildFeedInner(recognised, name, code, qty, unitPrice, lineTotal, netCartTotal, sym, itemDeals);
                 // Re-play the pop-in animation so the user sees the update
                 existing.classList.remove('feed-bump');
                 void existing.offsetWidth; // reflow
@@ -9736,7 +9773,7 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
             var el = document.createElement('div');
             el.className = 'pos-cam-feed-item' + (recognised ? '' : ' is-unknown');
             el.dataset.barcode = code;
-            el.innerHTML = _buildFeedInner(recognised, name, code, qty, unitPrice, lineTotal, cartTotal, sym);
+            el.innerHTML = _buildFeedInner(recognised, name, code, qty, unitPrice, lineTotal, netCartTotal, sym, itemDeals);
             feed.appendChild(el);
 
             // Cap at 20 unique cards
