@@ -1613,8 +1613,9 @@ if (in_array($user['role'] ?? '', ['admin', 'manager'], true)) {
         }
         .pos-cam-close:active { background: rgba(255,255,255,0.25); }
         .pos-cam-view {
-            flex: 1; position: relative; overflow: hidden;
+            flex: 1; min-height: 0; position: relative; overflow: hidden;
             display: flex; align-items: center; justify-content: center; background: #000;
+            max-height: 55vh; /* ensure feed panel is always visible below */
         }
         #posCamVideo { width: 100%; height: 100%; object-fit: cover; display: block; }
         .pos-cam-guide {
@@ -1700,31 +1701,34 @@ if (in_array($user['role'] ?? '', ['admin', 'manager'], true)) {
         #barcodeScanStrip .fas { color: #4ade80; }
         #barcodeScanLast { margin-left: auto; opacity: 0.65; font-weight: 400; font-size: 12px; }
         /* Scanned items live feed (Facebook Live comment style) */
+        /* Scanned items feed — sits BELOW the viewfinder as a scrollable panel */
         .pos-cam-feed {
-            position: absolute; left: 12px; bottom: 16px; right: 12px;
-            display: flex; flex-direction: column-reverse; gap: 8px;
-            pointer-events: none; z-index: 10;
-            max-height: 65%; overflow: hidden;
+            display: flex; flex-direction: column; gap: 0;
+            flex-shrink: 0;
+            max-height: 220px; overflow-y: auto;
+            background: #080c12;
+            border-top: 1px solid rgba(74,222,128,0.18);
+            scroll-behavior: smooth;
         }
+        .pos-cam-feed:empty { display: none; }
         .pos-cam-feed-item {
             display: flex; align-items: center; gap: 12px;
-            background: rgba(8,12,18,0.92); backdrop-filter: blur(12px) saturate(1.4);
-            border: 1.5px solid rgba(74,222,128,0.55); border-radius: 14px;
-            padding: 11px 14px; color: #fff;
-            animation: pos-feed-in .24s cubic-bezier(.22,1,.36,1); transform-origin: bottom left;
-            width: 100%;
-            box-shadow: 0 6px 24px rgba(0,0,0,0.55), 0 0 0 1px rgba(74,222,128,0.1);
+            padding: 10px 14px;
+            border-bottom: 1px solid rgba(255,255,255,0.06);
+            color: #fff;
+            animation: pos-feed-in .2s ease;
+            flex-shrink: 0;
         }
-        .pos-cam-feed-item.fade-out { animation: pos-feed-out .38s ease forwards; }
-        @keyframes pos-feed-in  { from { opacity:0; transform: translateY(14px) scale(.93); } to { opacity:1; transform: none; } }
-        @keyframes pos-feed-out { to   { opacity:0; transform: scale(.9) translateX(-12px); } }
-        .pos-cam-feed-item .fi-icon { color: #4ade80; font-size: 20px; flex-shrink: 0; }
-        .fi-body { display: flex; flex-direction: column; gap: 3px; flex: 1; min-width: 0; }
-        .fi-body .fi-name { font-weight: 700; font-size: 15px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-        .fi-body .fi-qty-label { font-size: 11px; color: rgba(255,255,255,0.5); }
+        .pos-cam-feed-item:first-child { animation: none; } /* suppress on clear/re-populate */
+        .pos-cam-feed-item.is-new { animation: pos-feed-in .2s ease; }
+        @keyframes pos-feed-in  { from { opacity:0; transform: translateX(-8px); } to { opacity:1; transform: none; } }
+        .pos-cam-feed-item .fi-icon { color: #4ade80; font-size: 18px; flex-shrink: 0; }
+        .fi-body { display: flex; flex-direction: column; gap: 2px; flex: 1; min-width: 0; }
+        .fi-body .fi-name { font-weight: 700; font-size: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .fi-body .fi-qty-label { font-size: 11px; color: rgba(255,255,255,0.45); }
         .fi-body .fi-cart-total { font-size: 11px; color: #4ade80; font-weight: 600; }
-        .fi-line-total { flex-shrink: 0; color: #4ade80; font-weight: 800; font-size: 18px; padding-left: 6px; white-space: nowrap; text-shadow: 0 0 12px rgba(74,222,128,0.4); }
-        .pos-cam-feed-item.is-unknown { border-color: rgba(248,113,113,0.5); }
+        .fi-line-total { flex-shrink: 0; color: #4ade80; font-weight: 800; font-size: 16px; padding-left: 6px; white-space: nowrap; }
+        .pos-cam-feed-item.is-unknown { border-left: 3px solid #f87171; }
         .fi-icon--warn { color: #f87171 !important; }
         /* Scan button in mobile bar */
         .pos-mobile-action.is-scan { color: #4ade80; }
@@ -8916,9 +8920,9 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
                 <div class="pos-cam-corner br"></div>
                 <div class="pos-cam-scan-line"></div>
             </div>
-            <!-- Live scan feed — items pop up here as they're scanned -->
-            <div class="pos-cam-feed" id="posCamFeed"></div>
         </div>
+        <!-- Live scan feed — builds up below the viewfinder like Facebook Live comments -->
+        <div class="pos-cam-feed" id="posCamFeed"></div>
         <!-- Mini cart panel — collapsed by default, expands after first scan -->
         <div class="pos-cam-cart collapsed" id="posCamCart">
             <div class="pos-cam-cart-head" onclick="posCamCartToggle()">
@@ -8931,7 +8935,7 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
         <div class="pos-cam-footer">
             <span id="posCamStatus">Point camera at a barcode</span>
             <label class="pos-cam-keep-lbl" title="Keep scanner open after each scan to add multiple items">
-                <input type="checkbox" id="posCamKeepOpen"> Keep open
+                <input type="checkbox" id="posCamKeepOpen" checked> Keep open
             </label>
         </div>
     </div>
@@ -9174,21 +9178,16 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
                     +   '<span class="fi-qty-label" style="color:#f87171;">Not registered — long-press a menu item to link</span>'
                     + '</div>');
 
-            feed.insertBefore(el, feed.firstChild);
+            // Append at bottom (newest at bottom, like a chat/live feed)
+            feed.appendChild(el);
 
-            // Keep at most 5 visible items
-            while (feed.children.length > 5) {
-                feed.removeChild(feed.lastChild);
+            // Cap at 20 items — remove oldest from top
+            while (feed.children.length > 20) {
+                feed.removeChild(feed.firstChild);
             }
 
-            // Fade out after 4 seconds when in "Keep open" mode
-            var keepOpen = document.getElementById('posCamKeepOpen');
-            if (keepOpen && keepOpen.checked) {
-                setTimeout(function () {
-                    el.classList.add('fade-out');
-                    setTimeout(function () { if (el.parentNode) el.parentNode.removeChild(el); }, 420);
-                }, 4000);
-            }
+            // Scroll to show the latest item
+            feed.scrollTop = feed.scrollHeight;
         }
 
         function _esc(str) {
