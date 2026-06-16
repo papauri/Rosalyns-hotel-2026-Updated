@@ -90,3 +90,26 @@ require_once __DIR__ . '/includes/audit-functions.php';
 // ---- Offline replay logging helpers (rh_log_offline_replay, rh_stamp_order_offline) ----
 require_once __DIR__ . '/includes/offline-log.php';
 
+// ---- Global formatting helpers ----
+if (!function_exists('rh_format_age')) {
+    /**
+     * Convert a duration in whole minutes to a human-readable string.
+     * < 1 min  → "< 1 min"
+     * 1–59     → "5 min"
+     * 60–1439  → "2h 15m"  (omits minutes when 0)
+     * 1440+    → "1d 3h"   (omits hours when 0)
+     */
+    function rh_format_age(int $minutes): string {
+        if ($minutes < 1)    return '< 1 min';
+        if ($minutes < 60)   return $minutes . ' min';
+        if ($minutes < 1440) {
+            $h = (int) floor($minutes / 60);
+            $m = $minutes % 60;
+            return $h . 'h' . ($m > 0 ? ' ' . $m . 'm' : '');
+        }
+        $d = (int) floor($minutes / 1440);
+        $h = (int) floor(($minutes % 1440) / 60);
+        return $d . 'd' . ($h > 0 ? ' ' . $h . 'h' : '');
+    }
+}
+

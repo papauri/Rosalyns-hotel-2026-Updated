@@ -1,4 +1,4 @@
-<?php
+﻿<?php
 
 /**
  * POS Till — Modern Touchscreen Restaurant Till
@@ -1701,29 +1701,31 @@ if (in_array($user['role'] ?? '', ['admin', 'manager'], true)) {
         #barcodeScanLast { margin-left: auto; opacity: 0.65; font-weight: 400; font-size: 12px; }
         /* Scanned items live feed (Facebook Live comment style) */
         .pos-cam-feed {
-            position: absolute; left: 10px; bottom: 12px; right: 10px;
-            display: flex; flex-direction: column-reverse; gap: 6px;
-            pointer-events: none; z-index: 2;
-            max-height: 60%; overflow: hidden;
+            position: absolute; left: 12px; bottom: 16px; right: 12px;
+            display: flex; flex-direction: column-reverse; gap: 8px;
+            pointer-events: none; z-index: 10;
+            max-height: 65%; overflow: hidden;
         }
         .pos-cam-feed-item {
-            display: flex; align-items: flex-start; gap: 9px;
-            background: rgba(10,14,20,0.82); backdrop-filter: blur(8px);
-            border: 1px solid rgba(74,222,128,0.4); border-radius: 12px;
-            padding: 8px 12px; color: #fff; font-size: 13px;
-            animation: pos-feed-in .2s cubic-bezier(.22,1,.36,1); transform-origin: bottom left;
-            width: fit-content; max-width: min(300px, calc(100% - 0px));
-            box-shadow: 0 4px 16px rgba(0,0,0,0.45);
+            display: flex; align-items: center; gap: 12px;
+            background: rgba(8,12,18,0.92); backdrop-filter: blur(12px) saturate(1.4);
+            border: 1.5px solid rgba(74,222,128,0.55); border-radius: 14px;
+            padding: 11px 14px; color: #fff;
+            animation: pos-feed-in .24s cubic-bezier(.22,1,.36,1); transform-origin: bottom left;
+            width: 100%;
+            box-shadow: 0 6px 24px rgba(0,0,0,0.55), 0 0 0 1px rgba(74,222,128,0.1);
         }
         .pos-cam-feed-item.fade-out { animation: pos-feed-out .38s ease forwards; }
-        @keyframes pos-feed-in  { from { opacity:0; transform: scale(.84) translateY(10px); } to { opacity:1; transform: none; } }
-        @keyframes pos-feed-out { to   { opacity:0; transform: scale(.9) translateX(-10px); } }
-        .pos-cam-feed-item .fi-icon { color: #4ade80; font-size: 15px; flex-shrink: 0; margin-top: 1px; }
-        .fi-body { display: flex; flex-direction: column; gap: 2px; flex: 1; min-width: 0; }
-        .fi-body .fi-name { font-weight: 700; font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 160px; }
-        .fi-body .fi-qty-label { font-size: 10px; color: rgba(255,255,255,0.5); }
-        .fi-body .fi-cart-total { font-size: 10px; color: rgba(74,222,128,0.75); font-weight: 600; }
-        .fi-line-total { flex-shrink: 0; color: #4ade80; font-weight: 800; font-size: 14px; padding-left: 10px; white-space: nowrap; align-self: center; }
+        @keyframes pos-feed-in  { from { opacity:0; transform: translateY(14px) scale(.93); } to { opacity:1; transform: none; } }
+        @keyframes pos-feed-out { to   { opacity:0; transform: scale(.9) translateX(-12px); } }
+        .pos-cam-feed-item .fi-icon { color: #4ade80; font-size: 20px; flex-shrink: 0; }
+        .fi-body { display: flex; flex-direction: column; gap: 3px; flex: 1; min-width: 0; }
+        .fi-body .fi-name { font-weight: 700; font-size: 15px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .fi-body .fi-qty-label { font-size: 11px; color: rgba(255,255,255,0.5); }
+        .fi-body .fi-cart-total { font-size: 11px; color: #4ade80; font-weight: 600; }
+        .fi-line-total { flex-shrink: 0; color: #4ade80; font-weight: 800; font-size: 18px; padding-left: 6px; white-space: nowrap; text-shadow: 0 0 12px rgba(74,222,128,0.4); }
+        .pos-cam-feed-item.is-unknown { border-color: rgba(248,113,113,0.5); }
+        .fi-icon--warn { color: #f87171 !important; }
         /* Scan button in mobile bar */
         .pos-mobile-action.is-scan { color: #4ade80; }
         .pos-mobile-action.is-scan.is-active { background: rgba(74,222,128,0.15); }
@@ -9081,14 +9083,17 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
             _setStatus('Scanned: ' + code);
             if (typeof posHandleBarcodeInput === 'function') posHandleBarcodeInput(code);
 
-            // Show/refresh mini cart + live feed after scan
-            setTimeout(function () { _refreshCart(); _addFeedItem(code); }, 120);
+            // Show feed card + refresh mini cart immediately (addToCart is synchronous)
+            _refreshCart();
+            _addFeedItem(code);
 
             var keepOpen = document.getElementById('posCamKeepOpen');
             if (!keepOpen || !keepOpen.checked) {
-                setTimeout(posCamScanClose, 900);
+                // Give user 3 seconds to see the scan feedback before closing
+                setTimeout(function () { _setStatus('Closing…'); }, 2600);
+                setTimeout(posCamScanClose, 3000);
             } else {
-                setTimeout(function () { _setStatus('Ready — scan next item'); }, 1000);
+                setTimeout(function () { _setStatus('Ready — scan next item'); }, 1200);
             }
         }
 
@@ -9152,16 +9157,22 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
                 }, 0);
             }
 
+            var recognised = matched !== null;
             var el = document.createElement('div');
-            el.className = 'pos-cam-feed-item';
-            el.innerHTML =
-                '<i class="fas fa-check-circle fi-icon"></i>'
-                + '<div class="fi-body">'
-                +   '<span class="fi-name">' + _esc(name) + '</span>'
-                +   (qty > 1 ? '<span class="fi-qty-label">' + qty + ' in cart</span>' : '')
-                +   (cartTotal !== null ? '<span class="fi-cart-total">Cart: ' + sym + ' ' + _fmt(cartTotal) + '</span>' : '')
-                + '</div>'
-                + (lineTotal !== null ? '<span class="fi-line-total">' + sym + ' ' + _fmt(lineTotal) + '</span>' : '');
+            el.className = 'pos-cam-feed-item' + (recognised ? '' : ' is-unknown');
+            el.innerHTML = recognised
+                ? ('<i class="fas fa-check-circle fi-icon"></i>'
+                    + '<div class="fi-body">'
+                    +   '<span class="fi-name">' + _esc(name) + '</span>'
+                    +   '<span class="fi-qty-label">' + qty + ' in cart</span>'
+                    +   (cartTotal !== null ? '<span class="fi-cart-total">Cart: ' + sym + ' ' + _fmt(cartTotal) + '</span>' : '')
+                    + '</div>'
+                    + (lineTotal !== null ? '<span class="fi-line-total">' + sym + ' ' + _fmt(lineTotal) + '</span>' : ''))
+                : ('<i class="fas fa-exclamation-circle fi-icon fi-icon--warn"></i>'
+                    + '<div class="fi-body">'
+                    +   '<span class="fi-name">' + _esc(code) + '</span>'
+                    +   '<span class="fi-qty-label" style="color:#f87171;">Not registered — long-press a menu item to link</span>'
+                    + '</div>');
 
             feed.insertBefore(el, feed.firstChild);
 

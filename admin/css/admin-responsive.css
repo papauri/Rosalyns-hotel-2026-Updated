@@ -1087,7 +1087,10 @@ body>footer {
         font-size: 11px !important;
     }
 
-    /* Collapse mobile-enhanced card grid to single column on phones */
+}
+
+/* @media (max-width: 360px) — Very narrow phones: single-column card grid    */
+@media (max-width: 360px) {
     table.mobile-enhanced tbody tr {
         grid-template-columns: 1fr !important;
     }

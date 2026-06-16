@@ -1089,6 +1089,15 @@ table.mobile-enhanced td[data-label="Actions"] {
     padding: 0 !important;
 }
 
+/* Primary identifier cells — always span both columns so they read as a card heading */
+table.mobile-enhanced td[data-label$=" Ref"],
+table.mobile-enhanced td[data-label="Reference"],
+table.mobile-enhanced td[data-label="Guest Name"],
+table.mobile-enhanced td[data-label="Ingredient"],
+table.mobile-enhanced td[data-label="Name"] {
+    grid-column: 1 / -1;
+}
+
 /* Wide-content cells span both columns */
 table.mobile-enhanced td[data-label="Payment"],
 table.mobile-enhanced td[data-label="Details"],

@@ -2016,7 +2016,7 @@ $currency_symbol = getSetting('currency_symbol');
                                     <td data-label="Guest"><?php echo htmlspecialchars($rs['customer_name'] ?? '—'); ?></td>
                                     <td data-label="Items"><?php echo (int)$rs['item_count']; ?></td>
                                     <td data-label="Total"><?php echo '<span class="kpi-currency">' . $currency_symbol . '</span>' . number_format((float)$rs['total_amount'], 2); ?></td>
-                                    <td data-label="Age" style="color:<?php echo $ageColor; ?>; font-weight:600;"><?php echo $age; ?> min</td>
+                                    <td data-label="Age" style="color:<?php echo $ageColor; ?>; font-weight:600;"><?php echo rh_format_age($age); ?></td>
                                     <td data-label="Status"><span class="badge badge-<?php echo htmlspecialchars($rs['status']); ?>"><?php echo ucfirst($rs['status']); ?></span></td>
                                     <td data-label="Actions">
                                         <a href="stock-orders.php?id=<?php echo (int)$rs['id']; ?>" class="btn btn-primary btn-sm">View</a>
