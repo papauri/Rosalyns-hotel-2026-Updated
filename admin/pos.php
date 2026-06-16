@@ -2405,7 +2405,7 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
                         <button class="a-receipt" onclick="closeSuccess(); openTabsTray();" data-help="View open tabs|Jump to the list of unpaid tickets. From there you can settle this tab when the customer is ready."><i class="fas fa-list"></i> View Tabs</button>
                     <?php endif; ?>
                     <?php if (in_array($user['role'] ?? '', ['admin', 'manager'], true)): ?>
-                        <button class="a-receipt" onclick="openPosPageModal('order-lifecycle.php?id=<?php echo (int)$lastOrderId; ?>','Timeline','fas fa-stream')" data-help="Order lifecycle|See every event for this order — placement, kitchen actions, stock movements, payment — with timestamps and the user who did each." style="background:#3a3a40;"><i class="fas fa-stream"></i> Lifecycle</button>
+                        <button class="a-receipt a-lifecycle" onclick="openPosPageModal('order-lifecycle.php?id=<?php echo (int)$lastOrderId; ?>','Timeline','fas fa-stream')" data-help="Order lifecycle|See every event for this order — placement, kitchen actions, stock movements, payment — with timestamps and the user who did each."><i class="fas fa-stream"></i> Lifecycle</button>
                     <?php endif; ?>
                     <button class="a-new" onclick="closeSuccess()" data-help="New order|Close this dialog and start ringing up the next order."><i class="fas fa-plus-circle"></i> New order</button>
                 </div>

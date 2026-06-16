@@ -2383,23 +2383,39 @@ a.recent-toggle span {
 .success-modal .actions {
     display: grid;
     grid-template-columns: repeat(2, 1fr);
-    gap: 10px;
-    margin-top: 20px;
+    gap: 8px;
+    margin-top: 22px;
 }
 
 .success-modal .actions a,
 .success-modal .actions button {
-    padding: 14px;
-    border-radius: 8px;
+    padding: 12px 16px;
+    border-radius: 10px;
     text-decoration: none;
     font-weight: 600;
     border: none;
     cursor: pointer;
-    font-size: 14px;
+    font-size: 13px;
+    letter-spacing: 0.01em;
     display: flex;
     align-items: center;
     justify-content: center;
-    gap: 6px;
+    gap: 7px;
+    transition: background 0.15s ease, box-shadow 0.15s ease, transform 0.1s ease;
+    box-shadow: 0 1px 3px rgba(0,0,0,.18), 0 1px 2px rgba(0,0,0,.12);
+    line-height: 1.2;
+}
+
+.success-modal .actions a:hover,
+.success-modal .actions button:hover {
+    box-shadow: 0 4px 12px rgba(0,0,0,.22);
+    transform: translateY(-1px);
+}
+
+.success-modal .actions a:active,
+.success-modal .actions button:active {
+    transform: translateY(0);
+    box-shadow: 0 1px 3px rgba(0,0,0,.18);
 }
 
 .a-print {
@@ -2407,15 +2423,40 @@ a.recent-toggle span {
     color: #fff;
 }
 
-.a-receipt {
-    background: #1f1f24;
+.a-print:hover {
+    background: #7a6750;
     color: #fff;
 }
 
+.a-receipt {
+    background: #2c2c35;
+    color: #fff;
+}
+
+.a-receipt:hover {
+    background: #3e3e4a;
+    color: #fff;
+}
+
+.a-lifecycle {
+    background: #3a3a48;
+}
+
+.a-lifecycle:hover {
+    background: #4a4a5a;
+}
+
 .a-new {
-    background: #28a745;
+    background: #1e8a3c;
     color: #fff;
     grid-column: 1 / -1;
+    padding: 13px 16px;
+    font-size: 14px;
+}
+
+.a-new:hover {
+    background: #176e30;
+    color: #fff;
 }
 
 .toast {
