@@ -671,13 +671,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     $dealIdsStr      = trim($_POST['deal_ids'] ?? '');
                     $dealValidation  = ($dealDiscountRaw > 0) ? pos_validate_deal_discount($pdo, $dealIdsStr, (float)$row['total_amount']) : ['amount' => 0.0, 'reason' => ''];
                     $dealDiscount    = min($dealDiscountRaw, round((float)$row['total_amount'] * 0.90, 2));
-                    if ($dealDiscount > 0 && !empty($dealValidation['reason'])) {
+                    if ($dealDiscount > 0) {
+                        $dealReason = !empty($dealValidation['reason']) ? $dealValidation['reason'] : 'Deal discount';
                         $row['total_amount'] = max(0.01, round((float)$row['total_amount'] - $dealDiscount, 2));
                         $pdo->prepare("UPDATE stock_orders SET total_amount=?, discount_amount=?, discount_reason=? WHERE id=?")
-                            ->execute([$row['total_amount'], $dealDiscount, $dealValidation['reason'], $orderId]);
-                        pos_logAudit($pdo, $orderId, $user['id'], $user['full_name'], 'deal_discount_applied', json_encode(['amount' => $dealDiscount, 'deals' => $dealValidation['reason']]));
-                    } else {
-                        $dealDiscount = 0.0;
+                            ->execute([$row['total_amount'], $dealDiscount, $dealReason, $orderId]);
+                        pos_logAudit($pdo, $orderId, $user['id'], $user['full_name'], 'deal_discount_applied', json_encode(['amount' => $dealDiscount, 'deals' => $dealReason]));
                     }
 
                     // Manual staff discount — requires pos_discount permission
@@ -687,7 +686,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         if (!hasPermission($user['id'], 'pos_discount')) throw new RuntimeException('You do not have permission to apply discounts.');
                         $discountedTotal = max(0.01, round((float)$row['total_amount'] - $discountAmount, 2));
                         $combinedDiscount = round($dealDiscount + $discountAmount, 2);
-                        $combinedReason   = trim(($dealValidation['reason'] ? $dealValidation['reason'] . ' + ' : '') . $discountReason);
+                        $combinedReason   = trim((isset($dealReason) && $dealReason ? $dealReason . ' + ' : '') . $discountReason);
                         $pdo->prepare("UPDATE stock_orders SET total_amount=?, discount_amount=?, discount_reason=? WHERE id=?")
                             ->execute([$discountedTotal, $combinedDiscount, $combinedReason ?: null, $orderId]);
                         $row['total_amount'] = $discountedTotal;
@@ -986,14 +985,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $dealValidation   = ($dealDiscountRaw > 0) ? pos_validate_deal_discount($pdo, $dealIdsStr, $totalAmount) : ['amount' => 0.0, 'reason' => ''];
                 // Cap deal discount at 90% of order total — sanity guard
                 $dealDiscount = min($dealDiscountRaw, round($totalAmount * 0.90, 2));
-                if ($dealDiscount > 0 && !empty($dealValidation['reason'])) {
+                if ($dealDiscount > 0) {
+                    $dealReason = !empty($dealValidation['reason']) ? $dealValidation['reason'] : 'Deal discount';
                     $totalAmount = max(0.01, round($totalAmount - $dealDiscount, 2));
                     $pdo->prepare("UPDATE stock_orders SET total_amount=?, discount_amount=?, discount_reason=? WHERE id=?")
-                        ->execute([$totalAmount, $dealDiscount, $dealValidation['reason'], $orderId]);
-                    pos_logAudit($pdo, $orderId, $user['id'], $user['full_name'], 'deal_discount_applied', json_encode(['amount' => $dealDiscount, 'deals' => $dealValidation['reason']]));
-                } elseif ($dealDiscountRaw > 0) {
-                    // Deal IDs were invalid / expired — ignore silently (don't crash the sale)
-                    $dealDiscount = 0.0;
+                        ->execute([$totalAmount, $dealDiscount, $dealReason, $orderId]);
+                    pos_logAudit($pdo, $orderId, $user['id'], $user['full_name'], 'deal_discount_applied', json_encode(['amount' => $dealDiscount, 'deals' => $dealReason]));
                 }
 
                 // Manual staff discount — requires pos_discount permission
@@ -1005,7 +1002,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     // If a deal already set discount_amount, add to it
                     $existingDiscount = (float)($dealDiscount);
                     $combinedDiscount = round($existingDiscount + $discountAmount, 2);
-                    $combinedReason   = trim(($dealValidation['reason'] ? $dealValidation['reason'] . ' + ' : '') . $discountReason);
+                    $combinedReason   = trim((isset($dealReason) && $dealReason ? $dealReason . ' + ' : '') . $discountReason);
                     $pdo->prepare("UPDATE stock_orders SET total_amount=?, discount_amount=?, discount_reason=? WHERE id=?")
                         ->execute([$totalAmount, $combinedDiscount, $combinedReason ?: null, $orderId]);
                     pos_logAudit($pdo, $orderId, $user['id'], $user['full_name'], 'discount_applied', json_encode(['amount' => $discountAmount, 'reason' => $discountReason]));
@@ -3231,6 +3228,10 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
         const posBarOpen = <?php echo $barWindow['is_open_now'] ? 'true' : 'false'; ?>;
         const posBarHours = <?php echo json_encode($barWindow['opens_at'] . ' – ' . $barWindow['closes_at']); ?>;
         const posCsrfToken = <?php echo json_encode($csrf_token); ?>;
+        const posLastOrderId    = <?php echo (int)$lastOrderId; ?>;
+        const posLastOrderEmail = <?php echo json_encode($lastOrderCustomerEmail); ?>;
+        const posLastOrderPhone = <?php echo json_encode($lastOrderCustomerPhone); ?>;
+        const posJustParked     = <?php echo $justParked ? 'true' : 'false'; ?>;
         const posUserId = <?php echo (int)$user['id']; ?>;
         const posCurrentUserName = <?php echo json_encode($user['full_name'] ?: $user['username']); ?>;
         const posCanManageTabs = <?php echo $isManagerOrAdmin ? 'true' : 'false'; ?>;
@@ -9273,6 +9274,25 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
                     setTimeout(syncFloatingWidgetsToViewport, 80);
                 });
             }());
+
+        // Auto-send receipt after redirect payment when contact info was captured
+        if (posLastOrderId > 0 && !posJustParked && (posLastOrderEmail || posLastOrderPhone)) {
+            document.addEventListener('DOMContentLoaded', function() {
+                _receiptOrderId = posLastOrderId;
+                setTimeout(function() {
+                    if (posLastOrderEmail) {
+                        var emailEl = document.getElementById('rmEmail');
+                        if (emailEl) emailEl.value = posLastOrderEmail;
+                        sendPosReceipt('email');
+                    }
+                    if (posLastOrderPhone) {
+                        var phoneEl = document.getElementById('rmPhone');
+                        if (phoneEl) phoneEl.value = posLastOrderPhone;
+                        sendPosReceipt('whatsapp');
+                    }
+                }, 600);
+            });
+        }
     </script>
     <?php $rh_help_hide_fab = true;
     $rh_help_disable_fallback = true;
