@@ -428,7 +428,6 @@ $DAY_NAMES = ['','Mon','Tue','Wed','Thu','Fri','Sat','Sun'];
         <?php endforeach; ?>
     </div>
     <?php endif; ?>
-</div>
 
 <!-- Add / Edit Modal -->
 <div class="dm-bg" id="dmBg">
@@ -1060,6 +1059,4 @@ function ipRender() {
     ).join('');
 }
 </script>
-<?php require_once 'includes/admin-flash.php'; ?>
-</body>
-</html>
+<?php require_once 'includes/admin-footer.php'; ?>

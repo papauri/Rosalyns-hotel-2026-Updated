@@ -1784,6 +1784,9 @@ if (in_array($user['role'] ?? '', ['admin', 'manager'], true)) {
         .cart-deal-line i { color: #10b981; flex-shrink: 0; }
         .cart-deal-line span:nth-child(3) { color: #6b7280; font-size: 11px; flex: 1; }
         .cdl-saving { margin-left: auto; font-weight: 700; color: #059669; white-space: nowrap; }
+        .cart-deal-pending { display: flex; align-items: center; gap: 7px; font-size: 12px; color: #92400e; background: #fffbeb; border-radius: 7px; padding: 5px 10px; margin-bottom: 4px; border: 1px dashed #fcd34d; }
+        .cart-deal-pending i { color: #d97706; flex-shrink: 0; }
+        .fi-deal-pending { background: rgba(251,191,36,0.15) !important; color: #92400e !important; border-color: rgba(251,191,36,0.4) !important; }
         .pay-deal-line { display: flex; align-items: center; gap: 8px; padding: 3px 0; }
         .pay-deal-line span:first-child { flex: 1; }
         .pdl-saving { margin-left: auto; white-space: nowrap; }
@@ -5961,6 +5964,30 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
                 dealsHtml = `<div class="cart-deals-block">${dealsHtml}</div>`;
             }
 
+            // Deal progress hints — show near-miss deals so staff know to upsell
+            if (cart.length && posDeals && posDeals.length) {
+                const pendingHints = [];
+                posDeals.forEach(deal => {
+                    if (!_dealNowValid(deal)) return;
+                    // Already fired
+                    if (_dealLines.find(d => d.id === String(deal.id))) return;
+                    if (deal.deal_type === 'multi_buy') {
+                        const qualifying = cart.filter(l => _dealItemQualifies(deal, l));
+                        if (!qualifying.length) return;
+                        const totalQty = qualifying.reduce((s, l) => s + Math.floor(Number(l.qty) || 0), 0);
+                        const groupSize = deal.multi_buy_qty || 2;
+                        const needed = groupSize - (totalQty % groupSize);
+                        if (needed > 0 && needed < groupSize) {
+                            const itemNames = [...new Set(qualifying.map(l => l.name))].join(', ');
+                            pendingHints.push(`<div class="cart-deal-pending"><i class="fas fa-hourglass-half"></i> <strong>${escHtml(deal.name)}</strong> — add <strong>${needed}</strong> more ${escHtml(itemNames)} to unlock</div>`);
+                        }
+                    }
+                });
+                if (pendingHints.length) {
+                    dealsHtml += `<div class="cart-deals-block">${pendingHints.join('')}</div>`;
+                }
+            }
+
             // Inject deal lines below cart items
             const dealsEl = document.getElementById('cart-deal-lines');
             if (dealsEl) dealsEl.innerHTML = dealsHtml;
@@ -9682,7 +9709,7 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
             el.classList.add('is-removed');
         };
 
-        function _buildFeedInner(recognised, name, code, qty, unitPrice, lineTotal, netCartTotal, sym, itemDeals) {
+        function _buildFeedInner(recognised, name, code, qty, unitPrice, lineTotal, netCartTotal, sym, itemDeals, pendingDeals) {
             if (!recognised) {
                 return '<i class="fas fa-exclamation-circle fi-icon fi-icon--warn"></i>'
                     + '<div class="fi-body">'
@@ -9697,6 +9724,15 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
                         return '<span class="fi-deal-badge"><i class="fas fa-tags"></i> '
                             + _esc(dl.name) + ' &mdash; ' + _esc(dl.detail)
                             + ' <strong>−' + sym + ' ' + _fmt(dl.saving) + '</strong></span>';
+                    }).join('')
+                    + '</div>';
+            }
+            if (pendingDeals && pendingDeals.length) {
+                dealHtml += '<div class="fi-deals">'
+                    + pendingDeals.map(function(pd) {
+                        return '<span class="fi-deal-badge fi-deal-pending"><i class="fas fa-hourglass-half"></i> '
+                            + _esc(pd.name) + ' &mdash; add '
+                            + '<strong>' + pd.needed + ' more</strong> to unlock</span>';
                     }).join('')
                     + '</div>';
             }
@@ -9744,13 +9780,30 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
 
             // Find deals that are currently active AND apply to this specific item
             var itemDeals = [];
-            if (recognised && typeof posDeals !== 'undefined' && typeof _dealLines !== 'undefined' && _dealLines.length) {
+            var pendingDeals = [];
+            if (recognised && typeof posDeals !== 'undefined') {
                 var fakeCartLine = { id: matched.id, type: matched.type || matched.menu_type, price: parseFloat(matched.price) || 0, qty: qty };
                 posDeals.forEach(function(deal) {
-                    var dl = _dealLines.find(function(d) { return d.id === String(deal.id); });
-                    if (!dl) return;
-                    if (typeof _dealItemQualifies === 'function' && _dealItemQualifies(deal, fakeCartLine)) {
+                    if (typeof _dealNowValid === 'function' && !_dealNowValid(deal)) return;
+                    if (typeof _dealItemQualifies !== 'function' || !_dealItemQualifies(deal, fakeCartLine)) return;
+                    var dl = (typeof _dealLines !== 'undefined') ? _dealLines.find(function(d) { return d.id === String(deal.id); }) : null;
+                    if (dl) {
                         itemDeals.push(dl);
+                    } else if (deal.deal_type === 'multi_buy') {
+                        // Deal qualifies for this item but hasn't fired yet — compute progress
+                        var groupSize = deal.multi_buy_qty || 2;
+                        var totalQtyInCart = 0;
+                        if (typeof cart !== 'undefined') {
+                            cart.forEach(function(ci) {
+                                if (typeof _dealItemQualifies === 'function' && _dealItemQualifies(deal, ci)) {
+                                    totalQtyInCart += Math.floor(Number(ci.qty) || 0);
+                                }
+                            });
+                        }
+                        var needed = groupSize - (totalQtyInCart % groupSize);
+                        if (needed > 0 && needed < groupSize) {
+                            pendingDeals.push({ name: deal.name, needed: needed, groupSize: groupSize });
+                        }
                     }
                 });
             }
@@ -9758,7 +9811,7 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
             // If a card for this barcode already exists, update it in-place (bump animation)
             var existing = feed.querySelector('[data-barcode="' + CSS.escape(code) + '"]');
             if (existing && !existing.classList.contains('is-removed')) {
-                existing.innerHTML = _buildFeedInner(recognised, name, code, qty, unitPrice, lineTotal, netCartTotal, sym, itemDeals);
+                existing.innerHTML = _buildFeedInner(recognised, name, code, qty, unitPrice, lineTotal, netCartTotal, sym, itemDeals, pendingDeals);
                 // Re-play the pop-in animation so the user sees the update
                 existing.classList.remove('feed-bump');
                 void existing.offsetWidth; // reflow
@@ -9773,7 +9826,7 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
             var el = document.createElement('div');
             el.className = 'pos-cam-feed-item' + (recognised ? '' : ' is-unknown');
             el.dataset.barcode = code;
-            el.innerHTML = _buildFeedInner(recognised, name, code, qty, unitPrice, lineTotal, netCartTotal, sym, itemDeals);
+            el.innerHTML = _buildFeedInner(recognised, name, code, qty, unitPrice, lineTotal, netCartTotal, sym, itemDeals, pendingDeals);
             feed.appendChild(el);
 
             // Cap at 20 unique cards
