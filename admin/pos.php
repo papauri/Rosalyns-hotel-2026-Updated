@@ -1654,9 +1654,9 @@ if (in_array($user['role'] ?? '', ['admin', 'manager'], true)) {
         @keyframes pos-cam-line { 0%,100% { top: 12px; } 50% { top: calc(100% - 12px); } }
         .pos-cam-footer {
             display: flex; align-items: center; justify-content: space-between;
-            padding: 14px 16px; background: rgba(0,0,0,0.88); color: #fff;
-            font-size: 13px; gap: 12px; flex-shrink: 0;
-            margin-top: auto; /* push to bottom of the flex column overlay */
+            padding: 8px 16px; background: rgba(0,0,0,0.88); color: #fff;
+            font-size: 12px; gap: 12px; flex-shrink: 0;
+            margin-top: auto;
         }
         #posCamStatus { opacity: 0.8; flex: 1; font-size: 13px; }
         .pos-cam-keep-lbl {
@@ -1754,10 +1754,20 @@ if (in_array($user['role'] ?? '', ['admin', 'manager'], true)) {
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.7.2/css/all.min.css">
     <link rel="stylesheet" href="css/pos-overrides.css">
     <script src="js/station-sounds.js"></script>
-    <script type="module">
-        import { BarcodeDetectorPolyfill } from 'https://cdn.jsdelivr.net/npm/@undecaf/barcode-detector-polyfill@0.9.21/dist/es2017/index.js';
-        if (!('BarcodeDetector' in window)) { window.BarcodeDetector = BarcodeDetectorPolyfill; }
+    <script>
+    /* Load BarcodeDetector polyfill for Firefox / Safari / older browsers.
+       Dynamic import lets us catch failures so Chrome Android (native) keeps working. */
+    (async function () {
+        if (!('BarcodeDetector' in window)) {
+            try {
+                const m = await import('https://cdn.jsdelivr.net/npm/@undecaf/barcode-detector-polyfill/dist/es2017/index.js');
+                window.BarcodeDetector = m.BarcodeDetectorPolyfill;
+            } catch (e) {
+                console.warn('[POS] BarcodeDetector polyfill failed to load. Native support only.');
+            }
+        }
         window._posBarcodeDetectorReady = true;
+    }());
     </script>
 </head>
 
@@ -8990,12 +9000,16 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
         }
         var COOLDOWN_MS = 2200;
 
-        async function _waitDetector(tries) {
-            for (var i = 0; i < (tries || 12); i++) {
+        async function _waitDetector() {
+            // Already available natively (Chrome Android) — return immediately
+            if (typeof BarcodeDetector !== 'undefined') return true;
+            // Wait for the async polyfill loader to finish (max 4 s)
+            for (var i = 0; i < 20; i++) {
+                await new Promise(function (r) { setTimeout(r, 200); });
                 if (typeof BarcodeDetector !== 'undefined') return true;
-                await new Promise(function (r) { setTimeout(r, 300); });
+                if (window._posBarcodeDetectorReady) break; // loader done, still nothing
             }
-            return false;
+            return typeof BarcodeDetector !== 'undefined';
         }
 
         // Back-button: push a history entry so Android back closes scanner instead of leaving the page
