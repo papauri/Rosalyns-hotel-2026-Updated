@@ -426,12 +426,12 @@
       </section>
 
       <section>
-        <h2>Barcode scanner <span class="pill amber">pos_86 — manager/admin</span></h2>
+        <h2>Barcode scanner — USB / Bluetooth wedge <span class="pill amber">pos_86 — manager/admin</span></h2>
         <p>Plug in any <strong>USB or Bluetooth barcode scanner</strong> (the kind that appears as a keyboard) and the POS can add items to the cart the moment you scan — no tapping the menu grid required. Each terminal remembers its own on/off preference.</p>
 
         <h3 style="font-size:1rem;margin:20px 0 8px;">Enable or disable the scanner</h3>
         <ol class="steps">
-          <li>Tap the <strong>barcode icon</strong> (<i style="font-family:monospace">⊞</i>) button in the search toolbar — it sits just to the right of the red <strong>×</strong> clear button.</li>
+          <li>Tap the <strong>barcode icon</strong> button in the search toolbar — it sits just to the right of the red <strong>×</strong> clear button.</li>
           <li>The button turns <strong>green</strong> and a dark status strip appears at the bottom of the screen: <em>"Barcode scanner active — scan an item to add it to the cart."</em></li>
           <li>Tap it again to turn the scanner <strong>off</strong>. The strip disappears.</li>
           <li>You can also toggle from the <strong>hamburger menu → Tools → Scanner: ON / OFF</strong>.</li>
@@ -445,28 +445,53 @@
           <li>Point the scanner at a product barcode and pull the trigger (or it auto-scans).</li>
           <li>The scanner types the barcode number in under 50 ms and sends Enter — the POS intercepts this as a scan, not human typing.</li>
           <li>If the barcode matches an item: the item is <strong>instantly added to the cart</strong> and a green toast confirms it (<em>"Added: Heineken"</em>).</li>
-          <li>If nothing matches: a warning toast shows <em>"Barcode not recognised: 12345678"</em> — the item needs its barcode assigned first (see below).</li>
+          <li>If nothing matches: a warning toast shows <em>"Barcode not recognised: 12345678"</em> — the item needs its barcode registered first (see the <em>Registering retail items</em> section below).</li>
           <li>The status strip at the bottom always shows the <strong>last scan result</strong>.</li>
         </ol>
         <div class="callout note">
           Normal typing is <strong>not affected</strong>. The scanner only triggers when you are not focused inside a text field (search box, payment amount, customer name, etc.).
         </div>
 
-        <h3 style="font-size:1rem;margin:20px 0 8px;">Assign a barcode to a menu item <span class="pill amber">manager</span></h3>
-        <p>Before scanning works for a product, a manager must link the barcode to the menu item once.</p>
+        <h3 style="font-size:1rem;margin:20px 0 8px;">Assign a barcode to an existing menu item <span class="pill amber">manager</span></h3>
+        <p>If an item is already on the menu and you just need to link its barcode, you can do it from the POS grid directly.</p>
         <ol class="steps">
           <li>Make sure you are logged in as a <strong>manager or admin</strong>.</li>
           <li>Find the item in the menu grid and <strong>hold your finger (or mouse button) on the tile for about 1 second</strong>. A dark <strong>Assign Barcode</strong> modal opens.</li>
           <li>Scan the product barcode directly into the input field — or type it manually.</li>
           <li>Tap <strong>Save</strong>. The barcode is saved to the database instantly and works from that moment — no page refresh needed.</li>
-          <li>Items with a barcode assigned show a small <strong>green barcode icon</strong> in the bottom-right corner of their tile so managers can see which items are wired up.</li>
+          <li>Items with a barcode assigned show a small <strong>green barcode icon</strong> in the bottom-right corner of their tile.</li>
         </ol>
         <div class="callout note">
-          To <strong>remove</strong> a barcode from an item, long-press the tile, clear the barcode field completely, and tap Save.
+          To <strong>remove</strong> a barcode from an item, long-press the tile, clear the barcode field completely, and tap Save. Each barcode can only be linked to <strong>one item</strong> — duplicates are rejected.
         </div>
-        <div class="callout warn">
-          Each barcode can only be assigned to <strong>one item</strong>. If you try to assign a barcode that is already on another item, you will get a duplicate-barcode error.
+      </section>
+
+      <section>
+        <h2>Camera barcode scanner — mobile <span class="pill">all roles</span></h2>
+        <p>On phones and tablets, use the device's rear camera to scan barcodes directly into the POS — no physical scanner hardware needed. This is ideal for bar staff scanning cans and bottles at speed.</p>
+
+        <h3 style="font-size:1rem;margin:20px 0 8px;">Opening the camera scanner</h3>
+        <ol class="steps">
+          <li>On mobile, tap the <strong>≡ Menu</strong> button in the top-right corner to open the POS menu sheet.</li>
+          <li>Tap the green <strong>📷 Scan</strong> button — the first button in the Till Actions row.</li>
+          <li>The camera viewfinder opens full-screen. Allow camera access if prompted — this is a one-time browser permission per device.</li>
+          <li>A green corner-bracket target and animated scan line show the active scan area.</li>
+        </ol>
+        <div class="callout note">
+          On desktop, a green camera icon also appears in the search toolbar next to the barcode toggle button. Clicking it opens the same camera scanner in a full-screen overlay.
         </div>
+
+        <h3 style="font-size:1rem;margin:20px 0 8px;">Scanning an item</h3>
+        <ol class="steps">
+          <li>Point the camera at the product barcode — hold steady for a moment.</li>
+          <li>When recognised: a short <strong>beep + vibration</strong> confirms the scan, and a green card pops up inside the viewfinder showing the <strong>item name and price</strong> (like a live comment on a Facebook Live stream).</li>
+          <li>The item is <strong>instantly added to the cart</strong>. A collapsible <strong>mini-cart panel</strong> at the bottom of the scanner shows all scanned items and the running total — tap the cart header to expand or collapse it.</li>
+          <li>By default, the scanner <strong>closes after one successful scan</strong> so you return straight to the cart. Check <strong>Keep open</strong> in the scanner footer if you are scanning a full round of drinks and want to stay in camera mode between scans.</li>
+          <li>Press the device <strong>Back button</strong> (Android hardware button or swipe gesture) to close the scanner without adding anything — it will not navigate away from the POS.</li>
+        </ol>
+
+        <h3 style="font-size:1rem;margin:20px 0 8px;">Flashlight</h3>
+        <p>If the bolt ⚡ icon appears in the top-right of the scanner header, your device supports flashlight control. Tap it to toggle the torch on/off for scanning in dim bars or stockrooms.</p>
 
         <h3 style="font-size:1rem;margin:20px 0 8px;">Quick reference</h3>
         <table>
@@ -475,23 +500,45 @@
           </thead>
           <tbody>
             <tr>
-              <td>Scanner is plugged in but nothing happens when I scan</td>
-              <td>Check the barcode icon button — it must be <strong>green (ON)</strong>. Also check you are not clicked inside a text field.</td>
+              <td>Camera says "access denied"</td>
+              <td>Go to your browser Settings → Site permissions → Camera → allow for this site. On iOS Safari: Settings app → Safari → Camera → Allow.</td>
             </tr>
             <tr>
-              <td><em>"Barcode not recognised"</em> toast appears</td>
-              <td>The barcode has not been assigned yet. Long-press the correct menu tile, scan into the modal, Save.</td>
+              <td>"Camera scanning not supported on this browser"</td>
+              <td>Use Chrome or Safari (iOS 16+). Firefox mobile does not yet support the BarcodeDetector API.</td>
             </tr>
             <tr>
-              <td>I scan and the wrong item gets added</td>
-              <td>Another item has this barcode assigned. Long-press that item, clear its barcode, Save. Then assign it to the correct item.</td>
+              <td>"Barcode not recognised" toast</td>
+              <td>The product is not yet registered. Go to <strong>Stock → Barcode Receive</strong> and register it as a POS item — takes 30 seconds. See the Stock guide.</td>
             </tr>
             <tr>
-              <td>I want to disable the scanner on a tablet that has no scanner</td>
-              <td>Tap the barcode button until it is grey (OFF). The setting is remembered on that device.</td>
+              <td>Back button leaves the POS</td>
+              <td>This means the scanner was open before that app session had any history. Simply re-open the POS page from your home screen shortcut — the back button correctly closes the scanner once a session is established.</td>
+            </tr>
+            <tr>
+              <td>Scanner keeps scanning the same item</td>
+              <td>A 2-second cooldown prevents double-scans. If you need to scan the same item twice, wait for the scan line animation to restart.</td>
             </tr>
           </tbody>
         </table>
+      </section>
+
+      <section>
+        <h2>Registering retail items for barcode scanning <span class="pill amber">manager / admin</span></h2>
+        <p>Products like cans of Coca-Cola or bottles of water are sold as-is — they are not <em>ingredients</em> in a recipe. Before their barcodes work at the POS, a manager registers them once via the <strong>Barcode Stock Receive</strong> page.</p>
+        <ol class="steps">
+          <li>Go to <strong>Stock → Barcode Receive</strong> (<code>/admin/stock-barcode-receive.php</code>) — or open it on your phone with the camera.</li>
+          <li>Scan the product barcode (or type it into the keyboard-wedge field).</li>
+          <li>If the barcode is new, the <strong>Register product</strong> modal appears. Choose <strong>POS Item</strong> (not Ingredient).</li>
+          <li>Fill in: <strong>Item name</strong>, <strong>Price</strong> (what the customer pays), <strong>Category</strong> (e.g. "Retail Items" — pre-created for you).</li>
+          <li>Tap <strong>Save POS Item</strong>. The item is immediately live on the POS and scannable at the camera scanner.</li>
+        </ol>
+        <div class="callout note">
+          Once registered, the item appears on the POS menu grid under its category with a green barcode badge. Staff can also tap it manually. The same barcode now works with both the camera scanner and any USB/Bluetooth wedge scanner connected to a till.
+        </div>
+        <div class="callout tip">
+          For stock-tracked ingredients (beer kegs, bottles of spirits that are measured), register as <strong>Ingredient</strong> instead, and link it to the correct stock ingredient record so stock levels are maintained automatically. See the Stock &amp; Orders guide for full details.
+        </div>
       </section>
 
       <section>

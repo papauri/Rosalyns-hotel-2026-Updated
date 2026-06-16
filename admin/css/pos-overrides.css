@@ -48,7 +48,7 @@ button {
 
 .till-wrap {
     display: grid;
-    grid-template-rows: auto 1fr;
+    grid-template-rows: auto 1fr auto;
     height: 100dvh;
     width: 100dvw;
     max-width: 100vw;
@@ -911,7 +911,7 @@ a.recent-toggle span {
     }
 
     .till-wrap {
-        grid-template-rows: auto minmax(0, 1fr);
+        grid-template-rows: auto minmax(0, 1fr) auto;
         height: 100dvh;
         min-height: 100dvh;
     }

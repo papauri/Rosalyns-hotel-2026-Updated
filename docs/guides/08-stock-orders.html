@@ -69,6 +69,10 @@
               <td><strong>Stock Variance</strong></td>
               <td>Daily / weekly variance between <em>system count</em> and <em>physical count</em>.</td>
             </tr>
+            <tr>
+              <td><strong>Barcode Receive</strong> <code>stock-barcode-receive.php</code></td>
+              <td>Scan delivery barcodes with phone camera — registers new products and fills stock receipts hands-free.</td>
+            </tr>
           </tbody>
         </table>
       </section>
@@ -78,7 +82,8 @@
 
         <h3>1. Morning — receive deliveries</h3>
         <ol class="steps">
-          <li>Go to <strong>Stock Receipts → New Receipt</strong>.</li>
+          <li>Go to <strong>Stock Receipts → New Receipt</strong> — or use <strong>Stock → Barcode Receive</strong> on
+            mobile to scan deliveries with your phone camera (faster for large deliveries).</li>
           <li>Pick the supplier.</li>
           <li>Add each item delivered with <strong>quantity</strong> and <strong>unit cost</strong>.</li>
           <li>Save. Stock is added to the relevant ingredients automatically.</li>
@@ -265,6 +270,46 @@
               <td>Manual (manager)</td>
               <td>Stock deducts but no charge.</td>
             </tr>
+          </tbody>
+        </table>
+      </section>
+
+      <section id="barcode-receiving">
+        <h2>Barcode stock receiving <span class="badge">Camera scanner</span></h2>
+        <p>When a delivery arrives, instead of typing each item manually you can scan product barcodes with your phone
+          camera. The system matches the barcode to an existing ingredient (or offers to register a new one) and fills
+          in the receipt line automatically.</p>
+
+        <h3>Opening the scanner</h3>
+        <ol class="steps">
+          <li>Go to <strong>Stock → Barcode Receive</strong> (<code>/admin/stock-barcode-receive.php</code>).</li>
+          <li>Tap <strong>Start Scanner</strong> — your phone camera activates and shows a viewfinder.</li>
+          <li>Point the camera at a product barcode. A beep and vibration confirm a successful read.</li>
+          <li>The matched item is added to the receipt list. Scan the next product immediately.</li>
+        </ol>
+
+        <h3>First-time scan of an unregistered product</h3>
+        <p>If the barcode hasn't been seen before, a registration dialog appears:</p>
+        <ol class="steps">
+          <li>Choose whether this product is an <strong>Ingredient</strong> (kitchen/bar stock, e.g. a beer keg) or a
+            <strong>POS Item</strong> (retail product sold directly from the till, e.g. a can of Coca-Cola).</li>
+          <li>Fill in the name, unit, and unit cost.</li>
+          <li>Save — the barcode is linked to the new record and the scanner continues immediately.</li>
+        </ol>
+        <div class="callout info">POS Items registered here appear on the <strong>Retail Items</strong> category on the
+          POS grid straight away and can be scanned at the till using the camera barcode scanner on mobile.</div>
+
+        <h3>Quick reference</h3>
+        <table class="guide-table">
+          <thead>
+            <tr><th>Situation</th><th>What to do</th></tr>
+          </thead>
+          <tbody>
+            <tr><td>Camera permission denied</td><td>Open browser site settings and allow camera for this site, then refresh.</td></tr>
+            <tr><td>Barcode not scanning</td><td>Ensure good lighting or toggle the <strong>Torch</strong> button. Hold the camera 10–20 cm from the barcode.</td></tr>
+            <tr><td>Wrong quantity received</td><td>Tap the quantity field on the receipt line and correct it before saving.</td></tr>
+            <tr><td>Duplicate scan</td><td>A 2-second cooldown prevents double-counting. Quantity increments automatically if you scan the same barcode twice.</td></tr>
+            <tr><td>Scanner keeps closing</td><td>Enable <strong>Keep open</strong> in the scanner footer — the camera stays on between scans.</td></tr>
           </tbody>
         </table>
       </section>

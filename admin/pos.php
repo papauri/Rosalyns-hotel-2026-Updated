@@ -1687,30 +1687,43 @@ if (in_array($user['role'] ?? '', ['admin', 'manager'], true)) {
         .pos-cam-cart-row .cc-qty { color: #4ade80; font-weight: 600; flex-shrink: 0; }
         .pos-cam-cart-row .cc-price { color: rgba(255,255,255,0.5); flex-shrink: 0; font-size: 11px; }
         .pos-cam-cart-empty { padding: 10px 14px; font-size: 12px; color: rgba(255,255,255,0.35); text-align:center; }
+        /* Barcode wedge status footer — lives as a natural .till-wrap grid row */
+        #barcodeScanStrip {
+            display: none; /* JS switches to flex */
+            align-items: center; gap: 10px;
+            background: #0d1117; color: #fff;
+            font-size: 13px; font-weight: 600;
+            padding: 10px 16px calc(10px + env(safe-area-inset-bottom));
+            border-top: 1px solid rgba(74,222,128,0.22);
+            pointer-events: none; flex-shrink: 0; width: 100%;
+        }
+        #barcodeScanStrip .fas { color: #4ade80; }
+        #barcodeScanLast { margin-left: auto; opacity: 0.65; font-weight: 400; font-size: 12px; }
         /* Scanned items live feed (Facebook Live comment style) */
         .pos-cam-feed {
             position: absolute; left: 10px; bottom: 12px; right: 10px;
             display: flex; flex-direction: column-reverse; gap: 6px;
             pointer-events: none; z-index: 2;
-            max-height: 55%; overflow: hidden;
+            max-height: 60%; overflow: hidden;
         }
         .pos-cam-feed-item {
-            display: flex; align-items: center; gap: 8px;
-            background: rgba(15,15,20,0.78); backdrop-filter: blur(6px);
-            border: 1px solid rgba(74,222,128,0.35); border-radius: 10px;
-            padding: 7px 10px; color: #fff; font-size: 13px;
-            animation: pos-feed-in .22s ease; transform-origin: bottom left;
-            width: fit-content; max-width: 100%;
+            display: flex; align-items: flex-start; gap: 9px;
+            background: rgba(10,14,20,0.82); backdrop-filter: blur(8px);
+            border: 1px solid rgba(74,222,128,0.4); border-radius: 12px;
+            padding: 8px 12px; color: #fff; font-size: 13px;
+            animation: pos-feed-in .2s cubic-bezier(.22,1,.36,1); transform-origin: bottom left;
+            width: fit-content; max-width: min(300px, calc(100% - 0px));
+            box-shadow: 0 4px 16px rgba(0,0,0,0.45);
         }
-        .pos-cam-feed-item.fade-out {
-            animation: pos-feed-out .4s ease forwards;
-        }
-        @keyframes pos-feed-in  { from { opacity:0; transform: scale(.88) translateY(6px); } to { opacity:1; transform: none; } }
-        @keyframes pos-feed-out { to   { opacity:0; transform: scale(.92) translateX(-8px); } }
-        .pos-cam-feed-item .fi-icon { color: #4ade80; font-size: 12px; flex-shrink: 0; }
-        .pos-cam-feed-item .fi-name { font-weight: 600; max-width: 180px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-        .pos-cam-feed-item .fi-amount { margin-left: auto; color: #4ade80; font-weight: 700; white-space: nowrap; font-size: 12px; padding-left: 8px; }
-        .pos-cam-feed-item .fi-qty { font-size: 10px; color: rgba(255,255,255,0.5); margin-left: 2px; }
+        .pos-cam-feed-item.fade-out { animation: pos-feed-out .38s ease forwards; }
+        @keyframes pos-feed-in  { from { opacity:0; transform: scale(.84) translateY(10px); } to { opacity:1; transform: none; } }
+        @keyframes pos-feed-out { to   { opacity:0; transform: scale(.9) translateX(-10px); } }
+        .pos-cam-feed-item .fi-icon { color: #4ade80; font-size: 15px; flex-shrink: 0; margin-top: 1px; }
+        .fi-body { display: flex; flex-direction: column; gap: 2px; flex: 1; min-width: 0; }
+        .fi-body .fi-name { font-weight: 700; font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 160px; }
+        .fi-body .fi-qty-label { font-size: 10px; color: rgba(255,255,255,0.5); }
+        .fi-body .fi-cart-total { font-size: 10px; color: rgba(74,222,128,0.75); font-weight: 600; }
+        .fi-line-total { flex-shrink: 0; color: #4ade80; font-weight: 800; font-size: 14px; padding-left: 10px; white-space: nowrap; align-self: center; }
         /* Scan button in mobile bar */
         .pos-mobile-action.is-scan { color: #4ade80; }
         .pos-mobile-action.is-scan.is-active { background: rgba(74,222,128,0.15); }
@@ -1898,13 +1911,6 @@ if (in_array($user['role'] ?? '', ['admin', 'manager'], true)) {
                 <div class="grid" id="grid"></div>
             </div>
 
-            <!-- Barcode scanner status strip (shown when scanner is active) -->
-            <div id="barcodeScanStrip" style="display:none;position:fixed;bottom:0;left:0;right:0;z-index:9000;background:#1a1a2e;color:#fff;font-size:13px;font-weight:600;padding:10px 16px calc(10px + env(safe-area-inset-bottom));align-items:center;gap:10px;pointer-events:none;">
-                <i class="fas fa-barcode" style="color:#4ade80;"></i>
-                <span>Barcode scanner active — scan an item to add it to the cart</span>
-                <span id="barcodeScanLast" style="margin-left:auto;opacity:0.7;font-weight:400;font-size:12px;"></span>
-            </div>
-
             <!-- Cart -->
             <div class="cart" id="mainCart">
                 <div class="cart-head">
@@ -1989,6 +1995,12 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
                 <i class="fas fa-shopping-cart"></i>
                 <span class="badge" id="cartBadge" style="display:none;">0</span>
             </button>
+        </div>
+        <!-- Barcode wedge scanner status bar — sits as a natural footer row inside .till-wrap grid -->
+        <div id="barcodeScanStrip" style="display:none;">
+            <i class="fas fa-barcode"></i>
+            <span>Barcode scanner active — scan an item to add it to the cart</span>
+            <span id="barcodeScanLast"></span>
         </div>
     </div>
 
@@ -8928,6 +8940,7 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
         'use strict';
         var _stream = null, _detector = null, _loopId = null, _canvas = null, _ctx = null;
         var _cooldown = false, _torchOn = false;
+        var _ac = null; // AudioContext — created once on scanner open (requires user gesture)
         var COOLDOWN_MS = 2200;
 
         async function _waitDetector(tries) {
@@ -8948,6 +8961,10 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
         window.posCamScanOpen = async function () {
             var overlay = document.getElementById('posCamScanOverlay');
             if (!overlay) return;
+            // Create AudioContext now — this IS a user gesture so it will be allowed
+            if (!_ac) {
+                try { _ac = new (window.AudioContext || window.webkitAudioContext)(); } catch(e) {}
+            }
             // Push dummy history state so browser back closes scanner, not the page
             history.pushState({ posCamScanner: true }, '');
             overlay.style.display = 'flex';
@@ -9000,6 +9017,7 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
             clearInterval(_loopId); _loopId = null;
             _cooldown = false; _torchOn = false;
             if (_stream) { _stream.getTracks().forEach(function (t) { t.stop(); }); _stream = null; }
+            if (_ac) { try { _ac.close(); } catch(e) {} _ac = null; }
             var video = document.getElementById('posCamVideo');
             if (video) video.srcObject = null;
             var torch = document.getElementById('posCamTorch');
@@ -9043,15 +9061,17 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
 
             // Haptic
             navigator.vibrate && navigator.vibrate(50);
-            // Beep
+            // Beep — uses pre-created AudioContext (avoids mobile autoplay block)
             try {
-                var ac = new (window.AudioContext || window.webkitAudioContext)();
-                var osc = ac.createOscillator(), g = ac.createGain();
-                osc.connect(g); g.connect(ac.destination);
-                osc.type = 'square'; osc.frequency.value = 1400;
-                g.gain.setValueAtTime(0.12, ac.currentTime);
-                g.gain.exponentialRampToValueAtTime(0.001, ac.currentTime + 0.07);
-                osc.start(ac.currentTime); osc.stop(ac.currentTime + 0.08);
+                if (_ac) {
+                    if (_ac.state === 'suspended') _ac.resume();
+                    var osc = _ac.createOscillator(), g = _ac.createGain();
+                    osc.connect(g); g.connect(_ac.destination);
+                    osc.type = 'square'; osc.frequency.value = 1450;
+                    g.gain.setValueAtTime(0.18, _ac.currentTime);
+                    g.gain.exponentialRampToValueAtTime(0.001, _ac.currentTime + 0.1);
+                    osc.start(_ac.currentTime); osc.stop(_ac.currentTime + 0.11);
+                }
             } catch (e) {}
 
             // Flash viewfinder
@@ -9109,7 +9129,8 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
         function _addFeedItem(code) {
             var feed = document.getElementById('posCamFeed');
             if (!feed) return;
-            // Find what was just added to the cart by matching barcode
+
+            // Resolve item from menuList by barcode
             var matched = (typeof menuList !== 'undefined')
                 ? menuList.find(function (m) { return m.barcode && m.barcode === code; })
                 : null;
@@ -9117,26 +9138,39 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
                 ? cart.find(function (c) { return c.id === matched.id; })
                 : null;
 
-            var name  = matched ? matched.name : code;
-            var price = matched ? ((parseFloat(matched.price) || 0)) : null;
-            var qty   = cartItem ? cartItem.qty : (matched ? 1 : null);
-            var sym   = (typeof currencySymbol !== 'undefined') ? currencySymbol : 'MWK';
+            var name      = matched ? matched.name : code;
+            var unitPrice = matched ? (parseFloat(matched.price) || 0) : null;
+            var qty       = cartItem ? (parseFloat(cartItem.qty) || 1) : 1;
+            var lineTotal = unitPrice !== null ? unitPrice * qty : null;
+            var sym       = (typeof currencySymbol !== 'undefined') ? currencySymbol : 'MWK';
+
+            // Running cart grand total
+            var cartTotal = null;
+            if (typeof cart !== 'undefined' && cart.length) {
+                cartTotal = cart.reduce(function (sum, ci) {
+                    return sum + (parseFloat(ci.price) || 0) * (parseFloat(ci.qty) || 1);
+                }, 0);
+            }
 
             var el = document.createElement('div');
             el.className = 'pos-cam-feed-item';
-            el.innerHTML = '<i class="fas fa-check-circle fi-icon"></i>'
-                + '<span class="fi-name">' + _esc(name) + '</span>'
-                + (qty > 1 ? '<span class="fi-qty">×' + qty + '</span>' : '')
-                + (price !== null ? '<span class="fi-amount">' + sym + ' ' + _fmt(price) + '</span>' : '');
+            el.innerHTML =
+                '<i class="fas fa-check-circle fi-icon"></i>'
+                + '<div class="fi-body">'
+                +   '<span class="fi-name">' + _esc(name) + '</span>'
+                +   (qty > 1 ? '<span class="fi-qty-label">' + qty + ' in cart</span>' : '')
+                +   (cartTotal !== null ? '<span class="fi-cart-total">Cart: ' + sym + ' ' + _fmt(cartTotal) + '</span>' : '')
+                + '</div>'
+                + (lineTotal !== null ? '<span class="fi-line-total">' + sym + ' ' + _fmt(lineTotal) + '</span>' : '');
 
             feed.insertBefore(el, feed.firstChild);
 
-            // Keep at most 4 visible items
-            while (feed.children.length > 4) {
+            // Keep at most 5 visible items
+            while (feed.children.length > 5) {
                 feed.removeChild(feed.lastChild);
             }
 
-            // Fade out after 4 seconds if "Keep open" is checked, else it disappears with scanner close
+            // Fade out after 4 seconds when in "Keep open" mode
             var keepOpen = document.getElementById('posCamKeepOpen');
             if (keepOpen && keepOpen.checked) {
                 setTimeout(function () {
