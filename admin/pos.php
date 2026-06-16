@@ -5548,11 +5548,13 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
                     const payFor     = deal.multi_buy_pay || 1;
                     const freePerGrp = groupSize - payFor;
                     const groups     = Math.floor(units.length / groupSize);
+                    console.log('[multi_buy]', deal.name, 'qualifying:', qualifying.length, 'units:', units.length, 'groupSize:', groupSize, 'payFor:', payFor, 'groups:', groups, 'freePerGrp:', freePerGrp);
                     if (groups < 1) continue;
                     // Respect max_uses_per_order cap
                     const maxFreeGroups = deal.max_uses_per_order ? Math.min(groups, deal.max_uses_per_order) : groups;
                     const totalFree  = maxFreeGroups * freePerGrp;
                     saving = Math.round(units.slice(0, totalFree).reduce((s, p) => s + p, 0) * 100) / 100;
+                    console.log('[multi_buy]', deal.name, 'totalFree:', totalFree, 'saving:', saving);
                     detail = `Buy ${groupSize}, pay for ${payFor} — ${totalFree} item${totalFree !== 1 ? 's' : ''} free`;
 
                 } else if (deal.deal_type === 'spend_save') {
@@ -5957,6 +5959,7 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
             </div>`).join('');
             }
             applyDeals();
+            console.log('[renderCart] _dealLines:', _dealLines, '_dealSavings:', _dealSavings);
 
             const t = cartTotal();
             const eff = effectiveCartTotal();
