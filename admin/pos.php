@@ -988,8 +988,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $dealDiscount = min($dealDiscountRaw, round($totalAmount * 0.90, 2));
                 if ($dealDiscount > 0 && !empty($dealValidation['reason'])) {
                     $totalAmount = max(0.01, round($totalAmount - $dealDiscount, 2));
-                    $pdo->prepare("UPDATE stock_orders SET total_amount=?, subtotal=?, discount_amount=?, discount_reason=? WHERE id=?")
-                        ->execute([$totalAmount, $totalAmount, $dealDiscount, $dealValidation['reason'], $orderId]);
+                    $pdo->prepare("UPDATE stock_orders SET total_amount=?, discount_amount=?, discount_reason=? WHERE id=?")
+                        ->execute([$totalAmount, $dealDiscount, $dealValidation['reason'], $orderId]);
                     pos_logAudit($pdo, $orderId, $user['id'], $user['full_name'], 'deal_discount_applied', json_encode(['amount' => $dealDiscount, 'deals' => $dealValidation['reason']]));
                 } elseif ($dealDiscountRaw > 0) {
                     // Deal IDs were invalid / expired — ignore silently (don't crash the sale)
@@ -1006,8 +1006,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     $existingDiscount = (float)($dealDiscount);
                     $combinedDiscount = round($existingDiscount + $discountAmount, 2);
                     $combinedReason   = trim(($dealValidation['reason'] ? $dealValidation['reason'] . ' + ' : '') . $discountReason);
-                    $pdo->prepare("UPDATE stock_orders SET total_amount=?, subtotal=?, discount_amount=?, discount_reason=? WHERE id=?")
-                        ->execute([$totalAmount, $totalAmount, $combinedDiscount, $combinedReason ?: null, $orderId]);
+                    $pdo->prepare("UPDATE stock_orders SET total_amount=?, discount_amount=?, discount_reason=? WHERE id=?")
+                        ->execute([$totalAmount, $combinedDiscount, $combinedReason ?: null, $orderId]);
                     pos_logAudit($pdo, $orderId, $user['id'], $user['full_name'], 'discount_applied', json_encode(['amount' => $discountAmount, 'reason' => $discountReason]));
                     logActivity($user['id'], 'pos_discount', 'Discount ' . $currency_symbol . ' ' . number_format($discountAmount, 2) . ' on order ' . $reference . ($discountReason ? ' — ' . $discountReason : ''));
                 }

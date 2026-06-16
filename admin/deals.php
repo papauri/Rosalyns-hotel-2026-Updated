@@ -15,6 +15,32 @@ if (!hasPermission((int)$user['id'], 'stock_management')) {
 
 $VALID_TYPES = ['happy_hour', 'percent_off', 'fixed_off', 'multi_buy', 'spend_save', 'combo'];
 
+// ── GET: item search / fetch by IDs ──────────────────────────────────────────
+if ($_SERVER['REQUEST_METHOD'] === 'GET' && isset($_GET['aj'])) {
+    header('Content-Type: application/json');
+    $q   = trim($_GET['q']   ?? '');
+    $ids = trim($_GET['ids'] ?? '');
+    if ($ids !== '') {
+        $idArr = array_values(array_filter(array_map('intval', explode(',', $ids))));
+        if ($idArr) {
+            $ph   = implode(',', array_fill(0, count($idArr), '?'));
+            $stmt = $pdo->prepare("SELECT mi.id, mi.item_name AS name, mc.name AS category
+                                   FROM menu_items mi JOIN menu_categories mc ON mc.id = mi.category_id
+                                   WHERE mi.id IN ($ph) ORDER BY mi.item_name");
+            $stmt->execute($idArr);
+            echo json_encode(array_values($stmt->fetchAll(PDO::FETCH_ASSOC)));
+        } else { echo json_encode([]); }
+    } elseif ($q !== '') {
+        $stmt = $pdo->prepare("SELECT mi.id, mi.item_name AS name, mc.name AS category
+                               FROM menu_items mi JOIN menu_categories mc ON mc.id = mi.category_id
+                               WHERE mi.is_available = 1 AND (mi.show_pos = 1 OR mi.show_room_service = 1)
+                               AND mi.item_name LIKE ? ORDER BY mi.item_name LIMIT 15");
+        $stmt->execute(['%' . $q . '%']);
+        echo json_encode(array_values($stmt->fetchAll(PDO::FETCH_ASSOC)));
+    } else { echo json_encode([]); }
+    exit;
+}
+
 // ── AJAX handlers ─────────────────────────────────────────────────────────────
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['ajax_action'])) {
     header('Content-Type: application/json');
@@ -265,6 +291,27 @@ $DAY_NAMES = ['','Mon','Tue','Wed','Thu','Fri','Sat','Sun'];
         .dm-footer .btn-save:hover { background:#4f46e5; }
         .dm-footer .btn-save:disabled { opacity:.6; cursor:not-allowed; }
         @media(max-width:520px) { .fm-2col,.fm-3col { grid-template-columns:1fr; } .dm-box { padding:18px 14px; } }
+
+        /* ── Item Picker ── */
+        .ip-wrap  { position:relative; }
+        .ip-wrap input { width:100%; box-sizing:border-box; }
+        .ip-drop  { position:absolute; top:calc(100% + 4px); left:0; right:0; background:#fff; border:1px solid #d1d5db;
+                    border-radius:10px; box-shadow:0 8px 24px rgba(0,0,0,.12); z-index:200; display:none; max-height:220px; overflow-y:auto; }
+        .ip-drop.open { display:block; }
+        .ip-result { padding:9px 14px; cursor:pointer; display:flex; align-items:center; justify-content:space-between; font-size:13px; color:#1f2937; border-bottom:1px solid #f3f4f6; }
+        .ip-result:last-child { border-bottom:none; }
+        .ip-result:hover,.ip-result.focused { background:#f0f0ff; }
+        .ip-result-cat { font-size:11px; color:#9ca3af; }
+        .ip-result-tick { color:#6366f1; font-size:12px; opacity:0; }
+        .ip-result.already .ip-result-tick { opacity:1; }
+        .ip-result.already { color:#9ca3af; cursor:default; }
+        .ip-no-result { padding:10px 14px; font-size:13px; color:#9ca3af; }
+        .ip-chips { display:flex; flex-wrap:wrap; gap:6px; margin-top:8px; min-height:0; }
+        .ip-chip  { display:inline-flex; align-items:center; gap:6px; background:#ede9fe; color:#5b21b6; border-radius:20px;
+                    padding:4px 10px 4px 12px; font-size:12px; font-weight:600; }
+        .ip-chip-x { background:none; border:none; cursor:pointer; color:#7c3aed; font-size:13px; line-height:1; padding:0; }
+        .ip-chip-x:hover { color:#dc2626; }
+        .ip-empty-hint { font-size:12px; color:#9ca3af; padding:4px 0; }
     </style>
 </head>
 <body>
@@ -490,8 +537,17 @@ $DAY_NAMES = ['','Mon','Tue','Wed','Thu','Fri','Sat','Sun'];
             <input type="text" id="dmItemTypes" placeholder="food, drink">
             <div class="fm-hint">Type exactly as they appear in the menu category slug: <code>food</code>, <code>drink</code></div>
         </div>
-        <div id="dmItemIdsRow" class="fm-row" style="display:none;"><label>Menu Item IDs (comma-separated)</label>
-            <input type="text" id="dmItemIds" placeholder="12, 45, 67">
+        <div id="dmItemIdsRow" style="display:none;">
+            <div class="fm-row" style="margin-bottom:8px;">
+                <label>Search &amp; Add Items</label>
+                <div class="ip-wrap">
+                    <input type="text" id="dmItemSearch" placeholder="Type item name e.g. Coca Cola…" autocomplete="off"
+                           oninput="ipSearch(this.value)" onkeydown="ipKeyNav(event)">
+                    <div class="ip-drop" id="ipDrop"></div>
+                </div>
+            </div>
+            <div class="ip-chips" id="ipChips"><span class="ip-empty-hint">No items selected — all items qualify</span></div>
+            <input type="hidden" id="dmItemIds" value="">
         </div>
     </div>
 
@@ -566,7 +622,19 @@ function openDealModal(id) {
     document.getElementById('dmValidTo').value   = d ? (d.valid_to   || '') : '';
     document.getElementById('dmAppliesTo').value = d ? (d.applies_to || 'all') : 'all';
     document.getElementById('dmItemTypes').value = (d && d.item_types) ? (Array.isArray(d.item_types)?d.item_types:JSON.parse(d.item_types)).join(', ') : '';
-    document.getElementById('dmItemIds').value   = (d && d.item_ids)   ? (Array.isArray(d.item_ids)?d.item_ids:JSON.parse(d.item_ids)).join(', ')   : '';
+
+    // Item picker — load names for saved IDs
+    _ipItems = [];
+    ipRender();
+    document.getElementById('dmItemSearch').value = '';
+    ipCloseDrop();
+    if (d && d.applies_to === 'items' && d.item_ids) {
+        const ids = Array.isArray(d.item_ids) ? d.item_ids : JSON.parse(d.item_ids);
+        if (ids.length) {
+            fetch('deals.php?aj=items&ids=' + ids.join(','))
+                .then(r => r.json()).then(rows => { _ipItems = rows.map(r => ({id:+r.id, name:r.name, category:r.category})); ipRender(); });
+        }
+    }
     document.getElementById('dmIsActive').checked  = d ? !!+d.is_active : true;
     document.getElementById('dmExclusive').checked = d ? !!+d.exclusive  : false;
 
@@ -767,6 +835,100 @@ async function deleteDeal(id) {
 }
 
 document.getElementById('dmBg').addEventListener('click', e => { if (e.target === document.getElementById('dmBg')) closeDealModal(); });
+
+/* ── Item Picker ──────────────────────────────────────────────────────────── */
+let _ipItems  = [];   // [{id, name, category}]
+let _ipTimer  = null;
+let _ipFocIdx = -1;
+let _ipResults = [];
+
+function ipSearch(q) {
+    clearTimeout(_ipTimer);
+    q = q.trim();
+    if (!q) { ipCloseDrop(); return; }
+    _ipTimer = setTimeout(() => ipDoSearch(q), 220);
+}
+
+async function ipDoSearch(q) {
+    try {
+        const rows = await fetch('deals.php?aj=items&q=' + encodeURIComponent(q)).then(r => r.json());
+        _ipResults = rows;
+        _ipFocIdx  = -1;
+        const drop = document.getElementById('ipDrop');
+        if (!rows.length) {
+            drop.innerHTML = '<div class="ip-no-result">No items found for "' + q.replace(/</g,'&lt;') + '"</div>';
+        } else {
+            drop.innerHTML = rows.map((r, i) => {
+                const already = _ipItems.some(x => x.id === +r.id);
+                return `<div class="ip-result${already?' already':''}" data-idx="${i}" onclick="ipAdd(${r.id},${JSON.stringify(r.name)},${JSON.stringify(r.category||'')})">
+                    <span>${r.name.replace(/</g,'&lt;')}<br><span class="ip-result-cat">${(r.category||'').replace(/</g,'&lt;')}</span></span>
+                    <span class="ip-result-tick">&#10003; added</span>
+                </div>`;
+            }).join('');
+        }
+        drop.classList.add('open');
+    } catch(e) {}
+}
+
+function ipAdd(id, name, category) {
+    if (_ipItems.some(x => x.id === +id)) return;
+    _ipItems.push({id: +id, name, category});
+    ipRender();
+    ipCloseDrop();
+    document.getElementById('dmItemSearch').value = '';
+    document.getElementById('dmItemSearch').focus();
+}
+
+function ipRemove(id) {
+    _ipItems = _ipItems.filter(x => x.id !== +id);
+    ipRender();
+}
+
+function ipRender() {
+    const chips  = document.getElementById('ipChips');
+    const hidden = document.getElementById('dmItemIds');
+    hidden.value = _ipItems.map(x => x.id).join(',');
+    if (!_ipItems.length) {
+        chips.innerHTML = '<span class="ip-empty-hint">No items selected — deal applies to all items</span>';
+        return;
+    }
+    chips.innerHTML = _ipItems.map(x =>
+        `<span class="ip-chip" title="${x.category||''}">${x.name.replace(/</g,'&lt;')}
+            <button type="button" class="ip-chip-x" onclick="ipRemove(${x.id})" title="Remove">&#215;</button>
+        </span>`
+    ).join('');
+}
+
+function ipCloseDrop() {
+    document.getElementById('ipDrop').classList.remove('open');
+    document.getElementById('ipDrop').innerHTML = '';
+    _ipResults = []; _ipFocIdx = -1;
+}
+
+function ipKeyNav(e) {
+    const drop = document.getElementById('ipDrop');
+    const items = drop.querySelectorAll('.ip-result:not(.already)');
+    if (!items.length) return;
+    if (e.key === 'ArrowDown') {
+        e.preventDefault();
+        _ipFocIdx = Math.min(_ipFocIdx + 1, items.length - 1);
+    } else if (e.key === 'ArrowUp') {
+        e.preventDefault();
+        _ipFocIdx = Math.max(_ipFocIdx - 1, 0);
+    } else if (e.key === 'Enter' && _ipFocIdx >= 0) {
+        e.preventDefault();
+        items[_ipFocIdx].click();
+        return;
+    } else if (e.key === 'Escape') {
+        ipCloseDrop(); return;
+    } else { return; }
+    items.forEach((el, i) => el.classList.toggle('focused', i === _ipFocIdx));
+    items[_ipFocIdx]?.scrollIntoView({block:'nearest'});
+}
+
+document.addEventListener('click', e => {
+    if (!e.target.closest('#dmItemIdsRow')) ipCloseDrop();
+});
 </script>
 <?php require_once 'includes/admin-flash.php'; ?>
 </body>
