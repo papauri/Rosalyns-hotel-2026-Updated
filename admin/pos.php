@@ -1935,7 +1935,7 @@ if (in_array($user['role'] ?? '', ['admin', 'manager'], true)) {
     (async function () {
         if (!('BarcodeDetector' in window)) {
             try {
-                const m = await import('https://cdn.jsdelivr.net/npm/@undecaf/barcode-detector-polyfill/dist/es2017/index.js');
+                const m = await import('https://unpkg.com/@undecaf/barcode-detector-polyfill@0.9.23/dist/main.js');
                 window.BarcodeDetector = m.BarcodeDetectorPolyfill;
             } catch (e) {
                 console.warn('[POS] BarcodeDetector polyfill failed to load. Native support only.');
