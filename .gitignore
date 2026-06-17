@@ -41,6 +41,7 @@ Desktop.ini
 *.log
 logs/
 error.log
+error_log
 
 # Cache
 cache/
