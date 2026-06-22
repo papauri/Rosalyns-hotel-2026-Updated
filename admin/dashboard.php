@@ -145,7 +145,7 @@ if (!$is_card_insight_ajax) {
     ");
         $recent_bookings = $recent_stmt->fetchAll(PDO::FETCH_ASSOC);
 
-        // Upcoming check-ins (next 7 days)
+        // Upcoming check-ins (next 7 days, excludes today which has its own section)
         $upcoming_stmt = $pdo->prepare("
         SELECT b.*, r.name as room_name,
                ir.room_number as individual_room_number, ir.room_name as individual_room_name,
@@ -153,7 +153,7 @@ if (!$is_card_insight_ajax) {
         FROM bookings b
         JOIN rooms r ON b.room_id = r.id
         LEFT JOIN individual_rooms ir ON b.individual_room_id = ir.id
-        WHERE b.check_in_date BETWEEN ? AND DATE_ADD(?, INTERVAL 7 DAY)
+        WHERE b.check_in_date BETWEEN DATE_ADD(?, INTERVAL 1 DAY) AND DATE_ADD(?, INTERVAL 7 DAY)
         AND b.status IN ('pending', 'confirmed')
         ORDER BY b.check_in_date ASC
     ");

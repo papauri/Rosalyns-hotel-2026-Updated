@@ -842,11 +842,11 @@ function getRoomDashboardSummary(): array
         ");
         $checkoutsToday = (int)$checkoutStmt->fetchColumn();
 
-        // Check-ins today
+        // Check-ins today (confirmed + pending, matching dashboard stat card)
         $checkinStmt = $pdo->query("
             SELECT COUNT(*) as count
             FROM bookings
-            WHERE status = 'confirmed' AND check_in_date = CURDATE()
+            WHERE status IN ('confirmed', 'pending') AND check_in_date = CURDATE()
         ");
         $checkinsToday = (int)$checkinStmt->fetchColumn();
 
