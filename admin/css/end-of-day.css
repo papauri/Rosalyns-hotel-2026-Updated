@@ -1,11 +1,83 @@
-/* Page-specific styles only.
-   Shared components (buttons, tables, cards, modals) → admin-components.css
-   Responsive rules → admin-responsive.css
-   Design tokens → /css/base/variables.css */
 /**
  * End of Day Report — admin dashboard styles
  * Refined, responsive, table-safe layout for operations + finance snapshots.
  */
+
+/* ============================================================
+   DESIGN TOKENS (self-contained — no external variables.css)
+   These define everything end-of-day.css references so the
+   page renders correctly without a separate token file.
+   ============================================================ */
+:root {
+    /* ── Brand / Luxury palette ─────────────────────────── */
+    --color-white:          #ffffff;
+    --color-background:     #F7F3EE;
+    --color-surface:        #F4EFE9;
+    --color-lux-clay-50:    #F3ECE4;
+    --color-lux-clay-100:   #EAD8C8;
+    --color-lux-ink:        #231F1C;
+    --color-lux-gold:       #B18247;
+    --color-lux-gold-dark:  #8A6030;
+
+    /* ── Primary (warm taupe) ───────────────────────────── */
+    --color-primary:        #8A775F;
+    --color-primary-dark:   #5F5343;
+    --color-primary-light:  #B09A82;
+
+    /* ── Text ───────────────────────────────────────────── */
+    --color-text-primary:   #2A2723;
+    --color-text-secondary: #6B5F56;
+
+    /* ── Borders ────────────────────────────────────────── */
+    --color-border:         #D4C9BE;
+    --color-border-light:   #E8DED4;
+
+    /* ── Semantic ───────────────────────────────────────── */
+    --color-success:        #16a34a;
+    --color-success-light:  #22c55e;
+    --color-error:          #dc2626;
+    --color-warning:        #d97706;
+    --color-info:           #2563eb;
+
+    /* ── Spacing scale ──────────────────────────────────── */
+    --space-1:  0.25rem;    /*  4px */
+    --space-2:  0.5rem;     /*  8px */
+    --space-3:  0.75rem;    /* 12px */
+    --space-4:  1rem;       /* 16px */
+    --space-5:  1.25rem;    /* 20px */
+    --space-6:  1.5rem;     /* 24px */
+
+    /* ── Border-radius scale ────────────────────────────── */
+    --radius-sm:   0.25rem;
+    --radius-md:   0.5rem;
+    --radius-lg:   0.75rem;
+    --radius-xl:   1rem;
+    --radius-full: 9999px;
+
+    /* ── Typography ─────────────────────────────────────── */
+    --font-sans:     'Jost', system-ui, -apple-system, sans-serif;
+    --font-serif:    'Cormorant Garamond', Georgia, 'Times New Roman', serif;
+    --font-medium:   500;
+    --font-semibold: 600;
+    --font-bold:     700;
+
+    /* ── Line heights ───────────────────────────────────── */
+    --leading-none:   1;
+    --leading-tight:  1.25;
+    --leading-snug:   1.375;
+    --leading-normal: 1.5;
+
+    /* ── Letter spacing ─────────────────────────────────── */
+    --tracking-normal:  0em;
+    --tracking-wide:    0.025em;
+    --tracking-wider:   0.05em;
+    --tracking-widest:  0.1em;
+
+    /* ── Motion ─────────────────────────────────────────── */
+    --transition-fast:  150ms;
+    --transition-base:  250ms;
+    --easing-smooth:    cubic-bezier(0.4, 0, 0.2, 1);
+}
 
 .eod-page {
     --eod-surface: color-mix(in srgb, var(--color-surface) 92%, var(--color-white) 8%);
