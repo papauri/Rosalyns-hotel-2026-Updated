@@ -307,7 +307,7 @@ if (!$error && $_SERVER['REQUEST_METHOD'] === 'POST') {
     if ($message) {
         $_SESSION['stock_msg'] = $message;
         // Invalidate stock dashboard cache
-        if (function_exists('deleteCache')) deleteCache('stock_dashboard_metrics_v2');
+        if (function_exists('deleteCache')) deleteCache('stock_dashboard_metrics_v3');
     }
     if ($error)   $_SESSION['stock_err'] = $error;
     header('Location: stock-ingredients.php');
@@ -332,8 +332,7 @@ if (!$error || strpos($error, 'Stock tables not yet') === false) {
     try {
         $stmt = $pdo->query("
             SELECT i.*,
-                   (SELECT COUNT(*) FROM stock_batches b WHERE b.ingredient_id = i.id AND b.status = 'active' AND (b.expiry_date IS NULL OR b.expiry_date >= CURDATE())) AS active_batches,
-                   (SELECT MIN(b.expiry_date) FROM stock_batches b WHERE b.ingredient_id = i.id AND b.status = 'active' AND b.expiry_date IS NOT NULL AND b.expiry_date >= CURDATE()) AS next_expiry
+                   (SELECT MIN(b.expiry_date) FROM stock_batches b WHERE b.ingredient_id = i.id AND b.status = 'active' AND b.expiry_date IS NOT NULL AND b.quantity_remaining > 0) AS next_expiry
             FROM stock_ingredients i
             ORDER BY i.is_archived ASC, i.category ASC, i.name ASC
         ");
@@ -368,24 +367,16 @@ if (!$error || strpos($error, 'Stock tables not yet') === false) {
 
 $csrf_token = generateCsrfToken();
 
-function stock_status_badge(array $i): string
+function stock_status_badge(array $i, ?int $expDays = null): string
 {
     $cur = (float)$i['current_quantity'];
     $min = (float)$i['min_quantity'];
     if ((int)$i['is_archived'] === 1) return '<span class="badge badge-archived">Archived</span>';
-    if ($cur <= 0) return '<span class="badge badge-critical">Critical</span>';
-    if ($min > 0 && $cur <= $min) return '<span class="badge badge-low">Low</span>';
+    if ($cur <= 0)                     return '<span class="badge badge-critical">Critical</span>';
+    if ($expDays !== null && $expDays < 0)  return '<span class="badge badge-critical">Expired</span>';
+    if ($min > 0 && $cur <= $min)      return '<span class="badge badge-low">Low</span>';
+    if ($expDays !== null && $expDays <= 7) return '<span class="badge badge-low">Expiring</span>';
     return '<span class="badge badge-ok">OK</span>';
-}
-function expiry_badge(?string $next, int $alert): string
-{
-    if (!$next) return '';
-    $today = new DateTime('today');
-    $exp = new DateTime($next);
-    $diff = (int)$today->diff($exp)->format('%r%a');
-    if ($diff <= 3) return '<span class="badge badge-critical" style="margin-left:6px;">Expires in ' . $diff . 'd</span>';
-    if ($diff <= $alert) return '<span class="badge badge-low" style="margin-left:6px;">Expires in ' . $diff . 'd</span>';
-    return '';
 }
 ?>
 <!DOCTYPE html>
@@ -471,11 +462,13 @@ function expiry_badge(?string $next, int $alert): string
                         if (!empty($i['next_expiry'])) {
                             $expDays = (int)(new DateTime('today'))->diff(new DateTime($i['next_expiry']))->format('%r%a');
                         }
-                        $isExpiringSoon = ($expDays !== null && $expDays <= 7);
+                        $isExpiringSoon = ($expDays !== null && $expDays >= 0 && $expDays <= 7);
+                        $isExpired      = ($expDays !== null && $expDays < 0);
                         $rowStatus = ((int)$i['is_archived'] === 1) ? 'archived'
-                            : ($cur <= 0 ? 'critical'
-                                : ($min > 0 && $cur <= $min ? 'low'
-                                    : ($isExpiringSoon ? 'expiring' : 'ok')));
+                            : ($cur <= 0     ? 'critical'
+                            : ($isExpired    ? 'critical'
+                            : ($min > 0 && $cur <= $min ? 'low'
+                            : ($isExpiringSoon ? 'expiring' : 'ok'))));
                         $qtyClass = $cur <= 0 ? 'qty-critical' : ($min > 0 && $cur <= $min ? 'qty-low' : '');
 
                         // Expiry pill class
@@ -527,7 +520,7 @@ function expiry_badge(?string $next, int $alert): string
                                 <?php endif; ?>
                             </td>
                             <td>
-                                <?php echo stock_status_badge($i); ?>
+                                <?php echo stock_status_badge($i, $expDays); ?>
                             </td>
                             <td>
                                 <div class="row-actions">
