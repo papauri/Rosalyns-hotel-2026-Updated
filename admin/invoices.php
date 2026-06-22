@@ -245,7 +245,12 @@ try {
                    WHEN p.booking_type = 'room' THEN b.guest_email
                    WHEN p.booking_type = 'conference' THEN ci.{$conferenceFields['email']}
                    ELSE NULL
-               END as customer_email
+               END as customer_email,
+               CASE
+                   WHEN p.booking_type = 'room' THEN b.guest_phone
+                   WHEN p.booking_type = 'conference' THEN ci.{$conferenceFields['phone']}
+                   ELSE NULL
+               END as customer_phone
         FROM payments p
         LEFT JOIN bookings b ON p.booking_type = 'room' AND p.booking_id = b.id
         LEFT JOIN rooms r ON p.booking_type = 'room' AND b.room_id = r.id
@@ -650,63 +655,90 @@ $totalAging = (float)$aging['bucket_0_30'] + (float)$aging['bucket_31_60'] + (fl
                                     </td>
                                     <td>
                                         <div class="action-buttons">
+                                            <!-- View generated document -->
                                             <?php if ($invoice['invoice_path'] && file_exists(__DIR__ . '/../' . $invoice['invoice_path'])): ?>
                                                 <a href="../<?php echo htmlspecialchars($invoice['invoice_path']); ?>"
                                                     target="_blank"
                                                     class="btn-action btn-view"
-                                                    title="View Invoice">
+                                                    title="<?php echo $invoice['payment_type'] === 'refund' ? 'View Credit Note' : 'View Invoice'; ?>">
                                                     <i class="fas fa-eye"></i> View
                                                 </a>
                                             <?php endif; ?>
 
-                                            <?php if ($invoice['invoice_generated']): ?>
+                                            <!-- Link to underlying booking -->
+                                            <?php if (!empty($invoice['booking_id'])): ?>
+                                                <?php if ($invoice['booking_type'] === 'room'): ?>
+                                                    <a class="btn-action" href="booking-detail.php?id=<?php echo (int)$invoice['booking_id']; ?>" title="View booking">
+                                                        <i class="fas fa-door-open"></i> Booking
+                                                    </a>
+                                                <?php elseif ($invoice['booking_type'] === 'conference'): ?>
+                                                    <a class="btn-action" href="conference-detail.php?id=<?php echo (int)$invoice['booking_id']; ?>" title="View conference inquiry">
+                                                        <i class="fas fa-chalkboard"></i> Booking
+                                                    </a>
+                                                <?php endif; ?>
+                                            <?php endif; ?>
+
+                                            <!-- Resend invoice — only for non-refund payments with a generated invoice -->
+                                            <?php if ($invoice['invoice_generated'] && $invoice['payment_type'] !== 'refund'): ?>
                                                 <form method="POST" style="display: inline;">
                                                     <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf_token, ENT_QUOTES, 'UTF-8'); ?>">
                                                     <input type="hidden" name="action" value="resend_invoice">
-                                                    <input type="hidden" name="payment_id" value="<?php echo $invoice['id']; ?>">
-                                                    <button type="submit" class="btn-action btn-resend" onclick="return confirm('Resend invoice email?');">
+                                                    <input type="hidden" name="payment_id" value="<?php echo (int)$invoice['id']; ?>">
+                                                    <button type="submit" class="btn-action btn-resend" onclick="return confirm('Resend invoice email to customer?');">
                                                         <i class="fas fa-paper-plane"></i> Resend
                                                     </button>
                                                 </form>
                                             <?php endif; ?>
 
-                                            <?php if (in_array($invoice['payment_status'], ['pending', 'partial'], true)): ?>
+                                            <!-- Payment reminder — only for outstanding, non-refund payments -->
+                                            <?php if (in_array($invoice['payment_status'], ['pending', 'partial'], true) && $invoice['payment_type'] !== 'refund'): ?>
                                                 <form method="POST" style="display: inline;">
                                                     <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf_token, ENT_QUOTES, 'UTF-8'); ?>">
                                                     <input type="hidden" name="action" value="send_reminder">
-                                                    <input type="hidden" name="payment_id" value="<?php echo $invoice['id']; ?>">
+                                                    <input type="hidden" name="payment_id" value="<?php echo (int)$invoice['id']; ?>">
                                                     <button type="submit" class="btn-action" onclick="return confirm('Send payment reminder email now?');">
                                                         <i class="fas fa-bell"></i> Reminder
                                                     </button>
                                                 </form>
                                             <?php endif; ?>
 
+                                            <!-- Direct email — address part must NOT be URL-encoded in mailto: -->
                                             <?php if (!empty($invoice['customer_email'])): ?>
-                                                <a class="btn-action" href="mailto:<?php echo rawurlencode($invoice['customer_email']); ?>?subject=<?php echo rawurlencode('Payment reminder - ' . ($invoice['invoice_number'] ?: $invoice['payment_reference'])); ?>">
+                                                <a class="btn-action" href="mailto:<?php echo htmlspecialchars($invoice['customer_email'], ENT_QUOTES, 'UTF-8'); ?>?subject=<?php echo htmlspecialchars(rawurlencode('Payment reminder - ' . ($invoice['invoice_number'] ?: $invoice['payment_reference'])), ENT_QUOTES, 'UTF-8'); ?>">
                                                     <i class="fas fa-envelope"></i> Email
                                                 </a>
                                             <?php endif; ?>
 
-                                            <?php if (!empty($invoice['booking_reference'])): ?>
-                                                <a class="btn-action" href="https://wa.me/?text=<?php echo urlencode('Payment reminder for ' . $invoice['booking_reference'] . ' (' . $invoice['payment_reference'] . ')'); ?>" target="_blank" rel="noopener">
-                                                    <i class="fab fa-whatsapp"></i> WhatsApp
-                                                </a>
+                                            <!-- WhatsApp — use phone number when available so message goes to the right contact -->
+                                            <?php
+                                            $waPhone = preg_replace('/[^0-9+]/', '', (string)($invoice['customer_phone'] ?? ''));
+                                            $waText = urlencode('Payment reminder for booking ' . $invoice['booking_reference'] . ' · Ref: ' . $invoice['payment_reference'] . ' · Amt: ' . ($currency_symbol ?? '') . number_format((float)$invoice['total_amount'], 0));
+                                            $waHref = !empty($waPhone)
+                                                ? 'https://wa.me/' . ltrim($waPhone, '+') . '?text=' . $waText
+                                                : 'https://wa.me/?text=' . $waText;
+                                            ?>
+                                            <a class="btn-action" href="<?php echo htmlspecialchars($waHref, ENT_QUOTES, 'UTF-8'); ?>" target="_blank" rel="noopener">
+                                                <i class="fab fa-whatsapp"></i> WhatsApp
+                                            </a>
+
+                                            <!-- Regenerate invoice — not applicable for refund records (use Credit Note instead) -->
+                                            <?php if ($invoice['payment_type'] !== 'refund'): ?>
+                                                <form method="POST" style="display: inline;">
+                                                    <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf_token, ENT_QUOTES, 'UTF-8'); ?>">
+                                                    <input type="hidden" name="action" value="regenerate_invoice">
+                                                    <input type="hidden" name="payment_id" value="<?php echo (int)$invoice['id']; ?>">
+                                                    <button type="submit" class="btn-action btn-regenerate" onclick="return confirm('Regenerate invoice? This will create a new invoice number.');">
+                                                        <i class="fas fa-sync"></i> Regenerate
+                                                    </button>
+                                                </form>
                                             <?php endif; ?>
 
-                                            <form method="POST" style="display: inline;">
-                                                <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf_token, ENT_QUOTES, 'UTF-8'); ?>">
-                                                <input type="hidden" name="action" value="regenerate_invoice">
-                                                <input type="hidden" name="payment_id" value="<?php echo $invoice['id']; ?>">
-                                                <button type="submit" class="btn-action btn-regenerate" onclick="return confirm('Regenerate invoice? This will create a new invoice number.');">
-                                                    <i class="fas fa-sync"></i> Regenerate
-                                                </button>
-                                            </form>
-
+                                            <!-- Credit Note — only for refund payments that haven't had one generated yet -->
                                             <?php if ($invoice['payment_type'] === 'refund' && !$invoice['invoice_generated']): ?>
                                                 <form method="POST" style="display: inline;">
                                                     <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf_token, ENT_QUOTES, 'UTF-8'); ?>">
                                                     <input type="hidden" name="action" value="generate_credit_note">
-                                                    <input type="hidden" name="payment_id" value="<?php echo $invoice['id']; ?>">
+                                                    <input type="hidden" name="payment_id" value="<?php echo (int)$invoice['id']; ?>">
                                                     <button type="submit" class="btn-action" style="background: #dc3545; color: white;" onclick="return confirm('Generate credit note for this refund?');">
                                                         <i class="fas fa-file-invoice"></i> Credit Note
                                                     </button>
