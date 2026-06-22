@@ -2392,3 +2392,33 @@ body.modal-open {
         min-height: 1.9rem !important;
     }
 }
+
+/* ============================================
+   GLOBAL ACTION BUTTONS
+   ============================================ */
+
+/* btn-add — used across stock, events, gallery, user mgmt pages.
+   Page-specific CSS may override this with scoped selectors. */
+.btn-add {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 9px 18px;
+    background: linear-gradient(135deg, var(--color-primary, #8A775F) 0%, #6f5b43 100%);
+    color: #fff;
+    border: none;
+    border-radius: 7px;
+    font-size: 13px;
+    font-weight: 500;
+    cursor: pointer;
+    text-decoration: none;
+    transition: background 0.15s, transform 0.15s, box-shadow 0.15s;
+}
+
+.btn-add:hover {
+    background: linear-gradient(135deg, #6f5b43 0%, #5a4933 100%);
+    color: #fff;
+    transform: translateY(-1px);
+    box-shadow: 0 4px 10px rgba(111, 91, 67, 0.3);
+    text-decoration: none;
+}

@@ -154,7 +154,7 @@ if (!$error && $_SERVER['REQUEST_METHOD'] === 'POST') {
     }
     if ($message) {
         $_SESSION['stock_msg'] = $message;
-        if (function_exists('deleteCache')) deleteCache('stock_dashboard_metrics_v2');
+        if (function_exists('deleteCache')) deleteCache('stock_dashboard_metrics_v3');
     }
     if ($error)   $_SESSION['stock_err'] = $error;
     header('Location: stock-recipes.php');
@@ -379,7 +379,6 @@ $csrf_token = generateCsrfToken();
         </form>
     </template>
 
-    <?php require_once 'includes/admin-footer.php'; ?>
     <script>
         let ingredients = <?php echo json_encode(array_map(fn($i) => [
                                 'id' => (int)$i['id'],
@@ -461,7 +460,7 @@ $csrf_token = generateCsrfToken();
                 editor.appendChild(tpl);
 
                 document.getElementById('re_name').textContent = data.item.name;
-                document.getElementById('re_type').textContent = type === 'food' ? 'Food' : 'Drink';
+                document.getElementById('re_type').textContent = type.charAt(0).toUpperCase() + type.slice(1);
                 document.getElementById('re_price').textContent = currencySymbol + ' ' + fmtMoney(data.item.price);
                 document.getElementById('re_item_id').value = itemId;
                 document.getElementById('re_menu_type').value = type;
@@ -660,7 +659,5 @@ $csrf_token = generateCsrfToken();
             document.getElementById('deleteRecipeForm').submit();
         }
     </script>
-</body>
-
-</html>
+    <?php require_once 'includes/admin-footer.php'; ?>
 
