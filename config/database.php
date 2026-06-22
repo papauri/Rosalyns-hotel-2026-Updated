@@ -4500,10 +4500,10 @@ function logTentativeBookingAction(int $booking_id, string $action, array $detai
         }
 
         $stmt = $pdo->prepare("
-            INSERT INTO tentative_booking_log (booking_id, action, details, created_at)
-            VALUES (?, ?, ?, CURRENT_TIMESTAMP)
+            INSERT INTO tentative_booking_log (booking_id, action, performed_by, action_reason)
+            VALUES (?, ?, NULL, ?)
         ");
-        $stmt->execute([$booking_id, $action, json_encode($details)]);
+        $stmt->execute([$booking_id, $action, !empty($details) ? json_encode($details) : null]);
 
         return true;
     } catch (PDOException $e) {
