@@ -740,14 +740,16 @@ if (!function_exists('hotel_japandi_document_shell')) {
                 continue;
             }
 
-            $extraHtml .= '<tr><td style="padding:0 48px;"><div style="height:1px;background:#d3cbc0;"></div></td></tr>'
-                . '<tr><td style="padding:0 48px;background:transparent;">' . $section . '</td></tr>';
+            $extraHtml .= '<tr><td bgcolor="#f5f2eb" style="background-color:#f5f2eb;padding:0 48px;"><div style="height:1px;background:#d3cbc0;"></div></td></tr>'
+                . '<tr><td bgcolor="#f5f2eb" style="background-color:#f5f2eb;padding:0 48px;">' . $section . '</td></tr>';
         }
 
         return '<table style="width:100%;background-color:#d5cfc4;border-collapse:collapse;" cellpadding="0" cellspacing="0" bgcolor="#d5cfc4"><tr><td bgcolor="#d5cfc4" style="padding:40px 20px;background-color:#d5cfc4;font-family:Helvetica,Arial,sans-serif;color:#3e3930;">'
-            . '<table style="width:100%;max-width:720px;margin:0 auto;border-collapse:collapse;background-color:#f5f2eb;border-radius:1px;box-shadow:0 16px 40px rgba(70,60,50,0.15),0 4px 12px rgba(70,60,50,0.08);border:1px solid #d3cbc0;" cellpadding="0" cellspacing="0" bgcolor="#f5f2eb">'
-            . '<tr><td style="padding:0;"><table style="width:100%;border-collapse:collapse;" cellpadding="0" cellspacing="0"><tr>'
-            . '<td style="padding:48px 48px 36px;vertical-align:top;">'
+            . '<table border="1" bordercolor="#d3cbc0" cellpadding="0" cellspacing="0" style="width:100%;max-width:720px;margin:0 auto;border-collapse:collapse;border:1px solid #d3cbc0;background-color:#f5f2eb;border-radius:1px;box-shadow:0 16px 40px rgba(70,60,50,0.15),0 4px 12px rgba(70,60,50,0.08);">'
+            . '<tr><td bgcolor="#f5f2eb" style="background-color:#f5f2eb;padding:0;">'
+            . '<table style="width:100%;border-collapse:collapse;" cellpadding="0" cellspacing="0">'
+            . '<tr><td bgcolor="#f5f2eb" style="background-color:#f5f2eb;padding:0;"><table style="width:100%;border-collapse:collapse;" cellpadding="0" cellspacing="0"><tr>'
+            . '<td bgcolor="#f5f2eb" style="background-color:#f5f2eb;padding:48px 48px 36px;vertical-align:top;">'
             . '<div style="max-width:120px;margin-bottom:16px;color:#9b8f7e;">{{logo_html}}</div>'
             . '<div style="font-family:Georgia,\'Times New Roman\',serif;font-size:24px;color:#3e3930;letter-spacing:0.04em;line-height:1;font-weight:400;">{{site_name}}</div>'
             . '<div style="width:30px;height:2px;background-color:#c2b8a6;margin:16px 0;"> </div>'
@@ -755,35 +757,36 @@ if (!function_exists('hotel_japandi_document_shell')) {
             . '<div style="font-size:10px;color:#6d6455;letter-spacing:0.04em;margin-top:4px;">{{contact_phone}} &nbsp;&middot;&nbsp; {{contact_email}}</div>'
             . $headerExtra
             . '</td>'
-            . '<td style="padding:48px 48px 36px;vertical-align:top;text-align:right;">'
+            . '<td bgcolor="#f5f2eb" style="background-color:#f5f2eb;padding:48px 48px 36px;vertical-align:top;text-align:right;">'
             . '<div style="font-size:9px;letter-spacing:0.25em;text-transform:uppercase;color:#9b8f7e;font-weight:600;margin-bottom:12px;">' . htmlspecialchars($documentLabel, ENT_QUOTES, 'UTF-8') . '</div>'
             . '<div style="font-family:Georgia,\'Times New Roman\',serif;font-size:24px;color:#3e3930;letter-spacing:0.04em;line-height:1.1;font-weight:400;">' . $documentNumber . '</div>'
             . '<div style="font-size:11px;color:#6d6455;margin-top:12px;letter-spacing:0.06em;">' . htmlspecialchars($dateLine, ENT_QUOTES, 'UTF-8') . '</div>'
             . $statusHtml
             . '</td>'
             . '</tr></table></td></tr>'
-            . '<tr><td style="padding:0 48px;"><table width="100%" cellpadding="0" cellspacing="0"><tr><td bgcolor="#d3cbc0" style="background-color:#d3cbc0;height:1px;font-size:1px;line-height:1px;"> </td></tr></table></td></tr>'
-            . '<tr><td style="padding:0;"><table style="width:100%;border-collapse:collapse;" cellpadding="0" cellspacing="0"><tr>'
-            . '<td style="width:50%;padding:32px 48px;vertical-align:top;border-right:1px solid #d3cbc0;">'
+            . '<tr><td bgcolor="#f5f2eb" style="background-color:#f5f2eb;padding:0 48px;"><table width="100%" cellpadding="0" cellspacing="0"><tr><td bgcolor="#d3cbc0" style="background-color:#d3cbc0;height:1px;font-size:1px;line-height:1px;"> </td></tr></table></td></tr>'
+            . '<tr><td bgcolor="#f5f2eb" style="background-color:#f5f2eb;padding:0;"><table style="width:100%;border-collapse:collapse;" cellpadding="0" cellspacing="0"><tr>'
+            . '<td bgcolor="#f5f2eb" style="background-color:#f5f2eb;width:50%;padding:32px 48px;vertical-align:top;border-right:1px solid #d3cbc0;">'
             . '<div style="font-size:9px;letter-spacing:0.2em;text-transform:uppercase;color:#9b8f7e;font-weight:600;margin-bottom:20px;">' . htmlspecialchars($leftHeading, ENT_QUOTES, 'UTF-8') . '</div>'
             . $leftContentHtml
             . '</td>'
-            . '<td style="width:50%;padding:32px 48px;vertical-align:top;">'
+            . '<td bgcolor="#f5f2eb" style="background-color:#f5f2eb;width:50%;padding:32px 48px;vertical-align:top;">'
             . '<div style="font-size:9px;letter-spacing:0.2em;text-transform:uppercase;color:#9b8f7e;font-weight:600;margin-bottom:20px;">' . htmlspecialchars($rightHeading, ENT_QUOTES, 'UTF-8') . '</div>'
             . $rightContentHtml
             . '</td>'
             . '</tr></table></td></tr>'
-            . '<tr><td style="padding:0 48px;"><table width="100%" cellpadding="0" cellspacing="0"><tr><td bgcolor="#d3cbc0" style="background-color:#d3cbc0;height:1px;font-size:1px;line-height:1px;"> </td></tr></table></td></tr>'
-            . '<tr><td style="padding:36px 48px 36px;background:transparent;">'
+            . '<tr><td bgcolor="#f5f2eb" style="background-color:#f5f2eb;padding:0 48px;"><table width="100%" cellpadding="0" cellspacing="0"><tr><td bgcolor="#d3cbc0" style="background-color:#d3cbc0;height:1px;font-size:1px;line-height:1px;"> </td></tr></table></td></tr>'
+            . '<tr><td bgcolor="#f5f2eb" style="background-color:#f5f2eb;padding:36px 48px 36px;">'
             . '<div style="font-size:9px;letter-spacing:0.2em;text-transform:uppercase;color:#9b8f7e;font-weight:600;margin-bottom:20px;">' . htmlspecialchars($contentHeading, ENT_QUOTES, 'UTF-8') . '</div>'
             . $contentHtml
             . '</td></tr>'
             . $extraHtml
-            . '<tr><td style="padding:0;"><table style="width:100%;border-collapse:collapse;background-color:#ece8e0;" cellpadding="0" cellspacing="0" bgcolor="#ece8e0"><tr>'
+            . '<tr><td bgcolor="#ece8e0" style="background-color:#ece8e0;padding:0;"><table style="width:100%;border-collapse:collapse;background-color:#ece8e0;" cellpadding="0" cellspacing="0" bgcolor="#ece8e0"><tr>'
             . '<td style="padding:28px 48px;vertical-align:middle;"><span style="font-family:Georgia,\'Times New Roman\',serif;font-size:15px;color:#3e3930;font-weight:400;letter-spacing:0.06em;">{{site_name}}</span></td>'
             . '<td style="padding:28px 48px;text-align:right;vertical-align:middle;"><span style="font-size:9px;color:#9b8f7e;letter-spacing:0.18em;text-transform:uppercase;">' . htmlspecialchars($footerNote, ENT_QUOTES, 'UTF-8') . '</span></td>'
             . '</tr></table></td></tr>'
             . '</table>'
+            . '</td></tr></table>'
             . '</td></tr></table>';
     }
 }
