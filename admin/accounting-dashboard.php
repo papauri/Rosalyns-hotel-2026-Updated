@@ -163,6 +163,7 @@ try {
                     AND p2.payment_date BETWEEN ? AND ?
                     AND p2.deleted_at IS NULL
                 )
+                AND b2.status IN ('pending', 'confirmed', 'checked-in')
             ) as total_room_outstanding
         FROM payments p
         WHERE p.booking_type = 'room'
@@ -189,6 +190,7 @@ try {
                     AND p2.payment_date BETWEEN ? AND ?
                     AND p2.deleted_at IS NULL
                 )
+                AND ci2.status NOT IN ('cancelled', 'rejected', 'expired')
             ) as total_conf_outstanding
         FROM payments p
         WHERE p.booking_type = 'conference'
@@ -267,21 +269,21 @@ try {
     $recentStmt->execute([$startDate, $endDate]);
     $recentPayments = $recentStmt->fetchAll(PDO::FETCH_ASSOC);
 
-    // Outstanding payments summary
+    // Outstanding payments summary (active statuses only — cancelled/expired cannot be collected)
     $outstandingStmt = $pdo->query("
         SELECT
             'room' as type,
             COUNT(*) as count,
             SUM(amount_due) as total_outstanding
         FROM bookings
-        WHERE amount_due > 0
+        WHERE amount_due > 0 AND status IN ('pending', 'confirmed', 'checked-in')
         UNION ALL
         SELECT
             'conference' as type,
             COUNT(*) as count,
             SUM(amount_due) as total_outstanding
         FROM conference_inquiries
-        WHERE amount_due > 0
+        WHERE amount_due > 0 AND status NOT IN ('cancelled', 'rejected', 'expired')
     ");
     $outstandingSummary = $outstandingStmt->fetchAll(PDO::FETCH_ASSOC);
 
@@ -293,7 +295,7 @@ try {
     $posByTypeStmt = $pdo->prepare("
         SELECT
             COALESCE(NULLIF(order_type, ''), 'walk_in') AS order_type,
-            COUNT(*) AS order_count,
+            COUNT(CASE WHEN status IN ('paid','completed') THEN 1 END) AS order_count,
             COALESCE(SUM(CASE WHEN status IN ('paid','completed') THEN total_amount ELSE 0 END), 0) AS gross_revenue,
             COALESCE(SUM(CASE WHEN status IN ('paid','completed') THEN total_cost ELSE 0 END), 0) AS cogs,
             COALESCE(SUM(CASE WHEN status = 'voided' THEN total_amount ELSE 0 END), 0) AS voided_amount,
