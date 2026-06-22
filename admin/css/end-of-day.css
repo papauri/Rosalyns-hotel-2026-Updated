@@ -85,74 +85,83 @@
     --eod-surface-strong: color-mix(in srgb, var(--color-lux-clay-100) 76%, var(--color-white) 24%);
     --eod-border: color-mix(in srgb, var(--color-border) 84%, transparent 16%);
     --eod-border-soft: color-mix(in srgb, var(--color-border-light) 78%, transparent 22%);
-    --eod-shadow-soft: 0 0.75rem 1.8rem color-mix(in srgb, var(--color-lux-ink) 10%, transparent 90%);
-    --eod-shadow-lift: 0 1.2rem 2.4rem color-mix(in srgb, var(--color-lux-ink) 14%, transparent 86%);
+    --eod-shadow-soft: 0 2px 8px color-mix(in srgb, var(--color-lux-ink) 7%, transparent 93%);
+    --eod-shadow-lift: 0 4px 16px color-mix(in srgb, var(--color-lux-ink) 10%, transparent 90%);
+    --eod-panel-pad: 1.2rem;
 
-    width: min(100%, 88rem);
-    margin-inline: auto;
-    padding-inline: clamp(1rem, 2.8vw, 2.4rem);
-    padding-block: clamp(1rem, 2.4vw, 2.2rem) clamp(2rem, 3.4vw, 3rem);
     font-family: var(--font-sans);
     color: var(--color-text-primary);
 }
 
 .eod-header {
-    display: grid;
-    gap: var(--space-4);
-    margin-bottom: clamp(1rem, 2vw, 1.6rem);
-    padding: clamp(1rem, 2.2vw, 1.7rem);
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-end;
+    flex-wrap: wrap;
+    gap: 1.25rem;
+    margin: 0 0 1.25rem;
+    padding: clamp(1.1rem, 2vw, 1.5rem) clamp(1.1rem, 2vw, 1.75rem);
+    background: linear-gradient(135deg, var(--eod-surface-alt), var(--eod-surface));
     border: 1px solid var(--eod-border);
-    border-radius: var(--radius-xl);
-    background:
-        radial-gradient(circle at top right, color-mix(in srgb, var(--color-lux-gold) 15%, transparent 85%), transparent 45%),
-        linear-gradient(140deg, var(--eod-surface-alt), var(--eod-surface));
+    border-radius: 14px;
     box-shadow: var(--eod-shadow-soft);
+}
+
+.eod-header__copy {
+    flex: 1 1 280px;
+    min-width: 0;
 }
 
 .eod-header__eyebrow {
     display: inline-flex;
     align-items: center;
     gap: var(--space-2);
-    margin-bottom: var(--space-1);
+    margin-bottom: var(--space-2);
+    padding: 0.2rem 0.7rem;
+    border-radius: var(--radius-full);
+    background: color-mix(in srgb, var(--color-lux-gold) 14%, transparent 86%);
+    border: 1px solid color-mix(in srgb, var(--color-lux-gold) 32%, transparent 68%);
     text-transform: uppercase;
     letter-spacing: var(--tracking-widest);
-    font-size: clamp(0.68rem, 0.64rem + 0.2vw, 0.8rem);
-    font-weight: var(--font-medium);
-    color: var(--color-lux-gold);
+    font-size: clamp(0.64rem, 0.6rem + 0.15vw, 0.72rem);
+    font-weight: var(--font-semibold);
+    color: var(--color-primary-dark);
 }
 
 .eod-header__title {
-    margin: 0;
-    font-family: var(--font-serif);
-    font-weight: var(--font-semibold);
-    font-size: clamp(1.75rem, 1.2rem + 2.1vw, 2.85rem);
+    margin: 0 0 0.3rem;
+    font-family: var(--font-sans);
+    font-weight: 700;
+    font-size: clamp(1.35rem, 1vw + 0.9rem, 1.8rem);
     line-height: var(--leading-tight);
-    letter-spacing: var(--tracking-normal);
+    letter-spacing: -0.01em;
     color: var(--color-lux-ink);
 }
 
 .eod-header__sub {
-    margin: var(--space-2) 0 0;
+    margin: 0;
     color: var(--color-text-secondary);
-    font-size: clamp(0.85rem, 0.8rem + 0.28vw, 1rem);
+    font-size: 0.92rem;
+    line-height: 1.5;
 }
 
 .eod-header__controls {
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(min(9rem, 100%), 1fr));
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
     gap: var(--space-2);
-    align-items: end;
+    flex-shrink: 0;
 }
 
 .eod-date {
     display: flex;
     flex-direction: column;
     gap: var(--space-1);
-    grid-column: 1 / -1;
     text-transform: uppercase;
     letter-spacing: var(--tracking-wider);
     color: var(--color-text-secondary);
-    font-size: clamp(0.66rem, 0.62rem + 0.2vw, 0.78rem);
+    font-size: clamp(0.64rem, 0.6rem + 0.18vw, 0.74rem);
+    font-weight: var(--font-semibold);
 }
 
 .eod-date input {
@@ -228,10 +237,10 @@
     display: flex;
     flex-direction: column;
     gap: var(--space-2);
-    margin-bottom: clamp(1rem, 2vw, 1.6rem);
-    padding: clamp(0.9rem, 1.8vw, 1.2rem);
+    margin-bottom: 1.25rem;
+    padding: clamp(0.9rem, 1.8vw, 1.15rem) clamp(1rem, 1.8vw, 1.25rem);
     border: 1px solid var(--eod-border);
-    border-radius: var(--radius-xl);
+    border-radius: 14px;
     background: var(--eod-surface-alt);
 }
 
@@ -290,7 +299,7 @@
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(min(14rem, 100%), 1fr));
     gap: var(--space-3);
-    margin-bottom: clamp(1rem, 2vw, 1.6rem);
+    margin-bottom: 1.25rem;
 }
 
 .eod-kpi {
@@ -301,8 +310,8 @@
     min-height: 100%;
     padding: clamp(0.95rem, 1.8vw, 1.2rem);
     border: 1px solid var(--eod-border);
-    border-inline-start-width: 0.35rem;
-    border-radius: var(--radius-lg);
+    border-inline-start-width: 0.3rem;
+    border-radius: 14px;
     background: var(--color-white);
     box-shadow: var(--eod-shadow-soft);
     transition: transform var(--transition-fast) var(--easing-smooth), box-shadow var(--transition-fast) var(--easing-smooth);
@@ -370,14 +379,14 @@
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(min(18rem, 100%), 1fr));
     gap: var(--space-3);
-    margin-bottom: clamp(1rem, 2vw, 1.6rem);
+    margin-bottom: 1.25rem;
 }
 
 .eod-insight-card {
     min-width: 0;
-    padding: clamp(0.95rem, 2vw, 1.4rem);
+    padding: clamp(0.95rem, 2vw, 1.35rem);
     border: 1px solid var(--eod-border);
-    border-radius: var(--radius-xl);
+    border-radius: 14px;
     background: var(--color-white);
     box-shadow: var(--eod-shadow-soft);
 }
@@ -406,9 +415,10 @@
 .eod-insight-card__title {
     margin: var(--space-3) 0 var(--space-1);
     color: var(--color-lux-ink);
-    font-family: var(--font-serif);
-    font-size: clamp(1.25rem, 1.02rem + 0.86vw, 1.65rem);
-    font-weight: var(--font-semibold);
+    font-family: var(--font-sans);
+    font-size: clamp(1.1rem, 0.92rem + 0.68vw, 1.4rem);
+    font-weight: 700;
+    letter-spacing: -0.01em;
     line-height: var(--leading-tight);
 }
 
@@ -639,20 +649,21 @@
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(min(20rem, 100%), 1fr));
     gap: var(--space-3);
-    margin-bottom: clamp(1rem, 2vw, 1.6rem);
+    margin-bottom: 1.25rem;
 }
 
 .eod-panel {
     min-width: 0;
-    padding: clamp(0.95rem, 2vw, 1.4rem);
+    padding: var(--eod-panel-pad);
     border: 1px solid var(--eod-border);
-    border-radius: var(--radius-xl);
+    border-radius: 14px;
     background: var(--color-white);
     box-shadow: var(--eod-shadow-soft);
+    overflow: hidden;
 }
 
 .eod-panel--accent {
-    background: linear-gradient(135deg, var(--eod-surface-alt), var(--color-white));
+    background: var(--color-white);
 }
 
 .eod-panel__head {
@@ -660,8 +671,10 @@
     align-items: center;
     justify-content: space-between;
     gap: var(--space-3);
-    margin-bottom: var(--space-3);
-    padding-bottom: var(--space-2);
+    margin: calc(-1 * var(--eod-panel-pad));
+    margin-bottom: var(--eod-panel-pad);
+    padding: 0.85rem 1.2rem;
+    background: linear-gradient(180deg, var(--eod-surface-alt), var(--eod-surface));
     border-bottom: 1px solid var(--eod-border-soft);
 }
 
@@ -671,14 +684,16 @@
     gap: var(--space-2);
     margin: 0;
     color: var(--color-lux-ink);
-    font-family: var(--font-serif);
+    font-family: var(--font-sans);
     font-weight: var(--font-semibold);
-    font-size: clamp(1.12rem, 1.02rem + 0.42vw, 1.4rem);
+    font-size: clamp(0.95rem, 0.88rem + 0.3vw, 1.08rem);
     line-height: var(--leading-tight);
+    letter-spacing: -0.01em;
 }
 
 .eod-panel__title i {
     color: var(--color-lux-gold);
+    font-size: 0.9em;
 }
 
 .eod-panel__date {
@@ -1221,17 +1236,8 @@
 }
 
 @media (min-width: 78rem) {
-    .eod-header {
-        grid-template-columns: minmax(0, 1fr) minmax(24rem, 34rem);
-        align-items: end;
-    }
-
     .eod-kpis {
         grid-template-columns: repeat(5, minmax(0, 1fr));
-    }
-
-    .eod-date {
-        grid-column: auto;
     }
 
     .eod-panel--wide {
@@ -1244,10 +1250,6 @@
 }
 
 @media (min-width: 160rem) {
-    .eod-page {
-        width: min(100%, 104rem);
-    }
-
     .eod-grid {
         grid-template-columns: repeat(4, minmax(0, 1fr));
     }
@@ -1281,11 +1283,6 @@
 
     body {
         background: var(--color-white) !important;
-    }
-
-    .eod-page {
-        width: 100%;
-        padding: 0;
     }
 
     .eod-panel,

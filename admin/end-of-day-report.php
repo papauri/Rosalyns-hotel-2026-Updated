@@ -928,22 +928,22 @@ if (isset($_GET['export']) && $_GET['export'] === 'csv') {
             <!-- Header -->
             <header class="eod-header">
                 <div class="eod-header__copy">
-                    <span class="eod-header__eyebrow">End of Day Report</span>
+                    <span class="eod-header__eyebrow"><i class="fas fa-moon"></i> End of Day Report</span>
                     <h1 class="eod-header__title"><?php echo htmlspecialchars(date('l, F j, Y', strtotime($report_date))); ?></h1>
                     <p class="eod-header__sub">
                         <?php echo htmlspecialchars($site_name); ?> &middot;
                         Generated <?php echo date('H:i'); ?> &middot;
-                        <?php echo $isToday ? 'Live (today)' : 'Archived day'; ?>
+                        <?php echo $isToday ? '<span style="color:var(--color-success);font-weight:500;">Live (today)</span>' : 'Archived day'; ?>
                     </p>
                 </div>
                 <form method="GET" class="eod-header__controls" action="end-of-day-report.php">
                     <label class="eod-date">
-                        <span>Date</span>
+                        <span>Select date</span>
                         <input type="date" name="date" value="<?php echo htmlspecialchars($report_date); ?>" max="<?php echo date('Y-m-d'); ?>">
                     </label>
-                    <button type="submit" class="eod-btn eod-btn--ghost"><i class="fas fa-refresh"></i> Refresh</button>
                     <a href="end-of-day-report.php?date=<?php echo date('Y-m-d', strtotime($report_date . ' -1 day')); ?>" class="eod-btn eod-btn--ghost" title="Previous day"><i class="fas fa-chevron-left"></i></a>
-                    <a href="end-of-day-report.php?date=<?php echo date('Y-m-d'); ?>" class="eod-btn eod-btn--ghost">Today</a>
+                    <button type="submit" class="eod-btn eod-btn--ghost"><i class="fas fa-rotate-right"></i> Refresh</button>
+                    <a href="end-of-day-report.php?date=<?php echo date('Y-m-d'); ?>" class="eod-btn eod-btn--primary">Today</a>
                 </form>
             </header>
 
