@@ -27,7 +27,7 @@ if (!ensureStockTablesExist()) {
 // Auto-run expiry sweep
 if (!$error) runStockExpiryCheck();
 
-$cacheKey = 'stock_dashboard_metrics_v2';
+$cacheKey = 'stock_dashboard_metrics_v3';
 $metrics = function_exists('getCache') ? getCache($cacheKey) : null;
 if (!$metrics && !$error) {
     try {
@@ -40,9 +40,12 @@ if (!$metrics && !$error) {
         $metrics['expiring_3d'] = (int)$pdo->query("SELECT COUNT(*) FROM stock_batches WHERE status = 'active' AND expiry_date IS NOT NULL AND expiry_date BETWEEN CURDATE() AND DATE_ADD(CURDATE(), INTERVAL 3 DAY)")->fetchColumn();
         $metrics['expiring_7d'] = (int)$pdo->query("SELECT COUNT(*) FROM stock_batches WHERE status = 'active' AND expiry_date IS NOT NULL AND expiry_date BETWEEN DATE_ADD(CURDATE(), INTERVAL 4 DAY) AND DATE_ADD(CURDATE(), INTERVAL 7 DAY)")->fetchColumn();
 
-        $metrics['orders_today'] = (int)$pdo->query("SELECT COUNT(*) FROM stock_orders WHERE DATE(created_at) = CURDATE()")->fetchColumn();
-        $metrics['revenue_today'] = (float)$pdo->query("SELECT COALESCE(SUM(total_amount), 0) FROM stock_orders WHERE status NOT IN ('cancelled','voided') AND DATE(created_at) = CURDATE()")->fetchColumn();
+        $metrics['orders_today'] = (int)$pdo->query("SELECT COUNT(*) FROM stock_orders WHERE status NOT IN ('voided','cancelled') AND DATE(created_at) = CURDATE()")->fetchColumn();
+        $metrics['orders_pending'] = (int)$pdo->query("SELECT COUNT(*) FROM stock_orders WHERE status = 'placed' AND DATE(created_at) = CURDATE()")->fetchColumn();
+        $metrics['revenue_today'] = (float)$pdo->query("SELECT COALESCE(SUM(total_amount), 0) FROM stock_orders WHERE status = 'paid' AND DATE(created_at) = CURDATE()")->fetchColumn();
+        $metrics['wastage_today'] = (float)$pdo->query("SELECT COALESCE(SUM(wastage_cost), 0) FROM stock_wastage WHERE recorded_date = CURDATE()")->fetchColumn();
         $metrics['wastage_30d'] = (float)$pdo->query("SELECT COALESCE(SUM(wastage_cost), 0) FROM stock_wastage WHERE recorded_date >= DATE_SUB(CURDATE(), INTERVAL 30 DAY)")->fetchColumn();
+        $metrics['expired_batches'] = (int)$pdo->query("SELECT COUNT(*) FROM stock_batches WHERE status = 'active' AND quantity_remaining > 0 AND expiry_date IS NOT NULL AND expiry_date < CURDATE()")->fetchColumn();
 
         $metrics['pending_reconcile'] = (int)$pdo->query("
             SELECT COUNT(*) FROM booking_charges
@@ -63,9 +66,40 @@ if (!$metrics && !$error) {
     if (function_exists('setCache')) setCache($cacheKey, $metrics, 300);
 }
 
+// Live operational data (always fresh — not cached)
+$topItemsToday = [];
+$mostWastedIngredients = [];
+if (!$error) {
+    try {
+        $topItemsToday = $pdo->query("
+            SELECT oi.item_name, oi.menu_type, SUM(oi.quantity) AS qty_sold, SUM(oi.line_total) AS revenue,
+                   COUNT(DISTINCT o.id) AS order_count
+            FROM stock_order_items oi
+            INNER JOIN stock_orders o ON o.id = oi.order_id
+            WHERE o.status = 'paid' AND DATE(o.created_at) = CURDATE()
+            GROUP BY oi.item_name, oi.menu_type
+            ORDER BY qty_sold DESC, revenue DESC
+            LIMIT 8
+        ")->fetchAll(PDO::FETCH_ASSOC);
+    } catch (Throwable $e) { $topItemsToday = []; }
+
+    try {
+        $mostWastedIngredients = $pdo->query("
+            SELECT i.name, i.unit, SUM(w.quantity) AS total_qty, SUM(w.wastage_cost) AS total_cost, COUNT(*) AS entries
+            FROM stock_wastage w
+            INNER JOIN stock_ingredients i ON i.id = w.ingredient_id
+            WHERE w.recorded_date >= DATE_SUB(CURDATE(), INTERVAL 30 DAY)
+            GROUP BY i.id, i.name, i.unit
+            ORDER BY total_cost DESC
+            LIMIT 6
+        ")->fetchAll(PDO::FETCH_ASSOC);
+    } catch (Throwable $e) { $mostWastedIngredients = []; }
+}
+
 // Live alert data (small queries, always fresh)
 $criticalIng = [];
 $expiringSoon = [];
+$expiredBatches = [];
 $lowStock = [];
 $totalAlerts = 0;
 
@@ -85,13 +119,22 @@ if (!$error) {
             ORDER BY b.expiry_date ASC LIMIT 10
         ")->fetchAll(PDO::FETCH_ASSOC);
 
+        $expiredBatches = $pdo->query("
+            SELECT b.batch_number, i.name, b.expiry_date, b.quantity_remaining,
+                   ABS(DATEDIFF(b.expiry_date, CURDATE())) AS days_expired
+            FROM stock_batches b
+            INNER JOIN stock_ingredients i ON i.id = b.ingredient_id
+            WHERE b.status = 'active' AND b.quantity_remaining > 0 AND b.expiry_date IS NOT NULL AND b.expiry_date < CURDATE()
+            ORDER BY b.expiry_date ASC LIMIT 10
+        ")->fetchAll(PDO::FETCH_ASSOC);
+
         $lowStock = $pdo->query("
             SELECT name, current_quantity, min_quantity, unit FROM stock_ingredients
             WHERE is_archived = 0 AND min_quantity > 0 AND current_quantity > 0 AND current_quantity <= min_quantity
             ORDER BY (current_quantity / min_quantity) ASC LIMIT 10
         ")->fetchAll(PDO::FETCH_ASSOC);
 
-        $totalAlerts = count($criticalIng) + count($expiringSoon) + count($lowStock);
+        $totalAlerts = count($criticalIng) + count($expiringSoon) + count($expiredBatches) + count($lowStock);
         if (($metrics['pending_reconcile'] ?? 0) > 0) $totalAlerts++;
     } catch (Throwable $e) {
         $totalAlerts = 0;
@@ -100,7 +143,7 @@ if (!$error) {
 
 // Health banner state
 $healthState = 'ok';
-if (count($criticalIng) > 0 || ($metrics['expiring_3d'] ?? 0) > 0) {
+if (count($criticalIng) > 0 || ($metrics['expiring_3d'] ?? 0) > 0 || ($metrics['expired_batches'] ?? 0) > 0) {
     $healthState = 'critical';
 } elseif (count($lowStock) > 0 || ($metrics['pending_reconcile'] ?? 0) > 0) {
     $healthState = 'warn';
@@ -161,6 +204,7 @@ $csrf_token = generateCsrfToken();
                     $parts = [];
                     if (count($criticalIng) > 0) $parts[] = count($criticalIng) . ' item(s) out of stock';
                     if (($metrics['expiring_3d'] ?? 0) > 0) $parts[] = ($metrics['expiring_3d']) . ' batch(es) expiring within 3 days';
+                    if (($metrics['expired_batches'] ?? 0) > 0) $parts[] = ($metrics['expired_batches']) . ' expired batch(es) still active';
                     echo implode(' &amp; ', $parts) . '.';
                     ?>
                 <?php else: ?>
@@ -180,19 +224,31 @@ $csrf_token = generateCsrfToken();
 
         <!-- ═══ TOP KPI ROW ═══ -->
         <div class="sdash-kpi-row">
-            <a class="sdash-kpi-card" href="stock-orders.php?date=today">
+            <a class="sdash-kpi-card" href="stock-orders.php?date=today&status=paid">
                 <div class="sdash-kpi-card__icon sdash-kpi-card__icon--blue">
-                    <i class="fas fa-shopping-bag"></i>
+                    <i class="fas fa-cash-register"></i>
                 </div>
                 <div class="sdash-kpi-card__body">
-                    <div class="sdash-kpi-card__label">Today's Orders</div>
-                    <div class="sdash-kpi-card__value"><?php echo number_format((int)$metrics['orders_today']); ?></div>
+                    <div class="sdash-kpi-card__label">Settled Today</div>
+                    <div class="sdash-kpi-card__value"><?php echo $currency_symbol . ' ' . number_format($metrics['revenue_today'], 0); ?></div>
                     <div class="sdash-kpi-card__sub">
-                        <?php echo $currency_symbol . ' ' . number_format($metrics['revenue_today'], 0); ?> revenue
-                        <?php if ((int)$metrics['orders_today'] > 0): ?>
+                        <?php echo number_format((int)$metrics['orders_today']); ?> paid order<?php echo (int)$metrics['orders_today'] !== 1 ? 's' : ''; ?>
+                        <?php if ((int)$metrics['orders_today'] > 0 && $metrics['revenue_today'] > 0): ?>
                             &middot; avg <?php echo $currency_symbol . ' ' . number_format($metrics['revenue_today'] / $metrics['orders_today'], 0); ?>
                         <?php endif; ?>
                     </div>
+                </div>
+                <span class="sdash-kpi-card__arrow"><i class="fas fa-chevron-right"></i></span>
+            </a>
+
+            <a class="sdash-kpi-card <?php echo (int)($metrics['orders_pending'] ?? 0) > 0 ? 'sdash-kpi-card--warn' : ''; ?>" href="stock-orders.php?status=placed">
+                <div class="sdash-kpi-card__icon <?php echo (int)($metrics['orders_pending'] ?? 0) > 0 ? 'sdash-kpi-card__icon--orange' : 'sdash-kpi-card__icon--green'; ?>">
+                    <i class="fas fa-hourglass-half"></i>
+                </div>
+                <div class="sdash-kpi-card__body">
+                    <div class="sdash-kpi-card__label">Open Tabs</div>
+                    <div class="sdash-kpi-card__value"><?php echo number_format((int)($metrics['orders_pending'] ?? 0)); ?></div>
+                    <div class="sdash-kpi-card__sub"><?php echo (int)($metrics['orders_pending'] ?? 0) > 0 ? 'Awaiting payment / close-out' : 'No open tabs right now'; ?></div>
                 </div>
                 <span class="sdash-kpi-card__arrow"><i class="fas fa-chevron-right"></i></span>
             </a>
@@ -214,9 +270,14 @@ $csrf_token = generateCsrfToken();
                     <i class="fas fa-trash-alt"></i>
                 </div>
                 <div class="sdash-kpi-card__body">
-                    <div class="sdash-kpi-card__label">Wastage (30 days)</div>
+                    <div class="sdash-kpi-card__label">Wastage</div>
                     <div class="sdash-kpi-card__value"><?php echo $currency_symbol . ' ' . number_format($metrics['wastage_30d'], 0); ?></div>
-                    <div class="sdash-kpi-card__sub">Recorded losses this month</div>
+                    <div class="sdash-kpi-card__sub">
+                        30-day total
+                        <?php if (($metrics['wastage_today'] ?? 0) > 0): ?>
+                            &middot; today: <?php echo $currency_symbol . ' ' . number_format($metrics['wastage_today'], 0); ?>
+                        <?php endif; ?>
+                    </div>
                 </div>
                 <span class="sdash-kpi-card__arrow"><i class="fas fa-chevron-right"></i></span>
             </a>
@@ -285,6 +346,35 @@ $csrf_token = generateCsrfToken();
                         <div class="sdash-alert-item__actions">
                             <a href="stock-batches.php?expiry=critical" class="sdash-btn sdash-btn--sm sdash-btn--warn">
                                 <i class="fas fa-eye"></i> Review
+                            </a>
+                        </div>
+                    </div>
+                    <?php endforeach; ?>
+                </div>
+            </div>
+            <?php endif; ?>
+
+            <?php if (!empty($expiredBatches)): ?>
+            <div class="sdash-alert-group sdash-alert-group--critical js-sdash-alert-group" data-open="true">
+                <button type="button" class="sdash-alert-group__header" onclick="toggleAlertGroup(this)" aria-expanded="true">
+                    <i class="fas fa-skull-crossbones"></i>
+                    <span>Expired Batches Still Active <em>(<?php echo count($expiredBatches); ?>)</em></span>
+                    <i class="fas fa-chevron-down sdash-alert-group__chevron"></i>
+                </button>
+                <div class="sdash-alert-group__body">
+                    <?php foreach ($expiredBatches as $b): ?>
+                    <div class="sdash-alert-item">
+                        <div class="sdash-alert-item__info">
+                            <span class="sdash-alert-item__name"><?php echo htmlspecialchars($b['name']); ?></span>
+                            <span class="sdash-alert-item__detail">
+                                Batch <?php echo htmlspecialchars($b['batch_number']); ?> &mdash;
+                                <strong style="color:#c82333">expired <?php echo (int)$b['days_expired']; ?> day<?php echo (int)$b['days_expired'] !== 1 ? 's' : ''; ?> ago</strong>
+                                &middot; <?php echo number_format((float)$b['quantity_remaining'], 1); ?> remaining
+                            </span>
+                        </div>
+                        <div class="sdash-alert-item__actions">
+                            <a href="stock-batches.php?filter=expired" class="sdash-btn sdash-btn--sm sdash-btn--primary">
+                                <i class="fas fa-trash"></i> Dispose
                             </a>
                         </div>
                     </div>
@@ -385,6 +475,10 @@ $csrf_token = generateCsrfToken();
                     <div class="sdash-health-stat__value"><?php echo number_format((int)$metrics['expiring_7d']); ?></div>
                     <div class="sdash-health-stat__label">Expiring 4–7 days</div>
                 </div>
+                <div class="sdash-health-stat <?php echo ($metrics['expired_batches'] ?? 0) > 0 ? 'sdash-health-stat--danger' : ''; ?>">
+                    <div class="sdash-health-stat__value"><?php echo number_format((int)($metrics['expired_batches'] ?? 0)); ?></div>
+                    <div class="sdash-health-stat__label"><a href="stock-batches.php?filter=expired" style="color:inherit;text-decoration:none;">Expired (still active)</a></div>
+                </div>
             </div>
         </div>
 
@@ -428,6 +522,80 @@ $csrf_token = generateCsrfToken();
             </div>
             <p class="sdash-coverage-note">Higher coverage = more automatic stock deductions and accurate cost reporting when orders are placed.</p>
         </div>
+
+        <!-- ═══ TOP ITEMS TODAY ═══ -->
+        <div class="sdash-section">
+            <div class="sdash-section__header">
+                <h3 class="sdash-section__title"><i class="fas fa-fire"></i> Top Items Sold Today</h3>
+                <a href="stock-orders.php?date=today&status=paid" class="sdash-section__action">All orders →</a>
+            </div>
+            <?php if (empty($topItemsToday)): ?>
+                <p style="color:#888;font-size:13px;padding:10px 0;">No settled orders today yet.</p>
+            <?php else: ?>
+            <div style="overflow-x:auto;">
+                <table style="width:100%;border-collapse:collapse;font-size:13px;">
+                    <thead>
+                        <tr style="border-bottom:2px solid #e5ddd0;text-align:left;">
+                            <th style="padding:6px 8px;color:#8A775F;font-weight:600;font-size:11px;text-transform:uppercase;">Item</th>
+                            <th style="padding:6px 8px;color:#8A775F;font-weight:600;font-size:11px;text-transform:uppercase;text-align:center;">Type</th>
+                            <th style="padding:6px 8px;color:#8A775F;font-weight:600;font-size:11px;text-transform:uppercase;text-align:right;">Qty Sold</th>
+                            <th style="padding:6px 8px;color:#8A775F;font-weight:600;font-size:11px;text-transform:uppercase;text-align:right;">Revenue</th>
+                            <th style="padding:6px 8px;color:#8A775F;font-weight:600;font-size:11px;text-transform:uppercase;text-align:right;">Orders</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <?php foreach ($topItemsToday as $idx => $item): ?>
+                        <tr style="border-bottom:1px solid #f0ece6;<?php echo $idx % 2 === 0 ? '' : 'background:#faf8f5;'; ?>">
+                            <td style="padding:8px;font-weight:500;"><?php echo htmlspecialchars($item['item_name']); ?></td>
+                            <td style="padding:8px;text-align:center;">
+                                <?php
+                                $type = strtolower((string)($item['menu_type'] ?? ''));
+                                $typeIcon = $type === 'drink' ? '🍹' : ($type === 'food' ? '🍽️' : '📦');
+                                echo $typeIcon . ' <small style="color:#888;">' . htmlspecialchars(ucfirst($type ?: 'item')) . '</small>';
+                                ?>
+                            </td>
+                            <td style="padding:8px;text-align:right;font-weight:600;"><?php echo number_format((float)$item['qty_sold'], 1); ?></td>
+                            <td style="padding:8px;text-align:right;color:#2e7d32;font-weight:600;"><?php echo $currency_symbol . ' ' . number_format((float)$item['revenue'], 0); ?></td>
+                            <td style="padding:8px;text-align:right;color:#888;"><?php echo (int)$item['order_count']; ?></td>
+                        </tr>
+                        <?php endforeach; ?>
+                    </tbody>
+                </table>
+            </div>
+            <?php endif; ?>
+        </div>
+
+        <!-- ═══ WASTAGE BREAKDOWN (30 DAYS) ═══ -->
+        <?php if (!empty($mostWastedIngredients)): ?>
+        <div class="sdash-section">
+            <div class="sdash-section__header">
+                <h3 class="sdash-section__title"><i class="fas fa-trash-alt" style="color:#e65100;"></i> Most Wasted Ingredients (30 days)</h3>
+                <a href="stock-wastage.php" class="sdash-section__action">All wastage →</a>
+            </div>
+            <div style="overflow-x:auto;">
+                <table style="width:100%;border-collapse:collapse;font-size:13px;">
+                    <thead>
+                        <tr style="border-bottom:2px solid #e5ddd0;text-align:left;">
+                            <th style="padding:6px 8px;color:#8A775F;font-weight:600;font-size:11px;text-transform:uppercase;">Ingredient</th>
+                            <th style="padding:6px 8px;color:#8A775F;font-weight:600;font-size:11px;text-transform:uppercase;text-align:right;">Qty Lost</th>
+                            <th style="padding:6px 8px;color:#8A775F;font-weight:600;font-size:11px;text-transform:uppercase;text-align:right;">Cost Lost</th>
+                            <th style="padding:6px 8px;color:#8A775F;font-weight:600;font-size:11px;text-transform:uppercase;text-align:right;">Entries</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <?php foreach ($mostWastedIngredients as $idx => $w): ?>
+                        <tr style="border-bottom:1px solid #f0ece6;<?php echo $idx % 2 === 0 ? '' : 'background:#faf8f5;'; ?>">
+                            <td style="padding:8px;font-weight:500;"><?php echo htmlspecialchars($w['name']); ?></td>
+                            <td style="padding:8px;text-align:right;"><?php echo number_format((float)$w['total_qty'], 2); ?> <?php echo htmlspecialchars($w['unit']); ?></td>
+                            <td style="padding:8px;text-align:right;color:#c62828;font-weight:600;"><?php echo $currency_symbol . ' ' . number_format((float)$w['total_cost'], 0); ?></td>
+                            <td style="padding:8px;text-align:right;color:#888;"><?php echo (int)$w['entries']; ?></td>
+                        </tr>
+                        <?php endforeach; ?>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+        <?php endif; ?>
 
         <!-- ═══ QUICK NAVIGATION ═══ -->
         <div class="sdash-section sdash-section--last">

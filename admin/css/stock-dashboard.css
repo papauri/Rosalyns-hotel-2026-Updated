@@ -77,9 +77,10 @@
     font-size: 20px;
     flex-shrink: 0;
 }
-.sdash-kpi-card__icon--blue  { background: #dbeafe; color: #1d4ed8; }
-.sdash-kpi-card__icon--green { background: #dcfce7; color: #16a34a; }
-.sdash-kpi-card__icon--orange{ background: #ffedd5; color: #c2410c; }
+.sdash-kpi-card__icon--blue   { background: #dbeafe; color: #1d4ed8; }
+.sdash-kpi-card__icon--green  { background: #dcfce7; color: #16a34a; }
+.sdash-kpi-card__icon--orange { background: #ffedd5; color: #c2410c; }
+.sdash-kpi-card--warn         { border-color: #fde68a; background: #fffbeb; }
 .sdash-kpi-card__body { flex: 1; min-width: 0; }
 .sdash-kpi-card__label {
     font-size: 11px;
