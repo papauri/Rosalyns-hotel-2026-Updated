@@ -1984,6 +1984,75 @@ $currency_symbol = getSetting('currency_symbol');
             </div>
         </div>
 
+        <!-- ===================================================================
+             System Health Monitor — polls /admin/api/system-health.php
+             ================================================================ -->
+        <h3 class="section-title" style="margin-top:6px;"><i class="fas fa-heartbeat" style="color:#dc3545;"></i> System Health</h3>
+        <div class="ops-grid" id="sysHealthGrid" style="margin-bottom:6px;">
+            <!-- Database -->
+            <div class="ops-card" style="cursor:default;">
+                <div class="ops-icon" id="shcDbIcon" style="background:#aaa;"><i class="fas fa-database"></i></div>
+                <div class="ops-body">
+                    <div class="ops-value" id="shcDbValue"><i class="fas fa-spinner fa-spin"></i></div>
+                    <div class="ops-label">Database</div>
+                    <div class="ops-sub" id="shcDbMeta">Checking…</div>
+                </div>
+            </div>
+            <!-- Last Backup -->
+            <div class="ops-card" style="cursor:default;">
+                <div class="ops-icon" id="shcBackupIcon" style="background:#aaa;"><i class="fas fa-cloud-download-alt"></i></div>
+                <div class="ops-body">
+                    <div class="ops-value" id="shcBackupValue" style="font-size:18px;"><i class="fas fa-spinner fa-spin"></i></div>
+                    <div class="ops-label">Last Backup</div>
+                    <div class="ops-sub" id="shcBackupMeta">Checking…</div>
+                </div>
+            </div>
+            <!-- Disk Space -->
+            <div class="ops-card" style="cursor:default;">
+                <div class="ops-icon" id="shcDiskIcon" style="background:#aaa;"><i class="fas fa-hdd"></i></div>
+                <div class="ops-body">
+                    <div class="ops-value" id="shcDiskValue" style="font-size:18px;"><i class="fas fa-spinner fa-spin"></i></div>
+                    <div class="ops-label">Disk Space Free</div>
+                    <div class="ops-sub" id="shcDiskMeta">Checking…</div>
+                </div>
+            </div>
+            <!-- Error Log -->
+            <div class="ops-card" style="cursor:default;">
+                <div class="ops-icon" id="shcLogIcon" style="background:#aaa;"><i class="fas fa-file-medical-alt"></i></div>
+                <div class="ops-body">
+                    <div class="ops-value" id="shcLogValue" style="font-size:18px;"><i class="fas fa-spinner fa-spin"></i></div>
+                    <div class="ops-label">Error Log Size</div>
+                    <div class="ops-sub" id="shcLogMeta">Checking…</div>
+                </div>
+            </div>
+            <!-- PHP Version -->
+            <div class="ops-card" style="cursor:default;">
+                <div class="ops-icon" style="background:#8892bf;"><i class="fab fa-php"></i></div>
+                <div class="ops-body">
+                    <div class="ops-value" id="shcPhpValue" style="font-size:16px;"><i class="fas fa-spinner fa-spin"></i></div>
+                    <div class="ops-label">PHP Version</div>
+                    <div class="ops-sub" id="shcPhpMeta">Checking…</div>
+                </div>
+            </div>
+            <!-- Tentative Booking Sweep -->
+            <div class="ops-card" style="cursor:default;">
+                <div class="ops-icon" id="shcSweepIcon" style="background:#aaa;"><i class="fas fa-broom"></i></div>
+                <div class="ops-body">
+                    <div class="ops-value" id="shcSweepValue" style="font-size:18px;"><i class="fas fa-spinner fa-spin"></i></div>
+                    <div class="ops-label">Tentative Sweep</div>
+                    <div class="ops-sub" id="shcSweepMeta">Checking…</div>
+                </div>
+            </div>
+        </div>
+        <div style="display:flex; justify-content:space-between; align-items:center; font-size:11px; color:#888; margin-bottom:20px; padding:0 2px 0 4px;">
+            <span>Auto-refreshes every 60 s &nbsp;&middot;&nbsp; Last checked: <strong id="shcLastChecked">—</strong></span>
+            <div style="display:flex; gap:6px;">
+                <a href="backup-management.php" class="btn btn-outline" style="font-size:11px; padding:4px 12px;"><i class="fas fa-archive"></i> Manage Backups</a>
+                <a href="system-logs.php" class="btn btn-outline" style="font-size:11px; padding:4px 12px;"><i class="fas fa-list-alt"></i> System Logs</a>
+                <button type="button" id="shcRefreshBtn" class="btn btn-outline" style="font-size:11px; padding:4px 12px;"><i class="fas fa-sync-alt"></i> Refresh</button>
+            </div>
+        </div>
+
         <?php if (!empty($roomServiceQueue)): ?>
             <!-- Room-service queue: live oldest-first list of in-flight room orders -->
             <div class="today-checkins-section">
@@ -3007,6 +3076,139 @@ $currency_symbol = getSetting('currency_symbol');
                     Alert.show('An error occurred while cancelling check-in', 'error');
                 });
         }
+        // -------------------------------------------------------------------
+        // System Health Monitor
+        // -------------------------------------------------------------------
+        (function () {
+            'use strict';
+            const SHC_URL  = 'api/system-health.php';
+            const POLL_MS  = 60000;
+            let   _shcTimer = null;
+
+            function fmtBytes(b) {
+                if (b === null || b === undefined) return '—';
+                b = Number(b);
+                if (b >= 1073741824) return (b / 1073741824).toFixed(1) + ' GB';
+                if (b >= 1048576)    return (b / 1048576).toFixed(1) + ' MB';
+                return Math.round(b / 1024) + ' KB';
+            }
+
+            function setCard(iconId, valueId, metaId, cfg) {
+                const ic = document.getElementById(iconId);
+                const vl = document.getElementById(valueId);
+                const mt = document.getElementById(metaId);
+                if (ic) ic.style.background = cfg.bg;
+                if (vl) vl.innerHTML        = cfg.value;
+                if (mt) mt.textContent      = cfg.meta;
+            }
+
+            async function shcFetch() {
+                const btn = document.getElementById('shcRefreshBtn');
+                if (btn) { btn.disabled = true; btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i>'; }
+                try {
+                    const res = await fetch(SHC_URL, {
+                        credentials: 'same-origin',
+                        headers: { 'X-Requested-With': 'XMLHttpRequest' }
+                    });
+                    if (!res.ok) throw new Error('HTTP ' + res.status);
+                    const d = await res.json();
+
+                    // Database
+                    const dbOk = d.db === 'ok';
+                    setCard('shcDbIcon', 'shcDbValue', 'shcDbMeta', {
+                        bg:    dbOk ? '#2e7d32' : '#c62828',
+                        value: dbOk
+                            ? '<i class="fas fa-check-circle" style="color:#fff;"></i>'
+                            : '<i class="fas fa-times-circle" style="color:#fff;"></i>',
+                        meta:  dbOk ? 'Connected' : 'Connection failed'
+                    });
+
+                    // Backup
+                    const bkAge = d.last_backup_age_hours;
+                    const bkBg  = !d.last_backup_at
+                        ? '#c62828'
+                        : (bkAge < 12 ? '#2e7d32' : (bkAge < 36 ? '#b45309' : '#c62828'));
+                    const bkVal  = d.last_backup_at
+                        ? (bkAge !== null ? bkAge + 'h ago' : '—')
+                        : 'Never';
+                    const bkMeta = d.last_backup_at
+                        ? (new Date(d.last_backup_at).toLocaleString()
+                            + (d.last_backup_size_bytes ? ' · ' + fmtBytes(d.last_backup_size_bytes) : ''))
+                        : 'No backup on record';
+                    setCard('shcBackupIcon', 'shcBackupValue', 'shcBackupMeta',
+                        { bg: bkBg, value: bkVal, meta: bkMeta });
+
+                    // Disk
+                    const dkPct = d.disk_free_pct;
+                    const dkBg  = dkPct === null ? '#607d8b'
+                        : (dkPct > 20 ? '#2e7d32' : (dkPct > 10 ? '#b45309' : '#c62828'));
+                    const dkVal  = dkPct !== null ? dkPct + '%' : '—';
+                    const dkMeta = d.disk_free_bytes !== null
+                        ? fmtBytes(d.disk_free_bytes) + ' free of ' + fmtBytes(d.disk_total_bytes)
+                        : 'Unavailable on this host';
+                    setCard('shcDiskIcon', 'shcDiskValue', 'shcDiskMeta',
+                        { bg: dkBg, value: dkVal, meta: dkMeta });
+
+                    // Error log
+                    const lgSz  = d.log_error_size_bytes;
+                    const lgBg  = lgSz === null ? '#607d8b'
+                        : (lgSz < 102400 ? '#2e7d32' : (lgSz < 1048576 ? '#b45309' : '#c62828'));
+                    const lgVal  = lgSz !== null ? fmtBytes(lgSz) : '—';
+                    const lgMeta = lgSz !== null
+                        ? (lgSz === 0 ? 'No errors logged' : 'php-errors.log on server')
+                        : 'File not found';
+                    setCard('shcLogIcon', 'shcLogValue', 'shcLogMeta',
+                        { bg: lgBg, value: lgVal, meta: lgMeta });
+
+                    // PHP version
+                    const phpVal = document.getElementById('shcPhpValue');
+                    const phpMt  = document.getElementById('shcPhpMeta');
+                    if (phpVal) phpVal.textContent = d.php_version || '—';
+                    if (phpMt)  phpMt.textContent  = d.server_time
+                        ? 'Server: ' + new Date(d.server_time).toLocaleTimeString()
+                        : '—';
+
+                    // Tentative sweep
+                    let swBg = '#607d8b', swVal = 'Never', swMeta = 'Cron not yet run';
+                    if (d.last_tentative_sweep_at) {
+                        const swAge = Math.round(
+                            (Date.now() - new Date(d.last_tentative_sweep_at).getTime()) / 3600000
+                        );
+                        swBg   = swAge < 2  ? '#2e7d32' : (swAge < 25 ? '#b45309' : '#c62828');
+                        swVal  = swAge + 'h ago';
+                        swMeta = new Date(d.last_tentative_sweep_at).toLocaleString();
+                    }
+                    setCard('shcSweepIcon', 'shcSweepValue', 'shcSweepMeta',
+                        { bg: swBg, value: swVal, meta: swMeta });
+
+                    const el = document.getElementById('shcLastChecked');
+                    if (el) el.textContent = new Date().toLocaleTimeString();
+                } catch (err) {
+                    console.error('[SysHealth]', err);
+                    const el = document.getElementById('shcLastChecked');
+                    if (el) el.textContent = 'Error: ' + (err.message || 'check failed');
+                } finally {
+                    if (btn) {
+                        btn.disabled  = false;
+                        btn.innerHTML = '<i class="fas fa-sync-alt"></i> Refresh';
+                    }
+                }
+            }
+
+            const btn = document.getElementById('shcRefreshBtn');
+            if (btn) {
+                btn.addEventListener('click', () => {
+                    clearTimeout(_shcTimer);
+                    shcFetch().finally(() => {
+                        _shcTimer = setTimeout(shcFetch, POLL_MS);
+                    });
+                });
+            }
+
+            // Run immediately on page load, then every 60 s
+            shcFetch();
+            _shcTimer = setInterval(shcFetch, POLL_MS);
+        })();
     </script>
 
     <?php require_once 'includes/admin-footer.php'; ?>

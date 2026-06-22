@@ -14,7 +14,9 @@
 
 # Database backups - generated locally / on server, never tracked
 backups/
+Database/
 logs/backup.log
+*.sql.gz
 
 # Email configuration with credentials - NEVER commit this!
 config/email.local.php
