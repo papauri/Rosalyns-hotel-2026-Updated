@@ -48,6 +48,7 @@ if (!$auth->checkPermission($client, 'bookings.create')) {
 require_once __DIR__ . '/../includes/booking-functions.php';
 require_once __DIR__ . '/../includes/whatsapp-functions.php';
 require_once __DIR__ . '/../includes/idempotency.php';
+require_once __DIR__ . '/../includes/booking-timeline.php';
 if (!isBookingEnabled()) {
     ApiResponse::error('Booking system is currently disabled', 503);
 }
@@ -265,7 +266,7 @@ try {
     // Generate unique booking reference
     $refPrefix = getSetting('booking_reference_prefix', 'LSH');
     do {
-        $bookingReference = $refPrefix . date('Y') . str_pad(rand(1, 9999), 4, '0', STR_PAD_LEFT);
+        $bookingReference = $refPrefix . date('Y') . str_pad(random_int(1, 999999), 6, '0', STR_PAD_LEFT);
         $refCheck = $pdo->prepare("SELECT COUNT(*) as count FROM bookings WHERE booking_reference = ?");
         $refCheck->execute([$bookingReference]);
         $refExists = $refCheck->fetch(PDO::FETCH_ASSOC)['count'] > 0;
@@ -303,11 +304,12 @@ try {
                 booking_reference, room_id, guest_name, guest_email, guest_phone,
                 guest_country, guest_address, number_of_guests, adult_guests, child_guests,
                 child_price_multiplier, check_in_date, check_out_date, number_of_nights,
-                total_amount, child_supplement_total, tourism_levy_amount, tourism_levy_percent,
+                total_amount, amount_due, total_with_vat,
+                child_supplement_total, tourism_levy_amount, tourism_levy_percent,
                 special_requests, status, is_tentative, tentative_expires_at, occupancy_type, client_uuid
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ");
-        
+
         $__bookingClientUuid = idem_normalize_uuid($__incomingClientUuid ?? null);
         $insertStmt->execute([
             $bookingReference,
@@ -325,6 +327,8 @@ try {
             $bookingData['check_out_date'],
             $nights,
             $totalAmount,
+            $totalAmount, // amount_due = full total for new bookings (no payments yet)
+            $totalAmount, // total_with_vat matches total_amount (levy already included)
             $childSupplementTotal,
             $tourismLevyAmount,
             $tourismLevyPercent,
@@ -357,7 +361,25 @@ try {
         
         // Commit transaction
         $pdo->commit();
-        
+
+        // Log booking creation to timeline and audit log
+        $__timelineData = [
+            'id'               => $bookingId,
+            'booking_reference'=> $bookingReference,
+            'room_id'          => $bookingData['room_id'],
+            'guest_name'       => $bookingData['guest_name'],
+            'guest_email'      => $bookingData['guest_email'],
+            'check_in_date'    => $bookingData['check_in_date'],
+            'check_out_date'   => $bookingData['check_out_date'],
+            'number_of_nights' => $nights,
+            'number_of_guests' => $bookingData['number_of_guests'],
+            'total_amount'     => $totalAmount,
+            'status'           => $bookingStatus,
+            'is_tentative'     => $isTentative,
+        ];
+        logBookingCreated($__timelineData, 'api', null, $bookingData['guest_name']);
+        logBookingCreatedAudit($bookingId, $bookingReference, 'api', $bookingData['guest_name']);
+
         // Prepare booking data for email
         $bookingForEmail = [
             'id' => $bookingId,

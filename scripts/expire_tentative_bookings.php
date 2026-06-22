@@ -17,7 +17,12 @@ declare(strict_types=1);
 
 if (PHP_SAPI !== 'cli') {
     if (session_status() !== PHP_SESSION_ACTIVE) session_start();
-    if (empty($_SESSION['admin_user']) || ($_SESSION['admin_user']['role'] ?? '') !== 'admin' || ($_GET['web'] ?? '') !== '1') {
+    $__webRole = $_SESSION['admin_role'] ?? '';
+    if (
+        empty($_SESSION['admin_user_id']) ||
+        !in_array($__webRole, ['admin', 'manager'], true) ||
+        ($_GET['web'] ?? '') !== '1'
+    ) {
         http_response_code(403);
         echo 'Forbidden — CLI only.';
         exit;
@@ -26,6 +31,7 @@ if (PHP_SAPI !== 'cli') {
 }
 
 require_once __DIR__ . '/../config/database.php';
+require_once __DIR__ . '/../config/email.php';
 
 $startedAt = date('Y-m-d H:i:s');
 echo "[{$startedAt}] Tentative-booking expiry sweep starting...\n";
@@ -45,8 +51,8 @@ foreach ($expired as $b) {
         echo "  OK  #{$bid} {$ref} (expired {$hours}h ago)\n";
         // Best-effort guest + admin notification — never fail the sweep on email errors.
         try {
-            if (function_exists('sendGuestBookingExpiredNotification')) {
-                @sendGuestBookingExpiredNotification($b);
+            if (function_exists('sendTentativeBookingExpiredEmail')) {
+                @sendTentativeBookingExpiredEmail($b);
             }
             if (function_exists('sendAdminBookingExpiredNotification')) {
                 @sendAdminBookingExpiredNotification($b, 'tentative');

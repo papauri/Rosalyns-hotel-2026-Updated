@@ -88,7 +88,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $message = 'Booking converted to confirmed!'
                 . ($email_result['success'] ? ' Confirmation email sent.' : ' (Email failed: ' . htmlspecialchars($email_result['message'] ?? '') . ')');
         } elseif ($action === 'cancel') {
-            $stmt = $pdo->prepare("SELECT * FROM bookings WHERE id = ?");
+            $stmt = $pdo->prepare("SELECT b.*, r.name as room_name FROM bookings b LEFT JOIN rooms r ON b.room_id = r.id WHERE b.id = ?");
             $stmt->execute([$booking_id]);
             $booking = $stmt->fetch(PDO::FETCH_ASSOC);
 
@@ -102,7 +102,23 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $pdo->prepare("INSERT INTO tentative_booking_log (booking_id, action, performed_by, action_reason) VALUES (?, 'cancelled', ?, ?)")
                 ->execute([$booking_id, (int)$user['id'], 'Cancelled by ' . $user['full_name']]);
 
-            $message = 'Tentative booking cancelled and room hold released.';
+            // Notify guest
+            require_once '../config/email.php';
+            $cancelReason = 'Tentative hold cancelled by hotel';
+            $cancel_email_result = sendBookingCancelledEmail($booking, $cancelReason);
+            logCancellationToDatabase(
+                $booking['id'],
+                $booking['booking_reference'],
+                'room',
+                $booking['guest_email'],
+                $user['id'],
+                $cancelReason,
+                $cancel_email_result['success'],
+                $cancel_email_result['message'] ?? ''
+            );
+
+            $message = 'Tentative booking cancelled and room hold released.'
+                . ($cancel_email_result['success'] ? ' Guest notified.' : ' (Guest notification failed.)');
         }
     } catch (Exception $e) {
         $error = $e->getMessage();
