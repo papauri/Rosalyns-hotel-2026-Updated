@@ -319,6 +319,20 @@ function reconcileRestaurantOrder(PDO $pdo, int $orderId, array $user): array
     }
 }
 
+// AJAX: order items viewer (used by the Items modal on this page)
+if (!$error && !empty($_GET['ajax']) && $_GET['ajax'] === 'order_items') {
+    $oid = (int)($_GET['id'] ?? 0);
+    header('Content-Type: application/json; charset=utf-8');
+    if ($oid > 0) {
+        $stmt = $pdo->prepare("SELECT item_name, menu_type, quantity, unit_price, line_total, kds_status, station, notes FROM stock_order_items WHERE order_id = ? ORDER BY id");
+        $stmt->execute([$oid]);
+        echo json_encode($stmt->fetchAll(PDO::FETCH_ASSOC));
+    } else {
+        echo '[]';
+    }
+    exit;
+}
+
 if (!$error && $_SERVER['REQUEST_METHOD'] === 'POST') {
     $token = $_POST['csrf_token'] ?? '';
     if (!validateCsrfToken($token)) {
@@ -500,7 +514,7 @@ if (!$error && $_SERVER['REQUEST_METHOD'] === 'POST') {
 
                     $pdo->commit();
 
-                    if (function_exists('deleteCache')) deleteCache('stock_dashboard_metrics_v2');
+                    if (function_exists('deleteCache')) deleteCache('stock_dashboard_metrics_v3');
 
                     $roomLabel = $roomNumber ? 'Room ' . $roomNumber : 'booking ' . ($roomServiceBooking['booking_reference'] ?? '');
                     $message = "Room-service order {$reference} posted to {$roomLabel} ({$currency_symbol} " . number_format($totalAmount, 2) . "). It will appear on the guest folio for checkout accounting.";
@@ -585,7 +599,7 @@ if (!$error && $_SERVER['REQUEST_METHOD'] === 'POST') {
 
                     $pdo->commit();
 
-                    if (function_exists('deleteCache')) deleteCache('stock_dashboard_metrics_v2');
+                    if (function_exists('deleteCache')) deleteCache('stock_dashboard_metrics_v3');
 
                     $changeMsg = '';
                     if ($paymentMethod === 'cash' && $paymentExtras['change_due'] > 0) {
@@ -687,8 +701,89 @@ if (!$error && $_SERVER['REQUEST_METHOD'] === 'POST') {
                 $orderId = (int)($_POST['order_id'] ?? 0);
                 if ($orderId <= 0) throw new RuntimeException('Invalid order.');
                 $changes = reconcileRestaurantOrder($pdo, $orderId, $user);
-                if (function_exists('deleteCache')) deleteCache('stock_dashboard_metrics_v2');
+                if (function_exists('deleteCache')) deleteCache('stock_dashboard_metrics_v3');
                 $message = 'Order reconciled: ' . implode(', ', $changes) . '.';
+            } elseif ($action === 'settle_order') {
+                /* SETTLE — close a placed (open) order by collecting payment.
+                 * The order already exists with items; we just need to record
+                 * payment and flip status to 'paid'. */
+                $orderId = (int)($_POST['order_id'] ?? 0);
+                $paymentMethod = $_POST['payment_method'] ?? '';
+                $allowedMethods = ['cash', 'mobile_money', 'card_manual'];
+                if (!in_array($paymentMethod, $allowedMethods, true)) {
+                    throw new RuntimeException('Select a valid payment method.');
+                }
+
+                $pdo->beginTransaction();
+                $oh = $pdo->prepare("SELECT * FROM stock_orders WHERE id = ? FOR UPDATE");
+                $oh->execute([$orderId]);
+                $order = $oh->fetch(PDO::FETCH_ASSOC);
+                if (!$order) throw new RuntimeException('Order not found.');
+                if ($order['status'] !== 'placed') throw new RuntimeException('Order is not open — cannot settle a ' . $order['status'] . ' order.');
+                if (($order['order_type'] ?? '') === 'room_service') throw new RuntimeException('Room-service orders are charged to the booking folio — use the booking module to settle them.');
+
+                $totalAmount = (float)$order['total_amount'];
+                if ($totalAmount <= 0) throw new RuntimeException('Order total is zero — cannot settle.');
+
+                $tendered        = (float)($_POST['tendered_amount'] ?? 0);
+                $mobileProvider  = mb_substr(trim($_POST['mobile_wallet_provider'] ?? ''), 0, 50);
+                $mobileReference = mb_substr(trim($_POST['mobile_wallet_reference'] ?? ''), 0, 100);
+                $cardLast4Raw    = preg_replace('/\D/', '', (string)($_POST['card_last4'] ?? ''));
+                $cardLast4       = strlen($cardLast4Raw) >= 4 ? substr($cardLast4Raw, -4) : null;
+                $cardAuthCode    = mb_substr(trim($_POST['card_auth_code'] ?? ''), 0, 50);
+
+                $paymentExtras = ['tendered_amount' => null, 'change_due' => null, 'mobile_wallet_provider' => null, 'mobile_wallet_reference' => null, 'card_last4' => null, 'card_auth_code' => null];
+                if ($paymentMethod === 'cash') {
+                    if ($tendered + 0.001 < $totalAmount) {
+                        throw new RuntimeException('Tendered amount (' . number_format($tendered, 2) . ') is less than order total (' . number_format($totalAmount, 2) . ').');
+                    }
+                    $paymentExtras['tendered_amount'] = round($tendered, 2);
+                    $paymentExtras['change_due']      = round($tendered - $totalAmount, 2);
+                } elseif ($paymentMethod === 'mobile_money') {
+                    if ($mobileProvider === '' || $mobileReference === '') {
+                        throw new RuntimeException('Mobile money requires both provider and transaction reference.');
+                    }
+                    $paymentExtras['mobile_wallet_provider']  = $mobileProvider;
+                    $paymentExtras['mobile_wallet_reference'] = $mobileReference;
+                } elseif ($paymentMethod === 'card_manual') {
+                    if (!$cardLast4 || $cardAuthCode === '') {
+                        throw new RuntimeException('Card payment requires the last 4 digits AND the authorisation code from the slip.');
+                    }
+                    $paymentExtras['card_last4']     = $cardLast4;
+                    $paymentExtras['card_auth_code'] = $cardAuthCode;
+                }
+
+                $pdo->prepare("
+                    UPDATE stock_orders SET
+                        status = 'paid', paid_at = NOW(), payment_method = ?,
+                        tendered_amount = ?, change_due = ?,
+                        mobile_wallet_provider = ?, mobile_wallet_reference = ?,
+                        card_last4 = ?, card_auth_code = ?, updated_at = NOW()
+                    WHERE id = ? AND status = 'placed'
+                ")->execute([
+                    $paymentMethod,
+                    $paymentExtras['tendered_amount'], $paymentExtras['change_due'],
+                    $paymentExtras['mobile_wallet_provider'], $paymentExtras['mobile_wallet_reference'],
+                    $paymentExtras['card_last4'], $paymentExtras['card_auth_code'],
+                    $orderId,
+                ]);
+
+                syncRestaurantOrderPayment($pdo, array_merge($order, ['status' => 'paid', 'payment_method' => $paymentMethod]), (int)$user['id'], $paymentMethod);
+                logOrderAudit($pdo, $orderId, (int)$user['id'], (string)$user['full_name'], 'settled', json_encode([
+                    'method'   => $paymentMethod,
+                    'total'    => $totalAmount,
+                    'tendered' => $paymentExtras['tendered_amount'],
+                    'change'   => $paymentExtras['change_due'],
+                ]));
+                $pdo->commit();
+
+                if (function_exists('deleteCache')) deleteCache('stock_dashboard_metrics_v3');
+
+                $changeMsg = '';
+                if ($paymentMethod === 'cash' && ($paymentExtras['change_due'] ?? 0) > 0) {
+                    $changeMsg = ' Change: ' . $currency_symbol . ' ' . number_format((float)$paymentExtras['change_due'], 2) . '.';
+                }
+                $message = "Order {$order['reference']} settled — {$currency_symbol} " . number_format($totalAmount, 2) . ' via ' . str_replace('_', ' ', $paymentMethod) . '.' . $changeMsg;
             }
         } catch (Throwable $e) {
             if ($pdo->inTransaction()) $pdo->rollBack();
@@ -2357,6 +2452,11 @@ $csrf_token = generateCsrfToken();
                             <td style="font-size:12px;"><?php echo htmlspecialchars(date('Y-m-d H:i', strtotime($o['created_at']))); ?></td>
                             <td>
                                 <a href="order-lifecycle.php?id=<?php echo (int)$o['id']; ?>" class="mini-action"><i class="fas fa-stream"></i> Timeline</a>
+                                <button type="button" class="mini-action"
+                                    onclick="showOrderItems(<?php echo (int)$o['id']; ?>, <?php echo json_encode($o['reference']); ?>)"
+                                    title="View line items for this order">
+                                    <i class="fas fa-list-ul"></i> Items
+                                </button>
                                 <?php if (in_array($o['status'], ['paid', 'voided', 'cancelled'], true) || $o['order_type'] === 'room_service'): ?>
                                     <a href="stock-receipt.php?id=<?php echo (int)$o['id']; ?>" class="mini-action primary"><i class="fas fa-receipt"></i> Receipt</a>
                                 <?php endif; ?>
@@ -2376,6 +2476,24 @@ $csrf_token = generateCsrfToken();
                                 <?php endif; ?>
                                 <?php if ($o['status'] === 'placed'): ?>
                                     <a href="order-lifecycle.php?id=<?php echo (int)$o['id']; ?>" class="mini-action primary" title="View live order status, items, and kitchen progress"><i class="fas fa-hourglass-half"></i> Open</a>
+                                    <?php if (($o['order_type'] ?? '') !== 'room_service'): ?>
+                                        <button type="button" class="mini-action success"
+                                            onclick="promptSettle(document.getElementById('sf-<?php echo (int)$o['id']; ?>'), <?php echo json_encode($o['reference']); ?>, <?php echo json_encode((float)$o['total_amount']); ?>)"
+                                            title="Settle this order and collect payment now">
+                                            <i class="fas fa-circle-check"></i> Settle
+                                        </button>
+                                        <form method="POST" id="sf-<?php echo (int)$o['id']; ?>" style="display:none;">
+                                            <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf_token, ENT_QUOTES, 'UTF-8'); ?>">
+                                            <input type="hidden" name="action" value="settle_order">
+                                            <input type="hidden" name="order_id" value="<?php echo (int)$o['id']; ?>">
+                                            <input type="hidden" name="payment_method" value="">
+                                            <input type="hidden" name="tendered_amount" value="">
+                                            <input type="hidden" name="mobile_wallet_provider" value="">
+                                            <input type="hidden" name="mobile_wallet_reference" value="">
+                                            <input type="hidden" name="card_last4" value="">
+                                            <input type="hidden" name="card_auth_code" value="">
+                                        </form>
+                                    <?php endif; ?>
                                     <form method="POST" style="display:inline;" onsubmit="return confirm('Cancel unpaid order and restore stock?');">
                                         <input type="hidden" name="csrf_token" value="<?php echo $csrf_token; ?>">
                                         <input type="hidden" name="action" value="cancel_order">
@@ -2618,6 +2736,56 @@ $csrf_token = generateCsrfToken();
             </div>
         </div>
     </div>
+
+    <!-- Settle Order Modal -->
+    <div id="soSettleModal" class="modal-overlay" data-modal role="dialog" aria-modal="true" aria-labelledby="soSettleTitle">
+        <div class="modal-content" style="max-width:min(96vw,30rem);width:min(96vw,30rem);">
+            <div class="modal-header">
+                <h3 class="modal-title" id="soSettleTitle" style="color:#155724;"><i class="fas fa-circle-check"></i> Settle Order</h3>
+                <button type="button" class="modal-close" aria-label="Close" onclick="soCloseSettle()">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div id="soSettleInfo" style="background:#f0fdf4;border:1px solid #bbf7d0;border-radius:6px;padding:10px 14px;margin-bottom:14px;font-size:14px;"></div>
+                <div style="margin-bottom:12px;">
+                    <label for="soSettleMethod" style="font-size:13px;font-weight:600;display:block;margin-bottom:4px;">Payment Method</label>
+                    <select id="soSettleMethod" style="width:100%;padding:8px 10px;border:1px solid #ced4da;border-radius:4px;font-size:14px;" onchange="soUpdateSettleFields()">
+                        <option value="">— Select —</option>
+                        <option value="cash">Cash</option>
+                        <option value="mobile_money">Mobile Money</option>
+                        <option value="card_manual">Card (Manual / Slip)</option>
+                    </select>
+                </div>
+                <div id="soSettleCashFields" style="display:none;margin-bottom:12px;">
+                    <label for="soSettleTendered" style="font-size:13px;font-weight:600;display:block;margin-bottom:4px;">Amount Tendered</label>
+                    <input type="number" id="soSettleTendered" min="0" step="0.01" placeholder="0.00"
+                        style="width:100%;padding:8px 10px;border:1px solid #ced4da;border-radius:4px;font-size:14px;box-sizing:border-box;"
+                        oninput="soCalcChange()">
+                    <div id="soSettleChangeDisplay" style="font-size:13px;margin-top:6px;font-weight:600;min-height:20px;"></div>
+                </div>
+                <div id="soSettleMobileFields" style="display:none;margin-bottom:12px;">
+                    <label for="soSettleMobileProvider" style="font-size:13px;font-weight:600;display:block;margin-bottom:4px;">Provider</label>
+                    <input type="text" id="soSettleMobileProvider" placeholder="e.g. Airtel Money, TNM Mpamba"
+                        style="width:100%;padding:8px 10px;border:1px solid #ced4da;border-radius:4px;font-size:14px;box-sizing:border-box;margin-bottom:8px;">
+                    <label for="soSettleMobileRef" style="font-size:13px;font-weight:600;display:block;margin-bottom:4px;">Transaction Reference</label>
+                    <input type="text" id="soSettleMobileRef" placeholder="e.g. P234567890"
+                        style="width:100%;padding:8px 10px;border:1px solid #ced4da;border-radius:4px;font-size:14px;box-sizing:border-box;">
+                </div>
+                <div id="soSettleCardFields" style="display:none;margin-bottom:12px;">
+                    <label for="soSettleCardLast4" style="font-size:13px;font-weight:600;display:block;margin-bottom:4px;">Card Last 4 Digits</label>
+                    <input type="text" id="soSettleCardLast4" maxlength="4" placeholder="1234"
+                        style="width:100%;padding:8px 10px;border:1px solid #ced4da;border-radius:4px;font-size:14px;box-sizing:border-box;margin-bottom:8px;">
+                    <label for="soSettleCardAuth" style="font-size:13px;font-weight:600;display:block;margin-bottom:4px;">Auth Code (from slip)</label>
+                    <input type="text" id="soSettleCardAuth" placeholder="e.g. 123456"
+                        style="width:100%;padding:8px 10px;border:1px solid #ced4da;border-radius:4px;font-size:14px;box-sizing:border-box;">
+                </div>
+                <span id="soSettleErr" style="color:#c82333;font-size:13px;display:none;"></span>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" onclick="soCloseSettle()">Cancel</button>
+                <button type="button" class="btn btn-primary" onclick="soDoSettle()"><i class="fas fa-circle-check"></i> Settle &amp; Close Order</button>
+            </div>
+        </div>
+    </div>
     <script>
         var _soVoidForm = null;
 
@@ -2661,6 +2829,169 @@ $csrf_token = generateCsrfToken();
             soCloseVoid(false);
             _soVoidForm = null;
             form.submit();
+        }
+
+        // ── Settle Order Modal ─────────────────────────────────────────────
+        var _soSettleForm = null;
+        var _soSettleTotal = 0;
+
+        function promptSettle(form, ref, total) {
+            _soSettleForm = form;
+            _soSettleTotal = parseFloat(total) || 0;
+            document.getElementById('soSettleMethod').value = '';
+            document.getElementById('soSettleTendered').value = '';
+            document.getElementById('soSettleMobileProvider').value = '';
+            document.getElementById('soSettleMobileRef').value = '';
+            document.getElementById('soSettleCardLast4').value = '';
+            document.getElementById('soSettleCardAuth').value = '';
+            document.getElementById('soSettleChangeDisplay').textContent = '';
+            document.getElementById('soSettleErr').style.display = 'none';
+            document.getElementById('soSettleInfo').innerHTML =
+                '<strong><i class="fas fa-receipt"></i> ' + ref + '</strong> &mdash; Total: <strong>' +
+                (REVIEW_CURRENCY || 'MWK') + ' ' + Number(total).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + '</strong>';
+            soUpdateSettleFields();
+            var modal = document.getElementById('soSettleModal');
+            if (modal) {
+                modal.classList.add('active');
+                document.body.classList.add('modal-open');
+            }
+        }
+
+        function soCloseSettle(resetState) {
+            if (resetState !== false) _soSettleForm = null;
+            var modal = document.getElementById('soSettleModal');
+            if (modal) modal.classList.remove('active');
+            if (!document.querySelector('.modal-overlay.active')) {
+                document.body.classList.remove('modal-open');
+            }
+        }
+
+        function soUpdateSettleFields() {
+            var method = document.getElementById('soSettleMethod').value;
+            document.getElementById('soSettleCashFields').style.display   = method === 'cash'         ? '' : 'none';
+            document.getElementById('soSettleMobileFields').style.display = method === 'mobile_money' ? '' : 'none';
+            document.getElementById('soSettleCardFields').style.display   = method === 'card_manual'  ? '' : 'none';
+            document.getElementById('soSettleChangeDisplay').textContent = '';
+        }
+
+        function soCalcChange() {
+            var cd = document.getElementById('soSettleChangeDisplay');
+            var tendered = parseFloat(document.getElementById('soSettleTendered').value) || 0;
+            if (tendered <= 0) { cd.textContent = ''; return; }
+            var change = tendered - _soSettleTotal;
+            if (change < -0.001) {
+                cd.style.color = '#c82333';
+                cd.textContent = 'Short by ' + (REVIEW_CURRENCY || '') + ' ' + Math.abs(change).toFixed(2);
+            } else {
+                cd.style.color = '#155724';
+                cd.textContent = 'Change due: ' + (REVIEW_CURRENCY || '') + ' ' + change.toFixed(2);
+            }
+        }
+
+        function soDoSettle() {
+            var errEl = document.getElementById('soSettleErr');
+            errEl.style.display = 'none';
+            var method = document.getElementById('soSettleMethod').value;
+            if (!method) {
+                errEl.textContent = 'Select a payment method.';
+                errEl.style.display = '';
+                return;
+            }
+            var form = _soSettleForm;
+            if (!form) return;
+
+            form.querySelector('[name=payment_method]').value = method;
+
+            if (method === 'cash') {
+                var tendered = parseFloat(document.getElementById('soSettleTendered').value) || 0;
+                if (tendered + 0.001 < _soSettleTotal) {
+                    errEl.textContent = 'Tendered amount is less than the order total.';
+                    errEl.style.display = '';
+                    return;
+                }
+                form.querySelector('[name=tendered_amount]').value = tendered.toFixed(2);
+            } else if (method === 'mobile_money') {
+                var provider = document.getElementById('soSettleMobileProvider').value.trim();
+                var ref = document.getElementById('soSettleMobileRef').value.trim();
+                if (!provider || !ref) {
+                    errEl.textContent = 'Enter both provider and transaction reference.';
+                    errEl.style.display = '';
+                    return;
+                }
+                form.querySelector('[name=mobile_wallet_provider]').value = provider;
+                form.querySelector('[name=mobile_wallet_reference]').value = ref;
+            } else if (method === 'card_manual') {
+                var last4 = document.getElementById('soSettleCardLast4').value.trim();
+                var auth = document.getElementById('soSettleCardAuth').value.trim();
+                if (last4.length !== 4 || !/^\d{4}$/.test(last4) || !auth) {
+                    errEl.textContent = 'Enter exactly 4 card digits and the auth code.';
+                    errEl.style.display = '';
+                    return;
+                }
+                form.querySelector('[name=card_last4]').value = last4;
+                form.querySelector('[name=card_auth_code]').value = auth;
+            }
+
+            soCloseSettle(false);
+            _soSettleForm = null;
+            form.submit();
+        }
+
+        // ── Order Items Viewer ─────────────────────────────────────────────
+        function showOrderItems(orderId, ref) {
+            var url = 'stock-orders.php?ajax=order_items&id=' + orderId;
+            fetch(url)
+                .then(function(r) { return r.json(); })
+                .then(function(items) {
+                    var html = '';
+                    if (!items || items.length === 0) {
+                        html = '<p style="text-align:center;color:#6c757d;padding:24px 0;"><i class="fas fa-inbox" style="font-size:28px;display:block;margin-bottom:8px;"></i>No items found for this order.</p>';
+                    } else {
+                        var statusColors = { pending: '#6c757d', in_progress: '#fd7e14', preparing: '#fd7e14', ready: '#0d6efd', collection: '#0d6efd', served: '#198754', void: '#dc3545' };
+                        var stationLabels = { kitchen: 'Kitchen', bar: 'Bar', coffee_bar: 'Coffee Bar' };
+                        html = '<div style="overflow-x:auto;"><table style="width:100%;border-collapse:collapse;font-size:13px;">';
+                        html += '<thead><tr style="background:#f8f9fa;">' +
+                            '<th style="padding:8px 10px;text-align:left;border-bottom:2px solid #dee2e6;">Item</th>' +
+                            '<th style="padding:8px 6px;text-align:center;border-bottom:2px solid #dee2e6;">Type</th>' +
+                            '<th style="padding:8px 6px;text-align:center;border-bottom:2px solid #dee2e6;">Qty</th>' +
+                            '<th style="padding:8px 10px;text-align:right;border-bottom:2px solid #dee2e6;">Unit</th>' +
+                            '<th style="padding:8px 10px;text-align:right;border-bottom:2px solid #dee2e6;">Line Total</th>' +
+                            '<th style="padding:8px 8px;text-align:center;border-bottom:2px solid #dee2e6;">Station</th>' +
+                            '<th style="padding:8px 8px;text-align:center;border-bottom:2px solid #dee2e6;">Status</th>' +
+                            '</tr></thead><tbody>';
+                        var lineTotal = 0;
+                        items.forEach(function(item, idx) {
+                            var rowBg = idx % 2 === 0 ? '#fff' : '#f9fafb';
+                            var statusColor = statusColors[item.kds_status] || '#6c757d';
+                            var stationLabel = stationLabels[item.station] || (item.station || '—');
+                            var lt = parseFloat(item.line_total) || 0;
+                            lineTotal += lt;
+                            html += '<tr style="background:' + rowBg + ';border-bottom:1px solid #f0f0f0;">' +
+                                '<td style="padding:8px 10px;font-weight:600;">' + (item.item_name || '—') +
+                                (item.notes ? '<div style="font-size:11px;color:#8B7355;font-weight:400;">' + item.notes + '</div>' : '') + '</td>' +
+                                '<td style="padding:8px 6px;text-align:center;"><span style="background:#f3ece4;color:#8B7355;border-radius:4px;padding:2px 7px;font-size:11px;font-weight:600;">' + (item.menu_type || '') + '</span></td>' +
+                                '<td style="padding:8px 6px;text-align:center;font-weight:700;">' + (item.quantity || '') + '</td>' +
+                                '<td style="padding:8px 10px;text-align:right;">' + (REVIEW_CURRENCY || '') + ' ' + Number(item.unit_price || 0).toFixed(2) + '</td>' +
+                                '<td style="padding:8px 10px;text-align:right;font-weight:600;">' + (REVIEW_CURRENCY || '') + ' ' + lt.toFixed(2) + '</td>' +
+                                '<td style="padding:8px 8px;text-align:center;font-size:12px;">' + stationLabel + '</td>' +
+                                '<td style="padding:8px 8px;text-align:center;"><span style="color:' + statusColor + ';font-weight:600;text-transform:capitalize;">' + (item.kds_status || '—').replace(/_/g, ' ') + '</span></td>' +
+                                '</tr>';
+                        });
+                        html += '</tbody><tfoot><tr style="background:#f8f9fa;font-weight:700;border-top:2px solid #dee2e6;">' +
+                            '<td colspan="4" style="padding:8px 10px;text-align:right;">Order Total</td>' +
+                            '<td style="padding:8px 10px;text-align:right;">' + (REVIEW_CURRENCY || '') + ' ' + lineTotal.toFixed(2) + '</td>' +
+                            '<td colspan="2"></td></tr></tfoot></table></div>';
+                        html += '<p style="margin:10px 0 0;font-size:12px;color:#6c757d;">' + items.length + ' line item' + (items.length !== 1 ? 's' : '') + '</p>';
+                    }
+                    if (typeof Modal !== 'undefined' && Modal.showMessage) {
+                        Modal.showMessage({ title: '<i class="fas fa-list-ul" style="color:#8B7355;"></i> Items — ' + ref, message: html });
+                    } else {
+                        showFallbackOverlay('Items — ' + ref, html, { maxWidth: '780px' });
+                    }
+                })
+                .catch(function() {
+                    showFallbackOverlay('Error', '<p style="color:#c82333;padding:16px 0;">Could not load order items. Please try again.</p>', {});
+                });
         }
 
         function openStockOrdersInsight(triggerEl) {

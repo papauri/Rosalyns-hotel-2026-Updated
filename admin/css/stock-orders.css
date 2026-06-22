@@ -675,3 +675,10 @@ a.shift-card:hover,
     color: #b37a00;
     background: #fffbf0;
 }
+
+.mini-action.success {
+    border-color: #198754;
+    color: #155724;
+    background: #f0fdf4;
+    font-weight: 600;
+}
