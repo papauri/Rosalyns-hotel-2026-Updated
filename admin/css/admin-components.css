@@ -1646,6 +1646,88 @@ body.modal-open {
     vertical-align: middle;
 }
 
+/* ── Global base for .btn-action ────────────────────────────────────────────
+   Used across many admin pages (invoices, events, gallery, cache, menu etc).
+   Page-specific CSS overrides colours via higher-specificity scoped rules.
+   Deliberately NOT .content-scoped so it applies even on finance-page wrappers. */
+.btn-action {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.3em;
+    padding: 0.4rem 0.8rem;
+    font-size: 0.82rem;
+    font-weight: 500;
+    line-height: 1.2;
+    border-radius: 8px;
+    border: 1px solid #D4C9BE;
+    background: #ffffff;
+    color: #2A2723;
+    cursor: pointer;
+    text-decoration: none;
+    white-space: nowrap;
+    transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease, box-shadow 0.15s ease;
+    vertical-align: middle;
+}
+
+.btn-action:hover {
+    background: #F7F3EE;
+    border-color: #8A775F;
+    color: #2A2723;
+    text-decoration: none;
+}
+
+.btn-action:focus-visible {
+    outline: 2px solid #8A775F;
+    outline-offset: 2px;
+}
+
+.btn-action i {
+    font-size: 0.9em;
+}
+
+/* ── Semantic modifiers (usable on any page loading admin-components.css) ── */
+.btn-action.btn-view {
+    background: #eff6ff;
+    color: #1d4ed8;
+    border-color: #bfdbfe;
+}
+.btn-action.btn-view:hover { background: #dbeafe; }
+
+.btn-action.btn-save {
+    background: #ecfdf3;
+    color: #1f7a42;
+    border-color: #bbf7d0;
+}
+.btn-action.btn-save:hover { background: #dcfce7; }
+
+.btn-action.btn-resend {
+    background: #ecfdf3;
+    color: #1f7a42;
+    border-color: #bbf7d0;
+}
+.btn-action.btn-resend:hover { background: #dcfce7; }
+
+.btn-action.btn-regenerate {
+    background: #fff7ed;
+    color: #b7791f;
+    border-color: #fed7aa;
+}
+.btn-action.btn-regenerate:hover { background: #ffedd5; }
+
+.btn-action.btn-delete {
+    background: #fef2f2;
+    color: #a03030;
+    border-color: #fecaca;
+}
+.btn-action.btn-delete:hover { background: #fee2e2; }
+
+.btn-action.btn-cancel {
+    background: #f9fafb;
+    color: #4b5563;
+    border-color: #d1d5db;
+}
+.btn-action.btn-cancel:hover { background: #f3f4f6; }
+
 /* Buttons — single source of truth, no overlap */
 
 :is(.admin-content, #rh-admin-page) .btn {

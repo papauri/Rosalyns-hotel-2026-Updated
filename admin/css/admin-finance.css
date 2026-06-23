@@ -411,6 +411,58 @@ body {
     box-shadow: var(--finance-shadow);
 }
 
+/* Default btn-action visual base — layout is set above, these add colour */
+.finance-page .btn-action {
+    background: var(--finance-surface);
+    color: var(--finance-text);
+    border: 1px solid var(--finance-border);
+    cursor: pointer;
+    text-decoration: none;
+}
+
+.finance-page .btn-action:hover {
+    background: #faf9f6;
+    border-color: var(--finance-accent);
+    color: var(--finance-text);
+    text-decoration: none;
+}
+
+/* View invoice / document — info blue */
+.finance-page .btn-action.btn-view {
+    background: var(--finance-info-bg);
+    color: var(--finance-info);
+    border-color: var(--finance-info-border);
+}
+
+.finance-page .btn-action.btn-view:hover {
+    background: #dbeafe;
+    color: var(--finance-info);
+}
+
+/* Resend email — success green */
+.finance-page .btn-action.btn-resend {
+    background: var(--finance-success-bg);
+    color: var(--finance-success);
+    border-color: var(--finance-success-border);
+}
+
+.finance-page .btn-action.btn-resend:hover {
+    background: #dcfce7;
+    color: var(--finance-success);
+}
+
+/* Regenerate invoice — warning amber */
+.finance-page .btn-action.btn-regenerate {
+    background: var(--finance-warning-bg);
+    color: var(--finance-warning);
+    border-color: var(--finance-warning-border);
+}
+
+.finance-page .btn-action.btn-regenerate:hover {
+    background: #fed7aa;
+    color: var(--finance-warning);
+}
+
 /* ============================================
    FILTERS
    ============================================ */

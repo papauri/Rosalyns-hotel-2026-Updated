@@ -7,6 +7,7 @@ require_once 'admin-init.php';
 require_once '../includes/quotation-pdf.php';
 require_once '../config/email.php';
 require_once __DIR__ . '/includes/booking-lifecycle.php';
+require_once __DIR__ . '/../includes/alert.php';
 
 $site_name       = getSetting('site_name');
 $currency_symbol = getSetting('currency_symbol', 'MWK');
@@ -51,13 +52,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 if ($result['success']) {
                     $pdo->prepare("UPDATE quotations SET status = 'sent', sent_at = NOW(), updated_at = NOW() WHERE id = ?")->execute([$quotation_id]);
                     $pdo->prepare("UPDATE bookings SET last_quotation_sent_at = NOW() WHERE id = ?")->execute([$qRow['booking_id']]);
-                    $message = 'Quotation resent to ' . htmlspecialchars($qRow['guest_email'] ?? '');
+                    $_SESSION['qt_flash'] = ['type' => 'success', 'msg' => 'Quotation resent to ' . ($qRow['guest_email'] ?? '')];
                 } else {
-                    $error = 'Resend failed: ' . $result['message'];
+                    $_SESSION['qt_flash'] = ['type' => 'error', 'msg' => 'Resend failed: ' . $result['message']];
                 }
             } catch (Throwable $e) {
-                $error = 'Error: ' . $e->getMessage();
+                $_SESSION['qt_flash'] = ['type' => 'error', 'msg' => 'Error: ' . $e->getMessage()];
             }
+            header('Location: quotations.php');
+            exit;
         }
 
         if ($action === 'mark_accepted' && $quotation_id > 0) {
@@ -65,7 +68,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $mqStmt->execute([$quotation_id]);
             $mqRow = $mqStmt->fetch(PDO::FETCH_ASSOC);
             if ($mqRow) {
-                // Block acceptance of expired quotations
                 $expiryDate = !empty($mqRow['expires_at']) ? $mqRow['expires_at'] : null;
                 if ($expiryDate && $expiryDate < date('Y-m-d')) {
                     $error = 'Cannot accept an expired quotation (expired ' . $expiryDate . ').';
@@ -75,7 +77,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         $error = $lcCheck['reason'];
                     } else {
                         $pdo->prepare("UPDATE quotations SET status = 'accepted', updated_at = NOW() WHERE id = ?")->execute([$quotation_id]);
-                        // Confirm the underlying booking when quotation is accepted
                         if (!empty($mqRow['booking_id'])) {
                             $pdo->prepare("UPDATE bookings SET status = 'confirmed', updated_at = NOW() WHERE id = ? AND status IN ('pending','tentative')")->execute([$mqRow['booking_id']]);
                         }
@@ -103,6 +104,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $error = 'Quotation not found.';
             }
         }
+    }
+}
+
+// ── Session flash (set by PRG redirect from resend action) ────────────────────
+if (!empty($_SESSION['qt_flash'])) {
+    $flash = $_SESSION['qt_flash'];
+    unset($_SESSION['qt_flash']);
+    if ($flash['type'] === 'success') {
+        $message = $flash['msg'];
+    } else {
+        $error = $flash['msg'];
     }
 }
 
@@ -251,16 +263,8 @@ try {
             </div>
         </div>
 
-        <?php if ($message): ?>
-            <div class="alert alert-success" style="margin-bottom:16px;">
-                <i class="fas fa-check-circle"></i> <?php echo htmlspecialchars($message); ?>
-            </div>
-        <?php endif; ?>
-        <?php if ($error): ?>
-            <div class="alert alert-error" style="margin-bottom:16px;">
-                <i class="fas fa-exclamation-circle"></i> <?php echo htmlspecialchars($error); ?>
-            </div>
-        <?php endif; ?>
+        <?php if ($message): showAlert($message, 'success'); endif; ?>
+        <?php if ($error): showAlert($error, 'error'); endif; ?>
 
         <!-- Stats -->
         <div class="qt-stats">
