@@ -886,6 +886,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 'email_development_mode' => isset($_POST['email_development_mode']) ? '1' : '0',
                 'email_log_enabled' => isset($_POST['email_log_enabled']) ? '1' : '0',
                 'email_preview_enabled' => isset($_POST['email_preview_enabled']) ? '1' : '0',
+                'invoice_recipients' => trim((string)($_POST['invoice_recipients'] ?? '')),
             ];
 
             if (!in_array($email_settings['smtp_secure'], ['ssl', 'tls', ''], true)) {
@@ -1527,6 +1528,14 @@ foreach ($canonicalTemplateDefaults as $templateKey => $templateDefaults) {
                             <span>Enable Email Previews</span>
                         </label>
                         <p class="help-text"><i class="fas fa-info-circle"></i> Save HTML previews of emails in logs/email-previews/ folder</p>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="invoice_recipients">Invoice Email CC Recipients</label>
+                        <input type="text" id="invoice_recipients" name="invoice_recipients" class="form-control"
+                            value="<?php echo htmlspecialchars($current_settings['invoice_recipients'] ?? ''); ?>"
+                            placeholder="accounts@example.com, manager@example.com">
+                        <p class="help-text"><i class="fas fa-info-circle"></i> Comma-separated list of addresses CCed on every invoice and reminder email. The SMTP username is always included automatically.</p>
                     </div>
 
                     <button type="submit" class="btn-submit">
