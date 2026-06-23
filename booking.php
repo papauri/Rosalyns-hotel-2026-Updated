@@ -345,9 +345,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         if (!empty($validation_errors)) {
             $error_messages = [];
             foreach ($validation_errors as $field => $message) {
-                $error_messages[] = ucfirst(str_replace('_', ' ', $field)) . ': ' . $message;
+                $error_messages[] = '• ' . $message;
             }
-            throw new Exception(implode('; ', $error_messages));
+            throw new Exception('Please fix the following before submitting: ' . implode(' ', $error_messages));
         }
 
         // Load room now so we can apply occupancy policies before availability validation
@@ -1201,6 +1201,11 @@ try {
                                     data-filter="all <?php echo htmlspecialchars($room_badge_value); ?>"
                                     data-badge="<?php echo htmlspecialchars($room['badge'] ?? ''); ?>">
                                     <input type="radio" name="room_id" value="<?php echo $room['id']; ?>" required>
+                                    <?php if (!empty($room['image_url'])): ?>
+                                    <div class="room-option__thumb">
+                                        <img src="<?php echo htmlspecialchars($room['image_url']); ?>" alt="<?php echo htmlspecialchars($room['name']); ?>" loading="lazy">
+                                    </div>
+                                    <?php endif; ?>
                                     <div class="room-info">
                                         <h4><?php echo htmlspecialchars($room['name']); ?></h4>
                                         <p><?php echo htmlspecialchars($room['short_description']); ?></p>
@@ -1220,6 +1225,140 @@ try {
                         </div>
                     </div>
                 <?php endif; ?>
+
+                <!-- Pre-selected Room Info (shown if room is pre-selected) -->
+                <?php if ($preselected_room): ?>
+                    <div class="form-section">
+                        <h3 class="form-section-title"><i class="fas fa-bed"></i> Selected Room</h3>
+                        <div class="room-selection">
+                            <div class="room-option selected"
+                                data-room-id="<?php echo $preselected_room['id']; ?>"
+                                data-room-name="<?php echo htmlspecialchars($preselected_room['name'], ENT_QUOTES, 'UTF-8'); ?>"
+                                data-room-price="<?php echo $preselected_room['price_per_night']; ?>"
+                                data-max-guests="<?php echo $preselected_room['max_guests']; ?>"
+                                data-children-allowed="<?php echo (int)$preselected_room['children_allowed']; ?>">
+                                <input type="hidden" name="room_id" value="<?php echo $preselected_room['id']; ?>" id="preselectedRoomId">
+                                <?php if (!empty($preselected_room['image_url'])): ?>
+                                <div class="room-option__thumb">
+                                    <img src="<?php echo htmlspecialchars($preselected_room['image_url']); ?>" alt="<?php echo htmlspecialchars($preselected_room['name']); ?>" loading="lazy">
+                                </div>
+                                <?php endif; ?>
+                                <div class="room-info">
+                                    <h4><?php echo htmlspecialchars($preselected_room['name']); ?></h4>
+                                    <p><?php echo htmlspecialchars($preselected_room['short_description']); ?></p>
+                                    <p><i class="fas fa-users"></i> Max <?php echo $preselected_room['max_guests']; ?> guests <span class="room-availability-count" data-default-text="(<?php echo $preselected_room['rooms_available']; ?> room<?php echo $preselected_room['rooms_available'] == 1 ? '' : 's'; ?> available)">(<?php echo $preselected_room['rooms_available']; ?> room<?php echo $preselected_room['rooms_available'] == 1 ? '' : 's'; ?> available)</span></p>
+                                    <?php if ((int)$preselected_room['children_allowed']): ?>
+                                        <span class="room-child-badge room-child-badge--yes"><i class="fas fa-child" aria-hidden="true"></i> Children welcome</span>
+                                    <?php else: ?>
+                                        <span class="room-child-badge room-child-badge--no"><i class="fas fa-ban" aria-hidden="true"></i> Adults only</span>
+                                    <?php endif; ?>
+                                </div>
+                                <div class="room-price">
+                                    <div class="room-price-amount"><?php echo $currency_symbol; ?><?php echo number_format($preselected_room['price_per_night'], 0); ?></div>
+                                    <div class="room-price-period">per night</div>
+                                </div>
+                            </div>
+                        </div>
+                        <p class="back-to-rooms-link">
+                            <a href="rooms-gallery.php">
+                                <i class="fas fa-arrow-left"></i> Choose a different room
+                            </a>
+                        </p>
+                    </div>
+                <?php endif; ?>
+
+                <!-- Guest Information -->
+                <div class="form-section">
+                    <h3 class="form-section-title"><i class="fas fa-user"></i> Guest Information</h3>
+                    <div class="form-grid">
+                        <div class="form-group">
+                            <label for="guest_name" class="required">Full Name</label>
+                            <input type="text" id="guest_name" name="guest_name" class="form-control" required autocomplete="name" placeholder="Your full name" value="<?php echo isset($_POST['guest_name']) ? htmlspecialchars($_POST['guest_name']) : ''; ?>">
+                        </div>
+                        <div class="form-group">
+                            <label for="guest_email" class="required">Email Address</label>
+                            <input type="email" id="guest_email" name="guest_email" class="form-control" required autocomplete="email" placeholder="your@email.com" value="<?php echo isset($_POST['guest_email']) ? htmlspecialchars($_POST['guest_email']) : ''; ?>">
+                        </div>
+                        <div class="form-group">
+                            <label for="guest_phone" class="required">Phone Number</label>
+                            <input type="tel" id="guest_phone" name="guest_phone" class="form-control" required autocomplete="tel" placeholder="+265 999 123 456" value="<?php echo isset($_POST['guest_phone']) ? htmlspecialchars($_POST['guest_phone']) : ''; ?>">
+                        </div>
+                        <div class="form-group">
+                            <label for="guest_country">Country</label>
+                            <input type="text" id="guest_country" name="guest_country" class="form-control" value="<?php echo isset($_POST['guest_country']) ? htmlspecialchars($_POST['guest_country']) : ''; ?>">
+                        </div>
+                    </div>
+                    <div class="form-group">
+                        <label for="guest_address">Address</label>
+                        <textarea id="guest_address" name="guest_address" class="form-control" rows="2"><?php echo isset($_POST['guest_address']) ? htmlspecialchars($_POST['guest_address']) : ''; ?></textarea>
+                    </div>
+                </div>
+
+                <!-- Guest Details -->
+                <div class="form-section" id="guestDetailsSection">
+                    <h3 class="form-section-title"><i class="fas fa-users"></i> Guest Details</h3>
+                    <div class="form-group">
+                        <label for="number_of_guests" class="required">Number of Guests</label>
+                        <select id="number_of_guests" name="number_of_guests" class="form-control" required>
+                            <option value="">Select room first...</option>
+                        </select>
+                        <small id="guestCapacityHint" class="form-hint" style="display: none;"></small>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="child_guests">Children (under 12)</label>
+                        <input
+                            type="number"
+                            id="child_guests"
+                            name="child_guests"
+                            class="form-control"
+                            min="0"
+                            max="19"
+                            value="<?php echo isset($_POST['child_guests']) ? (int)$_POST['child_guests'] : 0; ?>">
+                        <small id="childGuestHint" class="form-hint">Children must be accompanied by at least 1 adult. Children under 12.</small>
+                    </div>
+
+                    <!-- Occupancy Type Guide (Informational Only) -->
+                    <div class="form-group">
+                        <label>Price per Night (by Guest Count)</label>
+                        <div class="occupancy-type-group occupancy-guide" id="occupancyTypeGroup">
+                            <div class="occupancy-type-label" id="singleOccupancyLabel">
+                                <strong>Single</strong>
+                                <span>1 Guest</span>
+                                <span id="singlePriceDisplay" class="price-display">-</span>
+                            </div>
+                            <div class="occupancy-type-label selected" id="doubleOccupancyLabel">
+                                <strong>Double</strong>
+                                <span>2 Guests</span>
+                                <span id="doublePriceDisplay" class="price-display">-</span>
+                            </div>
+                            <div class="occupancy-type-label" id="tripleOccupancyLabel">
+                                <strong>Triple</strong>
+                                <span>3 Guests</span>
+                                <span id="triplePriceDisplay" class="price-display">-</span>
+                            </div>
+                        </div>
+                        <small class="form-hint" id="occupancyHint">
+                            <i class="fas fa-info-circle"></i> The rate per night adjusts automatically based on how many guests are staying
+                        </small>
+                    </div>
+
+                    <!-- Second Room Suggestion (hidden by default) -->
+                    <div id="secondRoomSuggestion">
+                        <div style="display: flex; align-items: start; gap: 12px;">
+                            <i class="fas fa-info-circle" style="color: var(--gold); font-size: 20px; margin-top: 2px;"></i>
+                            <div>
+                                <h4 style="margin: 0 0 8px 0; color: var(--navy); font-size: 16px;">Group Too Large for One Room</h4>
+                                <p style="margin: 0 0 10px 0; color: #666; font-size: 14px;">Your group exceeds the maximum capacity for this room type. Please book this room for some guests, then make a separate booking for the remaining guests — or <a href="contact-us.php" style="color: var(--gold);">contact us</a> for group booking assistance.</p>
+                                <div id="secondRoomOptions" style="margin-top: 10px;"></div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="form-group" style="margin-top:16px;">
+                        <label for="special_requests">Special Requests (Optional)</label>
+                        <textarea id="special_requests" name="special_requests" class="form-control" rows="3" placeholder="E.g., early check-in, airport pickup, dietary requirements..."><?php echo isset($_POST['special_requests']) ? htmlspecialchars($_POST['special_requests']) : ''; ?></textarea>
+                    </div>
+                </div>
 
                 <!-- Booking Type Selection -->
                 <?php $tentative_bookings_enabled = getSetting('tentative_bookings_enabled', '1') !== '0'; ?>
@@ -1271,135 +1410,6 @@ try {
                     <?php endif; ?>
                 </div>
 
-                <!-- Pre-selected Room Info (shown if room is pre-selected) -->
-                <?php if ($preselected_room): ?>
-                    <div class="form-section">
-                        <h3 class="form-section-title"><i class="fas fa-bed"></i> Selected Room</h3>
-                        <div class="room-selection">
-                            <div class="room-option selected"
-                                data-room-id="<?php echo $preselected_room['id']; ?>"
-                                data-room-name="<?php echo htmlspecialchars($preselected_room['name'], ENT_QUOTES, 'UTF-8'); ?>"
-                                data-room-price="<?php echo $preselected_room['price_per_night']; ?>"
-                                data-max-guests="<?php echo $preselected_room['max_guests']; ?>"
-                                data-children-allowed="<?php echo (int)$preselected_room['children_allowed']; ?>">
-                                <input type="hidden" name="room_id" value="<?php echo $preselected_room['id']; ?>" id="preselectedRoomId">
-                                <div class="room-info">
-                                    <h4><?php echo htmlspecialchars($preselected_room['name']); ?></h4>
-                                    <p><?php echo htmlspecialchars($preselected_room['short_description']); ?></p>
-                                    <p><i class="fas fa-users"></i> Max <?php echo $preselected_room['max_guests']; ?> guests <span class="room-availability-count" data-default-text="(<?php echo $preselected_room['rooms_available']; ?> room<?php echo $preselected_room['rooms_available'] == 1 ? '' : 's'; ?> available)">(<?php echo $preselected_room['rooms_available']; ?> room<?php echo $preselected_room['rooms_available'] == 1 ? '' : 's'; ?> available)</span></p>
-                                    <?php if ((int)$preselected_room['children_allowed']): ?>
-                                        <span class="room-child-badge room-child-badge--yes"><i class="fas fa-child" aria-hidden="true"></i> Children welcome</span>
-                                    <?php else: ?>
-                                        <span class="room-child-badge room-child-badge--no"><i class="fas fa-ban" aria-hidden="true"></i> Adults only</span>
-                                    <?php endif; ?>
-                                </div>
-                                <div class="room-price">
-                                    <div class="room-price-amount"><?php echo $currency_symbol; ?><?php echo number_format($preselected_room['price_per_night'], 0); ?></div>
-                                    <div class="room-price-period">per night</div>
-                                </div>
-                            </div>
-                        </div>
-                        <p class="back-to-rooms-link">
-                            <a href="rooms-gallery.php">
-                                <i class="fas fa-arrow-left"></i> Choose a different room
-                            </a>
-                        </p>
-                    </div>
-                <?php endif; ?>
-
-                <!-- Guest Information -->
-                <div class="form-section">
-                    <h3 class="form-section-title"><i class="fas fa-user"></i> Guest Information</h3>
-                    <div class="form-grid">
-                        <div class="form-group">
-                            <label for="guest_name" class="required">Full Name</label>
-                            <input type="text" id="guest_name" name="guest_name" class="form-control" required value="<?php echo isset($_POST['guest_name']) ? htmlspecialchars($_POST['guest_name']) : ''; ?>">
-                        </div>
-                        <div class="form-group">
-                            <label for="guest_email" class="required">Email Address</label>
-                            <input type="email" id="guest_email" name="guest_email" class="form-control" required value="<?php echo isset($_POST['guest_email']) ? htmlspecialchars($_POST['guest_email']) : ''; ?>">
-                        </div>
-                        <div class="form-group">
-                            <label for="guest_phone" class="required">Phone Number</label>
-                            <input type="tel" id="guest_phone" name="guest_phone" class="form-control" required value="<?php echo isset($_POST['guest_phone']) ? htmlspecialchars($_POST['guest_phone']) : ''; ?>">
-                        </div>
-                        <div class="form-group">
-                            <label for="guest_country">Country</label>
-                            <input type="text" id="guest_country" name="guest_country" class="form-control" value="<?php echo isset($_POST['guest_country']) ? htmlspecialchars($_POST['guest_country']) : ''; ?>">
-                        </div>
-                    </div>
-                    <div class="form-group">
-                        <label for="guest_address">Address</label>
-                        <textarea id="guest_address" name="guest_address" class="form-control" rows="2"><?php echo isset($_POST['guest_address']) ? htmlspecialchars($_POST['guest_address']) : ''; ?></textarea>
-                    </div>
-                </div>
-
-                <!-- Guest Details -->
-                <div class="form-section" id="guestDetailsSection">
-                    <h3 class="form-section-title"><i class="fas fa-users"></i> Guest Details</h3>
-                    <div class="form-group">
-                        <label for="number_of_guests" class="required">Number of Guests</label>
-                        <select id="number_of_guests" name="number_of_guests" class="form-control" required>
-                            <option value="">Select room first...</option>
-                        </select>
-                        <small id="guestCapacityHint" class="form-hint" style="display: none;"></small>
-                    </div>
-
-                    <div class="form-group">
-                        <label for="child_guests">Children (under 12)</label>
-                        <input
-                            type="number"
-                            id="child_guests"
-                            name="child_guests"
-                            class="form-control"
-                            min="0"
-                            max="19"
-                            value="<?php echo isset($_POST['child_guests']) ? (int)$_POST['child_guests'] : 0; ?>">
-                        <small id="childGuestHint" class="form-hint">At least 1 adult is required.</small>
-                    </div>
-
-                    <!-- Occupancy Type Guide (Informational Only) -->
-                    <div class="form-group">
-                        <label>Occupancy Pricing Guide</label>
-                        <div class="occupancy-type-group occupancy-guide" id="occupancyTypeGroup">
-                            <div class="occupancy-type-label" id="singleOccupancyLabel">
-                                <strong>Single</strong>
-                                <span>1 Guest</span>
-                                <span id="singlePriceDisplay" class="price-display">-</span>
-                            </div>
-                            <div class="occupancy-type-label selected" id="doubleOccupancyLabel">
-                                <strong>Double</strong>
-                                <span>2 Guests</span>
-                                <span id="doublePriceDisplay" class="price-display">-</span>
-                            </div>
-                            <div class="occupancy-type-label" id="tripleOccupancyLabel">
-                                <strong>Triple</strong>
-                                <span>3 Guests</span>
-                                <span id="triplePriceDisplay" class="price-display">-</span>
-                            </div>
-                        </div>
-                        <small class="form-hint" id="occupancyHint">
-                            <i class="fas fa-info-circle"></i> Occupancy type is automatically determined based on your guest count
-                        </small>
-                    </div>
-
-                    <!-- Second Room Suggestion (hidden by default) -->
-                    <div id="secondRoomSuggestion">
-                        <div style="display: flex; align-items: start; gap: 12px;">
-                            <i class="fas fa-info-circle" style="color: var(--gold); font-size: 20px; margin-top: 2px;"></i>
-                            <div>
-                                <h4 style="margin: 0 0 8px 0; color: var(--navy); font-size: 16px;">Consider Booking Multiple Rooms</h4>
-                                <p style="margin: 0 0 10px 0; color: #666; font-size: 14px;">Your group size exceeds the maximum capacity for one room. You can book multiple rooms to accommodate all guests.</p>
-                                <div id="secondRoomOptions" style="margin-top: 10px;"></div>
-                            </div>
-                        </div>
-                    </div>
-                    <div class="form-group" style="margin-top:16px;">
-                        <label for="special_requests">Special Requests (Optional)</label>
-                        <textarea id="special_requests" name="special_requests" class="form-control" rows="3" placeholder="E.g., early check-in, airport pickup, dietary requirements..."><?php echo isset($_POST['special_requests']) ? htmlspecialchars($_POST['special_requests']) : ''; ?></textarea>
-                    </div>
-                </div>
-
                 <!-- Rate Plan Badge (shown via JS when a discount/surcharge is active) -->
                 <div class="form-section" id="ratePlanSection" style="display:none;">
                     <div id="ratePlanBadge" class="rate-plan-badge"></div>
@@ -1430,7 +1440,7 @@ try {
                             <span id="summaryRoom">-</span>
                         </div>
                         <div class="summary-row">
-                            <span>Occupancy Type:</span>
+                            <span>Rate Type:</span>
                             <span id="summaryOccupancyType">-</span>
                         </div>
                         <div class="summary-row">
@@ -2185,8 +2195,8 @@ try {
             const roomName = roomOption.querySelector('h4').textContent;
             const roomPrice = parseFloat(roomOption.querySelector('.room-price-amount').textContent.replace(/[^0-9.]/g, ''));
 
-            const checkInDate = new Date(selection.checkIn);
-            const checkOutDate = new Date(selection.checkOut);
+            const checkInDate = new Date(selection.checkIn + 'T12:00:00');
+            const checkOutDate = new Date(selection.checkOut + 'T12:00:00');
 
             document.getElementById('summaryRoom').textContent = roomName;
             document.getElementById('summaryCheckIn').textContent = checkInDate.toLocaleDateString('en-US', {
@@ -2532,8 +2542,8 @@ try {
             }
 
             if (selectedRoomId && checkIn && checkOut) {
-                const checkInDate = new Date(checkIn);
-                const checkOutDate = new Date(checkOut);
+                const checkInDate = new Date(checkIn + 'T12:00:00');
+                const checkOutDate = new Date(checkOut + 'T12:00:00');
                 const nights = Math.ceil((checkOutDate - checkInDate) / (1000 * 60 * 60 * 24));
 
                 if (nights > 0) {
@@ -3356,11 +3366,11 @@ try {
                 return false;
             }
 
-            // Check for valid characters (letters, spaces, hyphens, apostrophes)
-            const namePattern = /^[a-zA-Z\s\-'\u00C0-\u017F\u0400-\u04FF]+$/;
+            // Check for valid characters (letters, spaces, hyphens, apostrophes, periods)
+            const namePattern = /^[a-zA-Z\s\-'.\u00C0-\u017F\u0400-\u04FF]+$/;
             if (!namePattern.test(value)) {
                 input.classList.add('is-invalid');
-                feedback.textContent = 'Name can only contain letters, spaces, hyphens';
+                feedback.textContent = 'Name can only contain letters, spaces, hyphens, and apostrophes';
                 feedback.className = 'field-feedback text-danger';
                 return false;
             }
@@ -3513,22 +3523,33 @@ try {
             const selectedRoom = getSelectedRoomData();
             const allocationValid = selectedRoom ? hasValidAllocation(totalGuestsInt, selectedRoom, childGuests) : false;
 
-            // Determine button state based on all validations
+            // Determine button state based on all validations — guide guest step by step
             let btnText = '<i class="fas fa-calendar-check"></i> Complete All Fields';
             let btnDisabled = true;
 
-            if (availabilityCheckPending || !availabilityKnown) {
-                btnText = '<i class="fas fa-spinner fa-spin"></i> Checking Availability';
+            if (!checkIn || !checkOut) {
+                btnText = '<i class="fas fa-calendar-alt"></i> Select Your Dates First';
+                btnDisabled = true;
+            } else if (!selectedRoomId) {
+                btnText = '<i class="fas fa-bed"></i> Select a Room to Continue';
+                btnDisabled = true;
+            } else if (availabilityCheckPending || !availabilityKnown) {
+                btnText = '<i class="fas fa-spinner fa-spin"></i> Checking Availability…';
                 btnDisabled = true;
             } else if (!availabilityValid) {
-                btnText = '<i class="fas fa-calendar-times"></i> Room Fully Booked - Try Different Dates';
+                btnText = '<i class="fas fa-calendar-times"></i> Room Fully Booked — Try Different Dates';
                 btnDisabled = true;
-            } else if (!allocationValid && selectedRoomId && numGuests) {
-                btnText = '<i class="fas fa-exclamation-triangle"></i> Choose a Supported Guest Count';
+            } else if (!numGuests) {
+                btnText = '<i class="fas fa-users"></i> Select Number of Guests';
                 btnDisabled = true;
-            } else if (selectedRoomId && checkIn && checkOut && numGuests && childValid && adultsInt >= 1 && allocationValid) {
-                // All required fields are filled - allow submission
-                // Browser validation will handle required contact fields
+            } else if (!childValid || adultsInt < 1) {
+                btnText = '<i class="fas fa-exclamation-triangle"></i> At Least 1 Adult Required';
+                btnDisabled = true;
+            } else if (!allocationValid) {
+                btnText = '<i class="fas fa-exclamation-triangle"></i> Guest Count Not Supported for This Room';
+                btnDisabled = true;
+            } else {
+                // All required fields are filled — browser validation handles contact fields on submit
                 btnText = '<i class="fas fa-check-circle"></i> Confirm Booking';
                 btnDisabled = false;
             }
