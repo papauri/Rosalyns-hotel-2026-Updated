@@ -1657,6 +1657,7 @@
         const target = (link.getAttribute('target') || '').toLowerCase();
         if (target && target !== '_self') return true;
         const rawHref = link.getAttribute('href') || '';
+        if (/^(mailto|tel|sms|callto):/i.test(rawHref)) return true;
         if (/([?&])(export|download)=/i.test(rawHref)) return true;
         if (/\.pdf(?:[?#]|$)/i.test(rawHref)) return true;
         if (/([?&])export=csv(?:[&#]|$)/i.test(rawHref)) return true;
