@@ -755,12 +755,6 @@ function sendPaymentInvoiceEmail(int $booking_id)
     global $pdo;
 
     try {
-        // Check if invoice emails are enabled
-        $send_invoices = (bool)getEmailSetting('send_invoice_emails', 0);
-        if (!$send_invoices) {
-            return ['success' => false, 'message' => 'Invoice emails are disabled. Enable "Send Invoice Emails" in Email Settings first.'];
-        }
-
         // Get booking details
         $stmt = $pdo->prepare("SELECT * FROM bookings WHERE id = ?");
         $stmt->execute([$booking_id]);
@@ -862,12 +856,6 @@ function sendPaymentInvoiceEmailWithCC(int $booking_id, array $ccRecipients = []
     global $pdo;
 
     try {
-        // Check if invoice emails are enabled
-        $send_invoices = (bool)getEmailSetting('send_invoice_emails', 0);
-        if (!$send_invoices) {
-            return ['success' => false, 'message' => 'Invoice emails are disabled. Enable "Send Invoice Emails" in Email Settings first.'];
-        }
-
         // Get booking details
         $stmt = $pdo->prepare("SELECT * FROM bookings WHERE id = ?");
         $stmt->execute([$booking_id]);
@@ -1895,12 +1883,6 @@ function sendConferenceInvoiceEmail(int $enquiry_id)
     global $pdo;
 
     try {
-        // Check if invoice emails are enabled
-        $send_invoices = (bool)getEmailSetting('send_invoice_emails', 0);
-        if (!$send_invoices) {
-            return ['success' => false, 'message' => 'Invoice emails are disabled. Enable "Send Invoice Emails" in Email Settings first.'];
-        }
-
         // Get enquiry details
         $stmt = $pdo->prepare("SELECT * FROM conference_inquiries WHERE id = ?");
         $stmt->execute([$enquiry_id]);
@@ -1973,12 +1955,6 @@ function sendConferenceInvoiceEmailWithCC(int $enquiry_id, array $ccRecipients =
     global $pdo;
 
     try {
-        // Check if invoice emails are enabled
-        $send_invoices = (bool)getEmailSetting('send_invoice_emails', 0);
-        if (!$send_invoices) {
-            return ['success' => false, 'message' => 'Invoice emails are disabled. Enable "Send Invoice Emails" in Email Settings first.'];
-        }
-
         // Get enquiry details
         $stmt = $pdo->prepare("SELECT * FROM conference_inquiries WHERE id = ?");
         $stmt->execute([$enquiry_id]);
