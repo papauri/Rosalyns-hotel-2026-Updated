@@ -1106,15 +1106,25 @@ try {
     <main id="main-content">
         <div class="main-content">
             <div class="booking-header">
+                <p class="booking-header__eyebrow"><i class="fas fa-bed"></i> Room Reservation</p>
                 <h1>Book Your Stay</h1>
-                <p>Complete the form below to reserve your room. Our team will confirm your booking shortly.</p>
+                <p class="booking-header__sub">Select your dates and room below. We'll confirm your reservation within 24 hours.</p>
+                <div class="booking-header__trust">
+                    <span><i class="fas fa-shield-alt"></i> Secure Booking</span>
+                    <span class="trust-divider">·</span>
+                    <span><i class="fas fa-clock"></i> Fast Confirmation</span>
+                    <span class="trust-divider">·</span>
+                    <span><i class="fas fa-headset"></i> 24/7 Support</span>
+                </div>
             </div>
 
             <?php if (isset($error_message)): ?>
                 <?php showAlert($error_message, 'error'); ?>
             <?php endif; ?>
 
-            <form method="POST" action="<?php echo htmlspecialchars($_SERVER['PHP_SELF']); ?>" class="booking-form-card" id="bookingForm">
+            <div class="booking-layout">
+                <div class="booking-form-column">
+                <form method="POST" action="<?php echo htmlspecialchars($_SERVER['PHP_SELF']); ?>" class="booking-form-card" id="bookingForm">
                 <?php
                 // Per-render idempotency token. Survives double-clicks, refresh-resubmit,
                 // and offline-queue replays — the DB unique index is the ultimate guarantor.
@@ -1126,7 +1136,7 @@ try {
                 <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($booking_csrf_token, ENT_QUOTES, 'UTF-8'); ?>">
 
                 <!-- Booking Details — date-first UX: pick dates before browsing rooms -->
-                <div class="form-section" id="bookingDetailsSection">
+                <div class="form-section form-section--step" id="bookingDetailsSection">
                     <h3 class="form-section-title"><i class="fas fa-calendar-alt"></i> When Are You Staying?</h3>
                     <div class="form-grid">
                         <div class="form-group">
@@ -1171,7 +1181,7 @@ try {
 
                 <!-- Room Selection — revealed after both dates are selected -->
                 <?php if (!$preselected_room): ?>
-                    <div class="form-section form-section--room" id="roomSectionWrapper" style="<?php echo (!empty($_POST['check_in_date']) && !empty($_POST['check_out_date'])) ? '' : 'display:none'; ?>">
+                    <div class="form-section form-section--room form-section--step" id="roomSectionWrapper" style="<?php echo (!empty($_POST['check_in_date']) && !empty($_POST['check_out_date'])) ? '' : 'display:none'; ?>">
                         <h3 class="form-section-title"><i class="fas fa-bed"></i> Select Your Room</h3>
                         <!-- Room Category Filter Tabs -->
                         <div class="rooms-filter" id="roomsFilterTabs">
@@ -1201,11 +1211,13 @@ try {
                                     data-filter="all <?php echo htmlspecialchars($room_badge_value); ?>"
                                     data-badge="<?php echo htmlspecialchars($room['badge'] ?? ''); ?>">
                                     <input type="radio" name="room_id" value="<?php echo $room['id']; ?>" required>
-                                    <?php if (!empty($room['image_url'])): ?>
-                                    <div class="room-option__thumb">
+                                    <div class="room-option__thumb<?php echo empty($room['image_url']) ? ' room-option__thumb--placeholder' : ''; ?>">
+                                        <?php if (!empty($room['image_url'])): ?>
                                         <img src="<?php echo htmlspecialchars($room['image_url']); ?>" alt="<?php echo htmlspecialchars($room['name']); ?>" loading="lazy">
+                                        <?php else: ?>
+                                        <div class="room-thumb-placeholder"><i class="fas fa-bed"></i></div>
+                                        <?php endif; ?>
                                     </div>
-                                    <?php endif; ?>
                                     <div class="room-info">
                                         <h4><?php echo htmlspecialchars($room['name']); ?></h4>
                                         <p><?php echo htmlspecialchars($room['short_description']); ?></p>
@@ -1238,11 +1250,13 @@ try {
                                 data-max-guests="<?php echo $preselected_room['max_guests']; ?>"
                                 data-children-allowed="<?php echo (int)$preselected_room['children_allowed']; ?>">
                                 <input type="hidden" name="room_id" value="<?php echo $preselected_room['id']; ?>" id="preselectedRoomId">
-                                <?php if (!empty($preselected_room['image_url'])): ?>
-                                <div class="room-option__thumb">
+                                <div class="room-option__thumb<?php echo empty($preselected_room['image_url']) ? ' room-option__thumb--placeholder' : ''; ?>">
+                                    <?php if (!empty($preselected_room['image_url'])): ?>
                                     <img src="<?php echo htmlspecialchars($preselected_room['image_url']); ?>" alt="<?php echo htmlspecialchars($preselected_room['name']); ?>" loading="lazy">
+                                    <?php else: ?>
+                                    <div class="room-thumb-placeholder"><i class="fas fa-bed"></i></div>
+                                    <?php endif; ?>
                                 </div>
-                                <?php endif; ?>
                                 <div class="room-info">
                                     <h4><?php echo htmlspecialchars($preselected_room['name']); ?></h4>
                                     <p><?php echo htmlspecialchars($preselected_room['short_description']); ?></p>
@@ -1268,7 +1282,7 @@ try {
                 <?php endif; ?>
 
                 <!-- Guest Information -->
-                <div class="form-section">
+                <div class="form-section form-section--step">
                     <h3 class="form-section-title"><i class="fas fa-user"></i> Guest Information</h3>
                     <div class="form-grid">
                         <div class="form-group">
@@ -1295,7 +1309,7 @@ try {
                 </div>
 
                 <!-- Guest Details -->
-                <div class="form-section" id="guestDetailsSection">
+                <div class="form-section form-section--step" id="guestDetailsSection">
                     <h3 class="form-section-title"><i class="fas fa-users"></i> Guest Details</h3>
                     <div class="form-group">
                         <label for="number_of_guests" class="required">Number of Guests</label>
@@ -1424,6 +1438,10 @@ try {
                     <div id="packagesList"></div>
                 </div>
 
+                </form>
+                </div><!-- /.booking-form-column -->
+
+                <aside class="booking-sidebar">
                 <!-- Booking Summary -->
                 <div class="booking-summary" id="bookingSummary">
                     <h3><i class="fas fa-receipt"></i> Booking Summary</h3>
@@ -1506,7 +1524,15 @@ try {
                 <p class="booking-footer-info">
                     <i class="fas fa-info-circle"></i> <?php echo htmlspecialchars($payment_policy); ?>
                 </p>
-            </form>
+
+                <div class="booking-sidebar__trust">
+                    <div class="trust-badge"><i class="fas fa-lock"></i> SSL Secured</div>
+                    <div class="trust-badge"><i class="fas fa-check-circle"></i> No Hidden Fees</div>
+                    <div class="trust-badge"><i class="fas fa-headset"></i> 24/7 Support</div>
+                    <div class="trust-badge"><i class="fas fa-phone-alt"></i> Call to Book</div>
+                </div>
+                </aside><!-- /.booking-sidebar -->
+            </div><!-- /.booking-layout -->
         </div>
     </main>
 
