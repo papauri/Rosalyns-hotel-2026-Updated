@@ -838,7 +838,7 @@ $totalAging = (float)$aging['bucket_0_30'] + (float)$aging['bucket_31_60'] + (fl
 
             var fd = new FormData(form);
 
-            fetch(form.action || window.location.pathname, {
+            fetch(form.getAttribute('action') || window.location.pathname, {
                 method: 'POST',
                 body: fd,
                 headers: { 'X-Requested-With': 'XMLHttpRequest' }
