@@ -1300,7 +1300,7 @@ try {
                             </div>
                         </div>
                         <p class="back-to-rooms-link">
-                            <a href="booking.php">
+                            <a href="rooms-gallery.php">
                                 <i class="fas fa-arrow-left"></i> Choose a different room
                             </a>
                         </p>

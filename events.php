@@ -213,6 +213,9 @@ $site_logo = getSetting('site_logo');
                                                 <span class="editorial-price-value"><?php echo $currency_symbol . number_format($event['ticket_price'], 0); ?></span>
                                             <?php endif; ?>
                                         </div>
+                                        <a href="contact-us.php?subject=Events&event=<?php echo rawurlencode($event['title']); ?>" class="btn btn-outline btn-sm">
+                                            <i class="fas fa-envelope"></i> Enquire
+                                        </a>
                                     </div>
                                 </div>
                             </article>

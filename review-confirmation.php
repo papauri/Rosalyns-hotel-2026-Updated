@@ -11,8 +11,12 @@ session_start();
 require_once __DIR__ . '/config/database.php';
 require_once __DIR__ . '/config/base-url.php';
 
-// Get review details from session if available
-$review_details = $_SESSION['review_details'] ?? null;
+// Require session data — redirect away if accessed directly
+if (empty($_SESSION['review_details'])) {
+    header('Location: ' . (defined('BASE_URL') ? BASE_URL : '/') . 'index.php');
+    exit;
+}
+$review_details = $_SESSION['review_details'];
 unset($_SESSION['review_details']);
 
 // Get site name

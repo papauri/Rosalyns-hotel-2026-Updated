@@ -121,7 +121,7 @@ foreach ($footer_links_raw as $link) {
     <meta charset="UTF-8">
     <?php
     $seo_data = [
-        'title' => 'Luxury Hotel | Premium Accommodation',
+        'title' => $site_name . ' | Luxury Hotel & Premium Accommodation',
         'description' => $hero_subtitle . '. Book your stay at our premier luxury hotel featuring world-class dining, spa, and breathtaking views.',
         'image' => '/images/hotel_gallery/Front.jpeg',
         'type' => 'website'

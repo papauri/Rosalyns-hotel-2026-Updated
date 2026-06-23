@@ -17,24 +17,24 @@ $site_address = getSetting('address_line1', '');
 $current_page = 'privacy-policy';
 $page_title = 'Privacy & Cookie Policy';
 
-// SEO meta
-$seo_title = "Privacy & Cookie Policy - $site_name";
-$seo_description = "Learn how $site_name collects, uses, and protects your personal data. Read our privacy policy and cookie usage information.";
+$seo_data = [
+    'title' => "Privacy & Cookie Policy - $site_name",
+    'description' => "Learn how $site_name collects, uses, and protects your personal data. Read our privacy policy and cookie usage information.",
+    'type' => 'website',
+];
 ?>
 <!DOCTYPE html>
 <html lang="en">
 
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title><?php echo htmlspecialchars($seo_title); ?></title>
-    <meta name="description" content="<?php echo htmlspecialchars($seo_description); ?>">
-    <meta name="robots" content="index, follow">
+    <?php require_once 'includes/seo-meta.php'; ?>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,300;0,400;0,500;0,600;1,300;1,400;1,500&family=Jost:wght@300;400;500;600&display=swap" rel="stylesheet">
 
     <!-- Main CSS - Loads all stylesheets in correct order -->
+    <link rel="stylesheet" href="css/base/critical.css">
     <link rel="stylesheet" href="css/main.css">
 </head>
 
@@ -48,7 +48,7 @@ $seo_description = "Learn how $site_name collects, uses, and protects your perso
             <div class="privacy-header">
                 <h1><i class="fas fa-shield-alt text-old"></i> Privacy & Cookie Policy</h1>
                 <p class="subtitle"><?php echo htmlspecialchars($site_name); ?> is committed to protecting your privacy</p>
-                <span class="last-updated"><i class="fas fa-calendar-alt"></i> Last Updated: <?php echo date('F j, Y'); ?></span>
+                <span class="last-updated"><i class="fas fa-calendar-alt"></i> Last Updated: <?php echo htmlspecialchars(getSetting('privacy_policy_updated', 'June 24, 2026')); ?></span>
             </div>
 
             <!-- Table of Contents -->

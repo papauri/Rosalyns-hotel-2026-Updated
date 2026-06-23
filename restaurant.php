@@ -618,24 +618,9 @@ try {
                             </div>
                         <?php endforeach; ?>
                     <?php else: ?>
-                        <!-- Fallback images if database is empty -->
-                        <div class="editorial-gallery-item"><img src="images/restaurant/dining-area-1.jpg" alt="Elegant Dining Area" loading="lazy">
-                            <div class="editorial-gallery-caption">Elegant Dining Area</div>
-                        </div>
-                        <div class="editorial-gallery-item"><img src="images/restaurant/dining-area-2.jpg" alt="Intimate Indoor Seating" loading="lazy">
-                            <div class="editorial-gallery-caption">Intimate Indoor Seating</div>
-                        </div>
-                        <div class="editorial-gallery-item"><img src="images/restaurant/bar-area.jpg" alt="Premium Bar" loading="lazy">
-                            <div class="editorial-gallery-caption">Premium Bar</div>
-                        </div>
-                        <div class="editorial-gallery-item"><img src="images/restaurant/food-platter.jpg" alt="Fresh Seafood" loading="lazy">
-                            <div class="editorial-gallery-caption">Fresh Seafood</div>
-                        </div>
-                        <div class="editorial-gallery-item"><img src="images/restaurant/fine-dining.jpg" alt="Fine Dining Experience" loading="lazy">
-                            <div class="editorial-gallery-caption">Fine Dining Experience</div>
-                        </div>
-                        <div class="editorial-gallery-item"><img src="images/restaurant/outdoor-terrace.jpg" alt="Alfresco Terrace" loading="lazy">
-                            <div class="editorial-gallery-caption">Alfresco Terrace</div>
+                        <div class="editorial-gallery-empty" style="grid-column: 1 / -1; text-align: center; padding: 3rem 1rem; color: var(--text-muted, #888);">
+                            <i class="fas fa-images" style="font-size: 2.5rem; margin-bottom: 1rem; display: block; opacity: .4;"></i>
+                            <p>Gallery photos coming soon. Upload images in Admin &gt; Restaurant Gallery.</p>
                         </div>
                     <?php endif; ?>
                 </div>

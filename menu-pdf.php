@@ -48,25 +48,33 @@ $food_categories  = [];
 $drink_categories = [];
 try {
     $stmt = $pdo->query("
-        SELECT mi.id, mi.category, mi.item_name, mi.description, mi.price, mi.is_featured,
-               mc.slug AS menu_type
-        FROM menu_items mi
-        JOIN menu_categories mc ON mc.id = mi.category_id
-        WHERE mi.is_available = 1 AND mc.is_active = 1
-        ORDER BY mc.sort_order ASC, mi.category ASC, mi.display_order ASC, mi.id ASC
+        SELECT id, category, item_name, description, price, is_featured
+        FROM food_menu
+        WHERE is_available = 1
+        ORDER BY category ASC, display_order ASC, id ASC
     ");
     foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $item) {
         $cat = cleanText($item['category'], 'Uncategorized');
-        if ($item['menu_type'] === 'drink') {
-            if (!isset($drink_categories[$cat])) $drink_categories[$cat] = [];
-            $drink_categories[$cat][] = $item;
-        } else {
-            if (!isset($food_categories[$cat])) $food_categories[$cat] = [];
-            $food_categories[$cat][] = $item;
-        }
+        if (!isset($food_categories[$cat])) $food_categories[$cat] = [];
+        $food_categories[$cat][] = $item;
     }
 } catch (PDOException $e) {
-    error_log("Menu PDF - fetch error: " . $e->getMessage());
+    error_log("Menu PDF - food fetch error: " . $e->getMessage());
+}
+try {
+    $stmt = $pdo->query("
+        SELECT id, category, item_name, description, price, 0 AS is_featured
+        FROM drink_menu
+        WHERE is_available = 1
+        ORDER BY category ASC, display_order ASC, id ASC
+    ");
+    foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $item) {
+        $cat = cleanText($item['category'], 'Drinks');
+        if (!isset($drink_categories[$cat])) $drink_categories[$cat] = [];
+        $drink_categories[$cat][] = $item;
+    }
+} catch (PDOException $e) {
+    error_log("Menu PDF - drink fetch error: " . $e->getMessage());
 }
 
 function parseCategoryOrder(mixed $json): array

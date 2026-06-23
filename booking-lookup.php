@@ -175,6 +175,7 @@ try {
     <!-- Font Awesome -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.7.2/css/all.min.css" crossorigin="anonymous" referrerpolicy="no-referrer">
     <!-- Main CSS - Loads all stylesheets in correct order -->
+    <link rel="stylesheet" href="css/base/critical.css">
     <link rel="stylesheet" href="css/main.css">
 </head>
 

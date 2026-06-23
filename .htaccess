@@ -101,6 +101,10 @@
 # Disable ETags for better caching
 FileETag None
 
+# Custom error pages
+ErrorDocument 404 /404.php
+ErrorDocument 403 /404.php
+
 # Prevent directory browsing
 Options -Indexes
 

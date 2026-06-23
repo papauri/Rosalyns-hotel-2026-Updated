@@ -208,7 +208,7 @@
                 </ul>
 
                 <h3>CSV export</h3>
-                <p>Click <strong>Export CSV</strong> in the header. The export applies all active filters but removes the pagination limit — you receive every matching row. Columns include: Reference, Type, BookingID, BookingRef, Customer, Date, Subtotal, VAT %, VAT, Total, Method, PaymentType, Status, ReceiptNo, InvoiceNo, MRAStatus, TransactionRef, Created, ProcessedBy.</p>
+                <p>Click <strong>Export CSV</strong> in the header. The export applies all active filters but removes the pagination limit — you receive every matching row. Columns include: Reference, Type, BookingID, BookingRef, Customer, Date, Subtotal, VAT %, VAT, Total, Method, PaymentType, Status, ReceiptNo, InvoiceNo, TransactionRef, Created, ProcessedBy.</p>
 
                 <h3>Inline actions per row</h3>
                 <ul class="checklist">
@@ -782,11 +782,6 @@
                             <td>POS orders without ledger entry</td>
                             <td>Paid stock orders not matched to a payment row in the <code>payments</code> table.</td>
                             <td>Run <code>pos-accounting.php</code> for the affected date and close the shift.</td>
-                        </tr>
-                        <tr>
-                            <td>MRA unsubmitted</td>
-                            <td>Sales not yet submitted to the Malawi Revenue Authority electronic invoicing system.</td>
-                            <td>Open the MRA submission module and submit outstanding rows.</td>
                         </tr>
                     </tbody>
                 </table>

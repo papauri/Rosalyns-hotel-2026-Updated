@@ -18,6 +18,11 @@ require_once 'includes/modal.php';
 require_once 'includes/section-headers.php';
 require_once 'includes/public-csrf.php';
 
+// Pre-fill from GET params (e.g. from events page enquiry links)
+$allowed_subjects = ['General Inquiry', 'Room Reservation', 'Conference Booking', 'Restaurant Reservation', 'Gym & Wellness', 'Events', 'Feedback', 'Complaint', 'Other'];
+$prefill_subject  = in_array($_GET['subject'] ?? '', $allowed_subjects, true) ? $_GET['subject'] : null;
+$prefill_event    = !empty($_GET['event']) ? sanitizeString($_GET['event'], 150) : null;
+
 // Fetch site settings
 $site_name   = getSetting('site_name');
 $site_logo   = getSetting('site_logo');
@@ -435,22 +440,28 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['contact_form'])) {
                                         <label for="contact-subject">Subject *</label>
                                         <select id="contact-subject" name="subject" required>
                                             <option value="">Select a subject</option>
-                                            <option value="General Inquiry" <?php echo ($_POST['subject'] ?? '') === 'General Inquiry' ? 'selected' : ''; ?>>General Inquiry</option>
-                                            <option value="Room Reservation" <?php echo ($_POST['subject'] ?? '') === 'Room Reservation' ? 'selected' : ''; ?>>Room Reservation</option>
-                                            <option value="Conference Booking" <?php echo ($_POST['subject'] ?? '') === 'Conference Booking' ? 'selected' : ''; ?>>Conference Booking</option>
-                                            <option value="Restaurant Reservation" <?php echo ($_POST['subject'] ?? '') === 'Restaurant Reservation' ? 'selected' : ''; ?>>Restaurant Reservation</option>
-                                            <option value="Gym & Wellness" <?php echo ($_POST['subject'] ?? '') === 'Gym & Wellness' ? 'selected' : ''; ?>>Gym & Wellness</option>
-                                            <option value="Events" <?php echo ($_POST['subject'] ?? '') === 'Events' ? 'selected' : ''; ?>>Events</option>
-                                            <option value="Feedback" <?php echo ($_POST['subject'] ?? '') === 'Feedback' ? 'selected' : ''; ?>>Feedback</option>
-                                            <option value="Complaint" <?php echo ($_POST['subject'] ?? '') === 'Complaint' ? 'selected' : ''; ?>>Complaint</option>
-                                            <option value="Other" <?php echo ($_POST['subject'] ?? '') === 'Other' ? 'selected' : ''; ?>>Other</option>
+                                            <option value="General Inquiry" <?php echo ($prefill_subject ?? ($_POST['subject'] ?? '')) === 'General Inquiry' ? 'selected' : ''; ?>>General Inquiry</option>
+                                            <option value="Room Reservation" <?php echo ($prefill_subject ?? ($_POST['subject'] ?? '')) === 'Room Reservation' ? 'selected' : ''; ?>>Room Reservation</option>
+                                            <option value="Conference Booking" <?php echo ($prefill_subject ?? ($_POST['subject'] ?? '')) === 'Conference Booking' ? 'selected' : ''; ?>>Conference Booking</option>
+                                            <option value="Restaurant Reservation" <?php echo ($prefill_subject ?? ($_POST['subject'] ?? '')) === 'Restaurant Reservation' ? 'selected' : ''; ?>>Restaurant Reservation</option>
+                                            <option value="Gym & Wellness" <?php echo ($prefill_subject ?? ($_POST['subject'] ?? '')) === 'Gym & Wellness' ? 'selected' : ''; ?>>Gym & Wellness</option>
+                                            <option value="Events" <?php echo ($prefill_subject ?? ($_POST['subject'] ?? '')) === 'Events' ? 'selected' : ''; ?>>Events</option>
+                                            <option value="Feedback" <?php echo ($prefill_subject ?? ($_POST['subject'] ?? '')) === 'Feedback' ? 'selected' : ''; ?>>Feedback</option>
+                                            <option value="Complaint" <?php echo ($prefill_subject ?? ($_POST['subject'] ?? '')) === 'Complaint' ? 'selected' : ''; ?>>Complaint</option>
+                                            <option value="Other" <?php echo ($prefill_subject ?? ($_POST['subject'] ?? '')) === 'Other' ? 'selected' : ''; ?>>Other</option>
                                         </select>
                                     </div>
                                 </div>
 
                                 <div class="form-group">
                                     <label for="contact-message">Message *</label>
-                                    <textarea id="contact-message" name="message" required minlength="10" maxlength="5000" placeholder="How can we help you?"><?php echo htmlspecialchars($_POST['message'] ?? ''); ?></textarea>
+                                    <?php
+                                    $prefill_msg = $_POST['message'] ?? '';
+                                    if ($prefill_msg === '' && $prefill_event !== null) {
+                                        $prefill_msg = "I would like to enquire about the event: {$prefill_event}";
+                                    }
+                                    ?>
+                                    <textarea id="contact-message" name="message" required minlength="10" maxlength="5000" placeholder="How can we help you?"><?php echo htmlspecialchars($prefill_msg); ?></textarea>
                                 </div>
 
                                 <div class="form-group">

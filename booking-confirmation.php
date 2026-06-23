@@ -264,7 +264,7 @@ try {
                             <a href="tel:<?php echo str_replace(' ', '', $phone_main); ?>" class="btn btn-secondary">
                                 <i class="fas fa-phone"></i> Call Hotel
                             </a>
-                            <a href="https://wa.me/<?php echo $whatsapp_number; ?>?text=Hi, I have a booking (<?php echo $booking['booking_reference']; ?>)" class="btn btn-whatsapp" target="_blank">
+                            <a href="https://wa.me/<?php echo rawurlencode(preg_replace('/[^0-9+]/', '', (string)$whatsapp_number)); ?>?text=<?php echo rawurlencode('Hi, I have a booking (' . $booking['booking_reference'] . ')'); ?>" class="btn btn-whatsapp" target="_blank">
                                 <i class="fab fa-whatsapp"></i> WhatsApp
                             </a>
                             <a href="mailto:<?php echo $email_reservations; ?>?subject=Booking <?php echo $booking['booking_reference']; ?>" class="btn btn-secondary">

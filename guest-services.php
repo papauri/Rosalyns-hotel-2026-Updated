@@ -33,27 +33,33 @@ $gymEnabled        = isGymEnabled();
 $restaurantEnabled = isRestaurantEnabled();
 $eventsEnabled     = isEventsEnabled();
 
-// Ensure guest_services table exists for configurable service cards
-try {
-    $pdo->exec("CREATE TABLE IF NOT EXISTS guest_services (
-        id INT UNSIGNED NOT NULL AUTO_INCREMENT,
-        service_key VARCHAR(50) NOT NULL,
-        title VARCHAR(150) NOT NULL,
-        description TEXT NULL,
-        icon_class VARCHAR(100) DEFAULT 'fas fa-concierge-bell',
-        image_path VARCHAR(500) DEFAULT NULL,
-        link_url VARCHAR(500) DEFAULT NULL,
-        link_text VARCHAR(100) DEFAULT 'Learn More',
-        display_order INT UNSIGNED DEFAULT 0,
-        is_active TINYINT(1) NOT NULL DEFAULT 1,
-        created_at TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP,
-        updated_at TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-        PRIMARY KEY (id),
-        UNIQUE KEY uk_service_key (service_key),
-        KEY idx_active_order (is_active, display_order)
-    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
-} catch (PDOException $e) {
-    error_log("guest_services table check: " . $e->getMessage());
+// Ensure guest_services table exists (check once, not on every request)
+if (empty($_SESSION['_gs_table_checked'])) {
+    try {
+        $tableExists = (bool) $pdo->query("SHOW TABLES LIKE 'guest_services'")->rowCount();
+        if (!$tableExists) {
+            $pdo->exec("CREATE TABLE IF NOT EXISTS guest_services (
+                id INT UNSIGNED NOT NULL AUTO_INCREMENT,
+                service_key VARCHAR(50) NOT NULL,
+                title VARCHAR(150) NOT NULL,
+                description TEXT NULL,
+                icon_class VARCHAR(100) DEFAULT 'fas fa-concierge-bell',
+                image_path VARCHAR(500) DEFAULT NULL,
+                link_url VARCHAR(500) DEFAULT NULL,
+                link_text VARCHAR(100) DEFAULT 'Learn More',
+                display_order INT UNSIGNED DEFAULT 0,
+                is_active TINYINT(1) NOT NULL DEFAULT 1,
+                created_at TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                PRIMARY KEY (id),
+                UNIQUE KEY uk_service_key (service_key),
+                KEY idx_active_order (is_active, display_order)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
+        }
+        $_SESSION['_gs_table_checked'] = true;
+    } catch (PDOException $e) {
+        error_log("guest_services table check: " . $e->getMessage());
+    }
 }
 
 // Fetch services from DB
