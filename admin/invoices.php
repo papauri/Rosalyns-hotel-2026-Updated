@@ -11,6 +11,12 @@ $error = '';
 $csrf_token = $csrf_token ?? generateCsrfToken();
 $conferenceFields = finance_conference_fields($pdo);
 
+// ── AJAX mode ────────────────────────────────────────────────────────────────
+// Inline email actions (resend_invoice, send_reminder) POST with _ajax=1 so
+// they return JSON instead of doing a full page navigation. This prevents the
+// admin page loader from getting stuck while SMTP is processing.
+$is_ajax = !empty($_POST['_ajax']) || (!empty($_SERVER['HTTP_X_REQUESTED_WITH']) && strtolower($_SERVER['HTTP_X_REQUESTED_WITH']) === 'xmlhttprequest');
+
 // Handle invoice actions
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
     try {
@@ -201,6 +207,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
         }
     } catch (Exception $e) {
         $error = 'Error: ' . $e->getMessage();
+    }
+
+    // AJAX: return JSON immediately (no page render)
+    if ($is_ajax) {
+        header('Content-Type: application/json; charset=utf-8');
+        if ($message) {
+            echo json_encode(['success' => true, 'message' => $message]);
+        } else {
+            echo json_encode(['success' => false, 'message' => $error ?: 'An unexpected error occurred.']);
+        }
+        exit;
     }
 }
 
@@ -680,11 +697,16 @@ $totalAging = (float)$aging['bucket_0_30'] + (float)$aging['bucket_31_60'] + (fl
 
                                             <!-- Resend invoice — only for non-refund payments with a generated invoice -->
                                             <?php if ($invoice['invoice_generated'] && $invoice['payment_type'] !== 'refund'): ?>
-                                                <form method="POST" style="display: inline;">
+                                                <form method="POST" action="invoices.php" class="invoice-ajax-form" data-no-admin-loader="1" style="display: inline;"
+                                                    data-confirm-msg="Resend invoice email to the customer?"
+                                                    data-confirm-title="Resend Invoice"
+                                                    data-confirm-ok="Send"
+                                                    data-confirm-icon="fa-paper-plane">
                                                     <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf_token, ENT_QUOTES, 'UTF-8'); ?>">
                                                     <input type="hidden" name="action" value="resend_invoice">
+                                                    <input type="hidden" name="_ajax" value="1">
                                                     <input type="hidden" name="payment_id" value="<?php echo (int)$invoice['id']; ?>">
-                                                    <button type="submit" class="btn-action btn-resend" onclick="return confirm('Resend invoice email to customer?');">
+                                                    <button type="submit" class="btn-action btn-resend">
                                                         <i class="fas fa-paper-plane"></i> Resend
                                                     </button>
                                                 </form>
@@ -692,11 +714,16 @@ $totalAging = (float)$aging['bucket_0_30'] + (float)$aging['bucket_31_60'] + (fl
 
                                             <!-- Payment reminder — only for outstanding, non-refund payments -->
                                             <?php if (in_array($invoice['payment_status'], ['pending', 'partial'], true) && $invoice['payment_type'] !== 'refund'): ?>
-                                                <form method="POST" style="display: inline;">
+                                                <form method="POST" action="invoices.php" class="invoice-ajax-form" data-no-admin-loader="1" style="display: inline;"
+                                                    data-confirm-msg="Send a payment reminder email to the customer now?"
+                                                    data-confirm-title="Send Payment Reminder"
+                                                    data-confirm-ok="Send Reminder"
+                                                    data-confirm-icon="fa-bell">
                                                     <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf_token, ENT_QUOTES, 'UTF-8'); ?>">
                                                     <input type="hidden" name="action" value="send_reminder">
+                                                    <input type="hidden" name="_ajax" value="1">
                                                     <input type="hidden" name="payment_id" value="<?php echo (int)$invoice['id']; ?>">
-                                                    <button type="submit" class="btn-action" onclick="return confirm('Send payment reminder email now?');">
+                                                    <button type="submit" class="btn-action btn-resend">
                                                         <i class="fas fa-bell"></i> Reminder
                                                     </button>
                                                 </form>
@@ -769,5 +796,91 @@ $totalAging = (float)$aging['bucket_0_30'] + (float)$aging['bucket_31_60'] + (fl
         });
     </script>
     <script src="js/admin-components.js"></script>
+    <script>
+    (function () {
+        'use strict';
+
+        function showToast(msg, type) {
+            if (window.Alert && typeof window.Alert.show === 'function') {
+                window.Alert.show(msg, type || 'success');
+            } else {
+                // Alert not yet ready — queue for admin-flash.php to pick up
+                try {
+                    var q = JSON.parse(sessionStorage.getItem('rh_alert_queue') || '[]');
+                    q.push({ msg: msg, type: type || 'success' });
+                    sessionStorage.setItem('rh_alert_queue', JSON.stringify(q));
+                } catch (e) {}
+                window.addEventListener('load', function () {
+                    if (window.Alert && typeof window.Alert.show === 'function') {
+                        window.Alert.show(msg, type || 'success');
+                    }
+                }, { once: true });
+            }
+        }
+
+        function doAjaxSubmit(form, btn) {
+            var origHtml = btn ? btn.innerHTML : '';
+            if (btn) {
+                btn.dataset.ajaxOrigHtml = origHtml;
+                btn.disabled = true;
+                btn.innerHTML = '<span class="admin-inline-spinner" aria-hidden="true"></span><span>Sending…</span>';
+            }
+
+            var fd = new FormData(form);
+
+            fetch(form.action || window.location.pathname, {
+                method: 'POST',
+                body: fd,
+                headers: { 'X-Requested-With': 'XMLHttpRequest' }
+            })
+            .then(function (r) {
+                if (!r.ok) throw new Error('Server error (' + r.status + ')');
+                return r.json();
+            })
+            .then(function (data) {
+                if (btn) { btn.disabled = false; btn.innerHTML = origHtml; }
+                showToast(data.message || (data.success ? 'Done.' : 'Failed.'), data.success ? 'success' : 'error');
+            })
+            .catch(function (err) {
+                if (btn) { btn.disabled = false; btn.innerHTML = origHtml; }
+                showToast('Request failed: ' + err.message, 'error');
+            });
+        }
+
+        // capture=true: runs BEFORE admin-main.js (which listens in bubbling phase).
+        // We fully own .invoice-ajax-form — prevent the default submission, handle
+        // confirmation ourselves, then do fetch() instead of a full page navigation.
+        document.addEventListener('submit', function (e) {
+            var form = e.target;
+            if (!form || !form.classList.contains('invoice-ajax-form')) return;
+
+            e.preventDefault();
+            e.stopImmediatePropagation(); // prevent admin-main.js from also handling
+
+            var btn = e.submitter || form.querySelector('button[type="submit"]');
+            var confirmMsg = form.dataset.confirmMsg;
+
+            if (confirmMsg) {
+                if (window.AdminConfirm && typeof window.AdminConfirm.request === 'function') {
+                    window.AdminConfirm.request({
+                        title:       form.dataset.confirmTitle || 'Confirm',
+                        message:     confirmMsg,
+                        confirmText: form.dataset.confirmOk   || 'Confirm',
+                        cancelText:  'Cancel',
+                        tone:        'info',
+                        icon:        form.dataset.confirmIcon  || 'fa-check'
+                    }).then(function (confirmed) {
+                        if (confirmed) doAjaxSubmit(form, btn);
+                    });
+                } else {
+                    // AdminConfirm not loaded yet — native fallback
+                    if (window.confirm(confirmMsg)) doAjaxSubmit(form, btn);
+                }
+            } else {
+                doAjaxSubmit(form, btn);
+            }
+        }, true); // capture phase
+    })();
+    </script>
     <?php require_once 'includes/admin-footer.php'; ?>
 

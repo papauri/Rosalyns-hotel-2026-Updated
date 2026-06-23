@@ -758,7 +758,7 @@ function sendPaymentInvoiceEmail(int $booking_id)
         // Check if invoice emails are enabled
         $send_invoices = (bool)getEmailSetting('send_invoice_emails', 0);
         if (!$send_invoices) {
-            return ['success' => true, 'message' => 'Invoice emails disabled'];
+            return ['success' => false, 'message' => 'Invoice emails are disabled. Enable "Send Invoice Emails" in Email Settings first.'];
         }
 
         // Get booking details
@@ -865,7 +865,7 @@ function sendPaymentInvoiceEmailWithCC(int $booking_id, array $ccRecipients = []
         // Check if invoice emails are enabled
         $send_invoices = (bool)getEmailSetting('send_invoice_emails', 0);
         if (!$send_invoices) {
-            return ['success' => true, 'message' => 'Invoice emails disabled'];
+            return ['success' => false, 'message' => 'Invoice emails are disabled. Enable "Send Invoice Emails" in Email Settings first.'];
         }
 
         // Get booking details
@@ -1898,7 +1898,7 @@ function sendConferenceInvoiceEmail(int $enquiry_id)
         // Check if invoice emails are enabled
         $send_invoices = (bool)getEmailSetting('send_invoice_emails', 0);
         if (!$send_invoices) {
-            return ['success' => true, 'message' => 'Invoice emails disabled'];
+            return ['success' => false, 'message' => 'Invoice emails are disabled. Enable "Send Invoice Emails" in Email Settings first.'];
         }
 
         // Get enquiry details
@@ -1976,7 +1976,7 @@ function sendConferenceInvoiceEmailWithCC(int $enquiry_id, array $ccRecipients =
         // Check if invoice emails are enabled
         $send_invoices = (bool)getEmailSetting('send_invoice_emails', 0);
         if (!$send_invoices) {
-            return ['success' => true, 'message' => 'Invoice emails disabled'];
+            return ['success' => false, 'message' => 'Invoice emails are disabled. Enable "Send Invoice Emails" in Email Settings first.'];
         }
 
         // Get enquiry details
