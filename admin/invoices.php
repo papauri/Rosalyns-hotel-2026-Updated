@@ -729,11 +729,21 @@ $totalAging = (float)$aging['bucket_0_30'] + (float)$aging['bucket_31_60'] + (fl
                                                 </form>
                                             <?php endif; ?>
 
-                                            <!-- Direct email — address part must NOT be URL-encoded in mailto: -->
+                                            <!-- Direct email with invoice attachment -->
                                             <?php if (!empty($invoice['customer_email'])): ?>
-                                                <a class="btn-action" href="mailto:<?php echo htmlspecialchars($invoice['customer_email'], ENT_QUOTES, 'UTF-8'); ?>?subject=<?php echo htmlspecialchars(rawurlencode('Payment reminder - ' . ($invoice['invoice_number'] ?: $invoice['payment_reference'])), ENT_QUOTES, 'UTF-8'); ?>">
-                                                    <i class="fas fa-envelope"></i> Email
-                                                </a>
+                                                <form method="POST" action="invoices.php" class="invoice-ajax-form" data-no-admin-loader="1" style="display: inline;"
+                                                    data-confirm-msg="Send an email with the invoice attached to <?php echo htmlspecialchars($invoice['customer_email'], ENT_QUOTES, 'UTF-8'); ?>?"
+                                                    data-confirm-title="Send Invoice Email"
+                                                    data-confirm-ok="Send"
+                                                    data-confirm-icon="fa-envelope">
+                                                    <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf_token, ENT_QUOTES, 'UTF-8'); ?>">
+                                                    <input type="hidden" name="action" value="resend_invoice">
+                                                    <input type="hidden" name="_ajax" value="1">
+                                                    <input type="hidden" name="payment_id" value="<?php echo (int)$invoice['id']; ?>">
+                                                    <button type="submit" class="btn-action">
+                                                        <i class="fas fa-envelope"></i> Email
+                                                    </button>
+                                                </form>
                                             <?php endif; ?>
 
                                             <!-- WhatsApp — use phone number when available so message goes to the right contact -->
