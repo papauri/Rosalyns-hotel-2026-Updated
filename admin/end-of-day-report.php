@@ -769,6 +769,53 @@ $conf_rev_change = (float)$rev['conf_gross'] - (float)$prev_sources['conf_gross'
 $fnb_rev_change  = (float)$rev['fnb_gross']  - (float)$prev_sources['fnb_gross'];
 
 // ---------------------------------------------------------------------------
+// ENHANCEMENT F — Maintenance snapshot
+// ---------------------------------------------------------------------------
+$maintenance = ['urgent' => 0, 'high' => 0, 'medium' => 0, 'low' => 0, 'total_open' => 0];
+try {
+    $maintStmt = $pdo->prepare("
+        SELECT COALESCE(priority, 'medium') AS priority, COUNT(*) AS cnt
+        FROM room_maintenance_schedules
+        WHERE status IN ('pending', 'in_progress')
+        GROUP BY COALESCE(priority, 'medium')
+    ");
+    $maintStmt->execute();
+    foreach ($maintStmt->fetchAll(PDO::FETCH_ASSOC) as $mr) {
+        $p = strtolower(trim((string)($mr['priority'] ?? 'medium')));
+        if (isset($maintenance[$p])) $maintenance[$p] = (int)$mr['cnt'];
+        $maintenance['total_open'] += (int)$mr['cnt'];
+    }
+} catch (Throwable $e) { /* table may not exist */ }
+
+// ---------------------------------------------------------------------------
+// ENHANCEMENT G — Quotation pipeline + gym inquiries
+// ---------------------------------------------------------------------------
+$quotation_stats = ['sent_today' => 0, 'accepted_today' => 0, 'total_active' => 0, 'pipeline_value' => 0.0];
+try {
+    $qStmt = $pdo->prepare("
+        SELECT
+            SUM(CASE WHEN DATE(sent_at) = :d THEN 1 ELSE 0 END) AS sent_today,
+            SUM(CASE WHEN DATE(updated_at) = :d AND status = 'accepted' THEN 1 ELSE 0 END) AS accepted_today,
+            SUM(CASE WHEN status = 'sent' THEN 1 ELSE 0 END) AS total_active,
+            COALESCE(SUM(CASE WHEN status = 'sent' THEN total_amount ELSE 0 END), 0) AS pipeline_value
+        FROM quotations
+    ");
+    $qStmt->execute([':d' => $report_date]);
+    $qRow = $qStmt->fetch(PDO::FETCH_ASSOC) ?: [];
+    $quotation_stats['sent_today']     = (int)($qRow['sent_today'] ?? 0);
+    $quotation_stats['accepted_today'] = (int)($qRow['accepted_today'] ?? 0);
+    $quotation_stats['total_active']   = (int)($qRow['total_active'] ?? 0);
+    $quotation_stats['pipeline_value'] = (float)($qRow['pipeline_value'] ?? 0);
+} catch (Throwable $e) { /* ignore */ }
+
+$gym_inquiries_today = 0;
+try {
+    $gymStmt = $pdo->prepare("SELECT COUNT(*) FROM gym_inquiries WHERE DATE(created_at) = :d AND (status = 'new' OR status = 'pending')");
+    $gymStmt->execute([':d' => $report_date]);
+    $gym_inquiries_today = (int)$gymStmt->fetchColumn();
+} catch (Throwable $e) { /* ignore */ }
+
+// ---------------------------------------------------------------------------
 // CSV export — must run before any HTML output
 // ---------------------------------------------------------------------------
 if (isset($_GET['export']) && $_GET['export'] === 'csv') {
@@ -1545,6 +1592,80 @@ if (isset($_GET['export']) && $_GET['export'] === 'csv') {
                         </ul>
                     <?php endif; ?>
                 </article>
+
+                <!-- Gym inquiries -->
+                <?php if ($gym_inquiries_today > 0): ?>
+                <article class="eod-panel" data-help="Gym Inquiries|New fitness centre membership inquiries received today that are awaiting response. Follow up promptly to convert leads.">
+                    <header class="eod-panel__head">
+                        <h2 class="eod-panel__title"><i class="fas fa-dumbbell"></i> Gym Inquiries</h2>
+                    </header>
+                    <div class="eod-hero-metric">
+                        <strong><?php echo $gym_inquiries_today; ?></strong>
+                        <span>New inquiry<?php echo $gym_inquiries_today === 1 ? '' : 's'; ?> pending response today.</span>
+                    </div>
+                    <a href="gym-inquiries.php" class="eod-link" style="margin-top:0.5rem;display:inline-block;">View &rarr;</a>
+                </article>
+                <?php endif; ?>
+
+                <!-- Open Maintenance -->
+                <?php if ($maintenance['total_open'] > 0): ?>
+                <article class="eod-panel" data-help="Open Maintenance|Rooms maintenance tasks still open at end of shift. Urgent and high priority tasks should be resolved before tomorrow's arrivals to ensure rooms are ready.">
+                    <header class="eod-panel__head">
+                        <h2 class="eod-panel__title"><i class="fas fa-screwdriver-wrench"></i> Open Maintenance</h2>
+                    </header>
+                    <ul class="eod-stats">
+                        <?php if ($maintenance['urgent'] > 0): ?>
+                        <li>
+                            <span class="eod-stats__label">Urgent</span>
+                            <span class="eod-stats__value eod-stats__value--warn"><?php echo $maintenance['urgent']; ?></span>
+                        </li>
+                        <?php endif; ?>
+                        <?php if ($maintenance['high'] > 0): ?>
+                        <li>
+                            <span class="eod-stats__label">High priority</span>
+                            <span class="eod-stats__value eod-stats__value--warn"><?php echo $maintenance['high']; ?></span>
+                        </li>
+                        <?php endif; ?>
+                        <?php if ($maintenance['medium'] > 0): ?>
+                        <li>
+                            <span class="eod-stats__label">Medium</span>
+                            <span class="eod-stats__value"><?php echo $maintenance['medium']; ?></span>
+                        </li>
+                        <?php endif; ?>
+                        <li>
+                            <span class="eod-stats__label">Total open tasks</span>
+                            <span class="eod-stats__value eod-stats__value--warn"><?php echo $maintenance['total_open']; ?></span>
+                            <span class="eod-stats__sub">Rooms need attention</span>
+                        </li>
+                    </ul>
+                    <a href="room-maintenance.php" class="eod-link" style="margin-top:0.5rem;display:inline-block;">View all &rarr;</a>
+                </article>
+                <?php endif; ?>
+
+                <!-- Quotation Pipeline -->
+                <?php if ($quotation_stats['sent_today'] > 0 || $quotation_stats['total_active'] > 0): ?>
+                <article class="eod-panel" data-help="Quotation Pipeline|Quotes sent today and quotes still awaiting a decision from prospects. Pipeline value is the total of all sent quotes not yet accepted or declined. Track conversion to ensure proposals translate into confirmed revenue.">
+                    <header class="eod-panel__head">
+                        <h2 class="eod-panel__title"><i class="fas fa-file-lines"></i> Quotations</h2>
+                    </header>
+                    <ul class="eod-stats">
+                        <li>
+                            <span class="eod-stats__label">Sent today</span>
+                            <span class="eod-stats__value"><?php echo $quotation_stats['sent_today']; ?></span>
+                        </li>
+                        <li>
+                            <span class="eod-stats__label">Accepted today</span>
+                            <span class="eod-stats__value eod-stats__value--good"><?php echo $quotation_stats['accepted_today']; ?></span>
+                        </li>
+                        <li>
+                            <span class="eod-stats__label">Active open quotes</span>
+                            <span class="eod-stats__value"><?php echo $quotation_stats['total_active']; ?></span>
+                            <span class="eod-stats__sub"><?php echo $money($quotation_stats['pipeline_value']); ?> pipeline value</span>
+                        </li>
+                    </ul>
+                    <a href="quotations.php" class="eod-link" style="margin-top:0.5rem;display:inline-block;">View all &rarr;</a>
+                </article>
+                <?php endif; ?>
 
                 <!-- Tomorrow preview -->
                 <article class="eod-panel eod-panel--accent" data-help="Tomorrow Preview|Expected arrivals: confirmed bookings checking in tomorrow. Expected departures: guests due to check out. Revenue forecast: the sum of booking charges due from tomorrow's arrivals based on their confirmed booking values.">

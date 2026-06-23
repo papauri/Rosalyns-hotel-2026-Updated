@@ -281,8 +281,8 @@ try {
     $daily_health_score -= $rooms_oo > 0 ? 5 : 0;
     $daily_health_score = max(0, min(100, $daily_health_score));
     $daily_health_label = $daily_health_score >= 90 ? 'Excellent close' : ($daily_health_score >= 75 ? 'Good close' : ($daily_health_score >= 55 ? 'Needs attention' : 'Critical review'));
-} catch (Throwable $e) {
-    error_log('EOD send fetch: ' . $e->getMessage());
+} catch (Throwable $eFetch) {
+    error_log('EOD send fetch: ' . $eFetch->getMessage());
 
     // Fallback to a safe zeroed dataset so sending can still proceed.
     $ops = $ops ?? [
@@ -335,6 +335,76 @@ try {
     $daily_health_score = $daily_health_score ?? 0;
     $daily_health_label = $daily_health_label ?? 'Needs attention';
 }
+
+// ── Extra data for the PDF attachment ──────────────────────────────────────────
+$pdf_room_type_perf = [];
+try {
+    $rtStmt2 = $pdo->prepare("
+        SELECT rt.name AS room_type, COUNT(DISTINCT b.id) AS bookings, COALESCE(SUM(p.total_amount), 0) AS revenue
+        FROM payments p INNER JOIN bookings b ON b.id = p.booking_id
+        INNER JOIN individual_rooms ir ON ir.id = b.room_id
+        INNER JOIN room_types rt ON rt.id = ir.room_type_id
+        WHERE DATE(p.payment_date) = :d AND p.payment_status IN ('completed','paid')
+          AND COALESCE(p.payment_type,'') <> 'refund' AND p.booking_type = 'room' AND p.deleted_at IS NULL
+        GROUP BY rt.id, rt.name ORDER BY revenue DESC LIMIT 6
+    ");
+    $rtStmt2->execute([':d' => $date]);
+    $pdf_room_type_perf = $rtStmt2->fetchAll(PDO::FETCH_ASSOC);
+} catch (Throwable $e) {}
+
+$pdf_guest_intel    = ['new_guests' => 0, 'returning_guests' => 0, 'avg_lead_days' => 0];
+$pdf_returning_rate = 0.0;
+try {
+    $giStmt2 = $pdo->prepare("
+        SELECT SUM(CASE WHEN bcount.total = 1 THEN 1 ELSE 0 END) AS new_guests,
+               SUM(CASE WHEN bcount.total > 1 THEN 1 ELSE 0 END) AS returning_guests
+        FROM bookings b
+        INNER JOIN (SELECT guest_email, COUNT(*) AS total FROM bookings WHERE guest_email != '' AND status NOT IN ('cancelled','no-show','expired') GROUP BY guest_email) bcount ON bcount.guest_email = b.guest_email
+        WHERE b.check_in_date = :d AND b.status NOT IN ('cancelled','no-show','expired') AND b.guest_email != ''
+    ");
+    $giStmt2->execute([':d' => $date]);
+    $giRow2 = $giStmt2->fetch(PDO::FETCH_ASSOC) ?: [];
+    $pdf_guest_intel['new_guests']       = (int)($giRow2['new_guests'] ?? 0);
+    $pdf_guest_intel['returning_guests'] = (int)($giRow2['returning_guests'] ?? 0);
+    $gitotal2 = $pdf_guest_intel['new_guests'] + $pdf_guest_intel['returning_guests'];
+    $pdf_returning_rate = $gitotal2 > 0 ? ($pdf_guest_intel['returning_guests'] / $gitotal2) * 100 : 0.0;
+} catch (Throwable $e) {}
+
+$pdf_maintenance = ['urgent' => 0, 'high' => 0, 'medium' => 0, 'low' => 0, 'total_open' => 0];
+try {
+    $mStmt2 = $pdo->prepare("SELECT COALESCE(priority,'medium') AS priority, COUNT(*) AS cnt FROM room_maintenance_schedules WHERE status IN ('pending','in_progress') GROUP BY COALESCE(priority,'medium')");
+    $mStmt2->execute();
+    foreach ($mStmt2->fetchAll(PDO::FETCH_ASSOC) as $mr2) {
+        $p2 = strtolower(trim((string)($mr2['priority'] ?? 'medium')));
+        if (isset($pdf_maintenance[$p2])) $pdf_maintenance[$p2] = (int)$mr2['cnt'];
+        $pdf_maintenance['total_open'] += (int)$mr2['cnt'];
+    }
+} catch (Throwable $e) {}
+
+$pdf_quotation_stats = ['sent_today' => 0, 'accepted_today' => 0, 'total_active' => 0, 'pipeline_value' => 0.0];
+try {
+    $qStmt2 = $pdo->prepare("SELECT SUM(CASE WHEN DATE(sent_at)=:d THEN 1 ELSE 0 END) AS sent_today, SUM(CASE WHEN DATE(updated_at)=:d AND status='accepted' THEN 1 ELSE 0 END) AS accepted_today, SUM(CASE WHEN status='sent' THEN 1 ELSE 0 END) AS total_active, COALESCE(SUM(CASE WHEN status='sent' THEN total_amount ELSE 0 END),0) AS pipeline_value FROM quotations");
+    $qStmt2->execute([':d' => $date]);
+    $qRow2 = $qStmt2->fetch(PDO::FETCH_ASSOC) ?: [];
+    $pdf_quotation_stats['sent_today']     = (int)($qRow2['sent_today'] ?? 0);
+    $pdf_quotation_stats['accepted_today'] = (int)($qRow2['accepted_today'] ?? 0);
+    $pdf_quotation_stats['total_active']   = (int)($qRow2['total_active'] ?? 0);
+    $pdf_quotation_stats['pipeline_value'] = (float)($qRow2['pipeline_value'] ?? 0);
+} catch (Throwable $e) {}
+
+$pdf_closeout_alerts = [];
+if ($arrivals_remaining > 0)
+    $pdf_closeout_alerts[] = ['level' => 'warn', 'title' => 'Arrivals still open', 'detail' => $arrivals_remaining . ' expected arrival(s) not checked in.'];
+if ($departures_remaining > 0)
+    $pdf_closeout_alerts[] = ['level' => 'warn', 'title' => 'Departures still open', 'detail' => $departures_remaining . ' expected departure(s) not checked out.'];
+if ((float)($rev['pending'] ?? 0) > 0)
+    $pdf_closeout_alerts[] = ['level' => 'warn', 'title' => 'Pending payments', 'detail' => _money($currency_symbol, (float)$rev['pending']) . ' still pending.'];
+if ($outstanding > 0)
+    $pdf_closeout_alerts[] = ['level' => 'warn', 'title' => 'Outstanding folio', 'detail' => _money($currency_symbol, $outstanding) . ' unpaid across active stays.'];
+if ((int)($pos['voided_count'] ?? 0) > 0)
+    $pdf_closeout_alerts[] = ['level' => 'watch', 'title' => 'POS voids', 'detail' => (int)$pos['voided_count'] . ' void(s) worth ' . _money($currency_symbol, (float)($pos['voided_value'] ?? 0)) . '.'];
+if (((int)($housekeeping['pending'] ?? 0) + (int)($housekeeping['in_progress'] ?? 0)) > 0)
+    $pdf_closeout_alerts[] = ['level' => 'watch', 'title' => 'Housekeeping open', 'detail' => ((int)($housekeeping['pending'] ?? 0) + (int)($housekeeping['in_progress'] ?? 0)) . ' task(s) not completed.'];
 
 $dateLabel = date('l, F j, Y', strtotime($date));
 
@@ -695,6 +765,58 @@ $subject = 'EOD Report — ' . $site_name . ' — ' . $dateLabel;
 $tomorrow    = $tomorrow ?? date('Y-m-d', strtotime($date . ' +1 day'));
 $attachments = [];
 try {
+    require_once __DIR__ . '/../../includes/eod-pdf-builder.php';
+
+    $pdf_d = [
+        'date'                   => $date,
+        'ops'                    => $ops,
+        'rev'                    => $rev,
+        'gross'                  => $gross,
+        'net'                    => $net,
+        'adr'                    => $adr,
+        'revpar'                 => $revpar,
+        'methods'                => $methods,
+        'cash_total'             => (float)($method_totals['cash'] ?? 0),
+        'pos'                    => $pos,
+        'pos_by_type'            => [],
+        'top_items'              => $top,
+        'void_reasons'           => [],
+        'hk'                     => $housekeeping,
+        'reviewRow'              => ['cnt' => (int)($reviews['c'] ?? 0), 'avg_rating' => (float)($reviews['a'] ?? 0)],
+        'outstanding'            => $outstanding,
+        'rooms_total'            => $rooms_total,
+        'rooms_occupied'         => $rooms_occupied,
+        'rooms_oo'               => $rooms_oo,
+        'occupancy_pct'          => $occupancy_pct,
+        'tom'                    => $tom,
+        'score'                  => $daily_health_score,
+        'score_label'            => $daily_health_label,
+        'net_change'             => $net_change,
+        'pos_change'             => $pos_change,
+        'occ_change'             => $occupancy_change,
+        'arrivals_remaining'     => $arrivals_remaining,
+        'departures_remaining'   => $departures_remaining,
+        'rooms_unsold'           => $rooms_unsold,
+        'empty_room_opportunity' => $empty_room_opportunity,
+        'payment_capture_rate'   => $payment_capture_rate,
+        'room_type_perf'         => $pdf_room_type_perf,
+        'guest_intel'            => $pdf_guest_intel,
+        'returning_rate'         => $pdf_returning_rate,
+        'closeout_alerts'        => $pdf_closeout_alerts,
+        'maintenance'            => $pdf_maintenance,
+        'quotation_stats'        => $pdf_quotation_stats,
+    ];
+    $attachments[] = [
+        'filename' => 'eod-report-' . $date . '.pdf',
+        'content'  => buildEodPdf($pdf_d, $site_name, $currency_symbol, $user['full_name'] ?? 'Admin'),
+        'mime'     => 'application/pdf',
+    ];
+} catch (Throwable $e) {
+    error_log('EOD email PDF attachment: ' . $e->getMessage());
+}
+
+// ─── (Legacy inline PDF block removed — replaced by eod-pdf-builder.php) ────
+if (false) {
     require_once __DIR__ . '/../../vendor/tecnickcom/tcpdf/tcpdf.php';
 
     $pC  = [243, 236, 228];
@@ -890,14 +1012,7 @@ try {
     $pa->SetTextColorArray($pT2);
     $pa->Cell(0, 4, $site_name . '  |  EOD Report  |  ' . $date . '  |  Generated ' . date('Y-m-d H:i') . '  |  All amounts in ' . trim($currency_symbol), 0, 0, 'C');
 
-    $attachments[] = [
-        'filename' => 'eod-report-' . $date . '.pdf',
-        'content'  => $pa->Output('eod-report-' . $date . '.pdf', 'S'),
-        'mime'     => 'application/pdf',
-    ];
-} catch (Throwable $e) {
-    error_log('EOD email PDF attachment: ' . $e->getMessage());
-}
+} // end if (false) — legacy inline PDF block
 
 $result = sendReportEmail($recipients, $subject, $html, $attachments, '', $cc_emails);
 

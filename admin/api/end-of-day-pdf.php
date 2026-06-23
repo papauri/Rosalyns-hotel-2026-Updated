@@ -243,6 +243,69 @@ try {
     ");
     $vrStmt->execute([':a' => $dayStart, ':b' => $dayEnd]);
     $void_reasons = $vrStmt->fetchAll(PDO::FETCH_ASSOC);
+
+    // 15) Room type performance
+    $room_type_perf = [];
+    try {
+        $rtStmt = $pdo->prepare("
+            SELECT rt.name AS room_type, COUNT(DISTINCT b.id) AS bookings, COALESCE(SUM(p.total_amount), 0) AS revenue
+            FROM payments p
+            INNER JOIN bookings b ON b.id = p.booking_id
+            INNER JOIN individual_rooms ir ON ir.id = b.room_id
+            INNER JOIN room_types rt ON rt.id = ir.room_type_id
+            WHERE DATE(p.payment_date) = :d AND p.payment_status IN ('completed','paid')
+              AND COALESCE(p.payment_type,'') <> 'refund' AND p.booking_type = 'room' AND p.deleted_at IS NULL
+            GROUP BY rt.id, rt.name ORDER BY revenue DESC LIMIT 6
+        ");
+        $rtStmt->execute([':d' => $date]);
+        $room_type_perf = $rtStmt->fetchAll(PDO::FETCH_ASSOC);
+    } catch (Throwable $e) {}
+
+    // 16) Guest intelligence
+    $guest_intel  = ['new_guests' => 0, 'returning_guests' => 0, 'avg_lead_days' => 0];
+    $returning_rate = 0.0;
+    try {
+        $giStmt = $pdo->prepare("
+            SELECT SUM(CASE WHEN bcount.total = 1 THEN 1 ELSE 0 END) AS new_guests,
+                   SUM(CASE WHEN bcount.total > 1 THEN 1 ELSE 0 END) AS returning_guests
+            FROM bookings b
+            INNER JOIN (SELECT guest_email, COUNT(*) AS total FROM bookings WHERE guest_email != '' AND status NOT IN ('cancelled','no-show','expired') GROUP BY guest_email) bcount ON bcount.guest_email = b.guest_email
+            WHERE b.check_in_date = :d AND b.status NOT IN ('cancelled','no-show','expired') AND b.guest_email != ''
+        ");
+        $giStmt->execute([':d' => $date]);
+        $giRow = $giStmt->fetch(PDO::FETCH_ASSOC) ?: [];
+        $guest_intel['new_guests']       = (int)($giRow['new_guests'] ?? 0);
+        $guest_intel['returning_guests'] = (int)($giRow['returning_guests'] ?? 0);
+        $leadStmt = $pdo->prepare("SELECT ROUND(AVG(DATEDIFF(check_in_date, DATE(created_at)))) FROM bookings WHERE check_in_date = :d AND status NOT IN ('cancelled','no-show','expired')");
+        $leadStmt->execute([':d' => $date]);
+        $guest_intel['avg_lead_days'] = max(0, (int)($leadStmt->fetchColumn() ?? 0));
+        $gitotal = $guest_intel['new_guests'] + $guest_intel['returning_guests'];
+        $returning_rate = $gitotal > 0 ? ($guest_intel['returning_guests'] / $gitotal) * 100 : 0.0;
+    } catch (Throwable $e) {}
+
+    // 17) Maintenance snapshot
+    $maintenance = ['urgent' => 0, 'high' => 0, 'medium' => 0, 'low' => 0, 'total_open' => 0];
+    try {
+        $mStmt = $pdo->prepare("SELECT COALESCE(priority,'medium') AS priority, COUNT(*) AS cnt FROM room_maintenance_schedules WHERE status IN ('pending','in_progress') GROUP BY COALESCE(priority,'medium')");
+        $mStmt->execute();
+        foreach ($mStmt->fetchAll(PDO::FETCH_ASSOC) as $mr) {
+            $p = strtolower(trim((string)($mr['priority'] ?? 'medium')));
+            if (isset($maintenance[$p])) $maintenance[$p] = (int)$mr['cnt'];
+            $maintenance['total_open'] += (int)$mr['cnt'];
+        }
+    } catch (Throwable $e) {}
+
+    // 18) Quotation pipeline
+    $quotation_stats = ['sent_today' => 0, 'accepted_today' => 0, 'total_active' => 0, 'pipeline_value' => 0.0];
+    try {
+        $qStmt = $pdo->prepare("SELECT SUM(CASE WHEN DATE(sent_at)=:d THEN 1 ELSE 0 END) AS sent_today, SUM(CASE WHEN DATE(updated_at)=:d AND status='accepted' THEN 1 ELSE 0 END) AS accepted_today, SUM(CASE WHEN status='sent' THEN 1 ELSE 0 END) AS total_active, COALESCE(SUM(CASE WHEN status='sent' THEN total_amount ELSE 0 END),0) AS pipeline_value FROM quotations");
+        $qStmt->execute([':d' => $date]);
+        $qRow = $qStmt->fetch(PDO::FETCH_ASSOC) ?: [];
+        $quotation_stats['sent_today']     = (int)($qRow['sent_today'] ?? 0);
+        $quotation_stats['accepted_today'] = (int)($qRow['accepted_today'] ?? 0);
+        $quotation_stats['total_active']   = (int)($qRow['total_active'] ?? 0);
+        $quotation_stats['pipeline_value'] = (float)($qRow['pipeline_value'] ?? 0);
+    } catch (Throwable $e) {}
 } catch (Throwable $e) {
     error_log('EOD PDF: ' . $e->getMessage());
     http_response_code(500);
@@ -250,10 +313,81 @@ try {
     exit;
 }
 
-// ---- Load TCPDF ------------------------------------------------------------
-require_once __DIR__ . '/../../vendor/tecnickcom/tcpdf/tcpdf.php';
+// ── Closeout alerts for the PDF ──────────────────────────────────────────────
+$payment_capture_rate2 = ($gross + (float)($rev['pending'] ?? 0)) > 0
+    ? ($gross / ($gross + (float)($rev['pending'] ?? 0))) * 100
+    : 100.0;
+$arrivals_remaining2   = max(0, (int)($ops['expected_arrivals'] ?? 0) - (int)($ops['arrivals_completed'] ?? 0));
+$departures_remaining2 = max(0, (int)($ops['expected_departures'] ?? 0) - (int)($ops['departures_completed'] ?? 0));
+$rooms_unsold2         = max(0, $rooms_total - $rooms_occupied);
+$empty_room_opp2       = $adr > 0 ? $rooms_unsold2 * $adr : 0.0;
 
-// ---- Design constants -------------------------------------------------------
+$closeout_alerts = [];
+if ($arrivals_remaining2 > 0)
+    $closeout_alerts[] = ['level' => 'warn', 'title' => 'Arrivals still open', 'detail' => $arrivals_remaining2 . ' expected arrival(s) not checked in.'];
+if ($departures_remaining2 > 0)
+    $closeout_alerts[] = ['level' => 'warn', 'title' => 'Departures still open', 'detail' => $departures_remaining2 . ' expected departure(s) not checked out.'];
+if ((float)($rev['pending'] ?? 0) > 0)
+    $closeout_alerts[] = ['level' => 'warn', 'title' => 'Pending payments', 'detail' => pdfMoney($currency_symbol, (float)$rev['pending']) . ' still pending.'];
+if ($outstanding > 0)
+    $closeout_alerts[] = ['level' => 'warn', 'title' => 'Outstanding folio', 'detail' => pdfMoney($currency_symbol, $outstanding) . ' unpaid across active stays.'];
+if ((int)$pos['voided_count'] > 0)
+    $closeout_alerts[] = ['level' => 'watch', 'title' => 'POS voids to review', 'detail' => (int)$pos['voided_count'] . ' void(s) worth ' . pdfMoney($currency_symbol, (float)$pos['voided_value']) . '.'];
+if (((int)$hk['pending'] + (int)$hk['in_progress']) > 0)
+    $closeout_alerts[] = ['level' => 'watch', 'title' => 'Housekeeping open', 'detail' => ((int)$hk['pending'] + (int)$hk['in_progress']) . ' task(s) not completed.'];
+
+// ---- Build and output PDF via shared builder --------------------------------
+require_once __DIR__ . '/../../includes/eod-pdf-builder.php';
+
+$d = [
+    'date'                   => $date,
+    'ops'                    => $ops,
+    'rev'                    => $rev,
+    'gross'                  => $gross,
+    'net'                    => $net,
+    'adr'                    => $adr,
+    'revpar'                 => $revpar,
+    'methods'                => $methods,
+    'cash_total'             => $cash_total,
+    'pos'                    => $pos,
+    'pos_by_type'            => $pos_by_type,
+    'top_items'              => $top_items,
+    'void_reasons'           => $void_reasons,
+    'hk'                     => $hk,
+    'reviewRow'              => $reviewRow,
+    'outstanding'            => $outstanding,
+    'rooms_total'            => $rooms_total,
+    'rooms_occupied'         => $rooms_occupied,
+    'rooms_oo'               => $rooms_oo,
+    'occupancy_pct'          => $occupancy_pct,
+    'tom'                    => $tom,
+    'score'                  => $score,
+    'score_label'            => $score_label,
+    'net_change'             => $net_change,
+    'pos_change'             => $pos_change,
+    'occ_change'             => $occ_change,
+    'arrivals_remaining'     => $arrivals_remaining2,
+    'departures_remaining'   => $departures_remaining2,
+    'rooms_unsold'           => $rooms_unsold2,
+    'empty_room_opportunity' => $empty_room_opp2,
+    'payment_capture_rate'   => $payment_capture_rate2,
+    'room_type_perf'         => $room_type_perf,
+    'guest_intel'            => $guest_intel,
+    'returning_rate'         => $returning_rate,
+    'closeout_alerts'        => $closeout_alerts,
+    'maintenance'            => $maintenance,
+    'quotation_stats'        => $quotation_stats,
+];
+
+$filename = 'eod-report-' . $date . '.pdf';
+header('Content-Type: application/pdf');
+header('Content-Disposition: attachment; filename="' . $filename . '"');
+header('Cache-Control: no-store');
+echo buildEodPdf($d, $site_name, $currency_symbol, $user['full_name'] ?? 'Admin');
+exit;
+
+// ---- (Legacy code below — superseded by eod-pdf-builder.php) ---------------
+// Design constants kept only so the file parses if somehow the exit above fails:
 $CREAM     = [243, 236, 228]; // #F3ECE4
 $CHARCOAL  = [35, 31, 28];    // #231F1C
 $BROWN     = [138, 119, 95];  // #8A775F
