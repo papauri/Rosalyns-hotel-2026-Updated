@@ -331,6 +331,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
 
         error_log("Conference enquiry submitted successfully from: " . $sanitized_data['email'] . " with reference: " . $inquiry_reference);
+
+        // Redirect to dedicated confirmation page
+        header('Location: conference-confirmation.php?ref=' . urlencode($inquiry_reference));
+        exit;
     } catch (\Throwable $e) {
         $inquiry_error = $e->getMessage();
         error_log('Conference inquiry error: ' . $e->getMessage() . ' in ' . $e->getFile() . ':' . $e->getLine());

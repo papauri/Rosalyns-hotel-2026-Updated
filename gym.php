@@ -253,6 +253,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['gym_booking_form'])) 
             }
 
             error_log("Gym booking submitted successfully from: " . $sanitized_data['email'] . " with reference: " . $bookingReference);
+
+            // Redirect to dedicated confirmation page
+            header('Location: gym-confirmation.php?ref=' . urlencode($bookingReference));
+            exit;
         } // end if (!empty($validation_errors)) else
     } // end CSRF/rate-limit else block
 }
