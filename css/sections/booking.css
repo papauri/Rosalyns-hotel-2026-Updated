@@ -2480,21 +2480,13 @@
 
 .booking-sidebar {
     position: sticky;
-    top: 90px;
-    /* align-self:start ensures the sidebar column height equals its
-       content, not the taller form column — sticky needs this */
+    top: clamp(90px, 10vw, 108px);     /* tracks header height across breakpoints */
+    /* align-self:start keeps the sidebar cell at content height (not
+       stretched to the form column height) — required for sticky */
     align-self: start;
-    max-height: calc(100vh - 110px);   /* never taller than the viewport */
-    overflow-y: auto;
-    /* Hide scrollbar on sidebar; scroll is purely functional */
-    scrollbar-width: none;
     display: flex;
     flex-direction: column;
     gap: 0;
-}
-
-.booking-sidebar::-webkit-scrollbar {
-    display: none;
 }
 
 .booking-sidebar .booking-summary {
@@ -2930,8 +2922,6 @@
         position: static;
         order: 2;
         margin-top: 32px;
-        max-height: none;
-        overflow-y: visible;
         align-self: auto;
     }
 
