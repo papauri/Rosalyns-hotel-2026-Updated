@@ -1843,14 +1843,37 @@ try {
         }
 
         // ── Graceful section-to-section scroll ────────────────────────────
+        // Custom RAF easing — cubic ease-in-out, ~900ms — far smoother than
+        // the browser's default behavior:'smooth' which often feels snappy.
         function scrollToSection(el, delay) {
             if (!el) return;
             setTimeout(function () {
                 const headerEl = document.querySelector('header') || document.querySelector('.site-header');
-                const offset   = (headerEl ? headerEl.offsetHeight : 80) + 24;
-                const top      = el.getBoundingClientRect().top + window.pageYOffset - offset;
-                window.scrollTo({ top: Math.max(0, top), behavior: 'smooth' });
-            }, delay || 320);
+                const offset   = (headerEl ? headerEl.offsetHeight : 80) + 32;
+                const targetY  = Math.max(0, el.getBoundingClientRect().top + window.pageYOffset - offset);
+                const startY   = window.pageYOffset;
+                const dist     = targetY - startY;
+
+                if (Math.abs(dist) < 8) return; // already there
+
+                // Duration scales with distance; cap between 640ms – 1100ms
+                const duration = Math.min(1100, Math.max(640, Math.abs(dist) * 0.75));
+                let startTime  = null;
+
+                function easeInOutCubic(t) {
+                    return t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
+                }
+
+                function tick(now) {
+                    if (!startTime) startTime = now;
+                    const elapsed  = now - startTime;
+                    const progress = Math.min(elapsed / duration, 1);
+                    window.scrollTo(0, startY + dist * easeInOutCubic(progress));
+                    if (progress < 1) requestAnimationFrame(tick);
+                }
+
+                requestAnimationFrame(tick);
+            }, delay || 280);
         }
 
         // Reveal room selection section once both dates are set
@@ -2091,6 +2114,10 @@ try {
             bookingTypeRadios.forEach(radio => {
                 radio.addEventListener('change', function() {
                     selectBookingType(this.value);
+                    // Scroll to the summary/submit area so the user sees it appear
+                    const bottomSection = document.querySelector('.booking-bottom-section')
+                                       || document.querySelector('.booking-action-bar');
+                    scrollToSection(bottomSection, 520);
                 });
             });
 
@@ -3372,6 +3399,34 @@ try {
             }
         }
 
+        // ── Guest info completion → scroll to booking type ────────────────
+        // Fires once when all three required fields become valid, then resets
+        // if the user invalidates a field so it can fire again if needed.
+        var _guestScrollFired = false;
+        function checkGuestInfoComplete() {
+            const n = document.getElementById('guest_name');
+            const e = document.getElementById('guest_email');
+            const p = document.getElementById('guest_phone');
+            const allValid = n && e && p
+                && n.classList.contains('is-valid')
+                && e.classList.contains('is-valid')
+                && p.classList.contains('is-valid');
+
+            if (allValid && !_guestScrollFired) {
+                _guestScrollFired = true;
+                // Target the Booking Type panel (right panel inside form-sections-row,
+                // or the entire row on mobile where they stack vertically)
+                const bookingTypeSection =
+                    document.querySelector('.booking-type-selection')?.closest('.form-section')
+                    || document.querySelector('[name="booking_type"]')?.closest('.form-section')
+                    || document.querySelector('.form-sections-row');
+                scrollToSection(bookingTypeSection, 480);
+            } else if (!allValid) {
+                // Reset so it fires again if the user fixes a field after invalidating
+                _guestScrollFired = false;
+            }
+        }
+
         // Instant field validation for better UX
         function initInstantValidation() {
             const nameInput = document.getElementById('guest_name');
@@ -3382,9 +3437,11 @@ try {
             if (nameInput) {
                 nameInput.addEventListener('input', function() {
                     validateNameField(this);
+                    checkGuestInfoComplete();
                 });
                 nameInput.addEventListener('blur', function() {
                     validateNameField(this);
+                    checkGuestInfoComplete();
                 });
             }
 
@@ -3392,9 +3449,11 @@ try {
             if (emailInput) {
                 emailInput.addEventListener('input', function() {
                     validateEmailField(this);
+                    checkGuestInfoComplete();
                 });
                 emailInput.addEventListener('blur', function() {
                     validateEmailField(this);
+                    checkGuestInfoComplete();
                 });
             }
 
@@ -3402,9 +3461,11 @@ try {
             if (phoneInput) {
                 phoneInput.addEventListener('input', function() {
                     validatePhoneField(this);
+                    checkGuestInfoComplete();
                 });
                 phoneInput.addEventListener('blur', function() {
                     validatePhoneField(this);
+                    checkGuestInfoComplete();
                 });
             }
         }
