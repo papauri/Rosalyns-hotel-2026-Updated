@@ -3,20 +3,50 @@
    Modern, airy hotel confirmation — Rosalyn's Hotel 2026
    ============================================================ */
 
-/* Page background */
+/* Page background + header offset fix
+   The base `main` rule adds padding-top for the fixed header, but our
+   padding shorthand below would override it. We restore it with calc(). */
 .confirmation-page main {
     background: #F7F3EE;
     min-height: 100vh;
-    padding: clamp(32px, 6vw, 80px) 16px clamp(48px, 8vw, 96px);
+    padding-top: calc(var(--header-height-mobile, var(--header-height, 80px)) + clamp(24px, 4vw, 48px));
+    padding-inline: 16px;
+    padding-bottom: clamp(48px, 8vw, 96px);
 }
 
-/* ── Centre column ── */
+/* ── Centre column — wide on large screens ── */
 .conf-wrap {
-    max-width: 620px;
+    max-width: 960px;
     margin: 0 auto;
     display: flex;
     flex-direction: column;
     gap: 16px;
+}
+
+/* ── 2-col body grid (desktop) ── */
+.conf-body-grid {
+    display: contents; /* mobile: children flow as direct flex items of .conf-wrap */
+}
+
+.conf-col-main,
+.conf-col-aside {
+    display: contents; /* mobile: cards flow flat in the column */
+}
+
+@media (min-width: 860px) {
+    .conf-body-grid {
+        display: grid;
+        grid-template-columns: 1fr 320px;
+        gap: 16px;
+        align-items: start;
+    }
+
+    .conf-col-main,
+    .conf-col-aside {
+        display: flex;
+        flex-direction: column;
+        gap: 16px;
+    }
 }
 
 /* ── Hero (icon + heading + subtitle) ── */
