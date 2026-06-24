@@ -133,39 +133,38 @@
 }
 
 .booking-summary h3 {
-    font-family: var(--font-serif, 'Cormorant Garamond', serif);
-    font-size: var(--text-xl, 1.25rem);
-    font-weight: 600;
-    color: var(--color-text-primary, #1A1A1A);
-    margin-bottom: var(--spacing-md, 16px);
-    padding-bottom: var(--spacing-sm, 8px);
+    font-family: var(--font-sans, 'Jost', sans-serif);
+    font-size: 0.75rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.12em;
+    color: var(--color-text-secondary, #6B5740);
+    margin-bottom: 18px;
+    padding-bottom: 14px;
     border-bottom: 1px solid rgba(139, 115, 85, 0.15);
     display: flex;
     align-items: center;
-    gap: var(--space-2, 0.5rem);
-    position: relative;
-    letter-spacing: 0.01em;
+    gap: 10px;
+    position: static;
 }
 
-.booking-summary h3::before {
-    content: '';
+.booking-summary h3 i {
     width: 28px;
     height: 28px;
     background: linear-gradient(135deg, var(--color-primary, #8B7355), var(--gold, #C9A961));
-    border-radius: 8px;
-    display: flex;
+    border-radius: 7px;
+    display: inline-flex;
     align-items: center;
     justify-content: center;
-    font-size: 14px;
-    box-shadow: 0 2px 6px rgba(139, 115, 85, 0.25);
+    font-size: 12px;
+    color: #fff;
+    flex-shrink: 0;
+    box-shadow: 0 2px 6px rgba(139, 115, 85, 0.3);
 }
 
+.booking-summary h3::before,
 .booking-summary h3::after {
-    content: '📋';
-    position: absolute;
-    left: 0;
-    font-size: 14px;
-    filter: drop-shadow(0 1px 1px rgba(0, 0, 0, 0.1));
+    display: none;
 }
 
 .summary-row {
@@ -521,10 +520,6 @@
         border-radius: var(--radius-md, 12px);
     }
 
-    .booking-summary h3 {
-        font-size: var(--text-lg, 1.125rem);
-    }
-
     .summary-row {
         padding: var(--spacing-sm, 8px) 10px;
         margin: 0 -10px;
@@ -562,11 +557,6 @@
     .booking-summary {
         padding: var(--spacing-sm, 16px);
         margin-bottom: var(--spacing-sm, 16px);
-    }
-
-    .booking-summary h3 {
-        font-size: var(--text-base, 1rem);
-        margin-bottom: var(--spacing-sm, 12px);
     }
 
     .summary-row {
@@ -659,20 +649,9 @@
     }
 
     .booking-summary h3 {
-        font-size: var(--text-lg, 1.125rem);
-        margin-bottom: var(--spacing-sm, 12px);
-        padding-bottom: var(--space-2, 6px);
-    }
-
-    .booking-summary h3::before {
-        width: 24px;
-        height: 24px;
-        border-radius: 6px;
-        font-size: 12px;
-    }
-
-    .booking-summary h3::after {
-        font-size: 12px;
+        font-size: 0.75rem;
+        margin-bottom: 14px;
+        padding-bottom: 10px;
     }
 
     .summary-row {
@@ -2511,7 +2490,7 @@
     border-radius: 16px 16px 0 0;
     margin-bottom: 0;
     border-bottom: none;
-    display: block !important;
+    /* JS controls display; no !important override */
 }
 
 .booking-sidebar .btn-submit {
@@ -2523,6 +2502,104 @@
     border-radius: 0;
     margin: 0;
     border-top: none;
+}
+
+/* ── Sidebar empty state ─────────────────── */
+
+.booking-sidebar__empty {
+    background: linear-gradient(145deg, #FAF8F5 0%, #F5F3F0 100%);
+    border: 1px solid rgba(139, 115, 85, 0.15);
+    border-bottom: none;
+    border-radius: 16px 16px 0 0;
+    padding: 28px 24px 24px;
+    text-align: center;
+    position: relative;
+    overflow: hidden;
+}
+
+.booking-sidebar__empty::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 3px;
+    background: linear-gradient(90deg, var(--color-primary, #8B7355), var(--gold, #C9A961), var(--color-primary, #8B7355));
+    opacity: 0.6;
+}
+
+.sidebar-empty-icon {
+    width: 52px;
+    height: 52px;
+    margin: 0 auto 14px;
+    background: linear-gradient(135deg, rgba(139, 115, 85, 0.1), rgba(201, 169, 97, 0.08));
+    border: 1.5px solid rgba(139, 115, 85, 0.2);
+    border-radius: 14px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 22px;
+    color: var(--color-primary, #8B7355);
+}
+
+.booking-sidebar__empty h4 {
+    font-family: var(--font-sans, 'Jost', sans-serif);
+    font-size: 0.875rem;
+    font-weight: 600;
+    color: var(--color-text-primary, #1A1A1A);
+    margin-bottom: 8px;
+    letter-spacing: 0.01em;
+}
+
+.booking-sidebar__empty p {
+    font-size: 0.8rem;
+    color: var(--color-text-secondary, #6B5740);
+    line-height: 1.55;
+    margin: 0;
+}
+
+.booking-sidebar__empty-steps {
+    margin-top: 18px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    text-align: left;
+}
+
+.sidebar-empty-step {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-size: 0.78rem;
+    color: var(--color-text-secondary, #6B5740);
+}
+
+.sidebar-empty-step span.step-num {
+    width: 20px;
+    height: 20px;
+    min-width: 20px;
+    background: rgba(139, 115, 85, 0.12);
+    border-radius: 50%;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 0.65rem;
+    font-weight: 700;
+    color: var(--color-primary, #8B7355);
+}
+
+/* Smooth fade for summary appearance */
+.booking-summary {
+    animation: none;
+}
+
+.booking-summary.is-visible {
+    animation: summaryFadeIn 0.35s ease forwards;
+}
+
+@keyframes summaryFadeIn {
+    from { opacity: 0; transform: translateY(-6px); }
+    to   { opacity: 1; transform: translateY(0); }
 }
 
 /* ── Enhanced booking header ─────────────── */

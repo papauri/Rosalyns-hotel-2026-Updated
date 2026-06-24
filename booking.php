@@ -1442,7 +1442,18 @@ try {
                 </div><!-- /.booking-form-column -->
 
                 <aside class="booking-sidebar">
-                <!-- Booking Summary -->
+                <!-- Empty state — shown before guest selects dates + room -->
+                <div class="booking-sidebar__empty" id="bookingSidebarEmpty">
+                    <div class="sidebar-empty-icon"><i class="fas fa-clipboard-list"></i></div>
+                    <h4>Your Booking Summary</h4>
+                    <p>Complete the steps on the left to see your full booking details here.</p>
+                    <div class="booking-sidebar__empty-steps">
+                        <div class="sidebar-empty-step"><span class="step-num">1</span> Select your dates</div>
+                        <div class="sidebar-empty-step"><span class="step-num">2</span> Choose a room</div>
+                        <div class="sidebar-empty-step"><span class="step-num">3</span> Enter guest details</div>
+                    </div>
+                </div>
+                <!-- Booking Summary (populated + shown by JS) -->
                 <div class="booking-summary" id="bookingSummary">
                     <h3><i class="fas fa-receipt"></i> Booking Summary</h3>
 
@@ -3583,6 +3594,34 @@ try {
             submitBtn.innerHTML = btnText;
             submitBtn.style.opacity = btnDisabled ? '0.6' : '1';
         };
+
+        // ── Sidebar empty state toggle ─────────────────────────────────────────
+        // Watch the summary div for JS-driven display changes and toggle the
+        // empty state placeholder accordingly. Also trigger fade-in animation.
+        (function () {
+            const summaryEl   = document.getElementById('bookingSummary');
+            const emptyEl     = document.getElementById('bookingSidebarEmpty');
+            if (!summaryEl || !emptyEl) return;
+
+            function syncState() {
+                const visible = summaryEl.style.display === 'block';
+                emptyEl.style.display  = visible ? 'none' : 'block';
+                if (visible) {
+                    summaryEl.classList.remove('is-visible');
+                    // Trigger reflow so the animation restarts cleanly
+                    void summaryEl.offsetWidth;
+                    summaryEl.classList.add('is-visible');
+                } else {
+                    summaryEl.classList.remove('is-visible');
+                }
+            }
+
+            new MutationObserver(syncState)
+                .observe(summaryEl, { attributes: true, attributeFilter: ['style'] });
+
+            // Run once on load in case JS already set display before observer attaches
+            syncState();
+        })();
     </script>
 
     <?php include 'includes/footer.php'; ?>
