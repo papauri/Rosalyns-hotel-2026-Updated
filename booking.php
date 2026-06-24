@@ -1122,8 +1122,7 @@ try {
                 <?php showAlert($error_message, 'error'); ?>
             <?php endif; ?>
 
-            <div class="booking-layout">
-                <div class="booking-form-column">
+            <div class="booking-form-wrapper">
                 <form method="POST" action="<?php echo htmlspecialchars($_SERVER['PHP_SELF']); ?>" class="booking-form-card" id="bookingForm">
                 <?php
                 // Per-render idempotency token. Survives double-clicks, refresh-resubmit,
@@ -1308,7 +1307,9 @@ try {
                     </div>
                 </div>
 
-                <!-- Guest Details -->
+                <!-- Guest Details + Booking Type: side-by-side on desktop -->
+                <div class="form-sections-row">
+
                 <div class="form-section form-section--step" id="guestDetailsSection">
                     <h3 class="form-section-title"><i class="fas fa-users"></i> Guest Details</h3>
                     <div class="form-group">
@@ -1424,6 +1425,8 @@ try {
                     <?php endif; ?>
                 </div>
 
+                </div><!-- /.form-sections-row -->
+
                 <!-- Rate Plan Badge (shown via JS when a discount/surcharge is active) -->
                 <div class="form-section" id="ratePlanSection" style="display:none;">
                     <div id="ratePlanBadge" class="rate-plan-badge"></div>
@@ -1439,111 +1442,117 @@ try {
                 </div>
 
                 </form>
-                </div><!-- /.booking-form-column -->
 
-                <aside class="booking-sidebar">
-                <!-- Empty state — shown before guest selects dates + room -->
-                <div class="booking-sidebar__empty" id="bookingSidebarEmpty">
-                    <div class="sidebar-empty-icon"><i class="fas fa-clipboard-list"></i></div>
-                    <h4>Your Booking Summary</h4>
-                    <p>Complete the steps on the left to see your full booking details here.</p>
-                    <div class="booking-sidebar__empty-steps">
-                        <div class="sidebar-empty-step"><span class="step-num">1</span> Select your dates</div>
-                        <div class="sidebar-empty-step"><span class="step-num">2</span> Choose a room</div>
-                        <div class="sidebar-empty-step"><span class="step-num">3</span> Enter guest details</div>
-                    </div>
-                </div>
-                <!-- Booking Summary (populated + shown by JS) -->
-                <div class="booking-summary" id="bookingSummary">
-                    <h3><i class="fas fa-receipt"></i> Booking Summary</h3>
+                <!-- ── Booking Bottom: summary + submit (below the form) ──── -->
+                <div class="booking-bottom-section">
 
-                    <!-- Booking Type Badge -->
-                    <div class="summary-badge" id="summaryBookingTypeBadge">
-                        <i class="fas fa-check-circle"></i> <span id="summaryBookingType">Standard Booking</span>
-                    </div>
-
-                    <div class="summary-section">
-                        <h4><i class="fas fa-bed"></i> Room Details</h4>
-                        <div class="summary-row">
-                            <span>Room:</span>
-                            <span id="summaryRoom">-</span>
-                        </div>
-                        <div class="summary-row">
-                            <span>Rate Type:</span>
-                            <span id="summaryOccupancyType">-</span>
-                        </div>
-                        <div class="summary-row">
-                            <span>Rate per Night:</span>
-                            <span id="summaryRatePerNight">-</span>
+                    <!-- Empty state (hidden once summary is populated) -->
+                    <div class="booking-bottom-empty" id="bookingSidebarEmpty">
+                        <div class="bottom-empty-inner">
+                            <div class="sidebar-empty-icon"><i class="fas fa-clipboard-list"></i></div>
+                            <div>
+                                <h4>Almost there!</h4>
+                                <p>Select your dates, a room, and enter your guest details to see your full booking summary here.</p>
+                            </div>
                         </div>
                     </div>
 
-                    <div class="summary-section">
-                        <h4><i class="fas fa-calendar-alt"></i> Stay Details</h4>
-                        <div class="summary-row">
-                            <span>Check-in:</span>
-                            <span id="summaryCheckIn">-</span>
+                    <!-- Populated summary (shown by JS) -->
+                    <div class="booking-summary" id="bookingSummary">
+                        <div class="summary-top-bar">
+                            <h3><i class="fas fa-receipt"></i> Booking Summary</h3>
+                            <div class="summary-badge" id="summaryBookingTypeBadge">
+                                <i class="fas fa-check-circle"></i> <span id="summaryBookingType">Standard Booking</span>
+                            </div>
                         </div>
-                        <div class="summary-row">
-                            <span>Check-out:</span>
-                            <span id="summaryCheckOut">-</span>
-                        </div>
-                        <div class="summary-row">
-                            <span>Number of Nights:</span>
-                            <span id="summaryNights">-</span>
+
+                        <div class="summary-sections-grid">
+                            <div class="summary-section">
+                                <h4><i class="fas fa-bed"></i> Room Details</h4>
+                                <div class="summary-row">
+                                    <span>Room:</span>
+                                    <span id="summaryRoom">-</span>
+                                </div>
+                                <div class="summary-row">
+                                    <span>Rate Type:</span>
+                                    <span id="summaryOccupancyType">-</span>
+                                </div>
+                                <div class="summary-row">
+                                    <span>Rate per Night:</span>
+                                    <span id="summaryRatePerNight">-</span>
+                                </div>
+                            </div>
+
+                            <div class="summary-section">
+                                <h4><i class="fas fa-calendar-alt"></i> Stay Details</h4>
+                                <div class="summary-row">
+                                    <span>Check-in:</span>
+                                    <span id="summaryCheckIn">-</span>
+                                </div>
+                                <div class="summary-row">
+                                    <span>Check-out:</span>
+                                    <span id="summaryCheckOut">-</span>
+                                </div>
+                                <div class="summary-row">
+                                    <span>Nights:</span>
+                                    <span id="summaryNights">-</span>
+                                </div>
+                            </div>
+
+                            <div class="summary-section">
+                                <h4><i class="fas fa-users"></i> Guest Details</h4>
+                                <div class="summary-row">
+                                    <span>Guests:</span>
+                                    <span id="summaryGuests">-</span>
+                                </div>
+                                <div class="summary-row" id="summaryChildChargeRow" style="display:none;">
+                                    <span>Child Supplement:</span>
+                                    <span id="summaryChildCharge">-</span>
+                                </div>
+                            </div>
+
+                            <div class="summary-section summary-total">
+                                <h4><i class="fas fa-receipt"></i> Total</h4>
+                                <div class="summary-row" id="summaryRatePlanRow" style="display:none;">
+                                    <span id="summaryRatePlanLabel">Special Rate:</span>
+                                    <span id="summaryRatePlanValue" class="summary-discount"></span>
+                                </div>
+                                <div class="summary-row" id="summaryPackageTotalRow" style="display:none;">
+                                    <span>Packages:</span>
+                                    <span id="summaryPackageTotal">-</span>
+                                </div>
+                                <div class="summary-row summary-row--total">
+                                    <span>Total Amount:</span>
+                                    <span id="summaryTotal">-</span>
+                                </div>
+                                <div class="summary-note" id="summaryTourismLevyNote" style="display:none;">
+                                    <i class="fas fa-percent"></i> <span id="tourismLevyText"></span>
+                                </div>
+                                <div class="summary-note" id="summaryNote">
+                                    <i class="fas fa-info-circle"></i> Payment on confirmation
+                                </div>
+                            </div>
+                        </div><!-- /.summary-sections-grid -->
+                    </div><!-- /#bookingSummary -->
+
+                    <!-- Submit + trust -->
+                    <div class="booking-action-bar">
+                        <button type="submit" class="btn-submit" form="bookingForm">
+                            <i class="fas fa-check-circle"></i> Confirm Booking
+                        </button>
+                        <p class="booking-footer-info">
+                            <i class="fas fa-info-circle"></i> <?php echo htmlspecialchars($payment_policy); ?>
+                        </p>
+                        <div class="booking-trust-row">
+                            <div class="trust-badge"><i class="fas fa-lock"></i> SSL Secured</div>
+                            <div class="trust-badge"><i class="fas fa-check-circle"></i> No Hidden Fees</div>
+                            <div class="trust-badge"><i class="fas fa-headset"></i> 24/7 Support</div>
+                            <div class="trust-badge"><i class="fas fa-phone-alt"></i> Call to Book</div>
                         </div>
                     </div>
 
-                    <div class="summary-section">
-                        <h4><i class="fas fa-users"></i> Guest Details</h4>
-                        <div class="summary-row">
-                            <span>Guests:</span>
-                            <span id="summaryGuests">-</span>
-                        </div>
-                        <div class="summary-row" id="summaryChildChargeRow" style="display:none;">
-                            <span>Child Supplement:</span>
-                            <span id="summaryChildCharge">-</span>
-                        </div>
-                    </div>
-
-                    <div class="summary-section summary-total">
-                        <div class="summary-row" id="summaryRatePlanRow" style="display:none;">
-                            <span id="summaryRatePlanLabel">Special Rate:</span>
-                            <span id="summaryRatePlanValue" class="summary-discount"></span>
-                        </div>
-                        <div class="summary-row" id="summaryPackageTotalRow" style="display:none;">
-                            <span>Packages:</span>
-                            <span id="summaryPackageTotal">-</span>
-                        </div>
-                        <div class="summary-row summary-row--total">
-                            <span>Total Amount:</span>
-                            <span id="summaryTotal">-</span>
-                        </div>
-                        <div class="summary-note" id="summaryTourismLevyNote" style="display:none;">
-                            <i class="fas fa-percent"></i> <span id="tourismLevyText"></span>
-                        </div>
-                        <div class="summary-note" id="summaryNote">
-                            <i class="fas fa-info-circle"></i> Payment details will be provided upon confirmation
-                        </div>
-                    </div>
-                </div>
-
-                <button type="submit" class="btn-submit" form="bookingForm">
-                    <i class="fas fa-check-circle"></i> Confirm Booking
-                </button>
-
-                <p class="booking-footer-info">
-                    <i class="fas fa-info-circle"></i> <?php echo htmlspecialchars($payment_policy); ?>
-                </p>
-
-                <div class="booking-sidebar__trust">
-                    <div class="trust-badge"><i class="fas fa-lock"></i> SSL Secured</div>
-                    <div class="trust-badge"><i class="fas fa-check-circle"></i> No Hidden Fees</div>
-                    <div class="trust-badge"><i class="fas fa-headset"></i> 24/7 Support</div>
-                    <div class="trust-badge"><i class="fas fa-phone-alt"></i> Call to Book</div>
-                </div>
-                </aside><!-- /.booking-sidebar -->
-            </div><!-- /.booking-layout -->
+                </div><!-- /.booking-bottom-section -->
+            </div><!-- /.booking-form-wrapper -->
         </div>
     </main>
 
