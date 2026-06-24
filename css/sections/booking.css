@@ -3813,3 +3813,306 @@
     font-weight: 400;
     letter-spacing: 0.015em;
 }
+
+
+/* ── BOOKING SUMMARY COMPLETE REDESIGN ───────────────────────────────
+   Replaces the broken 4-column equal grid with a clean vertical layout.
+   All JS IDs preserved. Old .summary-sections-grid is hidden.
+   ──────────────────────────────────────────────────────────────────── */
+
+/* Hide the old grid — new structure renders outside it */
+.summary-sections-grid { display: none !important; }
+
+/* Summary wrapper gets padding from its parent card */
+.booking-page #bookingSummary {
+    padding: 24px 28px 20px;
+}
+
+/* ── Top bar ── */
+.bsum-topbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    margin-bottom: 20px;
+    padding-bottom: 16px;
+    border-bottom: 1px solid rgba(139,115,85,0.1);
+    flex-wrap: wrap;
+}
+
+.bsum-title {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-family: 'Jost', sans-serif;
+    font-size: 0.72rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.12em;
+    color: #6B5740;
+}
+
+.bsum-title-icon {
+    width: 28px;
+    height: 28px;
+    background: linear-gradient(135deg, #8B7355, #C9A961);
+    border-radius: 7px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: #fff;
+    font-size: 11px;
+    flex-shrink: 0;
+    box-shadow: 0 2px 6px rgba(139,115,85,0.3);
+}
+
+.bsum-type-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 5px 14px;
+    border-radius: 100px;
+    background: rgba(201,169,97,0.1);
+    border: 1px solid rgba(201,169,97,0.3);
+    color: #7A5C2E;
+    font-family: 'Jost', sans-serif;
+    font-size: 0.75rem;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+    white-space: nowrap;
+}
+
+/* ── Room hero ── */
+.bsum-room-hero {
+    margin-bottom: 18px;
+    padding-bottom: 18px;
+    border-bottom: 1px solid rgba(139,115,85,0.08);
+}
+
+.bsum-room-name {
+    font-family: 'Cormorant Garamond', serif;
+    font-size: 1.45rem;
+    font-weight: 500;
+    color: #1A1A1A;
+    line-height: 1.2;
+    margin-bottom: 6px;
+    letter-spacing: 0.01em;
+}
+
+.bsum-room-meta {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+    font-family: 'Jost', sans-serif;
+    font-size: 0.8rem;
+    color: #7A6A58;
+}
+
+.bsum-room-meta strong {
+    color: #8B7355;
+    font-weight: 700;
+}
+
+.bsum-per-night {
+    color: #9B8A72;
+    font-size: 0.72rem;
+}
+
+.bsum-meta-dot {
+    color: rgba(139,115,85,0.25);
+    font-size: 1.1rem;
+    line-height: 1;
+}
+
+/* ── Dates row ── */
+.bsum-dates-row {
+    display: grid;
+    grid-template-columns: 1fr auto 1fr;
+    align-items: center;
+    gap: 12px;
+    padding: 16px 0;
+    border-bottom: 1px solid rgba(139,115,85,0.08);
+    margin-bottom: 0;
+}
+
+.bsum-date-block {
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+}
+
+.bsum-date-block--out {
+    align-items: flex-end;
+    text-align: right;
+}
+
+.bsum-date-label {
+    font-family: 'Jost', sans-serif;
+    font-size: 0.66rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    color: #9B8A72;
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    white-space: nowrap;
+}
+
+.bsum-date-block--out .bsum-date-label {
+    justify-content: flex-end;
+}
+
+.bsum-date-val {
+    font-family: 'Cormorant Garamond', serif;
+    font-size: 1.0rem;
+    font-weight: 500;
+    color: #1A1A1A;
+    line-height: 1.25;
+    white-space: nowrap;
+}
+
+.bsum-nights-badge {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    background: linear-gradient(145deg, rgba(139,115,85,0.07), rgba(201,169,97,0.09));
+    border: 1px solid rgba(139,115,85,0.18);
+    border-radius: 12px;
+    padding: 10px 18px;
+    min-width: 68px;
+    text-align: center;
+}
+
+.bsum-nights-num {
+    font-family: 'Cormorant Garamond', serif;
+    font-size: 1.6rem;
+    font-weight: 600;
+    color: #8B7355;
+    line-height: 1;
+}
+
+.bsum-nights-lbl {
+    font-family: 'Jost', sans-serif;
+    font-size: 0.6rem;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    color: #9B8A72;
+    margin-top: 2px;
+}
+
+/* ── Guests row ── */
+.bsum-guests-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-family: 'Jost', sans-serif;
+    font-size: 0.84rem;
+    color: #5E504A;
+    padding: 14px 0;
+    border-bottom: 1px solid rgba(139,115,85,0.08);
+}
+
+.bsum-guests-row > i {
+    color: #8B7355;
+    font-size: 13px;
+    flex-shrink: 0;
+}
+
+.bsum-child-charge {
+    color: #9B8A72;
+    font-size: 0.78rem;
+}
+
+/* ── Detail rows (packages / rate plan) ── */
+.bsum-detail-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    padding: 9px 0;
+    border-bottom: 1px solid rgba(139,115,85,0.07);
+    font-family: 'Jost', sans-serif;
+    font-size: 0.8rem;
+    color: #7A6A58;
+}
+
+/* ── Total block ── */
+.bsum-total-block {
+    display: flex;
+    align-items: flex-end;
+    justify-content: space-between;
+    gap: 16px;
+    padding-top: 16px;
+    margin-top: 4px;
+    flex-wrap: wrap;
+}
+
+.bsum-total-label {
+    font-family: 'Jost', sans-serif;
+    font-size: 0.68rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.11em;
+    color: #6B5740;
+    margin-bottom: 5px;
+}
+
+.bsum-total-note {
+    font-family: 'Jost', sans-serif;
+    font-size: 0.72rem;
+    color: #9B8A72;
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    line-height: 1.4;
+}
+
+.bsum-total-note--levy {
+    margin-top: 3px;
+}
+
+.bsum-total-amount {
+    font-family: 'Cormorant Garamond', serif;
+    font-size: 2.1rem;
+    font-weight: 700;
+    color: #8B7355;
+    line-height: 1;
+    letter-spacing: -0.01em;
+    white-space: nowrap;
+}
+
+/* ── Responsive ── */
+@media (max-width: 600px) {
+    .booking-page #bookingSummary {
+        padding: 18px 16px 16px;
+    }
+    .bsum-dates-row {
+        grid-template-columns: 1fr;
+        gap: 10px;
+    }
+    .bsum-date-block--out {
+        align-items: flex-start;
+        text-align: left;
+    }
+    .bsum-date-block--out .bsum-date-label {
+        justify-content: flex-start;
+    }
+    .bsum-nights-badge {
+        flex-direction: row;
+        gap: 6px;
+        padding: 8px 14px;
+        justify-content: flex-start;
+        width: fit-content;
+    }
+    .bsum-total-amount {
+        font-size: 1.65rem;
+    }
+    .bsum-total-block {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 6px;
+    }
+}

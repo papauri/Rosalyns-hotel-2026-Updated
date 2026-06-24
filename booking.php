@@ -1459,80 +1459,76 @@ try {
 
                     <!-- Populated summary (shown by JS) -->
                     <div class="booking-summary" id="bookingSummary">
-                        <div class="summary-top-bar">
-                            <h3><i class="fas fa-receipt"></i> Booking Summary</h3>
-                            <div class="summary-badge" id="summaryBookingTypeBadge">
-                                <i class="fas fa-check-circle"></i> <span id="summaryBookingType">Standard Booking</span>
+
+                        <!-- ── Top bar ── -->
+                        <div class="bsum-topbar">
+                            <div class="bsum-title">
+                                <span class="bsum-title-icon"><i class="fas fa-receipt"></i></span>
+                                <span>Booking Summary</span>
+                            </div>
+                            <div class="bsum-type-badge" id="summaryBookingTypeBadge">
+                                <i class="fas fa-check-circle"></i>
+                                <span id="summaryBookingType">Standard Booking</span>
                             </div>
                         </div>
 
-                        <div class="summary-sections-grid">
-                            <div class="summary-section">
-                                <h4><i class="fas fa-bed"></i> Room Details</h4>
-                                <div class="summary-row">
-                                    <span>Room:</span>
-                                    <span id="summaryRoom">-</span>
-                                </div>
-                                <div class="summary-row">
-                                    <span>Rate Type:</span>
-                                    <span id="summaryOccupancyType">-</span>
-                                </div>
-                                <div class="summary-row">
-                                    <span>Rate per Night:</span>
-                                    <span id="summaryRatePerNight">-</span>
-                                </div>
+                        <!-- ── Room hero ── -->
+                        <div class="bsum-room-hero">
+                            <div class="bsum-room-name" id="summaryRoom">—</div>
+                            <div class="bsum-room-meta">
+                                <span class="bsum-rate-type" id="summaryOccupancyType"></span>
+                                <span class="bsum-meta-dot">·</span>
+                                <span class="bsum-rate-night"><strong id="summaryRatePerNight"></strong><span class="bsum-per-night"> / night</span></span>
                             </div>
+                        </div>
 
-                            <div class="summary-section">
-                                <h4><i class="fas fa-calendar-alt"></i> Stay Details</h4>
-                                <div class="summary-row">
-                                    <span>Check-in:</span>
-                                    <span id="summaryCheckIn">-</span>
-                                </div>
-                                <div class="summary-row">
-                                    <span>Check-out:</span>
-                                    <span id="summaryCheckOut">-</span>
-                                </div>
-                                <div class="summary-row">
-                                    <span>Nights:</span>
-                                    <span id="summaryNights">-</span>
-                                </div>
+                        <!-- ── Dates + nights ── -->
+                        <div class="bsum-dates-row">
+                            <div class="bsum-date-block">
+                                <div class="bsum-date-label"><i class="fas fa-sign-in-alt"></i> Check-in</div>
+                                <div class="bsum-date-val" id="summaryCheckIn">—</div>
                             </div>
-
-                            <div class="summary-section">
-                                <h4><i class="fas fa-users"></i> Guest Details</h4>
-                                <div class="summary-row">
-                                    <span>Guests:</span>
-                                    <span id="summaryGuests">-</span>
-                                </div>
-                                <div class="summary-row" id="summaryChildChargeRow" style="display:none;">
-                                    <span>Child Supplement:</span>
-                                    <span id="summaryChildCharge">-</span>
-                                </div>
+                            <div class="bsum-nights-badge">
+                                <span class="bsum-nights-num" id="summaryNights">—</span>
+                                <span class="bsum-nights-lbl">night</span>
                             </div>
+                            <div class="bsum-date-block bsum-date-block--out">
+                                <div class="bsum-date-label"><i class="fas fa-sign-out-alt"></i> Check-out</div>
+                                <div class="bsum-date-val" id="summaryCheckOut">—</div>
+                            </div>
+                        </div>
 
-                            <div class="summary-section summary-total">
-                                <h4><i class="fas fa-receipt"></i> Total</h4>
-                                <div class="summary-row" id="summaryRatePlanRow" style="display:none;">
-                                    <span id="summaryRatePlanLabel">Special Rate:</span>
-                                    <span id="summaryRatePlanValue" class="summary-discount"></span>
-                                </div>
-                                <div class="summary-row" id="summaryPackageTotalRow" style="display:none;">
-                                    <span>Packages:</span>
-                                    <span id="summaryPackageTotal">-</span>
-                                </div>
-                                <div class="summary-row summary-row--total">
-                                    <span>Total Amount:</span>
-                                    <span id="summaryTotal">-</span>
-                                </div>
-                                <div class="summary-note" id="summaryTourismLevyNote" style="display:none;">
-                                    <i class="fas fa-percent"></i> <span id="tourismLevyText"></span>
-                                </div>
-                                <div class="summary-note" id="summaryNote">
+                        <!-- ── Guests ── -->
+                        <div class="bsum-guests-row">
+                            <i class="fas fa-users"></i>
+                            <span id="summaryGuests">—</span>
+                            <span id="summaryChildChargeRow" style="display:none;" class="bsum-child-charge">·&nbsp;<span id="summaryChildCharge"></span> child supplement</span>
+                        </div>
+
+                        <!-- ── Optional rows (packages / rate plan) ── -->
+                        <div id="summaryRatePlanRow" style="display:none;" class="bsum-detail-row">
+                            <span id="summaryRatePlanLabel">Special Rate</span>
+                            <span id="summaryRatePlanValue" class="summary-discount"></span>
+                        </div>
+                        <div id="summaryPackageTotalRow" style="display:none;" class="bsum-detail-row">
+                            <span>Packages</span>
+                            <span id="summaryPackageTotal"></span>
+                        </div>
+
+                        <!-- ── Total ── -->
+                        <div class="bsum-total-block">
+                            <div class="bsum-total-info">
+                                <div class="bsum-total-label">Total Amount</div>
+                                <div class="bsum-total-note" id="summaryNote">
                                     <i class="fas fa-info-circle"></i> Payment on confirmation
                                 </div>
+                                <div id="summaryTourismLevyNote" style="display:none;" class="bsum-total-note bsum-total-note--levy">
+                                    <i class="fas fa-percent"></i> <span id="tourismLevyText"></span>
+                                </div>
                             </div>
-                        </div><!-- /.summary-sections-grid -->
+                            <div class="bsum-total-amount" id="summaryTotal">—</div>
+                        </div>
+
                     </div><!-- /#bookingSummary -->
 
                     <!-- Submit + trust -->
