@@ -2471,7 +2471,7 @@
     display: grid;
     grid-template-columns: 1fr 380px;
     gap: 32px;
-    align-items: start;
+    align-items: start;         /* required for sticky child to work */
 }
 
 .booking-form-column {
@@ -2481,9 +2481,20 @@
 .booking-sidebar {
     position: sticky;
     top: 90px;
+    /* align-self:start ensures the sidebar column height equals its
+       content, not the taller form column — sticky needs this */
+    align-self: start;
+    max-height: calc(100vh - 110px);   /* never taller than the viewport */
+    overflow-y: auto;
+    /* Hide scrollbar on sidebar; scroll is purely functional */
+    scrollbar-width: none;
     display: flex;
     flex-direction: column;
     gap: 0;
+}
+
+.booking-sidebar::-webkit-scrollbar {
+    display: none;
 }
 
 .booking-sidebar .booking-summary {
@@ -2896,21 +2907,20 @@
 
 /* ── Responsive ──────────────────────────── */
 
-@media (max-width: 1100px) {
+/* Slightly narrower sidebar on large-but-not-huge screens */
+@media (max-width: 1280px) {
     .booking-layout {
         grid-template-columns: 1fr 340px;
-        gap: 24px;
+        gap: 28px;
     }
 }
 
-@media (max-width: 900px) {
-    .booking-layout {
-        grid-template-columns: 1fr 300px;
-        gap: 20px;
-    }
-}
-
-@media (max-width: 768px) {
+/* ── Tablet + Mobile: sidebar moves below form ─────────────────────
+   At ≤1024px the two-column layout is too cramped. The summary card
+   drops to the bottom (order: 2) so guests fill the form first, then
+   review and submit from the summary below.
+   ─────────────────────────────────────────────────────────────────── */
+@media (max-width: 1024px) {
     .booking-layout {
         grid-template-columns: 1fr;
         gap: 0;
@@ -2919,10 +2929,15 @@
     .booking-sidebar {
         position: static;
         order: 2;
-        margin-top: 24px;
+        margin-top: 32px;
+        max-height: none;
+        overflow-y: visible;
+        align-self: auto;
     }
 
-    .booking-sidebar .booking-summary {
+    /* Round all corners on summary/trust when stacked */
+    .booking-sidebar .booking-summary,
+    .booking-sidebar .booking-sidebar__empty {
         border-radius: 16px 16px 0 0;
     }
 
@@ -2930,12 +2945,8 @@
         border-radius: 0 0 16px 16px;
     }
 
-    .booking-page .room-option__thumb {
-        height: 160px;
-    }
-
     .booking-page .booking-type-selection {
-        grid-template-columns: 1fr;
+        grid-template-columns: 1fr 1fr;
     }
 
     .booking-header__trust {
@@ -2943,11 +2954,17 @@
     }
 }
 
-@media (max-width: 480px) {
-    .booking-layout {
-        gap: 0;
+@media (max-width: 768px) {
+    .booking-page .room-option__thumb {
+        height: 160px;
     }
 
+    .booking-page .booking-type-selection {
+        grid-template-columns: 1fr;
+    }
+}
+
+@media (max-width: 480px) {
     .booking-page .room-option__thumb {
         height: 140px;
     }
