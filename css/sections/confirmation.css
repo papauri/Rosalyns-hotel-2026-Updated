@@ -3,41 +3,53 @@
    Modern, airy hotel confirmation — Rosalyn's Hotel 2026
    ============================================================ */
 
-/* Page background + header offset fix
-   The base `main` rule adds padding-top for the fixed header, but our
-   padding shorthand below would override it. We restore it with calc(). */
+/* ── Page shell ──────────────────────────────────────────────────────────────
+   layout.css:34 has: main>div>[class*="hero"]:first-child { margin-top: -80px }
+   which matches .conf-hero because "hero" is in the class name and pulls it
+   behind the fixed navbar. We cancel that here, then add our own top padding.
+   Using !important so no cascade conflict can re-introduce the overlap.        */
 .confirmation-page main {
     background: #F7F3EE;
     min-height: 100vh;
-    padding-top: calc(var(--header-height-mobile, var(--header-height, 80px)) + clamp(24px, 4vw, 48px));
-    padding-inline: 16px;
+    padding-top: clamp(100px, calc(var(--header-height-mobile, var(--header-height, 80px)) + 40px), 160px) !important;
+    padding-left: 16px;
+    padding-right: 16px;
     padding-bottom: clamp(48px, 8vw, 96px);
+}
+
+/* Cancel the negative margin-top that layout.css applies to any [class*="hero"]
+   first-child — it undoes our padding and hides the icon ring behind the navbar */
+.confirmation-page .conf-hero {
+    margin-top: 0 !important;
 }
 
 /* ── Centre column — wide on large screens ── */
 .conf-wrap {
-    max-width: 960px;
+    max-width: 980px;
     margin: 0 auto;
     display: flex;
     flex-direction: column;
-    gap: 16px;
+    gap: 20px;
 }
 
-/* ── 2-col body grid (desktop) ── */
+/* ── 2-col body grid ─────────────────────────────────────────────────────────
+   Mobile: display:contents makes both col wrappers transparent — cards flow
+   as direct flex children of .conf-wrap (single column, natural order).
+   Desktop (≥ 860px): grid with main column + narrow aside.                   */
 .conf-body-grid {
-    display: contents; /* mobile: children flow as direct flex items of .conf-wrap */
+    display: contents;
 }
 
 .conf-col-main,
 .conf-col-aside {
-    display: contents; /* mobile: cards flow flat in the column */
+    display: contents;
 }
 
 @media (min-width: 860px) {
     .conf-body-grid {
         display: grid;
-        grid-template-columns: 1fr 320px;
-        gap: 16px;
+        grid-template-columns: 1fr 300px;
+        gap: 20px;
         align-items: start;
     }
 
@@ -45,14 +57,20 @@
     .conf-col-aside {
         display: flex;
         flex-direction: column;
-        gap: 16px;
+        gap: 20px;
+    }
+}
+
+@media (min-width: 1100px) {
+    .conf-body-grid {
+        grid-template-columns: 1fr 340px;
     }
 }
 
 /* ── Hero (icon + heading + subtitle) ── */
 .conf-hero {
     text-align: center;
-    padding: 0 0 8px;
+    padding: 8px 0 16px;
 }
 
 .conf-icon-ring {
