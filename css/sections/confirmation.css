@@ -569,6 +569,97 @@
     font-weight: 600;
 }
 
+/* ── Occupancy / rate-plan tags ── */
+.conf-stay-tags {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-top: 14px;
+    padding-top: 14px;
+    border-top: 1px solid rgba(139,115,85,0.08);
+}
+
+.conf-stay-tag {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    padding: 4px 12px;
+    border-radius: 100px;
+    background: rgba(139,115,85,0.07);
+    border: 1px solid rgba(139,115,85,0.15);
+    font-family: 'Jost', sans-serif;
+    font-size: 0.74rem;
+    font-weight: 600;
+    color: #6B5740;
+    letter-spacing: 0.03em;
+}
+
+.conf-stay-tag i {
+    font-size: 10px;
+    color: #C9A961;
+}
+
+/* ── Extras & Packages block ── */
+.conf-extras {
+    margin-top: 14px;
+    padding-top: 14px;
+    border-top: 1px solid rgba(139,115,85,0.08);
+}
+
+.conf-extras-title {
+    font-family: 'Jost', sans-serif;
+    font-size: 0.68rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.12em;
+    color: #9B8A72;
+    margin-bottom: 10px;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.conf-extras-title i {
+    color: #C9A961;
+    font-size: 11px;
+}
+
+.conf-extras-row {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 7px 0;
+    border-bottom: 1px solid rgba(139,115,85,0.06);
+    font-family: 'Jost', sans-serif;
+    font-size: 0.82rem;
+}
+
+.conf-extras-row:last-child {
+    border-bottom: none;
+    padding-bottom: 0;
+}
+
+.conf-extras-name {
+    color: #3E3530;
+    font-weight: 500;
+}
+
+.conf-extras-name em {
+    font-style: normal;
+    color: #9B8A72;
+    font-size: 0.75rem;
+    margin-left: 4px;
+}
+
+.conf-extras-cost {
+    font-family: 'Cormorant Garamond', serif;
+    font-size: 1.0rem;
+    font-weight: 600;
+    color: #8B7355;
+    white-space: nowrap;
+}
+
 /* ── Error state ── */
 .conf-error {
     text-align: center;

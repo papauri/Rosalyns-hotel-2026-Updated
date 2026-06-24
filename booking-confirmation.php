@@ -39,6 +39,24 @@ try {
     $error = "Unable to retrieve booking details.";
 }
 
+// Fetch extras / packages for this booking group
+$booking_packages = [];
+if (!isset($error) && !empty($split_bookings)) {
+    try {
+        $bookingIds = array_column($split_bookings, 'id');
+        $placeholders = implode(',', array_fill(0, count($bookingIds), '?'));
+        $pkgStmt = $pdo->prepare(
+            "SELECT package_name, price_type, price_amount, quantity, total_cost
+             FROM booking_packages WHERE booking_id IN ($placeholders)
+             ORDER BY id ASC"
+        );
+        $pkgStmt->execute($bookingIds);
+        $booking_packages = $pkgStmt->fetchAll(PDO::FETCH_ASSOC);
+    } catch (PDOException $e) {
+        error_log("Confirmation page: packages query error: " . $e->getMessage());
+    }
+}
+
 $site_name = getSetting('site_name');
 $currency_symbol = getSetting('currency_symbol');
 $phone_main = getSetting('phone_main');
@@ -197,6 +215,43 @@ try {
                                     <div class="conf-total-amount"><?php echo $currency_symbol; ?><?php echo number_format($group_total_amount, 0); ?></div>
                                 </div>
                             </div>
+
+                            <?php
+                            // Occupancy type + rate plan meta row
+                            $occupancy_type  = trim((string)($booking['occupancy_type'] ?? ''));
+                            $rate_plan_label = trim((string)($booking['rate_plan_label'] ?? ''));
+                            if ($occupancy_type !== '' || $rate_plan_label !== ''):
+                            ?>
+                            <div class="conf-stay-tags">
+                                <?php if ($occupancy_type !== ''): ?>
+                                    <span class="conf-stay-tag"><i class="fas fa-bed"></i> <?php echo htmlspecialchars(ucfirst(str_replace('_', ' ', $occupancy_type))); ?></span>
+                                <?php endif; ?>
+                                <?php if ($rate_plan_label !== ''): ?>
+                                    <span class="conf-stay-tag"><i class="fas fa-tag"></i> <?php echo htmlspecialchars($rate_plan_label); ?></span>
+                                <?php endif; ?>
+                            </div>
+                            <?php endif; ?>
+
+                            <?php if (!empty($booking_packages)): ?>
+                            <div class="conf-extras">
+                                <div class="conf-extras-title"><i class="fas fa-plus-circle"></i> Extras &amp; Packages</div>
+                                <?php foreach ($booking_packages as $pkg):
+                                    $suffix = $pkg['price_type'] === 'per_night' ? '/night' : '';
+                                    $qty    = (int)$pkg['quantity'];
+                                ?>
+                                <div class="conf-extras-row">
+                                    <span class="conf-extras-name">
+                                        <?php echo htmlspecialchars($pkg['package_name']); ?>
+                                        <?php if ($qty > 1 || $suffix): ?>
+                                            <em><?php echo ($qty > 1 ? "×{$qty}" : '') . ($suffix ? " {$suffix}" : ''); ?></em>
+                                        <?php endif; ?>
+                                    </span>
+                                    <span class="conf-extras-cost"><?php echo $currency_symbol . number_format((float)$pkg['total_cost'], 0); ?></span>
+                                </div>
+                                <?php endforeach; ?>
+                            </div>
+                            <?php endif; ?>
+
                         </div>
                     </div>
 
