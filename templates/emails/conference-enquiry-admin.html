@@ -1,239 +1,151 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>New Conference Enquiry</title>
-    <style>
-        body {
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-            line-height: 1.6;
-            color: #333;
-            background-color: #f4f4f4;
-            margin: 0;
-            padding: 20px;
-        }
-        .email-container {
-            max-width: 600px;
-            margin: 0 auto;
-            background: white;
-            border-radius: 10px;
-            overflow: hidden;
-            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
-        }
-        .header {
-            background: linear-gradient(135deg, #8B7355 0%, #c49b2e 100%);
-            color: #1A1A1A;
-            padding: 30px;
-            text-align: center;
-        }
-        .header h1 {
-            margin: 0;
-            font-size: 28px;
-            font-weight: 600;
-        }
-        .content {
-            padding: 30px;
-        }
-        .enquiry-details {
-            background: #f8f9fa;
-            border: 2px solid #1A1A1A;
-            border-radius: 10px;
-            padding: 20px;
-            margin: 20px 0;
-        }
-        .enquiry-details h2 {
-            color: #1A1A1A;
-            margin-top: 0;
-            font-size: 20px;
-            border-bottom: 2px solid #8B7355;
-            padding-bottom: 10px;
-        }
-        .reference-number {
-            background: #8B7355;
-            color: #1A1A1A;
-            padding: 10px 15px;
-            border-radius: 5px;
-            font-weight: bold;
-            font-size: 18px;
-            text-align: center;
-            margin: 15px 0;
-        }
-        .detail-row {
-            display: flex;
-            justify-content: space-between;
-            padding: 10px 0;
-            border-bottom: 1px solid #ddd;
-        }
-        .detail-row:last-child {
-            border-bottom: none;
-        }
-        .detail-label {
-            font-weight: bold;
-            color: #1A1A1A;
-        }
-        .detail-value {
-            color: #333;
-        }
-        .info-box {
-            background: #e7f3ff;
-            border-left: 4px solid #0d6efd;
-            border-radius: 5px;
-            padding: 15px;
-            margin: 20px 0;
-        }
-        .info-box h3 {
-            color: #0d6efd;
-            margin-top: 0;
-            font-size: 18px;
-        }
-        .info-box p {
-            color: #0d6efd;
-            margin: 0;
-        }
-        .action-button {
-            display: inline-block;
-            background: #8B7355;
-            color: #1A1A1A;
-            padding: 12px 24px;
-            text-decoration: none;
-            border-radius: 5px;
-            font-weight: bold;
-            font-size: 16px;
-            text-align: center;
-        }
-        .footer {
-            background: #f8f9fa;
-            padding: 20px;
-            text-align: center;
-            border-top: 2px solid #1A1A1A;
-        }
-        .footer p {
-            color: #666;
-            font-size: 14px;
-            margin: 5px 0;
-        }
-        @media only screen and (max-width: 600px) {
-            .email-container {
-                width: 100% !important;
-            }
-            .detail-row {
-                flex-direction: column;
-            }
-            .detail-label {
-                margin-bottom: 5px;
-            }
-        }
-    </style>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0">
+<!--[if !mso]><!-->
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display:ital@0;1&family=DM+Sans:ital,opsz,wght@0,9..40,300..700;1,9..40,300..700&family=Noto+Serif+JP:wght@300;400&display=swap" rel="stylesheet">
+<!--<![endif]-->
+<style>
+body{margin:0;padding:0;background-color:#d5cfc4;-webkit-text-size-adjust:100%;-ms-text-size-adjust:100%;}
+table,td{border-collapse:collapse;}
+img{border:0;height:auto;line-height:100%;outline:none;text-decoration:none;}
+@media only screen and (max-width:640px){
+  .ew-card{width:100%!important;}
+  .ew-pad{padding:28px 20px!important;}
+}
+</style>
 </head>
-<body>
-    <div class="email-container">
-        <div class="header">
-            <h1>📋 ACTION REQUIRED: New Conference Enquiry</h1>
+<body style="margin:0;padding:0;background-color:#d5cfc4;">
+<div style="font-family:'DM Sans',Arial,Helvetica,sans-serif;color:#3e3930;background-color:#d5cfc4;padding:40px 20px;margin:0;">
+  <div style="display:none;font-size:1px;color:#d5cfc4;line-height:1px;max-height:0;max-width:0;opacity:0;overflow:hidden;">New conference enquiry — {{inquiry_reference}} from {{company_name}}</div>
+
+  <table width="100%" border="0" cellspacing="0" cellpadding="0" style="background-color:#d5cfc4;">
+  <tr><td align="center" style="padding:20px 0;">
+    <table class="ew-card" width="100%" border="0" cellspacing="0" cellpadding="0" style="max-width:600px;width:100%;margin:0 auto;background-color:#f5f2eb;border-radius:1px;box-shadow:0 16px 40px rgba(70,60,50,0.15),0 4px 12px rgba(70,60,50,0.08);border:1px solid rgba(190,175,155,0.5);">
+
+      <!-- Header -->
+      <tr><td align="center" style="padding:48px 48px 32px;">
+        <div style="font-family:'Noto Serif JP','DM Serif Display',Georgia,serif;font-size:24px;color:#3e3930;letter-spacing:0.04em;line-height:1;font-weight:400;">{{site_name}}</div>
+        <div style="width:30px;height:1px;background:#c2b8a6;margin:16px auto;"></div>
+        <div style="font-size:9px;letter-spacing:0.25em;text-transform:uppercase;color:#9b8f7e;font-weight:600;">New Conference Enquiry</div>
+      </td></tr>
+
+      <!-- Body text -->
+      <tr><td class="ew-pad" style="padding:0 48px 32px;font-size:14px;line-height:1.8;color:#5c5549;">
+        <p style="margin:0 0 16px;">A new conference enquiry has been submitted via the website. Please review and respond within 24 hours.</p>
+      </td></tr>
+
+      <!-- Enquiry summary -->
+      <tr><td style="padding:0 48px 36px;">
+        <table width="100%" border="0" cellspacing="0" cellpadding="0" style="border:1px solid #d3cbc0;background:rgba(211,203,192,0.15);">
+        <tr><td style="padding:24px;">
+          <div style="font-size:9px;letter-spacing:0.2em;text-transform:uppercase;color:#9b8f7e;font-weight:600;margin-bottom:16px;text-align:center;">Enquiry Details</div>
+          <table width="100%" border="0" cellspacing="0" cellpadding="0" style="font-size:12px;line-height:1.8;">
+            <tr>
+              <td width="40%" style="color:#9b8f7e;font-weight:600;text-transform:uppercase;letter-spacing:0.1em;font-size:9px;padding-bottom:8px;">Reference</td>
+              <td width="60%" style="color:#6d6455;font-weight:500;padding-bottom:8px;text-align:right;">{{inquiry_reference}}</td>
+            </tr>
+            <tr>
+              <td style="color:#9b8f7e;font-weight:600;text-transform:uppercase;letter-spacing:0.1em;font-size:9px;padding-bottom:8px;border-top:1px solid #e1dbce;padding-top:8px;">Contact Person</td>
+              <td style="color:#6d6455;font-weight:500;padding-bottom:8px;text-align:right;border-top:1px solid #e1dbce;padding-top:8px;">{{contact_person}}</td>
+            </tr>
+            <tr>
+              <td style="color:#9b8f7e;font-weight:600;text-transform:uppercase;letter-spacing:0.1em;font-size:9px;padding-bottom:8px;border-top:1px solid #e1dbce;padding-top:8px;">Company</td>
+              <td style="color:#6d6455;font-weight:500;padding-bottom:8px;text-align:right;border-top:1px solid #e1dbce;padding-top:8px;">{{company_name}}</td>
+            </tr>
+            <tr>
+              <td style="color:#9b8f7e;font-weight:600;text-transform:uppercase;letter-spacing:0.1em;font-size:9px;padding-bottom:8px;border-top:1px solid #e1dbce;padding-top:8px;">Email</td>
+              <td style="color:#6d6455;font-weight:500;padding-bottom:8px;text-align:right;border-top:1px solid #e1dbce;padding-top:8px;">{{email}}</td>
+            </tr>
+            <tr>
+              <td style="color:#9b8f7e;font-weight:600;text-transform:uppercase;letter-spacing:0.1em;font-size:9px;padding-bottom:8px;border-top:1px solid #e1dbce;padding-top:8px;">Conference Room</td>
+              <td style="color:#6d6455;font-weight:500;padding-bottom:8px;text-align:right;border-top:1px solid #e1dbce;padding-top:8px;">{{room_name}}</td>
+            </tr>
+            <tr>
+              <td style="color:#9b8f7e;font-weight:600;text-transform:uppercase;letter-spacing:0.1em;font-size:9px;padding-bottom:8px;border-top:1px solid #e1dbce;padding-top:8px;">Event Date</td>
+              <td style="color:#6d6455;font-weight:500;padding-bottom:8px;text-align:right;border-top:1px solid #e1dbce;padding-top:8px;">{{event_date}}</td>
+            </tr>
+            <tr>
+              <td style="color:#9b8f7e;font-weight:600;text-transform:uppercase;letter-spacing:0.1em;font-size:9px;padding-bottom:8px;border-top:1px solid #e1dbce;padding-top:8px;">Time</td>
+              <td style="color:#6d6455;font-weight:500;padding-bottom:8px;text-align:right;border-top:1px solid #e1dbce;padding-top:8px;">{{start_time}} – {{end_time}}</td>
+            </tr>
+            <tr>
+              <td style="color:#9b8f7e;font-weight:600;text-transform:uppercase;letter-spacing:0.1em;font-size:9px;padding-bottom:8px;border-top:1px solid #e1dbce;padding-top:8px;">Attendees</td>
+              <td style="color:#6d6455;font-weight:500;padding-bottom:8px;text-align:right;border-top:1px solid #e1dbce;padding-top:8px;">{{number_of_attendees}}</td>
+            </tr>
+            <tr>
+              <td style="color:#9b8f7e;font-weight:600;text-transform:uppercase;letter-spacing:0.1em;font-size:9px;padding-bottom:8px;border-top:1px solid #e1dbce;padding-top:8px;">Estimated Amount</td>
+              <td style="color:#3e3930;font-weight:600;font-size:14px;padding-bottom:8px;text-align:right;border-top:1px solid #e1dbce;padding-top:8px;">{{currency_symbol}} {{total_amount}}</td>
+            </tr>
+          </table>
+        </td></tr>
+        </table>
+      </td></tr>
+
+      {{#if event_type}}
+      <tr><td style="padding:0 48px 24px;">
+        <div style="background:rgba(201,169,97,0.08);border-left:3px solid #C9A961;padding:14px 16px;font-size:12px;line-height:1.7;color:#5c5549;">
+          <strong style="font-size:9px;letter-spacing:0.15em;text-transform:uppercase;color:#9b8f7e;">Event Type</strong><br>{{event_type}}
         </div>
-        <div class="content">
-            <p><strong>A new conference enquiry requires your attention.</strong> Please review the details below and follow up with the customer within 24 hours to confirm availability and finalize the booking.</p>
-            
-            <div class="enquiry-details">
-                <h2>Enquiry Details</h2>
-                
-                <div class="reference-number">
-                    Reference: {{inquiry_reference}}
-                </div>
-                
-                <div class="detail-row">
-                    <span class="detail-label">Company:</span>
-                    <span class="detail-value">{{company_name}}</span>
-                </div>
-                
-                <div class="detail-row">
-                    <span class="detail-label">Contact Person:</span>
-                    <span class="detail-value">{{contact_person}}</span>
-                </div>
-                
-                <div class="detail-row">
-                    <span class="detail-label">Email:</span>
-                    <span class="detail-value">{{email}}</span>
-                </div>
-                
-                <div class="detail-row">
-                    <span class="detail-label">Phone:</span>
-                    <span class="detail-value">{{phone}}</span>
-                </div>
-                
-                <div class="detail-row">
-                    <span class="detail-label">Conference Room:</span>
-                    <span class="detail-value">{{room_name}}</span>
-                </div>
-                
-                <div class="detail-row">
-                    <span class="detail-label">Event Date:</span>
-                    <span class="detail-value">{{event_date}}</span>
-                </div>
-                
-                <div class="detail-row">
-                    <span class="detail-label">Event Time:</span>
-                    <span class="detail-value">{{start_time}} - {{end_time}}</span>
-                </div>
-                
-                <div class="detail-row">
-                    <span class="detail-label">Number of Attendees:</span>
-                    <span class="detail-value">{{number_of_attendees}}</span>
-                </div>
-                
-                <div class="detail-row">
-                    <span class="detail-label">Event Type:</span>
-                    <span class="detail-value">{{event_type}}</span>
-                </div>
-                
-                <div class="detail-row">
-                    <span class="detail-label">Estimated Amount:</span>
-                    <span class="detail-value">{{currency_symbol}} {{total_amount}}</span>
-                </div>
-            </div>
-            
-            {{#if catering_required}}
-            <div class="info-box">
-                <h3>🍽️ Catering Services Requested</h3>
-                <p>Customer has requested catering services - please discuss menu options and pricing during follow-up.</p>
-            </div>
-            {{/if}}
-            
-            {{#if av_equipment}}
-            <div class="info-box">
-                <h3>🎤 AV Equipment Requirements</h3>
-                <p>{{av_equipment}}</p>
-            </div>
-            {{/if}}
-            
-            {{#if special_requirements}}
-            <div class="info-box">
-                <h3>📝 Special Requirements</h3>
-                <p>{{special_requirements}}</p>
-            </div>
-            {{/if}}
-            
-            <div class="info-box" style="background: #fff3cd; border-left-color: #ffc107;">
-                <h3 style="color: #856404;">📞 Action Required</h3>
-                <p style="color: #856404;"><strong>Please follow up with this customer promptly:</strong><br>
-                1. Confirm room availability for the requested date and time<br>
-                2. Review and finalize catering requirements (if applicable)<br>
-                3. Verify AV equipment needs and availability<br>
-                4. Provide formal quote and booking confirmation<br>
-                5. Discuss payment terms and deposit requirements</p>
-            </div>
-            
-            <div style="text-align: center; margin-top: 30px;">
-                <a href="mailto:{{email}}" class="action-button">📧 Reply to Customer</a>
-                <span style="display: inline-block; width: 10px;"></span>
-                <a href="{{admin_url}}" class="action-button">🔐 View in Admin Panel</a>
-            </div>
+      </td></tr>
+      {{/if}}
+
+      {{#if catering_required}}
+      <tr><td style="padding:0 48px 24px;">
+        <div style="background:rgba(201,169,97,0.08);border-left:3px solid #C9A961;padding:14px 16px;font-size:12px;line-height:1.7;color:#5c5549;">
+          <strong style="font-size:9px;letter-spacing:0.15em;text-transform:uppercase;color:#9b8f7e;">Catering</strong><br>Catering services have been requested.
         </div>
-        <div class="footer">
-            <p><strong>Staff Notification - Please respond promptly</strong></p>
-            <p><em>Submitted: {{submission_date}} from {{submission_source}}</em></p>
-            <p>{{site_name}} - Conference Management System</p>
+      </td></tr>
+      {{/if}}
+
+      {{#if av_equipment}}
+      <tr><td style="padding:0 48px 24px;">
+        <div style="background:rgba(201,169,97,0.08);border-left:3px solid #C9A961;padding:14px 16px;font-size:12px;line-height:1.7;color:#5c5549;">
+          <strong style="font-size:9px;letter-spacing:0.15em;text-transform:uppercase;color:#9b8f7e;">AV Equipment</strong><br>{{av_equipment}}
         </div>
-    </div>
+      </td></tr>
+      {{/if}}
+
+      {{#if special_requirements}}
+      <tr><td style="padding:0 48px 24px;">
+        <div style="background:rgba(201,169,97,0.08);border-left:3px solid #C9A961;padding:14px 16px;font-size:12px;line-height:1.7;color:#5c5549;">
+          <strong style="font-size:9px;letter-spacing:0.15em;text-transform:uppercase;color:#9b8f7e;">Special Requirements</strong><br>{{special_requirements}}
+        </div>
+      </td></tr>
+      {{/if}}
+
+      <!-- Admin CTA -->
+      <tr><td align="center" style="padding:0 48px 48px;">
+        <table border="0" cellspacing="0" cellpadding="0"><tr>
+          <td align="center" style="border-radius:2px;background-color:#524b3f;">
+            <a href="{{admin_url}}" target="_blank" style="font-size:11px;font-family:'DM Sans',Arial,sans-serif;color:#ffffff;text-decoration:none;padding:14px 28px;border:1px solid #524b3f;display:inline-block;letter-spacing:0.15em;text-transform:uppercase;font-weight:600;">
+              View in Admin Panel
+            </a>
+          </td>
+        </tr></table>
+      </td></tr>
+
+      <!-- Divider -->
+      <tr><td style="padding:0 48px;"><div style="height:1px;background:#d3cbc0;line-height:1px;font-size:1px;">&nbsp;</div></td></tr>
+
+      <!-- Footer -->
+      <tr><td style="padding:32px 48px;background:rgba(211,203,192,0.25);">
+        <table width="100%" border="0" cellspacing="0" cellpadding="0">
+          <tr><td align="center" style="padding-bottom:12px;">
+            <span style="font-family:'Noto Serif JP','DM Serif Display',Georgia,serif;font-size:14px;color:#3e3930;font-weight:400;letter-spacing:0.06em;">{{site_name}}</span>
+          </td></tr>
+          <tr><td align="center" style="font-size:10px;color:#6d6455;line-height:1.6;letter-spacing:0.04em;">
+            {{phone}}&nbsp;|&nbsp;<a href="mailto:{{contact_email}}" style="color:#6d6455;text-decoration:none;">{{contact_email}}</a>
+          </td></tr>
+        </table>
+      </td></tr>
+
+    </table>
+  </td></tr>
+  </table>
+</div>
 </body>
 </html>

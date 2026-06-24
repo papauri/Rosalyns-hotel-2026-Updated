@@ -1348,14 +1348,17 @@ function ensureBookingEmailTemplateDefaults()
                         . '<p style="margin:0;">We will be in touch within 24 hours. For immediate assistance contact us at <a href="mailto:{{contact_email}}" style="color:#524b3f;">{{contact_email}}</a>.</p>'
                 )
                     . hotel_premium_email_summary_rows('Booking Summary', [
-                        ['Reference',  '{{booking_reference}}'],
-                        ['Room',       '{{room_name}}'],
-                        ['Check-in',   '{{check_in_date_formatted}}'],
-                        ['Check-out',  '{{check_out_date_formatted}}'],
-                        ['Nights',     '{{number_of_nights}}'],
-                        ['Guests',     '{{number_of_guests}}'],
-                        ['Total',      '{{currency_symbol}} {{total_amount_formatted}}', true],
+                        ['Reference',        '{{booking_reference}}'],
+                        ['Room',             '{{room_name}}'],
+                        ['Occupancy',        '{{occupancy_type}}'],
+                        ['Check-in',         '{{check_in_date_formatted}}'],
+                        ['Check-out',        '{{check_out_date_formatted}}'],
+                        ['Nights',           '{{number_of_nights}}'],
+                        ['Guests',           '{{number_of_guests}}'],
+                        ['Rate Plan',        '{{rate_plan_label}}'],
+                        ['Total',            '{{currency_symbol}} {{total_amount_formatted}}', true],
                     ])
+                    . '{{packages_html}}'
                     . '<tr><td style="padding:0 48px 48px;font-size:12px;line-height:1.8;color:#9b8f7e;text-align:center;font-style:italic;">{{payment_policy}}</td></tr>'
             ),
         ],
@@ -1370,14 +1373,17 @@ function ensureBookingEmailTemplateDefaults()
                         . '<p style="margin:0;">Check-in from <strong>{{check_in_time}}</strong> &middot; Check-out by <strong>{{check_out_time}}</strong>.</p>'
                 )
                     . hotel_premium_email_summary_rows('Confirmed Booking', [
-                        ['Reference',  '{{booking_reference}}'],
-                        ['Room',       '{{room_name}}'],
-                        ['Check-in',   '{{check_in_date_formatted}}'],
-                        ['Check-out',  '{{check_out_date_formatted}}'],
-                        ['Nights',     '{{number_of_nights}}'],
-                        ['Guests',     '{{number_of_guests}}'],
-                        ['Total',      '{{currency_symbol}} {{total_amount_formatted}}', true],
+                        ['Reference',        '{{booking_reference}}'],
+                        ['Room',             '{{room_name}}'],
+                        ['Occupancy',        '{{occupancy_type}}'],
+                        ['Check-in',         '{{check_in_date_formatted}}'],
+                        ['Check-out',        '{{check_out_date_formatted}}'],
+                        ['Nights',           '{{number_of_nights}}'],
+                        ['Guests',           '{{number_of_guests}}'],
+                        ['Rate Plan',        '{{rate_plan_label}}'],
+                        ['Total',            '{{currency_symbol}} {{total_amount_formatted}}', true],
                     ])
+                    . '{{packages_html}}'
                     . '<tr><td style="padding:0 48px 48px;font-size:12px;line-height:1.8;color:#9b8f7e;text-align:center;font-style:italic;">{{payment_policy}}</td></tr>'
             ),
         ],
@@ -1776,7 +1782,7 @@ if (!function_exists('resetBookingEmailTemplatesToDefaults')) {
  */
 function buildBookingEmailVariables(array $booking, ?array $room = null, array $extra = [])
 {
-    global $email_site_name, $email_site_url, $email_from_email;
+    global $email_site_name, $email_site_url, $email_from_email, $pdo;
 
     $currency = getSetting('currency_symbol');
     $roomTypeName = $room['name'] ?? ($booking['room_name'] ?? '');
@@ -1785,6 +1791,10 @@ function buildBookingEmailVariables(array $booking, ?array $room = null, array $
         $roomAssignment = getBookingRoomLabel((int)$booking['id']);
     }
     $displayRoomName = $roomAssignment !== '' ? trim($roomTypeName . ' - ' . $roomAssignment) : $roomTypeName;
+
+    $occupancyType = (string)($booking['occupancy_type'] ?? '');
+    $occupancyLabel = $occupancyType !== '' ? ucfirst(str_replace('_', ' ', $occupancyType)) : '';
+
     $vars = [
         'site_name' => $email_site_name,
         'site_url' => $email_site_url,
@@ -1801,6 +1811,7 @@ function buildBookingEmailVariables(array $booking, ?array $room = null, array $
         'room_name' => $displayRoomName,
         'room_assignment' => $roomAssignment,
         'room_numbers' => $roomAssignment,
+        'occupancy_type' => $occupancyLabel,
         'check_in_date_formatted' => !empty($booking['check_in_date']) ? date('F j, Y', strtotime($booking['check_in_date'])) : '',
         'check_out_date_formatted' => !empty($booking['check_out_date']) ? date('F j, Y', strtotime($booking['check_out_date'])) : '',
         'number_of_nights' => (string)($booking['number_of_nights'] ?? ''),
@@ -1820,6 +1831,37 @@ function buildBookingEmailVariables(array $booking, ?array $room = null, array $
         'package_total_formatted' => isset($booking['package_total']) && (float)$booking['package_total'] > 0
             ? number_format((float)$booking['package_total'], 0) : '',
     ];
+
+    // ── Booking packages / extras ────────────────────────────────────────────
+    $packagesHtml = '';
+    $bookingId = (int)($booking['id'] ?? 0);
+    if ($bookingId > 0 && isset($pdo)) {
+        try {
+            $pkgStmt = $pdo->prepare(
+                'SELECT package_name, price_type, price_amount, quantity, total_cost
+                 FROM booking_packages WHERE booking_id = ? ORDER BY id ASC'
+            );
+            $pkgStmt->execute([$bookingId]);
+            $pkgRows = $pkgStmt->fetchAll(PDO::FETCH_ASSOC);
+            if (!empty($pkgRows)) {
+                $summaryRows = [];
+                foreach ($pkgRows as $pkg) {
+                    $priceSuffix = $pkg['price_type'] === 'per_night' ? '/night' : '';
+                    $qty         = (int)$pkg['quantity'];
+                    $label       = htmlspecialchars($pkg['package_name']);
+                    $costFmt     = $currency . ' ' . number_format((float)$pkg['total_cost'], 0);
+                    $detail      = $qty > 1 ? " (x{$qty}{$priceSuffix})" : ($priceSuffix ? " ({$priceSuffix})" : '');
+                    $summaryRows[] = [$label . $detail, $costFmt];
+                }
+                if (function_exists('hotel_premium_email_summary_rows')) {
+                    $packagesHtml = hotel_premium_email_summary_rows('Extras & Packages', $summaryRows);
+                }
+            }
+        } catch (\Throwable $e) {
+            error_log('buildBookingEmailVariables packages query error: ' . $e->getMessage());
+        }
+    }
+    $vars['packages_html'] = $packagesHtml;
 
     // ── VAT / Levy tax vars ─────────────────────────────────────────────
     $vatEnabled   = in_array(getSetting('vat_enabled'), ['1', 1, true, 'true', 'on'], true);
@@ -2276,7 +2318,7 @@ function sendBookingModifiedEmail(array $booking, array $changes = [])
  */
 function sendAdminNotificationEmail(array $booking)
 {
-    global $email_from_name, $email_from_email, $email_admin_email, $email_site_name, $email_site_url;
+    global $email_from_name, $email_from_email, $email_admin_email, $email_site_name, $email_site_url, $pdo;
 
     try {
         $notificationEmail = trim((string)getSetting('booking_notification_email', ''));
@@ -2304,33 +2346,60 @@ function sendAdminNotificationEmail(array $booking)
             $adminBookingUrl = $adminBaseUrl . '/admin/bookings.php?search=' . rawurlencode($bookingReference);
         }
 
-        $htmlBody = '
-        <h1 style="color: #8B7355; text-align: center;">📋 New Booking Received</h1>
-        <p>A new booking has been made on the website.</p>
+        // Build admin notification using premium email shell for visual consistency
+        $currency = getSetting('currency_symbol');
+        $nights   = (int)($booking['number_of_nights'] ?? 0);
+        $occupancyRaw = (string)($booking['occupancy_type'] ?? '');
+        $occupancyLabel = $occupancyRaw !== '' ? ucfirst(str_replace('_', ' ', $occupancyRaw)) : '—';
+        $ratePlan = (string)($booking['rate_plan_label'] ?? '');
 
-        <div style="background: #FAF6F0; border: 2px solid #C8A45A; padding: 20px; margin: 20px 0; border-radius: 10px;">
-            <h2 style="color: #8B7355; margin-top: 0;;text-align:left;">Booking Details</h2>
+        // Collect packages for admin view
+        $adminPackageRows = [];
+        if (isset($pdo) && $bookingId > 0) {
+            try {
+                $ap = $pdo->prepare('SELECT package_name, price_type, quantity, total_cost FROM booking_packages WHERE booking_id = ? ORDER BY id ASC');
+                $ap->execute([$bookingId]);
+                foreach ($ap->fetchAll(PDO::FETCH_ASSOC) as $pkg) {
+                    $suffix = $pkg['price_type'] === 'per_night' ? '/night' : '';
+                    $qty    = (int)$pkg['quantity'];
+                    $label  = htmlspecialchars($pkg['package_name']) . ($qty > 1 ? " x{$qty}" : '') . ($suffix ? " ({$suffix})" : '');
+                    $adminPackageRows[] = [$label, $currency . ' ' . number_format((float)$pkg['total_cost'], 0)];
+                }
+            } catch (\Throwable $ignored) {}
+        }
 
-            <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="margin:0;"><tr><td style="padding:10px 10px 10px 0;font-weight:bold;color:#1A1A1A;width:44%;vertical-align:top;font-family:\'Segoe UI\',Tahoma,Verdana,sans-serif;border-bottom:1px solid #e8e0d4;">Booking Reference:</td><td style="padding:10px 0 10px 6px;color: #8B7355; font-weight: bold;;text-align:left;vertical-align:top;font-family:\'Segoe UI\',Tahoma,Verdana,sans-serif;border-bottom:1px solid #e8e0d4;">' . htmlspecialchars($booking['booking_reference']) . '</td></tr></table>
+        $summaryRows = [
+            ['Reference',    htmlspecialchars($booking['booking_reference'] ?? '')],
+            ['Guest',        htmlspecialchars($booking['guest_name'] ?? '') . ' &lt;' . htmlspecialchars($booking['guest_email'] ?? '') . '&gt;'],
+            ['Phone',        htmlspecialchars($booking['guest_phone'] ?? '')],
+            ['Room',         htmlspecialchars($booking['room_name'] ?? '')],
+            ['Occupancy',    $occupancyLabel],
+            ['Check-in',     !empty($booking['check_in_date']) ? date('D, j M Y', strtotime($booking['check_in_date'])) : ''],
+            ['Check-out',    !empty($booking['check_out_date']) ? date('D, j M Y', strtotime($booking['check_out_date'])) : ''],
+            ['Nights',       $nights . ($nights === 1 ? ' night' : ' nights')],
+            ['Guests',       (string)($booking['number_of_guests'] ?? '')],
+        ];
+        if ($ratePlan !== '') {
+            $summaryRows[] = ['Rate Plan', htmlspecialchars($ratePlan)];
+        }
+        $summaryRows[] = ['Total', $currency . ' ' . number_format((float)($booking['total_amount'] ?? 0), 0), true];
 
-            <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="margin:0;"><tr><td style="padding:10px 10px 10px 0;font-weight:bold;color:#1A1A1A;width:44%;vertical-align:top;font-family:\'Segoe UI\',Tahoma,Verdana,sans-serif;border-bottom:1px solid #e8e0d4;">Guest Name:</td><td style="padding:10px 0 10px 6px;color: #333;;text-align:left;vertical-align:top;font-family:\'Segoe UI\',Tahoma,Verdana,sans-serif;border-bottom:1px solid #e8e0d4;">' . htmlspecialchars($booking['guest_name']) . '</td></tr></table>
+        $innerHtml = hotel_premium_email_body(
+            'Reservations Team',
+            '<p style="margin:0 0 16px;">A new booking has been submitted via the website. Please review and confirm the reservation.</p>'
+        )
+            . hotel_premium_email_summary_rows('New Booking Details', $summaryRows)
+            . (!empty($adminPackageRows) ? hotel_premium_email_summary_rows('Extras & Packages', $adminPackageRows) : '')
+            . (!empty($booking['special_requests'])
+                ? '<tr><td style="padding:0 48px 24px;"><div style="background:rgba(201,169,97,0.08);border-left:3px solid #C9A961;padding:14px 16px;font-size:12px;line-height:1.7;color:#5c5549;"><strong style="font-size:9px;letter-spacing:0.15em;text-transform:uppercase;color:#9b8f7e;">Special Requests</strong><br>' . htmlspecialchars($booking['special_requests']) . '</div></td></tr>'
+                : '')
+            . hotel_premium_email_cta($adminBookingUrl, 'Open in Admin Panel');
 
-            <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="margin:0;"><tr><td style="padding:10px 10px 10px 0;font-weight:bold;color:#1A1A1A;width:44%;vertical-align:top;font-family:\'Segoe UI\',Tahoma,Verdana,sans-serif;border-bottom:1px solid #e8e0d4;">Guest Email:</td><td style="padding:10px 0 10px 6px;color: #333;;text-align:left;vertical-align:top;font-family:\'Segoe UI\',Tahoma,Verdana,sans-serif;border-bottom:1px solid #e8e0d4;">' . htmlspecialchars($booking['guest_email']) . '</td></tr></table>
-
-            <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="margin:0;"><tr><td style="padding:10px 10px 10px 0;font-weight:bold;color:#1A1A1A;width:44%;vertical-align:top;font-family:\'Segoe UI\',Tahoma,Verdana,sans-serif;border-bottom:1px solid #e8e0d4;">Guest Phone:</td><td style="padding:10px 0 10px 6px;color: #333;;text-align:left;vertical-align:top;font-family:\'Segoe UI\',Tahoma,Verdana,sans-serif;border-bottom:1px solid #e8e0d4;">' . htmlspecialchars($booking['guest_phone']) . '</td></tr></table>
-
-            <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="margin:0;"><tr><td style="padding:10px 10px 10px 0;font-weight:bold;color:#1A1A1A;width:44%;vertical-align:top;font-family:\'Segoe UI\',Tahoma,Verdana,sans-serif;border-bottom:1px solid #e8e0d4;">Check-in Date:</td><td style="padding:10px 0 10px 6px;color: #333;;text-align:left;vertical-align:top;font-family:\'Segoe UI\',Tahoma,Verdana,sans-serif;border-bottom:1px solid #e8e0d4;">' . date('F j, Y', strtotime($booking['check_in_date'])) . '</td></tr></table>
-
-            <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="margin:0;"><tr><td style="padding:10px 10px 10px 0;font-weight:bold;color:#1A1A1A;width:44%;vertical-align:top;font-family:\'Segoe UI\',Tahoma,Verdana,sans-serif;border-bottom:1px solid #e8e0d4;">Check-out Date:</td><td style="padding:10px 0 10px 6px;color: #333;;text-align:left;vertical-align:top;font-family:\'Segoe UI\',Tahoma,Verdana,sans-serif;border-bottom:1px solid #e8e0d4;">' . date('F j, Y', strtotime($booking['check_out_date'])) . '</td></tr></table>
-
-            <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="margin:0;"><tr><td style="padding:10px 10px 10px 0;font-weight:bold;color:#1A1A1A;width:44%;vertical-align:top;font-family:\'Segoe UI\',Tahoma,Verdana,sans-serif;">Total Amount:</td><td style="padding:10px 0 10px 6px;color: #8B7355; font-weight: bold;;text-align:left;vertical-align:top;font-family:\'Segoe UI\',Tahoma,Verdana,sans-serif;">' . getSetting('currency_symbol') . ' ' . number_format($booking['total_amount'], 0) . '</td></tr></table>
-        </div>
-
-        <div style="text-align: center; margin-top: 30px;">
-            <a href="' . htmlspecialchars($adminBookingUrl) . '" style="display: inline-block; background: #8B7355; color: #1A1A1A; padding: 12px 24px; text-decoration: none; border-radius: 5px; font-weight: bold; font-size: 16px;">
-                Open Booking in Admin Panel
-            </a>
-        </div>';
+        $htmlBody = hotel_premium_email_html(
+            'New booking received — ' . ($booking['booking_reference'] ?? ''),
+            $innerHtml,
+            'reservations@' . ($_SERVER['HTTP_HOST'] ?? 'hotel')
+        );
 
         // Send email
         $primaryResult = sendEmail(
