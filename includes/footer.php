@@ -314,13 +314,6 @@ if (!function_exists('footer_parse_tags')) {
     <?php endif; ?>
 </div>
 
-<!-- Main CSS - Only load if not already loaded -->
-<?php if (!function_exists('assetUrl')): ?>
-    <link rel="stylesheet" href="css/main.css">
-<?php else: ?>
-    <link rel="stylesheet" href="<?php echo assetUrl('css/main.css'); ?>">
-<?php endif; ?>
-
 <!-- Unified Navigation - SPA routing so only content swaps, header never reloads.
      Loaded globally here so every page (including index.php) gets it.
      Singleton guard inside of script prevents double-init when a page also loads it.

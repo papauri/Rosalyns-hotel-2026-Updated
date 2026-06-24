@@ -662,7 +662,6 @@ try {
         </section>
 
         <!-- Scripts -->
-        <script src="js/modal.js"></script>
         <script src="js/main.js"></script>
         <script src="js/spatial-loading.js" defer></script>
         <script>

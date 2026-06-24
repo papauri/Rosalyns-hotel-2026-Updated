@@ -2494,7 +2494,7 @@ function sendConferenceEnquiryEmail(array $data)
             'Conference Enquiry Received - ' . htmlspecialchars($email_site_name) . ' [' . $data['inquiry_reference'] . ']',
             $htmlBody
         );
-    } catch (Exception $e) {
+    } catch (\Throwable $e) {
         error_log("Send Conference Enquiry Email Error: " . $e->getMessage());
         return [
             'success' => false,
@@ -2516,6 +2516,10 @@ function sendConferenceAdminNotificationEmail(array $data)
         $stmt->execute([$data['conference_room_id']]);
         $room = $stmt->fetch(PDO::FETCH_ASSOC);
 
+        if (!$room) {
+            throw new \RuntimeException("Conference room #{$data['conference_room_id']} not found — cannot send admin notification.");
+        }
+
         $currency_symbol = getSetting('currency_symbol');
         $total_amount = $data['total_amount'] ? number_format($data['total_amount'], 0) : 'To be determined';
 
@@ -2535,6 +2539,7 @@ function sendConferenceAdminNotificationEmail(array $data)
             'contact_person' => $data['contact_person'],
             'email' => $data['email'],
             'phone' => $data['phone'],
+            'submission_date' => date('F j, Y H:i'),
             'room_name' => $room['name'],
             'event_date' => date('F j, Y', strtotime($data['event_date'])),
             'start_time' => date('H:i', strtotime($data['start_time'])),
@@ -2621,7 +2626,7 @@ function sendConferenceAdminNotificationEmail(array $data)
             'New Conference Enquiry - ' . htmlspecialchars($email_site_name) . ' [' . $data['inquiry_reference'] . ']',
             $htmlBody
         );
-    } catch (Exception $e) {
+    } catch (\Throwable $e) {
         error_log("Send Conference Admin Notification Error: " . $e->getMessage());
         return [
             'success' => false,

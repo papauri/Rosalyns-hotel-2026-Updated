@@ -337,8 +337,6 @@ try {
     </main>
     <?php include 'includes/footer.php'; ?>
     <script src="js/session-handler.js" defer></script>
-    <script src="js/modal.js" defer></script>
-    <script src="js/page-transitions.js" defer></script>
     <script src="js/scroll-reveal.js" defer></script>
     <script src="js/booking-lookup.js" defer></script>
 </body>

@@ -657,7 +657,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         </section>
     </main>
 
-    <script src="js/modal.js"></script>
     <script src="js/main.js"></script>
 
     <!-- JavaScript for Star Rating and Form Validation -->

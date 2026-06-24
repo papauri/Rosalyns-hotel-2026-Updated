@@ -6,6 +6,9 @@
 (function () {
     'use strict';
 
+    if (window.__rhModalLoaded) return;
+    window.__rhModalLoaded = true;
+
     // ============================================
     // MODAL CONTROLLER
     // ============================================

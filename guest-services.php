@@ -339,8 +339,6 @@ $whatsapp      = getSetting('whatsapp_number');
 
     <?php include 'includes/footer.php'; ?>
     <?php include 'includes/modal.php'; ?>
-    <script src="js/modal.js" defer></script>
-    <script src="js/page-transitions.js" defer></script>
     <script src="js/scroll-reveal.js" defer></script>
 </body>
 

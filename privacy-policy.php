@@ -286,7 +286,6 @@ $seo_data = [
         </div>
     </main>
 
-    <script src="js/modal.js"></script>
     <script src="js/main.js" defer></script>
 
     <?php require_once 'includes/footer.php'; ?>

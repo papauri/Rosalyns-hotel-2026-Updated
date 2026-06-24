@@ -138,8 +138,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $sanitized_data['end_time'] = $end_time_validation['time'];
         }
 
-        // Validate time range
-        if (empty($validation_errors['start_time']) && empty($validation_errors['end_time'])) {
+        // Validate time range — only when both start and end time passed their own validations
+        if (empty($validation_errors['event_date']) && empty($validation_errors['end_time'])
+            && isset($sanitized_data['start_time'], $sanitized_data['end_time'])) {
             $time_range_validation = validateTimeRange($sanitized_data['start_time'], $sanitized_data['end_time']);
             if (!$time_range_validation['valid']) {
                 $validation_errors['time_range'] = $time_range_validation['error'];
@@ -330,8 +331,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
 
         error_log("Conference enquiry submitted successfully from: " . $sanitized_data['email'] . " with reference: " . $inquiry_reference);
-    } catch (Exception $e) {
+    } catch (\Throwable $e) {
         $inquiry_error = $e->getMessage();
+        error_log('Conference inquiry error: ' . $e->getMessage() . ' in ' . $e->getFile() . ':' . $e->getLine());
     }
 }
 
@@ -594,7 +596,6 @@ function resolveConferenceImage(?string $imagePath): string
         ?>
 
         <!-- Scripts -->
-        <script src="js/modal.js"></script>
         <script src="js/main.js"></script>
         <script>
             // Inquiry Modal - target by specific ID, not generic selector

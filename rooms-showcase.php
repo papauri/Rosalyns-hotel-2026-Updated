@@ -335,9 +335,7 @@ $seo_data = [
     <?php include 'includes/footer.php'; ?>
     <?php include 'includes/modal.php'; ?>
 
-    <script src="js/modal.js" defer></script>
     <script src="js/main.js" defer></script>
-    <script src="js/page-transitions.js" defer></script>
     <script src="js/scroll-reveal.js" defer></script>
     <script src="js/parallax-cards.js" defer></script>
     <script src="js/cursor-follower.js" defer></script>

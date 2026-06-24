@@ -765,7 +765,6 @@ try {
         </div>
 
         <!-- Scripts -->
-        <script src="js/modal.js"></script>
         <script src="js/main.js"></script>
         <script>
             // Open result modal if present (after form submission)

@@ -1536,7 +1536,6 @@ try {
         </div>
     </main>
 
-    <script src="js/modal.js"></script>
     <script src="js/main.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/flatpickr"></script>
     <!-- Availability Modal -->

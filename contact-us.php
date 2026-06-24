@@ -502,8 +502,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['contact_form'])) {
             </section>
         <?php endif; ?>
 
-        <!-- Scripts -->
-        <script src="js/modal.js" defer></script>
     </main>
     <?php include 'includes/footer.php'; ?>
 </body>

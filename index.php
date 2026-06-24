@@ -150,7 +150,6 @@ foreach ($footer_links_raw as $link) {
 
     <!-- Defer non-critical JS for faster initial load -->
     <script src="js/session-handler.js" defer></script>
-    <script src="js/modal.js" defer></script>
     <script src="js/main.js" defer></script>
 
     <!-- Premium Animations: Load after main content -->
@@ -159,9 +158,6 @@ foreach ($footer_links_raw as $link) {
     <script src="js/intersection-observer.js" defer></script>
     <script src="js/parallax-cards.js" defer></script>
     <script src="js/editorial-rooms-animations.js" defer></script>
-
-    <!-- Scroll-Based Lazy Loading Animations - Works immediately -->
-    <script src="js/scroll-lazy-animations.js" defer></script>
 
     <!-- Scroll Reveal Animation System - Unified scroll-triggered animations -->
     <script src="js/scroll-reveal.js" defer></script>

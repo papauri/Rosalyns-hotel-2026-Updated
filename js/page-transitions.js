@@ -18,10 +18,13 @@
 (function() {
     'use strict';
 
+    if (window.__rhPageTransitionsLoaded) return;
+    window.__rhPageTransitionsLoaded = true;
+
     // ============================================
     // CONFIGURATION
     // ============================================
-    
+
     const CONFIG = {
         // Page transition settings
         pageLoadDelay: 500,               // Minimum visible time for loader (ms)
