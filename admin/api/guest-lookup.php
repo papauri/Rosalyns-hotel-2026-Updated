@@ -1,19 +1,15 @@
 <?php
 declare(strict_types=1);
-require_once '../admin-init.php';
+require_once __DIR__ . '/api-init.php';
 
 header('Content-Type: application/json; charset=utf-8');
 
-if (!hasPermission($user['id'], 'bookings')) {
-    http_response_code(403);
-    echo json_encode(['error' => 'Forbidden']);
-    exit;
-}
+requireApiPermission('bookings');
 
 $q    = trim($_GET['q'] ?? '');
-$csrf = $_GET['csrf'] ?? '';
+$csrf = (string)($_GET['csrf'] ?? '');
 
-if (!validateCsrfToken($csrf)) {
+if (!function_exists('validateCsrfToken') || !validateCsrfToken($csrf)) {
     http_response_code(403);
     echo json_encode(['error' => 'Invalid token']);
     exit;
