@@ -3494,3 +3494,142 @@
     }
 }
 }
+
+/* ── VISUAL FIXES ─────────────────────────────────────────────────────
+   Fix off-brand colours and refine booking type + occupancy cards
+   ──────────────────────────────────────────────────────────────────── */
+
+/* Badge: "No payment required yet" — was teal (confirmed-bg), now warm amber */
+.booking-page .booking-type-badge.info {
+    background: rgba(201, 169, 97, 0.12);
+    color: #7A5C2E;
+    border: 1px solid rgba(201, 169, 97, 0.3);
+}
+
+/* Badge: Recommended — slightly refined */
+.booking-page .booking-type-badge.recommended {
+    background: linear-gradient(135deg, #8B7355, #C9A961);
+    color: #fff;
+    font-size: 0.68rem;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    padding: 5px 12px;
+    box-shadow: 0 2px 8px rgba(139,115,85,0.3);
+}
+
+/* Booking type cards — cleaner proportions */
+.booking-page .booking-type-option {
+    border-radius: 14px;
+    border: 1.5px solid rgba(139, 115, 85, 0.15);
+    padding: 18px 16px;
+    transition: border-color 0.2s ease, box-shadow 0.2s ease, transform 0.2s ease;
+    cursor: pointer;
+    background: #FDFCFA;
+    position: relative;
+    overflow: hidden;
+}
+
+.booking-page .booking-type-option:hover {
+    border-color: rgba(139, 115, 85, 0.4);
+    box-shadow: 0 4px 16px rgba(139, 115, 85, 0.12);
+    transform: translateY(-2px);
+}
+
+.booking-page .booking-type-option:has(input:checked),
+.booking-page .booking-type-option.selected {
+    border-color: #8B7355;
+    background: linear-gradient(145deg, rgba(139,115,85,0.05), rgba(201,169,97,0.04));
+    box-shadow: 0 0 0 3px rgba(139,115,85,0.1), 0 4px 16px rgba(139,115,85,0.12);
+    transform: none;
+}
+
+.booking-page .booking-type-header {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 8px;
+}
+
+.booking-page .booking-type-header i {
+    width: 32px;
+    height: 32px;
+    border-radius: 8px;
+    background: rgba(139, 115, 85, 0.1);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: #8B7355;
+    font-size: 14px;
+    flex-shrink: 0;
+}
+
+.booking-page .booking-type-header h4 {
+    font-family: 'Jost', sans-serif;
+    font-size: 0.9rem;
+    font-weight: 700;
+    color: #1A1A1A;
+    margin: 0;
+    letter-spacing: 0.01em;
+}
+
+.booking-page .booking-type-description {
+    font-size: 0.78rem;
+    line-height: 1.6;
+    color: #7A6A58;
+    margin: 0 0 12px;
+}
+
+/* Occupancy guide cards — tighter, more refined */
+.booking-page .occupancy-type-group {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 10px;
+}
+
+.booking-page .occupancy-type-label {
+    border: 1.5px solid rgba(139, 115, 85, 0.15);
+    border-radius: 12px;
+    padding: 12px 8px;
+    text-align: center;
+    cursor: default;
+    transition: all 0.2s ease;
+    background: #FDFCFA;
+}
+
+.booking-page .occupancy-type-label strong {
+    display: block;
+    font-family: 'Jost', sans-serif;
+    font-size: 0.78rem;
+    font-weight: 700;
+    color: #1A1A1A;
+    margin-bottom: 2px;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+}
+
+.booking-page .occupancy-type-label > span:not(.price-display) {
+    display: block;
+    font-size: 0.7rem;
+    color: #9B8A72;
+    margin-bottom: 6px;
+}
+
+.booking-page .occupancy-type-label .price-display {
+    display: block;
+    font-size: 0.85rem;
+    font-weight: 700;
+    color: #8B7355;
+}
+
+.booking-page .occupancy-type-label.selected {
+    border-color: #C9A961;
+    background: linear-gradient(145deg, rgba(201,169,97,0.08), rgba(139,115,85,0.04));
+    box-shadow: 0 0 0 2px rgba(201,169,97,0.2);
+}
+
+/* Section title consistency — Booking Type title same weight as others */
+.booking-page .form-section-title {
+    font-size: clamp(1.2rem, 2vw, 1.5rem);
+    font-weight: 400;
+    letter-spacing: 0.015em;
+}
