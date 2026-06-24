@@ -3472,26 +3472,26 @@ $today_str = $today->format('Y-m-d');
                                                 <?php endif; ?>
                                                 <?php if ($booking['status'] === 'confirmed'): ?>
                                                     <?php
-                                                    $is_paid = ($booking['payment_status'] === 'paid');
+                                                    $payment_st = $booking['actual_payment_status'] ?? $booking['payment_status'];
+                                                    $is_paid = in_array($payment_st, ['paid', 'partial', 'completed'], true);
                                                     $room_assigned = !empty($booking['individual_room_id']);
                                                     // Date-based validation: check-in only allowed on or after check-in date
                                                     $checkin_date_obj = new DateTime($booking['check_in_date']);
                                                     $checkin_date_obj->setTime(0, 0, 0);
                                                     $today_dt = new DateTime('today');
                                                     $checkin_date_reached = $checkin_date_obj <= $today_dt;
-                                                    $can_checkin = $is_paid && $room_assigned && $checkin_date_reached;
+                                                    // Room assignment is advisory (not a hard block) — auto-assigned bookings have no individual_room_id
+                                                    $can_checkin = $is_paid && $checkin_date_reached;
                                                     $checkin_error = '';
                                                     if (!$is_paid) {
-                                                        $checkin_error = 'Cannot check in: booking must be PAID first.';
-                                                    } elseif (!$room_assigned) {
-                                                        $checkin_error = 'Cannot check in: a room must be assigned first.';
+                                                        $checkin_error = 'Cannot check in: booking must have at least partial payment.';
                                                     } elseif (!$checkin_date_reached) {
                                                         $checkin_error = 'Cannot check in: Check-in date has not been reached yet (' . htmlspecialchars($booking['check_in_date']) . ').';
                                                     }
                                                     // Parameters for modal
                                                     $guest_name = htmlspecialchars($booking['guest_name'], ENT_QUOTES);
                                                     $check_in_date = htmlspecialchars($booking['check_in_date'], ENT_QUOTES);
-                                                    $payment_status = $booking['payment_status']; // 'paid', 'unpaid', etc
+                                                    $payment_status = $booking['actual_payment_status'] ?? $booking['payment_status'];
                                                     $room_assigned_bool = $room_assigned ? 'true' : 'false';
                                                     $booking_status = $booking['status'];
                                                     ?>
@@ -6476,7 +6476,7 @@ $today_str = $today->format('Y-m-d');
             document.getElementById('checkin_guest_name').value = guestName;
             document.getElementById('checkin_date').value = checkInDate;
 
-            const paymentOk = paymentStatus === 'paid' || paymentStatus === 'completed';
+            const paymentOk = paymentStatus === 'paid' || paymentStatus === 'completed' || paymentStatus === 'partial';
             const roomOk = roomAssigned === true || roomAssigned === '1' || roomAssigned === 'true';
             const statusOk = bookingStatus === 'confirmed';
 
@@ -6488,9 +6488,9 @@ $today_str = $today->format('Y-m-d');
             const overdueDays = isLateCheckIn ? Math.floor((todayObj - checkInDateObj) / 86400000) : 0;
 
             document.getElementById('prereq_payment').innerHTML = '<i class="fas ' + (paymentOk ? 'fa-check-circle' : 'fa-times-circle') + '"></i> ' +
-                (paymentOk ? 'Payment is PAID' : 'Payment must be marked as PAID');
-            document.getElementById('prereq_room').innerHTML = '<i class="fas ' + (roomOk ? 'fa-check-circle' : 'fa-times-circle') + '"></i> ' +
-                (roomOk ? 'Room is assigned' : 'A room must be assigned');
+                (paymentOk ? ('Payment: ' + paymentStatus) : 'Payment required (at least partial)');
+            document.getElementById('prereq_room').innerHTML = '<i class="fas ' + (roomOk ? 'fa-check-circle' : 'fa-exclamation-circle') + '" style="color:' + (roomOk ? '' : '#f0a500') + '"></i> ' +
+                (roomOk ? 'Room assigned' : 'No specific room assigned (auto-assign)');
             document.getElementById('prereq_status').innerHTML = '<i class="fas ' + (statusOk ? 'fa-check-circle' : 'fa-times-circle') + '"></i> ' +
                 (statusOk ? 'Booking is CONFIRMED' : 'Booking must be CONFIRMED');
 
@@ -6541,7 +6541,7 @@ $today_str = $today->format('Y-m-d');
                 '<i class="fas fa-calendar-check"></i> On-time check-in workflow.';
             prerequisitesEl.style.display = 'block';
 
-            const canCheckIn = paymentOk && roomOk && statusOk && dateReached;
+            const canCheckIn = paymentOk && statusOk && dateReached; // roomOk is advisory only
             submitBtn.disabled = !canCheckIn;
             submitBtn.classList.remove('btn-danger');
             submitBtn.classList.add('btn-primary');
@@ -6549,12 +6549,15 @@ $today_str = $today->format('Y-m-d');
 
             if (!canCheckIn) {
                 const issues = [];
-                if (!paymentOk) issues.push('payment not paid');
-                if (!roomOk) issues.push('room not assigned');
+                if (!paymentOk) issues.push('no payment recorded');
                 if (!statusOk) issues.push('booking not confirmed');
                 if (!dateReached) issues.push('check-in date not reached');
                 errorEl.textContent = 'Cannot check in because ' + issues.join(', ') + '.';
                 errorEl.style.display = 'block';
+            } else if (!roomOk) {
+                errorEl.textContent = 'Note: No specific room assigned — booking will check in without an individual room number.';
+                errorEl.style.display = 'block';
+                errorEl.style.color = '#856404';
             }
         }
 

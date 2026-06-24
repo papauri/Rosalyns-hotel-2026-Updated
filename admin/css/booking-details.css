@@ -1406,20 +1406,54 @@
     order: 4;
 }
 
-.story-pill {
+/* ── Story card header: icon + eyebrow/title + numbered badge ── */
+.story-card .info-card-header {
+    align-items: center;
+    gap: 0.6rem;
+    border-bottom: 1px solid color-mix(in srgb, var(--color-lux-clay-100, #ECE1D6) 70%, transparent);
+    background: linear-gradient(180deg,
+            color-mix(in srgb, var(--color-lux-clay-50, #F3ECE4) 32%, var(--color-white, #fff)) 0%,
+            var(--color-white, #fff) 100%);
+}
+
+.story-head-text {
+    display: flex;
+    flex-direction: column;
+    gap: 0.05rem;
+    min-width: 0;
+}
+
+.story-eyebrow {
+    font-size: 0.58rem;
+    font-weight: 600;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--color-lux-gold, #B18247);
+}
+
+.story-card .info-card-header h3 {
+    font-family: 'Cormorant Garamond', serif;
+    font-size: clamp(1rem, 0.92rem + 0.3vw, 1.18rem);
+    font-weight: 600;
+    line-height: 1.05;
+    color: var(--color-lux-ink, #231F1C);
+}
+
+.story-step-num {
     margin-left: auto;
+    flex-shrink: 0;
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    padding: 0.24rem 0.5rem;
-    border-radius: 999px;
-    font-size: clamp(0.64rem, 0.62rem + 0.06vw, 0.72rem);
+    width: 1.55rem;
+    height: 1.55rem;
+    border-radius: 50%;
+    font-family: 'Cormorant Garamond', serif;
+    font-size: 0.92rem;
     font-weight: 600;
-    letter-spacing: 0.03em;
-    text-transform: uppercase;
     color: var(--color-primary, #8A775F);
-    background: color-mix(in srgb, var(--color-primary, #8A775F) 14%, var(--color-white, #fff));
-    border: 1px solid color-mix(in srgb, var(--color-primary, #8A775F) 28%, var(--admin-surface-border, #d9dee7));
+    background: color-mix(in srgb, var(--color-primary, #8A775F) 12%, var(--color-white, #fff));
+    border: 1px solid color-mix(in srgb, var(--color-primary, #8A775F) 26%, transparent);
 }
 
 .folio-card {
@@ -1502,110 +1536,300 @@
     margin-top: auto;
 }
 
+/* ===========================================================
+   STORY CARD BODIES — premium editorial redesign
+   =========================================================== */
+.story-card .info-card-body {
+    padding: 0.9rem 0.95rem 1rem;
+}
+
+/* ── Guest card: tidy label/value rows ── */
 .story-card .info-row {
-    padding: 0.18rem 0;
+    padding: 0.32rem 0;
     min-height: 0;
+    border-bottom: 1px solid color-mix(in srgb, var(--color-lux-clay-100, #ECE1D6) 45%, transparent);
 }
 
 .story-card .info-label {
-    font-size: clamp(0.7rem, 0.68rem + 0.08vw, 0.76rem);
+    font-size: 0.62rem;
+    font-weight: 600;
+    letter-spacing: 0.07em;
+    text-transform: uppercase;
+    color: var(--color-text-secondary, #8a7a68);
 }
 
 .story-card .info-value {
-    font-size: clamp(0.74rem, 0.71rem + 0.1vw, 0.82rem);
+    font-size: clamp(0.78rem, 0.74rem + 0.12vw, 0.86rem);
+    font-weight: 500;
+    color: var(--color-lux-ink, #231F1C);
 }
 
 .story-card .guest-contact-actions {
-    margin-top: 0.38rem;
-    padding-top: 0.32rem;
-    gap: 0.3rem;
+    margin-top: 0.7rem;
+    padding-top: 0.7rem;
+    gap: 0.45rem;
+    border-top: 1px solid color-mix(in srgb, var(--color-lux-clay-100, #ECE1D6) 55%, transparent);
 }
 
 .story-card .guest-contact-actions a {
-    padding: 0.46rem 0.54rem;
-    font-size: clamp(0.66rem, 0.65rem + 0.06vw, 0.74rem);
-    border-radius: 0.56rem;
+    padding: 0.55rem 0.6rem;
+    font-size: 0.7rem;
+    border-radius: 0.6rem;
+    font-weight: 600;
 }
 
+/* ── Stay card: centred date journey ── */
 .story-card .room-info-display,
 .story-card .stay-duration-display,
 .story-card .payment-summary {
-    padding: 0.06rem 0;
+    padding: 0;
 }
 
-.story-card .room-name-display {
-    font-size: clamp(0.94rem, 0.88rem + 0.24vw, 1.08rem);
-    margin-bottom: 0.18rem;
-}
-
-.story-card .room-type-display {
-    font-size: clamp(0.7rem, 0.68rem + 0.08vw, 0.76rem);
-    margin-bottom: 0.55rem;
-}
-
-.story-card .assigned-room-badge {
-    padding: 0.38rem 0.62rem;
-    border-radius: 0.58rem;
-    font-size: clamp(0.64rem, 0.62rem + 0.07vw, 0.72rem);
-    gap: 0.32rem;
+.story-card .stay-duration-display {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 0.85rem;
+    height: 100%;
 }
 
 .story-card .date-range {
-    gap: 0.4rem;
-    margin-bottom: 0.3rem;
+    gap: 0.7rem;
+    margin-bottom: 0;
+    padding: 0.85rem 1rem;
+    width: 100%;
+    box-sizing: border-box;
+    border-radius: 0.85rem;
+    background: linear-gradient(135deg,
+            color-mix(in srgb, var(--color-lux-clay-50, #F3ECE4) 55%, var(--color-white, #fff)) 0%,
+            var(--color-white, #fff) 100%);
+    border: 1px solid color-mix(in srgb, var(--color-lux-clay-100, #ECE1D6) 60%, transparent);
 }
 
 .story-card .date-box .day {
-    font-size: clamp(1.1rem, 0.98rem + 0.42vw, 1.35rem);
+    font-family: 'Cormorant Garamond', serif;
+    font-size: clamp(1.7rem, 1.3rem + 1vw, 2.2rem);
+    font-weight: 600;
+    color: var(--color-lux-ink, #231F1C);
 }
 
 .story-card .date-box .month-year {
-    font-size: clamp(0.66rem, 0.65rem + 0.05vw, 0.72rem);
-    margin-top: 0.12rem;
+    font-size: 0.7rem;
+    font-weight: 500;
+    color: var(--color-text-secondary, #8a7a68);
+    margin-top: 0.18rem;
 }
 
 .story-card .date-box .label {
-    font-size: 0.58rem;
-    margin-top: 0.3rem;
+    font-size: 0.56rem;
+    letter-spacing: 0.12em;
+    margin-top: 0.35rem;
 }
 
 .story-card .date-arrow {
-    font-size: 0.9rem;
+    font-size: 0.85rem;
+    color: var(--color-lux-gold, #B18247);
 }
 
 .story-card .nights-display {
-    padding: 0.3rem 0.56rem;
-    gap: 0.3rem;
-    font-size: clamp(0.66rem, 0.64rem + 0.08vw, 0.74rem);
+    padding: 0.4rem 0.85rem;
+    gap: 0.4rem;
+    font-size: 0.74rem;
+    background: color-mix(in srgb, var(--color-lux-gold, #B18247) 12%, var(--color-white, #fff));
+    color: var(--color-lux-gold-deep, #8E6231);
+    border: 1px solid color-mix(in srgb, var(--color-lux-gold, #B18247) 22%, transparent);
+}
+
+/* ── Room card: enriched layout ── */
+.story-card .room-info-display {
+    text-align: left;
+    display: flex;
+    flex-direction: column;
+    gap: 0.7rem;
+    height: 100%;
+}
+
+.room-hero {
+    display: flex;
+    align-items: center;
+    gap: 0.7rem;
+}
+
+.room-hero-icon {
+    flex-shrink: 0;
+    width: 2.6rem;
+    height: 2.6rem;
+    border-radius: 0.7rem;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 1.05rem;
+    color: var(--color-lux-gold, #B18247);
+    background: color-mix(in srgb, var(--color-lux-gold, #B18247) 13%, var(--color-white, #fff));
+    border: 1px solid color-mix(in srgb, var(--color-lux-gold, #B18247) 20%, transparent);
+}
+
+.story-card .room-name-display {
+    font-family: 'Cormorant Garamond', serif;
+    font-size: clamp(1.15rem, 1rem + 0.5vw, 1.4rem);
+    font-weight: 600;
+    line-height: 1.05;
+    color: var(--color-lux-ink, #231F1C);
+    margin-bottom: 0.1rem;
+}
+
+.story-card .room-type-display {
+    font-size: 0.6rem;
+    font-weight: 600;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--color-text-secondary, #8a7a68);
+    margin-bottom: 0;
+}
+
+.room-rate-plan {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    padding: 0.45rem 0.6rem;
+    border-radius: 0.55rem;
+    font-size: 0.7rem;
+    color: var(--color-lux-gold-deep, #8A5F2A);
+    background: color-mix(in srgb, var(--color-lux-gold, #B18247) 11%, var(--color-white, #fff));
+    border-left: 3px solid var(--color-lux-gold, #B18247);
+}
+
+.room-meta-grid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 0.45rem;
+}
+
+.room-meta-cell {
+    display: flex;
+    flex-direction: column;
+    gap: 0.12rem;
+    padding: 0.5rem 0.6rem;
+    border-radius: 0.6rem;
+    background: color-mix(in srgb, var(--color-lux-clay-50, #F3ECE4) 40%, var(--color-white, #fff));
+    border: 1px solid color-mix(in srgb, var(--color-lux-clay-100, #ECE1D6) 55%, transparent);
+}
+
+.room-meta-label {
+    font-size: 0.56rem;
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--color-text-secondary, #8a7a68);
+}
+
+.room-meta-value {
+    font-size: 0.86rem;
+    font-weight: 600;
+    color: var(--color-lux-ink, #231F1C);
+}
+
+.story-card .assigned-room-badge {
+    padding: 0.55rem 0.75rem;
+    border-radius: 0.65rem;
+    font-size: 0.75rem;
+    gap: 0.45rem;
+    width: 100%;
+    box-sizing: border-box;
+}
+
+.room-unassigned {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    padding: 0.55rem 0.7rem;
+    border-radius: 0.6rem;
+    font-size: 0.72rem;
+    color: var(--color-text-secondary, #8a7a68);
+    background: color-mix(in srgb, var(--color-lux-clay-50, #F3ECE4) 45%, var(--color-white, #fff));
+    border: 1px dashed color-mix(in srgb, var(--color-lux-clay-300, #C8B39F) 70%, transparent);
+}
+
+.story-card .room-status-indicator {
+    margin-top: auto;
+    display: flex;
+    align-items: center;
+    font-size: 0.72rem;
+    color: var(--color-text-secondary, #8a7a68);
+    padding-top: 0.6rem;
+    border-top: 1px solid color-mix(in srgb, var(--color-lux-clay-100, #ECE1D6) 50%, transparent);
+}
+
+.story-card .room-status-indicator strong {
+    color: var(--color-lux-ink, #231F1C);
+    margin-left: 0.25rem;
+}
+
+/* ── Payment card: prominent amount + tight breakdown ── */
+.story-card .payment-summary {
+    display: flex;
+    flex-direction: column;
+}
+
+.payment-amount-block {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0.4rem;
+    padding: 0.85rem 0.7rem 0.95rem;
+    border-radius: 0.85rem;
+    text-align: center;
+    background: linear-gradient(135deg,
+            color-mix(in srgb, var(--color-lux-clay-50, #F3ECE4) 50%, var(--color-white, #fff)) 0%,
+            var(--color-white, #fff) 100%);
+    border: 1px solid color-mix(in srgb, var(--color-lux-clay-100, #ECE1D6) 60%, transparent);
+}
+
+.payment-amount-label {
+    font-size: 0.58rem;
+    font-weight: 600;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--color-text-secondary, #8a7a68);
 }
 
 .story-card .payment-amount {
-    font-size: clamp(1.05rem, 0.94rem + 0.38vw, 1.3rem);
-    line-height: 1.1;
-    margin-bottom: 0.12rem;
+    font-family: 'Cormorant Garamond', serif;
+    font-size: clamp(1.55rem, 1.2rem + 1.1vw, 2rem);
+    font-weight: 600;
+    line-height: 1;
+    margin-bottom: 0;
+    color: var(--color-lux-ink, #231F1C);
 }
 
 .story-card .payment-amount .currency {
-    font-size: clamp(0.64rem, 0.62rem + 0.1vw, 0.72rem);
-}
-
-.story-card .payment-reference {
-    font-size: clamp(0.62rem, 0.61rem + 0.05vw, 0.7rem);
-    margin-top: 0.34rem;
+    font-size: 0.78rem;
+    font-weight: 500;
+    color: var(--color-lux-gold, #B18247);
+    vertical-align: middle;
 }
 
 .story-card .info-value.status-badge {
-    font-size: clamp(0.62rem, 0.61rem + 0.05vw, 0.7rem);
-    padding: 0.24rem 0.52rem;
-    gap: 0.3rem;
+    font-size: 0.64rem;
+    padding: 0.28rem 0.7rem;
+    gap: 0.32rem;
+    border-radius: 999px;
+}
+
+.story-card .payment-reference {
+    font-size: 0.66rem;
+    margin-top: 0.5rem;
+    text-align: center;
+    color: var(--color-text-secondary, #8a7a68);
 }
 
 .payment-tax-breakdown {
-    margin-top: 0.62rem;
-    padding-top: 0.62rem;
-    border-top: 1px solid #ece7df;
+    margin-top: 0.7rem;
+    padding-top: 0.7rem;
+    border-top: 1px solid color-mix(in srgb, var(--color-lux-clay-100, #ECE1D6) 60%, transparent);
     display: grid;
-    gap: 0.34rem;
+    gap: 0.4rem;
 }
 
 .payment-tax-row {
@@ -1613,7 +1837,7 @@
     justify-content: space-between;
     align-items: center;
     gap: 0.5rem;
-    font-size: clamp(0.67rem, 0.65rem + 0.08vw, 0.76rem);
+    font-size: 0.74rem;
     color: var(--color-text-secondary, #5E554D);
 }
 
@@ -1623,9 +1847,16 @@
 }
 
 .payment-tax-row--total {
-    margin-top: 0.15rem;
-    padding-top: 0.38rem;
-    border-top: 1px dashed #ddd4c8;
+    margin-top: 0.25rem;
+    padding-top: 0.5rem;
+    border-top: 1px dashed color-mix(in srgb, var(--color-lux-clay-300, #C8B39F) 65%, transparent);
+}
+
+.payment-tax-row--total span,
+.payment-tax-row--total strong {
+    font-size: 0.82rem;
+    font-weight: 700;
+    color: var(--color-lux-ink, #231F1C);
 }
 
 .actions-card .info-card-body {
@@ -2193,8 +2424,8 @@
         grid-template-columns: 1fr;
     }
 
-    .story-pill {
-        margin-left: 0;
+    .room-meta-grid {
+        grid-template-columns: repeat(2, 1fr);
     }
 
     .booking-hero {

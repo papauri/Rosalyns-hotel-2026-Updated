@@ -1270,8 +1270,11 @@ unset($_SESSION['success_message'], $_SESSION['error_message']);
             <div class="info-card story-card story-card--guest">
                 <div class="info-card-header">
                     <div class="icon guest"><i class="fas fa-user"></i></div>
-                    <h3>Guest Information</h3>
-                    <span class="story-pill">Step 1</span>
+                    <div class="story-head-text">
+                        <span class="story-eyebrow">Step 1</span>
+                        <h3>Guest Information</h3>
+                    </div>
+                    <span class="story-step-num">1</span>
                 </div>
                 <div class="info-card-body">
                     <div class="info-row">
@@ -1358,8 +1361,11 @@ unset($_SESSION['success_message'], $_SESSION['error_message']);
             <div class="info-card story-card story-card--stay">
                 <div class="info-card-header">
                     <div class="icon stay"><i class="fas fa-calendar-alt"></i></div>
-                    <h3>Stay Duration</h3>
-                    <span class="story-pill">Step 2</span>
+                    <div class="story-head-text">
+                        <span class="story-eyebrow">Step 2</span>
+                        <h3>Stay Duration</h3>
+                    </div>
+                    <span class="story-step-num">2</span>
                 </div>
                 <div class="info-card-body">
                     <div class="stay-duration-display">
@@ -1388,44 +1394,66 @@ unset($_SESSION['success_message'], $_SESSION['error_message']);
             <div class="info-card story-card story-card--room">
                 <div class="info-card-header">
                     <div class="icon room"><i class="fas fa-bed"></i></div>
-                    <h3>Room Details</h3>
-                    <span class="story-pill">Step 3</span>
+                    <div class="story-head-text">
+                        <span class="story-eyebrow">Step 3</span>
+                        <h3>Room Details</h3>
+                    </div>
+                    <span class="story-step-num">3</span>
                 </div>
                 <div class="info-card-body">
                     <div class="room-info-display">
-                        <div class="room-name-display"><?php echo htmlspecialchars($booking['room_name']); ?></div>
-                        <div class="room-type-display">Room Type</div>
+                        <div class="room-hero">
+                            <div class="room-hero-icon"><i class="fas fa-bed"></i></div>
+                            <div class="room-hero-text">
+                                <div class="room-name-display"><?php echo htmlspecialchars($booking['room_name']); ?></div>
+                                <div class="room-type-display">Room type</div>
+                            </div>
+                        </div>
+
                         <?php if (!empty($booking['rate_plan_label'])): ?>
-                            <div style="margin-top:10px; padding:6px 10px; background:rgba(177,130,71,0.12); border-left:3px solid #B18247; border-radius:3px; font-size:12px; color:#8A5F2A;">
-                                <i class="fas fa-tag"></i> <?php echo htmlspecialchars($booking['rate_plan_label']); ?>
-                                <?php if ((float)($booking['rate_plan_discount'] ?? 0) > 0): ?> &mdash; -<?php echo $currency_symbol; ?><?php echo number_format((float) $booking['rate_plan_discount'], 2); ?>/night<?php endif; ?>
+                            <div class="room-rate-plan">
+                                <i class="fas fa-tag"></i>
+                                <span><?php echo htmlspecialchars($booking['rate_plan_label']); ?><?php if ((float)($booking['rate_plan_discount'] ?? 0) > 0): ?> &mdash; -<?php echo $currency_symbol; ?><?php echo number_format((float) $booking['rate_plan_discount'], 2); ?>/night<?php endif; ?></span>
                             </div>
                         <?php endif; ?>
+
+                        <div class="room-meta-grid">
+                            <div class="room-meta-cell">
+                                <span class="room-meta-label">Rate / night</span>
+                                <span class="room-meta-value"><?php echo $currency_symbol; ?><?php echo number_format((float) $booking['price_per_night'], 0); ?></span>
+                            </div>
+                            <div class="room-meta-cell">
+                                <span class="room-meta-label">Nights</span>
+                                <span class="room-meta-value"><?php echo (int) $booking['number_of_nights']; ?></span>
+                            </div>
+                            <div class="room-meta-cell">
+                                <span class="room-meta-label">Occupancy</span>
+                                <span class="room-meta-value"><?php echo (int) $booking['number_of_guests']; ?> guest<?php echo ((int) $booking['number_of_guests']) === 1 ? '' : 's'; ?></span>
+                            </div>
+                            <?php if ($booking['individual_room_floor']): ?>
+                            <div class="room-meta-cell">
+                                <span class="room-meta-label">Floor</span>
+                                <span class="room-meta-value"><?php echo htmlspecialchars($booking['individual_room_floor']); ?></span>
+                            </div>
+                            <?php endif; ?>
+                        </div>
 
                         <?php $bookingRoomLabel = getBookingRoomLabel((int) $booking['id'], (string)($booking['individual_room_name'] ?: (($booking['room_type_name'] ?: 'Room') . ' ' . $booking['individual_room_number']))); ?>
                         <?php if ($bookingRoomLabel !== ''): ?>
                             <div class="assigned-room-badge">
                                 <i class="fas fa-door-open"></i>
-                                <?php echo htmlspecialchars($bookingRoomLabel); ?>
-                            </div>
-                            <?php if ($booking['individual_room_floor']): ?>
-                                <div style="font-size: 12px; color: #888; margin-top: 8px;">
-                                    <i class="fas fa-layer-group"></i> Floor: <?php echo htmlspecialchars($booking['individual_room_floor']); ?>
-                                </div>
-                            <?php endif; ?>
-                            <div class="room-status-indicator">
-                                <span class="status-dot <?php echo htmlspecialchars($booking['derived_room_status']); ?>"></span>
-                                <?php echo ucfirst($booking['derived_room_status']); ?>
+                                <span><?php echo htmlspecialchars($bookingRoomLabel); ?></span>
                             </div>
                         <?php else: ?>
-                            <div style="color: #aaa; font-size: 13px; margin-top: 12px;">
-                                <i class="fas fa-info-circle"></i> No specific room assigned
-                            </div>
-                            <div class="room-status-indicator" style="margin-top: 12px;">
-                                <span class="status-dot <?php echo htmlspecialchars($booking['derived_room_status']); ?>"></span>
-                                <?php echo ucfirst($booking['derived_room_status']); ?>
+                            <div class="room-unassigned">
+                                <i class="fas fa-info-circle"></i> No specific room assigned yet
                             </div>
                         <?php endif; ?>
+
+                        <div class="room-status-indicator">
+                            <span class="status-dot <?php echo htmlspecialchars($booking['derived_room_status']); ?>"></span>
+                            Room status: <strong><?php echo ucfirst($booking['derived_room_status']); ?></strong>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -1434,19 +1462,16 @@ unset($_SESSION['success_message'], $_SESSION['error_message']);
             <div class="info-card story-card story-card--payment">
                 <div class="info-card-header">
                     <div class="icon payment"><i class="fas fa-credit-card"></i></div>
-                    <h3>Payment Information</h3>
-                    <span class="story-pill">Step 4</span>
+                    <div class="story-head-text">
+                        <span class="story-eyebrow">Step 4</span>
+                        <h3>Payment Information</h3>
+                    </div>
+                    <span class="story-step-num">4</span>
                 </div>
                 <div class="info-card-body">
                     <div class="payment-summary">
                         <?php
                         $display_total = $folio_total_amount;
-                        ?>
-                        <div class="payment-amount">
-                            <span class="currency"><?php echo $currency_symbol; ?></span>
-                            <?php echo number_format($display_total, 2); ?>
-                        </div>
-                        <?php
                         $payment_status = $booking['actual_payment_status'];
                         $status_class = in_array($payment_status, ['paid', 'completed']) ? 'paid' : (in_array($payment_status, ['partial']) ? 'partial' : 'unpaid');
                         $status_labels = [
@@ -1459,9 +1484,16 @@ unset($_SESSION['success_message'], $_SESSION['error_message']);
                             'refunded' => 'Refunded',
                         ];
                         ?>
-                        <div class="info-value status-badge <?php echo $status_class; ?>" style="margin-top: 8px;">
-                            <i class="fas <?php echo $status_class === 'paid' ? 'fa-check-circle' : 'fa-exclamation-circle'; ?>"></i>
-                            <?php echo $status_labels[$payment_status] ?? ucfirst($payment_status); ?>
+                        <div class="payment-amount-block">
+                            <span class="payment-amount-label">Total amount</span>
+                            <div class="payment-amount">
+                                <span class="currency"><?php echo $currency_symbol; ?></span>
+                                <?php echo number_format($display_total, 2); ?>
+                            </div>
+                            <div class="info-value status-badge <?php echo $status_class; ?>">
+                                <i class="fas <?php echo $status_class === 'paid' ? 'fa-check-circle' : 'fa-exclamation-circle'; ?>"></i>
+                                <?php echo $status_labels[$payment_status] ?? ucfirst($payment_status); ?>
+                            </div>
                         </div>
                         <?php if ($booking['payment_reference']): ?>
                             <div class="payment-reference">

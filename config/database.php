@@ -2276,9 +2276,9 @@ function validateBookingStatusTransition(string $currentStatus, string $newStatu
  */
 function validateCheckIn(array $booking): array
 {
-    $requiredFields = ['status', 'payment_status', 'individual_room_id', 'check_in_date'];
+    $requiredFields = ['status', 'payment_status', 'check_in_date'];
     foreach ($requiredFields as $field) {
-        if (!isset($booking[$field])) {
+        if (!array_key_exists($field, $booking)) {
             return ['allowed' => false, 'reason' => "Missing required field: {$field}"];
         }
     }
@@ -2287,16 +2287,16 @@ function validateCheckIn(array $booking): array
         return ['allowed' => false, 'reason' => "Booking must be CONFIRMED to check in (current: {$booking['status']})"];
     }
 
-    if ($booking['payment_status'] !== 'paid') {
-        return ['allowed' => false, 'reason' => "Booking must be PAID to check in (current: {$booking['payment_status']})"];
+    // Unpaid bookings cannot check in; partial payment is allowed (balance collected at reception)
+    if ($booking['payment_status'] === 'unpaid' || $booking['payment_status'] === '') {
+        return ['allowed' => false, 'reason' => "Booking must have at least a partial payment to check in (current: {$booking['payment_status']})"];
     }
 
-    if (empty($booking['individual_room_id'])) {
-        return ['allowed' => false, 'reason' => "A room must be assigned before check-in"];
-    }
+    // individual_room_id is NOT a hard requirement — not all properties track physical room numbers,
+    // and auto-assigned bookings legitimately have no individual_room_id set.
 
     // Date-based validation: check-in only allowed on or after check-in date
-    $check_in_date = new DateTime($booking['check_in_date']);
+    $check_in_date = new DateTime((string)$booking['check_in_date']);
     $check_in_date->setTime(0, 0, 0);
     $today = new DateTime('today');
 
