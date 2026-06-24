@@ -1216,6 +1216,39 @@ try {
             background: #fdf8f2;
         }
 
+        /* ── Availability summary panel ─────────────────────────────────── */
+        .avail-panel {
+            display: none;
+            gap: 10px;
+            flex-wrap: wrap;
+            margin-bottom: 18px;
+        }
+        .avail-panel.visible { display: flex; }
+        .avail-card {
+            flex: 1; min-width: 140px;
+            border: 2px solid transparent;
+            border-radius: 8px; padding: 13px 15px;
+            cursor: pointer;
+            transition: border-color .15s, transform .12s, box-shadow .12s;
+            position: relative;
+        }
+        .avail-card:hover { transform: translateY(-2px); box-shadow: 0 4px 12px rgba(0,0,0,.08); }
+        .avail-card.ac-available { background: #f0faf4; border-color: #a3d5b3; }
+        .avail-card.ac-unavailable { background: #fdf0f0; border-color: #f5b8b8; cursor: not-allowed; opacity: .75; }
+        .avail-card.ac-selected { border-color: var(--gold, #b18247); box-shadow: 0 0 0 3px rgba(177,130,71,.15); }
+        .avail-card-count { font-size: 24px; font-weight: 700; line-height: 1; }
+        .ac-available .avail-card-count { color: #1a7a3c; }
+        .ac-unavailable .avail-card-count { color: #c0392b; }
+        .avail-card-name { font-size: 13px; font-weight: 600; color: #2a2723; margin-top: 5px; }
+        .avail-card-price { font-size: 11px; color: #7a7068; margin-top: 3px; }
+        .avail-card-tag {
+            display: inline-block; font-size: 10px; font-weight: 700;
+            text-transform: uppercase; letter-spacing: .04em;
+            border-radius: 8px; padding: 2px 7px; margin-top: 6px;
+        }
+        .ac-available .avail-card-tag { background: #d4edda; color: #1a6632; }
+        .ac-unavailable .avail-card-tag { background: #f8d7da; color: #721c24; }
+
         @media (max-width: 640px) {
 
             .form-row,
@@ -1464,6 +1497,9 @@ try {
                     <div id="roomAvailabilityNotice" style="margin-bottom:14px;padding:10px 14px;border-radius:6px;background:#fff8e1;border-left:3px solid #f0c36d;color:#7a5c00;font-size:13px;display:<?php echo (!empty($_POST['check_in_date']) && !empty($_POST['check_out_date'])) ? 'none' : 'flex'; ?>;align-items:center;gap:8px;">
                         <i class="fas fa-calendar-alt"></i> Select check-in and check-out dates above to see available rooms.
                     </div>
+
+                    <!-- Availability summary cards — populated by JS after dates are chosen -->
+                    <div id="availSummaryPanel" class="avail-panel" role="list" aria-label="Room availability"></div>
 
                     <!-- Rooms counter: each increment adds a new room line -->
                     <div id="roomsCounterRow" style="display:flex;align-items:center;gap:14px;margin-bottom:16px;flex-wrap:wrap;">
@@ -1825,6 +1861,13 @@ try {
             const occSel = lineEl.querySelector('.line-occ-select');
             const roomId = parseInt(roomSel?.value || '0', 10);
             const room = roomsData.find(r => r.id === roomId);
+
+            // Sync selected state on availability cards
+            if (roomId) {
+                document.querySelectorAll('.avail-card').forEach(c => {
+                    c.classList.toggle('ac-selected', parseInt(c.dataset.roomId) === roomId);
+                });
+            }
             if (!room) {
                 calculateTotal();
                 return;
@@ -2069,7 +2112,9 @@ try {
         // ── Availability AJAX ─────────────────────────────────────────────────────
         function checkAvailabilityForDates(checkIn, checkOut) {
             const notice = el('roomAvailabilityNotice');
+            const panel  = el('availSummaryPanel');
             document.querySelectorAll('.line-room-select').forEach(s => s.disabled = true);
+            if (panel) { panel.innerHTML = ''; panel.classList.remove('visible'); }
             if (notice) {
                 notice.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Checking availability…';
                 notice.style.cssText = 'display:flex;align-items:center;gap:8px;background:#fff8e1;border-left:3px solid #f0c36d;color:#7a5c00;padding:10px 14px;border-radius:6px;margin-bottom:14px;font-size:13px;';
@@ -2122,6 +2167,44 @@ try {
                         sel.options[0].text = '— Select Room Type —';
                     });
                     if (notice) notice.style.display = 'none';
+
+                    // Build availability summary panel
+                    const panel = el('availSummaryPanel');
+                    if (panel && roomsData.length > 0) {
+                        panel.innerHTML = '';
+                        roomsData.forEach(function (rm) {
+                            const info = _availMap[rm.id];
+                            if (!info) return;
+                            const avail = !!info.available;
+                            const left  = avail ? (info.rooms_left > 0 ? info.rooms_left : 1) : 0;
+                            const card  = document.createElement('div');
+                            card.className = 'avail-card ' + (avail ? 'ac-available' : 'ac-unavailable');
+                            card.setAttribute('role', 'listitem');
+                            card.dataset.roomId = rm.id;
+                            card.innerHTML =
+                                '<div class="avail-card-count">' + (avail ? left : '0') + '</div>' +
+                                '<div class="avail-card-name">' + rm.name + '</div>' +
+                                '<div class="avail-card-price">' + currency + rm.price_per_night.toLocaleString() + ' / night</div>' +
+                                '<span class="avail-card-tag">' + (avail ? (left === 1 ? 'Available' : left + ' Available') : 'Sold Out') + '</span>';
+                            if (avail) {
+                                card.addEventListener('click', function () {
+                                    // Auto-select this room type in the first empty line dropdown
+                                    const selects = Array.from(document.querySelectorAll('.line-room-select'));
+                                    const target  = selects.find(s => !s.value) || selects[0];
+                                    if (target) {
+                                        target.value = rm.id;
+                                        target.dispatchEvent(new Event('change'));
+                                    }
+                                    // Mark selected card
+                                    document.querySelectorAll('.avail-card').forEach(c => c.classList.remove('ac-selected'));
+                                    card.classList.add('ac-selected');
+                                });
+                            }
+                            panel.appendChild(card);
+                        });
+                        panel.classList.add('visible');
+                    }
+
                     getVisibleLines().forEach(ln => {
                         const i = parseInt(ln.id.replace('room-line-', ''), 10);
                         updateLineRoom(i);
