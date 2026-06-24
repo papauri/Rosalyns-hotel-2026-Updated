@@ -3627,6 +3627,186 @@
     box-shadow: 0 0 0 2px rgba(201,169,97,0.2);
 }
 
+/* ── ROOM CARD DEFINITIVE FIX ────────────────────────────────────────
+   Resolves overlapping info, badge positioning, and layout conflicts
+   from earlier rounds of styling. Uses specificity + !important where
+   earlier rules contain !important that would otherwise win.
+   ──────────────────────────────────────────────────────────────────── */
+
+/* 1. Card container — clean vertical flex, no ambiguity */
+.booking-page .room-option {
+    display: flex !important;
+    flex-direction: column !important;
+    align-items: stretch !important;
+    justify-content: flex-start !important;
+    padding: 0 !important;
+    gap: 0 !important;
+    background: #FFFFFF !important;
+    border-radius: 16px !important;
+    border: 1.5px solid rgba(139,115,85,0.12) !important;
+    overflow: hidden !important;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.04) !important;
+    cursor: pointer;
+    transition: transform 0.25s ease, box-shadow 0.25s ease, border-color 0.2s ease;
+}
+
+/* 2. Image — full width at top, fixed height, no border-radius (card clips) */
+.booking-page .room-option .room-option__thumb,
+.booking-page .room-option__thumb {
+    width: 100% !important;
+    height: 195px !important;
+    flex-shrink: 0 !important;
+    border-radius: 0 !important;
+    overflow: hidden;
+    position: relative;
+    background: linear-gradient(135deg, #EDE9E3, #E8E4DD);
+    margin: 0;
+}
+
+.booking-page .room-option .room-option__thumb img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block;
+    transition: transform 0.55s ease;
+}
+
+.booking-page .room-option:hover .room-option__thumb img {
+    transform: scale(1.06);
+}
+
+/* 3. Room info — normal block flow, flex column, NO position:absolute leakage */
+.booking-page .room-option .room-info {
+    flex: 1 1 auto !important;
+    padding: 14px 16px 10px !important;
+    display: flex !important;
+    flex-direction: column !important;
+    gap: 0;
+    position: static !important;
+    z-index: auto !important;
+    transform: none !important;
+    min-width: 0;
+}
+
+.booking-page .room-option.selected .room-info {
+    transform: none !important;
+}
+
+.booking-page .room-option .room-info h4 {
+    font-family: 'Cormorant Garamond', serif !important;
+    font-size: 1.1rem !important;
+    font-weight: 600 !important;
+    color: #1A1A1A !important;
+    margin: 0 0 5px !important;
+    letter-spacing: 0.01em;
+    line-height: 1.25;
+    white-space: normal;
+}
+
+.booking-page .room-option .room-info > p {
+    font-family: 'Jost', sans-serif !important;
+    font-size: 0.775rem !important;
+    color: #7A6A58 !important;
+    line-height: 1.5;
+    margin: 0 0 4px !important;
+    white-space: normal;
+}
+
+/* 4. Child badge — static flow inside room-info (NOT absolute-positioned)
+      This was the main culprit: absolute + top:10px put it over the image
+      from INSIDE room-info, causing double-badge-over-image overlap. */
+.booking-page .room-option .room-child-badge {
+    position: static !important;
+    display: inline-flex !important;
+    align-items: center;
+    gap: 4px;
+    margin-top: 8px !important;
+    padding: 3px 9px !important;
+    border-radius: 20px;
+    font-size: 0.67rem !important;
+    font-weight: 600;
+    letter-spacing: 0.03em;
+    backdrop-filter: none !important;
+    -webkit-backdrop-filter: none !important;
+    align-self: flex-start;
+    top: auto !important;
+    left: auto !important;
+    z-index: auto !important;
+}
+
+/* 5. Price strip — flex row: amount + "per night" on one line */
+.booking-page .room-option .room-price {
+    flex-shrink: 0 !important;
+    display: flex !important;
+    flex-direction: row !important;
+    align-items: baseline;
+    gap: 6px;
+    padding: 10px 16px 13px !important;
+    border-top: 1px solid rgba(139,115,85,0.09) !important;
+    background: rgba(250,248,245,0.6) !important;
+    text-align: left !important;
+    transform: none !important;
+    position: static !important;
+    z-index: auto !important;
+}
+
+.booking-page .room-option.selected .room-price {
+    background: rgba(139,115,85,0.06) !important;
+    transform: none !important;
+}
+
+.booking-page .room-option .room-price-amount {
+    font-family: 'Cormorant Garamond', serif !important;
+    font-size: 1.25rem !important;
+    font-weight: 700 !important;
+    color: #8B7355 !important;
+    line-height: 1;
+    display: inline !important;
+}
+
+.booking-page .room-option .room-price-period {
+    font-family: 'Jost', sans-serif !important;
+    font-size: 0.67rem !important;
+    color: #9B8A72 !important;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    display: inline !important;
+}
+
+/* 6. Selected checkmark — top-right corner over the image, never clipped */
+.booking-page .room-option.selected::after {
+    position: absolute !important;
+    top: 10px !important;
+    right: 10px !important;
+    bottom: auto !important;
+    left: auto !important;
+    z-index: 5 !important;
+    width: 26px !important;
+    height: 26px !important;
+    font-size: 13px !important;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.22);
+}
+
+/* 7. Hover + selected card states */
+.booking-page .room-option:hover {
+    transform: translateY(-3px) !important;
+    box-shadow: 0 8px 28px rgba(139,115,85,0.18) !important;
+    border-color: rgba(139,115,85,0.3) !important;
+}
+
+.booking-page .room-option.selected {
+    border-color: #8B7355 !important;
+    box-shadow: 0 0 0 3px rgba(139,115,85,0.12), 0 6px 24px rgba(139,115,85,0.18) !important;
+    transform: none !important;
+}
+
+/* 8. Disabled */
+.booking-page .room-option.room-option-disabled {
+    transform: none !important;
+    box-shadow: none !important;
+    opacity: 0.55;
+}
+
 /* Section title consistency — Booking Type title same weight as others */
 .booking-page .form-section-title {
     font-size: clamp(1.2rem, 2vw, 1.5rem);
