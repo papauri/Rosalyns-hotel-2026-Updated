@@ -3200,22 +3200,37 @@
     grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
 }
 
-/* ── 6. form-sections-row — two separate floating cards ────────── */
+/* ── 6. form-sections-row — ONE unified card, two panels inside ─── */
 .booking-page .form-sections-row {
     display: grid;
     grid-template-columns: 1fr 1fr;
-    gap: 16px;
+    gap: 0;
     align-items: start;
-    border-bottom: none !important;
+    /* Card styling on the row itself */
+    background: #FFFFFF;
+    border-radius: 20px;
+    border: 1px solid rgba(139, 115, 85, 0.1) !important;
+    border-bottom: 1px solid rgba(139, 115, 85, 0.1) !important;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.04), 0 8px 28px rgba(139,115,85,0.06);
+    overflow: hidden;
 }
 
 .booking-page .form-sections-row::after {
     display: none;
 }
 
+/* Strip individual card styling from children — they're panels, not cards */
+.booking-page .form-sections-row > .form-section {
+    background: transparent !important;
+    border-radius: 0 !important;
+    border: none !important;
+    box-shadow: none !important;
+    padding: clamp(28px, 4vw, 52px) clamp(24px, 4vw, 48px) !important;
+}
+
+/* Subtle divider between the two panels */
 .booking-page .form-sections-row > .form-section + .form-section {
-    border-top: 1px solid rgba(139,115,85,0.1) !important;
-    padding-left: clamp(24px, 4vw, 52px) !important;
+    border-left: 1px solid rgba(139, 115, 85, 0.1) !important;
 }
 
 /* ── 7. Room cards — spacious, image-led ────────────────────────── */
@@ -3447,7 +3462,12 @@
 @media (max-width: 720px) {
     .booking-page .form-sections-row {
         grid-template-columns: 1fr;
-        gap: 12px;
+        /* stays one unified card, sections stack */
+    }
+
+    .booking-page .form-sections-row > .form-section + .form-section {
+        border-left: none !important;
+        border-top: 1px solid rgba(139, 115, 85, 0.1) !important;
     }
 }
 
