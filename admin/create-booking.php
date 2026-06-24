@@ -423,6 +423,26 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['create_booking'])) {
             $pdo->prepare("SELECT id FROM rooms WHERE id = ? FOR UPDATE")->execute([$lock_rid]);
         }
 
+        // ── Server-side availability guard (prevents double-booking race) ─────
+        // Re-verify capacity for every room type inside the locked transaction.
+        // Sum requested qty per room_id (multiple lines may target the same type).
+        $requested_qty_by_room = [];
+        foreach ($room_lines as $line) {
+            $rid = (int)$line['room_id'];
+            $requested_qty_by_room[$rid] = ($requested_qty_by_room[$rid] ?? 0) + (int)$line['qty'];
+        }
+        foreach ($requested_qty_by_room as $rid => $needed) {
+            $avail = checkRoomAvailability($rid, $check_in_date, $check_out_date, null, $child_guests, $needed);
+            if (empty($avail['available'])) {
+                throw new Exception($avail['error'] ?? 'Selected room is no longer available for those dates.');
+            }
+            $remaining = (int)($avail['remaining_rooms'] ?? 0);
+            if ($remaining < $needed) {
+                $room_label = $avail['room']['name'] ?? ('room type ' . $rid);
+                throw new Exception('Only ' . max(0, $remaining) . ' room(s) of "' . $room_label . '" remain available for those dates, but ' . $needed . ' were requested.');
+            }
+        }
+
         $created_bookings = [];
         $booking_number   = 0;
         $primary_booking_db_id = null;   // tracks the first-inserted booking's DB id
@@ -771,7 +791,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['create_booking'])) {
         ];
         header('Location: booking-details.php?id=' . $primary_id);
         exit;
-    } catch (Exception $e) {
+    } catch (\Throwable $e) {
         if ($pdo->inTransaction()) $pdo->rollBack();
         $error = $e->getMessage();
         rh_log_event('create-booking', 'error', 'Booking creation failed: ' . $e->getMessage(), [

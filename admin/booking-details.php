@@ -383,6 +383,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['booking_action'])) {
             case 'confirm':
                 $stmt = $pdo->prepare("UPDATE bookings SET status = 'confirmed', updated_at = NOW() WHERE id = ? AND status = 'pending'");
                 $stmt->execute([$booking_id]);
+                $confirm_changed = $stmt->rowCount() > 0;
+
+                if (!$confirm_changed) {
+                    $_SESSION['error_message'] = 'Only pending bookings can be confirmed.';
+                    break;
+                }
 
                 // Decrement room availability and get booking details
                 $room_stmt = $pdo->prepare("SELECT room_id, booking_reference, payment_status, individual_room_id FROM bookings WHERE id = ?");
@@ -663,7 +669,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['booking_action'])) {
                 }
                 break;
         }
-    } catch (PDOException $e) {
+    } catch (\Throwable $e) {
         $_SESSION['error_message'] = 'Action failed. Please try again.';
         error_log("Booking action error: " . $e->getMessage());
     }
@@ -728,8 +734,9 @@ try {
                     COALESCE(SUM(CASE WHEN status NOT IN ('cancelled','no-show','expired') THEN total_amount ELSE 0 END), 0) AS lifetime_spend
                 FROM bookings
                 WHERE guest_email = :email
+                  AND id != :current_id
             ");
-            $cntStmt->execute([':email' => $booking['guest_email']]);
+            $cntStmt->execute([':email' => $booking['guest_email'], ':current_id' => $booking_id]);
             $ghCounts = $cntStmt->fetch(PDO::FETCH_ASSOC) ?: [];
 
             $guest_history = [

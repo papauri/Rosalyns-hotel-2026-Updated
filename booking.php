@@ -1877,12 +1877,19 @@ try {
             const ci = document.getElementById('check_in_date');
             const co = document.getElementById('check_out_date');
             const wrapper = document.getElementById('roomSectionWrapper');
-            if (!wrapper) return;
-            if (ci && co && ci.value && co.value && co.value > ci.value) {
-                wrapper.style.display = '';
-                scrollToSection(wrapper, 350);
+            const datesGood = ci && co && ci.value && co.value && co.value > ci.value;
+
+            if (datesGood) {
+                if (wrapper) {
+                    wrapper.style.display = '';
+                    scrollToSection(wrapper, 350);
+                } else if (preselectedRoomId) {
+                    // Room already chosen — jump straight to guest info
+                    const guestInfoSection = document.querySelector('.form-section-title .fa-user')?.closest('.form-section');
+                    scrollToSection(guestInfoSection, 350);
+                }
             } else {
-                wrapper.style.display = 'none';
+                if (wrapper) wrapper.style.display = 'none';
             }
         }
 
@@ -1929,6 +1936,11 @@ try {
                             const currentCheckOut = checkOutCalendar.selectedDates[0];
                             if (currentCheckOut && currentCheckOut < nextDay) {
                                 checkOutCalendar.clear();
+                            }
+
+                            // Auto-open check-out if it hasn't been set yet
+                            if (!checkOutCalendar.selectedDates.length) {
+                                setTimeout(() => checkOutCalendar.open(), 180);
                             }
                         }
                     }
@@ -2034,10 +2046,10 @@ try {
                 // Find room by exact name match from roomsData
                 const matchingRoom = roomsData.find(room => room.name === heroRoomType);
                 if (matchingRoom) {
-                    // Select the matching room
+                    // Select the matching room (suppress scroll — page-load auto-select)
                     const roomOption = document.querySelector(`.room-option[data-room-id="${matchingRoom.id}"]`);
                     if (roomOption) {
-                        selectRoom(roomOption);
+                        selectRoom(roomOption, true);
                     }
                 }
             }
@@ -2093,8 +2105,8 @@ try {
                         }
                     };
 
-                    // Call selectRoom to ensure all room-specific settings are applied
-                    selectRoom(syntheticRoomOption);
+                    // Call selectRoom to ensure all room-specific settings are applied (suppress scroll on page load)
+                    selectRoom(syntheticRoomOption, true);
 
                     // Trigger availability check for pre-selected room if dates are provided
                     if (heroCheckIn && heroCheckOut) {
@@ -2110,10 +2122,15 @@ try {
             bookingTypeRadios.forEach(radio => {
                 radio.addEventListener('change', function() {
                     selectBookingType(this.value);
-                    // Scroll to the summary/submit area so the user sees it appear
-                    const bottomSection = document.querySelector('.booking-bottom-section')
-                                       || document.querySelector('.booking-action-bar');
-                    scrollToSection(bottomSection, 520);
+                    // Scroll to packages if visible, otherwise go straight to summary
+                    const pkgSection = document.getElementById('packagesSection');
+                    if (pkgSection && pkgSection.style.display !== 'none') {
+                        scrollToSection(pkgSection, 400);
+                    } else {
+                        const bottomSection = document.querySelector('.booking-bottom-section')
+                                           || document.querySelector('.booking-action-bar');
+                        scrollToSection(bottomSection, 520);
+                    }
                 });
             });
 
@@ -2300,7 +2317,7 @@ try {
             submitBtn.style.opacity = '1';
         }
 
-        function selectRoom(label) {
+        function selectRoom(label, skipScroll) {
             document.querySelectorAll('.room-option').forEach(opt => opt.classList.remove('selected'));
             label.classList.add('selected');
 
@@ -2352,9 +2369,11 @@ try {
                 performAvailabilityCheck();
             }
 
-            // Scroll to guest information section after a room is picked
-            const guestInfoSection = document.querySelector('.form-section-title .fa-user')?.closest('.form-section');
-            scrollToSection(guestInfoSection, 420);
+            // Scroll to guest information section after a room is picked (skip on page-load pre-selection)
+            if (!skipScroll) {
+                const guestInfoSection = document.querySelector('.form-section-title .fa-user')?.closest('.form-section');
+                scrollToSection(guestInfoSection, 420);
+            }
         }
 
         // Update guest dropdown options based on room capacity
@@ -2534,6 +2553,8 @@ try {
             }
 
             section.style.display = '';
+            // Guide the user's eye to the newly-revealed packages section
+            scrollToSection(section, 450);
             list.innerHTML = currentPackages.map(pkg => {
                 const isComplimentary = parseFloat(pkg.price_amount) === 0;
                 let cost = 0;
@@ -3410,13 +3431,11 @@ try {
 
             if (allValid && !_guestScrollFired) {
                 _guestScrollFired = true;
-                // Target the Booking Type panel (right panel inside form-sections-row,
-                // or the entire row on mobile where they stack vertically)
-                const bookingTypeSection =
-                    document.querySelector('.booking-type-selection')?.closest('.form-section')
-                    || document.querySelector('[name="booking_type"]')?.closest('.form-section')
+                // Scroll to the guest-details block (number of guests) — next logical step
+                const guestDetailsSection =
+                    document.getElementById('guestDetailsSection')
                     || document.querySelector('.form-sections-row');
-                scrollToSection(bookingTypeSection, 480);
+                scrollToSection(guestDetailsSection, 480);
             } else if (!allValid) {
                 // Reset so it fires again if the user fixes a field after invalidating
                 _guestScrollFired = false;
