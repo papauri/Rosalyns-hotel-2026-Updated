@@ -2335,18 +2335,18 @@
     margin-inline: auto;
 }
 
-/* Booking form card fluid sizing */
+/* Booking form card fluid sizing — matches wrapper, no inner cap */
 .booking-page .booking-form-card {
-    max-width: min(960px, 100%);
+    max-width: 100%;
     width: 100%;
     margin-inline: auto;
     box-sizing: border-box;
 }
 
-/* Form sections inner padding — fluid */
+/* Form sections inner padding — generous breathing room */
 .booking-page .form-section {
-    padding-inline: clamp(16px, 3vw, 32px);
-    padding-block: clamp(18px, 3vw, 28px);
+    padding-inline: clamp(28px, 5vw, 56px);
+    padding-block: clamp(32px, 4vw, 48px);
 }
 
 /* ── Breakpoint overrides ─────────────────── */
@@ -2360,6 +2360,12 @@
     .booking-page .booking-form-card {
         border-radius: 12px;
         margin-inline: 0;
+    }
+
+    /* Tighten section padding slightly on very small screens */
+    .booking-page .form-section {
+        padding-inline: 18px;
+        padding-block: 24px;
     }
 
     .booking-page .booking-header h1 {
@@ -2478,17 +2484,31 @@
 .form-sections-row {
     display: grid;
     grid-template-columns: 1fr 1fr;
-    gap: 0;
+    gap: 0;                 /* no gap — sections share the card edge */
     align-items: start;
+    position: relative;
+}
+
+/* Vertical divider between the two panels */
+.form-sections-row::after {
+    content: '';
+    position: absolute;
+    top: clamp(32px, 4vw, 48px);
+    bottom: clamp(32px, 4vw, 48px);
+    left: 50%;
+    width: 1px;
+    background: rgba(139, 115, 85, 0.12);
+    pointer-events: none;
 }
 
 .form-sections-row > .form-section {
-    border-top: none;         /* avoid double border with sibling above */
+    border-bottom: none;    /* row has its own bottom border below */
+    border-top: none;
 }
 
-.form-sections-row > .form-section + .form-section {
-    border-left: 1px solid rgba(139, 115, 85, 0.1);
-    padding-left: clamp(16px, 3vw, 32px);
+/* Outer border below the row (replaces individual section borders) */
+.form-sections-row {
+    border-bottom: 1px solid var(--color-border-light, #E8E4DD);
 }
 
 /* ── Booking bottom section (summary + submit) ─── */
@@ -2964,9 +2984,12 @@
         grid-template-columns: 1fr;
     }
 
+    /* Hide the vertical pseudo-divider when stacked */
+    .form-sections-row::after {
+        display: none;
+    }
+
     .form-sections-row > .form-section + .form-section {
-        border-left: none;
-        padding-left: 0;
         border-top: 1px solid rgba(139, 115, 85, 0.1);
     }
 

@@ -1842,6 +1842,17 @@ try {
             return dates;
         }
 
+        // ── Graceful section-to-section scroll ────────────────────────────
+        function scrollToSection(el, delay) {
+            if (!el) return;
+            setTimeout(function () {
+                const headerEl = document.querySelector('header') || document.querySelector('.site-header');
+                const offset   = (headerEl ? headerEl.offsetHeight : 80) + 24;
+                const top      = el.getBoundingClientRect().top + window.pageYOffset - offset;
+                window.scrollTo({ top: Math.max(0, top), behavior: 'smooth' });
+            }, delay || 320);
+        }
+
         // Reveal room selection section once both dates are set
         function revealRoomSection() {
             const ci = document.getElementById('check_in_date');
@@ -1850,6 +1861,7 @@ try {
             if (!wrapper) return;
             if (ci && co && ci.value && co.value && co.value > ci.value) {
                 wrapper.style.display = '';
+                scrollToSection(wrapper, 350);
             } else {
                 wrapper.style.display = 'none';
             }
@@ -2316,6 +2328,10 @@ try {
             if (document.getElementById('check_in_date')?.value && document.getElementById('check_out_date')?.value) {
                 performAvailabilityCheck();
             }
+
+            // Scroll to guest information section after a room is picked
+            const guestInfoSection = document.querySelector('.form-section-title .fa-user')?.closest('.form-section');
+            scrollToSection(guestInfoSection, 420);
         }
 
         // Update guest dropdown options based on room capacity
@@ -2954,6 +2970,9 @@ try {
                     updatePriceBasedOnGuestCount();
                     updateSummary();
                     validateFormForSubmit();
+                    // Scroll to booking type section (right column of form-sections-row)
+                    const bookingTypeSection = document.querySelector('.booking-type-selection')?.closest('.form-section');
+                    scrollToSection(bookingTypeSection, 350);
                 });
             }
 
