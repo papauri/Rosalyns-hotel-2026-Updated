@@ -706,6 +706,43 @@ try {
         exit;
     }
 
+    // ── Returning guest history ──────────────────────────────────────
+    $guest_history = ['total_bookings' => 0, 'completed_stays' => 0, 'lifetime_spend' => 0.0, 'bookings' => []];
+    if (!empty($booking['guest_email'])) {
+        try {
+            $ghStmt = $pdo->prepare("
+                SELECT id, booking_reference, check_in_date, check_out_date, total_amount, status
+                FROM bookings
+                WHERE guest_email = :email
+                  AND id != :current_id
+                ORDER BY check_in_date DESC
+                LIMIT 6
+            ");
+            $ghStmt->execute([':email' => $booking['guest_email'], ':current_id' => $booking_id]);
+            $past_bookings = $ghStmt->fetchAll(PDO::FETCH_ASSOC);
+
+            $cntStmt = $pdo->prepare("
+                SELECT
+                    COUNT(*) AS total_bookings,
+                    SUM(CASE WHEN status NOT IN ('cancelled','no-show','expired') THEN 1 ELSE 0 END) AS completed_stays,
+                    COALESCE(SUM(CASE WHEN status NOT IN ('cancelled','no-show','expired') THEN total_amount ELSE 0 END), 0) AS lifetime_spend
+                FROM bookings
+                WHERE guest_email = :email
+            ");
+            $cntStmt->execute([':email' => $booking['guest_email']]);
+            $ghCounts = $cntStmt->fetch(PDO::FETCH_ASSOC) ?: [];
+
+            $guest_history = [
+                'total_bookings'  => (int)($ghCounts['total_bookings']  ?? 0),
+                'completed_stays' => (int)($ghCounts['completed_stays'] ?? 0),
+                'lifetime_spend'  => (float)($ghCounts['lifetime_spend'] ?? 0),
+                'bookings'        => $past_bookings,
+            ];
+        } catch (\Throwable $e) {
+            error_log('Guest history query: ' . $e->getMessage());
+        }
+    }
+
     // Derive room status from booking status if no individual room assigned
     if (empty($booking['individual_room_status'])) {
         $booking_status = $booking['status'];
@@ -1080,6 +1117,43 @@ unset($_SESSION['success_message'], $_SESSION['error_message']);
             --bd-status-bg: <?php echo htmlspecialchars($current_status['bg']); ?>;
             --bd-status-color: <?php echo htmlspecialchars($current_status['color']); ?>;
         }
+        /* Returning guest history */
+        .gh-badge {
+            display: inline-flex; align-items: center; gap: 5px;
+            font-size: 11px; font-weight: 700; letter-spacing: .03em;
+            border-radius: 12px; padding: 3px 10px; margin-bottom: 10px;
+        }
+        .gh-badge--returning { background: #d4f0dc; color: #1a6632; border: 1px solid #a3d5b3; }
+        .gh-badge--new       { background: #e8f4e8; color: #2d6a2d; border: 1px solid #a8d4a8; }
+        .gh-stats-row {
+            display: flex; gap: 10px; flex-wrap: wrap; margin: 8px 0 10px;
+        }
+        .gh-stat {
+            flex: 1; min-width: 70px;
+            background: #faf5ef; border: 1px solid #e8d9c4;
+            border-radius: 6px; padding: 8px 10px; text-align: center;
+        }
+        .gh-stat-val { font-size: 18px; font-weight: 700; color: #2a2723; }
+        .gh-stat-lbl { font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: .04em; color: #8a7a68; margin-top: 2px; }
+        .gh-past-list { margin-top: 8px; }
+        .gh-past-item {
+            display: flex; align-items: center; justify-content: space-between;
+            padding: 7px 0; border-bottom: 1px solid #f0ebe4; font-size: 12px;
+        }
+        .gh-past-item:last-child { border-bottom: none; }
+        .gh-past-ref { font-weight: 600; color: #2a2723; }
+        .gh-past-dates { color: #7a7068; }
+        .gh-past-status {
+            font-size: 10px; font-weight: 700; text-transform: uppercase;
+            border-radius: 8px; padding: 2px 7px;
+        }
+        .gh-past-status.confirmed,
+        .gh-past-status.checked_out,
+        .gh-past-status.completed  { background:#d4edda; color:#1a6632; }
+        .gh-past-status.checked_in { background:#cce5ff; color:#004085; }
+        .gh-past-status.cancelled  { background:#f8d7da; color:#721c24; }
+        .gh-past-status.pending    { background:#fff3cd; color:#856404; }
+        .gh-past-status.no-show   { background:#f8d7da; color:#721c24; }
     </style>
 </head>
 
@@ -1231,6 +1305,45 @@ unset($_SESSION['success_message'], $_SESSION['error_message']);
                             <i class="fas fa-phone"></i> Call
                         </a>
                     </div>
+
+                    <?php if (!empty($booking['guest_email'])): ?>
+                    <div style="margin-top:14px;padding-top:14px;border-top:1px solid #f0ebe4;">
+                        <?php if ($guest_history['completed_stays'] >= 1): ?>
+                            <span class="gh-badge gh-badge--returning"><i class="fas fa-redo-alt"></i> Returning Guest</span>
+                        <?php else: ?>
+                            <span class="gh-badge gh-badge--new"><i class="fas fa-star"></i> First Stay</span>
+                        <?php endif; ?>
+
+                        <div class="gh-stats-row">
+                            <div class="gh-stat">
+                                <div class="gh-stat-val"><?php echo $guest_history['completed_stays']; ?></div>
+                                <div class="gh-stat-lbl">Stays</div>
+                            </div>
+                            <div class="gh-stat">
+                                <div class="gh-stat-val"><?php echo $guest_history['total_bookings']; ?></div>
+                                <div class="gh-stat-lbl">Bookings</div>
+                            </div>
+                            <div class="gh-stat">
+                                <div class="gh-stat-val" style="font-size:13px;"><?php echo $currency_symbol . number_format($guest_history['lifetime_spend'], 0); ?></div>
+                                <div class="gh-stat-lbl">Lifetime</div>
+                            </div>
+                        </div>
+
+                        <?php if (!empty($guest_history['bookings'])): ?>
+                        <div class="gh-past-list">
+                            <?php foreach ($guest_history['bookings'] as $pb): ?>
+                            <div class="gh-past-item">
+                                <div>
+                                    <a href="booking-details.php?id=<?php echo (int)$pb['id']; ?>" class="gh-past-ref"><?php echo htmlspecialchars($pb['booking_reference']); ?></a>
+                                    <div class="gh-past-dates"><?php echo date('M j, Y', strtotime($pb['check_in_date'])); ?> → <?php echo date('M j, Y', strtotime($pb['check_out_date'])); ?></div>
+                                </div>
+                                <span class="gh-past-status <?php echo htmlspecialchars(str_replace('-', '_', $pb['status'])); ?>"><?php echo htmlspecialchars(ucfirst(str_replace(['-','_'], ' ', $pb['status']))); ?></span>
+                            </div>
+                            <?php endforeach; ?>
+                        </div>
+                        <?php endif; ?>
+                    </div>
+                    <?php endif; ?>
                 </div>
             </div>
 

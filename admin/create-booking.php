@@ -1203,6 +1203,172 @@ try {
                 grid-template-columns: 1fr;
             }
         }
+
+        /* ── Returning Guest Lookup ─────────────────────────────────────── */
+        .rg-lookup-bar {
+            position: relative;
+            margin-bottom: 18px;
+            padding-bottom: 18px;
+            border-bottom: 1px solid var(--admin-border, #e8e0d8);
+        }
+        .rg-lookup-bar > label {
+            display: block;
+            font-size: 12px;
+            font-weight: 600;
+            letter-spacing: .05em;
+            text-transform: uppercase;
+            color: var(--admin-muted, #7a7068);
+            margin-bottom: 6px;
+        }
+        .rg-search-wrap {
+            position: relative;
+            display: flex;
+            align-items: center;
+        }
+        .rg-search-icon {
+            position: absolute;
+            left: 11px;
+            color: var(--admin-muted, #9a9088);
+            pointer-events: none;
+            font-size: 13px;
+        }
+        .rg-search-input {
+            width: 100%;
+            padding: 9px 12px 9px 34px;
+            font-size: 14px;
+            border: 1px solid var(--admin-border, #e0d8d0);
+            border-radius: 6px;
+            background: var(--admin-card-bg, #fff);
+            color: var(--admin-text, #2a2723);
+            outline: none;
+            transition: border-color .15s;
+            font-family: inherit;
+        }
+        .rg-search-input:focus {
+            border-color: var(--gold, #b18247);
+            box-shadow: 0 0 0 2px rgba(177,130,71,.12);
+        }
+        .rg-clear-btn {
+            position: absolute;
+            right: 10px;
+            background: none;
+            border: none;
+            color: #9a9088;
+            cursor: pointer;
+            padding: 4px;
+            font-size: 14px;
+            line-height: 1;
+            display: none;
+        }
+        .rg-dropdown {
+            position: absolute;
+            top: calc(100% + 4px);
+            left: 0; right: 0;
+            z-index: 200;
+            background: #fff;
+            border: 1px solid var(--admin-border, #e0d8d0);
+            border-radius: 8px;
+            box-shadow: 0 8px 24px rgba(0,0,0,.12);
+            overflow: hidden;
+            display: none;
+        }
+        .rg-dropdown.open { display: block; }
+        .rg-dropdown-item {
+            display: flex;
+            align-items: flex-start;
+            gap: 10px;
+            padding: 10px 14px;
+            cursor: pointer;
+            transition: background .1s;
+            border-bottom: 1px solid #f0ebe4;
+        }
+        .rg-dropdown-item:last-child { border-bottom: none; }
+        .rg-dropdown-item:hover,
+        .rg-dropdown-item.focused { background: #fdf9f5; }
+        .rg-dropdown-avatar {
+            width: 34px; height: 34px;
+            border-radius: 50%;
+            background: linear-gradient(135deg, #b18247, #8a6535);
+            display: flex; align-items: center; justify-content: center;
+            font-size: 14px; font-weight: 700; color: #fff;
+            flex-shrink: 0;
+            margin-top: 2px;
+        }
+        .rg-dropdown-info { flex: 1; min-width: 0; }
+        .rg-dropdown-name {
+            font-size: 14px; font-weight: 600;
+            color: var(--admin-text, #2a2723);
+            white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+        }
+        .rg-dropdown-meta {
+            font-size: 12px;
+            color: var(--admin-muted, #7a7068);
+            margin-top: 2px;
+        }
+        .rg-dropdown-stays {
+            font-size: 11px;
+            background: #f4ede3;
+            color: #8a5c1a;
+            border-radius: 10px;
+            padding: 2px 8px;
+            white-space: nowrap;
+            font-weight: 600;
+            flex-shrink: 0;
+            align-self: center;
+        }
+        .rg-dropdown-msg {
+            padding: 12px 16px;
+            font-size: 13px;
+            color: var(--admin-muted, #7a7068);
+            text-align: center;
+        }
+        .rg-selected-card {
+            display: none;
+            background: linear-gradient(135deg, #fdf9f4, #faf4ec);
+            border: 1px solid #dbc89a;
+            border-radius: 8px;
+            padding: 14px 16px;
+            margin-top: 10px;
+            position: relative;
+        }
+        .rg-selected-card.visible { display: flex; gap: 14px; align-items: flex-start; }
+        .rg-selected-avatar {
+            width: 44px; height: 44px;
+            border-radius: 50%;
+            background: linear-gradient(135deg, #b18247, #7a5c28);
+            display: flex; align-items: center; justify-content: center;
+            font-size: 18px; font-weight: 700; color: #fff;
+            flex-shrink: 0;
+        }
+        .rg-selected-body { flex: 1; min-width: 0; }
+        .rg-selected-name { font-size: 15px; font-weight: 700; color: #2a2723; }
+        .rg-selected-badges {
+            display: flex; flex-wrap: wrap; gap: 6px;
+            margin: 6px 0;
+        }
+        .rg-badge {
+            display: inline-flex; align-items: center; gap: 4px;
+            font-size: 11px; font-weight: 600;
+            border-radius: 10px; padding: 3px 9px;
+        }
+        .rg-badge--returning { background: #d4edda; color: #1a6632; border: 1px solid #a3d5b3; }
+        .rg-badge--stays    { background: #fde8c8; color: #834a00; border: 1px solid #f0c478; }
+        .rg-badge--spend    { background: #e8f0fb; color: #1a3e7a; border: 1px solid #b3c8ef; }
+        .rg-badge--new      { background: #e8f4e8; color: #2d6a2d; border: 1px solid #a8d4a8; }
+        .rg-selected-meta   { font-size: 12px; color: #6a6058; margin-top: 4px; }
+        .rg-selected-clear {
+            position: absolute; top: 10px; right: 12px;
+            background: none; border: none;
+            color: #9a9088; cursor: pointer;
+            font-size: 15px; padding: 2px 4px;
+        }
+        .rg-selected-clear:hover { color: #c0392b; }
+        .rg-spinner {
+            display: none;
+            position: absolute; right: 36px;
+            color: var(--gold, #b18247);
+            font-size: 13px;
+        }
     </style>
 </head>
 
@@ -1320,33 +1486,57 @@ try {
                 <!-- ══ 3. GUEST INFORMATION ═══════════════════════════════════════════════ -->
                 <div class="form-card">
                     <h3><i class="fas fa-user"></i> Guest Information</h3>
+
+                    <!-- Returning Guest Lookup -->
+                    <div class="rg-lookup-bar">
+                        <label><i class="fas fa-search" style="margin-right:5px;color:var(--gold,#b18247);"></i> Returning Guest Lookup</label>
+                        <div class="rg-search-wrap">
+                            <i class="fas fa-user-check rg-search-icon"></i>
+                            <input type="text" id="rgSearchInput" class="rg-search-input" placeholder="Search by name, email or phone…" autocomplete="off">
+                            <i class="fas fa-spinner fa-spin rg-spinner" id="rgSpinner"></i>
+                            <button type="button" class="rg-clear-btn" id="rgClearSearch" title="Clear search" onclick="rgClearSearch()"><i class="fas fa-times"></i></button>
+                        </div>
+                        <div class="rg-dropdown" id="rgDropdown" role="listbox"></div>
+
+                        <!-- Selected guest card — shown after selection -->
+                        <div class="rg-selected-card" id="rgSelectedCard">
+                            <div class="rg-selected-avatar" id="rgSelectedAvatar">?</div>
+                            <div class="rg-selected-body">
+                                <div class="rg-selected-name" id="rgSelectedName"></div>
+                                <div class="rg-selected-badges" id="rgSelectedBadges"></div>
+                                <div class="rg-selected-meta" id="rgSelectedMeta"></div>
+                            </div>
+                            <button type="button" class="rg-selected-clear" onclick="rgClearSelection()" title="Clear — enter new guest info"><i class="fas fa-times-circle"></i></button>
+                        </div>
+                    </div>
+
                     <div class="form-row">
                         <div class="form-group">
                             <label>Full Name <span class="required">*</span></label>
-                            <input type="text" name="guest_name" required
+                            <input type="text" name="guest_name" id="guestName" required
                                 value="<?php echo htmlspecialchars($_POST['guest_name'] ?? ''); ?>">
                         </div>
                         <div class="form-group">
                             <label>Email Address <span class="required">*</span></label>
-                            <input type="email" name="guest_email" required
+                            <input type="email" name="guest_email" id="guestEmail" required
                                 value="<?php echo htmlspecialchars($_POST['guest_email'] ?? ''); ?>">
                         </div>
                     </div>
                     <div class="form-row">
                         <div class="form-group">
                             <label>Phone Number <span class="required">*</span></label>
-                            <input type="tel" name="guest_phone" required
+                            <input type="tel" name="guest_phone" id="guestPhone" required
                                 value="<?php echo htmlspecialchars($_POST['guest_phone'] ?? ''); ?>">
                         </div>
                         <div class="form-group">
                             <label>Country</label>
-                            <input type="text" name="guest_country"
+                            <input type="text" name="guest_country" id="guestCountry"
                                 value="<?php echo htmlspecialchars($_POST['guest_country'] ?? ''); ?>">
                         </div>
                     </div>
                     <div class="form-group">
                         <label>Address</label>
-                        <textarea name="guest_address" rows="2"><?php echo htmlspecialchars($_POST['guest_address'] ?? ''); ?></textarea>
+                        <textarea name="guest_address" id="guestAddress" rows="2"><?php echo htmlspecialchars($_POST['guest_address'] ?? ''); ?></textarea>
                     </div>
                 </div>
 
@@ -2252,6 +2442,210 @@ try {
             updateGroupSummary();
             onBookingStatusChange();
         });
+
+        // ═══════════════════════════════════════════════════════════════════
+        // Returning Guest Lookup
+        // ═══════════════════════════════════════════════════════════════════
+        (function () {
+            const csrfToken  = document.querySelector('input[name="csrf_token"]')?.value || '';
+            const searchInput = document.getElementById('rgSearchInput');
+            const dropdown    = document.getElementById('rgDropdown');
+            const spinner     = document.getElementById('rgSpinner');
+            const clearBtn    = document.getElementById('rgClearSearch');
+            const selCard     = document.getElementById('rgSelectedCard');
+            const selAvatar   = document.getElementById('rgSelectedAvatar');
+            const selName     = document.getElementById('rgSelectedName');
+            const selBadges   = document.getElementById('rgSelectedBadges');
+            const selMeta     = document.getElementById('rgSelectedMeta');
+
+            if (!searchInput) return;
+
+            let debounceTimer = null;
+            let lastQuery     = '';
+            let focusedIdx    = -1;
+            let currentGuests = [];
+
+            function getField(id) { return document.getElementById(id); }
+
+            function initials(name) {
+                const parts = String(name || '').trim().split(/\s+/);
+                return (parts.length >= 2
+                    ? parts[0][0] + parts[parts.length - 1][0]
+                    : (parts[0][0] || '?')
+                ).toUpperCase();
+            }
+
+            function fmt(currency, amount) {
+                return currency + ' ' + Number(amount).toLocaleString('en', {minimumFractionDigits: 0, maximumFractionDigits: 0});
+            }
+
+            function escHtml(str) {
+                return String(str || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+            }
+
+            document.addEventListener('click', function (e) {
+                if (!e.target.closest('#rgSearchInput') && !e.target.closest('#rgDropdown')) {
+                    closeDropdown();
+                }
+            });
+
+            function closeDropdown() {
+                dropdown.classList.remove('open');
+                dropdown.innerHTML = '';
+                focusedIdx = -1;
+            }
+
+            searchInput.addEventListener('input', function () {
+                const q = this.value.trim();
+                clearBtn.style.display = q.length > 0 ? 'block' : 'none';
+                clearTimeout(debounceTimer);
+                if (q.length < 2) { closeDropdown(); return; }
+                if (q === lastQuery) return;
+                debounceTimer = setTimeout(() => doSearch(q), 280);
+            });
+
+            searchInput.addEventListener('keydown', function (e) {
+                const items = dropdown.querySelectorAll('.rg-dropdown-item');
+                if (e.key === 'ArrowDown') {
+                    e.preventDefault();
+                    focusedIdx = Math.min(focusedIdx + 1, items.length - 1);
+                    highlightItem(items);
+                } else if (e.key === 'ArrowUp') {
+                    e.preventDefault();
+                    focusedIdx = Math.max(focusedIdx - 1, 0);
+                    highlightItem(items);
+                } else if (e.key === 'Enter') {
+                    e.preventDefault();
+                    if (focusedIdx >= 0 && focusedIdx < currentGuests.length) {
+                        selectGuest(currentGuests[focusedIdx]);
+                    }
+                } else if (e.key === 'Escape') {
+                    closeDropdown();
+                }
+            });
+
+            function highlightItem(items) {
+                items.forEach((item, i) => item.classList.toggle('focused', i === focusedIdx));
+                if (items[focusedIdx]) items[focusedIdx].scrollIntoView({ block: 'nearest' });
+            }
+
+            async function doSearch(q) {
+                lastQuery = q;
+                spinner.style.display = 'inline-block';
+                try {
+                    const url = 'api/guest-lookup.php?q=' + encodeURIComponent(q) + '&csrf=' + encodeURIComponent(csrfToken);
+                    const res = await fetch(url);
+                    if (!res.ok) throw new Error('HTTP ' + res.status);
+                    const data = await res.json();
+                    if (data.error) throw new Error(data.error);
+                    renderDropdown(data.guests || [], q);
+                } catch (err) {
+                    dropdown.innerHTML = '<div class="rg-dropdown-msg" style="color:#c0392b;">Error: ' + escHtml(err.message) + '</div>';
+                    dropdown.classList.add('open');
+                } finally {
+                    spinner.style.display = 'none';
+                }
+            }
+
+            function renderDropdown(guests, q) {
+                currentGuests = guests;
+                focusedIdx    = -1;
+                dropdown.innerHTML = '';
+
+                if (guests.length === 0) {
+                    dropdown.innerHTML = '<div class="rg-dropdown-msg">No returning guests found for "<strong>' + escHtml(q) + '</strong>" — fill in guest details below.</div>';
+                    dropdown.classList.add('open');
+                    return;
+                }
+
+                guests.forEach(function (g, idx) {
+                    const item = document.createElement('div');
+                    item.className = 'rg-dropdown-item';
+                    item.setAttribute('role', 'option');
+                    item.innerHTML =
+                        '<div class="rg-dropdown-avatar">' + escHtml(initials(g.name)) + '</div>' +
+                        '<div class="rg-dropdown-info">' +
+                            '<div class="rg-dropdown-name">' + escHtml(g.name) + '</div>' +
+                            '<div class="rg-dropdown-meta">' + escHtml(g.email) + (g.phone ? '  ·  ' + escHtml(g.phone) : '') + '</div>' +
+                        '</div>' +
+                        '<div class="rg-dropdown-stays">' + escHtml(g.stay_label) + '</div>';
+                    item.addEventListener('click', function () { selectGuest(g); });
+                    item.addEventListener('mouseenter', function () {
+                        focusedIdx = idx;
+                        highlightItem(dropdown.querySelectorAll('.rg-dropdown-item'));
+                    });
+                    dropdown.appendChild(item);
+                });
+
+                dropdown.classList.add('open');
+            }
+
+            function selectGuest(g) {
+                closeDropdown();
+
+                const fName    = getField('guestName');
+                const fEmail   = getField('guestEmail');
+                const fPhone   = getField('guestPhone');
+                const fCountry = getField('guestCountry');
+                const fAddress = getField('guestAddress');
+
+                if (fName)    fName.value    = g.name    || '';
+                if (fEmail)   fEmail.value   = g.email   || '';
+                if (fPhone)   fPhone.value   = g.phone   || '';
+                if (fCountry) fCountry.value = g.country || '';
+                if (fAddress) fAddress.value = g.address || '';
+
+                [fName, fEmail, fPhone, fCountry, fAddress].forEach(function (el) {
+                    if (el) el.dispatchEvent(new Event('change', { bubbles: true }));
+                });
+
+                showSelectedCard(g);
+                searchInput.value      = '';
+                clearBtn.style.display = 'none';
+            }
+
+            function showSelectedCard(g) {
+                selAvatar.textContent = initials(g.name);
+                selName.textContent   = g.name;
+
+                const badges = [];
+                if (g.completed_stays >= 1) {
+                    badges.push('<span class="rg-badge rg-badge--returning"><i class="fas fa-redo-alt"></i> Returning Guest</span>');
+                } else {
+                    badges.push('<span class="rg-badge rg-badge--new"><i class="fas fa-star"></i> First Stay</span>');
+                }
+                if (g.completed_stays >= 1) {
+                    badges.push('<span class="rg-badge rg-badge--stays"><i class="fas fa-bed"></i> ' + escHtml(g.stay_label) + '</span>');
+                }
+                if (g.lifetime_spend > 0) {
+                    badges.push('<span class="rg-badge rg-badge--spend"><i class="fas fa-coins"></i> ' + escHtml(fmt(g.currency, g.lifetime_spend)) + ' lifetime</span>');
+                }
+                selBadges.innerHTML = badges.join('');
+
+                const metaParts = [];
+                if (g.last_stay_label)  metaParts.push('Last stay: ' + g.last_stay_label);
+                if (g.last_booking_ref) metaParts.push('Ref: ' + g.last_booking_ref);
+                if (g.email)            metaParts.push(g.email);
+                selMeta.textContent = metaParts.join('  ·  ');
+
+                selCard.classList.add('visible');
+            }
+
+            window.rgClearSearch = function () {
+                searchInput.value      = '';
+                clearBtn.style.display = 'none';
+                closeDropdown();
+            };
+
+            window.rgClearSelection = function () {
+                selCard.classList.remove('visible');
+                ['guestName','guestEmail','guestPhone','guestCountry','guestAddress'].forEach(function (id) {
+                    const el = getField(id);
+                    if (el) el.value = '';
+                });
+                searchInput.focus();
+            };
+        })();
     </script>
     <script src="js/admin-components.js" defer></script>
 <?php require_once 'includes/admin-footer.php'; ?>
