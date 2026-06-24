@@ -622,16 +622,26 @@ if (!function_exists('hotel_embed_logo_cid')) {
             };
 
             try {
+                // Only embed when the logo URL is actually present in the HTML.
+                // Embedding without a matching cid: reference causes the image to appear
+                // as a spurious file attachment in Outlook, Gmail, and Apple Mail.
+                $pubUrl      = hotel_email_logo_url();
+                $escapedUrl  = $pubUrl !== '' ? htmlspecialchars($pubUrl, ENT_QUOTES, 'UTF-8') : '';
+                $urlInHtml   = $pubUrl !== ''
+                    && (strpos($html, $pubUrl) !== false || ($escapedUrl !== '' && strpos($html, $escapedUrl) !== false));
+
+                if (!$urlInHtml) {
+                    // Logo URL not in HTML — skip embedding to avoid spurious attachment
+                    return $html;
+                }
+
                 $mail->addEmbeddedImage($localPath, 'hotel_logo_cid', 'logo.' . $ext, 'base64', $mime);
                 // Replace public URL (both raw and HTML-escaped) with the CID reference
-                $pubUrl = hotel_email_logo_url();
-                if ($pubUrl !== '') {
-                    $html = str_replace(
-                        [htmlspecialchars($pubUrl, ENT_QUOTES, 'UTF-8'), $pubUrl],
-                        ['cid:hotel_logo_cid', 'cid:hotel_logo_cid'],
-                        $html
-                    );
-                }
+                $html = str_replace(
+                    [$escapedUrl, $pubUrl],
+                    ['cid:hotel_logo_cid', 'cid:hotel_logo_cid'],
+                    $html
+                );
             } catch (Exception $e) {
                 error_log('hotel_embed_logo_cid: ' . $e->getMessage());
             }
@@ -2353,6 +2363,13 @@ function sendAdminNotificationEmail(array $booking)
         $occupancyLabel = $occupancyRaw !== '' ? ucfirst(str_replace('_', ' ', $occupancyRaw)) : '—';
         $ratePlan = (string)($booking['rate_plan_label'] ?? '');
 
+        // Detect tentative booking
+        $isTentative = !empty($booking['is_tentative']) || (string)($booking['status'] ?? '') === 'tentative';
+        $tentativeExpiresAt = trim((string)($booking['tentative_expires_at'] ?? ''));
+        $tentativeExpiresFormatted = ($isTentative && $tentativeExpiresAt !== '')
+            ? date('F j, Y g:i A', strtotime($tentativeExpiresAt))
+            : '';
+
         // Collect packages for admin view
         $adminPackageRows = [];
         if (isset($pdo) && $bookingId > 0) {
@@ -2368,6 +2385,7 @@ function sendAdminNotificationEmail(array $booking)
             } catch (\Throwable $ignored) {}
         }
 
+        $summaryHeading = $isTentative ? 'Tentative Hold Details' : 'New Booking Details';
         $summaryRows = [
             ['Reference',    htmlspecialchars($booking['booking_reference'] ?? '')],
             ['Guest',        htmlspecialchars($booking['guest_name'] ?? '') . ' &lt;' . htmlspecialchars($booking['guest_email'] ?? '') . '&gt;'],
@@ -2382,30 +2400,60 @@ function sendAdminNotificationEmail(array $booking)
         if ($ratePlan !== '') {
             $summaryRows[] = ['Rate Plan', htmlspecialchars($ratePlan)];
         }
+        if ($isTentative && $tentativeExpiresFormatted !== '') {
+            $summaryRows[] = ['Hold Expires', $tentativeExpiresFormatted, true];
+        }
         $summaryRows[] = ['Total', $currency . ' ' . number_format((float)($booking['total_amount'] ?? 0), 0), true];
 
-        $innerHtml = hotel_premium_email_body(
-            'Reservations Team',
-            '<p style="margin:0 0 16px;">A new booking has been submitted via the website. Please review and confirm the reservation.</p>'
-        )
-            . hotel_premium_email_summary_rows('New Booking Details', $summaryRows)
+        $adminBodyText = $isTentative
+            ? '<p style="margin:0 0 16px;">A <strong>tentative hold</strong> has been placed via the website. The guest must confirm before the hold expires. Please review and follow up as needed.</p>'
+                . ($tentativeExpiresFormatted !== ''
+                    ? '<p style="margin:0 0 16px;background:rgba(201,169,97,0.1);border-left:3px solid #C9A961;padding:10px 14px;font-size:13px;color:#5c5549;">'
+                        . '<strong>Hold expires:</strong> ' . $tentativeExpiresFormatted . '</p>'
+                    : '')
+            : '<p style="margin:0 0 16px;">A new booking has been submitted via the website. Please review and confirm the reservation.</p>';
+
+        $innerHtml = hotel_premium_email_body('Reservations Team', $adminBodyText)
+            . hotel_premium_email_summary_rows($summaryHeading, $summaryRows)
             . (!empty($adminPackageRows) ? hotel_premium_email_summary_rows('Extras & Packages', $adminPackageRows) : '')
             . (!empty($booking['special_requests'])
                 ? '<tr><td style="padding:0 48px 24px;"><div style="background:rgba(201,169,97,0.08);border-left:3px solid #C9A961;padding:14px 16px;font-size:12px;line-height:1.7;color:#5c5549;"><strong style="font-size:9px;letter-spacing:0.15em;text-transform:uppercase;color:#9b8f7e;">Special Requests</strong><br>' . htmlspecialchars($booking['special_requests']) . '</div></td></tr>'
                 : '')
             . hotel_premium_email_cta($adminBookingUrl, 'Open in Admin Panel');
 
+        $preheader = $isTentative
+            ? 'Tentative hold — ' . ($booking['booking_reference'] ?? '')
+            : 'New booking received — ' . ($booking['booking_reference'] ?? '');
+
         $htmlBody = hotel_premium_email_html(
-            'New booking received — ' . ($booking['booking_reference'] ?? ''),
+            $preheader,
             $innerHtml,
             'reservations@' . ($_SERVER['HTTP_HOST'] ?? 'hotel')
         );
+
+        // Substitute header/footer tokens that hotel_premium_email_html() leaves as placeholders
+        $logoSrc      = function_exists('hotel_email_logo_url') ? hotel_email_logo_url() : '';
+        $logoHtml     = $logoSrc !== ''
+            ? '<img src="' . htmlspecialchars($logoSrc, ENT_QUOTES, 'UTF-8') . '" alt="'
+                . htmlspecialchars($email_site_name, ENT_QUOTES, 'UTF-8')
+                . '" style="max-width:160px;height:auto;display:block;margin:0 auto;">'
+            : '';
+        $htmlBody = strtr($htmlBody, [
+            '{{logo_html}}'     => $logoHtml,
+            '{{site_name}}'     => htmlspecialchars($email_site_name, ENT_QUOTES, 'UTF-8'),
+            '{{address}}'       => htmlspecialchars((string)getSetting('hotel_address', getSetting('address', '')), ENT_QUOTES, 'UTF-8'),
+            '{{contact_phone}}' => htmlspecialchars((string)getSetting('phone_main', ''), ENT_QUOTES, 'UTF-8'),
+            '{{contact_email}}' => htmlspecialchars((string)($email_from_email ?: getSetting('email_main', '')), ENT_QUOTES, 'UTF-8'),
+        ]);
+
+        $adminSubject = ($isTentative ? 'Tentative Hold' : 'New Booking')
+            . ' - ' . htmlspecialchars($email_site_name) . ' [' . $booking['booking_reference'] . ']';
 
         // Send email
         $primaryResult = sendEmail(
             $notificationEmail,
             'Reservations Team',
-            'New Booking - ' . htmlspecialchars($email_site_name) . ' [' . $booking['booking_reference'] . ']',
+            $adminSubject,
             $htmlBody
         );
 
@@ -2426,7 +2474,7 @@ function sendAdminNotificationEmail(array $booking)
                 sendEmail(
                     $ccEmail,
                     'Reservations Team',
-                    'New Booking - ' . htmlspecialchars($email_site_name) . ' [' . $booking['booking_reference'] . ']',
+                    $adminSubject,
                     $htmlBody
                 );
             }
