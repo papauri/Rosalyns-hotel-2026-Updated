@@ -9,7 +9,7 @@
  *
  * BUMP SW_VERSION whenever cached assets must be force-refreshed on all clients.
  */
-const SW_VERSION = 'rh-public-v2-2026-06-10';
+const SW_VERSION = 'rh-public-v3-2026-06-24';
 const ASSET_CACHE = `${SW_VERSION}-assets`;
 const PAGE_CACHE  = `${SW_VERSION}-pages`;
 
@@ -17,7 +17,11 @@ const PAGE_CACHE  = `${SW_VERSION}-pages`;
 const MAX_PAGE_CACHE_ENTRIES  = 40;
 const MAX_ASSET_CACHE_ENTRIES = 80;
 
-const OFFLINE_FALLBACK = '/offline.php';
+// Derive base path from this SW's own URL so the worker is subdirectory-install-safe.
+// e.g. if SW is at /rosalyns-hotel/public-sw.js → SW_BASE = '/rosalyns-hotel/'
+const SW_BASE = self.location.pathname.replace(/\/[^/]*$/, '/');
+
+const OFFLINE_FALLBACK = SW_BASE + 'offline.php';
 
 const isImmutableAsset = url => /\.(?:woff2?|ttf|eot|svg|png|jpe?g|webp|gif|ico)$/i.test(url.pathname);
 const isStyleOrScript  = url => /\.(?:css|js)(\?.*)?$/i.test(url.pathname + url.search);
@@ -72,8 +76,8 @@ self.addEventListener('fetch', event => {
     if (req.method !== 'GET') return;
     // Never intercept cross-origin, admin, or API paths
     if (url.origin !== self.location.origin) return;
-    if (url.pathname.startsWith('/admin/')) return;
-    if (url.pathname.startsWith('/api/')) return;
+    if (url.pathname.startsWith(SW_BASE + 'admin/')) return;
+    if (url.pathname.startsWith(SW_BASE + 'api/')) return;
 
     // Immutable assets — cache-first
     if (isImmutableAsset(url)) {

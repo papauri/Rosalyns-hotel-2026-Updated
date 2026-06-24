@@ -8,8 +8,9 @@
     'use strict';
 
     // ── Service Worker registration ───────────────────────────────────────────
+    // Use a relative path so it resolves correctly in any subdirectory install.
     if ('serviceWorker' in navigator) {
-        navigator.serviceWorker.register('/public-sw.js', { scope: '/' })
+        navigator.serviceWorker.register('public-sw.js', { scope: './' })
             .catch(function () { /* silent */ });
     }
 
