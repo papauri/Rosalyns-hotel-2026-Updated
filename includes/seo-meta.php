@@ -237,7 +237,7 @@ if (!empty($seo['breadcrumbs'])):
     window._siteName = <?php echo json_encode((string)($site_name ?: '')); ?>;
 </script>
 <!-- PWA manifest — enables browser install prompt on desktop + mobile -->
-<link rel="manifest" href="/manifest.php">
+<link rel="manifest" href="<?php echo htmlspecialchars(defined('BASE_URL') ? rtrim(BASE_URL, '/') . '/manifest.php' : 'manifest.php'); ?>">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
