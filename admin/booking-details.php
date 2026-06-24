@@ -1133,14 +1133,15 @@ unset($_SESSION['success_message'], $_SESSION['error_message']);
         .gh-badge--returning { background: #d4f0dc; color: #1a6632; border: 1px solid #a3d5b3; }
         .gh-badge--new       { background: #e8f4e8; color: #2d6a2d; border: 1px solid #a8d4a8; }
         .gh-stats-row {
-            display: flex; gap: 10px; flex-wrap: wrap; margin: 8px 0 10px;
+            display: grid; grid-template-columns: 1fr 1fr 1.5fr; gap: 8px; margin: 8px 0 10px;
         }
         .gh-stat {
-            flex: 1; min-width: 70px;
+            min-width: 0;
             background: #faf5ef; border: 1px solid #e8d9c4;
             border-radius: 6px; padding: 8px 10px; text-align: center;
         }
-        .gh-stat-val { font-size: 18px; font-weight: 700; color: #2a2723; }
+        .gh-stat-val { font-size: 16px; font-weight: 700; color: #2a2723; line-height: 1.2; word-break: break-word; overflow-wrap: anywhere; }
+        .gh-stat-val--lifetime { font-size: 12px; }
         .gh-stat-lbl { font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: .04em; color: #8a7a68; margin-top: 2px; }
         .gh-past-list { margin-top: 8px; }
         .gh-past-item {
@@ -1259,12 +1260,38 @@ unset($_SESSION['success_message'], $_SESSION['error_message']);
         <?php endif; ?>
 
         <div class="booking-story-intro">
-            <h2>Booking Story</h2>
-            <p>Follow the booking from guest details to stay, room setup, and payment before operational actions.</p>
+            <div class="story-intro-text">
+                <h2>Booking Journey</h2>
+                <p>Follow the booking from guest details to stay, room setup, and payment.</p>
+            </div>
+            <div class="story-steps-track">
+                <div class="story-track-step">
+                    <div class="track-step-num">1</div>
+                    <div class="track-step-label">Guest</div>
+                </div>
+                <div class="story-track-line"></div>
+                <div class="story-track-step">
+                    <div class="track-step-num">2</div>
+                    <div class="track-step-label">Stay</div>
+                </div>
+                <div class="story-track-line"></div>
+                <div class="story-track-step">
+                    <div class="track-step-num">3</div>
+                    <div class="track-step-label">Room</div>
+                </div>
+                <div class="story-track-line"></div>
+                <div class="story-track-step">
+                    <div class="track-step-num">4</div>
+                    <div class="track-step-label">Payment</div>
+                </div>
+            </div>
         </div>
 
         <!-- Details Grid -->
         <div class="details-grid">
+
+            <!-- Story Cards: asymmetric 3-panel grid -->
+            <div class="story-grid">
 
             <!-- Guest Information Card -->
             <div class="info-card story-card story-card--guest">
@@ -1334,7 +1361,7 @@ unset($_SESSION['success_message'], $_SESSION['error_message']);
                                 <div class="gh-stat-lbl">Bookings</div>
                             </div>
                             <div class="gh-stat">
-                                <div class="gh-stat-val" style="font-size:13px;"><?php echo $currency_symbol . number_format($guest_history['lifetime_spend'], 0); ?></div>
+                                <div class="gh-stat-val gh-stat-val--lifetime"><?php echo $currency_symbol . number_format($guest_history['lifetime_spend'], 0); ?></div>
                                 <div class="gh-stat-lbl">Lifetime</div>
                             </div>
                         </div>
@@ -1356,6 +1383,9 @@ unset($_SESSION['success_message'], $_SESSION['error_message']);
                     <?php endif; ?>
                 </div>
             </div>
+
+            <!-- Center column: Stay + Room stacked -->
+            <div class="story-center-col">
 
             <!-- Stay Duration Card -->
             <div class="info-card story-card story-card--stay">
@@ -1458,6 +1488,8 @@ unset($_SESSION['success_message'], $_SESSION['error_message']);
                 </div>
             </div>
 
+            </div><!-- /.story-center-col -->
+
             <!-- Payment Information Card -->
             <div class="info-card story-card story-card--payment">
                 <div class="info-card-header">
@@ -1542,6 +1574,8 @@ unset($_SESSION['success_message'], $_SESSION['error_message']);
                     <?php endif; ?>
                 </div>
             </div>
+
+            </div><!-- /.story-grid -->
 
             <!-- Folio/Charges Card -->
             <div class="info-card folio-card" id="folio">
@@ -1780,6 +1814,8 @@ unset($_SESSION['success_message'], $_SESSION['error_message']);
                 </div>
             </div>
 
+            <div class="timeline-notes-row">
+
             <!-- Timeline Card -->
             <div class="info-card timeline-card">
                 <div class="info-card-header">
@@ -1844,12 +1880,12 @@ unset($_SESSION['success_message'], $_SESSION['error_message']);
             </div>
 
             <!-- Notes Card -->
-            <div class="info-card notes-card">
+            <div class="info-card notes-card" style="display:flex;flex-direction:column;">
                 <div class="info-card-header">
                     <div class="icon notes"><i class="fas fa-sticky-note"></i></div>
                     <h3>Internal Notes</h3>
                 </div>
-                <div class="info-card-body">
+                <div class="info-card-body" style="flex:1;">
                     <div class="notes-form">
                         <form method="POST">
                             <textarea name="note_text" placeholder="Add a note about this booking..." required></textarea>
@@ -1878,6 +1914,8 @@ unset($_SESSION['success_message'], $_SESSION['error_message']);
                     </div>
                 </div>
             </div>
+
+            </div><!-- /.timeline-notes-row -->
 
             <?php if ($booking['special_requests']): ?>
                 <!-- Special Requests -->

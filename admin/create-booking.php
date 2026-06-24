@@ -713,16 +713,74 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['create_booking'])) {
                 'occupancy_type'         => $fl['occupancy_type'],
                 'room_name'              => $room_name_for_email,
             ];
-            if ($booking_status === 'confirmed') {
-                $email_result = sendBookingConfirmedEmail($booking_data);
+            if ($payment_received && $amount_collected > 0) {
+                // Payment taken — send receipt/invoice email (replaces standard confirmation)
+                try {
+                    require_once '../config/invoice.php';
+                    $inv_cc = [];
+                    $inv_recipients_cfg = getEmailSetting('invoice_recipients', '');
+                    $inv_smtp_user = getEmailSetting('smtp_username', '');
+                    if (!empty($inv_recipients_cfg)) {
+                        $inv_cc = array_filter(array_map('trim', explode(',', $inv_recipients_cfg)));
+                    }
+                    if (!empty($inv_smtp_user) && !in_array($inv_smtp_user, $inv_cc)) {
+                        $inv_cc[] = $inv_smtp_user;
+                    }
+                    $inv_result = sendPaymentInvoiceEmailWithCC($primary_id, $inv_cc);
+                    $email_msg = $inv_result['success']
+                        ? ' Payment receipt emailed to guest.'
+                        : ' (Receipt email failed: ' . htmlspecialchars($inv_result['message'] ?? 'unknown error') . ')';
+                } catch (\Throwable $invEx) {
+                    error_log('Receipt email failed for ' . $primary_ref . ': ' . $invEx->getMessage());
+                    $email_msg = ' (Receipt email failed)';
+                }
             } elseif ($is_tentative) {
+                // Tentative booking confirmation
                 $email_result = sendTentativeBookingConfirmedEmail($booking_data);
+                $email_msg = $email_result['success']
+                    ? ' Confirmation email sent.'
+                    : ' (Email failed: ' . htmlspecialchars($email_result['message'] ?? 'unknown error') . ')';
             } else {
-                $email_result = sendBookingReceivedEmail($booking_data);
+                // No payment yet — send booking confirmation + proforma invoice
+                if ($booking_status === 'confirmed') {
+                    $email_result = sendBookingConfirmedEmail($booking_data);
+                } else {
+                    $email_result = sendBookingReceivedEmail($booking_data);
+                }
+                $email_msg = $email_result['success']
+                    ? ' Confirmation email sent.'
+                    : ' (Email failed: ' . htmlspecialchars($email_result['message'] ?? 'unknown error') . ')';
+
+                // Also send proforma invoice showing balance due
+                if (in_array($booking_status, ['confirmed', 'pending'], true)) {
+                    try {
+                        if (!function_exists('sendTentativeQuotationEmail')) {
+                            require_once '../config/email.php';
+                        }
+                        $qp_stmt = $pdo->prepare(
+                            "SELECT b.*, r.name AS room_name, r.price_per_night, r.short_description,
+                                    r.bed_type, r.size_sqm, r.max_guests
+                             FROM bookings b JOIN rooms r ON b.room_id = r.id
+                             WHERE b.id = ? LIMIT 1"
+                        );
+                        $qp_stmt->execute([$primary_id]);
+                        $qp_booking = $qp_stmt->fetch(PDO::FETCH_ASSOC);
+                        if ($qp_booking) {
+                            $qp_result = sendTentativeQuotationEmail($qp_booking, [
+                                'valid_days'      => 30,
+                                'quotation_notes' => 'Payment is due upon arrival. Please bring this invoice with you.',
+                                'attach_pdf'      => true,
+                                'send_whatsapp'   => false,
+                            ]);
+                            if (!empty($qp_result['success'])) {
+                                $email_msg .= ' Invoice sent to guest.';
+                            }
+                        }
+                    } catch (\Throwable $qpEx) {
+                        error_log('Proforma invoice email failed for ' . $primary_ref . ': ' . $qpEx->getMessage());
+                    }
+                }
             }
-            $email_msg = $email_result['success']
-                ? ' Confirmation email sent.'
-                : ' (Email failed: ' . htmlspecialchars($email_result['message'] ?? 'unknown error') . ')';
 
             // ── Admin CC: send a copy to the hotel admin for admin-created bookings ──
             try {
@@ -1139,6 +1197,94 @@ try {
             background: #9a6f3b;
         }
 
+        /* ── Section step bar ─────────────────────────────────────────── */
+        .cb-step-bar {
+            display: flex;
+            justify-content: center;
+            margin-bottom: 28px;
+            position: sticky;
+            top: 0;
+            z-index: 90;
+            background: var(--cream, #F3ECE4);
+            padding: 10px 0 8px;
+            box-shadow: 0 2px 8px rgba(35,31,28,0.08);
+        }
+        .cb-step-track {
+            display: flex;
+            align-items: center;
+            gap: 0;
+            flex-wrap: wrap;
+            justify-content: center;
+            gap: 4px;
+        }
+        .cb-step {
+            display: flex;
+            align-items: center;
+            gap: 7px;
+            background: none;
+            border: 2px solid #D2C8BC;
+            border-radius: 24px;
+            padding: 6px 14px 6px 10px;
+            cursor: pointer;
+            font-family: inherit;
+            font-size: 13px;
+            color: #999;
+            transition: all 0.2s;
+        }
+        .cb-step:hover { border-color: #8A775F; color: #8A775F; }
+        .cb-step.active { border-color: #B18247; background: #B18247; color: #fff; }
+        .cb-step.done { border-color: #6b9e73; background: #edf7ee; color: #4a7a53; }
+        .cb-step-num {
+            width: 22px; height: 22px;
+            border-radius: 50%;
+            background: rgba(0,0,0,0.12);
+            display: flex; align-items: center; justify-content: center;
+            font-size: 11px; font-weight: 700; flex-shrink: 0;
+        }
+        .cb-step.active .cb-step-num { background: rgba(255,255,255,0.3); }
+        .cb-step.done .cb-step-num { background: #6b9e73; color: #fff; }
+        .cb-step-label { font-size: 12px; white-space: nowrap; }
+        .cb-step-sep { color: #ccc; font-size: 16px; margin: 0 2px; user-select: none; }
+
+        /* ── Section nav buttons ──────────────────────────────────────── */
+        .cb-section-nav {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-top: 20px;
+            padding-top: 16px;
+            border-top: 1px solid #EDE8E0;
+        }
+        .cb-nav-btn {
+            display: inline-flex;
+            align-items: center;
+            gap: 7px;
+            padding: 9px 20px;
+            border-radius: 6px;
+            font-family: inherit;
+            font-size: 13px;
+            font-weight: 600;
+            cursor: pointer;
+            border: 2px solid #B18247;
+            transition: all 0.2s;
+        }
+        .cb-nav-next { background: #B18247; color: #fff; }
+        .cb-nav-next:hover { background: #9a6f3b; border-color: #9a6f3b; }
+        .cb-nav-prev { background: #fff; color: #8A775F; }
+        .cb-nav-prev:hover { background: #FAF6F0; }
+        .cb-nav-prev:first-child:last-child { margin-left: auto; }
+        .cb-section-error {
+            font-size: 12px;
+            color: #c0392b;
+            background: #fdf3f2;
+            border: 1px solid #f5b7b1;
+            border-radius: 4px;
+            padding: 7px 12px;
+            margin-top: 10px;
+            display: none;
+        }
+        .cb-field-error { border-color: #c0392b !important; }
+
         .room-line {
             border: 1px solid #e8e0d8;
             border-radius: 7px;
@@ -1454,8 +1600,43 @@ try {
                 <input type="hidden" name="auto_assign_room" id="autoAssignRoom" value="1">
                 <input type="hidden" name="payment_received" id="paymentReceivedHidden" value="0">
 
+                <!-- ── Section progress bar ─────────────────────────────────────── -->
+                <div class="cb-step-bar" id="cbStepBar">
+                    <div class="cb-step-track">
+                        <button type="button" class="cb-step active" id="cbStepBtn1" onclick="cbJumpTo(1)">
+                            <span class="cb-step-num">1</span>
+                            <span class="cb-step-label">Stay Details</span>
+                        </button>
+                        <span class="cb-step-sep">›</span>
+                        <button type="button" class="cb-step" id="cbStepBtn2" onclick="cbJumpTo(2)">
+                            <span class="cb-step-num">2</span>
+                            <span class="cb-step-label">Rooms</span>
+                        </button>
+                        <span class="cb-step-sep">›</span>
+                        <button type="button" class="cb-step" id="cbStepBtn3" onclick="cbJumpTo(3)">
+                            <span class="cb-step-num">3</span>
+                            <span class="cb-step-label">Guest Info</span>
+                        </button>
+                        <span class="cb-step-sep">›</span>
+                        <button type="button" class="cb-step" id="cbStepBtn4" onclick="cbJumpTo(4)">
+                            <span class="cb-step-num">4</span>
+                            <span class="cb-step-label">Status</span>
+                        </button>
+                        <span class="cb-step-sep">›</span>
+                        <button type="button" class="cb-step" id="cbStepBtn5" onclick="cbJumpTo(5)">
+                            <span class="cb-step-num">5</span>
+                            <span class="cb-step-label">Payment</span>
+                        </button>
+                        <span class="cb-step-sep">›</span>
+                        <button type="button" class="cb-step" id="cbStepBtn6" onclick="cbJumpTo(6)">
+                            <span class="cb-step-num">6</span>
+                            <span class="cb-step-label">Review</span>
+                        </button>
+                    </div>
+                </div>
+
                 <!-- ══ 1. STAY DETAILS ═══════════════════════════════════════════════════ -->
-                <div class="form-card">
+                <div class="form-card" id="cbSection1">
                     <h3><i class="fas fa-calendar-alt"></i> Stay Details</h3>
                     <div class="form-row three-col">
                         <div class="form-group">
@@ -1488,10 +1669,15 @@ try {
                         <label>Special Requests</label>
                         <textarea name="special_requests" rows="2" placeholder="Early check-in, extra pillows, allergies…"><?php echo htmlspecialchars($_POST['special_requests'] ?? ''); ?></textarea>
                     </div>
+                    <div class="cb-section-error" id="cbErr1"></div>
+                    <div class="cb-section-nav">
+                        <span></span>
+                        <button type="button" class="cb-nav-btn cb-nav-next" onclick="cbNext(1)">Rooms &amp; Availability <i class="fas fa-arrow-right"></i></button>
+                    </div>
                 </div>
 
                 <!-- ══ 2. ROOM ALLOCATION ════════════════════════════════════════════════ -->
-                <div class="form-card" id="roomAllocationCard">
+                <div class="form-card" id="cbSection2">
                     <h3><i class="fas fa-bed"></i> Room Allocation</h3>
 
                     <div id="roomAvailabilityNotice" style="margin-bottom:14px;padding:10px 14px;border-radius:6px;background:#fff8e1;border-left:3px solid #f0c36d;color:#7a5c00;font-size:13px;display:<?php echo (!empty($_POST['check_in_date']) && !empty($_POST['check_out_date'])) ? 'none' : 'flex'; ?>;align-items:center;gap:8px;">
@@ -1537,10 +1723,15 @@ try {
                             <div id="irList" class="ir-list"></div>
                         </div>
                     </div>
+                    <div class="cb-section-error" id="cbErr2"></div>
+                    <div class="cb-section-nav">
+                        <button type="button" class="cb-nav-btn cb-nav-prev" onclick="cbPrev(2)"><i class="fas fa-arrow-left"></i> Stay Details</button>
+                        <button type="button" class="cb-nav-btn cb-nav-next" onclick="cbNext(2)">Guest Information <i class="fas fa-arrow-right"></i></button>
+                    </div>
                 </div>
 
                 <!-- ══ 3. GUEST INFORMATION ═══════════════════════════════════════════════ -->
-                <div class="form-card">
+                <div class="form-card" id="cbSection3">
                     <h3><i class="fas fa-user"></i> Guest Information</h3>
 
                     <!-- Returning Guest Lookup -->
@@ -1594,10 +1785,15 @@ try {
                         <label>Address</label>
                         <textarea name="guest_address" id="guestAddress" rows="2"><?php echo htmlspecialchars($_POST['guest_address'] ?? ''); ?></textarea>
                     </div>
+                    <div class="cb-section-error" id="cbErr3"></div>
+                    <div class="cb-section-nav">
+                        <button type="button" class="cb-nav-btn cb-nav-prev" onclick="cbPrev(3)"><i class="fas fa-arrow-left"></i> Rooms</button>
+                        <button type="button" class="cb-nav-btn cb-nav-next" onclick="cbNext(3)">Booking Status <i class="fas fa-arrow-right"></i></button>
+                    </div>
                 </div>
 
                 <!-- ══ 4. BOOKING STATUS ══════════════════════════════════════════════════ -->
-                <div class="form-card">
+                <div class="form-card" id="cbSection4">
                     <h3><i class="fas fa-tag"></i> Booking Status</h3>
                     <div class="form-row">
                         <div class="form-group">
@@ -1612,10 +1808,14 @@ try {
                             </select>
                         </div>
                     </div>
+                    <div class="cb-section-nav" style="margin-top:16px;">
+                        <button type="button" class="cb-nav-btn cb-nav-prev" onclick="cbPrev(4)"><i class="fas fa-arrow-left"></i> Guest Info</button>
+                        <button type="button" class="cb-nav-btn cb-nav-next" onclick="cbNext(4)">Payment <i class="fas fa-arrow-right"></i></button>
+                    </div>
                 </div>
 
                 <!-- ══ 5. PAYMENT TO COLLECT ══════════════════════════════════════════════ -->
-                <div class="form-card">
+                <div class="form-card" id="cbSection5">
                     <h3><i class="fas fa-receipt"></i> Payment to Collect</h3>
 
                     <table class="accounting-table">
@@ -1694,10 +1894,15 @@ try {
                             </div>
                         </div>
                     </div>
+                    <div class="cb-section-error" id="cbErr5"></div>
+                    <div class="cb-section-nav">
+                        <button type="button" class="cb-nav-btn cb-nav-prev" onclick="cbPrev(5)"><i class="fas fa-arrow-left"></i> Status</button>
+                        <button type="button" class="cb-nav-btn cb-nav-next" onclick="cbNext(5)">Review &amp; Submit <i class="fas fa-arrow-right"></i></button>
+                    </div>
                 </div>
 
                 <!-- ══ 6. ADMIN & NOTIFICATION ════════════════════════════════════════════ -->
-                <div class="form-card">
+                <div class="form-card" id="cbSection6">
                     <h3><i class="fas fa-cog"></i> Admin &amp; Notification</h3>
                     <div class="form-row">
                         <div class="form-group">
@@ -1746,9 +1951,13 @@ try {
                             </div>
                         </div>
                     </div>
+                    <div class="cb-section-nav" style="border-top:none; padding-top:8px; margin-top:8px;">
+                        <button type="button" class="cb-nav-btn cb-nav-prev" onclick="cbPrev(6)"><i class="fas fa-arrow-left"></i> Payment</button>
+                        <span></span>
+                    </div>
                 </div>
 
-                <button type="submit" class="btn-create">
+                <button type="submit" class="btn-create" id="cbSubmitBtn">
                     <i class="fas fa-plus-circle"></i> Create Booking
                 </button>
             </form>
@@ -2748,6 +2957,175 @@ try {
                 });
                 searchInput.focus();
             };
+        })();
+
+        // ═══════════════════════════════════════════════════════════════════
+        // Section step navigation
+        // ═══════════════════════════════════════════════════════════════════
+        (function () {
+            const SECTIONS = 6;
+            let currentSection = 1;
+
+            function getSection(n) { return document.getElementById('cbSection' + n); }
+            function getStepBtn(n) { return document.getElementById('cbStepBtn' + n); }
+            function getErrBox(n)  { return document.getElementById('cbErr' + n); }
+
+            function setActiveStep(n) {
+                currentSection = n;
+                for (let i = 1; i <= SECTIONS; i++) {
+                    const btn = getStepBtn(i);
+                    if (!btn) continue;
+                    btn.classList.remove('active', 'done');
+                    if (i < n) btn.classList.add('done');
+                    if (i === n) btn.classList.add('active');
+                }
+            }
+
+            function scrollToSection(n) {
+                const el = getSection(n);
+                if (!el) return;
+                const top = el.getBoundingClientRect().top + window.scrollY - 80;
+                window.scrollTo({ top, behavior: 'smooth' });
+            }
+
+            function showErr(n, msg) {
+                const box = getErrBox(n);
+                if (!box) return;
+                box.textContent = msg;
+                box.style.display = msg ? 'block' : 'none';
+            }
+
+            function clearFieldErrors(fields) {
+                fields.forEach(function (f) { f.classList.remove('cb-field-error'); });
+            }
+
+            // Section-specific validation
+            function validateSection(n) {
+                const errs = [];
+                const badFields = [];
+
+                if (n === 1) {
+                    const ci = document.getElementById('checkInDate');
+                    const co = document.getElementById('checkOutDate');
+                    const guests = document.querySelector('[name="number_of_guests"]');
+                    if (!ci || !ci.value) { errs.push('Check-in date is required.'); if (ci) badFields.push(ci); }
+                    if (!co || !co.value) { errs.push('Check-out date is required.'); if (co) badFields.push(co); }
+                    if (ci && co && ci.value && co.value && co.value <= ci.value) {
+                        errs.push('Check-out must be after check-in.');
+                        badFields.push(co);
+                    }
+                    if (!guests || !guests.value || parseInt(guests.value) < 1) {
+                        errs.push('At least 1 guest is required.');
+                        if (guests) badFields.push(guests);
+                    }
+                }
+
+                if (n === 2) {
+                    // Require at least one room line with a room selected
+                    const roomSelects = document.querySelectorAll('select[name="room_line_room_id[]"]');
+                    const hasRoom = Array.from(roomSelects).some(function (s) { return s.value; });
+                    if (!hasRoom) {
+                        errs.push('Please select at least one room type before continuing.');
+                    }
+                }
+
+                if (n === 3) {
+                    const nm  = document.getElementById('guestName');
+                    const em  = document.getElementById('guestEmail');
+                    const ph  = document.getElementById('guestPhone');
+                    if (!nm || !nm.value.trim()) { errs.push('Guest name is required.'); if (nm) badFields.push(nm); }
+                    if (!em || !em.value.trim()) { errs.push('Guest email is required.'); if (em) badFields.push(em); }
+                    else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(em.value.trim())) {
+                        errs.push('Please enter a valid email address.');
+                        badFields.push(em);
+                    }
+                    if (!ph || !ph.value.trim()) { errs.push('Guest phone is required.'); if (ph) badFields.push(ph); }
+                }
+
+                if (n === 5) {
+                    const check = document.getElementById('paymentReceivedCheck');
+                    if (check && check.checked) {
+                        const amt = document.getElementById('amountCollected');
+                        if (!amt || !amt.value || parseFloat(amt.value) <= 0) {
+                            errs.push('Please enter the amount collected, or uncheck "Payment Received Now".');
+                            if (amt) badFields.push(amt);
+                        }
+                    }
+                }
+
+                // Clear previous field errors then mark bad ones
+                document.querySelectorAll('.cb-field-error').forEach(function (el) {
+                    el.classList.remove('cb-field-error');
+                });
+                badFields.forEach(function (f) { f.classList.add('cb-field-error'); });
+
+                return errs;
+            }
+
+            window.cbNext = function (n) {
+                showErr(n, '');
+                const errs = validateSection(n);
+                if (errs.length) {
+                    showErr(n, errs.join(' '));
+                    // Scroll to the error within the section
+                    const el = getSection(n);
+                    if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                    return;
+                }
+                const next = n + 1;
+                if (next > SECTIONS) return;
+                setActiveStep(next);
+                scrollToSection(next);
+            };
+
+            window.cbPrev = function (n) {
+                const prev = n - 1;
+                if (prev < 1) return;
+                showErr(n, '');
+                setActiveStep(prev);
+                scrollToSection(prev);
+            };
+
+            window.cbJumpTo = function (n) {
+                showErr(currentSection, '');
+                setActiveStep(n);
+                scrollToSection(n);
+            };
+
+            // Update active step on scroll via IntersectionObserver
+            if ('IntersectionObserver' in window) {
+                const obs = new IntersectionObserver(function (entries) {
+                    entries.forEach(function (entry) {
+                        if (entry.isIntersecting) {
+                            const id = entry.target.id;
+                            const num = parseInt(id.replace('cbSection', ''));
+                            if (!isNaN(num)) setActiveStep(num);
+                        }
+                    });
+                }, { rootMargin: '-40% 0px -40% 0px', threshold: 0 });
+
+                for (let i = 1; i <= SECTIONS; i++) {
+                    const el = getSection(i);
+                    if (el) obs.observe(el);
+                }
+            }
+
+            // On form submit: run validation across all sections before submitting
+            const form = document.getElementById('createBookingForm');
+            if (form) {
+                form.addEventListener('submit', function (e) {
+                    for (let i = 1; i <= SECTIONS; i++) {
+                        const errs = validateSection(i);
+                        if (errs.length) {
+                            e.preventDefault();
+                            showErr(i, errs.join(' '));
+                            setActiveStep(i);
+                            scrollToSection(i);
+                            return;
+                        }
+                    }
+                });
+            }
         })();
     </script>
     <script src="js/admin-components.js" defer></script>
