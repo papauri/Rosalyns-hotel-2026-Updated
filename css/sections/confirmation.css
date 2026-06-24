@@ -1,0 +1,586 @@
+/* ============================================================
+   BOOKING CONFIRMATION PAGE
+   Modern, airy hotel confirmation — Rosalyn's Hotel 2026
+   ============================================================ */
+
+/* Page background */
+.confirmation-page main {
+    background: #F7F3EE;
+    min-height: 100vh;
+    padding: clamp(32px, 6vw, 80px) 16px clamp(48px, 8vw, 96px);
+}
+
+/* ── Centre column ── */
+.conf-wrap {
+    max-width: 620px;
+    margin: 0 auto;
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+}
+
+/* ── Hero (icon + heading + subtitle) ── */
+.conf-hero {
+    text-align: center;
+    padding: 0 0 8px;
+}
+
+.conf-icon-ring {
+    width: 80px;
+    height: 80px;
+    border-radius: 50%;
+    background: linear-gradient(135deg, #8B7355 0%, #C9A961 100%);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 32px;
+    color: #fff;
+    margin: 0 auto 20px;
+    box-shadow: 0 0 0 12px rgba(139,115,85,0.1), 0 8px 32px rgba(139,115,85,0.25);
+    animation: conf-pop 0.55s cubic-bezier(0.34,1.56,0.64,1) both;
+}
+
+.conf-icon-ring.tentative {
+    background: linear-gradient(135deg, #7A6A58 0%, #A89070 100%);
+    box-shadow: 0 0 0 12px rgba(120,106,88,0.1), 0 8px 32px rgba(120,106,88,0.22);
+}
+
+@keyframes conf-pop {
+    from { opacity: 0; transform: scale(0.4); }
+    to   { opacity: 1; transform: scale(1); }
+}
+
+.conf-heading {
+    font-family: 'Cormorant Garamond', Georgia, serif;
+    font-size: clamp(1.75rem, 4vw, 2.6rem);
+    font-weight: 400;
+    color: #1A1A1A;
+    letter-spacing: 0.01em;
+    line-height: 1.15;
+    margin: 0 0 10px;
+}
+
+.conf-subtitle {
+    font-family: 'Jost', sans-serif;
+    font-size: 0.9rem;
+    color: #7A6A58;
+    line-height: 1.6;
+    margin: 0 0 16px;
+    max-width: 42ch;
+    margin-inline: auto;
+}
+
+.conf-type-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 5px 16px;
+    border-radius: 100px;
+    font-family: 'Jost', sans-serif;
+    font-size: 0.72rem;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+}
+
+.conf-type-pill.standard {
+    background: rgba(139,115,85,0.1);
+    color: #6B5740;
+    border: 1px solid rgba(139,115,85,0.2);
+}
+
+.conf-type-pill.tentative {
+    background: rgba(201,169,97,0.12);
+    color: #7A5C2E;
+    border: 1px solid rgba(201,169,97,0.35);
+}
+
+/* ── Generic card ── */
+.conf-card {
+    background: #FFFFFF;
+    border-radius: 20px;
+    border: 1px solid rgba(139,115,85,0.1);
+    box-shadow: 0 2px 8px rgba(0,0,0,0.04), 0 8px 28px rgba(139,115,85,0.06);
+    overflow: hidden;
+    animation: conf-slide-up 0.4s ease both;
+}
+
+@keyframes conf-slide-up {
+    from { opacity: 0; transform: translateY(12px); }
+    to   { opacity: 1; transform: translateY(0); }
+}
+
+.conf-card:nth-child(2) { animation-delay: 0.08s; }
+.conf-card:nth-child(3) { animation-delay: 0.14s; }
+.conf-card:nth-child(4) { animation-delay: 0.20s; }
+.conf-card:nth-child(5) { animation-delay: 0.26s; }
+.conf-card:nth-child(6) { animation-delay: 0.32s; }
+
+.conf-card-body {
+    padding: 22px 24px;
+}
+
+.conf-card-title {
+    font-family: 'Jost', sans-serif;
+    font-size: 0.68rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.12em;
+    color: #9B8A72;
+    margin-bottom: 14px;
+    display: flex;
+    align-items: center;
+    gap: 7px;
+}
+
+.conf-card-title i {
+    color: #C9A961;
+    font-size: 11px;
+}
+
+/* ── Reference card ── */
+.conf-ref-card {
+    background: linear-gradient(145deg, #FFFFFF 0%, #FAF8F5 100%);
+    border: 1.5px solid rgba(139,115,85,0.18);
+    position: relative;
+    overflow: hidden;
+}
+
+.conf-ref-card::before {
+    content: '';
+    position: absolute;
+    top: 0; left: 0; right: 0;
+    height: 3px;
+    background: linear-gradient(90deg, #8B7355, #C9A961, #8B7355);
+}
+
+.conf-ref-body {
+    padding: 20px 24px 20px;
+    text-align: center;
+}
+
+.conf-ref-label {
+    font-family: 'Jost', sans-serif;
+    font-size: 0.67rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.13em;
+    color: #9B8A72;
+    margin-bottom: 8px;
+}
+
+.conf-ref-number {
+    font-family: 'Cormorant Garamond', serif;
+    font-size: clamp(1.5rem, 4vw, 2.2rem);
+    font-weight: 600;
+    color: #8B7355;
+    letter-spacing: 0.06em;
+    line-height: 1;
+}
+
+.conf-ref-group {
+    margin-top: 8px;
+    font-family: 'Jost', sans-serif;
+    font-size: 0.75rem;
+    color: #9B8A72;
+    line-height: 1.5;
+}
+
+/* ── Tentative warning banner ── */
+.conf-expiry-banner {
+    background: linear-gradient(135deg, rgba(201,169,97,0.1), rgba(201,169,97,0.06));
+    border: 1.5px solid rgba(201,169,97,0.35);
+    border-radius: 14px;
+    padding: 14px 20px;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    font-family: 'Jost', sans-serif;
+    font-size: 0.82rem;
+    color: #7A5C2E;
+    animation: conf-slide-up 0.4s ease 0.1s both;
+}
+
+.conf-expiry-banner i {
+    font-size: 18px;
+    color: #C9A961;
+    flex-shrink: 0;
+}
+
+.conf-expiry-banner strong {
+    display: block;
+    font-weight: 700;
+    margin-bottom: 2px;
+}
+
+/* ── Stay card ── */
+.conf-room-name {
+    font-family: 'Cormorant Garamond', serif;
+    font-size: 1.35rem;
+    font-weight: 500;
+    color: #1A1A1A;
+    margin-bottom: 16px;
+    letter-spacing: 0.01em;
+    line-height: 1.2;
+}
+
+.conf-dates-row {
+    display: grid;
+    grid-template-columns: 1fr auto 1fr;
+    align-items: center;
+    gap: 12px;
+    padding: 16px 0;
+    border-top: 1px solid rgba(139,115,85,0.08);
+    border-bottom: 1px solid rgba(139,115,85,0.08);
+    margin-bottom: 16px;
+}
+
+.conf-date-block {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+}
+
+.conf-date-block--right {
+    align-items: flex-end;
+    text-align: right;
+}
+
+.conf-date-label {
+    font-family: 'Jost', sans-serif;
+    font-size: 0.64rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    color: #9B8A72;
+}
+
+.conf-date-val {
+    font-family: 'Cormorant Garamond', serif;
+    font-size: 1.0rem;
+    font-weight: 500;
+    color: #1A1A1A;
+    white-space: nowrap;
+    line-height: 1.25;
+}
+
+.conf-date-time {
+    font-family: 'Jost', sans-serif;
+    font-size: 0.68rem;
+    color: #9B8A72;
+}
+
+.conf-nights-pill {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    background: linear-gradient(145deg, rgba(139,115,85,0.07), rgba(201,169,97,0.09));
+    border: 1px solid rgba(139,115,85,0.18);
+    border-radius: 12px;
+    padding: 10px 16px;
+    min-width: 64px;
+    text-align: center;
+    gap: 2px;
+}
+
+.conf-nights-num {
+    font-family: 'Cormorant Garamond', serif;
+    font-size: 1.5rem;
+    font-weight: 600;
+    color: #8B7355;
+    line-height: 1;
+}
+
+.conf-nights-lbl {
+    font-family: 'Jost', sans-serif;
+    font-size: 0.58rem;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    color: #9B8A72;
+}
+
+.conf-stay-meta {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    flex-wrap: wrap;
+}
+
+.conf-guests-line {
+    font-family: 'Jost', sans-serif;
+    font-size: 0.84rem;
+    color: #5E504A;
+    display: flex;
+    align-items: center;
+    gap: 7px;
+}
+
+.conf-guests-line i {
+    color: #8B7355;
+    font-size: 13px;
+}
+
+.conf-total-block {
+    text-align: right;
+}
+
+.conf-total-label {
+    font-family: 'Jost', sans-serif;
+    font-size: 0.65rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    color: #9B8A72;
+    margin-bottom: 2px;
+}
+
+.conf-total-amount {
+    font-family: 'Cormorant Garamond', serif;
+    font-size: 1.65rem;
+    font-weight: 700;
+    color: #8B7355;
+    line-height: 1;
+    white-space: nowrap;
+}
+
+/* ── Guest details card ── */
+.conf-detail-list {
+    display: flex;
+    flex-direction: column;
+    gap: 0;
+}
+
+.conf-detail-row {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 16px;
+    padding: 9px 0;
+    border-bottom: 1px solid rgba(139,115,85,0.07);
+    font-family: 'Jost', sans-serif;
+    font-size: 0.82rem;
+}
+
+.conf-detail-row:last-child {
+    border-bottom: none;
+    padding-bottom: 0;
+}
+
+.conf-detail-row > span:first-child {
+    color: #9B8A72;
+    font-size: 0.75rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.07em;
+    flex-shrink: 0;
+}
+
+.conf-detail-row > span:last-child {
+    color: #1A1A1A;
+    font-weight: 500;
+    text-align: right;
+    word-break: break-word;
+}
+
+.conf-detail-row.conf-detail-row--total > span:last-child {
+    font-family: 'Cormorant Garamond', serif;
+    font-size: 1.25rem;
+    font-weight: 700;
+    color: #8B7355;
+}
+
+/* ── Next steps card ── */
+.conf-steps {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    counter-reset: steps;
+}
+
+.conf-steps li {
+    counter-increment: steps;
+    display: flex;
+    align-items: flex-start;
+    gap: 12px;
+    font-family: 'Jost', sans-serif;
+    font-size: 0.82rem;
+    color: #5E504A;
+    line-height: 1.55;
+}
+
+.conf-steps li::before {
+    content: counter(steps);
+    width: 24px;
+    height: 24px;
+    min-width: 24px;
+    border-radius: 50%;
+    background: linear-gradient(135deg, #8B7355, #C9A961);
+    color: #fff;
+    font-size: 0.68rem;
+    font-weight: 700;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin-top: 1px;
+    flex-shrink: 0;
+}
+
+.conf-steps li strong {
+    color: #1A1A1A;
+    font-weight: 700;
+}
+
+/* ── Payment info ── */
+.conf-payment-text {
+    font-family: 'Jost', sans-serif;
+    font-size: 0.82rem;
+    color: #5E504A;
+    line-height: 1.7;
+}
+
+.conf-payment-text strong {
+    color: #1A1A1A;
+    font-weight: 700;
+}
+
+/* ── Action buttons ── */
+.conf-actions {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+    gap: 10px;
+    padding: 4px 0;
+}
+
+.conf-btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    padding: 12px 16px;
+    border-radius: 12px;
+    font-family: 'Jost', sans-serif;
+    font-size: 0.8rem;
+    font-weight: 600;
+    text-decoration: none;
+    border: none;
+    cursor: pointer;
+    transition: transform 0.18s ease, box-shadow 0.18s ease;
+    letter-spacing: 0.02em;
+    white-space: nowrap;
+}
+
+.conf-btn:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 6px 16px rgba(0,0,0,0.1);
+}
+
+.conf-btn--primary {
+    background: linear-gradient(135deg, #8B7355, #A89070);
+    color: #fff;
+    box-shadow: 0 3px 12px rgba(139,115,85,0.3);
+}
+
+.conf-btn--ghost {
+    background: #FFFFFF;
+    color: #5E504A;
+    border: 1.5px solid rgba(139,115,85,0.2);
+}
+
+.conf-btn--ghost:hover {
+    border-color: rgba(139,115,85,0.4);
+}
+
+.conf-btn--whatsapp {
+    background: #25D366;
+    color: #fff;
+    box-shadow: 0 3px 12px rgba(37,211,102,0.25);
+}
+
+.conf-btn--home {
+    background: #1A1A1A;
+    color: #FAF8F5;
+}
+
+/* ── Contact footer ── */
+.conf-contact-note {
+    text-align: center;
+    font-family: 'Jost', sans-serif;
+    font-size: 0.78rem;
+    color: #9B8A72;
+    padding: 8px 0 0;
+}
+
+.conf-contact-note a {
+    color: #8B7355;
+    text-decoration: none;
+    font-weight: 600;
+}
+
+/* ── Error state ── */
+.conf-error {
+    text-align: center;
+    padding: 60px 24px;
+}
+
+.conf-error i {
+    font-size: 56px;
+    color: #dc3545;
+    margin-bottom: 20px;
+    display: block;
+}
+
+.conf-error h1 {
+    font-family: 'Cormorant Garamond', serif;
+    font-size: 1.8rem;
+    margin-bottom: 12px;
+}
+
+.conf-error p {
+    color: #7A6A58;
+    font-family: 'Jost', sans-serif;
+    font-size: 0.9rem;
+    margin-bottom: 24px;
+}
+
+/* ── Responsive ── */
+@media (max-width: 480px) {
+    .conf-dates-row {
+        grid-template-columns: 1fr;
+        gap: 8px;
+    }
+    .conf-date-block--right {
+        align-items: flex-start;
+        text-align: left;
+    }
+    .conf-nights-pill {
+        flex-direction: row;
+        gap: 6px;
+        width: fit-content;
+        padding: 8px 14px;
+    }
+    .conf-stay-meta {
+        flex-direction: column;
+        align-items: flex-start;
+    }
+    .conf-total-block {
+        text-align: left;
+    }
+    .conf-actions {
+        grid-template-columns: 1fr 1fr;
+    }
+    .conf-btn--home {
+        grid-column: 1 / -1;
+    }
+}
+
+@media print {
+    .confirmation-page header,
+    .confirmation-page footer,
+    .conf-actions { display: none; }
+    .conf-card { box-shadow: none; border: 1px solid #ccc; }
+}
