@@ -631,11 +631,12 @@
 
 .editorial-facility-link {
     display: inline-flex;
-    width: 2.75rem;
-    height: 2.75rem;
+    width: 3rem;
+    height: 3rem;
     align-items: center;
     justify-content: center;
-    margin-top: auto;
+    margin-top: var(--space-6, 1.5rem);
+    align-self: center;
     position: relative;
     border-radius: var(--radius-full, 9999px);
     color: var(--color-primary, #8A775F);
