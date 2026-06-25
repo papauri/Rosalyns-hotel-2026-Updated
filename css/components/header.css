@@ -269,6 +269,7 @@
 
 .header__actions {
     margin-left: auto;
+    margin-right: 1rem;
     display: flex;
     align-items: center;
     gap: clamp(0.5rem, 1vw, 0.75rem);
@@ -331,7 +332,6 @@
     color: #ffffff;
     flex-shrink: 0;
     box-shadow: none;
-    margin-right: 0.5rem;
     transition:
         opacity var(--header-transition-fast),
         transform var(--header-transition-fast);
