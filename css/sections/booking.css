@@ -4940,3 +4940,316 @@
         gap: 8px;
     }
 }
+
+/* ══════════════════════════════════════════════════════════════════
+   BOOKING SUMMARY — COMPLETE ELEMENT COVERAGE
+   All bsum- elements + summary-badge scoped fixes + full responsive
+   ══════════════════════════════════════════════════════════════════ */
+
+/* ── Fix summary-badge when JS swaps class from bsum-type-badge ── */
+.booking-page .summary-badge {
+    margin-bottom: 0 !important;
+    padding: 5px 14px !important;
+    font-size: 0.75rem !important;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+    border-radius: 100px !important;
+    white-space: nowrap;
+}
+
+.booking-page .summary-badge.badge-standard {
+    background: rgba(201,169,97,0.1) !important;
+    color: #7A5C2E !important;
+    border: 1px solid rgba(201,169,97,0.3) !important;
+}
+
+.booking-page .summary-badge.badge-tentative {
+    background: rgba(255,193,7,0.1) !important;
+    color: #7A5C2E !important;
+    border: 1px solid rgba(255,193,7,0.35) !important;
+}
+
+.booking-page .summary-badge i {
+    font-size: 0.75rem !important;
+}
+
+/* ── Top bar: always flex-wrap so badge never crushes title ───── */
+.booking-page .bsum-topbar {
+    flex-wrap: wrap;
+    row-gap: 8px;
+}
+
+.booking-page .bsum-title {
+    flex-shrink: 0;
+    white-space: nowrap;
+}
+
+/* ── Room hero: spacing control ───────────────────────────────── */
+.booking-page .bsum-room-hero {
+    padding-bottom: 14px;
+    margin-bottom: 14px;
+}
+
+/* ── Rate-night: allow wrapping so long "X rooms" text wraps ──── */
+.booking-page .bsum-rate-night {
+    white-space: normal;
+    overflow-wrap: break-word;
+    word-break: break-word;
+    line-height: 1.4;
+}
+
+/* ── Dates row: label font fix ────────────────────────────────── */
+.booking-page .bsum-date-label {
+    font-size: 0.63rem;
+    letter-spacing: 0.08em;
+}
+
+.booking-page .bsum-nights-lbl {
+    font-size: 0.58rem;
+    letter-spacing: 0.08em;
+}
+
+/* ── Guests row: wrap when child charge makes line too long ────── */
+.booking-page .bsum-guests-row {
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: 4px 8px;
+    padding: 12px 0;
+    font-size: 0.84rem;
+    line-height: 1.5;
+}
+
+.booking-page .bsum-guests-row > i {
+    align-self: center;
+    flex-shrink: 0;
+}
+
+.booking-page .bsum-child-charge {
+    white-space: normal;
+    overflow-wrap: break-word;
+    word-break: break-word;
+    font-size: 0.76rem;
+    color: #9B8A72;
+    line-height: 1.4;
+}
+
+/* ── Rate plan row: right value right-aligned ─────────────────── */
+.booking-page .bsum-detail-row {
+    flex-wrap: wrap;
+    gap: 4px 12px;
+}
+
+.booking-page #summaryRatePlanRow .summary-discount {
+    font-weight: 700;
+    color: #1f7a42;
+    white-space: nowrap;
+}
+
+/* ── Total notes: prevent overflow ───────────────────────────── */
+.booking-page .bsum-total-note {
+    flex-wrap: wrap;
+    gap: 4px;
+    font-size: 0.7rem;
+    line-height: 1.45;
+}
+
+.booking-page .bsum-total-label {
+    font-size: 0.66rem;
+    letter-spacing: 0.1em;
+}
+
+/* ══════════════════════════════════════
+   TABLET (481–1024px)
+   ══════════════════════════════════════ */
+@media (min-width: 481px) and (max-width: 1024px) {
+    .booking-page .bsum-room-hero {
+        margin-bottom: 12px;
+        padding-bottom: 12px;
+    }
+
+    .booking-page .bsum-dates-row {
+        gap: 8px;
+        padding: 12px 0;
+    }
+
+    .booking-page .bsum-nights-badge {
+        padding: 8px 12px;
+        min-width: 56px;
+    }
+
+    .booking-page .bsum-guests-row {
+        padding: 10px 0;
+        font-size: 0.82rem;
+    }
+
+    .booking-page .bsum-total-block {
+        padding-top: 14px;
+        gap: 10px;
+    }
+
+    .booking-page .bsum-total-amount {
+        font-size: clamp(1.3rem, 2.5vw, 1.8rem);
+    }
+}
+
+/* ══════════════════════════════════════
+   MOBILE (≤600px)
+   ══════════════════════════════════════ */
+@media (max-width: 600px) {
+    /* Topbar: title + badge wrap to separate lines */
+    .booking-page .bsum-topbar {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 8px;
+        margin-bottom: 14px;
+        padding-bottom: 12px;
+    }
+
+    /* Room hero */
+    .booking-page .bsum-room-hero {
+        margin-bottom: 10px;
+        padding-bottom: 10px;
+    }
+
+    .booking-page .bsum-room-name {
+        font-size: 1.05rem;
+    }
+
+    .booking-page .bsum-room-meta {
+        font-size: 0.75rem;
+        gap: 5px;
+        row-gap: 3px;
+    }
+
+    .booking-page .bsum-meta-dot {
+        display: none; /* bullet looks odd when wrapping */
+    }
+
+    .booking-page .bsum-rate-type,
+    .booking-page .bsum-rate-night {
+        white-space: normal;
+        overflow: visible;
+        text-overflow: clip;
+    }
+
+    /* Dates: compact */
+    .booking-page .bsum-dates-row {
+        padding: 10px 0;
+        gap: 6px;
+    }
+
+    .booking-page .bsum-date-label {
+        font-size: 0.6rem;
+    }
+
+    .booking-page .bsum-date-val {
+        font-size: 0.78rem;
+    }
+
+    .booking-page .bsum-nights-badge {
+        padding: 6px 10px;
+        min-width: 44px;
+    }
+
+    .booking-page .bsum-nights-num {
+        font-size: 1.1rem;
+    }
+
+    .booking-page .bsum-nights-lbl {
+        font-size: 0.55rem;
+    }
+
+    /* Guests row: text + charge wrap cleanly */
+    .booking-page .bsum-guests-row {
+        font-size: 0.8rem;
+        padding: 10px 0;
+        gap: 3px 6px;
+    }
+
+    .booking-page .bsum-child-charge {
+        font-size: 0.73rem;
+        width: 100%; /* force onto its own line */
+        padding-left: 21px; /* align under guest text, past the icon */
+    }
+
+    /* Detail rows */
+    .booking-page .bsum-detail-row {
+        padding: 8px 0;
+        font-size: 0.77rem;
+    }
+
+    /* Total block: label above, amount beside */
+    .booking-page .bsum-total-block {
+        flex-direction: row;
+        align-items: flex-end;
+        flex-wrap: wrap;
+        padding-top: 12px;
+        gap: 8px;
+    }
+
+    .booking-page .bsum-total-label {
+        font-size: 0.63rem;
+    }
+
+    .booking-page .bsum-total-note {
+        font-size: 0.67rem;
+    }
+
+    .booking-page .bsum-total-amount {
+        font-size: clamp(1.25rem, 5.5vw, 1.6rem);
+    }
+}
+
+/* ══════════════════════════════════════
+   EXTRA SMALL (≤360px)
+   ══════════════════════════════════════ */
+@media (max-width: 360px) {
+    .booking-page #bookingSummary {
+        padding: 14px 14px 12px !important;
+    }
+
+    .booking-page .bsum-room-name {
+        font-size: 0.95rem;
+    }
+
+    /* Dates: fully stack on very small screens */
+    .booking-page .bsum-dates-row {
+        grid-template-columns: 1fr;
+        gap: 6px;
+    }
+
+    .booking-page .bsum-date-block--out {
+        align-items: flex-start;
+        text-align: left;
+    }
+
+    .booking-page .bsum-date-block--out .bsum-date-label {
+        justify-content: flex-start;
+    }
+
+    .booking-page .bsum-nights-badge {
+        flex-direction: row;
+        gap: 5px;
+        width: fit-content;
+        justify-content: flex-start;
+        border-radius: 8px;
+    }
+
+    .booking-page .bsum-nights-num {
+        font-size: 1rem;
+    }
+
+    .booking-page .bsum-total-block {
+        flex-direction: column;
+        align-items: flex-start;
+    }
+
+    .booking-page .bsum-total-amount {
+        font-size: 1.35rem;
+    }
+
+    /* Package list items: tighter */
+    .booking-page .bsum-pkg-list li {
+        font-size: 0.75rem;
+    }
+}
