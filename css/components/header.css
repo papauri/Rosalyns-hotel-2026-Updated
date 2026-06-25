@@ -331,6 +331,7 @@
     color: #ffffff;
     flex-shrink: 0;
     box-shadow: none;
+    margin-right: 0.5rem;
     transition:
         opacity var(--header-transition-fast),
         transform var(--header-transition-fast);
