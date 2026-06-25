@@ -373,32 +373,55 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['create_booking'])) {
                 $applied_rate_discount   = $dyn['discount_amount'];
             }
 
-            $base_amt  = $r_price * $number_of_nights;
-            $child_sup = ($child_guests > 0) ? ($r_price * ($cpm / 100) * $child_guests * $number_of_nights) : 0.0;
-            $levy_amt  = ($ovr === null && $levy_pct_db > 0) ? round(($base_amt + $child_sup) * ($levy_pct_db / 100), 2) : 0.0;
-            $tot_amt   = $ovr !== null ? $ovr : ($base_amt + $child_sup + $levy_amt);
-            $vat_amt   = ($vat_rate_db > 0) ? round($tot_amt * ($vat_rate_db / 100), 2) : 0.0;
-            $twv       = $tot_amt + $vat_amt;
+            // Per-room base, then child supplement is group-level (one charge regardless of qty)
+            $base_amt_per  = $r_price * $number_of_nights;
+            $base_amt_all  = $base_amt_per * $qty;
+            $child_sup     = ($child_guests > 0) ? ($r_price * ($cpm / 100) * $child_guests * $number_of_nights) : 0.0;
+            $levy_amt      = ($ovr === null && $levy_pct_db > 0) ? round(($base_amt_all + $child_sup) * ($levy_pct_db / 100), 2) : 0.0;
+            $tot_amt       = $ovr !== null ? $ovr : ($base_amt_all + $child_sup + $levy_amt);
+            $vat_amt       = ($vat_rate_db > 0) ? round($tot_amt * ($vat_rate_db / 100), 2) : 0.0;
+            $twv           = $tot_amt + $vat_amt;  // covers ALL qty rooms
+
+            // Per-row INSERT amounts: spread base across rows; child supplement on first row only
+            $row_levy_per   = ($ovr === null && $levy_pct_db > 0) ? round($base_amt_per * ($levy_pct_db / 100), 2) : 0.0;
+            $row_tot_per    = $base_amt_per + $row_levy_per;
+            $row_vat_per    = ($vat_rate_db > 0) ? round($row_tot_per * ($vat_rate_db / 100), 2) : 0.0;
+            $row_twv_per    = $row_tot_per + $row_vat_per;
+            $first_levy_add = ($ovr === null && $levy_pct_db > 0) ? round($child_sup * ($levy_pct_db / 100), 2) : 0.0;
+            $first_tot_add  = $child_sup + $first_levy_add;
+            $first_vat_add  = ($vat_rate_db > 0) ? round($first_tot_add * ($vat_rate_db / 100), 2) : 0.0;
+            $first_twv_add  = $first_tot_add + $first_vat_add;
 
             $line['calc'] = [
                 'room_price'         => $r_price,
-                'cpm'              => $cpm,
-                'base_amount'        => $base_amt,
-                'child_supplement' => $child_sup,
+                'cpm'                => $cpm,
+                'base_amount'        => $base_amt_all,
+                'base_amount_per'    => $base_amt_per,
+                'child_supplement'   => $child_sup,
                 'levy_pct'           => $ovr !== null ? 0.0 : $levy_pct_db,
-                'levy_amount' => $levy_amt,
+                'levy_amount'        => $levy_amt,
                 'total_amount'       => $tot_amt,
-                'vat_rate'         => $vat_rate_db,
+                'vat_rate'           => $vat_rate_db,
                 'vat_amount'         => $vat_amt,
-                'total_with_vat'   => $twv,
+                'total_with_vat'     => $twv,
+                // per-row amounts
+                'row_tot_per'        => $row_tot_per,
+                'row_levy_per'       => $row_levy_per,
+                'row_vat_per'        => $row_vat_per,
+                'row_twv_per'        => $row_twv_per,
+                'first_tot_add'      => $first_tot_add,
+                'first_levy_add'     => $first_levy_add,
+                'first_vat_add'      => $first_vat_add,
+                'first_twv_add'      => $first_twv_add,
                 'rate_plan_id'       => $applied_rate_plan_id,
                 'rate_plan_label'    => $applied_rate_plan_label,
                 'rate_plan_discount' => $applied_rate_discount,
             ];
-            $grand_total_with_vat   += $twv * $qty;
-            $grand_child_supplement += $child_sup * $qty;
-            $grand_levy_amount      += $levy_amt * $qty;
-            $grand_vat_amount       += $vat_amt * $qty;
+            // $twv already covers all qty rooms — do NOT multiply by $qty
+            $grand_total_with_vat   += $twv;
+            $grand_child_supplement += $child_sup;
+            $grand_levy_amount      += $levy_amt;
+            $grand_vat_amount       += $vat_amt;
         }
         unset($line);
 
@@ -460,6 +483,21 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['create_booking'])) {
                     $ref_exists = (int)$ref_check->fetchColumn() > 0;
                 } while ($ref_exists);
 
+                $is_first_in_line = ($room_idx === 0);
+
+                // Per-row financials: child supplement on first row only
+                $row_tot  = $c['row_tot_per']  + ($is_first_in_line ? $c['first_tot_add']  : 0.0);
+                $row_levy = $c['row_levy_per'] + ($is_first_in_line ? $c['first_levy_add'] : 0.0);
+                $row_vat  = $c['row_vat_per']  + ($is_first_in_line ? $c['first_vat_add']  : 0.0);
+                $row_twv  = $c['row_twv_per']  + ($is_first_in_line ? $c['first_twv_add']  : 0.0);
+                $row_child_sup = $is_first_in_line ? $c['child_supplement'] : 0.0;
+
+                // Distribute guests: adults spread evenly, children on first row only
+                $adults_floor  = (int)floor($adult_guests / $qty);
+                $row_adults    = ($room_idx < $qty - 1) ? $adults_floor : ($adult_guests - $adults_floor * ($qty - 1));
+                $row_children  = $is_first_in_line ? $child_guests : 0;
+                $row_guests    = $row_adults + $row_children;
+
                 $is_primary = ($booking_number === 0);
                 $__bookingClientUuid = idem_normalize_uuid(
                     $is_primary
@@ -506,20 +544,20 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['create_booking'])) {
                     $guest_phone,
                     $guest_country,
                     $guest_address,
-                    $number_of_guests,
-                    $adult_guests,
-                    $child_guests,
+                    $row_guests,
+                    $row_adults,
+                    $row_children,
                     $c['cpm'],
                     $check_in_date,
                     $check_out_date,
                     $number_of_nights,
-                    $c['total_amount'],
-                    $c['child_supplement'],
-                    $c['levy_amount'],
+                    $row_tot,
+                    $row_child_sup,
+                    $row_levy,
                     $c['levy_pct'],
                     $c['vat_rate'],
-                    $c['vat_amount'],
-                    $c['total_with_vat'],
+                    $row_vat,
+                    $row_twv,
                     $special_requests,
                     $booking_status,
                     $payment_status_val,
@@ -552,7 +590,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['create_booking'])) {
                     'id'             => $new_booking_id,
                     'ref'            => $booking_reference,
                     'room_name'      => $r['name'],
-                    'total_with_vat' => $c['total_with_vat'],
+                    'total_with_vat' => $row_twv,
                     'manual_room_id' => $this_individual_room_id,
                     'room_combination_id' => $assigned_combination_id,
                 ];

@@ -792,7 +792,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 'is_tentative' => $is_tentative,
                 'tentative_expires_at' => $tentative_expires_at,
                 'occupancy_type' => $occupancy_type,
-                'room_price' => $room_price,
+                'room_price' => $roomsNeeded > 1
+                    ? round($bookingGroupTotal / max(1, $number_of_nights), 2)
+                    : $room_price,
+                'room_price_per_room' => $room_price,
                 'rooms_needed' => $roomsNeeded,
                 'split_count' => count($createdReferences),
                 'all_references' => $createdReferences

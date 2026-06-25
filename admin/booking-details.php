@@ -766,6 +766,24 @@ try {
         $booking['derived_room_status'] = $booking['individual_room_status'];
     }
 
+    // ── Group booking siblings ───────────────────────────────────────
+    $group_bookings = [];
+    $primary_id_for_group = !empty($booking['primary_booking_id'])
+        ? (int)$booking['primary_booking_id']
+        : (int)$booking['id'];
+    $sib_stmt = $pdo->prepare("
+        SELECT b.id, b.booking_reference, b.status, b.number_of_guests,
+               b.total_with_vat, b.primary_booking_id,
+               COALESCE(r.name, 'Unknown') AS room_name
+        FROM bookings b
+        LEFT JOIN rooms r ON b.room_id = r.id
+        WHERE (b.id = :pid OR b.primary_booking_id = :pid2)
+          AND b.id != :current
+        ORDER BY b.id ASC
+    ");
+    $sib_stmt->execute([':pid' => $primary_id_for_group, ':pid2' => $primary_id_for_group, ':current' => $booking_id]);
+    $group_bookings = $sib_stmt->fetchAll(PDO::FETCH_ASSOC);
+
     // Fetch booking notes
     $notes_stmt = $pdo->prepare("
         SELECT n.*, u.full_name as created_by_name
@@ -1196,6 +1214,24 @@ unset($_SESSION['success_message'], $_SESSION['error_message']);
                 <i class="fas <?php echo $statusBanner['icon']; ?>"></i>
                 <span><?php echo $statusBanner['text']; ?></span>
             </div>
+        <?php endif; ?>
+
+        <!-- Group booking notice -->
+        <?php if (!empty($group_bookings)): ?>
+        <div style="background:rgba(139,115,85,0.08);border:1px solid rgba(139,115,85,0.25);border-radius:10px;padding:14px 18px;margin-bottom:16px;display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
+            <i class="fas fa-layer-group" style="color:#8B7355;font-size:1.1rem;flex-shrink:0;"></i>
+            <span style="font-weight:600;color:#5A4A3A;font-size:0.9rem;">
+                <?php echo !empty($booking['primary_booking_id']) ? 'Secondary room in a group booking' : 'Primary booking — group of ' . (count($group_bookings) + 1) . ' rooms'; ?>
+            </span>
+            <span style="color:#7A6A58;font-size:0.85rem;">Linked rooms:</span>
+            <?php foreach ($group_bookings as $gb): ?>
+            <a href="booking-details.php?id=<?php echo (int)$gb['id']; ?>"
+               style="display:inline-flex;align-items:center;gap:6px;background:#fff;border:1px solid rgba(139,115,85,0.3);border-radius:6px;padding:4px 10px;font-size:0.82rem;color:#5A4A3A;text-decoration:none;white-space:nowrap;">
+                <i class="fas fa-door-open" style="font-size:0.75rem;color:#8B7355;"></i>
+                <?php echo htmlspecialchars($gb['room_name']); ?> &mdash; <strong><?php echo htmlspecialchars($gb['booking_reference']); ?></strong>
+            </a>
+            <?php endforeach; ?>
+        </div>
         <?php endif; ?>
 
         <!-- Hero Section -->
