@@ -531,7 +531,7 @@
     justify-content: center;
     width: 40px;
     height: 40px;
-    background: #F5F1ED;
+    background: #D4C5B9;
     border: none;
     cursor: pointer;
     padding: 0;
@@ -539,20 +539,18 @@
     color: #2C2825;
     flex-shrink: 0;
     transition: all var(--header-transition);
-    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.12);
     font-size: 18px;
+    box-shadow: none;
 }
 
 .header__mobile-close:hover {
-    color: #8B7355;
-    background: #FAF9F7;
-    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.18);
-    transform: translateY(-2px);
+    color: #FBF8F4;
+    background: #8B7355;
+    transform: scale(1.08);
 }
 
 .header__mobile-close:active {
-    transform: translateY(0);
-    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+    transform: scale(0.96);
 }
 
 .header__mobile-close:focus-visible {
