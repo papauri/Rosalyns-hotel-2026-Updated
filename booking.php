@@ -1435,7 +1435,7 @@ try {
                 <!-- Package Add-ons (populated via JS after availability check) -->
                 <div class="form-section" id="packagesSection" style="display:none;">
                     <h3 class="form-section-title"><i class="fas fa-gift"></i> Add-On Packages</h3>
-                    <p style="font-size:14px; color:var(--color-text-secondary); margin-bottom:16px;">
+                    <p class="form-section-subtitle">
                         Enhance your stay with one of our curated packages.
                     </p>
                     <div id="packagesList"></div>
@@ -1510,9 +1510,12 @@ try {
                             <span id="summaryRatePlanLabel">Special Rate</span>
                             <span id="summaryRatePlanValue" class="summary-discount"></span>
                         </div>
-                        <div id="summaryPackageTotalRow" style="display:none;" class="bsum-detail-row">
-                            <span>Packages</span>
-                            <span id="summaryPackageTotal"></span>
+                        <div id="summaryPackageTotalRow" style="display:none;" class="bsum-detail-row bsum-detail-row--packages">
+                            <div class="bsum-pkg-info">
+                                <span class="bsum-pkg-label"><i class="fas fa-gift" aria-hidden="true"></i> Add-on Packages</span>
+                                <ul class="bsum-pkg-list" id="summaryPackageNames"></ul>
+                            </div>
+                            <span id="summaryPackageTotal" class="bsum-pkg-total"></span>
                         </div>
 
                         <!-- ── Total ── -->
@@ -2788,19 +2791,33 @@ try {
                         ratePlanRow.style.display = 'none';
                     }
 
-                    // Update package total row
+                    // Update package total row + individual package names
                     const pkgTotalRow = document.getElementById('summaryPackageTotalRow');
                     const pkgTotalEl = document.getElementById('summaryPackageTotal');
+                    const pkgNamesList = document.getElementById('summaryPackageNames');
                     const compCount = currentPackages.filter(p => selectedPackageIds.has(Number(p.id)) && parseFloat(p.price_amount) === 0).length;
+                    const selectedPkgs = currentPackages.filter(p => selectedPackageIds.has(Number(p.id)));
+
+                    // Populate individual package names
+                    if (pkgNamesList) {
+                        pkgNamesList.innerHTML = '';
+                        selectedPkgs.forEach(pkg => {
+                            const isComp = parseFloat(pkg.price_amount) === 0;
+                            const li = document.createElement('li');
+                            li.innerHTML = `<i class="${pkg.icon || 'fas fa-check-circle'}" aria-hidden="true"></i>${pkg.name}${isComp ? ' <span class="bsum-pkg-comp"><i class="fas fa-gift" aria-hidden="true"></i> Complimentary</span>' : ''}`;
+                            pkgNamesList.appendChild(li);
+                        });
+                    }
+
                     if (pkgTotalRow) {
                         if (pkgTotal > 0 && compCount > 0) {
-                            pkgTotalEl.innerHTML = currencySymbol + pkgTotal.toLocaleString() + ` <small style="color:#1f7a42;">+ ${compCount} complimentary</small>`;
+                            pkgTotalEl.innerHTML = `${currencySymbol}${pkgTotal.toLocaleString()} <span class="bsum-pkg-comp">+${compCount} free</span>`;
                             pkgTotalRow.style.display = '';
                         } else if (pkgTotal > 0) {
                             pkgTotalEl.textContent = currencySymbol + pkgTotal.toLocaleString();
                             pkgTotalRow.style.display = '';
                         } else if (compCount > 0) {
-                            pkgTotalEl.innerHTML = `<span style="color:#1f7a42;"><i class="fas fa-gift"></i> Complimentary</span>`;
+                            pkgTotalEl.innerHTML = `<span class="bsum-pkg-comp"><i class="fas fa-gift" aria-hidden="true"></i> Complimentary</span>`;
                             pkgTotalRow.style.display = '';
                         } else {
                             pkgTotalRow.style.display = 'none';
