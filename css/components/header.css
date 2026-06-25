@@ -534,7 +534,7 @@
     background: #D4C5B9;
     border: none;
     cursor: pointer;
-    padding: 0;
+    padding: 0 !important;
     border-radius: 10px;
     color: #2C2825;
     flex-shrink: 0;
@@ -546,6 +546,7 @@
 .header__mobile-close svg {
     width: 24px;
     height: 24px;
+    max-width: none;
     flex-shrink: 0;
 }
 
