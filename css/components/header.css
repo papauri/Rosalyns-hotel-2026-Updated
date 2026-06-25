@@ -543,6 +543,12 @@
     box-shadow: none;
 }
 
+.header__mobile-close svg {
+    width: 24px;
+    height: 24px;
+    flex-shrink: 0;
+}
+
 .header__mobile-close:hover {
     color: #FBF8F4;
     background: #8B7355;
