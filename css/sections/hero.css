@@ -285,11 +285,31 @@
     right: auto;
     width: min(58vw, 860px);
     max-width: min(58vw, 860px);
-    padding: clamp(2.5rem, 4.5vw, 5.5rem) clamp(2.25rem, 3.4vw, 4rem) clamp(3.6rem, 5.4vw, 6.2rem) clamp(2.25rem, 3.4vw, 4rem) !important;
+    /* Override bottom:5% — scale with vh so the card sits lower on tall screens
+       and isn't pushed too high on short laptop viewports */
+    bottom: clamp(2rem, 8vh, 15%);
+    padding: clamp(2rem, 4vw, 5rem) clamp(2.25rem, 3.4vw, 4rem) clamp(2.5rem, 4.5vw, 5.5rem) clamp(2.25rem, 3.4vw, 4rem) !important;
     border-radius: var(--landing-card-radius, 1rem);
     border: 1px solid color-mix(in srgb, #FFFFFF 36%, transparent 64%);
     background: linear-gradient(155deg, rgba(20, 19, 16, 0.5) 0%, rgba(20, 19, 16, 0.22) 100%);
     backdrop-filter: blur(5px);
+}
+
+/* Short laptop screens (height ≤ 820px) — reduce padding so card doesn't dominate */
+@media (max-height: 820px) {
+    .hero--home-lux.hero--image .hero__content {
+        bottom: clamp(1.5rem, 6vh, 10%) !important;
+        padding: clamp(1.5rem, 2.5vw, 2.5rem) clamp(1.75rem, 2.8vw, 3rem) clamp(2rem, 3vw, 3.5rem) clamp(1.75rem, 2.8vw, 3rem) !important;
+    }
+
+    .hero--home-lux.hero--image .hero__title {
+        font-size: clamp(1.9rem, 3.5vw, 3.2rem) !important;
+    }
+
+    .hero--home-lux.hero--image .hero__description {
+        font-size: clamp(0.9rem, 1.2vw, 1rem) !important;
+        margin-bottom: clamp(0.8rem, 1.4vw, 1.4rem) !important;
+    }
 }
 
 .hero--home-lux.hero--image .hero__title {
