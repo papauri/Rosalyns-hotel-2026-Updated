@@ -5009,11 +5009,11 @@
     letter-spacing: 0.08em;
 }
 
-/* ── Guests row: wrap when child charge makes line too long ────── */
+/* ── Guests row: main text + child charge always on its own line ── */
 .booking-page .bsum-guests-row {
     flex-wrap: wrap;
-    align-items: baseline;
-    gap: 4px 8px;
+    align-items: center;
+    gap: 3px 8px;
     padding: 12px 0;
     font-size: 0.84rem;
     line-height: 1.5;
@@ -5024,13 +5024,25 @@
     flex-shrink: 0;
 }
 
+/* Child charge: full-width so it sits on its own line, indented */
 .booking-page .bsum-child-charge {
+    flex-basis: 100%;
+    padding-left: 22px; /* aligns under guest text, past the fa-users icon */
+    display: flex;
+    align-items: center;
+    gap: 5px;
     white-space: normal;
     overflow-wrap: break-word;
     word-break: break-word;
-    font-size: 0.76rem;
+    font-size: 0.78rem;
     color: #9B8A72;
     line-height: 1.4;
+}
+
+.booking-page .bsum-child-charge i {
+    color: #B89A6A;
+    font-size: 0.7rem;
+    flex-shrink: 0;
 }
 
 /* ── Rate plan row: right value right-aligned ─────────────────── */
@@ -5168,8 +5180,6 @@
 
     .booking-page .bsum-child-charge {
         font-size: 0.73rem;
-        width: 100%; /* force onto its own line */
-        padding-left: 21px; /* align under guest text, past the icon */
     }
 
     /* Detail rows */

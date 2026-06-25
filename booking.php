@@ -1502,7 +1502,7 @@ try {
                         <div class="bsum-guests-row">
                             <i class="fas fa-users"></i>
                             <span id="summaryGuests">—</span>
-                            <span id="summaryChildChargeRow" style="display:none;" class="bsum-child-charge">·&nbsp;<span id="summaryChildCharge"></span> child supplement</span>
+                            <span id="summaryChildChargeRow" style="display:none;" class="bsum-child-charge"><i class="fas fa-child" aria-hidden="true"></i> <span id="summaryChildCharge"></span> child supplement</span>
                         </div>
 
                         <!-- ── Optional rows (packages / rate plan) ── -->
@@ -2740,8 +2740,8 @@ try {
                         `${getOccupancyLabel(allocation[0].occupancyType)} (${totalGuests} Guest${totalGuests === 1 ? '' : 's'})`;
                     document.getElementById('summaryOccupancyType').textContent = occupancySummary;
                     document.getElementById('summaryRatePerNight').textContent = roomsNeeded > 1 ?
-                        `${currencySymbol}${roomRateTotalPerNight.toLocaleString()}/night across ${roomsNeeded} rooms` :
-                        `${currencySymbol}${roomRateTotalPerNight.toLocaleString()}/night`;
+                        `${currencySymbol}${roomRateTotalPerNight.toLocaleString()} across ${roomsNeeded} rooms` :
+                        `${currencySymbol}${roomRateTotalPerNight.toLocaleString()}`;
 
                     // Update stay details section
                     document.getElementById('summaryCheckIn').textContent = checkInDate.toLocaleDateString('en-US', {
@@ -2756,7 +2756,9 @@ try {
                         day: 'numeric',
                         year: 'numeric'
                     });
-                    document.getElementById('summaryNights').textContent = nights + (nights === 1 ? ' night' : ' nights');
+                    document.getElementById('summaryNights').textContent = nights;
+                    const nightsLbl = document.querySelector('.bsum-nights-lbl');
+                    if (nightsLbl) nightsLbl.textContent = nights === 1 ? 'night' : 'nights';
 
                     // Update guest details section
                     if (summaryGuests) {
