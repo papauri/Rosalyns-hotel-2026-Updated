@@ -102,7 +102,6 @@
 }
 
 .landing-main .editorial-booking-form {
-    grid-template-columns: repeat(4, minmax(0, 1fr)) minmax(180px, 1fr);
     gap: clamp(0.75rem, 1.2vw, 1.1rem);
     background: linear-gradient(165deg,
         color-mix(in srgb, var(--premium-surface-1, var(--color-surface)) 92%, var(--color-white) 8%) 0%,
@@ -114,11 +113,26 @@
     box-shadow: var(--premium-shadow-soft, var(--landing-card-shadow, 0 14px 34px rgba(46, 40, 33, 0.08)));
 }
 
-/* Desktop only: submit sits inline in the 5-column row */
-@media (min-width: 769px) {
+/* Desktop only: 5-column row with inline submit */
+@media (min-width: 1025px) {
+    .landing-main .editorial-booking-form {
+        grid-template-columns: repeat(4, minmax(0, 1fr)) minmax(180px, 1fr);
+    }
     .landing-main .editorial-booking-form .editorial-booking-submit {
         grid-column: auto;
         width: auto;
+    }
+}
+
+/* Tablet: 2-column grid, submit full width */
+@media (max-width: 1024px) {
+    .landing-main .editorial-booking-form {
+        grid-template-columns: repeat(2, 1fr);
+    }
+    .landing-main .editorial-booking-form .editorial-booking-submit,
+    .landing-main .editorial-booking-form .editorial-booking-field:last-of-type {
+        grid-column: 1 / -1;
+        width: 100%;
     }
 }
 
