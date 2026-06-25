@@ -452,6 +452,15 @@ textarea {
     }
 }
 
+@media (max-width: 520px) {
+    .header__logo-kicker {
+        display: none;
+    }
+    .header__actions {
+        flex-shrink: 0;
+    }
+}
+
 @media (min-width: 1024px) {
 
     /* header height becomes 90px — align main offset to match */

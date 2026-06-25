@@ -883,6 +883,40 @@
    SMALL MOBILE DEVICES
    ============================================ */
 
+@media (max-width: 520px) {
+    /* Hide tagline — not needed on small screens, frees width for toggle */
+    .header__logo-kicker {
+        display: none;
+    }
+
+    /* Allow brand to shrink so toggle never gets pushed out */
+    .header__brand {
+        flex-shrink: 1;
+        min-width: 0;
+    }
+
+    .header__logo-copy {
+        min-width: 0;
+        overflow: hidden;
+    }
+
+    .header__logo-text {
+        font-size: clamp(0.95rem, 3.8vw, 1.1rem);
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+    }
+
+    /* Ensure toggle never shrinks */
+    .header__actions {
+        flex-shrink: 0;
+    }
+
+    .header__toggle {
+        flex-shrink: 0;
+    }
+}
+
 @media (max-width: 374px) {
     :root {
         --header-height-mobile: 70px;
