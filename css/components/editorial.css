@@ -96,6 +96,42 @@
     grid-column: 1 / -1;
 }
 
+/* Availability hint */
+.widget-availability-hint {
+    grid-column: 1 / -1;
+    padding: 10px 12px;
+    border-radius: 6px;
+    font-size: 13px;
+    line-height: 1.5;
+}
+.widget-availability-hint:empty { display: none; }
+.widget-availability-hint--success {
+    background-color: rgba(40, 167, 69, 0.1);
+    border: 1px solid rgba(40, 167, 69, 0.3);
+    color: #155724;
+}
+.widget-availability-hint--warning {
+    background-color: rgba(220, 53, 69, 0.1);
+    border: 1px solid rgba(220, 53, 69, 0.3);
+    color: #dc3545;
+}
+.widget-availability-hint--info {
+    background-color: rgba(255, 193, 7, 0.1);
+    border: 1px solid rgba(255, 193, 7, 0.3);
+    color: #856404;
+}
+.widget-availability-hint--error {
+    background-color: rgba(220, 53, 69, 0.05);
+    border: 1px solid rgba(220, 53, 69, 0.2);
+    color: #856404;
+}
+@media (prefers-contrast: high) {
+    .widget-availability-hint--success { border-color: #155724; }
+    .widget-availability-hint--warning,
+    .widget-availability-hint--error  { border-color: #dc3545; }
+    .widget-availability-hint--info   { border-color: #856404; }
+}
+
 /* Landing premium booking composition */
 .landing-main .booking-widget-container {
     max-width: var(--landing-content-max, 1240px);

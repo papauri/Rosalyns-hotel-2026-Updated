@@ -68,12 +68,9 @@ foreach ($widget_rooms as $room) {
             <div class="editorial-booking-field">
                 <label class="editorial-booking-label" for="guests">Guests</label>
                 <select class="editorial-booking-input" id="guests" name="guests">
-                    <?php for ($i = 1; $i <= min($widget_max_guests, 5); $i++): ?>
+                    <?php for ($i = 1; $i <= $widget_max_guests; $i++): ?>
                         <option value="<?php echo $i; ?>" <?php echo $i === 2 ? 'selected' : ''; ?>><?php echo $i; ?> Guest<?php echo $i > 1 ? 's' : ''; ?></option>
                     <?php endfor; ?>
-                    <?php if ($widget_max_guests > 5): ?>
-                        <option value="<?php echo $widget_max_guests; ?>"><?php echo $widget_max_guests; ?>+ Guests</option>
-                    <?php endif; ?>
                 </select>
             </div>
             <div class="editorial-booking-field">
@@ -102,7 +99,7 @@ foreach ($widget_rooms as $room) {
                 <span>Check Availability</span>
                 <i class="fas fa-arrow-right" aria-hidden="true"></i>
             </button>
-            <div class="widget-availability-hint" id="widgetAvailabilityHint" style="display: none; margin-top: 12px; padding: 10px 12px; border-radius: 6px; font-size: 13px; line-height: 1.5;"></div>
+            <div class="widget-availability-hint" id="widgetAvailabilityHint" aria-live="polite"></div>
         </form>
     </div>
 </section>
@@ -195,6 +192,7 @@ foreach ($widget_rooms as $room) {
             })
             .catch(error => {
                 console.error('Availability check failed for room', roomId, error);
+                showHint('<i class="fas fa-exclamation-circle"></i> Could not check availability. Please try again or <a href="contact.php">contact us</a>.', 'error');
             });
     }
     
@@ -287,40 +285,28 @@ foreach ($widget_rooms as $room) {
      */
     function showHint(message, type) {
         if (!availabilityHint) return;
-        
         availabilityHint.innerHTML = message;
-        availabilityHint.style.display = 'block';
-        
-        // Style based on type
-        switch(type) {
-            case 'success':
-                availabilityHint.style.backgroundColor = 'rgba(40, 167, 69, 0.1)';
-                availabilityHint.style.border = '1px solid rgba(40, 167, 69, 0.3)';
-                availabilityHint.style.color = '#155724';
-                break;
-            case 'warning':
-                availabilityHint.style.backgroundColor = 'rgba(220, 53, 69, 0.1)';
-                availabilityHint.style.border = '1px solid rgba(220, 53, 69, 0.3)';
-                availabilityHint.style.color = '#dc3545';
-                break;
-            default:
-                availabilityHint.style.backgroundColor = 'rgba(255, 193, 7, 0.1)';
-                availabilityHint.style.border = '1px solid rgba(255, 193, 7, 0.3)';
-                availabilityHint.style.color = '#856404';
-        }
+        availabilityHint.className = `widget-availability-hint widget-availability-hint--${type || 'info'}`;
     }
     
     function findCompatibleRooms(guests, children) {
+        const checkIn = checkInInput?.value;
+        const checkOut = checkOutInput?.value;
         return roomData.filter(room => {
-            const hasCapacity = room.max_guests >= guests;
-            const allowsChildren = children === 0 || room.children_allowed === 1;
-            return hasCapacity && allowsChildren;
+            if (room.max_guests < guests) return false;
+            if (children > 0 && room.children_allowed !== 1) return false;
+            if (checkIn && checkOut) {
+                const statusKey = `${room.id}_${checkIn}_${checkOut}_${children}`;
+                const status = availabilityStatus[statusKey];
+                if (status && !status.available) return false;
+            }
+            return true;
         });
     }
     
     function hideHint() {
         if (!availabilityHint) return;
-        availabilityHint.style.display = 'none';
+        availabilityHint.className = 'widget-availability-hint';
         availabilityHint.innerHTML = '';
     }
     
@@ -446,7 +432,7 @@ foreach ($widget_rooms as $room) {
             
             // Rebuild guests options based on room capacity
             guestsSelect.innerHTML = '';
-            for (let i = 1; i <= Math.min(maxGuests, 5); i++) {
+            for (let i = 1; i <= maxGuests; i++) {
                 const option = document.createElement('option');
                 option.value = i;
                 option.textContent = i + (i === 1 ? ' Guest' : ' Guests');
@@ -454,13 +440,6 @@ foreach ($widget_rooms as $room) {
                     option.selected = true;
                 }
                 guestsSelect.appendChild(option);
-            }
-            
-            if (maxGuests > 5) {
-                const moreOption = document.createElement('option');
-                moreOption.value = maxGuests;
-                moreOption.textContent = maxGuests + '+ Guests';
-                guestsSelect.appendChild(moreOption);
             }
         }
         
@@ -505,14 +484,20 @@ foreach ($widget_rooms as $room) {
     if (roomTypeSelect) {
         roomTypeSelect.addEventListener('change', function() {
             updateGuestsForRoom();
-            // Re-check availability for selected room when room changes
             const checkIn = checkInInput?.value;
             const checkOut = checkOutInput?.value;
-            if (checkIn && checkOut) {
-                const selectedOption = roomTypeSelect.options[roomTypeSelect.selectedIndex];
-                if (selectedOption && selectedOption.dataset.roomId) {
+            const selectedOption = roomTypeSelect.options[roomTypeSelect.selectedIndex];
+            if (selectedOption && selectedOption.dataset.roomId) {
+                if (checkIn && checkOut) {
                     checkSingleRoomAvailability(parseInt(selectedOption.dataset.roomId), checkIn, checkOut, parseInt(childrenSelect?.value || '0', 10));
                 }
+            } else {
+                // "Any Room" — always allow submission
+                if (submitBtn) {
+                    submitBtn.disabled = false;
+                    submitBtn.style.opacity = '1';
+                }
+                hideHint();
             }
         });
     }
