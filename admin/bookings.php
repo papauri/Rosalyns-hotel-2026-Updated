@@ -2039,24 +2039,34 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $extVatAmount    = $extVatRate > 0 ? round($newTotal * ($extVatRate / 100), 2) : 0.0;
             $extTotalWithVat = round($newTotal + $extVatAmount, 2);
 
-            // Check for conflicts with other bookings on the extended dates
+            // Check for conflicts — fetch actual booking details so the error is actionable
             $blockingStatuses = getBookingStatusesThatBlockAvailability(false);
             $placeholders = implode(',', array_fill(0, count($blockingStatuses), '?'));
             $conflict_stmt = $pdo->prepare(
-                "SELECT COUNT(*) FROM bookings
+                "SELECT booking_reference, guest_name, check_in_date, check_out_date, status
+                 FROM bookings
                  WHERE room_id = ? AND id != ? AND status IN ({$placeholders})
-                 AND NOT (check_out_date <= ? OR check_in_date >= ?)"
+                 AND NOT (check_out_date <= ? OR check_in_date >= ?)
+                 ORDER BY check_in_date ASC
+                 LIMIT 3"
             );
             $conflict_stmt->execute(array_merge(
                 [$bk['room_id'], $booking_id],
                 $blockingStatuses,
                 [$oldCheckout, $new_checkout]
             ));
-            $conflicts = (int)$conflict_stmt->fetchColumn();
+            $conflictRows = $conflict_stmt->fetchAll(PDO::FETCH_ASSOC);
 
-            if ($conflicts > 0) {
+            if (!empty($conflictRows)) {
+                $details = array_map(function ($c) {
+                    $in  = date('d M Y', strtotime($c['check_in_date']));
+                    $out = date('d M Y', strtotime($c['check_out_date']));
+                    return sprintf('%s — %s (%s to %s, %s)',
+                        $c['booking_reference'], $c['guest_name'], $in, $out, ucfirst($c['status']));
+                }, $conflictRows);
+                $msg = 'Cannot extend: the following booking' . (count($conflictRows) > 1 ? 's conflict' : ' conflicts') . ' with the new dates: ' . implode('; ', $details);
                 header('Content-Type: application/json');
-                echo json_encode(['success' => false, 'message' => 'Cannot extend: another booking conflicts with the new checkout date range']);
+                echo json_encode(['success' => false, 'message' => $msg, 'conflicts' => $conflictRows]);
                 exit;
             }
 
@@ -6891,14 +6901,28 @@ $today_str = $today->format('Y-m-d');
                             reloadWithBookingActionMessage(data, 'Stay extended successfully.');
                         })
                         .catch(error => {
-                            setModalActionLoading(form, false);
-                            if (submitBtn) setButtonLoading(submitBtn, false);
+                            // Force-clear loading state — do this first before anything else
+                            // so the overlay never gets stuck even if Alert.show throws
+                            try { setModalActionLoading(form, false); } catch(_) {}
+                            try {
+                                const mc = form ? form.closest('.modal-content') : null;
+                                if (mc) {
+                                    mc.classList.remove('is-modal-busy');
+                                    const ldr = mc.querySelector('.modal-inline-loader');
+                                    if (ldr) ldr.setAttribute('hidden', 'hidden');
+                                }
+                            } catch(_) {}
+                            if (submitBtn) {
+                                try { setButtonLoading(submitBtn, false); } catch(_) {}
+                            }
                             Alert.show(error.message || 'An error occurred while extending the stay.', 'error');
                         });
                 })
                 .catch(() => {
-                    setModalActionLoading(form, false);
-                    if (submitBtn) setButtonLoading(submitBtn, false);
+                    try { setModalActionLoading(form, false); } catch(_) {}
+                    if (submitBtn) {
+                        try { setButtonLoading(submitBtn, false); } catch(_) {}
+                    }
                 });
         });
 
