@@ -4326,3 +4326,262 @@
         padding: 18px !important;
     }
 }
+
+/* ══════════════════════════════════════════════════════════════════
+   SELECT YOUR ROOM — DEFINITIVE RESPONSIVE OVERHAUL
+   Explicit breakpoints for every device tier. All scoped to
+   .booking-page so nothing bleeds to other pages.
+   ══════════════════════════════════════════════════════════════════ */
+
+/* ── Base: the card is a vertical flex column ─────────────────── */
+.booking-page .room-option {
+    display: flex !important;
+    flex-direction: column !important;
+    height: 100%;
+}
+
+/* ── Filter chips row ─────────────────────────────────────────── */
+.booking-page .rooms-filter {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-bottom: 20px;
+    align-items: center;
+}
+
+.booking-page .chip {
+    white-space: nowrap;
+    flex-shrink: 0;
+}
+
+.booking-page .chip-count {
+    opacity: 0.65;
+    font-size: 0.85em;
+    font-weight: 400;
+}
+
+/* ── Grid: 3 columns on desktop ───────────────────────────────── */
+.booking-page .room-selection {
+    display: grid !important;
+    grid-template-columns: repeat(3, 1fr) !important;
+    gap: 18px !important;
+    margin-bottom: 0 !important;
+    align-items: stretch;
+}
+
+/* ── Thumbnail: fluid height ──────────────────────────────────── */
+.booking-page .room-option__thumb {
+    height: 190px !important;
+    flex-shrink: 0 !important;
+}
+
+/* ── Room info: readable at all sizes ─────────────────────────── */
+.booking-page .room-option .room-info h4 {
+    font-size: clamp(1rem, 1.5vw, 1.15rem) !important;
+}
+
+.booking-page .room-option .room-info > p {
+    font-size: 0.78rem !important;
+    line-height: 1.5;
+}
+
+/* ── Price strip always visible ───────────────────────────────── */
+.booking-page .room-option .room-price {
+    margin-top: auto;
+}
+
+/* ── Unavailable badge: full-width strip inside the price area ── */
+.booking-page .unavailable-badge {
+    position: static !important;
+    width: 100%;
+    border-radius: 0 !important;
+    text-align: center;
+    justify-content: center;
+    padding: 6px 12px !important;
+    margin: 0 !important;
+}
+
+/* ── Availability message spans full row ──────────────────────── */
+.booking-page .availability-message {
+    grid-column: 1 / -1 !important;
+    font-size: 0.875rem;
+}
+
+/* ══════════════════════════════════════
+   TABLET WIDE (769px – 1024px): 2 cols
+   ══════════════════════════════════════ */
+@media (min-width: 769px) and (max-width: 1024px) {
+    .booking-page .room-selection {
+        grid-template-columns: repeat(2, 1fr) !important;
+        gap: 16px !important;
+    }
+
+    .booking-page .room-option__thumb {
+        height: 175px !important;
+    }
+
+    .booking-page .rooms-filter {
+        gap: 6px;
+        margin-bottom: 16px;
+    }
+}
+
+/* ══════════════════════════════════════
+   TABLET NARROW / PHABLET (481px – 768px): 2 cols then 1 col
+   ══════════════════════════════════════ */
+@media (min-width: 601px) and (max-width: 768px) {
+    .booking-page .room-selection {
+        grid-template-columns: repeat(2, 1fr) !important;
+        gap: 14px !important;
+    }
+
+    .booking-page .room-option__thumb {
+        height: 155px !important;
+    }
+
+    .booking-page .rooms-filter {
+        gap: 6px;
+        margin-bottom: 14px;
+    }
+
+    .booking-page .chip {
+        font-size: 0.67rem !important;
+        padding: 6px 14px !important;
+    }
+}
+
+@media (min-width: 481px) and (max-width: 600px) {
+    .booking-page .room-selection {
+        grid-template-columns: 1fr !important;
+        gap: 12px !important;
+    }
+
+    .booking-page .room-option__thumb {
+        height: 170px !important;
+    }
+}
+
+/* ══════════════════════════════════════
+   MOBILE (≤480px): single column, horizontal card
+   ══════════════════════════════════════ */
+@media (max-width: 480px) {
+    .booking-page .room-selection {
+        grid-template-columns: 1fr !important;
+        gap: 12px !important;
+    }
+
+    /* Switch card to horizontal: thumb on left, info on right */
+    .booking-page .room-option {
+        flex-direction: row !important;
+        align-items: stretch !important;
+        min-height: 110px;
+    }
+
+    .booking-page .room-option .room-option__thumb {
+        width: 110px !important;
+        height: auto !important;
+        min-height: 110px !important;
+        flex-shrink: 0 !important;
+        border-radius: 16px 0 0 16px !important;
+    }
+
+    .booking-page .room-option .room-option__thumb img {
+        border-radius: 0 !important;
+    }
+
+    .booking-page .room-option .room-option__thumb--placeholder {
+        border-radius: 16px 0 0 16px !important;
+    }
+
+    /* Info + price stack vertically inside the right side */
+    .booking-page .room-option .room-info {
+        flex: 1 1 0 !important;
+        padding: 10px 12px 6px !important;
+        min-width: 0;
+    }
+
+    .booking-page .room-option .room-info h4 {
+        font-size: 0.9rem !important;
+        margin-bottom: 3px !important;
+    }
+
+    .booking-page .room-option .room-info > p {
+        font-size: 0.72rem !important;
+    }
+
+    .booking-page .room-option .room-child-badge {
+        font-size: 0.62rem !important;
+        padding: 2px 7px !important;
+        margin-top: 4px !important;
+    }
+
+    .booking-page .room-option .room-price {
+        padding: 6px 12px 10px !important;
+        border-top: 1px solid rgba(139,115,85,0.09) !important;
+        flex-direction: row !important;
+        align-items: baseline;
+        gap: 4px;
+        justify-content: flex-start;
+    }
+
+    .booking-page .room-option .room-price-amount {
+        font-size: 1rem !important;
+    }
+
+    .booking-page .room-option .room-price-period {
+        font-size: 0.6rem !important;
+    }
+
+    /* Selected checkmark: top-right corner */
+    .booking-page .room-option.selected::after {
+        top: 8px !important;
+        right: 8px !important;
+        width: 20px !important;
+        height: 20px !important;
+        font-size: 10px !important;
+    }
+
+    /* Filter chips: smaller on mobile */
+    .booking-page .chip {
+        font-size: 0.65rem !important;
+        padding: 5px 12px !important;
+        letter-spacing: 0.05em !important;
+    }
+
+    .booking-page .chip-count {
+        display: none; /* save space on mobile */
+    }
+
+    .booking-page .rooms-filter {
+        gap: 5px;
+        margin-bottom: 12px;
+    }
+}
+
+/* ══════════════════════════════════════
+   EXTRA SMALL (≤360px): tighter thumb
+   ══════════════════════════════════════ */
+@media (max-width: 360px) {
+    .booking-page .room-option .room-option__thumb {
+        width: 88px !important;
+        min-height: 88px !important;
+    }
+
+    .booking-page .room-option .room-info {
+        padding: 8px 10px 4px !important;
+    }
+}
+
+/* ══════════════════════════════════════
+   4K / ULTRA-WIDE (≥1600px): max 4 cols
+   ══════════════════════════════════════ */
+@media (min-width: 1600px) {
+    .booking-page .room-selection {
+        grid-template-columns: repeat(4, 1fr) !important;
+        gap: 20px !important;
+    }
+
+    .booking-page .room-option__thumb {
+        height: 210px !important;
+    }
+}
