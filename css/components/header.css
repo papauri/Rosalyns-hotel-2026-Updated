@@ -358,6 +358,18 @@
     .header__toggle {
         display: flex !important;
     }
+
+    /* Tablet: wider panel so it doesn't look like a narrow sliver */
+    .header__mobile {
+        max-width: min(100vw, 480px);
+    }
+}
+
+@media (max-width: 600px) {
+    /* Mid phones: panel takes full screen width */
+    .header__mobile {
+        max-width: 100vw;
+    }
 }
 
 @media (hover: hover) {
@@ -456,7 +468,7 @@
     left: 0;
     bottom: 0;
     width: 100%;
-    max-width: 420px;
+    max-width: min(100vw, 440px);
     color: var(--header-nav-color-scrolled);
     background:
         linear-gradient(160deg, color-mix(in srgb, var(--color-surface, #FBF8F4) 83%, #ffffff 17%) 0%, color-mix(in srgb, var(--color-lux-clay-50, #F3ECE4) 84%, var(--color-surface, #FBF8F4) 16%) 100%);
@@ -519,18 +531,20 @@
     justify-content: center;
     width: 40px;
     height: 40px;
-    background: transparent;
-    border: none;
+    background: rgba(35, 31, 28, 0.08);
+    border: 1px solid rgba(35, 31, 28, 0.14);
     cursor: pointer;
     padding: 0;
-    border-radius: var(--radius-md, 8px);
-    color: color-mix(in srgb, var(--header-nav-color-scrolled) 75%, #ffffff 25%);
-    transition: all var(--header-transition);
+    border-radius: 50%;
+    color: #231F1C;
+    flex-shrink: 0;
+    transition: background var(--header-transition), color var(--header-transition), border-color var(--header-transition);
 }
 
 .header__mobile-close:hover {
-    color: var(--header-nav-color-scrolled);
-    background: var(--header-nav-hover-bg-scrolled);
+    color: #B18247;
+    background: rgba(177, 130, 71, 0.12);
+    border-color: rgba(177, 130, 71, 0.3);
 }
 
 .header__mobile-close:focus-visible {
