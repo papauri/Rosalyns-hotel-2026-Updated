@@ -101,10 +101,6 @@
     max-width: var(--landing-content-max, 1240px);
 }
 
-.landing-main .editorial-booking-form .editorial-booking-submit {
-    grid-column: auto;
-}
-
 .landing-main .editorial-booking-form {
     grid-template-columns: repeat(4, minmax(0, 1fr)) minmax(180px, 1fr);
     gap: clamp(0.75rem, 1.2vw, 1.1rem);
@@ -116,6 +112,14 @@
     border-radius: var(--premium-card-radius, var(--landing-card-radius, 1rem));
     padding: clamp(1rem, 1.9vw, 1.65rem);
     box-shadow: var(--premium-shadow-soft, var(--landing-card-shadow, 0 14px 34px rgba(46, 40, 33, 0.08)));
+}
+
+/* Desktop only: submit sits inline in the 5-column row */
+@media (min-width: 769px) {
+    .landing-main .editorial-booking-form .editorial-booking-submit {
+        grid-column: auto;
+        width: auto;
+    }
 }
 
 .booking-widget__intro {
@@ -1503,7 +1507,13 @@
     .landing-main .editorial-booking-form {
         grid-template-columns: repeat(2, 1fr);
     }
-    
+
+    .landing-main .editorial-booking-form .editorial-booking-submit,
+    .landing-main .editorial-booking-form .editorial-booking-field:last-of-type {
+        grid-column: 1 / -1;
+        width: 100%;
+    }
+
     .editorial-reviews-grid {
         grid-template-columns: 1fr;
     }
@@ -1646,8 +1656,21 @@
         grid-column: 1;
     }
 
+    .landing-main .editorial-booking-form {
+        grid-template-columns: 1fr;
+    }
+
+    .landing-main .editorial-booking-form .editorial-booking-submit,
+    .landing-main .editorial-booking-form .editorial-booking-field:last-of-type {
+        grid-column: 1;
+        width: 100%;
+    }
+
     .editorial-booking-submit {
         width: 100%;
+        font-size: 0.78rem;
+        letter-spacing: 0.07em;
+        padding: 0 1rem;
     }
     
     .ue-card-image {
