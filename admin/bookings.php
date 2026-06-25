@@ -1805,27 +1805,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                             }
                             logBookingAudit($booking_id, 'no-show', ['status' => $bk['status']], ['status' => 'no-show'], $noshowAuditNote, $bk['booking_reference'] ?? null);
 
-                            // Auto-refund (if policy configured) and guest email
+                            // Auto-refund — DB-only, fast
                             $ns_refund = ['created' => false, 'refund_ref' => '', 'refund_amount' => 0.0];
                             if ((float)($bk['amount_paid'] ?? 0) > 0) {
                                 require_once __DIR__ . '/../includes/booking-functions.php';
                                 $ns_refund = createNoShowRefund($bk, (int)($user['id'] ?? 0), $pdo);
                             }
-                            $ns_email = ['success' => false];
-                            if (!empty($bk['guest_email'])) {
-                                require_once __DIR__ . '/../config/email.php';
-                                $ns_email = sendNoShowEmail(
-                                    $bk,
-                                    (float)($ns_refund['refund_amount'] ?? 0.0),
-                                    (string)($ns_refund['refund_ref'] ?? '')
-                                );
-                            }
                             if ($ns_refund['created']) {
                                 $message .= ' Pending refund ' . $ns_refund['refund_ref']
                                     . ' (' . getSetting('currency_symbol', 'MWK') . ' ' . number_format((float)$ns_refund['refund_amount'], 2) . ') queued.';
-                            }
-                            if ($ns_email['success']) {
-                                $message .= ' No-show email sent to guest.';
                             }
                         }
                     }
@@ -1838,8 +1826,25 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 header('Content-Type: application/json');
                 if (!empty($error)) {
                     echo json_encode(['success' => false, 'message' => $error]);
-                } else {
-                    echo json_encode(['success' => true, 'message' => $message ?? 'Booking marked as no-show.']);
+                    exit;
+                }
+                echo json_encode(['success' => true, 'message' => $message ?? 'Booking marked as no-show.']);
+
+                // Flush response to the browser NOW so the loader clears immediately.
+                // Email sending (SMTP) can block for 30-300s on a slow/unreachable server;
+                // by flushing first the UI is unblocked regardless of email outcome.
+                if (ob_get_level()) { ob_end_flush(); }
+                flush();
+                if (function_exists('fastcgi_finish_request')) { fastcgi_finish_request(); }
+
+                // Send guest no-show email after the connection is closed
+                if (!isset($error) && !empty($bk['guest_email'])) {
+                    require_once __DIR__ . '/../config/email.php';
+                    sendNoShowEmail(
+                        $bk,
+                        (float)($ns_refund['refund_amount'] ?? 0.0),
+                        (string)($ns_refund['refund_ref'] ?? '')
+                    );
                 }
                 exit;
             }
@@ -3950,7 +3955,7 @@ $today_str = $today->format('Y-m-d');
             restoreQueuedBookingActionMessage();
         }
 
-        function postBookingAction(formData, errorMessage) {
+        function postBookingAction(formData, errorMessage, timeoutMs) {
             if (formData instanceof FormData && !formData.has('csrf_token')) {
                 const csrfMeta = document.querySelector('meta[name="csrf-token"]');
                 const csrfToken = window._rhCsrf || (csrfMeta ? (csrfMeta.getAttribute('content') || '') : '');
@@ -3959,13 +3964,18 @@ $today_str = $today->format('Y-m-d');
                 }
             }
 
+            const controller = new AbortController();
+            const tid = setTimeout(() => controller.abort(), timeoutMs || 30000);
+
             return fetch(window.location.href, {
                 method: 'POST',
                 body: formData,
+                signal: controller.signal,
                 headers: {
                     'X-Requested-With': 'XMLHttpRequest'
                 }
             }).then(async response => {
+                clearTimeout(tid);
                 const contentType = response.headers.get('content-type') || '';
                 if (contentType.includes('application/json')) {
                     const data = await response.json();
@@ -3979,9 +3989,13 @@ $today_str = $today->format('Y-m-d');
                     throw new Error(errorMessage || 'Action failed.');
                 }
 
-                return {
-                    success: true
-                };
+                return { success: true };
+            }).catch(err => {
+                clearTimeout(tid);
+                if (err.name === 'AbortError') {
+                    throw new Error('The request timed out. Please try again.');
+                }
+                throw err;
             });
         }
 
@@ -6616,13 +6630,17 @@ $today_str = $today->format('Y-m-d');
             }
 
             const submitBtn = this.querySelector('button[type="submit"]');
+            const form = this;
             if (submitBtn) setButtonLoading(submitBtn, true);
-            setModalActionLoading(this, true, mode === 'noshow' ? 'Marking booking as No-Show...' : 'Checking in guest...');
+            setModalActionLoading(form, true, mode === 'noshow' ? 'Marking as No-Show...' : 'Checking in guest...');
 
             postBookingAction(formData, mode === 'noshow' ? 'Error marking booking as no-show' : 'Error checking in guest')
-                .then(data => reloadWithBookingActionMessage(data, mode === 'noshow' ? 'Booking marked as no-show successfully.' : 'Guest checked in successfully.'))
+                .then(data => {
+                    setModalActionLoading(form, false);
+                    reloadWithBookingActionMessage(data, mode === 'noshow' ? 'Booking marked as no-show successfully.' : 'Guest checked in successfully.');
+                })
                 .catch(error => {
-                    setModalActionLoading(this, false);
+                    setModalActionLoading(form, false);
                     if (submitBtn) setButtonLoading(submitBtn, false);
                     Alert.show(error.message || (mode === 'noshow' ? 'Error marking booking as no-show' : 'Error checking in guest'), 'error');
                 });
@@ -6861,15 +6879,14 @@ $today_str = $today->format('Y-m-d');
                     tone: 'success'
                 })
                 .then(confirmed => {
-                    if (!confirmed) {
-                        return;
-                    }
+                    if (!confirmed) return;
 
                     if (submitBtn) setButtonLoading(submitBtn, true);
                     setModalActionLoading(form, true, 'Extending stay...');
 
                     return postBookingAction(formData, 'Failed to extend stay.')
                         .then(data => {
+                            setModalActionLoading(form, false);
                             closeExtendStayModal();
                             reloadWithBookingActionMessage(data, 'Stay extended successfully.');
                         })
@@ -6878,6 +6895,10 @@ $today_str = $today->format('Y-m-d');
                             if (submitBtn) setButtonLoading(submitBtn, false);
                             Alert.show(error.message || 'An error occurred while extending the stay.', 'error');
                         });
+                })
+                .catch(() => {
+                    setModalActionLoading(form, false);
+                    if (submitBtn) setButtonLoading(submitBtn, false);
                 });
         });
 

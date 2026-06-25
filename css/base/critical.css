@@ -205,7 +205,7 @@ main>div>[class*="hero"]:first-child {
 .header__toggle-icon {
     position: relative;
     width: 20px;
-    height: 16px;
+    height: 15px;
     display: inline-flex;
 }
 
@@ -223,13 +223,12 @@ main>div>[class*="hero"]:first-child {
 }
 
 .header__toggle-line:nth-child(2) {
-    top: 7px;
+    top: 50%;
+    transform: translateY(-50%);
 }
 
 .header__toggle-line:nth-child(3) {
     bottom: 0;
-    width: 82%;
-    left: 18%;
 }
 
 /* Mobile responsive */
@@ -238,20 +237,13 @@ main>div>[class*="hero"]:first-child {
         display: flex;
         align-items: center;
         justify-content: center;
-        width: 46px;
-        height: 46px;
+        width: 40px;
+        height: 40px;
         padding: 0;
-        border-radius: 14px;
-        color: #231F1C;
-        border: 1px solid rgba(143, 118, 96, 0.44);
-        background-color: #efe3d6;
-        background:
-            radial-gradient(circle at 24% 22%, rgba(255, 255, 255, 0.72) 0%, rgba(255, 255, 255, 0) 58%),
-            linear-gradient(155deg, rgba(255, 255, 255, 0.9) 0%, rgba(236, 225, 214, 0.92) 100%);
-        box-shadow:
-            0 10px 22px rgba(23, 18, 13, 0.16),
-            inset 0 1px 0 rgba(255, 255, 255, 0.74),
-            inset 0 -1px 0 rgba(120, 89, 58, 0.2);
+        border-radius: 10px;
+        color: #fff;
+        border: 1.5px solid rgba(255, 255, 255, 0.32);
+        background: transparent;
     }
 
     .header__mobile-toggle {

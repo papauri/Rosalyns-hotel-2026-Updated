@@ -974,20 +974,21 @@
 }
 
 .header.header--scrolled .header__toggle {
-    background-color: #efe3d6;
-    background-image:
-        radial-gradient(circle at 24% 22%, rgba(255, 255, 255, 0.72) 0%, rgba(255, 255, 255, 0) 58%),
-        linear-gradient(155deg, rgba(251, 248, 244, 0.96) 0%, rgba(236, 225, 214, 0.98) 100%);
-    border-color: color-mix(in srgb, var(--color-lux-clay-500, #8F7660) 44%, transparent 56%);
+    background: transparent;
+    border-color: rgba(35, 31, 28, 0.22);
     color: var(--header-nav-color-scrolled);
-    box-shadow:
-        0 10px 22px rgba(23, 18, 13, 0.16),
-        inset 0 1px 0 rgba(255, 255, 255, 0.74),
-        inset 0 -1px 0 rgba(120, 89, 58, 0.2);
 }
 
-.header.header--scrolled .header__toggle-line {
-    background: color-mix(in srgb, var(--color-lux-ink, #231F1C) 88%, #3b2f24 12%);
+@media (hover: hover) {
+    .header.header--scrolled .header__toggle:hover {
+        background: rgba(35, 31, 28, 0.07);
+        border-color: rgba(35, 31, 28, 0.38);
+    }
+}
+
+.header.header--scrolled .header__toggle[aria-expanded="true"] {
+    background: rgba(35, 31, 28, 0.08);
+    border-color: rgba(35, 31, 28, 0.3);
 }
 
 
