@@ -223,19 +223,17 @@ main>div>[class*="hero"]:first-child {
 .header__toggle-line:nth-child(2) { top: 50%; transform: translateY(-50%); }
 .header__toggle-line:nth-child(3) { bottom: 0; }
 
-/* Mobile responsive — pill capsule */
+/* Mobile responsive */
 @media (max-width: 1024px) {
     .header__toggle {
         display: flex;
         align-items: center;
         gap: 10px;
         height: 40px;
-        padding: 0 16px 0 13px;
-        border-radius: 100px;
+        padding: 0;
+        background: none;
+        border: none;
         color: #fff;
-        border: 1px solid rgba(255, 255, 255, 0.44);
-        background: rgba(255, 255, 255, 0.18);
-        box-shadow: 0 2px 18px rgba(0, 0, 0, 0.22);
     }
     .header__toggle::after {
         content: 'MENU';

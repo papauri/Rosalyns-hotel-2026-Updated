@@ -323,22 +323,16 @@
     align-items: center;
     gap: 10px;
     height: 40px;
-    padding: 0 16px 0 13px;
-    background: rgba(255, 255, 255, 0.18);
-    backdrop-filter: blur(24px) saturate(160%);
-    -webkit-backdrop-filter: blur(24px) saturate(160%);
-    border: 1px solid rgba(255, 255, 255, 0.44);
-    border-radius: 100px;
+    padding: 0;
+    background: none;
+    border: none;
+    border-radius: 0;
     cursor: pointer;
     color: #ffffff;
     flex-shrink: 0;
-    box-shadow:
-        0 2px 18px rgba(0, 0, 0, 0.22),
-        inset 0 1px 0 rgba(255, 255, 255, 0.28);
+    box-shadow: none;
     transition:
-        background var(--header-transition-fast),
-        border-color var(--header-transition-fast),
-        box-shadow var(--header-transition-fast),
+        opacity var(--header-transition-fast),
         transform var(--header-transition-fast);
 }
 
@@ -368,26 +362,22 @@
 
 @media (hover: hover) {
     .header__toggle:hover {
-        background: rgba(255, 255, 255, 0.26);
-        border-color: rgba(255, 255, 255, 0.62);
-        box-shadow:
-            0 4px 24px rgba(0, 0, 0, 0.26),
-            inset 0 1px 0 rgba(255, 255, 255, 0.36);
+        opacity: 0.75;
     }
 }
 
 .header__toggle:active {
-    transform: scale(0.95);
+    transform: scale(0.92);
 }
 
 .header__toggle:focus-visible {
     outline: 2px solid rgba(177, 130, 71, 0.8);
-    outline-offset: 3px;
+    outline-offset: 4px;
+    border-radius: 4px;
 }
 
 .header__toggle[aria-expanded="true"] {
-    background: rgba(255, 255, 255, 0.24);
-    border-color: rgba(255, 255, 255, 0.58);
+    opacity: 1;
 }
 
 /* ── Lines icon ── */
@@ -989,25 +979,7 @@
 }
 
 .header.header--scrolled .header__toggle {
-    background: rgba(35, 31, 28, 0.07);
-    border-color: rgba(35, 31, 28, 0.22);
     color: var(--header-nav-color-scrolled);
-    box-shadow: 0 2px 12px rgba(0, 0, 0, 0.10);
-    backdrop-filter: blur(16px);
-    -webkit-backdrop-filter: blur(16px);
-}
-
-@media (hover: hover) {
-    .header.header--scrolled .header__toggle:hover {
-        background: rgba(35, 31, 28, 0.11);
-        border-color: rgba(35, 31, 28, 0.38);
-        box-shadow: 0 3px 16px rgba(0, 0, 0, 0.13);
-    }
-}
-
-.header.header--scrolled .header__toggle[aria-expanded="true"] {
-    background: rgba(35, 31, 28, 0.10);
-    border-color: rgba(35, 31, 28, 0.35);
 }
 
 
