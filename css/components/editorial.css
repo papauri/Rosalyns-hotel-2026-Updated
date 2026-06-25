@@ -10,8 +10,8 @@
 
 .editorial-booking-form {
     display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-    gap: clamp(0.85rem, 1.5vw, 1.3rem);
+    grid-template-columns: repeat(2, 1fr);
+    gap: clamp(0.75rem, 1.2vw, 1.1rem);
     align-items: end;
 }
 
@@ -51,29 +51,49 @@
     display: flex;
     align-items: center;
     justify-content: center;
-    gap: var(--space-2, 0.5rem);
+    gap: 0.6rem;
     min-height: 50px;
-    padding: var(--space-4, 1rem) var(--space-6, 1.5rem);
-    background: linear-gradient(135deg, color-mix(in srgb, var(--color-primary, #8B7355) 92%, var(--color-primary-dark) 8%) 0%, var(--color-primary-dark, #6B5740) 100%);
-    color: var(--color-white, #FFFFFF);
-    border: none;
-    border-radius: var(--premium-card-radius, var(--radius-lg, 12px));
-    font-size: var(--text-base, 1rem);
-    font-weight: var(--font-semibold, 600);
+    padding: 0 clamp(1.2rem, 2vw, 2rem);
+    background: linear-gradient(140deg, #C9A060 0%, #B18247 48%, #916535 100%);
+    color: #ffffff;
+    border: 1px solid rgba(145, 101, 53, 0.45);
+    border-radius: var(--radius-full, 9999px);
+    font-size: 0.82rem;
+    font-weight: 700;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
     font-family: var(--font-sans, 'Jost', sans-serif);
     cursor: pointer;
-    transition: transform var(--motion-premium-duration-fast, 300ms) var(--motion-premium-ease, cubic-bezier(0.22, 1, 0.36, 1)), box-shadow var(--motion-premium-duration-fast, 300ms) var(--motion-premium-ease, cubic-bezier(0.22, 1, 0.36, 1)), filter var(--motion-premium-duration-fast, 300ms) var(--motion-premium-ease, cubic-bezier(0.22, 1, 0.36, 1));
+    box-shadow:
+        0 4px 20px rgba(177, 130, 71, 0.38),
+        inset 0 1px 0 rgba(255, 255, 255, 0.22);
+    transition:
+        transform 260ms cubic-bezier(0.22, 1, 0.36, 1),
+        box-shadow 260ms cubic-bezier(0.22, 1, 0.36, 1),
+        filter 260ms cubic-bezier(0.22, 1, 0.36, 1);
+    white-space: nowrap;
 }
 
 .editorial-booking-submit:hover {
     transform: translateY(-2px);
-    box-shadow: var(--premium-shadow-elevated, 0 22px 46px rgba(46, 40, 33, 0.11));
-    filter: saturate(1.05);
+    filter: brightness(1.07);
+    box-shadow:
+        0 8px 28px rgba(177, 130, 71, 0.48),
+        inset 0 1px 0 rgba(255, 255, 255, 0.28);
+}
+
+.editorial-booking-submit:active {
+    transform: scale(0.97);
 }
 
 .editorial-booking-submit:focus-visible {
-    outline: 2px solid var(--color-primary, #8B7355);
-    outline-offset: 2px;
+    outline: 2px solid #B18247;
+    outline-offset: 3px;
+}
+
+/* Base: submit spans all columns so it never orphans */
+.editorial-booking-submit {
+    grid-column: 1 / -1;
 }
 
 /* Landing premium booking composition */
@@ -81,9 +101,13 @@
     max-width: var(--landing-content-max, 1240px);
 }
 
+.landing-main .editorial-booking-form .editorial-booking-submit {
+    grid-column: auto;
+}
+
 .landing-main .editorial-booking-form {
-    grid-template-columns: repeat(4, minmax(0, 1fr)) minmax(210px, 1.1fr);
-    gap: clamp(0.85rem, 1.4vw, 1.25rem);
+    grid-template-columns: repeat(4, minmax(0, 1fr)) minmax(180px, 1fr);
+    gap: clamp(0.75rem, 1.2vw, 1.1rem);
     background: linear-gradient(165deg,
         color-mix(in srgb, var(--premium-surface-1, var(--color-surface)) 92%, var(--color-white) 8%) 0%,
         color-mix(in srgb, var(--premium-surface-soft, var(--color-surface-soft)) 82%, var(--color-white) 18%) 100%
@@ -1467,11 +1491,17 @@
     }
 
     .editorial-booking-form {
-        grid-template-columns: 1fr;
+        grid-template-columns: repeat(2, 1fr);
+    }
+
+    /* Submit spans both columns on tablet */
+    .editorial-booking-form .editorial-booking-field:last-of-type,
+    .editorial-booking-form .editorial-booking-submit {
+        grid-column: 1 / -1;
     }
 
     .landing-main .editorial-booking-form {
-        grid-template-columns: 1fr;
+        grid-template-columns: repeat(2, 1fr);
     }
     
     .editorial-reviews-grid {
@@ -1605,6 +1635,15 @@
     .editorial-gallery-grid,
     .editorial-rooms-gallery-grid {
         grid-template-columns: 1fr;
+    }
+
+    .editorial-booking-form {
+        grid-template-columns: 1fr;
+    }
+
+    .editorial-booking-form .editorial-booking-field:last-of-type,
+    .editorial-booking-form .editorial-booking-submit {
+        grid-column: 1;
     }
 
     .editorial-booking-submit {
