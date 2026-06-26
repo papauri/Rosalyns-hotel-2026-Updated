@@ -4867,11 +4867,12 @@ function checkIndividualRoomAvailability(int $individualRoomId, string $checkIn,
         }
 
         // Check housekeeping assignments blocking this room
+        // 'completed' is intentionally excluded — a completed task means the room is clean and ready
         $housekeepingStmt = $pdo->prepare("
             SELECT id, due_date, status
             FROM housekeeping_assignments
             WHERE individual_room_id = ?
-            AND status IN ('pending', 'in_progress', 'completed', 'blocked')
+            AND status IN ('pending', 'in_progress', 'blocked')
             AND due_date >= ?
             AND due_date < ?
         ");
@@ -5180,8 +5181,8 @@ function assignIndividualRoomToBooking(int $bookingId, int $individualRoomId, bo
     try {
         $pdo->beginTransaction();
 
-        // Verify booking exists
-        $bookingStmt = $pdo->prepare("SELECT id, booking_reference, room_id, check_in_date, check_out_date, number_of_nights, number_of_guests, child_guests, occupancy_type, total_amount, status FROM bookings WHERE id = ?");
+        // Verify booking exists (fetch finance columns so we can preserve levy + packages on total recalc)
+        $bookingStmt = $pdo->prepare("SELECT id, booking_reference, room_id, check_in_date, check_out_date, number_of_nights, number_of_guests, child_guests, occupancy_type, total_amount, tourism_levy_percent, package_total, vat_rate, status FROM bookings WHERE id = ?");
         $bookingStmt->execute([$bookingId]);
         $booking = $bookingStmt->fetch(PDO::FETCH_ASSOC);
 
@@ -5250,11 +5251,38 @@ function assignIndividualRoomToBooking(int $bookingId, int $individualRoomId, bo
             ? ($ratePerNight * ($childMultiplier / 100) * $children * $nights)
             : 0.0;
         $baseAmount = $ratePerNight * $nights;
-        $newTotal = $baseAmount + $childSupplement;
 
-        // Update booking with individual room and refreshed child pricing totals
-        $updateStmt = $pdo->prepare("UPDATE bookings SET individual_room_id = ?, child_price_multiplier = ?, child_supplement_total = ?, total_amount = ? WHERE id = ?");
-        $updateStmt->execute([$individualRoomId, $childMultiplier, $childSupplement, $newTotal, $bookingId]);
+        // Preserve tourism levy and package total from the original booking
+        $levyPct       = max(0.0, (float)($booking['tourism_levy_percent'] ?? 0));
+        $levyAmount    = $levyPct > 0 ? round(($baseAmount + $childSupplement) * ($levyPct / 100), 2) : 0.0;
+        $packageTotal  = max(0.0, (float)($booking['package_total'] ?? 0));
+        $vatRate       = max(0.0, (float)($booking['vat_rate'] ?? 0));
+        $newTotal      = $baseAmount + $childSupplement + $levyAmount + $packageTotal;
+        $vatAmount     = $vatRate > 0 ? round($newTotal * ($vatRate / 100), 2) : 0.0;
+        $newTotalWithVat = $newTotal + $vatAmount;
+
+        // Update booking: individual room + all finance columns atomically
+        $updateStmt = $pdo->prepare("
+            UPDATE bookings
+            SET individual_room_id       = ?,
+                child_price_multiplier   = ?,
+                child_supplement_total   = ?,
+                tourism_levy_amount      = ?,
+                total_amount             = ?,
+                amount_due               = ?,
+                total_with_vat           = ?
+            WHERE id = ?
+        ");
+        $updateStmt->execute([
+            $individualRoomId,
+            $childMultiplier,
+            $childSupplement,
+            $levyAmount,
+            $newTotal,
+            $newTotal,
+            $newTotalWithVat,
+            $bookingId,
+        ]);
         syncBookingRooms($bookingId, [$individualRoomId], null);
 
         // Update individual room status based on timeline-aware logic
