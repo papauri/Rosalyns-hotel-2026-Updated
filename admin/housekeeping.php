@@ -174,7 +174,7 @@ function getCheckoutCleanupRooms(PDO $pdo): array
     // Build the NOT EXISTS clause conditionally based on available columns
     $notExistsConditions = [
         "ha.individual_room_id = ir.id",
-        "ha.status IN ('pending', 'in_progress')"
+        "ha.status IN ('pending', 'in_progress', 'completed', 'verified')"
     ];
 
     if ($hasAssignmentType) {
@@ -353,7 +353,7 @@ function reconcileIndividualRoomHousekeeping(PDO $pdo, int $roomId, ?int $perfor
 
     // Build ORDER BY clause based on available columns
     $orderByClauses = [
-        "CASE status WHEN 'in_progress' THEN 1 WHEN 'pending' THEN 2 WHEN 'completed' THEN 3 WHEN 'blocked' THEN 4 ELSE 99 END"
+        "CASE status WHEN 'in_progress' THEN 1 WHEN 'pending' THEN 2 WHEN 'blocked' THEN 3 ELSE 99 END"
     ];
 
     if ($hasPriority) {
@@ -367,7 +367,7 @@ function reconcileIndividualRoomHousekeeping(PDO $pdo, int $roomId, ?int $perfor
         SELECT " . implode(', ', $selectColumns) . "
         FROM housekeeping_assignments
                 WHERE individual_room_id = ?
-                    AND status IN ('pending','in_progress','completed','blocked')
+                    AND status IN ('pending','in_progress','blocked')
         ORDER BY " . implode(', ', $orderByClauses) . "
         LIMIT 1
     ";
@@ -724,8 +724,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             // Validation
             if (!$id || !$room_id || !$due_date) {
                 $error = 'Room and due date are required.';
-            } elseif (!validateDueDate($due_date)) {
-                $error = 'Due date cannot be in the past. Please select today or a future date.';
+            } elseif (strtotime($due_date) === false) {
+                $error = 'Invalid due date format.';
             } elseif (!in_array($status, $validHousekeepingStatuses, true)) {
                 $error = 'Invalid housekeeping status.';
             } elseif ($hasPriority && !in_array($priority, $validPriorities, true)) {
@@ -738,8 +738,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $error = 'Selected room is invalid or inactive.';
             } elseif (!housekeepingUserExists($pdo, $assigned_to)) {
                 $error = 'Assigned user is invalid.';
-            } elseif (strtotime($due_date) === false) {
-                $error = 'Invalid due date format.';
             } else {
                 $pdo->beginTransaction();
                 $existsStmt = $pdo->prepare("SELECT id, individual_room_id, status FROM housekeeping_assignments WHERE id = ?");

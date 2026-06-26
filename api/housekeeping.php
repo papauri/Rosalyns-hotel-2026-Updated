@@ -145,10 +145,10 @@ function getCheckoutCleanupRooms(): array {
           AND b.check_out_date <= CURDATE()
           AND ir.is_active = 1
           AND NOT EXISTS (
-              SELECT 1 FROM housekeeping_assignments ha 
-              WHERE ha.individual_room_id = ir.id 
+              SELECT 1 FROM housekeeping_assignments ha
+              WHERE ha.individual_room_id = ir.id
                 AND ha.assignment_type = 'checkout_cleanup'
-                AND ha.status IN ('pending', 'in_progress')
+                AND ha.status IN ('pending', 'in_progress', 'completed', 'verified')
                 AND ha.linked_booking_id = b.id
           )
         ORDER BY b.check_out_date ASC, ir.room_number ASC
@@ -178,6 +178,52 @@ function getStaffWorkload(): array {
     ";
     $stmt = $pdo->query($sql);
     return $stmt->fetchAll(PDO::FETCH_ASSOC);
+}
+
+/**
+ * Sync individual_rooms status/housekeeping_status after an assignment changes.
+ * Mirror of reconcileIndividualRoomHousekeeping() in admin/housekeeping.php.
+ */
+function apiReconcileRoom(int $assignmentId): void {
+    global $pdo;
+    $row = $pdo->prepare("SELECT individual_room_id FROM housekeeping_assignments WHERE id = ?");
+    $row->execute([$assignmentId]);
+    $r = $row->fetch(PDO::FETCH_ASSOC);
+    if ($r) apiReconcileRoomById((int)$r['individual_room_id']);
+}
+
+function apiReconcileRoomById(int $roomId): void {
+    global $pdo;
+    $stmt = $pdo->prepare("
+        SELECT status FROM housekeeping_assignments
+        WHERE individual_room_id = ?
+          AND status IN ('pending','in_progress','blocked')
+        ORDER BY CASE status WHEN 'in_progress' THEN 1 WHEN 'pending' THEN 2 WHEN 'blocked' THEN 3 ELSE 99 END
+        LIMIT 1
+    ");
+    $stmt->execute([$roomId]);
+    $open = $stmt->fetch(PDO::FETCH_ASSOC);
+
+    if ($open) {
+        $hsStatus = in_array($open['status'], ['pending','in_progress'], true) ? $open['status'] : 'pending';
+        $pdo->prepare("UPDATE individual_rooms SET housekeeping_status = ? WHERE id = ?")
+            ->execute([$hsStatus, $roomId]);
+        $rs = $pdo->prepare("SELECT status FROM individual_rooms WHERE id = ?");
+        $rs->execute([$roomId]);
+        if ((string)$rs->fetchColumn() === 'available') {
+            $pdo->prepare("UPDATE individual_rooms SET status = 'cleaning' WHERE id = ?")
+                ->execute([$roomId]);
+        }
+    } else {
+        $pdo->prepare("UPDATE individual_rooms SET housekeeping_status = 'completed', housekeeping_notes = NULL WHERE id = ?")
+            ->execute([$roomId]);
+        $rs = $pdo->prepare("SELECT status FROM individual_rooms WHERE id = ?");
+        $rs->execute([$roomId]);
+        if ((string)$rs->fetchColumn() === 'cleaning') {
+            $pdo->prepare("UPDATE individual_rooms SET status = 'available' WHERE id = ?")
+                ->execute([$roomId]);
+        }
+    }
 }
 
 /**
@@ -414,10 +460,21 @@ function updateAssignment($id): void {
     
     if (!$fields) ApiResponse::error('No fields to update', 400);
 
+    // Capture old room_id before update in case it changes
+    $oldRoom = $pdo->prepare("SELECT individual_room_id FROM housekeeping_assignments WHERE id = ?");
+    $oldRoom->execute([$id]);
+    $oldRoomId = (int)($oldRoom->fetchColumn() ?: 0);
+
     $params[] = $id;
     $sql = "UPDATE housekeeping_assignments SET " . implode(', ', $fields) . " WHERE id = ?";
     $stmt = $pdo->prepare($sql);
     $stmt->execute($params);
+
+    apiReconcileRoomById($oldRoomId);
+    if (isset($input['individual_room_id']) && (int)$input['individual_room_id'] !== $oldRoomId) {
+        apiReconcileRoomById((int)$input['individual_room_id']);
+    }
+
     ApiResponse::success(null, 'Assignment updated');
 }
 
@@ -440,6 +497,7 @@ function updateStatus($id): void {
     
     $stmt = $pdo->prepare("UPDATE housekeeping_assignments SET status = ?, completed_at = ?, verified_at = ?, verified_by = ? WHERE id = ?");
     $stmt->execute([$status, $completedAt, $verifiedAt, $verifiedBy, $id]);
+    apiReconcileRoom($id);
     ApiResponse::success(null, 'Status updated');
 }
 
@@ -475,6 +533,7 @@ function verifyAssignment($id): void {
     
     $stmt = $pdo->prepare("UPDATE housekeeping_assignments SET status = 'verified', verified_by = ?, verified_at = NOW() WHERE id = ?");
     $stmt->execute([$verifiedBy, $id]);
+    apiReconcileRoom($id);
     ApiResponse::success(null, 'Assignment verified');
 }
 
@@ -483,7 +542,10 @@ function verifyAssignment($id): void {
  */
 function deleteAssignment($id): void {
     global $pdo;
-    $stmt = $pdo->prepare("DELETE FROM housekeeping_assignments WHERE id = ?");
-    $stmt->execute([$id]);
+    $row = $pdo->prepare("SELECT individual_room_id FROM housekeeping_assignments WHERE id = ?");
+    $row->execute([$id]);
+    $roomId = (int)($row->fetchColumn() ?: 0);
+    $pdo->prepare("DELETE FROM housekeeping_assignments WHERE id = ?")->execute([$id]);
+    if ($roomId) apiReconcileRoomById($roomId);
     ApiResponse::success(null, 'Assignment deleted');
 }
