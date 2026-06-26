@@ -136,17 +136,36 @@ function c_void_room_service_folio_charges(PDO $pdo, int $orderId, string $reaso
         return 0;
     }
 
-    $stmt = $pdo->prepare("SELECT id, booking_id FROM booking_charges WHERE stock_order_id = ? AND voided = 0 FOR UPDATE");
+    $stmt = $pdo->prepare("SELECT id, booking_id, charge_type, source_item_id, quantity, stock_tracked FROM booking_charges WHERE stock_order_id = ? AND voided = 0 FOR UPDATE");
     $stmt->execute([$orderId]);
     $charges = $stmt->fetchAll(PDO::FETCH_ASSOC);
     if (!$charges) {
         return 0;
     }
 
+    // If stock was already restored via the POS adjustment trail (source_type='pos_order'),
+    // don't restore again from the folio charge path.
+    $posAdjStmt = $pdo->prepare("SELECT COUNT(*) FROM stock_adjustments WHERE source_type = 'pos_order' AND source_id = ?");
+    $posAdjStmt->execute([$orderId]);
+    $stockAlreadyRestoredViaPosPath = (int)$posAdjStmt->fetchColumn() > 0;
+
     $update = $pdo->prepare("UPDATE booking_charges SET voided = 1, voided_at = NOW(), void_reason = ?, voided_by = ?, updated_at = NOW() WHERE id = ?");
     $bookingIds = [];
     foreach ($charges as $charge) {
-        $update->execute([mb_substr($reason, 0, 255), $voidedBy, (int)$charge['id']]);
+        $chargeId = (int)$charge['id'];
+        $update->execute([mb_substr($reason, 0, 255), $voidedBy, $chargeId]);
+        // Restore stock if it was deducted via the room_service path and not yet restored
+        if (!$stockAlreadyRestoredViaPosPath
+            && !empty($charge['stock_tracked'])
+            && in_array((string)$charge['charge_type'], ['food', 'drink'], true)
+            && !empty($charge['source_item_id'])
+        ) {
+            try {
+                restoreStockForMenuItem((int)$charge['source_item_id'], (string)$charge['charge_type'], (float)$charge['quantity'], 'Room service order cancelled: ' . $reason, $voidedBy, $chargeId);
+            } catch (Throwable $se) {
+                error_log("c_void_room_service_folio_charges stock restore failed for charge {$chargeId}: " . $se->getMessage());
+            }
+        }
         $bookingIds[(int)$charge['booking_id']] = true;
     }
 
