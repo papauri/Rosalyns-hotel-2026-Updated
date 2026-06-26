@@ -4853,7 +4853,7 @@ function checkIndividualRoomAvailability(int $individualRoomId, string $checkIn,
             FROM room_maintenance_schedules
             WHERE individual_room_id = ?
             AND block_room = 1
-            AND status IN ('planned', 'pending', 'in_progress')
+            AND status IN ('pending', 'in_progress')
             AND NOT (end_date <= ? OR start_date >= ?)
         ");
         $maintenanceStmt->execute([$individualRoomId, $checkIn, $checkOut]);

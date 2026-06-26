@@ -494,10 +494,10 @@ function updateSchedule($id) {
         ApiResponse::validationError(['date_range' => 'Invalid start/end date range']);
     }
     
-    if ($hasDueDate && $dueDate && !validateApiDueDate($dueDate)) {
+    if ($hasDueDate && isset($input['due_date']) && $input['due_date'] && !validateApiDueDate($input['due_date'])) {
         ApiResponse::validationError(['due_date' => 'Due date cannot be in the past']);
     }
-    
+
     if ($blockRoom === 1 && in_array($status, ['pending', 'in_progress'], true) && maintenanceApiOverlaps($pdo, $roomId, $startDate, $endDate, $id)) {
         ApiResponse::validationError(['overlap' => 'Overlapping active maintenance block exists for this room']);
     }

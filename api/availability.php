@@ -335,7 +335,7 @@ function getIndividualRoomsAvailability(int $roomTypeId, ?string $checkIn, ?stri
             FROM room_maintenance_schedules
             WHERE individual_room_id = ?
               AND block_room = 1
-              AND status IN ('planned', 'in_progress')
+              AND status IN ('pending', 'in_progress')
               AND NOT (DATE(end_date) < ? OR DATE(start_date) > ?)
         ";
         $maintenanceParams[] = $room['id'];
