@@ -1159,6 +1159,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     error_log("Invoice email failed: " . $invoice_result['message']);
                     $message .= ' (Invoice email failed - check logs)';
                 }
+
+                // Send receipt email with PDF for this payment
+                $bk_pay_id_stmt = $pdo->prepare("SELECT id FROM payments WHERE booking_type = 'room' AND booking_id = ? AND payment_type != 'refund' AND deleted_at IS NULL ORDER BY id DESC LIMIT 1");
+                $bk_pay_id_stmt->execute([$booking_id]);
+                $bk_pay_id = (int)($bk_pay_id_stmt->fetchColumn() ?: 0);
+                if ($bk_pay_id > 0) {
+                    require_once '../config/receipts.php';
+                    $receipt_result = receipt_auto_send($pdo, $bk_pay_id, $user);
+                    if ($receipt_result['success']) {
+                        $message .= ' Receipt emailed.';
+                    }
+                }
             }
         } elseif ($action === 'checkout') {
             // Checkout a checked-in booking
@@ -1430,6 +1442,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         $settlementNotes,
                         (int)($user['id'] ?? 0),
                     ]);
+                    $settlement_pay_id = (int)$pdo->lastInsertId();
 
                     // Re-sync booking financials after settlement payment insert.
                     recalculateBookingFinancials($booking_id);
@@ -1525,6 +1538,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 );
 
                 $pdo->commit();
+
+                // Send receipt email if an extra-night settlement payment was recorded
+                if (!empty($settlement_pay_id)) {
+                    try {
+                        require_once '../config/receipts.php';
+                        receipt_auto_send($pdo, $settlement_pay_id, $user);
+                    } catch (Throwable $rcptEx) {
+                        error_log('Receipt email failed for settlement payment ' . $settlement_pay_id . ': ' . $rcptEx->getMessage());
+                    }
+                }
 
                 header('Content-Type: application/json');
                 $checkoutMessage = 'Checkout completed successfully.';
@@ -1703,9 +1726,20 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $combined_notes ?: null,
                 (int)($user['id'] ?? 0),
             ]);
+            $consolidation_pay_id = (int)$pdo->lastInsertId();
 
             recalculateBookingFinancials($booking_id);
             $pdo->commit();
+
+            // Send receipt email for this consolidation payment
+            if ($consolidation_pay_id > 0) {
+                try {
+                    require_once '../config/receipts.php';
+                    receipt_auto_send($pdo, $consolidation_pay_id, $user);
+                } catch (Throwable $rcptEx) {
+                    error_log('Receipt email failed for consolidation payment ' . $consolidation_pay_id . ': ' . $rcptEx->getMessage());
+                }
+            }
 
             // Fetch updated figures to return to JS
             $upd_stmt = $pdo->prepare("SELECT amount_paid, amount_due, payment_status FROM bookings WHERE id = ?");

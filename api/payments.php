@@ -594,6 +594,16 @@ function createPayment(PDO $pdo)
 
         $pdo->commit();
 
+        // Send receipt email automatically for completed/paid payments
+        if (in_array($input['payment_status'], ['completed', 'paid'], true)) {
+            try {
+                require_once __DIR__ . '/../config/receipts.php';
+                receipt_auto_send($pdo, (int)$paymentId, null);
+            } catch (Throwable $receiptEx) {
+                error_log('Auto receipt email failed for payment ' . $paymentId . ': ' . $receiptEx->getMessage());
+            }
+        }
+
         // Fetch created payment
         $fetchStmt = $pdo->prepare("SELECT * FROM payments WHERE id = ?");
         $fetchStmt->execute([$paymentId]);

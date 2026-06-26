@@ -752,7 +752,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['create_booking'])) {
                 'room_name'              => $room_name_for_email,
             ];
             if ($payment_received && $amount_collected > 0) {
-                // Payment taken — send receipt/invoice email (replaces standard confirmation)
+                // Payment taken — send invoice email then receipt email
                 try {
                     require_once '../config/invoice.php';
                     $inv_cc = [];
@@ -766,11 +766,26 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['create_booking'])) {
                     }
                     $inv_result = sendPaymentInvoiceEmailWithCC($primary_id, $inv_cc);
                     $email_msg = $inv_result['success']
-                        ? ' Payment receipt emailed to guest.'
-                        : ' (Receipt email failed: ' . htmlspecialchars($inv_result['message'] ?? 'unknown error') . ')';
+                        ? ' Invoice emailed to guest.'
+                        : ' (Invoice email failed: ' . htmlspecialchars($inv_result['message'] ?? 'unknown error') . ')';
                 } catch (\Throwable $invEx) {
-                    error_log('Receipt email failed for ' . $primary_ref . ': ' . $invEx->getMessage());
-                    $email_msg = ' (Receipt email failed)';
+                    error_log('Invoice email failed for ' . $primary_ref . ': ' . $invEx->getMessage());
+                    $email_msg = ' (Invoice email failed)';
+                }
+                // Send receipt email with PDF for the primary booking's latest payment
+                try {
+                    require_once '../config/receipts.php';
+                    $latestPayStmt = $pdo->prepare("SELECT id FROM payments WHERE booking_type = 'room' AND booking_id = ? AND deleted_at IS NULL ORDER BY id DESC LIMIT 1");
+                    $latestPayStmt->execute([$primary_id]);
+                    $latestPayId = (int)($latestPayStmt->fetchColumn() ?: 0);
+                    if ($latestPayId > 0) {
+                        $rcpt_result = receipt_auto_send($pdo, $latestPayId, $user);
+                        if ($rcpt_result['success']) {
+                            $email_msg .= ' Receipt emailed.';
+                        }
+                    }
+                } catch (\Throwable $rcptEx) {
+                    error_log('Receipt email failed for ' . $primary_ref . ': ' . $rcptEx->getMessage());
                 }
             } elseif ($is_tentative) {
                 // Tentative booking confirmation

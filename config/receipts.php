@@ -556,6 +556,34 @@ if (!function_exists('receipt_send_email')) {
     }
 }
 
+/**
+ * Automatically send a receipt email for a payment, safely.
+ * - Only sends if payment is completed/paid and no receipt has been emailed yet.
+ * - Never throws; always returns a result array so callers can log the outcome.
+ */
+if (!function_exists('receipt_auto_send')) {
+    function receipt_auto_send(PDO $pdo, int $paymentId, ?array $user = null): array
+    {
+        try {
+            receipt_ensure_schema($pdo);
+            $payment = receipt_get_payment($pdo, $paymentId);
+            if (!$payment) {
+                return ['success' => false, 'message' => 'Payment not found'];
+            }
+            if (!in_array((string)($payment['payment_status'] ?? ''), ['completed', 'paid'], true)) {
+                return ['success' => false, 'message' => 'Payment not in completed/paid status'];
+            }
+            if (!empty($payment['receipt_emailed_at'])) {
+                return ['success' => false, 'message' => 'Receipt already emailed at ' . $payment['receipt_emailed_at']];
+            }
+            return receipt_send_email($pdo, $paymentId, null, $user);
+        } catch (Throwable $e) {
+            error_log('receipt_auto_send failed for payment ' . $paymentId . ': ' . $e->getMessage());
+            return ['success' => false, 'message' => $e->getMessage()];
+        }
+    }
+}
+
 if (!function_exists('receipt_whatsapp_message')) {
     function receipt_whatsapp_message(PDO $pdo, int $paymentId): array
     {

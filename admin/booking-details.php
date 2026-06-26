@@ -1034,6 +1034,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['update_payment'])) {
                 $paymentNotes,
                 $user['id']
             ]);
+            $new_payment_id = (int)$pdo->lastInsertId();
 
             logBookingPayment($booking_id, $booking['booking_reference'], $paymentTotalWithVat, 'full_payment', 'cash', 'completed', $user['id'], $payment_reference);
 
@@ -1061,8 +1062,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['update_payment'])) {
             require_once '../config/invoice.php';
             $invoice_result = sendPaymentInvoiceEmail($booking_id);
 
+            require_once '../config/receipts.php';
+            $receipt_result = receipt_auto_send($pdo, $new_payment_id, $user);
+
             $_SESSION['success_message'] = 'Payment status updated. Payment recorded.' . $auto_assign_msg .
-                ($invoice_result['success'] ? ' Invoice sent!' : ' (Invoice email failed)');
+                ($invoice_result['success'] ? ' Invoice sent!' : ' (Invoice email failed)') .
+                ($receipt_result['success'] ? ' Receipt emailed.' : '');
         } else {
             $_SESSION['success_message'] = 'Payment status updated.';
         }

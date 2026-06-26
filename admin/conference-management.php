@@ -502,6 +502,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['enquiry_action'])) {
                         $receipt_number,
                         $user['id']
                     ]);
+                    $conf_payment_id = (int)$pdo->lastInsertId();
 
                     $update_amounts = $pdo->prepare("
                             UPDATE conference_inquiries
@@ -511,6 +512,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['enquiry_action'])) {
                         ");
                     $update_amounts->execute([$totalWithVat, $vatRate, $vatAmount, $totalWithVat, $enquiry_id]);
                     $pdo->commit();
+
+                    // Send receipt email with PDF
+                    if ($conf_payment_id > 0) {
+                        try {
+                            require_once '../config/receipts.php';
+                            receipt_auto_send($pdo, $conf_payment_id, $user);
+                        } catch (Throwable $rcptEx) {
+                            error_log('Receipt email failed for conference payment ' . $conf_payment_id . ': ' . $rcptEx->getMessage());
+                        }
+                    }
 
                     $invoice_result = sendConferenceInvoiceEmail($enquiry_id);
                     if ($invoice_result['success']) {

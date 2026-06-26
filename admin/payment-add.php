@@ -399,6 +399,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     } catch (Exception $e) {
                         error_log("Error sending room payment invoice email: " . $e->getMessage());
                     }
+
+                    // Send receipt email with PDF
+                    try {
+                        require_once __DIR__ . '/../config/receipts.php';
+                        receipt_auto_send($pdo, (int)$newPaymentId, $user);
+                    } catch (Throwable $rcptEx) {
+                        error_log('Receipt email failed for payment ' . $newPaymentId . ': ' . $rcptEx->getMessage());
+                    }
                 }
 
                 // Send invoice email for conference bookings
