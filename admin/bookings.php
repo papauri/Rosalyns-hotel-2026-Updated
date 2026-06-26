@@ -466,6 +466,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 );
                 $pdo->commit();
 
+                // Timeline event (outside transaction — non-fatal if it fails)
+                logBookingCheckIn($booking_id, $booking['booking_reference'] ?? '', 'admin', $user['id'] ?? null, $user['full_name'] ?? null);
+
                 $scheduledCheckIn = new DateTime((string)($booking['check_in_date'] ?? 'today'));
                 $scheduledCheckIn->setTime(0, 0, 0);
                 $todayCheckIn = new DateTime('today');
@@ -507,8 +510,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     $booking['booking_reference'] ?? null
                 );
             } elseif ($new_status === 'cancel-checkin') {
-                // Validate check-out first
-                $check = $pdo->prepare("SELECT id, status, booking_reference, check_out_date FROM bookings WHERE id = ?");
+                $check = $pdo->prepare("SELECT id, status, booking_reference FROM bookings WHERE id = ?");
                 $check->execute([$booking_id]);
                 $booking = $check->fetch(PDO::FETCH_ASSOC);
 
@@ -516,10 +518,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     throw new Exception('Booking not found');
                 }
 
-                // Use the validation helper function (revert check-in = check-out validation)
-                $validation = validateCheckOut($booking);
-                if (!$validation['allowed']) {
-                    throw new Exception("Cannot cancel check-in: " . $validation['reason']);
+                if ($booking['status'] !== 'checked-in') {
+                    throw new Exception('Can only cancel check-in for a booking that is currently checked in (current status: ' . ($booking['status'] ?? 'unknown') . ')');
                 }
 
                 $pdo->beginTransaction();

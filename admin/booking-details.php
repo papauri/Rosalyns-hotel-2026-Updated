@@ -436,14 +436,38 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['booking_action'])) {
                     if (!$validation['allowed']) {
                         $_SESSION['error_message'] = getBookingActionErrorMessage('check_in', $validation['reason']);
                     } else {
-                        $stmt = $pdo->prepare("UPDATE bookings SET status = 'checked-in', updated_at = NOW() WHERE id = ?");
-                        $stmt->execute([$booking_id]);
+                        $pdo->beginTransaction();
+                        $pdo->prepare("UPDATE bookings SET status = 'checked-in', updated_at = NOW() WHERE id = ?")->execute([$booking_id]);
+                        $updatedRoomCount = updateBookingRoomsStatus($booking_id, 'occupied', 'Guest checked in', $user['id'] ?? null);
+                        $pdo->commit();
 
+                        // Timeline event (outside transaction — non-fatal if it fails)
                         logBookingCheckIn($booking_id, $check_row['booking_reference'], 'admin', $user['id'], $user['full_name']);
 
-                        $updatedRoomCount = updateBookingRoomsStatus($booking_id, 'occupied', 'Guest checked in', $user['id'] ?? null);
+                        // Late check-in detection for audit trail
+                        $ciScheduled = (new DateTime((string)$check_row['check_in_date']))->setTime(0, 0, 0);
+                        $ciToday = new DateTime('today');
+                        $isLateCI = $ciScheduled < $ciToday;
+                        $lateCIDays = $isLateCI ? (int)$ciScheduled->diff($ciToday)->days : 0;
+                        $lateAuditNote = $isLateCI ? 'Late check-in (' . $lateCIDays . ' day(s) overdue)' : null;
 
-                        $_SESSION['success_message'] = 'Guest checked in successfully.' . ($updatedRoomCount > 0 ? ' Room assignment marked as occupied.' : '');
+                        logBookingAudit(
+                            $booking_id,
+                            'checked-in',
+                            ['status' => 'confirmed'],
+                            ['status' => 'checked-in'],
+                            $lateAuditNote,
+                            $check_row['booking_reference']
+                        );
+                        rh_log_event('bookings', $isLateCI ? 'warning' : 'info',
+                            $isLateCI ? 'Late guest check-in' : 'Guest checked in',
+                            ['booking_id' => $booking_id, 'ref' => $check_row['booking_reference'], 'by' => $user['full_name'] ?? $user['username']]
+                        );
+
+                        $successMsg = 'Guest checked in successfully.';
+                        if ($updatedRoomCount > 0) $successMsg .= ' Room marked as occupied.';
+                        if ($isLateCI) $successMsg .= ' Note: late check-in (' . $lateCIDays . ' day(s) overdue).';
+                        $_SESSION['success_message'] = $successMsg;
                     }
                 }
                 break;
@@ -1999,7 +2023,7 @@ unset($_SESSION['success_message'], $_SESSION['error_message']);
 
                                 <?php if ($booking['status'] == 'confirmed'): ?>
                                     <?php
-                                    $can_checkin = ($booking['actual_payment_status'] === 'paid' || $booking['actual_payment_status'] === 'completed');
+                                    $can_checkin = !in_array($booking['actual_payment_status'] ?? '', ['unpaid', ''], true);
                                     $room_assigned = !empty($booking['individual_room_id']);
                                     $check_in_date = new DateTime($booking['check_in_date']);
                                     $check_in_date->setTime(0, 0, 0);
@@ -2007,7 +2031,7 @@ unset($_SESSION['success_message'], $_SESSION['error_message']);
                                     $checkin_date_reached = $check_in_date <= $today;
                                     $checkin_disabled_reason = '';
                                     if (!$can_checkin) {
-                                        $checkin_disabled_reason = 'Payment required before check-in';
+                                        $checkin_disabled_reason = 'At least a partial payment must be recorded before check-in';
                                     } elseif (!$room_assigned) {
                                         $checkin_disabled_reason = 'Room must be assigned before check-in';
                                     } elseif (!$checkin_date_reached) {
