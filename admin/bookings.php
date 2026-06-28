@@ -104,6 +104,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     $cancellation_reason = 'Resent by admin';
                     $email_result = sendBookingCancelledEmail($booking, $cancellation_reason);
                     break;
+                case 'booking_reminder':
+                    if (!in_array($booking['status'], ['confirmed', 'pending', 'checked-in'], true)) {
+                        throw new Exception('Reminder emails are only for active bookings');
+                    }
+                    $email_result = sendBookingReminderEmail($booking);
+                    break;
                 case 'invoice':
                     require_once '../config/invoice.php';
                     $cc_recipients = array_values(array_filter($cc_array));
@@ -3656,7 +3662,7 @@ $today_str = $today->format('Y-m-d');
                                                             <button type="button" onclick="openConsolidationModal(<?php echo $booking['id']; ?>, '<?php echo htmlspecialchars($booking['booking_reference'], ENT_QUOTES); ?>')"><i class="fas fa-scale-balanced"></i> Consolidation</button>
                                                         <?php endif; ?>
                                                         <hr class="menu-divider">
-                                                        <button type="button" onclick="openResendEmailModal(<?php echo $booking['id']; ?>, '<?php echo htmlspecialchars($booking['booking_reference'], ENT_QUOTES); ?>', '<?php echo htmlspecialchars($booking['status']); ?>')"><i class="fas fa-envelope"></i> Resend email</button>
+                                                        <button type="button" onclick="openResendEmailModal(<?php echo $booking['id']; ?>, '<?php echo htmlspecialchars($booking['booking_reference'], ENT_QUOTES); ?>', '<?php echo htmlspecialchars($booking['status']); ?>', <?php echo ($is_missed_checkin || $is_overdue_checkout) ? 'true' : 'false'; ?>)"><i class="fas fa-envelope"></i> Resend email</button>
                                                         <button type="button" onclick="sendInvoiceEmail(<?php echo $booking['id']; ?>, '<?php echo htmlspecialchars($booking['booking_reference'], ENT_QUOTES); ?>', this)"><i class="fas fa-file-invoice"></i> Send invoice</button>
                                                         <button type="button" onclick="openBookingListQuoteModal(<?php echo $booking['id']; ?>, '<?php echo htmlspecialchars($booking['booking_reference'], ENT_QUOTES); ?>', '<?php echo htmlspecialchars($booking['guest_name'], ENT_QUOTES); ?>', '<?php echo htmlspecialchars($booking['guest_email'] ?? '', ENT_QUOTES); ?>')"><i class="fas fa-file-invoice-dollar"></i> Send quotation</button>
                                                         <?php if (!empty($booking['guest_phone'])): ?>
@@ -5102,6 +5108,7 @@ $today_str = $today->format('Y-m-d');
             </div>
             <form id="resendEmailForm" method="POST" action="">
                 <input type="hidden" name="action" value="resend_email">
+                <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf_token); ?>">
                 <input type="hidden" name="booking_id" id="modal_booking_id" value="">
 
                 <div class="modal-body">
@@ -5120,6 +5127,7 @@ $today_str = $today->format('Y-m-d');
                             <option value="tentative_converted">Tentative Converted to Confirmed</option>
                             <option value="booking_cancelled">Booking Cancelled</option>
                             <option value="invoice">Invoice</option>
+                            <option value="booking_reminder" id="opt_booking_reminder" style="display:none;">&#9888; Check-in Reminder (Late / Overdue)</option>
                         </select>
                         <small style="color: #666;">Select the type of email to resend based on current booking status</small>
                     </div>
@@ -5127,13 +5135,19 @@ $today_str = $today->format('Y-m-d');
                     <div class="form-group">
                         <label for="cc_emails"><i class="fas fa-users"></i> CC Emails (Optional):</label>
                         <input type="text" name="cc_emails" id="cc_emails" class="form-control" placeholder="email1@example.com, email2@example.com">
-                        <small style="color: #666;">Comma-separated email addresses to CC (e.g., hotel manager, accounting)</small>
+                        <small style="color: #666;">Comma-separated email addresses to CC</small>
+                    </div>
+
+                    <!-- Inline success state (replaces toast on mobile) -->
+                    <div id="resendEmailSuccess" style="display:none;text-align:center;padding:18px 12px;">
+                        <div style="font-size:2.2rem;color:#28a745;margin-bottom:8px;"><i class="fas fa-circle-check"></i></div>
+                        <div style="font-weight:600;color:#1a4731;font-size:1rem;" id="resendEmailSuccessMsg">Email sent!</div>
                     </div>
                 </div>
 
                 <div class="modal-footer">
                     <button type="button" class="btn btn-secondary" onclick="closeResendEmailModal()">Cancel</button>
-                    <button type="submit" class="btn btn-primary"><i class="fas fa-paper-plane"></i> Send Email</button>
+                    <button type="submit" class="btn btn-primary" id="resendEmailSubmitBtn"><i class="fas fa-paper-plane"></i> Send Email</button>
                 </div>
             </form>
         </div>
@@ -6130,23 +6144,28 @@ $today_str = $today->format('Y-m-d');
             closeViewBookingModal();
         });
 
-        function openResendEmailModal(bookingId, bookingReference, bookingStatus) {
+        function openResendEmailModal(bookingId, bookingReference, bookingStatus, isLateOrOverdue = false) {
             const modal = document.getElementById('resendEmailModal');
             setBookingPageModalOpen(modal, true);
             document.getElementById('modal_booking_id').value = bookingId;
             document.getElementById('modal_booking_reference').value = bookingReference;
 
+            // Reset success state
+            document.getElementById('resendEmailSuccess').style.display = 'none';
+            document.getElementById('resendEmailSubmitBtn').style.display = '';
+            const prevErr = document.getElementById('resendEmailError');
+            if (prevErr) prevErr.remove();
+
+            // Show/hide reminder option — only for late check-in or overdue bookings
+            const reminderOpt = document.getElementById('opt_booking_reminder');
+            if (reminderOpt) {
+                reminderOpt.style.display = isLateOrOverdue ? '' : 'none';
+            }
+
             // Set default email type based on booking status
             const emailTypeSelect = document.getElementById('email_type');
             emailTypeSelect.value = '';
 
-            // Show/hide appropriate options based on status
-            const options = emailTypeSelect.querySelectorAll('option');
-            options.forEach(option => {
-                option.style.display = '';
-            });
-
-            // Disable options that don't make sense for current status
             switch (bookingStatus) {
                 case 'pending':
                     emailTypeSelect.value = 'booking_received';
@@ -6155,10 +6174,13 @@ $today_str = $today->format('Y-m-d');
                     emailTypeSelect.value = 'tentative_confirmed';
                     break;
                 case 'confirmed':
-                    emailTypeSelect.value = 'booking_confirmed';
+                    emailTypeSelect.value = isLateOrOverdue ? 'booking_reminder' : 'booking_confirmed';
                     break;
                 case 'cancelled':
                     emailTypeSelect.value = 'booking_cancelled';
+                    break;
+                case 'checked-in':
+                    if (isLateOrOverdue) emailTypeSelect.value = 'booking_reminder';
                     break;
             }
         }
@@ -6166,7 +6188,15 @@ $today_str = $today->format('Y-m-d');
         function closeResendEmailModal() {
             const modal = document.getElementById('resendEmailModal');
             setBookingPageModalOpen(modal, false);
-            document.getElementById('resendEmailForm').reset();
+            const form = document.getElementById('resendEmailForm');
+            form.reset();
+            // Restore form body if it was hidden by success state
+            const body = form.querySelector('.modal-body');
+            if (body) body.style.display = '';
+            const successEl = document.getElementById('resendEmailSuccess');
+            if (successEl) successEl.style.display = 'none';
+            const submitBtn = document.getElementById('resendEmailSubmitBtn');
+            if (submitBtn) { submitBtn.style.display = ''; submitBtn.disabled = false; }
             const errEl = document.getElementById('resendEmailError');
             if (errEl) errEl.remove();
         }
@@ -6198,19 +6228,30 @@ $today_str = $today->format('Y-m-d');
                         },
                         body: formData
                     })
-                    .then(res => res.json())
+                    .then(res => {
+                        if (!res.ok) throw new Error('HTTP ' + res.status);
+                        return res.json();
+                    })
                     .then(data => {
                         if (data.success) {
-                            if (submitBtn) {
-                                submitBtn.disabled = false;
-                                submitBtn.innerHTML = originalLabel;
+                            // Show inline success (visible on mobile without needing to scroll)
+                            const successEl = document.getElementById('resendEmailSuccess');
+                            const successMsg = document.getElementById('resendEmailSuccessMsg');
+                            if (successEl) {
+                                if (successMsg) successMsg.textContent = data.message || 'Email sent successfully!';
+                                resendForm.querySelector('.modal-body').style.display = 'none';
+                                successEl.style.display = 'block';
+                                if (submitBtn) submitBtn.style.display = 'none';
                             }
-                            closeResendEmailModal();
-                            showBookingActionMessage(data.message || 'Email sent successfully.', 'success');
+                            // Auto-close after 1.6s then show toast
+                            setTimeout(() => {
+                                closeResendEmailModal();
+                                showBookingActionMessage(data.message || 'Email sent successfully.', 'success');
+                            }, 1600);
                         } else {
                             const errDiv = document.createElement('div');
                             errDiv.id = 'resendEmailError';
-                            errDiv.style.cssText = 'color:#dc3545; font-size:13px; margin: 8px 0 0; padding: 8px 12px; background:#fff5f5; border:1px solid #f5c6cb; border-radius:6px;';
+                            errDiv.style.cssText = 'color:#dc3545;font-size:13px;margin:8px 0 0;padding:8px 12px;background:#fff5f5;border:1px solid #f5c6cb;border-radius:6px;';
                             errDiv.textContent = data.message || 'Failed to send email.';
                             resendForm.querySelector('.modal-footer').before(errDiv);
                             if (submitBtn) {
@@ -6222,7 +6263,7 @@ $today_str = $today->format('Y-m-d');
                     .catch(() => {
                         const errDiv = document.createElement('div');
                         errDiv.id = 'resendEmailError';
-                        errDiv.style.cssText = 'color:#dc3545; font-size:13px; margin: 8px 0 0; padding: 8px 12px; background:#fff5f5; border:1px solid #f5c6cb; border-radius:6px;';
+                        errDiv.style.cssText = 'color:#dc3545;font-size:13px;margin:8px 0 0;padding:8px 12px;background:#fff5f5;border:1px solid #f5c6cb;border-radius:6px;';
                         errDiv.textContent = 'Network error — please try again.';
                         resendForm.querySelector('.modal-footer').before(errDiv);
                         if (submitBtn) {

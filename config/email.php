@@ -1397,6 +1397,28 @@ function ensureBookingEmailTemplateDefaults()
                     . '<tr><td style="padding:0 48px 48px;font-size:12px;line-height:1.8;color:#9b8f7e;text-align:center;font-style:italic;">{{payment_policy}}</td></tr>'
             ),
         ],
+        'booking_reminder' => [
+            'name'    => 'Check-in Reminder (Late / Overdue)',
+            'subject' => 'Reminder: Your Stay at {{site_name}} — {{booking_reference}}',
+            'html'    => hotel_premium_email_html(
+                'Reminder: Your booking {{booking_reference}} at {{site_name}}',
+                hotel_premium_email_body(
+                    '{{guest_name}}',
+                    '{{urgency_notice}}'
+                        . '<p style="margin:0;">If you have any questions or need to adjust your booking, please contact us at <a href="mailto:{{contact_email}}" style="color:#524b3f;">{{contact_email}}</a> or {{phone_main}}.</p>'
+                )
+                    . hotel_premium_email_summary_rows('Your Reservation', [
+                        ['Reference',  '{{booking_reference}}'],
+                        ['Room',       '{{room_name}}'],
+                        ['Check-in',   '{{check_in_date_formatted}}'],
+                        ['Check-out',  '{{check_out_date_formatted}}'],
+                        ['Nights',     '{{number_of_nights}}'],
+                        ['Guests',     '{{number_of_guests}}'],
+                        ['Total',      '{{currency_symbol}} {{total_amount_formatted}}', true],
+                    ])
+                    . '<tr><td style="padding:0 48px 48px;font-size:12px;line-height:1.8;color:#9b8f7e;text-align:center;font-style:italic;">{{payment_policy}}</td></tr>'
+            ),
+        ],
         'booking_cancelled' => [
             'name'    => 'Booking Cancelled (Customer)',
             'subject' => 'Booking Cancelled — {{booking_reference}}',
@@ -3406,6 +3428,65 @@ function generateWhatsAppLink(array $booking, array $room)
     $message .= "Please confirm my booking. Thank you!";
 
     return 'https://wa.me/' . $whatsapp_number . '?text=' . urlencode($message);
+}
+
+/**
+ * Send check-in reminder email for late check-in or overdue bookings
+ */
+function sendBookingReminderEmail(array $booking): array
+{
+    global $pdo;
+
+    try {
+        $stmt = $pdo->prepare("SELECT * FROM rooms WHERE id = ?");
+        $stmt->execute([$booking['room_id']]);
+        $room = $stmt->fetch(PDO::FETCH_ASSOC);
+
+        if (!$room) {
+            throw new Exception('Room not found');
+        }
+
+        $checkInDate = $booking['check_in_date'] ?? '';
+        $today       = date('Y-m-d');
+        $daysOverdue = $checkInDate ? (int)((strtotime($today) - strtotime($checkInDate)) / 86400) : 0;
+
+        $urgencyLine = '';
+        if ($daysOverdue > 0) {
+            $urgencyLine = '<p style="margin:0 0 16px;color:#b0552b;font-weight:600;">Your check-in date was ' . $daysOverdue . ' day' . ($daysOverdue === 1 ? '' : 's') . ' ago. Please contact us to confirm your arrival or to reschedule.</p>';
+        } elseif ($daysOverdue === 0) {
+            $urgencyLine = '<p style="margin:0 0 16px;color:#7a5c2e;font-weight:600;">Your check-in is today. We are expecting you and your room is ready.</p>';
+        } else {
+            $urgencyLine = '<p style="margin:0 0 16px;">Your upcoming stay at <strong>{{site_name}}</strong> is approaching. We wanted to remind you of your reservation details.</p>';
+        }
+
+        $templateVars = buildBookingEmailVariables($booking, $room, [
+            'days_overdue'   => (string)max(0, $daysOverdue),
+            'urgency_notice' => $urgencyLine,
+        ]);
+        $dbTemplate = renderBookingEmailTemplate('booking_reminder', $templateVars);
+        if ($dbTemplate) {
+            return sendEmail(
+                $booking['guest_email'],
+                $booking['guest_name'],
+                $dbTemplate['subject'],
+                $dbTemplate['html_body'],
+                $dbTemplate['text_body'] ?? ''
+            );
+        }
+
+        // Fallback plain email if template not configured
+        $subject = 'Reminder: Your stay at ' . getSetting('site_name', 'Rosalyn\'s Hotel');
+        $htmlBody = '<p>Dear ' . htmlspecialchars($booking['guest_name']) . ',</p>'
+            . $urgencyLine
+            . '<p>Booking Reference: <strong>' . htmlspecialchars($booking['booking_reference']) . '</strong></p>'
+            . '<p>Room: ' . htmlspecialchars($room['name']) . '</p>'
+            . '<p>Check-in: ' . htmlspecialchars($checkInDate) . '</p>'
+            . '<p>Please contact us if you have any questions.</p>';
+        return sendEmail($booking['guest_email'], $booking['guest_name'], $subject, $htmlBody);
+    } catch (Exception $e) {
+        error_log('sendBookingReminderEmail error: ' . $e->getMessage());
+        return ['success' => false, 'message' => $e->getMessage()];
+    }
 }
 
 /**
