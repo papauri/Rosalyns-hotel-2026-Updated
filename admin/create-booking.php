@@ -746,7 +746,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['create_booking'])) {
             try {
                 require_once '../config/credit-notes.php';
 
-                // Build a queue of this guest's usable, selected credit notes.
+                // Email override: by default only the booking guest's own credit may be
+                // applied (matched on guest_email). Staff can deliberately apply credit
+                // from a different account, but only with an explicit reason, which is
+                // recorded on the application notes and the audit log.
+                $credit_override        = !empty($_POST['apply_credit_override']);
+                $credit_override_reason = trim((string)($_POST['apply_credit_override_reason'] ?? ''));
+                $credit_override_active  = $credit_override && $credit_override_reason !== '';
+                if ($credit_override && !$credit_override_active) {
+                    $credit_msg = ' (Note: credit override was selected without a reason, so credit from a different account was not applied.)';
+                }
+
+                // Build a queue of usable, selected credit notes.
                 $cnQueue = [];
                 foreach (array_unique(array_map('intval', $rawCreditIds)) as $cnId) {
                     if ($cnId <= 0) {
@@ -767,11 +778,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['create_booking'])) {
                     if ((float)$cn['balance'] <= 0.005) {
                         continue;
                     }
-                    // Security: only the guest's own credit may be applied.
-                    if (strcasecmp(trim((string)$cn['guest_email']), trim((string)$guest_email)) !== 0) {
+                    // Security: the guest's own credit applies freely; credit belonging to
+                    // a different account is only allowed under an explicit, audited override.
+                    $emailMatches = strcasecmp(trim((string)$cn['guest_email']), trim((string)$guest_email)) === 0;
+                    if (!$emailMatches && !$credit_override_active) {
                         continue;
                     }
-                    $cnQueue[] = ['id' => (int)$cn['id'], 'number' => (string)$cn['credit_note_number'], 'balance' => (float)$cn['balance']];
+                    $cnQueue[] = [
+                        'id'       => (int)$cn['id'],
+                        'number'   => (string)$cn['credit_note_number'],
+                        'balance'  => (float)$cn['balance'],
+                        'override' => !$emailMatches,
+                        'cn_email' => (string)$cn['guest_email'],
+                    ];
                 }
 
                 $applied_credit_total = 0.0;
@@ -792,19 +811,35 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['create_booking'])) {
                             continue;
                         }
                         $amt = round(min($due, $cnq['balance']), 2);
+                        $applyNote = 'Applied at booking creation';
+                        if (!empty($cnq['override'])) {
+                            $applyNote .= ' — OVERRIDE: credit from a different account (' . $cnq['cn_email'] . '). Reason: ' . $credit_override_reason;
+                        }
                         $res = applyCreditNote(
                             $pdo,
                             $cnq['id'],
                             ['booking_id' => $cb['id'], 'booking_type' => 'room', 'booking_reference' => $cb['ref']],
                             $amt,
                             (int)($user['id'] ?? 0),
-                            'Applied at booking creation'
+                            $applyNote
                         );
                         if (!empty($res['success'])) {
                             $due = round($due - $amt, 2);
                             $cnq['balance'] = (float)$res['remaining_balance'];
                             $applied_credit_total += $amt;
                             $applied_credit_numbers[$cnq['number']] = true;
+                            if (!empty($cnq['override'])) {
+                                rh_log_event('create-booking', 'warning', 'Guest credit applied via email override', [
+                                    'booking_id'         => $cb['id'],
+                                    'booking_reference'  => $cb['ref'],
+                                    'credit_note'        => $cnq['number'],
+                                    'credit_note_email'  => $cnq['cn_email'],
+                                    'booking_email'      => $guest_email,
+                                    'amount'             => $amt,
+                                    'reason'             => $credit_override_reason,
+                                    'by'                 => $user['username'] ?? null,
+                                ]);
+                            }
                         } else {
                             error_log('create-booking applyCreditNote failed for CN ' . $cnq['id'] . ': ' . ($res['error'] ?? 'unknown'));
                         }
@@ -2090,6 +2125,26 @@ try {
                                 <i class="fas fa-magnifying-glass"></i> Check available credit
                             </button>
                         </div>
+
+                        <!-- Override: apply credit belonging to a different account -->
+                        <div style="margin-top:12px;">
+                            <label style="display:flex;align-items:center;gap:8px;font-size:12px;color:#5c4a2f;cursor:pointer;">
+                                <input type="checkbox" name="apply_credit_override" id="creditOverrideCheck" value="1" onchange="onCreditOverrideToggle()">
+                                Use credit from a different account (override)
+                            </label>
+                            <div id="creditOverrideBox" style="display:none;margin-top:8px;background:#fff;border:1px dashed #C9A36A;border-radius:6px;padding:10px 12px;">
+                                <div style="font-size:11px;color:#b0552b;margin-bottom:8px;"><i class="fas fa-triangle-exclamation"></i> Applying another guest's credit is recorded in the audit log.</div>
+                                <div class="form-group" style="margin:0 0 8px;">
+                                    <label style="font-size:12px;">Credit account email</label>
+                                    <input type="email" id="creditOverrideEmail" placeholder="email the credit was issued to">
+                                </div>
+                                <div class="form-group" style="margin:0;">
+                                    <label style="font-size:12px;">Reason for override <span class="required">*</span></label>
+                                    <input type="text" name="apply_credit_override_reason" id="creditOverrideReason" maxlength="200" placeholder="e.g. Company paying for employee's stay">
+                                </div>
+                            </div>
+                        </div>
+
                         <div id="creditList" style="margin-top:12px;font-size:13px;"></div>
                     </div>
 
@@ -2099,14 +2154,32 @@ try {
                         <button type="button" class="cb-nav-btn cb-nav-next" onclick="cbNext(5)">Review &amp; Submit <i class="fas fa-arrow-right"></i></button>
                     </div>
                     <script>
+                        function onCreditOverrideToggle() {
+                            var on = document.getElementById('creditOverrideCheck').checked;
+                            document.getElementById('creditOverrideBox').style.display = on ? 'block' : 'none';
+                            // Clear any previously loaded list so the source can't be ambiguous.
+                            document.getElementById('creditList').innerHTML = '';
+                        }
+
                         function loadGuestCredit() {
-                            var emailEl = document.getElementById('guestEmail');
                             var listEl = document.getElementById('creditList');
                             var btn = document.getElementById('creditLoadBtn');
-                            var email = emailEl ? emailEl.value.trim() : '';
-                            if (!email) {
-                                listEl.innerHTML = '<span style="color:#b0552b;">Enter the guest email (step 3) first.</span>';
-                                return;
+                            var override = document.getElementById('creditOverrideCheck').checked;
+                            var email;
+                            if (override) {
+                                var ovEmail = document.getElementById('creditOverrideEmail');
+                                email = ovEmail ? ovEmail.value.trim() : '';
+                                if (!email) {
+                                    listEl.innerHTML = '<span style="color:#b0552b;">Enter the credit account email to look up.</span>';
+                                    return;
+                                }
+                            } else {
+                                var emailEl = document.getElementById('guestEmail');
+                                email = emailEl ? emailEl.value.trim() : '';
+                                if (!email) {
+                                    listEl.innerHTML = '<span style="color:#b0552b;">Enter the guest email (step 3) first.</span>';
+                                    return;
+                                }
                             }
                             btn.disabled = true;
                             listEl.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Checking…';
