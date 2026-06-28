@@ -537,9 +537,9 @@ if ($is_card_insight_ajax) {
                     } else {
                         $room = (string)($row['room_name'] ?? '—');
                     }
+                    $bid = (int)($row['booking_id'] ?? 0);
                     $payload['rows'][] = [
-                        'booking_id' => (int)($row['booking_id'] ?? 0),
-                        'reference' => (string)$row['booking_reference'],
+                        'reference' => ['href' => 'booking-details.php?id=' . $bid, 'label' => (string)$row['booking_reference']],
                         'guest' => (string)$row['guest_name'],
                         'room' => $room,
                         'checkout' => date('M j, Y', strtotime((string)$row['check_out_date'])),
@@ -581,9 +581,9 @@ if ($is_card_insight_ajax) {
                     } else {
                         $room = (string)($row['room_name'] ?? '—');
                     }
+                    $bid = (int)($row['booking_id'] ?? 0);
                     $payload['rows'][] = [
-                        'booking_id' => (int)($row['booking_id'] ?? 0),
-                        'reference' => (string)$row['booking_reference'],
+                        'reference' => ['href' => 'booking-details.php?id=' . $bid, 'label' => (string)$row['booking_reference']],
                         'guest' => (string)$row['guest_name'],
                         'room' => $room,
                         'checkout' => date('M j, Y', strtotime((string)$row['check_out_date'])),
@@ -612,9 +612,9 @@ if ($is_card_insight_ajax) {
                                      LIMIT 30");
                 $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
                 foreach ($rows as $row) {
+                    $bid = (int)($row['booking_id'] ?? 0);
                     $payload['rows'][] = [
-                        'booking_id' => (int)($row['booking_id'] ?? 0),
-                        'reference' => (string)$row['booking_reference'],
+                        'reference' => ['href' => 'booking-details.php?id=' . $bid, 'label' => (string)$row['booking_reference']],
                         'guest' => (string)$row['guest_name'],
                         'checkin' => date('M j, Y', strtotime((string)$row['check_in_date'])),
                         'nights' => (string)(int)($row['number_of_nights'] ?? 0),
@@ -655,9 +655,9 @@ if ($is_card_insight_ajax) {
                     } else {
                         $room = (string)($row['room_name'] ?? '—');
                     }
+                    $bid = (int)($row['booking_id'] ?? 0);
                     $payload['rows'][] = [
-                        'booking_id' => (int)($row['booking_id'] ?? 0),
-                        'reference' => (string)$row['booking_reference'],
+                        'reference' => ['href' => 'booking-details.php?id=' . $bid, 'label' => (string)$row['booking_reference']],
                         'guest' => (string)$row['guest_name'],
                         'room' => $room,
                         'checkout' => date('M j, Y', strtotime((string)$row['check_out_date'])),
@@ -685,9 +685,9 @@ if ($is_card_insight_ajax) {
                                      LIMIT 30");
                 $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
                 foreach ($rows as $row) {
+                    $iid = (int)($row['inquiry_id'] ?? 0);
                     $payload['rows'][] = [
-                        'inquiry_id' => (int)($row['inquiry_id'] ?? 0),
-                        'reference' => (string)$row['inquiry_reference'],
+                        'reference' => ['href' => 'conference-management.php#enquiry-' . $iid, 'label' => (string)$row['inquiry_reference']],
                         'company' => (string)$row['company_name'],
                         'contact' => (string)$row['contact_person'],
                         'event_date' => date('M j, Y', strtotime((string)$row['event_date'])),
@@ -718,9 +718,9 @@ if ($is_card_insight_ajax) {
                 $stmt->execute([$today]);
                 $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
                 foreach ($rows as $row) {
+                    $iid = (int)($row['inquiry_id'] ?? 0);
                     $payload['rows'][] = [
-                        'inquiry_id' => (int)($row['inquiry_id'] ?? 0),
-                        'reference' => (string)$row['inquiry_reference'],
+                        'reference' => ['href' => 'conference-management.php#enquiry-' . $iid, 'label' => (string)$row['inquiry_reference']],
                         'company' => (string)$row['company_name'],
                         'room' => (string)($row['room_name'] ?? 'Unassigned'),
                         'time' => date('H:i', strtotime((string)$row['start_time'])) . ' - ' . date('H:i', strtotime((string)$row['end_time'])),
@@ -748,9 +748,9 @@ if ($is_card_insight_ajax) {
                                      LIMIT 30");
                 $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
                 foreach ($rows as $row) {
+                    $bid = (int)($row['booking_id'] ?? 0);
                     $payload['rows'][] = [
-                        'booking_id' => (int)($row['booking_id'] ?? 0),
-                        'reference' => (string)$row['booking_reference'],
+                        'reference' => ['href' => 'booking-details.php?id=' . $bid, 'label' => (string)$row['booking_reference']],
                         'guest' => (string)$row['guest_name'],
                         'checkin' => date('M j, Y', strtotime((string)$row['check_in_date'])),
                         'expired_at' => $formatDateTime((string)$row['expired_at']),
@@ -778,9 +778,9 @@ if ($is_card_insight_ajax) {
                                      LIMIT 30");
                 $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
                 foreach ($rows as $row) {
+                    $bid = (int)($row['booking_id'] ?? 0);
                     $payload['rows'][] = [
-                        'booking_id' => (int)($row['booking_id'] ?? 0),
-                        'reference' => (string)$row['booking_reference'],
+                        'reference' => ['href' => 'booking-details.php?id=' . $bid, 'label' => (string)$row['booking_reference']],
                         'guest' => (string)$row['guest_name'],
                         'status' => ucfirst((string)$row['status']),
                         'total' => $formatMoney((float)($row['total_amount'] ?? 0)),
