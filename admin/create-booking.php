@@ -33,6 +33,49 @@ $levy_pct_cfg    = $levy_enabled ? (float)getSetting('tourism_levy_percent', 0) 
 $currency_symbol = getSetting('currency_symbol', 'MWK');
 finance_ensure_sequence_tables($pdo);
 
+// ── AJAX: look up a guest's redeemable credit notes by email ──────────────────
+// Served from this page so it reuses booking-staff permissions (the credit-notes
+// API is gated to the 'invoices' permission, which booking staff may not hold).
+if (($_GET['ajax'] ?? '') === 'guest_credit_lookup') {
+    header('Content-Type: application/json');
+    $lookupEmail = trim($_GET['email'] ?? '');
+    if ($lookupEmail === '' || !filter_var($lookupEmail, FILTER_VALIDATE_EMAIL)) {
+        echo json_encode(['success' => true, 'data' => [], 'total_balance' => 0, 'currency' => $currency_symbol]);
+        exit;
+    }
+    try {
+        $cnLookup = $pdo->prepare("
+            SELECT id, credit_note_number, balance, expires_at, reason
+            FROM credit_notes
+            WHERE guest_email = ?
+              AND status IN ('active', 'partially_applied')
+              AND balance > 0.005
+              AND (expires_at IS NULL OR expires_at >= CURDATE())
+            ORDER BY (expires_at IS NULL), expires_at ASC, id ASC
+        ");
+        $cnLookup->execute([$lookupEmail]);
+        $cnData = [];
+        $cnTotal = 0.0;
+        foreach ($cnLookup->fetchAll(PDO::FETCH_ASSOC) as $cnRow) {
+            $cnBal = (float)$cnRow['balance'];
+            $cnTotal += $cnBal;
+            $cnData[] = [
+                'id'              => (int)$cnRow['id'],
+                'number'          => (string)$cnRow['credit_note_number'],
+                'balance'         => round($cnBal, 2),
+                'balance_display' => $currency_symbol . number_format($cnBal, 2),
+                'expires_at'      => $cnRow['expires_at'] ? date('d M Y', strtotime((string)$cnRow['expires_at'])) : 'No expiry',
+                'reason'          => ucfirst(str_replace('_', ' ', (string)($cnRow['reason'] ?? ''))),
+            ];
+        }
+        echo json_encode(['success' => true, 'data' => $cnData, 'total_balance' => round($cnTotal, 2), 'currency' => $currency_symbol]);
+    } catch (\Throwable $e) {
+        error_log('create-booking guest_credit_lookup error: ' . $e->getMessage());
+        echo json_encode(['success' => false, 'data' => [], 'total_balance' => 0, 'currency' => $currency_symbol]);
+    }
+    exit;
+}
+
 // Fetch all active room types
 try {
     $rooms_stmt = $pdo->query("
@@ -692,6 +735,94 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['create_booking'])) {
             }
         }
 
+        // ── Apply guest credit notes (must run after commit — applyCreditNote starts
+        //    its own transaction). Non-fatal: the booking is already durable, so any
+        //    failure here is logged and surfaced, never rolled back. Credit is applied
+        //    greedily across the created bookings until the selected notes are spent or
+        //    the bookings' balances are cleared. ──────────────────────────────────────
+        $credit_msg = '';
+        $rawCreditIds = $_POST['apply_credit_note_ids'] ?? [];
+        if (!$is_tentative && is_array($rawCreditIds) && !empty($rawCreditIds)) {
+            try {
+                require_once '../config/credit-notes.php';
+
+                // Build a queue of this guest's usable, selected credit notes.
+                $cnQueue = [];
+                foreach (array_unique(array_map('intval', $rawCreditIds)) as $cnId) {
+                    if ($cnId <= 0) {
+                        continue;
+                    }
+                    $cnStmt = $pdo->prepare("SELECT id, credit_note_number, balance, guest_email, status, expires_at FROM credit_notes WHERE id = ?");
+                    $cnStmt->execute([$cnId]);
+                    $cn = $cnStmt->fetch(PDO::FETCH_ASSOC);
+                    if (!$cn) {
+                        continue;
+                    }
+                    if (!in_array((string)$cn['status'], ['active', 'partially_applied'], true)) {
+                        continue;
+                    }
+                    if ($cn['expires_at'] !== null && (string)$cn['expires_at'] < date('Y-m-d')) {
+                        continue;
+                    }
+                    if ((float)$cn['balance'] <= 0.005) {
+                        continue;
+                    }
+                    // Security: only the guest's own credit may be applied.
+                    if (strcasecmp(trim((string)$cn['guest_email']), trim((string)$guest_email)) !== 0) {
+                        continue;
+                    }
+                    $cnQueue[] = ['id' => (int)$cn['id'], 'number' => (string)$cn['credit_note_number'], 'balance' => (float)$cn['balance']];
+                }
+
+                $applied_credit_total = 0.0;
+                $applied_credit_numbers = [];
+                foreach ($created_bookings as $cb) {
+                    if (empty($cnQueue)) {
+                        break;
+                    }
+                    $dueStmt = $pdo->prepare("SELECT amount_due FROM bookings WHERE id = ?");
+                    $dueStmt->execute([$cb['id']]);
+                    $due = round((float)($dueStmt->fetchColumn() ?: 0), 2);
+
+                    foreach ($cnQueue as &$cnq) {
+                        if ($due <= 0.005) {
+                            break;
+                        }
+                        if ($cnq['balance'] <= 0.005) {
+                            continue;
+                        }
+                        $amt = round(min($due, $cnq['balance']), 2);
+                        $res = applyCreditNote(
+                            $pdo,
+                            $cnq['id'],
+                            ['booking_id' => $cb['id'], 'booking_type' => 'room', 'booking_reference' => $cb['ref']],
+                            $amt,
+                            (int)($user['id'] ?? 0),
+                            'Applied at booking creation'
+                        );
+                        if (!empty($res['success'])) {
+                            $due = round($due - $amt, 2);
+                            $cnq['balance'] = (float)$res['remaining_balance'];
+                            $applied_credit_total += $amt;
+                            $applied_credit_numbers[$cnq['number']] = true;
+                        } else {
+                            error_log('create-booking applyCreditNote failed for CN ' . $cnq['id'] . ': ' . ($res['error'] ?? 'unknown'));
+                        }
+                    }
+                    unset($cnq);
+                }
+
+                if ($applied_credit_total > 0) {
+                    $credit_msg = ' Applied ' . htmlspecialchars($currency_symbol) . number_format($applied_credit_total, 2)
+                        . ' from credit note' . (count($applied_credit_numbers) > 1 ? 's' : '') . ' '
+                        . htmlspecialchars(implode(', ', array_keys($applied_credit_numbers))) . '.';
+                }
+            } catch (\Throwable $creditEx) {
+                error_log('create-booking credit application error: ' . $creditEx->getMessage());
+                $credit_msg = ' (Note: booking created, but guest credit could not be applied automatically — apply it from the booking page.)';
+            }
+        }
+
         // ── Audit logs ───────────────────────────────────────────────────────
         foreach ($created_bookings as $cb) {
             rh_log_event('create-booking', 'info', 'Booking created by admin', [
@@ -898,7 +1029,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['create_booking'])) {
         $rooms_suffix = $total_rooms_booked > 1 ? ' (' . $total_rooms_booked . ' rooms)' : '';
         $_SESSION['flash_message'] = [
             'type' => 'success',
-            'text' => 'Booking ' . $primary_ref . $rooms_suffix . ' created successfully!' . $email_msg,
+            'text' => 'Booking ' . $primary_ref . $rooms_suffix . ' created successfully!' . ($credit_msg ?? '') . $email_msg,
         ];
         header('Location: booking-details.php?id=' . $primary_id);
         exit;
@@ -1947,11 +2078,68 @@ try {
                             </div>
                         </div>
                     </div>
+
+                    <!-- ══ Apply guest credit (credit notes) ══ -->
+                    <div id="creditPanel" style="margin-top:18px;padding:16px;background:#FAF6F0;border:1px solid #D2C8BC;border-radius:8px;">
+                        <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;">
+                            <div>
+                                <strong style="font-size:13px;color:#5c4a2f;"><i class="fas fa-wallet"></i> Guest Credit</strong>
+                                <div style="font-size:12px;color:#8A775F;margin-top:2px;">Apply store credit (credit notes) this guest holds toward the booking.</div>
+                            </div>
+                            <button type="button" class="cb-nav-btn" id="creditLoadBtn" onclick="loadGuestCredit()" style="flex:0 0 auto;">
+                                <i class="fas fa-magnifying-glass"></i> Check available credit
+                            </button>
+                        </div>
+                        <div id="creditList" style="margin-top:12px;font-size:13px;"></div>
+                    </div>
+
                     <div class="cb-section-error" id="cbErr5"></div>
                     <div class="cb-section-nav">
                         <button type="button" class="cb-nav-btn cb-nav-prev" onclick="cbPrev(5)"><i class="fas fa-arrow-left"></i> Status</button>
                         <button type="button" class="cb-nav-btn cb-nav-next" onclick="cbNext(5)">Review &amp; Submit <i class="fas fa-arrow-right"></i></button>
                     </div>
+                    <script>
+                        function loadGuestCredit() {
+                            var emailEl = document.getElementById('guestEmail');
+                            var listEl = document.getElementById('creditList');
+                            var btn = document.getElementById('creditLoadBtn');
+                            var email = emailEl ? emailEl.value.trim() : '';
+                            if (!email) {
+                                listEl.innerHTML = '<span style="color:#b0552b;">Enter the guest email (step 3) first.</span>';
+                                return;
+                            }
+                            btn.disabled = true;
+                            listEl.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Checking…';
+                            fetch('create-booking.php?ajax=guest_credit_lookup&email=' + encodeURIComponent(email), {
+                                    headers: { 'X-Requested-With': 'XMLHttpRequest' }
+                                })
+                                .then(function (r) { return r.json(); })
+                                .then(function (res) {
+                                    btn.disabled = false;
+                                    if (!res.success || !res.data || res.data.length === 0) {
+                                        listEl.innerHTML = '<span style="color:#8A775F;">No redeemable credit on file for this guest.</span>';
+                                        return;
+                                    }
+                                    var html = '<div style="display:flex;flex-direction:column;gap:8px;">';
+                                    res.data.forEach(function (cn) {
+                                        html += '<label style="display:flex;align-items:flex-start;gap:10px;background:#fff;border:1px solid #E2D8CC;border-radius:6px;padding:9px 11px;cursor:pointer;">'
+                                            + '<input type="checkbox" name="apply_credit_note_ids[]" value="' + cn.id + '" class="credit-cn-check" style="margin-top:3px;">'
+                                            + '<span><span style="font-weight:600;">' + cn.number + '</span> — ' + cn.balance_display
+                                            + '<span style="display:block;font-size:11px;color:#8A775F;">' + (cn.reason ? cn.reason + ' · ' : '') + 'Expires: ' + cn.expires_at + '</span>'
+                                            + '</span></label>';
+                                    });
+                                    html += '</div>';
+                                    html += '<div style="margin-top:10px;font-size:12px;color:#5c4a2f;">'
+                                        + 'Total available: <strong>' + res.currency + Number(res.total_balance).toLocaleString('en-US', {minimumFractionDigits:2, maximumFractionDigits:2}) + '</strong>'
+                                        + '<br>Selected credit is applied to the balance after the booking is created (capped at the amount due).</div>';
+                                    listEl.innerHTML = html;
+                                })
+                                .catch(function () {
+                                    btn.disabled = false;
+                                    listEl.innerHTML = '<span style="color:#b0552b;">Could not load credit. Try again.</span>';
+                                });
+                        }
+                    </script>
                 </div>
 
                 <!-- ══ 6. ADMIN & NOTIFICATION ════════════════════════════════════════════ -->

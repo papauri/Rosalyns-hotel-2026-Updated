@@ -89,8 +89,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $payment
             $refund_reason = $_POST['refund_reason'] ?? '';
             $refund_notes = $_POST['refund_notes'] ?? '';
             $refund_status = $_POST['refund_status'] ?? 'pending';
+            $refund_method = $_POST['refund_method'] ?? 'original';
 
             // Validate inputs
+            if (!in_array($refund_method, ['original', 'store_credit'], true)) {
+                throw new Exception('Invalid refund method.');
+            }
+            $isStoreCredit = ($refund_method === 'store_credit');
+
             if ($refund_amount <= 0) {
                 throw new Exception('Refund amount must be greater than zero.');
             }
@@ -100,11 +106,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $payment
             if (!in_array($refund_reason, ['early_checkout', 'late_checkout_charge', 'cancellation', 'service_issue', 'overpayment', 'other'], true)) {
                 throw new Exception('Invalid refund reason.');
             }
-            if (!in_array($refund_status, ['pending', 'processing', 'completed', 'failed'], true)) {
-                throw new Exception('Invalid refund status.');
-            }
-            if ($isMobileMoneyPayment && $refund_status === 'completed') {
-                throw new Exception('Mobile money refunds must start as pending or processing until provider confirmation.');
+
+            if ($isStoreCredit) {
+                // Store credit is issued immediately as a credit note — it is always
+                // settled now, independent of the original payment method (no external
+                // provider settlement is involved). The mobile-money hold does not apply.
+                $refund_status = 'completed';
+            } else {
+                if (!in_array($refund_status, ['pending', 'processing', 'completed', 'failed'], true)) {
+                    throw new Exception('Invalid refund status.');
+                }
+                if ($isMobileMoneyPayment && $refund_status === 'completed') {
+                    throw new Exception('Mobile money refunds must start as pending or processing until provider confirmation.');
+                }
             }
 
             $refund_payment_status = match ($refund_status) {
@@ -163,6 +177,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $payment
                 )
             ");
 
+            // For store credit the payout vehicle is a credit note, so record the
+            // refund row's method as 'credit_note' (the credit note itself is issued
+            // after commit). Cash/card/mobile-money refunds keep the original method.
+            $refund_payment_method = $isStoreCredit ? 'credit_note' : $payment['payment_method'];
+            $effective_refund_notes = $isStoreCredit
+                ? trim('Refunded as store credit. ' . $refund_notes)
+                : $refund_notes;
+
             $insertStmt->execute([
                 $refundRef,
                 $payment['booking_type'],
@@ -173,13 +195,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $payment
                 $vat_rate,
                 $vat_amount,
                 $refund_amount,
-                $payment['payment_method'],
+                $refund_payment_method,
                 $refund_payment_status,
                 $payment_id,
                 $refund_reason,
                 $refund_status,
                 $refund_amount,
-                $refund_notes,
+                $effective_refund_notes,
                 $_SESSION['admin_user_id'] ?? null
             ]);
 
@@ -224,31 +246,93 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $payment
 
             $pdo->commit();
 
-            $message = 'Refund created successfully! Reference: ' . $refundRef;
-
-            // Send refund notification email to guest — failure must NOT block the response
             $refundEmailSent = false;
             $refundEmailNote = '';
-            try {
-                require_once __DIR__ . '/../config/email.php';
-                $rfEmailResult = sendRefundNotificationEmail(
-                    $payment,
-                    $refundRef,
-                    $refund_amount,
-                    $refund_reason
-                );
-                if (!empty($rfEmailResult['success'])) {
-                    $refundEmailSent = true;
-                    $message .= ' Refund notification emailed to customer.';
-                } else {
-                    $refundEmailNote = $rfEmailResult['message'] ?? 'Email could not be sent.';
-                    error_log('Refund notification email failed for ' . $refundRef . ': ' . $refundEmailNote);
-                    $message .= ' (Note: refund saved, but the notification email was not sent — ' . $refundEmailNote . ')';
+
+            if ($isStoreCredit) {
+                // Issue the credit note as a post-commit side effect (mirrors the
+                // refund-email pattern). The core refund is already durable; if the
+                // credit note fails we surface a clear manual-fallback message rather
+                // than rolling back a settled refund.
+                $message = 'Refund issued as store credit (Ref ' . $refundRef . ').';
+                try {
+                    require_once __DIR__ . '/../config/credit-notes.php';
+
+                    // Map refund reasons to the credit-note reason vocabulary.
+                    $cnReasonMap = [
+                        'early_checkout'       => 'early_checkout',
+                        'cancellation'         => 'cancellation',
+                        'service_issue'        => 'service_issue',
+                        'overpayment'          => 'overpayment',
+                        'late_checkout_charge' => 'other',
+                        'other'                => 'other',
+                    ];
+                    $cnGuestName = trim((string)($payment['customer_name'] ?? ''));
+                    if ($cnGuestName === '') {
+                        $cnGuestName = trim((string)($payment['booking_reference'] ?? '')) ?: 'Guest';
+                    }
+                    $cnBookingType = in_array($payment['booking_type'], ['room', 'conference', 'restaurant'], true)
+                        ? $payment['booking_type'] : 'goodwill';
+                    $cnHasEmail = !empty($payment['customer_email']) && filter_var($payment['customer_email'], FILTER_VALIDATE_EMAIL);
+
+                    $cnResult = issueCreditNote($pdo, [
+                        'amount'              => $refund_amount,
+                        'guest_name'          => $cnGuestName,
+                        'guest_email'         => $payment['customer_email'] ?? null,
+                        'booking_id'          => $payment['booking_id'],
+                        'booking_reference'   => $payment['booking_reference'],
+                        'booking_type'        => $cnBookingType,
+                        'reason'              => $cnReasonMap[$refund_reason] ?? 'other',
+                        'reason_notes'        => 'Store-credit refund ' . $refundRef . ($refund_notes !== '' ? ' — ' . $refund_notes : ''),
+                        'vat_rate'            => $vat_rate,
+                        'original_payment_id' => $payment_id,
+                        'issued_by'           => (int)($_SESSION['admin_user_id'] ?? 0),
+                        'generate_pdf'        => true,
+                        'send_email'          => $cnHasEmail,
+                    ]);
+
+                    if (!empty($cnResult['success'])) {
+                        $cnNumber = (string)($cnResult['credit_note_number'] ?? '');
+                        $message = 'Refund issued as store credit. Credit note ' . $cnNumber . ' created (Ref ' . $refundRef . ').';
+                        $refundEmailSent = $cnHasEmail; // credit-note email carries the redeemable number
+                        if (!$cnHasEmail) {
+                            $message .= ' No customer email on file — share the credit note number manually.';
+                        }
+                        // Stamp the credit note number onto the refund row for traceability.
+                        $pdo->prepare("UPDATE payments SET refund_notes = CONCAT(COALESCE(refund_notes, ''), ?) WHERE payment_reference = ?")
+                            ->execute([' [Credit note: ' . $cnNumber . ']', $refundRef]);
+                    } else {
+                        $message .= ' WARNING: the credit note could not be issued automatically — issue it manually from Credit Notes. (' . ($cnResult['error'] ?? 'unknown error') . ')';
+                        error_log('Store-credit CN issue failed for ' . $refundRef . ': ' . ($cnResult['error'] ?? 'unknown'));
+                    }
+                } catch (Throwable $cnEx) {
+                    $message .= ' WARNING: the credit note could not be issued automatically — issue it manually from Credit Notes.';
+                    error_log('Store-credit CN exception for ' . $refundRef . ': ' . $cnEx->getMessage());
                 }
-            } catch (Throwable $emailEx) {
-                $refundEmailNote = $emailEx->getMessage();
-                error_log('Refund notification email exception for ' . $refundRef . ': ' . $refundEmailNote);
-                $message .= ' (Note: refund saved, but the notification email could not be sent.)';
+            } else {
+                // Standard refund back to the original payment method — notify by email.
+                $message = 'Refund created successfully! Reference: ' . $refundRef;
+                try {
+                    require_once __DIR__ . '/../config/email.php';
+                    $rfEmailResult = sendRefundNotificationEmail(
+                        $payment,
+                        $refundRef,
+                        $refund_amount,
+                        $refund_reason
+                    );
+                    if (!empty($rfEmailResult['success'])) {
+                        $refundEmailSent = true;
+                        $message .= ' Refund notification emailed to customer.';
+                    } else {
+                        $refundEmailNote = $rfEmailResult['message'] ?? 'Email could not be sent.';
+                        error_log('Refund notification email failed for ' . $refundRef . ': ' . $refundEmailNote);
+                        $message .= ' (Note: refund saved, but the notification email was not sent — ' . $refundEmailNote . ')';
+                    }
+                } catch (Throwable $emailEx) {
+                    $refundEmailNote = $emailEx->getMessage();
+                    error_log('Refund notification email exception for ' . $refundRef . ': ' . $refundEmailNote);
+                    $message .= ' (Note: refund saved, but the notification email could not be sent.)';
+                }
             }
 
             // Log the action to admin_activity_log
@@ -288,6 +372,136 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $payment
     <link rel="stylesheet" href="css/admin-styles.css">
     <link rel="stylesheet" href="css/admin-components.css">
     <link rel="stylesheet" href="css/admin-finance.css">
+    <style>
+        /* ── Process Refund — scoped UI ─────────────────────────────── */
+        .refund-grid {
+            display: grid;
+            grid-template-columns: 1.1fr 1fr 1fr;
+            gap: 16px;
+        }
+        .refund-field { display: flex; flex-direction: column; gap: 6px; }
+        .refund-field > label {
+            font-size: 12px;
+            font-weight: 600;
+            color: var(--finance-ink, #2a2a2a);
+            letter-spacing: 0.01em;
+        }
+        .refund-field__hint { font-size: 11px; color: var(--finance-muted, #6b7280); line-height: 1.4; }
+        .refund-field select,
+        .refund-field textarea {
+            width: 100%;
+            border: 1px solid var(--finance-border, #d9d4ca);
+            border-radius: 8px;
+            padding: 9px 11px;
+            font-size: 13px;
+            font-family: inherit;
+            background: #fff;
+            color: var(--finance-ink, #2a2a2a);
+            transition: border-color .15s ease, box-shadow .15s ease;
+        }
+        .refund-field select:focus,
+        .refund-field textarea:focus,
+        .refund-amount:focus-within {
+            outline: none;
+            border-color: var(--finance-accent, #8a6d3b);
+            box-shadow: 0 0 0 3px rgba(138, 109, 59, 0.12);
+        }
+        /* currency-prefixed amount input */
+        .refund-amount {
+            display: flex;
+            align-items: stretch;
+            border: 1px solid var(--finance-border, #d9d4ca);
+            border-radius: 8px;
+            overflow: hidden;
+            background: #fff;
+            transition: border-color .15s ease, box-shadow .15s ease;
+        }
+        .refund-amount__symbol {
+            display: flex; align-items: center;
+            padding: 0 12px;
+            background: var(--finance-bg, #f6f3ee);
+            border-right: 1px solid var(--finance-border, #d9d4ca);
+            font-size: 13px; font-weight: 700; color: var(--finance-muted, #6b7280);
+            white-space: nowrap; flex-shrink: 0;
+        }
+        .refund-amount input {
+            flex: 1; min-width: 0;
+            border: 0; background: transparent;
+            padding: 10px 12px;
+            font-size: 15px; font-weight: 600;
+            color: var(--finance-ink, #2a2a2a);
+        }
+        .refund-amount input:focus { outline: none; }
+        .refund-amount.is-invalid { border-color: var(--finance-danger, #c0392b); box-shadow: 0 0 0 3px rgba(192,57,43,.12); }
+        /* quick-fill chips */
+        .refund-quickfill { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 2px; }
+        .refund-chip {
+            border: 1px solid var(--finance-border, #d9d4ca);
+            background: #fff;
+            color: var(--finance-ink, #2a2a2a);
+            border-radius: 999px;
+            padding: 4px 11px;
+            font-size: 11px; font-weight: 600;
+            cursor: pointer;
+            transition: background .12s ease, border-color .12s ease, color .12s ease;
+        }
+        .refund-chip:hover { background: var(--finance-bg, #f6f3ee); border-color: var(--finance-accent, #8a6d3b); }
+        .refund-chip:active { transform: translateY(1px); }
+        /* live summary */
+        .refund-summary { margin-top: 18px; }
+        .refund-summary__rows { padding: 6px 18px 14px; }
+        .refund-summary__row {
+            display: flex; align-items: baseline; justify-content: space-between;
+            gap: 12px;
+            padding: 9px 0;
+            border-bottom: 1px dashed var(--finance-border, #e6e1d8);
+            font-size: 13px;
+        }
+        .refund-summary__row:last-child { border-bottom: 0; }
+        .refund-summary__row span { color: var(--finance-muted, #6b7280); }
+        .refund-summary__row strong { font-weight: 600; color: var(--finance-ink, #2a2a2a); }
+        .refund-summary__row--total { margin-top: 4px; padding-top: 13px; border-top: 2px solid var(--finance-border, #d9d4ca); border-bottom: 0; }
+        .refund-summary__row--total span { font-weight: 600; color: var(--finance-ink, #2a2a2a); font-size: 14px; }
+        .refund-summary__row--total strong { font-size: 18px; color: var(--finance-danger, #c0392b); }
+        .refund-amount-warn {
+            display: none;
+            margin-top: 8px;
+            font-size: 12px; color: var(--finance-danger, #c0392b);
+        }
+        .refund-amount-warn.show { display: block; }
+        .refund-actions { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 22px; }
+        /* refund destination segmented toggle */
+        .refund-dest { margin-bottom: 18px; }
+        .refund-dest__label {
+            font-size: 12px; font-weight: 600; color: var(--finance-ink, #2a2a2a);
+            display: block; margin-bottom: 8px;
+        }
+        .refund-dest__options { display: flex; gap: 10px; flex-wrap: wrap; }
+        .refund-dest__opt {
+            flex: 1 1 240px;
+            display: flex; align-items: flex-start; gap: 10px;
+            border: 1px solid var(--finance-border, #d9d4ca);
+            border-radius: 10px;
+            padding: 12px 14px;
+            cursor: pointer;
+            background: #fff;
+            transition: border-color .15s ease, box-shadow .15s ease, background .15s ease;
+        }
+        .refund-dest__opt:hover { border-color: var(--finance-accent, #8a6d3b); }
+        .refund-dest__opt input { margin-top: 3px; accent-color: var(--finance-accent, #8a6d3b); }
+        .refund-dest__opt.is-selected {
+            border-color: var(--finance-accent, #8a6d3b);
+            background: var(--finance-bg, #f6f3ee);
+            box-shadow: 0 0 0 3px rgba(138, 109, 59, 0.10);
+        }
+        .refund-dest__opt-title { font-size: 13px; font-weight: 600; color: var(--finance-ink, #2a2a2a); }
+        .refund-dest__opt-desc { font-size: 11px; color: var(--finance-muted, #6b7280); line-height: 1.4; margin-top: 2px; }
+        .refund-field.is-disabled { opacity: .5; pointer-events: none; }
+        @media (max-width: 720px) {
+            .refund-grid { grid-template-columns: 1fr; }
+            .refund-actions .btn { flex: 1; justify-content: center; }
+        }
+    </style>
 </head>
 
 <body>
@@ -445,20 +659,46 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $payment
                             <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf_token, ENT_QUOTES, 'UTF-8'); ?>">
                             <input type="hidden" name="action" value="create_refund">
 
-                            <div class="filter-form">
-                                <div class="filter-group">
+                            <div class="refund-dest">
+                                <span class="refund-dest__label">Refund to *</span>
+                                <div class="refund-dest__options">
+                                    <label class="refund-dest__opt is-selected" id="refund_dest_original">
+                                        <input type="radio" name="refund_method" value="original" checked>
+                                        <span>
+                                            <span class="refund-dest__opt-title"><i class="fas fa-rotate-left"></i> Original payment method</span>
+                                            <span class="refund-dest__opt-desc">Return the money the way it was paid (<?php echo htmlspecialchars(ucfirst(str_replace('_', ' ', (string)$payment['payment_method']))); ?>).</span>
+                                        </span>
+                                    </label>
+                                    <label class="refund-dest__opt" id="refund_dest_credit">
+                                        <input type="radio" name="refund_method" value="store_credit">
+                                        <span>
+                                            <span class="refund-dest__opt-title"><i class="fas fa-wallet"></i> Store credit (credit note)</span>
+                                            <span class="refund-dest__opt-desc">Issue a credit note the guest can redeem on a future booking. Settled immediately.</span>
+                                        </span>
+                                    </label>
+                                </div>
+                            </div>
+
+                            <div class="refund-grid">
+                                <div class="refund-field">
                                     <label for="refund_amount">Refund Amount *</label>
-                                    <div style="display:flex;align-items:stretch;border:1px solid #ddd;border-radius:6px;overflow:hidden;background:#fff;">
-                                        <span style="display:flex;align-items:center;padding:0 10px;background:#f5f5f5;border-right:1px solid #ddd;font-size:12px;font-weight:700;color:#666;white-space:nowrap;flex-shrink:0;"><?php echo htmlspecialchars($currency_symbol); ?></span>
+                                    <div class="refund-amount" id="refund_amount_wrap">
+                                        <span class="refund-amount__symbol"><?php echo htmlspecialchars($currency_symbol); ?></span>
                                         <input type="number" id="refund_amount" name="refund_amount"
                                             step="0.01" min="0.01" max="<?php echo $maxRefundable; ?>"
                                             value="<?php echo $maxRefundable; ?>" required
-                                            style="flex:1;border:none;border-radius:0;padding:8px 10px;min-width:0;font-size:13px;background:transparent;">
+                                            inputmode="decimal" autocomplete="off">
                                     </div>
-                                    <small style="color: #666;">Maximum: <?php echo $currency_symbol; ?><?php echo number_format($maxRefundable, 2); ?></small>
+                                    <div class="refund-quickfill" aria-label="Quick fill refund amount">
+                                        <button type="button" class="refund-chip" data-fill="full">Full (<?php echo $currency_symbol . number_format($maxRefundable, 2); ?>)</button>
+                                        <button type="button" class="refund-chip" data-fill="half">50%</button>
+                                        <button type="button" class="refund-chip" data-fill="clear">Clear</button>
+                                    </div>
+                                    <div class="refund-amount-warn" id="refund_amount_warn"><i class="fas fa-triangle-exclamation"></i> Amount exceeds the refundable balance.</div>
+                                    <small class="refund-field__hint">Maximum refundable: <?php echo $currency_symbol; ?><?php echo number_format($maxRefundable, 2); ?></small>
                                 </div>
 
-                                <div class="filter-group">
+                                <div class="refund-field">
                                     <label for="refund_reason">Refund Reason *</label>
                                     <select id="refund_reason" name="refund_reason" required>
                                         <option value="">Select a reason</option>
@@ -469,9 +709,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $payment
                                         <option value="overpayment">Overpayment</option>
                                         <option value="other">Other</option>
                                     </select>
+                                    <small class="refund-field__hint">Shown on the customer's refund email.</small>
                                 </div>
 
-                                <div class="filter-group">
+                                <div class="refund-field" id="refund_status_field">
                                     <label for="refund_status">Refund Status *</label>
                                     <select id="refund_status" name="refund_status" required>
                                         <option value="pending">Pending</option>
@@ -480,45 +721,45 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $payment
                                         <option value="failed">Failed</option>
                                     </select>
                                     <?php if ($isMobileMoneyPayment): ?>
-                                        <small style="color: #666;">Mobile money refunds should remain pending or processing until provider settlement confirms completion.</small>
+                                        <small class="refund-field__hint">Mobile money refunds stay pending/processing until the provider confirms settlement.</small>
                                     <?php endif; ?>
                                 </div>
                             </div>
 
-                            <div class="filter-group" style="margin-top: 14px;">
+                            <div class="refund-field" style="margin-top: 16px;">
                                 <label for="refund_notes">Refund Notes</label>
                                 <textarea id="refund_notes" name="refund_notes" rows="3"
-                                    placeholder="Additional details about this refund..."></textarea>
+                                    placeholder="Internal notes about this refund (not shown to the customer)..."></textarea>
                             </div>
 
                             <!-- Refund Summary -->
-                            <div class="acct-panel" style="background: var(--finance-bg); margin-top: 18px;">
+                            <div class="acct-panel refund-summary" style="background: var(--finance-bg);">
                                 <div class="acct-panel__head">
                                     <h3 class="acct-panel__title" style="font-size: 14px;">Refund Summary</h3>
                                 </div>
-                                <div style="padding: 14px 18px; display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px; font-size: 13px;">
-                                    <div>
-                                        <span style="color: var(--finance-muted);">Refund Amount (excl. VAT):</span>
-                                        <div id="summary_excl_vat" style="font-weight: 600;"><?php echo $currency_symbol; ?>0.00</div>
+                                <div class="refund-summary__rows">
+                                    <div class="refund-summary__row">
+                                        <span>Refund amount (excl. VAT)</span>
+                                        <strong id="summary_excl_vat"><?php echo $currency_symbol; ?>0.00</strong>
                                     </div>
-                                    <div>
-                                        <span style="color: var(--finance-muted);">VAT Amount:</span>
-                                        <div id="summary_vat" style="font-weight: 600;"><?php echo $currency_symbol; ?>0.00</div>
+                                    <div class="refund-summary__row">
+                                        <span>VAT portion (pro-rated)</span>
+                                        <strong id="summary_vat"><?php echo $currency_symbol; ?>0.00</strong>
                                     </div>
-                                    <div>
-                                        <span style="color: var(--finance-muted);">Total Refund:</span>
-                                        <div id="summary_total" style="font-weight: 700; color: var(--finance-danger);"><?php echo $currency_symbol; ?>0.00</div>
+                                    <div class="refund-summary__row">
+                                        <span>Remaining refundable after this</span>
+                                        <strong id="summary_remaining"><?php echo $currency_symbol; ?><?php echo number_format($maxRefundable, 2); ?></strong>
                                     </div>
-                                    <div>
-                                        <span style="color: var(--finance-muted);">Remaining Balance:</span>
-                                        <div id="summary_remaining" style="font-weight: 600;"><?php echo $currency_symbol; ?><?php echo number_format($maxRefundable, 0); ?></div>
+                                    <div class="refund-summary__row refund-summary__row--total">
+                                        <span>Total refund</span>
+                                        <strong id="summary_total"><?php echo $currency_symbol; ?>0.00</strong>
                                     </div>
                                 </div>
                             </div>
 
-                            <div class="action-buttons" style="margin-top: 20px;">
-                                <button type="submit" class="btn btn-primary">
-                                    <i class="fas fa-check"></i> Process Refund
+                            <div class="refund-actions">
+                                <button type="submit" class="btn btn-primary" id="refund_submit_btn">
+                                    <i class="fas fa-rotate-left"></i> Process Refund
                                 </button>
                                 <a href="payments.php" class="btn btn-secondary">
                                     <i class="fas fa-times"></i> Cancel
@@ -542,39 +783,88 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $payment
         const vatRate = <?php echo $payment['vat_rate'] ?? 0; ?>;
         const currencySymbol = '<?php echo $currency_symbol; ?>';
 
+        const fmt = (n) => currencySymbol + Number(n).toLocaleString('en-US', {
+            minimumFractionDigits: 2,
+            maximumFractionDigits: 2
+        });
+
+        const refundEl = document.getElementById('refund_amount');
+        const wrapEl = document.getElementById('refund_amount_wrap');
+        const warnEl = document.getElementById('refund_amount_warn');
+        const submitBtn = document.getElementById('refund_submit_btn');
+
         function updateSummary() {
-            const refundEl = document.getElementById('refund_amount');
             if (!refundEl) return; // form not rendered (fully refunded)
             const refundAmount = parseFloat(refundEl.value) || 0;
 
-            // Calculate VAT portion (pro-rated)
+            // Calculate VAT portion (pro-rated out of the gross refund)
             const vatAmount = refundAmount * (vatRate / (100 + vatRate));
             const exclVat = refundAmount - vatAmount;
             const remaining = maxRefundable - refundAmount;
 
-            document.getElementById('summary_excl_vat').textContent = currencySymbol + Number(exclVat).toLocaleString('en-US', {
-                minimumFractionDigits: 2,
-                maximumFractionDigits: 2
-            });
-            document.getElementById('summary_vat').textContent = currencySymbol + Number(vatAmount).toLocaleString('en-US', {
-                minimumFractionDigits: 2,
-                maximumFractionDigits: 2
-            });
-            document.getElementById('summary_total').textContent = currencySymbol + Number(refundAmount).toLocaleString('en-US', {
-                minimumFractionDigits: 2,
-                maximumFractionDigits: 2
-            });
-            document.getElementById('summary_remaining').textContent = currencySymbol + Number(remaining).toLocaleString('en-US', {
-                minimumFractionDigits: 2,
-                maximumFractionDigits: 2
-            });
+            document.getElementById('summary_excl_vat').textContent = fmt(exclVat);
+            document.getElementById('summary_vat').textContent = fmt(vatAmount);
+            document.getElementById('summary_total').textContent = fmt(refundAmount);
+            document.getElementById('summary_remaining').textContent = fmt(Math.max(0, remaining));
+
+            // Validation feedback: block over-refund and zero/negative amounts
+            const overLimit = refundAmount > maxRefundable + 0.001;
+            const invalid = overLimit || refundAmount <= 0;
+            if (wrapEl) wrapEl.classList.toggle('is-invalid', invalid);
+            if (warnEl) warnEl.classList.toggle('show', overLimit);
+            if (submitBtn) {
+                submitBtn.disabled = invalid;
+                submitBtn.style.opacity = invalid ? '0.55' : '';
+                submitBtn.style.pointerEvents = invalid ? 'none' : '';
+            }
         }
 
-        const refundEl = document.getElementById('refund_amount');
+        function setAmount(val) {
+            if (!refundEl) return;
+            refundEl.value = (Math.round(val * 100) / 100).toFixed(2);
+            updateSummary();
+            refundEl.focus();
+        }
+
+        document.querySelectorAll('.refund-chip').forEach((chip) => {
+            chip.addEventListener('click', () => {
+                const mode = chip.getAttribute('data-fill');
+                if (mode === 'full') setAmount(maxRefundable);
+                else if (mode === 'half') setAmount(maxRefundable / 2);
+                else if (mode === 'clear') setAmount(0);
+            });
+        });
+
         if (refundEl) {
             refundEl.addEventListener('input', updateSummary);
             updateSummary();
         }
+
+        // ── Refund destination (original method vs store credit) ──────
+        const destRadios = document.querySelectorAll('input[name="refund_method"]');
+        const statusField = document.getElementById('refund_status_field');
+        const statusSelect = document.getElementById('refund_status');
+
+        function syncRefundDestination() {
+            const selected = document.querySelector('input[name="refund_method"]:checked');
+            const mode = selected ? selected.value : 'original';
+
+            document.querySelectorAll('.refund-dest__opt').forEach((opt) => {
+                const r = opt.querySelector('input[type="radio"]');
+                opt.classList.toggle('is-selected', !!(r && r.checked));
+            });
+
+            const isCredit = mode === 'store_credit';
+            // Store credit settles immediately, so the status field is not applicable.
+            if (statusField) statusField.classList.toggle('is-disabled', isCredit);
+            if (statusSelect) {
+                statusSelect.disabled = isCredit; // disabled fields are not POSTed; server forces 'completed'
+                if (isCredit) statusSelect.value = 'completed';
+            }
+        }
+
+        destRadios.forEach((r) => r.addEventListener('change', syncRefundDestination));
+        syncRefundDestination();
     </script>
 </body>
 
