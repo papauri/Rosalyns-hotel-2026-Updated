@@ -36,6 +36,7 @@ $booking_template_defs_master = [
     'event_quotation_document' => 'Event Quotation PDF',
     'credit_note' => 'Credit Note Email',
     'credit_note_document' => 'Credit Note PDF',
+    'refund_notification' => 'Refund Notification Email',
     'payment_receipt' => 'Payment Receipt Email',
     'payment_receipt_document' => 'Payment Receipt PDF',
 ];
@@ -69,6 +70,7 @@ $booking_template_short_names = [
     'event_quotation_document' => 'Event Quote PDF',
     'credit_note' => 'Credit Note Email',
     'credit_note_document' => 'Credit Note PDF',
+    'refund_notification' => 'Refund Email',
     'payment_receipt' => 'Receipt Email',
     'payment_receipt_document' => 'Receipt PDF',
 ];
@@ -323,6 +325,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['booking_email_templat
             '{{reason}}'                   => 'Overpayment adjustment',
             '{{reason_notes}}'             => 'Issued after reservation amount was corrected.',
             '{{expires_at}}'               => date('F j, Y', strtotime('+90 days')),
+            '{{refund_reference}}'         => 'REF-2026-000042',
+            '{{refund_amount_formatted}}'  => number_format(1200, 2),
+            '{{refund_reason_display}}'    => 'Early Check-Out',
+            '{{refund_date_formatted}}'    => date('F j, Y'),
+            '{{booking_type_label}}'       => 'Room',
             '{{address}}'                  => $ajaxAddress,
             '{{hotel_phone}}'              => (string)getSetting('phone_main', ''),
             '{{hotel_address}}'            => $ajaxAddress,

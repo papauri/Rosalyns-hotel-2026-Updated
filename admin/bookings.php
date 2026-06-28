@@ -105,8 +105,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     $email_result = sendBookingCancelledEmail($booking, $cancellation_reason);
                     break;
                 case 'booking_reminder':
+                    // Reminder emails are only valid for active bookings. A no-show
+                    // (or any closed status) is explicitly excluded here so it can
+                    // never receive a late/overdue alert — no-show takes precedence
+                    // over any time-based checkout logic. sendBookingReminderEmail()
+                    // enforces the same rule again as defence-in-depth.
                     if (!in_array($booking['status'], ['confirmed', 'pending', 'checked-in'], true)) {
-                        throw new Exception('Reminder emails are only for active bookings');
+                        throw new Exception('Reminder emails are only for active bookings (no-show, cancelled and closed bookings are excluded).');
                     }
                     $email_result = sendBookingReminderEmail($booking);
                     break;
@@ -410,11 +415,21 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 }
             }
 
+            // Housekeeping / room-status gate with a clear, actionable reason so
+            // staff know WHY the room is blocked and HOW to free it (rooms with a
+            // pending checkout cleanup must not be assignable until it is done).
+            $hkBlock = getRoomHousekeepingAssignmentBlock($individual_room_id);
+            if ($hkBlock && !empty($hkBlock['blocked'])) {
+                header('Content-Type: application/json');
+                echo json_encode(['success' => false, 'message' => $hkBlock['message']]);
+                exit;
+            }
+
             $assigned = assignIndividualRoomToBooking($booking_id, $individual_room_id, $allowChildPolicyOverride, $childPolicyOverrideNote, $user['id'] ?? null);
 
             if (!$assigned) {
                 header('Content-Type: application/json');
-                echo json_encode(['success' => false, 'message' => 'Selected room is not available for the booking dates']);
+                echo json_encode(['success' => false, 'message' => 'Selected room could not be assigned — it is unavailable for the booking dates (it may overlap another reservation, a maintenance block, or a housekeeping task). Check the room timeline and try again.']);
                 exit;
             }
 
@@ -3050,6 +3065,11 @@ try {
         ? "b.check_out_date <= CURDATE()"
         : "b.check_out_date < CURDATE()";
 
+    // Only genuinely checked-in guests can be overdue on checkout. The
+    // status = 'checked-in' gate inherently excludes no-show, cancelled and
+    // confirmed-but-never-arrived bookings — those are surfaced as missed
+    // check-ins above, never as late checkouts. No-show takes precedence over
+    // any time-based checkout logic.
     $overdue_stmt = $pdo->query("
         SELECT b.*, r.name as room_name,
                ir.room_number as individual_room_number,

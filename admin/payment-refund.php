@@ -227,6 +227,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $payment
             $message = 'Refund created successfully! Reference: ' . $refundRef;
 
             // Send refund notification email to guest — failure must NOT block the response
+            $refundEmailSent = false;
+            $refundEmailNote = '';
             try {
                 require_once __DIR__ . '/../config/email.php';
                 $rfEmailResult = sendRefundNotificationEmail(
@@ -235,13 +237,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $payment
                     $refund_amount,
                     $refund_reason
                 );
-                if ($rfEmailResult['success']) {
+                if (!empty($rfEmailResult['success'])) {
+                    $refundEmailSent = true;
                     $message .= ' Refund notification emailed to customer.';
                 } else {
-                    error_log('Refund notification email failed for ' . $refundRef . ': ' . $rfEmailResult['message']);
+                    $refundEmailNote = $rfEmailResult['message'] ?? 'Email could not be sent.';
+                    error_log('Refund notification email failed for ' . $refundRef . ': ' . $refundEmailNote);
+                    $message .= ' (Note: refund saved, but the notification email was not sent — ' . $refundEmailNote . ')';
                 }
             } catch (Throwable $emailEx) {
-                error_log('Refund notification email exception for ' . $refundRef . ': ' . $emailEx->getMessage());
+                $refundEmailNote = $emailEx->getMessage();
+                error_log('Refund notification email exception for ' . $refundRef . ': ' . $refundEmailNote);
+                $message .= ' (Note: refund saved, but the notification email could not be sent.)';
             }
 
             // Log the action to admin_activity_log
@@ -292,7 +299,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $payment
             <div class="acct-page-header__copy">
                 <h1 class="acct-page-header__title">Process Refund</h1>
                 <p class="acct-page-header__subtitle">
-                    Issue a partial or full refund against an existing payment. Updates booking balances &amp; generates a credit note.
+                    Issue a partial or full refund against an existing payment. Updates booking balances &amp; emails the customer a refund confirmation.
                 </p>
             </div>
             <div style="display:flex; gap:8px; flex-wrap:wrap;">
@@ -314,9 +321,29 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $payment
         <?php endif; ?>
 
         <?php if ($message): ?>
-            <div class="acct-error" style="background: var(--finance-success-bg); border-color: var(--finance-success-border); color: var(--finance-success);">
-                <i class="fas fa-check-circle"></i> <?php echo htmlspecialchars($message); ?>
-                <a href="payments.php" class="acct-link" style="margin-left: 12px;">Return to Payments →</a>
+            <div class="acct-panel refund-success" style="margin-top: 4px;">
+                <div style="padding: 24px 22px; text-align: center;">
+                    <div class="refund-success__icon" style="font-size: 2.4rem; color: var(--finance-success, #1e7e4f); margin-bottom: 10px;">
+                        <i class="fas fa-circle-check"></i>
+                    </div>
+                    <h2 style="margin: 0 0 6px; font-size: 1.15rem; color: var(--finance-ink, #2a2a2a);">Refund processed</h2>
+                    <p style="margin: 0 0 14px; color: var(--finance-muted, #6b6b6b); font-size: 0.92rem; max-width: 520px; margin-left: auto; margin-right: auto;">
+                        <?php echo htmlspecialchars($message); ?>
+                    </p>
+                    <div style="margin-bottom: 18px;">
+                        <?php if (!empty($refundEmailSent)): ?>
+                            <span class="acct-pill acct-pill--completed"><i class="fas fa-envelope-circle-check"></i> Customer notified by email</span>
+                        <?php else: ?>
+                            <span class="acct-pill acct-pill--pending"><i class="fas fa-envelope"></i> Email not sent — notify the customer manually</span>
+                        <?php endif; ?>
+                    </div>
+                    <div style="display:flex; gap:10px; justify-content:center; flex-wrap:wrap;">
+                        <a href="payments.php" class="btn btn-primary"><i class="fas fa-arrow-left"></i> Return to Payments</a>
+                        <?php if (!empty($payment['id'])): ?>
+                            <a href="payment-details.php?id=<?php echo (int)$payment['id']; ?>" class="btn btn-secondary"><i class="fas fa-eye"></i> View Original Payment</a>
+                        <?php endif; ?>
+                    </div>
+                </div>
             </div>
         <?php endif; ?>
 

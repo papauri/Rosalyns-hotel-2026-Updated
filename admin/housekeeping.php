@@ -169,9 +169,12 @@ function getOccupiedRooms(PDO $pdo): array
 function getCheckoutCleanupRooms(PDO $pdo): array
 {
     $hasAssignmentType = housekeepingColumnExists($pdo, 'assignment_type');
-    $hasLinkedBookingId = housekeepingColumnExists($pdo, 'linked_booking_id');
 
-    // Build the NOT EXISTS clause conditionally based on available columns
+    // A room needs at most ONE checkout cleanup regardless of how many past
+    // bookings it has. We deliberately do NOT match on linked_booking_id here:
+    // if the room already has any checkout cleanup (open OR already done), it is
+    // excluded — this is what prevents the same room being listed/created twice
+    // when it has more than one qualifying past booking.
     $notExistsConditions = [
         "ha.individual_room_id = ir.id",
         "ha.status IN ('pending', 'in_progress', 'completed', 'verified')"
@@ -180,14 +183,14 @@ function getCheckoutCleanupRooms(PDO $pdo): array
     if ($hasAssignmentType) {
         $notExistsConditions[] = "ha.assignment_type = 'checkout_cleanup'";
     }
-    if ($hasLinkedBookingId) {
-        $notExistsConditions[] = "ha.linked_booking_id = b.id";
-    }
 
     $notExistsClause = implode(' AND ', $notExistsConditions);
 
+    // Collapse to exactly one row per room by selecting only the most recent
+    // qualifying booking for that room (latest checkout, then latest id). Without
+    // this, a room with two past bookings produced two rows -> two cleanups.
     $sql = "
-        SELECT DISTINCT
+        SELECT
             ir.id,
             ir.room_number,
             ir.room_name,
@@ -199,6 +202,15 @@ function getCheckoutCleanupRooms(PDO $pdo): array
         WHERE b.status IN ('checked-out', 'checked-in')
           AND b.check_out_date <= CURDATE()
           AND ir.is_active = 1
+          AND b.id = (
+              SELECT b2.id
+              FROM bookings b2
+              WHERE b2.individual_room_id = ir.id
+                AND b2.status IN ('checked-out', 'checked-in')
+                AND b2.check_out_date <= CURDATE()
+              ORDER BY b2.check_out_date DESC, b2.id DESC
+              LIMIT 1
+          )
           AND NOT EXISTS (
               SELECT 1 FROM housekeeping_assignments ha
               WHERE {$notExistsClause}
@@ -260,7 +272,10 @@ function autoCreateCheckoutCleanup(PDO $pdo, int $performedBy): int
     $created = 0;
 
     foreach ($checkoutRooms as $room) {
-        // Check if assignment already exists
+        // Guard against duplicates PER ROOM (not per booking). A room must never
+        // hold two open checkout cleanups — that previously left the room stuck
+        // in 'cleaning' after completing one, because the phantom second one kept
+        // it blocked. linked_booking_id is intentionally excluded from this check.
         $checkConditions = [
             "individual_room_id = ?",
             "status IN ('pending', 'in_progress')"
@@ -269,10 +284,6 @@ function autoCreateCheckoutCleanup(PDO $pdo, int $performedBy): int
 
         if ($hasAssignmentType) {
             $checkConditions[] = "assignment_type = 'checkout_cleanup'";
-        }
-        if ($hasLinkedBookingId) {
-            $checkConditions[] = "linked_booking_id = ?";
-            $checkParams[] = $room['booking_id'];
         }
 
         $checkSql = "SELECT id FROM housekeeping_assignments WHERE " . implode(' AND ', $checkConditions);

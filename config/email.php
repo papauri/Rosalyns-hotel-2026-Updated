@@ -1672,6 +1672,27 @@ function ensureBookingEmailTemplateDefaults()
             'subject' => 'Credit Note Document',
             'html'    => hotel_default_credit_note_document_html(),
         ],
+        /* ── Refund notification ─────────────────────────────────── */
+        'refund_notification' => [
+            'name'    => 'Refund Notification Email',
+            'subject' => 'Refund Issued — {{site_name}} · {{refund_reference}}',
+            'html'    => hotel_premium_email_html(
+                'A refund of {{currency_symbol}} {{refund_amount_formatted}} has been issued — {{refund_reference}}',
+                hotel_premium_email_body(
+                    '{{guest_name}}',
+                    '<p style="margin:0 0 16px;">We are writing to confirm that a refund has been issued on your account with <strong>{{site_name}}</strong>.</p>'
+                        . '<p style="margin:0 0 16px;">The refund will be processed through your original payment method. Please allow 3&ndash;5 business days for the funds to appear in your account.</p>'
+                        . '<p style="margin:0;">If you have any questions about this refund, please contact us at <a href="mailto:{{contact_email}}" style="color:#524b3f;">{{contact_email}}</a>.</p>'
+                )
+                    . hotel_premium_email_summary_rows('Refund Details', [
+                        ['Refund Reference',  '{{refund_reference}}'],
+                        ['Booking Reference', '{{booking_reference}}'],
+                        ['Reason',            '{{refund_reason_display}}'],
+                        ['Date Issued',       '{{refund_date_formatted}}'],
+                        ['Refund Amount',     '{{currency_symbol}} {{refund_amount_formatted}}', true],
+                    ])
+            ),
+        ],
         /* ── Receipt ─────────────────────────────────────────────── */
         'payment_receipt' => [
             'name'    => 'Payment Receipt Email',
@@ -3431,7 +3452,20 @@ function generateWhatsAppLink(array $booking, array $room)
 }
 
 /**
- * Send check-in reminder email for late check-in or overdue bookings
+ * Send a booking reminder email.
+ *
+ * This single email serves two DISTINCT conditions and must never conflate them:
+ *   1. Missed / upcoming check-in (a potential no-show) — driven by check_in_date.
+ *   2. Overdue checkout (guest has arrived but not departed) — driven by check_out_date.
+ *
+ * Precedence rules (highest first):
+ *   - A no-show / cancelled / checked-out / completed / expired booking NEVER
+ *     receives a reminder. No-show status supersedes all time-based logic.
+ *   - A booking that has NOT been checked in is always treated as a potential
+ *     no-show (check-in reminder) — even if its checkout date has also elapsed.
+ *     It is NEVER framed as a late checkout.
+ *   - Only a genuinely checked-in booking past its checkout date is treated as
+ *     an overdue checkout.
  */
 function sendBookingReminderEmail(array $booking): array
 {
@@ -3446,17 +3480,52 @@ function sendBookingReminderEmail(array $booking): array
             throw new Exception('Room not found');
         }
 
-        $checkInDate = $booking['check_in_date'] ?? '';
-        $today       = date('Y-m-d');
-        $daysOverdue = $checkInDate ? (int)((strtotime($today) - strtotime($checkInDate)) / 86400) : 0;
+        $status = (string)($booking['status'] ?? '');
 
-        $urgencyLine = '';
-        if ($daysOverdue > 0) {
-            $urgencyLine = '<p style="margin:0 0 16px;color:#b0552b;font-weight:600;">Your check-in date was ' . $daysOverdue . ' day' . ($daysOverdue === 1 ? '' : 's') . ' ago. Please contact us to confirm your arrival or to reschedule.</p>';
-        } elseif ($daysOverdue === 0) {
-            $urgencyLine = '<p style="margin:0 0 16px;color:#7a5c2e;font-weight:600;">Your check-in is today. We are expecting you and your room is ready.</p>';
+        // ── PRECEDENCE GUARD ───────────────────────────────────────────────
+        // A no-show (or otherwise closed) booking must NEVER generate a
+        // late/overdue reminder. This is enforced here, independent of the
+        // caller, so the rule holds no matter which code path invokes it.
+        $blockedStatuses = ['no-show', 'cancelled', 'checked-out', 'completed', 'expired'];
+        if (in_array($status, $blockedStatuses, true)) {
+            throw new Exception('Reminder emails cannot be sent for ' . ($status !== '' ? $status : 'closed') . ' bookings.');
+        }
+
+        $today        = new DateTime('today');
+        $checkInDate  = (string)($booking['check_in_date'] ?? '');
+        $checkOutDate = (string)($booking['check_out_date'] ?? '');
+        $checkInObj   = $checkInDate  !== '' ? (new DateTime($checkInDate))->setTime(0, 0, 0)  : null;
+        $checkOutObj  = $checkOutDate !== '' ? (new DateTime($checkOutDate))->setTime(0, 0, 0) : null;
+
+        $hasCheckedIn   = ($status === 'checked-in');
+        $checkInPassed  = $checkInObj  ? ($checkInObj  < $today) : false;
+        $checkOutPassed = $checkOutObj ? ($checkOutObj < $today) : false;
+
+        if ($hasCheckedIn && $checkOutPassed) {
+            // ── OVERDUE CHECKOUT ── guest arrived but has not departed.
+            $daysOverdue = (int)$checkOutObj->diff($today)->days;
+            $urgencyLine = '<p style="margin:0 0 16px;color:#b0552b;font-weight:600;">'
+                . 'Your checkout date was ' . $daysOverdue . ' day' . ($daysOverdue === 1 ? '' : 's')
+                . ' ago. Please contact reception to complete your checkout or to extend your stay.</p>';
+            $referenceLabel = 'Checkout';
+            $referenceDate  = $checkOutDate;
         } else {
-            $urgencyLine = '<p style="margin:0 0 16px;">Your upcoming stay at <strong>{{site_name}}</strong> is approaching. We wanted to remind you of your reservation details.</p>';
+            // ── MISSED / UPCOMING CHECK-IN (potential no-show) ──
+            // Any not-yet-checked-in booking lands here, including ones whose
+            // checkout date has also elapsed — it is a no-show candidate, not a
+            // late checkout.
+            $daysOverdue = $checkInPassed ? (int)$checkInObj->diff($today)->days : 0;
+            if ($checkInPassed) {
+                $urgencyLine = '<p style="margin:0 0 16px;color:#b0552b;font-weight:600;">'
+                    . 'Your check-in date was ' . $daysOverdue . ' day' . ($daysOverdue === 1 ? '' : 's')
+                    . ' ago. Please contact us to confirm your arrival or to reschedule.</p>';
+            } elseif ($checkInObj && $checkInObj == $today) {
+                $urgencyLine = '<p style="margin:0 0 16px;color:#7a5c2e;font-weight:600;">Your check-in is today. We are expecting you and your room is ready.</p>';
+            } else {
+                $urgencyLine = '<p style="margin:0 0 16px;">Your upcoming stay at <strong>{{site_name}}</strong> is approaching. We wanted to remind you of your reservation details.</p>';
+            }
+            $referenceLabel = 'Check-in';
+            $referenceDate  = $checkInDate;
         }
 
         $templateVars = buildBookingEmailVariables($booking, $room, [
@@ -3480,7 +3549,7 @@ function sendBookingReminderEmail(array $booking): array
             . $urgencyLine
             . '<p>Booking Reference: <strong>' . htmlspecialchars($booking['booking_reference']) . '</strong></p>'
             . '<p>Room: ' . htmlspecialchars($room['name']) . '</p>'
-            . '<p>Check-in: ' . htmlspecialchars($checkInDate) . '</p>'
+            . '<p>' . htmlspecialchars($referenceLabel) . ': ' . htmlspecialchars($referenceDate) . '</p>'
             . '<p>Please contact us if you have any questions.</p>';
         return sendEmail($booking['guest_email'], $booking['guest_name'], $subject, $htmlBody);
     } catch (Exception $e) {
@@ -5800,18 +5869,19 @@ function sendRefundNotificationEmail(array $payment, string $refundRef, float $r
 
     try {
         $currencySymbol = getSetting('currency_symbol', 'K');
+        $bookingType    = (string)($payment['booking_type'] ?? '');
 
         // Resolve guest name and email depending on booking type
         $guestName  = '';
         $guestEmail = '';
 
-        if ($payment['booking_type'] === 'room') {
+        if ($bookingType === 'room') {
             $bStmt = $pdo->prepare("SELECT guest_name, guest_email FROM bookings WHERE id = ? LIMIT 1");
             $bStmt->execute([$payment['booking_id']]);
             $bRow = $bStmt->fetch(PDO::FETCH_ASSOC);
             $guestName  = $bRow['guest_name']  ?? '';
             $guestEmail = $bRow['guest_email'] ?? '';
-        } elseif ($payment['booking_type'] === 'conference') {
+        } elseif ($bookingType === 'conference') {
             // Use the customer_name / customer_email if already joined, else re-query
             $guestName  = $payment['customer_name']  ?? '';
             $guestEmail = $payment['customer_email'] ?? '';
@@ -5829,6 +5899,20 @@ function sendRefundNotificationEmail(array $payment, string $refundRef, float $r
                 $guestName  = $cfRow['cname']  ?? '';
                 $guestEmail = $cfRow['cemail'] ?? '';
             }
+        } elseif ($bookingType === 'restaurant') {
+            $guestName  = $payment['customer_name']  ?? '';
+            $guestEmail = $payment['customer_email'] ?? '';
+            if (empty($guestEmail)) {
+                try {
+                    $soStmt = $pdo->prepare("SELECT customer_name, customer_email FROM stock_orders WHERE id = ? LIMIT 1");
+                    $soStmt->execute([$payment['booking_id']]);
+                    $soRow = $soStmt->fetch(PDO::FETCH_ASSOC);
+                    $guestName  = $soRow['customer_name']  ?? '';
+                    $guestEmail = $soRow['customer_email'] ?? '';
+                } catch (\Throwable $soEx) {
+                    error_log('sendRefundNotificationEmail restaurant lookup: ' . $soEx->getMessage());
+                }
+            }
         }
 
         if (empty($guestEmail) || !filter_var($guestEmail, FILTER_VALIDATE_EMAIL)) {
@@ -5844,57 +5928,71 @@ function sendRefundNotificationEmail(array $payment, string $refundRef, float $r
             'other'                 => 'Other',
         ];
         $reasonDisplay = $reasonLabels[$refundReason] ?? ucwords(str_replace('_', ' ', $refundReason));
+        $bookingRef    = (string)($payment['booking_reference'] ?? '');
 
-        $bookingRef = htmlspecialchars($payment['booking_reference'] ?? '');
-        $siteName   = htmlspecialchars($email_site_name);
+        // Build the standard premium-shell variables (logo, site name, address,
+        // contact details, currency) plus the refund-specific placeholders so the
+        // editable DB template renders with the same UI/UX as every other email.
+        $shellBooking = [
+            'guest_name'        => $guestName,
+            'guest_email'       => $guestEmail,
+            'booking_reference' => $bookingRef,
+        ];
+        $vars = buildBookingEmailVariables($shellBooking, null, [
+            'refund_reference'        => $refundRef,
+            'refund_amount_formatted' => number_format($refundAmount, 2),
+            'refund_reason_display'   => $reasonDisplay,
+            'refund_date_formatted'   => date('F j, Y'),
+            'booking_reference'       => $bookingRef !== '' ? $bookingRef : '—',
+            'booking_type_label'      => ucfirst($bookingType),
+        ]);
 
-        $htmlBody = '
-        <h1 style="color: #8B7355; text-align: center;">Refund Notification</h1>
-        <p>Dear ' . htmlspecialchars($guestName) . ',</p>
-        <p>We are writing to confirm that a refund has been issued on your account with <strong>' . $siteName . '</strong>.</p>
+        // Preferred path: render the admin-editable template from the DB.
+        $dbTemplate = renderBookingEmailTemplate('refund_notification', $vars);
+        if ($dbTemplate) {
+            return sendEmail(
+                $guestEmail,
+                $guestName,
+                $dbTemplate['subject'],
+                $dbTemplate['html_body'],
+                $dbTemplate['text_body'] ?? ''
+            );
+        }
 
-        <div style="background: #FAF6F0; border: 2px solid #C8A45A; padding: 20px; margin: 20px 0; border-radius: 10px;">
-            <h2 style="color: #8B7355; margin-top: 0; text-align:left;">Refund Details</h2>
-
-            <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="margin:0;">
-                <tr><td style="padding:10px 10px 10px 0;font-weight:bold;color:#1A1A1A;width:44%;vertical-align:top;font-family:\'Segoe UI\',Tahoma,Verdana,sans-serif;border-bottom:1px solid #e8e0d4;">Refund Reference:</td>
-                    <td style="padding:10px 0 10px 6px;color:#8B7355;font-weight:bold;font-size:16px;text-align:left;vertical-align:top;font-family:\'Segoe UI\',Tahoma,Verdana,sans-serif;border-bottom:1px solid #e8e0d4;">' . htmlspecialchars($refundRef) . '</td></tr>
-            </table>
-            ' . ($bookingRef !== '' ? '
-            <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="margin:0;">
-                <tr><td style="padding:10px 10px 10px 0;font-weight:bold;color:#1A1A1A;width:44%;vertical-align:top;font-family:\'Segoe UI\',Tahoma,Verdana,sans-serif;border-bottom:1px solid #e8e0d4;">Booking Reference:</td>
-                    <td style="padding:10px 0 10px 6px;color:#333;text-align:left;vertical-align:top;font-family:\'Segoe UI\',Tahoma,Verdana,sans-serif;border-bottom:1px solid #e8e0d4;">' . $bookingRef . '</td></tr>
-            </table>' : '') . '
-            <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="margin:0;">
-                <tr><td style="padding:10px 10px 10px 0;font-weight:bold;color:#1A1A1A;width:44%;vertical-align:top;font-family:\'Segoe UI\',Tahoma,Verdana,sans-serif;border-bottom:1px solid #e8e0d4;">Refund Amount:</td>
-                    <td style="padding:10px 0 10px 6px;color:#8B7355;font-weight:bold;font-size:18px;text-align:left;vertical-align:top;font-family:\'Segoe UI\',Tahoma,Verdana,sans-serif;border-bottom:1px solid #e8e0d4;">' . htmlspecialchars($currencySymbol) . ' ' . number_format($refundAmount, 2) . '</td></tr>
-            </table>
-            <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="margin:0;">
-                <tr><td style="padding:10px 10px 10px 0;font-weight:bold;color:#1A1A1A;width:44%;vertical-align:top;font-family:\'Segoe UI\',Tahoma,Verdana,sans-serif;border-bottom:1px solid #e8e0d4;">Reason:</td>
-                    <td style="padding:10px 0 10px 6px;color:#333;text-align:left;vertical-align:top;font-family:\'Segoe UI\',Tahoma,Verdana,sans-serif;border-bottom:1px solid #e8e0d4;">' . htmlspecialchars($reasonDisplay) . '</td></tr>
-            </table>
-            <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="margin:0;">
-                <tr><td style="padding:10px 10px 10px 0;font-weight:bold;color:#1A1A1A;width:44%;vertical-align:top;font-family:\'Segoe UI\',Tahoma,Verdana,sans-serif;">Date Issued:</td>
-                    <td style="padding:10px 0 10px 6px;color:#333;text-align:left;vertical-align:top;font-family:\'Segoe UI\',Tahoma,Verdana,sans-serif;">' . date('F j, Y') . '</td></tr>
-            </table>
-        </div>
-
-        <div style="background: #d4edda; padding: 15px; border-left: 4px solid #28a745; border-radius: 5px; margin: 20px 0;">
-            <p style="color: #155724; margin: 0;">
-                The refund will be processed through your original payment method. Please allow 3–5 business days for the funds to appear in your account.
-            </p>
-        </div>
-
-        <p>If you have any questions about this refund, please contact us at <a href="mailto:' . htmlspecialchars($email_from_email) . '">' . htmlspecialchars($email_from_email) . '</a>.</p>
-        <p style="margin:28px 0 0;font-size:14px;color:#777;text-align:center;font-style:italic;">
-            Warm regards &mdash; ' . $siteName . '
-        </p>';
+        // Fallback: premium-wrapped HTML built in code (same shell as the template)
+        // used only when the DB template is missing or deactivated.
+        $siteName = htmlspecialchars($email_site_name);
+        $summaryRows = [
+            ['Refund Reference',  htmlspecialchars($refundRef)],
+            ['Booking Reference', $bookingRef !== '' ? htmlspecialchars($bookingRef) : '—'],
+            ['Reason',            htmlspecialchars($reasonDisplay)],
+            ['Date Issued',       date('F j, Y')],
+            ['Refund Amount',     htmlspecialchars($currencySymbol) . ' ' . number_format($refundAmount, 2), true],
+        ];
+        $innerHtml = hotel_premium_email_body(
+            htmlspecialchars($guestName),
+            '<p style="margin:0 0 16px;">We are writing to confirm that a refund has been issued on your account with <strong>' . $siteName . '</strong>.</p>'
+                . '<p style="margin:0 0 16px;">The refund will be processed through your original payment method. Please allow 3&ndash;5 business days for the funds to appear in your account.</p>'
+                . '<p style="margin:0;">If you have any questions about this refund, please contact us at <a href="mailto:' . htmlspecialchars($email_from_email) . '" style="color:#524b3f;">' . htmlspecialchars($email_from_email) . '</a>.</p>'
+        )
+            . hotel_premium_email_summary_rows('Refund Details', $summaryRows);
+        $shellHtml = hotel_premium_email_html(
+            'A refund of ' . htmlspecialchars($currencySymbol) . ' ' . number_format($refundAmount, 2) . ' has been issued — ' . htmlspecialchars($refundRef),
+            $innerHtml,
+            '{{guest_email}}'
+        );
+        // Resolve the {{...}} placeholders left in the shell (logo, site name, address, etc.)
+        $replace = [];
+        foreach ($vars as $k => $v) {
+            $replace['{{' . $k . '}}'] = (string)$v;
+        }
+        $shellHtml = strtr($shellHtml, $replace);
 
         return sendEmail(
             $guestEmail,
             $guestName,
-            'Refund Issued - ' . $siteName . ($bookingRef !== '' ? ' [' . $payment['booking_reference'] . ']' : ''),
-            $htmlBody
+            'Refund Issued — ' . $email_site_name . ($bookingRef !== '' ? ' [' . $bookingRef . ']' : ''),
+            $shellHtml
         );
     } catch (Exception $e) {
         error_log('sendRefundNotificationEmail Error: ' . $e->getMessage());

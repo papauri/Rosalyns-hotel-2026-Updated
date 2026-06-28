@@ -4797,6 +4797,74 @@ function isIndividualRoomAvailable(int $individualRoomId, string $checkIn, strin
 }
 
 /**
+ * Explain whether an individual room is blocked from being assigned to a guest
+ * because of housekeeping (a pending/in-progress cleanup) or because the room is
+ * in a non-bookable physical state (cleaning / maintenance / out of order).
+ *
+ * This powers the admin-facing assignment messaging: it tells staff exactly WHY
+ * a room cannot be assigned and HOW to free it. A room is only assignable once
+ * its checkout cleanup is completed (which returns it to 'available').
+ *
+ * @return array{blocked:bool, reason:string, message:string}|null
+ *         null  => no housekeeping/status block (room is free to assign)
+ */
+function getRoomHousekeepingAssignmentBlock(int $individualRoomId): ?array
+{
+    global $pdo;
+
+    try {
+        $stmt = $pdo->prepare("SELECT room_number, room_name, status, housekeeping_status FROM individual_rooms WHERE id = ?");
+        $stmt->execute([$individualRoomId]);
+        $room = $stmt->fetch(PDO::FETCH_ASSOC);
+        if (!$room) {
+            return null; // let the caller's existing not-found handling deal with it
+        }
+
+        $label = trim((string)($room['room_number'] ?? '')) !== ''
+            ? 'Room ' . $room['room_number']
+            : (trim((string)($room['room_name'] ?? '')) ?: 'This room');
+
+        // Count open housekeeping assignments — the authoritative blocker.
+        $openStmt = $pdo->prepare("
+            SELECT COUNT(*) FROM housekeeping_assignments
+            WHERE individual_room_id = ? AND status IN ('pending', 'in_progress', 'blocked')
+        ");
+        $openStmt->execute([$individualRoomId]);
+        $openCount = (int)$openStmt->fetchColumn();
+
+        $needsCleaning = $openCount > 0
+            || (string)($room['housekeeping_status'] ?? '') === 'pending'
+            || (string)($room['status'] ?? '') === 'cleaning';
+
+        if ($needsCleaning) {
+            $taskWord = $openCount > 1 ? 'cleanups' : 'cleanup';
+            return [
+                'blocked' => true,
+                'reason'  => 'housekeeping_pending',
+                'message' => $label . ' cannot be assigned yet — it has a pending checkout ' . $taskWord . '. '
+                    . 'Open Housekeeping and mark the ' . $taskWord . ' as completed to free the room, then assign it.',
+            ];
+        }
+
+        $physicalStatus = (string)($room['status'] ?? '');
+        if (in_array($physicalStatus, ['maintenance', 'out_of_order'], true)) {
+            $stateLabel = $physicalStatus === 'out_of_order' ? 'out of order' : 'under maintenance';
+            return [
+                'blocked' => true,
+                'reason'  => 'room_' . $physicalStatus,
+                'message' => $label . ' cannot be assigned — it is currently ' . $stateLabel . '. '
+                    . 'Clear the room status in Room Management before assigning it.',
+            ];
+        }
+
+        return null;
+    } catch (Throwable $e) {
+        error_log('getRoomHousekeepingAssignmentBlock error: ' . $e->getMessage());
+        return null; // fail open to the existing availability enforcement
+    }
+}
+
+/**
  * Enhanced availability check for a specific individual room
  */
 function checkIndividualRoomAvailability(int $individualRoomId, string $checkIn, string $checkOut, ?int $excludeBookingId = null)
