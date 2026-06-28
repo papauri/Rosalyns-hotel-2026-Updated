@@ -882,6 +882,105 @@ function getSetting(string $key, mixed $default = '')
     }
 }
 
+if (!function_exists('moduleEnabled')) {
+    /**
+     * Returns true if a feature module is enabled for this installation.
+     * Fails open — if the table doesn't exist yet, every module is considered on.
+     * Results are cached per request via static array.
+     *
+     * Module keys: bookings, housekeeping, pos, stock, conference, gym, finance, website_cms
+     */
+    function moduleEnabled(string $module): bool
+    {
+        static $cache = null;
+        static $tableExists = null;
+
+        global $pdo;
+
+        if ($tableExists === null) {
+            try {
+                $stmt = $pdo->prepare("SELECT COUNT(*) FROM information_schema.TABLES WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'enabled_modules'");
+                $stmt->execute();
+                $tableExists = ((int)$stmt->fetchColumn() > 0);
+
+                if (!$tableExists) {
+                    // Create and seed the table on first use
+                    $pdo->exec("CREATE TABLE IF NOT EXISTS enabled_modules (
+                        id INT AUTO_INCREMENT PRIMARY KEY,
+                        module_key VARCHAR(50) NOT NULL UNIQUE,
+                        module_name VARCHAR(100) NOT NULL,
+                        description VARCHAR(255) NOT NULL DEFAULT '',
+                        is_enabled TINYINT(1) NOT NULL DEFAULT 1,
+                        sort_order INT NOT NULL DEFAULT 0,
+                        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+                    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+
+                    $modules = [
+                        ['bookings',    'Bookings & Reservations', 'Room bookings, check-in/out, calendar, rate plans', 1],
+                        ['housekeeping','Housekeeping',             'Cleaning schedules, room maintenance, room status', 2],
+                        ['pos',         'Point of Sale',            'Restaurant, bar, KDS/BDS/CDS, menu management',    3],
+                        ['stock',       'Stock & Inventory',        'Ingredients, recipes, stock orders, wastage',      4],
+                        ['conference',  'Conference & Events',      'Conference rooms, event bookings, quotations',     5],
+                        ['gym',         'Gym & Fitness',            'Gym management, packages, inquiries',              6],
+                        ['finance',     'Finance & Payments',       'Invoices, credit notes, reports, accounting',      7],
+                        ['website_cms', 'Website & CMS',            'Gallery, pages, deals, reviews, social settings',  8],
+                    ];
+
+                    $ins = $pdo->prepare("INSERT IGNORE INTO enabled_modules (module_key, module_name, description, is_enabled, sort_order) VALUES (?,?,?,1,?)");
+                    foreach ($modules as [$key, $name, $desc, $order]) {
+                        $ins->execute([$key, $name, $desc, $order]);
+                    }
+                    $tableExists = true;
+                }
+            } catch (Throwable $e) {
+                error_log('moduleEnabled table check failed: ' . $e->getMessage());
+                $tableExists = false;
+            }
+        }
+
+        // Table doesn't exist — fail open so nothing breaks
+        if (!$tableExists) {
+            return true;
+        }
+
+        // Load all modules into cache on first real call
+        if ($cache === null) {
+            $cache = [];
+            try {
+                $rows = $pdo->query("SELECT module_key, is_enabled FROM enabled_modules")->fetchAll(PDO::FETCH_KEY_PAIR);
+                foreach ($rows as $key => $val) {
+                    $cache[(string)$key] = (bool)(int)$val;
+                }
+            } catch (Throwable $e) {
+                error_log('moduleEnabled load failed: ' . $e->getMessage());
+                return true; // fail open
+            }
+        }
+
+        // Unknown module keys default to enabled
+        return $cache[$module] ?? true;
+    }
+}
+
+if (!function_exists('getEnabledModules')) {
+    /**
+     * Returns array of all modules with their enabled state.
+     * Used by the module settings admin page.
+     */
+    function getEnabledModules(): array
+    {
+        global $pdo;
+        try {
+            // Ensure table exists by calling moduleEnabled first
+            moduleEnabled('bookings');
+            return $pdo->query("SELECT module_key, module_name, description, is_enabled, sort_order FROM enabled_modules ORDER BY sort_order ASC")->fetchAll(PDO::FETCH_ASSOC);
+        } catch (Throwable $e) {
+            error_log('getEnabledModules failed: ' . $e->getMessage());
+            return [];
+        }
+    }
+}
+
 if (!function_exists('rh_is_public_frontend_request')) {
     function rh_is_public_frontend_request(): bool
     {

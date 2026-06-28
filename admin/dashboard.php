@@ -97,102 +97,101 @@ try {
     $station_union_end_sql = '';
 }
 
+// Resolve module flags once — used by both queries and HTML
+$mod_bookings    = moduleEnabled('bookings');
+$mod_housekeeping= moduleEnabled('housekeeping');
+$mod_pos         = moduleEnabled('pos');
+$mod_stock       = moduleEnabled('stock');
+$mod_conference  = moduleEnabled('conference');
+$mod_gym         = moduleEnabled('gym');
+$mod_finance     = moduleEnabled('finance');
+$mod_website_cms = moduleEnabled('website_cms');
+
 if (!$is_card_insight_ajax) {
 
-    // Fetch dashboard statistics
+    // Fetch dashboard statistics — skip queries for disabled modules
     try {
-        // Today's check-ins
-        $checkins_stmt = $pdo->prepare("SELECT COUNT(*) as count FROM bookings WHERE check_in_date = ? AND status IN ('confirmed', 'pending')");
-        $checkins_stmt->execute([$today]);
-        $today_checkins = $checkins_stmt->fetch(PDO::FETCH_ASSOC)['count'];
+        if ($mod_bookings) {
+            $checkins_stmt = $pdo->prepare("SELECT COUNT(*) as count FROM bookings WHERE check_in_date = ? AND status IN ('confirmed', 'pending')");
+            $checkins_stmt->execute([$today]);
+            $today_checkins = $checkins_stmt->fetch(PDO::FETCH_ASSOC)['count'];
 
-        // Today's check-outs
-        $checkouts_stmt = $pdo->prepare("SELECT COUNT(*) as count FROM bookings WHERE check_out_date = ? AND status = 'checked-in'");
-        $checkouts_stmt->execute([$today]);
-        $today_checkouts = $checkouts_stmt->fetch(PDO::FETCH_ASSOC)['count'];
+            $checkouts_stmt = $pdo->prepare("SELECT COUNT(*) as count FROM bookings WHERE check_out_date = ? AND status = 'checked-in'");
+            $checkouts_stmt->execute([$today]);
+            $today_checkouts = $checkouts_stmt->fetch(PDO::FETCH_ASSOC)['count'];
 
-        // Pending bookings
-        $pending_stmt = $pdo->query("SELECT COUNT(*) as count FROM bookings WHERE status = 'pending'");
-        $pending_bookings = $pending_stmt->fetch(PDO::FETCH_ASSOC)['count'];
+            $pending_stmt = $pdo->query("SELECT COUNT(*) as count FROM bookings WHERE status = 'pending'");
+            $pending_bookings = $pending_stmt->fetch(PDO::FETCH_ASSOC)['count'];
 
-        // Currently checked in
-        $current_stmt = $pdo->query("SELECT COUNT(*) as count FROM bookings WHERE status = 'checked-in'");
-        $current_guests = $current_stmt->fetch(PDO::FETCH_ASSOC)['count'];
+            $current_stmt = $pdo->query("SELECT COUNT(*) as count FROM bookings WHERE status = 'checked-in'");
+            $current_guests = $current_stmt->fetch(PDO::FETCH_ASSOC)['count'];
 
-        // Pending conference enquiries
-        $pending_conf_stmt = $pdo->query("SELECT COUNT(*) as count FROM conference_inquiries WHERE status = 'pending'");
-        $pending_conference = $pending_conf_stmt->fetch(PDO::FETCH_ASSOC)['count'];
+            $expired_stmt = $pdo->query("SELECT COUNT(*) as count FROM bookings WHERE status = 'expired' AND expired_at >= DATE_SUB(NOW(), INTERVAL 24 HOUR)");
+            $expired_bookings = $expired_stmt->fetch(PDO::FETCH_ASSOC)['count'];
 
-        // Expired bookings (last 24 hours)
-        $expired_stmt = $pdo->query("SELECT COUNT(*) as count FROM bookings WHERE status = 'expired' AND expired_at >= DATE_SUB(NOW(), INTERVAL 24 HOUR)");
-        $expired_bookings = $expired_stmt->fetch(PDO::FETCH_ASSOC)['count'];
+            $recent_stmt = $pdo->query("
+                SELECT b.*, r.name as room_name,
+                       ir.room_number as individual_room_number, ir.room_name as individual_room_name,
+                       b.total_amount, b.amount_paid, b.amount_due, b.payment_status
+                FROM bookings b
+                JOIN rooms r ON b.room_id = r.id
+                LEFT JOIN individual_rooms ir ON b.individual_room_id = ir.id
+                ORDER BY b.created_at DESC LIMIT 10
+            ");
+            $recent_bookings = $recent_stmt->fetchAll(PDO::FETCH_ASSOC);
 
-        // Today's conference events
-        $today_conf_stmt = $pdo->prepare("SELECT COUNT(*) as count FROM conference_inquiries WHERE event_date = ? AND status IN ('confirmed', 'pending')");
-        $today_conf_stmt->execute([$today]);
-        $today_conferences = $today_conf_stmt->fetch(PDO::FETCH_ASSOC)['count'];
+            $upcoming_stmt = $pdo->prepare("
+                SELECT b.*, r.name as room_name,
+                       ir.room_number as individual_room_number, ir.room_name as individual_room_name,
+                       b.total_amount, b.amount_paid, b.amount_due, b.payment_status
+                FROM bookings b
+                JOIN rooms r ON b.room_id = r.id
+                LEFT JOIN individual_rooms ir ON b.individual_room_id = ir.id
+                WHERE b.check_in_date BETWEEN DATE_ADD(?, INTERVAL 1 DAY) AND DATE_ADD(?, INTERVAL 7 DAY)
+                AND b.status IN ('pending', 'confirmed')
+                ORDER BY b.check_in_date ASC
+            ");
+            $upcoming_stmt->execute([$today, $today]);
+            $upcoming_checkins = $upcoming_stmt->fetchAll(PDO::FETCH_ASSOC);
+        }
 
-        // Recent bookings (last 10)
-        $recent_stmt = $pdo->query("
-        SELECT b.*, r.name as room_name,
-               ir.room_number as individual_room_number, ir.room_name as individual_room_name,
-               b.total_amount, b.amount_paid, b.amount_due, b.payment_status
-        FROM bookings b
-        JOIN rooms r ON b.room_id = r.id
-        LEFT JOIN individual_rooms ir ON b.individual_room_id = ir.id
-        ORDER BY b.created_at DESC
-        LIMIT 10
-    ");
-        $recent_bookings = $recent_stmt->fetchAll(PDO::FETCH_ASSOC);
+        if ($mod_conference) {
+            $pending_conf_stmt = $pdo->query("SELECT COUNT(*) as count FROM conference_inquiries WHERE status = 'pending'");
+            $pending_conference = $pending_conf_stmt->fetch(PDO::FETCH_ASSOC)['count'];
 
-        // Upcoming check-ins (next 7 days, excludes today which has its own section)
-        $upcoming_stmt = $pdo->prepare("
-        SELECT b.*, r.name as room_name,
-               ir.room_number as individual_room_number, ir.room_name as individual_room_name,
-               b.total_amount, b.amount_paid, b.amount_due, b.payment_status
-        FROM bookings b
-        JOIN rooms r ON b.room_id = r.id
-        LEFT JOIN individual_rooms ir ON b.individual_room_id = ir.id
-        WHERE b.check_in_date BETWEEN DATE_ADD(?, INTERVAL 1 DAY) AND DATE_ADD(?, INTERVAL 7 DAY)
-        AND b.status IN ('pending', 'confirmed')
-        ORDER BY b.check_in_date ASC
-    ");
-        $upcoming_stmt->execute([$today, $today]);
-        $upcoming_checkins = $upcoming_stmt->fetchAll(PDO::FETCH_ASSOC);
+            $today_conf_stmt = $pdo->prepare("SELECT COUNT(*) as count FROM conference_inquiries WHERE event_date = ? AND status IN ('confirmed', 'pending')");
+            $today_conf_stmt->execute([$today]);
+            $today_conferences = $today_conf_stmt->fetch(PDO::FETCH_ASSOC)['count'];
 
-        // Recent conference enquiries (last 10)
-        $recent_conf_stmt = $pdo->query("
-        SELECT ci.*, cr.name as room_name
-        FROM conference_inquiries ci
-        LEFT JOIN conference_rooms cr ON ci.conference_room_id = cr.id
-        ORDER BY ci.created_at DESC
-        LIMIT 10
-    ");
-        $recent_conferences = $recent_conf_stmt->fetchAll(PDO::FETCH_ASSOC);
+            $recent_conf_stmt = $pdo->query("
+                SELECT ci.*, cr.name as room_name
+                FROM conference_inquiries ci
+                LEFT JOIN conference_rooms cr ON ci.conference_room_id = cr.id
+                ORDER BY ci.created_at DESC LIMIT 10
+            ");
+            $recent_conferences = $recent_conf_stmt->fetchAll(PDO::FETCH_ASSOC);
 
-        // Today's conference events
-        $today_conf_events_stmt = $pdo->prepare("
-        SELECT ci.*, cr.name as room_name
-        FROM conference_inquiries ci
-        LEFT JOIN conference_rooms cr ON ci.conference_room_id = cr.id
-        WHERE ci.event_date = ?
-        AND ci.status IN ('confirmed', 'pending')
-        ORDER BY ci.start_time ASC
-    ");
-        $today_conf_events_stmt->execute([$today]);
-        $today_conference_events = $today_conf_events_stmt->fetchAll(PDO::FETCH_ASSOC);
+            $today_conf_events_stmt = $pdo->prepare("
+                SELECT ci.*, cr.name as room_name
+                FROM conference_inquiries ci
+                LEFT JOIN conference_rooms cr ON ci.conference_room_id = cr.id
+                WHERE ci.event_date = ? AND ci.status IN ('confirmed', 'pending')
+                ORDER BY ci.start_time ASC
+            ");
+            $today_conf_events_stmt->execute([$today]);
+            $today_conference_events = $today_conf_events_stmt->fetchAll(PDO::FETCH_ASSOC);
 
-        // Upcoming conference events (next 7 days)
-        $upcoming_conf_stmt = $pdo->prepare("
-        SELECT ci.*, cr.name as room_name
-        FROM conference_inquiries ci
-        LEFT JOIN conference_rooms cr ON ci.conference_room_id = cr.id
-        WHERE ci.event_date BETWEEN ? AND DATE_ADD(?, INTERVAL 7 DAY)
-        AND ci.status IN ('pending', 'confirmed')
-        ORDER BY ci.event_date ASC, ci.start_time ASC
-    ");
-        $upcoming_conf_stmt->execute([$today, $today]);
-        $upcoming_conferences = $upcoming_conf_stmt->fetchAll(PDO::FETCH_ASSOC);
+            $upcoming_conf_stmt = $pdo->prepare("
+                SELECT ci.*, cr.name as room_name
+                FROM conference_inquiries ci
+                LEFT JOIN conference_rooms cr ON ci.conference_room_id = cr.id
+                WHERE ci.event_date BETWEEN ? AND DATE_ADD(?, INTERVAL 7 DAY)
+                AND ci.status IN ('pending', 'confirmed')
+                ORDER BY ci.event_date ASC, ci.start_time ASC
+            ");
+            $upcoming_conf_stmt->execute([$today, $today]);
+            $upcoming_conferences = $upcoming_conf_stmt->fetchAll(PDO::FETCH_ASSOC);
+        }
     } catch (PDOException $e) {
         $error = "Unable to load dashboard data.";
     }
@@ -214,115 +213,99 @@ if (!$is_card_insight_ajax) {
         'orders_today'         => 0,
         'restaurant_rev_today' => 0.0,
     ];
+    if ($mod_pos) {
+        try {
+            $r = $pdo->query("SELECT COUNT(*) c, COALESCE(SUM(total_amount),0) v FROM stock_orders WHERE status='placed'")->fetch(PDO::FETCH_ASSOC);
+            $ops['open_tabs'] = (int)$r['c'];
+            $ops['open_tabs_value'] = (float)$r['v'];
+            if ($mod_bookings) {
+                $ops['room_service_pending'] = (int)$pdo->query("SELECT COUNT(*) FROM stock_orders WHERE order_type='room_service' AND status IN ('placed','pending','confirmed')")->fetchColumn();
+                $ops['room_service_reminder_pending'] = (int)$pdo->query("SELECT COUNT(*)
+                    FROM bookings b
+                    INNER JOIN individual_rooms ir ON ir.id = b.individual_room_id
+                    WHERE b.status = 'checked-in'
+                        AND b.individual_room_id IS NOT NULL
+                        AND ir.is_active = 1
+                        AND NOT EXISTS (
+                            SELECT 1 FROM stock_orders o
+                            WHERE o.order_type = 'room_service'
+                                AND (o.booking_id = b.id OR (o.booking_id IS NULL AND o.individual_room_id = b.individual_room_id))
+                                AND (o.status IN ('completed', 'paid') OR o.kitchen_status = 'served')
+                                AND DATE(COALESCE(o.served_at, o.updated_at, o.created_at)) = CURDATE()
+                        )")->fetchColumn();
+                $ops['room_service_reminders_due'] = $roomServiceReminderDueNow ? (int)$ops['room_service_reminder_pending'] : 0;
+            }
+            if ($station_union_start_sql !== '' && $station_union_end_sql !== '') {
+                $stationCountStmt = $pdo->prepare("SELECT oi.station, COUNT(DISTINCT o.id) AS c
+                    FROM stock_orders o
+                    INNER JOIN stock_order_items oi ON oi.order_id = o.id
+                    WHERE o.kitchen_status IN ('new','in_progress','ready','recalled')
+                      AND o.fired_at IS NOT NULL AND o.fired_at >= ? AND o.fired_at < ?
+                      AND oi.kds_status NOT IN ('served','void')
+                    GROUP BY oi.station");
+                $stationCountStmt->execute([$station_union_start_sql, $station_union_end_sql]);
+                $st = $stationCountStmt->fetchAll(PDO::FETCH_KEY_PAIR);
+                $ops['kds_kitchen_pending'] = (int)($st['kitchen'] ?? 0);
+                $ops['kds_bar_pending']     = (int)($st['bar'] ?? 0);
+                $ops['kds_coffee_pending']  = (int)($st['coffee_bar'] ?? 0);
+            }
+            $r = $pdo->query("SELECT COUNT(*) c, COALESCE(SUM(total_amount),0) v FROM stock_orders WHERE status IN ('paid','completed') AND DATE(COALESCE(paid_at, created_at))=CURDATE()")->fetch(PDO::FETCH_ASSOC);
+            $ops['orders_today'] = (int)$r['c'];
+            $ops['restaurant_rev_today'] = (float)$r['v'];
+        } catch (Throwable $e) { /* legacy schema — keep zeros */ }
+    }
+
+    if ($mod_stock) {
+        try {
+            $stock['low_stock']        = (int)$pdo->query("SELECT COUNT(*) FROM stock_ingredients WHERE is_archived=0 AND min_quantity > 0 AND current_quantity <= min_quantity")->fetchColumn();
+            $stock['expiring_batches'] = (int)$pdo->query("SELECT COUNT(*) FROM stock_batches WHERE status='active' AND quantity_remaining > 0 AND expiry_date IS NOT NULL AND expiry_date BETWEEN CURDATE() AND DATE_ADD(CURDATE(), INTERVAL 7 DAY)")->fetchColumn();
+            $stock['expired_batches']  = (int)$pdo->query("SELECT COUNT(*) FROM stock_batches WHERE status='active' AND quantity_remaining > 0 AND expiry_date IS NOT NULL AND expiry_date < CURDATE()")->fetchColumn();
+            $stock['wastage_today']    = (float)$pdo->query("SELECT COALESCE(SUM(quantity * COALESCE(cost_per_unit,0)),0) FROM stock_wastage WHERE DATE(created_at)=CURDATE()")->fetchColumn();
+            $stock['low_items']        = $pdo->query("SELECT id, name, unit, current_quantity, min_quantity FROM stock_ingredients WHERE is_archived=0 AND min_quantity > 0 AND current_quantity <= min_quantity ORDER BY (current_quantity / NULLIF(min_quantity,0)) ASC LIMIT 8")->fetchAll(PDO::FETCH_ASSOC);
+            $stock['expiring_items']   = $pdo->query("SELECT b.id, i.name, b.batch_number, b.quantity_remaining, i.unit, b.expiry_date FROM stock_batches b JOIN stock_ingredients i ON i.id=b.ingredient_id WHERE b.status='active' AND b.quantity_remaining > 0 AND b.expiry_date IS NOT NULL AND b.expiry_date <= DATE_ADD(CURDATE(), INTERVAL 7 DAY) ORDER BY b.expiry_date ASC LIMIT 8")->fetchAll(PDO::FETCH_ASSOC);
+        } catch (Throwable $e) { /* fine */ }
+    }
+
+    if ($mod_finance) {
+        try {
+            $r = $pdo->query("SELECT COUNT(*) c, COALESCE(SUM(payment_amount),0) v FROM payments WHERE DATE(payment_date)=CURDATE() AND payment_status IN ('paid','completed','partial') AND deleted_at IS NULL AND COALESCE(payment_type, '') <> 'refund'")->fetch(PDO::FETCH_ASSOC);
+            $finance['payments_today'] = (int)$r['c'];
+            $finance['revenue_today']  = (float)$r['v'];
+            $finance['revenue_today'] += (float)($ops['restaurant_rev_today'] ?? 0);
+            $r = $pdo->query("SELECT COUNT(*) c, COALESCE(SUM(amount_due),0) v FROM bookings WHERE amount_due > 0 AND status IN ('pending','confirmed','checked-in')")->fetch(PDO::FETCH_ASSOC);
+            $finance['outstanding_count'] = (int)$r['c'];
+            $finance['outstanding']       = (float)$r['v'];
+            $finance['refunds_pending']   = (int)$pdo->query("SELECT COUNT(*) FROM payments WHERE payment_type='refund' AND refund_status IN ('pending','processing') AND deleted_at IS NULL")->fetchColumn();
+        } catch (Throwable $e) { /* fine */ }
+    }
+
     try {
-        $r = $pdo->query("SELECT COUNT(*) c, COALESCE(SUM(total_amount),0) v FROM stock_orders WHERE status='placed'")->fetch(PDO::FETCH_ASSOC);
-        $ops['open_tabs'] = (int)$r['c'];
-        $ops['open_tabs_value'] = (float)$r['v'];
-        $ops['room_service_pending'] = (int)$pdo->query("SELECT COUNT(*) FROM stock_orders WHERE order_type='room_service' AND status IN ('placed','pending','confirmed')")->fetchColumn();
-        $ops['room_service_reminder_pending'] = (int)$pdo->query("SELECT COUNT(*)
-                        FROM bookings b
-                        INNER JOIN individual_rooms ir ON ir.id = b.individual_room_id
-                        WHERE b.status = 'checked-in'
-                            AND b.individual_room_id IS NOT NULL
-                            AND ir.is_active = 1
-                            AND NOT EXISTS (
-                                        SELECT 1
-                                        FROM stock_orders o
-                                        WHERE o.order_type = 'room_service'
-                                            AND (o.booking_id = b.id OR (o.booking_id IS NULL AND o.individual_room_id = b.individual_room_id))
-                                            AND (o.status IN ('completed', 'paid') OR o.kitchen_status = 'served')
-                                            AND DATE(COALESCE(o.served_at, o.updated_at, o.created_at)) = CURDATE()
-                                )")->fetchColumn();
-        $ops['room_service_reminders_due'] = $roomServiceReminderDueNow ? (int)$ops['room_service_reminder_pending'] : 0;
-        if ($station_union_start_sql !== '' && $station_union_end_sql !== '') {
-            $stationCountStmt = $pdo->prepare("SELECT oi.station, COUNT(DISTINCT o.id) AS c
-                FROM stock_orders o
-                INNER JOIN stock_order_items oi ON oi.order_id = o.id
-                WHERE o.kitchen_status IN ('new','in_progress','ready','recalled')
-                  AND o.fired_at IS NOT NULL
-                  AND o.fired_at >= ?
-                  AND o.fired_at < ?
-                  AND oi.kds_status NOT IN ('served','void')
-                GROUP BY oi.station");
-            $stationCountStmt->execute([$station_union_start_sql, $station_union_end_sql]);
-            $st = $stationCountStmt->fetchAll(PDO::FETCH_KEY_PAIR);
-            $ops['kds_kitchen_pending'] = (int)($st['kitchen'] ?? 0);
-            $ops['kds_bar_pending'] = (int)($st['bar'] ?? 0);
-            $ops['kds_coffee_pending'] = (int)($st['coffee_bar'] ?? 0);
+        if ($mod_website_cms) {
+            $guestSvc['pending_reviews'] = (int)$pdo->query("SELECT COUNT(*) FROM reviews WHERE status='pending'")->fetchColumn();
+            $guestSvc['unread_contact']  = (int)$pdo->query("SELECT COUNT(*) FROM contact_inquiries WHERE status='new'")->fetchColumn();
         }
-        $r = $pdo->query("SELECT COUNT(*) c, COALESCE(SUM(total_amount),0) v FROM stock_orders WHERE status IN ('paid','completed') AND DATE(COALESCE(paid_at, created_at))=CURDATE()")->fetch(PDO::FETCH_ASSOC);
-        $ops['orders_today'] = (int)$r['c'];
-        $ops['restaurant_rev_today'] = (float)$r['v'];
-    } catch (Throwable $e) { /* legacy schema — keep zeros */
-    }
+        if ($mod_gym) {
+            $guestSvc['pending_gym'] = (int)$pdo->query("SELECT COUNT(*) FROM gym_inquiries WHERE status='pending' OR status='new'")->fetchColumn();
+        }
+        if ($mod_housekeeping) {
+            $guestSvc['maintenance_open'] = (int)$pdo->query("SELECT COUNT(*) FROM individual_rooms WHERE status IN ('maintenance','out_of_order')")->fetchColumn();
+            $guestSvc['housekeeping_due'] = (int)$pdo->query("SELECT COUNT(*) FROM housekeeping_assignments WHERE status IN ('pending','in_progress') AND (due_date IS NULL OR due_date <= CURDATE())")->fetchColumn();
+        }
+    } catch (Throwable $e) { /* fine */ }
 
-    $stock = [
-        'low_stock'        => 0,
-        'expiring_batches' => 0,
-        'expired_batches'  => 0,
-        'wastage_today'    => 0.0,
-        'low_items'        => [],
-        'expiring_items'   => [],
-    ];
-    try {
-        $stock['low_stock'] = (int)$pdo->query("SELECT COUNT(*) FROM stock_ingredients WHERE is_archived=0 AND min_quantity > 0 AND current_quantity <= min_quantity")->fetchColumn();
-        $stock['expiring_batches'] = (int)$pdo->query("SELECT COUNT(*) FROM stock_batches WHERE status='active' AND quantity_remaining > 0 AND expiry_date IS NOT NULL AND expiry_date BETWEEN CURDATE() AND DATE_ADD(CURDATE(), INTERVAL 7 DAY)")->fetchColumn();
-        $stock['expired_batches']  = (int)$pdo->query("SELECT COUNT(*) FROM stock_batches WHERE status='active' AND quantity_remaining > 0 AND expiry_date IS NOT NULL AND expiry_date < CURDATE()")->fetchColumn();
-        $stock['wastage_today'] = (float)$pdo->query("SELECT COALESCE(SUM(quantity * COALESCE(cost_per_unit,0)),0) FROM stock_wastage WHERE DATE(created_at)=CURDATE()")->fetchColumn();
-        $stock['low_items']      = $pdo->query("SELECT id, name, unit, current_quantity, min_quantity FROM stock_ingredients WHERE is_archived=0 AND min_quantity > 0 AND current_quantity <= min_quantity ORDER BY (current_quantity / NULLIF(min_quantity,0)) ASC LIMIT 8")->fetchAll(PDO::FETCH_ASSOC);
-        $stock['expiring_items'] = $pdo->query("SELECT b.id, i.name, b.batch_number, b.quantity_remaining, i.unit, b.expiry_date FROM stock_batches b JOIN stock_ingredients i ON i.id=b.ingredient_id WHERE b.status='active' AND b.quantity_remaining > 0 AND b.expiry_date IS NOT NULL AND b.expiry_date <= DATE_ADD(CURDATE(), INTERVAL 7 DAY) ORDER BY b.expiry_date ASC LIMIT 8")->fetchAll(PDO::FETCH_ASSOC);
-    } catch (Throwable $e) { /* fine */
-    }
-
-    $finance = [
-        'revenue_today'    => 0.0,
-        'payments_today'   => 0,
-        'outstanding'      => 0.0,
-        'outstanding_count' => 0,
-        'refunds_pending'  => 0,
-    ];
-    try {
-        $r = $pdo->query("SELECT COUNT(*) c, COALESCE(SUM(payment_amount),0) v FROM payments WHERE DATE(payment_date)=CURDATE() AND payment_status IN ('paid','completed','partial') AND deleted_at IS NULL AND COALESCE(payment_type, '') <> 'refund'")->fetch(PDO::FETCH_ASSOC);
-        $finance['payments_today'] = (int)$r['c'];
-        $finance['revenue_today'] = (float)$r['v'];
-        $finance['revenue_today'] += (float)($ops['restaurant_rev_today'] ?? 0);
-        $r = $pdo->query("SELECT COUNT(*) c, COALESCE(SUM(amount_due),0) v FROM bookings WHERE amount_due > 0 AND status IN ('pending','confirmed','checked-in')")->fetch(PDO::FETCH_ASSOC);
-        $finance['outstanding_count'] = (int)$r['c'];
-        $finance['outstanding'] = (float)$r['v'];
-        $finance['refunds_pending'] = (int)$pdo->query("SELECT COUNT(*) FROM payments WHERE payment_type='refund' AND refund_status IN ('pending','processing') AND deleted_at IS NULL")->fetchColumn();
-    } catch (Throwable $e) { /* fine */
-    }
-
-    $guestSvc = [
-        'pending_reviews'  => 0,
-        'unread_contact'   => 0,
-        'pending_gym'      => 0,
-        'maintenance_open' => 0,
-        'housekeeping_due' => 0,
-    ];
-    try {
-        $guestSvc['pending_reviews']  = (int)$pdo->query("SELECT COUNT(*) FROM reviews WHERE status='pending'")->fetchColumn();
-        $guestSvc['unread_contact']   = (int)$pdo->query("SELECT COUNT(*) FROM contact_inquiries WHERE status='new'")->fetchColumn();
-        $guestSvc['pending_gym']      = (int)$pdo->query("SELECT COUNT(*) FROM gym_inquiries WHERE status='pending' OR status='new'")->fetchColumn();
-        $guestSvc['maintenance_open'] = (int)$pdo->query("SELECT COUNT(*) FROM individual_rooms WHERE status IN ('maintenance','out_of_order')")->fetchColumn();
-        $guestSvc['housekeeping_due'] = (int)$pdo->query("SELECT COUNT(*) FROM housekeeping_assignments WHERE status IN ('pending','in_progress') AND (due_date IS NULL OR due_date <= CURDATE())")->fetchColumn();
-    } catch (Throwable $e) { /* fine */
-    }
-
-    // Pending room-service orders detail (for the new widget)
-    $roomServiceQueue = [];
-    try {
-        $roomServiceQueue = $pdo->query("
-        SELECT o.id, o.reference, o.room_number, o.customer_name, o.total_amount, o.created_at, o.status,
-               TIMESTAMPDIFF(MINUTE, o.created_at, NOW()) AS age_min,
-               (SELECT COUNT(*) FROM stock_order_items i WHERE i.order_id=o.id) AS item_count
-          FROM stock_orders o
-         WHERE o.order_type='room_service' AND o.status IN ('placed','pending','confirmed')
-         ORDER BY o.created_at ASC
-         LIMIT 10
-    ")->fetchAll(PDO::FETCH_ASSOC);
-    } catch (Throwable $e) {
-        $roomServiceQueue = [];
+    if ($mod_pos && $mod_bookings) {
+        try {
+            $roomServiceQueue = $pdo->query("
+                SELECT o.id, o.reference, o.room_number, o.customer_name, o.total_amount, o.created_at, o.status,
+                       TIMESTAMPDIFF(MINUTE, o.created_at, NOW()) AS age_min,
+                       (SELECT COUNT(*) FROM stock_order_items i WHERE i.order_id=o.id) AS item_count
+                FROM stock_orders o
+                WHERE o.order_type='room_service' AND o.status IN ('placed','pending','confirmed')
+                ORDER BY o.created_at ASC LIMIT 10
+            ")->fetchAll(PDO::FETCH_ASSOC);
+        } catch (Throwable $e) {
+            $roomServiceQueue = [];
+        }
     }
 
     // Fetch recent login activity (admin only)
@@ -1685,7 +1668,9 @@ $currency_symbol = getSetting('currency_symbol');
             <a class="guide-menu-btn" href="../docs/guides/14-reports-eod.html" target="_blank" rel="noopener"><i class="fas fa-chart-bar"></i> Reports Guide</a>
         </div>
 
+        <?php if ($mod_bookings || $mod_conference || $mod_finance): ?>
         <div class="stats-grid">
+            <?php if ($mod_bookings): ?>
             <a class="stat-card stat-info js-dashboard-insight" data-insight-card="checkins_today" href="bookings.php?filter=checkin_today" title="View today's check-ins">
                 <span class="stat-cta">View →</span>
                 <div class="stat-icon"><i class="fas fa-calendar-check"></i></div>
@@ -1718,6 +1703,16 @@ $currency_symbol = getSetting('currency_symbol');
                 <div class="stat-sub">Currently checked in</div>
             </a>
 
+            <a class="stat-card <?php echo $expired_bookings > 0 ? 'stat-warn' : ''; ?> js-dashboard-insight" data-insight-card="expired_bookings" href="bookings.php?status=expired" title="Bookings that expired in the last 24h">
+                <span class="stat-cta">Review →</span>
+                <div class="stat-icon"><i class="fas fa-hourglass-end"></i></div>
+                <div class="stat-value"><?php echo $expired_bookings; ?></div>
+                <div class="stat-label">Expired (24h)</div>
+                <div class="stat-sub">Unpaid holds released</div>
+            </a>
+            <?php endif; ?>
+
+            <?php if ($mod_conference): ?>
             <a class="stat-card <?php echo $pending_conference > 0 ? 'stat-warn' : ''; ?> js-dashboard-insight" data-insight-card="pending_conference" href="conference-management.php?status=pending" title="Conference enquiries needing reply">
                 <span class="stat-cta">Action →</span>
                 <div class="stat-icon"><i class="fas fa-users-cog"></i></div>
@@ -1733,15 +1728,9 @@ $currency_symbol = getSetting('currency_symbol');
                 <div class="stat-label">Today's Conference Events</div>
                 <div class="stat-sub">Confirmed + pending</div>
             </a>
+            <?php endif; ?>
 
-            <a class="stat-card <?php echo $expired_bookings > 0 ? 'stat-warn' : ''; ?> js-dashboard-insight" data-insight-card="expired_bookings" href="bookings.php?status=expired" title="Bookings that expired in the last 24h">
-                <span class="stat-cta">Review →</span>
-                <div class="stat-icon"><i class="fas fa-hourglass-end"></i></div>
-                <div class="stat-value"><?php echo $expired_bookings; ?></div>
-                <div class="stat-label">Expired (24h)</div>
-                <div class="stat-sub">Unpaid holds released</div>
-            </a>
-
+            <?php if ($mod_finance): ?>
             <a class="stat-card <?php echo $finance['outstanding'] > 0 ? 'stat-alert' : 'stat-good'; ?> js-dashboard-insight" data-insight-card="outstanding_balances" href="payments.php?balance=outstanding" title="View bookings with outstanding balances">
                 <span class="stat-cta">Collect →</span>
                 <div class="stat-icon"><i class="fas fa-money-bill-wave"></i></div>
@@ -1754,11 +1743,15 @@ $currency_symbol = getSetting('currency_symbol');
                 <div class="stat-label">Outstanding Balances</div>
                 <div class="stat-sub"><?php echo $finance['outstanding_count']; ?> booking(s) with amount due</div>
             </a>
+            <?php endif; ?>
         </div>
+        <?php endif; ?>
 
+        <?php if ($mod_pos || $mod_finance): ?>
         <!-- Operations Pulse: real-time restaurant / room-service / KDS pipeline -->
         <h3 class="section-title" style="margin-top:6px;"><i class="fas fa-bolt"></i> Operations Pulse</h3>
         <div class="ops-grid">
+            <?php if ($mod_pos): ?>
             <a class="ops-card js-dashboard-insight" data-insight-card="open_tabs" href="stock-orders.php?status=placed" title="Open restaurant tabs awaiting payment">
                 <div class="ops-icon" style="background:#e67e22;"><i class="fas fa-receipt"></i></div>
                 <div class="ops-body">
@@ -1767,6 +1760,8 @@ $currency_symbol = getSetting('currency_symbol');
                     <div class="ops-sub"><?php echo '<span class="kpi-currency">' . $currency_symbol . '</span>' . number_format($ops['open_tabs_value'], 2); ?> outstanding</div>
                 </div>
             </a>
+
+            <?php if ($mod_bookings): ?>
             <a class="ops-card js-dashboard-insight" data-insight-card="room_service_pending" href="stock-orders.php?type=room_service" title="Room-service orders in flight">
                 <div class="ops-icon" style="background:#8e44ad;"><i class="fas fa-concierge-bell"></i></div>
                 <div class="ops-body">
@@ -1789,6 +1784,8 @@ $currency_symbol = getSetting('currency_symbol');
                     </div>
                 </div>
             </a>
+            <?php endif; ?>
+
             <a class="ops-card js-dashboard-insight" data-insight-card="kitchen_tickets" href="kds.php" title="Open Kitchen Display System">
                 <div class="ops-icon" style="background:#dc3545;"><i class="fas fa-utensils"></i></div>
                 <div class="ops-body">
@@ -1821,12 +1818,15 @@ $currency_symbol = getSetting('currency_symbol');
                     <div class="ops-sub"><?php echo $ops['orders_today']; ?> order(s) settled</div>
                 </div>
             </a>
+            <?php endif; ?>
+
+            <?php if ($mod_finance): ?>
             <a class="ops-card js-dashboard-insight" data-insight-card="total_revenue_today" href="payments.php?date=<?php echo $today; ?>" title="Payments captured today">
                 <div class="ops-icon" style="background:#2e7d32;"><i class="fas fa-credit-card"></i></div>
                 <div class="ops-body">
                     <div class="ops-value"><?php echo '<span class="kpi-currency">' . $currency_symbol . '</span>' . number_format($finance['revenue_today'], 2); ?></div>
                     <div class="ops-label">Total Revenue Today</div>
-                    <div class="ops-sub"><?php echo $finance['payments_today']; ?> payment(s) + restaurant</div>
+                    <div class="ops-sub"><?php echo $finance['payments_today']; ?> payment(s)<?php echo $mod_pos ? ' + restaurant' : ''; ?></div>
                 </div>
             </a>
             <a class="ops-card js-dashboard-insight" data-insight-card="refunds_pending" href="payments.php?refund_status=pending" title="Refunds in queue">
@@ -1837,10 +1837,14 @@ $currency_symbol = getSetting('currency_symbol');
                     <div class="ops-sub">Need approval / processing</div>
                 </div>
             </a>
+            <?php endif; ?>
         </div>
+        <?php endif; ?>
 
-        <!-- Three-up widget strip: Stock Health · Guest Services · Maintenance & Housekeeping -->
+        <?php if ($mod_stock || $mod_website_cms || $mod_gym || $mod_bookings || $mod_housekeeping || $mod_pos || $mod_finance): ?>
+        <!-- Three-up widget strip: Stock Health · Guest Services · Operations & Facilities -->
         <div class="widget-strip">
+            <?php if ($mod_stock): ?>
             <!-- Stock Health -->
             <div class="widget-card">
                 <h4>
@@ -1885,7 +1889,9 @@ $currency_symbol = getSetting('currency_symbol');
                     </div>
                 <?php endif; ?>
             </div>
+            <?php endif; // mod_stock ?>
 
+            <?php if ($mod_website_cms || $mod_gym || $mod_bookings): ?>
             <!-- Guest Services -->
             <div class="widget-card">
                 <h4>
@@ -1897,6 +1903,7 @@ $currency_symbol = getSetting('currency_symbol');
                     </span>
                 </h4>
                 <ul class="widget-list">
+                    <?php if ($mod_website_cms): ?>
                     <li>
                         <span class="pri"><i class="fas fa-star" style="color:#f1c40f;"></i> Reviews awaiting moderation</span>
                         <a href="reviews.php?status=pending" style="text-decoration:none;">
@@ -1909,12 +1916,16 @@ $currency_symbol = getSetting('currency_symbol');
                             <span class="pulse-pill <?php echo $guestSvc['unread_contact'] > 0 ? 'red' : 'green'; ?>"><?php echo $guestSvc['unread_contact']; ?></span>
                         </a>
                     </li>
+                    <?php endif; ?>
+                    <?php if ($mod_gym): ?>
                     <li>
                         <span class="pri"><i class="fas fa-dumbbell" style="color:#16a085;"></i> Gym inquiries pending</span>
                         <a href="gym-inquiries.php" style="text-decoration:none;">
                             <span class="pulse-pill <?php echo $guestSvc['pending_gym'] > 0 ? 'amber' : 'green'; ?>"><?php echo $guestSvc['pending_gym']; ?></span>
                         </a>
                     </li>
+                    <?php endif; ?>
+                    <?php if ($mod_bookings): ?>
                     <li>
                         <span class="pri"><i class="fas fa-calendar-day"></i> Today's check-ins</span>
                         <a href="bookings.php?filter=checkin_today" style="text-decoration:none;">
@@ -1927,10 +1938,13 @@ $currency_symbol = getSetting('currency_symbol');
                             <span class="pulse-pill green"><?php echo $current_guests; ?></span>
                         </a>
                     </li>
+                    <?php endif; ?>
                 </ul>
             </div>
+            <?php endif; ?>
 
-            <!-- Maintenance & Housekeeping -->
+            <?php if ($mod_housekeeping || $mod_pos || $mod_finance): ?>
+            <!-- Operations & Facilities -->
             <div class="widget-card">
                 <h4>
                     <span><i class="fas fa-tools"></i> Operations & Facilities</span>
@@ -1941,6 +1955,7 @@ $currency_symbol = getSetting('currency_symbol');
                     </span>
                 </h4>
                 <ul class="widget-list">
+                    <?php if ($mod_housekeeping): ?>
                     <li>
                         <span class="pri"><i class="fas fa-wrench" style="color:#fd7e14;"></i> Rooms in maintenance / OOO</span>
                         <a href="room-maintenance.php" style="text-decoration:none;">
@@ -1953,6 +1968,8 @@ $currency_symbol = getSetting('currency_symbol');
                             <span class="pulse-pill <?php echo $guestSvc['housekeeping_due'] > 0 ? 'amber' : 'green'; ?>"><?php echo $guestSvc['housekeeping_due']; ?></span>
                         </a>
                     </li>
+                    <?php endif; ?>
+                    <?php if ($mod_pos && $mod_bookings): ?>
                     <li>
                         <span class="pri"><i class="fas fa-concierge-bell" style="color:#8e44ad;"></i> Room-service orders open</span>
                         <a href="stock-orders.php?type=room_service" style="text-decoration:none;">
@@ -1968,21 +1985,28 @@ $currency_symbol = getSetting('currency_symbol');
                             <?php echo $ops['room_service_reminders_due']; ?>
                         </button>
                     </li>
+                    <?php endif; ?>
+                    <?php if ($mod_pos): ?>
                     <li>
                         <span class="pri"><i class="fas fa-receipt" style="color:#e67e22;"></i> Open restaurant tabs</span>
                         <a href="stock-orders.php?status=placed" style="text-decoration:none;">
                             <span class="pulse-pill <?php echo $ops['open_tabs'] > 0 ? 'amber' : 'green'; ?>"><?php echo $ops['open_tabs']; ?></span>
                         </a>
                     </li>
+                    <?php endif; ?>
+                    <?php if ($mod_finance): ?>
                     <li>
                         <span class="pri"><i class="fas fa-money-check-alt" style="color:#dc3545;"></i> Bookings with balance due</span>
                         <a href="payments.php?balance=outstanding" style="text-decoration:none;">
                             <span class="pulse-pill <?php echo $finance['outstanding_count'] > 0 ? 'red' : 'green'; ?>"><?php echo $finance['outstanding_count']; ?></span>
                         </a>
                     </li>
+                    <?php endif; ?>
                 </ul>
             </div>
+            <?php endif; ?>
         </div>
+        <?php endif; ?>
 
         <!-- ===================================================================
              System Health Monitor — polls /admin/api/system-health.php
@@ -2053,7 +2077,7 @@ $currency_symbol = getSetting('currency_symbol');
             </div>
         </div>
 
-        <?php if (!empty($roomServiceQueue)): ?>
+        <?php if ($mod_pos && $mod_bookings && !empty($roomServiceQueue)): ?>
             <!-- Room-service queue: live oldest-first list of in-flight room orders -->
             <div class="today-checkins-section">
                 <h3>
@@ -2099,7 +2123,7 @@ $currency_symbol = getSetting('currency_symbol');
             </div>
         <?php endif; ?>
 
-        <?php if (!empty($stock['expiring_items'])): ?>
+        <?php if ($mod_stock && !empty($stock['expiring_items'])): ?>
             <!-- Stock alerts: batches expiring within 7 days -->
             <div class="today-checkins-section">
                 <h3>
@@ -2139,6 +2163,7 @@ $currency_symbol = getSetting('currency_symbol');
         <?php endif; ?>
 
 
+        <?php if ($mod_bookings || $mod_housekeeping): ?>
         <!-- Room Status Widget -->
         <?php
         $roomSummary = getRoomDashboardSummary();
@@ -2368,7 +2393,9 @@ $currency_symbol = getSetting('currency_symbol');
                 </div>
             <?php endif; ?>
         </div>
+        <?php endif; // mod_bookings || mod_housekeeping ?>
 
+        <?php if ($mod_bookings): ?>
         <h3 class="section-title">Upcoming Check-ins (Next 7 Days)</h3>
         <div class="table-container">
             <table class="table">
@@ -2514,6 +2541,9 @@ $currency_symbol = getSetting('currency_symbol');
             </table>
         </div>
 
+        <?php endif; // mod_bookings ?>
+
+        <?php if ($mod_conference): ?>
         <h3 class="section-title mt-4">Upcoming Conference Events (Next 7 Days)</h3>
         <div class="table-container">
             <table class="table">
@@ -2599,6 +2629,7 @@ $currency_symbol = getSetting('currency_symbol');
                 </tbody>
             </table>
         </div>
+        <?php endif; // mod_conference ?>
 
         <?php if ($user['role'] === 'admin'): ?>
             <!-- Login Activity Log -->
