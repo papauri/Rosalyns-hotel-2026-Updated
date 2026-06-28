@@ -6009,6 +6009,68 @@ function sendRefundNotificationEmail(array $payment, string $refundRef, float $r
  * @param int    $rating     Overall star rating (1–5).
  * @return array ['success' => bool, 'message' => string]
  */
+function sendAdminWelcomeEmail(string $fullName, string $email, string $username, string $tempPassword, string $role): array
+{
+    global $email_site_name, $email_site_url;
+
+    try {
+        if (empty($email) || !filter_var($email, FILTER_VALIDATE_EMAIL)) {
+            return ['success' => false, 'message' => 'No valid staff email provided'];
+        }
+
+        $siteName  = htmlspecialchars($email_site_name);
+        $adminUrl  = rtrim((string)$email_site_url, '/') . '/admin/';
+        $name      = htmlspecialchars($fullName);
+        $uname     = htmlspecialchars($username);
+        $roleLabel = htmlspecialchars(ucfirst($role));
+        $pass      = htmlspecialchars($tempPassword);
+
+        $htmlBody = '
+        <h1 style="color:#8B7355;text-align:center;">Welcome to ' . $siteName . '</h1>
+        <p>Dear ' . $name . ',</p>
+        <p>Your staff account has been created. You can log in to the admin panel using the credentials below.</p>
+
+        <div style="background:#FAF6F0;border:2px solid #C8A45A;padding:20px;margin:20px 0;border-radius:10px;">
+            <h2 style="color:#8B7355;margin-top:0;text-align:left;">Your Login Details</h2>
+            <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="margin:0;">
+                <tr>
+                    <td style="padding:10px 10px 10px 0;font-weight:bold;color:#1A1A1A;width:40%;vertical-align:top;border-bottom:1px solid #e8e0d4;">Username:</td>
+                    <td style="padding:10px 0 10px 6px;color:#333;border-bottom:1px solid #e8e0d4;">' . $uname . '</td>
+                </tr>
+                <tr>
+                    <td style="padding:10px 10px 10px 0;font-weight:bold;color:#1A1A1A;width:40%;vertical-align:top;border-bottom:1px solid #e8e0d4;">Password:</td>
+                    <td style="padding:10px 0 10px 6px;color:#333;border-bottom:1px solid #e8e0d4;font-family:monospace;">' . $pass . '</td>
+                </tr>
+                <tr>
+                    <td style="padding:10px 10px 10px 0;font-weight:bold;color:#1A1A1A;width:40%;vertical-align:top;">Role:</td>
+                    <td style="padding:10px 0 10px 6px;color:#333;">' . $roleLabel . '</td>
+                </tr>
+            </table>
+        </div>
+
+        <div style="background:#FDF6EC;padding:15px;border-left:4px solid #C8A45A;border-radius:5px;margin:20px 0;">
+            <p style="color:#5C4A32;margin:0;font-size:13px;">
+                <strong>Security reminder:</strong> Please change your password after your first login.
+            </p>
+        </div>
+
+        <p style="text-align:center;margin:28px 0;">
+            <a href="' . htmlspecialchars($adminUrl) . '" style="display:inline-block;background:#8B7355;color:#fff;padding:14px 32px;text-decoration:none;border-radius:4px;font-size:15px;letter-spacing:0.04em;">
+                Go to Admin Panel &rarr;
+            </a>
+        </p>
+
+        <p style="margin:28px 0 0;font-size:14px;color:#777;text-align:center;font-style:italic;">
+            Warm regards &mdash; ' . $siteName . '
+        </p>';
+
+        return sendEmail($email, $fullName, 'Welcome to ' . $email_site_name . ' — Your Account is Ready', $htmlBody);
+    } catch (Exception $e) {
+        error_log('sendAdminWelcomeEmail Error: ' . $e->getMessage());
+        return ['success' => false, 'message' => $e->getMessage()];
+    }
+}
+
 function sendReviewAcknowledgementEmail(string $guestName, string $guestEmail, string $reviewTitle, int $rating = 0): array
 {
     global $email_from_email, $email_site_name;

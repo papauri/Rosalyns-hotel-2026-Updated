@@ -69,7 +69,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
                         // Send welcome email if requested
                         if ($send_welcome) {
-                            // TODO: Implement welcome email
+                            $welcome = sendAdminWelcomeEmail($full_name, $email, $username, $password, $role);
+                            if (!$welcome['success']) {
+                                error_log('Welcome email failed for ' . $email . ': ' . $welcome['message']);
+                                $success_msg .= ' (Welcome email could not be sent — please share credentials manually.)';
+                            }
                         }
                     }
                 }

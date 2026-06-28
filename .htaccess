@@ -108,6 +108,9 @@ ErrorDocument 403 /404.php
 # Prevent directory browsing
 Options -Indexes
 
+# Belt-and-suspenders: never expose PHP errors to the browser in production
+php_flag display_errors Off
+
 # Force HTTPS
 <IfModule mod_rewrite.c>
     RewriteEngine On
