@@ -72,6 +72,11 @@ $vatNumber = getSetting('vat_number');
 $vatSettingsMessage = '';
 $vatSettingsError = '';
 
+// Module flags
+$mod_bookings   = function_exists('moduleEnabled') && moduleEnabled('bookings');
+$mod_pos        = function_exists('moduleEnabled') && moduleEnabled('pos');
+$mod_conference = function_exists('moduleEnabled') && moduleEnabled('conference');
+
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['save_vat_settings'])) {
     if (!validateCsrfToken($_POST['csrf_token'] ?? '')) {
         $vatSettingsError = 'Security token invalid. Please refresh and try again.';
@@ -146,75 +151,81 @@ try {
     $financialStmt->execute([$startDate, $endDate]);
     $financialSummary = $financialStmt->fetch(PDO::FETCH_ASSOC);
 
-    // Room bookings financial summary
-    $roomStmt = $pdo->prepare("
-        SELECT
-            COUNT(DISTINCT p.booking_id) as total_bookings_with_payments,
-            COALESCE(SUM(CASE WHEN p.payment_status IN ('completed', 'paid') AND COALESCE(p.payment_type, '') != 'refund' THEN p.total_amount ELSE 0 END), 0) as room_collected,
-            COALESCE(SUM(CASE WHEN p.payment_status IN ('completed', 'paid') AND COALESCE(p.payment_type, '') != 'refund' THEN p.vat_amount ELSE 0 END), 0)
-                - COALESCE(SUM(CASE WHEN p.payment_type = 'refund' AND p.refund_status IN ('completed','processing') THEN p.vat_amount ELSE 0 END), 0)
-                as room_vat_collected,
-            (
-                SELECT COALESCE(SUM(b2.amount_due), 0)
-                FROM bookings b2
-                WHERE b2.id IN (
-                    SELECT DISTINCT p2.booking_id FROM payments p2
-                    WHERE p2.booking_type = 'room'
-                    AND p2.payment_date BETWEEN ? AND ?
-                    AND p2.deleted_at IS NULL
-                )
-                AND b2.status IN ('pending', 'confirmed', 'checked-in')
-            ) as total_room_outstanding
-        FROM payments p
-        WHERE p.booking_type = 'room'
-        AND p.payment_date BETWEEN ? AND ?
-        AND p.deleted_at IS NULL
-    ");
-    $roomStmt->execute([$startDate, $endDate, $startDate, $endDate]);
-    $roomSummary = $roomStmt->fetch(PDO::FETCH_ASSOC);
+    if ($mod_bookings) {
+        // Room bookings financial summary
+        $roomStmt = $pdo->prepare("
+            SELECT
+                COUNT(DISTINCT p.booking_id) as total_bookings_with_payments,
+                COALESCE(SUM(CASE WHEN p.payment_status IN ('completed', 'paid') AND COALESCE(p.payment_type, '') != 'refund' THEN p.total_amount ELSE 0 END), 0) as room_collected,
+                COALESCE(SUM(CASE WHEN p.payment_status IN ('completed', 'paid') AND COALESCE(p.payment_type, '') != 'refund' THEN p.vat_amount ELSE 0 END), 0)
+                    - COALESCE(SUM(CASE WHEN p.payment_type = 'refund' AND p.refund_status IN ('completed','processing') THEN p.vat_amount ELSE 0 END), 0)
+                    as room_vat_collected,
+                (
+                    SELECT COALESCE(SUM(b2.amount_due), 0)
+                    FROM bookings b2
+                    WHERE b2.id IN (
+                        SELECT DISTINCT p2.booking_id FROM payments p2
+                        WHERE p2.booking_type = 'room'
+                        AND p2.payment_date BETWEEN ? AND ?
+                        AND p2.deleted_at IS NULL
+                    )
+                    AND b2.status IN ('pending', 'confirmed', 'checked-in')
+                ) as total_room_outstanding
+            FROM payments p
+            WHERE p.booking_type = 'room'
+            AND p.payment_date BETWEEN ? AND ?
+            AND p.deleted_at IS NULL
+        ");
+        $roomStmt->execute([$startDate, $endDate, $startDate, $endDate]);
+        $roomSummary = $roomStmt->fetch(PDO::FETCH_ASSOC);
+    }
 
-    // Conference bookings financial summary
-    $confStmt = $pdo->prepare("
-        SELECT
-            COUNT(DISTINCT p.booking_id) as total_conferences_with_payments,
-            COALESCE(SUM(CASE WHEN p.payment_status IN ('completed', 'paid') AND COALESCE(p.payment_type, '') != 'refund' THEN p.total_amount ELSE 0 END), 0) as conf_collected,
-            COALESCE(SUM(CASE WHEN p.payment_status IN ('completed', 'paid') AND COALESCE(p.payment_type, '') != 'refund' THEN p.vat_amount ELSE 0 END), 0)
-                - COALESCE(SUM(CASE WHEN p.payment_type = 'refund' AND p.refund_status IN ('completed','processing') THEN p.vat_amount ELSE 0 END), 0)
-                as conf_vat_collected,
-            (
-                SELECT COALESCE(SUM(ci2.amount_due), 0)
-                FROM conference_inquiries ci2
-                WHERE ci2.id IN (
-                    SELECT DISTINCT p2.booking_id FROM payments p2
-                    WHERE p2.booking_type = 'conference'
-                    AND p2.payment_date BETWEEN ? AND ?
-                    AND p2.deleted_at IS NULL
-                )
-                AND ci2.status NOT IN ('cancelled', 'rejected', 'expired')
-            ) as total_conf_outstanding
-        FROM payments p
-        WHERE p.booking_type = 'conference'
-        AND p.payment_date BETWEEN ? AND ?
-        AND p.deleted_at IS NULL
-    ");
-    $confStmt->execute([$startDate, $endDate, $startDate, $endDate]);
-    $confSummary = $confStmt->fetch(PDO::FETCH_ASSOC);
+    if ($mod_conference) {
+        // Conference bookings financial summary
+        $confStmt = $pdo->prepare("
+            SELECT
+                COUNT(DISTINCT p.booking_id) as total_conferences_with_payments,
+                COALESCE(SUM(CASE WHEN p.payment_status IN ('completed', 'paid') AND COALESCE(p.payment_type, '') != 'refund' THEN p.total_amount ELSE 0 END), 0) as conf_collected,
+                COALESCE(SUM(CASE WHEN p.payment_status IN ('completed', 'paid') AND COALESCE(p.payment_type, '') != 'refund' THEN p.vat_amount ELSE 0 END), 0)
+                    - COALESCE(SUM(CASE WHEN p.payment_type = 'refund' AND p.refund_status IN ('completed','processing') THEN p.vat_amount ELSE 0 END), 0)
+                    as conf_vat_collected,
+                (
+                    SELECT COALESCE(SUM(ci2.amount_due), 0)
+                    FROM conference_inquiries ci2
+                    WHERE ci2.id IN (
+                        SELECT DISTINCT p2.booking_id FROM payments p2
+                        WHERE p2.booking_type = 'conference'
+                        AND p2.payment_date BETWEEN ? AND ?
+                        AND p2.deleted_at IS NULL
+                    )
+                    AND ci2.status NOT IN ('cancelled', 'rejected', 'expired')
+                ) as total_conf_outstanding
+            FROM payments p
+            WHERE p.booking_type = 'conference'
+            AND p.payment_date BETWEEN ? AND ?
+            AND p.deleted_at IS NULL
+        ");
+        $confStmt->execute([$startDate, $endDate, $startDate, $endDate]);
+        $confSummary = $confStmt->fetch(PDO::FETCH_ASSOC);
+    }
 
-    // Restaurant/POS financial summary synced from stock orders into payments
-    $restaurantStmt = $pdo->prepare("
-        SELECT
-            COUNT(DISTINCT CASE WHEN COALESCE(p.payment_type, '') != 'refund' THEN p.booking_id ELSE NULL END) as total_restaurant_orders_with_payments,
-            COALESCE(SUM(CASE WHEN p.payment_status IN ('completed', 'paid') AND COALESCE(p.payment_type, '') != 'refund' THEN p.total_amount ELSE 0 END), 0) as restaurant_collected,
-            COALESCE(SUM(CASE WHEN p.payment_status IN ('completed', 'paid') AND COALESCE(p.payment_type, '') != 'refund' THEN p.vat_amount ELSE 0 END), 0)
-                - COALESCE(SUM(CASE WHEN p.payment_type = 'refund' AND p.refund_status IN ('completed','processing') THEN p.vat_amount ELSE 0 END), 0)
-                as restaurant_vat_collected
-        FROM payments p
-        WHERE p.booking_type = 'restaurant'
-        AND p.payment_date BETWEEN ? AND ?
-        AND p.deleted_at IS NULL
-    ");
-    $restaurantStmt->execute([$startDate, $endDate]);
-    $restaurantSummary = $restaurantStmt->fetch(PDO::FETCH_ASSOC);
+    if ($mod_pos) {
+        // Restaurant/POS financial summary synced from stock orders into payments
+        $restaurantStmt = $pdo->prepare("
+            SELECT
+                COUNT(DISTINCT CASE WHEN COALESCE(p.payment_type, '') != 'refund' THEN p.booking_id ELSE NULL END) as total_restaurant_orders_with_payments,
+                COALESCE(SUM(CASE WHEN p.payment_status IN ('completed', 'paid') AND COALESCE(p.payment_type, '') != 'refund' THEN p.total_amount ELSE 0 END), 0) as restaurant_collected,
+                COALESCE(SUM(CASE WHEN p.payment_status IN ('completed', 'paid') AND COALESCE(p.payment_type, '') != 'refund' THEN p.vat_amount ELSE 0 END), 0)
+                    - COALESCE(SUM(CASE WHEN p.payment_type = 'refund' AND p.refund_status IN ('completed','processing') THEN p.vat_amount ELSE 0 END), 0)
+                    as restaurant_vat_collected
+            FROM payments p
+            WHERE p.booking_type = 'restaurant'
+            AND p.payment_date BETWEEN ? AND ?
+            AND p.deleted_at IS NULL
+        ");
+        $restaurantStmt->execute([$startDate, $endDate]);
+        $restaurantSummary = $restaurantStmt->fetch(PDO::FETCH_ASSOC);
+    }
 
     // Payment method breakdown
     $methodStmt = $pdo->prepare("
@@ -269,55 +280,51 @@ try {
     $recentStmt->execute([$startDate, $endDate]);
     $recentPayments = $recentStmt->fetchAll(PDO::FETCH_ASSOC);
 
-    // Outstanding payments summary (active statuses only — cancelled/expired cannot be collected)
-    $outstandingStmt = $pdo->query("
-        SELECT
-            'room' as type,
-            COUNT(*) as count,
-            SUM(amount_due) as total_outstanding
-        FROM bookings
-        WHERE amount_due > 0 AND status IN ('pending', 'confirmed', 'checked-in')
-        UNION ALL
-        SELECT
-            'conference' as type,
-            COUNT(*) as count,
-            SUM(amount_due) as total_outstanding
-        FROM conference_inquiries
-        WHERE amount_due > 0 AND status NOT IN ('cancelled', 'rejected', 'expired')
-    ");
-    $outstandingSummary = $outstandingStmt->fetchAll(PDO::FETCH_ASSOC);
+    // Outstanding payments summary (filtered by enabled modules)
+    $outstandingParts = [];
+    if ($mod_bookings) {
+        $outstandingParts[] = "SELECT 'room' as type, COUNT(*) as count, SUM(amount_due) as total_outstanding FROM bookings WHERE amount_due > 0 AND status IN ('pending', 'confirmed', 'checked-in')";
+    }
+    if ($mod_conference) {
+        $outstandingParts[] = "SELECT 'conference' as type, COUNT(*) as count, SUM(amount_due) as total_outstanding FROM conference_inquiries WHERE amount_due > 0 AND status NOT IN ('cancelled', 'rejected', 'expired')";
+    }
+    if (!empty($outstandingParts)) {
+        $outstandingStmt = $pdo->query(implode(' UNION ALL ', $outstandingParts));
+        $outstandingSummary = $outstandingStmt->fetchAll(PDO::FETCH_ASSOC);
+    }
 
     // ====================================================================
     // Comprehensive analytics: POS by order type, daily trend, COGS, totals
     // ====================================================================
 
-    // POS revenue split by station / order_type (room_service vs walk-in etc.)
-    $posByTypeStmt = $pdo->prepare("
-        SELECT
-            COALESCE(NULLIF(order_type, ''), 'walk_in') AS order_type,
-            COUNT(CASE WHEN status IN ('paid','completed') THEN 1 END) AS order_count,
-            COALESCE(SUM(CASE WHEN status IN ('paid','completed') THEN total_amount ELSE 0 END), 0) AS gross_revenue,
-            COALESCE(SUM(CASE WHEN status IN ('paid','completed') THEN total_cost ELSE 0 END), 0) AS cogs,
-            COALESCE(SUM(CASE WHEN status = 'voided' THEN total_amount ELSE 0 END), 0) AS voided_amount,
-            COALESCE(SUM(CASE WHEN status = 'voided' THEN 1 ELSE 0 END), 0) AS voided_count
-        FROM stock_orders
-        WHERE created_at BETWEEN ? AND ?
-        GROUP BY order_type
-        ORDER BY gross_revenue DESC
-    ");
-    $posByTypeStmt->execute([$startDate . ' 00:00:00', $endDate . ' 23:59:59']);
-    $posByType = $posByTypeStmt->fetchAll(PDO::FETCH_ASSOC);
+    if ($mod_pos) {
+        // POS revenue split by station / order_type
+        $posByTypeStmt = $pdo->prepare("
+            SELECT
+                COALESCE(NULLIF(order_type, ''), 'walk_in') AS order_type,
+                COUNT(CASE WHEN status IN ('paid','completed') THEN 1 END) AS order_count,
+                COALESCE(SUM(CASE WHEN status IN ('paid','completed') THEN total_amount ELSE 0 END), 0) AS gross_revenue,
+                COALESCE(SUM(CASE WHEN status IN ('paid','completed') THEN total_cost ELSE 0 END), 0) AS cogs,
+                COALESCE(SUM(CASE WHEN status = 'voided' THEN total_amount ELSE 0 END), 0) AS voided_amount,
+                COALESCE(SUM(CASE WHEN status = 'voided' THEN 1 ELSE 0 END), 0) AS voided_count
+            FROM stock_orders
+            WHERE created_at BETWEEN ? AND ?
+            GROUP BY order_type
+            ORDER BY gross_revenue DESC
+        ");
+        $posByTypeStmt->execute([$startDate . ' 00:00:00', $endDate . ' 23:59:59']);
+        $posByType = $posByTypeStmt->fetchAll(PDO::FETCH_ASSOC);
 
-    // Total POS COGS in range (for gross margin calc)
-    $posTotalsStmt = $pdo->prepare("
-        SELECT
-            COALESCE(SUM(CASE WHEN status IN ('paid','completed') THEN total_amount ELSE 0 END), 0) AS gross_revenue,
-            COALESCE(SUM(CASE WHEN status IN ('paid','completed') THEN total_cost ELSE 0 END), 0) AS cogs
-        FROM stock_orders
-        WHERE created_at BETWEEN ? AND ?
-    ");
-    $posTotalsStmt->execute([$startDate . ' 00:00:00', $endDate . ' 23:59:59']);
-    $posTotals = $posTotalsStmt->fetch(PDO::FETCH_ASSOC) ?: ['gross_revenue' => 0, 'cogs' => 0];
+        $posTotalsStmt = $pdo->prepare("
+            SELECT
+                COALESCE(SUM(CASE WHEN status IN ('paid','completed') THEN total_amount ELSE 0 END), 0) AS gross_revenue,
+                COALESCE(SUM(CASE WHEN status IN ('paid','completed') THEN total_cost ELSE 0 END), 0) AS cogs
+            FROM stock_orders
+            WHERE created_at BETWEEN ? AND ?
+        ");
+        $posTotalsStmt->execute([$startDate . ' 00:00:00', $endDate . ' 23:59:59']);
+        $posTotals = $posTotalsStmt->fetch(PDO::FETCH_ASSOC) ?: ['gross_revenue' => 0, 'cogs' => 0];
+    }
 
     // Daily revenue trend (last 14 days within the selected range, capped to range)
     $trendStartCandidate = max(strtotime($startDate), strtotime('-13 days', strtotime($endDate)));
@@ -514,13 +521,15 @@ if (!isset($dailyTrend)) {
 
         $cat_voids_value = 0;
         $cat_voids_count = 0;
-        try {
-            $vStmt = $pdo->prepare("SELECT COUNT(*) c, COALESCE(SUM(total_amount),0) v FROM stock_orders WHERE status='voided' AND voided_at BETWEEN ? AND ?");
-            $vStmt->execute([$startDate . ' 00:00:00', $endDate . ' 23:59:59']);
-            $vrow = $vStmt->fetch(PDO::FETCH_ASSOC) ?: ['c' => 0, 'v' => 0];
-            $cat_voids_count = (int)$vrow['c'];
-            $cat_voids_value = (float)$vrow['v'];
-        } catch (Throwable $e) { /* ignore */
+        if ($mod_pos) {
+            try {
+                $vStmt = $pdo->prepare("SELECT COUNT(*) c, COALESCE(SUM(total_amount),0) v FROM stock_orders WHERE status='voided' AND voided_at BETWEEN ? AND ?");
+                $vStmt->execute([$startDate . ' 00:00:00', $endDate . ' 23:59:59']);
+                $vrow = $vStmt->fetch(PDO::FETCH_ASSOC) ?: ['c' => 0, 'v' => 0];
+                $cat_voids_count = (int)$vrow['c'];
+                $cat_voids_value = (float)$vrow['v'];
+            } catch (Throwable $e) { /* ignore */
+            }
         }
 
         // Source totals for the Revenue by Source table.
@@ -1022,14 +1031,18 @@ if (!isset($dailyTrend)) {
                         <td>Pending (payments table)</td>
                         <td class="num"><?php echo $currency_symbol . number_format($cat_pending, 2); ?></td>
                     </tr>
+                    <?php if ($mod_bookings): ?>
                     <tr>
                         <td>Room balances outstanding</td>
                         <td class="num"><?php echo $currency_symbol . number_format((float)($roomSummary['total_room_outstanding'] ?? 0), 2); ?></td>
                     </tr>
+                    <?php endif; ?>
+                    <?php if ($mod_conference): ?>
                     <tr>
                         <td>Conference balances outstanding</td>
                         <td class="num"><?php echo $currency_symbol . number_format((float)($confSummary['total_conf_outstanding'] ?? 0), 2); ?></td>
                     </tr>
+                    <?php endif; ?>
                 </tbody>
             </table>
             <div class="acct-insight-note">Direction: start with oldest/highest balances, then update payment records so receivables age and risk are always visible.</div>
@@ -1505,8 +1518,9 @@ if (!isset($dailyTrend)) {
                     </thead>
                     <tbody>
                         <?php
-                        $rows = [
-                            [
+                        $rows = [];
+                        if ($mod_bookings) {
+                            $rows[] = [
                                 'label'    => 'Rooms (bookings)',
                                 'icon'     => 'fa-bed',
                                 'count'    => (int)($roomSummary['total_bookings_with_payments'] ?? 0),
@@ -1514,8 +1528,10 @@ if (!isset($dailyTrend)) {
                                 'vat'      => (float)($roomSummary['room_vat_collected'] ?? 0),
                                 'link'     => 'payments.php?booking_type=room',
                                 'link_lbl' => 'Room payments',
-                            ],
-                            [
+                            ];
+                        }
+                        if ($mod_conference) {
+                            $rows[] = [
                                 'label'    => 'Conferences &amp; events',
                                 'icon'     => 'fa-briefcase',
                                 'count'    => (int)($confSummary['total_conferences_with_payments'] ?? 0),
@@ -1523,8 +1539,10 @@ if (!isset($dailyTrend)) {
                                 'vat'      => (float)($confSummary['conf_vat_collected'] ?? 0),
                                 'link'     => 'payments.php?booking_type=conference',
                                 'link_lbl' => 'Conference payments',
-                            ],
-                            [
+                            ];
+                        }
+                        if ($mod_pos) {
+                            $rows[] = [
                                 'label'    => 'F&amp;B / Restaurant (POS)',
                                 'icon'     => 'fa-utensils',
                                 'count'    => (int)($restaurantSummary['total_restaurant_orders_with_payments'] ?? 0),
@@ -1532,8 +1550,8 @@ if (!isset($dailyTrend)) {
                                 'vat'      => (float)($restaurantSummary['restaurant_vat_collected'] ?? 0),
                                 'link'     => 'stock-orders.php',
                                 'link_lbl' => 'POS orders',
-                            ],
-                        ];
+                            ];
+                        }
                         foreach ($rows as $r):
                             $pct = $source_total_gross > 0 ? ($r['gross'] / $source_total_gross) * 100 : 0;
                         ?>
@@ -1553,7 +1571,7 @@ if (!isset($dailyTrend)) {
                     <tfoot>
                         <tr>
                             <th>Total</th>
-                            <th class="num"><?php echo number_format(($roomSummary['total_bookings_with_payments'] ?? 0) + ($confSummary['total_conferences_with_payments'] ?? 0) + ($restaurantSummary['total_restaurant_orders_with_payments'] ?? 0)); ?></th>
+                            <th class="num"><?php echo number_format(array_sum(array_column($rows, 'count'))); ?></th>
                             <th class="num"><?php echo $currency_symbol . number_format($source_total_gross, 2); ?></th>
                             <th class="num"><?php echo $currency_symbol . number_format($cat_vat, 2); ?></th>
                             <th class="num">100%</th>
@@ -1565,7 +1583,7 @@ if (!isset($dailyTrend)) {
         </section>
 
         <!-- POS Performance — gross margin from stock_orders.total_cost -->
-        <?php if (!empty($posByType) || $pos_gross > 0): ?>
+        <?php if ($mod_pos && (!empty($posByType) || $pos_gross > 0)): ?>
             <section class="acct-panel">
                 <header class="acct-panel__head">
                     <h2 class="acct-panel__title"><i class="fas fa-cash-register"></i> POS Performance &amp; Gross Margin</h2>

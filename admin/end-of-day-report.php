@@ -39,6 +39,13 @@ $dayEnd   = $report_date . ' 23:59:59';
 $tomorrow = date('Y-m-d', strtotime($report_date . ' +1 day'));
 $isToday  = ($report_date === date('Y-m-d'));
 
+// Module flags — drives query and HTML gating
+$mod_bookings     = function_exists('moduleEnabled') && moduleEnabled('bookings');
+$mod_pos          = function_exists('moduleEnabled') && moduleEnabled('pos');
+$mod_conference   = function_exists('moduleEnabled') && moduleEnabled('conference');
+$mod_gym          = function_exists('moduleEnabled') && moduleEnabled('gym');
+$mod_housekeeping = function_exists('moduleEnabled') && moduleEnabled('housekeeping');
+
 // Helper for formatted money
 $money = function ($v) use ($currency_symbol) {
     return '<span class="kpi-currency">' . $currency_symbol . '</span>' . number_format((float)$v, 2);
@@ -74,43 +81,46 @@ $ops = [
     'cancellations'       => 0,
     'no_shows'            => 0,
 ];
-try {
-    $opsStmt = $pdo->prepare("
-        SELECT
-            SUM(CASE WHEN check_in_date = :d AND status IN ('confirmed','tentative','pending','checked-in') THEN 1 ELSE 0 END) AS expected_arrivals,
-            SUM(CASE WHEN check_in_date = :d AND status = 'checked-in' THEN 1 ELSE 0 END) AS arrivals_completed,
-            SUM(CASE WHEN check_out_date = :d AND status IN ('checked-in','checked-out') THEN 1 ELSE 0 END) AS expected_departures,
-            SUM(CASE WHEN check_out_date = :d AND status = 'checked-out' THEN 1 ELSE 0 END) AS departures_completed,
-            SUM(CASE WHEN check_in_date < :d AND check_out_date > :d AND status = 'checked-in' THEN 1 ELSE 0 END) AS stayovers,
-            SUM(CASE WHEN DATE(created_at) = :d THEN 1 ELSE 0 END) AS new_bookings,
-            SUM(CASE WHEN DATE(updated_at) = :d AND status = 'cancelled' THEN 1 ELSE 0 END) AS cancellations,
-            SUM(CASE WHEN check_in_date = :d AND status = 'expired' THEN 1 ELSE 0 END) AS no_shows
-        FROM bookings
-    ");
-    $opsStmt->execute([':d' => $report_date]);
-    $ops = array_merge($ops, $opsStmt->fetch(PDO::FETCH_ASSOC) ?: []);
-} catch (Throwable $e) {
-    error_log('EOD ops: ' . $e->getMessage());
+if ($mod_bookings) {
+    try {
+        $opsStmt = $pdo->prepare("
+            SELECT
+                SUM(CASE WHEN check_in_date = :d AND status IN ('confirmed','tentative','pending','checked-in') THEN 1 ELSE 0 END) AS expected_arrivals,
+                SUM(CASE WHEN check_in_date = :d AND status = 'checked-in' THEN 1 ELSE 0 END) AS arrivals_completed,
+                SUM(CASE WHEN check_out_date = :d AND status IN ('checked-in','checked-out') THEN 1 ELSE 0 END) AS expected_departures,
+                SUM(CASE WHEN check_out_date = :d AND status = 'checked-out' THEN 1 ELSE 0 END) AS departures_completed,
+                SUM(CASE WHEN check_in_date < :d AND check_out_date > :d AND status = 'checked-in' THEN 1 ELSE 0 END) AS stayovers,
+                SUM(CASE WHEN DATE(created_at) = :d THEN 1 ELSE 0 END) AS new_bookings,
+                SUM(CASE WHEN DATE(updated_at) = :d AND status = 'cancelled' THEN 1 ELSE 0 END) AS cancellations,
+                SUM(CASE WHEN check_in_date = :d AND status = 'expired' THEN 1 ELSE 0 END) AS no_shows
+            FROM bookings
+        ");
+        $opsStmt->execute([':d' => $report_date]);
+        $ops = array_merge($ops, $opsStmt->fetch(PDO::FETCH_ASSOC) ?: []);
+    } catch (Throwable $e) {
+        error_log('EOD ops: ' . $e->getMessage());
+    }
 }
 
 // Room inventory & occupancy
 $rooms_total = 0;
 $rooms_occupied = 0;
 $rooms_oo = 0;
-try {
-    $rooms_total = (int)$pdo->query("SELECT COUNT(*) FROM individual_rooms WHERE status <> 'out_of_order'")->fetchColumn();
-    $rooms_oo    = (int)$pdo->query("SELECT COUNT(*) FROM individual_rooms WHERE status = 'out_of_order'")->fetchColumn();
-    // Rooms occupied on this date: bookings overlapping the date
-    $occStmt = $pdo->prepare("
-        SELECT COUNT(*) FROM bookings
-        WHERE status IN ('checked-in','checked-out')
-          AND check_in_date <= :d
-          AND check_out_date > :d
-    ");
-    $occStmt->execute([':d' => $report_date]);
-    $rooms_occupied = (int)$occStmt->fetchColumn();
-} catch (Throwable $e) {
-    error_log('EOD occupancy: ' . $e->getMessage());
+if ($mod_bookings) {
+    try {
+        $rooms_total = (int)$pdo->query("SELECT COUNT(*) FROM individual_rooms WHERE status <> 'out_of_order'")->fetchColumn();
+        $rooms_oo    = (int)$pdo->query("SELECT COUNT(*) FROM individual_rooms WHERE status = 'out_of_order'")->fetchColumn();
+        $occStmt = $pdo->prepare("
+            SELECT COUNT(*) FROM bookings
+            WHERE status IN ('checked-in','checked-out')
+              AND check_in_date <= :d
+              AND check_out_date > :d
+        ");
+        $occStmt->execute([':d' => $report_date]);
+        $rooms_occupied = (int)$occStmt->fetchColumn();
+    } catch (Throwable $e) {
+        error_log('EOD occupancy: ' . $e->getMessage());
+    }
 }
 $occupancy_pct = $rooms_total > 0 ? ($rooms_occupied / $rooms_total) * 100 : 0;
 
@@ -187,56 +197,60 @@ try {
 // ---------------------------------------------------------------------------
 $pos_by_type = [];
 $pos_totals  = ['orders' => 0, 'gross' => 0.0, 'cogs' => 0.0, 'voided_value' => 0.0, 'voided_count' => 0];
-try {
-    $tStmt = $pdo->prepare("
-        SELECT COALESCE(NULLIF(order_type,''),'walk_in') AS order_type,
-               COUNT(*) AS cnt,
-               COALESCE(SUM(CASE WHEN status IN ('paid','completed') THEN total_amount ELSE 0 END),0) AS gross,
-               COALESCE(SUM(CASE WHEN status IN ('paid','completed') THEN total_cost   ELSE 0 END),0) AS cogs
-        FROM stock_orders
-        WHERE created_at BETWEEN :a AND :b
-        GROUP BY order_type
-        ORDER BY gross DESC
-    ");
-    $tStmt->execute([':a' => $dayStart, ':b' => $dayEnd]);
-    $pos_by_type = $tStmt->fetchAll(PDO::FETCH_ASSOC);
+if ($mod_pos) {
+    try {
+        $tStmt = $pdo->prepare("
+            SELECT COALESCE(NULLIF(order_type,''),'walk_in') AS order_type,
+                   COUNT(*) AS cnt,
+                   COALESCE(SUM(CASE WHEN status IN ('paid','completed') THEN total_amount ELSE 0 END),0) AS gross,
+                   COALESCE(SUM(CASE WHEN status IN ('paid','completed') THEN total_cost   ELSE 0 END),0) AS cogs
+            FROM stock_orders
+            WHERE created_at BETWEEN :a AND :b
+            GROUP BY order_type
+            ORDER BY gross DESC
+        ");
+        $tStmt->execute([':a' => $dayStart, ':b' => $dayEnd]);
+        $pos_by_type = $tStmt->fetchAll(PDO::FETCH_ASSOC);
 
-    $tot = $pdo->prepare("
-        SELECT
-            COUNT(*) AS orders,
-            COALESCE(SUM(CASE WHEN status IN ('paid','completed') THEN total_amount ELSE 0 END),0) AS gross,
-            COALESCE(SUM(CASE WHEN status IN ('paid','completed') THEN total_cost   ELSE 0 END),0) AS cogs,
-            COALESCE(SUM(CASE WHEN status='voided' THEN total_amount ELSE 0 END),0) AS voided_value,
-            COALESCE(SUM(CASE WHEN status='voided' THEN 1 ELSE 0 END),0) AS voided_count
-        FROM stock_orders
-        WHERE created_at BETWEEN :a AND :b
-    ");
-    $tot->execute([':a' => $dayStart, ':b' => $dayEnd]);
-    $pos_totals = array_merge($pos_totals, $tot->fetch(PDO::FETCH_ASSOC) ?: []);
-} catch (Throwable $e) {
-    error_log('EOD POS: ' . $e->getMessage());
+        $tot = $pdo->prepare("
+            SELECT
+                COUNT(*) AS orders,
+                COALESCE(SUM(CASE WHEN status IN ('paid','completed') THEN total_amount ELSE 0 END),0) AS gross,
+                COALESCE(SUM(CASE WHEN status IN ('paid','completed') THEN total_cost   ELSE 0 END),0) AS cogs,
+                COALESCE(SUM(CASE WHEN status='voided' THEN total_amount ELSE 0 END),0) AS voided_value,
+                COALESCE(SUM(CASE WHEN status='voided' THEN 1 ELSE 0 END),0) AS voided_count
+            FROM stock_orders
+            WHERE created_at BETWEEN :a AND :b
+        ");
+        $tot->execute([':a' => $dayStart, ':b' => $dayEnd]);
+        $pos_totals = array_merge($pos_totals, $tot->fetch(PDO::FETCH_ASSOC) ?: []);
+    } catch (Throwable $e) {
+        error_log('EOD POS: ' . $e->getMessage());
+    }
 }
 $pos_margin = (float)$pos_totals['gross'] - (float)$pos_totals['cogs'];
 $pos_margin_pct = $pos_totals['gross'] > 0 ? ($pos_margin / (float)$pos_totals['gross']) * 100 : 0;
 
 $top_items = [];
-try {
-    $itStmt = $pdo->prepare("
-        SELECT soi.item_name, soi.menu_type,
-               SUM(soi.quantity)   AS qty,
-               SUM(soi.line_total) AS revenue
-        FROM stock_order_items soi
-        INNER JOIN stock_orders o ON o.id = soi.order_id
-        WHERE o.status IN ('paid','completed')
-          AND o.created_at BETWEEN :a AND :b
-        GROUP BY soi.item_name, soi.menu_type
-        ORDER BY revenue DESC
-        LIMIT 8
-    ");
-    $itStmt->execute([':a' => $dayStart, ':b' => $dayEnd]);
-    $top_items = $itStmt->fetchAll(PDO::FETCH_ASSOC);
-} catch (Throwable $e) {
-    error_log('EOD top items: ' . $e->getMessage());
+if ($mod_pos) {
+    try {
+        $itStmt = $pdo->prepare("
+            SELECT soi.item_name, soi.menu_type,
+                   SUM(soi.quantity)   AS qty,
+                   SUM(soi.line_total) AS revenue
+            FROM stock_order_items soi
+            INNER JOIN stock_orders o ON o.id = soi.order_id
+            WHERE o.status IN ('paid','completed')
+              AND o.created_at BETWEEN :a AND :b
+            GROUP BY soi.item_name, soi.menu_type
+            ORDER BY revenue DESC
+            LIMIT 8
+        ");
+        $itStmt->execute([':a' => $dayStart, ':b' => $dayEnd]);
+        $top_items = $itStmt->fetchAll(PDO::FETCH_ASSOC);
+    } catch (Throwable $e) {
+        error_log('EOD top items: ' . $e->getMessage());
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -261,28 +275,32 @@ try {
 // 6) Housekeeping snapshot
 // ---------------------------------------------------------------------------
 $housekeeping = ['pending' => 0, 'in_progress' => 0, 'completed' => 0];
-try {
-    $hkStmt = $pdo->prepare("
-        SELECT
-            SUM(CASE WHEN status='pending'     THEN 1 ELSE 0 END) AS pending,
-            SUM(CASE WHEN status='in_progress' THEN 1 ELSE 0 END) AS in_progress,
-            SUM(CASE WHEN status='completed' AND DATE(updated_at)=:d THEN 1 ELSE 0 END) AS completed
-        FROM housekeeping_assignments
-    ");
-    $hkStmt->execute([':d' => $report_date]);
-    $housekeeping = array_merge($housekeeping, $hkStmt->fetch(PDO::FETCH_ASSOC) ?: []);
-} catch (Throwable $e) {
-    // Table may not exist on every install — silent fallback
+if ($mod_housekeeping) {
+    try {
+        $hkStmt = $pdo->prepare("
+            SELECT
+                SUM(CASE WHEN status='pending'     THEN 1 ELSE 0 END) AS pending,
+                SUM(CASE WHEN status='in_progress' THEN 1 ELSE 0 END) AS in_progress,
+                SUM(CASE WHEN status='completed' AND DATE(updated_at)=:d THEN 1 ELSE 0 END) AS completed
+            FROM housekeeping_assignments
+        ");
+        $hkStmt->execute([':d' => $report_date]);
+        $housekeeping = array_merge($housekeeping, $hkStmt->fetch(PDO::FETCH_ASSOC) ?: []);
+    } catch (Throwable $e) {
+        // Table may not exist on every install — silent fallback
+    }
 }
 
 // ---------------------------------------------------------------------------
 // 7) Outstanding folio (across all in-house guests)
 // ---------------------------------------------------------------------------
 $outstanding_folio = 0.0;
-try {
-    $oStmt = $pdo->query("SELECT COALESCE(SUM(amount_due),0) FROM bookings WHERE amount_due > 0 AND status IN ('checked-in','confirmed','tentative')");
-    $outstanding_folio = (float)$oStmt->fetchColumn();
-} catch (Throwable $e) { /* ignore */
+if ($mod_bookings) {
+    try {
+        $oStmt = $pdo->query("SELECT COALESCE(SUM(amount_due),0) FROM bookings WHERE amount_due > 0 AND status IN ('checked-in','confirmed','tentative')");
+        $outstanding_folio = (float)$oStmt->fetchColumn();
+    } catch (Throwable $e) { /* ignore */
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -321,70 +339,71 @@ $dynamic_pricing = [
     'top_rate_plan'           => '',
     'top_package'             => '',
 ];
-try {
-    $dpStmt = $pdo->prepare("
-        SELECT
-            SUM(CASE WHEN rate_plan_id IS NOT NULL THEN 1 ELSE 0 END) AS bookings_with_rate_plan,
-            COALESCE(SUM(CASE WHEN rate_plan_id IS NOT NULL THEN COALESCE(rate_plan_discount,0) ELSE 0 END),0) AS total_discount_given,
-            COALESCE(SUM(COALESCE(package_total,0)),0) AS package_revenue
-        FROM bookings
-        WHERE DATE(created_at) = :d
-          AND status NOT IN ('cancelled','no-show')
-    ");
-    $dpStmt->execute([':d' => $report_date]);
-    $dpRow = $dpStmt->fetch(PDO::FETCH_ASSOC) ?: [];
-    $dynamic_pricing['bookings_with_rate_plan'] = (int)($dpRow['bookings_with_rate_plan'] ?? 0);
-    $dynamic_pricing['total_discount_given']    = (float)($dpRow['total_discount_given'] ?? 0);
-    $dynamic_pricing['package_revenue']         = (float)($dpRow['package_revenue'] ?? 0);
+if ($mod_bookings) {
+    try {
+        $dpStmt = $pdo->prepare("
+            SELECT
+                SUM(CASE WHEN rate_plan_id IS NOT NULL THEN 1 ELSE 0 END) AS bookings_with_rate_plan,
+                COALESCE(SUM(CASE WHEN rate_plan_id IS NOT NULL THEN COALESCE(rate_plan_discount,0) ELSE 0 END),0) AS total_discount_given,
+                COALESCE(SUM(COALESCE(package_total,0)),0) AS package_revenue
+            FROM bookings
+            WHERE DATE(created_at) = :d
+              AND status NOT IN ('cancelled','no-show')
+        ");
+        $dpStmt->execute([':d' => $report_date]);
+        $dpRow = $dpStmt->fetch(PDO::FETCH_ASSOC) ?: [];
+        $dynamic_pricing['bookings_with_rate_plan'] = (int)($dpRow['bookings_with_rate_plan'] ?? 0);
+        $dynamic_pricing['total_discount_given']    = (float)($dpRow['total_discount_given'] ?? 0);
+        $dynamic_pricing['package_revenue']         = (float)($dpRow['package_revenue'] ?? 0);
 
-    // Count packages booked today
-    $bpStmt = $pdo->prepare("
-        SELECT COUNT(*) FROM booking_packages bp
-        INNER JOIN bookings b ON b.id = bp.booking_id
-        WHERE DATE(b.created_at) = :d AND b.status NOT IN ('cancelled','no-show')
-    ");
-    $bpStmt->execute([':d' => $report_date]);
-    $dynamic_pricing['packages_booked'] = (int)$bpStmt->fetchColumn();
+        $bpStmt = $pdo->prepare("
+            SELECT COUNT(*) FROM booking_packages bp
+            INNER JOIN bookings b ON b.id = bp.booking_id
+            WHERE DATE(b.created_at) = :d AND b.status NOT IN ('cancelled','no-show')
+        ");
+        $bpStmt->execute([':d' => $report_date]);
+        $dynamic_pricing['packages_booked'] = (int)$bpStmt->fetchColumn();
 
-    // Top rate plan used today
-    $rpStmt = $pdo->prepare("
-        SELECT rate_plan_label, COUNT(*) AS cnt FROM bookings
-        WHERE DATE(created_at) = :d AND rate_plan_id IS NOT NULL AND status NOT IN ('cancelled','no-show')
-        GROUP BY rate_plan_label ORDER BY cnt DESC LIMIT 1
-    ");
-    $rpStmt->execute([':d' => $report_date]);
-    $rpRow = $rpStmt->fetch(PDO::FETCH_ASSOC);
-    $dynamic_pricing['top_rate_plan'] = $rpRow ? (string)$rpRow['rate_plan_label'] : '';
+        $rpStmt = $pdo->prepare("
+            SELECT rate_plan_label, COUNT(*) AS cnt FROM bookings
+            WHERE DATE(created_at) = :d AND rate_plan_id IS NOT NULL AND status NOT IN ('cancelled','no-show')
+            GROUP BY rate_plan_label ORDER BY cnt DESC LIMIT 1
+        ");
+        $rpStmt->execute([':d' => $report_date]);
+        $rpRow = $rpStmt->fetch(PDO::FETCH_ASSOC);
+        $dynamic_pricing['top_rate_plan'] = $rpRow ? (string)$rpRow['rate_plan_label'] : '';
 
-    // Top package booked today
-    $tpStmt = $pdo->prepare("
-        SELECT bp.package_name, COUNT(*) AS cnt FROM booking_packages bp
-        INNER JOIN bookings b ON b.id = bp.booking_id
-        WHERE DATE(b.created_at) = :d AND b.status NOT IN ('cancelled','no-show')
-        GROUP BY bp.package_name ORDER BY cnt DESC LIMIT 1
-    ");
-    $tpStmt->execute([':d' => $report_date]);
-    $tpRow = $tpStmt->fetch(PDO::FETCH_ASSOC);
-    $dynamic_pricing['top_package'] = $tpRow ? (string)$tpRow['package_name'] : '';
-} catch (Throwable $e) {
-    error_log('EOD dynamic pricing: ' . $e->getMessage());
+        $tpStmt = $pdo->prepare("
+            SELECT bp.package_name, COUNT(*) AS cnt FROM booking_packages bp
+            INNER JOIN bookings b ON b.id = bp.booking_id
+            WHERE DATE(b.created_at) = :d AND b.status NOT IN ('cancelled','no-show')
+            GROUP BY bp.package_name ORDER BY cnt DESC LIMIT 1
+        ");
+        $tpStmt->execute([':d' => $report_date]);
+        $tpRow = $tpStmt->fetch(PDO::FETCH_ASSOC);
+        $dynamic_pricing['top_package'] = $tpRow ? (string)$tpRow['package_name'] : '';
+    } catch (Throwable $e) {
+        error_log('EOD dynamic pricing: ' . $e->getMessage());
+    }
 }
 
 // ---------------------------------------------------------------------------
 // 9) Tomorrow preview
 // ---------------------------------------------------------------------------
 $tomorrow_preview = ['arrivals' => 0, 'departures' => 0, 'rev_forecast' => 0.0];
-try {
-    $tp = $pdo->prepare("
-        SELECT
-            SUM(CASE WHEN check_in_date  = :t AND status IN ('confirmed','tentative','pending') THEN 1 ELSE 0 END) AS arrivals,
-            SUM(CASE WHEN check_out_date = :t AND status IN ('checked-in','confirmed')           THEN 1 ELSE 0 END) AS departures,
-            COALESCE(SUM(CASE WHEN check_in_date = :t AND status IN ('confirmed','tentative','pending') THEN total_amount ELSE 0 END), 0) AS rev_forecast
-        FROM bookings
-    ");
-    $tp->execute([':t' => $tomorrow]);
-    $tomorrow_preview = array_merge($tomorrow_preview, $tp->fetch(PDO::FETCH_ASSOC) ?: []);
-} catch (Throwable $e) { /* ignore */
+if ($mod_bookings) {
+    try {
+        $tp = $pdo->prepare("
+            SELECT
+                SUM(CASE WHEN check_in_date  = :t AND status IN ('confirmed','tentative','pending') THEN 1 ELSE 0 END) AS arrivals,
+                SUM(CASE WHEN check_out_date = :t AND status IN ('checked-in','confirmed')           THEN 1 ELSE 0 END) AS departures,
+                COALESCE(SUM(CASE WHEN check_in_date = :t AND status IN ('confirmed','tentative','pending') THEN total_amount ELSE 0 END), 0) AS rev_forecast
+            FROM bookings
+        ");
+        $tp->execute([':t' => $tomorrow]);
+        $tomorrow_preview = array_merge($tomorrow_preview, $tp->fetch(PDO::FETCH_ASSOC) ?: []);
+    } catch (Throwable $e) { /* ignore */
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -421,31 +440,35 @@ try {
     $previous['room_gross'] = (float)($prevPayRow['room_gross'] ?? 0);
     $previous['net_revenue'] = $previous['gross_revenue'] - $previous['refunds'];
 
-    $prevPos = $pdo->prepare("
-        SELECT
-            COUNT(*) AS orders,
-            COALESCE(SUM(CASE WHEN status IN ('paid','completed') THEN total_amount ELSE 0 END), 0) AS gross
-        FROM stock_orders
-        WHERE created_at BETWEEN :a AND :b
-    ");
-    $prevPos->execute([':a' => $previous_day_start, ':b' => $previous_day_end]);
-    $prevPosRow = $prevPos->fetch(PDO::FETCH_ASSOC) ?: [];
-    $previous['pos_orders'] = (int)($prevPosRow['orders'] ?? 0);
-    $previous['pos_gross'] = (float)($prevPosRow['gross'] ?? 0);
+    if ($mod_pos) {
+        $prevPos = $pdo->prepare("
+            SELECT
+                COUNT(*) AS orders,
+                COALESCE(SUM(CASE WHEN status IN ('paid','completed') THEN total_amount ELSE 0 END), 0) AS gross
+            FROM stock_orders
+            WHERE created_at BETWEEN :a AND :b
+        ");
+        $prevPos->execute([':a' => $previous_day_start, ':b' => $previous_day_end]);
+        $prevPosRow = $prevPos->fetch(PDO::FETCH_ASSOC) ?: [];
+        $previous['pos_orders'] = (int)($prevPosRow['orders'] ?? 0);
+        $previous['pos_gross'] = (float)($prevPosRow['gross'] ?? 0);
+    }
 
-    $prevBookings = $pdo->prepare("SELECT COUNT(*) FROM bookings WHERE DATE(created_at) = :d");
-    $prevBookings->execute([':d' => $previous_day]);
-    $previous['new_bookings'] = (int)$prevBookings->fetchColumn();
+    if ($mod_bookings) {
+        $prevBookings = $pdo->prepare("SELECT COUNT(*) FROM bookings WHERE DATE(created_at) = :d");
+        $prevBookings->execute([':d' => $previous_day]);
+        $previous['new_bookings'] = (int)$prevBookings->fetchColumn();
 
-    $prevOcc = $pdo->prepare("
-        SELECT COUNT(*) FROM bookings
-        WHERE status IN ('checked-in','checked-out')
-          AND check_in_date <= :d
-          AND check_out_date > :d
-    ");
-    $prevOcc->execute([':d' => $previous_day]);
-    $previous['rooms_occupied'] = (int)$prevOcc->fetchColumn();
-    $previous['occupancy_pct'] = $rooms_total > 0 ? ($previous['rooms_occupied'] / $rooms_total) * 100 : 0;
+        $prevOcc = $pdo->prepare("
+            SELECT COUNT(*) FROM bookings
+            WHERE status IN ('checked-in','checked-out')
+              AND check_in_date <= :d
+              AND check_out_date > :d
+        ");
+        $prevOcc->execute([':d' => $previous_day]);
+        $previous['rooms_occupied'] = (int)$prevOcc->fetchColumn();
+        $previous['occupancy_pct'] = $rooms_total > 0 ? ($previous['rooms_occupied'] / $rooms_total) * 100 : 0;
+    }
 } catch (Throwable $e) {
     error_log('EOD previous comparison: ' . $e->getMessage());
 }
@@ -490,11 +513,11 @@ $revenue_per_transaction = (int)$rev['txn_count'] > 0 ? $gross_revenue / (int)$r
 $fnb_per_occupied_room = $rooms_occupied > 0 ? (float)$pos_totals['gross'] / $rooms_occupied : 0;
 $unpaid_risk = (float)$rev['pending'] + $outstanding_folio;
 
-$revenue_sources = [
-    ['label' => 'Rooms', 'value' => (float)$rev['room_gross']],
-    ['label' => 'Conferences', 'value' => (float)$rev['conf_gross']],
-    ['label' => 'F&B / POS', 'value' => (float)$rev['fnb_gross']],
-];
+$revenue_sources = [];
+if ($mod_bookings)   { $revenue_sources[] = ['label' => 'Rooms',       'value' => (float)$rev['room_gross']]; }
+if ($mod_conference) { $revenue_sources[] = ['label' => 'Conferences',  'value' => (float)$rev['conf_gross']]; }
+if ($mod_pos)        { $revenue_sources[] = ['label' => 'F&B / POS',    'value' => (float)$rev['fnb_gross']]; }
+if (empty($revenue_sources)) { $revenue_sources[] = ['label' => 'Revenue', 'value' => $gross_revenue]; }
 usort($revenue_sources, fn($a, $b) => $b['value'] <=> $a['value']);
 $top_revenue_source = $revenue_sources[0];
 $top_revenue_source_share = $gross_revenue > 0 ? ((float)$top_revenue_source['value'] / $gross_revenue) * 100 : 0;
@@ -510,15 +533,21 @@ $pos_change_pct = $previous['pos_gross'] > 0 ? ($pos_change / $previous['pos_gro
 $order_value_change = $average_order_value - $previous_average_order_value;
 
 $daily_health_score = 100;
-$daily_health_score -= min(18, $arrivals_remaining * 4);
-$daily_health_score -= min(16, $departures_remaining * 4);
-$daily_health_score -= min(16, (int)$ops['no_shows'] * 8);
-$daily_health_score -= min(12, (int)$ops['cancellations'] * 3);
-$daily_health_score -= min(12, (int)$pos_totals['voided_count'] * 4);
+if ($mod_bookings) {
+    $daily_health_score -= min(18, $arrivals_remaining * 4);
+    $daily_health_score -= min(16, $departures_remaining * 4);
+    $daily_health_score -= min(16, (int)$ops['no_shows'] * 8);
+    $daily_health_score -= min(12, (int)$ops['cancellations'] * 3);
+    $daily_health_score -= $outstanding_folio > 0 ? 8 : 0;
+    $daily_health_score -= $rooms_oo > 0 ? 5 : 0;
+}
+if ($mod_pos) {
+    $daily_health_score -= min(12, (int)$pos_totals['voided_count'] * 4);
+}
 $daily_health_score -= (float)$rev['pending'] > 0 ? 8 : 0;
-$daily_health_score -= $outstanding_folio > 0 ? 8 : 0;
-$daily_health_score -= ((int)$housekeeping['pending'] + (int)$housekeeping['in_progress']) > 0 ? 8 : 0;
-$daily_health_score -= $rooms_oo > 0 ? 5 : 0;
+if ($mod_housekeeping) {
+    $daily_health_score -= ((int)$housekeeping['pending'] + (int)$housekeeping['in_progress']) > 0 ? 8 : 0;
+}
 $daily_health_score = max(0, min(100, $daily_health_score));
 $daily_health_label = $daily_health_score >= 90 ? 'Excellent close' : ($daily_health_score >= 75 ? 'Good close' : ($daily_health_score >= 55 ? 'Needs attention' : 'Critical review'));
 
@@ -532,50 +561,52 @@ $closeout_alerts = [];
 $addAlert = function (string $level, string $icon, string $title, string $detail) use (&$closeout_alerts): void {
     $closeout_alerts[] = ['level' => $level, 'icon' => $icon, 'title' => $title, 'detail' => $detail];
 };
-if ($arrivals_remaining > 0) {
-    $addAlert('warn', 'fa-person-walking-luggage', 'Arrivals still open', $arrivals_remaining . ' expected arrival' . ($arrivals_remaining === 1 ? '' : 's') . ' not checked in.');
-}
-if ($departures_remaining > 0) {
-    $addAlert('warn', 'fa-door-open', 'Departures still open', $departures_remaining . ' expected departure' . ($departures_remaining === 1 ? '' : 's') . ' not checked out.');
+if ($mod_bookings) {
+    if ($arrivals_remaining > 0) {
+        $addAlert('warn', 'fa-person-walking-luggage', 'Arrivals still open', $arrivals_remaining . ' expected arrival' . ($arrivals_remaining === 1 ? '' : 's') . ' not checked in.');
+    }
+    if ($departures_remaining > 0) {
+        $addAlert('warn', 'fa-door-open', 'Departures still open', $departures_remaining . ' expected departure' . ($departures_remaining === 1 ? '' : 's') . ' not checked out.');
+    }
+    if ($outstanding_folio > 0) {
+        $addAlert('warn', 'fa-file-invoice-dollar', 'Outstanding guest folio', $money($outstanding_folio) . ' unpaid across in-house / active stays.');
+    }
+    if ($rooms_oo > 0) {
+        $addAlert('watch', 'fa-screwdriver-wrench', 'Rooms out of order', $rooms_oo . ' room' . ($rooms_oo === 1 ? '' : 's') . ' unavailable for sale.');
+    }
 }
 if ((float)$rev['pending'] > 0) {
     $addAlert('warn', 'fa-hourglass-half', 'Same-day pending payments', $money((float)$rev['pending']) . ' still pending or partial in today\'s ledger.');
 }
-if ($outstanding_folio > 0) {
-    $addAlert('warn', 'fa-file-invoice-dollar', 'Outstanding guest folio', $money($outstanding_folio) . ' unpaid across in-house / active stays.');
-}
-if ((int)$pos_totals['voided_count'] > 0) {
+if ($mod_pos && (int)$pos_totals['voided_count'] > 0) {
     $addAlert('warn', 'fa-ban', 'POS voids to review', (int)$pos_totals['voided_count'] . ' void' . ((int)$pos_totals['voided_count'] === 1 ? '' : 's') . ' worth ' . $money((float)$pos_totals['voided_value']) . '.');
 }
 if ((float)$rev['refunds'] > 0) {
     $addAlert('watch', 'fa-rotate-left', 'Refunds processed', $money((float)$rev['refunds']) . ' refunded today.');
 }
-if (((int)$housekeeping['pending'] + (int)$housekeeping['in_progress']) > 0) {
+if ($mod_housekeeping && ((int)$housekeeping['pending'] + (int)$housekeeping['in_progress']) > 0) {
     $addAlert('watch', 'fa-broom', 'Housekeeping not fully closed', ((int)$housekeeping['pending'] + (int)$housekeeping['in_progress']) . ' room task' . (((int)$housekeeping['pending'] + (int)$housekeeping['in_progress']) === 1 ? '' : 's') . ' still open.');
-}
-if ($rooms_oo > 0) {
-    $addAlert('watch', 'fa-screwdriver-wrench', 'Rooms out of order', $rooms_oo . ' room' . ($rooms_oo === 1 ? '' : 's') . ' unavailable for sale.');
 }
 
 // --- Smart analytical alerts ---
 $void_rate = (int)$pos_totals['orders'] > 0 ? ((int)$pos_totals['voided_count'] / (int)$pos_totals['orders']) * 100 : 0;
-if ($void_rate > 5 && (int)$pos_totals['voided_count'] > 0) {
+if ($mod_pos && $void_rate > 5 && (int)$pos_totals['voided_count'] > 0) {
     $addAlert('warn', 'fa-triangle-exclamation', 'High void rate — review immediately', sprintf('%.1f%% of all POS orders voided (%d orders worth %s). Investigate cashier logs.', $void_rate, (int)$pos_totals['voided_count'], strip_tags($money((float)$pos_totals['voided_value']))));
 }
 $cash_share = $gross_revenue > 0 ? ($method_totals['cash'] / $gross_revenue) * 100 : 0;
 if ($cash_share > 60 && $method_totals['cash'] > 0) {
     $addAlert('watch', 'fa-sack-dollar', 'High cash day — reconcile drawers', sprintf('%.0f%% of today\'s revenue collected in cash. Ensure cashier drawers are counted and closed before end of shift.', $cash_share));
 }
-if ($pos_margin_pct < 25 && (float)$pos_totals['gross'] > 500) {
+if ($mod_pos && $pos_margin_pct < 25 && (float)$pos_totals['gross'] > 500) {
     $addAlert('watch', 'fa-chart-pie', 'Low F&B gross margin', sprintf('POS margin is %.1f%% today (healthy target ≥ 35%%). Review high-cost items or check COGS recipe costs.', $pos_margin_pct));
 }
-if ($occupancy_pct < 40 && $rooms_total > 0 && $isToday) {
+if ($mod_bookings && $occupancy_pct < 40 && $rooms_total > 0 && $isToday) {
     $addAlert('watch', 'fa-bed', 'Low occupancy day', sprintf('%.1f%% occupancy. Consider activating walk-in promotions or last-minute rate adjustments.', $occupancy_pct));
 }
-if ((int)$ops['new_bookings'] === 0 && $isToday) {
+if ($mod_bookings && (int)$ops['new_bookings'] === 0 && $isToday) {
     $addAlert('watch', 'fa-calendar-xmark', 'No new bookings today', 'Zero new reservations created. Monitor demand signals and consider a short-window promotion.');
 }
-if ($guest_intel['returning_guests'] === 0 && $guest_intel_total > 0 && $returning_rate < 15) {
+if ($mod_bookings && $guest_intel['returning_guests'] === 0 && $guest_intel_total > 0 && $returning_rate < 15) {
     $addAlert('watch', 'fa-person-walking-arrow-loop-left', 'Low repeat guest rate', sprintf('Only %.0f%% of today\'s arrivals are returning guests. Loyalty programme or follow-up emails may help.', $returning_rate));
 }
 if (!$closeout_alerts) {
@@ -652,70 +683,72 @@ $trend_max_total = max(array_map(fn($r) => $r['net'] + $r['pos_gross'], $trend_d
 
 // ---------------------------------------------------------------------------
 // ENHANCEMENT B — Room type revenue breakdown today
-// Tells the owner which room category is the revenue engine.
 // ---------------------------------------------------------------------------
 $room_type_perf = [];
-try {
-    $rtStmt = $pdo->prepare("
-        SELECT rt.name AS room_type,
-               COUNT(DISTINCT b.id) AS bookings,
-               COALESCE(SUM(p.total_amount), 0) AS revenue
-        FROM payments p
-        INNER JOIN bookings b  ON b.id = p.booking_id
-        INNER JOIN individual_rooms ir ON ir.id = b.room_id
-        INNER JOIN room_types rt ON rt.id = ir.room_type_id
-        WHERE DATE(p.payment_date) = :d
-          AND p.payment_status IN ('completed','paid')
-          AND COALESCE(p.payment_type,'') <> 'refund'
-          AND p.booking_type = 'room'
-          AND p.deleted_at IS NULL
-        GROUP BY rt.id, rt.name
-        ORDER BY revenue DESC
-        LIMIT 6
-    ");
-    $rtStmt->execute([':d' => $report_date]);
-    $room_type_perf = $rtStmt->fetchAll(PDO::FETCH_ASSOC);
-} catch (Throwable $e) {
-    error_log('EOD room type perf: ' . $e->getMessage());
+if ($mod_bookings) {
+    try {
+        $rtStmt = $pdo->prepare("
+            SELECT rt.name AS room_type,
+                   COUNT(DISTINCT b.id) AS bookings,
+                   COALESCE(SUM(p.total_amount), 0) AS revenue
+            FROM payments p
+            INNER JOIN bookings b  ON b.id = p.booking_id
+            INNER JOIN individual_rooms ir ON ir.id = b.room_id
+            INNER JOIN room_types rt ON rt.id = ir.room_type_id
+            WHERE DATE(p.payment_date) = :d
+              AND p.payment_status IN ('completed','paid')
+              AND COALESCE(p.payment_type,'') <> 'refund'
+              AND p.booking_type = 'room'
+              AND p.deleted_at IS NULL
+            GROUP BY rt.id, rt.name
+            ORDER BY revenue DESC
+            LIMIT 6
+        ");
+        $rtStmt->execute([':d' => $report_date]);
+        $room_type_perf = $rtStmt->fetchAll(PDO::FETCH_ASSOC);
+    } catch (Throwable $e) {
+        error_log('EOD room type perf: ' . $e->getMessage());
+    }
 }
 
 // ---------------------------------------------------------------------------
 // ENHANCEMENT C — Guest intelligence: new vs returning guests + lead time
-// Loyalty health + booking-window strategy insight.
 // ---------------------------------------------------------------------------
 $guest_intel = ['new_guests' => 0, 'returning_guests' => 0, 'avg_lead_days' => 0];
-try {
-    $giStmt = $pdo->prepare("
-        SELECT
-            SUM(CASE WHEN bcount.total = 1 THEN 1 ELSE 0 END) AS new_guests,
-            SUM(CASE WHEN bcount.total > 1 THEN 1 ELSE 0 END) AS returning_guests
-        FROM bookings b
-        INNER JOIN (
-            SELECT guest_email, COUNT(*) AS total
-            FROM bookings
-            WHERE guest_email != ''
-              AND status NOT IN ('cancelled','no-show','expired')
-            GROUP BY guest_email
-        ) bcount ON bcount.guest_email = b.guest_email
-        WHERE b.check_in_date = :d
-          AND b.status NOT IN ('cancelled','no-show','expired')
-          AND b.guest_email != ''
-    ");
-    $giStmt->execute([':d' => $report_date]);
-    $giRow = $giStmt->fetch(PDO::FETCH_ASSOC) ?: [];
-    $guest_intel['new_guests']       = (int)($giRow['new_guests'] ?? 0);
-    $guest_intel['returning_guests'] = (int)($giRow['returning_guests'] ?? 0);
+if ($mod_bookings) {
+    try {
+        $giStmt = $pdo->prepare("
+            SELECT
+                SUM(CASE WHEN bcount.total = 1 THEN 1 ELSE 0 END) AS new_guests,
+                SUM(CASE WHEN bcount.total > 1 THEN 1 ELSE 0 END) AS returning_guests
+            FROM bookings b
+            INNER JOIN (
+                SELECT guest_email, COUNT(*) AS total
+                FROM bookings
+                WHERE guest_email != ''
+                  AND status NOT IN ('cancelled','no-show','expired')
+                GROUP BY guest_email
+            ) bcount ON bcount.guest_email = b.guest_email
+            WHERE b.check_in_date = :d
+              AND b.status NOT IN ('cancelled','no-show','expired')
+              AND b.guest_email != ''
+        ");
+        $giStmt->execute([':d' => $report_date]);
+        $giRow = $giStmt->fetch(PDO::FETCH_ASSOC) ?: [];
+        $guest_intel['new_guests']       = (int)($giRow['new_guests'] ?? 0);
+        $guest_intel['returning_guests'] = (int)($giRow['returning_guests'] ?? 0);
 
-    $leadStmt = $pdo->prepare("
-        SELECT ROUND(AVG(DATEDIFF(check_in_date, DATE(created_at)))) AS avg_lead
-        FROM bookings
-        WHERE check_in_date = :d
-          AND status NOT IN ('cancelled','no-show','expired')
-    ");
-    $leadStmt->execute([':d' => $report_date]);
-    $guest_intel['avg_lead_days'] = max(0, (int)($leadStmt->fetchColumn() ?? 0));
-} catch (Throwable $e) {
-    error_log('EOD guest intel: ' . $e->getMessage());
+        $leadStmt = $pdo->prepare("
+            SELECT ROUND(AVG(DATEDIFF(check_in_date, DATE(created_at)))) AS avg_lead
+            FROM bookings
+            WHERE check_in_date = :d
+              AND status NOT IN ('cancelled','no-show','expired')
+        ");
+        $leadStmt->execute([':d' => $report_date]);
+        $guest_intel['avg_lead_days'] = max(0, (int)($leadStmt->fetchColumn() ?? 0));
+    } catch (Throwable $e) {
+        error_log('EOD guest intel: ' . $e->getMessage());
+    }
 }
 $guest_intel_total = $guest_intel['new_guests'] + $guest_intel['returning_guests'];
 $returning_rate    = $guest_intel_total > 0 ? ($guest_intel['returning_guests'] / $guest_intel_total) * 100 : 0;
@@ -723,25 +756,26 @@ $lead_time_label   = $guest_intel['avg_lead_days'] <= 1 ? 'Same-day / walk-in' :
 
 // ---------------------------------------------------------------------------
 // ENHANCEMENT D — Void breakdown by reason
-// Drill-down for loss prevention and error analysis.
 // ---------------------------------------------------------------------------
 $void_reasons = [];
-try {
-    $vrStmt = $pdo->prepare("
-        SELECT COALESCE(NULLIF(TRIM(void_reason), ''), 'No reason given') AS reason,
-               COUNT(*) AS cnt,
-               COALESCE(SUM(total_amount), 0) AS value
-        FROM stock_orders
-        WHERE status = 'voided'
-          AND created_at BETWEEN :a AND :b
-        GROUP BY reason
-        ORDER BY cnt DESC
-        LIMIT 5
-    ");
-    $vrStmt->execute([':a' => $dayStart, ':b' => $dayEnd]);
-    $void_reasons = $vrStmt->fetchAll(PDO::FETCH_ASSOC);
-} catch (Throwable $e) {
-    error_log('EOD void reasons: ' . $e->getMessage());
+if ($mod_pos) {
+    try {
+        $vrStmt = $pdo->prepare("
+            SELECT COALESCE(NULLIF(TRIM(void_reason), ''), 'No reason given') AS reason,
+                   COUNT(*) AS cnt,
+                   COALESCE(SUM(total_amount), 0) AS value
+            FROM stock_orders
+            WHERE status = 'voided'
+              AND created_at BETWEEN :a AND :b
+            GROUP BY reason
+            ORDER BY cnt DESC
+            LIMIT 5
+        ");
+        $vrStmt->execute([':a' => $dayStart, ':b' => $dayEnd]);
+        $void_reasons = $vrStmt->fetchAll(PDO::FETCH_ASSOC);
+    } catch (Throwable $e) {
+        error_log('EOD void reasons: ' . $e->getMessage());
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -809,11 +843,14 @@ try {
 } catch (Throwable $e) { /* ignore */ }
 
 $gym_inquiries_today = 0;
-try {
-    $gymStmt = $pdo->prepare("SELECT COUNT(*) FROM gym_inquiries WHERE DATE(created_at) = :d AND (status = 'new' OR status = 'pending')");
-    $gymStmt->execute([':d' => $report_date]);
-    $gym_inquiries_today = (int)$gymStmt->fetchColumn();
-} catch (Throwable $e) { /* ignore */ }
+if ($mod_gym) {
+    try {
+        $gymStmt = $pdo->prepare("SELECT COUNT(*) FROM gym_inquiries WHERE DATE(created_at) = :d AND (status = 'new' OR status = 'pending')");
+        $gymStmt->execute([':d' => $report_date]);
+        $gym_inquiries_today = (int)$gymStmt->fetchColumn();
+    } catch (Throwable $e) { /* ignore */
+    }
+}
 
 // ---------------------------------------------------------------------------
 // CSV export — must run before any HTML output
@@ -1038,6 +1075,7 @@ if (isset($_GET['export']) && $_GET['export'] === 'csv') {
                         <span>Refunds &minus;<?php echo $money($rev['refunds']); ?></span>
                     </div>
                 </div>
+                <?php if ($mod_bookings): ?>
                 <div class="eod-kpi eod-kpi--occupancy" data-help="Occupancy Rate|Rooms sold ÷ total available rooms × 100. A room counts as occupied if a checked-in or checked-out booking spans tonight. Out-of-order rooms are excluded from the available room count.">
                     <div class="eod-kpi__label">Occupancy</div>
                     <div class="eod-kpi__value"><?php echo number_format($occupancy_pct, 1); ?>%</div>
@@ -1053,6 +1091,7 @@ if (isset($_GET['export']) && $_GET['export'] === 'csv') {
                         <span>RevPAR <?php echo $money($revpar); ?></span>
                     </div>
                 </div>
+                <?php endif; ?>
                 <div class="eod-kpi eod-kpi--cash" data-help="VAT Collected|Total Value Added Tax charged across all completed transactions today. This amount is owed to the tax authority — it is not hotel profit. Shown here as a closeout reference.">
                     <div class="eod-kpi__label">VAT Collected</div>
                     <div class="eod-kpi__value"><?php echo $money($total_vat); ?></div>
@@ -1061,6 +1100,7 @@ if (isset($_GET['export']) && $_GET['export'] === 'csv') {
                         <span><?php echo (int)$rev['txn_count']; ?> transactions</span>
                     </div>
                 </div>
+                <?php if ($mod_bookings): ?>
                 <div class="eod-kpi eod-kpi--owed" data-help="Outstanding Folio|Unpaid charges posted to in-house guest accounts. Guests can run charges to their room and settle on check-out. This balance must be collected before departure — it is live unrecovered revenue.">
                     <div class="eod-kpi__label">Outstanding Folio</div>
                     <div class="eod-kpi__value"><?php echo $money($outstanding_folio); ?></div>
@@ -1069,6 +1109,7 @@ if (isset($_GET['export']) && $_GET['export'] === 'csv') {
                         <a href="payments.php">Collect &rarr;</a>
                     </div>
                 </div>
+                <?php endif; ?>
                 <?php if ($cn_issued_count > 0 || $cn_redeemed_today > 0): ?>
                     <div class="eod-kpi eod-kpi--cash" data-help="Credit Notes Issued|Total value of credit notes created today. A credit note is issued instead of a cash refund — it gives the guest hotel credit to use on a future visit. Track this to monitor outstanding liability.">
                         <div class="eod-kpi__label">CN Issued Today</div>
@@ -1113,24 +1154,31 @@ if (isset($_GET['export']) && $_GET['export'] === 'csv') {
                             <span>Net revenue vs yesterday</span>
                             <strong class="eod-trend eod-trend--<?php echo $trendTone($net_change); ?>"><?php echo $trendLabel($net_change, true); ?> <small><?php echo $trendLabel($net_change_pct, false, '%'); ?></small></strong>
                         </li>
+                        <?php if ($mod_bookings): ?>
                         <li>
                             <span>Rooms revenue vs yesterday</span>
                             <strong class="eod-trend eod-trend--<?php echo $trendTone($room_rev_change); ?>"><?php echo $trendLabel($room_rev_change, true); ?></strong>
                         </li>
-                        <?php if ((float)$rev['conf_gross'] > 0 || (float)$prev_sources['conf_gross'] > 0): ?>
+                        <?php endif; ?>
+                        <?php if ($mod_conference && ((float)$rev['conf_gross'] > 0 || (float)$prev_sources['conf_gross'] > 0)): ?>
                         <li>
                             <span>Conference revenue vs yesterday</span>
                             <strong class="eod-trend eod-trend--<?php echo $trendTone($conf_rev_change); ?>"><?php echo $trendLabel($conf_rev_change, true); ?></strong>
                         </li>
                         <?php endif; ?>
+                        <?php if ($mod_pos): ?>
                         <li>
                             <span>F&amp;B vs yesterday</span>
                             <strong class="eod-trend eod-trend--<?php echo $trendTone($fnb_rev_change); ?>"><?php echo $trendLabel($fnb_rev_change, true); ?></strong>
                         </li>
+                        <?php endif; ?>
+                        <?php if ($mod_bookings): ?>
                         <li>
                             <span>Occupancy movement</span>
                             <strong class="eod-trend eod-trend--<?php echo $trendTone($occupancy_change); ?>"><?php echo $trendLabel($occupancy_change, false, ' pts'); ?></strong>
                         </li>
+                        <?php endif; ?>
+                        <?php if ($mod_pos): ?>
                         <li>
                             <span>POS sales vs yesterday</span>
                             <strong class="eod-trend eod-trend--<?php echo $trendTone($pos_change); ?>"><?php echo $trendLabel($pos_change, true); ?> <small><?php echo $trendLabel($pos_change_pct, false, '%'); ?></small></strong>
@@ -1139,10 +1187,13 @@ if (isset($_GET['export']) && $_GET['export'] === 'csv') {
                             <span>Average POS order</span>
                             <strong class="eod-trend eod-trend--<?php echo $trendTone($order_value_change); ?>"><?php echo $money($average_order_value); ?></strong>
                         </li>
+                        <?php endif; ?>
+                        <?php if ($mod_bookings): ?>
                         <li>
                             <span>New bookings today</span>
                             <strong class="eod-trend eod-trend--<?php echo $trendTone((float)((int)$ops['new_bookings'] - $previous['new_bookings'])); ?>"><?php echo (int)$ops['new_bookings']; ?> <small><?php echo $trendLabel((float)((int)$ops['new_bookings'] - $previous['new_bookings'])); ?> vs yesterday</small></strong>
                         </li>
+                        <?php endif; ?>
                     </ul>
                 </article>
 
@@ -1177,6 +1228,7 @@ if (isset($_GET['export']) && $_GET['export'] === 'csv') {
                     </ul>
                 </article>
 
+                <?php if ($mod_bookings): ?>
                 <article class="eod-insight-card" data-help="Yield & Opportunity|Empty-room opportunity: estimated revenue lost from unsold rooms (unsold rooms × ADR). F&B per occupied room: food and beverage revenue per occupied room — measures in-house guest spend. Top revenue source shows which booking type generated the most gross income today.">
                     <div class="eod-insight-card__head">
                         <span class="eod-insight-card__label">Yield & Opportunity</span>
@@ -1185,10 +1237,11 @@ if (isset($_GET['export']) && $_GET['export'] === 'csv') {
                     <ul class="eod-ledger">
                         <li><span>Unsold rooms</span><strong><?php echo (int)$rooms_unsold; ?></strong></li>
                         <li><span>Empty-room opportunity</span><strong><?php echo $money($empty_room_opportunity); ?></strong></li>
-                        <li><span>F&amp;B per occupied room</span><strong><?php echo $money($fnb_per_occupied_room); ?></strong></li>
+                        <?php if ($mod_pos): ?><li><span>F&amp;B per occupied room</span><strong><?php echo $money($fnb_per_occupied_room); ?></strong></li><?php endif; ?>
                         <li><span>Top revenue source</span><strong><?php echo htmlspecialchars($top_revenue_source['label']); ?> <small><?php echo number_format($top_revenue_source_share, 1); ?>%</small></strong></li>
                     </ul>
                 </article>
+                <?php endif; ?>
 
                 <article class="eod-insight-card" data-help="Best Seller & Risk Exposure|Top POS item: the single menu item generating the most revenue today. Unpaid exposure: combined total of all pending payments and outstanding folio — the maximum amount currently at risk of non-collection.">
                     <div class="eod-insight-card__head">
@@ -1208,6 +1261,7 @@ if (isset($_GET['export']) && $_GET['export'] === 'csv') {
 
             <!-- Operations grid -->
             <section class="eod-grid">
+                <?php if ($mod_bookings): ?>
                 <!-- Front office activity -->
                 <article class="eod-panel" data-help="Front Office Activity|Expected arrivals: confirmed bookings due to check in today. Departures: guests due to check out. Stayovers: guests in-house tonight with a future departure date. New bookings: reservations created today for any future date. Cancellations and no-shows reduce both occupancy and revenue.">
                     <header class="eod-panel__head">
@@ -1244,6 +1298,7 @@ if (isset($_GET['export']) && $_GET['export'] === 'csv') {
                         </li>
                     </ul>
                 </article>
+                <?php endif; ?>
 
                 <!-- Revenue by source -->
                 <article class="eod-panel" data-help="Revenue by Source|Rooms: accommodation payments collected today. Conferences: event and function booking payments. F&B / POS: restaurant charges posted through the payments system. Net = Gross minus any refunds processed today. The % Mix column shows each source's share of total gross.">
@@ -1262,11 +1317,10 @@ if (isset($_GET['export']) && $_GET['export'] === 'csv') {
                             </thead>
                             <tbody>
                                 <?php
-                                $rows = [
-                                    ['Rooms',         (float)$rev['room_gross'], (float)$rev['room_vat']],
-                                    ['Conferences',   (float)$rev['conf_gross'], (float)$rev['conf_vat']],
-                                    ['F&amp;B / POS', (float)$rev['fnb_gross'],  (float)$rev['fnb_vat']],
-                                ];
+                                $rows = [];
+                                if ($mod_bookings)   { $rows[] = ['Rooms',         (float)$rev['room_gross'], (float)$rev['room_vat']]; }
+                                if ($mod_conference) { $rows[] = ['Conferences',   (float)$rev['conf_gross'], (float)$rev['conf_vat']]; }
+                                if ($mod_pos)        { $rows[] = ['F&amp;B / POS', (float)$rev['fnb_gross'],  (float)$rev['fnb_vat']]; }
                                 foreach ($rows as $r):
                                     $share = $gross_revenue > 0 ? ($r[1] / $gross_revenue) * 100 : 0;
                                 ?>
@@ -1331,6 +1385,7 @@ if (isset($_GET['export']) && $_GET['export'] === 'csv') {
                     <?php endif; ?>
                 </article>
 
+                <?php if ($mod_pos): ?>
                 <!-- POS -->
                 <article class="eod-panel" data-help="POS / F&B Sales|Orders placed on the till system (walk-in, room service, takeaway, delivery). COGS is the ingredient cost from stock recipes. Margin % = (Gross − COGS) ÷ Gross × 100. Healthy F&B margin target is ≥35%. Voids are cancelled orders — review if they exceed 5% of total orders.">
                     <header class="eod-panel__head">
@@ -1379,7 +1434,9 @@ if (isset($_GET['export']) && $_GET['export'] === 'csv') {
                         </div>
                     <?php endif; ?>
                 </article>
+                <?php endif; ?>
 
+                <?php if ($mod_pos): ?>
                 <!-- Top selling items -->
                 <article class="eod-panel eod-panel--wide" data-help="Top Selling Items|Best-performing individual menu items today ranked by total revenue. Qty is total units sold. Use this to guide menu decisions, manage stock for tomorrow, and identify high-margin items worth promoting.">
                     <header class="eod-panel__head">
@@ -1412,7 +1469,9 @@ if (isset($_GET['export']) && $_GET['export'] === 'csv') {
                         </div>
                     <?php endif; ?>
                 </article>
+                <?php endif; ?>
 
+                <?php if ($mod_bookings): ?>
                 <!-- Dynamic pricing & packages -->
                 <article class="eod-panel" data-help="Dynamic Pricing & Packages|Rate-plan bookings used a configured pricing rule (early bird, corporate, long stay, etc.). Discounts given is the total reduction from rack rate applied today. Package add-on revenue comes from extras bundled with a booking.">
                     <header class="eod-panel__head">
@@ -1446,7 +1505,9 @@ if (isset($_GET['export']) && $_GET['export'] === 'csv') {
                         </ul>
                     <?php endif; ?>
                 </article>
+                <?php endif; ?>
 
+                <?php if ($mod_housekeeping): ?>
                 <!-- Housekeeping -->
                 <article class="eod-panel" data-help="Housekeeping Status|Pending: tasks assigned but not yet started. In progress: currently being worked on. Completed: fully done today. All pending and in-progress tasks should be resolved before end of shift so rooms are ready for tomorrow's arrivals.">
                     <header class="eod-panel__head">
@@ -1467,6 +1528,7 @@ if (isset($_GET['export']) && $_GET['export'] === 'csv') {
                         </li>
                     </ul>
                 </article>
+                <?php endif; ?>
 
                 <!-- Guest sentiment -->
                 <article class="eod-panel" data-help="Guest Reviews|Reviews submitted today. Average rating is out of 5. Daily monitoring catches service issues before they escalate. Low scores should be reviewed with the relevant department head before the next shift.">
@@ -1530,6 +1592,7 @@ if (isset($_GET['export']) && $_GET['export'] === 'csv') {
                     </div>
                 </article>
 
+                <?php if ($mod_bookings): ?>
                 <!-- Room type revenue -->
                 <article class="eod-panel" data-help="Room Type Revenue|Accommodation payments broken down by room category today. Bar length shows each type's share relative to the highest-earning category. Useful for pricing decisions, upsell targets, and understanding which room tiers drive revenue.">
                     <header class="eod-panel__head">
@@ -1558,7 +1621,9 @@ if (isset($_GET['export']) && $_GET['export'] === 'csv') {
                         </ul>
                     <?php endif; ?>
                 </article>
+                <?php endif; ?>
 
+                <?php if ($mod_bookings): ?>
                 <!-- Guest intelligence -->
                 <article class="eod-panel" data-help="Guest Intelligence|New guests: arrivals today with no prior booking history in the system. Returning guests: arrivals who have booked before. Booking lead time: average days between when today's guests made their reservation and their arrival date. Short lead times may indicate last-minute demand.">
                     <header class="eod-panel__head">
@@ -1592,6 +1657,7 @@ if (isset($_GET['export']) && $_GET['export'] === 'csv') {
                         </ul>
                     <?php endif; ?>
                 </article>
+                <?php endif; ?>
 
                 <!-- Gym inquiries -->
                 <?php if ($gym_inquiries_today > 0): ?>
@@ -1608,7 +1674,7 @@ if (isset($_GET['export']) && $_GET['export'] === 'csv') {
                 <?php endif; ?>
 
                 <!-- Open Maintenance -->
-                <?php if ($maintenance['total_open'] > 0): ?>
+                <?php if ($mod_bookings && $maintenance['total_open'] > 0): ?>
                 <article class="eod-panel" data-help="Open Maintenance|Rooms maintenance tasks still open at end of shift. Urgent and high priority tasks should be resolved before tomorrow's arrivals to ensure rooms are ready.">
                     <header class="eod-panel__head">
                         <h2 class="eod-panel__title"><i class="fas fa-screwdriver-wrench"></i> Open Maintenance</h2>
@@ -1667,6 +1733,7 @@ if (isset($_GET['export']) && $_GET['export'] === 'csv') {
                 </article>
                 <?php endif; ?>
 
+                <?php if ($mod_bookings): ?>
                 <!-- Tomorrow preview -->
                 <article class="eod-panel eod-panel--accent" data-help="Tomorrow Preview|Expected arrivals: confirmed bookings checking in tomorrow. Expected departures: guests due to check out. Revenue forecast: the sum of booking charges due from tomorrow's arrivals based on their confirmed booking values.">
                     <header class="eod-panel__head">
@@ -1688,6 +1755,7 @@ if (isset($_GET['export']) && $_GET['export'] === 'csv') {
                         </li>
                     </ul>
                 </article>
+                <?php endif; ?>
             </section>
 
             <!-- Footer note -->
