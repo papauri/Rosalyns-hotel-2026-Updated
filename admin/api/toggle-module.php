@@ -22,11 +22,18 @@ if (!validateCsrfToken($_POST['csrf_token'] ?? '')) {
 requireApiPermission('booking_settings');
 
 $allowed = ['bookings', 'housekeeping', 'pos', 'stock', 'conference', 'gym', 'finance', 'website_cms'];
+$locked  = ['finance']; // These modules cannot be disabled — always required
+
 $module_key = trim((string)($_POST['module_key'] ?? ''));
 $is_enabled = (int)!empty($_POST['is_enabled']);
 
 if (!in_array($module_key, $allowed, true)) {
     echo json_encode(['success' => false, 'error' => 'Invalid module key.']);
+    exit;
+}
+
+if (!$is_enabled && in_array($module_key, $locked, true)) {
+    echo json_encode(['success' => false, 'error' => 'Finance & Accounting cannot be disabled — it is required by all business types.']);
     exit;
 }
 

@@ -23,70 +23,116 @@ foreach ($modules as $m) {
     $module_state[(string)$m['module_key']] = (bool)(int)$m['is_enabled'];
 }
 
+// Finance is always locked on — cannot be disabled
+$locked_modules = ['finance'];
+
 $modules_meta = [
-    'bookings'    => [
-        'icon'  => 'fas fa-calendar-check',
-        'color' => '#2e7d32',
-        'bg'    => '#e8f5e9',
-        'label' => 'Bookings & Reservations',
-        'desc'  => 'Room bookings, calendar, blocked dates, tentative holds, check-in and check-out flows.',
-        'warn'  => 'Disabling hides all booking pages and the Bookings nav section.',
+    'bookings' => [
+        'icon'   => 'fas fa-calendar-check',
+        'color'  => '#2e7d32',
+        'bg'     => '#e8f5e9',
+        'label'  => 'Bookings & Reservations',
+        'desc'   => 'Room bookings, calendar, blocked dates, tentative holds, check-in and check-out flows.',
+        'warn'   => 'Disabling hides all booking pages and the Bookings nav section.',
+        'locked' => false,
     ],
     'housekeeping' => [
-        'icon'  => 'fas fa-broom',
-        'color' => '#8B7355',
-        'bg'    => '#f5f2eb',
-        'label' => 'Housekeeping',
-        'desc'  => 'Room cleaning schedules, task assignment, and housekeeping reconciliation.',
-        'warn'  => null,
+        'icon'   => 'fas fa-broom',
+        'color'  => '#8B7355',
+        'bg'     => '#f5f2eb',
+        'label'  => 'Housekeeping',
+        'desc'   => 'Room cleaning schedules, task assignment, and housekeeping reconciliation.',
+        'warn'   => null,
+        'locked' => false,
     ],
     'pos' => [
-        'icon'  => 'fas fa-cash-register',
-        'color' => '#8B7355',
-        'bg'    => '#fdf8f0',
-        'label' => 'POS & Stations',
-        'desc'  => 'Point-of-sale till, kitchen display (KDS), bar display (BDS), coffee bar (CDS), room service, deals and offline log.',
-        'warn'  => null,
+        'icon'   => 'fas fa-cash-register',
+        'color'  => '#8B7355',
+        'bg'     => '#fdf8f0',
+        'label'  => 'POS & Stations',
+        'desc'   => 'Point-of-sale till, kitchen display (KDS), bar display (BDS), coffee bar, room service, deals and offline log.',
+        'warn'   => null,
+        'locked' => false,
     ],
     'stock' => [
-        'icon'  => 'fas fa-boxes',
-        'color' => '#1565c0',
-        'bg'    => '#e3f2fd',
-        'label' => 'Stock Management',
-        'desc'  => 'Ingredients, recipes, batch tracking, stock orders, barcode receiving, stock counts and wastage.',
-        'warn'  => null,
+        'icon'   => 'fas fa-boxes',
+        'color'  => '#1565c0',
+        'bg'     => '#e3f2fd',
+        'label'  => 'Stock Management',
+        'desc'   => 'Ingredients, recipes, batch tracking, stock orders, barcode receiving, stock counts and wastage.',
+        'warn'   => null,
+        'locked' => false,
     ],
     'conference' => [
-        'icon'  => 'fas fa-briefcase',
-        'color' => '#5e35b1',
-        'bg'    => '#ede7f6',
-        'label' => 'Conference Rooms',
-        'desc'  => 'Conference room management, bookings and inquiry handling.',
-        'warn'  => null,
+        'icon'   => 'fas fa-briefcase',
+        'color'  => '#5e35b1',
+        'bg'     => '#ede7f6',
+        'label'  => 'Conference Rooms',
+        'desc'   => 'Conference room management, bookings and inquiry handling.',
+        'warn'   => null,
+        'locked' => false,
     ],
     'gym' => [
-        'icon'  => 'fas fa-dumbbell',
-        'color' => '#c62828',
-        'bg'    => '#ffebee',
-        'label' => 'Gym & Fitness',
-        'desc'  => 'Gym packages, membership management and gym inquiry tracking.',
-        'warn'  => null,
+        'icon'   => 'fas fa-dumbbell',
+        'color'  => '#c62828',
+        'bg'     => '#ffebee',
+        'label'  => 'Gym & Fitness',
+        'desc'   => 'Gym packages, membership management and gym inquiry tracking.',
+        'warn'   => null,
+        'locked' => false,
     ],
     'finance' => [
-        'icon'  => 'fas fa-calculator',
-        'color' => '#B18247',
-        'bg'    => '#fdf3e3',
-        'label' => 'Finance & Accounting',
-        'desc'  => 'Payments, invoices, receipts, credit notes, quotations, accounting dashboard and reports.',
-        'warn'  => 'Disabling hides all Finance nav items including payments and reports.',
+        'icon'   => 'fas fa-calculator',
+        'color'  => '#B18247',
+        'bg'     => '#fdf3e3',
+        'label'  => 'Finance & Accounting',
+        'desc'   => 'Payments, invoices, receipts, credit notes, quotations, accounting dashboard, reports and end-of-day.',
+        'warn'   => null,
+        'locked' => true,
     ],
     'website_cms' => [
-        'icon'  => 'fas fa-globe',
-        'color' => '#0c8d6c',
-        'bg'    => '#e8f5f1',
-        'label' => 'Website & CMS',
-        'desc'  => 'Gallery, media portal, pages, events, reviews, contact inquiries, footer and section headers.',
-        'warn'  => null,
+        'icon'   => 'fas fa-globe',
+        'color'  => '#0c8d6c',
+        'bg'     => '#e8f5f1',
+        'label'  => 'Website & CMS',
+        'desc'   => 'Gallery, media portal, pages, events, reviews, contact inquiries, footer and section headers.',
+        'warn'   => null,
+        'locked' => false,
+    ],
+];
+
+// Business presets — define which modules are ON for each business type
+// finance is always 1 and the API will enforce that
+$presets = [
+    'full_hotel' => [
+        'label' => 'Full Hotel',
+        'icon'  => 'fas fa-hotel',
+        'desc'  => 'All modules active',
+        'modules' => ['bookings' => 1, 'housekeeping' => 1, 'pos' => 1, 'stock' => 1, 'conference' => 1, 'gym' => 1, 'finance' => 1, 'website_cms' => 1],
+    ],
+    'hotel_no_restaurant' => [
+        'label' => 'Hotel (No Restaurant)',
+        'icon'  => 'fas fa-bed',
+        'desc'  => 'Rooms + conference + gym, no POS or stock',
+        'modules' => ['bookings' => 1, 'housekeeping' => 1, 'pos' => 0, 'stock' => 0, 'conference' => 1, 'gym' => 1, 'finance' => 1, 'website_cms' => 1],
+    ],
+    'bar_restaurant' => [
+        'label' => 'Bar / Restaurant',
+        'icon'  => 'fas fa-martini-glass',
+        'desc'  => 'POS + stock only',
+        'modules' => ['bookings' => 0, 'housekeeping' => 0, 'pos' => 1, 'stock' => 1, 'conference' => 0, 'gym' => 0, 'finance' => 1, 'website_cms' => 0],
+    ],
+    'conference_venue' => [
+        'label' => 'Conference Venue',
+        'icon'  => 'fas fa-briefcase',
+        'desc'  => 'Bookings + conference + website',
+        'modules' => ['bookings' => 1, 'housekeeping' => 0, 'pos' => 0, 'stock' => 0, 'conference' => 1, 'gym' => 0, 'finance' => 1, 'website_cms' => 1],
+    ],
+    'gym_fitness' => [
+        'label' => 'Gym / Fitness',
+        'icon'  => 'fas fa-dumbbell',
+        'desc'  => 'Gym + POS + website',
+        'modules' => ['bookings' => 0, 'housekeeping' => 0, 'pos' => 1, 'stock' => 0, 'conference' => 0, 'gym' => 1, 'finance' => 1, 'website_cms' => 1],
     ],
 ];
 ?>
@@ -103,37 +149,93 @@ $modules_meta = [
     <link rel="stylesheet" href="css/admin-styles.css">
     <link rel="stylesheet" href="css/admin-components.css">
     <style>
+        /* ── Presets ─────────────────────────────────────── */
+        .ms-presets-card {
+            background: #fff;
+            border: 1px solid #d5cfc4;
+            border-radius: 4px;
+            padding: 22px 24px 20px;
+            margin-bottom: 28px;
+        }
+        .ms-presets-heading {
+            font-size: .82rem;
+            font-weight: 700;
+            letter-spacing: .07em;
+            text-transform: uppercase;
+            color: #8B7355;
+            margin: 0 0 6px;
+        }
+        .ms-presets-sub {
+            font-size: .84rem;
+            color: #7a6f63;
+            margin: 0 0 18px;
+        }
+        .ms-presets-row {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+        }
+        .ms-preset-btn {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            padding: 9px 16px;
+            border: 1.5px solid #d5cfc4;
+            border-radius: 4px;
+            background: #faf8f4;
+            color: #3e3930;
+            font-size: .84rem;
+            font-weight: 500;
+            cursor: pointer;
+            transition: border-color .18s, background .18s, color .18s;
+            user-select: none;
+        }
+        .ms-preset-btn:hover { border-color: #8B7355; background: #f5f0e8; color: #3e3930; }
+        .ms-preset-btn:active { background: #ede5d6; }
+        .ms-preset-btn i { color: #8B7355; font-size: .9rem; }
+        .ms-preset-btn .ms-preset-desc {
+            font-size: .74rem;
+            color: #9a8f82;
+            display: block;
+            font-weight: 400;
+            line-height: 1.2;
+            margin-top: 1px;
+        }
+        .ms-preset-btn-inner { display: flex; flex-direction: column; }
+
+        /* ── Intro / reload banner ───────────────────────── */
         .ms-intro {
             background: #fff;
             border: 1px solid #d5cfc4;
             border-radius: 4px;
-            padding: 20px 24px;
-            margin-bottom: 28px;
+            padding: 18px 22px;
+            margin-bottom: 22px;
             display: flex;
             align-items: flex-start;
             gap: 14px;
         }
-        .ms-intro i { color: #8B7355; font-size: 1.3rem; margin-top: 2px; flex-shrink: 0; }
-        .ms-intro p { margin: 0; color: #5a5147; font-size: .9rem; line-height: 1.6; }
+        .ms-intro i { color: #8B7355; font-size: 1.2rem; margin-top: 2px; flex-shrink: 0; }
+        .ms-intro p { margin: 0; color: #5a5147; font-size: .88rem; line-height: 1.6; }
         .ms-intro strong { color: #3e3930; }
 
         .ms-reload-banner {
             background: #fffbeb;
             border: 1px solid #f6c90e;
             border-radius: 4px;
-            padding: 11px 18px;
-            margin-bottom: 28px;
-            font-size: .84rem;
+            padding: 10px 16px;
+            margin-bottom: 22px;
+            font-size: .82rem;
             color: #7a5f00;
             display: flex;
             align-items: center;
             gap: 10px;
         }
 
+        /* ── Module grid ─────────────────────────────────── */
         .ms-grid {
             display: grid;
-            grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
-            gap: 18px;
+            grid-template-columns: repeat(auto-fill, minmax(310px, 1fr));
+            gap: 16px;
             margin-bottom: 40px;
         }
 
@@ -141,116 +243,111 @@ $modules_meta = [
             background: #fff;
             border: 1px solid #d5cfc4;
             border-radius: 4px;
-            padding: 22px 22px 20px;
+            padding: 20px 20px 18px;
             display: flex;
             flex-direction: column;
-            gap: 0;
             transition: box-shadow .2s, border-color .2s;
-            position: relative;
         }
         .ms-card:hover { box-shadow: 0 4px 18px rgba(70,60,50,.10); border-color: #c4b89a; }
-        .ms-card.is-disabled { opacity: .72; }
+        .ms-card.is-disabled { opacity: .68; }
+        .ms-card.is-locked { border-color: #C8A45A; background: #fffdf8; }
 
         .ms-card-header {
             display: flex;
             align-items: flex-start;
-            gap: 14px;
-            margin-bottom: 14px;
+            gap: 13px;
+            margin-bottom: 12px;
         }
         .ms-card-icon {
-            width: 44px;
-            height: 44px;
+            width: 42px; height: 42px;
             border-radius: 10px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            font-size: 1.2rem;
-            flex-shrink: 0;
+            display: flex; align-items: center; justify-content: center;
+            font-size: 1.1rem; flex-shrink: 0;
         }
         .ms-card-title-block { flex: 1; min-width: 0; }
-        .ms-card-title { font-size: .98rem; font-weight: 600; color: #3e3930; margin: 0 0 3px; line-height: 1.3; }
-        .ms-card-desc { font-size: .81rem; color: #7a6f63; line-height: 1.55; margin: 0; }
+        .ms-card-title {
+            font-size: .96rem; font-weight: 600; color: #3e3930;
+            margin: 0 0 3px; line-height: 1.3;
+            display: flex; align-items: center; gap: 7px;
+        }
+        .ms-core-badge {
+            display: inline-flex; align-items: center; gap: 4px;
+            background: #fdf3e3; color: #B18247;
+            border: 1px solid #e8c98a; border-radius: 3px;
+            font-size: .68rem; font-weight: 700; letter-spacing: .05em;
+            padding: 1px 6px; text-transform: uppercase;
+        }
+        .ms-card-desc { font-size: .8rem; color: #7a6f63; line-height: 1.55; margin: 0; }
 
         .ms-card-footer {
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            margin-top: 16px;
-            padding-top: 14px;
-            border-top: 1px solid #ede8e0;
+            display: flex; align-items: center; justify-content: space-between;
+            margin-top: 14px; padding-top: 12px; border-top: 1px solid #ede8e0;
         }
-        .ms-status-label { font-size: .8rem; font-weight: 500; color: #8a7f73; }
+        .ms-status-label { font-size: .79rem; font-weight: 500; color: #8a7f73; }
         .ms-status-label.enabled  { color: #2e7d32; }
         .ms-status-label.disabled { color: #9e4040; }
+        .ms-status-label.locked   { color: #B18247; }
 
         /* Toggle switch */
-        .ms-toggle { position: relative; display: inline-block; width: 50px; height: 26px; }
+        .ms-toggle { position: relative; display: inline-block; width: 48px; height: 25px; }
         .ms-toggle input { opacity: 0; width: 0; height: 0; }
         .ms-toggle-slider {
             position: absolute; inset: 0;
-            background: #d5cfc4; border-radius: 26px;
-            cursor: pointer;
-            transition: background .25s;
+            background: #d5cfc4; border-radius: 25px; cursor: pointer;
+            transition: background .22s;
         }
         .ms-toggle-slider::before {
             content: '';
             position: absolute;
-            width: 20px; height: 20px;
-            left: 3px; top: 3px;
-            background: #fff;
-            border-radius: 50%;
-            transition: transform .25s;
+            width: 19px; height: 19px; left: 3px; top: 3px;
+            background: #fff; border-radius: 50%;
+            transition: transform .22s;
             box-shadow: 0 1px 4px rgba(0,0,0,.18);
         }
         .ms-toggle input:checked + .ms-toggle-slider { background: #4CAF50; }
-        .ms-toggle input:checked + .ms-toggle-slider::before { transform: translateX(24px); }
-        .ms-toggle input:disabled + .ms-toggle-slider { opacity: .5; cursor: not-allowed; }
+        .ms-toggle input:checked + .ms-toggle-slider::before { transform: translateX(23px); }
+        .ms-toggle input:disabled + .ms-toggle-slider { opacity: .55; cursor: not-allowed; }
 
         /* Warning badge */
         .ms-card-warn {
-            background: #fff7ed;
-            border: 1px solid #fb923c;
-            border-radius: 4px;
-            padding: 8px 12px;
-            margin-top: 12px;
-            font-size: .78rem;
-            color: #9a3412;
-            display: flex;
-            gap: 8px;
-            align-items: flex-start;
+            background: #fff7ed; border: 1px solid #fb923c; border-radius: 4px;
+            padding: 7px 10px; margin-top: 10px; font-size: .77rem; color: #9a3412;
+            display: flex; gap: 7px; align-items: flex-start;
         }
         .ms-card-warn i { margin-top: 1px; flex-shrink: 0; }
         .ms-card-warn.hidden { display: none; }
 
-        /* Confirm dialog overlay */
+        /* Confirm overlay */
         .ms-confirm-overlay {
-            display: none;
-            position: fixed;
-            inset: 0;
-            background: rgba(30,25,20,.45);
-            z-index: 9000;
-            align-items: center;
-            justify-content: center;
+            display: none; position: fixed; inset: 0;
+            background: rgba(30,25,20,.45); z-index: 9000;
+            align-items: center; justify-content: center;
         }
         .ms-confirm-overlay.active { display: flex; }
         .ms-confirm-box {
-            background: #fff;
-            border-radius: 6px;
-            padding: 30px 28px 24px;
-            max-width: 400px;
-            width: 90%;
+            background: #fff; border-radius: 6px; padding: 28px 26px 22px;
+            max-width: 420px; width: 92%;
             box-shadow: 0 12px 48px rgba(30,25,20,.22);
         }
-        .ms-confirm-box h3 { margin: 0 0 10px; font-size: 1.05rem; color: #3e3930; }
-        .ms-confirm-box p  { margin: 0 0 22px; font-size: .88rem; color: #5a5147; line-height: 1.55; }
+        .ms-confirm-box h3 { margin: 0 0 10px; font-size: 1.02rem; color: #3e3930; }
+        .ms-confirm-box p  { margin: 0 0 20px; font-size: .87rem; color: #5a5147; line-height: 1.55; }
         .ms-confirm-actions { display: flex; gap: 10px; justify-content: flex-end; }
-        .ms-confirm-actions .btn-cancel  { background: #f0ebe3; color: #3e3930; border: 1px solid #d5cfc4; border-radius: 3px; padding: 8px 18px; font-size: .86rem; cursor: pointer; font-weight: 500; }
-        .ms-confirm-actions .btn-disable { background: #c0392b; color: #fff; border: none; border-radius: 3px; padding: 8px 18px; font-size: .86rem; cursor: pointer; font-weight: 600; }
+        .ms-confirm-actions .btn-cancel  { background: #f0ebe3; color: #3e3930; border: 1px solid #d5cfc4; border-radius: 3px; padding: 8px 16px; font-size: .85rem; cursor: pointer; font-weight: 500; }
+        .ms-confirm-actions .btn-disable { background: #c0392b; color: #fff; border: none; border-radius: 3px; padding: 8px 16px; font-size: .85rem; cursor: pointer; font-weight: 600; }
         .ms-confirm-actions .btn-cancel:hover  { background: #e8e0d4; }
         .ms-confirm-actions .btn-disable:hover { background: #a93226; }
 
+        /* Preset applying state */
+        .ms-preset-btn.applying { opacity: .6; pointer-events: none; }
+        .ms-section-title {
+            font-size: .82rem; font-weight: 700; letter-spacing: .07em;
+            text-transform: uppercase; color: #8B7355; margin: 0 0 14px;
+        }
+
         @media (max-width: 640px) {
             .ms-grid { grid-template-columns: 1fr; }
+            .ms-presets-row { flex-direction: column; }
+            .ms-preset-btn { width: 100%; }
         }
     </style>
 </head>
@@ -268,7 +365,28 @@ $modules_meta = [
 
         <div class="ms-intro">
             <i class="fas fa-info-circle"></i>
-            <p>Enable or disable feature modules for this installation. <strong>Disabled modules are hidden from the sidebar navigation and the dashboard.</strong> You can re-enable any module at any time — no data is deleted.</p>
+            <p>Configure which modules are active for this installation. <strong>Disabled modules are hidden from the sidebar and dashboard</strong> — no data is deleted. Finance &amp; Accounting is always on and cannot be disabled.</p>
+        </div>
+
+        <!-- Business type presets -->
+        <div class="ms-presets-card">
+            <div class="ms-presets-heading"><i class="fas fa-bolt" style="margin-right:6px;"></i>Quick Setup — Business Presets</div>
+            <p class="ms-presets-sub">Select a business type to automatically enable the right modules in one click.</p>
+            <div class="ms-presets-row">
+                <?php foreach ($presets as $preset_key => $preset): ?>
+                <button type="button"
+                        class="ms-preset-btn"
+                        data-preset="<?php echo htmlspecialchars($preset_key); ?>"
+                        data-modules="<?php echo htmlspecialchars(json_encode($preset['modules'])); ?>"
+                        title="<?php echo htmlspecialchars($preset['desc']); ?>">
+                    <i class="<?php echo htmlspecialchars($preset['icon']); ?>"></i>
+                    <span class="ms-preset-btn-inner">
+                        <span><?php echo htmlspecialchars($preset['label']); ?></span>
+                        <span class="ms-preset-desc"><?php echo htmlspecialchars($preset['desc']); ?></span>
+                    </span>
+                </button>
+                <?php endforeach; ?>
+            </div>
         </div>
 
         <div class="ms-reload-banner">
@@ -276,17 +394,25 @@ $modules_meta = [
             Changes take effect immediately. The navigation sidebar updates on your next page load.
         </div>
 
+        <div class="ms-section-title">Individual Modules</div>
+
         <div class="ms-grid">
             <?php foreach ($modules_meta as $key => $meta):
                 $enabled = $module_state[$key] ?? true;
+                $locked  = $meta['locked'];
             ?>
-            <div class="ms-card <?php echo $enabled ? '' : 'is-disabled'; ?>" id="ms-card-<?php echo htmlspecialchars($key); ?>">
+            <div class="ms-card <?php echo $locked ? 'is-locked' : ($enabled ? '' : 'is-disabled'); ?>" id="ms-card-<?php echo htmlspecialchars($key); ?>">
                 <div class="ms-card-header">
                     <div class="ms-card-icon" style="background:<?php echo htmlspecialchars($meta['bg']); ?>;color:<?php echo htmlspecialchars($meta['color']); ?>;">
                         <i class="<?php echo htmlspecialchars($meta['icon']); ?>"></i>
                     </div>
                     <div class="ms-card-title-block">
-                        <div class="ms-card-title"><?php echo htmlspecialchars($meta['label']); ?></div>
+                        <div class="ms-card-title">
+                            <?php echo htmlspecialchars($meta['label']); ?>
+                            <?php if ($locked): ?>
+                            <span class="ms-core-badge"><i class="fas fa-lock"></i> Core</span>
+                            <?php endif; ?>
+                        </div>
                         <p class="ms-card-desc"><?php echo htmlspecialchars($meta['desc']); ?></p>
                     </div>
                 </div>
@@ -299,9 +425,13 @@ $modules_meta = [
                 <?php endif; ?>
 
                 <div class="ms-card-footer">
-                    <span class="ms-status-label <?php echo $enabled ? 'enabled' : 'disabled'; ?>" id="ms-label-<?php echo htmlspecialchars($key); ?>">
-                        <i class="fas fa-<?php echo $enabled ? 'check-circle' : 'times-circle'; ?>"></i>
-                        <?php echo $enabled ? 'Enabled' : 'Disabled'; ?>
+                    <span class="ms-status-label <?php echo $locked ? 'locked' : ($enabled ? 'enabled' : 'disabled'); ?>" id="ms-label-<?php echo htmlspecialchars($key); ?>">
+                        <?php if ($locked): ?>
+                            <i class="fas fa-lock"></i> Always On
+                        <?php else: ?>
+                            <i class="fas fa-<?php echo $enabled ? 'check-circle' : 'times-circle'; ?>"></i>
+                            <?php echo $enabled ? 'Enabled' : 'Disabled'; ?>
+                        <?php endif; ?>
                     </span>
                     <label class="ms-toggle" aria-label="Toggle <?php echo htmlspecialchars($meta['label']); ?>">
                         <input type="checkbox"
@@ -310,7 +440,8 @@ $modules_meta = [
                                data-has-warn="<?php echo $meta['warn'] ? '1' : '0'; ?>"
                                data-warn-text="<?php echo htmlspecialchars((string)$meta['warn']); ?>"
                                data-label="<?php echo htmlspecialchars($meta['label']); ?>"
-                               <?php echo $enabled ? 'checked' : ''; ?>>
+                               <?php echo ($enabled || $locked) ? 'checked' : ''; ?>
+                               <?php echo $locked ? 'disabled' : ''; ?>>
                         <span class="ms-toggle-slider"></span>
                     </label>
                 </div>
@@ -319,7 +450,7 @@ $modules_meta = [
         </div>
     </div>
 
-    <!-- Confirmation dialog for disabling modules with warnings -->
+    <!-- Confirmation dialog for modules with warnings -->
     <div class="ms-confirm-overlay" id="msConfirmOverlay">
         <div class="ms-confirm-box">
             <h3><i class="fas fa-triangle-exclamation" style="color:#f59e0b;margin-right:8px;"></i> Disable Module?</h3>
@@ -343,58 +474,67 @@ $modules_meta = [
                 Alert.show(msg, type || 'success');
                 return;
             }
-            // Fallback
             var el = document.createElement('div');
             el.style.cssText = 'position:fixed;bottom:24px;right:24px;z-index:9999;background:' +
-                (type === 'error' ? '#c0392b' : '#2e7d32') +
-                ';color:#fff;padding:12px 20px;border-radius:6px;font-size:.88rem;box-shadow:0 4px 16px rgba(0,0,0,.18);';
+                (type === 'error' ? '#c0392b' : type === 'info' ? '#8B7355' : '#2e7d32') +
+                ';color:#fff;padding:12px 20px;border-radius:6px;font-size:.87rem;box-shadow:0 4px 16px rgba(0,0,0,.18);max-width:320px;';
             el.textContent = msg;
             document.body.appendChild(el);
             setTimeout(function () { el.remove(); }, 3500);
         }
 
-        function doToggle(checkbox, moduleKey, enable) {
-            checkbox.disabled = true;
+        function updateCard(moduleKey, enable) {
             var card  = document.getElementById('ms-card-' + moduleKey);
             var label = document.getElementById('ms-label-' + moduleKey);
             var warn  = document.getElementById('ms-warn-' + moduleKey);
+            var cb    = document.getElementById('ms-toggle-' + moduleKey);
+            if (cb && !cb.disabled) { cb.checked = enable; }
+            if (label) {
+                label.className = 'ms-status-label ' + (enable ? 'enabled' : 'disabled');
+                label.innerHTML = '<i class="fas fa-' + (enable ? 'check-circle' : 'times-circle') + '"></i> ' + (enable ? 'Enabled' : 'Disabled');
+            }
+            if (card) { card.classList.toggle('is-disabled', !enable); }
+            if (warn) { warn.classList.toggle('hidden', enable); }
+        }
+
+        function doToggle(checkbox, moduleKey, enable, silent) {
+            if (checkbox) { checkbox.disabled = true; }
 
             var fd = new FormData();
             fd.append('csrf_token', csrf);
             fd.append('module_key', moduleKey);
             fd.append('is_enabled', enable ? '1' : '0');
 
-            fetch('api/toggle-module.php', { method: 'POST', body: fd, credentials: 'same-origin' })
+            return fetch('api/toggle-module.php', { method: 'POST', body: fd, credentials: 'same-origin' })
                 .then(function (r) { return r.json(); })
                 .then(function (data) {
                     if (!data.success) {
-                        checkbox.checked = !enable; // revert
-                        showToast(data.error || 'Failed to save.', 'error');
-                    } else {
-                        if (label) {
-                            label.className = 'ms-status-label ' + (enable ? 'enabled' : 'disabled');
-                            label.innerHTML = '<i class="fas fa-' + (enable ? 'check-circle' : 'times-circle') + '"></i> ' + (enable ? 'Enabled' : 'Disabled');
-                        }
-                        if (card) { card.classList.toggle('is-disabled', !enable); }
-                        if (warn) { warn.classList.toggle('hidden', enable); }
-                        showToast((enable ? 'Enabled' : 'Disabled') + ': ' + checkbox.getAttribute('data-label'), enable ? 'success' : 'info');
+                        if (checkbox) { checkbox.checked = !enable; }
+                        if (!silent) { showToast(data.error || 'Failed to save.', 'error'); }
+                        return false;
                     }
+                    updateCard(moduleKey, enable);
+                    if (!silent) {
+                        showToast((enable ? 'Enabled' : 'Disabled') + ': ' + (checkbox ? checkbox.getAttribute('data-label') : moduleKey), enable ? 'success' : 'info');
+                    }
+                    return true;
                 })
                 .catch(function () {
-                    checkbox.checked = !enable;
-                    showToast('Network error — please try again.', 'error');
+                    if (checkbox) { checkbox.checked = !enable; }
+                    if (!silent) { showToast('Network error — please try again.', 'error'); }
+                    return false;
                 })
-                .finally(function () { checkbox.disabled = false; });
+                .finally(function () { if (checkbox) { checkbox.disabled = false; } });
         }
 
-        document.querySelectorAll('.ms-toggle input[type="checkbox"]').forEach(function (cb) {
+        // Individual toggle handlers
+        document.querySelectorAll('.ms-toggle input[type="checkbox"]:not([disabled])').forEach(function (cb) {
             cb.addEventListener('change', function () {
-                var key    = cb.getAttribute('data-module');
-                var enable = cb.checked;
+                var key     = cb.getAttribute('data-module');
+                var enable  = cb.checked;
                 var hasWarn = cb.getAttribute('data-has-warn') === '1';
 
                 if (!enable && hasWarn) {
-                    // Show confirmation before disabling
                     pendingToggle = { cb: cb, key: key };
                     var overlay = document.getElementById('msConfirmOverlay');
                     var text    = document.getElementById('msConfirmText');
@@ -404,14 +544,14 @@ $modules_meta = [
                             ' You can re-enable it at any time.';
                     }
                     if (overlay) { overlay.classList.add('active'); }
-                    cb.checked = true; // revert visually until confirmed
+                    cb.checked = true;
                     return;
                 }
-
-                doToggle(cb, key, enable);
+                doToggle(cb, key, enable, false);
             });
         });
 
+        // Confirm dialog
         var cancelBtn  = document.getElementById('msConfirmCancel');
         var proceedBtn = document.getElementById('msConfirmProceed');
         var overlay    = document.getElementById('msConfirmOverlay');
@@ -422,26 +562,60 @@ $modules_meta = [
                 if (overlay) { overlay.classList.remove('active'); }
             });
         }
-
         if (proceedBtn) {
             proceedBtn.addEventListener('click', function () {
                 if (overlay) { overlay.classList.remove('active'); }
                 if (pendingToggle) {
                     pendingToggle.cb.checked = false;
-                    doToggle(pendingToggle.cb, pendingToggle.key, false);
+                    doToggle(pendingToggle.cb, pendingToggle.key, false, false);
                     pendingToggle = null;
                 }
+            });
+        }
+        if (overlay) {
+            overlay.addEventListener('click', function (e) {
+                if (e.target === overlay) { pendingToggle = null; overlay.classList.remove('active'); }
             });
         }
 
-        if (overlay) {
-            overlay.addEventListener('click', function (e) {
-                if (e.target === overlay) {
-                    pendingToggle = null;
-                    overlay.classList.remove('active');
+        // Preset buttons — apply all module states sequentially
+        document.querySelectorAll('.ms-preset-btn').forEach(function (btn) {
+            btn.addEventListener('click', function () {
+                var config = JSON.parse(btn.getAttribute('data-modules') || '{}');
+                var label  = btn.querySelector('span:first-child') ? btn.querySelector('.ms-preset-btn-inner > span:first-child').textContent : 'preset';
+                btn.classList.add('applying');
+
+                var keys = Object.keys(config);
+                var idx  = 0;
+
+                function applyNext() {
+                    if (idx >= keys.length) {
+                        btn.classList.remove('applying');
+                        showToast('Preset applied: ' + label, 'success');
+                        return;
+                    }
+                    var key    = keys[idx++];
+                    var enable = !!config[key];
+                    var cb     = document.getElementById('ms-toggle-' + key);
+
+                    // Skip locked modules
+                    if (cb && cb.disabled) { applyNext(); return; }
+
+                    var fd = new FormData();
+                    fd.append('csrf_token', csrf);
+                    fd.append('module_key', key);
+                    fd.append('is_enabled', enable ? '1' : '0');
+
+                    fetch('api/toggle-module.php', { method: 'POST', body: fd, credentials: 'same-origin' })
+                        .then(function (r) { return r.json(); })
+                        .then(function (data) { if (data.success) { updateCard(key, enable); } })
+                        .catch(function () {})
+                        .finally(applyNext);
                 }
+
+                applyNext();
             });
-        }
+        });
     })();
     </script>
 </body>
