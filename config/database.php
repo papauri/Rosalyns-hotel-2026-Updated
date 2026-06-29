@@ -889,6 +889,7 @@ if (!function_exists('moduleEnabled')) {
      * Results are cached per request via static array.
      *
      * Module keys: bookings, housekeeping, pos, stock, conference, gym, finance, website_cms
+     * Station sub-keys (require pos=on): station_kds, station_bds, station_cds, station_room_service
      */
     function moduleEnabled(string $module): bool
     {
@@ -916,14 +917,19 @@ if (!function_exists('moduleEnabled')) {
                     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
 
                     $modules = [
-                        ['bookings',    'Bookings & Reservations', 'Room bookings, check-in/out, calendar, rate plans', 1],
-                        ['housekeeping','Housekeeping',             'Cleaning schedules, room maintenance, room status', 2],
-                        ['pos',         'Point of Sale',            'Restaurant, bar, KDS/BDS/CDS, menu management',    3],
-                        ['stock',       'Stock & Inventory',        'Ingredients, recipes, stock orders, wastage',      4],
-                        ['conference',  'Conference & Events',      'Conference rooms, event bookings, quotations',     5],
-                        ['gym',         'Gym & Fitness',            'Gym management, packages, inquiries',              6],
-                        ['finance',     'Finance & Payments',       'Invoices, credit notes, reports, accounting',      7],
-                        ['website_cms', 'Website & CMS',            'Gallery, pages, deals, reviews, social settings',  8],
+                        ['bookings',             'Bookings & Reservations',  'Room bookings, check-in/out, calendar, rate plans', 1],
+                        ['housekeeping',         'Housekeeping',              'Cleaning schedules, room maintenance, room status', 2],
+                        ['pos',                  'Point of Sale',             'Restaurant, bar, KDS/BDS/CDS, menu management',    3],
+                        ['stock',                'Stock & Inventory',         'Ingredients, recipes, stock orders, wastage',      4],
+                        ['conference',           'Conference & Events',       'Conference rooms, event bookings, quotations',     5],
+                        ['gym',                  'Gym & Fitness',             'Gym management, packages, inquiries',              6],
+                        ['finance',              'Finance & Payments',        'Invoices, credit notes, reports, accounting',      7],
+                        ['website_cms',          'Website & CMS',             'Gallery, pages, deals, reviews, social settings',  8],
+                        // Station sub-modules (only relevant when pos=1)
+                        ['station_kds',          'Kitchen Display (KDS)',     'Kitchen order display and ticket management',      31],
+                        ['station_bds',          'Bar Display (BDS)',         'Bar order display and drink ticket management',    32],
+                        ['station_cds',          'Coffee Bar Display (CDS)',  'Coffee bar order display and management',          33],
+                        ['station_room_service', 'Room Service Station',      'In-room dining display and order management',      34],
                     ];
 
                     $ins = $pdo->prepare("INSERT IGNORE INTO enabled_modules (module_key, module_name, description, is_enabled, sort_order) VALUES (?,?,?,1,?)");

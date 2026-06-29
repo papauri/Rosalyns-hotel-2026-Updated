@@ -26,6 +26,14 @@ foreach ($modules as $m) {
 // Finance is always locked on — cannot be disabled
 $locked_modules = ['finance'];
 
+// Station sub-modules (only active when pos is enabled)
+$station_meta = [
+    'station_kds'          => ['icon' => 'fas fa-utensils',       'color' => '#c82333', 'label' => 'Kitchen Display (KDS)',     'desc' => 'Kitchen order tickets and prep display.'],
+    'station_bds'          => ['icon' => 'fas fa-cocktail',        'color' => '#5e35b1', 'label' => 'Bar Display (BDS)',         'desc' => 'Bar drink orders and display screen.'],
+    'station_cds'          => ['icon' => 'fas fa-mug-hot',         'color' => '#6f4e37', 'label' => 'Coffee Bar Display (CDS)', 'desc' => 'Coffee bar orders and display screen.'],
+    'station_room_service' => ['icon' => 'fas fa-bell-concierge',  'color' => '#0c8d6c', 'label' => 'Room Service Station',     'desc' => 'In-room dining orders and dashboard.'],
+];
+
 $modules_meta = [
     'bookings' => [
         'icon'   => 'fas fa-calendar-check',
@@ -50,7 +58,7 @@ $modules_meta = [
         'color'  => '#8B7355',
         'bg'     => '#fdf8f0',
         'label'  => 'POS & Stations',
-        'desc'   => 'Point-of-sale till, kitchen display (KDS), bar display (BDS), coffee bar, room service, deals and offline log.',
+        'desc'   => 'Point-of-sale till, deals, offline log and station displays. Configure individual stations below.',
         'warn'   => null,
         'locked' => false,
     ],
@@ -107,32 +115,52 @@ $presets = [
     'full_hotel' => [
         'label' => 'Full Hotel',
         'icon'  => 'fas fa-hotel',
-        'desc'  => 'All modules active',
-        'modules' => ['bookings' => 1, 'housekeeping' => 1, 'pos' => 1, 'stock' => 1, 'conference' => 1, 'gym' => 1, 'finance' => 1, 'website_cms' => 1],
+        'desc'  => 'All modules + all stations active',
+        'modules' => [
+            'bookings' => 1, 'housekeeping' => 1, 'pos' => 1, 'stock' => 1,
+            'conference' => 1, 'gym' => 1, 'finance' => 1, 'website_cms' => 1,
+            'station_kds' => 1, 'station_bds' => 1, 'station_cds' => 1, 'station_room_service' => 1,
+        ],
     ],
     'hotel_no_restaurant' => [
         'label' => 'Hotel (No Restaurant)',
         'icon'  => 'fas fa-bed',
         'desc'  => 'Rooms + conference + gym, no POS or stock',
-        'modules' => ['bookings' => 1, 'housekeeping' => 1, 'pos' => 0, 'stock' => 0, 'conference' => 1, 'gym' => 1, 'finance' => 1, 'website_cms' => 1],
+        'modules' => [
+            'bookings' => 1, 'housekeeping' => 1, 'pos' => 0, 'stock' => 0,
+            'conference' => 1, 'gym' => 1, 'finance' => 1, 'website_cms' => 1,
+            'station_kds' => 0, 'station_bds' => 0, 'station_cds' => 0, 'station_room_service' => 0,
+        ],
     ],
     'bar_restaurant' => [
         'label' => 'Bar / Restaurant',
         'icon'  => 'fas fa-martini-glass',
-        'desc'  => 'POS + stock only',
-        'modules' => ['bookings' => 0, 'housekeeping' => 0, 'pos' => 1, 'stock' => 1, 'conference' => 0, 'gym' => 0, 'finance' => 1, 'website_cms' => 0],
+        'desc'  => 'POS + KDS + BDS + stock',
+        'modules' => [
+            'bookings' => 0, 'housekeeping' => 0, 'pos' => 1, 'stock' => 1,
+            'conference' => 0, 'gym' => 0, 'finance' => 1, 'website_cms' => 0,
+            'station_kds' => 1, 'station_bds' => 1, 'station_cds' => 0, 'station_room_service' => 0,
+        ],
     ],
     'conference_venue' => [
         'label' => 'Conference Venue',
         'icon'  => 'fas fa-briefcase',
         'desc'  => 'Bookings + conference + website',
-        'modules' => ['bookings' => 1, 'housekeeping' => 0, 'pos' => 0, 'stock' => 0, 'conference' => 1, 'gym' => 0, 'finance' => 1, 'website_cms' => 1],
+        'modules' => [
+            'bookings' => 1, 'housekeeping' => 0, 'pos' => 0, 'stock' => 0,
+            'conference' => 1, 'gym' => 0, 'finance' => 1, 'website_cms' => 1,
+            'station_kds' => 0, 'station_bds' => 0, 'station_cds' => 0, 'station_room_service' => 0,
+        ],
     ],
     'gym_fitness' => [
         'label' => 'Gym / Fitness',
         'icon'  => 'fas fa-dumbbell',
-        'desc'  => 'Gym + POS + website',
-        'modules' => ['bookings' => 0, 'housekeeping' => 0, 'pos' => 1, 'stock' => 0, 'conference' => 0, 'gym' => 1, 'finance' => 1, 'website_cms' => 1],
+        'desc'  => 'Gym + POS till + website',
+        'modules' => [
+            'bookings' => 0, 'housekeeping' => 0, 'pos' => 1, 'stock' => 0,
+            'conference' => 0, 'gym' => 1, 'finance' => 1, 'website_cms' => 1,
+            'station_kds' => 0, 'station_bds' => 0, 'station_cds' => 0, 'station_room_service' => 0,
+        ],
     ],
 ];
 ?>
@@ -344,6 +372,38 @@ $presets = [
             text-transform: uppercase; color: #8B7355; margin: 0 0 14px;
         }
 
+        /* ── Station sub-panel ───────────────────────────── */
+        .ms-stations-panel {
+            margin-top: 14px;
+            border-top: 1px solid #ede8e0;
+            padding-top: 10px;
+        }
+        .ms-stations-toggle {
+            display: flex; align-items: center; gap: 7px;
+            background: none; border: none; padding: 4px 0; cursor: pointer;
+            font-size: .8rem; font-weight: 600; color: #8B7355;
+            width: 100%;
+        }
+        .ms-stations-toggle:hover { color: #6e5a3e; }
+        .ms-stations-chevron { margin-left: auto; font-size: .7rem; transition: transform .2s; }
+        .ms-stations-toggle[aria-expanded="true"] .ms-stations-chevron { transform: rotate(180deg); }
+
+        .ms-stations-body {
+            margin-top: 10px;
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+        .ms-station-row {
+            display: flex; align-items: center; justify-content: space-between; gap: 10px;
+            padding: 8px 10px;
+            background: #faf8f4; border: 1px solid #ede8e0; border-radius: 4px;
+        }
+        .ms-station-left { display: flex; align-items: flex-start; gap: 10px; flex: 1; min-width: 0; }
+        .ms-station-name { font-size: .8rem; font-weight: 600; color: #3e3930; line-height: 1.2; }
+        .ms-station-desc { font-size: .74rem; color: #9a8f82; margin-top: 1px; }
+        .ms-station-right { display: flex; align-items: center; gap: 10px; flex-shrink: 0; }
+
         @media (max-width: 640px) {
             .ms-grid { grid-template-columns: 1fr; }
             .ms-presets-row { flex-direction: column; }
@@ -400,6 +460,7 @@ $presets = [
             <?php foreach ($modules_meta as $key => $meta):
                 $enabled = $module_state[$key] ?? true;
                 $locked  = $meta['locked'];
+                $pos_on  = ($module_state['pos'] ?? true);
             ?>
             <div class="ms-card <?php echo $locked ? 'is-locked' : ($enabled ? '' : 'is-disabled'); ?>" id="ms-card-<?php echo htmlspecialchars($key); ?>">
                 <div class="ms-card-header">
@@ -445,6 +506,48 @@ $presets = [
                         <span class="ms-toggle-slider"></span>
                     </label>
                 </div>
+
+                <?php if ($key === 'pos'): ?>
+                <!-- Station sub-modules — only relevant when POS is on -->
+                <div class="ms-stations-panel" id="ms-stations-panel" style="<?php echo $enabled ? '' : 'opacity:.45;pointer-events:none;'; ?>">
+                    <button type="button" class="ms-stations-toggle" id="msStationsToggle" aria-expanded="false">
+                        <i class="fas fa-display" style="color:#8B7355;"></i>
+                        <span>Configure Stations</span>
+                        <i class="fas fa-chevron-down ms-stations-chevron"></i>
+                    </button>
+                    <div class="ms-stations-body" id="msStationsBody" hidden>
+                        <?php foreach ($station_meta as $skey => $smeta):
+                            $senabled = $module_state[$skey] ?? true;
+                        ?>
+                        <div class="ms-station-row" id="ms-card-<?php echo htmlspecialchars($skey); ?>">
+                            <div class="ms-station-left">
+                                <i class="<?php echo htmlspecialchars($smeta['icon']); ?>" style="color:<?php echo htmlspecialchars($smeta['color']); ?>;width:18px;text-align:center;"></i>
+                                <div>
+                                    <div class="ms-station-name"><?php echo htmlspecialchars($smeta['label']); ?></div>
+                                    <div class="ms-station-desc"><?php echo htmlspecialchars($smeta['desc']); ?></div>
+                                </div>
+                            </div>
+                            <div class="ms-station-right">
+                                <span class="ms-status-label <?php echo $senabled ? 'enabled' : 'disabled'; ?>" id="ms-label-<?php echo htmlspecialchars($skey); ?>" style="font-size:.74rem;">
+                                    <i class="fas fa-<?php echo $senabled ? 'check-circle' : 'times-circle'; ?>"></i>
+                                    <?php echo $senabled ? 'On' : 'Off'; ?>
+                                </span>
+                                <label class="ms-toggle" style="width:40px;height:22px;" aria-label="Toggle <?php echo htmlspecialchars($smeta['label']); ?>">
+                                    <input type="checkbox"
+                                           id="ms-toggle-<?php echo htmlspecialchars($skey); ?>"
+                                           data-module="<?php echo htmlspecialchars($skey); ?>"
+                                           data-has-warn="0"
+                                           data-warn-text=""
+                                           data-label="<?php echo htmlspecialchars($smeta['label']); ?>"
+                                           <?php echo $senabled ? 'checked' : ''; ?>>
+                                    <span class="ms-toggle-slider" style="border-radius:22px;"></span>
+                                </label>
+                            </div>
+                        </div>
+                        <?php endforeach; ?>
+                    </div>
+                </div>
+                <?php endif; ?>
             </div>
             <?php endforeach; ?>
         </div>
@@ -483,15 +586,18 @@ $presets = [
             setTimeout(function () { el.remove(); }, 3500);
         }
 
+        var stationKeys = ['station_kds', 'station_bds', 'station_cds', 'station_room_service'];
+
         function updateCard(moduleKey, enable) {
             var card  = document.getElementById('ms-card-' + moduleKey);
             var label = document.getElementById('ms-label-' + moduleKey);
             var warn  = document.getElementById('ms-warn-' + moduleKey);
             var cb    = document.getElementById('ms-toggle-' + moduleKey);
             if (cb && !cb.disabled) { cb.checked = enable; }
+            var isStation = stationKeys.indexOf(moduleKey) !== -1;
             if (label) {
                 label.className = 'ms-status-label ' + (enable ? 'enabled' : 'disabled');
-                label.innerHTML = '<i class="fas fa-' + (enable ? 'check-circle' : 'times-circle') + '"></i> ' + (enable ? 'Enabled' : 'Disabled');
+                label.innerHTML = '<i class="fas fa-' + (enable ? 'check-circle' : 'times-circle') + '"></i> ' + (enable ? (isStation ? 'On' : 'Enabled') : (isStation ? 'Off' : 'Disabled'));
             }
             if (card) { card.classList.toggle('is-disabled', !enable); }
             if (warn) { warn.classList.toggle('hidden', enable); }
@@ -575,6 +681,27 @@ $presets = [
         if (overlay) {
             overlay.addEventListener('click', function (e) {
                 if (e.target === overlay) { pendingToggle = null; overlay.classList.remove('active'); }
+            });
+        }
+
+        // Station expand/collapse
+        var stationsToggle = document.getElementById('msStationsToggle');
+        var stationsBody   = document.getElementById('msStationsBody');
+        if (stationsToggle && stationsBody) {
+            stationsToggle.addEventListener('click', function () {
+                var open = stationsBody.hidden;
+                stationsBody.hidden = !open;
+                stationsToggle.setAttribute('aria-expanded', open ? 'true' : 'false');
+            });
+        }
+
+        // When POS module is toggled, dim/undim the station panel
+        var posToggle = document.getElementById('ms-toggle-pos');
+        var stationsPanel = document.getElementById('ms-stations-panel');
+        if (posToggle && stationsPanel) {
+            posToggle.addEventListener('change', function () {
+                stationsPanel.style.opacity = posToggle.checked ? '' : '.45';
+                stationsPanel.style.pointerEvents = posToggle.checked ? '' : 'none';
             });
         }
 

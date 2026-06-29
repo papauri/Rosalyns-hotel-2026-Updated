@@ -46,10 +46,15 @@ if (!function_exists('_renderNavLink')) {
     /**
      * Render a single nav <li> if the user has permission and the module is enabled.
      */
-    function _renderNavLink(string $href, string $icon, string $label, ?string $perm, string $current_page, string $iconStyle = '', ?string $moduleKey = null): void
+    function _renderNavLink(string $href, string $icon, string $label, ?string $perm, string $current_page, string $iconStyle = '', $moduleKey = null): void
     {
         if (!_canShowNavItem($perm)) return;
-        if ($moduleKey !== null && function_exists('moduleEnabled') && !moduleEnabled($moduleKey)) return;
+        if ($moduleKey !== null && function_exists('moduleEnabled')) {
+            $keys = is_array($moduleKey) ? $moduleKey : [(string)$moduleKey];
+            foreach ($keys as $_mk) {
+                if (!moduleEnabled((string)$_mk)) return;
+            }
+        }
         $hrefPath   = (string)(parse_url($href, PHP_URL_PATH) ?: $href);
         $isActive   = (strpos($href, '../') !== 0 && basename($hrefPath) === $current_page) ? ' active' : '';
         $iconAttr   = $iconStyle !== '' ? ' style="' . htmlspecialchars($iconStyle) . '"' : '';
@@ -87,10 +92,10 @@ $_nav_groups = [
     ],
     'Stations' => [
         ['pos.php',                    'fas fa-cash-register',  'POS Till',          'pos_till',          'color:#8B7355;', 'pos'],
-        ['kds.php',                    'fas fa-utensils',       'Kitchen (KDS)',      'kds_view',          'color:#c82333;', 'pos'],
-        ['bds.php',                    'fas fa-cocktail',       'Bar Display (BDS)', 'bds_view',          'color:#5e35b1;', 'pos'],
-        ['cds.php',                    'fas fa-mug-hot',        'Coffee Bar (CDS)',  'cds_view',          'color:#6f4e37;', 'pos'],
-        ['room-service-dashboard.php', 'fas fa-bell-concierge', 'Room Service',      'room_service_view', 'color:#0c8d6c;', 'pos'],
+        ['kds.php',                    'fas fa-utensils',       'Kitchen (KDS)',      'kds_view',          'color:#c82333;', ['pos', 'station_kds']],
+        ['bds.php',                    'fas fa-cocktail',       'Bar Display (BDS)', 'bds_view',          'color:#5e35b1;', ['pos', 'station_bds']],
+        ['cds.php',                    'fas fa-mug-hot',        'Coffee Bar (CDS)',  'cds_view',          'color:#6f4e37;', ['pos', 'station_cds']],
+        ['room-service-dashboard.php', 'fas fa-bell-concierge', 'Room Service',      'room_service_view', 'color:#0c8d6c;', ['pos', 'station_room_service']],
         ['kds-report.php',             'fas fa-file-invoice',   'Station Reports',   'kds_reports',       '', 'pos'],
         ['station-settings.php',       'fas fa-clock',          'Station Hours',     'stock_management',  '', 'pos'],
         ['deals.php',                  'fas fa-tags',           'Deals & Promos',    'stock_management',  '', 'pos'],
@@ -435,7 +440,13 @@ if ($_admin_back_target !== null) {
             $isActiveGroup = false;
             foreach ($items as $it) {
                 if (!_canShowNavItem($it[3] ?? null)) continue;
-                if (($it[5] ?? null) !== null && function_exists('moduleEnabled') && !moduleEnabled($it[5])) continue;
+                $_modKeys = $it[5] ?? null;
+                if ($_modKeys !== null && function_exists('moduleEnabled')) {
+                    $_mkList = is_array($_modKeys) ? $_modKeys : [(string)$_modKeys];
+                    $_mkOk = true;
+                    foreach ($_mkList as $_mk) { if (!moduleEnabled((string)$_mk)) { $_mkOk = false; break; } }
+                    if (!$_mkOk) continue;
+                }
                 $visibleCount++;
                 if (basename($it[0]) === $current_page) {
                     $isActiveGroup = true;

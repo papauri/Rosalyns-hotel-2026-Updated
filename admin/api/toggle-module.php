@@ -21,7 +21,8 @@ if (!validateCsrfToken($_POST['csrf_token'] ?? '')) {
 
 requireApiPermission('booking_settings');
 
-$allowed = ['bookings', 'housekeeping', 'pos', 'stock', 'conference', 'gym', 'finance', 'website_cms'];
+$allowed = ['bookings', 'housekeeping', 'pos', 'stock', 'conference', 'gym', 'finance', 'website_cms',
+            'station_kds', 'station_bds', 'station_cds', 'station_room_service'];
 $locked  = ['finance']; // These modules cannot be disabled — always required
 
 $module_key = trim((string)($_POST['module_key'] ?? ''));
