@@ -162,6 +162,26 @@ $presets = [
             'station_kds' => 0, 'station_bds' => 0, 'station_cds' => 0, 'station_room_service' => 0,
         ],
     ],
+    'retail_shop' => [
+        'label' => 'Retail / Shop',
+        'icon'  => 'fas fa-store',
+        'desc'  => 'POS + stock + finance only',
+        'modules' => [
+            'bookings' => 0, 'housekeeping' => 0, 'pos' => 1, 'stock' => 1,
+            'conference' => 0, 'gym' => 0, 'finance' => 1, 'website_cms' => 0,
+            'station_kds' => 0, 'station_bds' => 0, 'station_cds' => 0, 'station_room_service' => 0,
+        ],
+    ],
+    'supermarket' => [
+        'label' => 'Supermarket',
+        'icon'  => 'fas fa-cart-shopping',
+        'desc'  => 'POS + stock + finance + website',
+        'modules' => [
+            'bookings' => 0, 'housekeeping' => 0, 'pos' => 1, 'stock' => 1,
+            'conference' => 0, 'gym' => 0, 'finance' => 1, 'website_cms' => 1,
+            'station_kds' => 0, 'station_bds' => 0, 'station_cds' => 0, 'station_room_service' => 0,
+        ],
+    ],
 ];
 ?>
 <!DOCTYPE html>
