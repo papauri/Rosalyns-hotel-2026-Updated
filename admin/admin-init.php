@@ -84,6 +84,26 @@ if ($_required_permission !== null && !hasPermission($user['id'], $_required_per
     exit;
 }
 
+// ---- Module-based Access Control ----
+// A page may be permission-granted (e.g. via role defaults) yet still belong
+// to a module the installation has disabled (e.g. "bookings" on a Bar/Restaurant
+// preset). Block direct navigation to such pages, not just hide their nav link.
+$_required_module = getModuleForPage($current_page);
+if ($_required_module !== null && ($user['role'] ?? '') !== 'admin') {
+    $_requiredModuleKeys = is_array($_required_module) ? $_required_module : [$_required_module];
+    $_moduleAccessOk = true;
+    foreach ($_requiredModuleKeys as $_requiredModuleKey) {
+        if (!moduleEnabled((string)$_requiredModuleKey)) {
+            $_moduleAccessOk = false;
+            break;
+        }
+    }
+    if (!$_moduleAccessOk) {
+        header('Location: dashboard.php?error=module_disabled');
+        exit;
+    }
+}
+
 // ---- Audit Functions ----
 // Load audit logging functions for housekeeping and maintenance
 require_once __DIR__ . '/includes/audit-functions.php';

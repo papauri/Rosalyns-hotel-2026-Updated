@@ -1650,6 +1650,11 @@ $currency_symbol = getSetting('currency_symbol');
                 <i class="fas fa-exclamation-triangle"></i> You do not have permission to access that page. Contact your administrator to request access.
             </div>
         <?php endif; ?>
+        <?php if (isset($_GET['error']) && $_GET['error'] === 'module_disabled'): ?>
+            <div style="background:#fff3e0; border:1px solid #ffe0b2; border-radius:8px; padding:14px 20px; margin-bottom:20px; color:#e65100; display:flex; align-items:center; gap:10px; font-size:14px;">
+                <i class="fas fa-puzzle-piece"></i> That page belongs to a module that's disabled for this installation. Enable it from Module Settings if you need access.
+            </div>
+        <?php endif; ?>
 
         <h2 class="section-title">Dashboard Overview</h2>
         <h3 class="section-title" style="margin-top:6px;"><i class="fas fa-book-open"></i> Guides Menu</h3>

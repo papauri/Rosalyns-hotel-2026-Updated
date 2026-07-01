@@ -1269,6 +1269,80 @@ function getPermissionForPage(string $page)
     return $map[$page] ?? null;
 }
 
+/**
+ * Map a page filename to the module key(s) that must be enabled to access it.
+ * Returns null when the page isn't gated by any module (always available).
+ * Returns a string for a single required module, or an array when more than
+ * one module key must all be enabled (e.g. a station page needs 'pos' AND
+ * its own station sub-module).
+ * Kept in sync with the moduleKey column in admin-header.php's $_nav_groups.
+ */
+function getModuleForPage(string $page)
+{
+    $map = [
+        'bookings.php' => 'bookings',
+        'booking-details.php' => 'bookings',
+        'create-booking.php' => 'bookings',
+        'edit-booking.php' => 'bookings',
+        'tentative-bookings.php' => 'bookings',
+        'process-checkin.php' => 'bookings',
+        'calendar.php' => 'bookings',
+        'blocked-dates.php' => 'bookings',
+        'rate-plans.php' => 'bookings',
+        'packages.php' => 'bookings',
+        'housekeeping.php' => 'housekeeping',
+        'pos.php' => 'pos',
+        'menu-management.php' => 'pos',
+        'kds-report.php' => 'pos',
+        'station-settings.php' => 'pos',
+        'deals.php' => 'pos',
+        'offline-log.php' => 'pos',
+        'kds.php' => ['pos', 'station_kds'],
+        'bds.php' => ['pos', 'station_bds'],
+        'cds.php' => ['pos', 'station_cds'],
+        'room-service-dashboard.php' => ['pos', 'station_room_service'],
+        'stock-dashboard.php' => 'stock',
+        'stock-ingredients.php' => 'stock',
+        'stock-recipes.php' => 'stock',
+        'stock-batches.php' => 'stock',
+        'stock-orders.php' => 'stock',
+        'stock-receipt.php' => 'stock',
+        'order-lifecycle.php' => 'stock',
+        'restaurant-tables.php' => 'stock',
+        'stock-barcode-receive.php' => 'stock',
+        'stock-count.php' => 'stock',
+        'stock-wastage.php' => 'stock',
+        'stock-reports.php' => 'stock',
+        'conference-management.php' => 'conference',
+        'gym-management.php' => 'gym',
+        'gym-packages.php' => 'gym',
+        'gym-inquiries.php' => 'gym',
+        'gallery-management.php' => 'website_cms',
+        'media-management.php' => 'website_cms',
+        'events-management.php' => 'website_cms',
+        'reviews.php' => 'website_cms',
+        'contact-inquiries.php' => 'website_cms',
+        'footer-management.php' => 'website_cms',
+        'page-management.php' => 'website_cms',
+        'section-headers-management.php' => 'website_cms',
+        'accounting-dashboard.php' => 'finance',
+        'pos-accounting.php' => 'finance',
+        'shift-close-report.php' => 'finance',
+        'payments.php' => 'finance',
+        'payment-details.php' => 'finance',
+        'payment-refund.php' => 'finance',
+        'payment-add.php' => 'finance',
+        'receipts.php' => 'finance',
+        'invoices.php' => 'finance',
+        'credit-notes.php' => 'finance',
+        'quotations.php' => 'finance',
+        'reports.php' => 'finance',
+        'end-of-day-report.php' => 'finance',
+    ];
+
+    return $map[$page] ?? null;
+}
+
 // ============================================
 // NAVIGATION HELPERS
 // ============================================
