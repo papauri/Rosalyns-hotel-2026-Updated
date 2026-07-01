@@ -713,58 +713,40 @@ foreach ($presets as $preset_key => $preset) {
 
         function applyPresetConfig(config, label, btn, presetKey) {
             btn.classList.add('applying');
-            var keys = Object.keys(config);
-            var idx  = 0;
 
-            function finishPreset() {
-                btn.classList.remove('applying');
-                clearActivePresetHighlight();
-                btn.classList.add('is-active-preset');
-                var nameSpan = btn.querySelector('.ms-preset-btn-inner > span:first-child');
-                if (nameSpan) {
-                    var newBadge = document.createElement('span');
-                    newBadge.className = 'ms-preset-active-badge';
-                    newBadge.innerHTML = '<i class="fas fa-check"></i> Active';
-                    nameSpan.appendChild(newBadge);
-                }
-                showToast('Preset applied: ' + label, 'success');
-            }
+            var fd = new FormData();
+            fd.append('csrf_token', csrf);
+            fd.append('preset_key', presetKey);
 
-            function syncFrontEnd() {
-                if (!presetKey) { finishPreset(); return; }
-                var fd = new FormData();
-                fd.append('csrf_token', csrf);
-                fd.append('preset_key', presetKey);
-                fetch('api/apply-preset-frontend.php', { method: 'POST', body: fd, credentials: 'same-origin' })
-                    .catch(function () {})
-                    .finally(finishPreset);
-            }
+            fetch('api/apply-preset.php', { method: 'POST', body: fd, credentials: 'same-origin' })
+                .then(function (r) { return r.json(); })
+                .then(function (data) {
+                    btn.classList.remove('applying');
 
-            function applyNext() {
-                if (idx >= keys.length) {
-                    syncFrontEnd();
-                    return;
-                }
-                var key    = keys[idx++];
-                var enable = !!config[key];
-                var cb     = document.getElementById('ms-toggle-' + key);
+                    if (!data.success) {
+                        showToast(data.error || 'Failed to apply preset.', 'error');
+                        return;
+                    }
 
-                // Skip locked modules
-                if (cb && cb.disabled) { applyNext(); return; }
+                    Object.keys(data.applied_modules || config).forEach(function (key) {
+                        updateCard(key, !!(data.applied_modules ? data.applied_modules[key] : config[key]));
+                    });
 
-                var fd = new FormData();
-                fd.append('csrf_token', csrf);
-                fd.append('module_key', key);
-                fd.append('is_enabled', enable ? '1' : '0');
-
-                fetch('api/toggle-module.php', { method: 'POST', body: fd, credentials: 'same-origin' })
-                    .then(function (r) { return r.json(); })
-                    .then(function (data) { if (data.success) { updateCard(key, enable); } })
-                    .catch(function () {})
-                    .finally(applyNext);
-            }
-
-            applyNext();
+                    clearActivePresetHighlight();
+                    btn.classList.add('is-active-preset');
+                    var nameSpan = btn.querySelector('.ms-preset-btn-inner > span:first-child');
+                    if (nameSpan) {
+                        var newBadge = document.createElement('span');
+                        newBadge.className = 'ms-preset-active-badge';
+                        newBadge.innerHTML = '<i class="fas fa-check"></i> Active';
+                        nameSpan.appendChild(newBadge);
+                    }
+                    showToast('Preset applied: ' + label, 'success');
+                })
+                .catch(function () {
+                    btn.classList.remove('applying');
+                    showToast('Network error — preset was not applied. Please try again.', 'error');
+                });
         }
 
         function escapeHtml(str) {
