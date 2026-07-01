@@ -1343,6 +1343,31 @@ function getModuleForPage(string $page)
     return $map[$page] ?? null;
 }
 
+/**
+ * Get all permission keys whose pages belong to the given module.
+ * Inverse of getModuleForPage() — used to work out which permissions
+ * (and therefore which users) are affected when a module is disabled.
+ */
+function getPermissionsForModule(string $module): array
+{
+    $matches = [];
+    foreach (getAllPermissions() as $permKey => $info) {
+        $page = $info['page'] ?? '';
+        if ($page === '') {
+            continue;
+        }
+        $requiredModule = getModuleForPage($page);
+        if ($requiredModule === null) {
+            continue;
+        }
+        $requiredModuleKeys = is_array($requiredModule) ? $requiredModule : [$requiredModule];
+        if (in_array($module, $requiredModuleKeys, true)) {
+            $matches[] = $permKey;
+        }
+    }
+    return $matches;
+}
+
 // ============================================
 // NAVIGATION HELPERS
 // ============================================

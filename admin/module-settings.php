@@ -111,78 +111,8 @@ $modules_meta = [
 
 // Business presets — define which modules are ON for each business type
 // finance is always 1 and the API will enforce that
-$presets = [
-    'full_hotel' => [
-        'label' => 'Full Hotel',
-        'icon'  => 'fas fa-hotel',
-        'desc'  => 'All modules + all stations active',
-        'modules' => [
-            'bookings' => 1, 'housekeeping' => 1, 'pos' => 1, 'stock' => 1,
-            'conference' => 1, 'gym' => 1, 'finance' => 1, 'website_cms' => 1,
-            'station_kds' => 1, 'station_bds' => 1, 'station_cds' => 1, 'station_room_service' => 1,
-        ],
-    ],
-    'hotel_no_restaurant' => [
-        'label' => 'Hotel (No Restaurant)',
-        'icon'  => 'fas fa-bed',
-        'desc'  => 'Rooms + conference + gym, no POS or stock',
-        'modules' => [
-            'bookings' => 1, 'housekeeping' => 1, 'pos' => 0, 'stock' => 0,
-            'conference' => 1, 'gym' => 1, 'finance' => 1, 'website_cms' => 1,
-            'station_kds' => 0, 'station_bds' => 0, 'station_cds' => 0, 'station_room_service' => 0,
-        ],
-    ],
-    'bar_restaurant' => [
-        'label' => 'Bar / Restaurant',
-        'icon'  => 'fas fa-martini-glass',
-        'desc'  => 'POS + KDS + BDS + stock',
-        'modules' => [
-            'bookings' => 0, 'housekeeping' => 0, 'pos' => 1, 'stock' => 1,
-            'conference' => 0, 'gym' => 0, 'finance' => 1, 'website_cms' => 0,
-            'station_kds' => 1, 'station_bds' => 1, 'station_cds' => 0, 'station_room_service' => 0,
-        ],
-    ],
-    'conference_venue' => [
-        'label' => 'Conference Venue',
-        'icon'  => 'fas fa-briefcase',
-        'desc'  => 'Bookings + conference + website',
-        'modules' => [
-            'bookings' => 1, 'housekeeping' => 0, 'pos' => 0, 'stock' => 0,
-            'conference' => 1, 'gym' => 0, 'finance' => 1, 'website_cms' => 1,
-            'station_kds' => 0, 'station_bds' => 0, 'station_cds' => 0, 'station_room_service' => 0,
-        ],
-    ],
-    'gym_fitness' => [
-        'label' => 'Gym / Fitness',
-        'icon'  => 'fas fa-dumbbell',
-        'desc'  => 'Gym + POS till + website',
-        'modules' => [
-            'bookings' => 0, 'housekeeping' => 0, 'pos' => 1, 'stock' => 0,
-            'conference' => 0, 'gym' => 1, 'finance' => 1, 'website_cms' => 1,
-            'station_kds' => 0, 'station_bds' => 0, 'station_cds' => 0, 'station_room_service' => 0,
-        ],
-    ],
-    'retail_shop' => [
-        'label' => 'Retail / Shop',
-        'icon'  => 'fas fa-store',
-        'desc'  => 'POS + stock + finance only',
-        'modules' => [
-            'bookings' => 0, 'housekeeping' => 0, 'pos' => 1, 'stock' => 1,
-            'conference' => 0, 'gym' => 0, 'finance' => 1, 'website_cms' => 0,
-            'station_kds' => 0, 'station_bds' => 0, 'station_cds' => 0, 'station_room_service' => 0,
-        ],
-    ],
-    'supermarket' => [
-        'label' => 'Supermarket',
-        'icon'  => 'fas fa-cart-shopping',
-        'desc'  => 'POS + stock + finance + website',
-        'modules' => [
-            'bookings' => 0, 'housekeeping' => 0, 'pos' => 1, 'stock' => 1,
-            'conference' => 0, 'gym' => 0, 'finance' => 1, 'website_cms' => 1,
-            'station_kds' => 0, 'station_bds' => 0, 'station_cds' => 0, 'station_room_service' => 0,
-        ],
-    ],
-];
+require_once __DIR__ . '/includes/module-presets.php';
+$presets = getBusinessPresets();
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -585,6 +515,19 @@ $presets = [
         </div>
     </div>
 
+    <!-- Preset impact dialog — shows which users lose access before a preset is applied -->
+    <div class="ms-confirm-overlay" id="msPresetImpactOverlay">
+        <div class="ms-confirm-box" style="max-width:520px;">
+            <h3><i class="fas fa-users" style="color:#B18247;margin-right:8px;"></i> Apply "<span id="msPresetImpactName"></span>" preset?</h3>
+            <p id="msPresetImpactSummary" style="margin-bottom:12px;"></p>
+            <div id="msPresetImpactUsers" style="max-height:280px;overflow-y:auto;margin-bottom:16px;"></div>
+            <div class="ms-confirm-actions">
+                <button class="btn-cancel" id="msPresetImpactCancel">Cancel</button>
+                <button class="btn-disable" id="msPresetImpactProceed" style="background:#8B7355;">Apply Preset</button>
+            </div>
+        </div>
+    </div>
+
     <?php require_once 'includes/admin-footer.php'; ?>
 
     <script>
@@ -725,44 +668,137 @@ $presets = [
             });
         }
 
+        // Preset buttons — check impact on existing users, confirm, then apply sequentially
+        var moduleLabels = <?php echo json_encode(array_combine(array_keys($modules_meta), array_column($modules_meta, 'label'))); ?>;
+        var pendingPreset = null;
+
+        function applyPresetConfig(config, label, btn) {
+            btn.classList.add('applying');
+            var keys = Object.keys(config);
+            var idx  = 0;
+
+            function applyNext() {
+                if (idx >= keys.length) {
+                    btn.classList.remove('applying');
+                    showToast('Preset applied: ' + label, 'success');
+                    return;
+                }
+                var key    = keys[idx++];
+                var enable = !!config[key];
+                var cb     = document.getElementById('ms-toggle-' + key);
+
+                // Skip locked modules
+                if (cb && cb.disabled) { applyNext(); return; }
+
+                var fd = new FormData();
+                fd.append('csrf_token', csrf);
+                fd.append('module_key', key);
+                fd.append('is_enabled', enable ? '1' : '0');
+
+                fetch('api/toggle-module.php', { method: 'POST', body: fd, credentials: 'same-origin' })
+                    .then(function (r) { return r.json(); })
+                    .then(function (data) { if (data.success) { updateCard(key, enable); } })
+                    .catch(function () {})
+                    .finally(applyNext);
+            }
+
+            applyNext();
+        }
+
+        function escapeHtml(str) {
+            var div = document.createElement('div');
+            div.textContent = String(str == null ? '' : str);
+            return div.innerHTML;
+        }
+
+        function renderPresetImpact(presetKey, presetLabel, data) {
+            var nameEl    = document.getElementById('msPresetImpactName');
+            var summaryEl = document.getElementById('msPresetImpactSummary');
+            var usersEl   = document.getElementById('msPresetImpactUsers');
+            if (nameEl) { nameEl.textContent = presetLabel; }
+
+            var disabledLabels = (data.modules_disabled || []).map(function (key) {
+                return moduleLabels[key] || key;
+            });
+
+            if (summaryEl) {
+                summaryEl.textContent = disabledLabels.length
+                    ? 'This will turn OFF: ' + disabledLabels.join(', ') + '.'
+                    : 'This preset does not turn off any currently-relevant modules.';
+            }
+
+            if (usersEl) {
+                var users = data.affected_users || [];
+                if (!users.length) {
+                    usersEl.innerHTML = '<p style="font-size:.84rem;color:#2e7d32;margin:0;"><i class="fas fa-circle-check"></i> No active users currently rely on the modules being turned off.</p>';
+                } else {
+                    var rows = users.map(function (u) {
+                        var perms = u.permissions_lost.map(function (p) { return escapeHtml(p.label); }).join(', ');
+                        return '<div style="padding:8px 10px;border:1px solid #ede8e0;border-radius:4px;margin-bottom:6px;background:#faf8f4;">' +
+                            '<div style="font-size:.85rem;font-weight:600;color:#3e3930;">' + escapeHtml(u.full_name) + ' <span style="font-weight:400;color:#9a8f82;">(' + escapeHtml(u.role) + ')</span></div>' +
+                            '<div style="font-size:.76rem;color:#9a3412;margin-top:2px;"><i class="fas fa-triangle-exclamation"></i> Will lose: ' + perms + '</div>' +
+                            '</div>';
+                    });
+                    usersEl.innerHTML =
+                        '<p style="font-size:.82rem;color:#9a3412;font-weight:600;margin:0 0 8px;">' + users.length + ' user' + (users.length === 1 ? '' : 's') + ' will lose access to the following:</p>' +
+                        rows.join('');
+                }
+            }
+        }
+
         // Preset buttons — apply all module states sequentially
         document.querySelectorAll('.ms-preset-btn').forEach(function (btn) {
             btn.addEventListener('click', function () {
                 var config = JSON.parse(btn.getAttribute('data-modules') || '{}');
-                var label  = btn.querySelector('span:first-child') ? btn.querySelector('.ms-preset-btn-inner > span:first-child').textContent : 'preset';
+                var label  = btn.querySelector('.ms-preset-btn-inner > span:first-child') ? btn.querySelector('.ms-preset-btn-inner > span:first-child').textContent : 'preset';
+                var presetKey = btn.getAttribute('data-preset');
+                var overlay = document.getElementById('msPresetImpactOverlay');
+
                 btn.classList.add('applying');
 
-                var keys = Object.keys(config);
-                var idx  = 0;
-
-                function applyNext() {
-                    if (idx >= keys.length) {
+                fetch('api/preset-affected-users.php?preset_key=' + encodeURIComponent(presetKey), { credentials: 'same-origin' })
+                    .then(function (r) { return r.json(); })
+                    .then(function (data) {
                         btn.classList.remove('applying');
-                        showToast('Preset applied: ' + label, 'success');
-                        return;
-                    }
-                    var key    = keys[idx++];
-                    var enable = !!config[key];
-                    var cb     = document.getElementById('ms-toggle-' + key);
-
-                    // Skip locked modules
-                    if (cb && cb.disabled) { applyNext(); return; }
-
-                    var fd = new FormData();
-                    fd.append('csrf_token', csrf);
-                    fd.append('module_key', key);
-                    fd.append('is_enabled', enable ? '1' : '0');
-
-                    fetch('api/toggle-module.php', { method: 'POST', body: fd, credentials: 'same-origin' })
-                        .then(function (r) { return r.json(); })
-                        .then(function (data) { if (data.success) { updateCard(key, enable); } })
-                        .catch(function () {})
-                        .finally(applyNext);
-                }
-
-                applyNext();
+                        if (!data.success) {
+                            showToast(data.error || 'Could not check preset impact.', 'error');
+                            return;
+                        }
+                        renderPresetImpact(presetKey, label, data);
+                        pendingPreset = { config: config, label: label, btn: btn };
+                        if (overlay) { overlay.classList.add('active'); }
+                    })
+                    .catch(function () {
+                        btn.classList.remove('applying');
+                        showToast('Network error — please try again.', 'error');
+                    });
             });
         });
+
+        var presetImpactOverlay = document.getElementById('msPresetImpactOverlay');
+        var presetImpactCancel  = document.getElementById('msPresetImpactCancel');
+        var presetImpactProceed = document.getElementById('msPresetImpactProceed');
+
+        if (presetImpactCancel) {
+            presetImpactCancel.addEventListener('click', function () {
+                pendingPreset = null;
+                if (presetImpactOverlay) { presetImpactOverlay.classList.remove('active'); }
+            });
+        }
+        if (presetImpactProceed) {
+            presetImpactProceed.addEventListener('click', function () {
+                if (presetImpactOverlay) { presetImpactOverlay.classList.remove('active'); }
+                if (pendingPreset) {
+                    applyPresetConfig(pendingPreset.config, pendingPreset.label, pendingPreset.btn);
+                    pendingPreset = null;
+                }
+            });
+        }
+        if (presetImpactOverlay) {
+            presetImpactOverlay.addEventListener('click', function (e) {
+                if (e.target === presetImpactOverlay) { pendingPreset = null; presetImpactOverlay.classList.remove('active'); }
+            });
+        }
     })();
     </script>
 </body>
