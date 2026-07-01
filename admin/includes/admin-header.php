@@ -85,9 +85,9 @@ $_nav_groups = [
         ['blocked-dates.php', 'fas fa-ban',            'Blocked Dates',  'blocked_dates', '', 'bookings'],
     ],
     'Rooms & Service' => [
-        ['room-management.php',   'fas fa-bed',       'Rooms',            'rooms',            '', null],
-        ['individual-rooms.php',  'fas fa-door-open', 'Individual Rooms', 'rooms',            '', null],
-        ['room-maintenance.php',  'fas fa-tools',     'Room Maintenance', 'room_maintenance', '', null],
+        ['room-management.php',   'fas fa-bed',       'Rooms',            'rooms',            '', 'bookings'],
+        ['individual-rooms.php',  'fas fa-door-open', 'Individual Rooms', 'rooms',            '', 'bookings'],
+        ['room-maintenance.php',  'fas fa-tools',     'Room Maintenance', 'room_maintenance', '', 'bookings'],
         ['housekeeping.php',      'fas fa-broom',     'Housekeeping',     'housekeeping',     '', 'housekeeping'],
     ],
     'Stations' => [

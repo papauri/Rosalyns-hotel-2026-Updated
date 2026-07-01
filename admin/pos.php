@@ -2036,12 +2036,20 @@ if (in_array($user['role'] ?? '', ['admin', 'manager'], true)) {
                     <?php if ($isManagerOrAdmin): ?>
                         <div class="tb-sep"></div>
                         <!-- Live screens (manager/admin only) -->
+                        <?php if (moduleEnabled('station_kds')): ?>
                         <a class="recent-toggle" href="kds.php" target="_blank" style="text-decoration:none;"><i class="fas fa-utensils"></i> Kitchen<span id="kitchenBadge" style="<?php echo ($adminStationsInit['counts']['kitchen']['open_total'] ?? 0) > 0 ? '' : 'display:none;'; ?>"><?php echo (int)($adminStationsInit['counts']['kitchen']['open_total'] ?? 0); ?></span></a>
+                        <?php endif; ?>
+                        <?php if (moduleEnabled('station_bds')): ?>
                         <a class="recent-toggle" href="bds.php" target="_blank" style="text-decoration:none;"><i class="fas fa-wine-glass"></i> Bar<span id="barBadge" style="<?php echo ($adminStationsInit['counts']['bar']['open_total'] ?? 0) > 0 ? '' : 'display:none;'; ?>"><?php echo (int)($adminStationsInit['counts']['bar']['open_total'] ?? 0); ?></span></a>
+                        <?php endif; ?>
+                        <?php if (moduleEnabled('station_cds')): ?>
                         <a class="recent-toggle" href="cds.php" target="_blank" style="text-decoration:none;"><i class="fas fa-mug-hot"></i> Coffee<span id="coffeeBadge" style="<?php echo ($adminStationsInit['counts']['coffee_bar']['open_total'] ?? 0) > 0 ? '' : 'display:none;'; ?>"><?php echo (int)($adminStationsInit['counts']['coffee_bar']['open_total'] ?? 0); ?></span></a>
+                        <?php endif; ?>
                         <button class="recent-toggle" onclick="openStationsTray()"><i class="fas fa-layer-group"></i> Stations<span id="stationsBadge" style="<?php $tot = ($adminStationsInit['counts']['kitchen']['open_total'] ?? 0) + ($adminStationsInit['counts']['bar']['open_total'] ?? 0) + ($adminStationsInit['counts']['coffee_bar']['open_total'] ?? 0);
                                                                                                                                                                 echo $tot > 0 ? '' : 'display:none;'; ?>"><?php echo $tot; ?></span></button>
+                        <?php if (moduleEnabled('stock')): ?>
                         <a class="recent-toggle" href="stock-orders.php"><i class="fas fa-list"></i> All Orders</a>
+                        <?php endif; ?>
                     <?php endif; ?>
                     <?php if ($posCanToggle86): ?>
                         <button class="recent-toggle" id="eightySixModeBtn" onclick="toggle86Mode()" data-help="86 Mode|Toggle item availability. When active, click any item to mark it as 86'd (unavailable) or to re-enable it. All sessions reload the menu."><i class="fas fa-ban"></i> 86</button>
@@ -3072,11 +3080,19 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
                     </div>
                 </div>
                 <div style="padding:12px 20px; border-top:1px solid #eaecef; display:flex; gap:8px; flex-wrap:wrap; font-size:12px; flex-shrink:0; background:#fafafa; border-radius:0 0 14px 14px;">
+                    <?php if (moduleEnabled('station_kds')): ?>
                     <a href="kds.php" target="_blank" style="padding:8px 12px; background:#d4a843; color:#1f1f24; text-decoration:none; border-radius:6px; font-weight:600;"><i class="fas fa-external-link-alt"></i> Kitchen</a>
+                    <?php endif; ?>
+                    <?php if (moduleEnabled('station_bds')): ?>
                     <a href="bds.php" target="_blank" style="padding:8px 12px; background:#6f42c1; color:#fff; text-decoration:none; border-radius:6px; font-weight:600;"><i class="fas fa-external-link-alt"></i> Bar</a>
+                    <?php endif; ?>
+                    <?php if (moduleEnabled('station_cds')): ?>
                     <a href="cds.php" target="_blank" style="padding:8px 12px; background:#8B5A2B; color:#fff; text-decoration:none; border-radius:6px; font-weight:600;"><i class="fas fa-external-link-alt"></i> Coffee</a>
+                    <?php endif; ?>
                     <button type="button" onclick="openRestoOrdersModal()" style="padding:8px 14px; background:#1a5276; color:#fff; border:none; border-radius:6px; font-weight:600; font-size:12px; cursor:pointer;"><i class="fas fa-receipt"></i> Today's restaurant orders</button>
+                    <?php if (moduleEnabled('stock')): ?>
                     <a href="stock-orders.php" style="padding:8px 12px; background:#3a3a40; color:#fff; text-decoration:none; border-radius:6px; font-weight:600;"><i class="fas fa-list"></i> Full orders list</a>
+                    <?php endif; ?>
                 </div>
             </div>
         </div>
@@ -9390,11 +9406,19 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
                 <section>
                     <h3 class="pm-group-title">Stations</h3>
                     <div class="pm-grid">
+                        <?php if (moduleEnabled('station_kds')): ?>
                         <a class="pm-action" href="kds.php" target="_blank" rel="noopener"><i class="fas fa-utensils"></i><span>Kitchen</span><span class="pm-badge" id="menuKitchenBadge" style="<?php echo ($adminStationsInit['counts']['kitchen']['open_total'] ?? 0) > 0 ? '' : 'display:none;'; ?>"><?php echo (int)($adminStationsInit['counts']['kitchen']['open_total'] ?? 0); ?></span></a>
+                        <?php endif; ?>
+                        <?php if (moduleEnabled('station_bds')): ?>
                         <a class="pm-action" href="bds.php" target="_blank" rel="noopener"><i class="fas fa-wine-glass"></i><span>Bar</span><span class="pm-badge" id="menuBarBadge" style="<?php echo ($adminStationsInit['counts']['bar']['open_total'] ?? 0) > 0 ? '' : 'display:none;'; ?>"><?php echo (int)($adminStationsInit['counts']['bar']['open_total'] ?? 0); ?></span></a>
+                        <?php endif; ?>
+                        <?php if (moduleEnabled('station_cds')): ?>
                         <a class="pm-action" href="cds.php" target="_blank" rel="noopener"><i class="fas fa-mug-hot"></i><span>Coffee</span><span class="pm-badge" id="menuCoffeeBadge" style="<?php echo ($adminStationsInit['counts']['coffee_bar']['open_total'] ?? 0) > 0 ? '' : 'display:none;'; ?>"><?php echo (int)($adminStationsInit['counts']['coffee_bar']['open_total'] ?? 0); ?></span></a>
+                        <?php endif; ?>
                         <button type="button" class="pm-action" onclick="runPosMobileMenuAction('openStationsTray')"><i class="fas fa-layer-group"></i><span>All Stations</span></button>
+                        <?php if (moduleEnabled('stock')): ?>
                         <a class="pm-action" href="stock-orders.php"><i class="fas fa-list"></i><span>All Orders</span></a>
+                        <?php endif; ?>
                     </div>
                 </section>
             <?php endif; ?>

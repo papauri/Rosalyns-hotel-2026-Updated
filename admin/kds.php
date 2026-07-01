@@ -319,15 +319,19 @@ $bootstrap['fingerprint'] = md5(
                     <a href="dashboard.php">
                         <i class="fas fa-tachometer-alt"></i> Admin Dashboard
                     </a>
+                    <?php if (!function_exists('moduleEnabled') || moduleEnabled('bookings')): ?>
                     <a href="bookings.php">
                         <i class="fas fa-calendar-check"></i> Bookings
                     </a>
+                    <?php endif; ?>
                     <a href="pos.php">
                         <i class="fas fa-cash-register"></i> POS / Restaurant Till
                     </a>
+                    <?php if (!function_exists('moduleEnabled') || moduleEnabled('bookings')): ?>
                     <a href="room-management.php">
                         <i class="fas fa-door-open"></i> Rooms
                     </a>
+                    <?php endif; ?>
                     <a href="payments.php">
                         <i class="fas fa-credit-card"></i> Payments
                     </a>

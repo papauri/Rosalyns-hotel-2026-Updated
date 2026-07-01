@@ -811,7 +811,9 @@ $printTitle = match ($mode) {
         <div class="scr-actions">
             <a class="btn-secondary" href="javascript:void(0)" onclick="history.back()"><i class="fas fa-arrow-left"></i> Back</a>
             <button class="btn-print" onclick="window.print()"><i class="fas fa-print"></i> Print / Save PDF</button>
+            <?php if (!function_exists('moduleEnabled') || moduleEnabled('pos')): ?>
             <a class="btn-secondary" href="pos.php"><i class="fas fa-cash-register"></i> POS</a>
+            <?php endif; ?>
             <?php if (in_array($user['role'], ['admin', 'manager'], true)): ?>
                 <a class="btn-secondary" href="shift-close-report.php?date=<?php echo urlencode(date('Y-m-d')); ?>"><i class="fas fa-layer-group"></i> Today's Closes</a>
             <?php endif; ?>
