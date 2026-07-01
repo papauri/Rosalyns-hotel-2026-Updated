@@ -2140,3 +2140,392 @@ function sendConferenceInvoiceEmailToClient(array $enquiry, string $invoice_file
         return ['success' => false, 'message' => $e->getMessage()];
     }
 }
+
+/**
+ * Build HTML content for a gym membership invoice.
+ * Simpler than the conference invoice (no room/attendees/AV fields) —
+ * gym_inquiries only carries name/membership_type/preferred_date/guests.
+ */
+function buildGymInvoiceHTML(array $inquiry, string $invoice_number, string $site_name, string $email_address, string $phone_number, string $address, string $currency_symbol)
+{
+    global $pdo;
+
+    $logo_url = getInvoiceLogoUrl();
+    $logo_html = '';
+    if (!empty($logo_url)) {
+        $logo_html = '<img src="' . htmlspecialchars($logo_url) . '" alt="' . htmlspecialchars($site_name) . '" style="max-width: 280px; height: auto; margin-bottom: 20px; display: block; margin-left: auto; margin-right: auto;">';
+    }
+
+    $vatEnabled = in_array(getSetting('vat_enabled'), ['1', 1, true, 'true', 'on'], true);
+    $vatRate = $vatEnabled ? (float)getSetting('vat_rate') : 0;
+    $vatNumber = getSetting('vat_number');
+
+    $paymentsStmt = $pdo->prepare("
+        SELECT * FROM payments
+        WHERE booking_type = 'gym' AND booking_id = ?
+        AND payment_status = 'completed' AND deleted_at IS NULL
+        ORDER BY payment_date ASC
+    ");
+    $paymentsStmt->execute([$inquiry['id']]);
+    $payments = $paymentsStmt->fetchAll(PDO::FETCH_ASSOC);
+
+    $subtotal = (float)$inquiry['total_amount'];
+    $vatAmount = $vatEnabled ? ($subtotal * ($vatRate / 100)) : 0;
+    $totalWithVat = $subtotal + $vatAmount;
+
+    $paymentDetailsHTML = '';
+    if (!empty($payments)) {
+        $paymentDetailsHTML = '<div style="margin-top: 20px; padding: 15px; background: #f8f9fa; border-radius: 5px;">
+                    <h4 style="color: #1A1A1A; margin-top: 0;">Payment History</h4>';
+        foreach ($payments as $payment) {
+            $paymentDetailsHTML .= '<div style="display: flex; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid #ddd;">
+                        <span>' . date('M j, Y', strtotime($payment['payment_date'])) . ' (' . ucfirst(str_replace('_', ' ', $payment['payment_method'])) . ')</span>
+                        <span>' . $currency_symbol . ' ' . number_format($payment['total_amount'], 2) . '</span>
+                    </div>';
+        }
+        $paymentDetailsHTML .= '</div>';
+    }
+
+    $depositSectionHTML = '';
+    if (!empty($inquiry['deposit_required']) && $inquiry['deposit_required'] > 0) {
+        $depositSectionHTML = '<div class="invoice-row">
+                    <span class="invoice-label">Deposit Required:</span>
+                    <span class="invoice-value">' . $currency_symbol . ' ' . number_format($inquiry['deposit_amount'], 2) . '</span>
+                </div>
+                <div class="invoice-row">
+                    <span class="invoice-label">Deposit Paid:</span>
+                    <span class="invoice-value" style="color: ' . ($inquiry['deposit_paid'] >= $inquiry['deposit_amount'] ? '#28a745' : '#dc3545') . '; font-weight: bold;">' . $currency_symbol . ' ' . number_format($inquiry['deposit_paid'] ?? 0, 2) . '</span>
+                </div>';
+    }
+
+    $vatSectionHTML = '';
+    if ($vatEnabled && $vatAmount > 0) {
+        $vatSectionHTML = '<div class="invoice-row">
+                    <span class="invoice-label">Subtotal (excl. VAT):</span>
+                    <span class="invoice-value">' . $currency_symbol . ' ' . number_format($subtotal, 2) . '</span>
+                </div>
+                <div class="invoice-row">
+                    <span class="invoice-label">VAT (' . number_format($vatRate, 2) . '%):</span>
+                    <span class="invoice-value">' . $currency_symbol . ' ' . number_format($vatAmount, 2) . '</span>
+                </div>';
+        if ($vatNumber) {
+            $vatSectionHTML .= '<div class="invoice-row">
+                    <span class="invoice-label">VAT Number:</span>
+                    <span class="invoice-value">' . htmlspecialchars($vatNumber) . '</span>
+                </div>';
+        }
+    }
+
+    return '
+    <div class="invoice-container">
+        <div class="invoice-header" style="text-align: center;">
+            ' . $logo_html . '
+            <h1 style="color: #8B7355; margin: 0 0 10px 0; font-size: 32px;">GYM MEMBERSHIP INVOICE</h1>
+            <p style="margin: 5px 0; font-size: 18px;">' . htmlspecialchars($site_name) . '</p>
+            <p style="margin: 5px 0;">Invoice Number: <strong>' . htmlspecialchars($invoice_number) . '</strong></p>
+            <p style="margin: 5px 0;">Date: ' . date('F j, Y') . '</p>
+        </div>
+
+        <div class="invoice-body">
+            <div class="invoice-details">
+                <h3 style="color: #1A1A1A; border-bottom: 2px solid #8B7355; padding-bottom: 10px; margin-bottom: 20px;">Member Information</h3>
+
+                <div class="invoice-row">
+                    <span class="invoice-label">Name:</span>
+                    <span class="invoice-value">' . htmlspecialchars($inquiry['name']) . '</span>
+                </div>
+                <div class="invoice-row">
+                    <span class="invoice-label">Email:</span>
+                    <span class="invoice-value">' . htmlspecialchars($inquiry['email']) . '</span>
+                </div>
+                <div class="invoice-row">
+                    <span class="invoice-label">Phone:</span>
+                    <span class="invoice-value">' . htmlspecialchars($inquiry['phone']) . '</span>
+                </div>
+            </div>
+
+            <div class="invoice-details">
+                <h3 style="color: #1A1A1A; border-bottom: 2px solid #8B7355; padding-bottom: 10px; margin-bottom: 20px;">Membership Details</h3>
+
+                <div class="invoice-row">
+                    <span class="invoice-label">Reference:</span>
+                    <span class="invoice-value" style="color: #8B7355; font-weight: bold; font-size: 16px;">' . htmlspecialchars($inquiry['reference_number']) . '</span>
+                </div>
+                <div class="invoice-row">
+                    <span class="invoice-label">Membership / Package:</span>
+                    <span class="invoice-value">' . htmlspecialchars($inquiry['membership_type'] ?? 'N/A') . '</span>
+                </div>
+                ' . (!empty($inquiry['preferred_date']) ? '<div class="invoice-row">
+                    <span class="invoice-label">Preferred Start Date:</span>
+                    <span class="invoice-value">' . date('F j, Y', strtotime($inquiry['preferred_date'])) . '</span>
+                </div>' : '') . '
+            </div>
+
+            <div class="total-section">
+                ' . $depositSectionHTML . '
+                ' . $vatSectionHTML . '
+                <div class="total-row">
+                    <span>Total Amount' . ($vatEnabled ? ' (incl. VAT)' : '') . ':</span>
+                    <span>' . $currency_symbol . ' ' . number_format($totalWithVat, 2) . '</span>
+                </div>
+                <p style="margin: 15px 0 0 0; color: #666; font-size: 14px;">
+                    <strong>Payment Status:</strong> <span style="color: #28a745; font-weight: bold;">PAID</span>
+                </p>
+                <p style="margin: 5px 0; color: #666; font-size: 14px;">
+                    <strong>Amount Paid:</strong> ' . $currency_symbol . ' ' . number_format($inquiry['amount_paid'] ?? $totalWithVat, 2) . '
+                </p>
+                ' . ($inquiry['amount_due'] > 0 ? '<p style="margin: 5px 0; color: #dc3545; font-size: 14px;">
+                    <strong>Balance Due:</strong> ' . $currency_symbol . ' ' . number_format($inquiry['amount_due'], 2) . '
+                </p>' : '') . '
+            </div>
+
+            ' . $paymentDetailsHTML . '
+        </div>
+
+        <div class="footer">
+            <p style="margin: 10px 0;"><strong>' . htmlspecialchars($site_name) . '</strong></p>
+            <p style="margin: 5px 0;">' . htmlspecialchars($address) . '</p>
+            <p style="margin: 5px 0;">Email: ' . htmlspecialchars($email_address) . ' | Phone: ' . htmlspecialchars($phone_number) . '</p>
+            <p style="margin: 15px 0 0 0; color: #999; font-size: 12px;">
+                Thank you for your payment! We look forward to seeing you at the gym.
+            </p>
+        </div>
+    </div>';
+}
+
+/**
+ * Generate PDF invoice for a gym membership payment (mirrors generateConferenceInvoicePDF).
+ */
+function generateGymInvoicePDF(int $inquiry_id)
+{
+    global $pdo, $tcpdf_loaded;
+
+    try {
+        $stmt = $pdo->prepare("
+            SELECT gi.*, s.setting_value as site_name
+            FROM gym_inquiries gi
+            JOIN site_settings s ON s.setting_key = 'site_name'
+            WHERE gi.id = ?
+        ");
+        $stmt->execute([$inquiry_id]);
+        $inquiry = $stmt->fetch(PDO::FETCH_ASSOC);
+
+        if (!$inquiry) {
+            throw new Exception("Gym inquiry not found");
+        }
+
+        $site_name = getSetting('site_name');
+        $email_address = getSetting('email_from_email');
+        $phone_number = getSetting('phone_main');
+        $address = getSetting('address_line1') . ', ' .
+            getSetting('address_line2') . ', ' .
+            getSetting('address_country');
+        $currency_symbol = getSetting('currency_symbol');
+
+        $invoiceDir = __DIR__ . '/../invoices';
+        if (!file_exists($invoiceDir)) {
+            mkdir($invoiceDir, 0755, true);
+        }
+
+        $invoice_prefix = getSetting('invoice_prefix', 'INV');
+        $invoice_start = (int)getSetting('invoice_start_number', 1000);
+
+        $invoice_number = finance_next_invoice_number($pdo, 'GYM-' . $invoice_prefix, $invoice_start, date('Y-m-d'), 'gym');
+        $filename = $invoice_number . '.pdf';
+        $filepath = $invoiceDir . '/' . $filename;
+
+        if ($tcpdf_loaded) {
+            $html = buildGymInvoiceHTML($inquiry, $invoice_number, $site_name, $email_address, $phone_number, $address, $currency_symbol);
+
+            if (function_exists('bookingRenderPdfFromHtml')) {
+                file_put_contents($filepath, bookingRenderPdfFromHtml($html, 'Invoice ' . $invoice_number));
+            } else {
+                $tcpdfClass = 'TCPDF';
+                $pdf = new $tcpdfClass(PDF_PAGE_ORIENTATION, PDF_UNIT, PDF_PAGE_FORMAT, true, 'UTF-8', false);
+                $pdf->SetCreator($site_name);
+                $pdf->SetAuthor($site_name);
+                $pdf->SetTitle('Invoice ' . $invoice_number);
+                $pdf->SetSubject('Gym Membership Invoice');
+                $pdf->setPrintHeader(false);
+                $pdf->setPrintFooter(false);
+                $pdf->SetMargins(8, 8, 8);
+                $pdf->SetAutoPageBreak(true, 10);
+                $pdf->SetFont('helvetica', '', 10);
+                $pdf->AddPage();
+                $pdf->SetFillColor(247, 243, 238);
+                $pdf->Rect(0, 0, 210, 297, 'F');
+                $pdf->writeHTML($html, true, false, true, false, '');
+                $pdf->Output($filepath, 'F');
+            }
+        } else {
+            $html = buildGymInvoiceHTML($inquiry, $invoice_number, $site_name, $email_address, $phone_number, $address, $currency_symbol);
+            $fullHtml = '<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>Invoice ' . $invoice_number . '</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 0; padding: 20px; }
+        .invoice-container { max-width: 800px; margin: 0 auto; border:1px solid #ddd; }
+        .invoice-header { background: linear-gradient(135deg, #1A1A1A 0%, #2A2A2A 100%); color: white; padding: 30px; }
+        .invoice-header h1 { margin: 0; color: #8B7355; }
+        .invoice-body { padding: 30px; }
+        .invoice-details { margin-bottom: 30px; }
+        .invoice-row { display: flex; justify-content: space-between; padding: 10px 0; border-bottom:1px solid #eee; }
+        .invoice-label { font-weight: bold; color: #333; }
+        .invoice-value { color: #666; }
+        .total-section { background: #f8f9fa; padding: 20px; border-radius:5px; margin-top: 20px; }
+        .total-row { display: flex; justify-content: space-between; font-size: 18px; font-weight: bold; color: #8B7355; }
+        .footer { text-align: center; padding: 20px; background: #f8f9fa; border-top: 1px solid #ddd; }
+    </style>
+</head>
+<body>' . $html . '</body></html>';
+
+            $htmlFilepath = str_replace('.pdf', '.html', $filepath);
+            file_put_contents($htmlFilepath, $fullHtml);
+
+            return [
+                'filepath' => $htmlFilepath,
+                'invoice_number' => $invoice_number,
+                'relative_path' => 'invoices/' . basename($htmlFilepath)
+            ];
+        }
+
+        return [
+            'filepath' => $filepath,
+            'invoice_number' => $invoice_number,
+            'relative_path' => 'invoices/' . $filename
+        ];
+    } catch (Exception $e) {
+        error_log("Generate Gym Invoice PDF Error: " . $e->getMessage());
+        return false;
+    }
+}
+
+/**
+ * Send gym membership payment invoice email (mirrors sendConferenceInvoiceEmail).
+ */
+function sendGymInvoiceEmail(int $inquiry_id)
+{
+    global $pdo;
+
+    try {
+        $stmt = $pdo->prepare("SELECT * FROM gym_inquiries WHERE id = ?");
+        $stmt->execute([$inquiry_id]);
+        $inquiry = $stmt->fetch(PDO::FETCH_ASSOC);
+
+        if (!$inquiry) {
+            throw new Exception("Gym inquiry not found");
+        }
+
+        $invoice_result = generateGymInvoicePDF($inquiry_id);
+        if (!$invoice_result) {
+            throw new Exception("Failed to generate invoice");
+        }
+
+        $invoice_file = $invoice_result['filepath'];
+        $invoice_number = $invoice_result['invoice_number'];
+        $invoice_path = $invoice_result['relative_path'];
+
+        $update_stmt = $pdo->prepare("
+            UPDATE payments
+            SET invoice_path = ?, invoice_number = ?, invoice_generated = 1
+            WHERE booking_type = 'gym' AND booking_id = ?
+            ORDER BY id DESC LIMIT 1
+        ");
+        $update_stmt->execute([$invoice_path, $invoice_number, $inquiry_id]);
+
+        $invoice_recipients = getEmailSetting('invoice_recipients', '');
+        $smtp_username = getEmailSetting('smtp_username', '');
+        $cc_recipients = array_filter(array_map('trim', explode(',', $invoice_recipients)));
+        if (!empty($smtp_username) && !in_array($smtp_username, $cc_recipients)) {
+            $cc_recipients[] = $smtp_username;
+        }
+
+        $result = sendGymInvoiceEmailToClient($inquiry, $invoice_file, $cc_recipients);
+
+        return [
+            'success' => $result['success'],
+            'message' => $result['message'],
+            'invoice_file' => $invoice_file,
+            'invoice_number' => $invoice_number,
+            'invoice_path' => $invoice_path,
+            'cc_recipients' => $cc_recipients
+        ];
+    } catch (Exception $e) {
+        error_log("Send Gym Invoice Email Error: " . $e->getMessage());
+        return [
+            'success' => false,
+            'message' => $e->getMessage()
+        ];
+    }
+}
+
+/**
+ * Send gym invoice email to client with CC recipients (mirrors sendConferenceInvoiceEmailToClient).
+ */
+function sendGymInvoiceEmailToClient(array $inquiry, string $invoice_file, array $cc_recipients = [])
+{
+    global $email_from_email, $email_site_name, $email_site_url;
+
+    try {
+        $currency_symbol = getSetting('currency_symbol');
+        $totalAmount = (float)($inquiry['total_amount'] ?? 0);
+        $amountPaid = (float)($inquiry['amount_paid'] ?? $totalAmount);
+        $amountDue = (float)($inquiry['amount_due'] ?? 0);
+
+        $subject = 'Gym Membership Payment Invoice - ' . htmlspecialchars($email_site_name) . ' [' . $inquiry['reference_number'] . ']';
+        $htmlBody = '
+        <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+            <div style="background: linear-gradient(135deg, #1A1A1A 0%, #2A2A2A 100%); padding: 30px; text-align: center; border-radius: 10px 10px 0 0;">
+                <h1 style="color: #8B7355; margin: 0; font-size: 32px;">&#10003; PAYMENT CONFIRMED</h1>
+                <p style="color: white; margin: 10px 0 0 0; font-size: 18px;">Thank you for your gym membership payment!</p>
+            </div>
+
+            <div style="background: #f8f9fa; padding: 30px; border:1px solid #ddd; border-top: none; border-radius: 0 0 10px 10px;">
+                <p>Dear ' . htmlspecialchars($inquiry['name']) . ',</p>
+
+                <p>We are pleased to confirm that your payment has been received. Please find attached your official invoice/receipt for membership booking <strong>' . htmlspecialchars($inquiry['reference_number']) . '</strong>.</p>
+
+                <div style="background: white; padding: 20px; border-radius: 8px; margin: 20px 0; border-left: 4px solid #8B7355;">
+                    <h3 style="color: #1A1A1A; margin-top: 0;">Membership Summary</h3>
+
+                    <div style="display: flex; justify-content: space-between; padding: 8px 0; border-bottom:1px solid #eee;">
+                        <span style="font-weight: bold; color: #333;">Package:</span>
+                        <span style="color: #666;">' . htmlspecialchars($inquiry['membership_type'] ?? 'N/A') . '</span>
+                    </div>
+
+                    <div style="display: flex; justify-content: space-between; padding: 15px 0;">
+                        <span style="font-weight: bold; color: #8B7355; font-size: 18px;">Total Paid:</span>
+                        <span style="color: #8B7355; font-weight: bold; font-size: 18px;">' . $currency_symbol . ' ' . number_format($amountPaid, 2) . '</span>
+                    </div>
+                </div>
+
+                <div style="background: #d4edda; padding: 15px; border-left: 4px solid #28a745; border-radius: 5px; margin: 20px 0;">
+                    <h3 style="color: #155724; margin-top: 0;">&#9989; Payment Status: ' . ($amountDue > 0 ? 'PARTIALLY PAID' : 'PAID IN FULL') . '</h3>
+                    <p style="color: #155724; margin: 0;">Your gym membership booking has been recorded. We look forward to seeing you!</p>
+                </div>
+
+                <p style="margin-top: 30px;">If you have any questions, please contact us at <a href="mailto:' . htmlspecialchars($email_from_email) . '">' . htmlspecialchars($email_from_email) . '</a>.</p>
+
+                <div style="text-align: center; margin-top: 40px; padding-top: 20px; border-top: 2px solid #1A1A1A;">
+                    <p style="color: #666; font-size: 14px; margin: 5px 0;"><strong>The ' . htmlspecialchars($email_site_name) . ' Team</strong></p>
+                    <p style="color: #666; font-size: 14px; margin: 5px 0;"><a href="' . htmlspecialchars($email_site_url) . '">' . htmlspecialchars($email_site_url) . '</a></p>
+                </div>
+            </div>
+        </div>';
+
+        return sendEmailWithAttachmentAndCC(
+            $inquiry['email'],
+            $inquiry['name'],
+            $subject,
+            $htmlBody,
+            $invoice_file,
+            $cc_recipients,
+            ''
+        );
+    } catch (Exception $e) {
+        error_log("Send Gym Invoice to Client Error: " . $e->getMessage());
+        return ['success' => false, 'message' => $e->getMessage()];
+    }
+}

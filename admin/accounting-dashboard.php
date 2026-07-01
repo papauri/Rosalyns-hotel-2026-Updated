@@ -76,6 +76,7 @@ $vatSettingsError = '';
 $mod_bookings   = function_exists('moduleEnabled') && moduleEnabled('bookings');
 $mod_pos        = function_exists('moduleEnabled') && moduleEnabled('pos');
 $mod_conference = function_exists('moduleEnabled') && moduleEnabled('conference');
+$mod_gym        = function_exists('moduleEnabled') && moduleEnabled('gym');
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['save_vat_settings'])) {
     if (!validateCsrfToken($_POST['csrf_token'] ?? '')) {
@@ -209,6 +210,35 @@ try {
         $confSummary = $confStmt->fetch(PDO::FETCH_ASSOC);
     }
 
+    if ($mod_gym) {
+        // Gym membership financial summary
+        $gymStmt = $pdo->prepare("
+            SELECT
+                COUNT(DISTINCT p.booking_id) as total_gym_with_payments,
+                COALESCE(SUM(CASE WHEN p.payment_status IN ('completed', 'paid') AND COALESCE(p.payment_type, '') != 'refund' THEN p.total_amount ELSE 0 END), 0) as gym_collected,
+                COALESCE(SUM(CASE WHEN p.payment_status IN ('completed', 'paid') AND COALESCE(p.payment_type, '') != 'refund' THEN p.vat_amount ELSE 0 END), 0)
+                    - COALESCE(SUM(CASE WHEN p.payment_type = 'refund' AND p.refund_status IN ('completed','processing') THEN p.vat_amount ELSE 0 END), 0)
+                    as gym_vat_collected,
+                (
+                    SELECT COALESCE(SUM(gi2.amount_due), 0)
+                    FROM gym_inquiries gi2
+                    WHERE gi2.id IN (
+                        SELECT DISTINCT p2.booking_id FROM payments p2
+                        WHERE p2.booking_type = 'gym'
+                        AND p2.payment_date BETWEEN ? AND ?
+                        AND p2.deleted_at IS NULL
+                    )
+                    AND gi2.status NOT IN ('cancelled')
+                ) as total_gym_outstanding
+            FROM payments p
+            WHERE p.booking_type = 'gym'
+            AND p.payment_date BETWEEN ? AND ?
+            AND p.deleted_at IS NULL
+        ");
+        $gymStmt->execute([$startDate, $endDate, $startDate, $endDate]);
+        $gymSummary = $gymStmt->fetch(PDO::FETCH_ASSOC);
+    }
+
     if ($mod_pos) {
         // Restaurant/POS financial summary synced from stock orders into payments
         $restaurantStmt = $pdo->prepare("
@@ -266,12 +296,14 @@ try {
                 WHEN p.booking_type = 'room' THEN CONCAT(b.guest_name, ' (', b.booking_reference, ')')
                 WHEN p.booking_type = 'conference' THEN CONCAT(ci.{$conferenceFields['company']}, ' (', ci.{$conferenceFields['reference']}, ')')
                 WHEN p.booking_type = 'restaurant' THEN CONCAT('Restaurant order ', so.reference, COALESCE(CONCAT(' - ', NULLIF(so.customer_name, '')), ''))
+                WHEN p.booking_type = 'gym' THEN CONCAT(gi.name, ' (', gi.reference_number, ')')
                 ELSE 'Unknown'
             END as booking_description
         FROM payments p
         LEFT JOIN bookings b ON p.booking_type = 'room' AND p.booking_id = b.id
         LEFT JOIN conference_inquiries ci ON p.booking_type = 'conference' AND p.booking_id = ci.id
         LEFT JOIN stock_orders so ON p.booking_type = 'restaurant' AND p.booking_id = so.id
+        LEFT JOIN gym_inquiries gi ON p.booking_type = 'gym' AND p.booking_id = gi.id
                 WHERE p.deleted_at IS NULL
                     AND p.payment_date BETWEEN ? AND ?
         ORDER BY p.payment_date DESC, p.created_at DESC
@@ -287,6 +319,9 @@ try {
     }
     if ($mod_conference) {
         $outstandingParts[] = "SELECT 'conference' as type, COUNT(*) as count, SUM(amount_due) as total_outstanding FROM conference_inquiries WHERE amount_due > 0 AND status NOT IN ('cancelled', 'rejected', 'expired')";
+    }
+    if ($mod_gym) {
+        $outstandingParts[] = "SELECT 'gym' as type, COUNT(*) as count, SUM(amount_due) as total_outstanding FROM gym_inquiries WHERE amount_due > 0 AND status NOT IN ('cancelled')";
     }
     if (!empty($outstandingParts)) {
         $outstandingStmt = $pdo->query(implode(' UNION ALL ', $outstandingParts));
@@ -335,6 +370,7 @@ try {
             COALESCE(SUM(CASE WHEN booking_type = 'room' AND payment_status IN ('completed','paid') AND COALESCE(payment_type, '') != 'refund' THEN total_amount ELSE 0 END), 0) AS room_rev,
             COALESCE(SUM(CASE WHEN booking_type = 'conference' AND payment_status IN ('completed','paid') AND COALESCE(payment_type, '') != 'refund' THEN total_amount ELSE 0 END), 0) AS conf_rev,
             COALESCE(SUM(CASE WHEN booking_type = 'restaurant' AND payment_status IN ('completed','paid') AND COALESCE(payment_type, '') != 'refund' THEN total_amount ELSE 0 END), 0) AS fnb_rev,
+            COALESCE(SUM(CASE WHEN booking_type = 'gym' AND payment_status IN ('completed','paid') AND COALESCE(payment_type, '') != 'refund' THEN total_amount ELSE 0 END), 0) AS gym_rev,
             COALESCE(SUM(CASE WHEN payment_type = 'refund' THEN refund_amount ELSE 0 END), 0) AS refunds,
             COUNT(*) AS txn_count
         FROM payments
@@ -487,6 +523,7 @@ if (!isset($dailyTrend)) {
         $cat_revenue_room  = (float)($roomSummary['room_collected'] ?? 0);
         $cat_revenue_conf  = (float)($confSummary['conf_collected'] ?? 0);
         $cat_revenue_fnb   = (float)($restaurantSummary['restaurant_collected'] ?? 0);
+        $cat_revenue_gym   = (float)($gymSummary['gym_collected'] ?? 0);
         $cat_recv_total = 0;
         $cat_recv_count = 0;
         foreach ($outstandingSummary as $o) {
@@ -533,7 +570,7 @@ if (!isset($dailyTrend)) {
         }
 
         // Source totals for the Revenue by Source table.
-        $source_total_gross = $cat_revenue_room + $cat_revenue_conf + $cat_revenue_fnb;
+        $source_total_gross = $cat_revenue_room + $cat_revenue_conf + $cat_revenue_fnb + $cat_revenue_gym;
         $pos_gross   = (float)($posTotals['gross_revenue'] ?? 0);
         $pos_cogs    = (float)($posTotals['cogs'] ?? 0);
         $pos_margin  = $pos_gross - $pos_cogs;
@@ -1041,6 +1078,12 @@ if (!isset($dailyTrend)) {
                     <tr>
                         <td>Conference balances outstanding</td>
                         <td class="num"><?php echo $currency_symbol . number_format((float)($confSummary['total_conf_outstanding'] ?? 0), 2); ?></td>
+                    </tr>
+                    <?php endif; ?>
+                    <?php if ($mod_gym): ?>
+                    <tr>
+                        <td>Gym balances outstanding</td>
+                        <td class="num"><?php echo $currency_symbol . number_format((float)($gymSummary['total_gym_outstanding'] ?? 0), 2); ?></td>
                     </tr>
                     <?php endif; ?>
                 </tbody>
@@ -1552,6 +1595,17 @@ if (!isset($dailyTrend)) {
                                 'link_lbl' => 'POS orders',
                             ];
                         }
+                        if ($mod_gym) {
+                            $rows[] = [
+                                'label'    => 'Gym memberships',
+                                'icon'     => 'fa-dumbbell',
+                                'count'    => (int)($gymSummary['total_gym_with_payments'] ?? 0),
+                                'gross'    => $cat_revenue_gym,
+                                'vat'      => (float)($gymSummary['gym_vat_collected'] ?? 0),
+                                'link'     => 'payments.php?booking_type=gym',
+                                'link_lbl' => 'Gym payments',
+                            ];
+                        }
                         foreach ($rows as $r):
                             $pct = $source_total_gross > 0 ? ($r['gross'] / $source_total_gross) * 100 : 0;
                         ?>
@@ -1763,6 +1817,7 @@ if (!isset($dailyTrend)) {
                                 <th class="num" title="Room booking payments received on this day">Rooms</th>
                                 <th class="num" title="Conference and events payments received on this day">Conference</th>
                                 <th class="num" title="Food &amp; Beverage (F&amp;B) — restaurant and bar sales via the POS system">F&amp;B</th>
+                                <th class="num" title="Gym membership payments received on this day">Gym</th>
                                 <th class="num" title="Refunds issued on this day (subtracted from Net Total)">Refunds</th>
                                 <th class="num" title="Net Total — all revenue sources combined, minus refunds">Net Total</th>
                                 <th class="num" title="Transactions — number of individual payment records on this day">Txns</th>
@@ -1772,11 +1827,11 @@ if (!isset($dailyTrend)) {
                             <?php
                             $maxNet = 0;
                             foreach ($dailyTrend as $d) {
-                                $net = (float)$d['room_rev'] + (float)$d['conf_rev'] + (float)$d['fnb_rev'] - (float)$d['refunds'];
+                                $net = (float)$d['room_rev'] + (float)$d['conf_rev'] + (float)$d['fnb_rev'] + (float)$d['gym_rev'] - (float)$d['refunds'];
                                 if ($net > $maxNet) $maxNet = $net;
                             }
                             foreach ($dailyTrend as $d):
-                                $net = (float)$d['room_rev'] + (float)$d['conf_rev'] + (float)$d['fnb_rev'] - (float)$d['refunds'];
+                                $net = (float)$d['room_rev'] + (float)$d['conf_rev'] + (float)$d['fnb_rev'] + (float)$d['gym_rev'] - (float)$d['refunds'];
                                 $netPct = $maxNet > 0 ? ($net / $maxNet) * 100 : 0;
                             ?>
                                 <tr>
@@ -1787,6 +1842,7 @@ if (!isset($dailyTrend)) {
                                     <td class="num"><?php echo $currency_symbol . number_format((float)$d['room_rev'], 2); ?></td>
                                     <td class="num"><?php echo $currency_symbol . number_format((float)$d['conf_rev'], 2); ?></td>
                                     <td class="num"><?php echo $currency_symbol . number_format((float)$d['fnb_rev'], 2); ?></td>
+                                    <td class="num"><?php echo $currency_symbol . number_format((float)$d['gym_rev'], 2); ?></td>
                                     <td class="num">
                                         <?php if ((float)$d['refunds'] > 0): ?>
                                             <span class="acct-muted">&minus;<?php echo $currency_symbol . number_format((float)$d['refunds'], 2); ?></span>

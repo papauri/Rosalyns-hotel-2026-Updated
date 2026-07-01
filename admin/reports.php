@@ -172,14 +172,17 @@ try {
         SELECT p.*,
             CASE WHEN p.booking_type = 'room' THEN b.booking_reference
                  WHEN p.booking_type = 'conference' THEN ci.{$conferenceFields['reference']}
+                 WHEN p.booking_type = 'gym' THEN gi.reference_number
             END as ref_number,
             CASE WHEN p.booking_type = 'room' THEN b.guest_name
                  WHEN p.booking_type = 'conference' THEN ci.{$conferenceFields['company']}
+                 WHEN p.booking_type = 'gym' THEN gi.name
             END as client_name,
             DATEDIFF(CURDATE(), p.payment_date) as days_overdue
         FROM payments p
         LEFT JOIN bookings b ON p.booking_type = 'room' AND p.booking_id = b.id
         LEFT JOIN conference_inquiries ci ON p.booking_type = 'conference' AND p.booking_id = ci.id
+        LEFT JOIN gym_inquiries gi ON p.booking_type = 'gym' AND p.booking_id = gi.id
         WHERE p.payment_status IN ('pending', 'partial') AND p.deleted_at IS NULL
           AND p.payment_date <= ?
         ORDER BY p.payment_date ASC
@@ -251,15 +254,18 @@ try {
         SELECT
             CASE WHEN p.booking_type = 'room' THEN b.guest_name
                  WHEN p.booking_type = 'conference' THEN ci.{$conferenceFields['company']}
+                 WHEN p.booking_type = 'gym' THEN gi.name
             END as client_name,
             CASE WHEN p.booking_type = 'room' THEN b.guest_email
                  WHEN p.booking_type = 'conference' THEN ci.{$conferenceFields['email']}
+                 WHEN p.booking_type = 'gym' THEN gi.email
             END as client_email,
             p.booking_type, COUNT(*) as transaction_count,
             COALESCE(SUM(p.total_amount), 0) as total_spent
         FROM payments p
         LEFT JOIN bookings b ON p.booking_type = 'room' AND p.booking_id = b.id
         LEFT JOIN conference_inquiries ci ON p.booking_type = 'conference' AND p.booking_id = ci.id
+        LEFT JOIN gym_inquiries gi ON p.booking_type = 'gym' AND p.booking_id = gi.id
         WHERE p.payment_status IN ('completed', 'paid') AND COALESCE(p.payment_type, '') != 'refund' AND p.deleted_at IS NULL
         AND p.payment_date >= ? AND p.payment_date <= ?
         GROUP BY client_name, client_email, p.booking_type
@@ -648,12 +654,14 @@ try {
     $roomsRevPl = 0.0;
     $confRevPl = 0.0;
     $fnbRevPl = 0.0;
+    $gymRevPl = 0.0;
     foreach ($revenueByType as $rt) {
         if ($rt['booking_type'] === 'room')        $roomsRevPl = (float)$rt['total_revenue'];
         if ($rt['booking_type'] === 'conference')  $confRevPl  = (float)$rt['total_revenue'];
         if ($rt['booking_type'] === 'restaurant')  $fnbRevPl   = (float)$rt['total_revenue'];
+        if ($rt['booking_type'] === 'gym')         $gymRevPl   = (float)$rt['total_revenue'];
     }
-    $grossRevenue   = $roomsRevPl + $confRevPl + $fnbRevPl;
+    $grossRevenue   = $roomsRevPl + $confRevPl + $fnbRevPl + $gymRevPl;
     $totalCogs      = (float)($plCogs['total_cogs'] ?? 0);
     $grossProfit    = $grossRevenue - $totalCogs;
     $netRevenue     = $grossRevenue - $totalRefunds - $totalVatCollected;
@@ -666,11 +674,12 @@ try {
     $vatRegisterStmt = $pdo->prepare("
         SELECT p.payment_date, p.payment_reference, p.booking_type, p.payment_method,
                p.payment_amount, p.vat_rate, p.vat_amount, p.total_amount,
-               COALESCE(b.guest_name, ci.{$conferenceFields['contact_name']}, so.customer_name, 'N/A') AS client_name
+               COALESCE(b.guest_name, ci.{$conferenceFields['contact_name']}, so.customer_name, gi.name, 'N/A') AS client_name
         FROM payments p
         LEFT JOIN bookings b ON p.booking_type = 'room' AND p.booking_id = b.id
         LEFT JOIN conference_inquiries ci ON p.booking_type = 'conference' AND p.booking_id = ci.id
         LEFT JOIN stock_orders so ON p.booking_type = 'restaurant' AND p.booking_id = so.id
+        LEFT JOIN gym_inquiries gi ON p.booking_type = 'gym' AND p.booking_id = gi.id
         WHERE p.payment_date >= ? AND p.payment_date <= DATE_ADD(?, INTERVAL 1 DAY)
         AND COALESCE(p.payment_type, '') != 'refund'
         AND p.deleted_at IS NULL
@@ -702,11 +711,12 @@ try {
         SELECT p.payment_reference, p.payment_date, p.total_amount, p.payment_status,
                p.booking_type, p.payment_method,
                DATEDIFF(CURDATE(), p.payment_date) AS days_outstanding,
-               COALESCE(b.guest_name, ci.{$conferenceFields['contact_name']}, so.customer_name, 'N/A') AS client_name
+               COALESCE(b.guest_name, ci.{$conferenceFields['contact_name']}, so.customer_name, gi.name, 'N/A') AS client_name
         FROM payments p
         LEFT JOIN bookings b ON p.booking_type = 'room' AND p.booking_id = b.id
         LEFT JOIN conference_inquiries ci ON p.booking_type = 'conference' AND p.booking_id = ci.id
         LEFT JOIN stock_orders so ON p.booking_type = 'restaurant' AND p.booking_id = so.id
+        LEFT JOIN gym_inquiries gi ON p.booking_type = 'gym' AND p.booking_id = gi.id
         WHERE p.payment_status IN ('pending', 'partial')
         AND COALESCE(p.payment_type, '') != 'refund'
         AND p.deleted_at IS NULL
@@ -878,7 +888,7 @@ try {
     $error = "Unable to load report data. Please try again.";
     error_log("Reports error: " . $e->getMessage());
     $plCogs = ['total_cogs' => 0, 'fnb_gross' => 0];
-    $roomsRevPl = $confRevPl = $fnbRevPl = $grossRevenue = $totalCogs = 0.0;
+    $roomsRevPl = $confRevPl = $fnbRevPl = $gymRevPl = $grossRevenue = $totalCogs = 0.0;
     $grossProfit = $netRevenue = $grossMarginPct = 0.0;
     $vatRegister = $vatByType = [];
     $vatRegisterTotal = $vatRegisterGross = 0.0;
@@ -1101,6 +1111,11 @@ try {
                                 <tr>
                                     <td>F&amp;B Revenue</td>
                                     <td style="text-align:right"><?php echo number_format($fnbRevPl, 2); ?></td>
+                                    <td style="text-align:right"></td>
+                                </tr>
+                                <tr>
+                                    <td>Gym Revenue</td>
+                                    <td style="text-align:right"><?php echo number_format($gymRevPl, 2); ?></td>
                                     <td style="text-align:right"></td>
                                 </tr>
                                 <tr style="font-weight:600; border-top: 2px solid var(--color-lux-clay-50)">

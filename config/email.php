@@ -3090,6 +3090,172 @@ function sendConferenceCancelledEmail(array $enquiry)
 }
 
 /**
+ * Send gym membership confirmed email (mirrors sendConferenceConfirmedEmail).
+ */
+function sendGymConfirmedEmail(array $inquiry)
+{
+    global $email_from_email, $email_site_name;
+
+    try {
+        $currency_symbol = getSetting('currency_symbol');
+        $total_amount = !empty($inquiry['total_amount']) ? number_format($inquiry['total_amount'], 0) : 'To be determined';
+
+        $htmlBody = '
+            <h1 style="color: #8B7355; text-align: center;">Gym Membership Confirmed!</h1>
+            <p>Dear ' . htmlspecialchars($inquiry['name']) . ',</p>
+            <p>Great news! Your gym membership booking with <strong>' . htmlspecialchars($email_site_name) . '</strong> has been confirmed by our team.</p>
+
+            <div style="background: #FAF6F0; border: 2px solid #C8A45A; padding: 20px; margin: 20px 0; border-radius: 10px;">
+                <h2 style="color: #8B7355; margin-top: 0;text-align:left;">Membership Details</h2>
+
+                <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="margin:0;"><tr><td style="padding:10px 10px 10px 0;font-weight:bold;color:#1A1A1A;width:44%;vertical-align:top;font-family:\'Segoe UI\',Tahoma,Verdana,sans-serif;border-bottom:1px solid #e8e0d4;">Reference:</td><td style="padding:10px 0 10px 6px;color: #8B7355; font-weight: bold; font-size: 18px;text-align:left;vertical-align:top;font-family:\'Segoe UI\',Tahoma,Verdana,sans-serif;border-bottom:1px solid #e8e0d4;">' . htmlspecialchars($inquiry['reference_number']) . '</td></tr></table>
+
+                <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="margin:0;"><tr><td style="padding:10px 10px 10px 0;font-weight:bold;color:#1A1A1A;width:44%;vertical-align:top;font-family:\'Segoe UI\',Tahoma,Verdana,sans-serif;border-bottom:1px solid #e8e0d4;">Package:</td><td style="padding:10px 0 10px 6px;color: #333;text-align:left;vertical-align:top;font-family:\'Segoe UI\',Tahoma,Verdana,sans-serif;border-bottom:1px solid #e8e0d4;">' . htmlspecialchars($inquiry['membership_type'] ?? 'N/A') . '</td></tr></table>
+
+                ' . (!empty($inquiry['preferred_date']) ? '<table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="margin:0;"><tr><td style="padding:10px 10px 10px 0;font-weight:bold;color:#1A1A1A;width:44%;vertical-align:top;font-family:\'Segoe UI\',Tahoma,Verdana,sans-serif;border-bottom:1px solid #e8e0d4;">Preferred Start Date:</td><td style="padding:10px 0 10px 6px;color: #333;text-align:left;vertical-align:top;font-family:\'Segoe UI\',Tahoma,Verdana,sans-serif;border-bottom:1px solid #e8e0d4;">' . date('F j, Y', strtotime($inquiry['preferred_date'])) . '</td></tr></table>' : '') . '
+
+                <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="margin:0;"><tr><td style="padding:10px 10px 10px 0;font-weight:bold;color:#1A1A1A;width:44%;vertical-align:top;font-family:\'Segoe UI\',Tahoma,Verdana,sans-serif;">Total Amount:</td><td style="padding:10px 0 10px 6px;color: #8B7355; font-weight: bold; font-size: 18px;text-align:left;vertical-align:top;font-family:\'Segoe UI\',Tahoma,Verdana,sans-serif;">' . $currency_symbol . ' ' . $total_amount . '</td></tr></table>
+            </div>
+
+            <div style="background: #d4edda; padding: 15px; border-left: 4px solid #28a745; border-radius: 5px; margin: 20px 0;">
+                <h3 style="color: #155724; margin-top: 0;text-align:left;">&#9989; Booking Status: Confirmed</h3>
+                <p style="color: #155724; margin: 0;">
+                    <strong>Your gym membership booking is now confirmed!</strong><br>
+                    We look forward to seeing you at ' . htmlspecialchars($email_site_name) . '.
+                </p>
+            </div>
+
+            <p>If you have any questions, please contact us at <a href="mailto:' . htmlspecialchars($email_from_email) . '">' . htmlspecialchars($email_from_email) . '</a> or call ' . getSetting('phone_main') . '.</p>
+        <p style="margin:28px 0 0;font-size:14px;color:#777;text-align:center;font-style:italic;">
+            Warm regards &mdash; see you soon.
+        </p>';
+
+        return sendEmail(
+            $inquiry['email'],
+            $inquiry['name'],
+            'Gym Membership Confirmed - ' . htmlspecialchars($email_site_name) . ' [' . $inquiry['reference_number'] . ']',
+            $htmlBody
+        );
+    } catch (Exception $e) {
+        error_log("Send Gym Confirmed Email Error: " . $e->getMessage());
+        return [
+            'success' => false,
+            'message' => $e->getMessage()
+        ];
+    }
+}
+
+/**
+ * Send gym membership cancelled email (mirrors sendConferenceCancelledEmail).
+ */
+function sendGymCancelledEmail(array $inquiry)
+{
+    global $email_from_email, $email_site_name;
+
+    try {
+        $htmlBody = '
+            <h1 style="color: #dc3545; text-align: center;">Gym Membership Booking Cancelled</h1>
+            <p>Dear ' . htmlspecialchars($inquiry['name']) . ',</p>
+            <p>We regret to inform you that your gym membership booking with <strong>' . htmlspecialchars($email_site_name) . '</strong> has been cancelled.</p>
+
+            <div style="background: #FAF6F0; border: 2px solid #dc3545; padding: 20px; margin: 20px 0; border-radius: 10px;">
+                <h2 style="color: #dc3545; margin-top: 0;text-align:left;">Cancelled Booking Details</h2>
+
+                <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="margin:0;"><tr><td style="padding:10px 10px 10px 0;font-weight:bold;color:#1A1A1A;width:44%;vertical-align:top;font-family:\'Segoe UI\',Tahoma,Verdana,sans-serif;border-bottom:1px solid #e8e0d4;">Reference:</td><td style="padding:10px 0 10px 6px;color: #dc3545; font-weight: bold; font-size: 18px;text-align:left;vertical-align:top;font-family:\'Segoe UI\',Tahoma,Verdana,sans-serif;border-bottom:1px solid #e8e0d4;">' . htmlspecialchars($inquiry['reference_number']) . '</td></tr></table>
+
+                <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="margin:0;"><tr><td style="padding:10px 10px 10px 0;font-weight:bold;color:#1A1A1A;width:44%;vertical-align:top;font-family:\'Segoe UI\',Tahoma,Verdana,sans-serif;">Package:</td><td style="padding:10px 0 10px 6px;color: #333;text-align:left;vertical-align:top;font-family:\'Segoe UI\',Tahoma,Verdana,sans-serif;">' . htmlspecialchars($inquiry['membership_type'] ?? 'N/A') . '</td></tr></table>
+            </div>
+
+            <div style="background: #f8d7da; padding: 15px; border-left: 4px solid #dc3545; border-radius: 5px; margin: 20px 0;">
+                <h3 style="color: #721c24; margin-top: 0;text-align:left;">&#10060; Booking Status: Cancelled</h3>
+                <p style="color: #721c24; margin: 0;">
+                    <strong>This booking has been cancelled.</strong><br>
+                    If you believe this is an error, please contact us immediately.
+                </p>
+            </div>
+
+            <p>If you have any questions or would like to rebook, please contact us at <a href="mailto:' . htmlspecialchars($email_from_email) . '">' . htmlspecialchars($email_from_email) . '</a> or call ' . getSetting('phone_main') . '.</p>
+
+            <p>We hope to have the opportunity to serve you in the future.</p>
+        <p style="margin:28px 0 0;font-size:14px;color:#777;text-align:center;font-style:italic;">
+            Warm regards &mdash; see you soon.
+        </p>';
+
+        return sendEmail(
+            $inquiry['email'],
+            $inquiry['name'],
+            'Gym Membership Cancelled - ' . htmlspecialchars($email_site_name) . ' [' . $inquiry['reference_number'] . ']',
+            $htmlBody
+        );
+    } catch (Exception $e) {
+        error_log("Send Gym Cancelled Email Error: " . $e->getMessage());
+        return [
+            'success' => false,
+            'message' => $e->getMessage()
+        ];
+    }
+}
+
+/**
+ * Send gym membership quotation email (mirrors sendConferenceQuotationEmail,
+ * simplified: no PDF attachment / WhatsApp — gym has no per-room booking
+ * complexity that would justify the extra generator subsystem conference has).
+ */
+function sendGymQuotationEmail(array $inquiry, array $options = []): array
+{
+    global $email_site_name;
+
+    try {
+        $recipientEmail = trim((string)($inquiry['email'] ?? ''));
+        if ($recipientEmail === '' || !filter_var($recipientEmail, FILTER_VALIDATE_EMAIL)) {
+            throw new Exception('Gym inquiry does not have a valid email address.');
+        }
+
+        $siteName = $email_site_name ?: getSetting('site_name', "Rosalyn's Beach Hotel");
+        $currency = (string)getSetting('currency_symbol', 'MWK ');
+        $validDays = max(1, (int)($options['valid_days'] ?? 7));
+        $notes = trim((string)($options['quotation_notes'] ?? ''));
+        $validUntil = (new DateTime())->modify('+' . $validDays . ' days');
+
+        $quoteRef = 'GQ-' . strtoupper((string)($inquiry['reference_number'] ?? ('GYM-' . (int)($inquiry['id'] ?? 0))));
+
+        $baseAmount = (float)($inquiry['total_amount'] ?? 0);
+        $vatAmount = (float)($inquiry['vat_amount'] ?? 0);
+        $totalAmount = (float)($inquiry['total_with_vat'] ?? 0);
+        if ($totalAmount <= 0) {
+            $totalAmount = $baseAmount + $vatAmount;
+        }
+
+        $subject = 'Gym Membership Quotation - ' . $siteName . ' [' . $quoteRef . ']';
+        $htmlBody = '<h1 style="color:#8B7355;text-align:center;">Gym Membership Quotation</h1>'
+            . '<p>Dear ' . htmlspecialchars((string)($inquiry['name'] ?? 'Guest'), ENT_QUOTES, 'UTF-8') . ',</p>'
+            . '<p>Thank you for your gym membership enquiry. Please find your quotation details below.</p>'
+            . '<p><strong>Inquiry Ref:</strong> ' . htmlspecialchars((string)($inquiry['reference_number'] ?? ''), ENT_QUOTES, 'UTF-8') . '<br>'
+            . '<strong>Quotation Ref:</strong> ' . htmlspecialchars($quoteRef, ENT_QUOTES, 'UTF-8') . '<br>'
+            . '<strong>Package:</strong> ' . htmlspecialchars((string)($inquiry['membership_type'] ?? ''), ENT_QUOTES, 'UTF-8') . '<br>'
+            . '<strong>Total:</strong> ' . htmlspecialchars($currency, ENT_QUOTES, 'UTF-8') . number_format($totalAmount, 0) . '<br>'
+            . '<strong>Valid Until:</strong> ' . $validUntil->format('F j, Y') . '</p>';
+
+        if ($notes !== '') {
+            $htmlBody .= '<p><strong>Notes:</strong><br>' . nl2br(htmlspecialchars($notes, ENT_QUOTES, 'UTF-8')) . '</p>';
+        }
+
+        $htmlBody .= '<p>To confirm this quotation, reply to this email or contact us at '
+            . htmlspecialchars((string)getSetting('phone_main', ''), ENT_QUOTES, 'UTF-8') . '.</p>';
+
+        $result = sendEmail($recipientEmail, (string)($inquiry['name'] ?? 'Guest'), $subject, $htmlBody);
+
+        return $result;
+    } catch (Exception $e) {
+        error_log("Send Gym Quotation Email Error: " . $e->getMessage());
+        return [
+            'success' => false,
+            'message' => $e->getMessage()
+        ];
+    }
+}
+
+/**
  * Send booking cancelled email
  */
 function sendBookingCancelledEmail(array $booking, string $cancellation_reason = '')

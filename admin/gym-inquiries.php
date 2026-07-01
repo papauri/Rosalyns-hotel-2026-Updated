@@ -4,7 +4,11 @@ require_once 'admin-init.php';
 /** @var string $csrf_token */
 
 require_once '../config/email.php';
+require_once '../config/invoice.php';
 require_once '../includes/alert.php';
+require_once '../includes/finance-sequences.php';
+
+finance_ensure_sequence_tables($pdo);
 
 $user = [
     'id' => $_SESSION['admin_user_id'],
@@ -14,6 +18,70 @@ $user = [
 ];
 $message = '';
 $error = '';
+$_can_gym_financials = hasPermission((int)($user['id'] ?? 0), 'gym_financials');
+$currency_symbol = (string)getSetting('currency_symbol', 'K');
+
+/**
+ * Recompute a gym inquiry's amount_paid/amount_due/deposit_paid from the
+ * payments table and persist them (mirrors syncConferenceEnquiryPaymentSnapshot
+ * in admin/conference-management.php).
+ */
+function syncGymInquiryPaymentSnapshot(PDO $pdo, int $inquiryId): ?array
+{
+    $inquiryStmt = $pdo->prepare("SELECT id, total_amount, deposit_required FROM gym_inquiries WHERE id = ? LIMIT 1");
+    $inquiryStmt->execute([$inquiryId]);
+    $inquiry = $inquiryStmt->fetch(PDO::FETCH_ASSOC);
+
+    if (!$inquiry) {
+        return null;
+    }
+
+    $paidStmt = $pdo->prepare("
+        SELECT COALESCE(SUM(CASE WHEN payment_status IN ('completed', 'paid') AND COALESCE(payment_type, '') != 'refund' THEN total_amount ELSE 0 END), 0) AS amount_paid
+        FROM payments
+        WHERE booking_type = 'gym'
+          AND booking_id = ?
+          AND deleted_at IS NULL
+    ");
+    $paidStmt->execute([$inquiryId]);
+    $amountPaid = (float)($paidStmt->fetchColumn() ?? 0);
+
+    $lastPaymentStmt = $pdo->prepare("
+        SELECT MAX(payment_date) AS last_payment_date
+        FROM payments
+        WHERE booking_type = 'gym'
+          AND booking_id = ?
+          AND payment_status IN ('completed', 'paid')
+          AND COALESCE(payment_type, '') != 'refund'
+          AND deleted_at IS NULL
+    ");
+    $lastPaymentStmt->execute([$inquiryId]);
+    $lastPaymentDate = $lastPaymentStmt->fetchColumn() ?: null;
+
+    $totalAmount = (float)($inquiry['total_amount'] ?? 0);
+    $depositRequired = (float)($inquiry['deposit_required'] ?? 0);
+    $amountDue = max(0, $totalAmount - $amountPaid);
+    $depositPaid = min($amountPaid, $depositRequired);
+
+    $syncStmt = $pdo->prepare("
+        UPDATE gym_inquiries
+        SET amount_paid = ?,
+            amount_due = ?,
+            deposit_paid = ?,
+            last_payment_date = ?,
+            updated_at = NOW()
+        WHERE id = ?
+    ");
+    $syncStmt->execute([$amountPaid, $amountDue, $depositPaid, $lastPaymentDate, $inquiryId]);
+
+    return [
+        'total_amount' => $totalAmount,
+        'amount_paid' => $amountPaid,
+        'amount_due' => $amountDue,
+        'deposit_required' => $depositRequired,
+        'deposit_paid' => $depositPaid,
+    ];
+}
 
 // Handle status updates and deletions
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['inquiry_action'])) {
@@ -60,9 +128,223 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['inquiry_action'])) {
             $stmt = $pdo->prepare("DELETE FROM gym_inquiries WHERE id = ?");
             $stmt->execute([$inquiry_id]);
             $message = 'Gym inquiry deleted successfully!';
+        } elseif (in_array($action, ['confirm', 'cancel', 'complete', 'send_invoice', 'send_quotation', 'update_amount', 'update_notes'], true)) {
+            $inquiry_id = (int)$inquiry_id;
+            if ($inquiry_id <= 0) {
+                throw new Exception('Invalid inquiry selected.');
+            }
+
+            if (in_array($action, ['send_invoice', 'send_quotation', 'update_amount'], true) && !hasPermission((int)($user['id'] ?? 0), 'gym_financials')) {
+                throw new Exception('You do not have permission to handle gym invoicing or pricing.');
+            }
+
+            $stmt = $pdo->prepare("SELECT * FROM gym_inquiries WHERE id = ?");
+            $stmt->execute([$inquiry_id]);
+            $inquiry = $stmt->fetch(PDO::FETCH_ASSOC);
+
+            if (!$inquiry) {
+                throw new Exception('Gym inquiry not found!');
+            }
+
+            $paymentSnapshot = syncGymInquiryPaymentSnapshot($pdo, $inquiry_id);
+            if ($paymentSnapshot !== null) {
+                $inquiry['amount_paid'] = $paymentSnapshot['amount_paid'];
+                $inquiry['amount_due'] = $paymentSnapshot['amount_due'];
+                $inquiry['deposit_paid'] = $paymentSnapshot['deposit_paid'];
+            }
+
+            if (in_array($action, ['confirm', 'complete'], true)) {
+                $depositRequired = (float)($paymentSnapshot['deposit_required'] ?? $inquiry['deposit_required'] ?? 0);
+                $depositPaid = (float)($paymentSnapshot['deposit_paid'] ?? $inquiry['deposit_paid'] ?? 0);
+                if ($depositRequired > 0 && $depositPaid + 0.0001 < $depositRequired) {
+                    throw new Exception('Required gym deposit has not been fully paid yet.');
+                }
+            }
+
+            if ($action === 'confirm') {
+                if (($inquiry['status'] ?? '') !== 'new') {
+                    throw new Exception('Only new inquiries can be confirmed.');
+                }
+
+                $stmt = $pdo->prepare("UPDATE gym_inquiries SET status = 'confirmed', updated_at = NOW() WHERE id = ?");
+                $stmt->execute([$inquiry_id]);
+
+                $email_result = sendGymConfirmedEmail($inquiry);
+                $message = $email_result['success']
+                    ? 'Gym membership confirmed successfully! Confirmation email sent.'
+                    : 'Gym membership confirmed successfully! (Email not sent: ' . htmlspecialchars($email_result['message']) . ')';
+            } elseif ($action === 'cancel') {
+                $stmt = $pdo->prepare("UPDATE gym_inquiries SET status = 'cancelled', updated_at = NOW() WHERE id = ?");
+                $stmt->execute([$inquiry_id]);
+
+                // Refund accounting: record a refund row if any completed payment exists.
+                $gymCanPay = $pdo->prepare("
+                    SELECT SUM(total_amount) as total_paid
+                    FROM payments
+                    WHERE booking_type = 'gym' AND booking_id = ?
+                      AND payment_status IN ('completed','paid') AND COALESCE(payment_type, '') != 'refund'
+                      AND deleted_at IS NULL
+                ");
+                $gymCanPay->execute([$inquiry_id]);
+                $gymPaidTotal = (float)(($gymCanPay->fetch(PDO::FETCH_ASSOC))['total_paid'] ?? 0);
+
+                if ($gymPaidTotal > 0) {
+                    do {
+                        $gymRefRef = 'RFD-GYM-' . strtoupper(substr(uniqid(), -8));
+                        $gymRefChk = $pdo->prepare("SELECT COUNT(*) FROM payments WHERE payment_reference = ?");
+                        $gymRefChk->execute([$gymRefRef]);
+                    } while ((int)$gymRefChk->fetchColumn() > 0);
+
+                    $gymVatEnabled = getSetting('vat_enabled') === '1';
+                    $gymVatRate    = $gymVatEnabled ? (float)getSetting('vat_rate') : 0;
+                    $gymVatAmt     = $gymVatRate > 0 ? round($gymPaidTotal * ($gymVatRate / (100 + $gymVatRate)), 2) : 0;
+                    $gymNetAmt     = round($gymPaidTotal - $gymVatAmt, 2);
+
+                    $pdo->prepare("
+                        INSERT INTO payments (
+                            payment_reference, booking_type, booking_id, booking_reference,
+                            payment_date, payment_amount, vat_rate, vat_amount, total_amount,
+                            payment_method, payment_type, payment_status,
+                            refund_reason, refund_status, refund_amount,
+                            recorded_by, created_at
+                        ) VALUES (?, 'gym', ?, ?, CURDATE(), ?, ?, ?, ?, 'cash', 'refund', 'completed',
+                                  'cancellation', 'completed', ?, ?, NOW())
+                    ")->execute([
+                        $gymRefRef,
+                        $inquiry_id,
+                        $inquiry['reference_number'] ?? '',
+                        $gymNetAmt,
+                        $gymVatRate,
+                        $gymVatAmt,
+                        $gymPaidTotal,
+                        $gymPaidTotal,
+                        (int)($user['id'] ?? 0),
+                    ]);
+
+                    $pdo->prepare("UPDATE gym_inquiries SET payment_status = 'refunded', updated_at = NOW() WHERE id = ?")
+                        ->execute([$inquiry_id]);
+                }
+
+                $email_result = sendGymCancelledEmail($inquiry);
+                $message = $email_result['success']
+                    ? 'Gym membership booking cancelled successfully! Cancellation email sent.'
+                    : 'Gym membership booking cancelled successfully! (Email not sent: ' . htmlspecialchars($email_result['message']) . ')';
+            } elseif ($action === 'complete') {
+                if (($inquiry['status'] ?? '') !== 'confirmed') {
+                    throw new Exception('Only confirmed memberships can be marked completed.');
+                }
+
+                $stmt = $pdo->prepare("UPDATE gym_inquiries SET status = 'closed', updated_at = NOW() WHERE id = ?");
+                $stmt->execute([$inquiry_id]);
+                $message = 'Gym membership marked as completed!';
+            } elseif ($action === 'send_invoice') {
+                try {
+                    $vatEnabled = getSetting('vat_enabled') === '1';
+                    $vatRate = $vatEnabled ? (float)getSetting('vat_rate') : 0;
+
+                    $totalAmount = (float)$inquiry['total_amount'];
+                    $vatAmount = $vatEnabled ? ($totalAmount * ($vatRate / 100)) : 0;
+                    $totalWithVat = $totalAmount + $vatAmount;
+
+                    // Idempotency guard — if already fully paid just resend the invoice
+                    $alreadyPaid = (float)($paymentSnapshot['amount_paid'] ?? 0);
+                    if ($alreadyPaid >= $totalWithVat - 0.01 && $totalWithVat > 0) {
+                        $invoice_result = sendGymInvoiceEmail($inquiry_id);
+                        $message = 'Payment already recorded. Invoice resent to ' . htmlspecialchars($inquiry['email'] ?? '');
+                        $message .= $invoice_result['success'] ? '' : ' (Invoice email failed: ' . $invoice_result['message'] . ')';
+                    } else {
+                        do {
+                            $payment_reference = 'PAY' . date('Ym') . strtoupper(substr(uniqid(), -6));
+                            $refChk = $pdo->prepare('SELECT COUNT(*) FROM payments WHERE payment_reference = ? LIMIT 1');
+                            $refChk->execute([$payment_reference]);
+                        } while ((int)$refChk->fetchColumn() > 0);
+
+                        $pdo->beginTransaction();
+                        $receipt_number = finance_next_receipt_number($pdo, date('Y-m-d'));
+
+                        $insert_payment = $pdo->prepare("
+                                INSERT INTO payments (
+                                    payment_reference, booking_type, booking_id, booking_reference,
+                                    payment_date, payment_amount, vat_rate, vat_amount, total_amount,
+                                    payment_method, payment_type, payment_status, invoice_generated,
+                                    receipt_number, status, recorded_by
+                                ) VALUES (?, 'gym', ?, ?, CURDATE(), ?, ?, ?, ?, 'cash', 'full_payment', 'completed', 1, ?, 'completed', ?)
+                            ");
+                        $insert_payment->execute([
+                            $payment_reference,
+                            $inquiry_id,
+                            $inquiry['reference_number'],
+                            $totalAmount,
+                            $vatRate,
+                            $vatAmount,
+                            $totalWithVat,
+                            $receipt_number,
+                            $user['id']
+                        ]);
+                        $gym_payment_id = (int)$pdo->lastInsertId();
+
+                        $update_amounts = $pdo->prepare("
+                                UPDATE gym_inquiries
+                                SET amount_paid = ?, amount_due = 0, vat_rate = ?, vat_amount = ?,
+                                    total_with_vat = ?, last_payment_date = CURDATE(), payment_status = 'full_paid'
+                                WHERE id = ?
+                            ");
+                        $update_amounts->execute([$totalWithVat, $vatRate, $vatAmount, $totalWithVat, $inquiry_id]);
+                        $pdo->commit();
+
+                        if ($gym_payment_id > 0) {
+                            try {
+                                require_once '../config/receipts.php';
+                                receipt_auto_send($pdo, $gym_payment_id, $user);
+                            } catch (Throwable $rcptEx) {
+                                error_log('Receipt email failed for gym payment ' . $gym_payment_id . ': ' . $rcptEx->getMessage());
+                            }
+                        }
+
+                        $invoice_result = sendGymInvoiceEmail($inquiry_id);
+                        if ($invoice_result['success']) {
+                            $message = 'Payment recorded successfully! Invoice sent to ' . htmlspecialchars($inquiry['email']);
+                        } else {
+                            $message = 'Payment recorded successfully! (Invoice email failed: ' . $invoice_result['message'] . ')';
+                        }
+                    }
+                } catch (PDOException $e) {
+                    if ($pdo->inTransaction()) {
+                        $pdo->rollBack();
+                    }
+                    $error = 'Failed to record payment: ' . $e->getMessage();
+                    error_log("Gym payment error: " . $e->getMessage());
+                }
+            } elseif ($action === 'send_quotation') {
+                $quoteValidDays = max(1, (int)($_POST['quotation_valid_days'] ?? 7));
+                $quoteNotes = trim((string)($_POST['quotation_notes'] ?? ''));
+
+                $quoteResult = sendGymQuotationEmail($inquiry, [
+                    'valid_days' => $quoteValidDays,
+                    'quotation_notes' => $quoteNotes,
+                ]);
+
+                if (!empty($quoteResult['success'])) {
+                    $message = 'Gym membership quotation sent to ' . htmlspecialchars((string)($inquiry['email'] ?? '')) . '.';
+                } else {
+                    $error = 'Failed to send quotation: ' . ($quoteResult['message'] ?? 'Unknown error');
+                }
+            } elseif ($action === 'update_amount') {
+                $amount = $_POST['total_amount'] ?? 0;
+                $stmt = $pdo->prepare("UPDATE gym_inquiries SET total_amount = ? WHERE id = ?");
+                $stmt->execute([$amount, $inquiry_id]);
+                $message = 'Total amount updated successfully!';
+            } elseif ($action === 'update_notes') {
+                $notes = $_POST['notes'] ?? '';
+                $stmt = $pdo->prepare("UPDATE gym_inquiries SET notes = ? WHERE id = ?");
+                $stmt->execute([$notes, $inquiry_id]);
+                $message = 'Notes updated successfully!';
+            }
         }
     } catch (PDOException $e) {
         $error = 'Error: ' . $e->getMessage();
+    } catch (Exception $e) {
+        $error = $e->getMessage();
     } catch (Throwable $e) {
         error_log('Gym inquiry action error: ' . $e->getMessage());
         $error = 'An unexpected error occurred. The status may have been updated but the notification email could not be sent.';
@@ -226,8 +508,9 @@ try {
                                 <select name="new_status" class="status-select" onchange="this.form.submit();">
                                     <option value="new" <?php echo $inquiry['status'] === 'new' ? 'selected' : ''; ?>>New</option>
                                     <option value="contacted" <?php echo $inquiry['status'] === 'contacted' ? 'selected' : ''; ?>>Contacted</option>
+                                    <option value="confirmed" <?php echo $inquiry['status'] === 'confirmed' ? 'selected' : ''; ?>>Confirmed (paid)</option>
                                     <option value="converted" <?php echo $inquiry['status'] === 'converted' ? 'selected' : ''; ?>>Converted</option>
-                                    <option value="closed" <?php echo $inquiry['status'] === 'closed' ? 'selected' : ''; ?>>Closed</option>
+                                    <option value="closed" <?php echo $inquiry['status'] === 'closed' ? 'selected' : ''; ?>>Closed / Completed</option>
                                     <option value="cancelled" <?php echo $inquiry['status'] === 'cancelled' ? 'selected' : ''; ?>>Cancelled</option>
                                 </select>
                             </form>
@@ -273,6 +556,10 @@ try {
     </div>
 
     <script>
+        var canGymFinancials = <?php echo json_encode($_can_gym_financials); ?>;
+        var gymCsrfToken = <?php echo json_encode($csrf_token); ?>;
+        var gymCurrencySymbol = <?php echo json_encode($currency_symbol); ?>;
+
         function showInquiryDetails(inquiry) {
             const modal = document.getElementById('inquiryModal');
             const body = document.getElementById('inquiryModalBody');
@@ -280,10 +567,107 @@ try {
             const statusColors = {
                 'new': '#17a2b8',
                 'contacted': '#ffc107',
+                'confirmed': '#8B7355',
                 'converted': '#28a745',
                 'closed': '#6c757d',
                 'cancelled': '#dc3545'
             };
+
+            function money(n) {
+                return gymCurrencySymbol + ' ' + Number(n || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+            }
+
+            function escapeHtml(str) {
+                const div = document.createElement('div');
+                div.textContent = String(str == null ? '' : str);
+                return div.innerHTML;
+            }
+
+            const totalAmount = inquiry.total_amount || 0;
+            const amountPaid = inquiry.amount_paid || 0;
+            const amountDue = inquiry.amount_due || 0;
+            const paymentStatus = inquiry.payment_status || 'pending';
+
+            const financialHtml = `
+                <div class="detail-item" style="grid-column: 1 / -1; border-top: 1px solid #eee; margin-top: 10px; padding-top: 14px;">
+                    <label style="font-weight:700;">Accounting</label>
+                </div>
+                <div class="detail-item">
+                    <label>Total Amount</label>
+                    <span>${money(totalAmount)}</span>
+                </div>
+                <div class="detail-item">
+                    <label>Amount Paid</label>
+                    <span style="color:#28a745;font-weight:600;">${money(amountPaid)}</span>
+                </div>
+                <div class="detail-item">
+                    <label>Amount Due</label>
+                    <span style="color:${amountDue > 0 ? '#dc3545' : '#28a745'};font-weight:600;">${money(amountDue)}</span>
+                </div>
+                <div class="detail-item">
+                    <label>Payment Status</label>
+                    <span>${paymentStatus.replace('_', ' ')}</span>
+                </div>
+                ${canGymFinancials ? `
+                <div class="detail-item" style="grid-column: 1 / -1;">
+                    <form method="POST" style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+                        <input type="hidden" name="inquiry_action" value="update_amount">
+                        <input type="hidden" name="inquiry_id" value="${inquiry.id}">
+                        <input type="hidden" name="csrf_token" value="${gymCsrfToken}">
+                        <label style="margin:0;">Set Total Amount:</label>
+                        <input type="number" step="0.01" min="0" name="total_amount" value="${totalAmount}" class="form-control" style="max-width:160px;">
+                        <button type="submit" class="btn btn-primary btn-sm"><i class="fas fa-save"></i> Save Amount</button>
+                    </form>
+                </div>
+                <div class="detail-item" style="grid-column: 1 / -1;">
+                    <form method="POST" style="display:flex;gap:8px;align-items:center;">
+                        <input type="hidden" name="inquiry_action" value="send_invoice">
+                        <input type="hidden" name="inquiry_id" value="${inquiry.id}">
+                        <input type="hidden" name="csrf_token" value="${gymCsrfToken}">
+                        <button type="submit" class="btn btn-primary btn-sm" ${totalAmount > 0 ? '' : 'disabled title="Set a total amount first"'}><i class="fas fa-file-invoice-dollar"></i> Record Payment &amp; Send Invoice</button>
+                    </form>
+                    <form method="POST" style="display:flex;gap:8px;align-items:center;margin-top:8px;flex-wrap:wrap;">
+                        <input type="hidden" name="inquiry_action" value="send_quotation">
+                        <input type="hidden" name="inquiry_id" value="${inquiry.id}">
+                        <input type="hidden" name="csrf_token" value="${gymCsrfToken}">
+                        <input type="number" min="1" name="quotation_valid_days" value="7" class="form-control" style="max-width:100px;" title="Valid for (days)">
+                        <button type="submit" class="btn btn-secondary btn-sm"><i class="fas fa-file-invoice"></i> Send Quotation</button>
+                    </form>
+                </div>
+                ` : ''}
+                <div class="detail-item" style="grid-column: 1 / -1;display:flex;gap:8px;flex-wrap:wrap;">
+                    ${inquiry.status === 'new' ? `
+                    <form method="POST" onsubmit="return confirm('Confirm this gym membership booking?');">
+                        <input type="hidden" name="inquiry_action" value="confirm">
+                        <input type="hidden" name="inquiry_id" value="${inquiry.id}">
+                        <input type="hidden" name="csrf_token" value="${gymCsrfToken}">
+                        <button type="submit" class="btn btn-primary btn-sm"><i class="fas fa-check"></i> Confirm</button>
+                    </form>` : ''}
+                    ${inquiry.status === 'confirmed' ? `
+                    <form method="POST" onsubmit="return confirm('Mark this membership as completed?');">
+                        <input type="hidden" name="inquiry_action" value="complete">
+                        <input type="hidden" name="inquiry_id" value="${inquiry.id}">
+                        <input type="hidden" name="csrf_token" value="${gymCsrfToken}">
+                        <button type="submit" class="btn btn-secondary btn-sm"><i class="fas fa-flag-checkered"></i> Mark Completed</button>
+                    </form>` : ''}
+                    ${(inquiry.status !== 'cancelled') ? `
+                    <form method="POST" onsubmit="return confirm('Cancel this booking? Any recorded payment will be refunded.');">
+                        <input type="hidden" name="inquiry_action" value="cancel">
+                        <input type="hidden" name="inquiry_id" value="${inquiry.id}">
+                        <input type="hidden" name="csrf_token" value="${gymCsrfToken}">
+                        <button type="submit" class="btn btn-danger btn-sm"><i class="fas fa-ban"></i> Cancel &amp; Refund</button>
+                    </form>` : ''}
+                </div>
+                <div class="detail-item" style="grid-column: 1 / -1;">
+                    <form method="POST" style="display:flex;gap:8px;align-items:flex-start;">
+                        <input type="hidden" name="inquiry_action" value="update_notes">
+                        <input type="hidden" name="inquiry_id" value="${inquiry.id}">
+                        <input type="hidden" name="csrf_token" value="${gymCsrfToken}">
+                        <textarea name="notes" class="form-control" rows="2" placeholder="Internal notes...">${escapeHtml(inquiry.notes || '')}</textarea>
+                        <button type="submit" class="btn btn-secondary btn-sm"><i class="fas fa-save"></i> Save Notes</button>
+                    </form>
+                </div>
+            `;
 
             body.innerHTML = `
                 <div class="inquiry-details">
@@ -337,6 +721,7 @@ try {
                         <span style="white-space: pre-wrap; background: #f8f9fa; padding: 12px; border-radius: 6px;">${inquiry.message}</span>
                     </div>
                     ` : ''}
+                    ${financialHtml}
                 </div>
             `;
 

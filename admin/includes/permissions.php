@@ -57,6 +57,7 @@ function getAllRoles()
                 'conference_financials',
                 'gym',
                 'gym_packages',
+                'gym_financials',
                 'menu',
                 'events',
                 'reviews',
@@ -504,6 +505,14 @@ function getAllPermissions()
             'icon' => 'fa-tags',
             'category' => 'Property',
             'page' => 'gym-management.php',
+            'group' => 'gym'
+        ],
+        'gym_financials' => [
+            'label' => 'Gym Invoicing & Pricing',
+            'description' => 'Send gym membership invoices/quotations and edit booking amounts',
+            'icon' => 'fa-file-invoice-dollar',
+            'category' => 'Property',
+            'page' => 'gym-inquiries.php',
             'group' => 'gym'
         ],
 

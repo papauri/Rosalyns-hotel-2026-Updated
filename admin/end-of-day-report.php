@@ -134,6 +134,8 @@ $rev = [
     'conf_vat'        => 0.0,
     'fnb_gross'       => 0.0,
     'fnb_vat'         => 0.0,
+    'gym_gross'       => 0.0,
+    'gym_vat'         => 0.0,
     'refunds'         => 0.0,
     'pending'         => 0.0,
     'txn_count'       => 0,
@@ -147,6 +149,8 @@ try {
             COALESCE(SUM(CASE WHEN booking_type='conference' AND payment_status IN ('completed','paid') AND COALESCE(payment_type, '') <> 'refund' THEN vat_amount   ELSE 0 END), 0) AS conf_vat,
             COALESCE(SUM(CASE WHEN booking_type='restaurant' AND payment_status IN ('completed','paid') AND COALESCE(payment_type, '') <> 'refund' THEN total_amount ELSE 0 END), 0) AS fnb_gross,
             COALESCE(SUM(CASE WHEN booking_type='restaurant' AND payment_status IN ('completed','paid') AND COALESCE(payment_type, '') <> 'refund' THEN vat_amount   ELSE 0 END), 0) AS fnb_vat,
+            COALESCE(SUM(CASE WHEN booking_type='gym'        AND payment_status IN ('completed','paid') AND COALESCE(payment_type, '') <> 'refund' THEN total_amount ELSE 0 END), 0) AS gym_gross,
+            COALESCE(SUM(CASE WHEN booking_type='gym'        AND payment_status IN ('completed','paid') AND COALESCE(payment_type, '') <> 'refund' THEN vat_amount   ELSE 0 END), 0) AS gym_vat,
             COALESCE(SUM(CASE WHEN payment_type='refund' AND refund_status IN ('completed','processing') THEN refund_amount ELSE 0 END), 0) AS refunds,
             COALESCE(SUM(CASE WHEN payment_type='refund' AND refund_status IN ('completed','processing') THEN vat_amount   ELSE 0 END), 0) AS refund_vat,
             COALESCE(SUM(CASE WHEN payment_status IN ('pending','partial') AND COALESCE(payment_type, '') <> 'refund' THEN total_amount ELSE 0 END), 0) AS pending,
@@ -161,7 +165,7 @@ try {
     error_log('EOD payments: ' . $e->getMessage());
 }
 
-$gross_revenue = (float)$rev['room_gross'] + (float)$rev['conf_gross'] + (float)$rev['fnb_gross'];
+$gross_revenue = (float)$rev['room_gross'] + (float)$rev['conf_gross'] + (float)$rev['fnb_gross'] + (float)$rev['gym_gross'];
 $net_revenue   = $gross_revenue - (float)$rev['refunds'];
 $total_vat     = (float)$rev['room_vat'] + (float)$rev['conf_vat'] + (float)$rev['fnb_vat'] - (float)($rev['refund_vat'] ?? 0);
 
@@ -517,6 +521,7 @@ $revenue_sources = [];
 if ($mod_bookings)   { $revenue_sources[] = ['label' => 'Rooms',       'value' => (float)$rev['room_gross']]; }
 if ($mod_conference) { $revenue_sources[] = ['label' => 'Conferences',  'value' => (float)$rev['conf_gross']]; }
 if ($mod_pos)        { $revenue_sources[] = ['label' => 'F&B / POS',    'value' => (float)$rev['fnb_gross']]; }
+if ($mod_gym)        { $revenue_sources[] = ['label' => 'Gym',          'value' => (float)$rev['gym_gross']]; }
 if (empty($revenue_sources)) { $revenue_sources[] = ['label' => 'Revenue', 'value' => $gross_revenue]; }
 usort($revenue_sources, fn($a, $b) => $b['value'] <=> $a['value']);
 $top_revenue_source = $revenue_sources[0];
@@ -781,13 +786,14 @@ if ($mod_pos) {
 // ---------------------------------------------------------------------------
 // ENHANCEMENT E — Previous day per-source revenue for segment comparison
 // ---------------------------------------------------------------------------
-$prev_sources = ['room_gross' => 0.0, 'conf_gross' => 0.0, 'fnb_gross' => 0.0];
+$prev_sources = ['room_gross' => 0.0, 'conf_gross' => 0.0, 'fnb_gross' => 0.0, 'gym_gross' => 0.0];
 try {
     $psStmt = $pdo->prepare("
         SELECT
             COALESCE(SUM(CASE WHEN booking_type='room'       AND payment_status IN ('completed','paid') AND COALESCE(payment_type,'') <> 'refund' THEN total_amount ELSE 0 END), 0) AS room_gross,
             COALESCE(SUM(CASE WHEN booking_type='conference' AND payment_status IN ('completed','paid') AND COALESCE(payment_type,'') <> 'refund' THEN total_amount ELSE 0 END), 0) AS conf_gross,
-            COALESCE(SUM(CASE WHEN booking_type='restaurant' AND payment_status IN ('completed','paid') AND COALESCE(payment_type,'') <> 'refund' THEN total_amount ELSE 0 END), 0) AS fnb_gross
+            COALESCE(SUM(CASE WHEN booking_type='restaurant' AND payment_status IN ('completed','paid') AND COALESCE(payment_type,'') <> 'refund' THEN total_amount ELSE 0 END), 0) AS fnb_gross,
+            COALESCE(SUM(CASE WHEN booking_type='gym'        AND payment_status IN ('completed','paid') AND COALESCE(payment_type,'') <> 'refund' THEN total_amount ELSE 0 END), 0) AS gym_gross
         FROM payments
         WHERE DATE(payment_date) = :d
           AND deleted_at IS NULL
@@ -801,6 +807,7 @@ try {
 $room_rev_change = (float)$rev['room_gross'] - (float)$prev_sources['room_gross'];
 $conf_rev_change = (float)$rev['conf_gross'] - (float)$prev_sources['conf_gross'];
 $fnb_rev_change  = (float)$rev['fnb_gross']  - (float)$prev_sources['fnb_gross'];
+$gym_rev_change  = (float)$rev['gym_gross']  - (float)$prev_sources['gym_gross'];
 
 // ---------------------------------------------------------------------------
 // ENHANCEMENT F — Maintenance snapshot
@@ -876,6 +883,7 @@ if (isset($_GET['export']) && $_GET['export'] === 'csv') {
         'Room Revenue',
         'Conference Revenue',
         'F&B/POS Revenue',
+        'Gym Revenue',
         // Rooms
         'Rooms Total',
         'Rooms Occupied',
@@ -939,6 +947,7 @@ if (isset($_GET['export']) && $_GET['export'] === 'csv') {
         number_format((float)$rev['room_gross'], 2, '.', ''),
         number_format((float)$rev['conf_gross'], 2, '.', ''),
         number_format((float)$rev['fnb_gross'], 2, '.', ''),
+        number_format((float)$rev['gym_gross'], 2, '.', ''),
         $rooms_total,
         $rooms_occupied,
         ($rooms_total - $rooms_occupied),
@@ -1172,6 +1181,12 @@ if (isset($_GET['export']) && $_GET['export'] === 'csv') {
                             <strong class="eod-trend eod-trend--<?php echo $trendTone($fnb_rev_change); ?>"><?php echo $trendLabel($fnb_rev_change, true); ?></strong>
                         </li>
                         <?php endif; ?>
+                        <?php if ($mod_gym && ((float)$rev['gym_gross'] > 0 || (float)$prev_sources['gym_gross'] > 0)): ?>
+                        <li>
+                            <span>Gym revenue vs yesterday</span>
+                            <strong class="eod-trend eod-trend--<?php echo $trendTone($gym_rev_change); ?>"><?php echo $trendLabel($gym_rev_change, true); ?></strong>
+                        </li>
+                        <?php endif; ?>
                         <?php if ($mod_bookings): ?>
                         <li>
                             <span>Occupancy movement</span>
@@ -1321,6 +1336,7 @@ if (isset($_GET['export']) && $_GET['export'] === 'csv') {
                                 if ($mod_bookings)   { $rows[] = ['Rooms',         (float)$rev['room_gross'], (float)$rev['room_vat']]; }
                                 if ($mod_conference) { $rows[] = ['Conferences',   (float)$rev['conf_gross'], (float)$rev['conf_vat']]; }
                                 if ($mod_pos)        { $rows[] = ['F&amp;B / POS', (float)$rev['fnb_gross'],  (float)$rev['fnb_vat']]; }
+                                if ($mod_gym)        { $rows[] = ['Gym',          (float)$rev['gym_gross'],  (float)$rev['gym_vat']]; }
                                 foreach ($rows as $r):
                                     $share = $gross_revenue > 0 ? ($r[1] / $gross_revenue) * 100 : 0;
                                 ?>
