@@ -85,6 +85,33 @@ function rh_is_feature_link_hidden(string $rawHref): bool {
         'rooms-gallery' => 'isBookingEnabled',
         'rooms'         => 'isBookingEnabled',
         'room'          => 'isBookingEnabled',
+        'booking-lookup' => 'isBookingEnabled',
+    ];
+
+    if (!isset($map[$slug])) {
+        return false;
+    }
+
+    $checker = $map[$slug];
+    return function_exists($checker) && !$checker();
+}
+
+/**
+ * Given a policy slug (e.g. "dining-policy", "cancellation-policy"), decide
+ * whether it should be hidden because it only applies to a feature that's
+ * currently switched off (module preset or per-feature setting).
+ */
+function rh_is_policy_hidden(string $slug): bool {
+    $slug = strtolower(trim($slug));
+
+    $map = [
+        'booking-policy'      => 'isBookingEnabled',
+        'cancellation-policy' => 'isBookingEnabled',
+        'dining-policy'       => 'isRestaurantEnabled',
+        'restaurant-policy'   => 'isRestaurantEnabled',
+        'conference-policy'   => 'isConferenceEnabled',
+        'gym-policy'          => 'isGymEnabled',
+        'membership-policy'   => 'isGymEnabled',
     ];
 
     if (!isset($map[$slug])) {

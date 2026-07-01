@@ -65,6 +65,11 @@ if (!function_exists('footer_parse_tags')) {
         try {
             $stmt = $pdo->query("SELECT slug, title, summary, content FROM policies WHERE is_active = 1 ORDER BY display_order ASC");
             $policies = $stmt->fetchAll(PDO::FETCH_ASSOC);
+            if (function_exists('rh_is_policy_hidden')) {
+                $policies = array_values(array_filter($policies, function ($policy) {
+                    return !rh_is_policy_hidden((string)($policy['slug'] ?? ''));
+                }));
+            }
         } catch (PDOException $e) {
             // Fallback if table doesn't exist
         }
@@ -168,9 +173,15 @@ if (!function_exists('footer_parse_tags')) {
                             <li><a href="#" class="policy-link" data-policy="<?php echo htmlspecialchars($policy['slug']); ?>"><?php echo htmlspecialchars($policy['title']); ?></a></li>
                         <?php endforeach; ?>
                     <?php else: ?>
+                        <?php if (!function_exists('rh_is_policy_hidden') || !rh_is_policy_hidden('booking-policy')): ?>
                         <li><a href="#" class="policy-link" data-policy="booking-policy">Booking Policy</a></li>
+                        <?php endif; ?>
+                        <?php if (!function_exists('rh_is_policy_hidden') || !rh_is_policy_hidden('cancellation-policy')): ?>
                         <li><a href="#" class="policy-link" data-policy="cancellation-policy">Cancellation</a></li>
+                        <?php endif; ?>
+                        <?php if (!function_exists('rh_is_policy_hidden') || !rh_is_policy_hidden('dining-policy')): ?>
                         <li><a href="#" class="policy-link" data-policy="dining-policy">Dining Policy</a></li>
+                        <?php endif; ?>
                         <li><a href="#" class="policy-link" data-policy="faqs">FAQs</a></li>
                     <?php endif; ?>
                 </ul>
@@ -304,6 +315,9 @@ if (!function_exists('footer_parse_tags')) {
         ];
 
         foreach ($defaultPolicies as $policy) {
+            if (function_exists('rh_is_policy_hidden') && rh_is_policy_hidden((string)($policy['slug'] ?? ''))) {
+                continue;
+            }
             renderModal(
                 'policy-' . $policy['slug'],
                 $policy['title'],
