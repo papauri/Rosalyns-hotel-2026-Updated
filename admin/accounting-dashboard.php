@@ -1870,11 +1870,11 @@ if (!isset($dailyTrend)) {
                         <thead>
                             <tr>
                                 <th>Date</th>
-                                <th class="num" title="Room booking payments received on this day">Rooms</th>
-                                <th class="num" title="Conference and events payments received on this day">Conference</th>
-                                <th class="num" title="Food &amp; Beverage (F&amp;B) — restaurant and bar sales via the POS system">F&amp;B</th>
-                                <th class="num" title="Gym membership payments received on this day">Gym</th>
-                                <th class="num" title="Event booking payments received on this day">Events</th>
+                                <?php if ($mod_bookings): ?><th class="num" title="Room booking payments received on this day">Rooms</th><?php endif; ?>
+                                <?php if ($mod_conference): ?><th class="num" title="Conference and events payments received on this day">Conference</th><?php endif; ?>
+                                <?php if ($mod_pos): ?><th class="num" title="Food &amp; Beverage (F&amp;B) — restaurant and bar sales via the POS system">F&amp;B</th><?php endif; ?>
+                                <?php if ($mod_gym): ?><th class="num" title="Gym membership payments received on this day">Gym</th><?php endif; ?>
+                                <?php if ($mod_events): ?><th class="num" title="Event booking payments received on this day">Events</th><?php endif; ?>
                                 <th class="num" title="Refunds issued on this day (subtracted from Net Total)">Refunds</th>
                                 <th class="num" title="Net Total — all revenue sources combined, minus refunds">Net Total</th>
                                 <th class="num" title="Transactions — number of individual payment records on this day">Txns</th>
@@ -1896,11 +1896,11 @@ if (!isset($dailyTrend)) {
                                         <strong><?php echo htmlspecialchars(date('D, M j', strtotime($d['day']))); ?></strong>
                                         <small class="acct-muted"><?php echo htmlspecialchars(date('Y', strtotime($d['day']))); ?></small>
                                     </td>
-                                    <td class="num"><?php echo $currency_symbol . number_format((float)$d['room_rev'], 2); ?></td>
-                                    <td class="num"><?php echo $currency_symbol . number_format((float)$d['conf_rev'], 2); ?></td>
-                                    <td class="num"><?php echo $currency_symbol . number_format((float)$d['fnb_rev'], 2); ?></td>
-                                    <td class="num"><?php echo $currency_symbol . number_format((float)$d['gym_rev'], 2); ?></td>
-                                    <td class="num"><?php echo $currency_symbol . number_format((float)$d['events_rev'], 2); ?></td>
+                                    <?php if ($mod_bookings): ?><td class="num"><?php echo $currency_symbol . number_format((float)$d['room_rev'], 2); ?></td><?php endif; ?>
+                                    <?php if ($mod_conference): ?><td class="num"><?php echo $currency_symbol . number_format((float)$d['conf_rev'], 2); ?></td><?php endif; ?>
+                                    <?php if ($mod_pos): ?><td class="num"><?php echo $currency_symbol . number_format((float)$d['fnb_rev'], 2); ?></td><?php endif; ?>
+                                    <?php if ($mod_gym): ?><td class="num"><?php echo $currency_symbol . number_format((float)$d['gym_rev'], 2); ?></td><?php endif; ?>
+                                    <?php if ($mod_events): ?><td class="num"><?php echo $currency_symbol . number_format((float)$d['events_rev'], 2); ?></td><?php endif; ?>
                                     <td class="num">
                                         <?php if ((float)$d['refunds'] > 0): ?>
                                             <span class="acct-muted">&minus;<?php echo $currency_symbol . number_format((float)$d['refunds'], 2); ?></span>

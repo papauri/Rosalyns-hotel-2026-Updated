@@ -25,9 +25,39 @@ if (strtotime($start_date) > strtotime($end_date)) {
     [$start_date, $end_date] = [$end_date, $start_date];
 }
 
+// Module flags — a tab whose module is disabled for this installation's
+// business preset should not be reachable, whether via the tab nav or a
+// direct ?tab= URL (mirrors the gating already applied on
+// accounting-dashboard.php / end-of-day-report.php / dashboard.php).
+$mod_bookings   = function_exists('moduleEnabled') && moduleEnabled('bookings');
+$mod_pos        = function_exists('moduleEnabled') && moduleEnabled('pos');
+$mod_stock      = function_exists('moduleEnabled') && moduleEnabled('stock');
+$mod_conference = function_exists('moduleEnabled') && moduleEnabled('conference');
+$mod_gym        = function_exists('moduleEnabled') && moduleEnabled('gym');
+// Events has no dedicated module toggle — gated by its own legacy setting.
+$mod_events     = function_exists('isEventsEnabled') && isEventsEnabled();
+
+// Tabs that are always available regardless of module state (cross-cutting
+// financial views) vs tabs that belong entirely to one module.
+$tab_module_map = [
+    'bookings'  => $mod_bookings,
+    'occupancy' => $mod_bookings,
+    'guests'    => $mod_bookings,
+    'conference' => ($mod_conference || $mod_gym || $mod_events),
+    'fnb'       => $mod_pos,
+    'stock'     => $mod_stock,
+    'staff'     => $mod_pos,
+    'voids'     => $mod_pos,
+];
+
 // Sanitize tab
 $valid_tabs = ['overview', 'revenue', 'vat', 'aging', 'bookings', 'occupancy', 'guests', 'conference', 'fnb', 'stock', 'staff', 'voids'];
 if (!in_array($active_tab, $valid_tabs)) {
+    $active_tab = 'overview';
+}
+// A tab tied to a disabled module isn't just hidden from the tab nav below —
+// direct URL access falls back to Overview too.
+if (isset($tab_module_map[$active_tab]) && !$tab_module_map[$active_tab]) {
     $active_tab = 'overview';
 }
 
@@ -982,7 +1012,9 @@ try {
                 'staff'      => ['icon' => 'fa-user-clock',      'label' => 'Staff',            'title' => 'Staff activity — orders processed, shift performance, and productivity'],
                 'voids'      => ['icon' => 'fa-ban',             'label' => 'Voids',            'title' => 'Voided orders and payments — items cancelled after being placed'],
             ];
-            foreach ($tabs as $tab_key => $tab_info): ?>
+            foreach ($tabs as $tab_key => $tab_info):
+                if (isset($tab_module_map[$tab_key]) && !$tab_module_map[$tab_key]) continue;
+            ?>
                 <a href="?tab=<?php echo $tab_key; ?>&start_date=<?php echo htmlspecialchars($start_date); ?>&end_date=<?php echo htmlspecialchars($end_date); ?>"
                     class="report-tab <?php echo $active_tab === $tab_key ? 'active' : ''; ?>"
                     title="<?php echo htmlspecialchars($tab_info['title'] ?? ''); ?>">
@@ -2710,6 +2742,7 @@ try {
         ?>
 
         <div class="acct-kpis">
+            <?php if ($mod_conference): ?>
             <div class="acct-kpi acct-kpi--revenue">
                 <div class="acct-kpi__label">Conference Revenue</div>
                 <div class="acct-kpi__value"><?php echo $currency_symbol . ' ' . number_format($totalConfRevenue, 2); ?></div>
@@ -2725,19 +2758,25 @@ try {
                 <div class="acct-kpi__value"><?php echo $currency_symbol . ' ' . number_format($confOutstanding, 2); ?></div>
                 <div class="acct-kpi__sub">Unpaid conference balances</div>
             </div>
+            <?php endif; ?>
+            <?php if ($mod_gym): ?>
             <div class="acct-kpi">
                 <div class="acct-kpi__label">Gym Inquiries</div>
                 <div class="acct-kpi__value"><?php echo number_format($totalGymInquiries); ?></div>
                 <div class="acct-kpi__sub">In selected period</div>
             </div>
+            <?php endif; ?>
+            <?php if ($mod_events): ?>
             <div class="acct-kpi">
                 <div class="acct-kpi__label">Event Bookings</div>
                 <div class="acct-kpi__value"><?php echo number_format($totalEventBookings); ?></div>
                 <div class="acct-kpi__sub">In selected period</div>
             </div>
+            <?php endif; ?>
         </div>
 
         <div class="acct-grid acct-grid--2">
+            <?php if ($mod_conference): ?>
             <!-- Conference Status -->
             <div class="acct-panel">
                 <h2 class="acct-panel__title"><i class="fas fa-briefcase"></i> Conference Inquiry Status</h2>
@@ -2766,7 +2805,9 @@ try {
                     </table>
                 <?php endif; ?>
             </div>
+            <?php endif; // mod_conference ?>
 
+            <?php if ($mod_gym): ?>
             <!-- Gym Inquiry Status -->
             <div class="acct-panel">
                 <h2 class="acct-panel__title"><i class="fas fa-dumbbell"></i> Gym Inquiry Status</h2>
@@ -2791,7 +2832,9 @@ try {
                     </table>
                 <?php endif; ?>
             </div>
+            <?php endif; // mod_gym ?>
 
+            <?php if ($mod_events): ?>
             <!-- Event Booking Status -->
             <div class="acct-panel">
                 <h2 class="acct-panel__title"><i class="fas fa-calendar-check"></i> Event Booking Status</h2>
@@ -2816,8 +2859,10 @@ try {
                     </table>
                 <?php endif; ?>
             </div>
+            <?php endif; // mod_events ?>
         </div>
 
+        <?php if ($mod_conference): ?>
         <!-- Conference Room Utilization -->
         <div class="acct-panel">
             <h2 class="acct-panel__title"><i class="fas fa-building"></i> Conference Room Utilization</h2>
@@ -2858,6 +2903,7 @@ try {
                 </table>
             <?php endif; ?>
         </div>
+        <?php endif; // mod_conference ?>
     </div>
 
 <?php endif; ?>
