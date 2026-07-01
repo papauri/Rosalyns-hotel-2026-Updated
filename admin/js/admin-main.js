@@ -1636,7 +1636,10 @@
 
         const loader = ensureLoader();
         if (loader.dataset.bootLoader === '1') {
+            let bootFinished = false;
             const finishBoot = function () {
+                if (bootFinished) return;
+                bootFinished = true;
                 hide();
             };
 
@@ -1644,6 +1647,10 @@
                 requestAnimationFrame(finishBoot);
             } else {
                 window.addEventListener('load', finishBoot, { once: true });
+                // Safety net: a slow/blocked external resource (fonts, CDN icons)
+                // can delay or suppress the 'load' event indefinitely, leaving this
+                // full-screen overlay intercepting every click on the page.
+                window.setTimeout(finishBoot, 4000);
             }
         }
     }
