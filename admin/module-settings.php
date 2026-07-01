@@ -623,7 +623,11 @@ foreach ($presets as $preset_key => $preset) {
                     updateCard(moduleKey, enable);
                     clearActivePresetHighlight();
                     if (!silent) {
-                        showToast((enable ? 'Enabled' : 'Disabled') + ': ' + (checkbox ? checkbox.getAttribute('data-label') : moduleKey), enable ? 'success' : 'info');
+                        showToast((enable ? 'Enabled' : 'Disabled') + ': ' + (checkbox ? checkbox.getAttribute('data-label') : moduleKey) + ' — refreshing admin view...', enable ? 'success' : 'info');
+                        // Same reasoning as the preset-apply flow: the sidebar nav is
+                        // rendered server-side and won't reflect this change until
+                        // the page reloads.
+                        setTimeout(function () { window.location.reload(); }, 900);
                     }
                     return true;
                 })
@@ -741,7 +745,13 @@ foreach ($presets as $preset_key => $preset) {
                         newBadge.innerHTML = '<i class="fas fa-check"></i> Active';
                         nameSpan.appendChild(newBadge);
                     }
-                    showToast('Preset applied: ' + label, 'success');
+                    showToast('Preset applied: ' + label + ' — refreshing admin view...', 'success');
+                    // The sidebar nav (admin-header.php) and any other module-gated
+                    // chrome on this page were rendered server-side at page load and
+                    // won't reflect the new module state from an AJAX-only update —
+                    // reload so the admin's whole view matches the preset immediately,
+                    // without the admin having to manually refresh.
+                    setTimeout(function () { window.location.reload(); }, 900);
                 })
                 .catch(function () {
                     btn.classList.remove('applying');

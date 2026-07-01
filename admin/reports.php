@@ -1151,41 +1151,53 @@ try {
                                 </tr>
                             </thead>
                             <tbody>
+                                <?php if ($mod_bookings): ?>
                                 <tr>
                                     <td>Room Revenue</td>
                                     <td style="text-align:right"><?php echo number_format($roomsRevPl, 2); ?></td>
                                     <td style="text-align:right"></td>
                                 </tr>
+                                <?php endif; ?>
+                                <?php if ($mod_conference): ?>
                                 <tr>
                                     <td>Conference Revenue</td>
                                     <td style="text-align:right"><?php echo number_format($confRevPl, 2); ?></td>
                                     <td style="text-align:right"></td>
                                 </tr>
+                                <?php endif; ?>
+                                <?php if ($mod_pos): ?>
                                 <tr>
                                     <td>F&amp;B Revenue</td>
                                     <td style="text-align:right"><?php echo number_format($fnbRevPl, 2); ?></td>
                                     <td style="text-align:right"></td>
                                 </tr>
+                                <?php endif; ?>
+                                <?php if ($mod_gym): ?>
                                 <tr>
                                     <td>Gym Revenue</td>
                                     <td style="text-align:right"><?php echo number_format($gymRevPl, 2); ?></td>
                                     <td style="text-align:right"></td>
                                 </tr>
+                                <?php endif; ?>
+                                <?php if ($mod_events): ?>
                                 <tr>
                                     <td>Event Booking Revenue</td>
                                     <td style="text-align:right"><?php echo number_format($eventsRevPl, 2); ?></td>
                                     <td style="text-align:right"></td>
                                 </tr>
+                                <?php endif; ?>
                                 <tr style="font-weight:600; border-top: 2px solid var(--color-lux-clay-50)">
                                     <td>= Total Gross Revenue</td>
                                     <td style="text-align:right"><?php echo number_format($grossRevenue, 2); ?></td>
                                     <td style="text-align:right"><?php echo rh_reports_delta($grossRevenue, $priorRevenue); ?></td>
                                 </tr>
+                                <?php if ($mod_pos): ?>
                                 <tr style="color: var(--color-text-secondary)">
                                     <td title="COGS (Cost of Goods Sold) — the actual cost of food and drink ingredients used to make F&B items sold through the restaurant.">– F&amp;B COGS</td>
                                     <td style="text-align:right">(<?php echo number_format($totalCogs, 2); ?>)</td>
                                     <td style="text-align:right"></td>
                                 </tr>
+                                <?php endif; ?>
                                 <tr style="font-weight:600; color: var(--color-lux-gold)">
                                     <td>= Gross Profit</td>
                                     <td style="text-align:right"><?php echo number_format($grossProfit, 2); ?></td>
@@ -1230,6 +1242,7 @@ try {
                         <p class="acct-muted" style="margin-bottom:10px; font-size:0.8em">Comparing <?php echo htmlspecialchars($start_date); ?> – <?php echo htmlspecialchars($end_date); ?> vs prior <?php echo $periodDays; ?> days (<?php echo htmlspecialchars($priorStartDate); ?> – <?php echo htmlspecialchars($priorEndDate); ?>)</p>
                         <table class="acct-table">
                             <tbody>
+                                <?php if ($mod_bookings): ?>
                                 <tr>
                                     <td>Occupancy Rate</td>
                                     <td style="text-align:right; font-weight:600"><?php echo $overallOccupancyRate; ?>%</td>
@@ -1262,6 +1275,7 @@ try {
                                     <td>Total Bookings (period)</td>
                                     <td style="text-align:right"><?php echo number_format($totalBookings); ?> <?php echo rh_reports_delta((float)$totalBookings, (float)$priorBookings); ?></td>
                                 </tr>
+                                <?php endif; ?>
                                 <tr>
                                     <td>Total Transactions</td>
                                     <td style="text-align:right"><?php echo number_format($totalTransactions); ?> <?php echo rh_reports_delta((float)$totalTransactions, (float)$priorTxns); ?></td>
@@ -1272,10 +1286,12 @@ try {
                                         <td style="text-align:right; color: #c82333"><?php echo $currency_symbol . ' ' . number_format($totalCreditNotesIssued, 2); ?></td>
                                     </tr>
                                 <?php endif; ?>
+                                <?php if ($mod_bookings): ?>
                                 <tr style="font-weight:600">
                                     <td>Revenue Forecast (upcoming)</td>
                                     <td style="text-align:right; color: var(--color-lux-gold)"><?php echo $currency_symbol . ' ' . number_format($forecastData['forecast_revenue']); ?></td>
                                 </tr>
+                                <?php endif; ?>
                             </tbody>
                         </table>
                     </div>
