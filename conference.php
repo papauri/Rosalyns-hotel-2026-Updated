@@ -22,8 +22,7 @@ require_once 'includes/validation.php';
 require_once 'includes/section-headers.php';
 require_once 'includes/public-csrf.php';
 
-requireConferenceEnabled();
-
+$conferenceEnabled = isConferenceEnabled();
 
 // Fetch policies for footer modals
 $policies = [];
@@ -377,11 +376,23 @@ function resolveConferenceImage(?string $imagePath): string
     <!-- Main CSS - Loads all stylesheets in correct order -->
     <link rel="stylesheet" href="css/base/critical.css">
     <link rel="stylesheet" href="css/main.css">
+    <link rel="stylesheet" href="css/feature-disabled.css">
 </head>
 
 <body class="conference-page">
     <?php include 'includes/loader.php'; ?>
     <?php include 'includes/header.php'; ?>
+
+    <?php if (!$conferenceEnabled): ?>
+    <main id="main-content">
+        <?php renderFeatureDisabledPage(
+            'fas fa-briefcase',
+            'Conference & Meeting Spaces',
+            'Our corporate booking service is temporarily unavailable',
+            'Our conference and meeting facilities are not currently bookable online. Please contact us directly and our team will be glad to help with your corporate event.'
+        ); ?>
+    </main>
+    <?php else: ?>
 
     <!-- Hero Section -->
     <?php include 'includes/hero.php'; ?>
@@ -788,6 +799,7 @@ function resolveConferenceImage(?string $imagePath): string
         </script>
 
     </main>
+    <?php endif; ?>
     <!-- Footer -->
     <?php include 'includes/footer.php'; ?>
 </body>

@@ -24,20 +24,34 @@ if (!defined('BOOKING_SYSTEM_LOADED')) {
  * 
  * @return bool True if booking system is enabled, false otherwise
  */
+/**
+ * A feature can be manually switched off via its own setting, but it must
+ * also respect the installation's business-preset module state (Module
+ * Settings admin page) — a Bar/Restaurant preset that turns "conference"
+ * off should hide the guest-facing conference pages too, regardless of
+ * the legacy per-feature setting.
+ */
+function rh_module_and_setting_enabled(string $moduleKey, string $settingKey): bool {
+    if (function_exists('moduleEnabled') && !moduleEnabled($moduleKey)) {
+        return false;
+    }
+    return getSetting($settingKey, '1') === '1';
+}
+
 function isBookingEnabled(): bool {
-    return getSetting('booking_system_enabled', '1') === '1';
+    return rh_module_and_setting_enabled('bookings', 'booking_system_enabled');
 }
 
 function isConferenceEnabled(): bool {
-    return getSetting('conference_system_enabled', '1') === '1';
+    return rh_module_and_setting_enabled('conference', 'conference_system_enabled');
 }
 
 function isGymEnabled(): bool {
-    return getSetting('gym_system_enabled', '1') === '1';
+    return rh_module_and_setting_enabled('gym', 'gym_system_enabled');
 }
 
 function isRestaurantEnabled(): bool {
-    return getSetting('restaurant_system_enabled', '1') === '1';
+    return rh_module_and_setting_enabled('pos', 'restaurant_system_enabled');
 }
 
 /**
@@ -221,22 +235,43 @@ function requireBookingEnabled(): void {
     }
 }
 
-function requireConferenceEnabled(): void {
-    if (!isConferenceEnabled()) {
-        error_log('Conference page accessed while conference system disabled');
-        http_response_code(503);
-        header('Location: ' . (defined('BASE_URL') ? BASE_URL : '/'));
-        exit;
-    }
-}
+/**
+ * Render an on-brand "temporarily unavailable" state for a guest-facing
+ * feature page (conference, gym) whose module has been switched off in
+ * the admin Module Settings page, or disabled via its own setting.
+ * Renders inline (keeps the site header/footer) rather than redirecting
+ * the visitor away with no explanation.
+ */
+function renderFeatureDisabledPage(string $icon, string $heading, string $subtitle, string $message): void {
+    $phone = getSetting('phone_main', '');
+    $email = getSetting('email_reservations', '');
 
-function requireGymEnabled(): void {
-    if (!isGymEnabled()) {
-        error_log('Gym page accessed while gym system disabled');
-        http_response_code(503);
-        header('Location: ' . (defined('BASE_URL') ? BASE_URL : '/'));
-        exit;
+    echo '<div class="feature-disabled-container">';
+    echo '<div class="feature-disabled-content">';
+    echo '<div class="feature-disabled-icon"><i class="' . htmlspecialchars($icon) . '"></i></div>';
+    echo '<h1>' . htmlspecialchars($heading) . '</h1>';
+    echo '<p class="feature-disabled-subtitle">' . htmlspecialchars($subtitle) . '</p>';
+    echo '<p class="feature-disabled-message">' . htmlspecialchars($message) . '</p>';
+
+    if ($phone || $email) {
+        echo '<div class="feature-disabled-contacts">';
+        if ($phone) {
+            echo '<a href="tel:' . htmlspecialchars(preg_replace('/[^0-9+]/', '', $phone)) . '" class="feature-disabled-contact-card">';
+            echo '<i class="fas fa-phone-alt"></i><span>Call Us</span><strong>' . htmlspecialchars($phone) . '</strong>';
+            echo '</a>';
+        }
+        if ($email) {
+            echo '<a href="mailto:' . htmlspecialchars($email) . '" class="feature-disabled-contact-card">';
+            echo '<i class="fas fa-envelope"></i><span>Email Us</span><strong>' . htmlspecialchars($email) . '</strong>';
+            echo '</a>';
+        }
+        echo '</div>';
     }
+
+    echo '<a href="' . htmlspecialchars(defined('BASE_URL') ? BASE_URL : '/') . '" class="feature-disabled-back">';
+    echo '<i class="fas fa-arrow-left"></i> Back to Home';
+    echo '</a>';
+    echo '</div></div>';
 }
 
 function requireRestaurantEnabled(): void {

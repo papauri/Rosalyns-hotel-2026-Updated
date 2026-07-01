@@ -9,7 +9,7 @@ require_once 'includes/image-proxy-helper.php';
 require_once 'includes/section-headers.php';
 require_once 'includes/public-csrf.php';
 
-requireGymEnabled();
+$gymEnabled = isGymEnabled();
 
 // Start session for any session-based functionality
 if (session_status() === PHP_SESSION_NONE) {
@@ -90,7 +90,9 @@ $bookingReference = '';
 $bookingEmailWarning = '';
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['gym_booking_form'])) {
     // CSRF validation
-    if (!pub_csrf_validate($_POST['csrf_token'] ?? '', 'gym')) {
+    if (!$gymEnabled) {
+        $bookingError = 'Gym bookings are temporarily unavailable. Please contact us directly.';
+    } elseif (!pub_csrf_validate($_POST['csrf_token'] ?? '', 'gym')) {
         $bookingError = 'Security token invalid. Please refresh the page and try again.';
     } elseif (!pub_rate_limit('gym_booking_form', 5, 600)) {
         // Rate limiting: 5 submissions per 10 minutes per session
@@ -314,6 +316,7 @@ try {
     <!-- Main CSS - Loads all stylesheets in correct order -->
     <link rel="stylesheet" href="css/base/critical.css">
     <link rel="stylesheet" href="css/main.css">
+    <link rel="stylesheet" href="css/feature-disabled.css">
 
 </head>
 
@@ -367,6 +370,17 @@ try {
     ?>
 
     <?php include 'includes/header.php'; ?>
+
+    <?php if (!$gymEnabled): ?>
+    <main id="main-content">
+        <?php renderFeatureDisabledPage(
+            'fas fa-dumbbell',
+            'Gym & Fitness',
+            'Our gym membership service is temporarily unavailable',
+            'Gym memberships and packages are not currently bookable online. Please contact us directly and our team will be glad to help.'
+        ); ?>
+    </main>
+    <?php else: ?>
 
     <!-- Hero Section -->
     <?php include 'includes/hero.php'; ?>
@@ -941,6 +955,7 @@ try {
         </script>
 
     </main>
+    <?php endif; ?>
     <!-- Footer -->
     <?php include 'includes/footer.php'; ?>
 </body>
