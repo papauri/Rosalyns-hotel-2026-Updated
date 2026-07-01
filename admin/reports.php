@@ -56,6 +56,7 @@ $conferenceRoomStats = [];
 $recentBookings = [];
 $reviewStats = [];
 $gymInquiryStats = [];
+$eventInquiryStats = [];
 $refundReasons = [];
 $refundStatuses = [];
 $refundTrends = [];
@@ -173,16 +174,19 @@ try {
             CASE WHEN p.booking_type = 'room' THEN b.booking_reference
                  WHEN p.booking_type = 'conference' THEN ci.{$conferenceFields['reference']}
                  WHEN p.booking_type = 'gym' THEN gi.reference_number
+                 WHEN p.booking_type = 'event' THEN ei.reference_number
             END as ref_number,
             CASE WHEN p.booking_type = 'room' THEN b.guest_name
                  WHEN p.booking_type = 'conference' THEN ci.{$conferenceFields['company']}
                  WHEN p.booking_type = 'gym' THEN gi.name
+                 WHEN p.booking_type = 'event' THEN ei.name
             END as client_name,
             DATEDIFF(CURDATE(), p.payment_date) as days_overdue
         FROM payments p
         LEFT JOIN bookings b ON p.booking_type = 'room' AND p.booking_id = b.id
         LEFT JOIN conference_inquiries ci ON p.booking_type = 'conference' AND p.booking_id = ci.id
         LEFT JOIN gym_inquiries gi ON p.booking_type = 'gym' AND p.booking_id = gi.id
+        LEFT JOIN event_inquiries ei ON p.booking_type = 'event' AND p.booking_id = ei.id
         WHERE p.payment_status IN ('pending', 'partial') AND p.deleted_at IS NULL
           AND p.payment_date <= ?
         ORDER BY p.payment_date ASC
@@ -255,10 +259,12 @@ try {
             CASE WHEN p.booking_type = 'room' THEN b.guest_name
                  WHEN p.booking_type = 'conference' THEN ci.{$conferenceFields['company']}
                  WHEN p.booking_type = 'gym' THEN gi.name
+                 WHEN p.booking_type = 'event' THEN ei.name
             END as client_name,
             CASE WHEN p.booking_type = 'room' THEN b.guest_email
                  WHEN p.booking_type = 'conference' THEN ci.{$conferenceFields['email']}
                  WHEN p.booking_type = 'gym' THEN gi.email
+                 WHEN p.booking_type = 'event' THEN ei.email
             END as client_email,
             p.booking_type, COUNT(*) as transaction_count,
             COALESCE(SUM(p.total_amount), 0) as total_spent
@@ -266,6 +272,7 @@ try {
         LEFT JOIN bookings b ON p.booking_type = 'room' AND p.booking_id = b.id
         LEFT JOIN conference_inquiries ci ON p.booking_type = 'conference' AND p.booking_id = ci.id
         LEFT JOIN gym_inquiries gi ON p.booking_type = 'gym' AND p.booking_id = gi.id
+        LEFT JOIN event_inquiries ei ON p.booking_type = 'event' AND p.booking_id = ei.id
         WHERE p.payment_status IN ('completed', 'paid') AND COALESCE(p.payment_type, '') != 'refund' AND p.deleted_at IS NULL
         AND p.payment_date >= ? AND p.payment_date <= ?
         GROUP BY client_name, client_email, p.booking_type
@@ -567,6 +574,16 @@ try {
     $gymStatsStmt->execute([$start_date, $end_date]);
     $gymInquiryStats = $gymStatsStmt->fetchAll(PDO::FETCH_ASSOC);
 
+    // 22b. Event Booking Stats
+    $eventStatsStmt = $pdo->prepare("
+        SELECT status, COUNT(*) as count
+        FROM event_inquiries
+        WHERE created_at >= ? AND created_at <= DATE_ADD(?, INTERVAL 1 DAY)
+        GROUP BY status
+    ");
+    $eventStatsStmt->execute([$start_date, $end_date]);
+    $eventInquiryStats = $eventStatsStmt->fetchAll(PDO::FETCH_ASSOC);
+
     // ============================================
     // ADVANCED HOTEL KPI METRICS
     // ============================================
@@ -655,13 +672,15 @@ try {
     $confRevPl = 0.0;
     $fnbRevPl = 0.0;
     $gymRevPl = 0.0;
+    $eventsRevPl = 0.0;
     foreach ($revenueByType as $rt) {
         if ($rt['booking_type'] === 'room')        $roomsRevPl = (float)$rt['total_revenue'];
         if ($rt['booking_type'] === 'conference')  $confRevPl  = (float)$rt['total_revenue'];
         if ($rt['booking_type'] === 'restaurant')  $fnbRevPl   = (float)$rt['total_revenue'];
         if ($rt['booking_type'] === 'gym')         $gymRevPl   = (float)$rt['total_revenue'];
+        if ($rt['booking_type'] === 'event')       $eventsRevPl = (float)$rt['total_revenue'];
     }
-    $grossRevenue   = $roomsRevPl + $confRevPl + $fnbRevPl + $gymRevPl;
+    $grossRevenue   = $roomsRevPl + $confRevPl + $fnbRevPl + $gymRevPl + $eventsRevPl;
     $totalCogs      = (float)($plCogs['total_cogs'] ?? 0);
     $grossProfit    = $grossRevenue - $totalCogs;
     $netRevenue     = $grossRevenue - $totalRefunds - $totalVatCollected;
@@ -674,12 +693,13 @@ try {
     $vatRegisterStmt = $pdo->prepare("
         SELECT p.payment_date, p.payment_reference, p.booking_type, p.payment_method,
                p.payment_amount, p.vat_rate, p.vat_amount, p.total_amount,
-               COALESCE(b.guest_name, ci.{$conferenceFields['contact_name']}, so.customer_name, gi.name, 'N/A') AS client_name
+               COALESCE(b.guest_name, ci.{$conferenceFields['contact_name']}, so.customer_name, gi.name, ei.name, 'N/A') AS client_name
         FROM payments p
         LEFT JOIN bookings b ON p.booking_type = 'room' AND p.booking_id = b.id
         LEFT JOIN conference_inquiries ci ON p.booking_type = 'conference' AND p.booking_id = ci.id
         LEFT JOIN stock_orders so ON p.booking_type = 'restaurant' AND p.booking_id = so.id
         LEFT JOIN gym_inquiries gi ON p.booking_type = 'gym' AND p.booking_id = gi.id
+        LEFT JOIN event_inquiries ei ON p.booking_type = 'event' AND p.booking_id = ei.id
         WHERE p.payment_date >= ? AND p.payment_date <= DATE_ADD(?, INTERVAL 1 DAY)
         AND COALESCE(p.payment_type, '') != 'refund'
         AND p.deleted_at IS NULL
@@ -711,12 +731,13 @@ try {
         SELECT p.payment_reference, p.payment_date, p.total_amount, p.payment_status,
                p.booking_type, p.payment_method,
                DATEDIFF(CURDATE(), p.payment_date) AS days_outstanding,
-               COALESCE(b.guest_name, ci.{$conferenceFields['contact_name']}, so.customer_name, gi.name, 'N/A') AS client_name
+               COALESCE(b.guest_name, ci.{$conferenceFields['contact_name']}, so.customer_name, gi.name, ei.name, 'N/A') AS client_name
         FROM payments p
         LEFT JOIN bookings b ON p.booking_type = 'room' AND p.booking_id = b.id
         LEFT JOIN conference_inquiries ci ON p.booking_type = 'conference' AND p.booking_id = ci.id
         LEFT JOIN stock_orders so ON p.booking_type = 'restaurant' AND p.booking_id = so.id
         LEFT JOIN gym_inquiries gi ON p.booking_type = 'gym' AND p.booking_id = gi.id
+        LEFT JOIN event_inquiries ei ON p.booking_type = 'event' AND p.booking_id = ei.id
         WHERE p.payment_status IN ('pending', 'partial')
         AND COALESCE(p.payment_type, '') != 'refund'
         AND p.deleted_at IS NULL
@@ -888,7 +909,7 @@ try {
     $error = "Unable to load report data. Please try again.";
     error_log("Reports error: " . $e->getMessage());
     $plCogs = ['total_cogs' => 0, 'fnb_gross' => 0];
-    $roomsRevPl = $confRevPl = $fnbRevPl = $gymRevPl = $grossRevenue = $totalCogs = 0.0;
+    $roomsRevPl = $confRevPl = $fnbRevPl = $gymRevPl = $eventsRevPl = $grossRevenue = $totalCogs = 0.0;
     $grossProfit = $netRevenue = $grossMarginPct = 0.0;
     $vatRegister = $vatByType = [];
     $vatRegisterTotal = $vatRegisterGross = 0.0;
@@ -1116,6 +1137,11 @@ try {
                                 <tr>
                                     <td>Gym Revenue</td>
                                     <td style="text-align:right"><?php echo number_format($gymRevPl, 2); ?></td>
+                                    <td style="text-align:right"></td>
+                                </tr>
+                                <tr>
+                                    <td>Event Booking Revenue</td>
+                                    <td style="text-align:right"><?php echo number_format($eventsRevPl, 2); ?></td>
                                     <td style="text-align:right"></td>
                                 </tr>
                                 <tr style="font-weight:600; border-top: 2px solid var(--color-lux-clay-50)">
@@ -2675,6 +2701,10 @@ try {
             foreach ($gymInquiryStats as $gi) {
                 $totalGymInquiries += $gi['count'];
             }
+            $totalEventBookings = 0;
+            foreach ($eventInquiryStats as $ei) {
+                $totalEventBookings += $ei['count'];
+            }
             $confCollectionPct = $totalConfRevenue > 0 ? round(($totalConfPaid / $totalConfRevenue) * 100, 0) : 0;
             $confOutstanding = $totalConfRevenue - $totalConfPaid;
         ?>
@@ -2698,6 +2728,11 @@ try {
             <div class="acct-kpi">
                 <div class="acct-kpi__label">Gym Inquiries</div>
                 <div class="acct-kpi__value"><?php echo number_format($totalGymInquiries); ?></div>
+                <div class="acct-kpi__sub">In selected period</div>
+            </div>
+            <div class="acct-kpi">
+                <div class="acct-kpi__label">Event Bookings</div>
+                <div class="acct-kpi__value"><?php echo number_format($totalEventBookings); ?></div>
                 <div class="acct-kpi__sub">In selected period</div>
             </div>
         </div>
@@ -2750,6 +2785,31 @@ try {
                                 <tr>
                                     <td><span class="acct-pill acct-pill--<?php echo htmlspecialchars($gi['status'] === 'new' ? 'pending' : ($gi['status'] === 'closed' ? 'completed' : $gi['status'])); ?>"><?php echo ucfirst(htmlspecialchars($gi['status'])); ?></span></td>
                                     <td><?php echo number_format($gi['count']); ?></td>
+                                </tr>
+                            <?php endforeach; ?>
+                        </tbody>
+                    </table>
+                <?php endif; ?>
+            </div>
+
+            <!-- Event Booking Status -->
+            <div class="acct-panel">
+                <h2 class="acct-panel__title"><i class="fas fa-calendar-check"></i> Event Booking Status</h2>
+                <?php if (empty($eventInquiryStats)): ?>
+                    <p class="acct-empty">No event bookings for this period.</p>
+                <?php else: ?>
+                    <table class="acct-table">
+                        <thead>
+                            <tr>
+                                <th>Status</th>
+                                <th>Count</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <?php foreach ($eventInquiryStats as $ei): ?>
+                                <tr>
+                                    <td><span class="acct-pill acct-pill--<?php echo htmlspecialchars($ei['status']); ?>"><?php echo ucfirst(htmlspecialchars($ei['status'])); ?></span></td>
+                                    <td><?php echo number_format($ei['count']); ?></td>
                                 </tr>
                             <?php endforeach; ?>
                         </tbody>

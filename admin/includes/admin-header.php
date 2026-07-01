@@ -122,6 +122,7 @@ $_nav_groups = [
         ['gym-inquiries.php',         'fas fa-inbox',        'Gym Inquiries',     'gym',               '', 'gym'],
         ['menu-management.php',       'fas fa-utensils',     'Menu',              'menu',              '', 'pos'],
         ['events-management.php',     'fas fa-calendar-alt', 'Events',            'events',            '', 'website_cms'],
+        ['events-inquiries.php',      'fas fa-calendar-check', 'Event Bookings',  'events_bookings',   '', 'website_cms'],
         ['reviews.php',               'fas fa-star',         'Reviews',           'reviews',           '', 'website_cms'],
         ['contact-inquiries.php',     'fas fa-envelope',     'Contact Inquiries', 'contact',           '', 'website_cms'],
         ['footer-management.php',     'fas fa-layer-group',  'Footer Management', 'footer_management', '', 'website_cms'],

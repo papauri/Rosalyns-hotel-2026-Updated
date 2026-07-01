@@ -45,6 +45,8 @@ $mod_pos          = function_exists('moduleEnabled') && moduleEnabled('pos');
 $mod_conference   = function_exists('moduleEnabled') && moduleEnabled('conference');
 $mod_gym          = function_exists('moduleEnabled') && moduleEnabled('gym');
 $mod_housekeeping = function_exists('moduleEnabled') && moduleEnabled('housekeeping');
+// Events has no dedicated module toggle — gated by its own legacy setting.
+$mod_events       = function_exists('isEventsEnabled') && isEventsEnabled();
 
 // Helper for formatted money
 $money = function ($v) use ($currency_symbol) {
@@ -136,6 +138,8 @@ $rev = [
     'fnb_vat'         => 0.0,
     'gym_gross'       => 0.0,
     'gym_vat'         => 0.0,
+    'events_gross'    => 0.0,
+    'events_vat'      => 0.0,
     'refunds'         => 0.0,
     'pending'         => 0.0,
     'txn_count'       => 0,
@@ -151,6 +155,8 @@ try {
             COALESCE(SUM(CASE WHEN booking_type='restaurant' AND payment_status IN ('completed','paid') AND COALESCE(payment_type, '') <> 'refund' THEN vat_amount   ELSE 0 END), 0) AS fnb_vat,
             COALESCE(SUM(CASE WHEN booking_type='gym'        AND payment_status IN ('completed','paid') AND COALESCE(payment_type, '') <> 'refund' THEN total_amount ELSE 0 END), 0) AS gym_gross,
             COALESCE(SUM(CASE WHEN booking_type='gym'        AND payment_status IN ('completed','paid') AND COALESCE(payment_type, '') <> 'refund' THEN vat_amount   ELSE 0 END), 0) AS gym_vat,
+            COALESCE(SUM(CASE WHEN booking_type='event'      AND payment_status IN ('completed','paid') AND COALESCE(payment_type, '') <> 'refund' THEN total_amount ELSE 0 END), 0) AS events_gross,
+            COALESCE(SUM(CASE WHEN booking_type='event'      AND payment_status IN ('completed','paid') AND COALESCE(payment_type, '') <> 'refund' THEN vat_amount   ELSE 0 END), 0) AS events_vat,
             COALESCE(SUM(CASE WHEN payment_type='refund' AND refund_status IN ('completed','processing') THEN refund_amount ELSE 0 END), 0) AS refunds,
             COALESCE(SUM(CASE WHEN payment_type='refund' AND refund_status IN ('completed','processing') THEN vat_amount   ELSE 0 END), 0) AS refund_vat,
             COALESCE(SUM(CASE WHEN payment_status IN ('pending','partial') AND COALESCE(payment_type, '') <> 'refund' THEN total_amount ELSE 0 END), 0) AS pending,
@@ -165,7 +171,7 @@ try {
     error_log('EOD payments: ' . $e->getMessage());
 }
 
-$gross_revenue = (float)$rev['room_gross'] + (float)$rev['conf_gross'] + (float)$rev['fnb_gross'] + (float)$rev['gym_gross'];
+$gross_revenue = (float)$rev['room_gross'] + (float)$rev['conf_gross'] + (float)$rev['fnb_gross'] + (float)$rev['gym_gross'] + (float)$rev['events_gross'];
 $net_revenue   = $gross_revenue - (float)$rev['refunds'];
 $total_vat     = (float)$rev['room_vat'] + (float)$rev['conf_vat'] + (float)$rev['fnb_vat'] - (float)($rev['refund_vat'] ?? 0);
 
@@ -522,6 +528,7 @@ if ($mod_bookings)   { $revenue_sources[] = ['label' => 'Rooms',       'value' =
 if ($mod_conference) { $revenue_sources[] = ['label' => 'Conferences',  'value' => (float)$rev['conf_gross']]; }
 if ($mod_pos)        { $revenue_sources[] = ['label' => 'F&B / POS',    'value' => (float)$rev['fnb_gross']]; }
 if ($mod_gym)        { $revenue_sources[] = ['label' => 'Gym',          'value' => (float)$rev['gym_gross']]; }
+if ($mod_events)     { $revenue_sources[] = ['label' => 'Events',       'value' => (float)$rev['events_gross']]; }
 if (empty($revenue_sources)) { $revenue_sources[] = ['label' => 'Revenue', 'value' => $gross_revenue]; }
 usort($revenue_sources, fn($a, $b) => $b['value'] <=> $a['value']);
 $top_revenue_source = $revenue_sources[0];
@@ -786,14 +793,15 @@ if ($mod_pos) {
 // ---------------------------------------------------------------------------
 // ENHANCEMENT E — Previous day per-source revenue for segment comparison
 // ---------------------------------------------------------------------------
-$prev_sources = ['room_gross' => 0.0, 'conf_gross' => 0.0, 'fnb_gross' => 0.0, 'gym_gross' => 0.0];
+$prev_sources = ['room_gross' => 0.0, 'conf_gross' => 0.0, 'fnb_gross' => 0.0, 'gym_gross' => 0.0, 'events_gross' => 0.0];
 try {
     $psStmt = $pdo->prepare("
         SELECT
             COALESCE(SUM(CASE WHEN booking_type='room'       AND payment_status IN ('completed','paid') AND COALESCE(payment_type,'') <> 'refund' THEN total_amount ELSE 0 END), 0) AS room_gross,
             COALESCE(SUM(CASE WHEN booking_type='conference' AND payment_status IN ('completed','paid') AND COALESCE(payment_type,'') <> 'refund' THEN total_amount ELSE 0 END), 0) AS conf_gross,
             COALESCE(SUM(CASE WHEN booking_type='restaurant' AND payment_status IN ('completed','paid') AND COALESCE(payment_type,'') <> 'refund' THEN total_amount ELSE 0 END), 0) AS fnb_gross,
-            COALESCE(SUM(CASE WHEN booking_type='gym'        AND payment_status IN ('completed','paid') AND COALESCE(payment_type,'') <> 'refund' THEN total_amount ELSE 0 END), 0) AS gym_gross
+            COALESCE(SUM(CASE WHEN booking_type='gym'        AND payment_status IN ('completed','paid') AND COALESCE(payment_type,'') <> 'refund' THEN total_amount ELSE 0 END), 0) AS gym_gross,
+            COALESCE(SUM(CASE WHEN booking_type='event'      AND payment_status IN ('completed','paid') AND COALESCE(payment_type,'') <> 'refund' THEN total_amount ELSE 0 END), 0) AS events_gross
         FROM payments
         WHERE DATE(payment_date) = :d
           AND deleted_at IS NULL
@@ -808,6 +816,7 @@ $room_rev_change = (float)$rev['room_gross'] - (float)$prev_sources['room_gross'
 $conf_rev_change = (float)$rev['conf_gross'] - (float)$prev_sources['conf_gross'];
 $fnb_rev_change  = (float)$rev['fnb_gross']  - (float)$prev_sources['fnb_gross'];
 $gym_rev_change  = (float)$rev['gym_gross']  - (float)$prev_sources['gym_gross'];
+$events_rev_change = (float)$rev['events_gross'] - (float)$prev_sources['events_gross'];
 
 // ---------------------------------------------------------------------------
 // ENHANCEMENT F — Maintenance snapshot
@@ -859,6 +868,16 @@ if ($mod_gym) {
     }
 }
 
+$event_bookings_today = 0;
+if ($mod_events) {
+    try {
+        $eventBookingsStmt = $pdo->prepare("SELECT COUNT(*) FROM event_inquiries WHERE DATE(created_at) = :d AND status = 'pending'");
+        $eventBookingsStmt->execute([':d' => $report_date]);
+        $event_bookings_today = (int)$eventBookingsStmt->fetchColumn();
+    } catch (Throwable $e) { /* ignore */
+    }
+}
+
 // ---------------------------------------------------------------------------
 // CSV export — must run before any HTML output
 // ---------------------------------------------------------------------------
@@ -884,6 +903,7 @@ if (isset($_GET['export']) && $_GET['export'] === 'csv') {
         'Conference Revenue',
         'F&B/POS Revenue',
         'Gym Revenue',
+        'Events Revenue',
         // Rooms
         'Rooms Total',
         'Rooms Occupied',
@@ -948,6 +968,7 @@ if (isset($_GET['export']) && $_GET['export'] === 'csv') {
         number_format((float)$rev['conf_gross'], 2, '.', ''),
         number_format((float)$rev['fnb_gross'], 2, '.', ''),
         number_format((float)$rev['gym_gross'], 2, '.', ''),
+        number_format((float)$rev['events_gross'], 2, '.', ''),
         $rooms_total,
         $rooms_occupied,
         ($rooms_total - $rooms_occupied),
@@ -1187,6 +1208,12 @@ if (isset($_GET['export']) && $_GET['export'] === 'csv') {
                             <strong class="eod-trend eod-trend--<?php echo $trendTone($gym_rev_change); ?>"><?php echo $trendLabel($gym_rev_change, true); ?></strong>
                         </li>
                         <?php endif; ?>
+                        <?php if ($mod_events && ((float)$rev['events_gross'] > 0 || (float)$prev_sources['events_gross'] > 0)): ?>
+                        <li>
+                            <span>Event revenue vs yesterday</span>
+                            <strong class="eod-trend eod-trend--<?php echo $trendTone($events_rev_change); ?>"><?php echo $trendLabel($events_rev_change, true); ?></strong>
+                        </li>
+                        <?php endif; ?>
                         <?php if ($mod_bookings): ?>
                         <li>
                             <span>Occupancy movement</span>
@@ -1337,6 +1364,7 @@ if (isset($_GET['export']) && $_GET['export'] === 'csv') {
                                 if ($mod_conference) { $rows[] = ['Conferences',   (float)$rev['conf_gross'], (float)$rev['conf_vat']]; }
                                 if ($mod_pos)        { $rows[] = ['F&amp;B / POS', (float)$rev['fnb_gross'],  (float)$rev['fnb_vat']]; }
                                 if ($mod_gym)        { $rows[] = ['Gym',          (float)$rev['gym_gross'],  (float)$rev['gym_vat']]; }
+                                if ($mod_events)     { $rows[] = ['Events',       (float)$rev['events_gross'], (float)$rev['events_vat']]; }
                                 foreach ($rows as $r):
                                     $share = $gross_revenue > 0 ? ($r[1] / $gross_revenue) * 100 : 0;
                                 ?>
@@ -1686,6 +1714,20 @@ if (isset($_GET['export']) && $_GET['export'] === 'csv') {
                         <span>New inquiry<?php echo $gym_inquiries_today === 1 ? '' : 's'; ?> pending response today.</span>
                     </div>
                     <a href="gym-inquiries.php" class="eod-link" style="margin-top:0.5rem;display:inline-block;">View &rarr;</a>
+                </article>
+                <?php endif; ?>
+
+                <!-- Event bookings -->
+                <?php if ($event_bookings_today > 0): ?>
+                <article class="eod-panel" data-help="Event Bookings|New event RSVPs/bookings received today that are awaiting confirmation. Follow up promptly.">
+                    <header class="eod-panel__head">
+                        <h2 class="eod-panel__title"><i class="fas fa-calendar-check"></i> Event Bookings</h2>
+                    </header>
+                    <div class="eod-hero-metric">
+                        <strong><?php echo $event_bookings_today; ?></strong>
+                        <span>New booking<?php echo $event_bookings_today === 1 ? '' : 's'; ?> pending response today.</span>
+                    </div>
+                    <a href="events-inquiries.php" class="eod-link" style="margin-top:0.5rem;display:inline-block;">View &rarr;</a>
                 </article>
                 <?php endif; ?>
 

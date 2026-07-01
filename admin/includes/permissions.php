@@ -60,6 +60,8 @@ function getAllRoles()
                 'gym_financials',
                 'menu',
                 'events',
+                'events_bookings',
+                'events_financials',
                 'reviews',
                 'contact',
                 'accounting',
@@ -687,6 +689,22 @@ function getAllPermissions()
             'page' => 'events-management.php',
             'group' => 'content'
         ],
+        'events_bookings' => [
+            'label' => 'Event Bookings',
+            'description' => 'View event RSVPs/bookings and handle day-to-day status (confirm, cancel, complete, notes)',
+            'icon' => 'fa-calendar-check',
+            'category' => 'Content',
+            'page' => 'events-inquiries.php',
+            'group' => 'content'
+        ],
+        'events_financials' => [
+            'label' => 'Event Invoicing & Pricing',
+            'description' => 'Send event booking invoices/quotations and edit booking amounts',
+            'icon' => 'fa-file-invoice-dollar',
+            'category' => 'Content',
+            'page' => 'events-inquiries.php',
+            'group' => 'content'
+        ],
         'reviews' => [
             'label' => 'Reviews',
             'description' => 'Manage guest reviews',
@@ -1292,6 +1310,7 @@ function getPermissionForPage(string $page)
         'stock-wastage.php' => 'stock_wastage',
         'stock-reports.php' => 'stock_reports',
         'events-management.php' => 'events',
+        'events-inquiries.php' => 'events_bookings',
         'reviews.php' => 'reviews',
         'contact-inquiries.php' => 'contact',
         'accounting-dashboard.php' => 'accounting',
@@ -1380,6 +1399,7 @@ function getModuleForPage(string $page)
         'gallery-management.php' => 'website_cms',
         'media-management.php' => 'website_cms',
         'events-management.php' => 'website_cms',
+        'events-inquiries.php' => 'website_cms',
         'reviews.php' => 'website_cms',
         'contact-inquiries.php' => 'website_cms',
         'footer-management.php' => 'website_cms',

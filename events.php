@@ -10,6 +10,130 @@ require_once 'includes/page-guard.php';
 requireEventsEnabled();
 require_once 'includes/image-proxy-helper.php';
 require_once 'includes/section-headers.php';
+require_once 'config/email.php';
+require_once 'config/invoice.php';
+require_once 'includes/validation.php';
+require_once 'includes/modal.php';
+require_once 'includes/public-csrf.php';
+
+if (session_status() === PHP_SESSION_NONE) {
+    session_start();
+}
+
+$events_csrf_token = pub_csrf_generate('events');
+
+// Handle event booking/RSVP form submission
+$bookingError = '';
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['event_booking_form'])) {
+    if (!pub_csrf_validate($_POST['csrf_token'] ?? '', 'events')) {
+        $bookingError = 'Security token invalid. Please refresh the page and try again.';
+    } elseif (!pub_rate_limit('event_booking_form', 5, 600)) {
+        $bookingError = 'Too many submissions. Please wait a few minutes before trying again.';
+    } else {
+        $validation_errors = [];
+        $sanitized_data = [];
+
+        $event_id = (int)($_POST['event_id'] ?? 0);
+        if ($event_id <= 0) {
+            $validation_errors['event_id'] = 'Please select an event to book.';
+        }
+
+        $name_validation = validateName($_POST['full_name'] ?? '', 2, true);
+        if (!$name_validation['valid']) {
+            $validation_errors['full_name'] = $name_validation['error'];
+        } else {
+            $sanitized_data['full_name'] = sanitizeString($name_validation['value'], 100);
+        }
+
+        $email_validation = validateEmail($_POST['email'] ?? '');
+        if (!$email_validation['valid']) {
+            $validation_errors['email'] = $email_validation['error'];
+        } else {
+            $sanitized_data['email'] = $_POST['email'];
+        }
+
+        $phone_validation = validatePhone($_POST['phone'] ?? '');
+        if (!$phone_validation['valid']) {
+            $validation_errors['phone'] = $phone_validation['error'];
+        } else {
+            $sanitized_data['phone'] = $phone_validation['sanitized'];
+        }
+
+        $guests_validation = validateNumber($_POST['guests'] ?? '', 1, 20, false);
+        if (!$guests_validation['valid']) {
+            $validation_errors['guests'] = $guests_validation['error'];
+        } else {
+            $sanitized_data['guests'] = $guests_validation['value'] ?? 1;
+        }
+
+        $message_validation = validateText($_POST['message'] ?? '', 0, 1000, false);
+        if (!$message_validation['valid']) {
+            $validation_errors['message'] = $message_validation['error'];
+        } else {
+            $sanitized_data['message'] = sanitizeString($message_validation['value'], 1000);
+        }
+
+        $consent = isset($_POST['consent']);
+        if (!$consent) {
+            $validation_errors['consent'] = 'You must accept consent to proceed.';
+        }
+
+        if (!empty($validation_errors)) {
+            $error_messages = [];
+            foreach ($validation_errors as $field => $msg) {
+                $error_messages[] = ucfirst(str_replace('_', ' ', $field)) . ': ' . $msg;
+            }
+            $bookingError = implode('; ', $error_messages);
+        } else {
+            $bookingReference = 'EVT-' . strtoupper(substr(uniqid(), -8));
+
+            try {
+                $stmt = $pdo->prepare("
+                    INSERT INTO event_inquiries (
+                        reference_number, event_id, name, email, phone, guests, message, consent, status
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending')
+                ");
+                $stmt->execute([
+                    $bookingReference,
+                    $event_id,
+                    $sanitized_data['full_name'],
+                    $sanitized_data['email'],
+                    $sanitized_data['phone'],
+                    $sanitized_data['guests'] ?? 1,
+                    $sanitized_data['message'] ?? '',
+                    $consent ? 1 : 0,
+                ]);
+
+                $eventTitleStmt = $pdo->prepare("SELECT title, event_date FROM events WHERE id = ? LIMIT 1");
+                $eventTitleStmt->execute([$event_id]);
+                $eventRow = $eventTitleStmt->fetch(PDO::FETCH_ASSOC);
+
+                $email_data = [
+                    'reference_number' => $bookingReference,
+                    'name' => $sanitized_data['full_name'],
+                    'email' => $sanitized_data['email'],
+                    'phone' => $sanitized_data['phone'],
+                    'guests' => $sanitized_data['guests'] ?? 1,
+                    'event_title' => $eventRow['title'] ?? '',
+                    'event_date' => $eventRow['event_date'] ?? null,
+                ];
+
+                $email_result = sendEventBookingConfirmedEmail($email_data);
+                if (!$email_result['success']) {
+                    error_log('Failed to send event booking confirmation email: ' . $email_result['message']);
+                }
+            } catch (PDOException $e) {
+                error_log('Failed to save event inquiry to database: ' . $e->getMessage());
+                $bookingError = 'We could not save your booking request. Please try again or contact us directly.';
+            }
+
+            if ($bookingError === '') {
+                header('Location: events-confirmation.php?ref=' . urlencode($bookingReference));
+                exit;
+            }
+        }
+    }
+}
 
 function resolveEventImagePath(?string $imagePath): string
 {
@@ -213,6 +337,9 @@ $site_logo = getSetting('site_logo');
                                                 <span class="editorial-price-value"><?php echo $currency_symbol . number_format($event['ticket_price'], 0); ?></span>
                                             <?php endif; ?>
                                         </div>
+                                        <button type="button" class="btn btn-primary btn-sm" data-open-event-booking data-event-id="<?php echo (int)$event['id']; ?>" data-event-title="<?php echo htmlspecialchars($event['title'], ENT_QUOTES); ?>">
+                                            <i class="fas fa-calendar-check"></i> Book This Event
+                                        </button>
                                         <a href="contact-us.php?subject=Events&event=<?php echo rawurlencode($event['title']); ?>" class="btn btn-outline btn-sm">
                                             <i class="fas fa-envelope"></i> Enquire
                                         </a>
@@ -305,10 +432,131 @@ $site_logo = getSetting('site_logo');
                 <?php endif; ?>
             </div>
         </section>
+
+        <!-- Event Booking Modal -->
+        <div class="modal modal--md" id="eventBookingModal" data-booking-modal role="dialog" aria-modal="true" aria-labelledby="eventBookingModal-title">
+            <div class="modal__backdrop" data-close-event-booking></div>
+            <div class="modal__wrapper">
+                <div class="modal__container">
+                    <button class="modal__close" aria-label="Close booking form" data-close-event-booking>
+                        <span aria-hidden="true">&times;</span>
+                    </button>
+                    <div class="modal__header">
+                        <span class="booking-pill">Event Booking</span>
+                        <h3 class="modal__title" id="eventBookingModal-title">Book <span id="eventBookingModalEventName">This Event</span></h3>
+                        <p>Complete the form and our team will confirm your booking via email.</p>
+                    </div>
+                    <div class="modal__body">
+                        <?php if ($bookingError): ?>
+                        <div class="alert alert-error" style="margin-bottom:16px;"><?php echo htmlspecialchars($bookingError); ?></div>
+                        <?php endif; ?>
+                        <form method="POST" class="booking-form" novalidate>
+                            <input type="hidden" name="event_booking_form" value="1">
+                            <input type="hidden" name="event_id" id="eventBookingEventId" value="">
+                            <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($events_csrf_token, ENT_QUOTES, 'UTF-8'); ?>">
+                            <div class="form-grid">
+                                <div class="form-group">
+                                    <label for="event_full_name">Full Name *</label>
+                                    <input type="text" id="event_full_name" name="full_name" required>
+                                </div>
+                                <div class="form-group">
+                                    <label for="event_email">Email *</label>
+                                    <input type="email" id="event_email" name="email" required>
+                                </div>
+                                <div class="form-group">
+                                    <label for="event_phone">Phone *</label>
+                                    <input type="tel" id="event_phone" name="phone" required>
+                                </div>
+                                <div class="form-group">
+                                    <label for="event_guests">Guests</label>
+                                    <input type="number" id="event_guests" name="guests" min="1" max="20" placeholder="1">
+                                </div>
+                                <div class="form-group full">
+                                    <label for="event_message">Message / Special Requests</label>
+                                    <textarea id="event_message" name="message" rows="4" placeholder="Any special requests or questions"></textarea>
+                                </div>
+                                <div class="form-consent full">
+                                    <label class="checkbox">
+                                        <input type="checkbox" name="consent" required>
+                                        <span>I agree to be contacted about this booking request.</span>
+                                    </label>
+                                </div>
+                            </div>
+                            <button type="submit" class="btn btn-primary full-width" id="eventBookingSubmitBtn" disabled>Send Booking Request</button>
+                        </form>
+                    </div>
+                </div>
+            </div>
+        </div>
     </main>
 
     <!-- Footer -->
     <?php include 'includes/footer.php'; ?>
+
+    <script src="js/main.js"></script>
+    <script>
+        (function () {
+            const bookingModal = document.getElementById('eventBookingModal');
+            const eventIdField = document.getElementById('eventBookingEventId');
+            const eventNameLabel = document.getElementById('eventBookingModalEventName');
+            const openButtons = document.querySelectorAll('[data-open-event-booking]');
+            const closeButtons = document.querySelectorAll('[data-close-event-booking]');
+
+            function openModal(eventId, eventTitle) {
+                if (!bookingModal) return;
+                if (eventIdField) eventIdField.value = eventId || '';
+                if (eventNameLabel) eventNameLabel.textContent = eventTitle || 'This Event';
+                bookingModal.classList.add('modal--active');
+                document.body.classList.add('modal-open');
+            }
+
+            function closeModal() {
+                if (!bookingModal) return;
+                bookingModal.classList.remove('modal--active');
+                document.body.classList.remove('modal-open');
+            }
+
+            openButtons.forEach(function (btn) {
+                btn.addEventListener('click', function () {
+                    openModal(btn.getAttribute('data-event-id'), btn.getAttribute('data-event-title'));
+                });
+            });
+            closeButtons.forEach(function (btn) { btn.addEventListener('click', closeModal); });
+            document.addEventListener('keyup', function (e) {
+                if (e.key === 'Escape') closeModal();
+            });
+
+            <?php if ($bookingError): ?>
+            // Re-open the modal automatically if the last submission failed validation
+            openModal(<?php echo json_encode((int)($_POST['event_id'] ?? 0)); ?>, '');
+            <?php endif; ?>
+
+            const consentCheckbox = bookingModal ? bookingModal.querySelector('input[name="consent"]') : null;
+            const submitBtn = document.getElementById('eventBookingSubmitBtn');
+
+            if (consentCheckbox && submitBtn) {
+                submitBtn.disabled = !consentCheckbox.checked;
+                submitBtn.style.opacity = consentCheckbox.checked ? '1' : '0.6';
+                submitBtn.style.cursor = consentCheckbox.checked ? 'pointer' : 'not-allowed';
+
+                consentCheckbox.addEventListener('change', function () {
+                    submitBtn.disabled = !this.checked;
+                    submitBtn.style.opacity = this.checked ? '1' : '0.6';
+                    submitBtn.style.cursor = this.checked ? 'pointer' : 'not-allowed';
+                });
+            }
+
+            const bookingForm = bookingModal ? bookingModal.querySelector('.booking-form') : null;
+            if (bookingForm && submitBtn) {
+                bookingForm.addEventListener('submit', function () {
+                    submitBtn.disabled = true;
+                    submitBtn.style.opacity = '0.6';
+                    submitBtn.style.cursor = 'not-allowed';
+                    submitBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Submitting...';
+                });
+            }
+        })();
+    </script>
 </body>
 
 </html>
