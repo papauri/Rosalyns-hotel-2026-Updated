@@ -50,8 +50,49 @@ function isGymEnabled(): bool {
     return rh_module_and_setting_enabled('gym', 'gym_system_enabled');
 }
 
+/**
+ * Unlike bookings/conference/gym, the POS module doesn't map 1:1 to "we run
+ * a public restaurant" — Retail/Shop, Supermarket and Gym/Fitness presets
+ * all keep POS on (for till sales) without a guest-facing dining page.
+ * Whether the restaurant page shows is decided purely by this setting,
+ * which the business-preset apply flow sets explicitly per preset.
+ */
 function isRestaurantEnabled(): bool {
-    return rh_module_and_setting_enabled('pos', 'restaurant_system_enabled');
+    return getSetting('restaurant_system_enabled', '1') === '1';
+}
+
+/**
+ * Given a raw link URL from an admin-managed link list (e.g. footer_links),
+ * decide whether it points to a page whose feature/module is currently
+ * switched off. Keeps freeform admin-editable link lists (which have no
+ * structured page/module association) in sync with the same module state
+ * that already gates the header nav and the pages themselves.
+ */
+function rh_is_feature_link_hidden(string $rawHref): bool {
+    $slug = strtolower(trim($rawHref));
+    $slug = preg_replace('#^api/#i', '', $slug);
+    $slug = ltrim($slug, '/#');
+    $slug = preg_replace('/[?#].*$/', '', $slug);
+    $slug = preg_replace('/\.php$/', '', (string)$slug);
+    $slug = trim((string)$slug, '/');
+
+    $map = [
+        'restaurant'    => 'isRestaurantEnabled',
+        'menu'          => 'isRestaurantEnabled',
+        'gym'           => 'isGymEnabled',
+        'conference'    => 'isConferenceEnabled',
+        'booking'       => 'isBookingEnabled',
+        'rooms-gallery' => 'isBookingEnabled',
+        'rooms'         => 'isBookingEnabled',
+        'room'          => 'isBookingEnabled',
+    ];
+
+    if (!isset($map[$slug])) {
+        return false;
+    }
+
+    $checker = $map[$slug];
+    return function_exists($checker) && !$checker();
 }
 
 /**

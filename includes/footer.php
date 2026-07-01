@@ -49,6 +49,7 @@ if (!function_exists('footer_parse_tags')) {
     }
 }
 ?>
+<?php if (!function_exists('isBookingEnabled')) { require_once __DIR__ . '/booking-functions.php'; } ?>
 <?php require_once __DIR__ . '/visitor-tracker.php'; ?>
 <?php require_once 'modal.php'; ?>
 <!-- Footer - Minimalist Professional 2026 with Lazy Load -->
@@ -92,6 +93,9 @@ if (!function_exists('footer_parse_tags')) {
             }
             $all_links = $stmt->fetchAll(PDO::FETCH_ASSOC);
             foreach ($all_links as $link) {
+                if (function_exists('rh_is_feature_link_hidden') && rh_is_feature_link_hidden((string)($link['link_url'] ?? ''))) {
+                    continue;
+                }
                 $footer_links[$link['column_name']][] = $link;
             }
         } catch (PDOException $e) {

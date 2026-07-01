@@ -18,6 +18,10 @@ if (!function_exists('getBusinessPresets')) {
                     'conference' => 1, 'gym' => 1, 'finance' => 1, 'website_cms' => 1,
                     'station_kds' => 1, 'station_bds' => 1, 'station_cds' => 1, 'station_room_service' => 1,
                 ],
+                // Guest-facing pages that only apply to some presets and can't be
+                // derived from the module flags alone (e.g. POS is "on" for a
+                // gym's snack till too, but that doesn't mean show a restaurant page).
+                'front_end' => ['restaurant_page' => 1],
             ],
             'hotel_no_restaurant' => [
                 'label' => 'Hotel (No Restaurant)',
@@ -28,6 +32,7 @@ if (!function_exists('getBusinessPresets')) {
                     'conference' => 1, 'gym' => 1, 'finance' => 1, 'website_cms' => 1,
                     'station_kds' => 0, 'station_bds' => 0, 'station_cds' => 0, 'station_room_service' => 0,
                 ],
+                'front_end' => ['restaurant_page' => 0],
             ],
             'bar_restaurant' => [
                 'label' => 'Bar / Restaurant',
@@ -38,6 +43,7 @@ if (!function_exists('getBusinessPresets')) {
                     'conference' => 0, 'gym' => 0, 'finance' => 1, 'website_cms' => 0,
                     'station_kds' => 1, 'station_bds' => 1, 'station_cds' => 0, 'station_room_service' => 0,
                 ],
+                'front_end' => ['restaurant_page' => 1],
             ],
             'conference_venue' => [
                 'label' => 'Conference Venue',
@@ -48,6 +54,7 @@ if (!function_exists('getBusinessPresets')) {
                     'conference' => 1, 'gym' => 0, 'finance' => 1, 'website_cms' => 1,
                     'station_kds' => 0, 'station_bds' => 0, 'station_cds' => 0, 'station_room_service' => 0,
                 ],
+                'front_end' => ['restaurant_page' => 0],
             ],
             'gym_fitness' => [
                 'label' => 'Gym / Fitness',
@@ -58,6 +65,7 @@ if (!function_exists('getBusinessPresets')) {
                     'conference' => 0, 'gym' => 1, 'finance' => 1, 'website_cms' => 1,
                     'station_kds' => 0, 'station_bds' => 0, 'station_cds' => 0, 'station_room_service' => 0,
                 ],
+                'front_end' => ['restaurant_page' => 0],
             ],
             'retail_shop' => [
                 'label' => 'Retail / Shop',
@@ -68,6 +76,7 @@ if (!function_exists('getBusinessPresets')) {
                     'conference' => 0, 'gym' => 0, 'finance' => 1, 'website_cms' => 0,
                     'station_kds' => 0, 'station_bds' => 0, 'station_cds' => 0, 'station_room_service' => 0,
                 ],
+                'front_end' => ['restaurant_page' => 0],
             ],
             'supermarket' => [
                 'label' => 'Supermarket',
@@ -78,6 +87,7 @@ if (!function_exists('getBusinessPresets')) {
                     'conference' => 0, 'gym' => 0, 'finance' => 1, 'website_cms' => 1,
                     'station_kds' => 0, 'station_bds' => 0, 'station_cds' => 0, 'station_room_service' => 0,
                 ],
+                'front_end' => ['restaurant_page' => 0],
             ],
         ];
     }

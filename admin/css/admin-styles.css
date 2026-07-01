@@ -4818,7 +4818,7 @@ a.ops-card:focus-visible {
         color: #fff !important;
         background: linear-gradient(135deg, rgba(139, 115, 85, 0.95) 0%, rgba(212, 168, 67, 0.65) 100%) !important;
         box-shadow: inset 3px 0 0 var(--gold, #d4a843), 0 4px 16px rgba(212, 168, 67, 0.18);
-        font-weight: 800;
+        font-weight: 600;
     }
 
     .admin-nav .admin-nav-link.active i {
@@ -5492,7 +5492,7 @@ a.ops-card:focus-visible {
     .admin-nav.nav-open .admin-nav-link.active {
         color: #5C4A32 !important;
         background: #f7f3ea;
-        font-weight: 800;
+        font-weight: 600;
     }
 
     .admin-nav.nav-open .nav-favorite-btn {

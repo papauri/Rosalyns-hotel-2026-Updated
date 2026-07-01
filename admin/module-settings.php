@@ -711,24 +711,38 @@ foreach ($presets as $preset_key => $preset) {
         var moduleLabels = <?php echo json_encode(array_combine(array_keys($modules_meta), array_column($modules_meta, 'label'))); ?>;
         var pendingPreset = null;
 
-        function applyPresetConfig(config, label, btn) {
+        function applyPresetConfig(config, label, btn, presetKey) {
             btn.classList.add('applying');
             var keys = Object.keys(config);
             var idx  = 0;
 
+            function finishPreset() {
+                btn.classList.remove('applying');
+                clearActivePresetHighlight();
+                btn.classList.add('is-active-preset');
+                var nameSpan = btn.querySelector('.ms-preset-btn-inner > span:first-child');
+                if (nameSpan) {
+                    var newBadge = document.createElement('span');
+                    newBadge.className = 'ms-preset-active-badge';
+                    newBadge.innerHTML = '<i class="fas fa-check"></i> Active';
+                    nameSpan.appendChild(newBadge);
+                }
+                showToast('Preset applied: ' + label, 'success');
+            }
+
+            function syncFrontEnd() {
+                if (!presetKey) { finishPreset(); return; }
+                var fd = new FormData();
+                fd.append('csrf_token', csrf);
+                fd.append('preset_key', presetKey);
+                fetch('api/apply-preset-frontend.php', { method: 'POST', body: fd, credentials: 'same-origin' })
+                    .catch(function () {})
+                    .finally(finishPreset);
+            }
+
             function applyNext() {
                 if (idx >= keys.length) {
-                    btn.classList.remove('applying');
-                    clearActivePresetHighlight();
-                    btn.classList.add('is-active-preset');
-                    var nameSpan = btn.querySelector('.ms-preset-btn-inner > span:first-child');
-                    if (nameSpan) {
-                        var newBadge = document.createElement('span');
-                        newBadge.className = 'ms-preset-active-badge';
-                        newBadge.innerHTML = '<i class="fas fa-check"></i> Active';
-                        nameSpan.appendChild(newBadge);
-                    }
-                    showToast('Preset applied: ' + label, 'success');
+                    syncFrontEnd();
                     return;
                 }
                 var key    = keys[idx++];
@@ -813,7 +827,7 @@ foreach ($presets as $preset_key => $preset) {
                             return;
                         }
                         renderPresetImpact(presetKey, label, data);
-                        pendingPreset = { config: config, label: label, btn: btn };
+                        pendingPreset = { config: config, label: label, btn: btn, presetKey: presetKey };
                         if (overlay) { overlay.classList.add('active'); }
                     })
                     .catch(function () {
@@ -837,7 +851,7 @@ foreach ($presets as $preset_key => $preset) {
             presetImpactProceed.addEventListener('click', function () {
                 if (presetImpactOverlay) { presetImpactOverlay.classList.remove('active'); }
                 if (pendingPreset) {
-                    applyPresetConfig(pendingPreset.config, pendingPreset.label, pendingPreset.btn);
+                    applyPresetConfig(pendingPreset.config, pendingPreset.label, pendingPreset.btn, pendingPreset.presetKey);
                     pendingPreset = null;
                 }
             });
