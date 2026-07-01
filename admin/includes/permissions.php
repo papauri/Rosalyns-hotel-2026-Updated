@@ -53,7 +53,10 @@ function getAllRoles()
                 'media_create',
                 'media_edit',
                 'conference',
+                'conference_rooms',
+                'conference_financials',
                 'gym',
+                'gym_packages',
                 'menu',
                 'events',
                 'reviews',
@@ -240,6 +243,30 @@ function getAllRoles()
                 'room_service_manage',
                 'pos_till',
                 'stock_orders'
+            ]
+        ],
+        'gym_staff' => [
+            'label' => 'Gym Staff',
+            'description' => 'Front-desk gym operator — view and respond to membership inquiries, cannot edit package pricing',
+            'icon' => 'fa-dumbbell',
+            'color' => '#c62828',
+            'level' => 20,
+            'is_system' => true,
+            'permissions' => [
+                'dashboard',
+                'gym'
+            ]
+        ],
+        'conference_staff' => [
+            'label' => 'Conference Staff',
+            'description' => 'Handles conference bookings — confirm, cancel and complete enquiries, cannot edit rooms or invoicing',
+            'icon' => 'fa-briefcase',
+            'color' => '#5e35b1',
+            'level' => 20,
+            'is_system' => true,
+            'permissions' => [
+                'dashboard',
+                'conference'
             ]
         ]
     ];
@@ -440,9 +467,25 @@ function getAllPermissions()
             'group' => 'media_write'
         ],
         'conference' => [
-            'label' => 'Conference Rooms',
-            'description' => 'Manage conference facilities',
+            'label' => 'Conference Bookings',
+            'description' => 'View conference room page and handle day-to-day booking status (confirm, cancel, complete, notes)',
             'icon' => 'fa-briefcase',
+            'category' => 'Property',
+            'page' => 'conference-management.php',
+            'group' => 'conference'
+        ],
+        'conference_rooms' => [
+            'label' => 'Manage Conference Rooms',
+            'description' => 'Add, edit, delete and toggle conference room facilities',
+            'icon' => 'fa-door-open',
+            'category' => 'Property',
+            'page' => 'conference-management.php',
+            'group' => 'conference'
+        ],
+        'conference_financials' => [
+            'label' => 'Conference Invoicing & Pricing',
+            'description' => 'Send conference invoices/quotations and edit booking amounts',
+            'icon' => 'fa-file-invoice-dollar',
             'category' => 'Property',
             'page' => 'conference-management.php',
             'group' => 'conference'
@@ -453,6 +496,14 @@ function getAllPermissions()
             'icon' => 'fa-dumbbell',
             'category' => 'Property',
             'page' => 'gym-inquiries.php',
+            'group' => 'gym'
+        ],
+        'gym_packages' => [
+            'label' => 'Manage Gym Packages',
+            'description' => 'Add, edit and price gym membership packages',
+            'icon' => 'fa-tags',
+            'category' => 'Property',
+            'page' => 'gym-management.php',
             'group' => 'gym'
         ],
 
@@ -1208,9 +1259,9 @@ function getPermissionForPage(string $page)
         'gallery-management.php' => 'gallery',
         'media-management.php' => 'media_management',
         'conference-management.php' => 'conference',
-        'gym-packages.php' => 'gym',
+        'gym-packages.php' => 'gym_packages',
         'gym-inquiries.php' => 'gym',
-        'gym-management.php' => 'gym',
+        'gym-management.php' => 'gym_packages',
         'menu-management.php' => 'menu',
         'stock-dashboard.php' => 'stock_dashboard',
         'stock-ingredients.php' => 'stock_management',

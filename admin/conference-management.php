@@ -153,6 +153,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             throw new Exception('Security token invalid — refresh the page.');
         }
         $action = $_POST['action'] ?? '';
+
+        if (in_array($action, ['add', 'update', 'delete', 'toggle_active'], true) && !hasPermission((int)($user['id'] ?? 0), 'conference_rooms')) {
+            throw new Exception('You do not have permission to manage conference room facilities.');
+        }
+
         $imagePath = uploadConferenceImage($_FILES['image'] ?? []);
 
         if ($action === 'add') {
@@ -317,6 +322,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['enquiry_action'])) {
 
         if (!$enquiry) {
             throw new Exception('Enquiry not found!');
+        }
+
+        if (in_array($action, ['send_invoice', 'send_quotation', 'update_amount'], true) && !hasPermission((int)($user['id'] ?? 0), 'conference_financials')) {
+            throw new Exception('You do not have permission to handle conference invoicing or pricing.');
         }
 
         $paymentSnapshot = syncConferenceEnquiryPaymentSnapshot($pdo, $enquiry_id);

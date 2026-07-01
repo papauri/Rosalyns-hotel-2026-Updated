@@ -113,6 +113,21 @@ $modules_meta = [
 // finance is always 1 and the API will enforce that
 require_once __DIR__ . '/includes/module-presets.php';
 $presets = getBusinessPresets();
+
+// Work out which preset (if any) matches the installation's current module state,
+// so the matching preset button can be highlighted as "Active".
+$current_module_snapshot = [];
+foreach (array_merge(array_keys($modules_meta), array_keys($station_meta)) as $mk) {
+    $current_module_snapshot[$mk] = ($module_state[$mk] ?? true) ? 1 : 0;
+}
+$active_preset_key = null;
+foreach ($presets as $preset_key => $preset) {
+    if (empty(array_diff_assoc($preset['modules'], $current_module_snapshot))
+        && empty(array_diff_assoc($current_module_snapshot, $preset['modules']))) {
+        $active_preset_key = $preset_key;
+        break;
+    }
+}
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -169,6 +184,18 @@ $presets = getBusinessPresets();
             user-select: none;
         }
         .ms-preset-btn:hover { border-color: #8B7355; background: #f5f0e8; color: #3e3930; }
+        .ms-preset-btn.is-active-preset {
+            border-color: #2e7d32;
+            background: #e8f5e9;
+        }
+        .ms-preset-btn.is-active-preset:hover { border-color: #2e7d32; background: #ddf0de; }
+        .ms-preset-active-badge {
+            display: inline-flex; align-items: center; gap: 4px;
+            background: #2e7d32; color: #fff;
+            border-radius: 3px; font-size: .64rem; font-weight: 700;
+            letter-spacing: .05em; text-transform: uppercase;
+            padding: 1px 6px; margin-left: 6px;
+        }
         .ms-preset-btn:active { background: #ede5d6; }
         .ms-preset-btn i { color: #8B7355; font-size: .9rem; }
         .ms-preset-btn .ms-preset-desc {
@@ -383,15 +410,18 @@ $presets = getBusinessPresets();
             <div class="ms-presets-heading"><i class="fas fa-bolt" style="margin-right:6px;"></i>Quick Setup — Business Presets</div>
             <p class="ms-presets-sub">Select a business type to automatically enable the right modules in one click.</p>
             <div class="ms-presets-row">
-                <?php foreach ($presets as $preset_key => $preset): ?>
+                <?php foreach ($presets as $preset_key => $preset):
+                    $is_active_preset = ($preset_key === $active_preset_key);
+                ?>
                 <button type="button"
-                        class="ms-preset-btn"
+                        class="ms-preset-btn<?php echo $is_active_preset ? ' is-active-preset' : ''; ?>"
                         data-preset="<?php echo htmlspecialchars($preset_key); ?>"
+                        data-preset-label="<?php echo htmlspecialchars($preset['label']); ?>"
                         data-modules="<?php echo htmlspecialchars(json_encode($preset['modules'])); ?>"
                         title="<?php echo htmlspecialchars($preset['desc']); ?>">
                     <i class="<?php echo htmlspecialchars($preset['icon']); ?>"></i>
                     <span class="ms-preset-btn-inner">
-                        <span><?php echo htmlspecialchars($preset['label']); ?></span>
+                        <span><?php echo htmlspecialchars($preset['label']); ?><?php if ($is_active_preset): ?><span class="ms-preset-active-badge"><i class="fas fa-check"></i> Active</span><?php endif; ?></span>
                         <span class="ms-preset-desc"><?php echo htmlspecialchars($preset['desc']); ?></span>
                     </span>
                 </button>
@@ -566,6 +596,14 @@ $presets = getBusinessPresets();
             if (warn) { warn.classList.toggle('hidden', enable); }
         }
 
+        function clearActivePresetHighlight() {
+            document.querySelectorAll('.ms-preset-btn').forEach(function (other) {
+                var badge = other.querySelector('.ms-preset-active-badge');
+                if (badge) { badge.remove(); }
+                other.classList.remove('is-active-preset');
+            });
+        }
+
         function doToggle(checkbox, moduleKey, enable, silent) {
             if (checkbox) { checkbox.disabled = true; }
 
@@ -583,6 +621,7 @@ $presets = getBusinessPresets();
                         return false;
                     }
                     updateCard(moduleKey, enable);
+                    clearActivePresetHighlight();
                     if (!silent) {
                         showToast((enable ? 'Enabled' : 'Disabled') + ': ' + (checkbox ? checkbox.getAttribute('data-label') : moduleKey), enable ? 'success' : 'info');
                     }
@@ -680,6 +719,15 @@ $presets = getBusinessPresets();
             function applyNext() {
                 if (idx >= keys.length) {
                     btn.classList.remove('applying');
+                    clearActivePresetHighlight();
+                    btn.classList.add('is-active-preset');
+                    var nameSpan = btn.querySelector('.ms-preset-btn-inner > span:first-child');
+                    if (nameSpan) {
+                        var newBadge = document.createElement('span');
+                        newBadge.className = 'ms-preset-active-badge';
+                        newBadge.innerHTML = '<i class="fas fa-check"></i> Active';
+                        nameSpan.appendChild(newBadge);
+                    }
                     showToast('Preset applied: ' + label, 'success');
                     return;
                 }
@@ -750,7 +798,7 @@ $presets = getBusinessPresets();
         document.querySelectorAll('.ms-preset-btn').forEach(function (btn) {
             btn.addEventListener('click', function () {
                 var config = JSON.parse(btn.getAttribute('data-modules') || '{}');
-                var label  = btn.querySelector('.ms-preset-btn-inner > span:first-child') ? btn.querySelector('.ms-preset-btn-inner > span:first-child').textContent : 'preset';
+                var label  = btn.getAttribute('data-preset-label') || 'preset';
                 var presetKey = btn.getAttribute('data-preset');
                 var overlay = document.getElementById('msPresetImpactOverlay');
 
