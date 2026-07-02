@@ -72,7 +72,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['pm_action'])) {
                 $stmt->execute([$name, $order, max(0, $order), $catId]);
                 $pm_json(true, 'Category updated.');
             }
-            $stmt = $pdo->prepare("INSERT INTO menu_categories (name, slug, description, icon, default_station, sort_order, shows_on_pos, shows_on_room_service, display_order, is_active) VALUES (?, ?, '', 'fa-tag', 'bar', ?, 1, 0, ?, 1)");
+            $stmt = $pdo->prepare("INSERT INTO menu_categories (name, slug, business_context, description, icon, default_station, sort_order, shows_on_pos, shows_on_room_service, display_order, is_active) VALUES (?, ?, 'retail', '', 'fa-tag', 'bar', ?, 1, 0, ?, 1)");
             $stmt->execute([$name, $pm_slugify($name), max(0, $order), $order]);
             $pm_json(true, 'Category added.');
         }
@@ -156,8 +156,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['pm_action'])) {
 $pm_categories = [];
 $pm_items_by_cat = [];
 try {
-    $pm_categories = $pdo->query("SELECT id, name, slug, icon, display_order, is_active FROM menu_categories ORDER BY is_active DESC, display_order ASC, name ASC")->fetchAll(PDO::FETCH_ASSOC);
-    $itemRows = $pdo->query("SELECT id, category_id, item_name, barcode, description, price, is_available, display_order FROM menu_items ORDER BY display_order ASC, item_name ASC")->fetchAll(PDO::FETCH_ASSOC);
+    // Only retail-context categories: this page manages the shop/gym/supermarket
+    // catalog — restaurant Food/Drinks categories belong to the food-service mode.
+    $pm_categories = $pdo->query("SELECT id, name, slug, icon, display_order, is_active FROM menu_categories WHERE COALESCE(business_context, 'food_service') = 'retail' ORDER BY is_active DESC, display_order ASC, name ASC")->fetchAll(PDO::FETCH_ASSOC);
+    $itemRows = $pdo->query("SELECT mi.id, mi.category_id, mi.item_name, mi.barcode, mi.description, mi.price, mi.is_available, mi.display_order FROM menu_items mi JOIN menu_categories mc ON mc.id = mi.category_id WHERE COALESCE(mc.business_context, 'food_service') = 'retail' ORDER BY mi.display_order ASC, mi.item_name ASC")->fetchAll(PDO::FETCH_ASSOC);
     foreach ($itemRows as $r) {
         $pm_items_by_cat[(int)$r['category_id']][] = $r;
     }

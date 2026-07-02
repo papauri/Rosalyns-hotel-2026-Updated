@@ -9,6 +9,14 @@ require_once 'includes/finance-schema.php';
 $site_name = getSetting('site_name');
 $currency_symbol = getSetting('currency_symbol');
 $conferenceFields = finance_conference_fields($pdo);
+
+// Module flags — gate structural UI (filter options, links) by the active
+// business preset. Historical ledger rows are never hidden.
+$mod_bookings   = function_exists('moduleEnabled') && moduleEnabled('bookings');
+$mod_pos        = function_exists('moduleEnabled') && moduleEnabled('pos');
+$mod_conference = function_exists('moduleEnabled') && moduleEnabled('conference');
+$mod_gym        = function_exists('moduleEnabled') && moduleEnabled('gym');
+$mod_events     = function_exists('isEventsEnabled') && isEventsEnabled();
 $paymentTransactionColumn = finance_payment_transaction_column($pdo);
 $paymentColumns = finance_table_columns($pdo, 'payments');
 $hasMraStatus = isset($paymentColumns['mra_status']);
@@ -636,14 +644,14 @@ $quickActive = function ($s, $e) use ($startDate, $endDate) {
         <form method="GET" class="filter-section" data-live-search-form="payments">
             <div class="filter-form">
                 <div class="filter-group">
-                    <label>Booking Type</label>
+                    <label><?php echo $mod_bookings ? 'Booking Type' : 'Payment Source'; ?></label>
                     <select name="booking_type">
                         <option value="">All Types</option>
-                        <option value="room" <?php echo $bookingType === 'room' ? 'selected' : ''; ?>>Room</option>
-                        <option value="conference" <?php echo $bookingType === 'conference' ? 'selected' : ''; ?>>Conference</option>
-                        <option value="restaurant" <?php echo $bookingType === 'restaurant' ? 'selected' : ''; ?>>Restaurant</option>
-                        <option value="gym" <?php echo $bookingType === 'gym' ? 'selected' : ''; ?>>Gym</option>
-                        <option value="event" <?php echo $bookingType === 'event' ? 'selected' : ''; ?>>Event</option>
+                        <?php if ($mod_bookings || $bookingType === 'room'): ?><option value="room" <?php echo $bookingType === 'room' ? 'selected' : ''; ?>>Room</option><?php endif; ?>
+                        <?php if ($mod_conference || $bookingType === 'conference'): ?><option value="conference" <?php echo $bookingType === 'conference' ? 'selected' : ''; ?>>Conference</option><?php endif; ?>
+                        <?php if ($mod_pos || $bookingType === 'restaurant'): ?><option value="restaurant" <?php echo $bookingType === 'restaurant' ? 'selected' : ''; ?>><?php echo isRestaurantEnabled() ? 'Restaurant' : 'POS / Till'; ?></option><?php endif; ?>
+                        <?php if ($mod_gym || $bookingType === 'gym'): ?><option value="gym" <?php echo $bookingType === 'gym' ? 'selected' : ''; ?>>Gym</option><?php endif; ?>
+                        <?php if ($mod_events || $bookingType === 'event'): ?><option value="event" <?php echo $bookingType === 'event' ? 'selected' : ''; ?>>Event</option><?php endif; ?>
                     </select>
                 </div>
 

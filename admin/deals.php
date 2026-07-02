@@ -171,9 +171,14 @@ $csrf_token = generateCsrfToken();
 $sym        = getSetting('currency_symbol', 'MWK');
 $site_name  = getSetting('site_name', 'Hotel');
 
-// Load categories and menu items for the item picker
+// Load categories and menu items for the item picker — scoped to the active
+// preset's catalog context (a hotel's deals pick from Food/Drinks, a
+// supermarket's from its retail categories; never each other's).
+$dealsCatalogContext = (function_exists('isRestaurantEnabled') && isRestaurantEnabled()) ? 'food_service' : 'retail';
 $menuCatsRaw = $pdo->query("
-    SELECT id, name, slug FROM menu_categories WHERE is_active = 1 ORDER BY sort_order ASC, name ASC
+    SELECT id, name, slug FROM menu_categories
+    WHERE is_active = 1 AND COALESCE(business_context, 'food_service') = " . $pdo->quote($dealsCatalogContext) . "
+    ORDER BY sort_order ASC, name ASC
 ")->fetchAll(PDO::FETCH_ASSOC);
 
 $menuItemsRaw = $pdo->query("
@@ -181,6 +186,7 @@ $menuItemsRaw = $pdo->query("
     FROM menu_items mi
     JOIN menu_categories mc ON mc.id = mi.category_id
     WHERE mc.is_active = 1 AND mi.is_available = 1
+      AND COALESCE(mc.business_context, 'food_service') = " . $pdo->quote($dealsCatalogContext) . "
       AND (mi.show_pos = 1 OR mi.show_room_service = 1)
     ORDER BY mi.item_name ASC
 ")->fetchAll(PDO::FETCH_ASSOC);

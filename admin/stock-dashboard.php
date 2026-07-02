@@ -482,7 +482,8 @@ $csrf_token = generateCsrfToken();
             </div>
         </div>
 
-        <!-- ═══ RECIPE COVERAGE ═══ -->
+        <?php if (function_exists('isRestaurantEnabled') && isRestaurantEnabled()): ?>
+        <!-- ═══ RECIPE COVERAGE ═══ (food-service only — recipes/food-cost don't apply to retail presets) -->
         <div class="sdash-section">
             <div class="sdash-section__header">
                 <h3 class="sdash-section__title"><i class="fas fa-book-open"></i> Recipe Coverage</h3>
@@ -522,6 +523,7 @@ $csrf_token = generateCsrfToken();
             </div>
             <p class="sdash-coverage-note">Higher coverage = more automatic stock deductions and accurate cost reporting when orders are placed.</p>
         </div>
+        <?php endif; ?>
 
         <!-- ═══ TOP ITEMS TODAY ═══ -->
         <div class="sdash-section">

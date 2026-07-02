@@ -81,7 +81,7 @@ try {
         if ((int)$chk->fetchColumn() > 0) {
             continue;
         }
-        $ins = $pdo->prepare("INSERT INTO menu_categories (name, slug, description, icon, default_station, sort_order, shows_on_pos, shows_on_room_service, display_order, is_active) VALUES (?, ?, '', ?, 'bar', ?, 1, 0, ?, 1)");
+        $ins = $pdo->prepare("INSERT INTO menu_categories (name, slug, business_context, description, icon, default_station, sort_order, shows_on_pos, shows_on_room_service, display_order, is_active) VALUES (?, ?, 'retail', '', ?, 'bar', ?, 1, 0, ?, 1)");
         $ins->execute([$name, $slug, (string)($starter['icon'] ?? 'fa-tag'), $i, $i]);
         $seeded_categories[] = $name;
     }

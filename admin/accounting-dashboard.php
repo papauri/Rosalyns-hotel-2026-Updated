@@ -75,6 +75,7 @@ $vatSettingsError = '';
 // Module flags
 $mod_bookings   = function_exists('moduleEnabled') && moduleEnabled('bookings');
 $mod_pos        = function_exists('moduleEnabled') && moduleEnabled('pos');
+$mod_stock      = function_exists('moduleEnabled') && moduleEnabled('stock');
 $mod_conference = function_exists('moduleEnabled') && moduleEnabled('conference');
 $mod_gym        = function_exists('moduleEnabled') && moduleEnabled('gym');
 // Events has no dedicated module toggle (no "events" key in enabled_modules) —
@@ -1551,8 +1552,8 @@ if (!isset($dailyTrend)) {
                 </tbody>
             </table>
             <div class="acct-insight-actions">
-                <a href="stock-orders.php" class="acct-btn acct-btn--primary">Open POS orders</a>
-                <a href="payments.php?booking_type=restaurant&start_date=<?php echo urlencode($startDate); ?>&end_date=<?php echo urlencode($endDate); ?>" class="acct-btn acct-btn--ghost">Open restaurant payments</a>
+                <a href="<?php echo $mod_stock ? 'stock-orders.php' : 'pos.php'; ?>" class="acct-btn acct-btn--primary">Open POS orders</a>
+                <a href="payments.php?booking_type=restaurant&start_date=<?php echo urlencode($startDate); ?>&end_date=<?php echo urlencode($endDate); ?>" class="acct-btn acct-btn--ghost">Open <?php echo isRestaurantEnabled() ? 'restaurant' : 'POS'; ?> payments</a>
             </div>
         </template>
 
@@ -1641,11 +1642,11 @@ if (!isset($dailyTrend)) {
                         if ($mod_pos) {
                             $rows[] = [
                                 'label'    => rh_pos_category_label(),
-                                'icon'     => 'fa-utensils',
+                                'icon'     => isRestaurantEnabled() ? 'fa-utensils' : 'fa-cash-register',
                                 'count'    => (int)($restaurantSummary['total_restaurant_orders_with_payments'] ?? 0),
                                 'gross'    => $cat_revenue_fnb,
                                 'vat'      => (float)($restaurantSummary['restaurant_vat_collected'] ?? 0),
-                                'link'     => 'stock-orders.php',
+                                'link'     => $mod_stock ? 'stock-orders.php' : 'pos.php',
                                 'link_lbl' => 'POS orders',
                             ];
                         }

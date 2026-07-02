@@ -156,6 +156,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 // ─────────────────────────────────────────────────────────────────────────────
 $filterStatus    = $_GET['status']     ?? 'all';
 $filterType      = $_GET['type']       ?? 'all';
+
+// Module flags — gate booking-type pickers/filters by the active preset.
+$cn_mod_bookings = function_exists('moduleEnabled') && moduleEnabled('bookings');
+$cn_mod_conf     = function_exists('moduleEnabled') && moduleEnabled('conference');
+$cn_any_booking  = $cn_mod_bookings || $cn_mod_conf;
 $filterDateFrom  = $_GET['date_from']  ?? '';
 $filterDateTo    = $_GET['date_to']    ?? '';
 $search          = trim($_GET['search'] ?? '');
@@ -245,16 +250,18 @@ ob_start();
 
     <!-- Optional: link to an existing booking -->
     <div class="cn-issue-booking-link">
+        <?php if ($cn_any_booking): ?>
         <label class="cn-issue-booking-link__toggle">
             <input type="checkbox" id="issue-link-booking-toggle" onchange="cnToggleIssueBookingSearch()">
             <i class="fas fa-link" style="color:var(--finance-accent,#8A775F);"></i>
             <span>Link to Existing Booking <small class="text-muted">(optional — leave unchecked for walk-in)</small></span>
         </label>
+        <?php endif; ?>
         <div class="cn-issue-booking-link__fields" id="issue-booking-search-wrap" style="display:none;">
             <div class="form-group" style="margin-bottom:8px;">
                 <select id="issue-search-booking-type" class="form-control" onchange="cnIssueSearchBooking()">
-                    <option value="room">Room Booking</option>
-                    <option value="conference">Conference Booking</option>
+                    <?php if ($cn_mod_bookings): ?><option value="room">Room Booking</option><?php endif; ?>
+                    <?php if ($cn_mod_conf): ?><option value="conference">Conference Booking</option><?php endif; ?>
                 </select>
             </div>
             <div class="form-group" style="margin-bottom:6px;">
@@ -270,12 +277,12 @@ ob_start();
     </div>
 
     <div class="form-group">
-        <label class="form-label">Guest Name <span class="required">*</span></label>
+        <label class="form-label"><?php echo $cn_mod_bookings ? 'Guest' : 'Customer'; ?> Name <span class="required">*</span></label>
         <input type="text" name="guest_name" class="form-control" required maxlength="150" placeholder="Full name">
     </div>
     <div class="form-group">
-        <label class="form-label">Guest Email</label>
-        <input type="email" name="guest_email" class="form-control" maxlength="150" placeholder="guest@example.com">
+        <label class="form-label"><?php echo $cn_mod_bookings ? 'Guest' : 'Customer'; ?> Email</label>
+        <input type="email" name="guest_email" class="form-control" maxlength="150" placeholder="<?php echo $cn_mod_bookings ? 'guest' : 'customer'; ?>@example.com">
     </div>
     <div class="form-group">
         <label class="form-label">Credit Note Value <span class="required">*</span></label>
@@ -285,9 +292,9 @@ ob_start();
         <label class="form-label">Reason <span class="required">*</span></label>
         <select name="reason" class="form-control">
             <option value="goodwill">Goodwill Gesture</option>
-            <option value="cancellation">Booking Cancellation</option>
+            <option value="cancellation"><?php echo $cn_any_booking ? 'Booking Cancellation' : 'Order Cancellation'; ?></option>
             <option value="service_issue">Service Issue / Complaint</option>
-            <option value="early_checkout">Early Checkout</option>
+            <?php if ($cn_mod_bookings): ?><option value="early_checkout">Early Checkout</option><?php endif; ?>
             <option value="overpayment">Overpayment</option>
             <option value="pricing_error">Pricing / Billing Error</option>
             <option value="other">Other</option>
@@ -325,8 +332,8 @@ ob_start();
     <div class="form-group">
         <label class="form-label">Booking Type <span class="required">*</span></label>
         <select name="booking_type" id="apply-booking-type" class="form-control" onchange="cnSearchBooking()">
-            <option value="room">Room Booking</option>
-            <option value="conference">Conference Booking</option>
+            <?php if ($cn_mod_bookings): ?><option value="room">Room Booking</option><?php endif; ?>
+            <?php if ($cn_mod_conf): ?><option value="conference">Conference Booking</option><?php endif; ?>
         </select>
     </div>
     <div class="form-group">
@@ -473,8 +480,8 @@ $modalsHtml = ob_get_clean();
                 </select>
                 <select name="type" class="filter-select">
                     <option value="all" <?php if ($filterType === 'all') echo ' selected'; ?>>All Types</option>
-                    <option value="room" <?php if ($filterType === 'room') echo ' selected'; ?>>Room Booking</option>
-                    <option value="conference" <?php if ($filterType === 'conference') echo ' selected'; ?>>Conference</option>
+                    <?php if ($cn_mod_bookings || $filterType === 'room'): ?><option value="room" <?php if ($filterType === 'room') echo ' selected'; ?>>Room Booking</option><?php endif; ?>
+                    <?php if ($cn_mod_conf || $filterType === 'conference'): ?><option value="conference" <?php if ($filterType === 'conference') echo ' selected'; ?>>Conference</option><?php endif; ?>
                     <option value="goodwill" <?php if ($filterType === 'goodwill') echo ' selected'; ?>>Goodwill</option>
                 </select>
                 <input type="date" name="date_from" class="filter-input" value="<?php echo htmlspecialchars($filterDateFrom); ?>" placeholder="From">
@@ -584,7 +591,7 @@ $modalsHtml = ob_get_clean();
                                     <?php endif; ?>
                                 </td>
                                 <td class="actions-cell">
-                                    <?php if ($isActive && $balance > 0): ?>
+                                    <?php if ($isActive && $balance > 0 && $cn_any_booking): ?>
                                         <button class="quick-action"
                                             onclick="openApplyCN(<?php echo (int)$cn['id']; ?>, '<?php echo htmlspecialchars((string)$cn['credit_note_number']); ?>', <?php echo number_format($balance, 2, '.', ''); ?>)"
                                             title="Apply to booking" style="color:var(--color-success,#1f7a42);">

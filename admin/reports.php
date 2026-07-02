@@ -1039,7 +1039,7 @@ try {
                 'occupancy'  => ['icon' => 'fa-bed',             'label' => 'Occupancy',        'title' => 'Room occupancy — what percentage of available room nights were sold'],
                 'guests'     => ['icon' => 'fa-users',           'label' => 'Guests',           'title' => 'Guest analysis — new vs returning guests, nationality, and spending patterns'],
                 'conference' => ['icon' => 'fa-briefcase',       'label' => 'Conference',       'title' => 'Conference and events revenue, inquiry conversion, and booking performance'],
-                'fnb'        => ['icon' => 'fa-utensils',        'label' => htmlspecialchars(rh_pos_category_label()), 'title' => isRestaurantEnabled() ? 'Food & Beverage (F&B) — restaurant and bar sales through the Point of Sale (POS) system' : 'Sales recorded through the Point of Sale (POS) / till system'],
+                'fnb'        => ['icon' => isRestaurantEnabled() ? 'fa-utensils' : 'fa-cash-register', 'label' => htmlspecialchars(rh_pos_category_label()), 'title' => isRestaurantEnabled() ? 'Food & Beverage (F&B) — restaurant and bar sales through the Point of Sale (POS) system' : 'Sales recorded through the Point of Sale (POS) / till system'],
                 'stock'      => ['icon' => 'fa-boxes-stacked',   'label' => 'Stock',            'title' => 'Stock and inventory — usage, wastage, and cost of goods consumed'],
                 'staff'      => ['icon' => 'fa-user-clock',      'label' => 'Staff',            'title' => 'Staff activity — orders processed, shift performance, and productivity'],
                 'voids'      => ['icon' => 'fa-ban',             'label' => 'Voids',            'title' => 'Voided orders and payments — items cancelled after being placed'],

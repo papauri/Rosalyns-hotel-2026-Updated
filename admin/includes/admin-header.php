@@ -121,7 +121,7 @@ $_nav_groups = [
         ['gym-management.php',        'fas fa-dumbbell',     'Gym Packages',      'gym_packages',      '', 'gym'],
         ['gym-inquiries.php',         'fas fa-inbox',        'Gym Inquiries',     'gym',               '', 'gym'],
         ['gym-members.php',           'fas fa-id-card',      'Gym Members',       'gym',               '', 'gym'],
-        ['menu-management.php',       'fas fa-utensils',     (function_exists('isRestaurantEnabled') && isRestaurantEnabled()) ? 'Menu' : 'Products', 'menu', '', 'pos'],
+        ['menu-management.php',       (function_exists('isRestaurantEnabled') && isRestaurantEnabled()) ? 'fas fa-utensils' : 'fas fa-box-open', (function_exists('isRestaurantEnabled') && isRestaurantEnabled()) ? 'Menu' : 'Products', 'menu', '', 'pos'],
         ['events-management.php',     'fas fa-calendar-alt', 'Events',            'events',            '', 'website_cms'],
         ['events-inquiries.php',      'fas fa-calendar-check', 'Event Bookings',  'events_bookings',   '', 'website_cms'],
         ['reviews.php',               'fas fa-star',         'Reviews',           'reviews',           '', 'website_cms'],

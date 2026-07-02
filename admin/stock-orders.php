@@ -1483,7 +1483,7 @@ $csrf_token = generateCsrfToken();
                             style="color:inherit;text-decoration:none;white-space:nowrap;"
                             title="View walk-in / dine-in orders"
                             onclick="event.stopPropagation();">
-                            <i class="fas fa-utensils" style="font-size:9px;"></i>
+                            <i class="fas <?php echo isRestaurantEnabled() ? 'fa-utensils' : 'fa-receipt'; ?>" style="font-size:9px;"></i>
                             Walk-in: <strong><?php echo (int)($operationsSnapshot['open_walk_in'] ?? 0); ?></strong>
                         </a>
                         <span style="color:#ced4da;">&middot;</span>
@@ -1822,7 +1822,7 @@ $csrf_token = generateCsrfToken();
                 <!-- Order Channel / Type Split -->
                 <div class="ops-panel ops-panel--channel-split" style="margin:0;">
                     <div class="ops-panel__header">
-                        <strong class="ops-panel__header-title"><i class="fas fa-utensils" style="color:#8B7355;"></i> Order Channels Today</strong>
+                        <strong class="ops-panel__header-title"><i class="fas <?php echo isRestaurantEnabled() ? 'fa-utensils' : 'fa-cash-register'; ?>" style="color:#8B7355;"></i> Order Channels Today</strong>
                         <span class="ops-panel__header-note">Click a channel to filter the orders list</span>
                     </div>
                     <div style="margin-top:12px;display:flex;flex-direction:column;gap:10px;">
@@ -1838,12 +1838,12 @@ $csrf_token = generateCsrfToken();
                                 default       => ucwords(str_replace('_', ' ', $chType)),
                             };
                             $chIcon = match ($chType) {
-                                'walk_in'      => 'fa-chair',
+                                'walk_in'      => isRestaurantEnabled() ? 'fa-chair' : 'fa-receipt',
                                 'dine_in'      => 'fa-utensils',
                                 'room_service' => 'fa-bell-concierge',
                                 'bar_tab'      => 'fa-martini-glass',
                                 'takeaway'     => 'fa-bag-shopping',
-                                default        => 'fa-utensils',
+                                default        => isRestaurantEnabled() ? 'fa-utensils' : 'fa-receipt',
                             };
                             $chRev  = (float)($ch['revenue'] ?? 0);
                             $chPct  = $totalChannelRevenue > 0 ? ($chRev / $totalChannelRevenue) * 100 : 0;

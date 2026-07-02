@@ -307,9 +307,16 @@ $receiptPlaceholderTokens = array_keys($templatePreviewMap);
                 <input type="text" name="search" class="filter-input" placeholder="Receipt #, payment ref, booking ref..." value="<?php echo htmlspecialchars($filters['search']); ?>">
                 <select name="type" class="filter-select">
                     <option value="all">All Types</option>
-                    <option value="room" <?php echo $filters['type'] === 'room' ? 'selected' : ''; ?>>Rooms</option>
-                    <option value="conference" <?php echo $filters['type'] === 'conference' ? 'selected' : ''; ?>>Conference</option>
-                    <option value="restaurant" <?php echo $filters['type'] === 'restaurant' ? 'selected' : ''; ?>>Restaurant/POS</option>
+                    <?php $rc_mod_bookings = function_exists('moduleEnabled') && moduleEnabled('bookings');
+                          $rc_mod_conf     = function_exists('moduleEnabled') && moduleEnabled('conference');
+                          $rc_mod_pos      = function_exists('moduleEnabled') && moduleEnabled('pos');
+                          $rc_mod_gym      = function_exists('moduleEnabled') && moduleEnabled('gym');
+                          $rc_mod_events   = function_exists('isEventsEnabled') && isEventsEnabled(); ?>
+                    <?php if ($rc_mod_bookings || $filters['type'] === 'room'): ?><option value="room" <?php echo $filters['type'] === 'room' ? 'selected' : ''; ?>>Rooms</option><?php endif; ?>
+                    <?php if ($rc_mod_conf || $filters['type'] === 'conference'): ?><option value="conference" <?php echo $filters['type'] === 'conference' ? 'selected' : ''; ?>>Conference</option><?php endif; ?>
+                    <?php if ($rc_mod_pos || $filters['type'] === 'restaurant'): ?><option value="restaurant" <?php echo $filters['type'] === 'restaurant' ? 'selected' : ''; ?>><?php echo (function_exists('isRestaurantEnabled') && isRestaurantEnabled()) ? 'Restaurant/POS' : 'POS / Till'; ?></option><?php endif; ?>
+                    <?php if ($rc_mod_gym || $filters['type'] === 'gym'): ?><option value="gym" <?php echo $filters['type'] === 'gym' ? 'selected' : ''; ?>>Gym</option><?php endif; ?>
+                    <?php if ($rc_mod_events || $filters['type'] === 'event'): ?><option value="event" <?php echo $filters['type'] === 'event' ? 'selected' : ''; ?>>Event</option><?php endif; ?>
                 </select>
                 <select name="status" class="filter-select">
                     <option value="all">All Statuses</option>

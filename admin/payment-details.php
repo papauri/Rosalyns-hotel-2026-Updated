@@ -539,7 +539,19 @@ if (($payment['payment_type'] ?? '') === 'refund' && !empty($payment['original_p
                     <?php endif; ?>
                 </div>
 
-                <a href="<?php echo $bookingDetails['type'] === 'room' ? 'booking-details.php?id=' . $bookingDetails['id'] : ($bookingDetails['type'] === 'restaurant' ? 'stock-orders.php' : 'conference-management.php'); ?>" class="btn-primary" style="display: inline-block; padding: 10px 20px; text-decoration: none;">
+                <?php
+                // Preset-aware source link: restaurant payments go to the orders
+                // console only when the stock module is on (POS-only presets keep
+                // the till); gym/event payments go to their inquiry pages.
+                $pd_source_href = match ($bookingDetails['type']) {
+                    'room'       => 'booking-details.php?id=' . $bookingDetails['id'],
+                    'restaurant' => (function_exists('moduleEnabled') && moduleEnabled('stock')) ? 'stock-orders.php' : 'pos.php',
+                    'gym'        => 'gym-inquiries.php',
+                    'event'      => 'events-inquiries.php',
+                    default      => 'conference-management.php',
+                };
+                ?>
+                <a href="<?php echo htmlspecialchars($pd_source_href); ?>" class="btn-primary" style="display: inline-block; padding: 10px 20px; text-decoration: none;">
                     <i class="fas fa-external-link-alt"></i> View Full <?php echo $bookingDetails['type'] === 'restaurant' ? 'Order' : 'Booking'; ?> Details
                 </a>
             </div>

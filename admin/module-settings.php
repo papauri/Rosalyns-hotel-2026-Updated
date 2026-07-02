@@ -562,8 +562,20 @@ foreach ($presets as $preset_key => $preset) {
 
     <script>
     (function () {
-        var csrf = <?php echo json_encode($csrf_token); ?>;
-        var pendingToggle = null;
+        // Per-render state. The SPA re-executes this inline script on every
+        // navigation to this page; state is refreshed each time, while the
+        // event listeners below are DELEGATED on document and bound exactly
+        // once — so preset/toggle clicks work on the first render, whether
+        // the page arrived via full load or SPA swap.
+        window.__msState = window.__msState || {};
+        window.__msState.csrf = <?php echo json_encode($csrf_token); ?>;
+        window.__msState.moduleLabels = <?php echo json_encode(array_combine(array_keys($modules_meta), array_column($modules_meta, 'label'))); ?>;
+        window.__msState.pendingToggle = null;
+        window.__msState.pendingPreset = null;
+
+        if (window.__msBound) { return; }
+        window.__msBound = true;
+        var S = window.__msState;
 
         function showToast(msg, type) {
             if (typeof Alert !== 'undefined' && Alert.show) {
@@ -608,7 +620,7 @@ foreach ($presets as $preset_key => $preset) {
             if (checkbox) { checkbox.disabled = true; }
 
             var fd = new FormData();
-            fd.append('csrf_token', csrf);
+            fd.append('csrf_token', S.csrf);
             fd.append('module_key', moduleKey);
             fd.append('is_enabled', enable ? '1' : '0');
 
@@ -639,87 +651,42 @@ foreach ($presets as $preset_key => $preset) {
                 .finally(function () { if (checkbox) { checkbox.disabled = false; } });
         }
 
-        // Individual toggle handlers
-        document.querySelectorAll('.ms-toggle input[type="checkbox"]:not([disabled])').forEach(function (cb) {
-            cb.addEventListener('change', function () {
-                var key     = cb.getAttribute('data-module');
-                var enable  = cb.checked;
-                var hasWarn = cb.getAttribute('data-has-warn') === '1';
+        // Module toggle switches — delegated
+        function handleToggleChange(cb) {
+            var key     = cb.getAttribute('data-module');
+            var enable  = cb.checked;
+            var hasWarn = cb.getAttribute('data-has-warn') === '1';
 
-                if (!enable && hasWarn) {
-                    pendingToggle = { cb: cb, key: key };
-                    var overlay = document.getElementById('msConfirmOverlay');
-                    var text    = document.getElementById('msConfirmText');
-                    if (text) {
-                        text.textContent = 'Disabling "' + cb.getAttribute('data-label') +
-                            '" will hide its pages and navigation links. ' + cb.getAttribute('data-warn-text') +
-                            ' You can re-enable it at any time.';
-                    }
-                    if (overlay) { overlay.classList.add('active'); }
-                    cb.checked = true;
-                    return;
+            // POS toggle also dims/undims the station sub-panel
+            if (key === 'pos') {
+                var stationsPanel = document.getElementById('ms-stations-panel');
+                if (stationsPanel) {
+                    stationsPanel.style.opacity = enable ? '' : '.45';
+                    stationsPanel.style.pointerEvents = enable ? '' : 'none';
                 }
-                doToggle(cb, key, enable, false);
-            });
-        });
+            }
 
-        // Confirm dialog
-        var cancelBtn  = document.getElementById('msConfirmCancel');
-        var proceedBtn = document.getElementById('msConfirmProceed');
-        var overlay    = document.getElementById('msConfirmOverlay');
-
-        if (cancelBtn) {
-            cancelBtn.addEventListener('click', function () {
-                pendingToggle = null;
-                if (overlay) { overlay.classList.remove('active'); }
-            });
-        }
-        if (proceedBtn) {
-            proceedBtn.addEventListener('click', function () {
-                if (overlay) { overlay.classList.remove('active'); }
-                if (pendingToggle) {
-                    pendingToggle.cb.checked = false;
-                    doToggle(pendingToggle.cb, pendingToggle.key, false, false);
-                    pendingToggle = null;
+            if (!enable && hasWarn) {
+                S.pendingToggle = { cb: cb, key: key };
+                var overlay = document.getElementById('msConfirmOverlay');
+                var text    = document.getElementById('msConfirmText');
+                if (text) {
+                    text.textContent = 'Disabling "' + cb.getAttribute('data-label') +
+                        '" will hide its pages and navigation links. ' + cb.getAttribute('data-warn-text') +
+                        ' You can re-enable it at any time.';
                 }
-            });
+                if (overlay) { overlay.classList.add('active'); }
+                cb.checked = true;
+                return;
+            }
+            doToggle(cb, key, enable, false);
         }
-        if (overlay) {
-            overlay.addEventListener('click', function (e) {
-                if (e.target === overlay) { pendingToggle = null; overlay.classList.remove('active'); }
-            });
-        }
-
-        // Station expand/collapse
-        var stationsToggle = document.getElementById('msStationsToggle');
-        var stationsBody   = document.getElementById('msStationsBody');
-        if (stationsToggle && stationsBody) {
-            stationsToggle.addEventListener('click', function () {
-                var open = stationsBody.hidden;
-                stationsBody.hidden = !open;
-                stationsToggle.setAttribute('aria-expanded', open ? 'true' : 'false');
-            });
-        }
-
-        // When POS module is toggled, dim/undim the station panel
-        var posToggle = document.getElementById('ms-toggle-pos');
-        var stationsPanel = document.getElementById('ms-stations-panel');
-        if (posToggle && stationsPanel) {
-            posToggle.addEventListener('change', function () {
-                stationsPanel.style.opacity = posToggle.checked ? '' : '.45';
-                stationsPanel.style.pointerEvents = posToggle.checked ? '' : 'none';
-            });
-        }
-
-        // Preset buttons — check impact on existing users, confirm, then apply sequentially
-        var moduleLabels = <?php echo json_encode(array_combine(array_keys($modules_meta), array_column($modules_meta, 'label'))); ?>;
-        var pendingPreset = null;
 
         function applyPresetConfig(config, label, btn, presetKey) {
             btn.classList.add('applying');
 
             var fd = new FormData();
-            fd.append('csrf_token', csrf);
+            fd.append('csrf_token', S.csrf);
             fd.append('preset_key', presetKey);
 
             fetch('api/apply-preset.php', { method: 'POST', body: fd, credentials: 'same-origin' })
@@ -770,7 +737,7 @@ foreach ($presets as $preset_key => $preset) {
             station_cds: 'Coffee Bar Display (CDS)', station_room_service: 'Room Service Station',
             restaurant_page: 'Restaurant / food-service pages'
         };
-        function moduleLabel(key) { return moduleLabels[key] || extraModuleLabels[key] || key; }
+        function moduleLabel(key) { return S.moduleLabels[key] || extraModuleLabels[key] || key; }
 
         function renderPresetImpact(presetKey, presetLabel, data) {
             var nameEl    = document.getElementById('msPresetImpactName');
@@ -818,59 +785,98 @@ foreach ($presets as $preset_key => $preset) {
             }
         }
 
-        // Preset buttons — apply all module states sequentially
-        document.querySelectorAll('.ms-preset-btn').forEach(function (btn) {
-            btn.addEventListener('click', function () {
-                var config = JSON.parse(btn.getAttribute('data-modules') || '{}');
-                var label  = btn.getAttribute('data-preset-label') || 'preset';
-                var presetKey = btn.getAttribute('data-preset');
-                var overlay = document.getElementById('msPresetImpactOverlay');
+        // Preset button — check impact on existing users, confirm, then apply
+        function handlePresetClick(btn) {
+            var config = JSON.parse(btn.getAttribute('data-modules') || '{}');
+            var label  = btn.getAttribute('data-preset-label') || 'preset';
+            var presetKey = btn.getAttribute('data-preset');
+            var overlay = document.getElementById('msPresetImpactOverlay');
 
-                btn.classList.add('applying');
+            btn.classList.add('applying');
 
-                fetch('api/preset-affected-users.php?preset_key=' + encodeURIComponent(presetKey), { credentials: 'same-origin' })
-                    .then(function (r) { return r.json(); })
-                    .then(function (data) {
-                        btn.classList.remove('applying');
-                        if (!data.success) {
-                            showToast(data.error || 'Could not check preset impact.', 'error');
-                            return;
-                        }
-                        renderPresetImpact(presetKey, label, data);
-                        pendingPreset = { config: config, label: label, btn: btn, presetKey: presetKey };
-                        if (overlay) { overlay.classList.add('active'); }
-                    })
-                    .catch(function () {
-                        btn.classList.remove('applying');
-                        showToast('Network error — please try again.', 'error');
-                    });
-            });
+            fetch('api/preset-affected-users.php?preset_key=' + encodeURIComponent(presetKey), { credentials: 'same-origin' })
+                .then(function (r) { return r.json(); })
+                .then(function (data) {
+                    btn.classList.remove('applying');
+                    if (!data.success) {
+                        showToast(data.error || 'Could not check preset impact.', 'error');
+                        return;
+                    }
+                    renderPresetImpact(presetKey, label, data);
+                    S.pendingPreset = { config: config, label: label, btn: btn, presetKey: presetKey };
+                    if (overlay) { overlay.classList.add('active'); }
+                })
+                .catch(function () {
+                    btn.classList.remove('applying');
+                    showToast('Network error — please try again.', 'error');
+                });
+        }
+
+        // ── Delegated listeners — bound once, work on every render ──────────
+        document.addEventListener('change', function (e) {
+            var cb = e.target.closest ? e.target.closest('.ms-toggle input[type="checkbox"]') : null;
+            if (!cb || cb.disabled) { return; }
+            handleToggleChange(cb);
         });
 
-        var presetImpactOverlay = document.getElementById('msPresetImpactOverlay');
-        var presetImpactCancel  = document.getElementById('msPresetImpactCancel');
-        var presetImpactProceed = document.getElementById('msPresetImpactProceed');
+        document.addEventListener('click', function (e) {
+            var t = e.target;
+            if (!t || !t.closest) { return; }
 
-        if (presetImpactCancel) {
-            presetImpactCancel.addEventListener('click', function () {
-                pendingPreset = null;
-                if (presetImpactOverlay) { presetImpactOverlay.classList.remove('active'); }
-            });
-        }
-        if (presetImpactProceed) {
-            presetImpactProceed.addEventListener('click', function () {
-                if (presetImpactOverlay) { presetImpactOverlay.classList.remove('active'); }
-                if (pendingPreset) {
-                    applyPresetConfig(pendingPreset.config, pendingPreset.label, pendingPreset.btn, pendingPreset.presetKey);
-                    pendingPreset = null;
+            var presetBtn = t.closest('.ms-preset-btn');
+            if (presetBtn && !presetBtn.classList.contains('applying')) { handlePresetClick(presetBtn); return; }
+
+            if (t.closest('#msStationsToggle')) {
+                var stationsBody = document.getElementById('msStationsBody');
+                var stationsToggle = document.getElementById('msStationsToggle');
+                if (stationsBody && stationsToggle) {
+                    var open = stationsBody.hidden;
+                    stationsBody.hidden = !open;
+                    stationsToggle.setAttribute('aria-expanded', open ? 'true' : 'false');
                 }
-            });
-        }
-        if (presetImpactOverlay) {
-            presetImpactOverlay.addEventListener('click', function (e) {
-                if (e.target === presetImpactOverlay) { pendingPreset = null; presetImpactOverlay.classList.remove('active'); }
-            });
-        }
+                return;
+            }
+
+            var confirmOverlay = document.getElementById('msConfirmOverlay');
+            if (t.closest('#msConfirmCancel')) {
+                S.pendingToggle = null;
+                if (confirmOverlay) { confirmOverlay.classList.remove('active'); }
+                return;
+            }
+            if (t.closest('#msConfirmProceed')) {
+                if (confirmOverlay) { confirmOverlay.classList.remove('active'); }
+                if (S.pendingToggle) {
+                    S.pendingToggle.cb.checked = false;
+                    doToggle(S.pendingToggle.cb, S.pendingToggle.key, false, false);
+                    S.pendingToggle = null;
+                }
+                return;
+            }
+            if (confirmOverlay && t === confirmOverlay) {
+                S.pendingToggle = null;
+                confirmOverlay.classList.remove('active');
+                return;
+            }
+
+            var impactOverlay = document.getElementById('msPresetImpactOverlay');
+            if (t.closest('#msPresetImpactCancel')) {
+                S.pendingPreset = null;
+                if (impactOverlay) { impactOverlay.classList.remove('active'); }
+                return;
+            }
+            if (t.closest('#msPresetImpactProceed')) {
+                if (impactOverlay) { impactOverlay.classList.remove('active'); }
+                if (S.pendingPreset) {
+                    applyPresetConfig(S.pendingPreset.config, S.pendingPreset.label, S.pendingPreset.btn, S.pendingPreset.presetKey);
+                    S.pendingPreset = null;
+                }
+                return;
+            }
+            if (impactOverlay && t === impactOverlay) {
+                S.pendingPreset = null;
+                impactOverlay.classList.remove('active');
+            }
+        });
     })();
     </script>
 </body>

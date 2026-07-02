@@ -12,6 +12,11 @@ require_once __DIR__ . '/../includes/alert.php';
 $site_name       = getSetting('site_name');
 $currency_symbol = getSetting('currency_symbol', 'MWK');
 
+// Module flags — gate quick-links and type options by the active preset.
+$qt_mod_bookings = function_exists('moduleEnabled') && moduleEnabled('bookings');
+$qt_mod_conf     = function_exists('moduleEnabled') && moduleEnabled('conference');
+$qt_mod_events   = function_exists('isEventsEnabled') && isEventsEnabled();
+
 $message = '';
 $error   = '';
 
@@ -254,12 +259,18 @@ try {
         <div class="qt-header">
             <h1><i class="fas fa-file-invoice-dollar" style="color:#B18247;"></i> Quotations</h1>
             <div style="display:flex;gap:10px;align-items:center;">
+                <?php if ($qt_mod_bookings): ?>
                 <a href="bookings.php" class="btn btn-secondary" style="font-size:13px;padding:7px 14px;">
                     <i class="fas fa-calendar-check"></i> All Bookings
                 </a>
                 <a href="tentative-bookings.php" class="btn btn-secondary" style="font-size:13px;padding:7px 14px;">
                     <i class="fas fa-clock"></i> Tentative
                 </a>
+                <?php elseif ($qt_mod_conf): ?>
+                <a href="conference-management.php" class="btn btn-secondary" style="font-size:13px;padding:7px 14px;">
+                    <i class="fas fa-briefcase"></i> Conference Bookings
+                </a>
+                <?php endif; ?>
             </div>
         </div>
 
@@ -298,15 +309,15 @@ try {
         <form method="GET" class="qt-filters">
             <div>
                 <label>Search</label>
-                <input type="text" name="search" placeholder="Guest name, email, reference…" value="<?php echo htmlspecialchars($search); ?>">
+                <input type="text" name="search" placeholder="<?php echo $qt_mod_bookings ? 'Guest' : 'Client'; ?> name, email, reference…" value="<?php echo htmlspecialchars($search); ?>">
             </div>
             <div>
                 <label>Type</label>
                 <select name="type">
                     <option value="">All types</option>
-                    <option value="room" <?php echo $filter_type === 'room'       ? 'selected' : ''; ?>>Room</option>
-                    <option value="conference" <?php echo $filter_type === 'conference' ? 'selected' : ''; ?>>Conference</option>
-                    <option value="event" <?php echo $filter_type === 'event'      ? 'selected' : ''; ?>>Event</option>
+                    <?php if ($qt_mod_bookings || $filter_type === 'room'): ?><option value="room" <?php echo $filter_type === 'room'       ? 'selected' : ''; ?>>Room</option><?php endif; ?>
+                    <?php if ($qt_mod_conf || $filter_type === 'conference'): ?><option value="conference" <?php echo $filter_type === 'conference' ? 'selected' : ''; ?>>Conference</option><?php endif; ?>
+                    <?php if ($qt_mod_events || $filter_type === 'event'): ?><option value="event" <?php echo $filter_type === 'event'      ? 'selected' : ''; ?>>Event</option><?php endif; ?>
                 </select>
             </div>
             <div>
@@ -340,10 +351,10 @@ try {
                     <thead>
                         <tr>
                             <th>Quote Ref</th>
-                            <th>Guest</th>
+                            <th><?php echo $qt_mod_bookings ? 'Guest' : 'Client'; ?></th>
                             <th>Booking Ref</th>
                             <th>Type</th>
-                            <th>Room / Package</th>
+                            <th><?php echo $qt_mod_bookings ? 'Room / Package' : 'Package'; ?></th>
                             <th>Total</th>
                             <th>Valid Until</th>
                             <th>Status</th>
@@ -455,15 +466,25 @@ try {
                     <i class="fas fa-file-invoice-dollar"></i>
                     <strong style="display:block;font-size:1.1rem;color:#555;margin-bottom:6px;">No quotations yet</strong>
                     <p style="font-size:13px;">
+                        <?php if ($qt_mod_bookings): ?>
                         Send a quotation from a booking's detail page, the bookings list, or the tentative bookings page.
+                        <?php else: ?>
+                        Send a quotation from a conference or event enquiry's detail page.
+                        <?php endif; ?>
                     </p>
                     <div style="display:flex;gap:10px;justify-content:center;margin-top:16px;">
+                        <?php if ($qt_mod_bookings): ?>
                         <a href="bookings.php" class="btn btn-primary" style="font-size:13px;padding:8px 16px;">
                             <i class="fas fa-calendar-check"></i> Go to Bookings
                         </a>
                         <a href="tentative-bookings.php" class="btn btn-secondary" style="font-size:13px;padding:8px 16px;">
                             <i class="fas fa-clock"></i> Tentative Bookings
                         </a>
+                        <?php elseif ($qt_mod_conf): ?>
+                        <a href="conference-management.php" class="btn btn-primary" style="font-size:13px;padding:8px 16px;">
+                            <i class="fas fa-briefcase"></i> Go to Conference Bookings
+                        </a>
+                        <?php endif; ?>
                     </div>
                 </div>
             <?php endif; ?>

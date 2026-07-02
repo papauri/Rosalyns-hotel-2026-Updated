@@ -45,6 +45,13 @@ if ($editId) {
 
 $paymentTransactionValue = $payment[$paymentTransactionColumn] ?? '';
 
+// Module flags — the booking picker only offers account types whose module
+// is enabled for this installation's business preset.
+$pa_mod_bookings = function_exists('moduleEnabled') && moduleEnabled('bookings');
+$pa_mod_conf     = function_exists('moduleEnabled') && moduleEnabled('conference');
+$pa_any_booking  = $pa_mod_bookings || $pa_mod_conf;
+$pa_default_type = $pa_mod_bookings ? 'room' : ($pa_mod_conf ? 'conference' : 'room');
+
 // Get booking type and ID from query params for new payment
 $bookingType = isset($_GET['booking_type']) ? $_GET['booking_type'] : '';
 $bookingId = isset($_GET['booking_id']) ? (int)$_GET['booking_id'] : 0;
@@ -619,7 +626,7 @@ function updateConferenceEnquiryPayments(PDO $pdo, int $enquiryId)
             <?php if (!$editId): ?>
                 <input type="hidden" name="client_uuid" value="<?php echo htmlspecialchars($_SESSION['admin_payment_add_uuid']); ?>">
             <?php endif; ?>
-            <input type="hidden" name="booking_type" id="hd-booking-type" value="<?php echo htmlspecialchars($bookingType); ?>">
+            <input type="hidden" name="booking_type" id="hd-booking-type" value="<?php echo htmlspecialchars($bookingType !== '' ? $bookingType : $pa_default_type); ?>">
             <input type="hidden" name="booking_id"   id="hd-booking-id"   value="<?php echo $bookingId; ?>">
 
             <div class="payment-console">
@@ -684,21 +691,36 @@ function updateConferenceEnquiryPayments(PDO $pdo, int $enquiryId)
                             </div>
 
                         <?php else: ?>
+                            <?php if (!$pa_any_booking): ?>
+                            <!-- No bookable account types on this preset — direct payments
+                                 are captured at the POS till or from inquiry pages instead. -->
+                            <div class="pa-picker" id="pa-picker">
+                                <p style="margin:0;padding:0.9rem 1rem;background:var(--finance-warning-bg,#fff8e6);border:1px solid var(--finance-warning-border,#e8c98a);border-radius:8px;font-size:0.87rem;color:var(--finance-muted,#6b6156);">
+                                    <i class="fas fa-circle-info"></i>
+                                    Room and conference accounts are disabled for this business type.
+                                    POS sales are settled at the till<?php if (function_exists('moduleEnabled') && moduleEnabled('gym')): ?>, and gym payments are recorded from Gym Inquiries<?php endif; ?><?php if (function_exists('isEventsEnabled') && isEventsEnabled()): ?>, and event payments from Event Bookings<?php endif; ?>.
+                                </p>
+                            </div>
+                            <?php else: ?>
                             <!-- Booking search picker -->
                             <div class="pa-picker" id="pa-picker">
                                 <div class="pa-picker__type-row">
-                                    <button type="button" class="pa-type-btn is-active" data-type="room" id="pa-type-room">
+                                    <?php if ($pa_mod_bookings): ?>
+                                    <button type="button" class="pa-type-btn <?php echo $pa_default_type === 'room' ? 'is-active' : ''; ?>" data-type="room" id="pa-type-room">
                                         <i class="fas fa-bed"></i> Room Booking
                                     </button>
-                                    <button type="button" class="pa-type-btn" data-type="conference" id="pa-type-conference">
+                                    <?php endif; ?>
+                                    <?php if ($pa_mod_conf): ?>
+                                    <button type="button" class="pa-type-btn <?php echo $pa_default_type === 'conference' ? 'is-active' : ''; ?>" data-type="conference" id="pa-type-conference">
                                         <i class="fas fa-users"></i> Conference
                                     </button>
+                                    <?php endif; ?>
                                 </div>
 
                                 <div class="pa-search-wrap" id="pa-search-wrap">
                                     <label class="pa-search-label" for="pa-search-input">
                                         <i class="fas fa-search"></i>
-                                        Search by guest name, reference, or email
+                                        Search by <?php echo $pa_mod_bookings ? 'guest' : 'contact'; ?> name, reference, or email
                                         <button type="button" class="wm-help" data-tooltip="Type at least 2 characters to search. Results show outstanding balance. Click any row to link it." aria-label="Help">?</button>
                                     </label>
                                     <input type="text"
@@ -740,6 +762,7 @@ function updateConferenceEnquiryPayments(PDO $pdo, int $enquiryId)
                                     <input type="checkbox" id="pa-override-cb"> Allow payment anyway (adjustment / credit)
                                 </label>
                             </div>
+                            <?php endif; /* $pa_any_booking */ ?>
                         <?php endif; ?>
                     </div>
 

@@ -556,11 +556,13 @@ $totalAging = (float)$aging['bucket_0_30'] + (float)$aging['bucket_31_60'] + (fl
             <form method="GET" action="">
                 <div class="filters-row">
                     <div class="filter-group">
-                        <label>Booking Type</label>
+                        <?php $inv_mod_bookings = function_exists('moduleEnabled') && moduleEnabled('bookings');
+                              $inv_mod_conf     = function_exists('moduleEnabled') && moduleEnabled('conference'); ?>
+                        <label><?php echo $inv_mod_bookings ? 'Booking Type' : 'Invoice Type'; ?></label>
                         <select name="filter_type">
                             <option value="all" <?php echo $filter_type === 'all' ? 'selected' : ''; ?>>All Types</option>
-                            <option value="room" <?php echo $filter_type === 'room' ? 'selected' : ''; ?>>Room Bookings</option>
-                            <option value="conference" <?php echo $filter_type === 'conference' ? 'selected' : ''; ?>>Conference Bookings</option>
+                            <?php if ($inv_mod_bookings || $filter_type === 'room'): ?><option value="room" <?php echo $filter_type === 'room' ? 'selected' : ''; ?>>Room Bookings</option><?php endif; ?>
+                            <?php if ($inv_mod_conf || $filter_type === 'conference'): ?><option value="conference" <?php echo $filter_type === 'conference' ? 'selected' : ''; ?>>Conference Bookings</option><?php endif; ?>
                         </select>
                     </div>
                     <div class="filter-group">

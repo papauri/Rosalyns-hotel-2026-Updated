@@ -1064,6 +1064,12 @@ $posCanDiscount = hasPermission($user['id'], 'pos_discount');
 $posCanToggle86 = hasPermission($user['id'], 'pos_86');
 $posCanFloat    = hasPermission($user['id'], 'pos_float');
 $menuAvailFilter = $posCanToggle86 ? '' : 'AND mi.is_available = 1';
+// Catalog scoping per business preset: food-service installations sell from
+// food_service categories (Food, Drinks); everyone else (supermarket, gym,
+// retail) sells from retail categories. A hotel never sees Groceries; a
+// supermarket never sees the restaurant menu. COALESCE keeps working if the
+// column predates a migration on some environment.
+$posCatalogContext = (function_exists('isRestaurantEnabled') && isRestaurantEnabled()) ? 'food_service' : 'retail';
 $allMenuItems = $pdo->query("
     SELECT mi.id, mi.item_name AS name, mi.price,
            COALESCE(mi.category, 'Other') AS sub_category,
@@ -1073,6 +1079,7 @@ $allMenuItems = $pdo->query("
     FROM menu_items mi
     JOIN menu_categories mc ON mc.id = mi.category_id
     WHERE mc.is_active = 1
+      AND COALESCE(mc.business_context, 'food_service') = " . $pdo->quote($posCatalogContext) . "
       AND (mi.show_pos = 1 OR mi.show_room_service = 1)
       $menuAvailFilter
     ORDER BY mc.sort_order ASC, mi.display_order ASC, mi.item_name ASC
@@ -2140,9 +2147,13 @@ if (in_array($user['role'] ?? '', ['admin', 'manager'], true)) {
                     <div class="service-ctx">
                         <div class="ctx-chips" role="group" aria-label="Service type">
                             <button type="button" class="ctx-chip is-active" data-type="walk_in" onclick="setServiceType('walk_in')"><i class="fas fa-walking"></i><span>Walk-in</span></button>
+                            <?php if (isRestaurantEnabled()): ?>
                             <button type="button" class="ctx-chip" data-type="dine_in" onclick="setServiceType('dine_in')"><i class="fas fa-utensils"></i><span>Dine-in</span></button>
                             <button type="button" class="ctx-chip" data-type="takeaway" onclick="setServiceType('takeaway')"><i class="fas fa-shopping-bag"></i><span>Takeaway</span></button>
+                            <?php endif; ?>
+                            <?php if (moduleEnabled('bookings') && moduleEnabled('station_room_service')): ?>
                             <button type="button" class="ctx-chip" data-type="room_service" onclick="setServiceType('room_service')"><i class="fas fa-bed"></i><span>Room</span></button>
+                            <?php endif; ?>
                         </div>
                         <input type="hidden" id="ctxOrderType" name="order_type" form="payForm" value="walk_in">
                         <div class="ctx-fields">
