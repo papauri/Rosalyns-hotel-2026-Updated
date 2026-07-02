@@ -328,6 +328,18 @@ body {
     border-color: #ddd6fe;
 }
 
+.finance-page .badge-gym {
+    background: #fef2f2;
+    color: #b91c1c;
+    border-color: #fecaca;
+}
+
+.finance-page .badge-event {
+    background: #ecfdf5;
+    color: #065f46;
+    border-color: #a7f3d0;
+}
+
 /* ============================================
    BUTTONS
    ============================================ */
@@ -3998,6 +4010,16 @@ body {
 .acct-pill--restaurant {
     background: #fdecd1;
     color: #b7791f;
+}
+
+.acct-pill--gym {
+    background: #fde3e3;
+    color: #c62828;
+}
+
+.acct-pill--event {
+    background: #dcf3ec;
+    color: #0c8d6c;
 }
 
 .acct-pill--completed,

@@ -318,14 +318,20 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['inquiry_action'])) {
             } elseif ($action === 'send_quotation') {
                 $quoteValidDays = max(1, (int)($_POST['quotation_valid_days'] ?? 7));
                 $quoteNotes = trim((string)($_POST['quotation_notes'] ?? ''));
+                $sendWhatsapp = isset($_POST['send_whatsapp']);
 
                 $quoteResult = sendGymQuotationEmail($inquiry, [
                     'valid_days' => $quoteValidDays,
                     'quotation_notes' => $quoteNotes,
+                    'attach_pdf' => true,
+                    'send_whatsapp' => $sendWhatsapp,
                 ]);
 
                 if (!empty($quoteResult['success'])) {
                     $message = 'Gym membership quotation sent to ' . htmlspecialchars((string)($inquiry['email'] ?? '')) . '.';
+                    if (!empty($quoteResult['whatsapp']['success'])) {
+                        $message .= ' WhatsApp delivered.';
+                    }
                 } else {
                     $error = 'Failed to send quotation: ' . ($quoteResult['message'] ?? 'Unknown error');
                 }
@@ -630,6 +636,7 @@ try {
                         <input type="hidden" name="inquiry_action" value="send_quotation">
                         <input type="hidden" name="inquiry_id" value="${inquiry.id}">
                         <input type="hidden" name="csrf_token" value="${gymCsrfToken}">
+                        <input type="hidden" name="send_whatsapp" value="1">
                         <input type="number" min="1" name="quotation_valid_days" value="7" class="form-control" style="max-width:100px;" title="Valid for (days)">
                         <button type="submit" class="btn btn-secondary btn-sm"><i class="fas fa-file-invoice"></i> Send Quotation</button>
                     </form>

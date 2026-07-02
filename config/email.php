@@ -3203,7 +3203,7 @@ function sendGymCancelledEmail(array $inquiry)
  */
 function sendGymQuotationEmail(array $inquiry, array $options = []): array
 {
-    global $email_site_name;
+    global $email_log_enabled, $email_site_name;
 
     try {
         $recipientEmail = trim((string)($inquiry['email'] ?? ''));
@@ -3215,9 +3215,14 @@ function sendGymQuotationEmail(array $inquiry, array $options = []): array
         $currency = (string)getSetting('currency_symbol', 'MWK ');
         $validDays = max(1, (int)($options['valid_days'] ?? 7));
         $notes = trim((string)($options['quotation_notes'] ?? ''));
+        $attachPdf = (bool)($options['attach_pdf'] ?? true);
+        $sendWhatsapp = (bool)($options['send_whatsapp'] ?? true);
         $validUntil = (new DateTime())->modify('+' . $validDays . ' days');
 
-        $quoteRef = 'GQ-' . strtoupper((string)($inquiry['reference_number'] ?? ('GYM-' . (int)($inquiry['id'] ?? 0))));
+        $quoteRef = trim((string)($options['quote_reference'] ?? ''));
+        if ($quoteRef === '') {
+            $quoteRef = 'GQ-' . strtoupper((string)($inquiry['reference_number'] ?? ('GYM-' . (int)($inquiry['id'] ?? 0))));
+        }
 
         $baseAmount = (float)($inquiry['total_amount'] ?? 0);
         $vatAmount = (float)($inquiry['vat_amount'] ?? 0);
@@ -3243,7 +3248,47 @@ function sendGymQuotationEmail(array $inquiry, array $options = []): array
         $htmlBody .= '<p>To confirm this quotation, reply to this email or contact us at '
             . htmlspecialchars((string)getSetting('phone_main', ''), ENT_QUOTES, 'UTF-8') . '.</p>';
 
-        $result = sendEmail($recipientEmail, (string)($inquiry['name'] ?? 'Guest'), $subject, $htmlBody);
+        $result = ['success' => false, 'message' => 'Unable to send quotation email.'];
+        if ($attachPdf) {
+            if (!function_exists('generateGymQuotationPDF')) {
+                require_once __DIR__ . '/invoice.php';
+            }
+            $pdfContent = generateGymQuotationPDF($inquiry, [
+                'valid_days' => $validDays,
+                'quotation_notes' => $notes,
+                'quote_reference' => $quoteRef,
+            ]);
+            $result = sendEmailWithBinaryAttachment(
+                $recipientEmail,
+                (string)($inquiry['name'] ?? 'Guest'),
+                $subject,
+                $htmlBody,
+                $pdfContent,
+                'Gym-Quotation-' . $quoteRef . '.pdf',
+                'application/pdf',
+                'Please review the attached gym membership quotation PDF.'
+            );
+        } else {
+            $result = sendEmail($recipientEmail, (string)($inquiry['name'] ?? 'Guest'), $subject, $htmlBody);
+        }
+
+        if (!empty($result['success']) && $email_log_enabled) {
+            logEmail($recipientEmail, (string)($inquiry['name'] ?? ''), $subject, 'sent');
+        }
+
+        if (!empty($result['success']) && $sendWhatsapp && empty($result['preview_url']) && function_exists('sendGymQuotationWhatsApp')) {
+            $waResult = sendGymQuotationWhatsApp($inquiry, [
+                'valid_days' => $validDays,
+                'quote_reference' => $quoteRef,
+                'quotation_notes' => $notes,
+            ]);
+            $result['whatsapp'] = $waResult;
+            if (!empty($waResult['success'])) {
+                $result['message'] = ($result['message'] ?? '') . ' WhatsApp quotation sent.';
+            } elseif (!in_array($waResult['message'] ?? '', ['No contact phone', 'WhatsApp disabled'], true)) {
+                $result['message'] = ($result['message'] ?? '') . ' WhatsApp not sent: ' . ($waResult['message'] ?? 'Unknown error');
+            }
+        }
 
         return $result;
     } catch (Exception $e) {
@@ -3373,7 +3418,7 @@ function sendEventCancelledEmail(array $inquiry): array
  */
 function sendEventInquiryQuotationEmail(array $inquiry, array $options = []): array
 {
-    global $email_site_name;
+    global $email_log_enabled, $email_site_name;
 
     try {
         $recipientEmail = trim((string)($inquiry['email'] ?? ''));
@@ -3385,9 +3430,14 @@ function sendEventInquiryQuotationEmail(array $inquiry, array $options = []): ar
         $currency = (string)getSetting('currency_symbol', 'MWK ');
         $validDays = max(1, (int)($options['valid_days'] ?? 7));
         $notes = trim((string)($options['quotation_notes'] ?? ''));
+        $attachPdf = (bool)($options['attach_pdf'] ?? true);
+        $sendWhatsapp = (bool)($options['send_whatsapp'] ?? true);
         $validUntil = (new DateTime())->modify('+' . $validDays . ' days');
 
-        $quoteRef = 'EQ-' . strtoupper((string)($inquiry['reference_number'] ?? ('EVT-' . (int)($inquiry['id'] ?? 0))));
+        $quoteRef = trim((string)($options['quote_reference'] ?? ''));
+        if ($quoteRef === '') {
+            $quoteRef = 'EQ-' . strtoupper((string)($inquiry['reference_number'] ?? ('EVT-' . (int)($inquiry['id'] ?? 0))));
+        }
 
         $baseAmount = (float)($inquiry['total_amount'] ?? 0);
         $vatAmount = (float)($inquiry['vat_amount'] ?? 0);
@@ -3413,7 +3463,49 @@ function sendEventInquiryQuotationEmail(array $inquiry, array $options = []): ar
         $htmlBody .= '<p>To confirm this quotation, reply to this email or contact us at '
             . htmlspecialchars((string)getSetting('phone_main', ''), ENT_QUOTES, 'UTF-8') . '.</p>';
 
-        return sendEmail($recipientEmail, (string)($inquiry['name'] ?? 'Guest'), $subject, $htmlBody);
+        $result = ['success' => false, 'message' => 'Unable to send quotation email.'];
+        if ($attachPdf) {
+            if (!function_exists('generateEventInquiryQuotationPDF')) {
+                require_once __DIR__ . '/invoice.php';
+            }
+            $pdfContent = generateEventInquiryQuotationPDF($inquiry, [
+                'valid_days' => $validDays,
+                'quotation_notes' => $notes,
+                'quote_reference' => $quoteRef,
+            ]);
+            $result = sendEmailWithBinaryAttachment(
+                $recipientEmail,
+                (string)($inquiry['name'] ?? 'Guest'),
+                $subject,
+                $htmlBody,
+                $pdfContent,
+                'Event-Quotation-' . $quoteRef . '.pdf',
+                'application/pdf',
+                'Please review the attached event booking quotation PDF.'
+            );
+        } else {
+            $result = sendEmail($recipientEmail, (string)($inquiry['name'] ?? 'Guest'), $subject, $htmlBody);
+        }
+
+        if (!empty($result['success']) && $email_log_enabled) {
+            logEmail($recipientEmail, (string)($inquiry['name'] ?? ''), $subject, 'sent');
+        }
+
+        if (!empty($result['success']) && $sendWhatsapp && empty($result['preview_url']) && function_exists('sendEventInquiryQuotationWhatsApp')) {
+            $waResult = sendEventInquiryQuotationWhatsApp($inquiry, [
+                'valid_days' => $validDays,
+                'quote_reference' => $quoteRef,
+                'quotation_notes' => $notes,
+            ]);
+            $result['whatsapp'] = $waResult;
+            if (!empty($waResult['success'])) {
+                $result['message'] = ($result['message'] ?? '') . ' WhatsApp quotation sent.';
+            } elseif (!in_array($waResult['message'] ?? '', ['No contact phone', 'WhatsApp disabled'], true)) {
+                $result['message'] = ($result['message'] ?? '') . ' WhatsApp not sent: ' . ($waResult['message'] ?? 'Unknown error');
+            }
+        }
+
+        return $result;
     } catch (Exception $e) {
         error_log("Send Event Inquiry Quotation Email Error: " . $e->getMessage());
         return [

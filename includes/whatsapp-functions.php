@@ -574,6 +574,31 @@ function getDefaultWhatsAppTemplate(string $key): string
             "Valid until: *{{valid_until}}*\n\n" .
             "{{quotation_notes}}\n\n" .
             "For confirmation, contact {{hotel_phone}}.",
+
+        'gym_quotation' =>
+        "🏨 *{{hotel_name}}*\n\n" .
+            "💪 *Gym Membership Quotation*\n\n" .
+            "Hello {{recipient_name}}, your gym membership quotation is ready.\n\n" .
+            "Ref: *{{inquiry_reference}}*\n" .
+            "Quote Ref: *{{quote_reference}}*\n" .
+            "Package: {{membership_type}}\n" .
+            "Total: *{{total_amount}}*\n" .
+            "Valid until: *{{valid_until}}*\n\n" .
+            "{{quotation_notes}}\n\n" .
+            "For confirmation, contact {{hotel_phone}}.",
+
+        'event_inquiry_quotation' =>
+        "🏨 *{{hotel_name}}*\n\n" .
+            "🎫 *Event Booking Quotation*\n\n" .
+            "Hello {{recipient_name}}, your event booking quotation is ready.\n\n" .
+            "Ref: *{{inquiry_reference}}*\n" .
+            "Quote Ref: *{{quote_reference}}*\n" .
+            "Event: {{event_title}}\n" .
+            "Guests: {{guests}}\n" .
+            "Total: *{{total_amount}}*\n" .
+            "Valid until: *{{valid_until}}*\n\n" .
+            "{{quotation_notes}}\n\n" .
+            "For confirmation, contact {{hotel_phone}}.",
     ];
 
     return $templates[$key] ?? "{{hotel_name}}: Booking {{booking_reference}} update.";
@@ -913,5 +938,96 @@ function sendEventQuotationWhatsApp(array $event, array $recipient = [], array $
     ];
 
     $message = renderWhatsAppTemplate('event_quotation', $vars);
+    return sendWhatsAppMessage($phone, $message);
+}
+
+/**
+ * Send a gym membership quotation via WhatsApp (mirrors sendConferenceQuotationWhatsApp).
+ */
+function sendGymQuotationWhatsApp(array $inquiry, array $options = []): array
+{
+    if (!isWhatsAppEnabled()) {
+        return ['success' => false, 'message' => 'WhatsApp disabled'];
+    }
+
+    $phone = normaliseWhatsAppNumber((string)($inquiry['phone'] ?? ''));
+    if (empty($phone)) {
+        return ['success' => false, 'message' => 'No contact phone'];
+    }
+
+    $currency = getSetting('currency_symbol');
+    $validDays = max(1, (int)($options['valid_days'] ?? 7));
+    $quoteRef = (string)($options['quote_reference'] ?? ('GQ-' . strtoupper((string)($inquiry['reference_number'] ?? ''))));
+    $notes = trim((string)($options['quotation_notes'] ?? ''));
+    $validUntil = (new DateTime())->modify('+' . $validDays . ' days')->format('F j, Y');
+
+    $baseAmount = (float)($inquiry['total_amount'] ?? 0);
+    $vatAmount = (float)($inquiry['vat_amount'] ?? 0);
+    $totalAmount = (float)($inquiry['total_with_vat'] ?? 0);
+    if ($totalAmount <= 0) {
+        $totalAmount = $baseAmount + $vatAmount;
+    }
+
+    $vars = [
+        'hotel_name' => getSetting('site_name'),
+        'recipient_name' => (string)($inquiry['name'] ?? 'Guest'),
+        'inquiry_reference' => (string)($inquiry['reference_number'] ?? ''),
+        'quote_reference' => $quoteRef,
+        'quotation_reference' => $quoteRef,
+        'membership_type' => (string)($inquiry['membership_type'] ?? ''),
+        'total_amount' => $currency . ' ' . number_format($totalAmount, 0),
+        'valid_until' => $validUntil,
+        'quotation_notes' => $notes !== '' ? $notes : 'Please confirm before the validity date to secure this quotation.',
+        'hotel_phone' => getSetting('phone_main', ''),
+    ];
+
+    $message = renderWhatsAppTemplate('gym_quotation', $vars);
+    return sendWhatsAppMessage($phone, $message);
+}
+
+/**
+ * Send an event booking quotation via WhatsApp (mirrors sendGymQuotationWhatsApp).
+ * Distinct from sendEventQuotationWhatsApp, which sends an ad-hoc quote against
+ * an events listing row rather than an event_inquiries booking.
+ */
+function sendEventInquiryQuotationWhatsApp(array $inquiry, array $options = []): array
+{
+    if (!isWhatsAppEnabled()) {
+        return ['success' => false, 'message' => 'WhatsApp disabled'];
+    }
+
+    $phone = normaliseWhatsAppNumber((string)($inquiry['phone'] ?? ''));
+    if (empty($phone)) {
+        return ['success' => false, 'message' => 'No contact phone'];
+    }
+
+    $currency = getSetting('currency_symbol');
+    $validDays = max(1, (int)($options['valid_days'] ?? 7));
+    $quoteRef = (string)($options['quote_reference'] ?? ('EQ-' . strtoupper((string)($inquiry['reference_number'] ?? ''))));
+    $notes = trim((string)($options['quotation_notes'] ?? ''));
+    $validUntil = (new DateTime())->modify('+' . $validDays . ' days')->format('F j, Y');
+
+    $baseAmount = (float)($inquiry['total_amount'] ?? 0);
+    $vatAmount = (float)($inquiry['vat_amount'] ?? 0);
+    $totalAmount = (float)($inquiry['total_with_vat'] ?? 0);
+    if ($totalAmount <= 0) {
+        $totalAmount = $baseAmount + $vatAmount;
+    }
+
+    $vars = [
+        'hotel_name' => getSetting('site_name'),
+        'recipient_name' => (string)($inquiry['name'] ?? 'Guest'),
+        'inquiry_reference' => (string)($inquiry['reference_number'] ?? ''),
+        'quote_reference' => $quoteRef,
+        'quotation_reference' => $quoteRef,
+        'event_title' => (string)($inquiry['event_title'] ?? 'Event'),
+        'guests' => (string)max(1, (int)($inquiry['guests'] ?? 1)),
+        'total_amount' => $currency . ' ' . number_format($totalAmount, 0),
+        'valid_until' => $validUntil,
+        'quotation_notes' => $notes !== '' ? $notes : 'Please confirm before the validity date to secure your event booking.',
+        'hotel_phone' => getSetting('phone_main', ''),
+    ];
+
+    $message = renderWhatsAppTemplate('event_inquiry_quotation', $vars);
     return sendWhatsAppMessage($phone, $message);
 }

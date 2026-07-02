@@ -2926,3 +2926,312 @@ function sendEventInvoiceEmailToClient(array $inquiry, string $invoice_file, arr
         return ['success' => false, 'message' => $e->getMessage()];
     }
 }
+
+/**
+ * Generate a gym membership quotation PDF (mirrors generateConferenceQuotationPDF —
+ * in-memory only, no invoice-number sequence since a quotation isn't a payment record).
+ *
+ * @param array $inquiry Row from gym_inquiries.
+ * @param array $options Optional keys: valid_days, quotation_notes, quote_reference.
+ * @return string Raw PDF binary.
+ */
+function generateGymQuotationPDF(array $inquiry, array $options = []): string
+{
+    require_once __DIR__ . '/../vendor/autoload.php';
+
+    $siteName = (string)getSetting('site_name', "Rosalyn's Beach Hotel");
+    $sitePhone = (string)getSetting('phone_main', '');
+    $siteEmail = (string)getSetting('email_main', getSetting('email_from_email', ''));
+    $siteAddress = trim((string)getSetting('address_line1', ''));
+    $currency = (string)getSetting('currency_symbol', 'MWK ');
+    $paymentPolicy = (string)getSetting('payment_policy', 'Payment terms apply as agreed with our reception team.');
+
+    $validDays = max(1, (int)($options['valid_days'] ?? 7));
+    $validUntil = (new DateTime())->modify('+' . $validDays . ' days');
+    $notes = trim((string)($options['quotation_notes'] ?? ($inquiry['notes'] ?? '')));
+    $quoteRef = trim((string)($options['quote_reference'] ?? ''));
+    if ($quoteRef === '') {
+        $quoteRef = 'GQ-' . strtoupper((string)($inquiry['reference_number'] ?? ('GYM-' . (int)($inquiry['id'] ?? 0))));
+    }
+
+    $baseAmount = (float)($inquiry['total_amount'] ?? 0);
+    $vatRate = (float)($inquiry['vat_rate'] ?? 0);
+    $vatAmount = (float)($inquiry['vat_amount'] ?? 0);
+    if ($vatAmount <= 0 && $vatRate > 0) {
+        $vatAmount = round($baseAmount * ($vatRate / 100), 2);
+    }
+    $totalAmount = (float)($inquiry['total_with_vat'] ?? 0);
+    if ($totalAmount <= 0) {
+        $totalAmount = $baseAmount + $vatAmount;
+    }
+    $depositAmount = (float)($inquiry['deposit_amount'] ?? 0);
+    $membershipType = (string)($inquiry['membership_type'] ?? 'Gym Membership');
+
+    $fmt = static function (float $value) use ($currency): string {
+        return $currency . number_format($value, 0);
+    };
+    $esc = static function (mixed $value): string {
+        return htmlspecialchars((string)$value, ENT_QUOTES, 'UTF-8');
+    };
+
+    $vatRow = '';
+    if ($vatAmount > 0) {
+        $vatLabel = $vatRate > 0 ? 'VAT (' . number_format($vatRate, 0) . '%)' : 'VAT';
+        $vatRow = '<tr><td>' . $esc($vatLabel) . '</td><td class="right">' . $esc($fmt($vatAmount)) . '</td></tr>';
+    }
+
+    $depositRow = '';
+    if (!empty($inquiry['deposit_required']) && $depositAmount > 0) {
+        $depositRow = '<tr><td>Deposit Required</td><td class="right">' . $esc($fmt($depositAmount)) . '</td></tr>';
+    }
+
+    $notesBlock = '';
+    if ($notes !== '') {
+        $notesBlock = '<div class="note-block"><h3>Notes</h3><p>' . nl2br($esc($notes)) . '</p></div>';
+    }
+
+    $html = '
+<style>
+body { font-family: helvetica; color: #2A2723; font-size: 10.5px; background: #F7F3EE; }
+.header { background: #8A775F; color: #ffffff; padding: 16px; }
+.header h1 { margin: 0 0 4px; font-size: 20px; letter-spacing: 0.8px; }
+.header p { margin: 0; font-size: 10px; color: #E6DBCF; }
+.meta { margin-top: 10px; border: 1px solid #E3D8CA; }
+.meta td { padding: 8px; font-size: 10px; }
+.meta .label { color: #7A6A58; text-transform: uppercase; letter-spacing: 0.6px; width: 35%; }
+.section-title { margin: 14px 0 6px; color: #8A775F; font-size: 12px; letter-spacing: 0.4px; }
+.detail-table, .price-table { border: 1px solid #E3D8CA; border-collapse: collapse; }
+.detail-table td, .price-table td { border: 1px solid #EDE4D8; padding: 7px; font-size: 10px; }
+.detail-table td:first-child, .price-table td:first-child { background: #F7F3EE; width: 38%; color: #5F5343; }
+.right { text-align: right; }
+.total-row td { background: #EDE2D4; font-weight: bold; color: #231F1C; }
+.policy { margin-top: 10px; background: #FFF8EC; border-left: 3px solid #B18247; padding: 10px; }
+.note-block { margin-top: 10px; background: #F2F7FC; border-left: 3px solid #4A6FA5; padding: 10px; }
+.note-block h3 { margin: 0 0 6px; font-size: 11px; color: #2D4F7A; }
+.footer { margin-top: 16px; font-size: 9px; color: #766A5E; text-align: center; }
+</style>
+
+<div class="header">
+    <h1>' . $esc($siteName) . '</h1>
+    <p>' . $esc($siteAddress) . ' | ' . $esc($sitePhone) . ' | ' . $esc($siteEmail) . '</p>
+</div>
+
+<table class="meta" width="100%" cellspacing="0" cellpadding="0">
+    <tr>
+        <td class="label">Quotation Ref</td>
+        <td>' . $esc($quoteRef) . '</td>
+        <td class="label">Valid Until</td>
+        <td>' . $esc($validUntil->format('F j, Y')) . '</td>
+    </tr>
+    <tr>
+        <td class="label">Prepared For</td>
+        <td>' . $esc((string)($inquiry['name'] ?? 'Guest')) . '</td>
+        <td class="label">Phone</td>
+        <td>' . $esc((string)($inquiry['phone'] ?? '')) . '</td>
+    </tr>
+</table>
+
+<h2 class="section-title">Membership Details</h2>
+<table class="detail-table" width="100%" cellspacing="0" cellpadding="0">
+    <tr><td>Inquiry Reference</td><td>' . $esc((string)($inquiry['reference_number'] ?? '')) . '</td></tr>
+    <tr><td>Package</td><td>' . $esc($membershipType) . '</td></tr>
+</table>
+
+<h2 class="section-title">Price Breakdown</h2>
+<table class="price-table" width="100%" cellspacing="0" cellpadding="0">
+    <tr><td>Membership Package</td><td class="right">' . $esc($fmt($baseAmount)) . '</td></tr>'
+        . $vatRow
+        . $depositRow
+        . '<tr class="total-row"><td>Total Quotation</td><td class="right">' . $esc($fmt($totalAmount)) . '</td></tr>
+</table>
+
+<div class="policy">
+    <strong>Payment Terms</strong><br>' . $esc($paymentPolicy) . '
+</div>'
+        . $notesBlock . '
+
+<div class="footer">
+    This quotation is valid until ' . $esc($validUntil->format('F j, Y')) . '. Availability and rates are subject to confirmation at acceptance.
+</div>';
+
+    if (function_exists('bookingRenderPdfFromHtml')) {
+        return bookingRenderPdfFromHtml($html, 'Gym Quotation ' . $quoteRef);
+    }
+
+    if (!class_exists('JapandiTCPDF')) {
+        class JapandiTCPDF extends TCPDF {
+            public function AddPage($orientation = '', $format = '', $keepmargins = false, $tocpage = false): void
+            {
+                parent::AddPage($orientation, $format, $keepmargins, $tocpage);
+                $this->SetFillColor(247, 243, 238);
+                $this->Rect(0, 0, $this->getPageWidth(), $this->getPageHeight(), 'F');
+            }
+        }
+    }
+    $pdf = new JapandiTCPDF('P', 'mm', 'A4', true, 'UTF-8', false);
+    $pdf->setPrintHeader(false);
+    $pdf->setPrintFooter(false);
+    $pdf->SetMargins(16, 16, 16);
+    $pdf->SetAutoPageBreak(true, 18);
+    $pdf->SetTitle('Gym Quotation ' . $quoteRef);
+    $pdf->SetAuthor($siteName);
+    $pdf->AddPage();
+    $pdf->writeHTML($html, true, false, true, false, '');
+
+    return $pdf->Output('', 'S');
+}
+
+/**
+ * Generate an event booking quotation PDF (mirrors generateGymQuotationPDF).
+ *
+ * @param array $inquiry Row from event_inquiries.
+ * @param array $options Optional keys: valid_days, quotation_notes, quote_reference.
+ * @return string Raw PDF binary.
+ */
+function generateEventInquiryQuotationPDF(array $inquiry, array $options = []): string
+{
+    require_once __DIR__ . '/../vendor/autoload.php';
+
+    $siteName = (string)getSetting('site_name', "Rosalyn's Beach Hotel");
+    $sitePhone = (string)getSetting('phone_main', '');
+    $siteEmail = (string)getSetting('email_main', getSetting('email_from_email', ''));
+    $siteAddress = trim((string)getSetting('address_line1', ''));
+    $currency = (string)getSetting('currency_symbol', 'MWK ');
+    $paymentPolicy = (string)getSetting('payment_policy', 'Payment terms apply as agreed with our reception team.');
+
+    $validDays = max(1, (int)($options['valid_days'] ?? 7));
+    $validUntil = (new DateTime())->modify('+' . $validDays . ' days');
+    $notes = trim((string)($options['quotation_notes'] ?? ($inquiry['notes'] ?? '')));
+    $quoteRef = trim((string)($options['quote_reference'] ?? ''));
+    if ($quoteRef === '') {
+        $quoteRef = 'EQ-' . strtoupper((string)($inquiry['reference_number'] ?? ('EVT-' . (int)($inquiry['id'] ?? 0))));
+    }
+
+    $baseAmount = (float)($inquiry['total_amount'] ?? 0);
+    $vatRate = (float)($inquiry['vat_rate'] ?? 0);
+    $vatAmount = (float)($inquiry['vat_amount'] ?? 0);
+    if ($vatAmount <= 0 && $vatRate > 0) {
+        $vatAmount = round($baseAmount * ($vatRate / 100), 2);
+    }
+    $totalAmount = (float)($inquiry['total_with_vat'] ?? 0);
+    if ($totalAmount <= 0) {
+        $totalAmount = $baseAmount + $vatAmount;
+    }
+    $depositAmount = (float)($inquiry['deposit_amount'] ?? 0);
+    $eventTitle = (string)($inquiry['event_title'] ?? 'Event Booking');
+    $guests = max(1, (int)($inquiry['guests'] ?? 1));
+
+    $fmt = static function (float $value) use ($currency): string {
+        return $currency . number_format($value, 0);
+    };
+    $esc = static function (mixed $value): string {
+        return htmlspecialchars((string)$value, ENT_QUOTES, 'UTF-8');
+    };
+
+    $vatRow = '';
+    if ($vatAmount > 0) {
+        $vatLabel = $vatRate > 0 ? 'VAT (' . number_format($vatRate, 0) . '%)' : 'VAT';
+        $vatRow = '<tr><td>' . $esc($vatLabel) . '</td><td class="right">' . $esc($fmt($vatAmount)) . '</td></tr>';
+    }
+
+    $depositRow = '';
+    if (!empty($inquiry['deposit_required']) && $depositAmount > 0) {
+        $depositRow = '<tr><td>Deposit Required</td><td class="right">' . $esc($fmt($depositAmount)) . '</td></tr>';
+    }
+
+    $notesBlock = '';
+    if ($notes !== '') {
+        $notesBlock = '<div class="note-block"><h3>Notes</h3><p>' . nl2br($esc($notes)) . '</p></div>';
+    }
+
+    $html = '
+<style>
+body { font-family: helvetica; color: #2A2723; font-size: 10.5px; background: #F7F3EE; }
+.header { background: #8A775F; color: #ffffff; padding: 16px; }
+.header h1 { margin: 0 0 4px; font-size: 20px; letter-spacing: 0.8px; }
+.header p { margin: 0; font-size: 10px; color: #E6DBCF; }
+.meta { margin-top: 10px; border: 1px solid #E3D8CA; }
+.meta td { padding: 8px; font-size: 10px; }
+.meta .label { color: #7A6A58; text-transform: uppercase; letter-spacing: 0.6px; width: 35%; }
+.section-title { margin: 14px 0 6px; color: #8A775F; font-size: 12px; letter-spacing: 0.4px; }
+.detail-table, .price-table { border: 1px solid #E3D8CA; border-collapse: collapse; }
+.detail-table td, .price-table td { border: 1px solid #EDE4D8; padding: 7px; font-size: 10px; }
+.detail-table td:first-child, .price-table td:first-child { background: #F7F3EE; width: 38%; color: #5F5343; }
+.right { text-align: right; }
+.total-row td { background: #EDE2D4; font-weight: bold; color: #231F1C; }
+.policy { margin-top: 10px; background: #FFF8EC; border-left: 3px solid #B18247; padding: 10px; }
+.note-block { margin-top: 10px; background: #F2F7FC; border-left: 3px solid #4A6FA5; padding: 10px; }
+.note-block h3 { margin: 0 0 6px; font-size: 11px; color: #2D4F7A; }
+.footer { margin-top: 16px; font-size: 9px; color: #766A5E; text-align: center; }
+</style>
+
+<div class="header">
+    <h1>' . $esc($siteName) . '</h1>
+    <p>' . $esc($siteAddress) . ' | ' . $esc($sitePhone) . ' | ' . $esc($siteEmail) . '</p>
+</div>
+
+<table class="meta" width="100%" cellspacing="0" cellpadding="0">
+    <tr>
+        <td class="label">Quotation Ref</td>
+        <td>' . $esc($quoteRef) . '</td>
+        <td class="label">Valid Until</td>
+        <td>' . $esc($validUntil->format('F j, Y')) . '</td>
+    </tr>
+    <tr>
+        <td class="label">Prepared For</td>
+        <td>' . $esc((string)($inquiry['name'] ?? 'Guest')) . '</td>
+        <td class="label">Phone</td>
+        <td>' . $esc((string)($inquiry['phone'] ?? '')) . '</td>
+    </tr>
+</table>
+
+<h2 class="section-title">Booking Details</h2>
+<table class="detail-table" width="100%" cellspacing="0" cellpadding="0">
+    <tr><td>Inquiry Reference</td><td>' . $esc((string)($inquiry['reference_number'] ?? '')) . '</td></tr>
+    <tr><td>Event</td><td>' . $esc($eventTitle) . '</td></tr>
+    <tr><td>Guests</td><td>' . $esc((string)$guests) . '</td></tr>
+</table>
+
+<h2 class="section-title">Price Breakdown</h2>
+<table class="price-table" width="100%" cellspacing="0" cellpadding="0">
+    <tr><td>Event Booking</td><td class="right">' . $esc($fmt($baseAmount)) . '</td></tr>'
+        . $vatRow
+        . $depositRow
+        . '<tr class="total-row"><td>Total Quotation</td><td class="right">' . $esc($fmt($totalAmount)) . '</td></tr>
+</table>
+
+<div class="policy">
+    <strong>Payment Terms</strong><br>' . $esc($paymentPolicy) . '
+</div>'
+        . $notesBlock . '
+
+<div class="footer">
+    This quotation is valid until ' . $esc($validUntil->format('F j, Y')) . '. Availability and rates are subject to confirmation at acceptance.
+</div>';
+
+    if (function_exists('bookingRenderPdfFromHtml')) {
+        return bookingRenderPdfFromHtml($html, 'Event Quotation ' . $quoteRef);
+    }
+
+    if (!class_exists('JapandiTCPDF')) {
+        class JapandiTCPDF extends TCPDF {
+            public function AddPage($orientation = '', $format = '', $keepmargins = false, $tocpage = false): void
+            {
+                parent::AddPage($orientation, $format, $keepmargins, $tocpage);
+                $this->SetFillColor(247, 243, 238);
+                $this->Rect(0, 0, $this->getPageWidth(), $this->getPageHeight(), 'F');
+            }
+        }
+    }
+    $pdf = new JapandiTCPDF('P', 'mm', 'A4', true, 'UTF-8', false);
+    $pdf->setPrintHeader(false);
+    $pdf->setPrintFooter(false);
+    $pdf->SetMargins(16, 16, 16);
+    $pdf->SetAutoPageBreak(true, 18);
+    $pdf->SetTitle('Event Quotation ' . $quoteRef);
+    $pdf->SetAuthor($siteName);
+    $pdf->AddPage();
+    $pdf->writeHTML($html, true, false, true, false, '');
+
+    return $pdf->Output('', 'S');
+}

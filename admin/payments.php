@@ -34,28 +34,38 @@ $sql = "
             WHEN p.booking_type = 'room' THEN CONCAT(b.guest_name, ' (', b.booking_reference, ')')
             WHEN p.booking_type = 'conference' THEN CONCAT(ci.{$conferenceFields['company']}, ' (', ci.{$conferenceFields['reference']}, ')')
             WHEN p.booking_type = 'restaurant' THEN CONCAT('Restaurant order ', so.reference, COALESCE(CONCAT(' - ', NULLIF(so.customer_name, '')), ''))
+            WHEN p.booking_type = 'gym' THEN CONCAT(gi.name, ' (', gi.reference_number, ')')
+            WHEN p.booking_type = 'event' THEN CONCAT(ei.name, ' (', ei.reference_number, ')')
             ELSE 'Unknown'
         END as booking_description,
         CASE
             WHEN p.booking_type = 'room' THEN b.booking_reference
             WHEN p.booking_type = 'conference' THEN ci.{$conferenceFields['reference']}
             WHEN p.booking_type = 'restaurant' THEN so.reference
+            WHEN p.booking_type = 'gym' THEN gi.reference_number
+            WHEN p.booking_type = 'event' THEN ei.reference_number
             ELSE NULL
         END as booking_reference,
         CASE
             WHEN p.booking_type = 'room' THEN b.guest_email
             WHEN p.booking_type = 'conference' THEN ci.{$conferenceFields['email']}
+            WHEN p.booking_type = 'gym' THEN gi.email
+            WHEN p.booking_type = 'event' THEN ei.email
             ELSE NULL
         END as contact_email,
         CASE
             WHEN p.booking_type = 'room' THEN b.guest_phone
             WHEN p.booking_type = 'conference' THEN ci.{$conferenceFields['phone']}
+            WHEN p.booking_type = 'gym' THEN gi.phone
+            WHEN p.booking_type = 'event' THEN ei.phone
             ELSE NULL
         END as contact_phone
     FROM payments p
     LEFT JOIN bookings b ON p.booking_type = 'room' AND p.booking_id = b.id
     LEFT JOIN conference_inquiries ci ON p.booking_type = 'conference' AND p.booking_id = ci.id
     LEFT JOIN stock_orders so ON p.booking_type = 'restaurant' AND p.booking_id = so.id
+    LEFT JOIN gym_inquiries gi ON p.booking_type = 'gym' AND p.booking_id = gi.id
+    LEFT JOIN event_inquiries ei ON p.booking_type = 'event' AND p.booking_id = ei.id
 ";
 
 $where_conditions = ["p.deleted_at IS NULL"];
@@ -128,6 +138,8 @@ $countSql = "
     LEFT JOIN bookings b ON p.booking_type = 'room' AND p.booking_id = b.id
     LEFT JOIN conference_inquiries ci ON p.booking_type = 'conference' AND p.booking_id = ci.id
     LEFT JOIN stock_orders so ON p.booking_type = 'restaurant' AND p.booking_id = so.id
+    LEFT JOIN gym_inquiries gi ON p.booking_type = 'gym' AND p.booking_id = gi.id
+    LEFT JOIN event_inquiries ei ON p.booking_type = 'event' AND p.booking_id = ei.id
 ";
 
 if (!empty($where_conditions)) {
@@ -215,9 +227,33 @@ if ($searchText !== '') {
                                 OR sox.customer_name LIKE ?
                             )
                 )
+                OR EXISTS (
+                        SELECT 1
+                        FROM gym_inquiries gix
+                        WHERE payments.booking_type = 'gym'
+                            AND payments.booking_id = gix.id
+                            AND (
+                                gix.name LIKE ?
+                                OR gix.reference_number LIKE ?
+                                OR gix.email LIKE ?
+                                OR gix.phone LIKE ?
+                            )
+                )
+                OR EXISTS (
+                        SELECT 1
+                        FROM event_inquiries eix
+                        WHERE payments.booking_type = 'event'
+                            AND payments.booking_id = eix.id
+                            AND (
+                                eix.name LIKE ?
+                                OR eix.reference_number LIKE ?
+                                OR eix.email LIKE ?
+                                OR eix.phone LIKE ?
+                            )
+                )
         )";
     $analyticsSearchLike = '%' . $searchText . '%';
-    $analyticsParams = array_merge($analyticsParams, array_fill(0, 18, $analyticsSearchLike));
+    $analyticsParams = array_merge($analyticsParams, array_fill(0, 26, $analyticsSearchLike));
 }
 if ($status) {
     $analyticsWhere[] = "payment_status = ?";
@@ -327,11 +363,15 @@ if (isset($_GET['export']) && $_GET['export'] === 'csv') {
                 WHEN p.booking_type = 'room' THEN b.guest_name
                 WHEN p.booking_type = 'conference' THEN ci.{$conferenceFields['company']}
                 WHEN p.booking_type = 'restaurant' THEN COALESCE(NULLIF(so.customer_name,''), CONCAT('Order ', so.reference))
+                WHEN p.booking_type = 'gym' THEN gi.name
+                WHEN p.booking_type = 'event' THEN ei.name
             END AS customer
         FROM payments p
         LEFT JOIN bookings b ON p.booking_type = 'room' AND p.booking_id = b.id
         LEFT JOIN conference_inquiries ci ON p.booking_type = 'conference' AND p.booking_id = ci.id
         LEFT JOIN stock_orders so ON p.booking_type = 'restaurant' AND p.booking_id = so.id
+        LEFT JOIN gym_inquiries gi ON p.booking_type = 'gym' AND p.booking_id = gi.id
+        LEFT JOIN event_inquiries ei ON p.booking_type = 'event' AND p.booking_id = ei.id
         WHERE " . implode(' AND ', $where_conditions) . "
         ORDER BY p.payment_date DESC, p.created_at DESC
     ";
@@ -507,7 +547,7 @@ $quickActive = function ($s, $e) use ($startDate, $endDate) {
                                 </tr>
                                 <?php else: foreach ($bySource as $row):
                                     $share = $gross_collected_total > 0 ? ((float)$row['collected'] / $gross_collected_total) * 100 : 0;
-                                    $label = ['room' => 'Rooms', 'conference' => 'Conferences', 'restaurant' => 'F&B / POS'][$row['booking_type']] ?? ucfirst((string)$row['booking_type']);
+                                    $label = ['room' => 'Rooms', 'conference' => 'Conferences', 'restaurant' => 'F&B / POS', 'gym' => 'Gym', 'event' => 'Events'][$row['booking_type']] ?? ucfirst((string)$row['booking_type']);
                                 ?>
                                     <tr>
                                         <td>
@@ -602,6 +642,8 @@ $quickActive = function ($s, $e) use ($startDate, $endDate) {
                         <option value="room" <?php echo $bookingType === 'room' ? 'selected' : ''; ?>>Room</option>
                         <option value="conference" <?php echo $bookingType === 'conference' ? 'selected' : ''; ?>>Conference</option>
                         <option value="restaurant" <?php echo $bookingType === 'restaurant' ? 'selected' : ''; ?>>Restaurant</option>
+                        <option value="gym" <?php echo $bookingType === 'gym' ? 'selected' : ''; ?>>Gym</option>
+                        <option value="event" <?php echo $bookingType === 'event' ? 'selected' : ''; ?>>Event</option>
                     </select>
                 </div>
 

@@ -86,7 +86,9 @@ $conferenceRoomStats = [];
 $recentBookings = [];
 $reviewStats = [];
 $gymInquiryStats = [];
+$gymRevenueTrend = [];
 $eventInquiryStats = [];
+$eventRevenueTrend = [];
 $refundReasons = [];
 $refundStatuses = [];
 $refundTrends = [];
@@ -596,7 +598,9 @@ try {
 
     // 22. Gym Inquiry Stats
     $gymStatsStmt = $pdo->prepare("
-        SELECT status, COUNT(*) as count
+        SELECT status, COUNT(*) as count,
+               COALESCE(SUM(total_amount), 0) as total_value,
+               COALESCE(SUM(amount_paid), 0) as total_paid
         FROM gym_inquiries
         WHERE created_at >= ? AND created_at <= DATE_ADD(?, INTERVAL 1 DAY)
         GROUP BY status
@@ -604,15 +608,43 @@ try {
     $gymStatsStmt->execute([$start_date, $end_date]);
     $gymInquiryStats = $gymStatsStmt->fetchAll(PDO::FETCH_ASSOC);
 
+    // 22a. Gym revenue trend over the selected period
+    $gymTrendStmt = $pdo->prepare("
+        SELECT DATE(created_at) as day,
+               COUNT(*) as bookings,
+               COALESCE(SUM(total_amount), 0) as revenue
+        FROM gym_inquiries
+        WHERE created_at >= ? AND created_at <= DATE_ADD(?, INTERVAL 1 DAY)
+        GROUP BY DATE(created_at)
+        ORDER BY day ASC
+    ");
+    $gymTrendStmt->execute([$start_date, $end_date]);
+    $gymRevenueTrend = $gymTrendStmt->fetchAll(PDO::FETCH_ASSOC);
+
     // 22b. Event Booking Stats
     $eventStatsStmt = $pdo->prepare("
-        SELECT status, COUNT(*) as count
+        SELECT status, COUNT(*) as count,
+               COALESCE(SUM(total_amount), 0) as total_value,
+               COALESCE(SUM(amount_paid), 0) as total_paid
         FROM event_inquiries
         WHERE created_at >= ? AND created_at <= DATE_ADD(?, INTERVAL 1 DAY)
         GROUP BY status
     ");
     $eventStatsStmt->execute([$start_date, $end_date]);
     $eventInquiryStats = $eventStatsStmt->fetchAll(PDO::FETCH_ASSOC);
+
+    // 22c. Event revenue trend over the selected period
+    $eventTrendStmt = $pdo->prepare("
+        SELECT DATE(created_at) as day,
+               COUNT(*) as bookings,
+               COALESCE(SUM(total_amount), 0) as revenue
+        FROM event_inquiries
+        WHERE created_at >= ? AND created_at <= DATE_ADD(?, INTERVAL 1 DAY)
+        GROUP BY DATE(created_at)
+        ORDER BY day ASC
+    ");
+    $eventTrendStmt->execute([$start_date, $end_date]);
+    $eventRevenueTrend = $eventTrendStmt->fetchAll(PDO::FETCH_ASSOC);
 
     // ============================================
     // ADVANCED HOTEL KPI METRICS
@@ -2746,13 +2778,25 @@ try {
                 $totalConfPaid += $cs['total_paid'];
             }
             $totalGymInquiries = 0;
+            $totalGymRevenue = 0;
+            $totalGymPaid = 0;
             foreach ($gymInquiryStats as $gi) {
                 $totalGymInquiries += $gi['count'];
+                $totalGymRevenue += $gi['total_value'];
+                $totalGymPaid += $gi['total_paid'];
             }
+            $gymOutstanding = $totalGymRevenue - $totalGymPaid;
+
             $totalEventBookings = 0;
+            $totalEventRevenue = 0;
+            $totalEventPaid = 0;
             foreach ($eventInquiryStats as $ei) {
                 $totalEventBookings += $ei['count'];
+                $totalEventRevenue += $ei['total_value'];
+                $totalEventPaid += $ei['total_paid'];
             }
+            $eventOutstanding = $totalEventRevenue - $totalEventPaid;
+
             $confCollectionPct = $totalConfRevenue > 0 ? round(($totalConfPaid / $totalConfRevenue) * 100, 0) : 0;
             $confOutstanding = $totalConfRevenue - $totalConfPaid;
         ?>
@@ -2777,16 +2821,26 @@ try {
             <?php endif; ?>
             <?php if ($mod_gym): ?>
             <div class="acct-kpi">
-                <div class="acct-kpi__label">Gym Inquiries</div>
-                <div class="acct-kpi__value"><?php echo number_format($totalGymInquiries); ?></div>
-                <div class="acct-kpi__sub">In selected period</div>
+                <div class="acct-kpi__label">Gym Revenue</div>
+                <div class="acct-kpi__value"><?php echo $currency_symbol . ' ' . number_format($totalGymRevenue, 2); ?></div>
+                <div class="acct-kpi__sub"><?php echo number_format($totalGymInquiries); ?> inquiries</div>
+            </div>
+            <div class="acct-kpi acct-kpi--receivables">
+                <div class="acct-kpi__label">Outstanding (Gym)</div>
+                <div class="acct-kpi__value"><?php echo $currency_symbol . ' ' . number_format($gymOutstanding, 2); ?></div>
+                <div class="acct-kpi__sub">Unpaid gym balances</div>
             </div>
             <?php endif; ?>
             <?php if ($mod_events): ?>
             <div class="acct-kpi">
-                <div class="acct-kpi__label">Event Bookings</div>
-                <div class="acct-kpi__value"><?php echo number_format($totalEventBookings); ?></div>
-                <div class="acct-kpi__sub">In selected period</div>
+                <div class="acct-kpi__label">Event Revenue</div>
+                <div class="acct-kpi__value"><?php echo $currency_symbol . ' ' . number_format($totalEventRevenue, 2); ?></div>
+                <div class="acct-kpi__sub"><?php echo number_format($totalEventBookings); ?> bookings</div>
+            </div>
+            <div class="acct-kpi acct-kpi--receivables">
+                <div class="acct-kpi__label">Outstanding (Events)</div>
+                <div class="acct-kpi__value"><?php echo $currency_symbol . ' ' . number_format($eventOutstanding, 2); ?></div>
+                <div class="acct-kpi__sub">Unpaid event balances</div>
             </div>
             <?php endif; ?>
         </div>
@@ -2835,6 +2889,8 @@ try {
                             <tr>
                                 <th>Status</th>
                                 <th>Count</th>
+                                <th>Value</th>
+                                <th>Paid</th>
                             </tr>
                         </thead>
                         <tbody>
@@ -2842,6 +2898,8 @@ try {
                                 <tr>
                                     <td><span class="acct-pill acct-pill--<?php echo htmlspecialchars($gi['status'] === 'new' ? 'pending' : ($gi['status'] === 'closed' ? 'completed' : $gi['status'])); ?>"><?php echo ucfirst(htmlspecialchars($gi['status'])); ?></span></td>
                                     <td><?php echo number_format($gi['count']); ?></td>
+                                    <td><?php echo $currency_symbol . ' ' . number_format($gi['total_value'], 2); ?></td>
+                                    <td><?php echo $currency_symbol . ' ' . number_format($gi['total_paid'], 2); ?></td>
                                 </tr>
                             <?php endforeach; ?>
                         </tbody>
@@ -2862,6 +2920,8 @@ try {
                             <tr>
                                 <th>Status</th>
                                 <th>Count</th>
+                                <th>Value</th>
+                                <th>Paid</th>
                             </tr>
                         </thead>
                         <tbody>
@@ -2869,6 +2929,8 @@ try {
                                 <tr>
                                     <td><span class="acct-pill acct-pill--<?php echo htmlspecialchars($ei['status']); ?>"><?php echo ucfirst(htmlspecialchars($ei['status'])); ?></span></td>
                                     <td><?php echo number_format($ei['count']); ?></td>
+                                    <td><?php echo $currency_symbol . ' ' . number_format($ei['total_value'], 2); ?></td>
+                                    <td><?php echo $currency_symbol . ' ' . number_format($ei['total_paid'], 2); ?></td>
                                 </tr>
                             <?php endforeach; ?>
                         </tbody>
@@ -2920,6 +2982,64 @@ try {
             <?php endif; ?>
         </div>
         <?php endif; // mod_conference ?>
+
+        <?php if ($mod_gym): ?>
+        <!-- Gym Revenue Trend -->
+        <div class="acct-panel">
+            <h2 class="acct-panel__title"><i class="fas fa-dumbbell"></i> Gym Revenue Trend</h2>
+            <?php if (empty($gymRevenueTrend)): ?>
+                <p class="acct-empty">No gym bookings in this period.</p>
+            <?php else: ?>
+                <table class="acct-table">
+                    <thead>
+                        <tr>
+                            <th>Date</th>
+                            <th>Bookings</th>
+                            <th>Revenue</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <?php foreach ($gymRevenueTrend as $gt): ?>
+                            <tr>
+                                <td><?php echo date('M j, Y', strtotime($gt['day'])); ?></td>
+                                <td><?php echo number_format($gt['bookings']); ?></td>
+                                <td><?php echo $currency_symbol . ' ' . number_format($gt['revenue'], 2); ?></td>
+                            </tr>
+                        <?php endforeach; ?>
+                    </tbody>
+                </table>
+            <?php endif; ?>
+        </div>
+        <?php endif; // mod_gym ?>
+
+        <?php if ($mod_events): ?>
+        <!-- Event Revenue Trend -->
+        <div class="acct-panel">
+            <h2 class="acct-panel__title"><i class="fas fa-calendar-check"></i> Event Revenue Trend</h2>
+            <?php if (empty($eventRevenueTrend)): ?>
+                <p class="acct-empty">No event bookings in this period.</p>
+            <?php else: ?>
+                <table class="acct-table">
+                    <thead>
+                        <tr>
+                            <th>Date</th>
+                            <th>Bookings</th>
+                            <th>Revenue</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <?php foreach ($eventRevenueTrend as $et): ?>
+                            <tr>
+                                <td><?php echo date('M j, Y', strtotime($et['day'])); ?></td>
+                                <td><?php echo number_format($et['bookings']); ?></td>
+                                <td><?php echo $currency_symbol . ' ' . number_format($et['revenue'], 2); ?></td>
+                            </tr>
+                        <?php endforeach; ?>
+                    </tbody>
+                </table>
+            <?php endif; ?>
+        </div>
+        <?php endif; // mod_events ?>
     </div>
 
 <?php endif; ?>
