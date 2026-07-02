@@ -75,6 +75,10 @@ $guestSvc = [
     'maintenance_open' => 0,
     'housekeeping_due' => 0,
 ];
+$gymDash = [
+    'active_members' => 0,
+    'expiring_members' => 0,
+];
 $roomServiceQueue = [];
 $activity_log = [];
 $activity_log_total = 0;
@@ -278,9 +282,20 @@ if (!$is_card_insight_ajax) {
             $finance['payments_today'] = (int)$r['c'];
             $finance['revenue_today']  = (float)$r['v'];
             $finance['revenue_today'] += (float)($ops['restaurant_rev_today'] ?? 0);
-            $r = $pdo->query("SELECT COUNT(*) c, COALESCE(SUM(amount_due),0) v FROM bookings WHERE amount_due > 0 AND status IN ('pending','confirmed','checked-in')")->fetch(PDO::FETCH_ASSOC);
-            $finance['outstanding_count'] = (int)$r['c'];
-            $finance['outstanding']       = (float)$r['v'];
+            // Outstanding receivables from every module this preset actually runs —
+            // a gym must not be shown "bookings with amount due" it can never have.
+            $outstandingSql = [];
+            if ($mod_bookings)   { $outstandingSql[] = "SELECT COUNT(*) c, COALESCE(SUM(amount_due),0) v FROM bookings WHERE amount_due > 0 AND status IN ('pending','confirmed','checked-in')"; }
+            if ($mod_conference) { $outstandingSql[] = "SELECT COUNT(*) c, COALESCE(SUM(amount_due),0) v FROM conference_inquiries WHERE amount_due > 0 AND status NOT IN ('cancelled')"; }
+            if ($mod_gym)        { $outstandingSql[] = "SELECT COUNT(*) c, COALESCE(SUM(amount_due),0) v FROM gym_inquiries WHERE amount_due > 0 AND status NOT IN ('cancelled','closed')"; }
+            if ($mod_events)     { $outstandingSql[] = "SELECT COUNT(*) c, COALESCE(SUM(amount_due),0) v FROM event_inquiries WHERE amount_due > 0 AND status NOT IN ('cancelled')"; }
+            foreach ($outstandingSql as $q) {
+                try {
+                    $r = $pdo->query($q)->fetch(PDO::FETCH_ASSOC);
+                    $finance['outstanding_count'] += (int)($r['c'] ?? 0);
+                    $finance['outstanding']       += (float)($r['v'] ?? 0);
+                } catch (Throwable $e) { /* per-module table may not exist yet */ }
+            }
             $finance['refunds_pending']   = (int)$pdo->query("SELECT COUNT(*) FROM payments WHERE payment_type='refund' AND refund_status IN ('pending','processing') AND deleted_at IS NULL")->fetchColumn();
         } catch (Throwable $e) { /* fine */ }
     }
@@ -292,6 +307,11 @@ if (!$is_card_insight_ajax) {
         }
         if ($mod_gym) {
             $guestSvc['pending_gym'] = (int)$pdo->query("SELECT COUNT(*) FROM gym_inquiries WHERE status='pending' OR status='new'")->fetchColumn();
+            // Membership register (gym_members) — guarded until its migration runs.
+            try {
+                $gymDash['active_members']   = (int)$pdo->query("SELECT COUNT(*) FROM gym_members WHERE status='active'")->fetchColumn();
+                $gymDash['expiring_members'] = (int)$pdo->query("SELECT COUNT(*) FROM gym_members WHERE status='active' AND expiry_date IS NOT NULL AND expiry_date BETWEEN CURDATE() AND DATE_ADD(CURDATE(), INTERVAL 30 DAY)")->fetchColumn();
+            } catch (Throwable $e) { /* table pending migration */ }
         }
         if ($mod_events) {
             try {
@@ -756,26 +776,35 @@ if ($is_card_insight_ajax) {
 
             case 'outstanding_balances':
                 $payload['title'] = 'Outstanding Balances';
-                $payload['subtitle'] = 'Bookings with amount due still unpaid';
+                $payload['subtitle'] = 'Accounts with amount due still unpaid';
                 $payload['columns'] = [
-                    ['key' => 'reference', 'label' => 'Booking'],
-                    ['key' => 'guest', 'label' => 'Guest'],
+                    ['key' => 'reference', 'label' => 'Reference'],
+                    ['key' => 'guest', 'label' => 'Client'],
                     ['key' => 'status', 'label' => 'Status'],
-                    ['key' => 'total', 'label' => 'Booking Total'],
+                    ['key' => 'total', 'label' => 'Total'],
                     ['key' => 'due', 'label' => 'Outstanding'],
                 ];
                 $payload['link'] = ['href' => 'payments.php?balance=outstanding', 'label' => 'Open outstanding balances'];
-                $stmt = $pdo->query("SELECT id AS booking_id, booking_reference, guest_name, status, total_amount, amount_due
-                                     FROM bookings
-                                     WHERE amount_due > 0 AND status IN ('pending','confirmed','checked-in')
-                                     ORDER BY amount_due DESC
-                                     LIMIT 30");
-                $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
+                // Pull receivables only from modules this preset runs.
+                $ob_union = [];
+                if ($mod_bookings)   { $ob_union[] = "SELECT id, booking_reference AS ref, guest_name AS who, status, total_amount, amount_due, 'booking' AS src FROM bookings WHERE amount_due > 0 AND status IN ('pending','confirmed','checked-in')"; }
+                if ($mod_conference) { $ob_union[] = "SELECT id, inquiry_reference AS ref, COALESCE(NULLIF(company_name,''), contact_person) AS who, status, total_amount, amount_due, 'conference' AS src FROM conference_inquiries WHERE amount_due > 0 AND status NOT IN ('cancelled')"; }
+                if ($mod_gym)        { $ob_union[] = "SELECT id, reference_number AS ref, name AS who, status, total_amount, amount_due, 'gym' AS src FROM gym_inquiries WHERE amount_due > 0 AND status NOT IN ('cancelled','closed')"; }
+                if ($mod_events)     { $ob_union[] = "SELECT id, reference_number AS ref, name AS who, status, total_amount, amount_due, 'event' AS src FROM event_inquiries WHERE amount_due > 0 AND status NOT IN ('cancelled')"; }
+                $rows = [];
+                foreach ($ob_union as $obSql) {
+                    try {
+                        foreach ($pdo->query($obSql)->fetchAll(PDO::FETCH_ASSOC) as $obRow) { $rows[] = $obRow; }
+                    } catch (Throwable $e) { /* module table may not exist yet */ }
+                }
+                usort($rows, static fn($a, $b) => (float)$b['amount_due'] <=> (float)$a['amount_due']);
+                $rows = array_slice($rows, 0, 30);
+                $ob_links = ['booking' => 'booking-details.php?id=', 'conference' => 'conference-management.php?id=', 'gym' => 'gym-inquiries.php?id=', 'event' => 'events-inquiries.php?id='];
                 foreach ($rows as $row) {
-                    $bid = (int)($row['booking_id'] ?? 0);
+                    $bid = (int)($row['id'] ?? 0);
                     $payload['rows'][] = [
-                        'reference' => ['href' => 'booking-details.php?id=' . $bid, 'label' => (string)$row['booking_reference']],
-                        'guest' => (string)$row['guest_name'],
+                        'reference' => ['href' => ($ob_links[$row['src']] ?? 'payments.php?q=') . $bid, 'label' => (string)$row['ref']],
+                        'guest' => (string)$row['who'],
                         'status' => ucfirst((string)$row['status']),
                         'total' => $formatMoney((float)($row['total_amount'] ?? 0)),
                         'due' => $formatMoney((float)($row['amount_due'] ?? 0)),
@@ -1437,9 +1466,13 @@ if ($is_card_insight_ajax) {
                 $openTabsStmt = $pdo->query("SELECT COUNT(*) AS c, COALESCE(SUM(total_amount), 0) AS v FROM stock_orders WHERE status = 'placed'")->fetch(PDO::FETCH_ASSOC);
                 $openTabsCount = (int)($openTabsStmt['c'] ?? 0);
                 $openTabsValue = (float)($openTabsStmt['v'] ?? 0);
-                $outstandingStmt = $pdo->query("SELECT COUNT(*) AS c, COALESCE(SUM(amount_due), 0) AS v FROM bookings WHERE amount_due > 0 AND status IN ('pending', 'confirmed', 'checked-in')")->fetch(PDO::FETCH_ASSOC);
-                $outstandingCount = (int)($outstandingStmt['c'] ?? 0);
-                $outstandingValue = (float)($outstandingStmt['v'] ?? 0);
+                $outstandingCount = 0;
+                $outstandingValue = 0.0;
+                if ($mod_bookings) {
+                    $outstandingStmt = $pdo->query("SELECT COUNT(*) AS c, COALESCE(SUM(amount_due), 0) AS v FROM bookings WHERE amount_due > 0 AND status IN ('pending', 'confirmed', 'checked-in')")->fetch(PDO::FETCH_ASSOC);
+                    $outstandingCount = (int)($outstandingStmt['c'] ?? 0);
+                    $outstandingValue = (float)($outstandingStmt['v'] ?? 0);
+                }
 
                 $payload['rows'][] = [
                     'metric' => 'Rooms in maintenance / out of order',
@@ -1473,12 +1506,14 @@ if ($is_card_insight_ajax) {
                     'detail' => $formatMoney($openTabsValue) . ' awaiting payment',
                     'action' => ['href' => $mod_stock ? 'stock-orders.php?status=placed' : 'pos.php', 'label' => 'Open Tabs', 'target' => '_blank'],
                 ];
-                $payload['rows'][] = [
-                    'metric' => 'Bookings with balance due',
-                    'current' => (string)$outstandingCount,
-                    'detail' => $formatMoney($outstandingValue) . ' still receivable',
-                    'action' => ['href' => 'payments.php?balance=outstanding', 'label' => 'Balances', 'target' => '_blank'],
-                ];
+                if ($mod_bookings) {
+                    $payload['rows'][] = [
+                        'metric' => 'Bookings with balance due',
+                        'current' => (string)$outstandingCount,
+                        'detail' => $formatMoney($outstandingValue) . ' still receivable',
+                        'action' => ['href' => 'payments.php?balance=outstanding', 'label' => 'Balances', 'target' => '_blank'],
+                    ];
+                }
                 $payload['empty'] = 'No operations or facilities issues are active right now.';
                 break;
 
@@ -1714,6 +1749,30 @@ $currency_symbol = getSetting('currency_symbol');
                 <div class="stat-sub"><span class="kpi-currency"><?php echo $currency_symbol; ?></span><?php echo number_format($ops['open_tabs_value'], 2); ?> outstanding</div>
             </a>
             <?php endif; ?>
+            <?php if ($mod_gym && !$mod_bookings): ?>
+            <?php /* Gym-first businesses — membership register front and centre. */ ?>
+            <a class="stat-card stat-good" href="gym-members.php" title="Open the membership register">
+                <span class="stat-cta">View →</span>
+                <div class="stat-icon"><i class="fas fa-id-card"></i></div>
+                <div class="stat-value"><?php echo (int)$gymDash['active_members']; ?></div>
+                <div class="stat-label">Active Members</div>
+                <div class="stat-sub">Currently enrolled memberships</div>
+            </a>
+            <a class="stat-card <?php echo $gymDash['expiring_members'] > 0 ? 'stat-warn' : ''; ?>" href="gym-members.php?filter=expiring" title="Memberships expiring within 30 days">
+                <span class="stat-cta">Action →</span>
+                <div class="stat-icon"><i class="fas fa-hourglass-end"></i></div>
+                <div class="stat-value"><?php echo (int)$gymDash['expiring_members']; ?></div>
+                <div class="stat-label">Expiring Soon</div>
+                <div class="stat-sub">Renewals due in the next 30 days</div>
+            </a>
+            <a class="stat-card <?php echo $guestSvc['pending_gym'] > 0 ? 'stat-warn' : 'stat-info'; ?>" href="gym-inquiries.php" title="New membership inquiries awaiting reply">
+                <span class="stat-cta">Reply →</span>
+                <div class="stat-icon"><i class="fas fa-inbox"></i></div>
+                <div class="stat-value"><?php echo (int)$guestSvc['pending_gym']; ?></div>
+                <div class="stat-label">New Inquiries</div>
+                <div class="stat-sub">Prospects waiting to hear back</div>
+            </a>
+            <?php endif; ?>
             <?php if ($mod_bookings): ?>
             <a class="stat-card stat-info js-dashboard-insight" data-insight-card="checkins_today" href="bookings.php?filter=checkin_today" title="View today's check-ins">
                 <span class="stat-cta">View →</span>
@@ -1785,7 +1844,7 @@ $currency_symbol = getSetting('currency_symbol');
                     </span>
                 </div>
                 <div class="stat-label">Outstanding Balances</div>
-                <div class="stat-sub"><?php echo $finance['outstanding_count']; ?> booking(s) with amount due</div>
+                <div class="stat-sub"><?php echo $finance['outstanding_count']; ?> <?php echo $mod_bookings ? 'booking(s)' : 'account(s)'; ?> with amount due</div>
             </a>
             <?php endif; ?>
         </div>
@@ -2054,7 +2113,7 @@ $currency_symbol = getSetting('currency_symbol');
                     <?php endif; ?>
                     <?php if ($mod_finance): ?>
                     <li>
-                        <span class="pri"><i class="fas fa-money-check-alt" style="color:#dc3545;"></i> Bookings with balance due</span>
+                        <span class="pri"><i class="fas fa-money-check-alt" style="color:#dc3545;"></i> <?php echo $mod_bookings ? 'Bookings' : 'Accounts'; ?> with balance due</span>
                         <a href="payments.php?balance=outstanding" style="text-decoration:none;">
                             <span class="pulse-pill <?php echo $finance['outstanding_count'] > 0 ? 'red' : 'green'; ?>"><?php echo $finance['outstanding_count']; ?></span>
                         </a>

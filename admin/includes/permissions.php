@@ -1330,6 +1330,7 @@ function getPermissionForPage(string $page)
         'pos-accounting.php' => 'pos_accounting',
         'shift-close-report.php' => 'pos_accounting',
         'quotations.php' => 'create_booking',
+        'gym-members.php' => 'gym',
         'section-headers-management.php' => 'section_headers',
         'footer-management.php'         => 'footer_management',
         'booking-settings.php' => 'booking_settings',
@@ -1419,7 +1420,8 @@ function getModuleForPage(string $page)
         'receipts.php' => 'finance',
         'invoices.php' => 'finance',
         'credit-notes.php' => 'finance',
-        'quotations.php' => 'finance',
+        'quotations.php' => ['finance', 'advance_booking'],
+        'gym-members.php' => 'gym',
         'reports.php' => 'finance',
         'end-of-day-report.php' => 'finance',
     ];
@@ -1440,6 +1442,16 @@ function rh_module_key_enabled(string $key): bool
 {
     if ($key === 'restaurant_page') {
         return function_exists('isRestaurantEnabled') && isRestaurantEnabled();
+    }
+    if ($key === 'advance_booking') {
+        // The standalone Quotations register only makes sense for businesses
+        // taking advance bookings (rooms, conferences) — not walk-in tills
+        // like a gym, supermarket, retail shop or bar. Per-inquiry quotation
+        // emails (gym/events) live inside their own inquiry pages regardless.
+        if (!function_exists('moduleEnabled')) {
+            return true;
+        }
+        return moduleEnabled('bookings') || moduleEnabled('conference');
     }
     return function_exists('moduleEnabled') && moduleEnabled($key);
 }
