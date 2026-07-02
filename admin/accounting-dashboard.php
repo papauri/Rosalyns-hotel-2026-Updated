@@ -1179,7 +1179,7 @@ if (!isset($dailyTrend)) {
             </table>
             <div class="acct-insight-actions">
                 <a href="payments.php?date=<?php echo urlencode($today); ?>" class="acct-btn acct-btn--primary">Open today's payments</a>
-                <a href="pos-accounting.php" class="acct-btn acct-btn--ghost">Open POS accounting</a>
+                <?php if ($mod_pos): ?><a href="pos-accounting.php" class="acct-btn acct-btn--ghost">Open POS accounting</a><?php endif; ?>
             </div>
         </template>
 

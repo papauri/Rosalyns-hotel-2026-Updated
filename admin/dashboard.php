@@ -789,7 +789,9 @@ if ($is_card_insight_ajax) {
                     ['key' => 'age', 'label' => 'Age'],
                     ['key' => 'status', 'label' => 'Status'],
                 ];
-                $payload['link'] = ['href' => 'stock-orders.php?status=placed', 'label' => 'Open full tabs list'];
+                $payload['link'] = $mod_stock
+                    ? ['href' => 'stock-orders.php?status=placed', 'label' => 'Open full tabs list']
+                    : ['href' => 'pos.php', 'label' => 'Open POS till'];
                 $stmt = $pdo->query("SELECT o.id AS order_id,
                                             o.reference,
                                             o.table_number,
@@ -1462,7 +1464,7 @@ if ($is_card_insight_ajax) {
                     'metric' => 'Open restaurant tabs',
                     'current' => (string)$openTabsCount,
                     'detail' => $formatMoney($openTabsValue) . ' awaiting payment',
-                    'action' => ['href' => 'stock-orders.php?status=placed', 'label' => 'Open Tabs', 'target' => '_blank'],
+                    'action' => ['href' => $mod_stock ? 'stock-orders.php?status=placed' : 'pos.php', 'label' => 'Open Tabs', 'target' => '_blank'],
                 ];
                 $payload['rows'][] = [
                     'metric' => 'Bookings with balance due',
@@ -1761,7 +1763,7 @@ $currency_symbol = getSetting('currency_symbol');
         <h3 class="section-title" style="margin-top:6px;"><i class="fas fa-bolt"></i> Operations Pulse</h3>
         <div class="ops-grid">
             <?php if ($mod_pos): ?>
-            <a class="ops-card js-dashboard-insight" data-insight-card="open_tabs" href="stock-orders.php?status=placed" title="<?php echo isRestaurantEnabled() ? 'Open restaurant tabs awaiting payment' : 'Placed orders awaiting payment'; ?>">
+            <a class="ops-card js-dashboard-insight" data-insight-card="open_tabs" href="<?php echo $mod_stock ? 'stock-orders.php?status=placed' : 'pos.php'; ?>" title="<?php echo isRestaurantEnabled() ? 'Open restaurant tabs awaiting payment' : 'Placed orders awaiting payment'; ?>">
                 <div class="ops-icon" style="background:#e67e22;"><i class="fas fa-receipt"></i></div>
                 <div class="ops-body">
                     <div class="ops-value"><?php echo $ops['open_tabs']; ?></div>
@@ -2004,7 +2006,7 @@ $currency_symbol = getSetting('currency_symbol');
                     <?php if ($mod_pos): ?>
                     <li>
                         <span class="pri"><i class="fas fa-receipt" style="color:#e67e22;"></i> <?php echo isRestaurantEnabled() ? 'Open restaurant tabs' : 'Pending orders'; ?></span>
-                        <a href="stock-orders.php?status=placed" style="text-decoration:none;">
+                        <a href="<?php echo $mod_stock ? 'stock-orders.php?status=placed' : 'pos.php'; ?>" style="text-decoration:none;">
                             <span class="pulse-pill <?php echo $ops['open_tabs'] > 0 ? 'amber' : 'green'; ?>"><?php echo $ops['open_tabs']; ?></span>
                         </a>
                     </li>

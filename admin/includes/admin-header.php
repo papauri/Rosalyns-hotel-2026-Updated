@@ -141,7 +141,7 @@ $_nav_groups = [
     ],
     'Finance' => [
         ['accounting-dashboard.php', 'fas fa-calculator',          'Accounting',     'accounting',       '',              'finance'],
-        ['pos-accounting.php',       'fas fa-cash-register',       'POS Accounting', 'pos_accounting',   'color:#8B7355;','finance'],
+        ['pos-accounting.php',       'fas fa-cash-register',       'POS Accounting', 'pos_accounting',   'color:#8B7355;',['finance', 'pos']],
         ['payments.php',             'fas fa-money-bill-wave',     'Payments',       'payments',         '',              'finance'],
         ['receipts.php',             'fas fa-receipt',             'Receipts',       'receipts',         '',              'finance'],
         ['invoices.php',             'fas fa-file-invoice-dollar', 'Invoices',       'invoices',         '',              'finance'],
