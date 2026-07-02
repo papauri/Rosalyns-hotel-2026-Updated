@@ -765,26 +765,44 @@ foreach ($presets as $preset_key => $preset) {
             return div.innerHTML;
         }
 
+        var extraModuleLabels = {
+            station_kds: 'Kitchen Display (KDS)', station_bds: 'Bar Display (BDS)',
+            station_cds: 'Coffee Bar Display (CDS)', station_room_service: 'Room Service Station',
+            restaurant_page: 'Restaurant / food-service pages'
+        };
+        function moduleLabel(key) { return moduleLabels[key] || extraModuleLabels[key] || key; }
+
         function renderPresetImpact(presetKey, presetLabel, data) {
             var nameEl    = document.getElementById('msPresetImpactName');
             var summaryEl = document.getElementById('msPresetImpactSummary');
             var usersEl   = document.getElementById('msPresetImpactUsers');
             if (nameEl) { nameEl.textContent = presetLabel; }
 
-            var disabledLabels = (data.modules_disabled || []).map(function (key) {
-                return moduleLabels[key] || key;
-            });
+            var disabledLabels = (data.modules_disabled || []).map(moduleLabel);
+            var enabledLabels  = (data.modules_enabled  || []).map(moduleLabel);
 
             if (summaryEl) {
-                summaryEl.textContent = disabledLabels.length
-                    ? 'This will turn OFF: ' + disabledLabels.join(', ') + '.'
-                    : 'This preset does not turn off any currently-relevant modules.';
+                var parts = [];
+                if (enabledLabels.length)  { parts.push('Turns ON: ' + enabledLabels.join(', ') + '.'); }
+                if (disabledLabels.length) { parts.push('Turns OFF: ' + disabledLabels.join(', ') + '.'); }
+                summaryEl.textContent = parts.length ? parts.join(' ') : 'This preset matches the current module state — nothing changes.';
             }
 
             if (usersEl) {
+                var menuHtml = '';
+                var mkList = function (title, icon, color, items) {
+                    if (!items || !items.length) { return ''; }
+                    return '<p style="font-size:.78rem;font-weight:700;color:' + color + ';margin:0 0 4px;"><i class="fas ' + icon + '"></i> ' + title + '</p>' +
+                        '<ul style="margin:0 0 10px;padding-left:20px;font-size:.78rem;color:#5a5147;">' +
+                        items.map(function (m) { return '<li>' + escapeHtml(m) + '</li>'; }).join('') +
+                        '</ul>';
+                };
+                menuHtml += mkList('Menus & pages removed', 'fa-eye-slash', '#9a3412', data.menus_removed);
+                menuHtml += mkList('Menus & pages added', 'fa-eye', '#2e7d32', data.menus_added);
+
                 var users = data.affected_users || [];
                 if (!users.length) {
-                    usersEl.innerHTML = '<p style="font-size:.84rem;color:#2e7d32;margin:0;"><i class="fas fa-circle-check"></i> No active users currently rely on the modules being turned off.</p>';
+                    usersEl.innerHTML = menuHtml + '<p style="font-size:.84rem;color:#2e7d32;margin:0;"><i class="fas fa-circle-check"></i> No active users currently rely on the modules being turned off.</p>';
                 } else {
                     var rows = users.map(function (u) {
                         var perms = u.permissions_lost.map(function (p) { return escapeHtml(p.label); }).join(', ');
@@ -793,7 +811,7 @@ foreach ($presets as $preset_key => $preset) {
                             '<div style="font-size:.76rem;color:#9a3412;margin-top:2px;"><i class="fas fa-triangle-exclamation"></i> Will lose: ' + perms + '</div>' +
                             '</div>';
                     });
-                    usersEl.innerHTML =
+                    usersEl.innerHTML = menuHtml +
                         '<p style="font-size:.82rem;color:#9a3412;font-weight:600;margin:0 0 8px;">' + users.length + ' user' + (users.length === 1 ? '' : 's') + ' will lose access to the following:</p>' +
                         rows.join('');
                 }

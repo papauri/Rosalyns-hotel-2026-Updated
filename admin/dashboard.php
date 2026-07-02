@@ -71,6 +71,7 @@ $guestSvc = [
     'pending_reviews' => 0,
     'unread_contact' => 0,
     'pending_gym' => 0,
+    'pending_events' => 0,
     'maintenance_open' => 0,
     'housekeeping_due' => 0,
 ];
@@ -110,6 +111,7 @@ $mod_station_kds = moduleEnabled('station_kds');
 $mod_station_bds = moduleEnabled('station_bds');
 $mod_station_cds = moduleEnabled('station_cds');
 $mod_station_room_service = moduleEnabled('station_room_service');
+$mod_events      = function_exists('isEventsEnabled') && isEventsEnabled();
 
 if (!$is_card_insight_ajax) {
 
@@ -290,6 +292,11 @@ if (!$is_card_insight_ajax) {
         }
         if ($mod_gym) {
             $guestSvc['pending_gym'] = (int)$pdo->query("SELECT COUNT(*) FROM gym_inquiries WHERE status='pending' OR status='new'")->fetchColumn();
+        }
+        if ($mod_events) {
+            try {
+                $guestSvc['pending_events'] = (int)$pdo->query("SELECT COUNT(*) FROM event_inquiries WHERE status='pending'")->fetchColumn();
+            } catch (Throwable $e) { $guestSvc['pending_events'] = 0; }
         }
         if ($mod_housekeeping) {
             $guestSvc['maintenance_open'] = (int)$pdo->query("SELECT COUNT(*) FROM individual_rooms WHERE status IN ('maintenance','out_of_order')")->fetchColumn();
@@ -1679,8 +1686,34 @@ $currency_symbol = getSetting('currency_symbol');
             <a class="guide-menu-btn" href="../docs/guides/14-reports-eod.html" target="_blank" rel="noopener"><i class="fas fa-chart-bar"></i> Reports Guide</a>
         </div>
 
-        <?php if ($mod_bookings || $mod_conference || $mod_finance): ?>
+        <?php if ($mod_bookings || $mod_conference || $mod_finance || $mod_pos): ?>
         <div class="stats-grid">
+            <?php if ($mod_pos && !$mod_bookings): ?>
+            <?php /* POS-first businesses (bar, retail, supermarket, gym) — their overview
+                     is orders and takings, not check-ins. Hotels keep the booking-centric
+                     overview; their POS numbers live in Operations Pulse below. */ ?>
+            <a class="stat-card stat-info" href="pos.php" title="Open the POS till">
+                <span class="stat-cta">Open →</span>
+                <div class="stat-icon"><i class="fas fa-receipt"></i></div>
+                <div class="stat-value"><?php echo (int)$ops['orders_today']; ?></div>
+                <div class="stat-label">Orders Today</div>
+                <div class="stat-sub">Settled through the POS till</div>
+            </a>
+            <a class="stat-card stat-good js-dashboard-insight" data-insight-card="restaurant_revenue_today" href="reports.php?type=accounting&range=today" title="Today's POS takings">
+                <span class="stat-cta">View →</span>
+                <div class="stat-icon"><i class="fas fa-cash-register"></i></div>
+                <div class="stat-value"><span class="kpi-currency"><?php echo $currency_symbol; ?></span><?php echo number_format($ops['restaurant_rev_today'], 2); ?></div>
+                <div class="stat-label"><?php echo isRestaurantEnabled() ? 'Restaurant Revenue Today' : 'POS Revenue Today'; ?></div>
+                <div class="stat-sub">Gross takings settled today</div>
+            </a>
+            <a class="stat-card <?php echo $ops['open_tabs'] > 0 ? 'stat-warn' : ''; ?> js-dashboard-insight" data-insight-card="open_tabs" href="<?php echo $mod_stock ? 'stock-orders.php?status=placed' : 'pos.php'; ?>" title="<?php echo isRestaurantEnabled() ? 'Open tabs awaiting payment' : 'Placed orders awaiting payment'; ?>">
+                <span class="stat-cta">Action →</span>
+                <div class="stat-icon"><i class="fas fa-hourglass-half"></i></div>
+                <div class="stat-value"><?php echo (int)$ops['open_tabs']; ?></div>
+                <div class="stat-label"><?php echo isRestaurantEnabled() ? 'Open Tabs' : 'Pending Orders'; ?></div>
+                <div class="stat-sub"><span class="kpi-currency"><?php echo $currency_symbol; ?></span><?php echo number_format($ops['open_tabs_value'], 2); ?> outstanding</div>
+            </a>
+            <?php endif; ?>
             <?php if ($mod_bookings): ?>
             <a class="stat-card stat-info js-dashboard-insight" data-insight-card="checkins_today" href="bookings.php?filter=checkin_today" title="View today's check-ins">
                 <span class="stat-cta">View →</span>
@@ -1939,6 +1972,14 @@ $currency_symbol = getSetting('currency_symbol');
                         <span class="pri"><i class="fas fa-dumbbell" style="color:#16a085;"></i> Gym inquiries pending</span>
                         <a href="gym-inquiries.php" style="text-decoration:none;">
                             <span class="pulse-pill <?php echo $guestSvc['pending_gym'] > 0 ? 'amber' : 'green'; ?>"><?php echo $guestSvc['pending_gym']; ?></span>
+                        </a>
+                    </li>
+                    <?php endif; ?>
+                    <?php if ($mod_website_cms && $mod_events): ?>
+                    <li>
+                        <span class="pri"><i class="fas fa-calendar-check" style="color:#5e35b1;"></i> Event bookings pending</span>
+                        <a href="events-inquiries.php" style="text-decoration:none;">
+                            <span class="pulse-pill <?php echo $guestSvc['pending_events'] > 0 ? 'amber' : 'green'; ?>"><?php echo $guestSvc['pending_events']; ?></span>
                         </a>
                     </li>
                     <?php endif; ?>

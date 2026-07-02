@@ -27,16 +27,55 @@ if (!isset($presets[$preset_key])) {
 $preset_modules = $presets[$preset_key]['modules'];
 $locked_modules = ['finance'];
 
-// Modules this preset would turn OFF (locked modules can never be disabled)
-$modules_disabled = [];
+// Diff the preset against the CURRENT module state so the dialog shows what
+// actually changes — not just everything the preset sets to 0.
+$modules_disabled = []; // preset turns OFF something currently on
+$modules_enabled  = []; // preset turns ON something currently off
 foreach ($preset_modules as $module_key => $enabled) {
-    if (!$enabled && !in_array($module_key, $locked_modules, true)) {
+    if (in_array($module_key, $locked_modules, true)) {
+        continue;
+    }
+    $currently_on = moduleEnabled($module_key);
+    if (!$enabled && $currently_on) {
         $modules_disabled[] = $module_key;
+    } elseif ($enabled && !$currently_on) {
+        $modules_enabled[] = $module_key;
     }
 }
 
+// The guest-facing restaurant flag rides alongside modules (front_end key)
+$preset_restaurant = (bool)($presets[$preset_key]['front_end']['restaurant_page'] ?? true);
+$current_restaurant = !function_exists('isRestaurantEnabled') || isRestaurantEnabled();
+if (!$preset_restaurant && $current_restaurant) {
+    $modules_disabled[] = 'restaurant_page';
+} elseif ($preset_restaurant && !$current_restaurant) {
+    $modules_enabled[] = 'restaurant_page';
+}
+
+// Human-readable admin-menu / guest-site areas per module key, so the dialog
+// can say exactly which menus appear or disappear. Mirrors admin-header.php.
+$menu_area_map = [
+    'bookings'             => 'Bookings, Calendar, Blocked Dates, Rooms & Room Maintenance, Rate Plans/Packages + guest Rooms & Booking pages',
+    'housekeeping'         => 'Housekeeping',
+    'pos'                  => 'POS Till, Stations group, Menu/Products, Deals, Offline Log, POS Accounting',
+    'stock'                => 'Stock group (Dashboard, Ingredients, Batches, Orders, Counts, Wastage, Reports)',
+    'conference'           => 'Conference Rooms + guest Conference page',
+    'gym'                  => 'Gym Packages & Gym Inquiries + guest Gym page',
+    'website_cms'          => 'Gallery, Media Portal, Events, Reviews, Contact Inquiries, Footer & Page Management',
+    'station_kds'          => 'Kitchen Display (KDS)',
+    'station_bds'          => 'Bar Display (BDS)',
+    'station_cds'          => 'Coffee Bar Display (CDS)',
+    'station_room_service' => 'Room Service station',
+    'restaurant_page'      => 'Restaurant Tables, Recipes, Station Hours/Reports + guest Restaurant page',
+];
+$menus_removed = array_values(array_filter(array_map(fn($k) => $menu_area_map[$k] ?? null, $modules_disabled)));
+$menus_added   = array_values(array_filter(array_map(fn($k) => $menu_area_map[$k] ?? null, $modules_enabled)));
+
+// restaurant_page isn't a real module — strip before permission lookups below
+$modules_disabled_real = array_values(array_diff($modules_disabled, ['restaurant_page']));
+
 $affected_permissions = [];
-foreach ($modules_disabled as $module_key) {
+foreach ($modules_disabled_real as $module_key) {
     foreach (getPermissionsForModule($module_key) as $permKey) {
         $affected_permissions[$permKey] = true;
     }
@@ -89,6 +128,9 @@ echo json_encode([
     'success' => true,
     'preset_key' => $preset_key,
     'modules_disabled' => $modules_disabled,
+    'modules_enabled' => $modules_enabled,
+    'menus_removed' => $menus_removed,
+    'menus_added' => $menus_added,
     'affected_users' => $affected_users,
 ]);
 exit;
