@@ -16,6 +16,13 @@ $current_page = basename($_SERVER['PHP_SELF']);
 $current_tab = $_GET['tab'] ?? 'food';
 $isAjax = !empty($_SERVER['HTTP_X_REQUESTED_WITH']) && strtolower($_SERVER['HTTP_X_REQUESTED_WITH']) === 'xmlhttprequest';
 
+// Non-restaurant presets (gym, retail, supermarket…) manage the POS product
+// catalog instead of a food/drinks menu — same page slot, different mode.
+if (function_exists('isRestaurantEnabled') && !isRestaurantEnabled()) {
+    require __DIR__ . '/includes/product-management-mode.php';
+    exit;
+}
+
 // Facebook sharing
 require_once '../includes/facebook-functions.php';
 $fb_menu_posting_on = isFacebookPostingEnabled()

@@ -65,6 +65,27 @@ try {
         updateSetting('restaurant_system_enabled', $front_end['restaurant_page'] ? '1' : '0');
     }
 
+    // Seed POS starter categories for the business type. Additive-only: a
+    // category is inserted only if its slug doesn't already exist — existing
+    // catalog rows are never modified or removed. default_station='bar' means
+    // products auto-serve at payment and never fire kitchen tickets.
+    $seeded_categories = [];
+    foreach (($preset['starter_categories'] ?? []) as $i => $starter) {
+        $name = trim((string)($starter['name'] ?? ''));
+        if ($name === '') {
+            continue;
+        }
+        $slug = strtolower(trim((string)preg_replace('/[^a-z0-9]+/i', '-', $name), '-'));
+        $chk = $pdo->prepare("SELECT COUNT(*) FROM menu_categories WHERE slug = ?");
+        $chk->execute([$slug]);
+        if ((int)$chk->fetchColumn() > 0) {
+            continue;
+        }
+        $ins = $pdo->prepare("INSERT INTO menu_categories (name, slug, description, icon, default_station, sort_order, shows_on_pos, shows_on_room_service, display_order, is_active) VALUES (?, ?, '', ?, 'bar', ?, 1, 0, ?, 1)");
+        $ins->execute([$name, $slug, (string)($starter['icon'] ?? 'fa-tag'), $i, $i]);
+        $seeded_categories[] = $name;
+    }
+
     if (function_exists('rh_log_event')) {
         rh_log_event('admin/module-settings', 'info',
             'Business preset applied: ' . $preset_key,
@@ -76,6 +97,7 @@ try {
         'success' => true,
         'preset_key' => $preset_key,
         'applied_modules' => $applied_modules,
+        'seeded_categories' => $seeded_categories,
     ]);
 } catch (Throwable $e) {
     error_log('apply-preset: ' . $e->getMessage());

@@ -66,6 +66,15 @@ if (!function_exists('getBusinessPresets')) {
                     'station_kds' => 0, 'station_bds' => 0, 'station_cds' => 0, 'station_room_service' => 0,
                 ],
                 'front_end' => ['restaurant_page' => 0],
+                // POS starter categories seeded on preset apply (additive-only —
+                // inserted only when the slug doesn't exist yet). Restaurant-style
+                // presets skip this; they already have Food/Drinks.
+                'starter_categories' => [
+                    ['name' => 'Supplements', 'icon' => 'fa-capsules'],
+                    ['name' => 'Beverages', 'icon' => 'fa-bottle-water'],
+                    ['name' => 'Merchandise', 'icon' => 'fa-shirt'],
+                    ['name' => 'Day Passes', 'icon' => 'fa-ticket'],
+                ],
             ],
             'retail_shop' => [
                 'label' => 'Retail / Shop',
@@ -77,6 +86,10 @@ if (!function_exists('getBusinessPresets')) {
                     'station_kds' => 0, 'station_bds' => 0, 'station_cds' => 0, 'station_room_service' => 0,
                 ],
                 'front_end' => ['restaurant_page' => 0],
+                'starter_categories' => [
+                    ['name' => 'General Merchandise', 'icon' => 'fa-box'],
+                    ['name' => 'Accessories', 'icon' => 'fa-bag-shopping'],
+                ],
             ],
             'supermarket' => [
                 'label' => 'Supermarket',
@@ -88,6 +101,12 @@ if (!function_exists('getBusinessPresets')) {
                     'station_kds' => 0, 'station_bds' => 0, 'station_cds' => 0, 'station_room_service' => 0,
                 ],
                 'front_end' => ['restaurant_page' => 0],
+                'starter_categories' => [
+                    ['name' => 'Groceries', 'icon' => 'fa-basket-shopping'],
+                    ['name' => 'Beverages', 'icon' => 'fa-bottle-water'],
+                    ['name' => 'Household', 'icon' => 'fa-house'],
+                    ['name' => 'Personal Care', 'icon' => 'fa-pump-soap'],
+                ],
             ],
         ];
     }
