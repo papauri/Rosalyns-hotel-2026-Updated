@@ -15,8 +15,12 @@
 (function () {
     'use strict';
 
-    /** Pages that always use full-page navigation (no SPA). */
-    var FULL_NAV = ['login.php', 'logout.php', 'kds.php', 'bds.php', 'cds.php', 'pos.php'];
+    /** Pages that always use full-page navigation (no SPA).
+     *  module-settings.php is here deliberately: applying a preset changes the
+     *  server-rendered nav/module state and reloads anyway, and its controls
+     *  must be dependable on first render — a config page gains nothing from
+     *  SPA swaps but inherits all their script re-execution edge cases. */
+    var FULL_NAV = ['login.php', 'logout.php', 'kds.php', 'bds.php', 'cds.php', 'pos.php', 'module-settings.php'];
 
     var CONTENT_ID = 'rh-admin-page';
     var PAGINATION_NAV_SELECTOR = '[data-admin-pagination], .bookings-pagination, .pagination, .log-table-pagination, .receipts-pagination, .pagination-bar, .inv-pagination, [data-admin-auto-pagination-nav]';
