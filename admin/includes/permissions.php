@@ -1376,8 +1376,8 @@ function getModuleForPage(string $page)
         'housekeeping.php' => 'housekeeping',
         'pos.php' => 'pos',
         'menu-management.php' => 'pos',
-        'kds-report.php' => 'pos',
-        'station-settings.php' => 'pos',
+        'kds-report.php' => ['pos', 'restaurant_page'],
+        'station-settings.php' => ['pos', 'restaurant_page'],
         'deals.php' => 'pos',
         'offline-log.php' => 'pos',
         'kds.php' => ['pos', 'station_kds'],
@@ -1386,12 +1386,12 @@ function getModuleForPage(string $page)
         'room-service-dashboard.php' => ['pos', 'station_room_service'],
         'stock-dashboard.php' => 'stock',
         'stock-ingredients.php' => 'stock',
-        'stock-recipes.php' => 'stock',
+        'stock-recipes.php' => ['stock', 'restaurant_page'],
         'stock-batches.php' => 'stock',
         'stock-orders.php' => 'stock',
         'stock-receipt.php' => 'stock',
         'order-lifecycle.php' => 'stock',
-        'restaurant-tables.php' => 'stock',
+        'restaurant-tables.php' => ['stock', 'restaurant_page'],
         'stock-barcode-receive.php' => 'stock',
         'stock-count.php' => 'stock',
         'stock-wastage.php' => 'stock',
@@ -1425,6 +1425,23 @@ function getModuleForPage(string $page)
     ];
 
     return $map[$page] ?? null;
+}
+
+/**
+ * The 'pos' module is on for any till-based business (retail, gym snack bar,
+ * supermarket checkout) — but some pages are meaningful only when there's an
+ * actual food/beverage service (dine-in tables, recipes/food-cost, station
+ * hours, station production reports). Those pages use this synthetic
+ * "restaurant_page" key instead of/alongside 'pos' — checked here rather
+ * than via moduleEnabled() since it's driven by isRestaurantEnabled(),
+ * not the enabled_modules table.
+ */
+function rh_module_key_enabled(string $key): bool
+{
+    if ($key === 'restaurant_page') {
+        return function_exists('isRestaurantEnabled') && isRestaurantEnabled();
+    }
+    return function_exists('moduleEnabled') && moduleEnabled($key);
 }
 
 /**

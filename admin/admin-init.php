@@ -94,7 +94,7 @@ if ($_required_module !== null && ($user['role'] ?? '') !== 'admin') {
     $_requiredModuleKeys = is_array($_required_module) ? $_required_module : [$_required_module];
     $_moduleAccessOk = true;
     foreach ($_requiredModuleKeys as $_requiredModuleKey) {
-        if (!moduleEnabled((string)$_requiredModuleKey)) {
+        if (!rh_module_key_enabled((string)$_requiredModuleKey)) {
             $_moduleAccessOk = false;
             break;
         }

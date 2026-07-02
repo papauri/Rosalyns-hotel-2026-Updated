@@ -106,6 +106,10 @@ $mod_conference  = moduleEnabled('conference');
 $mod_gym         = moduleEnabled('gym');
 $mod_finance     = moduleEnabled('finance');
 $mod_website_cms = moduleEnabled('website_cms');
+$mod_station_kds = moduleEnabled('station_kds');
+$mod_station_bds = moduleEnabled('station_bds');
+$mod_station_cds = moduleEnabled('station_cds');
+$mod_station_room_service = moduleEnabled('station_room_service');
 
 if (!$is_card_insight_ajax) {
 
@@ -774,14 +778,14 @@ if ($is_card_insight_ajax) {
                 break;
 
             case 'open_tabs':
-                $payload['title'] = 'Open Restaurant Tabs Awaiting Payment';
-                $payload['subtitle'] = 'Oldest open tabs first (max 30 shown)';
+                $payload['title'] = isRestaurantEnabled() ? 'Open Restaurant Tabs Awaiting Payment' : 'Placed Orders Awaiting Payment';
+                $payload['subtitle'] = isRestaurantEnabled() ? 'Oldest open tabs first (max 30 shown)' : 'Oldest pending orders first (max 30 shown)';
                 $payload['columns'] = [
                     ['key' => 'reference', 'label' => 'Order'],
                     ['key' => 'location', 'label' => 'Location'],
                     ['key' => 'foh', 'label' => 'FOH (POS)'],
                     ['key' => 'items', 'label' => 'Items'],
-                    ['key' => 'total', 'label' => 'Tab Total'],
+                    ['key' => 'total', 'label' => isRestaurantEnabled() ? 'Tab Total' : 'Order Total'],
                     ['key' => 'age', 'label' => 'Age'],
                     ['key' => 'status', 'label' => 'Status'],
                 ];
@@ -872,7 +876,7 @@ if ($is_card_insight_ajax) {
                         'status' => $orderStatus,
                     ];
                 }
-                $payload['empty'] = 'No open restaurant tabs are awaiting payment.';
+                $payload['empty'] = isRestaurantEnabled() ? 'No open restaurant tabs are awaiting payment.' : 'No placed orders are awaiting payment.';
                 break;
 
             case 'room_service_reminders_due':
@@ -1661,14 +1665,14 @@ $currency_symbol = getSetting('currency_symbol');
         <div class="guide-menu-grid">
             <a class="guide-menu-btn" href="../docs/guides/index.html" target="_blank" rel="noopener"><i class="fas fa-book-open"></i> All Guides</a>
             <a class="guide-menu-btn" href="../docs/guides/99-admin-dashboard-full-guide.html" target="_blank" rel="noopener"><i class="fas fa-scroll"></i> Admin Bible</a>
-            <a class="guide-menu-btn" href="../docs/guides/01-pos-till.html" target="_blank" rel="noopener"><i class="fas fa-cash-register"></i> POS Guide</a>
-            <a class="guide-menu-btn" href="../docs/guides/02-kds-kitchen.html" target="_blank" rel="noopener"><i class="fas fa-utensils"></i> KDS Guide</a>
-            <a class="guide-menu-btn" href="../docs/guides/03-bds-bar.html" target="_blank" rel="noopener"><i class="fas fa-cocktail"></i> BDS Guide</a>
-            <a class="guide-menu-btn" href="../docs/guides/04-cds-coffee.html" target="_blank" rel="noopener"><i class="fas fa-mug-hot"></i> CDS Guide</a>
-            <a class="guide-menu-btn" href="../docs/guides/05-room-service.html" target="_blank" rel="noopener"><i class="fas fa-bell-concierge"></i> Room Service Guide</a>
-            <a class="guide-menu-btn" href="../docs/guides/06-housekeeping.html" target="_blank" rel="noopener"><i class="fas fa-broom"></i> Housekeeping Guide</a>
-            <a class="guide-menu-btn" href="../docs/guides/07-reception-bookings.html" target="_blank" rel="noopener"><i class="fas fa-calendar-check"></i> Reception Guide</a>
-            <a class="guide-menu-btn" href="../docs/guides/08-stock-orders.html" target="_blank" rel="noopener"><i class="fas fa-boxes"></i> Stock Guide</a>
+            <?php if ($mod_pos): ?><a class="guide-menu-btn" href="../docs/guides/01-pos-till.html" target="_blank" rel="noopener"><i class="fas fa-cash-register"></i> POS Guide</a><?php endif; ?>
+            <?php if ($mod_pos && $mod_station_kds): ?><a class="guide-menu-btn" href="../docs/guides/02-kds-kitchen.html" target="_blank" rel="noopener"><i class="fas fa-utensils"></i> KDS Guide</a><?php endif; ?>
+            <?php if ($mod_pos && $mod_station_bds): ?><a class="guide-menu-btn" href="../docs/guides/03-bds-bar.html" target="_blank" rel="noopener"><i class="fas fa-cocktail"></i> BDS Guide</a><?php endif; ?>
+            <?php if ($mod_pos && $mod_station_cds): ?><a class="guide-menu-btn" href="../docs/guides/04-cds-coffee.html" target="_blank" rel="noopener"><i class="fas fa-mug-hot"></i> CDS Guide</a><?php endif; ?>
+            <?php if ($mod_pos && $mod_station_room_service): ?><a class="guide-menu-btn" href="../docs/guides/05-room-service.html" target="_blank" rel="noopener"><i class="fas fa-bell-concierge"></i> Room Service Guide</a><?php endif; ?>
+            <?php if ($mod_housekeeping): ?><a class="guide-menu-btn" href="../docs/guides/06-housekeeping.html" target="_blank" rel="noopener"><i class="fas fa-broom"></i> Housekeeping Guide</a><?php endif; ?>
+            <?php if ($mod_bookings): ?><a class="guide-menu-btn" href="../docs/guides/07-reception-bookings.html" target="_blank" rel="noopener"><i class="fas fa-calendar-check"></i> Reception Guide</a><?php endif; ?>
+            <?php if ($mod_stock): ?><a class="guide-menu-btn" href="../docs/guides/08-stock-orders.html" target="_blank" rel="noopener"><i class="fas fa-boxes"></i> Stock Guide</a><?php endif; ?>
             <a class="guide-menu-btn" href="../docs/guides/13-finance-payments.html" target="_blank" rel="noopener"><i class="fas fa-money-bill-wave"></i> Finance Guide</a>
             <a class="guide-menu-btn" href="../docs/guides/14-reports-eod.html" target="_blank" rel="noopener"><i class="fas fa-chart-bar"></i> Reports Guide</a>
         </div>
@@ -1757,11 +1761,11 @@ $currency_symbol = getSetting('currency_symbol');
         <h3 class="section-title" style="margin-top:6px;"><i class="fas fa-bolt"></i> Operations Pulse</h3>
         <div class="ops-grid">
             <?php if ($mod_pos): ?>
-            <a class="ops-card js-dashboard-insight" data-insight-card="open_tabs" href="stock-orders.php?status=placed" title="Open restaurant tabs awaiting payment">
+            <a class="ops-card js-dashboard-insight" data-insight-card="open_tabs" href="stock-orders.php?status=placed" title="<?php echo isRestaurantEnabled() ? 'Open restaurant tabs awaiting payment' : 'Placed orders awaiting payment'; ?>">
                 <div class="ops-icon" style="background:#e67e22;"><i class="fas fa-receipt"></i></div>
                 <div class="ops-body">
                     <div class="ops-value"><?php echo $ops['open_tabs']; ?></div>
-                    <div class="ops-label">Open Tabs</div>
+                    <div class="ops-label"><?php echo isRestaurantEnabled() ? 'Open Tabs' : 'Pending Orders'; ?></div>
                     <div class="ops-sub"><?php echo '<span class="kpi-currency">' . $currency_symbol . '</span>' . number_format($ops['open_tabs_value'], 2); ?> outstanding</div>
                 </div>
             </a>
@@ -1791,6 +1795,7 @@ $currency_symbol = getSetting('currency_symbol');
             </a>
             <?php endif; ?>
 
+            <?php if ($mod_station_kds): ?>
             <a class="ops-card js-dashboard-insight" data-insight-card="kitchen_tickets" href="kds.php" title="Open Kitchen Display System">
                 <div class="ops-icon" style="background:#dc3545;"><i class="fas fa-utensils"></i></div>
                 <div class="ops-body">
@@ -1799,6 +1804,8 @@ $currency_symbol = getSetting('currency_symbol');
                     <div class="ops-sub">Active service-window tickets</div>
                 </div>
             </a>
+            <?php endif; ?>
+            <?php if ($mod_station_bds): ?>
             <a class="ops-card js-dashboard-insight" data-insight-card="bar_tickets" href="bds.php" title="Open Bar Display System">
                 <div class="ops-icon" style="background:#6f42c1;"><i class="fas fa-cocktail"></i></div>
                 <div class="ops-body">
@@ -1807,6 +1814,8 @@ $currency_symbol = getSetting('currency_symbol');
                     <div class="ops-sub">Active service-window tickets</div>
                 </div>
             </a>
+            <?php endif; ?>
+            <?php if ($mod_station_cds): ?>
             <a class="ops-card js-dashboard-insight" data-insight-card="coffee_tickets" href="cds.php" title="Open Coffee Display System">
                 <div class="ops-icon" style="background:#8B5A2B;"><i class="fas fa-mug-hot"></i></div>
                 <div class="ops-body">
@@ -1815,11 +1824,12 @@ $currency_symbol = getSetting('currency_symbol');
                     <div class="ops-sub">Active service-window tickets</div>
                 </div>
             </a>
-            <a class="ops-card js-dashboard-insight" data-insight-card="restaurant_revenue_today" href="reports.php?type=accounting&range=today" title="Today's restaurant revenue">
+            <?php endif; ?>
+            <a class="ops-card js-dashboard-insight" data-insight-card="restaurant_revenue_today" href="reports.php?type=accounting&range=today" title="<?php echo isRestaurantEnabled() ? "Today's restaurant revenue" : "Today's POS revenue"; ?>">
                 <div class="ops-icon" style="background:#16a085;"><i class="fas fa-cash-register"></i></div>
                 <div class="ops-body">
                     <div class="ops-value"><?php echo '<span class="kpi-currency">' . $currency_symbol . '</span>' . number_format($ops['restaurant_rev_today'], 2); ?></div>
-                    <div class="ops-label">Restaurant Revenue Today</div>
+                    <div class="ops-label"><?php echo isRestaurantEnabled() ? 'Restaurant Revenue Today' : 'POS Revenue Today'; ?></div>
                     <div class="ops-sub"><?php echo $ops['orders_today']; ?> order(s) settled</div>
                 </div>
             </a>
@@ -1993,7 +2003,7 @@ $currency_symbol = getSetting('currency_symbol');
                     <?php endif; ?>
                     <?php if ($mod_pos): ?>
                     <li>
-                        <span class="pri"><i class="fas fa-receipt" style="color:#e67e22;"></i> Open restaurant tabs</span>
+                        <span class="pri"><i class="fas fa-receipt" style="color:#e67e22;"></i> <?php echo isRestaurantEnabled() ? 'Open restaurant tabs' : 'Pending orders'; ?></span>
                         <a href="stock-orders.php?status=placed" style="text-decoration:none;">
                             <span class="pulse-pill <?php echo $ops['open_tabs'] > 0 ? 'amber' : 'green'; ?>"><?php echo $ops['open_tabs']; ?></span>
                         </a>

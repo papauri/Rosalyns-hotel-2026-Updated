@@ -49,10 +49,10 @@ if (!function_exists('_renderNavLink')) {
     function _renderNavLink(string $href, string $icon, string $label, ?string $perm, string $current_page, string $iconStyle = '', $moduleKey = null): void
     {
         if (!_canShowNavItem($perm)) return;
-        if ($moduleKey !== null && function_exists('moduleEnabled')) {
+        if ($moduleKey !== null && function_exists('rh_module_key_enabled')) {
             $keys = is_array($moduleKey) ? $moduleKey : [(string)$moduleKey];
             foreach ($keys as $_mk) {
-                if (!moduleEnabled((string)$_mk)) return;
+                if (!rh_module_key_enabled((string)$_mk)) return;
             }
         }
         $hrefPath   = (string)(parse_url($href, PHP_URL_PATH) ?: $href);
@@ -96,8 +96,8 @@ $_nav_groups = [
         ['bds.php',                    'fas fa-cocktail',       'Bar Display (BDS)', 'bds_view',          'color:#5e35b1;', ['pos', 'station_bds']],
         ['cds.php',                    'fas fa-mug-hot',        'Coffee Bar (CDS)',  'cds_view',          'color:#6f4e37;', ['pos', 'station_cds']],
         ['room-service-dashboard.php', 'fas fa-bell-concierge', 'Room Service',      'room_service_view', 'color:#0c8d6c;', ['pos', 'station_room_service']],
-        ['kds-report.php',             'fas fa-file-invoice',   'Station Reports',   'kds_reports',       '', 'pos'],
-        ['station-settings.php',       'fas fa-clock',          'Station Hours',     'stock_management',  '', 'pos'],
+        ['kds-report.php',             'fas fa-file-invoice',   'Station Reports',   'kds_reports',       '', ['pos', 'restaurant_page']],
+        ['station-settings.php',       'fas fa-clock',          'Station Hours',     'stock_management',  '', ['pos', 'restaurant_page']],
         ['deals.php',                  'fas fa-tags',           'Deals & Promos',    'stock_management',  '', 'pos'],
         ['offline-log.php',            'fas fa-cloud-arrow-up', 'Offline Log',       'offline_log_view',  '', 'pos'],
     ],
@@ -120,7 +120,7 @@ $_nav_groups = [
         ['conference-management.php', 'fas fa-briefcase',    'Conference Rooms',  'conference',        '', 'conference'],
         ['gym-management.php',        'fas fa-dumbbell',     'Gym Packages',      'gym_packages',      '', 'gym'],
         ['gym-inquiries.php',         'fas fa-inbox',        'Gym Inquiries',     'gym',               '', 'gym'],
-        ['menu-management.php',       'fas fa-utensils',     'Menu',              'menu',              '', 'pos'],
+        ['menu-management.php',       'fas fa-utensils',     (function_exists('isRestaurantEnabled') && isRestaurantEnabled()) ? 'Menu' : 'Products', 'menu', '', 'pos'],
         ['events-management.php',     'fas fa-calendar-alt', 'Events',            'events',            '', 'website_cms'],
         ['events-inquiries.php',      'fas fa-calendar-check', 'Event Bookings',  'events_bookings',   '', 'website_cms'],
         ['reviews.php',               'fas fa-star',         'Reviews',           'reviews',           '', 'website_cms'],
@@ -130,10 +130,10 @@ $_nav_groups = [
     'Stock' => [
         ['stock-dashboard.php',       'fas fa-boxes',          'Stock Dashboard',   'stock_dashboard',  '', 'stock'],
         ['stock-ingredients.php',     'fas fa-carrot',         'Ingredients',       'stock_management', '', 'stock'],
-        ['stock-recipes.php',         'fas fa-book-open',      'Recipes',           'stock_management', '', 'stock'],
+        ['stock-recipes.php',         'fas fa-book-open',      'Recipes',           'stock_management', '', ['stock', 'restaurant_page']],
         ['stock-batches.php',         'fas fa-layer-group',    'Batch Tracker',     'stock_batches',    '', 'stock'],
-        ['stock-orders.php',          'fas fa-receipt',        'Restaurant Orders', 'stock_orders',     '', 'stock'],
-        ['restaurant-tables.php',     'fas fa-chair',          'Restaurant Tables', 'stock_management', '', 'stock'],
+        ['stock-orders.php',          'fas fa-receipt',        (function_exists('isRestaurantEnabled') && isRestaurantEnabled()) ? 'Restaurant Orders' : 'Orders', 'stock_orders', '', 'stock'],
+        ['restaurant-tables.php',     'fas fa-chair',          'Restaurant Tables', 'stock_management', '', ['stock', 'restaurant_page']],
         ['stock-barcode-receive.php', 'fas fa-barcode',        'Receive Stock',     'stock_management', '', 'stock'],
         ['stock-count.php',           'fas fa-clipboard-check','Stock Count',       'stock_count',      '', 'stock'],
         ['stock-wastage.php',         'fas fa-trash-alt',      'Wastage Log',       'stock_wastage',    '', 'stock'],
@@ -442,10 +442,10 @@ if ($_admin_back_target !== null) {
             foreach ($items as $it) {
                 if (!_canShowNavItem($it[3] ?? null)) continue;
                 $_modKeys = $it[5] ?? null;
-                if ($_modKeys !== null && function_exists('moduleEnabled')) {
+                if ($_modKeys !== null && function_exists('rh_module_key_enabled')) {
                     $_mkList = is_array($_modKeys) ? $_modKeys : [(string)$_modKeys];
                     $_mkOk = true;
-                    foreach ($_mkList as $_mk) { if (!moduleEnabled((string)$_mk)) { $_mkOk = false; break; } }
+                    foreach ($_mkList as $_mk) { if (!rh_module_key_enabled((string)$_mk)) { $_mkOk = false; break; } }
                     if (!$_mkOk) continue;
                 }
                 $visibleCount++;
