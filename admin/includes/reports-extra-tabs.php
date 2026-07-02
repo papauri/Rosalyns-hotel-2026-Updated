@@ -216,7 +216,7 @@ $voids = [
 <!-- F&B / POS Tab -->
 <div class="tab-content <?php echo $active_tab === 'fnb' ? 'active' : ''; ?>" id="tab-fnb">
     <div class="rx-kpis">
-        <div class="rx-kpi"><div class="lbl">F&amp;B Net Revenue</div><div class="val"><?php echo $rp_currency.' '.number_format((float)($fnb['totals']['net_revenue'] ?? 0), 2); ?></div></div>
+        <div class="rx-kpi"><div class="lbl"><?php echo htmlspecialchars(rh_pos_short_label()); ?> Net Revenue</div><div class="val"><?php echo $rp_currency.' '.number_format((float)($fnb['totals']['net_revenue'] ?? 0), 2); ?></div></div>
         <div class="rx-kpi"><div class="lbl">Orders</div><div class="val"><?php echo number_format((int)($fnb['totals']['orders'] ?? 0)); ?></div></div>
         <div class="rx-kpi"><div class="lbl">Avg Check</div><div class="val"><?php echo $rp_currency.' '.number_format((float)($fnb['totals']['avg_check'] ?? 0), 2); ?></div></div>
         <div class="rx-kpi"><div class="lbl">Voided Value</div><div class="val" style="color:#c82333;"><?php echo $rp_currency.' '.number_format((float)($fnb['totals']['voided_value'] ?? 0), 2); ?></div></div>

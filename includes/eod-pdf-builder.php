@@ -251,7 +251,7 @@ function buildEodPdf(
             'sub_c' => $TEXT2,
         ],
         [
-            'label' => 'F&B / POS',
+            'label' => isRestaurantEnabled() ? 'F&B / POS' : 'POS',
             'value' => $m($pos_gross),
             'sub'   => ($pos_change >= 0 ? '+' : '') . $m($pos_change) . ' vs yday',
             'sub_c' => $pos_sub_c,
@@ -351,7 +351,7 @@ function buildEodPdf(
     $i = 0;
     $rowL('Rooms',       $m((float)$rev['room_gross']), false, $i++);
     $rowL('Conferences', $m((float)$rev['conf_gross']), false, $i++);
-    $rowL('F&B / POS',   $m((float)$rev['fnb_gross']),  false, $i++);
+    $rowL(isRestaurantEnabled() ? 'F&B / POS' : 'POS', $m((float)$rev['fnb_gross']),  false, $i++);
 
     // Gross Total gold bar
     $pdf->SetFillColorArray($GOLD);
@@ -420,7 +420,7 @@ function buildEodPdf(
     $rowL('RevPAR', $m($revpar), false, $i++);
 
     // ── RIGHT: POS / F&B ─────────────────────────────────────────────────────
-    $secR('POS / F&B', $CHARCOAL);
+    $secR(isRestaurantEnabled() ? 'POS / F&B' : 'POS', $CHARCOAL);
     $i = 0;
     $rowR('Total Orders',    (string)(int)$pos['orders'], false, $i++);
     $rowR('Gross Revenue',   $m($pos_gross), false, $i++);

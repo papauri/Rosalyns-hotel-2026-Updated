@@ -547,7 +547,7 @@ $quickActive = function ($s, $e) use ($startDate, $endDate) {
                                 </tr>
                                 <?php else: foreach ($bySource as $row):
                                     $share = $gross_collected_total > 0 ? ((float)$row['collected'] / $gross_collected_total) * 100 : 0;
-                                    $label = ['room' => 'Rooms', 'conference' => 'Conferences', 'restaurant' => 'F&B / POS', 'gym' => 'Gym', 'event' => 'Events'][$row['booking_type']] ?? ucfirst((string)$row['booking_type']);
+                                    $label = ['room' => 'Rooms', 'conference' => 'Conferences', 'restaurant' => rh_pos_category_label(), 'gym' => 'Gym', 'event' => 'Events'][$row['booking_type']] ?? ucfirst((string)$row['booking_type']);
                                 ?>
                                     <tr>
                                         <td>

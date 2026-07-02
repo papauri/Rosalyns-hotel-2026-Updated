@@ -533,7 +533,7 @@ $totalAging = (float)$aging['bucket_0_30'] + (float)$aging['bucket_31_60'] + (fl
                                     <td colspan="4" class="acct-empty acct-empty--good" style="text-align:center;"><i class="fas fa-check-circle"></i> All clear — no outstanding invoices</td>
                                 </tr>
                                 <?php else: foreach ($outstandingBySource as $o):
-                                    $label = ['room' => 'Rooms', 'conference' => 'Conferences', 'restaurant' => 'F&amp;B / POS'][$o['booking_type']] ?? ucfirst((string)$o['booking_type']);
+                                    $label = ['room' => 'Rooms', 'conference' => 'Conferences', 'restaurant' => htmlspecialchars(rh_pos_category_label())][$o['booking_type']] ?? ucfirst((string)$o['booking_type']);
                                 ?>
                                     <tr>
                                         <td><span class="acct-pill acct-pill--<?php echo htmlspecialchars((string)$o['booking_type']); ?>"><?php echo $label; ?></span></td>

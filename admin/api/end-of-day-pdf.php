@@ -523,7 +523,7 @@ $yL = pdfSection($pdf, '  Revenue by Source', $yL, $CHARCOAL);
 $revRows = [
     ['Rooms',        pdfMoney($currency_symbol, (float)$rev['room_gross']),  false],
     ['Conferences',  pdfMoney($currency_symbol, (float)$rev['conf_gross']),  false],
-    ['F&B / POS',    pdfMoney($currency_symbol, (float)$rev['fnb_gross']),   false],
+    [isRestaurantEnabled() ? 'F&B / POS' : 'POS', pdfMoney($currency_symbol, (float)$rev['fnb_gross']),   false],
     ['Gross Total',  pdfMoney($currency_symbol, $gross),                      true],
 ];
 if ((float)$rev['refunds'] > 0) {
@@ -577,7 +577,7 @@ foreach ($foRows as $i => $fr) {
 }
 
 // --- RIGHT: POS / F&B ---
-$yR = pdfSection($pdf, '  POS / F&B', $yR, $GOLD);
+$yR = pdfSection($pdf, isRestaurantEnabled() ? '  POS / F&B' : '  POS', $yR, $GOLD);
 $posRows = [
     ['Total Orders',      (string)(int)$pos['orders']],
     ['Gross Revenue',     pdfMoney($currency_symbol, (float)$pos['gross'])],

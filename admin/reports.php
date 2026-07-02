@@ -1039,7 +1039,7 @@ try {
                 'occupancy'  => ['icon' => 'fa-bed',             'label' => 'Occupancy',        'title' => 'Room occupancy — what percentage of available room nights were sold'],
                 'guests'     => ['icon' => 'fa-users',           'label' => 'Guests',           'title' => 'Guest analysis — new vs returning guests, nationality, and spending patterns'],
                 'conference' => ['icon' => 'fa-briefcase',       'label' => 'Conference',       'title' => 'Conference and events revenue, inquiry conversion, and booking performance'],
-                'fnb'        => ['icon' => 'fa-utensils',        'label' => 'F&amp;B / POS',    'title' => 'Food & Beverage (F&B) — restaurant and bar sales through the Point of Sale (POS) system'],
+                'fnb'        => ['icon' => 'fa-utensils',        'label' => htmlspecialchars(rh_pos_category_label()), 'title' => isRestaurantEnabled() ? 'Food & Beverage (F&B) — restaurant and bar sales through the Point of Sale (POS) system' : 'Sales recorded through the Point of Sale (POS) / till system'],
                 'stock'      => ['icon' => 'fa-boxes-stacked',   'label' => 'Stock',            'title' => 'Stock and inventory — usage, wastage, and cost of goods consumed'],
                 'staff'      => ['icon' => 'fa-user-clock',      'label' => 'Staff',            'title' => 'Staff activity — orders processed, shift performance, and productivity'],
                 'voids'      => ['icon' => 'fa-ban',             'label' => 'Voids',            'title' => 'Voided orders and payments — items cancelled after being placed'],
@@ -1107,11 +1107,11 @@ try {
                         <div class="rh-help-panel__grid">
                             <div>
                                 <h4>📊 Gross Revenue vs Net Revenue</h4>
-                                <p><strong>Gross Revenue</strong> = all money collected from rooms, conference, and F&amp;B before any deductions. <strong>Net Revenue</strong> = Gross minus refunds and VAT. Net is the money the business actually keeps, excluding tax obligations.</p>
+                                <p><strong>Gross Revenue</strong> = all money collected from rooms, conference, and <?php echo htmlspecialchars(rh_pos_short_label()); ?> before any deductions. <strong>Net Revenue</strong> = Gross minus refunds and VAT. Net is the money the business actually keeps, excluding tax obligations.</p>
                             </div>
                             <div>
                                 <h4>📉 Gross Profit &amp; Margin</h4>
-                                <p><strong>Gross Profit</strong> = Revenue minus F&amp;B Cost of Goods (COGS). It does <em>not</em> include staff wages, utilities, or depreciation — those come later in a full P&amp;L. A margin above 60% is healthy for a hotel with F&amp;B.</p>
+                                <p><strong>Gross Profit</strong> = Revenue minus <?php echo htmlspecialchars(rh_pos_short_label()); ?> Cost of Goods (COGS). It does <em>not</em> include staff wages, utilities, or depreciation — those come later in a full P&amp;L. A margin above 60% is healthy for a business with <?php echo htmlspecialchars(rh_pos_short_label()); ?>.</p>
                             </div>
                             <div>
                                 <h4>🏨 ADR &amp; RevPAR</h4>
@@ -1134,16 +1134,24 @@ try {
                 </details>
 
                 <!-- P&L KPI Row -->
+                <?php
+                    $_rpt_categories = [];
+                    if ($mod_bookings) { $_rpt_categories[] = 'Rooms'; }
+                    if ($mod_conference) { $_rpt_categories[] = 'Conference'; }
+                    if ($mod_gym) { $_rpt_categories[] = 'Gym'; }
+                    if ($mod_events) { $_rpt_categories[] = 'Events'; }
+                    if ($mod_pos) { $_rpt_categories[] = rh_pos_short_label(); }
+                ?>
                 <div class="acct-kpis">
                     <div class="acct-kpi acct-kpi--revenue">
                         <div class="acct-kpi__label">Gross Revenue</div>
                         <div class="acct-kpi__value"><?php echo $currency_symbol . ' ' . number_format($grossRevenue, 2); ?></div>
-                        <div class="acct-kpi__sub">Rooms + Conference + F&amp;B <?php echo rh_reports_delta($grossRevenue, $priorRevenue); ?></div>
+                        <div class="acct-kpi__sub"><?php echo htmlspecialchars(implode(' + ', $_rpt_categories) ?: 'Revenue'); ?> <?php echo rh_reports_delta($grossRevenue, $priorRevenue); ?></div>
                     </div>
                     <div class="acct-kpi acct-kpi--cash">
                         <div class="acct-kpi__label">Gross Profit</div>
                         <div class="acct-kpi__value"><?php echo $currency_symbol . ' ' . number_format($grossProfit, 2); ?></div>
-                        <div class="acct-kpi__sub"><?php echo $grossMarginPct; ?>% margin · After F&amp;B COGS</div>
+                        <div class="acct-kpi__sub"><?php echo $grossMarginPct; ?>% margin · After <?php echo htmlspecialchars(rh_pos_short_label()); ?> COGS</div>
                     </div>
                     <div class="acct-kpi acct-kpi--vat">
                         <div class="acct-kpi__label">VAT Collected</div>
@@ -1199,7 +1207,7 @@ try {
                                 <?php endif; ?>
                                 <?php if ($mod_pos): ?>
                                 <tr>
-                                    <td>F&amp;B Revenue</td>
+                                    <td><?php echo htmlspecialchars(rh_pos_short_label()); ?> Revenue</td>
                                     <td style="text-align:right"><?php echo number_format($fnbRevPl, 2); ?></td>
                                     <td style="text-align:right"></td>
                                 </tr>
@@ -1225,7 +1233,7 @@ try {
                                 </tr>
                                 <?php if ($mod_pos): ?>
                                 <tr style="color: var(--color-text-secondary)">
-                                    <td title="COGS (Cost of Goods Sold) — the actual cost of food and drink ingredients used to make F&B items sold through the restaurant.">– F&amp;B COGS</td>
+                                    <td title="<?php echo isRestaurantEnabled() ? 'COGS (Cost of Goods Sold) — the actual cost of food and drink ingredients used to make F&B items sold through the restaurant.' : 'COGS (Cost of Goods Sold) — the actual cost of stock/ingredients used to fulfil POS/till sales.'; ?>">– <?php echo htmlspecialchars(rh_pos_short_label()); ?> COGS</td>
                                     <td style="text-align:right">(<?php echo number_format($totalCogs, 2); ?>)</td>
                                     <td style="text-align:right"></td>
                                 </tr>

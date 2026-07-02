@@ -62,6 +62,25 @@ function isRestaurantEnabled(): bool {
 }
 
 /**
+ * Admin-side revenue/reporting labels for POS-driven income. The POS module
+ * is on for retail/gym/supermarket presets too (till sales), not just an
+ * actual restaurant — calling that revenue "F&B" is misleading when there's
+ * no public dining page. Same show/hide principle as everywhere else: never
+ * hide the money, just word it accurately for the active preset.
+ */
+function rh_pos_category_label(): string {
+    return isRestaurantEnabled() ? 'F&B / Restaurant (POS)' : 'POS / Till Sales';
+}
+
+function rh_pos_short_label(): string {
+    return isRestaurantEnabled() ? 'F&B' : 'POS';
+}
+
+function rh_pos_cogs_label(): string {
+    return isRestaurantEnabled() ? 'F&B COGS' : 'POS COGS';
+}
+
+/**
  * Given a raw link URL from an admin-managed link list (e.g. footer_links),
  * decide whether it points to a page whose feature/module is currently
  * switched off. Keeps freeform admin-editable link lists (which have no

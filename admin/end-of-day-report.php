@@ -526,7 +526,7 @@ $unpaid_risk = (float)$rev['pending'] + $outstanding_folio;
 $revenue_sources = [];
 if ($mod_bookings)   { $revenue_sources[] = ['label' => 'Rooms',       'value' => (float)$rev['room_gross']]; }
 if ($mod_conference) { $revenue_sources[] = ['label' => 'Conferences',  'value' => (float)$rev['conf_gross']]; }
-if ($mod_pos)        { $revenue_sources[] = ['label' => 'F&B / POS',    'value' => (float)$rev['fnb_gross']]; }
+if ($mod_pos)        { $revenue_sources[] = ['label' => rh_pos_category_label(), 'value' => (float)$rev['fnb_gross']]; }
 if ($mod_gym)        { $revenue_sources[] = ['label' => 'Gym',          'value' => (float)$rev['gym_gross']]; }
 if ($mod_events)     { $revenue_sources[] = ['label' => 'Events',       'value' => (float)$rev['events_gross']]; }
 if (empty($revenue_sources)) { $revenue_sources[] = ['label' => 'Revenue', 'value' => $gross_revenue]; }
@@ -610,7 +610,7 @@ if ($cash_share > 60 && $method_totals['cash'] > 0) {
     $addAlert('watch', 'fa-sack-dollar', 'High cash day — reconcile drawers', sprintf('%.0f%% of today\'s revenue collected in cash. Ensure cashier drawers are counted and closed before end of shift.', $cash_share));
 }
 if ($mod_pos && $pos_margin_pct < 25 && (float)$pos_totals['gross'] > 500) {
-    $addAlert('watch', 'fa-chart-pie', 'Low F&B gross margin', sprintf('POS margin is %.1f%% today (healthy target ≥ 35%%). Review high-cost items or check COGS recipe costs.', $pos_margin_pct));
+    $addAlert('watch', 'fa-chart-pie', 'Low ' . rh_pos_short_label() . ' gross margin', sprintf('POS margin is %.1f%% today (healthy target ≥ 35%%). Review high-cost items or check COGS recipe costs.', $pos_margin_pct));
 }
 if ($mod_bookings && $occupancy_pct < 40 && $rooms_total > 0 && $isToday) {
     $addAlert('watch', 'fa-bed', 'Low occupancy day', sprintf('%.1f%% occupancy. Consider activating walk-in promotions or last-minute rate adjustments.', $occupancy_pct));
@@ -901,7 +901,7 @@ if (isset($_GET['export']) && $_GET['export'] === 'csv') {
         'VAT Collected',
         'Room Revenue',
         'Conference Revenue',
-        'F&B/POS Revenue',
+        rh_pos_short_label() . ' Revenue',
         'Gym Revenue',
         'Events Revenue',
         // Rooms
@@ -1198,7 +1198,7 @@ if (isset($_GET['export']) && $_GET['export'] === 'csv') {
                         <?php endif; ?>
                         <?php if ($mod_pos): ?>
                         <li>
-                            <span>F&amp;B vs yesterday</span>
+                            <span><?php echo htmlspecialchars(rh_pos_short_label()); ?> vs yesterday</span>
                             <strong class="eod-trend eod-trend--<?php echo $trendTone($fnb_rev_change); ?>"><?php echo $trendLabel($fnb_rev_change, true); ?></strong>
                         </li>
                         <?php endif; ?>
@@ -1271,7 +1271,7 @@ if (isset($_GET['export']) && $_GET['export'] === 'csv') {
                 </article>
 
                 <?php if ($mod_bookings): ?>
-                <article class="eod-insight-card" data-help="Yield & Opportunity|Empty-room opportunity: estimated revenue lost from unsold rooms (unsold rooms × ADR). F&B per occupied room: food and beverage revenue per occupied room — measures in-house guest spend. Top revenue source shows which booking type generated the most gross income today.">
+                <article class="eod-insight-card" data-help="Yield & Opportunity|Empty-room opportunity: estimated revenue lost from unsold rooms (unsold rooms × ADR). <?php echo htmlspecialchars(rh_pos_short_label()); ?> per occupied room: <?php echo isRestaurantEnabled() ? 'food and beverage' : 'POS/till'; ?> revenue per occupied room — measures in-house guest spend. Top revenue source shows which booking type generated the most gross income today.">
                     <div class="eod-insight-card__head">
                         <span class="eod-insight-card__label">Yield & Opportunity</span>
                         <i class="fas fa-bullseye"></i>
@@ -1279,7 +1279,7 @@ if (isset($_GET['export']) && $_GET['export'] === 'csv') {
                     <ul class="eod-ledger">
                         <li><span>Unsold rooms</span><strong><?php echo (int)$rooms_unsold; ?></strong></li>
                         <li><span>Empty-room opportunity</span><strong><?php echo $money($empty_room_opportunity); ?></strong></li>
-                        <?php if ($mod_pos): ?><li><span>F&amp;B per occupied room</span><strong><?php echo $money($fnb_per_occupied_room); ?></strong></li><?php endif; ?>
+                        <?php if ($mod_pos): ?><li><span><?php echo htmlspecialchars(rh_pos_short_label()); ?> per occupied room</span><strong><?php echo $money($fnb_per_occupied_room); ?></strong></li><?php endif; ?>
                         <li><span>Top revenue source</span><strong><?php echo htmlspecialchars($top_revenue_source['label']); ?> <small><?php echo number_format($top_revenue_source_share, 1); ?>%</small></strong></li>
                     </ul>
                 </article>
@@ -1343,7 +1343,7 @@ if (isset($_GET['export']) && $_GET['export'] === 'csv') {
                 <?php endif; ?>
 
                 <!-- Revenue by source -->
-                <article class="eod-panel" data-help="Revenue by Source|Rooms: accommodation payments collected today. Conferences: event and function booking payments. F&B / POS: restaurant charges posted through the payments system. Net = Gross minus any refunds processed today. The % Mix column shows each source's share of total gross.">
+                <article class="eod-panel" data-help="Revenue by Source|Rooms: accommodation payments collected today. Conferences: event and function booking payments. <?php echo htmlspecialchars(rh_pos_category_label()); ?>: <?php echo isRestaurantEnabled() ? 'restaurant charges' : 'till sales'; ?> posted through the payments system. Net = Gross minus any refunds processed today. The % Mix column shows each source's share of total gross.">
                     <header class="eod-panel__head">
                         <h2 class="eod-panel__title"><i class="fas fa-coins"></i> Revenue by Source</h2>
                     </header>
@@ -1362,7 +1362,7 @@ if (isset($_GET['export']) && $_GET['export'] === 'csv') {
                                 $rows = [];
                                 if ($mod_bookings)   { $rows[] = ['Rooms',         (float)$rev['room_gross'], (float)$rev['room_vat']]; }
                                 if ($mod_conference) { $rows[] = ['Conferences',   (float)$rev['conf_gross'], (float)$rev['conf_vat']]; }
-                                if ($mod_pos)        { $rows[] = ['F&amp;B / POS', (float)$rev['fnb_gross'],  (float)$rev['fnb_vat']]; }
+                                if ($mod_pos)        { $rows[] = [htmlspecialchars(rh_pos_category_label()), (float)$rev['fnb_gross'],  (float)$rev['fnb_vat']]; }
                                 if ($mod_gym)        { $rows[] = ['Gym',          (float)$rev['gym_gross'],  (float)$rev['gym_vat']]; }
                                 if ($mod_events)     { $rows[] = ['Events',       (float)$rev['events_gross'], (float)$rev['events_vat']]; }
                                 foreach ($rows as $r):
@@ -1431,9 +1431,9 @@ if (isset($_GET['export']) && $_GET['export'] === 'csv') {
 
                 <?php if ($mod_pos): ?>
                 <!-- POS -->
-                <article class="eod-panel" data-help="POS / F&B Sales|Orders placed on the till system (walk-in, room service, takeaway, delivery). COGS is the ingredient cost from stock recipes. Margin % = (Gross − COGS) ÷ Gross × 100. Healthy F&B margin target is ≥35%. Voids are cancelled orders — review if they exceed 5% of total orders.">
+                <article class="eod-panel" data-help="<?php echo htmlspecialchars('POS / ' . rh_pos_short_label() . ' Sales'); ?>|Orders placed on the till system (walk-in, room service, takeaway, delivery). COGS is the ingredient cost from stock recipes. Margin % = (Gross − COGS) ÷ Gross × 100. Healthy margin target is ≥35%. Voids are cancelled orders — review if they exceed 5% of total orders.">
                     <header class="eod-panel__head">
-                        <h2 class="eod-panel__title"><i class="fas fa-cash-register"></i> POS / F&amp;B</h2>
+                        <h2 class="eod-panel__title"><i class="fas fa-cash-register"></i> POS<?php echo isRestaurantEnabled() ? ' / F&amp;B' : ''; ?></h2>
                     </header>
                     <div class="eod-mini-kpis">
                         <div><span>Orders</span><strong><?php echo (int)$pos_totals['orders']; ?></strong></div>
@@ -1596,7 +1596,7 @@ if (isset($_GET['export']) && $_GET['export'] === 'csv') {
                 </article>
 
                 <!-- 7-day rolling trend -->
-                <article class="eod-panel eod-panel--wide" data-help="7-Day Revenue Trend|Net room/conference/F&B revenue plus POS gross for each of the last 7 days. The momentum bar compares each day's combined total to the week's highest day. The gold bar is today. Voids column shows cancelled POS orders per day.">
+                <article class="eod-panel eod-panel--wide" data-help="7-Day Revenue Trend|Net room/conference/<?php echo htmlspecialchars(rh_pos_short_label()); ?> revenue plus POS gross for each of the last 7 days. The momentum bar compares each day's combined total to the week's highest day. The gold bar is today. Voids column shows cancelled POS orders per day.">
                     <header class="eod-panel__head">
                         <h2 class="eod-panel__title"><i class="fas fa-chart-line"></i> 7-Day Revenue Trend</h2>
                         <span class="eod-panel__date"><?php echo htmlspecialchars(date('M j', strtotime($trend_start))); ?> – <?php echo htmlspecialchars(date('M j', strtotime($report_date))); ?></span>
@@ -1607,7 +1607,7 @@ if (isset($_GET['export']) && $_GET['export'] === 'csv') {
                                 <tr>
                                     <th>Day</th>
                                     <th class="num">Net Rev</th>
-                                    <th class="num">F&amp;B POS</th>
+                                    <?php if ($mod_pos): ?><th class="num"><?php echo htmlspecialchars(rh_pos_short_label()); ?></th><?php endif; ?>
                                     <th>Momentum</th>
                                     <th class="num">Voids</th>
                                 </tr>
@@ -1621,7 +1621,7 @@ if (isset($_GET['export']) && $_GET['export'] === 'csv') {
                                     <tr class="<?php echo $is_today ? 'eod-table__today' : ''; ?>">
                                         <td data-label="Day"><strong><?php echo htmlspecialchars($td['label']); ?></strong><?php echo $is_today ? ' <span class="eod-tag eod-tag--today">Today</span>' : ''; ?></td>
                                         <td class="num" data-label="Net Rev"><?php echo $money($td['net']); ?></td>
-                                        <td class="num" data-label="F&B POS"><?php echo $money($td['pos_gross']); ?></td>
+                                        <?php if ($mod_pos): ?><td class="num" data-label="<?php echo htmlspecialchars(rh_pos_short_label()); ?>"><?php echo $money($td['pos_gross']); ?></td><?php endif; ?>
                                         <td data-label="Momentum">
                                             <div class="eod-trend-bar">
                                                 <div class="eod-trend-bar__fill<?php echo $is_today ? ' eod-trend-bar__fill--today' : ''; ?>" style="width:<?php echo number_format($bar_width, 1); ?>%"></div>

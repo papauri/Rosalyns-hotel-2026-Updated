@@ -628,8 +628,17 @@ if (!isset($dailyTrend)) {
         <div class="acct-page-header">
             <div class="acct-page-header__copy">
                 <h1 class="acct-page-header__title">Accounting Dashboard</h1>
+                <?php
+                    $_acct_categories = [];
+                    if ($mod_bookings) { $_acct_categories[] = 'rooms'; }
+                    if ($mod_conference) { $_acct_categories[] = 'conferences'; }
+                    if ($mod_gym) { $_acct_categories[] = 'gym'; }
+                    if ($mod_events) { $_acct_categories[] = 'events'; }
+                    if ($mod_pos) { $_acct_categories[] = htmlspecialchars(rh_pos_category_label()); }
+                    if ($mod_bookings && $mod_pos) { $_acct_categories[] = 'room service'; }
+                ?>
                 <p class="acct-page-header__subtitle">
-                    Live financial overview across rooms, conferences, F&amp;B (POS) and room service —
+                    Live financial overview across <?php echo implode(', ', $_acct_categories) ?: 'this installation'; ?> —
                     <strong>
                         <?php echo $showAll
                             ? 'All-time'
@@ -1631,7 +1640,7 @@ if (!isset($dailyTrend)) {
                         }
                         if ($mod_pos) {
                             $rows[] = [
-                                'label'    => 'F&amp;B / Restaurant (POS)',
+                                'label'    => rh_pos_category_label(),
                                 'icon'     => 'fa-utensils',
                                 'count'    => (int)($restaurantSummary['total_restaurant_orders_with_payments'] ?? 0),
                                 'gross'    => $cat_revenue_fnb,
@@ -1872,7 +1881,7 @@ if (!isset($dailyTrend)) {
                                 <th>Date</th>
                                 <?php if ($mod_bookings): ?><th class="num" title="Room booking payments received on this day">Rooms</th><?php endif; ?>
                                 <?php if ($mod_conference): ?><th class="num" title="Conference and events payments received on this day">Conference</th><?php endif; ?>
-                                <?php if ($mod_pos): ?><th class="num" title="Food &amp; Beverage (F&amp;B) — restaurant and bar sales via the POS system">F&amp;B</th><?php endif; ?>
+                                <?php if ($mod_pos): ?><th class="num" title="<?php echo isRestaurantEnabled() ? 'Food &amp; Beverage (F&amp;B) — restaurant and bar sales via the POS system' : 'Sales recorded through the POS/till system'; ?>"><?php echo htmlspecialchars(rh_pos_short_label()); ?></th><?php endif; ?>
                                 <?php if ($mod_gym): ?><th class="num" title="Gym membership payments received on this day">Gym</th><?php endif; ?>
                                 <?php if ($mod_events): ?><th class="num" title="Event booking payments received on this day">Events</th><?php endif; ?>
                                 <th class="num" title="Refunds issued on this day (subtracted from Net Total)">Refunds</th>

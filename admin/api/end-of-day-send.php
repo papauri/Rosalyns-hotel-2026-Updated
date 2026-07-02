@@ -452,7 +452,7 @@ if ($channel === 'whatsapp') {
     $lines[] = '';
     $lines[] = "  🏨 Rooms:       " . _money($currency_symbol, (float)$rev['room_gross']);
     $lines[] = "  🎪 Conference:  " . _money($currency_symbol, (float)$rev['conf_gross']);
-    $lines[] = "  🍽️ F&B:         " . _money($currency_symbol, (float)$rev['fnb_gross']);
+    $lines[] = (isRestaurantEnabled() ? "  🍽️ F&B:         " : "  🛒 POS:         ") . _money($currency_symbol, (float)$rev['fnb_gross']);
     $lines[] = '';
     $lines[] = "━━━━━━━━━━ 🛏️ ROOMS ━━━━━━━━━━";
     $lines[] = "Occupancy: *" . number_format($occupancy_pct, 1) . "%* (" . $rooms_occupied . "/" . $rooms_total . " rooms)";
@@ -467,7 +467,7 @@ if ($channel === 'whatsapp') {
         $lines[] = "Cancellations: " . (int)($ops['cancellations'] ?? 0) . "   No-shows: " . (int)($ops['no_shows'] ?? 0);
     }
     $lines[] = '';
-    $lines[] = "━━━━━━━━━━ 🍽️ F&B / POS ━━━━━━━━━━";
+    $lines[] = isRestaurantEnabled() ? "━━━━━━━━━━ 🍽️ F&B / POS ━━━━━━━━━━" : "━━━━━━━━━━ 🛒 POS ━━━━━━━━━━";
     $lines[] = "Orders: " . (int)$pos['orders'] . "   Gross: *" . _money($currency_symbol, (float)$pos['gross']) . "*";
     $lines[] = "Margin: " . _money($currency_symbol, ((float)$pos['gross'] - (float)$pos['cogs'])) . " (" . number_format((float)$pos['gross'] > 0 ? (((float)$pos['gross'] - (float)$pos['cogs']) / (float)$pos['gross']) * 100 : 0, 1) . "%)";
     $lines[] = "  " . $posArrow . " vs yesterday: " . ($pos_change >= 0 ? '+' : '') . _money($currency_symbol, $pos_change);
@@ -629,7 +629,7 @@ $html .= '</td>';
 
 // POS
 $html .= '<td style="padding:16px;text-align:center;background:#F3ECE4;">';
-$html .= '<div style="font-size:9px;letter-spacing:0.1em;color:#8A775F;text-transform:uppercase;margin-bottom:4px;">F&amp;B / POS</div>';
+$html .= '<div style="font-size:9px;letter-spacing:0.1em;color:#8A775F;text-transform:uppercase;margin-bottom:4px;">' . (isRestaurantEnabled() ? 'F&amp;B / POS' : 'POS') . '</div>';
 $html .= '<div style="font-size:20px;font-weight:700;color:#231F1C;">' . _money($currency_symbol, (float)$pos['gross']) . '</div>';
 $html .= '<div style="font-size:11px;color:' . $pos_color . ';margin-top:3px;">' . $pos_sign . _money($currency_symbol, $pos_change) . ' vs yesterday</div>';
 $html .= '</td>';
@@ -658,7 +658,7 @@ $html .= $section_head('Revenue by Source');
 $revSrcRows = [
     ['Rooms',              _money($currency_symbol, (float)$rev['room_gross'])],
     ['Conferences',        _money($currency_symbol, (float)$rev['conf_gross'])],
-    ['F&amp;B / POS',     _money($currency_symbol, (float)$rev['fnb_gross'])],
+    [isRestaurantEnabled() ? 'F&amp;B / POS' : 'POS', _money($currency_symbol, (float)$rev['fnb_gross'])],
 ];
 foreach ($revSrcRows as $rr) {
     $html .= $row($rr[0], $rr[1]);
@@ -686,7 +686,7 @@ $html .= $row('Rooms Sold / Available', $rooms_occupied . ' / ' . $rooms_total);
 $html .= $row('Unsold Room Opportunity', _money($currency_symbol, (float)$empty_room_opportunity));
 
 // POS section
-$html .= $section_head('POS / F&B');
+$html .= $section_head(isRestaurantEnabled() ? 'POS / F&B' : 'POS');
 $html .= $row('Total Orders', (string)(int)$pos['orders']);
 $html .= $row('Gross Revenue', _money($currency_symbol, (float)$pos['gross']));
 $html .= $row('Cost of Goods (COGS)', _money($currency_symbol, (float)$pos['cogs']));
@@ -880,7 +880,7 @@ if (false) {
         ['NET REVENUE', _money($currency_symbol, $net),                 ($net_change >= 0 ? '+' : '') . _money($currency_symbol, $net_change) . ' vs yday'],
         ['OCCUPANCY',   number_format($occupancy_pct, 1) . '%',         $rooms_occupied . '/' . $rooms_total . ' rooms'],
         ['ADR',         _money($currency_symbol, $adr),                 'RevPAR ' . _money($currency_symbol, $revpar)],
-        ['F&B / POS',   _money($currency_symbol, (float)$pos['gross']), ($pos_change >= 0 ? '+' : '') . _money($currency_symbol, $pos_change) . ' vs yday'],
+        [isRestaurantEnabled() ? 'F&B / POS' : 'POS',   _money($currency_symbol, (float)$pos['gross']), ($pos_change >= 0 ? '+' : '') . _money($currency_symbol, $pos_change) . ' vs yday'],
     ];
     $kpiXp = 14.0;
     foreach ($kpiItems as $ki) {
@@ -928,7 +928,7 @@ if (false) {
     $pdfSec('Revenue by Source');
     $pdfRowA('Rooms',            _money($currency_symbol, (float)$rev['room_gross']), false, 0);
     $pdfRowA('Conferences',      _money($currency_symbol, (float)$rev['conf_gross']), false, 1);
-    $pdfRowA('F&B / POS',        _money($currency_symbol, (float)$rev['fnb_gross']),  false, 2);
+    $pdfRowA(isRestaurantEnabled() ? 'F&B / POS' : 'POS', _money($currency_symbol, (float)$rev['fnb_gross']),  false, 2);
     $pdfRowA('Gross Total',      _money($currency_symbol, $gross), true, 3);
     if ((float)$rev['refunds'] > 0) {
         $pdfRowA('Less Refunds', '-' . _money($currency_symbol, (float)$rev['refunds']), false, 4);
@@ -951,7 +951,7 @@ if (false) {
         $pa->AddPage();
         $py = 14.0;
     }
-    $pdfSec('POS / F&B');
+    $pdfSec(isRestaurantEnabled() ? 'POS / F&B' : 'POS');
     $pdfRowA('Total Orders',  (string)(int)$pos['orders'], false, 0);
     $pdfRowA('Gross Revenue', _money($currency_symbol, (float)$pos['gross']), false, 1);
     $pdfRowA('Gross Margin',  _money($currency_symbol, $pos_margin_val) . ' (' . number_format($pos_marg_pct, 1) . '%)', false, 2);
