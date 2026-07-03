@@ -227,8 +227,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['inquiry_action'])) {
 
                 $email_result = sendGymCancelledEmail($inquiry);
                 $message = $email_result['success']
-                    ? 'Gym membership booking cancelled successfully! Cancellation email sent.'
-                    : 'Gym membership booking cancelled successfully! (Email not sent: ' . htmlspecialchars($email_result['message']) . ')';
+                    ? 'Gym membership cancelled successfully! Cancellation email sent.'
+                    : 'Gym membership cancelled successfully! (Email not sent: ' . htmlspecialchars($email_result['message']) . ')';
             } elseif ($action === 'complete') {
                 if (($inquiry['status'] ?? '') !== 'confirmed') {
                     throw new Exception('Only confirmed memberships can be marked completed.');
@@ -644,7 +644,7 @@ try {
                 ` : ''}
                 <div class="detail-item" style="grid-column: 1 / -1;display:flex;gap:8px;flex-wrap:wrap;">
                     ${inquiry.status === 'new' ? `
-                    <form method="POST" onsubmit="return confirm('Confirm this gym membership booking?');">
+                    <form method="POST" onsubmit="return confirm('Confirm this gym membership?');">
                         <input type="hidden" name="inquiry_action" value="confirm">
                         <input type="hidden" name="inquiry_id" value="${inquiry.id}">
                         <input type="hidden" name="csrf_token" value="${gymCsrfToken}">
@@ -658,7 +658,7 @@ try {
                         <button type="submit" class="btn btn-secondary btn-sm"><i class="fas fa-flag-checkered"></i> Mark Completed</button>
                     </form>` : ''}
                     ${(inquiry.status !== 'cancelled') ? `
-                    <form method="POST" onsubmit="return confirm('Cancel this booking? Any recorded payment will be refunded.');">
+                    <form method="POST" onsubmit="return confirm('Cancel this membership? Any recorded payment will be refunded.');">
                         <input type="hidden" name="inquiry_action" value="cancel">
                         <input type="hidden" name="inquiry_id" value="${inquiry.id}">
                         <input type="hidden" name="csrf_token" value="${gymCsrfToken}">
@@ -707,7 +707,7 @@ try {
                         <span>${inquiry.preferred_time ? new Date('1970-01-01T' + inquiry.preferred_time).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }) : 'N/A'}</span>
                     </div>
                     <div class="detail-item">
-                        <label>Number of Guests</label>
+                        <label>Number of People</label>
                         <span>${inquiry.guests || 1}</span>
                     </div>
                     <div class="detail-item">

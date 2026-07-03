@@ -673,7 +673,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $payment
                                         <input type="radio" name="refund_method" value="store_credit">
                                         <span>
                                             <span class="refund-dest__opt-title"><i class="fas fa-wallet"></i> Store credit (credit note)</span>
-                                            <span class="refund-dest__opt-desc">Issue a credit note the guest can redeem on a future booking. Settled immediately.</span>
+                                            <span class="refund-dest__opt-desc">Issue a credit note the customer can redeem on a future purchase. Settled immediately.</span>
                                         </span>
                                     </label>
                                 </div>

@@ -449,7 +449,7 @@ try {
                         <th>Name</th>
                         <th>Contact</th>
                         <th>Event</th>
-                        <th>Guests</th>
+                        <th>Attendees</th>
                         <th>Status</th>
                         <th>Created</th>
                         <th>Actions</th>
@@ -674,7 +674,7 @@ try {
                         <span>${inquiry.event_date ? new Date(inquiry.event_date).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : 'N/A'}</span>
                     </div>
                     <div class="detail-item">
-                        <label>Number of Guests</label>
+                        <label>Number of Attendees</label>
                         <span>${inquiry.guests || 1}</span>
                     </div>
                     <div class="detail-item">

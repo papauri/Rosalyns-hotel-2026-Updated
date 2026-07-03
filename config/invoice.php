@@ -2615,7 +2615,7 @@ function buildEventInvoiceHTML(array $inquiry, string $invoice_number, string $s
 
         <div class="invoice-body">
             <div class="invoice-details">
-                <h3 style="color: #1A1A1A; border-bottom: 2px solid #8B7355; padding-bottom: 10px; margin-bottom: 20px;">Guest Information</h3>
+                <h3 style="color: #1A1A1A; border-bottom: 2px solid #8B7355; padding-bottom: 10px; margin-bottom: 20px;">Attendee Information</h3>
 
                 <div class="invoice-row">
                     <span class="invoice-label">Name:</span>
@@ -2632,7 +2632,7 @@ function buildEventInvoiceHTML(array $inquiry, string $invoice_number, string $s
             </div>
 
             <div class="invoice-details">
-                <h3 style="color: #1A1A1A; border-bottom: 2px solid #8B7355; padding-bottom: 10px; margin-bottom: 20px;">Booking Details</h3>
+                <h3 style="color: #1A1A1A; border-bottom: 2px solid #8B7355; padding-bottom: 10px; margin-bottom: 20px;">Event Booking Details</h3>
 
                 <div class="invoice-row">
                     <span class="invoice-label">Reference:</span>
@@ -2647,7 +2647,7 @@ function buildEventInvoiceHTML(array $inquiry, string $invoice_number, string $s
                     <span class="invoice-value">' . date('F j, Y', strtotime($inquiry['event_date'])) . '</span>
                 </div>' : '') . '
                 <div class="invoice-row">
-                    <span class="invoice-label">Guests:</span>
+                    <span class="invoice-label">Attendees:</span>
                     <span class="invoice-value">' . (int)($inquiry['guests'] ?? 1) . '</span>
                 </div>
             </div>
@@ -3025,7 +3025,7 @@ body { font-family: helvetica; color: #2A2723; font-size: 10.5px; background: #F
     </tr>
     <tr>
         <td class="label">Prepared For</td>
-        <td>' . $esc((string)($inquiry['name'] ?? 'Guest')) . '</td>
+        <td>' . $esc((string)($inquiry['name'] ?? 'Member')) . '</td>
         <td class="label">Phone</td>
         <td>' . $esc((string)($inquiry['phone'] ?? '')) . '</td>
     </tr>
@@ -3179,17 +3179,17 @@ body { font-family: helvetica; color: #2A2723; font-size: 10.5px; background: #F
     </tr>
     <tr>
         <td class="label">Prepared For</td>
-        <td>' . $esc((string)($inquiry['name'] ?? 'Guest')) . '</td>
+        <td>' . $esc((string)($inquiry['name'] ?? 'Attendee')) . '</td>
         <td class="label">Phone</td>
         <td>' . $esc((string)($inquiry['phone'] ?? '')) . '</td>
     </tr>
 </table>
 
-<h2 class="section-title">Booking Details</h2>
+<h2 class="section-title">Event Booking Details</h2>
 <table class="detail-table" width="100%" cellspacing="0" cellpadding="0">
     <tr><td>Inquiry Reference</td><td>' . $esc((string)($inquiry['reference_number'] ?? '')) . '</td></tr>
     <tr><td>Event</td><td>' . $esc($eventTitle) . '</td></tr>
-    <tr><td>Guests</td><td>' . $esc((string)$guests) . '</td></tr>
+    <tr><td>Attendees</td><td>' . $esc((string)$guests) . '</td></tr>
 </table>
 
 <h2 class="section-title">Price Breakdown</h2>

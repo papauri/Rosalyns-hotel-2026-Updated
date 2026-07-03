@@ -176,6 +176,66 @@ if ($payment['booking_type'] === 'room') {
             'status' => $order['status']
         ];
     }
+} elseif ($payment['booking_type'] === 'gym') {
+    try {
+        $gymStmt = $pdo->prepare("SELECT * FROM gym_inquiries WHERE id = ?");
+        $gymStmt->execute([$payment['booking_id']]);
+        if ($gi = $gymStmt->fetch(PDO::FETCH_ASSOC)) {
+            $bookingDetails = [
+                'type' => 'gym',
+                'id' => (int)$gi['id'],
+                'reference' => $gi['reference_number'],
+                'person' => [
+                    'label' => 'Member',
+                    'name' => $gi['name'],
+                    'email' => $gi['email'],
+                    'phone' => $gi['phone'],
+                ],
+                'detail_rows' => array_filter([
+                    'Membership' => $gi['membership_type'] ?: null,
+                ]),
+                'amounts' => [
+                    'total_amount' => (float)($gi['total_amount'] ?? 0),
+                    'amount_paid' => (float)($gi['amount_paid'] ?? 0),
+                    'amount_due' => (float)($gi['amount_due'] ?? 0),
+                    'vat_rate' => (float)($gi['vat_rate'] ?? 0),
+                    'vat_amount' => (float)($gi['vat_amount'] ?? 0),
+                ],
+                'status' => $gi['status']
+            ];
+        }
+    } catch (Throwable $e) { /* table pending — card simply not shown */ }
+} elseif ($payment['booking_type'] === 'event') {
+    try {
+        $evStmt = $pdo->prepare("SELECT ei.*, e.title AS event_title, e.event_date FROM event_inquiries ei LEFT JOIN events e ON e.id = ei.event_id WHERE ei.id = ?");
+        $evStmt->execute([$payment['booking_id']]);
+        if ($ei = $evStmt->fetch(PDO::FETCH_ASSOC)) {
+            $bookingDetails = [
+                'type' => 'event',
+                'id' => (int)$ei['id'],
+                'reference' => $ei['reference_number'],
+                'person' => [
+                    'label' => 'Attendee',
+                    'name' => $ei['name'],
+                    'email' => $ei['email'],
+                    'phone' => $ei['phone'],
+                ],
+                'detail_rows' => array_filter([
+                    'Event' => $ei['event_title'] ?: null,
+                    'Event Date' => !empty($ei['event_date']) ? date('M j, Y', strtotime($ei['event_date'])) : null,
+                    'Attendees' => (int)($ei['guests'] ?? 0) ?: null,
+                ]),
+                'amounts' => [
+                    'total_amount' => (float)($ei['total_amount'] ?? 0),
+                    'amount_paid' => (float)($ei['amount_paid'] ?? 0),
+                    'amount_due' => (float)($ei['amount_due'] ?? 0),
+                    'vat_rate' => (float)($ei['vat_rate'] ?? 0),
+                    'vat_amount' => (float)($ei['vat_amount'] ?? 0),
+                ],
+                'status' => $ei['status']
+            ];
+        }
+    } catch (Throwable $e) { /* table pending — card simply not shown */ }
 }
 
 // Get other payments for this booking
@@ -489,13 +549,24 @@ if (($payment['payment_type'] ?? '') === 'refund' && !empty($payment['original_p
             </div>
         </div>
 
-        <!-- Booking Information -->
-        <?php if ($bookingDetails): ?>
+        <!-- Source record information — labelled by what the payment actually is -->
+        <?php if ($bookingDetails):
+            // Per-type vocabulary: a gym payment is a membership, an event payment
+            // an event booking, a restaurant payment an order — not a room booking.
+            $pd_type_labels = [
+                'room'       => ['heading' => 'Booking Information',       'title' => 'Room Booking',      'noun' => 'Booking'],
+                'conference' => ['heading' => 'Booking Information',       'title' => 'Conference Booking', 'noun' => 'Booking'],
+                'restaurant' => ['heading' => 'Order Information',         'title' => 'Restaurant Order',  'noun' => 'Order'],
+                'gym'        => ['heading' => 'Membership Information',    'title' => 'Gym Membership',    'noun' => 'Membership'],
+                'event'      => ['heading' => 'Event Booking Information', 'title' => 'Event Booking',     'noun' => 'Event Booking'],
+            ];
+            $pd_labels = $pd_type_labels[$bookingDetails['type']] ?? ['heading' => 'Record Information', 'title' => ucfirst($bookingDetails['type']), 'noun' => 'Record'];
+        ?>
             <div class="detail-card" style="margin-bottom: 24px;">
-                <h3><i class="fas fa-calendar-check"></i> Booking Information</h3>
+                <h3><i class="fas fa-calendar-check"></i> <?php echo $pd_labels['heading']; ?></h3>
 
                 <div class="booking-summary">
-                    <h4><?php echo ucfirst($bookingDetails['type']); ?> Booking</h4>
+                    <h4><?php echo $pd_labels['title']; ?></h4>
 
                     <?php if ($bookingDetails['type'] === 'room'): ?>
                         <p><strong>Reference:</strong> <?php echo htmlspecialchars($bookingDetails['reference']); ?></p>
@@ -527,6 +598,22 @@ if (($payment['payment_type'] ?? '') === 'refund' && !empty($payment['original_p
                             <p><strong>VAT:</strong> <?php echo $currency_symbol; ?><?php echo number_format($bookingDetails['amounts']['vat_amount'], 0); ?> (<?php echo $bookingDetails['amounts']['vat_rate']; ?>%)</p>
                         <?php endif; ?>
                         <p><strong>Status:</strong> <span class="status-badge badge-<?php echo $bookingDetails['status']; ?>"><?php echo ucfirst($bookingDetails['status']); ?></span></p>
+                    <?php elseif (in_array($bookingDetails['type'], ['gym', 'event'], true)): ?>
+                        <p><strong>Reference:</strong> <?php echo htmlspecialchars($bookingDetails['reference']); ?></p>
+                        <p><strong><?php echo htmlspecialchars($bookingDetails['person']['label']); ?>:</strong> <?php echo htmlspecialchars($bookingDetails['person']['name']); ?></p>
+                        <?php if (!empty($bookingDetails['person']['email'])): ?>
+                            <p><strong>Email:</strong> <?php echo htmlspecialchars($bookingDetails['person']['email']); ?></p>
+                        <?php endif; ?>
+                        <?php foreach ($bookingDetails['detail_rows'] as $pd_dl => $pd_dv): ?>
+                            <p><strong><?php echo htmlspecialchars($pd_dl); ?>:</strong> <?php echo htmlspecialchars((string)$pd_dv); ?></p>
+                        <?php endforeach; ?>
+                        <p><strong>Total Amount:</strong> <?php echo $currency_symbol; ?><?php echo number_format($bookingDetails['amounts']['total_amount'], 0); ?></p>
+                        <p><strong>Amount Paid:</strong> <span style="color: #28a745;"><?php echo $currency_symbol; ?><?php echo number_format($bookingDetails['amounts']['amount_paid'], 0); ?></span></p>
+                        <p><strong>Amount Due:</strong> <span style="color: <?php echo $bookingDetails['amounts']['amount_due'] > 0 ? '#dc3545' : '#28a745'; ?>;"><?php echo $currency_symbol; ?><?php echo number_format($bookingDetails['amounts']['amount_due'], 0); ?></span></p>
+                        <?php if ($bookingDetails['amounts']['vat_amount'] > 0): ?>
+                            <p><strong>VAT:</strong> <?php echo $currency_symbol; ?><?php echo number_format($bookingDetails['amounts']['vat_amount'], 0); ?> (<?php echo $bookingDetails['amounts']['vat_rate']; ?>%)</p>
+                        <?php endif; ?>
+                        <p><strong>Status:</strong> <span class="status-badge badge-<?php echo $bookingDetails['status']; ?>"><?php echo ucfirst($bookingDetails['status']); ?></span></p>
                     <?php else: ?>
                         <p><strong>Reference:</strong> <?php echo htmlspecialchars($bookingDetails['reference']); ?></p>
                         <p><strong>Customer:</strong> <?php echo htmlspecialchars($bookingDetails['customer']['name']); ?></p>
@@ -552,15 +639,15 @@ if (($payment['payment_type'] ?? '') === 'refund' && !empty($payment['original_p
                 };
                 ?>
                 <a href="<?php echo htmlspecialchars($pd_source_href); ?>" class="btn-primary" style="display: inline-block; padding: 10px 20px; text-decoration: none;">
-                    <i class="fas fa-external-link-alt"></i> View Full <?php echo $bookingDetails['type'] === 'restaurant' ? 'Order' : 'Booking'; ?> Details
+                    <i class="fas fa-external-link-alt"></i> View Full <?php echo $pd_labels['noun']; ?> Details
                 </a>
             </div>
         <?php endif; ?>
 
-        <!-- Other Payments for this Booking -->
+        <!-- Other Payments for this record -->
         <?php if (!empty($otherPayments)): ?>
             <div class="detail-card">
-                <h3><i class="fas fa-list"></i> Other Payments for this Booking</h3>
+                <h3><i class="fas fa-list"></i> Other Payments for this <?php echo isset($pd_labels) ? $pd_labels['noun'] : 'Record'; ?></h3>
 
                 <div class="other-payments">
                     <?php foreach ($otherPayments as $otherPayment): ?>
