@@ -39,6 +39,10 @@ function receipts_build_where(array $input, array &$params): string
     if (($input['type'] ?? 'all') !== 'all') {
         $where[] = 'p.booking_type = ?';
         $params[] = $input['type'];
+    } elseif (!empty($input['_scope_types']) && is_array($input['_scope_types'])) {
+        // Preset scoping: default view shows only enabled modules' receipts.
+        $where[] = 'p.booking_type IN (' . implode(',', array_fill(0, count($input['_scope_types']), '?')) . ')';
+        foreach ($input['_scope_types'] as $t) { $params[] = $t; }
     }
     if (($input['status'] ?? 'all') === 'missing') {
         $where[] = "(p.receipt_number IS NULL OR p.receipt_number = '')";
@@ -70,11 +74,24 @@ $filters = [
     'date_to' => $_GET['date_to'] ?? '',
     'search' => trim((string)($_GET['search'] ?? '')),
 ];
-if (!in_array($filters['type'], ['all', 'room', 'conference', 'restaurant'], true)) {
+if (!in_array($filters['type'], ['all', 'room', 'conference', 'restaurant', 'gym', 'event'], true)) {
     $filters['type'] = 'all';
 }
 if (!in_array($filters['status'], ['all', 'missing', 'generated', 'emailed'], true)) {
     $filters['status'] = 'all';
+}
+
+// Preset scoping: default list shows receipts for enabled modules only.
+// ?type= deep links and ?scope=all bypass; history is never deleted.
+$scopeAll            = (($_GET['scope'] ?? '') === 'all');
+$allBookingTypes     = ['room', 'conference', 'restaurant', 'gym', 'event'];
+$enabledBookingTypes = function_exists('rh_enabled_booking_types') ? rh_enabled_booking_types() : [];
+$scopeActive         = $filters['type'] === 'all' && !$scopeAll
+    && !empty($enabledBookingTypes)
+    && count($enabledBookingTypes) < count($allBookingTypes);
+$hiddenBookingTypes  = $scopeActive ? array_values(array_diff($allBookingTypes, $enabledBookingTypes)) : [];
+if ($scopeActive) {
+    $filters['_scope_types'] = $enabledBookingTypes;
 }
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
@@ -174,6 +191,15 @@ $summaryStmt = $pdo->prepare("SELECT COUNT(*) AS total_receipts,
     FROM payments p $whereSql");
 $summaryStmt->execute($params);
 $summary = $summaryStmt->fetch(PDO::FETCH_ASSOC) ?: [];
+
+// Rows hidden by preset scoping (for the notice above the table)
+$hiddenScopedCount = 0;
+if ($scopeActive && $hiddenBookingTypes !== []) {
+    $hPh = implode(',', array_fill(0, count($hiddenBookingTypes), '?'));
+    $hStmt = $pdo->prepare("SELECT COUNT(*) FROM payments p WHERE p.deleted_at IS NULL AND p.payment_status IN ('completed','paid','refunded') AND p.booking_type IN ($hPh)");
+    $hStmt->execute($hiddenBookingTypes);
+    $hiddenScopedCount = (int)$hStmt->fetchColumn();
+}
 
 $page = max(1, (int)($_GET['page'] ?? 1));
 $limit = 10;
@@ -332,6 +358,21 @@ $receiptPlaceholderTokens = array_keys($templatePreviewMap);
                 <?php endif; ?>
             </form>
         </div>
+
+        <?php
+        $scopeQs = $_GET;
+        unset($scopeQs['scope'], $scopeQs['page']);
+        if ($scopeActive && $hiddenScopedCount > 0): ?>
+            <div style="background:#faf8f4; border:1px solid #e5d9c9; border-radius:10px; padding:10px 14px; margin:0 0 14px; display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap; font-size:13px; color:#7a6f63;">
+                <span><i class="fas fa-filter" style="margin-right:6px;"></i>Showing receipts for your active modules only (<?php echo number_format($hiddenScopedCount); ?> older record<?php echo $hiddenScopedCount === 1 ? '' : 's'; ?> from disabled modules hidden).</span>
+                <a href="?<?php echo htmlspecialchars(http_build_query(array_merge($scopeQs, ['scope' => 'all']))); ?>" style="color:#8B7355; font-weight:600; text-decoration:none;">Show all history &rarr;</a>
+            </div>
+        <?php elseif ($scopeAll && $filters['type'] === 'all'): ?>
+            <div style="background:#faf8f4; border:1px solid #e5d9c9; border-radius:10px; padding:10px 14px; margin:0 0 14px; display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap; font-size:13px; color:#7a6f63;">
+                <span><i class="fas fa-clock-rotate-left" style="margin-right:6px;"></i>Showing full receipt history, including records from disabled modules.</span>
+                <a href="?<?php echo htmlspecialchars(http_build_query($scopeQs)); ?>" style="color:#8B7355; font-weight:600; text-decoration:none;">Show relevant only &rarr;</a>
+            </div>
+        <?php endif; ?>
 
         <!-- Receipts Table -->
         <div class="table-container" data-admin-pagination-scope data-receipts-pagination-scope data-page-size="<?php echo (int)$limit; ?>" data-current-page="<?php echo (int)$page; ?>" data-total-pages="<?php echo (int)$totalPages; ?>">

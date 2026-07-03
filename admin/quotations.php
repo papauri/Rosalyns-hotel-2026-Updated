@@ -185,9 +185,22 @@ $search        = trim($_GET['search'] ?? '');
 $where  = ['1=1'];
 $params = [];
 
+// Preset scoping: default list shows quotations for enabled modules only
+// (untyped/legacy rows always stay visible). ?type= and ?scope=all bypass.
+$scopeAll            = (($_GET['scope'] ?? '') === 'all');
+$allBookingTypes     = ['room', 'conference', 'restaurant', 'gym', 'event'];
+$enabledBookingTypes = function_exists('rh_enabled_booking_types') ? rh_enabled_booking_types() : [];
+$scopeActive         = $filter_type === '' && !$scopeAll
+    && !empty($enabledBookingTypes)
+    && count($enabledBookingTypes) < count($allBookingTypes);
+$hiddenBookingTypes  = $scopeActive ? array_values(array_diff($allBookingTypes, $enabledBookingTypes)) : [];
+
 if ($filter_type !== '') {
     $where[]  = 'q.booking_type = ?';
     $params[] = $filter_type;
+} elseif ($scopeActive) {
+    $where[] = '(q.booking_type IS NULL OR q.booking_type IN (' . implode(',', array_fill(0, count($enabledBookingTypes), '?')) . '))';
+    $params  = array_merge($params, $enabledBookingTypes);
 }
 if ($filter_status !== '') {
     $where[]  = 'q.status = ?';
@@ -221,6 +234,15 @@ try {
     $listStmt   = $pdo->prepare($sql);
     $listStmt->execute($params);
     $quotations = $listStmt->fetchAll(PDO::FETCH_ASSOC);
+
+    // Rows hidden by preset scoping (for the notice above the list)
+    $hiddenScopedCount = 0;
+    if ($scopeActive && $hiddenBookingTypes !== []) {
+        $hPh = implode(',', array_fill(0, count($hiddenBookingTypes), '?'));
+        $hStmt = $pdo->prepare("SELECT COUNT(*) FROM quotations q WHERE q.booking_type IN ($hPh)");
+        $hStmt->execute($hiddenBookingTypes);
+        $hiddenScopedCount = (int)$hStmt->fetchColumn();
+    }
 
     foreach ($quotations as $q) {
         $stats['total']++;
@@ -343,6 +365,21 @@ try {
                 <a href="quotations.php" class="btn btn-secondary" style="font-size:13px;padding:8px 14px;">Clear</a>
             </div>
         </form>
+
+        <?php
+        $scopeQs = $_GET;
+        unset($scopeQs['scope']);
+        if ($scopeActive && ($hiddenScopedCount ?? 0) > 0): ?>
+            <div style="background:#faf8f4; border:1px solid #e5d9c9; border-radius:10px; padding:10px 14px; margin:0 0 14px; display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap; font-size:13px; color:#7a6f63;">
+                <span><i class="fas fa-filter" style="margin-right:6px;"></i>Showing quotations for your active modules only (<?php echo number_format($hiddenScopedCount); ?> older record<?php echo (int)$hiddenScopedCount === 1 ? '' : 's'; ?> from disabled modules hidden).</span>
+                <a href="?<?php echo htmlspecialchars(http_build_query(array_merge($scopeQs, ['scope' => 'all']))); ?>" style="color:#8B7355; font-weight:600; text-decoration:none;">Show all history &rarr;</a>
+            </div>
+        <?php elseif ($scopeAll && $filter_type === ''): ?>
+            <div style="background:#faf8f4; border:1px solid #e5d9c9; border-radius:10px; padding:10px 14px; margin:0 0 14px; display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap; font-size:13px; color:#7a6f63;">
+                <span><i class="fas fa-clock-rotate-left" style="margin-right:6px;"></i>Showing full quotation history, including records from disabled modules.</span>
+                <a href="?<?php echo htmlspecialchars(http_build_query($scopeQs)); ?>" style="color:#8B7355; font-weight:600; text-decoration:none;">Show relevant only &rarr;</a>
+            </div>
+        <?php endif; ?>
 
         <!-- Table -->
         <div class="table-container">

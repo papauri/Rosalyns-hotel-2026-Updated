@@ -226,6 +226,16 @@ $filter_type = $_GET['filter_type'] ?? 'all';
 $filter_status = $_GET['filter_status'] ?? 'all';
 $search = $_GET['search'] ?? '';
 
+// Preset scoping: default list shows invoices for enabled modules only.
+// Explicit ?filter_type= and ?scope=all bypass; history is never deleted.
+$scopeAll            = (($_GET['scope'] ?? '') === 'all');
+$allBookingTypes     = ['room', 'conference', 'restaurant', 'gym', 'event'];
+$enabledBookingTypes = function_exists('rh_enabled_booking_types') ? rh_enabled_booking_types() : [];
+$scopeActive         = $filter_type === 'all' && !$scopeAll
+    && !empty($enabledBookingTypes)
+    && count($enabledBookingTypes) < count($allBookingTypes);
+$hiddenBookingTypes  = $scopeActive ? array_values(array_diff($allBookingTypes, $enabledBookingTypes)) : [];
+
 // Build query
 $where_conditions = ["p.deleted_at IS NULL"];
 $params = [];
@@ -233,6 +243,9 @@ $params = [];
 if ($filter_type !== 'all') {
     $where_conditions[] = "p.booking_type = ?";
     $params[] = $filter_type;
+} elseif ($scopeActive) {
+    $where_conditions[] = "p.booking_type IN (" . implode(',', array_fill(0, count($enabledBookingTypes), '?')) . ")";
+    $params = array_merge($params, $enabledBookingTypes);
 }
 
 if ($filter_status !== 'all') {
@@ -283,6 +296,15 @@ try {
     $stmt = $pdo->prepare($sql);
     $stmt->execute($params);
     $invoices = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+    // Rows hidden by preset scoping (for the notice above the table)
+    $hiddenScopedCount = 0;
+    if ($scopeActive && $hiddenBookingTypes !== []) {
+        $hPh = implode(',', array_fill(0, count($hiddenBookingTypes), '?'));
+        $hStmt = $pdo->prepare("SELECT COUNT(*) FROM payments WHERE deleted_at IS NULL AND booking_type IN ($hPh)");
+        $hStmt->execute($hiddenBookingTypes);
+        $hiddenScopedCount = (int)$hStmt->fetchColumn();
+    }
 
     // Get statistics
     $stats_stmt = $pdo->query("
@@ -590,6 +612,21 @@ $totalAging = (float)$aging['bucket_0_30'] + (float)$aging['bucket_31_60'] + (fl
                 </div>
             </form>
         </div>
+
+        <?php
+        $scopeQs = $_GET;
+        unset($scopeQs['scope']);
+        if ($scopeActive && ($hiddenScopedCount ?? 0) > 0): ?>
+            <div style="background:#faf8f4; border:1px solid #e5d9c9; border-radius:10px; padding:10px 14px; margin:0 0 14px; display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap; font-size:13px; color:#7a6f63;">
+                <span><i class="fas fa-filter" style="margin-right:6px;"></i>Showing invoices for your active modules only (<?php echo number_format($hiddenScopedCount); ?> older record<?php echo (int)$hiddenScopedCount === 1 ? '' : 's'; ?> from disabled modules hidden).</span>
+                <a href="?<?php echo htmlspecialchars(http_build_query(array_merge($scopeQs, ['scope' => 'all']))); ?>" style="color:#8B7355; font-weight:600; text-decoration:none;">Show all history &rarr;</a>
+            </div>
+        <?php elseif ($scopeAll && $filter_type === 'all'): ?>
+            <div style="background:#faf8f4; border:1px solid #e5d9c9; border-radius:10px; padding:10px 14px; margin:0 0 14px; display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap; font-size:13px; color:#7a6f63;">
+                <span><i class="fas fa-clock-rotate-left" style="margin-right:6px;"></i>Showing full invoice history, including records from disabled modules.</span>
+                <a href="?<?php echo htmlspecialchars(http_build_query($scopeQs)); ?>" style="color:#8B7355; font-weight:600; text-decoration:none;">Show relevant only &rarr;</a>
+            </div>
+        <?php endif; ?>
 
         <!-- Invoices Table -->
         <div class="invoices-table">

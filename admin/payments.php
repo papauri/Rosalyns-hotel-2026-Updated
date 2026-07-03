@@ -30,6 +30,18 @@ $startDate = isset($_GET['start_date']) ? $_GET['start_date'] : '';
 $endDate = isset($_GET['end_date']) ? $_GET['end_date'] : '';
 $searchText = trim((string)($_GET['search_text'] ?? ''));
 $has_active_payment_filters = $bookingType !== '' || $bookingId > 0 || $status !== '' || $paymentMethod !== '' || $startDate !== '' || $endDate !== '' || $searchText !== '';
+
+// Preset scoping: by default the list shows only rows whose module is enabled
+// (a gym sees gym/event/till payments, not room-booking history). Explicit
+// ?booking_type= deep links and ?scope=all bypass it; nothing is ever deleted.
+$scopeAll            = (($_GET['scope'] ?? '') === 'all');
+$allBookingTypes     = ['room', 'conference', 'restaurant', 'gym', 'event'];
+$enabledBookingTypes = function_exists('rh_enabled_booking_types') ? rh_enabled_booking_types() : [];
+$scopeActive         = $bookingType === '' && !$scopeAll
+    && !empty($enabledBookingTypes)
+    && count($enabledBookingTypes) < count($allBookingTypes);
+$hiddenBookingTypes  = $scopeActive ? array_values(array_diff($allBookingTypes, $enabledBookingTypes)) : [];
+
 $page = isset($_GET['page']) ? max(1, (int)$_GET['page']) : 1;
 $limit = 50;
 $offset = ($page - 1) * $limit;
@@ -82,6 +94,9 @@ $params = [];
 if ($bookingType) {
     $where_conditions[] = "p.booking_type = ?";
     $params[] = $bookingType;
+} elseif ($scopeActive) {
+    $where_conditions[] = "p.booking_type IN (" . implode(',', array_fill(0, count($enabledBookingTypes), '?')) . ")";
+    $params = array_merge($params, $enabledBookingTypes);
 }
 
 if ($bookingId) {
@@ -178,6 +193,15 @@ $paymentMethods = $methodsStmt->fetchAll(PDO::FETCH_COLUMN);
 
 $totalPages = ceil($total / $limit);
 
+// How many rows the preset scoping is currently hiding (drives the notice).
+$hiddenScopedCount = 0;
+if ($scopeActive && $hiddenBookingTypes !== []) {
+    $hPh = implode(',', array_fill(0, count($hiddenBookingTypes), '?'));
+    $hStmt = $pdo->prepare("SELECT COUNT(*) FROM payments WHERE deleted_at IS NULL AND booking_type IN ($hPh)");
+    $hStmt->execute($hiddenBookingTypes);
+    $hiddenScopedCount = (int)$hStmt->fetchColumn();
+}
+
 // ──────────────────────────────────────────────────────────────────────────
 // Filter-aware analytics (respect current GET filters)
 // ──────────────────────────────────────────────────────────────────────────
@@ -186,6 +210,10 @@ $analyticsParams = [];
 if ($bookingType) {
     $analyticsWhere[] = "booking_type = ?";
     $analyticsParams[] = $bookingType;
+} elseif ($scopeActive) {
+    // Keep the summary cards consistent with the scoped list below them.
+    $analyticsWhere[] = "booking_type IN (" . implode(',', array_fill(0, count($enabledBookingTypes), '?')) . ")";
+    $analyticsParams = array_merge($analyticsParams, $enabledBookingTypes);
 }
 if ($bookingId) {
     $analyticsWhere[] = "booking_id = ?";
@@ -723,6 +751,22 @@ $quickActive = function ($s, $e) use ($startDate, $endDate) {
                 <div style="color: #2f3a63; font-size: 13px;">
                     Showing <?php echo number_format($total); ?> payment result<?php echo (int)$total === 1 ? '' : 's'; ?><?php if ($searchText !== ''): ?> for &ldquo;<?php echo htmlspecialchars($searchText); ?>&rdquo;<?php endif; ?>.
                 </div>
+            </div>
+        <?php endif; ?>
+
+        <?php
+        // Preset-scope notice + escape hatch (only when scoping actually hides rows)
+        $scopeQs = $_GET;
+        unset($scopeQs['scope'], $scopeQs['page']);
+        if ($scopeActive && $hiddenScopedCount > 0): ?>
+            <div style="background:#faf8f4; border:1px solid #e5d9c9; border-radius:10px; padding:10px 14px; margin:0 0 14px; display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap; font-size:13px; color:#7a6f63;">
+                <span><i class="fas fa-filter" style="margin-right:6px;"></i>Showing records for your active modules only (<?php echo number_format($hiddenScopedCount); ?> older record<?php echo $hiddenScopedCount === 1 ? '' : 's'; ?> from disabled modules hidden).</span>
+                <a href="?<?php echo htmlspecialchars(http_build_query(array_merge($scopeQs, ['scope' => 'all']))); ?>" style="color:#8B7355; font-weight:600; text-decoration:none;">Show all history &rarr;</a>
+            </div>
+        <?php elseif ($scopeAll && $bookingType === ''): ?>
+            <div style="background:#faf8f4; border:1px solid #e5d9c9; border-radius:10px; padding:10px 14px; margin:0 0 14px; display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap; font-size:13px; color:#7a6f63;">
+                <span><i class="fas fa-clock-rotate-left" style="margin-right:6px;"></i>Showing full payment history, including records from disabled modules.</span>
+                <a href="?<?php echo htmlspecialchars(http_build_query($scopeQs)); ?>" style="color:#8B7355; font-weight:600; text-decoration:none;">Show relevant only &rarr;</a>
             </div>
         <?php endif; ?>
 

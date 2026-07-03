@@ -182,6 +182,23 @@ if ($filterType !== 'all') {
     $where[]  = 'cn.booking_type = ?';
     $params[] = $filterType;
 }
+
+// Preset scoping: credit notes only carry room/conference/goodwill types.
+// Hide rows for DISABLED modules by default; goodwill/standalone notes always
+// show. ?type= deep links and ?scope=all bypass; nothing is deleted.
+$scopeAll           = (($_GET['scope'] ?? '') === 'all');
+$cnModuleTypes      = ['room' => 'bookings', 'conference' => 'conference'];
+$hiddenBookingTypes = [];
+foreach ($cnModuleTypes as $cnType => $cnModule) {
+    if (!(function_exists('moduleEnabled') && moduleEnabled($cnModule))) {
+        $hiddenBookingTypes[] = $cnType;
+    }
+}
+$scopeActive = $filterType === 'all' && !$scopeAll && $hiddenBookingTypes !== [];
+if ($scopeActive) {
+    $where[] = 'cn.booking_type NOT IN (' . implode(',', array_fill(0, count($hiddenBookingTypes), '?')) . ')';
+    $params  = array_merge($params, $hiddenBookingTypes);
+}
 if ($filterDateFrom !== '') {
     $where[]  = 'DATE(cn.issued_at) >= ?';
     $params[] = $filterDateFrom;
@@ -233,6 +250,15 @@ $listStmt   = $pdo->prepare("
 ");
 $listStmt->execute($listParams);
 $creditNotes = $listStmt->fetchAll(PDO::FETCH_ASSOC);
+
+// Rows hidden by preset scoping (for the notice above the table)
+$hiddenScopedCount = 0;
+if ($scopeActive) {
+    $hPh = implode(',', array_fill(0, count($hiddenBookingTypes), '?'));
+    $hStmt = $pdo->prepare("SELECT COUNT(*) FROM credit_notes cn WHERE cn.booking_type IN ($hPh)");
+    $hStmt->execute($hiddenBookingTypes);
+    $hiddenScopedCount = (int)$hStmt->fetchColumn();
+}
 
 $currencySymbol = getSetting('currency_symbol') ?: 'MWK';
 
@@ -492,6 +518,21 @@ $modalsHtml = ob_get_clean();
                 <?php endif; ?>
             </form>
         </div>
+
+        <?php
+        $scopeQs = $_GET;
+        unset($scopeQs['scope'], $scopeQs['page']);
+        if ($scopeActive && $hiddenScopedCount > 0): ?>
+            <div style="background:#faf8f4; border:1px solid #e5d9c9; border-radius:10px; padding:10px 14px; margin:0 0 14px; display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap; font-size:13px; color:#7a6f63;">
+                <span><i class="fas fa-filter" style="margin-right:6px;"></i>Showing credit notes for your active modules only (<?php echo number_format($hiddenScopedCount); ?> older record<?php echo $hiddenScopedCount === 1 ? '' : 's'; ?> from disabled modules hidden).</span>
+                <a href="?<?php echo htmlspecialchars(http_build_query(array_merge($scopeQs, ['scope' => 'all']))); ?>" style="color:#8B7355; font-weight:600; text-decoration:none;">Show all history &rarr;</a>
+            </div>
+        <?php elseif ($scopeAll && $filterType === 'all'): ?>
+            <div style="background:#faf8f4; border:1px solid #e5d9c9; border-radius:10px; padding:10px 14px; margin:0 0 14px; display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap; font-size:13px; color:#7a6f63;">
+                <span><i class="fas fa-clock-rotate-left" style="margin-right:6px;"></i>Showing full credit-note history, including records from disabled modules.</span>
+                <a href="?<?php echo htmlspecialchars(http_build_query($scopeQs)); ?>" style="color:#8B7355; font-weight:600; text-decoration:none;">Show relevant only &rarr;</a>
+            </div>
+        <?php endif; ?>
 
         <!-- Credit Notes Table -->
         <div class="table-container">

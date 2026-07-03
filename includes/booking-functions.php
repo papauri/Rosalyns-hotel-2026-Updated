@@ -81,6 +81,27 @@ function rh_pos_cogs_label(): string {
 }
 
 /**
+ * booking_type values (payments ledger vocabulary) whose owning module is
+ * enabled for this installation. Drives the DEFAULT scoping of finance list
+ * pages: a Gym preset's invoice/payment lists open showing gym/event/till
+ * rows, not room-booking history. Data is never deleted — pages offer a
+ * "show all history" escape hatch and explicit ?booking_type= deep links
+ * bypass scoping entirely.
+ */
+function rh_enabled_booking_types(): array {
+    $types = [];
+    $mod = static function (string $m): bool {
+        return function_exists('moduleEnabled') && moduleEnabled($m);
+    };
+    if ($mod('bookings'))   { $types[] = 'room'; }
+    if ($mod('conference')) { $types[] = 'conference'; }
+    if ($mod('pos'))        { $types[] = 'restaurant'; }
+    if ($mod('gym'))        { $types[] = 'gym'; }
+    if (function_exists('isEventsEnabled') && isEventsEnabled()) { $types[] = 'event'; }
+    return $types;
+}
+
+/**
  * Given a raw link URL from an admin-managed link list (e.g. footer_links),
  * decide whether it points to a page whose feature/module is currently
  * switched off. Keeps freeform admin-editable link lists (which have no
