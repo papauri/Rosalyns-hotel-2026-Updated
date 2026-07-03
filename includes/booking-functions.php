@@ -126,6 +126,8 @@ function rh_is_feature_link_hidden(string $rawHref): bool {
         'rooms'         => 'isBookingEnabled',
         'room'          => 'isBookingEnabled',
         'booking-lookup' => 'isBookingEnabled',
+        'events'        => 'isEventsEnabled',
+        'events-confirmation' => 'isEventsEnabled',
     ];
 
     if (!isset($map[$slug])) {

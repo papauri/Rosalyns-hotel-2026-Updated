@@ -19,6 +19,13 @@ require_once 'config/base-url.php';
 // Include database configuration
 require_once 'config/database.php';
 
+// Reviews belong to the Website & CMS module — presets without it don't
+// collect guest reviews.
+if (function_exists('moduleEnabled') && !moduleEnabled('website_cms')) {
+    header('Location: ' . (defined('BASE_URL') ? BASE_URL : '/'));
+    exit;
+}
+
 // Include alert system
 require_once 'includes/alert.php';
 

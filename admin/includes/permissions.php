@@ -59,6 +59,7 @@ function getAllRoles()
                 'gym_packages',
                 'gym_financials',
                 'gym_checkin',
+                'gym_reports',
                 'menu',
                 'events',
                 'events_bookings',
@@ -259,7 +260,8 @@ function getAllRoles()
             'permissions' => [
                 'dashboard',
                 'gym',
-                'gym_checkin'
+                'gym_checkin',
+                'gym_reports'
             ]
         ],
         'conference_staff' => [
@@ -525,6 +527,14 @@ function getAllPermissions()
             'icon' => 'fa-barcode',
             'category' => 'Property',
             'page' => 'gym-checkin.php',
+            'group' => 'gym'
+        ],
+        'gym_reports' => [
+            'label' => 'Gym Reports',
+            'description' => 'Membership, attendance and outstanding-balance analytics for the gym',
+            'icon' => 'fa-chart-line',
+            'category' => 'Property',
+            'page' => 'gym-reports.php',
             'group' => 'gym'
         ],
 
@@ -1342,6 +1352,7 @@ function getPermissionForPage(string $page)
         'quotations.php' => 'create_booking',
         'gym-members.php' => 'gym',
         'gym-checkin.php' => 'gym_checkin',
+        'gym-reports.php' => 'gym_reports',
         'section-headers-management.php' => 'section_headers',
         'footer-management.php'         => 'footer_management',
         'booking-settings.php' => 'booking_settings',
@@ -1414,8 +1425,8 @@ function getModuleForPage(string $page)
         'gym-inquiries.php' => 'gym',
         'gallery-management.php' => 'website_cms',
         'media-management.php' => 'website_cms',
-        'events-management.php' => 'website_cms',
-        'events-inquiries.php' => 'website_cms',
+        'events-management.php' => ['website_cms', 'events'],
+        'events-inquiries.php' => ['website_cms', 'events'],
         'reviews.php' => 'website_cms',
         'contact-inquiries.php' => 'website_cms',
         'footer-management.php' => 'website_cms',
@@ -1434,6 +1445,7 @@ function getModuleForPage(string $page)
         'quotations.php' => ['finance', 'billing'],
         'gym-members.php' => 'gym',
         'gym-checkin.php' => 'gym',
+        'gym-reports.php' => 'gym',
         'reports.php' => 'finance',
         'end-of-day-report.php' => 'finance',
     ];
@@ -1454,6 +1466,12 @@ function rh_module_key_enabled(string $key): bool
 {
     if ($key === 'restaurant_page') {
         return function_exists('isRestaurantEnabled') && isRestaurantEnabled();
+    }
+    if ($key === 'events') {
+        // Events is preset-scoped via the events_page front_end flag
+        // (events_system_enabled setting): hotels/conference/gym run events,
+        // supermarket/retail/bar do not.
+        return function_exists('isEventsEnabled') && isEventsEnabled();
     }
     if ($key === 'advance_booking') {
         // Accounts-receivable businesses only (rooms, conferences): deposits,

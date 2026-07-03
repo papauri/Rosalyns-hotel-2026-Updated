@@ -76,8 +76,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['gm_action'])) {
                 $chk = $pdo->prepare("SELECT COUNT(*) FROM gym_members WHERE member_number = ?");
                 $chk->execute([$memberNumber]);
             } while ((int)$chk->fetchColumn() > 0);
-            $stmt = $pdo->prepare("INSERT INTO gym_members (member_number, full_name, email, phone, membership_type, start_date, expiry_date, monthly_fee, status, notes, created_by) VALUES (?,?,?,?,?,?,?,?,?,?,?)");
-            $stmt->execute([$memberNumber, $name, $email ?: null, $phone ?: null, $type ?: null, $start, $expiry ?: null, $fee, $status, $notes ?: null, (int)($user['id'] ?? 0)]);
+            $inquiryId = (int)($_POST['gym_inquiry_id'] ?? 0);
+            $stmt = $pdo->prepare("INSERT INTO gym_members (member_number, full_name, email, phone, membership_type, start_date, expiry_date, monthly_fee, status, notes, gym_inquiry_id, created_by) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)");
+            $stmt->execute([$memberNumber, $name, $email ?: null, $phone ?: null, $type ?: null, $start, $expiry ?: null, $fee, $status, $notes ?: null, $inquiryId ?: null, (int)($user['id'] ?? 0)]);
+
+            // Converting an inquiry: mark the sales lead converted so the
+            // pipeline reflects reality. Best-effort — never blocks enrolment.
+            if ($inquiryId > 0) {
+                try {
+                    $pdo->prepare("UPDATE gym_inquiries SET status='converted' WHERE id=? AND status NOT IN ('cancelled')")->execute([$inquiryId]);
+                } catch (Throwable $e) { /* fine */ }
+            }
 
             // Digital membership card (barcode) email — never blocks the enrolment.
             $cardNote = '';
@@ -248,8 +257,13 @@ $gm_currency = (string)getSetting('currency_symbol', 'K');
                 <span class="cat-count" title="Check-ins recorded today"><i class="fas fa-clock"></i> Visits today: <?php echo $gm_visits_today; ?></span>
                 <?php endif; ?>
                 <?php if (hasPermission((int)$user['id'], 'gym_checkin')): ?>
-                <a class="btn-add" href="gym-checkin.php" style="text-decoration:none;background:#111827;">
+                <a class="btn-add" href="gym-checkin.php" style="text-decoration:none;background:#111827;color:#ffffff;">
                     <i class="fas fa-barcode"></i> Check-In Scanner
+                </a>
+                <?php endif; ?>
+                <?php if (hasPermission((int)$user['id'], 'gym_reports')): ?>
+                <a class="btn-add" href="gym-reports.php" style="text-decoration:none;background:#8B7355;color:#ffffff;">
+                    <i class="fas fa-chart-line"></i> Gym Reports
                 </a>
                 <?php endif; ?>
                 <button class="btn-add" onclick="gmOpenModal()">
@@ -366,6 +380,7 @@ $gm_currency = (string)getSetting('currency_symbol', 'K');
             </div>
             <div class="mm-modal-body">
                 <input type="hidden" id="gmId" value="0">
+                <input type="hidden" id="gmInquiryId" value="0">
                 <label style="display:block;font-weight:600;margin-bottom:4px;">Full name</label>
                 <input type="text" id="gmName" maxlength="255" style="width:100%;padding:9px;border:1px solid #d3cbc0;border-radius:4px;margin-bottom:12px;">
                 <div style="display:flex;gap:12px;margin-bottom:12px;">
@@ -464,6 +479,7 @@ $gm_currency = (string)getSetting('currency_symbol', 'K');
         function gmOpenModal(m) {
             document.getElementById('gmModalTitle').textContent = m ? 'Edit Member' : 'Enrol Member';
             document.getElementById('gmId').value = m ? m.id : 0;
+            document.getElementById('gmInquiryId').value = 0;
             document.getElementById('gmName').value = m ? (m.full_name || '') : '';
             document.getElementById('gmEmail').value = m ? (m.email || '') : '';
             document.getElementById('gmPhone').value = m ? (m.phone || '') : '';
@@ -485,6 +501,7 @@ $gm_currency = (string)getSetting('currency_symbol', 'K');
             gmPost({
                 gm_action: 'member_save',
                 id: document.getElementById('gmId').value,
+                gym_inquiry_id: document.getElementById('gmInquiryId').value,
                 full_name: name,
                 email: document.getElementById('gmEmail').value.trim(),
                 phone: document.getElementById('gmPhone').value.trim(),
@@ -552,6 +569,20 @@ $gm_currency = (string)getSetting('currency_symbol', 'K');
             var el = document.getElementById(id);
             el.addEventListener('click', function (e) { if (e.target === el) { gmClose(id); } });
         });
+
+        // "Enrol" handoff from gym-inquiries.php: ?enrol_name=…&enrol_email=…
+        // opens the enrol modal pre-filled and links the member back to the
+        // inquiry via gym_inquiry_id (marked converted on save).
+        (function () {
+            var q = new URLSearchParams(window.location.search);
+            if (!q.has('enrol_name')) { return; }
+            gmOpenModal();
+            document.getElementById('gmName').value = q.get('enrol_name') || '';
+            document.getElementById('gmEmail').value = q.get('enrol_email') || '';
+            document.getElementById('gmPhone').value = q.get('enrol_phone') || '';
+            document.getElementById('gmType').value = q.get('enrol_type') || '';
+            document.getElementById('gmInquiryId').value = parseInt(q.get('enrol_inquiry_id') || '0', 10) || 0;
+        })();
     </script>
 
     <?php require_once 'includes/admin-footer.php'; ?>

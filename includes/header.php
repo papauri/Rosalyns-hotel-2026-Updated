@@ -124,7 +124,8 @@ if ($header_logo_kicker === '') {
             $gymEnabled = function_exists('isGymEnabled') ? isGymEnabled() : true;
             $restaurantEnabled = function_exists('isRestaurantEnabled') ? isRestaurantEnabled() : true;
 
-            $_nav_pages = array_values(array_filter($_nav_pages, function ($navp) use ($bookingEnabled, $conferenceEnabled, $gymEnabled, $restaurantEnabled) {
+            $eventsEnabled = function_exists('isEventsEnabled') ? isEventsEnabled() : true;
+            $_nav_pages = array_values(array_filter($_nav_pages, function ($navp) use ($bookingEnabled, $conferenceEnabled, $gymEnabled, $restaurantEnabled, $eventsEnabled) {
                 $key = $navp['page_key'] ?? '';
                 if ($key === 'rooms' && !$bookingEnabled) {
                     return false;
@@ -136,6 +137,9 @@ if ($header_logo_kicker === '') {
                     return false;
                 }
                 if ($key === 'restaurant' && !$restaurantEnabled) {
+                    return false;
+                }
+                if ($key === 'events' && !$eventsEnabled) {
                     return false;
                 }
                 return true;

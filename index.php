@@ -381,8 +381,8 @@ foreach ($footer_links_raw as $link) {
                 include 'includes/upcoming-events.php';
                 ?>
 
-                <!-- Hotel Reviews Section -->
-                <?php include 'includes/reviews-section.php'; ?>
+                <!-- Reviews Section — belongs to the Website & CMS module -->
+                <?php if (!function_exists('moduleEnabled') || moduleEnabled('website_cms')) { include 'includes/reviews-section.php'; } ?>
 
 
                 <!-- Passalacqua-Inspired Testimonials Section: Editorial, Borderless, Large Serif Quotes -->

@@ -530,6 +530,13 @@ try {
                                 <button type="button" class="btn btn-primary btn-sm" onclick="showInquiryDetails(<?php echo htmlspecialchars(json_encode($inquiry)); ?>)">
                                     <i class="fas fa-eye"></i> View
                                 </button>
+                                <?php if ($inquiry['status'] !== 'cancelled'): ?>
+                                <a class="btn btn-sm" style="background:#2e7d32;color:#ffffff;text-decoration:none;"
+                                   title="Enrol this inquiry as a gym member (opens the register pre-filled)"
+                                   href="gym-members.php?enrol_name=<?php echo urlencode((string)$inquiry['name']); ?>&enrol_email=<?php echo urlencode((string)($inquiry['email'] ?? '')); ?>&enrol_phone=<?php echo urlencode((string)($inquiry['phone'] ?? '')); ?>&enrol_type=<?php echo urlencode((string)($inquiry['membership_type'] ?? '')); ?>&enrol_inquiry_id=<?php echo (int)$inquiry['id']; ?>">
+                                    <i class="fas fa-id-card"></i> Enrol
+                                </a>
+                                <?php endif; ?>
                                 <form method="POST" style="display:inline;">
                                     <input type="hidden" name="inquiry_action" value="delete">
                                     <input type="hidden" name="inquiry_id" value="<?php echo $inquiry['id']; ?>">

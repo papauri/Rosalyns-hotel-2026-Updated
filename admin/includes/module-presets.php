@@ -21,7 +21,7 @@ if (!function_exists('getBusinessPresets')) {
                 // Guest-facing pages that only apply to some presets and can't be
                 // derived from the module flags alone (e.g. POS is "on" for a
                 // gym's snack till too, but that doesn't mean show a restaurant page).
-                'front_end' => ['restaurant_page' => 1],
+                'front_end' => ['restaurant_page' => 1, 'events_page' => 1],
             ],
             'hotel_no_restaurant' => [
                 'label' => 'Hotel (No Restaurant)',
@@ -32,7 +32,7 @@ if (!function_exists('getBusinessPresets')) {
                     'conference' => 1, 'gym' => 1, 'finance' => 1, 'website_cms' => 1,
                     'station_kds' => 0, 'station_bds' => 0, 'station_cds' => 0, 'station_room_service' => 0,
                 ],
-                'front_end' => ['restaurant_page' => 0],
+                'front_end' => ['restaurant_page' => 0, 'events_page' => 1],
             ],
             'bar_restaurant' => [
                 'label' => 'Bar / Restaurant',
@@ -43,7 +43,7 @@ if (!function_exists('getBusinessPresets')) {
                     'conference' => 0, 'gym' => 0, 'finance' => 1, 'website_cms' => 0,
                     'station_kds' => 1, 'station_bds' => 1, 'station_cds' => 0, 'station_room_service' => 0,
                 ],
-                'front_end' => ['restaurant_page' => 1],
+                'front_end' => ['restaurant_page' => 1, 'events_page' => 0],
             ],
             'conference_venue' => [
                 'label' => 'Conference Venue',
@@ -54,7 +54,7 @@ if (!function_exists('getBusinessPresets')) {
                     'conference' => 1, 'gym' => 0, 'finance' => 1, 'website_cms' => 1,
                     'station_kds' => 0, 'station_bds' => 0, 'station_cds' => 0, 'station_room_service' => 0,
                 ],
-                'front_end' => ['restaurant_page' => 0],
+                'front_end' => ['restaurant_page' => 0, 'events_page' => 1],
             ],
             'gym_fitness' => [
                 'label' => 'Gym / Fitness',
@@ -65,7 +65,7 @@ if (!function_exists('getBusinessPresets')) {
                     'conference' => 0, 'gym' => 1, 'finance' => 1, 'website_cms' => 1,
                     'station_kds' => 0, 'station_bds' => 0, 'station_cds' => 0, 'station_room_service' => 0,
                 ],
-                'front_end' => ['restaurant_page' => 0],
+                'front_end' => ['restaurant_page' => 0, 'events_page' => 1],
                 // POS starter categories seeded on preset apply (additive-only —
                 // inserted only when the slug doesn't exist yet). Restaurant-style
                 // presets skip this; they already have Food/Drinks.
@@ -85,7 +85,7 @@ if (!function_exists('getBusinessPresets')) {
                     'conference' => 0, 'gym' => 0, 'finance' => 1, 'website_cms' => 0,
                     'station_kds' => 0, 'station_bds' => 0, 'station_cds' => 0, 'station_room_service' => 0,
                 ],
-                'front_end' => ['restaurant_page' => 0],
+                'front_end' => ['restaurant_page' => 0, 'events_page' => 0],
                 'starter_categories' => [
                     ['name' => 'General Merchandise', 'icon' => 'fa-box'],
                     ['name' => 'Accessories', 'icon' => 'fa-bag-shopping'],
@@ -100,7 +100,7 @@ if (!function_exists('getBusinessPresets')) {
                     'conference' => 0, 'gym' => 0, 'finance' => 1, 'website_cms' => 1,
                     'station_kds' => 0, 'station_bds' => 0, 'station_cds' => 0, 'station_room_service' => 0,
                 ],
-                'front_end' => ['restaurant_page' => 0],
+                'front_end' => ['restaurant_page' => 0, 'events_page' => 0],
                 'starter_categories' => [
                     ['name' => 'Groceries', 'icon' => 'fa-basket-shopping'],
                     ['name' => 'Beverages', 'icon' => 'fa-bottle-water'],

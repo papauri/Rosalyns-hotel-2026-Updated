@@ -64,6 +64,9 @@ try {
     if (isset($front_end['restaurant_page'])) {
         updateSetting('restaurant_system_enabled', $front_end['restaurant_page'] ? '1' : '0');
     }
+    if (isset($front_end['events_page'])) {
+        updateSetting('events_system_enabled', $front_end['events_page'] ? '1' : '0');
+    }
 
     // Seed POS starter categories for the business type. Additive-only: a
     // category is inserted only if its slug doesn't already exist — existing
