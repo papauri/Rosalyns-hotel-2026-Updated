@@ -58,6 +58,7 @@ function getAllRoles()
                 'gym',
                 'gym_packages',
                 'gym_financials',
+                'gym_checkin',
                 'menu',
                 'events',
                 'events_bookings',
@@ -257,7 +258,8 @@ function getAllRoles()
             'is_system' => true,
             'permissions' => [
                 'dashboard',
-                'gym'
+                'gym',
+                'gym_checkin'
             ]
         ],
         'conference_staff' => [
@@ -515,6 +517,14 @@ function getAllPermissions()
             'icon' => 'fa-file-invoice-dollar',
             'category' => 'Property',
             'page' => 'gym-inquiries.php',
+            'group' => 'gym'
+        ],
+        'gym_checkin' => [
+            'label' => 'Gym Check-In Scanner',
+            'description' => 'Scan member barcodes to check members in and out of the gym',
+            'icon' => 'fa-barcode',
+            'category' => 'Property',
+            'page' => 'gym-checkin.php',
             'group' => 'gym'
         ],
 
@@ -1331,6 +1341,7 @@ function getPermissionForPage(string $page)
         'shift-close-report.php' => 'pos_accounting',
         'quotations.php' => 'create_booking',
         'gym-members.php' => 'gym',
+        'gym-checkin.php' => 'gym_checkin',
         'section-headers-management.php' => 'section_headers',
         'footer-management.php'         => 'footer_management',
         'booking-settings.php' => 'booking_settings',
@@ -1422,6 +1433,7 @@ function getModuleForPage(string $page)
         'credit-notes.php' => ['finance', 'advance_booking'],
         'quotations.php' => ['finance', 'billing'],
         'gym-members.php' => 'gym',
+        'gym-checkin.php' => 'gym',
         'reports.php' => 'finance',
         'end-of-day-report.php' => 'finance',
     ];

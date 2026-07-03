@@ -13,6 +13,7 @@
  */
 require_once 'admin-init.php';
 require_once '../includes/alert.php';
+require_once __DIR__ . '/includes/gym-checkin-lib.php';
 
 /** @var PDO $pdo */
 /** @var array $user */
@@ -77,7 +78,64 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['gm_action'])) {
             } while ((int)$chk->fetchColumn() > 0);
             $stmt = $pdo->prepare("INSERT INTO gym_members (member_number, full_name, email, phone, membership_type, start_date, expiry_date, monthly_fee, status, notes, created_by) VALUES (?,?,?,?,?,?,?,?,?,?,?)");
             $stmt->execute([$memberNumber, $name, $email ?: null, $phone ?: null, $type ?: null, $start, $expiry ?: null, $fee, $status, $notes ?: null, (int)($user['id'] ?? 0)]);
-            $gm_json(true, 'Member enrolled — ' . $memberNumber . '.');
+
+            // Digital membership card (barcode) email — never blocks the enrolment.
+            $cardNote = '';
+            if ($email !== '') {
+                try {
+                    require_once '../config/email.php';
+                    $cardResult = sendGymMemberCardEmail([
+                        'member_number'   => $memberNumber,
+                        'full_name'       => $name,
+                        'email'           => $email,
+                        'membership_type' => $type,
+                        'expiry_date'     => $expiry ?: null,
+                    ]);
+                    $cardNote = !empty($cardResult['success'])
+                        ? ' Membership card emailed.'
+                        : ' (Card email failed: ' . (string)($cardResult['message'] ?? 'unknown error') . ')';
+                } catch (Throwable $mailEx) {
+                    error_log('gym-members card email: ' . $mailEx->getMessage());
+                    $cardNote = ' (Card email failed — member saved.)';
+                }
+            }
+            $gm_json(true, 'Member enrolled — ' . $memberNumber . '.' . $cardNote);
+        }
+
+        if ($action === 'member_card') {
+            $memberId = (int)($_POST['id'] ?? 0);
+            $stmt = $pdo->prepare("SELECT member_number, full_name, email, membership_type, expiry_date FROM gym_members WHERE id = ?");
+            $stmt->execute([$memberId]);
+            $member = $stmt->fetch(PDO::FETCH_ASSOC);
+            if (!$member) {
+                $gm_json(false, 'Member not found.');
+            }
+            if (empty($member['email'])) {
+                $gm_json(false, 'This member has no email address on file.');
+            }
+            require_once '../config/email.php';
+            $cardResult = sendGymMemberCardEmail($member);
+            $gm_json(!empty($cardResult['success']), (string)($cardResult['message'] ?? 'Card email failed.'));
+        }
+
+        if ($action === 'member_attendance') {
+            $memberId = (int)($_POST['id'] ?? 0);
+            if (!gym_attendance_table_exists($pdo)) {
+                header('Content-Type: application/json');
+                echo json_encode(['success' => true, 'visits' => [], 'pending_migration' => true]);
+                exit;
+            }
+            $stmt = $pdo->prepare("
+                SELECT checked_in_at, checked_out_at, method,
+                       CASE WHEN checked_out_at IS NULL THEN NULL
+                            ELSE TIMESTAMPDIFF(MINUTE, checked_in_at, checked_out_at) END AS minutes
+                FROM gym_attendance WHERE member_id = ?
+                ORDER BY checked_in_at DESC LIMIT 10
+            ");
+            $stmt->execute([$memberId]);
+            header('Content-Type: application/json');
+            echo json_encode(['success' => true, 'visits' => $stmt->fetchAll(PDO::FETCH_ASSOC)]);
+            exit;
         }
 
         if ($action === 'member_status') {
@@ -123,6 +181,27 @@ try {
     $gm_table_missing = true;
 }
 
+// Attendance aggregates — degrade to empty until gym_attendance migration runs
+$gm_attendance_ready = !$gm_table_missing && gym_attendance_table_exists($pdo);
+$gm_visit_stats = [];      // member_id => ['visits' => n, 'last_in' => datetime, 'in_now' => 0|1]
+$gm_in_gym_now = 0;
+$gm_visits_today = 0;
+if ($gm_attendance_ready) {
+    try {
+        foreach ($pdo->query("
+            SELECT member_id, COUNT(*) AS visits, MAX(checked_in_at) AS last_in,
+                   SUM(CASE WHEN checked_out_at IS NULL THEN 1 ELSE 0 END) AS in_now
+            FROM gym_attendance GROUP BY member_id
+        ")->fetchAll(PDO::FETCH_ASSOC) as $vs) {
+            $gm_visit_stats[(int)$vs['member_id']] = $vs;
+        }
+        $gm_in_gym_now   = (int)$pdo->query("SELECT COUNT(*) FROM gym_attendance WHERE checked_out_at IS NULL")->fetchColumn();
+        $gm_visits_today = (int)$pdo->query("SELECT COUNT(*) FROM gym_attendance WHERE checked_in_at >= CURDATE()")->fetchColumn();
+    } catch (PDOException $e) {
+        $gm_attendance_ready = false;
+    }
+}
+
 // Package names for the membership-type datalist (best effort)
 $gm_packages = [];
 try {
@@ -163,9 +242,20 @@ $gm_currency = (string)getSetting('currency_symbol', 'K');
         <div class="page-header">
             <h2 class="page-title">Gym Members</h2>
             <?php if (!$gm_table_missing): ?>
-            <button class="btn-add" onclick="gmOpenModal()">
-                <i class="fas fa-user-plus"></i> Enrol Member
-            </button>
+            <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;">
+                <?php if ($gm_attendance_ready): ?>
+                <span class="cat-count" title="Members checked in right now"><i class="fas fa-person-running"></i> In gym now: <?php echo $gm_in_gym_now; ?></span>
+                <span class="cat-count" title="Check-ins recorded today"><i class="fas fa-clock"></i> Visits today: <?php echo $gm_visits_today; ?></span>
+                <?php endif; ?>
+                <?php if (hasPermission((int)$user['id'], 'gym_checkin')): ?>
+                <a class="btn-add" href="gym-checkin.php" style="text-decoration:none;background:#111827;">
+                    <i class="fas fa-barcode"></i> Check-In Scanner
+                </a>
+                <?php endif; ?>
+                <button class="btn-add" onclick="gmOpenModal()">
+                    <i class="fas fa-user-plus"></i> Enrol Member
+                </button>
+            </div>
             <?php endif; ?>
         </div>
 
@@ -197,8 +287,12 @@ $gm_currency = (string)getSetting('currency_symbol', 'K');
                         <th style="width:100px;">Started</th>
                         <th style="width:100px;">Expires</th>
                         <th style="width:110px;">Fee (<?php echo htmlspecialchars($gm_currency); ?>/mo)</th>
+                        <?php if ($gm_attendance_ready): ?>
+                        <th style="width:120px;" title="Most recent check-in">Last Visit</th>
+                        <th style="width:70px;" title="Total recorded visits">Visits</th>
+                        <?php endif; ?>
                         <th style="width:100px;">Status</th>
-                        <th style="width:130px;">Actions</th>
+                        <th style="width:170px;">Actions</th>
                     </tr>
                 </thead>
                 <tbody>
@@ -218,10 +312,34 @@ $gm_currency = (string)getSetting('currency_symbol', 'K');
                                 <?php echo $m['expiry_date'] ? htmlspecialchars(date('M j, Y', strtotime($m['expiry_date']))) : '—'; ?>
                             </td>
                             <td><?php echo $m['monthly_fee'] !== null ? number_format((float)$m['monthly_fee'], 2) : '—'; ?></td>
+                            <?php if ($gm_attendance_ready):
+                                $vs = $gm_visit_stats[(int)$m['id']] ?? null;
+                                $inNow = $vs && (int)$vs['in_now'] > 0;
+                            ?>
+                            <td style="font-size:.85rem;">
+                                <?php if ($inNow): ?>
+                                    <span style="font-weight:700;color:#2e7d32;"><i class="fas fa-person-running"></i> In gym</span>
+                                <?php elseif ($vs && $vs['last_in']): ?>
+                                    <?php echo htmlspecialchars(date('M j, H:i', strtotime((string)$vs['last_in']))); ?>
+                                <?php else: ?>
+                                    <span style="color:#9a8f82;">Never</span>
+                                <?php endif; ?>
+                            </td>
+                            <td style="text-align:center;">
+                                <?php if ($vs && (int)$vs['visits'] > 0): ?>
+                                    <a href="#" onclick="gmShowLog(<?php echo (int)$m['id']; ?>, '<?php echo htmlspecialchars($m['full_name'], ENT_QUOTES); ?>'); return false;" style="font-weight:700;"><?php echo (int)$vs['visits']; ?></a>
+                                <?php else: ?>
+                                    <span style="color:#9a8f82;">0</span>
+                                <?php endif; ?>
+                            </td>
+                            <?php endif; ?>
                             <td><span style="font-weight:600;color:<?php echo $statusColor; ?>;"><?php echo ucfirst($m['status']); ?></span></td>
                             <td class="actions-cell">
                                 <div class="action-buttons">
                                     <button class="btn-action" title="Edit" onclick="gmOpenModal(<?php echo htmlspecialchars(json_encode($m), ENT_QUOTES); ?>)"><i class="fas fa-pen"></i></button>
+                                    <?php if (!empty($m['email'])): ?>
+                                        <button class="btn-action" title="Resend membership card email" onclick="gmResendCard(<?php echo (int)$m['id']; ?>)"><i class="fas fa-envelope"></i></button>
+                                    <?php endif; ?>
                                     <?php if ($m['status'] === 'active'): ?>
                                         <button class="btn-action" title="Suspend" onclick="gmStatus(<?php echo (int)$m['id']; ?>, 'suspended')"><i class="fas fa-pause"></i></button>
                                     <?php else: ?>
@@ -293,6 +411,19 @@ $gm_currency = (string)getSetting('currency_symbol', 'K');
             <div class="mm-modal-foot" style="display:flex;justify-content:flex-end;gap:10px;padding:14px 18px;">
                 <button class="mm-btn mm-btn-ghost" onclick="gmClose('gmModal')">Cancel</button>
                 <button class="mm-btn mm-btn-primary" onclick="gmSave()">Save Member</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Attendance log modal -->
+    <div class="mm-modal" id="gmLogModal">
+        <div class="mm-modal-card sm">
+            <div class="mm-modal-head">
+                <h3 id="gmLogTitle">Recent Visits</h3>
+                <button type="button" class="mm-modal-close" onclick="gmClose('gmLogModal')" aria-label="Close">&times;</button>
+            </div>
+            <div class="mm-modal-body" id="gmLogBody" style="max-height:60vh;overflow-y:auto;">
+                <p style="color:#9a8f82;">Loading…</p>
             </div>
         </div>
     </div>
@@ -369,6 +500,44 @@ $gm_currency = (string)getSetting('currency_symbol', 'K');
         function gmStatus(id, status) { gmPost({ gm_action: 'member_status', id: id, status: status }); }
         function gmDelete(id) { gmPost({ gm_action: 'member_delete', id: id }); }
 
+        function gmResendCard(id) {
+            var fd = new FormData();
+            fd.append('gm_action', 'member_card');
+            fd.append('id', id);
+            fetch(window.location.pathname, { method: 'POST', body: fd, credentials: 'same-origin', headers: { 'X-Requested-With': 'XMLHttpRequest' } })
+                .then(function (r) { return r.json(); })
+                .then(function (d) { gmToast(d.message || (d.success ? 'Card sent.' : 'Failed.'), !!d.success); })
+                .catch(function () { gmToast('Network error — please try again.', false); });
+        }
+
+        function gmEscape(s) { var d = document.createElement('div'); d.textContent = String(s == null ? '' : s); return d.innerHTML; }
+        function gmFmtDT(dt) { if (!dt) return ''; var d = new Date(String(dt).replace(' ', 'T')); return isNaN(d) ? String(dt) : d.toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }); }
+        function gmFmtDur(mins) { if (mins == null) return '<span style="color:#2e7d32;font-weight:700;">in gym</span>'; mins = parseInt(mins, 10); return mins >= 60 ? Math.floor(mins / 60) + 'h ' + (mins % 60) + 'm' : mins + 'm'; }
+
+        function gmShowLog(id, name) {
+            document.getElementById('gmLogTitle').textContent = 'Recent Visits — ' + name;
+            document.getElementById('gmLogBody').innerHTML = '<p style="color:#9a8f82;">Loading…</p>';
+            gmOpen('gmLogModal');
+            var fd = new FormData();
+            fd.append('gm_action', 'member_attendance');
+            fd.append('id', id);
+            fetch(window.location.pathname, { method: 'POST', body: fd, credentials: 'same-origin', headers: { 'X-Requested-With': 'XMLHttpRequest' } })
+                .then(function (r) { return r.json(); })
+                .then(function (d) {
+                    var body = document.getElementById('gmLogBody');
+                    var visits = (d && d.visits) || [];
+                    if (!visits.length) {
+                        body.innerHTML = '<p style="color:#9a8f82;margin:0;">No visits recorded yet.</p>';
+                        return;
+                    }
+                    body.innerHTML = '<table class="menu-table" style="margin:0;"><thead><tr><th>In</th><th>Out</th><th>Duration</th><th>Method</th></tr></thead><tbody>' +
+                        visits.map(function (v) {
+                            return '<tr><td>' + gmFmtDT(v.checked_in_at) + '</td><td>' + (v.checked_out_at ? gmFmtDT(v.checked_out_at) : '—') + '</td><td>' + gmFmtDur(v.minutes) + '</td><td>' + gmEscape(v.method) + '</td></tr>';
+                        }).join('') + '</tbody></table>';
+                })
+                .catch(function () { document.getElementById('gmLogBody').innerHTML = '<p style="color:#c0392b;margin:0;">Could not load visits.</p>'; });
+        }
+
         var gmConfirmCb = null;
         function gmConfirm(text, cb) {
             document.getElementById('gmConfirmText').textContent = text;
@@ -379,7 +548,7 @@ $gm_currency = (string)getSetting('currency_symbol', 'K');
             gmClose('gmConfirmModal');
             if (gmConfirmCb) { gmConfirmCb(); gmConfirmCb = null; }
         });
-        ['gmModal', 'gmConfirmModal'].forEach(function (id) {
+        ['gmModal', 'gmConfirmModal', 'gmLogModal'].forEach(function (id) {
             var el = document.getElementById(id);
             el.addEventListener('click', function (e) { if (e.target === el) { gmClose(id); } });
         });

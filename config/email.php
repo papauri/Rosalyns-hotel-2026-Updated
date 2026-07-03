@@ -3233,7 +3233,7 @@ function sendGymQuotationEmail(array $inquiry, array $options = []): array
 
         $subject = 'Gym Membership Quotation - ' . $siteName . ' [' . $quoteRef . ']';
         $htmlBody = '<h1 style="color:#8B7355;text-align:center;">Gym Membership Quotation</h1>'
-            . '<p>Dear ' . htmlspecialchars((string)($inquiry['name'] ?? 'Guest'), ENT_QUOTES, 'UTF-8') . ',</p>'
+            . '<p>Dear ' . htmlspecialchars((string)($inquiry['name'] ?? 'Member'), ENT_QUOTES, 'UTF-8') . ',</p>'
             . '<p>Thank you for your gym membership enquiry. Please find your quotation details below.</p>'
             . '<p><strong>Inquiry Ref:</strong> ' . htmlspecialchars((string)($inquiry['reference_number'] ?? ''), ENT_QUOTES, 'UTF-8') . '<br>'
             . '<strong>Quotation Ref:</strong> ' . htmlspecialchars($quoteRef, ENT_QUOTES, 'UTF-8') . '<br>'
@@ -3260,7 +3260,7 @@ function sendGymQuotationEmail(array $inquiry, array $options = []): array
             ]);
             $result = sendEmailWithBinaryAttachment(
                 $recipientEmail,
-                (string)($inquiry['name'] ?? 'Guest'),
+                (string)($inquiry['name'] ?? 'Member'),
                 $subject,
                 $htmlBody,
                 $pdfContent,
@@ -3269,7 +3269,7 @@ function sendGymQuotationEmail(array $inquiry, array $options = []): array
                 'Please review the attached gym membership quotation PDF.'
             );
         } else {
-            $result = sendEmail($recipientEmail, (string)($inquiry['name'] ?? 'Guest'), $subject, $htmlBody);
+            $result = sendEmail($recipientEmail, (string)($inquiry['name'] ?? 'Member'), $subject, $htmlBody);
         }
 
         if (!empty($result['success']) && $email_log_enabled) {
@@ -3324,7 +3324,7 @@ function sendEventBookingConfirmedEmail(array $inquiry): array
 
                 ' . (!empty($inquiry['event_date']) ? '<table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="margin:0;"><tr><td style="padding:10px 10px 10px 0;font-weight:bold;color:#1A1A1A;width:44%;vertical-align:top;font-family:\'Segoe UI\',Tahoma,Verdana,sans-serif;border-bottom:1px solid #e8e0d4;">Event Date:</td><td style="padding:10px 0 10px 6px;color: #333;text-align:left;vertical-align:top;font-family:\'Segoe UI\',Tahoma,Verdana,sans-serif;border-bottom:1px solid #e8e0d4;">' . date('F j, Y', strtotime($inquiry['event_date'])) . '</td></tr></table>' : '') . '
 
-                <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="margin:0;"><tr><td style="padding:10px 10px 10px 0;font-weight:bold;color:#1A1A1A;width:44%;vertical-align:top;font-family:\'Segoe UI\',Tahoma,Verdana,sans-serif;">Guests:</td><td style="padding:10px 0 10px 6px;color: #333;text-align:left;vertical-align:top;font-family:\'Segoe UI\',Tahoma,Verdana,sans-serif;">' . (int)($inquiry['guests'] ?? 1) . '</td></tr></table>
+                <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="margin:0;"><tr><td style="padding:10px 10px 10px 0;font-weight:bold;color:#1A1A1A;width:44%;vertical-align:top;font-family:\'Segoe UI\',Tahoma,Verdana,sans-serif;">Attendees:</td><td style="padding:10px 0 10px 6px;color: #333;text-align:left;vertical-align:top;font-family:\'Segoe UI\',Tahoma,Verdana,sans-serif;">' . (int)($inquiry['guests'] ?? 1) . '</td></tr></table>
             </div>
 
             <div style="background: #d4edda; padding: 15px; border-left: 4px solid #28a745; border-radius: 5px; margin: 20px 0;">
@@ -3448,7 +3448,7 @@ function sendEventInquiryQuotationEmail(array $inquiry, array $options = []): ar
 
         $subject = 'Event Booking Quotation - ' . $siteName . ' [' . $quoteRef . ']';
         $htmlBody = '<h1 style="color:#8B7355;text-align:center;">Event Booking Quotation</h1>'
-            . '<p>Dear ' . htmlspecialchars((string)($inquiry['name'] ?? 'Guest'), ENT_QUOTES, 'UTF-8') . ',</p>'
+            . '<p>Dear ' . htmlspecialchars((string)($inquiry['name'] ?? 'Attendee'), ENT_QUOTES, 'UTF-8') . ',</p>'
             . '<p>Thank you for your event enquiry. Please find your quotation details below.</p>'
             . '<p><strong>Inquiry Ref:</strong> ' . htmlspecialchars((string)($inquiry['reference_number'] ?? ''), ENT_QUOTES, 'UTF-8') . '<br>'
             . '<strong>Quotation Ref:</strong> ' . htmlspecialchars($quoteRef, ENT_QUOTES, 'UTF-8') . '<br>'
@@ -3475,7 +3475,7 @@ function sendEventInquiryQuotationEmail(array $inquiry, array $options = []): ar
             ]);
             $result = sendEmailWithBinaryAttachment(
                 $recipientEmail,
-                (string)($inquiry['name'] ?? 'Guest'),
+                (string)($inquiry['name'] ?? 'Attendee'),
                 $subject,
                 $htmlBody,
                 $pdfContent,
@@ -3484,7 +3484,7 @@ function sendEventInquiryQuotationEmail(array $inquiry, array $options = []): ar
                 'Please review the attached event booking quotation PDF.'
             );
         } else {
-            $result = sendEmail($recipientEmail, (string)($inquiry['name'] ?? 'Guest'), $subject, $htmlBody);
+            $result = sendEmail($recipientEmail, (string)($inquiry['name'] ?? 'Attendee'), $subject, $htmlBody);
         }
 
         if (!empty($result['success']) && $email_log_enabled) {
@@ -4623,7 +4623,7 @@ function sendGymBookingEmail(array $data)
 
             ';
             $guestCount1 = (!empty($data['guests']) && $data['guests'] > 1) ? (int)$data['guests'] : 1;
-            $htmlBody .= '<table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="margin:0;"><tr><td style="padding:10px 8px 10px 0;font-weight:bold;color:#1A1A1A;width:44%;vertical-align:top;">Number of Guests:</td><td style="padding:10px 0 10px 8px;color:#333;text-align:left;vertical-align:top;">' . $guestCount1 . '</td></tr></table>';
+            $htmlBody .= '<table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="margin:0;"><tr><td style="padding:10px 8px 10px 0;font-weight:bold;color:#1A1A1A;width:44%;vertical-align:top;">Number of People:</td><td style="padding:10px 0 10px 8px;color:#333;text-align:left;vertical-align:top;">' . $guestCount1 . '</td></tr></table>';
             $htmlBody .= '
         </div>';
 
@@ -4727,7 +4727,7 @@ function sendGymAdminNotificationEmail(array $data)
 
             ';
             $guestCount2 = (!empty($data['guests']) && $data['guests'] > 1) ? (int)$data['guests'] : 1;
-            $htmlBody .= '<table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="margin:0;"><tr><td style="padding:10px 8px 10px 0;font-weight:bold;color:#1A1A1A;width:44%;vertical-align:top;">Number of Guests:</td><td style="padding:10px 0 10px 8px;color:#333;text-align:left;vertical-align:top;">' . $guestCount2 . '</td></tr></table>';
+            $htmlBody .= '<table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="margin:0;"><tr><td style="padding:10px 8px 10px 0;font-weight:bold;color:#1A1A1A;width:44%;vertical-align:top;">Number of People:</td><td style="padding:10px 0 10px 8px;color:#333;text-align:left;vertical-align:top;">' . $guestCount2 . '</td></tr></table>';
             $htmlBody .= '
         </div>';
 
@@ -5057,7 +5057,7 @@ function sendGymInquiryContactedEmail(array $inquiry): array
 
     try {
         $site_name = getSetting('site_name', $email_site_name);
-        $name = htmlspecialchars($inquiry['name'] ?? 'Guest');
+        $name = htmlspecialchars($inquiry['name'] ?? 'Member');
         $ref  = htmlspecialchars($inquiry['reference_number'] ?? '');
         $type = htmlspecialchars($inquiry['membership_type'] ?? 'Membership');
         $date = !empty($inquiry['preferred_date']) ? date('F j, Y', strtotime($inquiry['preferred_date'])) : 'Flexible';
@@ -5349,7 +5349,7 @@ function sendGymInquiryConvertedEmail(array $inquiry): array
 
     try {
         $site_name = getSetting('site_name', $email_site_name);
-        $name = htmlspecialchars($inquiry['name'] ?? 'Guest');
+        $name = htmlspecialchars($inquiry['name'] ?? 'Member');
         $ref  = htmlspecialchars($inquiry['reference_number'] ?? '');
         $type = htmlspecialchars($inquiry['membership_type'] ?? 'Membership');
         $contact_email = htmlspecialchars($email_from_email);
@@ -6547,6 +6547,134 @@ function sendReviewAcknowledgementEmail(string $guestName, string $guestEmail, s
         );
     } catch (Exception $e) {
         error_log('sendReviewAcknowledgementEmail Error: ' . $e->getMessage());
+        return ['success' => false, 'message' => $e->getMessage()];
+    }
+}
+
+/**
+ * Email a gym member their digital membership card: a CODE 128 barcode of
+ * their member number (the payload the Gym Check-In scanner reads), shown
+ * inline (CID) and attached as a PNG for saving to a phone.
+ *
+ * Non-blocking by design — callers treat a failure as "member saved, email
+ * failed" and never roll back the enrolment.
+ */
+function sendGymMemberCardEmail(array $member): array
+{
+    global $email_from_name, $email_from_email, $email_site_name, $email_admin_email, $email_bcc_admin;
+    global $smtp_host, $smtp_port, $smtp_username, $smtp_password, $smtp_secure, $smtp_timeout, $smtp_debug;
+    global $development_mode, $email_preview_enabled;
+
+    try {
+        $toEmail = trim((string)($member['email'] ?? ''));
+        if ($toEmail === '' || !filter_var($toEmail, FILTER_VALIDATE_EMAIL)) {
+            return ['success' => false, 'message' => 'Member has no valid email address.'];
+        }
+        $memberNumber = trim((string)($member['member_number'] ?? ''));
+        if ($memberNumber === '') {
+            return ['success' => false, 'message' => 'Member number missing.'];
+        }
+        $name     = (string)($member['full_name'] ?? 'Member');
+        $siteName = $email_site_name ?: getSetting('site_name', 'Gym');
+
+        // Barcode PNG (CODE 128 — same symbology the check-in scanner reads)
+        $barcodePng = '';
+        try {
+            if (!class_exists('TCPDFBarcode')) {
+                require_once __DIR__ . '/../vendor/tecnickcom/tcpdf/tcpdf_barcodes_1d.php';
+            }
+            $bc = new TCPDFBarcode($memberNumber, 'C128');
+            $barcodePng = (string)$bc->getBarcodePngData(3, 80, [0, 0, 0]);
+        } catch (Throwable $bcEx) {
+            error_log('sendGymMemberCardEmail barcode generation failed: ' . $bcEx->getMessage());
+        }
+
+        $expiryLine = !empty($member['expiry_date'])
+            ? date('F j, Y', strtotime((string)$member['expiry_date']))
+            : 'No expiry set';
+
+        $barcodeBlock = $barcodePng !== ''
+            ? '<div style="background:#ffffff;border:2px dashed #C8A45A;border-radius:10px;padding:22px;text-align:center;margin:20px 0;">
+                   <img src="cid:gymmembercard" alt="Member barcode ' . htmlspecialchars($memberNumber) . '" style="max-width:100%;height:auto;">
+                   <div style="font-size:20px;font-weight:bold;letter-spacing:3px;color:#1A1A1A;margin-top:10px;">' . htmlspecialchars($memberNumber) . '</div>
+               </div>'
+            : '<div style="background:#ffffff;border:2px dashed #C8A45A;border-radius:10px;padding:22px;text-align:center;margin:20px 0;">
+                   <div style="font-size:26px;font-weight:bold;letter-spacing:4px;color:#1A1A1A;">' . htmlspecialchars($memberNumber) . '</div>
+               </div>';
+
+        $htmlBody = '
+            <h1 style="color: #8B7355; text-align: center;">Your Membership Card</h1>
+            <p>Dear ' . htmlspecialchars($name) . ',</p>
+            <p>Welcome to <strong>' . htmlspecialchars($siteName) . '</strong>! Your membership is set up &mdash; this email is your digital membership card.</p>
+            ' . $barcodeBlock . '
+            <div style="background: #FAF6F0; border: 2px solid #C8A45A; padding: 20px; margin: 20px 0; border-radius: 10px;">
+                <h2 style="color: #8B7355; margin-top: 0;text-align:left;">Membership Details</h2>
+                <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="margin:0;"><tr><td style="padding:10px 10px 10px 0;font-weight:bold;color:#1A1A1A;width:44%;vertical-align:top;border-bottom:1px solid #e8e0d4;">Member Number:</td><td style="padding:10px 0 10px 6px;color:#8B7355;font-weight:bold;font-size:18px;text-align:left;vertical-align:top;border-bottom:1px solid #e8e0d4;">' . htmlspecialchars($memberNumber) . '</td></tr></table>
+                <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="margin:0;"><tr><td style="padding:10px 10px 10px 0;font-weight:bold;color:#1A1A1A;width:44%;vertical-align:top;border-bottom:1px solid #e8e0d4;">Package:</td><td style="padding:10px 0 10px 6px;color:#333;text-align:left;vertical-align:top;border-bottom:1px solid #e8e0d4;">' . htmlspecialchars((string)($member['membership_type'] ?? '') !== '' ? (string)$member['membership_type'] : 'N/A') . '</td></tr></table>
+                <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="margin:0;"><tr><td style="padding:10px 10px 10px 0;font-weight:bold;color:#1A1A1A;width:44%;vertical-align:top;">Valid Until:</td><td style="padding:10px 0 10px 6px;color:#333;text-align:left;vertical-align:top;">' . htmlspecialchars($expiryLine) . '</td></tr></table>
+            </div>
+            <div style="background: #d4edda; padding: 15px; border-left: 4px solid #28a745; border-radius: 5px; margin: 20px 0;">
+                <p style="color: #155724; margin: 0;">
+                    <strong>How to use it:</strong> present this barcode (on your phone or printed) at reception when you arrive &mdash; we scan it to check you in, and again on your way out. The attached image can be saved to your phone for quick access.
+                </p>
+            </div>
+            <p>If you have any questions, contact us at <a href="mailto:' . htmlspecialchars((string)$email_from_email) . '">' . htmlspecialchars((string)$email_from_email) . '</a>' . (getSetting('phone_main') ? ' or call ' . htmlspecialchars((string)getSetting('phone_main')) : '') . '.</p>
+            <p style="margin:28px 0 0;font-size:14px;color:#777;text-align:center;font-style:italic;">See you at the gym!</p>';
+
+        $subject = 'Your Membership Card - ' . $siteName . ' [' . $memberNumber . ']';
+        $altBody = 'Your ' . $siteName . ' member number is ' . $memberNumber . '. Present it at reception to check in. Valid until: ' . $expiryLine . '.';
+
+        if ($development_mode && (empty($smtp_password) || $email_preview_enabled)) {
+            return createEmailPreview($toEmail, $name, $subject, $htmlBody, $altBody);
+        }
+
+        $mail = new PHPMailer(true);
+        $smtpSec = strtolower(trim((string)$smtp_secure));
+        if ($smtpSec === '' && (int)$smtp_port === 587) {
+            $smtpSec = 'tls';
+        } elseif ($smtpSec === '' && (int)$smtp_port === 465) {
+            $smtpSec = 'ssl';
+        }
+
+        $mail->isSMTP();
+        $mail->Host = $smtp_host;
+        $mail->SMTPAuth = true;
+        $mail->Username = $smtp_username;
+        $mail->Password = $smtp_password;
+        if ($smtpSec !== '') {
+            $mail->SMTPSecure = $smtpSec;
+        }
+        $mail->Port = $smtp_port;
+        $mail->Timeout = $smtp_timeout;
+        if ($smtp_debug > 0) {
+            $mail->SMTPDebug = $smtp_debug;
+        }
+
+        $fromName = $email_from_name ?: $siteName;
+        $mail->setFrom($smtp_username, $fromName);
+        $mail->addAddress($toEmail, $name);
+        if (!empty($email_from_email) && filter_var($email_from_email, FILTER_VALIDATE_EMAIL)) {
+            $mail->addReplyTo($email_from_email, $fromName);
+        }
+        if ($email_bcc_admin && !empty($email_admin_email)) {
+            $mail->addBCC($email_admin_email);
+        }
+
+        $mail->CharSet = PHPMailer::CHARSET_UTF8;
+        $mail->Encoding = PHPMailer::ENCODING_BASE64;
+        $mail->isHTML(true);
+        $mail->Subject = $subject;
+        if ($barcodePng !== '') {
+            $mail->addStringEmbeddedImage($barcodePng, 'gymmembercard', 'member-card-' . $memberNumber . '.png', 'base64', 'image/png');
+            $mail->addStringAttachment($barcodePng, 'member-card-' . $memberNumber . '.png', 'base64', 'image/png');
+        }
+        $mail->Body = hotel_embed_logo_cid($mail, wrapEmailTemplate($htmlBody, $subject));
+        $mail->AltBody = $altBody;
+        $mail->send();
+
+        return ['success' => true, 'message' => 'Membership card emailed to ' . $toEmail . '.'];
+    } catch (Exception $e) {
+        error_log('sendGymMemberCardEmail Error: ' . $e->getMessage());
         return ['success' => false, 'message' => $e->getMessage()];
     }
 }
