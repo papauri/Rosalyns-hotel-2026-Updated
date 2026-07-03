@@ -1990,7 +1990,7 @@ $currency_symbol = getSetting('currency_symbol');
                         <?php endforeach; ?>
                     </ul>
                 <?php else: ?>
-                    <p style="font-size:12px; color:#28a745; margin:8px 0 0;"><i class="fas fa-check-circle"></i> All ingredients above minimum.</p>
+                    <p style="font-size:12px; color:#28a745; margin:8px 0 0;"><i class="fas fa-check-circle"></i> All <?php echo isRestaurantEnabled() ? 'ingredients' : 'stock items'; ?> above minimum.</p>
                 <?php endif; ?>
                 <?php if ($stock['wastage_today'] > 0): ?>
                     <div style="margin-top:10px; padding:6px 10px; background:#fbe9e7; border-radius:6px; font-size:11px; color:#c62828;">
@@ -2004,7 +2004,7 @@ $currency_symbol = getSetting('currency_symbol');
             <!-- Guest Services -->
             <div class="widget-card">
                 <h4>
-                    <span><i class="fas fa-headset"></i> Guest Services Queue</span>
+                    <span><i class="fas fa-headset"></i> <?php echo $mod_bookings ? 'Guest' : 'Customer'; ?> Services Queue</span>
                     <span class="widget-card__heading-actions">
                         <button type="button" class="btn btn-outline dashboard-widget-insight-trigger js-dashboard-insight" data-insight-card="guest_services_queue" title="Open guest services overview">
                             Overview
@@ -2175,7 +2175,8 @@ $currency_symbol = getSetting('currency_symbol');
                     <div class="ops-sub" id="shcPhpMeta">Checking…</div>
                 </div>
             </div>
-            <!-- Tentative Booking Sweep -->
+            <?php if ($mod_bookings): ?>
+            <!-- Tentative Booking Sweep — booking-expiry housekeeping, only meaningful with the bookings module -->
             <div class="ops-card" style="cursor:default;">
                 <div class="ops-icon" id="shcSweepIcon" style="background:#aaa;"><i class="fas fa-broom"></i></div>
                 <div class="ops-body">
@@ -2184,6 +2185,7 @@ $currency_symbol = getSetting('currency_symbol');
                     <div class="ops-sub" id="shcSweepMeta">Checking…</div>
                 </div>
             </div>
+            <?php endif; ?>
         </div>
         <div style="display:flex; justify-content:space-between; align-items:center; font-size:11px; color:#888; margin-bottom:20px; padding:0 2px 0 4px;">
             <span>Auto-refreshes every 60 s &nbsp;&middot;&nbsp; Last checked: <strong id="shcLastChecked">—</strong></span>
@@ -2356,6 +2358,9 @@ $currency_symbol = getSetting('currency_symbol');
             </div>
         </div>
 
+        <?php endif; // mod_bookings || mod_housekeeping — room status widget ?>
+
+        <?php if ($mod_bookings): ?>
         <!-- Today's Check-ins Management -->
         <div class="today-checkins-section">
             <h3>
@@ -2457,6 +2462,9 @@ $currency_symbol = getSetting('currency_symbol');
             <?php endif; ?>
         </div>
 
+        <?php endif; // mod_bookings — today's check-ins ?>
+
+        <?php if ($mod_conference): ?>
         <!-- Today's Conference Events -->
         <div class="today-checkins-section">
             <h3>
@@ -2510,7 +2518,7 @@ $currency_symbol = getSetting('currency_symbol');
                 </div>
             <?php endif; ?>
         </div>
-        <?php endif; // mod_bookings || mod_housekeeping ?>
+        <?php endif; // mod_conference — today's conference events ?>
 
         <?php if ($mod_bookings): ?>
         <h3 class="section-title">Upcoming Check-ins (Next 7 Days)</h3>

@@ -15,6 +15,16 @@ $message = '';
 $error = '';
 $template_preview = null;
 $default_site_maintenance_message = 'Our website is temporarily unavailable while we complete scheduled maintenance. Please check back shortly.';
+
+// Module flags — gate settings sections/templates by the active business
+// preset. Structural UI only; stored settings/templates are never mutated
+// for hidden sections (hidden checkbox values are preserved via hidden inputs,
+// and the template save loop skips filtered-out templates entirely).
+$mod_bookings   = function_exists('moduleEnabled') && moduleEnabled('bookings');
+$mod_pos        = function_exists('moduleEnabled') && moduleEnabled('pos');
+$mod_conference = function_exists('moduleEnabled') && moduleEnabled('conference');
+$mod_gym        = function_exists('moduleEnabled') && moduleEnabled('gym');
+$mod_events     = function_exists('isEventsEnabled') && isEventsEnabled();
 $booking_template_defs_master = [
     'booking_received' => 'Booking Received Email',
     'booking_confirmed' => 'Booking Confirmed Email',
@@ -40,6 +50,37 @@ $booking_template_defs_master = [
     'payment_receipt' => 'Payment Receipt Email',
     'payment_receipt_document' => 'Payment Receipt PDF',
 ];
+
+// Filter the template editor to templates the active preset can actually send.
+// Hidden templates keep their stored content untouched — the save loop below
+// iterates this same filtered list, so it never overwrites what it can't see.
+$booking_template_module_map = [
+    'booking_received' => 'bookings', 'booking_confirmed' => 'bookings',
+    'booking_reminder' => 'bookings', 'booking_cancelled' => 'bookings',
+    'payment_invoice' => 'bookings', 'payment_invoice_document' => 'bookings',
+    'tentative_booking_created' => 'bookings', 'tentative_booking_reminder' => 'bookings',
+    'tentative_booking_expired' => 'bookings', 'tentative_booking_converted' => 'bookings',
+    'tentative_quotation' => 'bookings', 'tentative_quotation_document' => 'bookings',
+    'conference_invoice' => 'conference', 'conference_invoice_document' => 'conference',
+    'conference_quotation' => 'conference', 'conference_quotation_document' => 'conference',
+    'event_quotation' => 'events', 'event_quotation_document' => 'events',
+    'credit_note' => 'ar', 'credit_note_document' => 'ar',
+    // refund_notification / payment_receipt(+document): every preset.
+];
+$booking_template_defs_master = array_filter(
+    $booking_template_defs_master,
+    function (string $tkey) use ($booking_template_module_map, $mod_bookings, $mod_conference, $mod_events): bool {
+        $need = $booking_template_module_map[$tkey] ?? null;
+        return match ($need) {
+            'bookings'   => $mod_bookings,
+            'conference' => $mod_conference,
+            'events'     => $mod_events,
+            'ar'         => $mod_bookings || $mod_conference, // credit notes: AR businesses
+            default      => true,
+        };
+    },
+    ARRAY_FILTER_USE_KEY
+);
 $booking_document_template_keys = [
     'payment_invoice_document',
     'conference_invoice_document',
@@ -1002,7 +1043,7 @@ foreach ($canonicalTemplateDefaults as $templateKey => $templateDefaults) {
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Booking Settings - Admin Panel</title>
+    <title><?php echo $mod_bookings ? 'Booking Settings' : 'Business Settings'; ?> - Admin Panel</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,300;0,400;0,500;0,600;1,300;1,400;1,500&family=Jost:wght@300;400;500;600&display=swap" rel="stylesheet">
@@ -1022,7 +1063,7 @@ foreach ($canonicalTemplateDefaults as $templateKey => $templateDefaults) {
         <div class="page-header">
             <h1 class="page-title">
                 <i class="fas fa-cog" style="color: #8B7355; margin-right: 10px;"></i>
-                Booking Settings
+                <?php echo $mod_bookings ? 'Booking Settings' : 'Business Settings'; ?>
             </h1>
         </div>
 
@@ -1091,6 +1132,7 @@ foreach ($canonicalTemplateDefaults as $templateKey => $templateDefaults) {
             </form>
         </div>
 
+        <?php if ($mod_bookings): ?>
         <div class="settings-card">
             <h2><i class="fas fa-toggle-on" style="color: #8B7355;"></i> Booking System Status</h2>
 
@@ -1418,6 +1460,8 @@ foreach ($canonicalTemplateDefaults as $templateKey => $templateDefaults) {
                 </details>
             </div>
 
+            <?php endif; /* $mod_bookings — Booking Status / Advance / Tentative / Tourism Levy */ ?>
+
             <div class="settings-card">
                 <h2><i class="fas fa-envelope" style="color: #8B7355;"></i> Email Configuration</h2>
 
@@ -1565,6 +1609,7 @@ foreach ($canonicalTemplateDefaults as $templateKey => $templateDefaults) {
                 </details>
             </div>
 
+            <?php if ($mod_bookings): ?>
             <div class="settings-card">
                 <h2><i class="fas fa-bell" style="color: #8B7355;"></i> Booking Notification Email</h2>
                 <form method="POST" action="booking-settings.php">
@@ -1592,11 +1637,18 @@ foreach ($canonicalTemplateDefaults as $templateKey => $templateDefaults) {
                 </form>
             </div>
 
+            <?php endif; /* $mod_bookings — Booking Notification Email */ ?>
+
             <div class="settings-card">
                 <h2><i class="fas fa-sliders-h" style="color: #8B7355;"></i> Service Modules &amp; Dedicated Notification Emails</h2>
                 <form method="POST" action="booking-settings.php">
                     <input type="hidden" name="service_channel_settings" value="1">
 
+                    <?php /* Each row shows only when its module is active for this preset.
+                             Hidden rows keep their stored values via hidden inputs — the save
+                             handler treats absent fields as "disable/blank", which would
+                             silently mutate settings for modules this preset doesn't manage. */ ?>
+                    <?php if ($mod_conference): ?>
                     <div class="form-group">
                         <label style="display:flex; align-items:center; gap:10px;">
                             <input type="checkbox" name="conference_system_enabled" value="1" <?php echo $current_conference_system_enabled ? 'checked' : ''; ?>>
@@ -1607,7 +1659,12 @@ foreach ($canonicalTemplateDefaults as $templateKey => $templateDefaults) {
                         <label for="conference_email">Conference Notification Email</label>
                         <input type="email" id="conference_email" name="conference_email" class="form-control" value="<?php echo htmlspecialchars($current_conference_email ?? ''); ?>" placeholder="conference@example.com">
                     </div>
+                    <?php else: ?>
+                    <?php if ($current_conference_system_enabled): ?><input type="hidden" name="conference_system_enabled" value="1"><?php endif; ?>
+                    <input type="hidden" name="conference_email" value="<?php echo htmlspecialchars($current_conference_email ?? ''); ?>">
+                    <?php endif; ?>
 
+                    <?php if ($mod_gym): ?>
                     <div class="form-group">
                         <label style="display:flex; align-items:center; gap:10px;">
                             <input type="checkbox" name="gym_system_enabled" value="1" <?php echo $current_gym_system_enabled ? 'checked' : ''; ?>>
@@ -1618,7 +1675,12 @@ foreach ($canonicalTemplateDefaults as $templateKey => $templateDefaults) {
                         <label for="gym_email">Gym Notification Email</label>
                         <input type="email" id="gym_email" name="gym_email" class="form-control" value="<?php echo htmlspecialchars($current_gym_email ?? ''); ?>" placeholder="gym@example.com">
                     </div>
+                    <?php else: ?>
+                    <?php if ($current_gym_system_enabled): ?><input type="hidden" name="gym_system_enabled" value="1"><?php endif; ?>
+                    <input type="hidden" name="gym_email" value="<?php echo htmlspecialchars($current_gym_email ?? ''); ?>">
+                    <?php endif; ?>
 
+                    <?php if ($mod_pos): ?>
                     <div class="form-group">
                         <label style="display:flex; align-items:center; gap:10px;">
                             <input type="checkbox" name="restaurant_system_enabled" value="1" <?php echo $current_restaurant_system_enabled ? 'checked' : ''; ?>>
@@ -1629,6 +1691,10 @@ foreach ($canonicalTemplateDefaults as $templateKey => $templateDefaults) {
                         <label for="email_restaurant">Restaurant Notification Email</label>
                         <input type="email" id="email_restaurant" name="email_restaurant" class="form-control" value="<?php echo htmlspecialchars($current_restaurant_email ?? ''); ?>" placeholder="restaurant@example.com">
                     </div>
+                    <?php else: ?>
+                    <?php if ($current_restaurant_system_enabled): ?><input type="hidden" name="restaurant_system_enabled" value="1"><?php endif; ?>
+                    <input type="hidden" name="email_restaurant" value="<?php echo htmlspecialchars($current_restaurant_email ?? ''); ?>">
+                    <?php endif; ?>
 
                     <button type="submit" class="btn-submit">
                         <i class="fas fa-save"></i> Save Service Module Settings
@@ -1745,7 +1811,7 @@ foreach ($canonicalTemplateDefaults as $templateKey => $templateDefaults) {
             ?>
             <div class="settings-card tpl-editor-card" id="email-templates" style="scroll-margin-top:18px;">
                 <div style="margin-bottom:14px;">
-                    <h2 style="margin:0 0 4px;"><i class="fas fa-envelope-open-text" style="color:#8B7355;"></i> Booking Email &amp; PDF Templates</h2>
+                    <h2 style="margin:0 0 4px;"><i class="fas fa-envelope-open-text" style="color:#8B7355;"></i> <?php echo $mod_bookings ? 'Booking Email &amp; PDF Templates' : 'Email &amp; PDF Templates'; ?></h2>
                     <p class="help-text" style="margin:0;">Email tabs preview wrapped emails. PDF tabs preview document HTML and the test-send action emails a real PDF attachment generated from the preview.</p>
                 </div>
 

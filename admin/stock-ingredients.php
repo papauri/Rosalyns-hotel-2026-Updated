@@ -378,13 +378,22 @@ function stock_status_badge(array $i, ?int $expDays = null): string
     if ($expDays !== null && $expDays <= 7) return '<span class="badge badge-low">Expiring</span>';
     return '<span class="badge badge-ok">OK</span>';
 }
+
+// Preset-aware vocabulary: a kitchen stocks "Ingredients" (raw materials that
+// recipes consume); a shop/supermarket stocks "Stock Items" (the products
+// themselves, auto-linked 1:1 from Product Management). Same table, same
+// ledger — only the noun changes.
+$stockIsFood  = function_exists('isRestaurantEnabled') && isRestaurantEnabled();
+$stockNoun    = $stockIsFood ? 'Ingredient' : 'Stock Item';
+$stockNounPl  = $stockIsFood ? 'Ingredients' : 'Stock Items';
+$stockNounLow = $stockIsFood ? 'ingredient' : 'stock item';
 ?>
 <!DOCTYPE html>
 <html lang="en">
 
 <head>
     <meta charset="UTF-8">
-    <title>Ingredients — Stock Management</title>
+    <title><?php echo $stockNounPl; ?> — Stock Management</title>
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -399,8 +408,8 @@ function stock_status_badge(array $i, ?int $expDays = null): string
 
     <div class="content stock-ingredients-page">
         <div class="page-header">
-            <h2 class="page-title"><i class="fas fa-carrot" style="color:var(--color-primary,#8A775F);"></i> Ingredients</h2>
-            <button class="btn-add" onclick="openIngredientModal()"><i class="fas fa-plus"></i> Add Ingredient</button>
+            <h2 class="page-title"><i class="fas <?php echo $stockIsFood ? 'fa-carrot' : 'fa-boxes-stacked'; ?>" style="color:var(--color-primary,#8A775F);"></i> <?php echo $stockNounPl; ?></h2>
+            <button class="btn-add" onclick="openIngredientModal()"><i class="fas fa-plus"></i> Add <?php echo $stockNoun; ?></button>
         </div>
 
         <?php if ($message): showAlert($message, 'success');
@@ -419,7 +428,7 @@ function stock_status_badge(array $i, ?int $expDays = null): string
         </div>
 
         <div class="stock-toolbar">
-            <input type="text" id="filter-search" placeholder="Search ingredient..." oninput="filterTable()">
+            <input type="text" id="filter-search" placeholder="Search <?php echo $stockNounLow; ?>..." oninput="filterTable()">
             <select id="filter-category" onchange="filterTable()">
                 <option value="">All categories</option>
                 <?php foreach ($categories as $c): ?>
@@ -568,7 +577,7 @@ function stock_status_badge(array $i, ?int $expDays = null): string
                     <?php endforeach; ?>
                     <?php if (empty($ingredients)): ?>
                         <tr>
-                            <td colspan="10" style="text-align:center; padding:30px; color:#6c757d;">No ingredients yet. Click <strong>Add Ingredient</strong> to get started.</td>
+                            <td colspan="10" style="text-align:center; padding:30px; color:#6c757d;">No <?php echo strtolower($stockNounPl); ?> yet. Click <strong>Add <?php echo $stockNoun; ?></strong> to get started.</td>
                         </tr>
                     <?php endif; ?>
                 </tbody>
@@ -579,7 +588,7 @@ function stock_status_badge(array $i, ?int $expDays = null): string
     <!-- Add/Edit Ingredient Modal -->
     <div class="modal-overlay" id="ingredientModal">
         <div class="modal-content">
-            <h3 id="ingredientModalTitle">Add Ingredient</h3>
+            <h3 id="ingredientModalTitle">Add <?php echo $stockNoun; ?></h3>
             <form method="POST" id="ingredientForm">
                 <input type="hidden" name="csrf_token" value="<?php echo $csrf_token; ?>">
                 <input type="hidden" name="action" id="ing_action" value="add">
@@ -590,13 +599,13 @@ function stock_status_badge(array $i, ?int $expDays = null): string
                         <input type="text" name="name" id="ing_name" required maxlength="200">
                     </div>
                     <div>
-                        <label>Category <i class="help" data-tip="Used to group ingredients in the recipe-builder dropdown. Pick consistent names like Dairy, Meat, Pantry, Vegetables, Beverages.">?</i></label>
-                        <input type="text" name="category" id="ing_category" placeholder="e.g. Dairy, Meat, Produce" maxlength="100">
+                        <label>Category <i class="help" data-tip="<?php echo $stockIsFood ? 'Used to group ingredients in the recipe-builder dropdown. Pick consistent names like Dairy, Meat, Pantry, Vegetables, Beverages.' : 'Used to group stock items in lists and reports. Pick consistent names like Groceries, Beverages, Household.'; ?>">?</i></label>
+                        <input type="text" name="category" id="ing_category" placeholder="<?php echo $stockIsFood ? 'e.g. Dairy, Meat, Produce' : 'e.g. Groceries, Beverages, Household'; ?>" maxlength="100">
                     </div>
                 </div>
                 <div class="form-row">
                     <div>
-                        <label>Unit * <i class="help" data-tip="The base unit for ALL stock movements of this ingredient — receipts, recipe quantities, wastage. Choose carefully; changing it later breaks existing recipes.">?</i></label>
+                        <label>Unit * <i class="help" data-tip="<?php echo $stockIsFood ? 'The base unit for ALL stock movements of this ingredient — receipts, recipe quantities, wastage. Choose carefully; changing it later breaks existing recipes.' : 'The base unit for ALL stock movements of this item — receipts, sales deductions, wastage. Retail products normally use Pieces (pcs).'; ?>">?</i></label>
                         <select name="unit" id="ing_unit" required>
                             <option value="g">Grams (g)</option>
                             <option value="kg">Kilograms (kg)</option>
@@ -609,7 +618,7 @@ function stock_status_badge(array $i, ?int $expDays = null): string
                         </select>
                     </div>
                     <div>
-                        <label>Min quantity (low-stock threshold) <i class="help" data-tip="When current stock drops to or below this number, the ingredient turns yellow on the dashboard and appears in reorder reports. Leave at 0 if you don't want low-stock alerts.">?</i></label>
+                        <label>Min quantity (low-stock threshold) <i class="help" data-tip="When current stock drops to or below this number, the <?php echo $stockNounLow; ?> turns yellow on the dashboard and appears in reorder reports. Leave at 0 if you don't want low-stock alerts.">?</i></label>
                         <input type="number" name="min_quantity" id="ing_min" step="0.001" min="0" value="0">
                     </div>
                 </div>
@@ -825,7 +834,7 @@ function stock_status_badge(array $i, ?int $expDays = null): string
         function openIngredientModal(data) {
             document.getElementById('ingredientForm').reset();
             if (data) {
-                document.getElementById('ingredientModalTitle').textContent = 'Edit Ingredient';
+                document.getElementById('ingredientModalTitle').textContent = 'Edit <?php echo $stockNoun; ?>';
                 document.getElementById('ing_action').value = 'update';
                 document.getElementById('ing_id').value = data.id;
                 document.getElementById('ing_name').value = data.name || '';
@@ -835,7 +844,7 @@ function stock_status_badge(array $i, ?int $expDays = null): string
                 document.getElementById('ing_yield').value = data.yield_percent || 100;
                 document.getElementById('ing_notes').value = data.notes || '';
             } else {
-                document.getElementById('ingredientModalTitle').textContent = 'Add Ingredient';
+                document.getElementById('ingredientModalTitle').textContent = 'Add <?php echo $stockNoun; ?>';
                 document.getElementById('ing_action').value = 'add';
                 document.getElementById('ing_id').value = '';
             }

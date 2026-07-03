@@ -448,10 +448,22 @@ $y += 24;
 // ============================================================
 $kpiW = 44;
 $kpiH = 18;
+// Preset flags — hotel KPIs/sections only render for booking businesses;
+// till-first presets (supermarket, retail, gym, bar) get POS KPIs instead.
+$eodModBookings   = !function_exists('moduleEnabled') || moduleEnabled('bookings');
+$eodModConference = !function_exists('moduleEnabled') || moduleEnabled('conference');
+$eodOrdersToday   = (int)($pos['orders'] ?? 0);
+if ($eodModBookings) {
+    $kpi_slot2 = ['OCCUPANCY', number_format($occupancy_pct, 1) . '%', number_format($rooms_occupied) . '/' . $rooms_total . ' rooms'];
+    $kpi_slot3 = ['ADR',       pdfMoney($currency_symbol, $adr),       'RevPAR ' . pdfMoney($currency_symbol, $revpar)];
+} else {
+    $kpi_slot2 = ['ORDERS TODAY',    (string)$eodOrdersToday, (int)($pos['voided_count'] ?? 0) . ' void(s)'];
+    $kpi_slot3 = ['AVG ORDER VALUE', pdfMoney($currency_symbol, $eodOrdersToday > 0 ? ((float)($pos['gross'] ?? 0)) / $eodOrdersToday : 0), 'per settled order'];
+}
 $kpis = [
     ['NET REVENUE',  pdfMoney($currency_symbol, $net),              pdfSign($net_change) . pdfMoney($currency_symbol, abs($net_change)) . ' vs yday'],
-    ['OCCUPANCY',    number_format($occupancy_pct, 1) . '%',        number_format($rooms_occupied) . '/' . $rooms_total . ' rooms'],
-    ['ADR',          pdfMoney($currency_symbol, $adr),              'RevPAR ' . pdfMoney($currency_symbol, $revpar)],
+    $kpi_slot2,
+    $kpi_slot3,
     ['HEALTH SCORE', (string)$score . ' / 100',                     $score_label],
 ];
 
@@ -520,12 +532,13 @@ $yR    = $y;
 
 // --- LEFT: REVENUE BY SOURCE ---
 $yL = pdfSection($pdf, '  Revenue by Source', $yL, $CHARCOAL);
-$revRows = [
-    ['Rooms',        pdfMoney($currency_symbol, (float)$rev['room_gross']),  false],
-    ['Conferences',  pdfMoney($currency_symbol, (float)$rev['conf_gross']),  false],
+$revRows = [];
+if ($eodModBookings)   { $revRows[] = ['Rooms',       pdfMoney($currency_symbol, (float)$rev['room_gross']), false]; }
+if ($eodModConference) { $revRows[] = ['Conferences', pdfMoney($currency_symbol, (float)$rev['conf_gross']), false]; }
+$revRows = array_merge($revRows, [
     [isRestaurantEnabled() ? 'F&B / POS' : 'POS', pdfMoney($currency_symbol, (float)$rev['fnb_gross']),   false],
     ['Gross Total',  pdfMoney($currency_symbol, $gross),                      true],
-];
+]);
 if ((float)$rev['refunds'] > 0) {
     $revRows[] = ['Less Refunds', '-' . pdfMoney($currency_symbol, (float)$rev['refunds']), false];
 }
@@ -549,7 +562,8 @@ foreach ($revRows as $i => $rr) {
     $yL += 6;
 }
 
-// --- LEFT: FRONT OFFICE ---
+// --- LEFT: FRONT OFFICE (hotel businesses only) ---
+if ($eodModBookings) {
 $yL += 3;
 $yL = pdfSection($pdf, '  Front Office', $yL, $CHARCOAL);
 $foRows = [
@@ -575,6 +589,7 @@ foreach ($foRows as $i => $fr) {
     $pdf->Cell(33, 6, $fr[1], 'B', 0, 'R', true);
     $yL += 6;
 }
+} // end front office (bookings)
 
 // --- RIGHT: POS / F&B ---
 $yR = pdfSection($pdf, isRestaurantEnabled() ? '  POS / F&B' : '  POS', $yR, $GOLD);
@@ -747,6 +762,8 @@ if ($y > 240) {
     $pdf->AddPage();
     $y = 14;
 }
+$eodModHousekeeping = !function_exists('moduleEnabled') || moduleEnabled('housekeeping');
+if ($eodModHousekeeping) {
 $y = pdfSection($pdf, '  Housekeeping & Guest Sentiment', $y, $BROWN);
 $hkRevRows = [
     ['HK Pending',            (string)(int)$hk['pending']],
@@ -767,7 +784,9 @@ foreach ($hkRevRows as $i => $hr) {
     $y += 6;
 }
 $y += 3;
+} // end housekeeping section
 
+if ($eodModBookings) {
 $y = pdfSection($pdf, '  Tomorrow Preview — ' . date('D, M j', strtotime($tomorrow)), $y, $BROWN);
 $tomRows = [
     ['Expected Arrivals',    (string)(int)$tom['arrivals']],
@@ -786,6 +805,7 @@ foreach ($tomRows as $i => $tr) {
     $pdf->Cell(82, 6, $tr[1], 'B', 0, 'R', true);
     $y += 6;
 }
+} // end tomorrow preview (bookings)
 
 // ============================================================
 // FOOTER

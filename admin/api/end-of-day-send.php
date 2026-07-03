@@ -408,6 +408,13 @@ if (((int)($housekeeping['pending'] ?? 0) + (int)($housekeeping['in_progress'] ?
 
 $dateLabel = date('l, F j, Y', strtotime($date));
 
+// Preset flags — rooms/occupancy/front-office content only for booking
+// businesses; conference lines only when the conference module is on.
+// Used by the WhatsApp text, HTML email, and attached PDF alike.
+$eodModBookings   = !function_exists('moduleEnabled') || moduleEnabled('bookings');
+$eodModConference = !function_exists('moduleEnabled') || moduleEnabled('conference');
+$eodOrdersToday   = (int)($pos['orders'] ?? 0);
+
 // -----------------------------------------------------------------------------
 // Channel: WhatsApp — concise plain-text summary
 // -----------------------------------------------------------------------------
@@ -450,10 +457,11 @@ if ($channel === 'whatsapp') {
     }
     $lines[] = "VAT Collected:  " . _money($currency_symbol, (float)$rev['total_vat']);
     $lines[] = '';
-    $lines[] = "  🏨 Rooms:       " . _money($currency_symbol, (float)$rev['room_gross']);
-    $lines[] = "  🎪 Conference:  " . _money($currency_symbol, (float)$rev['conf_gross']);
+    if ($eodModBookings)   { $lines[] = "  🏨 Rooms:       " . _money($currency_symbol, (float)$rev['room_gross']); }
+    if ($eodModConference) { $lines[] = "  🎪 Conference:  " . _money($currency_symbol, (float)$rev['conf_gross']); }
     $lines[] = (isRestaurantEnabled() ? "  🍽️ F&B:         " : "  🛒 POS:         ") . _money($currency_symbol, (float)$rev['fnb_gross']);
     $lines[] = '';
+    if ($eodModBookings) {
     $lines[] = "━━━━━━━━━━ 🛏️ ROOMS ━━━━━━━━━━";
     $lines[] = "Occupancy: *" . number_format($occupancy_pct, 1) . "%* (" . $rooms_occupied . "/" . $rooms_total . " rooms)";
     $lines[] = "  " . $occArrow . " " . ($occupancy_change >= 0 ? '+' : '') . number_format($occupancy_change, 1) . " pts vs yesterday";
@@ -467,6 +475,7 @@ if ($channel === 'whatsapp') {
         $lines[] = "Cancellations: " . (int)($ops['cancellations'] ?? 0) . "   No-shows: " . (int)($ops['no_shows'] ?? 0);
     }
     $lines[] = '';
+    } // end rooms block (bookings)
     $lines[] = isRestaurantEnabled() ? "━━━━━━━━━━ 🍽️ F&B / POS ━━━━━━━━━━" : "━━━━━━━━━━ 🛒 POS ━━━━━━━━━━";
     $lines[] = "Orders: " . (int)$pos['orders'] . "   Gross: *" . _money($currency_symbol, (float)$pos['gross']) . "*";
     $lines[] = "Margin: " . _money($currency_symbol, ((float)$pos['gross'] - (float)$pos['cogs'])) . " (" . number_format((float)$pos['gross'] > 0 ? (((float)$pos['gross'] - (float)$pos['cogs']) / (float)$pos['gross']) * 100 : 0, 1) . "%)";
@@ -499,11 +508,13 @@ if ($channel === 'whatsapp') {
         $lines[] = '';
     }
 
-    $lines[] = "━━━━━━━━━━ 📅 TOMORROW ━━━━━━━━━━";
-    $lines[] = date('D, j M Y', strtotime($date . ' +1 day'));
-    $lines[] = "Arrivals: " . (int)$tom['arrivals'] . "   Departures: " . (int)$tom['departures'];
-    $lines[] = "Forecast: " . _money($currency_symbol, (float)$tom['rev_forecast']);
-    $lines[] = '';
+    if ($eodModBookings) {
+        $lines[] = "━━━━━━━━━━ 📅 TOMORROW ━━━━━━━━━━";
+        $lines[] = date('D, j M Y', strtotime($date . ' +1 day'));
+        $lines[] = "Arrivals: " . (int)$tom['arrivals'] . "   Departures: " . (int)$tom['departures'];
+        $lines[] = "Forecast: " . _money($currency_symbol, (float)$tom['rev_forecast']);
+        $lines[] = '';
+    }
     $lines[] = "— " . ($user['full_name'] ?: 'Admin') . " · " . date('H:i') . " · " . $site_name;
 
     $msg = implode("\n", $lines);
@@ -613,19 +624,34 @@ $html .= '<div style="font-size:20px;font-weight:700;color:#231F1C;">' . _money(
 $html .= '<div style="font-size:11px;color:' . $net_color . ';margin-top:3px;">' . $net_sign . _money($currency_symbol, $net_change) . ' vs yesterday</div>';
 $html .= '</td>';
 
-// Occupancy
-$html .= '<td style="padding:16px;text-align:center;background:#F3ECE4;border-right:1px solid #e5d9c9;">';
-$html .= '<div style="font-size:9px;letter-spacing:0.1em;color:#8A775F;text-transform:uppercase;margin-bottom:4px;">Occupancy</div>';
-$html .= '<div style="font-size:20px;font-weight:700;color:#231F1C;">' . number_format($occupancy_pct, 1) . '%</div>';
-$html .= '<div style="font-size:11px;color:#5e554d;margin-top:3px;">' . $rooms_occupied . '&nbsp;/&nbsp;' . $rooms_total . ' rooms &nbsp;<span style="color:' . $occ_color . ';">' . $occ_sign . number_format($occupancy_change, 1) . ' pts</span></div>';
-$html .= '</td>';
+if ($eodModBookings) {
+    // Occupancy
+    $html .= '<td style="padding:16px;text-align:center;background:#F3ECE4;border-right:1px solid #e5d9c9;">';
+    $html .= '<div style="font-size:9px;letter-spacing:0.1em;color:#8A775F;text-transform:uppercase;margin-bottom:4px;">Occupancy</div>';
+    $html .= '<div style="font-size:20px;font-weight:700;color:#231F1C;">' . number_format($occupancy_pct, 1) . '%</div>';
+    $html .= '<div style="font-size:11px;color:#5e554d;margin-top:3px;">' . $rooms_occupied . '&nbsp;/&nbsp;' . $rooms_total . ' rooms &nbsp;<span style="color:' . $occ_color . ';">' . $occ_sign . number_format($occupancy_change, 1) . ' pts</span></div>';
+    $html .= '</td>';
 
-// ADR / RevPAR
-$html .= '<td style="padding:16px;text-align:center;background:#F3ECE4;border-right:1px solid #e5d9c9;">';
-$html .= '<div style="font-size:9px;letter-spacing:0.1em;color:#8A775F;text-transform:uppercase;margin-bottom:4px;">ADR</div>';
-$html .= '<div style="font-size:20px;font-weight:700;color:#231F1C;">' . _money($currency_symbol, $adr) . '</div>';
-$html .= '<div style="font-size:11px;color:#5e554d;margin-top:3px;">RevPAR&nbsp;' . _money($currency_symbol, $revpar) . '</div>';
-$html .= '</td>';
+    // ADR / RevPAR
+    $html .= '<td style="padding:16px;text-align:center;background:#F3ECE4;border-right:1px solid #e5d9c9;">';
+    $html .= '<div style="font-size:9px;letter-spacing:0.1em;color:#8A775F;text-transform:uppercase;margin-bottom:4px;">ADR</div>';
+    $html .= '<div style="font-size:20px;font-weight:700;color:#231F1C;">' . _money($currency_symbol, $adr) . '</div>';
+    $html .= '<div style="font-size:11px;color:#5e554d;margin-top:3px;">RevPAR&nbsp;' . _money($currency_symbol, $revpar) . '</div>';
+    $html .= '</td>';
+} else {
+    // Till-first presets: orders + average order value instead of hotel KPIs
+    $html .= '<td style="padding:16px;text-align:center;background:#F3ECE4;border-right:1px solid #e5d9c9;">';
+    $html .= '<div style="font-size:9px;letter-spacing:0.1em;color:#8A775F;text-transform:uppercase;margin-bottom:4px;">Orders Today</div>';
+    $html .= '<div style="font-size:20px;font-weight:700;color:#231F1C;">' . $eodOrdersToday . '</div>';
+    $html .= '<div style="font-size:11px;color:#5e554d;margin-top:3px;">' . (int)($pos['voided_count'] ?? 0) . ' void(s)</div>';
+    $html .= '</td>';
+
+    $html .= '<td style="padding:16px;text-align:center;background:#F3ECE4;border-right:1px solid #e5d9c9;">';
+    $html .= '<div style="font-size:9px;letter-spacing:0.1em;color:#8A775F;text-transform:uppercase;margin-bottom:4px;">Avg Order Value</div>';
+    $html .= '<div style="font-size:20px;font-weight:700;color:#231F1C;">' . _money($currency_symbol, $eodOrdersToday > 0 ? ((float)($pos['gross'] ?? 0)) / $eodOrdersToday : 0) . '</div>';
+    $html .= '<div style="font-size:11px;color:#5e554d;margin-top:3px;">per settled order</div>';
+    $html .= '</td>';
+}
 
 // POS
 $html .= '<td style="padding:16px;text-align:center;background:#F3ECE4;">';
@@ -655,11 +681,10 @@ $html .= '<table style="width:100%;border-collapse:collapse;">';
 
 // REVENUE section
 $html .= $section_head('Revenue by Source');
-$revSrcRows = [
-    ['Rooms',              _money($currency_symbol, (float)$rev['room_gross'])],
-    ['Conferences',        _money($currency_symbol, (float)$rev['conf_gross'])],
-    [isRestaurantEnabled() ? 'F&amp;B / POS' : 'POS', _money($currency_symbol, (float)$rev['fnb_gross'])],
-];
+$revSrcRows = [];
+if ($eodModBookings)   { $revSrcRows[] = ['Rooms',       _money($currency_symbol, (float)$rev['room_gross'])]; }
+if ($eodModConference) { $revSrcRows[] = ['Conferences', _money($currency_symbol, (float)$rev['conf_gross'])]; }
+$revSrcRows[] = [isRestaurantEnabled() ? 'F&amp;B / POS' : 'POS', _money($currency_symbol, (float)$rev['fnb_gross'])];
 foreach ($revSrcRows as $rr) {
     $html .= $row($rr[0], $rr[1]);
 }
@@ -674,16 +699,18 @@ $html .= $row('Pending / Partial', _money($currency_symbol, (float)($rev['pendin
 $html .= $row('Outstanding Folio', _money($currency_symbol, (float)$outstanding));
 $html .= $row('Payment Capture Rate', number_format((float)$payment_capture_rate, 1) . '%');
 
-// FRONT OFFICE section
-$html .= $section_head('Front Office Activity');
-$html .= $row('Arrivals (done / expected)', (int)($ops['arrivals_completed'] ?? 0) . ' of ' . (int)($ops['expected_arrivals'] ?? 0));
-$html .= $row('Departures (done / expected)', (int)($ops['departures_completed'] ?? 0) . ' of ' . (int)($ops['expected_departures'] ?? 0));
-$html .= $row('Stay-overs tonight', (string)(int)($ops['stayovers'] ?? 0));
-$html .= $row('New Bookings Created', (string)(int)($ops['new_bookings'] ?? 0));
-$html .= $row('Cancellations', (string)(int)($ops['cancellations'] ?? 0));
-$html .= $row('No-Shows', (string)(int)($ops['no_shows'] ?? 0));
-$html .= $row('Rooms Sold / Available', $rooms_occupied . ' / ' . $rooms_total);
-$html .= $row('Unsold Room Opportunity', _money($currency_symbol, (float)$empty_room_opportunity));
+// FRONT OFFICE section (hotel businesses only)
+if ($eodModBookings) {
+    $html .= $section_head('Front Office Activity');
+    $html .= $row('Arrivals (done / expected)', (int)($ops['arrivals_completed'] ?? 0) . ' of ' . (int)($ops['expected_arrivals'] ?? 0));
+    $html .= $row('Departures (done / expected)', (int)($ops['departures_completed'] ?? 0) . ' of ' . (int)($ops['expected_departures'] ?? 0));
+    $html .= $row('Stay-overs tonight', (string)(int)($ops['stayovers'] ?? 0));
+    $html .= $row('New Bookings Created', (string)(int)($ops['new_bookings'] ?? 0));
+    $html .= $row('Cancellations', (string)(int)($ops['cancellations'] ?? 0));
+    $html .= $row('No-Shows', (string)(int)($ops['no_shows'] ?? 0));
+    $html .= $row('Rooms Sold / Available', $rooms_occupied . ' / ' . $rooms_total);
+    $html .= $row('Unsold Room Opportunity', _money($currency_symbol, (float)$empty_room_opportunity));
+}
 
 // POS section
 $html .= $section_head(isRestaurantEnabled() ? 'POS / F&B' : 'POS');
@@ -742,15 +769,17 @@ if ((int)$reviews['c'] > 0) {
 $html .= '</table>';
 
 // ── TOMORROW PREVIEW ─────────────────────────────────────────────────────────
-$html .= '<div style="background:#231F1C;padding:16px 20px;margin-top:4px;">';
-$html .= '<div style="font-size:10px;letter-spacing:0.1em;color:#B18247;text-transform:uppercase;font-weight:700;margin-bottom:8px;">Tomorrow Preview — ' . htmlspecialchars(date('D, j M Y', strtotime($date . ' +1 day'))) . '</div>';
-$html .= '<table style="width:100%;">';
-$html .= '<tr>';
-$html .= '<td style="text-align:center;padding:10px;"><div style="font-size:9px;color:#a89683;text-transform:uppercase;letter-spacing:0.1em;">Arrivals</div><div style="font-size:22px;font-weight:700;color:#ffffff;">' . (int)$tom['arrivals'] . '</div></td>';
-$html .= '<td style="text-align:center;padding:10px;border-left:1px solid #3d3733;"><div style="font-size:9px;color:#a89683;text-transform:uppercase;letter-spacing:0.1em;">Departures</div><div style="font-size:22px;font-weight:700;color:#ffffff;">' . (int)$tom['departures'] . '</div></td>';
-$html .= '<td style="text-align:center;padding:10px;border-left:1px solid #3d3733;"><div style="font-size:9px;color:#a89683;text-transform:uppercase;letter-spacing:0.1em;">Revenue Forecast</div><div style="font-size:22px;font-weight:700;color:#B18247;">' . _money($currency_symbol, (float)$tom['rev_forecast']) . '</div></td>';
-$html .= '</tr>';
-$html .= '</table></div>';
+if ($eodModBookings) {
+    $html .= '<div style="background:#231F1C;padding:16px 20px;margin-top:4px;">';
+    $html .= '<div style="font-size:10px;letter-spacing:0.1em;color:#B18247;text-transform:uppercase;font-weight:700;margin-bottom:8px;">Tomorrow Preview — ' . htmlspecialchars(date('D, j M Y', strtotime($date . ' +1 day'))) . '</div>';
+    $html .= '<table style="width:100%;">';
+    $html .= '<tr>';
+    $html .= '<td style="text-align:center;padding:10px;"><div style="font-size:9px;color:#a89683;text-transform:uppercase;letter-spacing:0.1em;">Arrivals</div><div style="font-size:22px;font-weight:700;color:#ffffff;">' . (int)$tom['arrivals'] . '</div></td>';
+    $html .= '<td style="text-align:center;padding:10px;border-left:1px solid #3d3733;"><div style="font-size:9px;color:#a89683;text-transform:uppercase;letter-spacing:0.1em;">Departures</div><div style="font-size:22px;font-weight:700;color:#ffffff;">' . (int)$tom['departures'] . '</div></td>';
+    $html .= '<td style="text-align:center;padding:10px;border-left:1px solid #3d3733;"><div style="font-size:9px;color:#a89683;text-transform:uppercase;letter-spacing:0.1em;">Revenue Forecast</div><div style="font-size:22px;font-weight:700;color:#B18247;">' . _money($currency_symbol, (float)$tom['rev_forecast']) . '</div></td>';
+    $html .= '</tr>';
+    $html .= '</table></div>';
+}
 
 // ── FOOTER ───────────────────────────────────────────────────────────────────
 $html .= '<div style="padding:12px 20px;background:#F7F3EE;border-top:1px solid #e5d9c9;border-radius:0 0 6px 6px;">';
@@ -876,10 +905,17 @@ if (false) {
     // KPI strip
     $kpiW = 44.0;
     $kpiH = 18.0;
+    if ($eodModBookings) {
+        $kpiSlot2 = ['OCCUPANCY', number_format($occupancy_pct, 1) . '%', $rooms_occupied . '/' . $rooms_total . ' rooms'];
+        $kpiSlot3 = ['ADR',       _money($currency_symbol, $adr),         'RevPAR ' . _money($currency_symbol, $revpar)];
+    } else {
+        $kpiSlot2 = ['ORDERS TODAY',    (string)$eodOrdersToday, (int)($pos['voided_count'] ?? 0) . ' void(s)'];
+        $kpiSlot3 = ['AVG ORDER VALUE', _money($currency_symbol, $eodOrdersToday > 0 ? ((float)($pos['gross'] ?? 0)) / $eodOrdersToday : 0), 'per settled order'];
+    }
     $kpiItems = [
         ['NET REVENUE', _money($currency_symbol, $net),                 ($net_change >= 0 ? '+' : '') . _money($currency_symbol, $net_change) . ' vs yday'],
-        ['OCCUPANCY',   number_format($occupancy_pct, 1) . '%',         $rooms_occupied . '/' . $rooms_total . ' rooms'],
-        ['ADR',         _money($currency_symbol, $adr),                 'RevPAR ' . _money($currency_symbol, $revpar)],
+        $kpiSlot2,
+        $kpiSlot3,
         [isRestaurantEnabled() ? 'F&B / POS' : 'POS',   _money($currency_symbol, (float)$pos['gross']), ($pos_change >= 0 ? '+' : '') . _money($currency_symbol, $pos_change) . ' vs yday'],
     ];
     $kpiXp = 14.0;
@@ -926,26 +962,29 @@ if (false) {
     };
 
     $pdfSec('Revenue by Source');
-    $pdfRowA('Rooms',            _money($currency_symbol, (float)$rev['room_gross']), false, 0);
-    $pdfRowA('Conferences',      _money($currency_symbol, (float)$rev['conf_gross']), false, 1);
-    $pdfRowA(isRestaurantEnabled() ? 'F&B / POS' : 'POS', _money($currency_symbol, (float)$rev['fnb_gross']),  false, 2);
-    $pdfRowA('Gross Total',      _money($currency_symbol, $gross), true, 3);
+    $pdfRowIdx = 0;
+    if ($eodModBookings)   { $pdfRowA('Rooms',       _money($currency_symbol, (float)$rev['room_gross']), false, $pdfRowIdx++); }
+    if ($eodModConference) { $pdfRowA('Conferences', _money($currency_symbol, (float)$rev['conf_gross']), false, $pdfRowIdx++); }
+    $pdfRowA(isRestaurantEnabled() ? 'F&B / POS' : 'POS', _money($currency_symbol, (float)$rev['fnb_gross']),  false, $pdfRowIdx++);
+    $pdfRowA('Gross Total',      _money($currency_symbol, $gross), true, $pdfRowIdx++);
     if ((float)$rev['refunds'] > 0) {
-        $pdfRowA('Less Refunds', '-' . _money($currency_symbol, (float)$rev['refunds']), false, 4);
+        $pdfRowA('Less Refunds', '-' . _money($currency_symbol, (float)$rev['refunds']), false, $pdfRowIdx++);
     }
-    $pdfRowA('Net Revenue',       _money($currency_symbol, $net), true, 5);
-    $pdfRowA('VAT Collected',     _money($currency_symbol, (float)$rev['total_vat']), false, 6);
-    $pdfRowA('Pending',           _money($currency_symbol, (float)$rev['pending']), false, 7);
-    $pdfRowA('Outstanding Folio', _money($currency_symbol, $outstanding), false, 8);
+    $pdfRowA('Net Revenue',       _money($currency_symbol, $net), true, $pdfRowIdx++);
+    $pdfRowA('VAT Collected',     _money($currency_symbol, (float)$rev['total_vat']), false, $pdfRowIdx++);
+    $pdfRowA('Pending',           _money($currency_symbol, (float)$rev['pending']), false, $pdfRowIdx++);
+    $pdfRowA('Outstanding Folio', _money($currency_symbol, $outstanding), false, $pdfRowIdx++);
     $py += 3.0;
 
-    $pdfSec('Front Office');
-    $pdfRowA('Arrivals (done / exp)',   (int)($ops['arrivals_completed']  ?? 0) . ' of ' . (int)($ops['expected_arrivals']  ?? 0), false, 0);
-    $pdfRowA('Departures (done / exp)', (int)($ops['departures_completed'] ?? 0) . ' of ' . (int)($ops['expected_departures'] ?? 0), false, 1);
-    $pdfRowA('Stay-overs tonight',      (string)(int)($ops['stayovers']   ?? 0), false, 2);
-    $pdfRowA('New Bookings',            (string)(int)($ops['new_bookings'] ?? 0), false, 3);
-    $pdfRowA('Cancellations / No-Shows', (int)($ops['cancellations'] ?? 0) . ' / ' . (int)($ops['no_shows'] ?? 0), false, 4);
-    $py += 3.0;
+    if ($eodModBookings) {
+        $pdfSec('Front Office');
+        $pdfRowA('Arrivals (done / exp)',   (int)($ops['arrivals_completed']  ?? 0) . ' of ' . (int)($ops['expected_arrivals']  ?? 0), false, 0);
+        $pdfRowA('Departures (done / exp)', (int)($ops['departures_completed'] ?? 0) . ' of ' . (int)($ops['expected_departures'] ?? 0), false, 1);
+        $pdfRowA('Stay-overs tonight',      (string)(int)($ops['stayovers']   ?? 0), false, 2);
+        $pdfRowA('New Bookings',            (string)(int)($ops['new_bookings'] ?? 0), false, 3);
+        $pdfRowA('Cancellations / No-Shows', (int)($ops['cancellations'] ?? 0) . ' / ' . (int)($ops['no_shows'] ?? 0), false, 4);
+        $py += 3.0;
+    }
 
     if ($py > 230) {
         $pa->AddPage();
@@ -1002,10 +1041,12 @@ if (false) {
         $pa->AddPage();
         $py = 14.0;
     }
-    $pdfSec('Tomorrow Preview - ' . date('D, M j', strtotime($tomorrow)));
-    $pdfRowA('Expected Arrivals',   (string)(int)$tom['arrivals'], false, 0);
-    $pdfRowA('Expected Departures', (string)(int)$tom['departures'], false, 1);
-    $pdfRowA('Revenue Forecast',    _money($currency_symbol, (float)($tom['rev_forecast'] ?? 0)), true, 2);
+    if ($eodModBookings) {
+        $pdfSec('Tomorrow Preview - ' . date('D, M j', strtotime($tomorrow)));
+        $pdfRowA('Expected Arrivals',   (string)(int)$tom['arrivals'], false, 0);
+        $pdfRowA('Expected Departures', (string)(int)$tom['departures'], false, 1);
+        $pdfRowA('Revenue Forecast',    _money($currency_symbol, (float)($tom['rev_forecast'] ?? 0)), true, 2);
+    }
 
     $pa->SetY(-10);
     $pa->SetFont('helvetica', 'I', 7);

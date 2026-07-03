@@ -1021,7 +1021,9 @@ try {
             </div>
             <div class="acct-quick-actions">
                 <a href="payments.php" class="acct-quick-action"><i class="fas fa-money-bill-wave"></i> Payments</a>
+                <?php if (function_exists('rh_module_key_enabled') && rh_module_key_enabled('billing')): ?>
                 <a href="invoices.php" class="acct-quick-action"><i class="fas fa-file-invoice"></i> Invoices</a>
+                <?php endif; ?>
                 <a href="accounting-dashboard.php" class="acct-quick-action"><i class="fas fa-tachometer-alt"></i> Dashboard</a>
                 <button type="button" class="acct-quick-action" onclick="exportToCSV()"><i class="fas fa-download"></i> Export CSV</button>
             </div>

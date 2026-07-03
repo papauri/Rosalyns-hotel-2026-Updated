@@ -1418,9 +1418,9 @@ function getModuleForPage(string $page)
         'payment-refund.php' => 'finance',
         'payment-add.php' => 'finance',
         'receipts.php' => 'finance',
-        'invoices.php' => 'finance',
-        'credit-notes.php' => 'finance',
-        'quotations.php' => ['finance', 'advance_booking'],
+        'invoices.php' => ['finance', 'billing'],
+        'credit-notes.php' => ['finance', 'advance_booking'],
+        'quotations.php' => ['finance', 'billing'],
         'gym-members.php' => 'gym',
         'reports.php' => 'finance',
         'end-of-day-report.php' => 'finance',
@@ -1444,14 +1444,29 @@ function rh_module_key_enabled(string $key): bool
         return function_exists('isRestaurantEnabled') && isRestaurantEnabled();
     }
     if ($key === 'advance_booking') {
-        // The standalone Quotations register only makes sense for businesses
-        // taking advance bookings (rooms, conferences) — not walk-in tills
-        // like a gym, supermarket, retail shop or bar. Per-inquiry quotation
-        // emails (gym/events) live inside their own inquiry pages regardless.
+        // Accounts-receivable businesses only (rooms, conferences): deposits,
+        // balances due, credit notes against future stays/events. A gym,
+        // supermarket, retail shop or bar refunds at source (POS refund)
+        // instead of issuing credit notes.
         if (!function_exists('moduleEnabled')) {
             return true;
         }
         return moduleEnabled('bookings') || moduleEnabled('conference');
+    }
+    if ($key === 'billing') {
+        // "Billing businesses" — anyone who invoices/quotes a named client in
+        // advance: rooms, conferences, gym memberships. Pure till businesses
+        // (supermarket, retail, bar/restaurant) sell at the point of sale:
+        // receipts + POS refunds, no invoice/quotation register. Events is
+        // deliberately excluded: the events feature is preset-independent
+        // (rides the legacy setting, on for every preset), and its per-booking
+        // invoice/quotation actions live inside events-inquiries.php itself —
+        // counting it here would put the invoice register back on every
+        // supermarket.
+        if (!function_exists('moduleEnabled')) {
+            return true;
+        }
+        return moduleEnabled('bookings') || moduleEnabled('conference') || moduleEnabled('gym');
     }
     return function_exists('moduleEnabled') && moduleEnabled($key);
 }

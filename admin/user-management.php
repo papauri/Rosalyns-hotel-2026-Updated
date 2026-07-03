@@ -24,6 +24,40 @@ $error_msg = '';
 // Get all roles for use throughout the page
 $all_roles = getAllRoles();
 
+// ── Preset relevance ────────────────────────────────────────────────────────
+// Staff roles only make sense when their module is on for this business
+// preset (a supermarket doesn't hire a receptionist or a chef). Role CHOICES
+// (create dropdown, role-template cards, filter buttons) are filtered to
+// relevant roles; EXISTING users always keep displaying whatever role they
+// hold — validation and the edit dropdown still accept every role.
+$rh_role_module_map = [
+    'receptionist'     => ['bookings'],
+    'housekeeping'     => ['housekeeping'],
+    'restaurant_staff' => ['pos'],
+    'chef'             => ['pos', 'station_kds'],
+    'bar_staff'        => ['pos', 'station_bds'],
+    'coffee_staff'     => ['pos', 'station_cds'],
+    'room_service'     => ['pos', 'station_room_service'],
+    'gym_staff'        => ['gym'],
+    'conference_staff' => ['conference'],
+    // admin / manager / accountant / viewer: every business needs them.
+];
+$rh_role_is_relevant = static function (string $roleKey) use ($rh_role_module_map): bool {
+    if (!isset($rh_role_module_map[$roleKey])) {
+        return true;
+    }
+    if (!function_exists('moduleEnabled')) {
+        return true;
+    }
+    foreach ($rh_role_module_map[$roleKey] as $mk) {
+        if (!moduleEnabled($mk)) {
+            return false;
+        }
+    }
+    return true;
+};
+$relevant_roles = array_filter($all_roles, static fn($k) => $rh_role_is_relevant((string)$k), ARRAY_FILTER_USE_KEY);
+
 // Handle form submissions
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     // Verify CSRF token
@@ -313,8 +347,27 @@ if ($editing_user_id > 0) {
 
 $all_permissions = getAllPermissions();
 $permission_categories = [];
+// Tag permissions whose page belongs to a module that's off for this preset.
+// The JS matrix hides them as new OFFERS but still renders any the user
+// already holds — existing grants are never hidden.
+$rh_perm_module_off = static function (array $info): bool {
+    if (!function_exists('getModuleForPage') || !function_exists('rh_module_key_enabled')) {
+        return false;
+    }
+    $mod = getModuleForPage((string)($info['page'] ?? ''));
+    if ($mod === null) {
+        return false;
+    }
+    foreach ((array)$mod as $mk) {
+        if (!rh_module_key_enabled((string)$mk)) {
+            return true;
+        }
+    }
+    return false;
+};
 foreach ($all_permissions as $key => $info) {
     if ($key === 'user_management') continue;
+    $info['module_off'] = $rh_perm_module_off($info);
     $permission_categories[$info['category']][$key] = $info;
 }
 
@@ -363,11 +416,16 @@ $nav_categories = getNavCategories();
         <?php endif; ?>
     </div>
 
-    <!-- Role Overview -->
+    <!-- Role Overview — roles relevant to this business preset, plus any
+         off-preset role that still has users (existing staff are never hidden) -->
     <div class="role-overview">
         <?php foreach ($all_roles as $role_key => $role_data): ?>
-        <?php $count = $user_counts[$role_key] ?? 0; ?>
-        <div class="role-card">
+        <?php
+            $count = $user_counts[$role_key] ?? 0;
+            $roleRelevant = isset($relevant_roles[$role_key]);
+            if (!$roleRelevant && $count === 0) { continue; }
+        ?>
+        <div class="role-card" <?php echo $roleRelevant ? '' : 'style="opacity:.55;" title="This role\'s module is disabled for the current business preset"'; ?>>
             <div class="role-icon" style="background: <?php echo $role_data['color']; ?>20; color: <?php echo $role_data['color']; ?>;">
                 <i class="fas <?php echo $role_data['icon']; ?>"></i>
             </div>
@@ -384,6 +442,7 @@ $nav_categories = getNavCategories();
             <div class="user-filters">
                 <button class="filter-btn active" onclick="filterUsers('all')">All</button>
                 <?php foreach ($all_roles as $role_key => $role_data): ?>
+                <?php if (!isset($relevant_roles[$role_key]) && ($user_counts[$role_key] ?? 0) === 0) { continue; } ?>
                 <button class="filter-btn" onclick="filterUsers('<?php echo $role_key; ?>')">
                     <?php echo $role_data['label']; ?>
                 </button>
@@ -547,7 +606,7 @@ $nav_categories = getNavCategories();
                 <div class="form-row">
                     <label for="add-role">Role</label>
                     <select id="add-role" name="role">
-                        <?php foreach ($all_roles as $role_key => $role_data): ?>
+                        <?php foreach ($relevant_roles as $role_key => $role_data): ?>
                         <option value="<?php echo $role_key; ?>"><?php echo $role_data['label']; ?> - <?php echo $role_data['description']; ?></option>
                         <?php endforeach; ?>
                     </select>
@@ -597,9 +656,12 @@ $nav_categories = getNavCategories();
                 </div>
                 <div class="form-row">
                     <label for="edit-role">Role</label>
+                    <?php /* Edit keeps EVERY role selectable — the user being edited may
+                             hold a role whose module is off; off-preset roles are labelled
+                             so admins don't newly assign them by accident. */ ?>
                     <select id="edit-role" name="role">
                         <?php foreach ($all_roles as $role_key => $role_data): ?>
-                        <option value="<?php echo $role_key; ?>"><?php echo $role_data['label']; ?></option>
+                        <option value="<?php echo $role_key; ?>"><?php echo $role_data['label']; ?><?php echo isset($relevant_roles[$role_key]) ? '' : ' (module disabled)'; ?></option>
                         <?php endforeach; ?>
                     </select>
                 </div>
@@ -770,10 +832,15 @@ function populatePermissionsForm(permissions, role) {
             <div class="perm-grid">
         `;
 
+        let renderedInCategory = 0;
         for (const [permKey, permInfo] of Object.entries(permissionData.permissionsByCategory[catName])) {
             if (permKey === 'user_management') continue; // Skip admin-only
 
             const isChecked = permissions[permKey] || false;
+            // Off-preset permissions aren't offered as new grants, but any the
+            // user already holds stay visible (and revocable).
+            if (permInfo.module_off && !isChecked) continue;
+            renderedInCategory++;
             const isDefault = defaultPerms.includes(permKey);
 
             categoryContent += `
@@ -796,6 +863,7 @@ function populatePermissionsForm(permissions, role) {
         }
 
         categoryContent += '</div>';
+        if (renderedInCategory === 0) continue; // whole category off-preset
         categoryHtml.innerHTML = categoryContent;
         container.appendChild(categoryHtml);
     }

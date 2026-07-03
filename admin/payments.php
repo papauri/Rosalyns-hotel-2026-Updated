@@ -481,9 +481,11 @@ $quickActive = function ($s, $e) use ($startDate, $endDate) {
                 <a href="accounting-dashboard.php" class="acct-quick-action">
                     <i class="fas fa-chart-line"></i> Dashboard
                 </a>
+                <?php if (function_exists('rh_module_key_enabled') && rh_module_key_enabled('billing')): ?>
                 <a href="invoices.php" class="acct-quick-action">
                     <i class="fas fa-file-invoice-dollar"></i> Invoices
                 </a>
+                <?php endif; ?>
             </div>
         </div>
 
@@ -805,9 +807,11 @@ $quickActive = function ($s, $e) use ($startDate, $endDate) {
                                         <a href="payment-details.php?id=<?php echo $payment['id']; ?>" class="btn btn-primary btn-sm" title="View Details">
                                             <i class="fas fa-eye"></i>
                                         </a>
+                                        <?php if (function_exists('rh_module_key_enabled') && rh_module_key_enabled('billing')): ?>
                                         <a href="invoices.php?search=<?php echo urlencode($payment['payment_reference']); ?>" class="btn btn-secondary btn-sm" title="Invoice">
                                             <i class="fas fa-file-invoice"></i>
                                         </a>
+                                        <?php endif; ?>
                                         <?php if (in_array($payment['payment_status'], ['completed', 'paid'], true) && $payment['payment_type'] != 'refund'): ?>
                                             <a href="payment-refund.php?id=<?php echo $payment['id']; ?>" class="btn btn-warning btn-sm" title="Process Refund"
                                                 data-admin-confirm="Open the refund form for this payment?"

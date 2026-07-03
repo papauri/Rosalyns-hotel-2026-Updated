@@ -82,6 +82,16 @@ $mod_gym        = function_exists('moduleEnabled') && moduleEnabled('gym');
 // it's gated by its own legacy setting instead, same as it always has been.
 $mod_events     = function_exists('isEventsEnabled') && isEventsEnabled();
 
+// Preset-aware copy: hotels talk about "guests", every other business about
+// "customers". Used in headings/tooltips/help text only — never in queries.
+$acct_party = $mod_bookings ? 'guest' : 'customer';
+// Billing surface per preset: invoices/quotations belong to businesses that
+// bill named clients in advance (rooms, conference, gym, events); credit
+// notes to accounts-receivable businesses (rooms, conference). Till-only
+// presets (supermarket, retail, bar) settle at the POS — receipts + refunds.
+$acct_billing = function_exists('rh_module_key_enabled') && rh_module_key_enabled('billing');
+$acct_ar      = function_exists('rh_module_key_enabled') && rh_module_key_enabled('advance_booking');
+
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['save_vat_settings'])) {
     if (!validateCsrfToken($_POST['csrf_token'] ?? '')) {
         $vatSettingsError = 'Security token invalid. Please refresh and try again.';
@@ -675,12 +685,14 @@ if (!isset($dailyTrend)) {
             <a href="payment-add.php" class="acct-quick-action acct-quick-action--accent" title="Manually record a new payment against a booking or invoice">
                 <i class="fas fa-plus"></i> Record Payment
             </a>
-            <a href="invoices.php" class="acct-quick-action" title="View, search, and download guest and client invoices">
+            <?php if ($acct_billing): ?>
+            <a href="invoices.php" class="acct-quick-action" title="View, search, and download <?php echo $acct_party; ?> and client invoices">
                 <i class="fas fa-file-invoice-dollar"></i> Invoices
             </a>
             <a href="quotations.php" class="acct-quick-action" title="View all quotations issued, track status, download PDFs">
                 <i class="fas fa-file-contract"></i> Quotations
             </a>
+            <?php endif; ?>
             <a href="reports.php" class="acct-quick-action" title="Detailed financial reports — P&amp;L, revenue by source, VAT register, occupancy, and more">
                 <i class="fas fa-chart-bar"></i> Reports
             </a>
@@ -838,7 +850,7 @@ if (!isset($dailyTrend)) {
                 </div>
                 <div class="acct-kpi__hint"><i class="fas fa-table-list"></i> Open detail</div>
             </div>
-            <div class="acct-kpi acct-kpi--receivables acct-kpi--interactive js-acct-insight-trigger" title="Receivables — money that guests/clients owe but have not yet paid. These are open invoices or partial bookings that still need collection." role="button" tabindex="0" data-insight-key="receivables" data-insight-title="Receivables Follow-up" aria-label="Open receivables follow-up">
+            <div class="acct-kpi acct-kpi--receivables acct-kpi--interactive js-acct-insight-trigger" title="Receivables — money that <?php echo $acct_party; ?>s/clients owe but have not yet paid. These are open invoices or partial balances that still need collection." role="button" tabindex="0" data-insight-key="receivables" data-insight-title="Receivables Follow-up" aria-label="Open receivables follow-up">
                 <div class="acct-kpi__label">Receivables</div>
                 <div class="acct-kpi__value"><?php echo '<span class="acct-kpi__currency">' . $currency_symbol . '</span>' . number_format($cat_recv_total, 2); ?></div>
                 <div class="acct-kpi__meta">
@@ -856,7 +868,7 @@ if (!isset($dailyTrend)) {
                 </div>
                 <div class="acct-kpi__hint"><i class="fas fa-table-list"></i> Open detail</div>
             </div>
-            <div class="acct-kpi acct-kpi--vat acct-kpi--interactive js-acct-insight-trigger" title="VAT Collected — Value Added Tax (VAT) is the tax portion collected on top of the sale price. This amount must be reported and paid to the tax authority (MRA). It is not the hotel&#39;s income." role="button" tabindex="0" data-insight-key="vat-collected" data-insight-title="VAT Compliance Snapshot" aria-label="Open VAT compliance snapshot">
+            <div class="acct-kpi acct-kpi--vat acct-kpi--interactive js-acct-insight-trigger" title="VAT Collected — Value Added Tax (VAT) is the tax portion collected on top of the sale price. This amount must be reported and paid to the tax authority (MRA). It is not the business&#39;s income." role="button" tabindex="0" data-insight-key="vat-collected" data-insight-title="VAT Compliance Snapshot" aria-label="Open VAT compliance snapshot">
                 <div class="acct-kpi__label">VAT Collected</div>
                 <div class="acct-kpi__value"><?php echo '<span class="acct-kpi__currency">' . $currency_symbol . '</span>' . number_format($cat_vat, 2); ?></div>
                 <div class="acct-kpi__meta">
@@ -867,6 +879,7 @@ if (!isset($dailyTrend)) {
             </div>
         </div>
 
+        <?php if ($acct_billing): // quotations register belongs to billing businesses (rooms/conference/gym/events) — hidden for till-only presets, matching the nav/page gate ?>
         <!-- Quotation Pipeline panel -->
         <section class="acct-panel" id="quotation-pipeline">
             <header class="acct-panel__head">
@@ -889,7 +902,7 @@ if (!isset($dailyTrend)) {
                     <div class="acct-kpi__meta"><span><?php echo $currency_symbol . ' ' . number_format((float)$quotationStats['sent_value'], 2); ?> outstanding</span></div>
                     <div class="acct-kpi__hint"><i class="fas fa-table-list"></i> Open detail</div>
                 </div>
-                <div class="acct-kpi acct-kpi--cash acct-kpi--interactive js-acct-insight-trigger" style="flex:1;min-width:120px;" title="Quotations accepted by the guest — indicates conversion" role="button" tabindex="0" data-insight-key="quotation-accepted" data-insight-title="Accepted Quotations Performance" aria-label="Open accepted quotations performance">
+                <div class="acct-kpi acct-kpi--cash acct-kpi--interactive js-acct-insight-trigger" style="flex:1;min-width:120px;" title="Quotations accepted by the <?php echo $acct_party; ?> — indicates conversion" role="button" tabindex="0" data-insight-key="quotation-accepted" data-insight-title="Accepted Quotations Performance" aria-label="Open accepted quotations performance">
                     <div class="acct-kpi__label">Accepted</div>
                     <div class="acct-kpi__value" style="font-size:1.4rem;color:#155724;"><?php echo (int)$quotationStats['accepted']; ?></div>
                     <div class="acct-kpi__meta"><span><?php echo $currency_symbol . ' ' . number_format((float)$quotationStats['accepted_value'], 2); ?></span></div>
@@ -907,7 +920,9 @@ if (!isset($dailyTrend)) {
                 </div>
             </div>
         </section>
+        <?php endif; // quotation pipeline (billing businesses) ?>
 
+        <?php if ($acct_ar): // credit notes are an accounts-receivable tool (rooms/conference) — till businesses refund at the POS instead ?>
         <!-- Credit Note Summary panel -->
         <section class="acct-panel" id="credit-note-summary">
             <header class="acct-panel__head">
@@ -930,7 +945,7 @@ if (!isset($dailyTrend)) {
                     <div class="acct-kpi__meta"><span>Applied to bookings</span></div>
                     <div class="acct-kpi__hint"><i class="fas fa-table-list"></i> Open detail</div>
                 </div>
-                <div class="acct-kpi acct-kpi--receivables acct-kpi--interactive js-acct-insight-trigger" style="flex:1;min-width:140px;" title="Outstanding credit note liability — the value guests can still redeem" role="button" tabindex="0" data-insight-key="cn-outstanding" data-insight-title="Credit Notes Outstanding Liability" aria-label="Open credit notes outstanding liability details">
+                <div class="acct-kpi acct-kpi--receivables acct-kpi--interactive js-acct-insight-trigger" style="flex:1;min-width:140px;" title="Outstanding credit note liability — the value <?php echo $acct_party; ?>s can still redeem" role="button" tabindex="0" data-insight-key="cn-outstanding" data-insight-title="Credit Notes Outstanding Liability" aria-label="Open credit notes outstanding liability details">
                     <div class="acct-kpi__label">CN Outstanding</div>
                     <div class="acct-kpi__value"><?php echo '<span class="acct-kpi__currency">' . $currency_symbol . '</span>' . number_format((float)$cnStats['total_outstanding'], 2); ?></div>
                     <div class="acct-kpi__meta"><span>Unredeemed liability</span></div>
@@ -938,6 +953,7 @@ if (!isset($dailyTrend)) {
                 </div>
             </div>
         </section>
+        <?php endif; // credit note summary (accounts-receivable businesses) ?>
 
         <section class="acct-panel">
             <header class="acct-panel__head">
@@ -982,18 +998,23 @@ if (!isset($dailyTrend)) {
                                 'label' => 'Generated invoices missing invoice number',
                                 'count' => (int)($complianceSummary['generated_invoices_missing_numbers'] ?? 0),
                                 'warn' => true,
-                                'action_link' => 'invoices.php',
-                                'action_label' => 'Open invoices workspace',
+                                'action_link' => $acct_billing ? 'invoices.php' : 'payments.php',
+                                'action_label' => $acct_billing ? 'Open invoices workspace' : 'Open payments ledger',
                             ],
-                            [
+                        ];
+                        // POS-ledger reconciliation only applies when a till exists
+                        if ($mod_pos) {
+                            $complianceRows[] = [
                                 'key' => 'compliance-pos-ledger-gap',
                                 'insight_title' => 'POS to Payments Ledger Gap',
                                 'label' => 'Paid POS orders missing payments ledger row',
                                 'count' => (int)($complianceSummary['paid_pos_without_ledger'] ?? 0),
                                 'warn' => true,
-                                'action_link' => 'stock-orders.php',
+                                'action_link' => $mod_stock ? 'stock-orders.php' : 'pos.php',
                                 'action_label' => 'Open POS orders',
-                            ],
+                            ];
+                        }
+                        $complianceRows = array_merge($complianceRows, [
                             [
                                 'key' => 'compliance-mra-pending',
                                 'insight_title' => $mraColumnsAvailable ? 'MRA Submission Readiness' : 'MRA Fields Installation Check',
@@ -1003,7 +1024,7 @@ if (!isset($dailyTrend)) {
                                 'action_link' => $mraColumnsAvailable ? ('reports.php?start_date=' . urlencode($startDate) . '&end_date=' . urlencode($endDate)) : 'booking-settings.php#invoice-settings',
                                 'action_label' => $mraColumnsAvailable ? 'Open MRA-focused reports' : 'Open settings & install fields',
                             ],
-                        ];
+                        ]);
                         foreach ($complianceRows as $row):
                             $hasGap = $row['warn'] && (int)$row['count'] > 0;
                         ?>
@@ -1096,7 +1117,7 @@ if (!isset($dailyTrend)) {
         </template>
 
         <template id="acct-insight-template-receivables">
-            <p class="acct-insight-intro">Receivables are outstanding balances still owed by guests or clients and should guide collection priorities.</p>
+            <p class="acct-insight-intro">Receivables are outstanding balances still owed by <?php echo $acct_party; ?>s or clients and should guide collection priorities.</p>
             <table class="acct-insight-table">
                 <thead>
                     <tr>
@@ -1145,8 +1166,8 @@ if (!isset($dailyTrend)) {
             </table>
             <div class="acct-insight-note">Direction: start with oldest/highest balances, then update payment records so receivables age and risk are always visible.</div>
             <div class="acct-insight-actions">
-                <a href="invoices.php" class="acct-btn acct-btn--primary">Open invoices</a>
-                <a href="payments.php?start_date=<?php echo urlencode($startDate); ?>&end_date=<?php echo urlencode($endDate); ?>" class="acct-btn acct-btn--ghost">Open payments</a>
+                <?php if ($acct_billing): ?><a href="invoices.php" class="acct-btn acct-btn--primary">Open invoices</a><?php endif; ?>
+                <a href="payments.php?start_date=<?php echo urlencode($startDate); ?>&end_date=<?php echo urlencode($endDate); ?>" class="acct-btn <?php echo $acct_billing ? 'acct-btn--ghost' : 'acct-btn--primary'; ?>">Open payments</a>
             </div>
         </template>
 
@@ -1354,7 +1375,7 @@ if (!isset($dailyTrend)) {
         </template>
 
         <template id="acct-insight-template-cn-issued">
-            <p class="acct-insight-intro">Issued credit notes represent total liability created for guests in the selected period.</p>
+            <p class="acct-insight-intro">Issued credit notes represent total liability created for <?php echo $acct_party; ?>s in the selected period.</p>
             <table class="acct-insight-table">
                 <thead>
                     <tr>
@@ -1523,7 +1544,7 @@ if (!isset($dailyTrend)) {
                 </tbody>
             </table>
             <div class="acct-insight-actions">
-                <a href="invoices.php" class="acct-btn acct-btn--primary">Open invoices workspace</a>
+                <a href="<?php echo $acct_billing ? 'invoices.php' : 'payments.php'; ?>" class="acct-btn acct-btn--primary"><?php echo $acct_billing ? 'Open invoices workspace' : 'Open payments ledger'; ?></a>
             </div>
         </template>
 

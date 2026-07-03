@@ -1146,7 +1146,7 @@ if (isset($_GET['export']) && $_GET['export'] === 'csv') {
                         <div class="eod-kpi__value"><?php echo $money($cn_issued_today); ?></div>
                         <div class="eod-kpi__meta">
                             <span><?php echo (int)$cn_issued_count; ?> credit note<?php echo $cn_issued_count !== 1 ? 's' : ''; ?></span>
-                            <a href="credit-notes.php">View &rarr;</a>
+                            <?php if (function_exists('rh_module_key_enabled') && rh_module_key_enabled('advance_booking')): ?><a href="credit-notes.php">View &rarr;</a><?php endif; ?>
                         </div>
                     </div>
                     <div class="eod-kpi eod-kpi--occupancy" data-help="Credit Notes Redeemed|Value of credit notes that guests used as payment today. Each redemption reduces the outstanding credit note liability balance.">
@@ -1766,8 +1766,9 @@ if (isset($_GET['export']) && $_GET['export'] === 'csv') {
                 </article>
                 <?php endif; ?>
 
-                <!-- Quotation Pipeline -->
-                <?php if ($quotation_stats['sent_today'] > 0 || $quotation_stats['total_active'] > 0): ?>
+                <!-- Quotation Pipeline (billing businesses only — matches the nav/page gate) -->
+                <?php $eod_billing = function_exists('rh_module_key_enabled') && rh_module_key_enabled('billing'); ?>
+                <?php if ($eod_billing && ($quotation_stats['sent_today'] > 0 || $quotation_stats['total_active'] > 0)): ?>
                 <article class="eod-panel" data-help="Quotation Pipeline|Quotes sent today and quotes still awaiting a decision from prospects. Pipeline value is the total of all sent quotes not yet accepted or declined. Track conversion to ensure proposals translate into confirmed revenue.">
                     <header class="eod-panel__head">
                         <h2 class="eod-panel__title"><i class="fas fa-file-lines"></i> Quotations</h2>

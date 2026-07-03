@@ -231,6 +231,42 @@ function buildEodPdf(
     $occ_sub_c = $occ_change >= 0 ? $GREEN : $RED;
     $pos_sub_c = $pos_change >= 0 ? $GREEN : $RED;
 
+    // Preset flags — hotel KPIs (occupancy/ADR) are meaningless for
+    // bookings-off businesses (supermarket, retail, gym, bar); they get
+    // POS-relevant KPIs in those two slots instead. Defaults keep the
+    // classic hotel layout if the module system isn't loaded.
+    $eodModBookings   = !function_exists('moduleEnabled') || moduleEnabled('bookings');
+    $eodModConference = !function_exists('moduleEnabled') || moduleEnabled('conference');
+
+    if ($eodModBookings) {
+        $kpi_slot2 = [
+            'label' => 'OCCUPANCY',
+            'value' => number_format($occupancy_pct, 1) . '%',
+            'sub'   => $rooms_occupied . '/' . $rooms_total . ' rooms  (' . ($occ_change >= 0 ? '+' : '') . number_format($occ_change, 1) . ' pts)',
+            'sub_c' => $occ_sub_c,
+        ];
+        $kpi_slot3 = [
+            'label' => 'ADR',
+            'value' => $m($adr),
+            'sub'   => 'RevPAR ' . $m($revpar),
+            'sub_c' => $TEXT2,
+        ];
+    } else {
+        $eodOrders   = (int)($pos['orders'] ?? 0);
+        $kpi_slot2 = [
+            'label' => 'ORDERS TODAY',
+            'value' => (string)$eodOrders,
+            'sub'   => (int)($pos['voided_count'] ?? 0) . ' void(s)',
+            'sub_c' => $TEXT2,
+        ];
+        $kpi_slot3 = [
+            'label' => 'AVG ORDER VALUE',
+            'value' => $m($eodOrders > 0 ? ((float)($pos['gross'] ?? 0)) / $eodOrders : 0),
+            'sub'   => 'per settled order',
+            'sub_c' => $TEXT2,
+        ];
+    }
+
     $kpis = [
         [
             'label' => 'NET REVENUE',
@@ -238,18 +274,8 @@ function buildEodPdf(
             'sub'   => ($net_change >= 0 ? '+' : '') . $m($net_change) . ' vs yday',
             'sub_c' => $net_sub_c,
         ],
-        [
-            'label' => 'OCCUPANCY',
-            'value' => number_format($occupancy_pct, 1) . '%',
-            'sub'   => $rooms_occupied . '/' . $rooms_total . ' rooms  (' . ($occ_change >= 0 ? '+' : '') . number_format($occ_change, 1) . ' pts)',
-            'sub_c' => $occ_sub_c,
-        ],
-        [
-            'label' => 'ADR',
-            'value' => $m($adr),
-            'sub'   => 'RevPAR ' . $m($revpar),
-            'sub_c' => $TEXT2,
-        ],
+        $kpi_slot2,
+        $kpi_slot3,
         [
             'label' => isRestaurantEnabled() ? 'F&B / POS' : 'POS',
             'value' => $m($pos_gross),
@@ -349,8 +375,8 @@ function buildEodPdf(
     // ── LEFT: Revenue by Source ───────────────────────────────────────────────
     $secL('Revenue by Source');
     $i = 0;
-    $rowL('Rooms',       $m((float)$rev['room_gross']), false, $i++);
-    $rowL('Conferences', $m((float)$rev['conf_gross']), false, $i++);
+    if ($eodModBookings)   { $rowL('Rooms',       $m((float)$rev['room_gross']), false, $i++); }
+    if ($eodModConference) { $rowL('Conferences', $m((float)$rev['conf_gross']), false, $i++); }
     $rowL(isRestaurantEnabled() ? 'F&B / POS' : 'POS', $m((float)$rev['fnb_gross']),  false, $i++);
 
     // Gross Total gold bar
@@ -399,25 +425,27 @@ function buildEodPdf(
 
     $yL += 3;
 
-    // ── LEFT: Front Office ────────────────────────────────────────────────────
-    $secL('Front Office');
-    $i = 0;
-    $rowL('Arrivals',
-        (int)($ops['arrivals_completed'] ?? 0) . ' done / ' . (int)($ops['expected_arrivals'] ?? 0) . ' exp.',
-        false, $i++);
-    $rowL('Departures',
-        (int)($ops['departures_completed'] ?? 0) . ' done / ' . (int)($ops['expected_departures'] ?? 0) . ' exp.',
-        false, $i++);
-    $rowL('Stay-overs (in-house)', (string)(int)($ops['stayovers'] ?? 0),    false, $i++);
-    $rowL('New Bookings Today',   (string)(int)($ops['new_bookings'] ?? 0),  false, $i++);
-    $rowL('Cancellations',        (string)(int)($ops['cancellations'] ?? 0), false, $i++);
-    $rowL('No-shows',             (string)(int)($ops['no_shows'] ?? 0),      false, $i++);
-    $rowL('Unsold Rooms',         $rooms_unsold . ' of ' . $rooms_total,     false, $i++);
-    if ($empty_room_opportunity > 0) {
-        $rowL('Empty-room Opportunity', $m($empty_room_opportunity), false, $i++);
+    // ── LEFT: Front Office (hotel businesses only) ───────────────────────────
+    if ($eodModBookings) {
+        $secL('Front Office');
+        $i = 0;
+        $rowL('Arrivals',
+            (int)($ops['arrivals_completed'] ?? 0) . ' done / ' . (int)($ops['expected_arrivals'] ?? 0) . ' exp.',
+            false, $i++);
+        $rowL('Departures',
+            (int)($ops['departures_completed'] ?? 0) . ' done / ' . (int)($ops['expected_departures'] ?? 0) . ' exp.',
+            false, $i++);
+        $rowL('Stay-overs (in-house)', (string)(int)($ops['stayovers'] ?? 0),    false, $i++);
+        $rowL('New Bookings Today',   (string)(int)($ops['new_bookings'] ?? 0),  false, $i++);
+        $rowL('Cancellations',        (string)(int)($ops['cancellations'] ?? 0), false, $i++);
+        $rowL('No-shows',             (string)(int)($ops['no_shows'] ?? 0),      false, $i++);
+        $rowL('Unsold Rooms',         $rooms_unsold . ' of ' . $rooms_total,     false, $i++);
+        if ($empty_room_opportunity > 0) {
+            $rowL('Empty-room Opportunity', $m($empty_room_opportunity), false, $i++);
+        }
+        $rowL('ADR',    $m($adr),    false, $i++);
+        $rowL('RevPAR', $m($revpar), false, $i++);
     }
-    $rowL('ADR',    $m($adr),    false, $i++);
-    $rowL('RevPAR', $m($revpar), false, $i++);
 
     // ── RIGHT: POS / F&B ─────────────────────────────────────────────────────
     $secR(isRestaurantEnabled() ? 'POS / F&B' : 'POS', $CHARCOAL);
@@ -723,25 +751,30 @@ function buildEodPdf(
     }
 
     // ══════════════════════════════════════════════════════════════════════════
-    // HOUSEKEEPING & GUEST REVIEWS
+    // HOUSEKEEPING & GUEST REVIEWS (module-gated)
     // ══════════════════════════════════════════════════════════════════════════
-    $pb();
-    $fwSec('Housekeeping & Guest Reviews', $BROWN);
-    $i = 0;
-    $fwRow('HK Pending',         (string)(int)($hk['pending']     ?? 0), false, $i++);
-    $fwRow('HK In Progress',     (string)(int)($hk['in_progress'] ?? 0), false, $i++);
-    $fwRow('HK Completed Today', (string)(int)($hk['completed']   ?? 0), false, $i++);
-    if ((int)($reviewRow['cnt'] ?? 0) > 0) {
-        $fwRow('Reviews Received',
-            (int)$reviewRow['cnt'] . ' — avg ' . number_format((float)($reviewRow['avg_rating'] ?? 0), 1) . '/5',
-            false, $i++);
+    $eodModHousekeeping = !function_exists('moduleEnabled') || moduleEnabled('housekeeping');
+    if ($eodModHousekeeping || (int)($reviewRow['cnt'] ?? 0) > 0) {
+        $pb();
+        $fwSec($eodModHousekeeping ? 'Housekeeping & Guest Reviews' : 'Customer Reviews', $BROWN);
+        $i = 0;
+        if ($eodModHousekeeping) {
+            $fwRow('HK Pending',         (string)(int)($hk['pending']     ?? 0), false, $i++);
+            $fwRow('HK In Progress',     (string)(int)($hk['in_progress'] ?? 0), false, $i++);
+            $fwRow('HK Completed Today', (string)(int)($hk['completed']   ?? 0), false, $i++);
+        }
+        if ((int)($reviewRow['cnt'] ?? 0) > 0) {
+            $fwRow('Reviews Received',
+                (int)$reviewRow['cnt'] . ' — avg ' . number_format((float)($reviewRow['avg_rating'] ?? 0), 1) . '/5',
+                false, $i++);
+        }
+        $y += 3;
     }
-    $y += 3;
 
     // ══════════════════════════════════════════════════════════════════════════
-    // OPEN MAINTENANCE TASKS
+    // OPEN MAINTENANCE TASKS (room maintenance — hotel businesses only)
     // ══════════════════════════════════════════════════════════════════════════
-    if ((int)($maintenance['total_open'] ?? 0) > 0) {
+    if ($eodModBookings && (int)($maintenance['total_open'] ?? 0) > 0) {
         $pb();
         $fwSec('Open Maintenance Tasks', $AMBER);
         $i = 0;
@@ -777,9 +810,10 @@ function buildEodPdf(
     }
 
     // ══════════════════════════════════════════════════════════════════════════
-    // QUOTATION PIPELINE
+    // QUOTATION PIPELINE (billing businesses only — matches the on-screen gate)
     // ══════════════════════════════════════════════════════════════════════════
-    if ((int)($quotation_stats['sent_today'] ?? 0) > 0 || (int)($quotation_stats['total_active'] ?? 0) > 0) {
+    $eodBilling = !function_exists('rh_module_key_enabled') || rh_module_key_enabled('billing');
+    if ($eodBilling && ((int)($quotation_stats['sent_today'] ?? 0) > 0 || (int)($quotation_stats['total_active'] ?? 0) > 0)) {
         $pb();
         $fwSec('Quotation Pipeline', $CHARCOAL);
         $i = 0;
@@ -791,8 +825,9 @@ function buildEodPdf(
     }
 
     // ══════════════════════════════════════════════════════════════════════════
-    // TOMORROW PREVIEW BAND
+    // TOMORROW PREVIEW BAND (arrivals/departures — hotel businesses only)
     // ══════════════════════════════════════════════════════════════════════════
+    if ($eodModBookings) {
     $pb();
     $TBH = 22.0;
     // Gold top strip
@@ -841,6 +876,7 @@ function buildEodPdf(
     }
 
     $y += $TBH + 4;
+    } // end tomorrow band (bookings)
 
     // ── Output ─────────────────────────────────────────────────────────────────
     return $pdf->Output('eod-report-' . $date . '.pdf', 'S');
