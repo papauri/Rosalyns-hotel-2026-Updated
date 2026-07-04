@@ -3087,11 +3087,6 @@ try {
     error_log("Error fetching overdue checkouts: " . $e->getMessage());
 }
 
-// ─── Handle extend-stay POST action ───────────────────────────────────────
-if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'extend_stay') {
-    // This is handled in the main POST block above, but we need to add it there.
-    // Handled below in the main POST block.
-}
 
 // $today_str is needed for table row rendering (overdue check-in flag)
 $today     = new DateTime();
@@ -4908,6 +4903,12 @@ $today_str = $today->format('Y-m-d');
             const modal = document.getElementById('checkoutSettlementModal');
             if (modal) setBookingPageModalOpen(modal, false);
         }
+
+        // Exported for the overdue-checkout modal's inline onclick buttons —
+        // reliable under SPA re-execution (see note by the modal handlers below).
+        window.checkoutBooking = checkoutBooking;
+        window.openCheckoutSettlementModal = openCheckoutSettlementModal;
+        window.closeCheckoutSettlementModal = closeCheckoutSettlementModal;
 
         function escHtml(str) {
             return String(str).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
@@ -6894,9 +6895,23 @@ $today_str = $today->format('Y-m-d');
 
             const minDateStr = checkoutPlusOne < todayLocal ? todayLocal : checkoutPlusOne;
 
+            // Default value: for an OVERDUE booking (checkout already passed) the
+            // minimum floor is today, but defaulting to *today* is not really an
+            // "extension" — a guest you're extending is staying at least one more
+            // night. So default to tomorrow when overdue, while still allowing the
+            // clerk to pick today via the picker. Non-overdue bookings default to
+            // the day after the current checkout (their first real extra night).
+            let defaultStr = minDateStr;
+            if (minDateStr === todayLocal) {
+                const tomorrowUtc = new Date(Date.UTC(
+                    now.getFullYear(), now.getMonth(), now.getDate() + 1
+                ));
+                defaultStr = tomorrowUtc.toISOString().split('T')[0];
+            }
+
             const newCheckoutInput = document.getElementById('new_checkout');
             newCheckoutInput.min = minDateStr;
-            newCheckoutInput.value = minDateStr;
+            newCheckoutInput.value = defaultStr;
         }
 
         function closeExtendStayModal() {
@@ -6922,6 +6937,18 @@ $today_str = $today->format('Y-m-d');
             const modal = document.getElementById('adminChangeDateModal');
             if (modal) setBookingPageModalOpen(modal, false);
         }
+
+        // Explicit window exports: this page loads via the admin SPA, which
+        // re-executes inline scripts inside an IIFE. Inline onclick attributes
+        // (the overdue-checkout modal's Checkout Now / Extend Stay / Change Date
+        // buttons) resolve against window, so bind these handlers there directly
+        // rather than relying on the SPA's auto-export heuristic.
+        window.openOverdueCheckoutsModal = openOverdueCheckoutsModal;
+        window.closeOverdueCheckoutsModal = closeOverdueCheckoutsModal;
+        window.openExtendStayModal = openExtendStayModal;
+        window.closeExtendStayModal = closeExtendStayModal;
+        window.openAdminChangeDateModal = openAdminChangeDateModal;
+        window.closeAdminChangeDateModal = closeAdminChangeDateModal;
 
         document.getElementById('adminChangeDateForm')?.addEventListener('submit', function(e) {
             e.preventDefault();
