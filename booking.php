@@ -1903,11 +1903,15 @@ try {
                     return ci && co && ci.value && co.value && co.value > ci.value;
                 case 2: // Room selected?
                     return !!document.querySelector('input[name="room_id"]:checked');
-                case 3: // Guest Information (name, email, phone filled)?
+                case 3: // Guest Information (name, email, phone filled AND validated green)?
                     var n = document.getElementById('guest_name');
                     var e = document.getElementById('guest_email');
                     var p = document.getElementById('guest_phone');
-                    return n && e && p && n.value.trim() && e.value.trim() && p.value.trim();
+                    return n && e && p
+                        && n.value.trim() && e.value.trim() && p.value.trim()
+                        && n.classList.contains('is-valid')
+                        && e.classList.contains('is-valid')
+                        && p.classList.contains('is-valid');
                 case 4: // Guest Details (number of guests selected)?
                     var g = document.getElementById('number_of_guests');
                     return g && g.value && parseInt(g.value) > 0;
@@ -3504,9 +3508,7 @@ try {
             }
         }
 
-        // ── Guest info completion → scroll to booking type ────────────────
-        // Fires once when all three required fields become valid, then resets
-        // if the user invalidates a field so it can fire again if needed.
+        // ── Guest info completion → scroll to Guest Details step 4 ──────
         var _guestScrollFired = false;
         function checkGuestInfoComplete() {
             const n = document.getElementById('guest_name');
@@ -3519,13 +3521,9 @@ try {
 
             if (allValid && !_guestScrollFired) {
                 _guestScrollFired = true;
-                // Scroll to the guest-details block (number of guests) — next logical step
-                const guestDetailsSection =
-                    document.getElementById('guestDetailsSection')
-                    || document.querySelector('.form-sections-row');
-                scrollToSection(guestDetailsSection, 480);
+                // Advance to step 4 (Guest Details) which validates steps 1-3 first
+                advanceToStep(4);
             } else if (!allValid) {
-                // Reset so it fires again if the user fixes a field after invalidating
                 _guestScrollFired = false;
             }
         }
