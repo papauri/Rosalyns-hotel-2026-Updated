@@ -11,7 +11,7 @@ $user = [
 ];
 
 require_once __DIR__ . '/includes/permissions.php';
-if (!hasPermission((int)$user['id'], 'booking_settings')) {
+if (!hasPermission((int)$user['id'], 'module_settings')) {
     header('Location: dashboard.php?error=access_denied');
     exit;
 }

@@ -849,6 +849,14 @@ function getAllPermissions()
             'page' => 'booking-settings.php',
             'group' => 'settings'
         ],
+        'module_settings' => [
+            'label' => 'Module Settings',
+            'description' => 'Enable/disable modules and apply business presets for the whole installation',
+            'icon' => 'fa-puzzle-piece',
+            'category' => 'Settings',
+            'page' => 'module-settings.php',
+            'group' => 'settings_advanced'
+        ],
         'pages' => [
             'label' => 'Page Management',
             'description' => 'Enable, disable and reorder website pages',
@@ -1356,8 +1364,10 @@ function getPermissionForPage(string $page)
         'section-headers-management.php' => 'section_headers',
         'footer-management.php'         => 'footer_management',
         'booking-settings.php' => 'booking_settings',
+        'module-settings.php'  => 'module_settings',
         'rate-plans.php'       => 'booking_settings',
         'packages.php'         => 'booking_settings',
+        'stock-barcode-receive.php' => 'stock_management',
         'page-management.php' => 'pages',
         'cache-management.php' => 'cache',
         'backup-management.php' => 'backup_management',

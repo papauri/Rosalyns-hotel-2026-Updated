@@ -20,7 +20,7 @@ if (!validateCsrfToken($_POST['csrf_token'] ?? '')) {
     exit;
 }
 
-requireApiPermission('booking_settings');
+requireApiPermission('module_settings');
 
 $preset_key = trim((string)($_POST['preset_key'] ?? ''));
 $presets = getBusinessPresets();

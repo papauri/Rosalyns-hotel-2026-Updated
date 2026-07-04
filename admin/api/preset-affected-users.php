@@ -14,7 +14,7 @@ if ($_SERVER['REQUEST_METHOD'] !== 'GET') {
     exit;
 }
 
-requireApiPermission('booking_settings');
+requireApiPermission('module_settings');
 
 $preset_key = trim((string)($_GET['preset_key'] ?? ''));
 $presets = getBusinessPresets();

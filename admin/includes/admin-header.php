@@ -157,7 +157,7 @@ $_nav_groups = [
         ['packages.php',             'fas fa-gift',                'Packages',       'booking_settings', '',              'bookings'],
     ],
     'Configuration' => [
-        ['module-settings.php',            'fas fa-puzzle-piece',       'Module Settings',   'booking_settings', '', null],
+        ['module-settings.php',            'fas fa-puzzle-piece',       'Module Settings',   'module_settings', '', null],
         ['booking-settings.php',           'fas fa-cog',                'Booking Settings',  'booking_settings', '', null],
         ['booking-settings.php?section=email-templates#email-templates', 'fas fa-envelope-open-text', 'Email Previewer', 'booking_settings', '', null],
         ['whatsapp-settings.php',          'fab fa-whatsapp',           'WhatsApp Settings', 'whatsapp_settings',  'color:#25D366;', null],

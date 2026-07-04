@@ -19,7 +19,7 @@ if (!validateCsrfToken($_POST['csrf_token'] ?? '')) {
     exit;
 }
 
-requireApiPermission('booking_settings');
+requireApiPermission('module_settings');
 
 $allowed = ['bookings', 'housekeeping', 'pos', 'stock', 'conference', 'gym', 'finance', 'website_cms',
             'station_kds', 'station_bds', 'station_cds', 'station_room_service'];
