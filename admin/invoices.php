@@ -57,6 +57,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
                 $result = sendPaymentInvoiceEmail($payment['booking_id']);
             } elseif ($payment['booking_type'] === 'conference') {
                 $result = sendConferenceInvoiceEmail($payment['booking_id']);
+            } elseif ($payment['booking_type'] === 'gym') {
+                $result = sendGymInvoiceEmail($payment['booking_id']);
+            } elseif ($payment['booking_type'] === 'event') {
+                $result = sendEventInvoiceEmail($payment['booking_id']);
             } else {
                 $result = ['success' => false, 'message' => 'Invoice email is not supported for ' . htmlspecialchars($payment['booking_type'], ENT_QUOTES, 'UTF-8') . ' payments.'];
             }
@@ -96,6 +100,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
                 $result = sendPaymentInvoiceEmail($payment['booking_id']);
             } elseif ($payment['booking_type'] === 'conference') {
                 $result = sendConferenceInvoiceEmail($payment['booking_id']);
+            } elseif ($payment['booking_type'] === 'gym') {
+                $result = sendGymInvoiceEmail($payment['booking_id']);
+            } elseif ($payment['booking_type'] === 'event') {
+                $result = sendEventInvoiceEmail($payment['booking_id']);
             } else {
                 $result = ['success' => false, 'message' => 'Reminder email is not supported for ' . htmlspecialchars($payment['booking_type'], ENT_QUOTES, 'UTF-8') . ' payments.'];
             }
@@ -136,6 +144,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
                 $result = generateInvoicePDF($payment['booking_id']);
             } elseif ($payment['booking_type'] === 'conference') {
                 $result = generateConferenceInvoicePDF($payment['booking_id']);
+            } elseif ($payment['booking_type'] === 'gym') {
+                $result = generateGymInvoicePDF($payment['booking_id']);
+            } elseif ($payment['booking_type'] === 'event') {
+                $result = generateEventInvoicePDF($payment['booking_id']);
             } else {
                 throw new Exception('Invoice regeneration is not supported for ' . htmlspecialchars($payment['booking_type'], ENT_QUOTES, 'UTF-8') . ' payments.');
             }

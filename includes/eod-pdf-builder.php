@@ -11,7 +11,16 @@ declare(strict_types=1);
  */
 
 if (!class_exists('TCPDF')) {
-    require_once __DIR__ . '/../vendor/tecnickcom/tcpdf/tcpdf.php';
+    // Prefer the shared resilient loader (composer autoload, vendor TCPDF, or a
+    // standalone TCPDF/ folder). Fall back to the direct vendor path if the
+    // helper isn't loaded in this context.
+    if (function_exists('hotel_load_tcpdf')) {
+        hotel_load_tcpdf();
+    } elseif (is_file(__DIR__ . '/../vendor/tecnickcom/tcpdf/tcpdf.php')) {
+        require_once __DIR__ . '/../vendor/tecnickcom/tcpdf/tcpdf.php';
+    } elseif (is_file(__DIR__ . '/../TCPDF/tcpdf.php')) {
+        require_once __DIR__ . '/../TCPDF/tcpdf.php';
+    }
 }
 
 if (!class_exists('RhEodPdf')) {

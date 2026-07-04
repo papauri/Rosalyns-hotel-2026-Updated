@@ -127,44 +127,84 @@ if (!empty($_SESSION['qt_flash'])) {
 if ($_SERVER['REQUEST_METHOD'] === 'GET' && isset($_GET['download'])) {
     $dlId = (int)($_GET['download'] ?? 0);
     if ($dlId > 0) {
-        $dlStmt = $pdo->prepare("SELECT q.*, b.* FROM quotations q LEFT JOIN bookings b ON q.booking_id = b.id WHERE q.id = ?");
-        $dlStmt->execute([$dlId]);
-        $dlRow = $dlStmt->fetch(PDO::FETCH_ASSOC);
-        if ($dlRow) {
+        $dlQStmt = $pdo->prepare("SELECT * FROM quotations WHERE id = ?");
+        $dlQStmt->execute([$dlId]);
+        $dlQuote = $dlQStmt->fetch(PDO::FETCH_ASSOC);
+        if ($dlQuote) {
             // Try saved PDF first
-            if (!empty($dlRow['pdf_path'])) {
-                $absPath = dirname(__DIR__) . '/' . ltrim($dlRow['pdf_path'], '/');
+            if (!empty($dlQuote['pdf_path'])) {
+                $absPath = dirname(__DIR__) . '/' . ltrim($dlQuote['pdf_path'], '/');
                 if (file_exists($absPath)) {
                     header('Content-Type: application/pdf');
-                    header('Content-Disposition: attachment; filename="' . $dlRow['quote_reference'] . '.pdf"');
+                    header('Content-Disposition: attachment; filename="' . $dlQuote['quote_reference'] . '.pdf"');
                     header('Content-Length: ' . filesize($absPath));
                     readfile($absPath);
                     exit;
                 }
             }
-            // Regenerate on the fly
-            $booking = $dlRow;
-            $rStmt   = $pdo->prepare("SELECT * FROM rooms WHERE id = ? LIMIT 1");
-            $rStmt->execute([$dlRow['booking_id']]);
-            $room    = $rStmt->fetch(PDO::FETCH_ASSOC) ?: [];
+            // Regenerate on the fly, per booking type
+            $dlType  = $dlQuote['booking_type'] ?: 'room';
+            $dlOpts  = [
+                'valid_days'      => (int)($dlQuote['valid_days'] ?? 7),
+                'quotation_notes' => $dlQuote['quotation_notes'] ?? '',
+                'quote_reference' => $dlQuote['quote_reference'] ?? '',
+            ];
 
             try {
-                $pdfBinary = generateQuotationPDF($booking, $room, [
-                    'valid_days'      => (int)($dlRow['valid_days'] ?? 7),
-                    'quotation_notes' => $dlRow['quotation_notes'] ?? '',
-                ]);
+                if ($dlType === 'conference') {
+                    require_once '../config/invoice.php';
+                    $eStmt = $pdo->prepare("SELECT * FROM conference_inquiries WHERE id = ? LIMIT 1");
+                    $eStmt->execute([$dlQuote['booking_id']]);
+                    $enquiry = $eStmt->fetch(PDO::FETCH_ASSOC);
+                    if (!$enquiry) {
+                        throw new RuntimeException('Conference enquiry for this quotation no longer exists.');
+                    }
+                    $crStmt = $pdo->prepare("SELECT * FROM conference_rooms WHERE id = ? LIMIT 1");
+                    $crStmt->execute([$enquiry['conference_room_id'] ?? 0]);
+                    $confRoom  = $crStmt->fetch(PDO::FETCH_ASSOC) ?: [];
+                    $pdfBinary = generateConferenceQuotationPDF($enquiry, $confRoom, $dlOpts);
+                } elseif ($dlType === 'gym') {
+                    require_once '../config/invoice.php';
+                    $gStmt = $pdo->prepare("SELECT * FROM gym_inquiries WHERE id = ? LIMIT 1");
+                    $gStmt->execute([$dlQuote['booking_id']]);
+                    $gymInquiry = $gStmt->fetch(PDO::FETCH_ASSOC);
+                    if (!$gymInquiry) {
+                        throw new RuntimeException('Gym inquiry for this quotation no longer exists.');
+                    }
+                    $pdfBinary = generateGymQuotationPDF($gymInquiry, $dlOpts);
+                } elseif ($dlType === 'event') {
+                    require_once '../config/invoice.php';
+                    $evStmt = $pdo->prepare("SELECT * FROM event_inquiries WHERE id = ? LIMIT 1");
+                    $evStmt->execute([$dlQuote['booking_id']]);
+                    $eventInquiry = $evStmt->fetch(PDO::FETCH_ASSOC);
+                    if (!$eventInquiry) {
+                        throw new RuntimeException('Event inquiry for this quotation no longer exists.');
+                    }
+                    $pdfBinary = generateEventInquiryQuotationPDF($eventInquiry, $dlOpts);
+                } else {
+                    $bStmt = $pdo->prepare("SELECT * FROM bookings WHERE id = ? LIMIT 1");
+                    $bStmt->execute([$dlQuote['booking_id']]);
+                    $booking = $bStmt->fetch(PDO::FETCH_ASSOC);
+                    if (!$booking) {
+                        throw new RuntimeException('Booking for this quotation no longer exists.');
+                    }
+                    $rStmt = $pdo->prepare("SELECT * FROM rooms WHERE id = ? LIMIT 1");
+                    $rStmt->execute([$booking['room_id'] ?? 0]);
+                    $room      = $rStmt->fetch(PDO::FETCH_ASSOC) ?: [];
+                    $pdfBinary = generateQuotationPDF($booking, $room, $dlOpts);
+                }
                 // Save regenerated PDF
                 $quotationsDir = dirname(__DIR__) . '/quotations';
                 if (!is_dir($quotationsDir)) {
                     mkdir($quotationsDir, 0755, true);
                 }
-                $fname   = $dlRow['quote_reference'] . '-' . date('Ymd') . '.pdf';
+                $fname   = $dlQuote['quote_reference'] . '-' . date('Ymd') . '.pdf';
                 $absFile = $quotationsDir . '/' . $fname;
                 file_put_contents($absFile, $pdfBinary);
                 $pdo->prepare("UPDATE quotations SET pdf_path = ? WHERE id = ?")->execute(['quotations/' . $fname, $dlId]);
 
                 header('Content-Type: application/pdf');
-                header('Content-Disposition: attachment; filename="' . $dlRow['quote_reference'] . '.pdf"');
+                header('Content-Disposition: attachment; filename="' . $dlQuote['quote_reference'] . '.pdf"');
                 header('Content-Length: ' . strlen($pdfBinary));
                 echo $pdfBinary;
                 exit;

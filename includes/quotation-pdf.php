@@ -25,7 +25,9 @@ if (!function_exists('quotationPdfRenderDocument')) {
             return bookingRenderPdfFromHtml($html, $title);
         }
 
-        require_once __DIR__ . '/../vendor/autoload.php';
+        if (!hotel_load_tcpdf()) {
+            throw new RuntimeException('The PDF engine (TCPDF) is not installed on this server. Upload the vendor/ folder (composer install) or a TCPDF/ folder to enable PDF documents.');
+        }
         if (!class_exists('JapandiTCPDF')) {
             class JapandiTCPDF extends TCPDF {
                 public function AddPage($orientation = '', $format = '', $keepmargins = false, $tocpage = false): void
@@ -68,7 +70,9 @@ if (!function_exists('quotationPdfRenderDocument')) {
  */
 function generateQuotationPDF(array $booking, array $room, array $options = []): string
 {
-    require_once __DIR__ . '/../vendor/autoload.php';
+    if (!hotel_load_tcpdf()) {
+        throw new RuntimeException('The PDF engine (TCPDF) is not installed on this server. Upload the vendor/ folder (composer install) or a TCPDF/ folder to enable PDF documents.');
+    }
 
     // ── Config ────────────────────────────────────────────────────────────────
     $site_name      = getSetting('site_name', "Rosalyn's Beach Hotel");
@@ -514,7 +518,9 @@ function generateQuotationPDF(array $booking, array $room, array $options = []):
  */
 function generateConferenceQuotationPDF(array $enquiry, array $room, array $options = []): string
 {
-    require_once __DIR__ . '/../vendor/autoload.php';
+    if (!hotel_load_tcpdf()) {
+        throw new RuntimeException('The PDF engine (TCPDF) is not installed on this server. Upload the vendor/ folder (composer install) or a TCPDF/ folder to enable PDF documents.');
+    }
 
     $siteName = (string)getSetting('site_name', "Rosalyn's Beach Hotel");
     $sitePhone = (string)getSetting('phone_main', '');
@@ -717,7 +723,9 @@ body { font-family: helvetica; color: #2A2723; font-size: 10.5px; background: #F
  */
 function generateEventQuotationPDF(array $event, array $recipient, array $options = []): string
 {
-    require_once __DIR__ . '/../vendor/autoload.php';
+    if (!hotel_load_tcpdf()) {
+        throw new RuntimeException('The PDF engine (TCPDF) is not installed on this server. Upload the vendor/ folder (composer install) or a TCPDF/ folder to enable PDF documents.');
+    }
 
     $siteName = (string)getSetting('site_name', "Rosalyn's Beach Hotel");
     $sitePhone = (string)getSetting('phone_main', '');

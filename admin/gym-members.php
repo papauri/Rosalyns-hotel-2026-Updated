@@ -197,15 +197,36 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['gm_action'])) {
                 echo json_encode(['success' => true, 'visits' => [], 'pending_migration' => true]);
                 exit;
             }
+            // Paginated visit log — 10 rows per page.
+            $perPage = 10;
+            $vpage = max(1, (int)($_POST['page'] ?? 1));
+            $vTotal = (int)$pdo->query("SELECT COUNT(*) FROM gym_attendance WHERE member_id = " . (int)$memberId)->fetchColumn();
+            $vPages = max(1, (int)ceil($vTotal / $perPage));
+            if ($vpage > $vPages) { $vpage = $vPages; }
+            $vOffset = ($vpage - 1) * $perPage;
             $stmt = $pdo->prepare("
                 SELECT checked_in_at, checked_out_at, method,
                        CASE WHEN checked_out_at IS NULL THEN NULL
                             ELSE TIMESTAMPDIFF(MINUTE, checked_in_at, checked_out_at) END AS minutes
                 FROM gym_attendance WHERE member_id = ?
-                ORDER BY checked_in_at DESC LIMIT 10
+                ORDER BY checked_in_at DESC LIMIT {$perPage} OFFSET {$vOffset}
             ");
             $stmt->execute([$memberId]);
             $visits = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+            // Page-only response: the visits table paginates without re-sending
+            // the heavier stats/histograms on every page turn.
+            if (!empty($_POST['visits_only'])) {
+                header('Content-Type: application/json');
+                echo json_encode([
+                    'success'     => true,
+                    'visits'      => $visits,
+                    'page'        => $vpage,
+                    'total_pages' => $vPages,
+                    'total'       => $vTotal,
+                ]);
+                exit;
+            }
 
             // Personal peak profile from ALL of this member's visits: per-hour
             // histogram + weekday preference, for targeted marketing.
@@ -246,23 +267,90 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['gm_action'])) {
             $weeks = $weekRows->fetchAll(PDO::FETCH_KEY_PAIR);
 
             // Segment for the marketing angle in the report header.
-            $memRow = $pdo->prepare("SELECT status, start_date, expiry_date FROM gym_members WHERE id = ?");
+            $memRow = $pdo->prepare("SELECT status, start_date, expiry_date, membership_type FROM gym_members WHERE id = ?");
             $memRow->execute([$memberId]);
             $mem = $memRow->fetch(PDO::FETCH_ASSOC) ?: [];
             $segment = function_exists('gym_member_segment')
                 ? gym_member_segment($mem, (int)($stats['visits_30d'] ?? 0), (int)($stats['total_visits'] ?? 0), $stats['last_visit'] ?? null)
                 : null;
 
+            // Time-of-day distribution (morning/midday/evening) for training-habit insight.
+            $dayparts = ['early' => 0, 'morning' => 0, 'midday' => 0, 'afternoon' => 0, 'evening' => 0];
+            foreach ($hours as $h => $c) {
+                if ($h < 6)        { $dayparts['early']     += $c; }
+                elseif ($h < 11)   { $dayparts['morning']   += $c; }
+                elseif ($h < 14)   { $dayparts['midday']    += $c; }
+                elseif ($h < 17)   { $dayparts['afternoon'] += $c; }
+                else               { $dayparts['evening']   += $c; }
+            }
+
+            // Attendance streaks (consecutive distinct days) + monthly trend for
+            // momentum. Pull distinct visit dates once, derive in PHP.
+            $dateRows = $pdo->prepare("SELECT DISTINCT DATE(checked_in_at) d FROM gym_attendance WHERE member_id = ? ORDER BY d ASC");
+            $dateRows->execute([$memberId]);
+            $dates = $dateRows->fetchAll(PDO::FETCH_COLUMN);
+            $longestStreak = 0; $currentStreak = 0; $prev = null;
+            foreach ($dates as $ds) {
+                if ($prev !== null && (strtotime($ds) - strtotime($prev)) === 86400) { $currentStreak++; }
+                else { $currentStreak = 1; }
+                if ($currentStreak > $longestStreak) { $longestStreak = $currentStreak; }
+                $prev = $ds;
+            }
+            // "Current" streak counts only if the last visit day is today or yesterday.
+            $activeStreak = 0;
+            if ($prev !== null && (strtotime(date('Y-m-d')) - strtotime($prev)) <= 86400) {
+                $activeStreak = $currentStreak;
+            }
+
+            // 6-month visit trend for the momentum sparkline.
+            $monthRows = $pdo->prepare("
+                SELECT DATE_FORMAT(checked_in_at, '%Y-%m') ym, COUNT(*) c
+                FROM gym_attendance
+                WHERE member_id = ? AND checked_in_at >= DATE_SUB(CURDATE(), INTERVAL 6 MONTH)
+                GROUP BY ym ORDER BY ym ASC
+            ");
+            $monthRows->execute([$memberId]);
+            $months = $monthRows->fetchAll(PDO::FETCH_KEY_PAIR);
+
+            // Membership value: total paid to date vs visits = cost-per-visit,
+            // a concrete retention/renewal talking point.
+            $costPerVisit = null; $paidTotal = null;
+            if (!empty($mem['membership_type'])) {
+                try {
+                    $paidStmt = $pdo->prepare("
+                        SELECT COALESCE(SUM(p.total_amount),0)
+                        FROM payments p
+                        JOIN gym_inquiries gi ON gi.id = p.booking_id
+                        JOIN gym_members gm ON gm.gym_inquiry_id = gi.id
+                        WHERE gm.id = ? AND p.booking_type='gym'
+                          AND p.payment_status IN ('completed','paid')
+                          AND COALESCE(p.payment_type,'') <> 'refund' AND p.deleted_at IS NULL
+                    ");
+                    $paidStmt->execute([$memberId]);
+                    $paidTotal = (float)$paidStmt->fetchColumn();
+                    $tv = (int)($stats['total_visits'] ?? 0);
+                    if ($paidTotal > 0 && $tv > 0) { $costPerVisit = round($paidTotal / $tv, 2); }
+                } catch (Throwable $e) { /* optional */ }
+            }
+
             header('Content-Type: application/json');
             echo json_encode([
-                'success' => true,
-                'visits'  => $visits,
-                'profile' => gym_peak_profile($hours, $wdays),
-                'hours'   => $hours,
-                'wdays'   => $wdays,
-                'stats'   => $stats,
-                'weeks'   => $weeks,
-                'segment' => $segment,
+                'success'       => true,
+                'visits'        => $visits,
+                'page'          => $vpage,
+                'total_pages'   => $vPages,
+                'total'         => $vTotal,
+                'profile'       => gym_peak_profile($hours, $wdays),
+                'hours'         => $hours,
+                'wdays'         => $wdays,
+                'stats'         => $stats,
+                'weeks'         => $weeks,
+                'segment'       => $segment,
+                'dayparts'      => $dayparts,
+                'streak'        => ['current' => $activeStreak, 'longest' => $longestStreak],
+                'months'        => $months,
+                'cost_per_visit' => $costPerVisit,
+                'paid_total'    => $paidTotal,
             ]);
             exit;
         }
@@ -781,7 +869,52 @@ $gm_currency = (string)getSetting('currency_symbol', 'K');
         function gmFmtDT(dt) { if (!dt) return ''; var d = new Date(String(dt).replace(' ', 'T')); return isNaN(d) ? String(dt) : d.toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }); }
         function gmFmtDur(mins) { if (mins == null) return '<span style="color:#2e7d32;font-weight:700;">in gym</span>'; mins = parseInt(mins, 10); return mins >= 60 ? Math.floor(mins / 60) + 'h ' + (mins % 60) + 'm' : mins + 'm'; }
 
+        var gmLogState = { id: 0, name: '', page: 1, totalPages: 1 };
+
+        function gmVisitsRows(visits) {
+            if (!visits.length) { return '<tr><td colspan="4" style="text-align:center;color:#9a8f82;padding:14px;">No visits on this page.</td></tr>'; }
+            return visits.map(function (v) {
+                return '<tr><td>' + gmFmtDT(v.checked_in_at) + '</td><td>' + (v.checked_out_at ? gmFmtDT(v.checked_out_at) : '—') + '</td><td>' + gmFmtDur(v.minutes) + '</td><td>' + gmEscape(v.method) + '</td></tr>';
+            }).join('');
+        }
+
+        function gmVisitsPager() {
+            if (gmLogState.totalPages <= 1) { return ''; }
+            var p = gmLogState.page, tp = gmLogState.totalPages;
+            var btn = function (label, target, disabled) {
+                return '<button type="button" onclick="gmVisitsPage(' + target + ')" ' + (disabled ? 'disabled' : '') +
+                    ' style="border:1px solid #d5cfc4;background:' + (disabled ? '#f3efe8' : '#fff') + ';color:#5a5147;border-radius:3px;padding:4px 10px;font-size:.78rem;cursor:' + (disabled ? 'default' : 'pointer') + ';">' + label + '</button>';
+            };
+            return '<div style="display:flex;align-items:center;justify-content:center;gap:10px;margin-top:10px;">' +
+                btn('&laquo; Prev', p - 1, p <= 1) +
+                '<span style="font-size:.76rem;color:#7a6f63;">Page ' + p + ' of ' + tp + '</span>' +
+                btn('Next &raquo;', p + 1, p >= tp) + '</div>';
+        }
+
+        function gmVisitsPage(page) {
+            if (page < 1 || page > gmLogState.totalPages) { return; }
+            var wrap = document.getElementById('gmVisitsWrap');
+            if (wrap) { wrap.style.opacity = '.5'; }
+            var fd = new FormData();
+            fd.append('csrf_token', GM_CSRF);
+            fd.append('gm_action', 'member_attendance');
+            fd.append('id', gmLogState.id);
+            fd.append('page', page);
+            fd.append('visits_only', 1);
+            fetch(window.location.pathname, { method: 'POST', body: fd, credentials: 'same-origin', headers: { 'X-Requested-With': 'XMLHttpRequest' } })
+                .then(function (r) { return r.json(); })
+                .then(function (d) {
+                    gmLogState.page = d.page || page;
+                    gmLogState.totalPages = d.total_pages || gmLogState.totalPages;
+                    document.getElementById('gmVisitsBody').innerHTML = gmVisitsRows((d && d.visits) || []);
+                    document.getElementById('gmVisitsPager').innerHTML = gmVisitsPager();
+                    if (wrap) { wrap.style.opacity = '1'; }
+                })
+                .catch(function () { if (wrap) { wrap.style.opacity = '1'; } });
+        }
+
         function gmShowLog(id, name) {
+            gmLogState = { id: id, name: name, page: 1, totalPages: 1 };
             document.getElementById('gmLogTitle').textContent = 'Fitness Report — ' + name;
             document.getElementById('gmLogBody').innerHTML = '<p style="color:#9a8f82;">Loading…</p>';
             gmOpen('gmLogModal');
@@ -794,7 +927,9 @@ $gm_currency = (string)getSetting('currency_symbol', 'K');
                 .then(function (d) {
                     var body = document.getElementById('gmLogBody');
                     var visits = (d && d.visits) || [];
-                    if (!visits.length) {
+                    gmLogState.page = d.page || 1;
+                    gmLogState.totalPages = d.total_pages || 1;
+                    if (!parseInt((d.stats || {}).total_visits || 0, 10)) {
                         body.innerHTML = '<p style="color:#9a8f82;margin:0;">No visits recorded yet.</p>';
                         return;
                     }
@@ -805,19 +940,56 @@ $gm_currency = (string)getSetting('currency_symbol', 'K');
                         html += '<div style="display:inline-block;background:' + gmEscape(d.segment.color || '#8B7355') + '1a;border:1px solid ' + gmEscape(d.segment.color || '#8B7355') + ';color:' + gmEscape(d.segment.color || '#8B7355') + ';border-radius:999px;padding:3px 12px;font-size:.74rem;font-weight:700;margin-bottom:10px;" title="' + gmEscape(d.segment.hint || '') + '">' + gmEscape(d.segment.segment) + '</div>';
                     }
                     var statCell = function (val, label) {
-                        return '<div style="flex:1;min-width:90px;background:#fff;border:1px solid #e8e0d4;border-radius:6px;padding:8px 10px;text-align:center;">' +
+                        return '<div style="flex:1;min-width:82px;background:#fff;border:1px solid #e8e0d4;border-radius:6px;padding:8px 10px;text-align:center;">' +
                             '<div style="font-size:1.05rem;font-weight:700;color:#3e3930;">' + val + '</div>' +
                             '<div style="font-size:.68rem;color:#9a8f82;text-transform:uppercase;letter-spacing:.04em;">' + label + '</div></div>';
                     };
                     var avgM = st.avg_minutes != null ? Math.round(parseFloat(st.avg_minutes)) : null;
                     var totH = st.total_minutes ? (parseInt(st.total_minutes, 10) / 60).toFixed(1) : '0';
+                    var streak = d.streak || {};
                     html += '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px;">' +
                         statCell(parseInt(st.total_visits || 0, 10), 'Total visits') +
                         statCell(parseInt(st.visits_30d || 0, 10) + ' / ' + parseInt(st.visits_7d || 0, 10), '30d / 7d') +
                         statCell(avgM != null ? gmFmtDur(avgM) : '—', 'Avg session') +
                         statCell(st.longest_minutes ? gmFmtDur(parseInt(st.longest_minutes, 10)) : '—', 'Longest') +
                         statCell(totH + 'h', 'Lifetime time') +
+                        statCell((streak.current || 0) + 'd', 'Streak (best ' + (streak.longest || 0) + 'd)') +
+                        (d.cost_per_visit != null ? statCell('<?php echo htmlspecialchars($gm_currency); ?>' + Number(d.cost_per_visit).toLocaleString(), 'Cost / visit') : '') +
                         '</div>';
+
+                    // ── Training habits: part-of-day distribution ──
+                    var dp = d.dayparts || {};
+                    var dpTotal = Object.keys(dp).reduce(function (a, k) { return a + (dp[k] || 0); }, 0);
+                    if (dpTotal > 0) {
+                        var dpMeta = [['early', 'Early (before 6)'], ['morning', 'Morning (6–11)'], ['midday', 'Midday (11–2)'], ['afternoon', 'Afternoon (2–5)'], ['evening', 'Evening (5+)']];
+                        html += '<div style="background:#FAF6F0;border:1px solid #e8e0d4;border-radius:6px;padding:12px 14px;margin-bottom:14px;">' +
+                            '<div style="font-weight:700;color:#8B7355;font-size:.8rem;margin-bottom:8px;"><i class="fas fa-clock"></i> Training habits</div>' +
+                            dpMeta.filter(function (m) { return dp[m[0]] > 0; }).map(function (m) {
+                                var c = dp[m[0]]; var pct = Math.round((c / dpTotal) * 100);
+                                return '<div style="display:flex;align-items:center;gap:8px;margin:3px 0;font-size:.74rem;color:#5a5147;">' +
+                                    '<span style="width:130px;">' + m[1] + '</span>' +
+                                    '<span style="flex:1;background:#ece4d8;border-radius:3px;overflow:hidden;"><span style="display:block;height:10px;width:' + Math.max(4, pct) + '%;background:#8B7355;"></span></span>' +
+                                    '<span style="width:46px;text-align:right;">' + pct + '% (' + c + ')</span></div>';
+                            }).join('') + '</div>';
+                    }
+
+                    // ── 6-month momentum trend ──
+                    var months = d.months || {};
+                    var moKeys = Object.keys(months);
+                    if (moKeys.length > 1) {
+                        var mmax = 0; moKeys.forEach(function (k) { if (months[k] > mmax) mmax = months[k]; });
+                        html += '<div style="background:#FAF6F0;border:1px solid #e8e0d4;border-radius:6px;padding:12px 14px;margin-bottom:14px;">' +
+                            '<div style="font-weight:700;color:#8B7355;font-size:.8rem;margin-bottom:8px;"><i class="fas fa-arrow-trend-up"></i> Monthly momentum (6 months)</div>' +
+                            '<div style="display:flex;align-items:flex-end;gap:8px;height:52px;">' +
+                            moKeys.map(function (k) {
+                                var c = months[k]; var h = Math.max(6, Math.round((c / mmax) * 46));
+                                var lbl = new Date(k + '-01T00:00:00').toLocaleDateString([], { month: 'short' });
+                                return '<div style="flex:1;text-align:center;" title="' + gmEscape(k) + ': ' + c + ' visits">' +
+                                    '<div style="font-size:.6rem;color:#9a8f82;">' + c + '</div>' +
+                                    '<div style="background:#B18247;border-radius:3px 3px 0 0;height:' + h + 'px;"></div>' +
+                                    '<div style="font-size:.62rem;color:#9a8f82;margin-top:2px;">' + lbl + '</div></div>';
+                            }).join('') + '</div></div>';
+                    }
 
                     // ── Weekly consistency: visits per week, last 8 weeks ──
                     var weeks = d.weeks || {};
@@ -855,10 +1027,13 @@ $gm_currency = (string)getSetting('currency_symbol', 'K');
                         }
                         html += '</div>';
                     }
-                    html += '<table class="menu-table" style="margin:0;"><thead><tr><th>In</th><th>Out</th><th>Duration</th><th>Method</th></tr></thead><tbody>' +
-                        visits.map(function (v) {
-                            return '<tr><td>' + gmFmtDT(v.checked_in_at) + '</td><td>' + (v.checked_out_at ? gmFmtDT(v.checked_out_at) : '—') + '</td><td>' + gmFmtDur(v.minutes) + '</td><td>' + gmEscape(v.method) + '</td></tr>';
-                        }).join('') + '</tbody></table>';
+
+                    // ── Visit log — paginated 10 per page ──
+                    html += '<div style="font-weight:700;color:#8B7355;font-size:.8rem;margin-bottom:6px;"><i class="fas fa-list"></i> Visit log (' + parseInt(st.total_visits || 0, 10) + ' total)</div>' +
+                        '<div id="gmVisitsWrap" style="transition:opacity .15s;">' +
+                        '<table class="menu-table" style="margin:0;"><thead><tr><th>In</th><th>Out</th><th>Duration</th><th>Method</th></tr></thead>' +
+                        '<tbody id="gmVisitsBody">' + gmVisitsRows(visits) + '</tbody></table>' +
+                        '<div id="gmVisitsPager">' + gmVisitsPager() + '</div></div>';
                     body.innerHTML = html;
                 })
                 .catch(function () { document.getElementById('gmLogBody').innerHTML = '<p style="color:#c0392b;margin:0;">Could not load visits.</p>'; });
@@ -924,7 +1099,7 @@ $gm_currency = (string)getSetting('currency_symbol', 'K');
         window.gmOpen = gmOpen; window.gmClose = gmClose; window.gmToast = gmToast;
         window.gmPost = gmPost; window.gmOpenModal = gmOpenModal; window.gmSave = gmSave;
         window.gmStatus = gmStatus; window.gmDelete = gmDelete; window.gmResendCard = gmResendCard;
-        window.gmShowLog = gmShowLog; window.gmSaveReminderSettings = gmSaveReminderSettings;
+        window.gmShowLog = gmShowLog; window.gmVisitsPage = gmVisitsPage; window.gmSaveReminderSettings = gmSaveReminderSettings;
         window.gmRunReminders = gmRunReminders; window.gmConfirm = gmConfirm;
     </script>
 

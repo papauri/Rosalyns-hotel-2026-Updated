@@ -2937,7 +2937,7 @@ function sendEventInvoiceEmailToClient(array $inquiry, string $invoice_file, arr
  */
 function generateGymQuotationPDF(array $inquiry, array $options = []): string
 {
-    require_once __DIR__ . '/../vendor/autoload.php';
+    hotel_load_tcpdf();
 
     $siteName = (string)getSetting('site_name', "Rosalyn's Beach Hotel");
     $sitePhone = (string)getSetting('phone_main', '');
@@ -3090,7 +3090,7 @@ body { font-family: helvetica; color: #2A2723; font-size: 10.5px; background: #F
  */
 function generateEventInquiryQuotationPDF(array $inquiry, array $options = []): string
 {
-    require_once __DIR__ . '/../vendor/autoload.php';
+    hotel_load_tcpdf();
 
     $siteName = (string)getSetting('site_name', "Rosalyn's Beach Hotel");
     $sitePhone = (string)getSetting('phone_main', '');

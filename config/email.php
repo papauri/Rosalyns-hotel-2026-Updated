@@ -1124,21 +1124,42 @@ if (!function_exists('renderBookingDocumentTemplate')) {
     }
 }
 
-if (!function_exists('bookingRenderPdfFromHtml')) {
-    function bookingRenderPdfFromHtml(string $html, string $title = 'Document'): string
+if (!function_exists('hotel_load_tcpdf')) {
+    /**
+     * Load the TCPDF PDF engine from whichever location exists on this host:
+     * Composer autoload, the vendor TCPDF package directly, or a standalone
+     * TCPDF/ folder in the project root. Never fatals when none are present —
+     * returns false so callers can degrade or raise a clean error instead.
+     */
+    function hotel_load_tcpdf(): bool
     {
-        if (!class_exists('TCPDF')) {
-            $vendorTcpdf = __DIR__ . '/../vendor/tecnickcom/tcpdf/tcpdf.php';
-            $legacyTcpdf = __DIR__ . '/../TCPDF/tcpdf.php';
-            if (is_file($vendorTcpdf)) {
-                require_once $vendorTcpdf;
-            } elseif (is_file($legacyTcpdf)) {
-                require_once $legacyTcpdf;
+        if (class_exists('TCPDF')) {
+            return true;
+        }
+
+        $candidates = [
+            __DIR__ . '/../vendor/autoload.php',
+            __DIR__ . '/../vendor/tecnickcom/tcpdf/tcpdf.php',
+            __DIR__ . '/../TCPDF/tcpdf.php',
+        ];
+        foreach ($candidates as $file) {
+            if (is_file($file)) {
+                require_once $file;
+                if (class_exists('TCPDF')) {
+                    return true;
+                }
             }
         }
 
-        if (!class_exists('TCPDF')) {
-            throw new RuntimeException('TCPDF is required to render PDF templates.');
+        return class_exists('TCPDF');
+    }
+}
+
+if (!function_exists('bookingRenderPdfFromHtml')) {
+    function bookingRenderPdfFromHtml(string $html, string $title = 'Document'): string
+    {
+        if (!hotel_load_tcpdf()) {
+            throw new RuntimeException('The PDF engine (TCPDF) is not installed on this server. Upload the vendor/ folder (composer install) or a TCPDF/ folder to enable PDF documents.');
         }
 
         // Anonymous subclass fills #D5CFC4 sand on every page — matches the document shell
@@ -4649,7 +4670,8 @@ function sendGymBookingEmail(array $data)
         <p>Thank you for choosing ' . htmlspecialchars($site_name) . '!</p>
         <p style="margin:28px 0 0;font-size:14px;color:#777;text-align:center;font-style:italic;">
             Warm regards &mdash; see you soon.
-        </p>';
+        </p>'
+        . (function_exists('rh_gym_data_notice') ? rh_gym_data_notice() : '');
         }
 
         // Send email
@@ -6559,6 +6581,25 @@ function sendReviewAcknowledgementEmail(string $guestName, string $guestEmail, s
  * Non-blocking by design — callers treat a failure as "member saved, email
  * failed" and never roll back the enrolment.
  */
+
+/**
+ * Fine-print data-collection & privacy notice appended to gym member emails.
+ * We log check-in/check-out times, so members are told plainly that this
+ * usage data is collected to improve their gym experience.
+ */
+if (!function_exists('rh_gym_data_notice')) {
+    function rh_gym_data_notice(): string
+    {
+        $siteName = function_exists('getSetting') ? (string)getSetting('site_name', 'the gym') : 'the gym';
+        return '<p style="margin:22px 0 0;padding-top:14px;border-top:1px solid #eee;font-size:11px;line-height:1.6;color:#999;text-align:center;">'
+            . 'Privacy note: when you check in and out we record your visit times and attendance. '
+            . htmlspecialchars($siteName) . ' uses this data only to improve your gym experience &mdash; understanding peak hours, '
+            . 'tailoring facilities and services, and keeping your membership up to date. We do not sell your personal data. '
+            . 'Contact us any time to ask about the information we hold.'
+            . '</p>';
+    }
+}
+
 function sendGymMemberCardEmail(array $member): array
 {
     global $email_from_name, $email_from_email, $email_site_name, $email_admin_email, $email_bcc_admin;
@@ -6619,7 +6660,8 @@ function sendGymMemberCardEmail(array $member): array
                 </p>
             </div>
             <p>If you have any questions, contact us at <a href="mailto:' . htmlspecialchars((string)$email_from_email) . '">' . htmlspecialchars((string)$email_from_email) . '</a>' . (getSetting('phone_main') ? ' or call ' . htmlspecialchars((string)getSetting('phone_main')) : '') . '.</p>
-            <p style="margin:28px 0 0;font-size:14px;color:#777;text-align:center;font-style:italic;">See you at the gym!</p>';
+            <p style="margin:28px 0 0;font-size:14px;color:#777;text-align:center;font-style:italic;">See you at the gym!</p>'
+            . rh_gym_data_notice();
 
         $subject = 'Your Membership Card - ' . $siteName . ' [' . $memberNumber . ']';
         $altBody = 'Your ' . $siteName . ' member number is ' . $memberNumber . '. Present it at reception to check in. Valid until: ' . $expiryLine . '.';
@@ -6745,7 +6787,8 @@ function sendGymRenewalReminderEmail(array $member, int $daysLeft): array
                 . (!empty($email_from_email) ? ', or reply to this email' : '') . ' and we\'ll sort it in a minute.
             </p>
         </div>
-        <p style="margin:28px 0 0;font-size:14px;color:#777;text-align:center;font-style:italic;">Keep the momentum going — see you at the gym!</p>';
+        <p style="margin:28px 0 0;font-size:14px;color:#777;text-align:center;font-style:italic;">Keep the momentum going — see you at the gym!</p>'
+        . rh_gym_data_notice();
 
     $subject = 'Your membership expires ' . $daysWord . ' — ' . $siteName;
     $altBody = 'Hi ' . $name . ', your ' . $siteName . ' membership'
