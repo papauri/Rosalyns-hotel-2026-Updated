@@ -211,7 +211,7 @@ if (!function_exists('receipt_placeholders')) {
             '{{payment_type}}' => htmlspecialchars(ucwords(str_replace('_', ' ', (string)($payment['payment_type'] ?? ''))), ENT_QUOTES, 'UTF-8'),
             '{{payment_status}}' => htmlspecialchars(ucwords(str_replace('_', ' ', (string)($payment['payment_status'] ?? ''))), ENT_QUOTES, 'UTF-8'),
             '{{payment_amount}}' => htmlspecialchars(receipt_format_money((float)($payment['payment_amount'] ?? 0), $currency), ENT_QUOTES, 'UTF-8'),
-            '{{vat_amount}}' => htmlspecialchars(receipt_format_money((float)($payment['vat_amount'] ?? 0), $currency), ENT_QUOTES, 'UTF-8'),
+            '{{vat_amount}}' => htmlspecialchars(vat_document_value(receipt_format_money((float)($payment['vat_amount'] ?? 0), $currency)), ENT_QUOTES, 'UTF-8'),
             '{{total_amount}}' => htmlspecialchars(receipt_format_money((float)($payment['total_amount'] ?? 0), $currency), ENT_QUOTES, 'UTF-8'),
             '{{description}}' => htmlspecialchars((string)$context['description'], ENT_QUOTES, 'UTF-8'),
             '{{contact_email}}' => htmlspecialchars($contactEmail, ENT_QUOTES, 'UTF-8'),

@@ -882,6 +882,105 @@ function getSetting(string $key, mixed $default = '')
     }
 }
 
+if (!function_exists('vat_mode')) {
+    /**
+     * Resolve the installation-wide VAT mode.
+     *   'off'       — VAT disabled (or rate 0): no VAT anywhere.
+     *   'inclusive' — prices already contain VAT; totals never inflate and
+     *                 customer documents show only the rate, never an amount.
+     *   'exclusive' — classic add-on-top VAT (default / legacy behaviour).
+     */
+    function vat_mode(): string
+    {
+        $enabled = in_array(getSetting('vat_enabled'), ['1', 1, true, 'true', 'on'], true);
+        if (!$enabled || (float)getSetting('vat_rate', 0) <= 0) {
+            return 'off';
+        }
+        return getSetting('vat_pricing_mode', 'exclusive') === 'inclusive' ? 'inclusive' : 'exclusive';
+    }
+}
+
+if (!function_exists('vat_components')) {
+    /**
+     * Split a priced amount into net / VAT / total according to vat_mode().
+     * $base is the priced amount (sum of item/room prices before any add-on VAT).
+     *
+     * off:       net = base, vat = 0,                    total = base
+     * inclusive: net = base/(1+r/100), vat = base - net, total = base
+     * exclusive: net = base, vat = base*r/100,           total = base + vat
+     *
+     * @return array{mode:string, rate:float, net:float, vat:float, total:float}
+     */
+    function vat_components(float $base): array
+    {
+        $mode = vat_mode();
+        $rate = $mode === 'off' ? 0.0 : (float)getSetting('vat_rate', 0);
+        if ($mode === 'inclusive' && $rate > 0) {
+            $net = round($base / (1 + ($rate / 100)), 2);
+            $vat = round($base - $net, 2);
+            return ['mode' => $mode, 'rate' => $rate, 'net' => $net, 'vat' => $vat, 'total' => round($base, 2)];
+        }
+        if ($mode === 'exclusive' && $rate > 0) {
+            $vat = round($base * ($rate / 100), 2);
+            return ['mode' => $mode, 'rate' => $rate, 'net' => round($base, 2), 'vat' => $vat, 'total' => round($base + $vat, 2)];
+        }
+        return ['mode' => 'off', 'rate' => 0.0, 'net' => round($base, 2), 'vat' => 0.0, 'total' => round($base, 2)];
+    }
+}
+
+if (!function_exists('vat_shows_amount')) {
+    /**
+     * Whether customer-facing documents (invoices, receipts, quotations,
+     * emails) should print a VAT amount line. Only exclusive mode itemises
+     * the amount; inclusive mode shows just the rate note; off shows nothing.
+     */
+    function vat_shows_amount(): bool
+    {
+        return vat_mode() === 'exclusive';
+    }
+}
+
+if (!function_exists('vat_document_value')) {
+    /**
+     * The value to print next to a "VAT" label on customer documents.
+     * exclusive → the formatted amount (e.g. "MWK 13,200.00")
+     * inclusive → rate-only wording (e.g. "Included at 16.5%") — never the amount
+     * off       → em dash
+     *
+     * @param string $formattedAmount Amount already formatted with currency.
+     */
+    function vat_document_value(string $formattedAmount): string
+    {
+        $mode = vat_mode();
+        if ($mode === 'exclusive') {
+            return $formattedAmount;
+        }
+        if ($mode === 'inclusive') {
+            $rate = (float)getSetting('vat_rate', 0);
+            $rateLabel = rtrim(rtrim(number_format($rate, 2), '0'), '.');
+            return 'Included at ' . $rateLabel . '%';
+        }
+        return '—';
+    }
+}
+
+if (!function_exists('vat_document_note')) {
+    /**
+     * Rate-only wording for customer documents in inclusive mode
+     * (e.g. "All prices are inclusive of VAT (16.5%).").
+     * Empty string in exclusive/off modes.
+     */
+    function vat_document_note(): string
+    {
+        if (vat_mode() !== 'inclusive') {
+            return '';
+        }
+        $rate = (float)getSetting('vat_rate', 0);
+        $rateLabel = rtrim(rtrim(number_format($rate, 2), '0'), '.');
+        return 'All prices are inclusive of VAT (' . $rateLabel . '%).';
+    }
+}
+
 if (!function_exists('moduleEnabled')) {
     /**
      * Returns true if a feature module is enabled for this installation.
@@ -5429,10 +5528,12 @@ function assignIndividualRoomToBooking(int $bookingId, int $individualRoomId, bo
         $levyPct       = max(0.0, (float)($booking['tourism_levy_percent'] ?? 0));
         $levyAmount    = $levyPct > 0 ? round(($baseAmount + $childSupplement) * ($levyPct / 100), 2) : 0.0;
         $packageTotal  = max(0.0, (float)($booking['package_total'] ?? 0));
-        $vatRate       = max(0.0, (float)($booking['vat_rate'] ?? 0));
         $newTotal      = $baseAmount + $childSupplement + $levyAmount + $packageTotal;
-        $vatAmount     = $vatRate > 0 ? round($newTotal * ($vatRate / 100), 2) : 0.0;
-        $newTotalWithVat = $newTotal + $vatAmount;
+        // VAT per installation mode: exclusive adds on top, inclusive extracts
+        // from the priced total (never inflates), off is zero.
+        $vatParts        = vat_components($newTotal);
+        $vatAmount       = $vatParts['vat'];
+        $newTotalWithVat = $vatParts['total'];
 
         // Update booking: individual room + all finance columns atomically
         $updateStmt = $pdo->prepare("
@@ -6676,13 +6777,12 @@ function calculateDateAdjustmentAmount(array $booking, string $newCheckIn, strin
             $newChildSupplement = $oldChildSupplement * $nightRatio;
         }
 
-        // Get VAT settings
-        $vatEnabled = getSetting('vat_enabled') === '1';
-        $vatRate = $vatEnabled ? (float)getSetting('vat_rate') : 0;
-
-        // Calculate VAT on base room amount only (child supplements may have their own VAT treatment)
-        $vatAmount = $newBaseAmount * ($vatRate / 100);
-        $newTotalAmount = $newBaseAmount + $vatAmount + $newChildSupplement;
+        // VAT on the base room amount per installation mode: exclusive adds on
+        // top, inclusive is already in the price (no add), off is zero.
+        $vatParts = vat_components($newBaseAmount);
+        $vatRate = $vatParts['rate'];
+        $vatAmount = $vatParts['vat'];
+        $newTotalAmount = $vatParts['total'] + $newChildSupplement;
 
         // Calculate delta (includes child supplement changes)
         $amountDelta = $newTotalAmount - $oldTotalAmount;

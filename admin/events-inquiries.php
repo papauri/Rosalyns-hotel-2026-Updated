@@ -218,12 +218,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['inquiry_action'])) {
                 $message = 'Event booking marked as completed!';
             } elseif ($action === 'send_invoice') {
                 try {
-                    $vatEnabled = getSetting('vat_enabled') === '1';
-                    $vatRate = $vatEnabled ? (float)getSetting('vat_rate') : 0;
-
                     $totalAmount = (float)$inquiry['total_amount'];
-                    $vatAmount = $vatEnabled ? ($totalAmount * ($vatRate / 100)) : 0;
-                    $totalWithVat = $totalAmount + $vatAmount;
+                    // VAT per installation mode (exclusive on top / inclusive extracted / off).
+                    $vatParts = vat_components($totalAmount);
+                    $vatRate = $vatParts['rate'];
+                    $vatAmount = $vatParts['vat'];
+                    $totalWithVat = $vatParts['total'];
 
                     // Idempotency guard — if already fully paid just resend the invoice
                     $alreadyPaid = (float)($paymentSnapshot['amount_paid'] ?? 0);
@@ -253,7 +253,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['inquiry_action'])) {
                             $payment_reference,
                             $inquiry_id,
                             $inquiry['reference_number'],
-                            $totalAmount,
+                            $vatParts['net'], // payment_amount is always the ex-VAT figure
                             $vatRate,
                             $vatAmount,
                             $totalWithVat,

@@ -1088,13 +1088,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $total_amount = (float)$row['total_amount'];
             $booking_reference = $row['booking_reference'];
 
-            // Get VAT settings - more flexible check
-            $vatEnabled = in_array(getSetting('vat_enabled'), ['1', 1, true, 'true', 'on'], true);
-            $vatRate = $vatEnabled ? (float)getSetting('vat_rate') : 0;
-
-            // Calculate amounts
-            $vatAmount = $vatEnabled ? ($total_amount * ($vatRate / 100)) : 0;
-            $totalWithVat = $total_amount + $vatAmount;
+            // VAT per installation mode: exclusive adds on top, inclusive
+            // extracts from the priced amount, off is zero.
+            $vatParts = vat_components($total_amount);
+            $vatRate = $vatParts['rate'];
+            $vatAmount = $vatParts['vat'];
+            $totalWithVat = $vatParts['total'];
 
             // Update payment status
             $stmt = $pdo->prepare("UPDATE bookings SET payment_status = ? WHERE id = ?");
@@ -1139,7 +1138,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         $payment_reference,
                         $booking_id,
                         $booking_reference,
-                        $total_amount,
+                        $vatParts['net'], // payment_amount is always the ex-VAT figure
                         $vatRate,
                         $vatAmount,
                         $totalWithVat,

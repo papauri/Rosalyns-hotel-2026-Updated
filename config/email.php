@@ -1942,7 +1942,7 @@ function buildBookingEmailVariables(array $booking, ?array $room = null, array $
     $levyEnabled  = in_array(getSetting('tourism_levy_enabled'), ['1', 1, true, 'true', 'on'], true);
     $vatRateVal   = $vatEnabled ? (float)getSetting('vat_rate') : 0.0;
     $vatNumVal    = (string)getSetting('vat_number', '');
-    $vatAmtVal    = (float)($booking['vat_amount'] ?? ($vatEnabled && isset($booking['total_amount']) ? (float)$booking['total_amount'] * $vatRateVal / 100.0 : 0.0));
+    $vatAmtVal    = (float)($booking['vat_amount'] ?? (isset($booking['total_amount']) ? vat_components((float)$booking['total_amount'])['vat'] : 0.0));
     // Use booking levy percent, fall back to site setting when levy is enabled
     $levyPctVal   = (float)($booking['tourism_levy_percent'] ?? ($levyEnabled ? (float)getSetting('tourism_levy_percent', 0) : 0.0));
     // Compute levy amount from subtotal when the booking has a rate but amount was 0
@@ -1950,10 +1950,12 @@ function buildBookingEmailVariables(array $booking, ?array $room = null, array $
     if ($levyAmtVal === 0.0 && $levyPctVal > 0.0) {
         $levyAmtVal = (float)($booking['total_amount'] ?? 0) * $levyPctVal / 100.0;
     }
-    $totalTaxVal  = (float)($booking['total_with_vat'] ?? ((float)($booking['total_amount'] ?? 0) + $vatAmtVal + $levyAmtVal));
+    $totalTaxVal  = (float)($booking['total_with_vat'] ?? (vat_mode() === 'inclusive'
+        ? (float)($booking['total_amount'] ?? 0) + $levyAmtVal
+        : (float)($booking['total_amount'] ?? 0) + $vatAmtVal + $levyAmtVal));
     $vars['vat_number']      = $vatNumVal;
     $vars['vat_rate']        = $vatRateVal > 0.0 ? number_format($vatRateVal, 1) : '0';
-    $vars['vat_amount']      = $vatAmtVal > 0.0 ? ($currency . ' ' . number_format($vatAmtVal, 2)) : '—';
+    $vars['vat_amount']      = $vatAmtVal > 0.0 ? vat_document_value($currency . ' ' . number_format($vatAmtVal, 2)) : '—';
     $vars['levy_rate']       = $levyPctVal > 0.0 ? number_format($levyPctVal, 1) : '0';
     $vars['levy_amount']     = $levyAmtVal > 0.0 ? ($currency . ' ' . number_format($levyAmtVal, 2)) : '—';
     $vars['subtotal_amount'] = $currency . ' ' . number_format((float)($booking['total_amount'] ?? 0), 2);
@@ -3249,7 +3251,8 @@ function sendGymQuotationEmail(array $inquiry, array $options = []): array
         $vatAmount = (float)($inquiry['vat_amount'] ?? 0);
         $totalAmount = (float)($inquiry['total_with_vat'] ?? 0);
         if ($totalAmount <= 0) {
-            $totalAmount = $baseAmount + $vatAmount;
+            // Inclusive mode: the priced amount already contains VAT.
+            $totalAmount = vat_mode() === 'inclusive' ? $baseAmount : $baseAmount + $vatAmount;
         }
 
         $subject = 'Gym Membership Quotation - ' . $siteName . ' [' . $quoteRef . ']';
@@ -3464,7 +3467,8 @@ function sendEventInquiryQuotationEmail(array $inquiry, array $options = []): ar
         $vatAmount = (float)($inquiry['vat_amount'] ?? 0);
         $totalAmount = (float)($inquiry['total_with_vat'] ?? 0);
         if ($totalAmount <= 0) {
-            $totalAmount = $baseAmount + $vatAmount;
+            // Inclusive mode: the priced amount already contains VAT.
+            $totalAmount = vat_mode() === 'inclusive' ? $baseAmount : $baseAmount + $vatAmount;
         }
 
         $subject = 'Event Booking Quotation - ' . $siteName . ' [' . $quoteRef . ']';
@@ -5647,7 +5651,9 @@ function sendTentativeQuotationEmail(array $booking, array $options = []): array
         $deposit_req = !empty($booking['deposit_required']);
         $deposit_amt = (float)($booking['deposit_amount'] ?? 0);
 
-        $room_subtotal  = $total - ($vat_enabled ? $vat_amount : 0.0) - $child_supp;
+        // Exclusive: VAT was added on top, so strip it to recover the room line.
+        // Inclusive/off: the priced total IS the room line (VAT, if any, is inside it).
+        $room_subtotal  = $total - (vat_mode() === 'exclusive' ? $vat_amount : 0.0) - $child_supp;
         $rate_per_night = $nights > 0 ? $room_subtotal / $nights : (float)$room['price_per_night'];
 
         $fmt = static function (float $v) use ($currency): string {
@@ -5742,7 +5748,7 @@ function sendTentativeQuotationEmail(array $booking, array $options = []): array
             $htmlBody .= $trow('Child supplement (' . $children . ' child' . ($children !== 1 ? 'ren' : '') . ')', $fmt($child_supp));
         }
         if ($vat_enabled && $vat_amount > 0) {
-            $htmlBody .= $trow('VAT (' . number_format($vat_rate, 0) . '%)', $fmt($vat_amount));
+            $htmlBody .= $trow('VAT (' . number_format($vat_rate, 0) . '%)', vat_document_value($fmt($vat_amount)));
         }
         $htmlBody .= $trow('Total Amount', $fmt($total), true)
             . '</table></div>';
@@ -5824,7 +5830,7 @@ function sendTentativeQuotationEmail(array $booking, array $options = []): array
                 'total_amount_formatted' => $fmt($total),
                 'rate_per_night' => $fmt($rate_per_night),
                 'room_subtotal' => $fmt($room_subtotal),
-                'vat_amount' => $fmt($vat_amount),
+                'vat_amount' => vat_document_value($fmt($vat_amount)),
                 'vat_rate' => number_format($vat_rate, 0),
                 'child_supplement' => $fmt($child_supp),
                 'deposit_amount' => $fmt($deposit_amt),
@@ -6042,7 +6048,8 @@ function sendConferenceQuotationEmail(array $enquiry, array $options = []): arra
         $vatAmount = (float)($enquiry['vat_amount'] ?? 0);
         $totalAmount = (float)($enquiry['total_with_vat'] ?? 0);
         if ($totalAmount <= 0) {
-            $totalAmount = $baseAmount + $vatAmount;
+            // Inclusive mode: the priced amount already contains VAT.
+            $totalAmount = vat_mode() === 'inclusive' ? $baseAmount : $baseAmount + $vatAmount;
         }
 
         $eventDate = !empty($enquiry['event_date']) ? date('l, F j, Y', strtotime((string)$enquiry['event_date'])) : 'To be confirmed';

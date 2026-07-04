@@ -422,18 +422,23 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['create_booking'])) {
             $child_sup     = ($child_guests > 0) ? ($r_price * ($cpm / 100) * $child_guests * $number_of_nights) : 0.0;
             $levy_amt      = ($ovr === null && $levy_pct_db > 0) ? round(($base_amt_all + $child_sup) * ($levy_pct_db / 100), 2) : 0.0;
             $tot_amt       = $ovr !== null ? $ovr : ($base_amt_all + $child_sup + $levy_amt);
-            $vat_amt       = ($vat_rate_db > 0) ? round($tot_amt * ($vat_rate_db / 100), 2) : 0.0;
-            $twv           = $tot_amt + $vat_amt;  // covers ALL qty rooms
+            // VAT per installation mode: exclusive on top, inclusive extracted
+            // from the priced amount (total never inflates), off zero.
+            $vp            = vat_components($tot_amt);
+            $vat_amt       = $vp['vat'];
+            $twv           = $vp['total'];  // covers ALL qty rooms
 
             // Per-row INSERT amounts: spread base across rows; child supplement on first row only
             $row_levy_per   = ($ovr === null && $levy_pct_db > 0) ? round($base_amt_per * ($levy_pct_db / 100), 2) : 0.0;
             $row_tot_per    = $base_amt_per + $row_levy_per;
-            $row_vat_per    = ($vat_rate_db > 0) ? round($row_tot_per * ($vat_rate_db / 100), 2) : 0.0;
-            $row_twv_per    = $row_tot_per + $row_vat_per;
+            $row_vp         = vat_components($row_tot_per);
+            $row_vat_per    = $row_vp['vat'];
+            $row_twv_per    = $row_vp['total'];
             $first_levy_add = ($ovr === null && $levy_pct_db > 0) ? round($child_sup * ($levy_pct_db / 100), 2) : 0.0;
             $first_tot_add  = $child_sup + $first_levy_add;
-            $first_vat_add  = ($vat_rate_db > 0) ? round($first_tot_add * ($vat_rate_db / 100), 2) : 0.0;
-            $first_twv_add  = $first_tot_add + $first_vat_add;
+            $first_vp       = vat_components($first_tot_add);
+            $first_vat_add  = $first_vp['vat'];
+            $first_twv_add  = $first_vp['total'];
 
             $line['calc'] = [
                 'room_price'         => $r_price,
@@ -2071,7 +2076,7 @@ try {
                             </tr>
                             <?php if ($vat_enabled): ?>
                                 <tr id="accRowVat" class="tax-row">
-                                    <td>VAT (<?php echo $vat_rate_cfg; ?>%)</td>
+                                    <td>VAT (<?php echo $vat_rate_cfg; ?>%)<?php echo vat_mode() === 'inclusive' ? ' — included in price' : ''; ?></td>
                                     <td id="accVatTotal">—</td>
                                 </tr>
                             <?php endif; ?>
@@ -2283,6 +2288,7 @@ try {
         const ratePlans = <?php echo $rate_plans_json; ?>;
         const currency = '<?php echo htmlspecialchars($currency_symbol, ENT_QUOTES); ?>';
         const vatRate = <?php echo (float)$vat_rate_cfg; ?>;
+        const vatMode = <?php echo json_encode(vat_mode()); ?>; // 'off' | 'inclusive' | 'exclusive'
         const levyPct = <?php echo (float)$levy_pct_cfg; ?>;
         const vatEnabled = <?php echo $vat_enabled  ? 'true' : 'false'; ?>;
         const levyEnabled = <?php echo $levy_enabled ? 'true' : 'false'; ?>;
@@ -2953,8 +2959,11 @@ try {
                 const lineChild = children > 0 ? (rate * (cMult / 100) * children * nights * qty) : 0;
                 const lineLevy = levyEnabled ? (lineBase + lineChild) * (levyPct / 100) : 0;
                 const lineSub = lineBase + lineChild + lineLevy;
-                const lineVat = vatEnabled ? lineSub * (vatRate / 100) : 0;
-                const lineGrand = lineSub + lineVat;
+                // Mode-aware VAT: inclusive extracts from the priced total
+                // (grand total never inflates); exclusive adds on top.
+                const lineVat = vatMode === 'inclusive' ? lineSub * (vatRate / (100 + vatRate))
+                    : (vatMode === 'exclusive' ? lineSub * (vatRate / 100) : 0);
+                const lineGrand = vatMode === 'exclusive' ? lineSub + lineVat : lineSub;
                 if (subEl) subEl.textContent = fmt(lineGrand);
                 grandBase += lineBase;
                 grandChild += lineChild;

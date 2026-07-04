@@ -69,6 +69,7 @@ $mraColumnsAvailable = false;
 $vatEnabled = in_array(getSetting('vat_enabled'), ['1', 1, true, 'true', 'on'], true);
 $vatRate = getSetting('vat_rate');
 $vatNumber = getSetting('vat_number');
+$vatPricingMode = getSetting('vat_pricing_mode', 'exclusive') === 'inclusive' ? 'inclusive' : 'exclusive';
 $vatSettingsMessage = '';
 $vatSettingsError = '';
 
@@ -114,11 +115,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['save_vat_settings']))
                 throw new Exception('VAT number is too long.');
             }
 
+            $vatPricingModeValue = ($_POST['vat_pricing_mode'] ?? 'exclusive') === 'inclusive' ? 'inclusive' : 'exclusive';
+
             $savedEnabled = updateSetting('vat_enabled', $vatEnabledValue);
             $savedRate = updateSetting('vat_rate', (string)$vatRateValue);
             $savedNumber = updateSetting('vat_number', $vatNumberValue);
+            $savedMode = updateSetting('vat_pricing_mode', $vatPricingModeValue);
 
-            if (!$savedEnabled || !$savedRate || !$savedNumber) {
+            if (!$savedEnabled || !$savedRate || !$savedNumber || !$savedMode) {
                 throw new Exception('Unable to save VAT settings right now.');
             }
 
@@ -135,6 +139,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['save_vat_settings']))
             $vatEnabled = in_array(getSetting('vat_enabled'), ['1', 1, true, 'true', 'on'], true);
             $vatRate = getSetting('vat_rate');
             $vatNumber = getSetting('vat_number');
+            $vatPricingMode = getSetting('vat_pricing_mode', 'exclusive') === 'inclusive' ? 'inclusive' : 'exclusive';
             $vatSettingsMessage = 'VAT settings updated successfully.';
         } catch (Throwable $e) {
             $vatSettingsError = $e->getMessage();
@@ -781,6 +786,16 @@ if (!isset($dailyTrend)) {
                                 <option value="1" <?php echo $vatEnabled ? 'selected' : ''; ?>>Enabled</option>
                                 <option value="0" <?php echo !$vatEnabled ? 'selected' : ''; ?>>Disabled</option>
                             </select>
+                        </div>
+                        <div class="vat-field-group">
+                            <label class="vat-field-group__label" for="vat_pricing_mode">Pricing Mode</label>
+                            <select class="vat-field-group__control" id="vat_pricing_mode" name="vat_pricing_mode">
+                                <option value="exclusive" <?php echo $vatPricingMode !== 'inclusive' ? 'selected' : ''; ?>>VAT added on top of prices</option>
+                                <option value="inclusive" <?php echo $vatPricingMode === 'inclusive' ? 'selected' : ''; ?>>Prices already include VAT</option>
+                            </select>
+                            <small style="color:#7a6f63;font-size:.74rem;display:block;margin-top:4px;">
+                                Inclusive: totals equal your listed prices and documents show only the VAT rate, never an amount.
+                            </small>
                         </div>
                         <div class="vat-field-group">
                             <label class="vat-field-group__label" for="vat_rate">VAT Rate (%)</label>

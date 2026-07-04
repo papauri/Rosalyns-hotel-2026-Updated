@@ -346,8 +346,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $booking) {
                     $tourism_levy_amount  = (float)($booking['tourism_levy_amount'] ?? 0);
                     $tourism_levy_percent = (float)($booking['tourism_levy_percent'] ?? 0);
 
-                    if ($pricingFieldsChanged && $vatEnabled && $vatRate > 0) {
-                        $vat_amount = round($total_amount * ($vatRate / 100), 2);
+                    if ($pricingFieldsChanged) {
+                        // Mode-aware: exclusive adds on top, inclusive extracts, off zeroes.
+                        $vat_amount = vat_components($total_amount)['vat'];
                     }
 
                     $update = $pdo->prepare("
@@ -429,9 +430,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $booking) {
                                 $tourism_levy_percent = 0.0;
                             }
 
-                            if ($vatEnabled && $vatRate > 0) {
-                                $vat_amount = round($total_amount * ($vatRate / 100), 2);
-                            }
+                            // Mode-aware: exclusive adds on top, inclusive extracts, off zeroes.
+                            $vat_amount = vat_components($total_amount)['vat'];
                         }
                     } else {
                         $number_of_nights = (int)($booking['number_of_nights'] ?? $number_of_nights);
@@ -510,7 +510,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $booking) {
                         }
                     }
 
-                    $total_with_vat = round($total_amount + $vat_amount, 2);
+                    // Inclusive mode: the priced total already contains VAT — never add on top.
+                    $total_with_vat = vat_mode() === 'inclusive'
+                        ? round($total_amount, 2)
+                        : round($total_amount + $vat_amount, 2);
 
                     $update->execute([
                         $room_id,
@@ -882,6 +885,7 @@ if (!$booking) {
         const currencySymbol = '<?php echo $currency_symbol; ?>';
         const vatEnabled = <?php echo $vatEnabled ? 'true' : 'false'; ?>;
         const vatRate = <?php echo $vatRate; ?>;
+        const vatMode = <?php echo json_encode(vat_mode()); ?>; // 'off' | 'inclusive' | 'exclusive'
         const childPriceMultiplier = <?php echo json_encode((float)($booking['child_price_multiplier'] ?? getSetting('booking_child_price_multiplier', getSetting('child_guest_price_multiplier', 50)))); ?>;
 
         function updatePricing() {
@@ -931,12 +935,15 @@ if (!$booking) {
                 `Child supplement (${activeChildMultiplier}%): ${currencySymbol} ${childSupplement.toLocaleString()}` :
                 'Child supplement: None';
 
-            if (vatEnabled && vatRate > 0) {
-                const vat = total * (vatRate / (100 + vatRate));
+            if (vatMode !== 'off' && vatRate > 0) {
+                const vat = vatMode === 'inclusive'
+                    ? total * (vatRate / (100 + vatRate))   // extracted from the priced total
+                    : total * (vatRate / 100);              // added on top of the priced total
+                const suffix = vatMode === 'inclusive' ? ' (included in price)' : ' (added on top)';
                 document.getElementById('calcVatInfo').textContent = 'VAT (' + vatRate + '%): ' + currencySymbol + ' ' + Number(vat).toLocaleString('en-US', {
                     minimumFractionDigits: 2,
                     maximumFractionDigits: 2
-                });
+                }) + suffix;
             }
         }
 

@@ -110,7 +110,9 @@ function generateQuotationPDF(array $booking, array $room, array $options = []):
     $deposit_req  = !empty($booking['deposit_required']);
     $deposit_amt  = (float)($booking['deposit_amount'] ?? 0);
 
-    $room_subtotal  = $total - ($vat_enabled ? $vat_amount : 0.0) - $child_supp;
+    // Exclusive: VAT was added on top, so strip it to recover the room line.
+    // Inclusive/off: the priced total IS the room line (VAT, if any, is inside it).
+    $room_subtotal  = $total - (vat_mode() === 'exclusive' ? $vat_amount : 0.0) - $child_supp;
     $rate_per_night = $nights > 0 ? $room_subtotal / $nights : (float)$room['price_per_night'];
 
     $fmt = static function (float $v) use ($currency): string {
@@ -143,7 +145,7 @@ function generateQuotationPDF(array $booking, array $room, array $options = []):
                 'guests' => htmlspecialchars($guestsLabel, ENT_QUOTES, 'UTF-8'),
                 'rate_per_night' => htmlspecialchars($fmt($rate_per_night), ENT_QUOTES, 'UTF-8'),
                 'room_subtotal' => htmlspecialchars($fmt($room_subtotal), ENT_QUOTES, 'UTF-8'),
-                'vat_amount' => htmlspecialchars($fmt($vat_amount), ENT_QUOTES, 'UTF-8'),
+                'vat_amount' => htmlspecialchars(vat_document_value($fmt($vat_amount)), ENT_QUOTES, 'UTF-8'),
                 'deposit_amount' => htmlspecialchars($fmt($deposit_amt), ENT_QUOTES, 'UTF-8'),
                 'total_amount' => htmlspecialchars($fmt($total), ENT_QUOTES, 'UTF-8'),
                 'balance_due' => htmlspecialchars($fmt(max(0, $total - $deposit_amt)), ENT_QUOTES, 'UTF-8'),
@@ -376,7 +378,7 @@ function generateQuotationPDF(array $booking, array $room, array $options = []):
         $priceRows[] = ['Child supplement  (' . $children . ' child' . ($children !== 1 ? 'ren' : '') . ')', $fmt($child_supp), false];
     }
     if ($vat_enabled && $vat_amount > 0) {
-        $priceRows[] = ['VAT  (' . number_format($vat_rate, 0) . '%)', $fmt($vat_amount), false];
+        $priceRows[] = ['VAT  (' . number_format($vat_rate, 0) . '%)', vat_document_value($fmt($vat_amount)), false];
     }
 
     foreach ($priceRows as [$label, $amount, $isBold]) {
@@ -542,11 +544,14 @@ function generateConferenceQuotationPDF(array $enquiry, array $room, array $opti
     $vatRate = (float)($enquiry['vat_rate'] ?? 0);
     $vatAmount = (float)($enquiry['vat_amount'] ?? 0);
     if ($vatAmount <= 0 && $vatRate > 0) {
-        $vatAmount = round($baseAmount * ($vatRate / 100), 2);
+        // Fallback derives per installation mode (on top / extracted / off).
+        $vatAmount = vat_components($baseAmount)['vat'];
     }
     $totalAmount = (float)($enquiry['total_with_vat'] ?? 0);
     if ($totalAmount <= 0) {
-        $totalAmount = $baseAmount + $vatAmount;
+        $totalAmount = (function_exists('vat_mode') && vat_mode() === 'inclusive')
+            ? $baseAmount
+            : $baseAmount + $vatAmount;
     }
 
     $depositRequired = (float)($enquiry['deposit_required'] ?? 0);
@@ -590,7 +595,7 @@ function generateConferenceQuotationPDF(array $enquiry, array $room, array $opti
                 'event_time' => $esc($eventTime),
                 'attendees' => (string)$attendees,
                 'total_amount' => $esc($fmt($totalAmount)),
-                'vat_amount' => $esc($fmt($vatAmount)),
+                'vat_amount' => $esc(vat_document_value($fmt($vatAmount))),
                 'deposit_amount' => $esc($fmt($depositRequired)),
                 'payment_policy' => nl2br($esc($paymentPolicy)),
                 'quotation_notes' => nl2br($esc($notes)),
@@ -621,7 +626,7 @@ function generateConferenceQuotationPDF(array $enquiry, array $room, array $opti
     $vatRow = '';
     if ($vatAmount > 0) {
         $vatLabel = $vatRate > 0 ? 'VAT (' . number_format($vatRate, 0) . '%)' : 'VAT';
-        $vatRow = '<tr><td>' . $esc($vatLabel) . '</td><td class="right">' . $esc($fmt($vatAmount)) . '</td></tr>';
+        $vatRow = '<tr><td>' . $esc($vatLabel) . '</td><td class="right">' . $esc(vat_document_value($fmt($vatAmount))) . '</td></tr>';
     }
 
     $depositRow = '';

@@ -411,10 +411,14 @@ function buildInvoiceHTML(array $booking, string $invoice_number, string $site_n
         $payments = $ps->fetchAll(PDO::FETCH_ASSOC);
     }
 
-    // Totals
+    // Totals — VAT per installation mode: exclusive adds on top of the room
+    // base, inclusive extracts from it (total never inflates), off is zero.
+    // Folio lines carry their own stored VAT split either way.
     $taxBase       = $roomSubtotal + $pkgTotal;
-    $vatAmount     = ($vatEnabled ? ($taxBase * $vatRate / 100) : 0) + $folioVat;
-    $totalWithVat  = $taxBase + $folioTotal + ($vatEnabled ? ($taxBase * $vatRate / 100) : 0);
+    $baseVatParts  = vat_components($taxBase);
+    $vatRate       = $baseVatParts['rate'];
+    $vatAmount     = $baseVatParts['vat'] + $folioVat;
+    $totalWithVat  = $baseVatParts['total'] + $folioTotal;
     $amountPaid    = array_sum(array_column($payments, 'total_amount'));
     $balanceDue    = max(0.0, $totalWithVat - $amountPaid);
 
@@ -524,10 +528,10 @@ function buildInvoiceHTML(array $booking, string $invoice_number, string $site_n
     $guestCountStr = $adultGuests . ' Adult' . ($adultGuests > 1 ? 's' : '') . ($childGuests > 0 ? ', ' . $childGuests . ' Child' . ($childGuests > 1 ? 'ren' : '') : '');
 
     // ── TOTALS ROWS (appended directly into charges tbody) ───
-    $cSub = number_format($roomSubtotal + $pkgTotal + $folioTotal - $folioVat, 2);
+    $cSub = number_format($baseVatParts['net'] + $folioTotal - $folioVat, 2);
     $totalsRows  = '<tr><td colspan="3" style="padding:6px 8px 3px; text-align:right; font-size:12px; color:#5E554D; font-family:Helvetica,Arial,sans-serif; border-top:2px solid #D8CDBE; border-left:1px solid #C8BEB0;">Subtotal</td><td width="25%" style="padding:6px 8px 3px; text-align:right; font-size:12px; color:#231F1C; font-family:Helvetica,Arial,sans-serif; border-top:2px solid #D8CDBE; border-right:1px solid #C8BEB0; white-space:nowrap;">' . $currency_symbol . ' ' . $cSub . '</td></tr>';
     if ($vatEnabled && $vatAmount > 0) {
-        $totalsRows .= '<tr><td colspan="3" style="padding:3px 8px; text-align:right; font-size:12px; color:#5E554D; font-family:Helvetica,Arial,sans-serif; border-bottom:1px solid #C8BEB0; border-left:1px solid #C8BEB0;">VAT (' . number_format($vatRate, 1) . '%)</td><td width="25%" style="padding:3px 8px; text-align:right; font-size:12px; color:#231F1C; font-family:Helvetica,Arial,sans-serif; border-bottom:1px solid #C8BEB0; border-right:1px solid #C8BEB0; white-space:nowrap;">' . $currency_symbol . ' ' . number_format($vatAmount, 2) . '</td></tr>';
+        $totalsRows .= '<tr><td colspan="3" style="padding:3px 8px; text-align:right; font-size:12px; color:#5E554D; font-family:Helvetica,Arial,sans-serif; border-bottom:1px solid #C8BEB0; border-left:1px solid #C8BEB0;">VAT (' . number_format($vatRate, 1) . '%)</td><td width="25%" style="padding:3px 8px; text-align:right; font-size:12px; color:#231F1C; font-family:Helvetica,Arial,sans-serif; border-bottom:1px solid #C8BEB0; border-right:1px solid #C8BEB0; white-space:nowrap;">' . htmlspecialchars(vat_document_value($currency_symbol . ' ' . number_format($vatAmount, 2)), ENT_QUOTES, 'UTF-8') . '</td></tr>';
     }
     if ($tourismLevyAmt > 0) {
         $totalsRows .= '<tr><td colspan="3" style="padding:3px 8px; text-align:right; font-size:12px; color:#5E554D; font-family:Helvetica,Arial,sans-serif; border-bottom:1px solid #C8BEB0; border-left:1px solid #C8BEB0;">Tourism levy</td><td width="25%" style="padding:3px 8px; text-align:right; font-size:12px; color:#231F1C; font-family:Helvetica,Arial,sans-serif; border-bottom:1px solid #C8BEB0; border-right:1px solid #C8BEB0; white-space:nowrap;">' . $currency_symbol . ' ' . number_format($tourismLevyAmt, 2) . '</td></tr>';
@@ -1680,10 +1684,12 @@ function buildConferenceInvoiceHTML(array $enquiry, string $invoice_number, stri
     $paymentsStmt->execute([$enquiry['id']]);
     $payments = $paymentsStmt->fetchAll(PDO::FETCH_ASSOC);
 
-    // Calculate totals
+    // Calculate totals — VAT per installation mode (on top / extracted / off).
     $subtotal = (float)$enquiry['total_amount'];
-    $vatAmount = $vatEnabled ? ($subtotal * ($vatRate / 100)) : 0;
-    $totalWithVat = $subtotal + $vatAmount;
+    $vatParts = vat_components($subtotal);
+    $vatRate = $vatParts['rate'];
+    $vatAmount = $vatParts['vat'];
+    $totalWithVat = $vatParts['total'];
 
     // Build payment details HTML
     $paymentDetailsHTML = '';
@@ -1723,7 +1729,7 @@ function buildConferenceInvoiceHTML(array $enquiry, string $invoice_number, stri
                 </div>
                 <div class="invoice-row">
                     <span class="invoice-label">VAT (' . number_format($vatRate, 2) . '%):</span>
-                    <span class="invoice-value">' . $currency_symbol . ' ' . number_format($vatAmount, 2) . '</span>
+                    <span class="invoice-value">' . htmlspecialchars(vat_document_value($currency_symbol . ' ' . number_format($vatAmount, 2)), ENT_QUOTES, 'UTF-8') . '</span>
                 </div>';
         if ($vatNumber) {
             $vatSectionHTML .= '<div class="invoice-row">
@@ -2046,7 +2052,7 @@ function sendConferenceInvoiceEmailToClient(array $enquiry, string $invoice_file
             'attendees' => (string)((int)($enquiry['number_of_attendees'] ?? 0)),
             'subtotal_amount' => htmlspecialchars($currency_symbol . ' ' . number_format($ciSubtotal, 2), ENT_QUOTES, 'UTF-8'),
             'vat_rate' => $ciVatRate > 0.0 ? number_format($ciVatRate, 1) : '0',
-            'vat_amount' => $ciVatAmt > 0.0 ? htmlspecialchars($currency_symbol . ' ' . number_format($ciVatAmt, 2), ENT_QUOTES, 'UTF-8') : '—',
+            'vat_amount' => $ciVatAmt > 0.0 ? htmlspecialchars(vat_document_value($currency_symbol . ' ' . number_format($ciVatAmt, 2)), ENT_QUOTES, 'UTF-8') : '—',
             'total_amount' => htmlspecialchars($currency_symbol . ' ' . number_format($ciTotalWithVat, 2), ENT_QUOTES, 'UTF-8'),
             'vat_number' => htmlspecialchars($ciVatNum, ENT_QUOTES, 'UTF-8'),
             'vat_number_html' => $ciVatNumHtml,
@@ -2170,8 +2176,11 @@ function buildGymInvoiceHTML(array $inquiry, string $invoice_number, string $sit
     $payments = $paymentsStmt->fetchAll(PDO::FETCH_ASSOC);
 
     $subtotal = (float)$inquiry['total_amount'];
-    $vatAmount = $vatEnabled ? ($subtotal * ($vatRate / 100)) : 0;
-    $totalWithVat = $subtotal + $vatAmount;
+    // VAT per installation mode (exclusive on top / inclusive extracted / off).
+    $vatParts = vat_components($subtotal);
+    $vatRate = $vatParts['rate'];
+    $vatAmount = $vatParts['vat'];
+    $totalWithVat = $vatParts['total'];
 
     $paymentDetailsHTML = '';
     if (!empty($payments)) {
@@ -2206,7 +2215,7 @@ function buildGymInvoiceHTML(array $inquiry, string $invoice_number, string $sit
                 </div>
                 <div class="invoice-row">
                     <span class="invoice-label">VAT (' . number_format($vatRate, 2) . '%):</span>
-                    <span class="invoice-value">' . $currency_symbol . ' ' . number_format($vatAmount, 2) . '</span>
+                    <span class="invoice-value">' . htmlspecialchars(vat_document_value($currency_symbol . ' ' . number_format($vatAmount, 2)), ENT_QUOTES, 'UTF-8') . '</span>
                 </div>';
         if ($vatNumber) {
             $vatSectionHTML .= '<div class="invoice-row">
@@ -2557,8 +2566,11 @@ function buildEventInvoiceHTML(array $inquiry, string $invoice_number, string $s
     $payments = $paymentsStmt->fetchAll(PDO::FETCH_ASSOC);
 
     $subtotal = (float)$inquiry['total_amount'];
-    $vatAmount = $vatEnabled ? ($subtotal * ($vatRate / 100)) : 0;
-    $totalWithVat = $subtotal + $vatAmount;
+    // VAT per installation mode (exclusive on top / inclusive extracted / off).
+    $vatParts = vat_components($subtotal);
+    $vatRate = $vatParts['rate'];
+    $vatAmount = $vatParts['vat'];
+    $totalWithVat = $vatParts['total'];
 
     $paymentDetailsHTML = '';
     if (!empty($payments)) {
@@ -2593,7 +2605,7 @@ function buildEventInvoiceHTML(array $inquiry, string $invoice_number, string $s
                 </div>
                 <div class="invoice-row">
                     <span class="invoice-label">VAT (' . number_format($vatRate, 2) . '%):</span>
-                    <span class="invoice-value">' . $currency_symbol . ' ' . number_format($vatAmount, 2) . '</span>
+                    <span class="invoice-value">' . htmlspecialchars(vat_document_value($currency_symbol . ' ' . number_format($vatAmount, 2)), ENT_QUOTES, 'UTF-8') . '</span>
                 </div>';
         if ($vatNumber) {
             $vatSectionHTML .= '<div class="invoice-row">
@@ -2958,11 +2970,14 @@ function generateGymQuotationPDF(array $inquiry, array $options = []): string
     $vatRate = (float)($inquiry['vat_rate'] ?? 0);
     $vatAmount = (float)($inquiry['vat_amount'] ?? 0);
     if ($vatAmount <= 0 && $vatRate > 0) {
-        $vatAmount = round($baseAmount * ($vatRate / 100), 2);
+        // Fallback derives per installation mode (on top / extracted / off).
+        $vatAmount = vat_components($baseAmount)['vat'];
     }
     $totalAmount = (float)($inquiry['total_with_vat'] ?? 0);
     if ($totalAmount <= 0) {
-        $totalAmount = $baseAmount + $vatAmount;
+        $totalAmount = (function_exists('vat_mode') && vat_mode() === 'inclusive')
+            ? $baseAmount
+            : $baseAmount + $vatAmount;
     }
     $depositAmount = (float)($inquiry['deposit_amount'] ?? 0);
     $membershipType = (string)($inquiry['membership_type'] ?? 'Gym Membership');
@@ -2977,7 +2992,7 @@ function generateGymQuotationPDF(array $inquiry, array $options = []): string
     $vatRow = '';
     if ($vatAmount > 0) {
         $vatLabel = $vatRate > 0 ? 'VAT (' . number_format($vatRate, 0) . '%)' : 'VAT';
-        $vatRow = '<tr><td>' . $esc($vatLabel) . '</td><td class="right">' . $esc($fmt($vatAmount)) . '</td></tr>';
+        $vatRow = '<tr><td>' . $esc($vatLabel) . '</td><td class="right">' . $esc(vat_document_value($fmt($vatAmount))) . '</td></tr>';
     }
 
     $depositRow = '';
@@ -3111,11 +3126,14 @@ function generateEventInquiryQuotationPDF(array $inquiry, array $options = []): 
     $vatRate = (float)($inquiry['vat_rate'] ?? 0);
     $vatAmount = (float)($inquiry['vat_amount'] ?? 0);
     if ($vatAmount <= 0 && $vatRate > 0) {
-        $vatAmount = round($baseAmount * ($vatRate / 100), 2);
+        // Fallback derives per installation mode (on top / extracted / off).
+        $vatAmount = vat_components($baseAmount)['vat'];
     }
     $totalAmount = (float)($inquiry['total_with_vat'] ?? 0);
     if ($totalAmount <= 0) {
-        $totalAmount = $baseAmount + $vatAmount;
+        $totalAmount = (function_exists('vat_mode') && vat_mode() === 'inclusive')
+            ? $baseAmount
+            : $baseAmount + $vatAmount;
     }
     $depositAmount = (float)($inquiry['deposit_amount'] ?? 0);
     $eventTitle = (string)($inquiry['event_title'] ?? 'Event Booking');
@@ -3131,7 +3149,7 @@ function generateEventInquiryQuotationPDF(array $inquiry, array $options = []): 
     $vatRow = '';
     if ($vatAmount > 0) {
         $vatLabel = $vatRate > 0 ? 'VAT (' . number_format($vatRate, 0) . '%)' : 'VAT';
-        $vatRow = '<tr><td>' . $esc($vatLabel) . '</td><td class="right">' . $esc($fmt($vatAmount)) . '</td></tr>';
+        $vatRow = '<tr><td>' . $esc($vatLabel) . '</td><td class="right">' . $esc(vat_document_value($fmt($vatAmount))) . '</td></tr>';
     }
 
     $depositRow = '';

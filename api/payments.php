@@ -852,11 +852,11 @@ function updateRoomBookingPayments(PDO $pdo, int $bookingId)
     $lastPaymentStmt->execute([$bookingId]);
     $lastPayment = $lastPaymentStmt->fetch(PDO::FETCH_ASSOC);
 
-    // Calculate VAT rate from settings
-    $vatEnabled = getSetting('vat_enabled') === '1';
-    $vatRate = $vatEnabled ? (float)getSetting('vat_rate') : 0;
-    $vatAmount = $totalAmount * ($vatRate / 100);
-    $totalWithVat = $totalAmount + $vatAmount;
+    // VAT per installation mode (exclusive on top / inclusive extracted / off).
+    $vatParts = vat_components($totalAmount);
+    $vatRate = $vatParts['rate'];
+    $vatAmount = $vatParts['vat'];
+    $totalWithVat = $vatParts['total'];
 
     // Update booking
     $updateStmt = $pdo->prepare("
@@ -938,11 +938,11 @@ function updateConferenceEnquiryPayments(PDO $pdo, int $enquiryId)
     $lastPaymentStmt->execute([$enquiryId]);
     $lastPayment = $lastPaymentStmt->fetch(PDO::FETCH_ASSOC);
 
-    // Calculate VAT rate from settings
-    $vatEnabled = getSetting('vat_enabled') === '1';
-    $vatRate = $vatEnabled ? (float)getSetting('vat_rate') : 0;
-    $vatAmount = $totalAmount * ($vatRate / 100);
-    $totalWithVat = $totalAmount + $vatAmount;
+    // VAT per installation mode (exclusive on top / inclusive extracted / off).
+    $vatParts = vat_components($totalAmount);
+    $vatRate = $vatParts['rate'];
+    $vatAmount = $vatParts['vat'];
+    $totalWithVat = $vatParts['total'];
 
     // Update enquiry
     $updateStmt = $pdo->prepare("

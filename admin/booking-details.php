@@ -1102,17 +1102,26 @@ $folio_extras_vat = (float)($folio_summary['extras_vat'] ?? 0);
 $booking_base_subtotal = (float)($booking['total_amount'] ?? 0);
 $booking_base_vat = (float)($booking['vat_amount'] ?? 0);
 if ($booking_base_vat <= 0.0 && $configured_vat_rate > 0.0) {
-    $booking_base_vat = round($booking_base_subtotal * ($configured_vat_rate / 100), 2);
+    $booking_base_vat = vat_components($booking_base_subtotal)['vat'];
 }
 
-$folio_subtotal_before_vat = $booking_base_subtotal + $folio_extras_subtotal;
+// Inclusive mode: priced amounts already contain VAT — the folio total is the
+// sum of priced amounts, never price + VAT again.
+$vat_is_inclusive = function_exists('vat_mode') && vat_mode() === 'inclusive';
+$folio_subtotal_before_vat = $vat_is_inclusive
+    ? max(0.0, ($booking_base_subtotal - $booking_base_vat) + ($folio_extras_subtotal - $folio_extras_vat))
+    : $booking_base_subtotal + $folio_extras_subtotal;
 $folio_total_vat = $booking_base_vat + $folio_extras_vat;
-$folio_total_amount = $folio_subtotal_before_vat + $folio_total_vat;
+$folio_total_amount = $vat_is_inclusive
+    ? $booking_base_subtotal + $folio_extras_subtotal
+    : $folio_subtotal_before_vat + $folio_total_vat;
 $folio_amount_paid = (float)($folio_summary['amount_paid'] ?? $booking['amount_paid'] ?? 0);
 $folio_balance_due = max(0.0, $folio_total_amount - $folio_amount_paid);
 $booking_levy_amount = (float)($booking['tourism_levy_amount'] ?? 0);
 $booking_levy_percent = (float)($booking['tourism_levy_percent'] ?? 0);
-$booking_room_total_with_tax = $booking_base_subtotal + $booking_base_vat;
+$booking_room_total_with_tax = $vat_is_inclusive
+    ? $booking_base_subtotal
+    : $booking_base_subtotal + $booking_base_vat;
 $room_status_label = ucfirst(str_replace('_', ' ', (string)($booking['derived_room_status'] ?? 'available')));
 
 $today_status_date = new DateTime('today');
@@ -2594,6 +2603,7 @@ unset($_SESSION['success_message'], $_SESSION['error_message']);
         const currentChildSupplement = <?php echo (float)($booking['child_supplement_total'] ?? 0); ?>;
         const pricePerNight = <?php echo (float)($booking['price_per_night'] ?? 0); ?>;
         const vatRate = <?php echo $vat_enabled ? (float) getSetting('vat_rate') : 0; ?>;
+        const vatMode = <?php echo json_encode(vat_mode()); ?>; // 'off' | 'inclusive' | 'exclusive'
         const levyRate = <?php echo $booking_levy_percent; ?>;
 
         function openDateAdjustModal() {
@@ -2690,8 +2700,10 @@ unset($_SESSION['success_message'], $_SESSION['error_message']);
 
             const newLevyAmount = levyRate > 0 ? ((newBaseAmount + newChildSupplement) * (levyRate / 100)) : 0;
             const newSubtotal = newBaseAmount + newChildSupplement + newLevyAmount;
-            const newVatAmount = newSubtotal * (vatRate / 100);
-            const newTotal = newSubtotal + newVatAmount;
+            // Mode-aware VAT (mirrors calculateDateAdjustmentAmount server-side).
+            const newVatAmount = vatMode === 'inclusive' ? newSubtotal * (vatRate / (100 + vatRate))
+                : (vatMode === 'exclusive' ? newSubtotal * (vatRate / 100) : 0);
+            const newTotal = vatMode === 'exclusive' ? newSubtotal + newVatAmount : newSubtotal;
             const amountDelta = newTotal - currentTotal;
             const nightsDelta = newNights - currentNights;
 
