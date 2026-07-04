@@ -1,0 +1,184 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Gym Management Guide — Rosalyn's Hotel</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link
+    href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@400;500;600;700&family=Jost:wght@300;400;500;600&display=swap"
+    rel="stylesheet">
+  <link rel="stylesheet" href="assets/guide-theme.css">
+  <script src="assets/guide-init.js" defer></script>
+</head>
+
+<body>
+
+  <nav class="top">
+    <a href="index.html" class="brand">ROSALYN'S HOTEL</a>
+    <div class="nav-links">
+      <a href="index.html">All Guides</a>
+      <a href="99-admin-dashboard-full-guide.html">Admin Bible</a>
+      <a href="owner-handover.php">Owner</a>
+      <a href="16-business-presets.html">← Prev</a>
+    </div>
+  </nav>
+
+  <header class="hero">
+    <div class="deck">
+      <div class="eyebrow">Guide 17 &middot; Gym Staff / Manager</div>
+      <h1>Gym Management</h1>
+      <p class="lead">From a website inquiry to a scanned check-in: packages, members, barcode cards, attendance,
+        renewal reminders and reports.</p>
+      <div class="meta">
+        <span>URL <strong>/admin/gym-members.php</strong></span>
+        <span>Role <strong>gym_staff · manager · admin</strong></span>
+        <span>Read time <strong>10 min</strong></span>
+      </div>
+    </div>
+  </header>
+
+  <main class="content">
+    <div class="deck">
+
+      <section>
+        <h2>The gym pipeline at a glance</h2>
+        <table>
+          <thead>
+            <tr>
+              <th>Stage</th>
+              <th>Where</th>
+              <th>What happens</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><strong>1. Packages</strong></td>
+              <td>Gym Packages</td>
+              <td>Define what you sell — name, price, duration. Package prices are the accounting source of truth for
+                member fees.</td>
+            </tr>
+            <tr>
+              <td><strong>2. Inquiry</strong></td>
+              <td>Gym Inquiries</td>
+              <td>A visitor fills the gym form on your website (package choices come from your live packages). The lead
+                lands here with status <em>new</em>; you can also send quotations and record payments per inquiry.</td>
+            </tr>
+            <tr>
+              <td><strong>3. Enrolment</strong></td>
+              <td>Gym Members</td>
+              <td>Click <strong>Enrol as member</strong> on the inquiry — the enrolment form opens pre-filled and the
+                lead is marked converted. The member gets a unique number (GM-XXXXXX) and their barcode card by email.
+              </td>
+            </tr>
+            <tr>
+              <td><strong>4. Visits</strong></td>
+              <td>Gym Check-In</td>
+              <td>Members scan in and out with their emailed barcode. Attendance feeds the analytics.</td>
+            </tr>
+            <tr>
+              <td><strong>5. Retention</strong></td>
+              <td>Gym Members / Reports</td>
+              <td>Renewal reminders go out automatically before expiry; segments and peak-hour data drive your
+                marketing.</td>
+            </tr>
+          </tbody>
+        </table>
+      </section>
+
+      <section>
+        <h2>Members register <span class="pill gold">gym</span></h2>
+        <p>Each row is one person with a live membership picture: status, package, a colour-coded
+          <strong>days-to-expiry</strong> pill (red ≤ 7 days, amber inside the reminder window, green beyond), visit
+          frequency over the last 30 days, their personal <strong>peak workout slot</strong>, and a marketing
+          <strong>segment chip</strong>.</p>
+        <ul class="checklist">
+          <li><strong>Fees follow the package.</strong> Selecting a package auto-fills its price; only a manager
+            (<code>gym_financials</code>) can override a fee, and free-text package names never unlock it.</li>
+          <li><strong>Names are protected.</strong> Renaming a member needs a manager — memberships are not
+            transferable to another person, and every identity or price change is audit-logged.</li>
+          <li><strong>Resend card</strong> re-emails the member's barcode card any time.</li>
+        </ul>
+        <div class="callout note">
+          <strong>Segments explained:</strong> <em>Loyal regular</em> (12+ visits / 30 days — reward them), <em>At risk
+            — 14d+ absent</em> (used to visit, has stopped — reach out before they lapse), <em>Win-back — lapsed</em>
+          (membership over — send a comeback offer), <em>New member</em> (joined under 2 weeks — onboard them),
+          <em>On hold</em> (suspended).
+        </div>
+      </section>
+
+      <section>
+        <h2>Barcode check-in <span class="pill gold">gym_checkin</span></h2>
+        <p>On enrolment every member with an email receives their <strong>digital membership card</strong> — a CODE-128
+          barcode of their member number, embedded in the email and attached as an image they can save to their phone.
+        </p>
+        <ol class="steps">
+          <li>Open <strong>Gym Check-In</strong> at reception (works on phones, tablets and desktops).</li>
+          <li>Scan the member's barcode with a <strong>USB scanner</strong>, the <strong>camera</strong> button, or
+            type the member number manually.</li>
+          <li>Green card = checked in (with their expiry date; amber note if it is within 7 days). Scanning again on
+            the way out checks them out and shows the visit duration.</li>
+          <li>Red card = refused — expired or suspended memberships cannot check in.</li>
+        </ol>
+        <div class="callout warn">
+          <strong>Pass-sharing guard:</strong> a member can check in at most <strong>2 times per day</strong> (setting
+          <code>gym_max_daily_visits</code>). A third scan is refused with a warning and logged — verify the person at
+          the desk actually matches the membership.
+        </div>
+        <div class="callout tip">
+          <strong>Forgot to scan out?</strong> Anyone still marked "in the gym" from a previous day is automatically
+          checked out at closing time (setting <code>gym_close_time</code>, default 22:00) — the next morning's scan is
+          always a fresh check-in and the "In gym now" count stays truthful.
+        </div>
+      </section>
+
+      <section>
+        <h2>Fitness report per member</h2>
+        <p>Click the <strong>Visits</strong> count on any member row to open their personal fitness report:</p>
+        <ul class="checklist">
+          <li>Headline stats — total visits, last 30 / 7 days, average and longest session, lifetime gym hours.</li>
+          <li><strong>Weekly consistency</strong> — a bar per week for the last 8 weeks.</li>
+          <li><strong>Peak training time</strong> — their hour-by-hour histogram and weekday preference (e.g.
+            "Evenings 18:00–20:00 · mostly Tue/Thu") — ideal for targeted class invites and offers.</li>
+          <li>The recent visit log with in/out times and durations.</li>
+        </ul>
+      </section>
+
+      <section>
+        <h2>Renewal reminders</h2>
+        <p>The <strong>Renewal Reminders</strong> strip on Gym Members controls automatic expiry emails:</p>
+        <ol class="steps">
+          <li>Switch reminders on and choose how many days before expiry to send (1–30, default 3). Save.</li>
+          <li>Set the daily scheduler once: run <code>scripts/gym_membership_reminders.php</code> from cron (the file
+            header shows the exact crontab line). No cron? Use the <strong>Send due reminders now</strong> button — it
+            does the same sweep.</li>
+          <li>Each member gets <strong>exactly one</strong> warm renewal email per expiry — never duplicates, even if
+            the sweep runs twice. A renewal (new expiry date) makes them remindable again.</li>
+        </ol>
+      </section>
+
+      <section>
+        <h2>Gym Reports <span class="pill gold">gym_reports</span></h2>
+        <p>The date-filtered operations report for the owner: members by status, new joiners and churn, expiring soon,
+          <strong>unpaid members with total outstanding</strong>, attendance analytics (busiest check-in and check-out
+          hours, busiest weekday, average visit duration, daily trend) and the gym revenue strip. Gym payments also
+          appear across the normal finance pages — payments, receipts, invoices — labelled as memberships.</p>
+      </section>
+
+    </div>
+  </main>
+
+  <footer class="guide-footer">
+    <div class="deck">
+      <div class="crest">— R H —</div>
+      <p><a href="index.html">← All guides</a> &middot; <a href="99-admin-dashboard-full-guide.html">Admin Bible</a>
+        &middot; <a href="owner-handover.php">Owner handover</a> &middot; <a href="16-business-presets.html">Prev:
+          Business Presets</a></p>
+    </div>
+  </footer>
+
+</body>
+
+</html>

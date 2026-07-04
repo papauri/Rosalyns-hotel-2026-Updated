@@ -269,23 +269,31 @@ try {
                CASE
                    WHEN p.booking_type = 'room' THEN CONCAT(b.guest_name, ' (', r.name, ')')
                    WHEN p.booking_type = 'conference' THEN CONCAT(ci.{$conferenceFields['company']}, ' (', cr.name, ')')
+                   WHEN p.booking_type = 'gym' THEN CONCAT(gi.name, ' (', gi.reference_number, ')')
+                   WHEN p.booking_type = 'event' THEN CONCAT(ei.name, ' (', ei.reference_number, ')')
                    ELSE 'Unknown'
                END as customer_name,
                CASE
                    WHEN p.booking_type = 'room' THEN b.guest_email
                    WHEN p.booking_type = 'conference' THEN ci.{$conferenceFields['email']}
+                   WHEN p.booking_type = 'gym' THEN gi.email
+                   WHEN p.booking_type = 'event' THEN ei.email
                    ELSE NULL
                END as customer_email,
                CASE
                    WHEN p.booking_type = 'room' THEN b.guest_phone
                    WHEN p.booking_type = 'conference' THEN ci.{$conferenceFields['phone']}
+                   WHEN p.booking_type = 'gym' THEN gi.phone
+                   WHEN p.booking_type = 'event' THEN ei.phone
                    ELSE NULL
                END as customer_phone
         FROM payments p
         LEFT JOIN bookings b ON p.booking_type = 'room' AND p.booking_id = b.id
         LEFT JOIN rooms r ON p.booking_type = 'room' AND b.room_id = r.id
         LEFT JOIN conference_inquiries ci ON p.booking_type = 'conference' AND p.booking_id = ci.id
-        LEFT JOIN conference_rooms cr ON p.booking_type = 'conference' AND ci.conference_room_id = cr.id";
+        LEFT JOIN conference_rooms cr ON p.booking_type = 'conference' AND ci.conference_room_id = cr.id
+        LEFT JOIN gym_inquiries gi ON p.booking_type = 'gym' AND p.booking_id = gi.id
+        LEFT JOIN event_inquiries ei ON p.booking_type = 'event' AND p.booking_id = ei.id";
 
     if (!empty($where_clause)) {
         $sql .= " WHERE $where_clause";
@@ -579,12 +587,16 @@ $totalAging = (float)$aging['bucket_0_30'] + (float)$aging['bucket_31_60'] + (fl
                 <div class="filters-row">
                     <div class="filter-group">
                         <?php $inv_mod_bookings = function_exists('moduleEnabled') && moduleEnabled('bookings');
-                              $inv_mod_conf     = function_exists('moduleEnabled') && moduleEnabled('conference'); ?>
+                              $inv_mod_conf     = function_exists('moduleEnabled') && moduleEnabled('conference');
+                              $inv_mod_gym      = function_exists('moduleEnabled') && moduleEnabled('gym');
+                              $inv_mod_events   = function_exists('isEventsEnabled') && isEventsEnabled(); ?>
                         <label><?php echo $inv_mod_bookings ? 'Booking Type' : 'Invoice Type'; ?></label>
                         <select name="filter_type">
                             <option value="all" <?php echo $filter_type === 'all' ? 'selected' : ''; ?>>All Types</option>
                             <?php if ($inv_mod_bookings || $filter_type === 'room'): ?><option value="room" <?php echo $filter_type === 'room' ? 'selected' : ''; ?>>Room Bookings</option><?php endif; ?>
                             <?php if ($inv_mod_conf || $filter_type === 'conference'): ?><option value="conference" <?php echo $filter_type === 'conference' ? 'selected' : ''; ?>>Conference Bookings</option><?php endif; ?>
+                            <?php if ($inv_mod_gym || $filter_type === 'gym'): ?><option value="gym" <?php echo $filter_type === 'gym' ? 'selected' : ''; ?>>Gym Memberships</option><?php endif; ?>
+                            <?php if ($inv_mod_events || $filter_type === 'event'): ?><option value="event" <?php echo $filter_type === 'event' ? 'selected' : ''; ?>>Event Bookings</option><?php endif; ?>
                         </select>
                     </div>
                     <div class="filter-group">

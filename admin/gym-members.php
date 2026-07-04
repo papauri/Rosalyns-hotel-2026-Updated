@@ -551,7 +551,7 @@ $gm_currency = (string)getSetting('currency_symbol', 'K');
                                     $freq = gym_frequency_label($v30, $m['start_date'] ?? null);
                                 ?>
                                 <?php if ($vs && (int)$vs['visits'] > 0): ?>
-                                    <a href="#" onclick="gmShowLog(<?php echo (int)$m['id']; ?>, '<?php echo htmlspecialchars($m['full_name'], ENT_QUOTES); ?>'); return false;" style="font-weight:700;"><?php echo (int)$vs['visits']; ?></a>
+                                    <a href="#" data-no-spa onclick="gmShowLog(<?php echo (int)$m['id']; ?>, '<?php echo htmlspecialchars($m['full_name'], ENT_QUOTES); ?>'); return false;" style="font-weight:700;"><?php echo (int)$vs['visits']; ?></a>
                                 <?php else: ?>
                                     <span style="color:#9a8f82;">0</span>
                                 <?php endif; ?>

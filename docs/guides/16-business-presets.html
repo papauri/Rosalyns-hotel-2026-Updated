@@ -1,0 +1,184 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Business Presets Guide — Rosalyn's Hotel</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link
+    href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@400;500;600;700&family=Jost:wght@300;400;500;600&display=swap"
+    rel="stylesheet">
+  <link rel="stylesheet" href="assets/guide-theme.css">
+  <script src="assets/guide-init.js" defer></script>
+</head>
+
+<body>
+
+  <nav class="top">
+    <a href="index.html" class="brand">ROSALYN'S HOTEL</a>
+    <div class="nav-links">
+      <a href="index.html">All Guides</a>
+      <a href="99-admin-dashboard-full-guide.html">Admin Bible</a>
+      <a href="owner-handover.php">Owner</a>
+      <a href="17-gym-management.html">Next →</a>
+    </div>
+  </nav>
+
+  <header class="hero">
+    <div class="deck">
+      <div class="eyebrow">Guide 16 &middot; Owner / Admin</div>
+      <h1>Business Presets &amp; Module Settings</h1>
+      <p class="lead">Shape the whole system around your actual business — hotel, bar, gym, shop or supermarket — with
+        one click.</p>
+      <div class="meta">
+        <span>URL <strong>/admin/module-settings.php</strong></span>
+        <span>Role <strong>admin · manager (booking_settings)</strong></span>
+        <span>Read time <strong>8 min</strong></span>
+      </div>
+    </div>
+  </header>
+
+  <main class="content">
+    <div class="deck">
+
+      <section>
+        <h2>What a preset is</h2>
+        <p>A <strong>business preset</strong> is a one-click profile that switches the right feature modules on and off
+          for your type of business. Instead of toggling ten modules by hand, you pick what you are — and the admin
+          menus, dashboard, finance pages, guest website and even the report exports all reshape themselves to match.
+        </p>
+        <table>
+          <thead>
+            <tr>
+              <th>Preset</th>
+              <th>What it turns on</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><strong>Full Hotel</strong></td>
+              <td>Everything — rooms, housekeeping, POS + all station displays, stock, conference, gym, website. The
+                complete system.</td>
+            </tr>
+            <tr>
+              <td><strong>Hotel (No Restaurant)</strong></td>
+              <td>Rooms, housekeeping, conference and gym — no POS or stock.</td>
+            </tr>
+            <tr>
+              <td><strong>Bar / Restaurant</strong></td>
+              <td>POS with Kitchen and Bar displays, stock, tables and recipes. No rooms, no website CMS.</td>
+            </tr>
+            <tr>
+              <td><strong>Conference Venue</strong></td>
+              <td>Bookings, conference rooms and the website. No POS or stock.</td>
+            </tr>
+            <tr>
+              <td><strong>Gym / Fitness</strong></td>
+              <td>Gym suite (packages, members, check-in, reports), a POS till for the front desk, events and the
+                website. No stock, no rooms.</td>
+            </tr>
+            <tr>
+              <td><strong>Retail / Shop</strong></td>
+              <td>POS till + stock + finance only. Products instead of menus; no food-service pages.</td>
+            </tr>
+            <tr>
+              <td><strong>Supermarket</strong></td>
+              <td>Like Retail, plus the website. Starter categories (Groceries, Household…) are seeded so you can start
+                scanning products immediately.</td>
+            </tr>
+          </tbody>
+        </table>
+        <div class="callout note">
+          <strong>Finance is always on.</strong> Every business reconciles takings, issues receipts and reads reports —
+          the Finance module can never be disabled.
+        </div>
+      </section>
+
+      <section>
+        <h2>Applying a preset</h2>
+        <ol class="steps">
+          <li>Open <strong>Configuration → Module Settings</strong>.</li>
+          <li>Click the preset that matches your business. The currently active preset carries a green
+            <strong>Active</strong> badge.</li>
+          <li>An <strong>impact dialog</strong> opens first — nothing changes until you confirm. It shows exactly what
+            turns ON, what turns OFF, which <strong>menus &amp; pages appear or disappear</strong>, and which
+            <strong>staff accounts would lose access</strong> to areas being switched off.</li>
+          <li>Confirm. Modules apply in one step, guest-facing pages follow, starter product categories are seeded for
+            shop-style presets, and the admin view refreshes itself so the new menus show immediately.</li>
+        </ol>
+        <div class="callout tip">
+          You can also toggle any <strong>single module</strong> on or off on the same page — presets are just
+          shortcuts. Station sub-modules (Kitchen, Bar, Coffee, Room Service displays) live inside the POS card and can
+          be switched individually.
+        </div>
+      </section>
+
+      <section>
+        <h2>What changes when a module is off</h2>
+        <ul class="checklist">
+          <li><strong>Admin menus</strong> — items and whole menu groups for that module disappear; typing the page URL
+            directly is blocked too.</li>
+          <li><strong>Dashboard</strong> — cards, widgets and quick links for that module vanish; a POS-first business
+            gets an orders/takings overview instead of check-ins.</li>
+          <li><strong>Finance pages</strong> — payments, receipts, invoices and other lists open showing records from
+            your active modules; wording adapts (e.g. "F&amp;B" becomes "POS / Till Sales" when there is no
+            restaurant).</li>
+          <li><strong>Guest website</strong> — navigation links, footer links, policies and the pages themselves follow
+            the preset. A gym preset shows no Rooms or Restaurant pages; the homepage always stays.</li>
+          <li><strong>Reports &amp; End of Day</strong> — tabs, KPI panels and the PDF / email / WhatsApp exports all
+            include only what your business runs.</li>
+          <li><strong>User roles</strong> — creating a staff account only offers roles relevant to your preset (a
+            supermarket is not offered "Chef").</li>
+        </ul>
+        <div class="callout warn">
+          <strong>No data is ever deleted.</strong> Switching presets hides features, not history. Finance lists show a
+          "Showing records for your active modules only" notice with a <strong>Show all history</strong> link whenever
+          older records from disabled modules exist — one click brings everything back into view.
+        </div>
+      </section>
+
+      <section>
+        <h2>Products vs menus (shop-style presets)</h2>
+        <p>The POS sells from one catalog, but it is scoped by business type. A restaurant manages <strong>Food &amp;
+            Drinks menus</strong> with recipes and kitchen routing; a shop, gym or supermarket manages
+          <strong>Products</strong> — simple items with a price and a barcode. Selling a product deducts one unit of
+          stock automatically (product = stock item), and the same barcode is used to receive stock in and sell it out.
+          Switching presets swaps which catalog the till shows; neither is deleted.</p>
+      </section>
+
+      <section>
+        <h2>Adding employees</h2>
+        <ol class="steps">
+          <li>Open <strong>Configuration → User Management</strong> and click <strong>Add User</strong>.</li>
+          <li>Pick a role — the list only offers roles that make sense for your preset. Existing users keep whatever
+            role they already have.</li>
+          <li>Tick <strong>Send welcome email</strong> — the new employee receives their username, a temporary password
+            and the login link. A <strong>Resend welcome</strong> button on each user row issues a fresh temporary
+            password later if needed.</li>
+          <li>Station staff land on their own screen after login — a bartender opens straight onto the Bar Display, a
+            cashier onto the POS till.</li>
+        </ol>
+        <div class="callout tip">
+          <strong>Self-service password change:</strong> every employee can click the <strong>key icon</strong> in the
+          admin header, enter their current and new password, and confirm with a <strong>6-digit code emailed</strong>
+          to them (valid 10 minutes). No admin needed.
+        </div>
+      </section>
+
+    </div>
+  </main>
+
+  <footer class="guide-footer">
+    <div class="deck">
+      <div class="crest">— R H —</div>
+      <p><a href="index.html">← All guides</a> &middot; <a href="99-admin-dashboard-full-guide.html">Admin Bible</a>
+        &middot; <a href="owner-handover.php">Owner handover</a> &middot; <a href="17-gym-management.html">Next: Gym
+          Management →</a></p>
+    </div>
+  </footer>
+
+</body>
+
+</html>

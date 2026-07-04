@@ -106,6 +106,8 @@ try {
             COALESCE(SUM(CASE WHEN booking_type='room'       AND payment_status IN ('completed','paid') AND COALESCE(payment_type, '') <> 'refund' THEN total_amount ELSE 0 END), 0) AS room_gross,
             COALESCE(SUM(CASE WHEN booking_type='conference' AND payment_status IN ('completed','paid') AND COALESCE(payment_type, '') <> 'refund' THEN total_amount ELSE 0 END), 0) AS conf_gross,
             COALESCE(SUM(CASE WHEN booking_type='restaurant' AND payment_status IN ('completed','paid') AND COALESCE(payment_type, '') <> 'refund' THEN total_amount ELSE 0 END), 0) AS fnb_gross,
+            COALESCE(SUM(CASE WHEN booking_type='gym'        AND payment_status IN ('completed','paid') AND COALESCE(payment_type, '') <> 'refund' THEN total_amount ELSE 0 END), 0) AS gym_gross,
+            COALESCE(SUM(CASE WHEN booking_type='event'      AND payment_status IN ('completed','paid') AND COALESCE(payment_type, '') <> 'refund' THEN total_amount ELSE 0 END), 0) AS events_gross,
             COALESCE(SUM(CASE WHEN payment_status IN ('completed','paid') AND COALESCE(payment_type, '') <> 'refund' THEN vat_amount ELSE 0 END), 0) AS total_vat,
                 COALESCE(SUM(CASE WHEN payment_type='refund' AND refund_status IN ('completed','processing') THEN refund_amount ELSE 0 END), 0) AS refunds,
                 COALESCE(SUM(CASE WHEN payment_type='refund' AND refund_status IN ('completed','processing') THEN vat_amount ELSE 0 END), 0) AS refund_vat,
@@ -118,7 +120,7 @@ try {
     $rev = $payStmt->fetch(PDO::FETCH_ASSOC) ?: [];
     $rev['total_vat'] = (float)($rev['total_vat'] ?? 0) - (float)($rev['refund_vat'] ?? 0);
 
-    $gross = (float)$rev['room_gross'] + (float)$rev['conf_gross'] + (float)$rev['fnb_gross'];
+    $gross = (float)$rev['room_gross'] + (float)$rev['conf_gross'] + (float)$rev['fnb_gross'] + (float)$rev['gym_gross'] + (float)$rev['events_gross'];
     $net   = $gross - (float)$rev['refunds'];
     $adr   = $rooms_occupied > 0 ? ((float)$rev['room_gross'] / $rooms_occupied) : 0;
     $revpar = $rooms_total    > 0 ? ((float)$rev['room_gross'] / $rooms_total)    : 0;
@@ -304,11 +306,14 @@ try {
         'room_gross' => 0,
         'conf_gross' => 0,
         'fnb_gross' => 0,
+        'gym_gross' => 0,
+        'events_gross' => 0,
         'total_vat' => 0,
         'refunds' => 0,
         'pending' => 0,
         'txn_count' => 0,
     ];
+    $rev += ['gym_gross' => 0, 'events_gross' => 0];
     $gross = $gross ?? 0.0;
     $net = $net ?? 0.0;
     $adr = $adr ?? 0.0;
@@ -413,6 +418,8 @@ $dateLabel = date('l, F j, Y', strtotime($date));
 // Used by the WhatsApp text, HTML email, and attached PDF alike.
 $eodModBookings   = !function_exists('moduleEnabled') || moduleEnabled('bookings');
 $eodModConference = !function_exists('moduleEnabled') || moduleEnabled('conference');
+$eodModGym        = !function_exists('moduleEnabled') || moduleEnabled('gym');
+$eodModEvents     = function_exists('isEventsEnabled') ? isEventsEnabled() : true;
 $eodOrdersToday   = (int)($pos['orders'] ?? 0);
 
 // -----------------------------------------------------------------------------
@@ -460,6 +467,8 @@ if ($channel === 'whatsapp') {
     if ($eodModBookings)   { $lines[] = "  🏨 Rooms:       " . _money($currency_symbol, (float)$rev['room_gross']); }
     if ($eodModConference) { $lines[] = "  🎪 Conference:  " . _money($currency_symbol, (float)$rev['conf_gross']); }
     $lines[] = (isRestaurantEnabled() ? "  🍽️ F&B:         " : "  🛒 POS:         ") . _money($currency_symbol, (float)$rev['fnb_gross']);
+    if ($eodModGym    || (float)$rev['gym_gross'] > 0)    { $lines[] = "  🏋️ Gym:         " . _money($currency_symbol, (float)$rev['gym_gross']); }
+    if ($eodModEvents || (float)$rev['events_gross'] > 0) { $lines[] = "  🎟️ Events:      " . _money($currency_symbol, (float)$rev['events_gross']); }
     $lines[] = '';
     if ($eodModBookings) {
     $lines[] = "━━━━━━━━━━ 🛏️ ROOMS ━━━━━━━━━━";
@@ -685,6 +694,8 @@ $revSrcRows = [];
 if ($eodModBookings)   { $revSrcRows[] = ['Rooms',       _money($currency_symbol, (float)$rev['room_gross'])]; }
 if ($eodModConference) { $revSrcRows[] = ['Conferences', _money($currency_symbol, (float)$rev['conf_gross'])]; }
 $revSrcRows[] = [isRestaurantEnabled() ? 'F&amp;B / POS' : 'POS', _money($currency_symbol, (float)$rev['fnb_gross'])];
+if ($eodModGym    || (float)$rev['gym_gross'] > 0)    { $revSrcRows[] = ['Gym',    _money($currency_symbol, (float)$rev['gym_gross'])]; }
+if ($eodModEvents || (float)$rev['events_gross'] > 0) { $revSrcRows[] = ['Events', _money($currency_symbol, (float)$rev['events_gross'])]; }
 foreach ($revSrcRows as $rr) {
     $html .= $row($rr[0], $rr[1]);
 }
@@ -966,6 +977,8 @@ if (false) {
     if ($eodModBookings)   { $pdfRowA('Rooms',       _money($currency_symbol, (float)$rev['room_gross']), false, $pdfRowIdx++); }
     if ($eodModConference) { $pdfRowA('Conferences', _money($currency_symbol, (float)$rev['conf_gross']), false, $pdfRowIdx++); }
     $pdfRowA(isRestaurantEnabled() ? 'F&B / POS' : 'POS', _money($currency_symbol, (float)$rev['fnb_gross']),  false, $pdfRowIdx++);
+    if ($eodModGym    || (float)$rev['gym_gross'] > 0)    { $pdfRowA('Gym',    _money($currency_symbol, (float)$rev['gym_gross']),    false, $pdfRowIdx++); }
+    if ($eodModEvents || (float)$rev['events_gross'] > 0) { $pdfRowA('Events', _money($currency_symbol, (float)$rev['events_gross']), false, $pdfRowIdx++); }
     $pdfRowA('Gross Total',      _money($currency_symbol, $gross), true, $pdfRowIdx++);
     if ((float)$rev['refunds'] > 0) {
         $pdfRowA('Less Refunds', '-' . _money($currency_symbol, (float)$rev['refunds']), false, $pdfRowIdx++);

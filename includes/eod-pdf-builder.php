@@ -237,6 +237,8 @@ function buildEodPdf(
     // classic hotel layout if the module system isn't loaded.
     $eodModBookings   = !function_exists('moduleEnabled') || moduleEnabled('bookings');
     $eodModConference = !function_exists('moduleEnabled') || moduleEnabled('conference');
+    $eodModGym        = !function_exists('moduleEnabled') || moduleEnabled('gym');
+    $eodModEvents     = function_exists('isEventsEnabled') ? isEventsEnabled() : true;
 
     if ($eodModBookings) {
         $kpi_slot2 = [
@@ -378,6 +380,8 @@ function buildEodPdf(
     if ($eodModBookings)   { $rowL('Rooms',       $m((float)$rev['room_gross']), false, $i++); }
     if ($eodModConference) { $rowL('Conferences', $m((float)$rev['conf_gross']), false, $i++); }
     $rowL(isRestaurantEnabled() ? 'F&B / POS' : 'POS', $m((float)$rev['fnb_gross']),  false, $i++);
+    if ($eodModGym    || (float)($rev['gym_gross'] ?? 0) > 0)    { $rowL('Gym',    $m((float)($rev['gym_gross'] ?? 0)),    false, $i++); }
+    if ($eodModEvents || (float)($rev['events_gross'] ?? 0) > 0) { $rowL('Events', $m((float)($rev['events_gross'] ?? 0)), false, $i++); }
 
     // Gross Total gold bar
     $pdf->SetFillColorArray($GOLD);
