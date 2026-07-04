@@ -66,6 +66,9 @@ function admin_default_route_for_role(string $role): string
     if ($role === 'coffee_staff') {
         return 'cds.php';
     }
+    if ($role === 'room_service') {
+        return 'room-service-dashboard.php';
+    }
     return 'dashboard.php';
 }
 

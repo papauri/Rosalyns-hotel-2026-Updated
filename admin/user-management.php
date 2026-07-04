@@ -240,6 +240,41 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             }
         }
 
+        // ---- RESEND WELCOME EMAIL (issues a fresh temporary password) ----
+        elseif ($action === 'resend_welcome') {
+            if (!hasPermission($user['id'], 'user_edit')) {
+                $error_msg = 'You do not have permission to manage users.';
+            } else {
+                $uid = (int)($_POST['user_id'] ?? 0);
+                if (!canManageUser($user['id'], $uid)) {
+                    $error_msg = 'You cannot manage this user.';
+                } else {
+                    $tstmt = $pdo->prepare("SELECT username, email, full_name, role FROM admin_users WHERE id = ?");
+                    $tstmt->execute([$uid]);
+                    $target = $tstmt->fetch(PDO::FETCH_ASSOC);
+                    if (!$target) {
+                        $error_msg = 'User not found.';
+                    } elseif (empty($target['email']) || !filter_var($target['email'], FILTER_VALIDATE_EMAIL)) {
+                        $error_msg = 'This user has no valid email address on file.';
+                    } else {
+                        // A welcome email is only useful with working credentials —
+                        // issue a fresh temporary password (same policy as create).
+                        $tempPassword = 'Rh' . bin2hex(random_bytes(4)) . '!' . random_int(10, 99);
+                        $pdo->prepare("UPDATE admin_users SET password_hash = ?, failed_login_attempts = 0 WHERE id = ?")
+                            ->execute([password_hash($tempPassword, PASSWORD_DEFAULT), $uid]);
+
+                        $welcome = sendAdminWelcomeEmail((string)$target['full_name'], (string)$target['email'], (string)$target['username'], $tempPassword, (string)$target['role']);
+                        if (!empty($welcome['success'])) {
+                            logActivity($user['id'], 'welcome_resent', "Resent welcome email (new temp password) to '{$target['username']}'");
+                            $success_msg = 'Welcome email with a new temporary password sent to ' . htmlspecialchars((string)$target['email']) . '.';
+                        } else {
+                            $error_msg = 'Password was reset but the email failed: ' . (string)($welcome['message'] ?? 'unknown error') . ' — share credentials manually.';
+                        }
+                    }
+                }
+            }
+        }
+
         // ---- DELETE USER ----
         elseif ($action === 'delete_user') {
             if (!hasPermission($user['id'], 'user_delete')) {
@@ -509,6 +544,13 @@ $nav_categories = getNavCategories();
                             </button>
                             <?php endif; ?>
 
+                            <?php if ($u['id'] != $user['id'] && !empty($u['email']) && hasPermission($user['id'], 'user_edit') && canManageUser($user['id'], $u['id'])): ?>
+                            <button type="button" class="btn-sm btn-edit" title="Resend welcome email with a NEW temporary password"
+                                onclick="if (confirm('Resend the welcome email to <?php echo htmlspecialchars($u['full_name'], ENT_QUOTES); ?>? This resets their password to a new temporary one.')) { submitResendWelcome(<?php echo (int)$u['id']; ?>); }">
+                                <i class="fas fa-envelope"></i>
+                            </button>
+                            <?php endif; ?>
+
                             <?php if ($u['id'] != $user['id'] && hasPermission($user['id'], 'user_delete') && canManageUser($user['id'], $u['id'])): ?>
                             <button type="button" class="btn-sm btn-delete" onclick="confirmDelete(<?php echo $u['id']; ?>, '<?php echo htmlspecialchars($u['full_name'], ENT_QUOTES); ?>')">
                                 <i class="fas fa-trash"></i>
@@ -720,6 +762,13 @@ $nav_categories = getNavCategories();
     <input type="hidden" name="user_id" id="delete-user-id">
 </form>
 
+<!-- Resend Welcome Form (hidden) -->
+<form method="POST" id="resendWelcomeForm" style="display:none;">
+    <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf_token); ?>">
+    <input type="hidden" name="action" value="resend_welcome">
+    <input type="hidden" name="user_id" id="resend-welcome-user-id">
+</form>
+
 <script>
 // Modal functions
 function openModal(modalId) {
@@ -747,6 +796,11 @@ function confirmDelete(userId, userName) {
     document.getElementById('delete-user-id').value = userId;
     document.getElementById('delete-confirm-name').textContent = userName;
     openModal('deleteConfirmModal');
+}
+
+function submitResendWelcome(userId) {
+    document.getElementById('resend-welcome-user-id').value = userId;
+    document.getElementById('resendWelcomeForm').submit();
 }
 
 function submitDeleteUser() {

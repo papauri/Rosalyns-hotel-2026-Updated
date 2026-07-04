@@ -6678,3 +6678,27 @@ function sendGymMemberCardEmail(array $member): array
         return ['success' => false, 'message' => $e->getMessage()];
     }
 }
+
+/**
+ * OTP email for the self-service password change (admin/change-password.php).
+ * Plain sendEmail() — the OTP is short-lived (10 min) and session-bound.
+ */
+function sendPasswordChangeOtpEmail(string $toEmail, string $name, string $otp): array
+{
+    global $email_site_name;
+    $siteName = $email_site_name ?: getSetting('site_name', 'Admin');
+
+    $htmlBody = '
+        <h1 style="color: #8B7355; text-align: center;">Password Change Verification</h1>
+        <p>Dear ' . htmlspecialchars($name) . ',</p>
+        <p>You requested a password change on your <strong>' . htmlspecialchars($siteName) . '</strong> staff account. Enter this code to confirm it:</p>
+        <div style="background:#FAF6F0;border:2px solid #C8A45A;border-radius:10px;padding:24px;text-align:center;margin:22px 0;">
+            <div style="font-size:34px;font-weight:bold;letter-spacing:10px;color:#1A1A1A;">' . htmlspecialchars($otp) . '</div>
+            <div style="font-size:12px;color:#8a7f73;margin-top:8px;">Valid for 10 minutes</div>
+        </div>
+        <div style="background:#fff3cd;padding:14px;border-left:4px solid #ffc107;border-radius:5px;margin:20px 0;">
+            <p style="color:#856404;margin:0;font-size:14px;"><strong>Didn\'t request this?</strong> Ignore this email — your password stays unchanged — and tell your administrator.</p>
+        </div>';
+
+    return sendEmail($toEmail, $name, 'Your verification code: ' . $otp . ' — ' . $siteName, wrapEmailTemplate($htmlBody, 'Password Change Verification'), 'Your ' . $siteName . ' password change verification code is ' . $otp . ' (valid 10 minutes).');
+}

@@ -405,6 +405,9 @@ if ($_admin_back_target !== null) {
         <button class="admin-nav-toggle" id="adminNavToggle" aria-label="Toggle navigation" aria-expanded="false">
             <i class="fas fa-bars" id="navToggleIcon"></i>
         </button>
+        <a href="change-password.php" class="btn-logout" title="Change my password" style="margin-right:6px;">
+            <i class="fas fa-key"></i>
+        </a>
         <a href="logout.php" class="btn-logout" title="Sign out">
             <i class="fas fa-sign-out-alt"></i> <span>Logout</span>
         </a>

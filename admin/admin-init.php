@@ -70,18 +70,47 @@ require_once __DIR__ . '/includes/permissions.php';
 
 $_required_permission = getPermissionForPage($current_page);
 if ($_required_permission !== null && !hasPermission($user['id'], $_required_permission)) {
-    // Restaurant staff get bounced to their till instead of the dashboard.
-    if (($user['role'] ?? '') === 'restaurant_staff' && $current_page !== 'pos.php') {
-        header('Location: pos.php');
+    // Deactivated accounts: hasPermission() returns false for inactive users on
+    // every page, so without this check they'd redirect-loop. Kill the session.
+    try {
+        $_active_stmt = $pdo->prepare("SELECT is_active FROM admin_users WHERE id = ?");
+        $_active_stmt->execute([$user['id']]);
+        if (!(int)$_active_stmt->fetchColumn()) {
+            session_unset();
+            session_destroy();
+            header('Location: login.php?error=account_disabled');
+            exit;
+        }
+    } catch (Throwable $e) { /* fall through to normal deny handling */ }
+
+    // Station-role staff bounce to their own home screen instead of the
+    // dashboard (which their default permission sets don't include).
+    $_role_home_map = [
+        'restaurant_staff' => 'pos.php',
+        'chef'             => 'kds.php',
+        'bar_staff'        => 'bds.php',
+        'coffee_staff'     => 'cds.php',
+        'room_service'     => 'room-service-dashboard.php',
+    ];
+    $_role_home = $_role_home_map[$user['role'] ?? ''] ?? 'dashboard.php';
+
+    if ($current_page !== $_role_home) {
+        header('Location: ' . $_role_home . ($_role_home === 'dashboard.php' ? '?error=access_denied' : ''));
         exit;
     }
-    // Chefs get bounced to the Kitchen Display.
-    if (($user['role'] ?? '') === 'chef' && $current_page !== 'kds.php') {
-        header('Location: kds.php');
-        exit;
-    }
-    // User doesn't have access to this page
-    header('Location: dashboard.php?error=access_denied');
+
+    // Loop-safety: the user was denied on their own home page (custom
+    // permission overrides, or a role like bar_staff denied 'dashboard'
+    // after a redirect here). Render a minimal no-access page — never loop.
+    http_response_code(403);
+    echo '<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>No Access</title></head>'
+        . '<body style="font-family:system-ui,sans-serif;background:#f5f2eb;display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0;">'
+        . '<div style="background:#fff;border:1px solid #d5cfc4;border-radius:6px;padding:36px 40px;max-width:420px;text-align:center;">'
+        . '<div style="font-size:2rem;margin-bottom:10px;">&#128274;</div>'
+        . '<h1 style="font-size:1.1rem;color:#3e3930;margin:0 0 10px;">No accessible pages</h1>'
+        . '<p style="font-size:.9rem;color:#7a6f63;line-height:1.6;margin:0 0 20px;">Your account (' . htmlspecialchars((string)($user['username'] ?? '')) . ') does not currently have permission to view this area. Please contact your administrator.</p>'
+        . '<a href="logout.php" style="display:inline-block;background:#8B7355;color:#fff;padding:10px 22px;border-radius:4px;text-decoration:none;font-size:.9rem;">Sign out</a>'
+        . '</div></body></html>';
     exit;
 }
 
