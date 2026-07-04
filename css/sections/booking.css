@@ -3504,6 +3504,11 @@
     background: rgba(201, 169, 97, 0.12);
     color: #7A5C2E;
     border: 1px solid rgba(201, 169, 97, 0.3);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 100%;
+    box-sizing: border-box;
 }
 
 /* Badge: Recommended — slightly refined */
@@ -4189,6 +4194,11 @@
 /* Badges — shared base: compact inline pill */
 .booking-page .booking-type-badge {
     display: inline-flex !important;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 100%;
+    box-sizing: border-box;
     align-items: center !important;
     gap: 5px !important;
     padding: 4px 11px !important;
