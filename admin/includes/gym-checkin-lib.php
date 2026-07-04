@@ -43,6 +43,50 @@ if (!function_exists('gym_checkin_process')) {
      *
      * @return array{outcome:string, message:string, member?:array, expiring_soon?:bool, duration_minutes?:int, attendance_id?:int}
      */
+    /**
+     * End-of-day sweep: close any visit still open from a PREVIOUS day.
+     * Members who forget to scan out get auto-checked-out at the gym's
+     * closing time (setting gym_close_time, default 22:00) on the day they
+     * checked in — so yesterday's forgotten scan never flips today's
+     * check-in into a check-out, "in gym now" stays truthful, and visit
+     * durations aren't inflated across midnight. Runs lazily before every
+     * scan/snapshot and from the daily cron. Idempotent and cheap (indexed
+     * on checked_in_at; matches only open rows).
+     *
+     * @return int rows auto-closed
+     */
+    function gym_auto_checkout_stale(PDO $pdo, ?int $adminId = null): int
+    {
+        if (!gym_attendance_table_exists($pdo)) {
+            return 0;
+        }
+        try {
+            $closeTime = '22:00:00';
+            if (function_exists('getSetting')) {
+                $t = trim((string)getSetting('gym_close_time', '22:00'));
+                if (preg_match('/^([01]?\d|2[0-3]):[0-5]\d$/', $t)) {
+                    $closeTime = $t . ':00';
+                }
+            }
+            // Close at the LATER of (check-in time, closing time) on the
+            // check-in day — a late-night check-in after closing still gets a
+            // non-negative duration.
+            $stmt = $pdo->prepare("
+                UPDATE gym_attendance
+                SET checked_out_at = GREATEST(checked_in_at, CONCAT(DATE(checked_in_at), ' ', ?)),
+                    checked_out_by = ?,
+                    notes = TRIM(CONCAT(COALESCE(notes, ''), ' [auto check-out: end of day]'))
+                WHERE checked_out_at IS NULL
+                  AND checked_in_at < CURDATE()
+            ");
+            $stmt->execute([$closeTime, $adminId]);
+            return (int)$stmt->rowCount();
+        } catch (Throwable $e) {
+            error_log('gym_auto_checkout_stale: ' . $e->getMessage());
+            return 0;
+        }
+    }
+
     function gym_checkin_process(PDO $pdo, string $code, int $adminId, string $method = 'barcode'): array
     {
         $code = strtoupper(trim($code));
@@ -55,6 +99,9 @@ if (!function_exists('gym_checkin_process')) {
         if (!gym_attendance_table_exists($pdo)) {
             return ['outcome' => 'pending_migration', 'message' => 'Attendance table missing — run the gym_attendance migration first.'];
         }
+        // Seamless day boundary: never let yesterday's forgotten scan-out
+        // turn today's arrival into a "checked out".
+        gym_auto_checkout_stale($pdo, $adminId);
 
         try {
             $stmt = $pdo->prepare("SELECT id, member_number, full_name, email, membership_type, start_date, expiry_date, status FROM gym_members WHERE member_number = ? LIMIT 1");
@@ -107,7 +154,31 @@ if (!function_exists('gym_checkin_process')) {
                 ];
             }
 
-            // No open visit → check in.
+            // No open visit → check in. Pass-sharing guard first: one person
+            // realistically visits at most gym_max_daily_visits times a day
+            // (default 2 — a morning session plus a re-entry). A further scan
+            // is the classic sign of a card being passed around outside, so
+            // it's refused with a clear warning; staff can still record a
+            // legitimate exception manually from the members page.
+            $maxDaily = 2;
+            if (function_exists('getSetting')) {
+                $md = (int)getSetting('gym_max_daily_visits', 2);
+                if ($md >= 1 && $md <= 10) { $maxDaily = $md; }
+            }
+            $todayCount = $pdo->prepare("SELECT COUNT(*) FROM gym_attendance WHERE member_id = ? AND checked_in_at >= CURDATE()");
+            $todayCount->execute([(int)$member['id']]);
+            $visitsToday = (int)$todayCount->fetchColumn();
+            if ($visitsToday >= $maxDaily) {
+                if (function_exists('logActivity')) {
+                    try { logActivity($adminId ?: 0, 'gym_checkin_blocked', 'Possible pass sharing: ' . $member['member_number'] . ' (' . $member['full_name'] . ') attempted visit #' . ($visitsToday + 1) . ' today'); } catch (Throwable $e) { /* fine */ }
+                }
+                return [
+                    'outcome' => 'blocked',
+                    'message' => $member['full_name'] . ' has already visited ' . $visitsToday . '× today — possible pass sharing. Verify the person matches the membership before letting them in.',
+                    'member'  => $memberPublic,
+                ];
+            }
+
             $pdo->prepare("INSERT INTO gym_attendance (member_id, member_number, checked_in_at, checked_in_by, method) VALUES (?, ?, NOW(), ?, ?)")
                 ->execute([(int)$member['id'], (string)$member['member_number'], $adminId ?: null, $method]);
             $attendanceId = (int)$pdo->lastInsertId();
@@ -142,6 +213,7 @@ if (!function_exists('gym_checkin_snapshot')) {
         if (!gym_attendance_table_exists($pdo)) {
             return $out;
         }
+        gym_auto_checkout_stale($pdo);
         try {
             $out['in_gym'] = $pdo->query("
                 SELECT ga.id, ga.member_number, ga.checked_in_at, gm.full_name,

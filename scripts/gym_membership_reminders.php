@@ -39,6 +39,7 @@ if (PHP_SAPI !== 'cli') {
 require_once __DIR__ . '/../config/database.php';
 require_once __DIR__ . '/../config/email.php';
 require_once __DIR__ . '/../admin/includes/gym-reminders-lib.php';
+require_once __DIR__ . '/../admin/includes/gym-checkin-lib.php';
 
 // Prevent overlapping runs (cron + manual button) from double-processing.
 $lockFile = sys_get_temp_dir() . DIRECTORY_SEPARATOR . 'rh_gym_reminders.lock';
@@ -55,6 +56,14 @@ $say = static function (string $line) use ($quiet): void {
 $say('[' . date('Y-m-d H:i:s') . '] Gym membership reminder sweep starting...');
 
 /** @var PDO $pdo */
+// End-of-day attendance sweep first: auto-check-out anyone still marked
+// "in gym" from a previous day (forgot to scan out) at the configured
+// closing time — keeps durations honest and next-day scans seamless.
+$staleClosed = gym_auto_checkout_stale($pdo);
+if ($staleClosed > 0) {
+    $say("Auto-checked-out $staleClosed stale visit(s) from previous days.");
+}
+
 $result = gym_run_expiry_reminders($pdo);
 
 if ($result['pending_migration']) {

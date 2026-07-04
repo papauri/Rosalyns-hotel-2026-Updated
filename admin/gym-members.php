@@ -68,9 +68,66 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['gm_action'])) {
                 $gm_json(false, 'Monthly fee must be zero or a positive amount.');
             }
 
+            // Identity & accounting protection (AD-style): a member record is a
+            // person, not a reusable slot. Renaming it — or repricing the
+            // membership away from the package — requires the gym_financials
+            // permission, and every such change is audit-logged. Prevents
+            // staff "recycling" one member's card/fee for someone else.
+            $gm_can_financials = hasPermission((int)($user['id'] ?? 0), 'gym_financials');
+
+            // Package pricing is the accounting source of truth: when the
+            // selected membership type matches an active package, the fee is
+            // taken FROM the package unless a privileged user overrides it.
+            if ($type !== '') {
+                try {
+                    $pkgStmt = $pdo->prepare("SELECT price FROM gym_packages WHERE name = ? AND is_active = 1 LIMIT 1");
+                    $pkgStmt->execute([$type]);
+                    $pkgPrice = $pkgStmt->fetchColumn();
+                    if ($pkgPrice !== false && (!$gm_can_financials || $fee === null)) {
+                        $fee = (float)$pkgPrice;
+                    }
+                } catch (Throwable $e) { /* packages table optional */ }
+            }
+
             if ($memberId > 0) {
+                $curStmt = $pdo->prepare("SELECT full_name, membership_type, monthly_fee FROM gym_members WHERE id = ?");
+                $curStmt->execute([$memberId]);
+                $cur = $curStmt->fetch(PDO::FETCH_ASSOC);
+                if (!$cur) {
+                    $gm_json(false, 'Member not found.');
+                }
+
+                if (!$gm_can_financials) {
+                    if ($name !== (string)$cur['full_name']) {
+                        $gm_json(false, 'Member name changes require a manager (legal name changes only — a membership is not transferable to another person).');
+                    }
+                    // Fee is never hand-set by non-privileged users: it either
+                    // follows a real package (derived above) or stays as stored.
+                    // Changing the type to free text does NOT unlock the fee.
+                    $typeIsPackage = false;
+                    try {
+                        $pkgChk = $pdo->prepare("SELECT COUNT(*) FROM gym_packages WHERE name = ? AND is_active = 1");
+                        $pkgChk->execute([$type]);
+                        $typeIsPackage = (int)$pkgChk->fetchColumn() > 0;
+                    } catch (Throwable $e) { /* packages optional */ }
+                    if (!$typeIsPackage) {
+                        $fee = $cur['monthly_fee'] !== null ? (float)$cur['monthly_fee'] : null;
+                    }
+                }
+
                 $stmt = $pdo->prepare("UPDATE gym_members SET full_name=?, email=?, phone=?, membership_type=?, start_date=?, expiry_date=?, monthly_fee=?, status=?, notes=? WHERE id=?");
                 $stmt->execute([$name, $email ?: null, $phone ?: null, $type ?: null, $start, $expiry ?: null, $fee, $status, $notes ?: null, $memberId]);
+
+                // Audit identity/pricing changes so misuse is traceable.
+                if (function_exists('logActivity')) {
+                    $changes = [];
+                    if ($name !== (string)$cur['full_name']) { $changes[] = "name '{$cur['full_name']}' → '$name'"; }
+                    if ($type !== (string)($cur['membership_type'] ?? '')) { $changes[] = "package '{$cur['membership_type']}' → '$type'"; }
+                    if ((string)$fee !== (string)$cur['monthly_fee']) { $changes[] = "fee {$cur['monthly_fee']} → {$fee}"; }
+                    if ($changes) {
+                        try { logActivity((int)$user['id'], 'gym_member_updated', 'Member #' . $memberId . ': ' . implode('; ', $changes)); } catch (Throwable $e) { /* fine */ }
+                    }
+                }
                 $gm_json(true, 'Member updated.');
             }
             do {
@@ -157,12 +214,51 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['gm_action'])) {
             $wdays = [];
             foreach ($dayRows->fetchAll(PDO::FETCH_ASSOC) as $dr) { $wdays[(int)$dr['d']] = (int)$dr['c']; }
 
+            // In-depth fitness stats for the visit report: totals, averages,
+            // consistency, weekday spread — all from this member's history.
+            $statRow = $pdo->prepare("
+                SELECT COUNT(*) AS total_visits,
+                       SUM(CASE WHEN checked_in_at >= DATE_SUB(NOW(), INTERVAL 30 DAY) THEN 1 ELSE 0 END) AS visits_30d,
+                       SUM(CASE WHEN checked_in_at >= DATE_SUB(NOW(), INTERVAL 7 DAY) THEN 1 ELSE 0 END) AS visits_7d,
+                       AVG(CASE WHEN checked_out_at IS NOT NULL THEN TIMESTAMPDIFF(MINUTE, checked_in_at, checked_out_at) END) AS avg_minutes,
+                       MAX(CASE WHEN checked_out_at IS NOT NULL THEN TIMESTAMPDIFF(MINUTE, checked_in_at, checked_out_at) END) AS longest_minutes,
+                       SUM(CASE WHEN checked_out_at IS NOT NULL THEN TIMESTAMPDIFF(MINUTE, checked_in_at, checked_out_at) ELSE 0 END) AS total_minutes,
+                       MIN(checked_in_at) AS first_visit,
+                       MAX(checked_in_at) AS last_visit,
+                       COUNT(DISTINCT DATE(checked_in_at)) AS distinct_days
+                FROM gym_attendance WHERE member_id = ?
+            ");
+            $statRow->execute([$memberId]);
+            $stats = $statRow->fetch(PDO::FETCH_ASSOC) ?: [];
+
+            // Weekly consistency: visits per ISO week over the last 8 weeks.
+            $weekRows = $pdo->prepare("
+                SELECT YEARWEEK(checked_in_at, 3) AS yw, COUNT(*) AS c
+                FROM gym_attendance
+                WHERE member_id = ? AND checked_in_at >= DATE_SUB(NOW(), INTERVAL 8 WEEK)
+                GROUP BY yw ORDER BY yw ASC
+            ");
+            $weekRows->execute([$memberId]);
+            $weeks = $weekRows->fetchAll(PDO::FETCH_KEY_PAIR);
+
+            // Segment for the marketing angle in the report header.
+            $memRow = $pdo->prepare("SELECT status, start_date, expiry_date FROM gym_members WHERE id = ?");
+            $memRow->execute([$memberId]);
+            $mem = $memRow->fetch(PDO::FETCH_ASSOC) ?: [];
+            $segment = function_exists('gym_member_segment')
+                ? gym_member_segment($mem, (int)($stats['visits_30d'] ?? 0), (int)($stats['total_visits'] ?? 0), $stats['last_visit'] ?? null)
+                : null;
+
             header('Content-Type: application/json');
             echo json_encode([
                 'success' => true,
                 'visits'  => $visits,
                 'profile' => gym_peak_profile($hours, $wdays),
                 'hours'   => $hours,
+                'wdays'   => $wdays,
+                'stats'   => $stats,
+                'weeks'   => $weeks,
+                'segment' => $segment,
             ]);
             exit;
         }
@@ -279,6 +375,16 @@ $gm_packages = [];
 try {
     $gm_packages = $pdo->query("SELECT name FROM gym_packages WHERE is_active=1 ORDER BY display_order ASC, name ASC")->fetchAll(PDO::FETCH_COLUMN);
 } catch (PDOException $e) { /* optional */ }
+
+// Package → price map (accounting source of truth for membership fees) and
+// the caller's pricing privilege, both consumed by the modal JS.
+$gm_package_prices = [];
+try {
+    foreach ($pdo->query("SELECT name, price FROM gym_packages WHERE is_active=1")->fetchAll(PDO::FETCH_ASSOC) as $pkgRow) {
+        $gm_package_prices[(string)$pkgRow['name']] = (float)$pkgRow['price'];
+    }
+} catch (PDOException $e) { /* optional */ }
+$gm_can_financials_ui = hasPermission((int)($user['id'] ?? 0), 'gym_financials');
 
 $gm_currency = (string)getSetting('currency_symbol', 'K');
 ?>
@@ -567,12 +673,20 @@ $gm_currency = (string)getSetting('currency_symbol', 'K');
     </div>
 
     <script>
+        // Self-contained CSRF: this content-block script re-runs on every SPA
+        // render (unlike the head fetch-shim), so gm* requests never depend on
+        // page-load order to carry a token.
+        var GM_CSRF = <?php echo json_encode($csrf_token); ?>;
+        var GM_PKG_PRICES = <?php echo json_encode($gm_package_prices); ?>;
+        var GM_CAN_FIN = <?php echo $gm_can_financials_ui ? 'true' : 'false'; ?>;
+
         function gmOpen(id) { document.getElementById(id).classList.add('open'); }
         function gmClose(id) { document.getElementById(id).classList.remove('open'); }
         function gmToast(msg, ok) { if (typeof Alert !== 'undefined' && Alert.show) { Alert.show(msg, ok ? 'success' : 'error'); } }
 
         function gmPost(fields) {
             var fd = new FormData();
+            fd.append('csrf_token', GM_CSRF);
             Object.keys(fields).forEach(function (k) { fd.append(k, fields[k] == null ? '' : fields[k]); });
             return fetch(window.location.pathname + window.location.search, { method: 'POST', body: fd, credentials: 'same-origin', headers: { 'X-Requested-With': 'XMLHttpRequest' } })
                 .then(function (r) { return r.json(); })
@@ -597,9 +711,30 @@ $gm_currency = (string)getSetting('currency_symbol', 'K');
             document.getElementById('gmFee').value = m && m.monthly_fee != null ? m.monthly_fee : '';
             document.getElementById('gmStatus').value = m ? (m.status || 'active') : 'active';
             document.getElementById('gmNotes').value = m ? (m.notes || '') : '';
+
+            // Identity & pricing locks (AD-style): editing an EXISTING member,
+            // non-privileged staff cannot rename them or hand-edit the fee —
+            // the fee follows the selected package (accounting source of truth).
+            var nameEl = document.getElementById('gmName');
+            var feeEl = document.getElementById('gmFee');
+            var lockIdentity = !!m && !GM_CAN_FIN;
+            nameEl.readOnly = lockIdentity;
+            nameEl.style.background = lockIdentity ? '#f3efe8' : '';
+            nameEl.title = lockIdentity ? 'Name changes require a manager — memberships are not transferable.' : '';
+            feeEl.readOnly = !GM_CAN_FIN;
+            feeEl.style.background = !GM_CAN_FIN ? '#f3efe8' : '';
+            feeEl.title = !GM_CAN_FIN ? 'Fee is set by the selected package. Overrides require a manager.' : '';
+
             gmOpen('gmModal');
-            setTimeout(function () { document.getElementById('gmName').focus(); }, 60);
+            setTimeout(function () { document.getElementById(lockIdentity ? 'gmEmail' : 'gmName').focus(); }, 60);
         }
+
+        // Selecting a package auto-fills its price as the fee — keeps member
+        // fees aligned with gym_packages for accounting.
+        document.getElementById('gmType').addEventListener('change', function () {
+            var p = GM_PKG_PRICES[this.value.trim()];
+            if (p != null) { document.getElementById('gmFee').value = p; }
+        });
 
         function gmSave() {
             var name = document.getElementById('gmName').value.trim();
@@ -640,10 +775,11 @@ $gm_currency = (string)getSetting('currency_symbol', 'K');
         function gmFmtDur(mins) { if (mins == null) return '<span style="color:#2e7d32;font-weight:700;">in gym</span>'; mins = parseInt(mins, 10); return mins >= 60 ? Math.floor(mins / 60) + 'h ' + (mins % 60) + 'm' : mins + 'm'; }
 
         function gmShowLog(id, name) {
-            document.getElementById('gmLogTitle').textContent = 'Recent Visits — ' + name;
+            document.getElementById('gmLogTitle').textContent = 'Fitness Report — ' + name;
             document.getElementById('gmLogBody').innerHTML = '<p style="color:#9a8f82;">Loading…</p>';
             gmOpen('gmLogModal');
             var fd = new FormData();
+            fd.append('csrf_token', GM_CSRF);
             fd.append('gm_action', 'member_attendance');
             fd.append('id', id);
             fetch(window.location.pathname, { method: 'POST', body: fd, credentials: 'same-origin', headers: { 'X-Requested-With': 'XMLHttpRequest' } })
@@ -656,6 +792,43 @@ $gm_currency = (string)getSetting('currency_symbol', 'K');
                         return;
                     }
                     var html = '';
+                    // ── Fitness report header: segment + headline stats ──
+                    var st = d.stats || {};
+                    if (d.segment && d.segment.segment) {
+                        html += '<div style="display:inline-block;background:' + gmEscape(d.segment.color || '#8B7355') + '1a;border:1px solid ' + gmEscape(d.segment.color || '#8B7355') + ';color:' + gmEscape(d.segment.color || '#8B7355') + ';border-radius:999px;padding:3px 12px;font-size:.74rem;font-weight:700;margin-bottom:10px;" title="' + gmEscape(d.segment.hint || '') + '">' + gmEscape(d.segment.segment) + '</div>';
+                    }
+                    var statCell = function (val, label) {
+                        return '<div style="flex:1;min-width:90px;background:#fff;border:1px solid #e8e0d4;border-radius:6px;padding:8px 10px;text-align:center;">' +
+                            '<div style="font-size:1.05rem;font-weight:700;color:#3e3930;">' + val + '</div>' +
+                            '<div style="font-size:.68rem;color:#9a8f82;text-transform:uppercase;letter-spacing:.04em;">' + label + '</div></div>';
+                    };
+                    var avgM = st.avg_minutes != null ? Math.round(parseFloat(st.avg_minutes)) : null;
+                    var totH = st.total_minutes ? (parseInt(st.total_minutes, 10) / 60).toFixed(1) : '0';
+                    html += '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px;">' +
+                        statCell(parseInt(st.total_visits || 0, 10), 'Total visits') +
+                        statCell(parseInt(st.visits_30d || 0, 10) + ' / ' + parseInt(st.visits_7d || 0, 10), '30d / 7d') +
+                        statCell(avgM != null ? gmFmtDur(avgM) : '—', 'Avg session') +
+                        statCell(st.longest_minutes ? gmFmtDur(parseInt(st.longest_minutes, 10)) : '—', 'Longest') +
+                        statCell(totH + 'h', 'Lifetime time') +
+                        '</div>';
+
+                    // ── Weekly consistency: visits per week, last 8 weeks ──
+                    var weeks = d.weeks || {};
+                    var wkKeys = Object.keys(weeks);
+                    if (wkKeys.length) {
+                        var wmax = 0; wkKeys.forEach(function (k) { if (weeks[k] > wmax) wmax = weeks[k]; });
+                        html += '<div style="background:#FAF6F0;border:1px solid #e8e0d4;border-radius:6px;padding:12px 14px;margin-bottom:14px;">' +
+                            '<div style="font-weight:700;color:#8B7355;font-size:.8rem;margin-bottom:8px;"><i class="fas fa-calendar-week"></i> Weekly consistency (last 8 weeks)</div>' +
+                            '<div style="display:flex;align-items:flex-end;gap:5px;height:52px;">' +
+                            wkKeys.map(function (k) {
+                                var c = weeks[k];
+                                var h = Math.max(6, Math.round((c / wmax) * 46));
+                                return '<div style="flex:1;text-align:center;" title="Week ' + gmEscape(String(k).slice(4)) + ': ' + c + ' visit(s)">' +
+                                    '<div style="background:#B18247;border-radius:3px 3px 0 0;height:' + h + 'px;"></div>' +
+                                    '<div style="font-size:.62rem;color:#9a8f82;margin-top:2px;">' + c + '</div></div>';
+                            }).join('') + '</div></div>';
+                    }
+
                     // Peak-time profile: summary line + per-hour histogram bars
                     if (d.profile && d.profile.summary) {
                         html += '<div style="background:#FAF6F0;border:1px solid #e8e0d4;border-radius:6px;padding:12px 14px;margin-bottom:14px;">' +
@@ -697,6 +870,7 @@ $gm_currency = (string)getSetting('currency_symbol', 'K');
         function gmRunReminders(btn) {
             btn.disabled = true;
             var fd = new FormData();
+            fd.append('csrf_token', GM_CSRF);
             fd.append('gm_action', 'run_reminders');
             fetch(window.location.pathname, { method: 'POST', body: fd, credentials: 'same-origin', headers: { 'X-Requested-With': 'XMLHttpRequest' } })
                 .then(function (r) { return r.json(); })
@@ -736,6 +910,15 @@ $gm_currency = (string)getSetting('currency_symbol', 'K');
             document.getElementById('gmType').value = q.get('enrol_type') || '';
             document.getElementById('gmInquiryId').value = parseInt(q.get('enrol_inquiry_id') || '0', 10) || 0;
         })();
+
+        // SPA-proof: expose the handlers used by inline onclick attributes
+        // explicitly, so a re-rendered page never depends on the SPA's
+        // automatic export heuristics for these to work on first click.
+        window.gmOpen = gmOpen; window.gmClose = gmClose; window.gmToast = gmToast;
+        window.gmPost = gmPost; window.gmOpenModal = gmOpenModal; window.gmSave = gmSave;
+        window.gmStatus = gmStatus; window.gmDelete = gmDelete; window.gmResendCard = gmResendCard;
+        window.gmShowLog = gmShowLog; window.gmSaveReminderSettings = gmSaveReminderSettings;
+        window.gmRunReminders = gmRunReminders; window.gmConfirm = gmConfirm;
     </script>
 
     <?php require_once 'includes/admin-footer.php'; ?>
