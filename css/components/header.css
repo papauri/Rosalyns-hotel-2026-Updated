@@ -165,8 +165,8 @@
 }
 
 .header__logo-media {
-    width: 94px;
-    height: 94px;
+    width: 120px;
+    height: 120px;
     display: inline-flex;
     align-items: center;
     justify-content: center;
@@ -175,7 +175,7 @@
 }
 
 .header__logo-image {
-    height: 88px;
+    height: 114px;
     width: auto;
     max-width: none;
     object-fit: contain;
@@ -765,12 +765,12 @@
     }
 
     .header__logo-media {
-        width: 108px;
-        height: 108px;
+        width: 140px;
+        height: 140px;
     }
 
     .header__logo-image {
-        height: 100px;
+        height: 132px;
     }
 
     .header__logo-text {
@@ -829,12 +829,12 @@
     }
 
     .header__logo-media {
-        width: 128px;
-        height: 128px;
+        width: 165px;
+        height: 165px;
     }
 
     .header__logo-image {
-        height: 120px;
+        height: 156px;
     }
 
     .header__logo-text {
@@ -880,12 +880,12 @@
     }
 
     .header__logo-media {
-        width: 140px;
-        height: 140px;
+        width: 180px;
+        height: 180px;
     }
 
     .header__logo-image {
-        height: 132px;
+        height: 170px;
     }
 
     .header__menu {
@@ -962,12 +962,12 @@
     }
 
     .header__logo-media {
-        width: 60px;
-        height: 60px;
+        width: 72px;
+        height: 72px;
     }
 
     .header__logo-image {
-        height: 54px;
+        height: 66px;
     }
 
     .header__mobile {
