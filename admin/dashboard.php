@@ -383,6 +383,39 @@ if ($is_card_insight_ajax) {
     header('Content-Type: application/json; charset=utf-8');
     $currency_symbol = getSetting('currency_symbol');
     $card = trim((string)($_GET['card'] ?? ''));
+
+    // Per-preset gate: an insight card is only served when its module is
+    // enabled — mirrors the UI gating so disabled-module data can't be
+    // fetched by direct URL on presets that hide those cards.
+    $insightCardGates = [
+        'checkins_today'            => $mod_bookings,
+        'checkouts_today'           => $mod_bookings,
+        'pending_bookings'          => $mod_bookings,
+        'inhouse_guests'            => $mod_bookings,
+        'expired_bookings'          => $mod_bookings,
+        'pending_conference'        => $mod_conference,
+        'today_conferences'         => $mod_conference,
+        'outstanding_balances'      => $mod_finance,
+        'open_tabs'                 => $mod_pos,
+        'room_service_reminders_due'=> $mod_pos && $mod_bookings,
+        'room_service_pending'      => $mod_pos && $mod_bookings,
+        'kitchen_tickets'           => $mod_pos && $mod_station_kds,
+        'bar_tickets'               => $mod_pos && $mod_station_bds,
+        'coffee_tickets'            => $mod_pos && $mod_station_cds,
+        'restaurant_revenue_today'  => $mod_pos,
+        'total_revenue_today'       => $mod_finance,
+        'refunds_pending'           => $mod_finance,
+        'stock_health'              => $mod_stock,
+        'guest_services_queue'      => $mod_website_cms || $mod_gym || $mod_bookings,
+        'operations_facilities'     => $mod_bookings || $mod_housekeeping || $mod_pos || $mod_finance,
+        'room_status_overview'      => $mod_bookings || $mod_housekeeping,
+    ];
+    $gateKey = str_starts_with($card, 'room_status_') ? 'room_status_overview' : $card;
+    if (isset($insightCardGates[$gateKey]) && !$insightCardGates[$gateKey]) {
+        http_response_code(404);
+        echo json_encode(['success' => false, 'error' => 'This insight is not available for the current business setup.']);
+        exit;
+    }
     $stationWindowStart = $station_union_start_sql;
     $stationWindowEnd = $station_union_end_sql;
     $stationWindowLabel = (string)($station_union_window['window_label'] ?? 'Current service window');

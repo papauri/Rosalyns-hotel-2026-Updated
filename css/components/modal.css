@@ -347,7 +347,8 @@ body.modal-open {
     }
 }
 
-@media (max-width: 64rem) {
+/* Card-stack collapse is mobile-only (≤48rem); larger screens keep tables. */
+@media (max-width: 48rem) {
     .modal__body table {
         table-layout: auto;
     }

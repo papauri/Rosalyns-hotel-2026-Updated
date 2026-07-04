@@ -362,7 +362,9 @@
     white-space: normal;
 }
 
-@media (max-width: 64rem) {
+/* Card-stack collapse is mobile-only (≤48rem). Laptops and tablets keep the
+   standard table layout so every modal matches the Outstanding Balances look. */
+@media (max-width: 48rem) {
 
     .modal__body table,
     .modal-body table,

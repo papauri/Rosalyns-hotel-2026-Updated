@@ -380,6 +380,8 @@ try {
                     <?php if ($qt_mod_bookings || $filter_type === 'room'): ?><option value="room" <?php echo $filter_type === 'room'       ? 'selected' : ''; ?>>Room</option><?php endif; ?>
                     <?php if ($qt_mod_conf || $filter_type === 'conference'): ?><option value="conference" <?php echo $filter_type === 'conference' ? 'selected' : ''; ?>>Conference</option><?php endif; ?>
                     <?php if ($qt_mod_events || $filter_type === 'event'): ?><option value="event" <?php echo $filter_type === 'event'      ? 'selected' : ''; ?>>Event</option><?php endif; ?>
+                    <?php $qt_mod_gym = function_exists('moduleEnabled') && moduleEnabled('gym'); ?>
+                    <?php if ($qt_mod_gym || $filter_type === 'gym'): ?><option value="gym" <?php echo $filter_type === 'gym'        ? 'selected' : ''; ?>>Gym</option><?php endif; ?>
                 </select>
             </div>
             <div>

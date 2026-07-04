@@ -1924,7 +1924,9 @@ table.mobile-enhanced td[data-label="Actions"] .actions-row .actions-more-toggle
     white-space: normal;
 }
 
-@media (max-width: 64rem) {
+/* Card-stack collapse is mobile-only (≤48rem); laptops keep real tables so
+   every modal matches the standard Outstanding Balances table look. */
+@media (max-width: 48rem) {
     .modal-body table {
         table-layout: auto;
     }
