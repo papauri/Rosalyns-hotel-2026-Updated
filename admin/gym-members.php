@@ -14,6 +14,8 @@
 require_once 'admin-init.php';
 require_once '../includes/alert.php';
 require_once __DIR__ . '/includes/gym-checkin-lib.php';
+require_once __DIR__ . '/includes/gym-analytics-lib.php';
+require_once __DIR__ . '/includes/gym-reminders-lib.php';
 
 /** @var PDO $pdo */
 /** @var array $user */
@@ -142,9 +144,56 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['gm_action'])) {
                 ORDER BY checked_in_at DESC LIMIT 10
             ");
             $stmt->execute([$memberId]);
+            $visits = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+            // Personal peak profile from ALL of this member's visits: per-hour
+            // histogram + weekday preference, for targeted marketing.
+            $hourRows = $pdo->prepare("SELECT HOUR(checked_in_at) AS h, COUNT(*) AS c FROM gym_attendance WHERE member_id = ? GROUP BY h");
+            $hourRows->execute([$memberId]);
+            $hours = [];
+            foreach ($hourRows->fetchAll(PDO::FETCH_ASSOC) as $hr) { $hours[(int)$hr['h']] = (int)$hr['c']; }
+            $dayRows = $pdo->prepare("SELECT WEEKDAY(checked_in_at) AS d, COUNT(*) AS c FROM gym_attendance WHERE member_id = ? GROUP BY d");
+            $dayRows->execute([$memberId]);
+            $wdays = [];
+            foreach ($dayRows->fetchAll(PDO::FETCH_ASSOC) as $dr) { $wdays[(int)$dr['d']] = (int)$dr['c']; }
+
             header('Content-Type: application/json');
-            echo json_encode(['success' => true, 'visits' => $stmt->fetchAll(PDO::FETCH_ASSOC)]);
+            echo json_encode([
+                'success' => true,
+                'visits'  => $visits,
+                'profile' => gym_peak_profile($hours, $wdays),
+                'hours'   => $hours,
+            ]);
             exit;
+        }
+
+        if ($action === 'reminder_settings') {
+            $enabled = !empty($_POST['enabled']) ? '1' : '0';
+            $days = (int)($_POST['days'] ?? 3);
+            if ($days < 1 || $days > 30) {
+                $gm_json(false, 'Reminder days must be between 1 and 30.');
+            }
+            updateSetting('gym_reminder_enabled', $enabled);
+            updateSetting('gym_reminder_days', (string)$days);
+            $gm_json(true, $enabled === '1'
+                ? 'Renewal reminders on — members are emailed ' . $days . ' day(s) before expiry.'
+                : 'Renewal reminders switched off.');
+        }
+
+        if ($action === 'run_reminders') {
+            require_once '../config/email.php';
+            $run = gym_run_expiry_reminders($pdo);
+            if ($run['pending_migration']) {
+                $gm_json(false, 'Reminder log table missing — run admin/migrations/2026_07_04_gym_reminder_log.sql first.');
+            }
+            if ($run['disabled']) {
+                $gm_json(false, 'Reminders are switched off — enable them first.');
+            }
+            $msg = 'Checked ' . $run['checked'] . ' due membership(s): ' . $run['sent'] . ' reminder(s) sent, ' . $run['skipped'] . ' already reminded.';
+            if (!empty($run['errors'])) {
+                $msg .= ' Errors: ' . implode(' | ', array_slice($run['errors'], 0, 3));
+            }
+            $gm_json(empty($run['errors']), $msg);
         }
 
         if ($action === 'member_status') {
@@ -195,14 +244,23 @@ $gm_attendance_ready = !$gm_table_missing && gym_attendance_table_exists($pdo);
 $gm_visit_stats = [];      // member_id => ['visits' => n, 'last_in' => datetime, 'in_now' => 0|1]
 $gm_in_gym_now = 0;
 $gm_visits_today = 0;
+$gm_peak_stats = [];       // member_id => ['hours' => [h=>c], 'wdays' => [d=>c]]
 if ($gm_attendance_ready) {
     try {
         foreach ($pdo->query("
             SELECT member_id, COUNT(*) AS visits, MAX(checked_in_at) AS last_in,
-                   SUM(CASE WHEN checked_out_at IS NULL THEN 1 ELSE 0 END) AS in_now
+                   SUM(CASE WHEN checked_out_at IS NULL THEN 1 ELSE 0 END) AS in_now,
+                   SUM(CASE WHEN checked_in_at >= DATE_SUB(NOW(), INTERVAL 30 DAY) THEN 1 ELSE 0 END) AS visits_30d
             FROM gym_attendance GROUP BY member_id
         ")->fetchAll(PDO::FETCH_ASSOC) as $vs) {
             $gm_visit_stats[(int)$vs['member_id']] = $vs;
+        }
+        // Per-member check-in hour + weekday histograms (small table; one pass each)
+        foreach ($pdo->query("SELECT member_id, HOUR(checked_in_at) AS h, COUNT(*) AS c FROM gym_attendance GROUP BY member_id, h")->fetchAll(PDO::FETCH_ASSOC) as $hr) {
+            $gm_peak_stats[(int)$hr['member_id']]['hours'][(int)$hr['h']] = (int)$hr['c'];
+        }
+        foreach ($pdo->query("SELECT member_id, WEEKDAY(checked_in_at) AS d, COUNT(*) AS c FROM gym_attendance GROUP BY member_id, d")->fetchAll(PDO::FETCH_ASSOC) as $dr) {
+            $gm_peak_stats[(int)$dr['member_id']]['wdays'][(int)$dr['d']] = (int)$dr['c'];
         }
         $gm_in_gym_now   = (int)$pdo->query("SELECT COUNT(*) FROM gym_attendance WHERE checked_out_at IS NULL")->fetchColumn();
         $gm_visits_today = (int)$pdo->query("SELECT COUNT(*) FROM gym_attendance WHERE checked_in_at >= CURDATE()")->fetchColumn();
@@ -210,6 +268,11 @@ if ($gm_attendance_ready) {
         $gm_attendance_ready = false;
     }
 }
+
+// Renewal-reminder configuration + last-run summary
+$gm_reminder_cfg   = gym_reminder_settings();
+$gm_reminder_ready = !$gm_table_missing && gym_reminder_log_table_exists($pdo);
+$gm_reminder_run   = $gm_reminder_ready ? gym_reminder_last_run($pdo) : ['last_sent_at' => null, 'sent_today' => 0, 'total' => 0];
 
 // Package names for the membership-type datalist (best effort)
 $gm_packages = [];
@@ -277,6 +340,34 @@ $gm_currency = (string)getSetting('currency_symbol', 'K');
             <?php showAlert('The membership register table (gym_members) has not been created yet — run the migration in admin/migrations/2026_07_03_create_gym_members.sql, then reload this page.', 'error'); ?>
         <?php else: ?>
 
+        <!-- Renewal reminder engine — configurable days-before-expiry email -->
+        <div style="background:#fff;border:1px solid #d5cfc4;border-radius:4px;padding:14px 18px;margin-bottom:18px;display:flex;align-items:center;gap:14px;flex-wrap:wrap;">
+            <span style="font-weight:700;color:#8B7355;font-size:.82rem;letter-spacing:.05em;text-transform:uppercase;">
+                <i class="fas fa-bell"></i> Renewal Reminders
+            </span>
+            <label style="display:inline-flex;align-items:center;gap:7px;font-size:.86rem;color:#3e3930;cursor:pointer;">
+                <input type="checkbox" id="gmRemEnabled" <?php echo $gm_reminder_cfg['enabled'] ? 'checked' : ''; ?>>
+                Email members
+            </label>
+            <label style="display:inline-flex;align-items:center;gap:7px;font-size:.86rem;color:#3e3930;">
+                <input type="number" id="gmRemDays" min="1" max="30" value="<?php echo (int)$gm_reminder_cfg['days']; ?>" style="width:64px;padding:6px 8px;border:1px solid #d3cbc0;border-radius:4px;">
+                day(s) before expiry
+            </label>
+            <button class="mm-btn mm-btn-sm" onclick="gmSaveReminderSettings()"><i class="fas fa-save"></i> Save</button>
+            <button class="mm-btn mm-btn-sm" style="background:#8B7355;color:#fff;" onclick="gmRunReminders(this)" title="Checks for memberships expiring within the window and emails any not yet reminded — safe to click repeatedly">
+                <i class="fas fa-paper-plane"></i> Send due reminders now
+            </button>
+            <span style="font-size:.78rem;color:#9a8f82;margin-left:auto;">
+                <?php if (!$gm_reminder_ready): ?>
+                    <i class="fas fa-triangle-exclamation" style="color:#B18247;"></i> Log table pending — run admin/migrations/2026_07_04_gym_reminder_log.sql
+                <?php elseif ($gm_reminder_run['last_sent_at']): ?>
+                    Last reminder sent <?php echo htmlspecialchars(date('M j, H:i', strtotime((string)$gm_reminder_run['last_sent_at']))); ?> · <?php echo (int)$gm_reminder_run['sent_today']; ?> today · <?php echo (int)$gm_reminder_run['total']; ?> all-time
+                <?php else: ?>
+                    No reminders sent yet — cron: scripts/gym_membership_reminders.php (daily)
+                <?php endif; ?>
+            </span>
+        </div>
+
         <div class="menu-type-tabs" style="margin-bottom:18px;">
             <?php foreach (['all' => 'All', 'active' => 'Active', 'expiring' => 'Expiring ≤30d', 'expired' => 'Expired'] as $fk => $fl): ?>
                 <a class="menu-type-tab <?php echo $gm_filter === $fk ? 'active' : ''; ?>" href="?filter=<?php echo $fk; ?>" style="text-decoration:none;">
@@ -303,7 +394,8 @@ $gm_currency = (string)getSetting('currency_symbol', 'K');
                         <th style="width:110px;">Fee (<?php echo htmlspecialchars($gm_currency); ?>/mo)</th>
                         <?php if ($gm_attendance_ready): ?>
                         <th style="width:120px;" title="Most recent check-in">Last Visit</th>
-                        <th style="width:70px;" title="Total recorded visits">Visits</th>
+                        <th style="width:90px;" title="Total visits, and visits in the last 30 days">Visits</th>
+                        <th style="width:160px;" title="Personal peak training time and marketing segment (click visits for the full breakdown)">Profile</th>
                         <?php endif; ?>
                         <th style="width:100px;">Status</th>
                         <th style="width:170px;">Actions</th>
@@ -311,8 +403,8 @@ $gm_currency = (string)getSetting('currency_symbol', 'K');
                 </thead>
                 <tbody>
                     <?php foreach ($gm_members as $m):
-                        $expSoon = $m['status'] === 'active' && $m['expiry_date'] && strtotime($m['expiry_date']) <= strtotime('+30 days');
                         $statusColor = ['active' => '#2e7d32', 'expired' => '#9e4040', 'suspended' => '#B18247', 'cancelled' => '#6c757d'][$m['status']] ?? '#6c757d';
+                        $expPill = gym_days_to_expiry($m['expiry_date'] ?? null, (string)$m['status'], (int)$gm_reminder_cfg['days']);
                     ?>
                         <tr>
                             <td><strong><?php echo htmlspecialchars($m['member_number']); ?></strong></td>
@@ -322,8 +414,9 @@ $gm_currency = (string)getSetting('currency_symbol', 'K');
                             </td>
                             <td><?php echo htmlspecialchars($m['membership_type'] ?? '—'); ?></td>
                             <td><?php echo htmlspecialchars(date('M j, Y', strtotime($m['start_date']))); ?></td>
-                            <td style="<?php echo $expSoon ? 'color:#c0392b;font-weight:600;' : ''; ?>">
+                            <td style="font-size:.85rem;">
                                 <?php echo $m['expiry_date'] ? htmlspecialchars(date('M j, Y', strtotime($m['expiry_date']))) : '—'; ?>
+                                <br><span style="display:inline-block;margin-top:3px;padding:1px 8px;border-radius:10px;font-size:.72rem;font-weight:700;color:<?php echo $expPill['color']; ?>;background:<?php echo $expPill['bg']; ?>;"><?php echo htmlspecialchars($expPill['label']); ?></span>
                             </td>
                             <td><?php echo $m['monthly_fee'] !== null ? number_format((float)$m['monthly_fee'], 2) : '—'; ?></td>
                             <?php if ($gm_attendance_ready):
@@ -339,12 +432,27 @@ $gm_currency = (string)getSetting('currency_symbol', 'K');
                                     <span style="color:#9a8f82;">Never</span>
                                 <?php endif; ?>
                             </td>
-                            <td style="text-align:center;">
+                            <td style="text-align:center;font-size:.85rem;">
+                                <?php
+                                    $v30 = $vs ? (int)($vs['visits_30d'] ?? 0) : 0;
+                                    $freq = gym_frequency_label($v30, $m['start_date'] ?? null);
+                                ?>
                                 <?php if ($vs && (int)$vs['visits'] > 0): ?>
                                     <a href="#" onclick="gmShowLog(<?php echo (int)$m['id']; ?>, '<?php echo htmlspecialchars($m['full_name'], ENT_QUOTES); ?>'); return false;" style="font-weight:700;"><?php echo (int)$vs['visits']; ?></a>
                                 <?php else: ?>
                                     <span style="color:#9a8f82;">0</span>
                                 <?php endif; ?>
+                                <br><span style="font-size:.72rem;font-weight:700;color:<?php echo $freq['color']; ?>;" title="<?php echo $v30; ?> visit(s) in the last 30 days"><?php echo htmlspecialchars($freq['label']); ?> · <?php echo $v30; ?>/30d</span>
+                            </td>
+                            <td style="font-size:.78rem;">
+                                <?php
+                                    $peak = gym_peak_profile($gm_peak_stats[(int)$m['id']]['hours'] ?? [], $gm_peak_stats[(int)$m['id']]['wdays'] ?? []);
+                                    $seg  = gym_member_segment($m, $v30, $vs ? (int)$vs['visits'] : 0, $vs['last_in'] ?? null);
+                                ?>
+                                <?php if ($peak['top_slot']): ?>
+                                    <span style="color:#5a5147;" title="<?php echo htmlspecialchars((string)$peak['summary']); ?>"><i class="fas fa-clock" style="color:#B18247;"></i> <?php echo htmlspecialchars((string)$peak['top_slot']); ?></span><br>
+                                <?php endif; ?>
+                                <span style="display:inline-block;margin-top:2px;padding:1px 8px;border-radius:10px;font-size:.7rem;font-weight:700;color:#fff;background:<?php echo $seg['color']; ?>;" title="<?php echo htmlspecialchars($seg['hint']); ?>"><?php echo htmlspecialchars($seg['segment']); ?></span>
                             </td>
                             <?php endif; ?>
                             <td><span style="font-weight:600;color:<?php echo $statusColor; ?>;"><?php echo ucfirst($m['status']); ?></span></td>
@@ -547,12 +655,57 @@ $gm_currency = (string)getSetting('currency_symbol', 'K');
                         body.innerHTML = '<p style="color:#9a8f82;margin:0;">No visits recorded yet.</p>';
                         return;
                     }
-                    body.innerHTML = '<table class="menu-table" style="margin:0;"><thead><tr><th>In</th><th>Out</th><th>Duration</th><th>Method</th></tr></thead><tbody>' +
+                    var html = '';
+                    // Peak-time profile: summary line + per-hour histogram bars
+                    if (d.profile && d.profile.summary) {
+                        html += '<div style="background:#FAF6F0;border:1px solid #e8e0d4;border-radius:6px;padding:12px 14px;margin-bottom:14px;">' +
+                            '<div style="font-weight:700;color:#8B7355;font-size:.8rem;margin-bottom:8px;"><i class="fas fa-chart-simple"></i> Peak training time: ' + gmEscape(d.profile.summary) + '</div>';
+                        var hours = d.hours || {};
+                        var max = 0;
+                        Object.keys(hours).forEach(function (h) { if (hours[h] > max) max = hours[h]; });
+                        if (max > 0) {
+                            html += Object.keys(hours).sort(function (a, b) { return a - b; }).map(function (h) {
+                                var c = hours[h];
+                                var pct = Math.max(4, Math.round((c / max) * 100));
+                                return '<div style="display:flex;align-items:center;gap:8px;margin:2px 0;font-size:.72rem;color:#5a5147;">' +
+                                    '<span style="width:42px;text-align:right;">' + String(h).padStart(2, '0') + ':00</span>' +
+                                    '<span style="flex:1;background:#ece4d8;border-radius:3px;overflow:hidden;"><span style="display:block;height:9px;width:' + pct + '%;background:#B18247;border-radius:3px;"></span></span>' +
+                                    '<span style="width:20px;">' + c + '</span></div>';
+                            }).join('');
+                        }
+                        html += '</div>';
+                    }
+                    html += '<table class="menu-table" style="margin:0;"><thead><tr><th>In</th><th>Out</th><th>Duration</th><th>Method</th></tr></thead><tbody>' +
                         visits.map(function (v) {
                             return '<tr><td>' + gmFmtDT(v.checked_in_at) + '</td><td>' + (v.checked_out_at ? gmFmtDT(v.checked_out_at) : '—') + '</td><td>' + gmFmtDur(v.minutes) + '</td><td>' + gmEscape(v.method) + '</td></tr>';
                         }).join('') + '</tbody></table>';
+                    body.innerHTML = html;
                 })
                 .catch(function () { document.getElementById('gmLogBody').innerHTML = '<p style="color:#c0392b;margin:0;">Could not load visits.</p>'; });
+        }
+
+        function gmSaveReminderSettings() {
+            var days = parseInt(document.getElementById('gmRemDays').value, 10);
+            if (isNaN(days) || days < 1 || days > 30) { gmToast('Reminder days must be between 1 and 30.', false); return; }
+            gmPost({
+                gm_action: 'reminder_settings',
+                enabled: document.getElementById('gmRemEnabled').checked ? 1 : 0,
+                days: days
+            });
+        }
+
+        function gmRunReminders(btn) {
+            btn.disabled = true;
+            var fd = new FormData();
+            fd.append('gm_action', 'run_reminders');
+            fetch(window.location.pathname, { method: 'POST', body: fd, credentials: 'same-origin', headers: { 'X-Requested-With': 'XMLHttpRequest' } })
+                .then(function (r) { return r.json(); })
+                .then(function (d) {
+                    gmToast(d.message || (d.success ? 'Done.' : 'Failed.'), !!d.success);
+                    if (d.success) { setTimeout(function () { window.location.reload(); }, 1400); }
+                })
+                .catch(function () { gmToast('Network error — please try again.', false); })
+                .finally(function () { btn.disabled = false; });
         }
 
         var gmConfirmCb = null;

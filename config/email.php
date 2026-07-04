@@ -6702,3 +6702,57 @@ function sendPasswordChangeOtpEmail(string $toEmail, string $name, string $otp):
 
     return sendEmail($toEmail, $name, 'Your verification code: ' . $otp . ' — ' . $siteName, wrapEmailTemplate($htmlBody, 'Password Change Verification'), 'Your ' . $siteName . ' password change verification code is ' . $otp . ' (valid 10 minutes).');
 }
+
+/**
+ * Membership renewal reminder — warm nudge sent N days before expiry by the
+ * gym reminder engine (admin/includes/gym-reminders-lib.php). Deliberately
+ * NOT invoice-like: it's a "we'd love to keep seeing you" note with the
+ * renewal details and a contact CTA.
+ */
+function sendGymRenewalReminderEmail(array $member, int $daysLeft): array
+{
+    global $email_site_name, $email_from_email;
+
+    $toEmail = trim((string)($member['email'] ?? ''));
+    if ($toEmail === '' || !filter_var($toEmail, FILTER_VALIDATE_EMAIL)) {
+        return ['success' => false, 'message' => 'Member has no valid email address.'];
+    }
+    $name       = (string)($member['full_name'] ?? 'Member');
+    $siteName   = $email_site_name ?: getSetting('site_name', 'Gym');
+    $package    = trim((string)($member['membership_type'] ?? ''));
+    $expiryDate = !empty($member['expiry_date']) ? date('l, F j, Y', strtotime((string)$member['expiry_date'])) : '';
+    $fee        = isset($member['monthly_fee']) && $member['monthly_fee'] !== null && (float)$member['monthly_fee'] > 0
+        ? trim((string)getSetting('currency_symbol', 'K')) . ' ' . number_format((float)$member['monthly_fee'], 2)
+        : '';
+    $phone      = (string)getSetting('phone_main', '');
+
+    $daysWord = $daysLeft === 0 ? 'today' : ($daysLeft === 1 ? 'tomorrow' : 'in ' . $daysLeft . ' days');
+
+    $htmlBody = '
+        <h1 style="color: #8B7355; text-align: center;">Your Membership Renews Soon</h1>
+        <p>Hi ' . htmlspecialchars($name) . ',</p>
+        <p>Just a friendly heads-up — your <strong>' . htmlspecialchars($siteName) . '</strong> membership expires <strong>' . htmlspecialchars($daysWord) . '</strong>. We\'d love to keep seeing you, so renew any time before then and your training won\'t miss a beat.</p>
+        <div style="background: #FAF6F0; border: 2px solid #C8A45A; padding: 20px; margin: 20px 0; border-radius: 10px;">
+            <h2 style="color: #8B7355; margin-top: 0;text-align:left;">Renewal Details</h2>'
+            . ($package !== '' ? '<table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="margin:0;"><tr><td style="padding:10px 10px 10px 0;font-weight:bold;color:#1A1A1A;width:44%;vertical-align:top;border-bottom:1px solid #e8e0d4;">Package:</td><td style="padding:10px 0 10px 6px;color:#333;text-align:left;vertical-align:top;border-bottom:1px solid #e8e0d4;">' . htmlspecialchars($package) . '</td></tr></table>' : '')
+            . ($expiryDate !== '' ? '<table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="margin:0;"><tr><td style="padding:10px 10px 10px 0;font-weight:bold;color:#1A1A1A;width:44%;vertical-align:top;border-bottom:1px solid #e8e0d4;">Expires:</td><td style="padding:10px 0 10px 6px;color:#8B7355;font-weight:bold;text-align:left;vertical-align:top;border-bottom:1px solid #e8e0d4;">' . htmlspecialchars($expiryDate) . '</td></tr></table>' : '')
+            . ($fee !== '' ? '<table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="margin:0;"><tr><td style="padding:10px 10px 10px 0;font-weight:bold;color:#1A1A1A;width:44%;vertical-align:top;">Monthly fee:</td><td style="padding:10px 0 10px 6px;color:#333;text-align:left;vertical-align:top;">' . htmlspecialchars($fee) . '</td></tr></table>' : '') . '
+        </div>
+        <div style="background: #d4edda; padding: 15px; border-left: 4px solid #28a745; border-radius: 5px; margin: 20px 0;">
+            <p style="color: #155724; margin: 0;">
+                <strong>Renewing is easy:</strong> speak to us at reception on your next visit'
+                . ($phone !== '' ? ', call ' . htmlspecialchars($phone) : '')
+                . (!empty($email_from_email) ? ', or reply to this email' : '') . ' and we\'ll sort it in a minute.
+            </p>
+        </div>
+        <p style="margin:28px 0 0;font-size:14px;color:#777;text-align:center;font-style:italic;">Keep the momentum going — see you at the gym!</p>';
+
+    $subject = 'Your membership expires ' . $daysWord . ' — ' . $siteName;
+    $altBody = 'Hi ' . $name . ', your ' . $siteName . ' membership'
+        . ($package !== '' ? ' (' . $package . ')' : '')
+        . ' expires ' . $daysWord
+        . ($expiryDate !== '' ? ' on ' . $expiryDate : '')
+        . '. Renew at reception' . ($phone !== '' ? ' or call ' . $phone : '') . '.';
+
+    return sendEmail($toEmail, $name, $subject, wrapEmailTemplate($htmlBody, 'Membership Renewal Reminder'), $altBody);
+}
