@@ -78,15 +78,25 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['gm_action'])) {
             // Package pricing is the accounting source of truth: when the
             // selected membership type matches an active package, the fee is
             // taken FROM the package unless a privileged user overrides it.
+            $typeIsActivePackage = false;
             if ($type !== '') {
                 try {
                     $pkgStmt = $pdo->prepare("SELECT price FROM gym_packages WHERE name = ? AND is_active = 1 LIMIT 1");
                     $pkgStmt->execute([$type]);
                     $pkgPrice = $pkgStmt->fetchColumn();
-                    if ($pkgPrice !== false && (!$gm_can_financials || $fee === null)) {
-                        $fee = (float)$pkgPrice;
+                    if ($pkgPrice !== false) {
+                        $typeIsActivePackage = true;
+                        if (!$gm_can_financials || $fee === null) {
+                            $fee = (float)$pkgPrice;
+                        }
                     }
                 } catch (Throwable $e) { /* packages table optional */ }
+            }
+            // Non-privileged staff can never invent a fee for a non-package
+            // type — on enrolment that means no fee is recorded until a
+            // manager sets one (or a real package is chosen).
+            if (!$gm_can_financials && !$typeIsActivePackage && $memberId === 0) {
+                $fee = null;
             }
 
             if ($memberId > 0) {
@@ -104,13 +114,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['gm_action'])) {
                     // Fee is never hand-set by non-privileged users: it either
                     // follows a real package (derived above) or stays as stored.
                     // Changing the type to free text does NOT unlock the fee.
-                    $typeIsPackage = false;
-                    try {
-                        $pkgChk = $pdo->prepare("SELECT COUNT(*) FROM gym_packages WHERE name = ? AND is_active = 1");
-                        $pkgChk->execute([$type]);
-                        $typeIsPackage = (int)$pkgChk->fetchColumn() > 0;
-                    } catch (Throwable $e) { /* packages optional */ }
-                    if (!$typeIsPackage) {
+                    if (!$typeIsActivePackage) {
                         $fee = $cur['monthly_fee'] !== null ? (float)$cur['monthly_fee'] : null;
                     }
                 }
@@ -342,6 +346,9 @@ $gm_in_gym_now = 0;
 $gm_visits_today = 0;
 $gm_peak_stats = [];       // member_id => ['hours' => [h=>c], 'wdays' => [d=>c]]
 if ($gm_attendance_ready) {
+    // Sweep stale open visits first so "In gym now" and last-visit stats
+    // never count someone who forgot to scan out on a previous day.
+    gym_auto_checkout_stale($pdo);
     try {
         foreach ($pdo->query("
             SELECT member_id, COUNT(*) AS visits, MAX(checked_in_at) AS last_in,
