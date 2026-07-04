@@ -1878,6 +1878,74 @@ try {
             }, delay || 280);
         }
 
+        /**
+         * Booking step progression system.
+         * Steps: 1 = When Are You Staying?, 2 = Select Your Room,
+         *        3 = Guest Information, 4 = Guest Details,
+         *        5 = Add-On Packages + Summary
+         */
+        function getStepSection(stepNumber) {
+            switch (stepNumber) {
+                case 1: return document.getElementById('bookingDetailsSection');
+                case 2: return document.getElementById('roomSectionWrapper');
+                case 3: return document.querySelector('.form-section-title .fa-user')?.closest('.form-section');
+                case 4: return document.getElementById('guestDetailsSection');
+                case 5: return document.getElementById('packagesSection');
+                default: return null;
+            }
+        }
+
+        function isStepComplete(stepNumber) {
+            switch (stepNumber) {
+                case 1: // Dates set?
+                    var ci = document.getElementById('check_in_date');
+                    var co = document.getElementById('check_out_date');
+                    return ci && co && ci.value && co.value && co.value > ci.value;
+                case 2: // Room selected?
+                    return !!document.querySelector('input[name="room_id"]:checked');
+                case 3: // Guest Information (name, email, phone filled)?
+                    var n = document.getElementById('guest_name');
+                    var e = document.getElementById('guest_email');
+                    var p = document.getElementById('guest_phone');
+                    return n && e && p && n.value.trim() && e.value.trim() && p.value.trim();
+                case 4: // Guest Details (number of guests selected)?
+                    var g = document.getElementById('number_of_guests');
+                    return g && g.value && parseInt(g.value) > 0;
+                case 5: // Packages — always reachable (optional)
+                    return true;
+                default:
+                    return false;
+            }
+        }
+
+        /** Advance to a step, ensuring all previous steps are complete.
+         *  Falls back to the earliest incomplete step if validation fails. */
+        function advanceToStep(targetStep) {
+            // Find the first incomplete step before target
+            for (var s = 1; s < targetStep; s++) {
+                if (!isStepComplete(s)) {
+                    var fallback = getStepSection(s);
+                    if (fallback) scrollToSection(fallback, 350);
+                    // Highlight incomplete fields on step 3
+                    if (s === 3) {
+                        ['guest_name','guest_email','guest_phone'].forEach(function(id) {
+                            var f = document.getElementById(id);
+                            if (f && !f.value.trim()) {
+                                f.style.borderColor = '#dc3545';
+                                var clr = function(){ this.style.borderColor = ''; };
+                                f.addEventListener('change', clr, {once:true});
+                                f.addEventListener('input', clr, {once:true});
+                            }
+                        });
+                    }
+                    return;
+                }
+            }
+            // All prior steps complete — scroll to target
+            var section = getStepSection(targetStep);
+            if (section) scrollToSection(section, 350);
+        }
+
         // Reveal room selection section once both dates are set
         function revealRoomSection() {
             const ci = document.getElementById('check_in_date');
@@ -1890,9 +1958,8 @@ try {
                     wrapper.style.display = '';
                     scrollToSection(wrapper, 350);
                 } else if (preselectedRoomId) {
-                    // Room already chosen — jump straight to guest info
-                    const guestInfoSection = document.querySelector('.form-section-title .fa-user')?.closest('.form-section');
-                    scrollToSection(guestInfoSection, 350);
+                    // Pre-selected room with dates set — advance to step 3 (Guest Information)
+                    advanceToStep(3);
                 }
             } else {
                 if (wrapper) wrapper.style.display = 'none';
@@ -2375,10 +2442,9 @@ try {
                 performAvailabilityCheck();
             }
 
-            // Scroll to guest information section after a room is picked (skip on page-load pre-selection)
+            // Scroll to Step 3: Guest Information after a room is picked (skip on page-load pre-selection)
             if (!skipScroll) {
-                const guestInfoSection = document.querySelector('.form-section-title .fa-user')?.closest('.form-section');
-                scrollToSection(guestInfoSection, 420);
+                advanceToStep(3);
             }
         }
 
