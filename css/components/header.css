@@ -165,8 +165,8 @@
 }
 
 .header__logo-media {
-    width: 62px;
-    height: 62px;
+    width: 84px;
+    height: 84px;
     display: inline-flex;
     align-items: center;
     justify-content: center;
@@ -175,16 +175,16 @@
 }
 
 .header__logo-image {
-    height: 58px;
+    height: 78px;
     width: auto;
     max-width: none;
     object-fit: contain;
-    image-rendering: -webkit-optimize-contrast;
-    image-rendering: crisp-edges;
+    image-rendering: auto;
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
     transform: translateZ(0);
     backface-visibility: hidden;
+    filter: drop-shadow(0 2px 6px rgba(0,0,0,0.15));
 }
 
 .header__logo-copy {
@@ -765,12 +765,12 @@
     }
 
     .header__logo-media {
-        width: 72px;
-        height: 72px;
+        width: 98px;
+        height: 98px;
     }
 
     .header__logo-image {
-        height: 68px;
+        height: 92px;
     }
 
     .header__logo-text {
@@ -829,12 +829,12 @@
     }
 
     .header__logo-media {
-        width: 88px;
-        height: 88px;
+        width: 118px;
+        height: 118px;
     }
 
     .header__logo-image {
-        height: 82px;
+        height: 110px;
     }
 
     .header__logo-text {
@@ -880,12 +880,12 @@
     }
 
     .header__logo-media {
-        width: 96px;
-        height: 96px;
+        width: 130px;
+        height: 130px;
     }
 
     .header__logo-image {
-        height: 90px;
+        height: 122px;
     }
 
     .header__menu {
@@ -962,12 +962,12 @@
     }
 
     .header__logo-media {
-        width: 46px;
-        height: 46px;
+        width: 56px;
+        height: 56px;
     }
 
     .header__logo-image {
-        height: 32px;
+        height: 50px;
     }
 
     .header__mobile {
