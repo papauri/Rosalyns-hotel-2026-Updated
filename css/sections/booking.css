@@ -4146,6 +4146,10 @@
     flex-direction: column;
     gap: 0;
     flex: 1;
+    font-family: var(--font-sans, 'Jost', sans-serif);
+    font-size: 0.875rem;
+    line-height: 1.6;
+    color: var(--color-text-secondary, #6B5740);
 }
 
 /* Header: icon square on left, title right — no wrapping */
