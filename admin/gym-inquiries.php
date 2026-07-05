@@ -132,6 +132,52 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['inquiry_action'])) {
             $stmt = $pdo->prepare("DELETE FROM gym_inquiries WHERE id = ?");
             $stmt->execute([$inquiry_id]);
             $message = 'Gym inquiry deleted successfully!';
+        } elseif ($action === 'send_message') {
+            // Free-form message emailed straight to the member from this page.
+            $inquiry_id = (int)$inquiry_id;
+            if ($inquiry_id <= 0) {
+                throw new Exception('Invalid inquiry selected.');
+            }
+
+            $fetch = $pdo->prepare("SELECT * FROM gym_inquiries WHERE id = ?");
+            $fetch->execute([$inquiry_id]);
+            $inquiry_row = $fetch->fetch(PDO::FETCH_ASSOC);
+            if (!$inquiry_row) {
+                throw new Exception('Gym inquiry not found.');
+            }
+            $recipient = trim((string)($inquiry_row['email'] ?? ''));
+            if (!filter_var($recipient, FILTER_VALIDATE_EMAIL)) {
+                throw new Exception('This inquiry has no valid email address on file.');
+            }
+
+            $subject = trim((string)($_POST['email_subject'] ?? ''));
+            $bodyText = trim((string)($_POST['email_message'] ?? ''));
+            if ($subject === '' || $bodyText === '') {
+                throw new Exception('Both a subject and a message are required to email the member.');
+            }
+            if (mb_strlen($subject) > 200) {
+                $subject = mb_substr($subject, 0, 200);
+            }
+
+            $site_name = (string)getSetting('site_name', 'Our Gym');
+            $memberName = htmlspecialchars((string)($inquiry_row['name'] ?? 'Member'), ENT_QUOTES, 'UTF-8');
+            // Preserve the admin's line breaks; escape everything to prevent HTML injection.
+            $safeBody = nl2br(htmlspecialchars($bodyText, ENT_QUOTES, 'UTF-8'));
+            $htmlBody = '
+                <h1 style="color:#8B7355;text-align:center;">' . htmlspecialchars($subject, ENT_QUOTES, 'UTF-8') . '</h1>
+                <p>Dear ' . $memberName . ',</p>
+                <div style="color:#333;line-height:1.7;font-size:15px;margin:16px 0;">' . $safeBody . '</div>
+                <p style="margin:28px 0 0;font-size:14px;color:#777;text-align:center;font-style:italic;">Warm regards &mdash; ' . htmlspecialchars($site_name, ENT_QUOTES, 'UTF-8') . '</p>';
+
+            $email_result = sendEmail($recipient, (string)($inquiry_row['name'] ?? ''), $subject, $htmlBody);
+            if (!empty($email_result['success'])) {
+                $preview = !empty($email_result['preview']) || !empty($email_result['preview_url']);
+                $message = $preview
+                    ? 'Email preview generated (development mode). No live email was sent.'
+                    : 'Message emailed to ' . htmlspecialchars($recipient) . '.';
+            } else {
+                throw new Exception('Failed to send email: ' . ($email_result['message'] ?? 'Unknown error'));
+            }
         } elseif (in_array($action, ['confirm', 'cancel', 'complete', 'send_invoice', 'send_quotation', 'update_amount', 'update_notes'], true)) {
             $inquiry_id = (int)$inquiry_id;
             if ($inquiry_id <= 0) {
@@ -515,14 +561,18 @@ try {
                                 <input type="hidden" name="inquiry_action" value="update_status">
                                 <input type="hidden" name="inquiry_id" value="<?php echo $inquiry['id']; ?>">
                                 <input type="hidden" name="csrf_token" value="<?= htmlspecialchars($csrf_token, ENT_QUOTES) ?>">
-                                <select name="new_status" class="status-select" onchange="this.form.submit();">
-                                    <option value="new" <?php echo $inquiry['status'] === 'new' ? 'selected' : ''; ?>>New</option>
-                                    <option value="contacted" <?php echo $inquiry['status'] === 'contacted' ? 'selected' : ''; ?>>Contacted</option>
-                                    <option value="confirmed" <?php echo $inquiry['status'] === 'confirmed' ? 'selected' : ''; ?>>Confirmed (paid)</option>
-                                    <option value="converted" <?php echo $inquiry['status'] === 'converted' ? 'selected' : ''; ?>>Converted</option>
-                                    <option value="closed" <?php echo $inquiry['status'] === 'closed' ? 'selected' : ''; ?>>Closed / Completed</option>
-                                    <option value="cancelled" <?php echo $inquiry['status'] === 'cancelled' ? 'selected' : ''; ?>>Cancelled</option>
-                                </select>
+                                <div class="status-pill-select" data-status="<?php echo htmlspecialchars($inquiry['status'], ENT_QUOTES); ?>">
+                                    <span class="status-dot"></span>
+                                    <select name="new_status" class="status-select" onchange="this.form.submit();" aria-label="Change status">
+                                        <option value="new" <?php echo $inquiry['status'] === 'new' ? 'selected' : ''; ?>>New</option>
+                                        <option value="contacted" <?php echo $inquiry['status'] === 'contacted' ? 'selected' : ''; ?>>Contacted</option>
+                                        <option value="confirmed" <?php echo $inquiry['status'] === 'confirmed' ? 'selected' : ''; ?>>Confirmed (paid)</option>
+                                        <option value="converted" <?php echo $inquiry['status'] === 'converted' ? 'selected' : ''; ?>>Converted</option>
+                                        <option value="closed" <?php echo $inquiry['status'] === 'closed' ? 'selected' : ''; ?>>Closed / Completed</option>
+                                        <option value="cancelled" <?php echo $inquiry['status'] === 'cancelled' ? 'selected' : ''; ?>>Cancelled</option>
+                                    </select>
+                                    <i class="fas fa-chevron-down status-caret"></i>
+                                </div>
                             </form>
                         </td>
                         <td>
@@ -534,6 +584,13 @@ try {
                                 <button type="button" class="btn btn-primary btn-sm" onclick="showInquiryDetails(<?php echo htmlspecialchars(json_encode($inquiry)); ?>)">
                                     <i class="fas fa-eye"></i> View
                                 </button>
+                                <?php if (!empty($inquiry['email'])): ?>
+                                <button type="button" class="btn btn-sm" style="background:#8B7355;color:#fff;"
+                                        title="Email this member directly"
+                                        onclick='openEmailComposer(<?php echo htmlspecialchars(json_encode(['id' => (int)$inquiry['id'], 'name' => (string)$inquiry['name'], 'email' => (string)$inquiry['email'], 'reference_number' => (string)($inquiry['reference_number'] ?? '')]), ENT_QUOTES); ?>)'>
+                                    <i class="fas fa-envelope"></i> Email
+                                </button>
+                                <?php endif; ?>
                                 <?php if ($inquiry['status'] !== 'cancelled'): ?>
                                 <a class="btn btn-sm" style="background:#2e7d32;color:#ffffff;text-decoration:none;"
                                    title="Enrol this inquiry as a gym member (opens the register pre-filled)"
@@ -572,14 +629,53 @@ try {
         </div>
     </div>
 
+    <!-- Email Composer Modal -->
+    <div id="emailComposerModal" class="modal">
+        <div class="modal-content" style="max-width:min(96vw,42rem);width:min(96vw,42rem);">
+            <div class="modal-header">
+                <h3><i class="fas fa-envelope" style="color:#8B7355;"></i> Email Member</h3>
+                <span class="close" onclick="closeEmailComposer()">&times;</span>
+            </div>
+            <div class="modal-body">
+                <form method="POST" id="emailComposerForm">
+                    <input type="hidden" name="inquiry_action" value="send_message">
+                    <input type="hidden" name="inquiry_id" id="composer-inquiry-id">
+                    <input type="hidden" name="csrf_token" value="<?= htmlspecialchars($csrf_token, ENT_QUOTES) ?>">
+                    <div class="composer-to" id="composer-to"></div>
+                    <div class="composer-field">
+                        <label for="email_subject">Subject</label>
+                        <input type="text" id="email_subject" name="email_subject" class="form-control" maxlength="200" required placeholder="e.g. Following up on your gym membership inquiry">
+                    </div>
+                    <div class="composer-field">
+                        <label for="email_message">Message</label>
+                        <textarea id="email_message" name="email_message" class="form-control" rows="7" required placeholder="Write your message to the member. Line breaks are preserved."></textarea>
+                        <small class="composer-hint">Sent as a branded email from your hotel. The member's name and your signature are added automatically.</small>
+                    </div>
+                    <div class="composer-actions">
+                        <button type="button" class="btn btn-secondary" onclick="closeEmailComposer()">Cancel</button>
+                        <button type="submit" class="btn btn-primary" id="composer-send-btn"><i class="fas fa-paper-plane"></i> Send Email</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+
     <script>
         var canGymFinancials = <?php echo json_encode($_can_gym_financials); ?>;
         var gymCsrfToken = <?php echo json_encode($csrf_token); ?>;
         var gymCurrencySymbol = <?php echo json_encode($currency_symbol); ?>;
 
+        // Global HTML-escape helper (also used by the email composer).
+        function escapeHtml(str) {
+            const div = document.createElement('div');
+            div.textContent = String(str == null ? '' : str);
+            return div.innerHTML;
+        }
+
         function showInquiryDetails(inquiry) {
             const modal = document.getElementById('inquiryModal');
             const body = document.getElementById('inquiryModalBody');
+            window._gymCurrentInquiry = inquiry;
 
             const statusColors = {
                 'new': '#17a2b8',
@@ -675,6 +771,10 @@ try {
                         <input type="hidden" name="csrf_token" value="${gymCsrfToken}">
                         <button type="submit" class="btn btn-danger btn-sm"><i class="fas fa-ban"></i> Cancel &amp; Refund</button>
                     </form>` : ''}
+                    ${inquiry.email ? `
+                    <button type="button" class="btn btn-sm" style="background:#8B7355;color:#fff;" onclick="openEmailComposer(window._gymCurrentInquiry)">
+                        <i class="fas fa-envelope"></i> Email Member
+                    </button>` : ''}
                 </div>
                 <div class="detail-item" style="grid-column: 1 / -1;">
                     <form method="POST" style="display:flex;gap:8px;align-items:flex-start;">
@@ -750,18 +850,54 @@ try {
             document.getElementById('inquiryModal').classList.remove('show');
         }
 
-        // Close modal when clicking outside
-        window.onclick = function(event) {
-            const modal = document.getElementById('inquiryModal');
-            if (event.target === modal) {
-                closeInquiryModal();
-            }
+        // ── Direct email composer ─────────────────────────────────────────
+        function openEmailComposer(inquiry) {
+            const modal = document.getElementById('emailComposerModal');
+            if (!modal) return;
+            document.getElementById('composer-inquiry-id').value = inquiry.id;
+
+            const ref = inquiry.reference_number ? ' · ' + escapeHtml(inquiry.reference_number) : '';
+            document.getElementById('composer-to').innerHTML =
+                '<span class="composer-to-label">To</span>' +
+                '<span class="composer-to-value">' + escapeHtml(inquiry.name || 'Member') +
+                ' &lt;' + escapeHtml(inquiry.email || '') + '&gt;' + ref + '</span>';
+
+            const form = document.getElementById('emailComposerForm');
+            form.email_subject.value = '';
+            form.email_message.value = '';
+
+            // Close the details modal if it happens to be open, then show composer.
+            closeInquiryModal();
+            modal.classList.add('show');
+            setTimeout(function() { form.email_subject.focus(); }, 80);
         }
 
-        // Close modal on Escape key
+        function closeEmailComposer() {
+            document.getElementById('emailComposerModal').classList.remove('show');
+        }
+
+        // Guard against a double-submit sending two emails.
+        document.getElementById('emailComposerForm').addEventListener('submit', function() {
+            const btn = document.getElementById('composer-send-btn');
+            btn.disabled = true;
+            btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Sending...';
+        });
+
+        // Close modals when clicking the backdrop
+        window.addEventListener('click', function(event) {
+            if (event.target === document.getElementById('inquiryModal')) {
+                closeInquiryModal();
+            }
+            if (event.target === document.getElementById('emailComposerModal')) {
+                closeEmailComposer();
+            }
+        });
+
+        // Close modals on Escape key
         document.addEventListener('keydown', function(event) {
             if (event.key === 'Escape') {
                 closeInquiryModal();
+                closeEmailComposer();
             }
         });
     </script>

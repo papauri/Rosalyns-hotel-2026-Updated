@@ -2580,3 +2580,143 @@ body.modal-open {
         grid-template-columns: 1fr;
     }
 }
+
+/* ============================================
+   STATUS PILL SELECT (inquiry list status column)
+   A colour-coded pill wrapping a native <select>. The pill tint/dot is driven
+   by data-status; the select sits transparently on top for the interaction.
+   ============================================ */
+.status-pill-select {
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    padding: 5px 26px 5px 11px;
+    border-radius: 999px;
+    border: 1px solid var(--sp-color, #6c757d);
+    background: var(--sp-tint, rgba(108, 117, 125, 0.1));
+    cursor: pointer;
+    transition: box-shadow 0.15s ease, background 0.15s ease;
+    max-width: 100%;
+}
+
+.status-pill-select:hover {
+    box-shadow: 0 2px 8px rgba(46, 40, 33, 0.14);
+}
+
+.status-pill-select .status-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: var(--sp-color, #6c757d);
+    flex-shrink: 0;
+}
+
+.status-pill-select .status-select {
+    appearance: none;
+    -webkit-appearance: none;
+    -moz-appearance: none;
+    border: none;
+    background: transparent;
+    color: var(--sp-color, #495057);
+    font-size: 0.78rem;
+    font-weight: 600;
+    letter-spacing: 0.01em;
+    cursor: pointer;
+    padding: 0;
+    margin: 0;
+    outline: none;
+    max-width: 100%;
+    text-overflow: ellipsis;
+}
+
+.status-pill-select .status-select option {
+    color: #333;
+    background: #fff;
+    font-weight: 500;
+}
+
+.status-pill-select .status-caret {
+    position: absolute;
+    right: 10px;
+    top: 50%;
+    transform: translateY(-50%);
+    font-size: 0.62rem;
+    color: var(--sp-color, #6c757d);
+    pointer-events: none;
+}
+
+/* Per-status colour theming */
+.status-pill-select[data-status="new"]       { --sp-color: #0f7c8c; --sp-tint: rgba(23, 162, 184, 0.12); }
+.status-pill-select[data-status="contacted"] { --sp-color: #a07800; --sp-tint: rgba(255, 193, 7, 0.16); }
+.status-pill-select[data-status="confirmed"] { --sp-color: #8B7355; --sp-tint: rgba(139, 115, 85, 0.14); }
+.status-pill-select[data-status="converted"] { --sp-color: #1e7e34; --sp-tint: rgba(40, 167, 69, 0.13); }
+.status-pill-select[data-status="closed"]    { --sp-color: #5a6268; --sp-tint: rgba(108, 117, 125, 0.12); }
+.status-pill-select[data-status="cancelled"] { --sp-color: #c82333; --sp-tint: rgba(220, 53, 69, 0.12); }
+
+/* ============================================
+   EMAIL COMPOSER MODAL
+   ============================================ */
+.composer-to {
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+    padding: 10px 12px;
+    margin-bottom: 16px;
+    background: color-mix(in srgb, var(--color-background, #F7F3EE) 50%, #fff);
+    border: 1px solid var(--admin-surface-border, #e5e7eb);
+    border-radius: 8px;
+    font-size: 0.86rem;
+    flex-wrap: wrap;
+}
+
+.composer-to-label {
+    font-size: 0.66rem;
+    font-weight: 700;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+    color: var(--color-text-secondary, #6b5740);
+}
+
+.composer-to-value {
+    color: var(--navy, #2A2723);
+    font-weight: 500;
+    overflow-wrap: anywhere;
+}
+
+.composer-field {
+    margin-bottom: 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.composer-field label {
+    font-size: 0.72rem;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: var(--color-text-secondary, #6b5740);
+}
+
+.composer-field .form-control {
+    width: 100%;
+}
+
+.composer-field textarea.form-control {
+    resize: vertical;
+    min-height: 120px;
+    line-height: 1.5;
+}
+
+.composer-hint {
+    font-size: 0.74rem;
+    color: #8a8178;
+}
+
+.composer-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 10px;
+    margin-top: 4px;
+}
