@@ -1,4 +1,9 @@
-<title>Rosalyn's — One System for the Whole Hotel</title>
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Rosalyn's &mdash; One System for the Whole Hotel</title>
 <style>
   :root {
     --sand:        #f5f2eb;
@@ -17,22 +22,13 @@
     --serif: "DM Serif Display", "Noto Serif", Georgia, "Times New Roman", serif;
     --sans:  "DM Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
     --maxw: 1080px;
+    --ease: cubic-bezier(0.22, 1, 0.36, 1);
   }
   @media (prefers-color-scheme: dark) {
     :root {
-      --sand:      #211e1a;
-      --sand-2:    #26221d;
-      --card:      #2b2620;
-      --ink:       #f0e9dc;
-      --ink-soft:  #b6ab98;
-      --wood:      #c2a781;
-      --gold:      #d8b263;
-      --gold-soft: #C8A45A;
-      --line:      #3b352c;
-      --line-soft: #332e26;
-      --good:      #7fc09a;
-      --warn:      #e0a35e;
-      --shadow:    0 1px 2px rgba(0,0,0,.2), 0 12px 34px rgba(0,0,0,.34);
+      --sand:#211e1a; --sand-2:#26221d; --card:#2b2620; --ink:#f0e9dc; --ink-soft:#b6ab98;
+      --wood:#c2a781; --gold:#d8b263; --gold-soft:#C8A45A; --line:#3b352c; --line-soft:#332e26;
+      --good:#7fc09a; --warn:#e0a35e; --shadow:0 1px 2px rgba(0,0,0,.2),0 12px 34px rgba(0,0,0,.34);
     }
   }
   :root[data-theme="dark"] {
@@ -47,6 +43,7 @@
   }
 
   * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
   body {
     margin: 0;
     background: var(--sand);
@@ -56,9 +53,10 @@
     line-height: 1.65;
     -webkit-font-smoothing: antialiased;
     text-rendering: optimizeLegibility;
+    overflow-x: hidden;
   }
   .wrap { max-width: var(--maxw); margin: 0 auto; padding: 0 28px; }
-  section { padding: 84px 0; border-top: 1px solid var(--line-soft); }
+  section { padding: 84px 0; border-top: 1px solid var(--line-soft); position: relative; }
   section:first-of-type { border-top: 0; }
 
   h1, h2, h3 { font-family: var(--serif); font-weight: 400; line-height: 1.12; text-wrap: balance; letter-spacing: .002em; }
@@ -69,6 +67,13 @@
   p { margin: 0 0 16px; max-width: 62ch; }
   .lead { font-size: 20px; color: var(--ink-soft); }
   strong { color: var(--ink); font-weight: 600; }
+
+  /* ---- Scroll progress bar ---- */
+  .progress {
+    position: fixed; top: 0; left: 0; height: 3px; width: 0;
+    background: linear-gradient(90deg, var(--wood), var(--gold-soft));
+    z-index: 100; transition: width .1s linear;
+  }
 
   /* ---- Hero ---- */
   .hero { padding: 96px 0 88px; border-top: 0; }
@@ -118,7 +123,8 @@
   /* ---- Toolkit grid ---- */
   .kit h2 { font-size: clamp(1.9rem, 1.3rem + 2.4vw, 2.9rem); margin: 0 0 10px; }
   .modules { display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 16px; margin-top: 40px; }
-  .mod { background: var(--card); border: 1px solid var(--line-soft); border-radius: 6px; padding: 22px 22px 20px; box-shadow: var(--shadow); }
+  .mod { background: var(--card); border: 1px solid var(--line-soft); border-radius: 6px; padding: 22px 22px 20px; box-shadow: var(--shadow); transition: transform .4s var(--ease), box-shadow .4s var(--ease); }
+  .mod:hover { transform: translateY(-4px); box-shadow: 0 6px 14px rgba(51,48,42,.08), 0 20px 44px rgba(51,48,42,.12); }
   .mod h3 { font-family: var(--sans); font-weight: 600; font-size: 1.02rem; letter-spacing: .01em; margin: 0 0 8px; display: flex; align-items: baseline; gap: 10px; }
   .mod h3::before { content: ""; width: 8px; height: 8px; border-radius: 2px; background: var(--gold-soft); transform: translateY(-1px); flex: 0 0 auto; }
   .mod p { font-size: 14.5px; color: var(--ink-soft); margin: 0; line-height: 1.55; }
@@ -135,19 +141,6 @@
   .fit-item { border-top: 2px solid var(--gold-soft); padding-top: 16px; }
   .fit-item h3 { font-family: var(--sans); font-weight: 600; font-size: 1.05rem; margin: 0 0 8px; }
   .fit-item p { font-size: 15px; color: var(--ink-soft); margin: 0; }
-
-  /* ---- Assurance strip ---- */
-  .assure { display: flex; flex-wrap: wrap; gap: 10px 26px; margin-top: 34px; }
-  .assure span { font-size: 14px; color: var(--ink-soft); display: inline-flex; align-items: center; gap: 9px; }
-  .assure span::before { content: "✓"; color: var(--good); font-weight: 700; }
-
-  /* ---- Close ---- */
-  .close { text-align: center; }
-  .close h2 { font-size: clamp(2.2rem, 1.5rem + 3vw, 3.6rem); max-width: 20ch; margin: 0 auto 22px; }
-  .close h2 em { font-style: italic; color: var(--wood); }
-  .close .lead { margin: 0 auto 12px; }
-  .signoff { margin-top: 46px; padding-top: 30px; border-top: 1px solid var(--line-soft); font-size: 14px; color: var(--ink-soft); }
-  .signoff strong { display: block; font-family: var(--serif); font-size: 1.25rem; color: var(--ink); margin-bottom: 4px; font-weight: 400; }
 
   /* ---- Objection pre-empt ---- */
   .objection {
@@ -179,9 +172,39 @@
   .qa p { font-size: 15px; color: var(--ink-soft); margin: 0; line-height: 1.6; }
   .qa p strong { color: var(--ink); }
 
-  .reveal-anim { opacity: 0; transform: translateY(16px); transition: opacity .7s ease, transform .7s ease; }
-  .reveal-anim.in { opacity: 1; transform: none; }
-  @media (prefers-reduced-motion: reduce) { .reveal-anim { opacity: 1; transform: none; transition: none; } }
+  /* ---- Close ---- */
+  .close { text-align: center; }
+  .close h2 { font-size: clamp(2.2rem, 1.5rem + 3vw, 3.6rem); max-width: 20ch; margin: 0 auto 22px; }
+  .close h2 em { font-style: italic; color: var(--wood); }
+  .close .lead { margin: 0 auto 12px; }
+  .signoff { margin-top: 46px; padding-top: 30px; border-top: 1px solid var(--line-soft); font-size: 14px; color: var(--ink-soft); }
+  .signoff strong { display: block; font-family: var(--serif); font-size: 1.25rem; color: var(--ink); margin-bottom: 4px; font-weight: 400; }
+
+  /* ============ SCROLL CHOREOGRAPHY ============ */
+  .anim { opacity: 0; transform: translateY(34px); transition: opacity .9s var(--ease), transform .9s var(--ease); will-change: opacity, transform; }
+  .anim.in { opacity: 1; transform: none; }
+  .anim.from-left  { transform: translateX(-46px); }
+  .anim.from-right { transform: translateX(46px); }
+  .anim.zoom       { transform: scale(.94); }
+  .anim.in.from-left, .anim.in.from-right, .anim.in.zoom { transform: none; }
+  .stagger > * { opacity: 0; transform: translateY(28px); transition: opacity .7s var(--ease), transform .7s var(--ease); }
+  .stagger.in > * { opacity: 1; transform: none; }
+
+  /* Word-by-word headline reveal. */
+  .split .word { display: inline-block; overflow: hidden; vertical-align: top; }
+  .split .word .inner {
+    display: inline-block;
+    transform: translateY(105%) rotate(4deg);
+    opacity: 0;
+    transition: transform .8s var(--ease), opacity .8s var(--ease);
+  }
+  .split.in .word .inner { transform: none; opacity: 1; }
+
+  @media (prefers-reduced-motion: reduce) {
+    html { scroll-behavior: auto; }
+    .anim, .stagger > *, .split .word .inner { opacity: 1 !important; transform: none !important; transition: none !important; }
+    .progress { display: none; }
+  }
 
   @media (max-width: 680px) {
     body { font-size: 16px; }
@@ -190,14 +213,18 @@
     .scene .when small { display: inline; margin-left: 8px; }
   }
 </style>
+</head>
+<body>
+
+<div class="progress" id="progress"></div>
 
 <!-- ============ HERO ============ -->
 <header class="hero">
   <div class="wrap">
-    <div class="brandline"><span class="dot"></span> Rosalyn's Beach Hotel &nbsp;·&nbsp; Hotel Management System</div>
-    <h1>Run the <em>whole</em> hotel from one calm screen.</h1>
-    <p class="lead">Front desk, restaurant, bar, housekeeping, gym, conference and the books — no longer four systems and a stack of notebooks. One place. One truth. Every kwacha accounted for.</p>
-    <div class="hero-meta">
+    <div class="brandline anim"><span class="dot"></span> Rosalyn's Beach Hotel &nbsp;&middot;&nbsp; Hotel Management System</div>
+    <h1 class="split">Run the <em>whole</em> hotel from one calm screen.</h1>
+    <p class="lead anim">Front desk, restaurant, bar, housekeeping, gym, conference and the books &mdash; no longer four systems and a stack of notebooks. One place. One truth. Every kwacha accounted for.</p>
+    <div class="hero-meta anim">
       <span>Built for Malawi</span>
       <span>Works offline</span>
       <span>MRA-ready VAT &amp; levy</span>
@@ -208,34 +235,34 @@
 
 <!-- ============ PROBLEM ============ -->
 <section class="problem">
-  <div class="wrap reveal-anim">
-    <p class="eyebrow">The quiet leak</p>
-    <h2>Most hotels don't lose money in one big moment. They lose it in a hundred small gaps.</h2>
-    <p class="lead">A booking taken on paper. A bar tab that walked out unpaid. A VAT figure guessed at month-end. Stock that vanished with no record. None of it feels urgent — until you add it up.</p>
-    <div class="pain-grid">
+  <div class="wrap">
+    <p class="eyebrow anim">The quiet leak</p>
+    <h2 class="split">Most hotels don't lose money in one big moment. They lose it in a hundred small gaps.</h2>
+    <p class="lead anim">A booking taken on paper. A bar tab that walked out unpaid. A VAT figure guessed at month-end. Stock that vanished with no record. None of it feels urgent &mdash; until you add it up.</p>
+    <div class="pain-grid stagger">
       <div class="pain"><span class="n">The diary</span><p>Double-bookings and lost reservations live in a paper diary only one person can read.</p></div>
       <div class="pain"><span class="n">The till</span><p>Restaurant and bar sales sit apart from the hotel books, so nothing ever fully reconciles.</p></div>
-      <div class="pain"><span class="n">The guesswork</span><p>Invoices, receipts and VAT are typed by hand — slow, error-prone, and hard to defend to the MRA.</p></div>
+      <div class="pain"><span class="n">The guesswork</span><p>Invoices, receipts and VAT are typed by hand &mdash; slow, error-prone, and hard to defend to the MRA.</p></div>
       <div class="pain"><span class="n">The blind spots</span><p>No one can answer "how did we do today?" without an hour of adding up.</p></div>
     </div>
-    <div class="objection">
+    <div class="objection anim">
       <p class="lbl">You're already thinking</p>
       <p class="q">Changing systems sounds like it'll disrupt my whole operation.</p>
-      <p class="a">It won't. We set it up <strong>with your real rooms, rates and menu first</strong>, run it alongside how you work now, and switch on one area at a time — reception, then the restaurant, then the rest. No day where the hotel stops.</p>
+      <p class="a">It won't. We set it up <strong>with your real rooms, rates and menu first</strong>, run it alongside how you work now, and switch on one area at a time &mdash; reception, then the restaurant, then the rest. No day where the hotel stops.</p>
     </div>
   </div>
 </section>
 
 <!-- ============ REVEAL ============ -->
 <section class="reveal">
-  <div class="wrap reveal-anim">
-    <p class="eyebrow">One system, your whole hotel</p>
-    <h2>Everything a guest touches — and everything you count — <em>in one connected place.</em></h2>
-    <p class="lead">A guest books a room online, orders dinner at the bar, checks into the gym, and settles at the desk. Behind the scenes it's a single flow: the folio updates itself, the kitchen gets the order, stock ticks down, VAT is worked out, and the day's total is already waiting for you. Nothing re-typed. Nothing slipping through.</p>
-    <div class="objection">
+  <div class="wrap">
+    <p class="eyebrow anim">One system, your whole hotel</p>
+    <h2 class="split">Everything a guest touches &mdash; and everything you count &mdash; in one connected place.</h2>
+    <p class="lead anim">A guest books a room online, orders dinner at the bar, checks into the gym, and settles at the desk. Behind the scenes it's a single flow: the folio updates itself, the kitchen gets the order, stock ticks down, VAT is worked out, and the day's total is already waiting for you. Nothing re-typed. Nothing slipping through.</p>
+    <div class="objection anim">
       <p class="lbl">You're already thinking</p>
       <p class="q">Do I have to use all of this? My hotel isn't run like anyone else's.</p>
-      <p class="a">No. This is the <strong>Full Hotel setup</strong> — everything is here, but you decide what's switched on. Run just rooms and finance to start; turn on the restaurant, gym or conference when you're ready. The system bends to how Rosalyn's works, not the other way round.</p>
+      <p class="a">No. This is the <strong>Full Hotel setup</strong> &mdash; everything is here, but you decide what's switched on. Run just rooms and finance to start; turn on the restaurant, gym or conference when you're ready. The system bends to how Rosalyn's works, not the other way round.</p>
     </div>
   </div>
 </section>
@@ -243,22 +270,20 @@
 <!-- ============ A DAY AT ROSALYN'S ============ -->
 <section class="day">
   <div class="wrap">
-    <div class="reveal-anim">
-      <p class="eyebrow">A day at Rosalyn's</p>
-      <h2>See it the way your team will live it.</h2>
-      <p class="lead" style="margin-bottom:8px;">The same system, following one ordinary day from open to close.</p>
-    </div>
+    <p class="eyebrow anim">A day at Rosalyn's</p>
+    <h2 class="split">See it the way your team will live it.</h2>
+    <p class="lead anim" style="margin-bottom:8px;">The same system, following one ordinary day from open to close.</p>
 
-    <div class="scene reveal-anim">
+    <div class="scene anim from-left">
       <div class="when">Reception<small>Morning</small></div>
       <div>
         <h3>Arrivals, without the scramble</h3>
-        <p>Today's check-ins are on the dashboard before the first guest walks in. Reception sees who's due, assigns a room, checks them in, and the guest folio opens automatically. Availability, rate plans and packages are all live — a walk-in is booked in under a minute.</p>
+        <p>Today's check-ins are on the dashboard before the first guest walks in. Reception sees who's due, assigns a room, checks them in, and the guest folio opens automatically. Availability, rate plans and packages are all live &mdash; a walk-in is booked in under a minute.</p>
         <ul><li>Live calendar</li><li>Online booking</li><li>Tentative holds</li><li>Room assignment</li><li>Guest folio</li></ul>
       </div>
     </div>
 
-    <div class="scene reveal-anim">
+    <div class="scene anim from-left">
       <div class="when">Housekeeping<small>Mid-morning</small></div>
       <div>
         <h3>Rooms turn over on their own schedule</h3>
@@ -267,37 +292,37 @@
       </div>
     </div>
 
-    <div class="scene reveal-anim">
+    <div class="scene anim from-left">
       <div class="when">Restaurant &amp; Bar<small>Lunch</small></div>
       <div>
         <h3>The till the kitchen can hear</h3>
-        <p>An order rung up at the POS fires straight to the kitchen, bar and coffee stations on their own screens. Open a tab, add rounds, split the bill, add a tip, charge it to a room. Every sale posts to the books and draws stock down as it's poured and plated — and it keeps working even when the internet drops.</p>
-        <ul><li>POS till</li><li>Kitchen · Bar · Coffee displays</li><li>Tabs &amp; splits</li><li>Room-service charging</li><li>Offline mode</li></ul>
+        <p>An order rung up at the POS fires straight to the kitchen, bar and coffee stations on their own screens. Open a tab, add rounds, split the bill, add a tip, charge it to a room. Every sale posts to the books and draws stock down as it's poured and plated &mdash; and it keeps working even when the internet drops.</p>
+        <ul><li>POS till</li><li>Kitchen &middot; Bar &middot; Coffee displays</li><li>Tabs &amp; splits</li><li>Room-service charging</li><li>Offline mode</li></ul>
       </div>
     </div>
 
-    <div class="scene reveal-anim">
+    <div class="scene anim from-left">
       <div class="when">Gym &amp; Events<small>Afternoon</small></div>
       <div>
         <h3>Every part of the property earns its keep</h3>
         <p>Members scan in at the gym with a barcode card and can reserve a slot from their phone so the floor never overcrowds. A conference enquiry becomes a quotation, then a confirmed booking, without leaving the system. Nothing on the property is off the books.</p>
-        <ul><li>Gym memberships</li><li>Slot booking calendar</li><li>Conference &amp; events</li><li>Quotations → bookings</li></ul>
+        <ul><li>Gym memberships</li><li>Slot booking calendar</li><li>Conference &amp; events</li><li>Quotations to bookings</li></ul>
       </div>
     </div>
 
-    <div class="scene reveal-anim">
+    <div class="scene anim from-left">
       <div class="when">Finance<small>End of day</small></div>
       <div>
         <h3>The books close themselves</h3>
-        <p>Invoices and receipts are generated as branded PDFs and emailed to guests automatically. VAT and tourism levy are applied correctly — set once, applied everywhere. At close, the End-of-Day report shows revenue by source, cash to bank, and outstanding balances. You leave knowing the number is right.</p>
+        <p>Invoices and receipts are generated as branded PDFs and emailed to guests automatically. VAT and tourism levy are applied correctly &mdash; set once, applied everywhere. At close, the End-of-Day report shows revenue by source, cash to bank, and outstanding balances. You leave knowing the number is right.</p>
         <ul><li>Invoices &amp; receipts</li><li>VAT (3 modes) &amp; levy</li><li>End-of-day report</li><li>Accounting dashboard</li></ul>
       </div>
     </div>
 
-    <div class="objection reveal-anim">
+    <div class="objection anim">
       <p class="lbl">You're already thinking</p>
-      <p class="q">My staff aren't tech people — they'll never take to this.</p>
-      <p class="a">It's built for the phones they already carry, with <strong>one simple screen per role</strong> — a waiter only sees the till, housekeeping only sees rooms. We train your team on-site, and most staff are confidently running their part the same day. If someone can use WhatsApp, they can use this.</p>
+      <p class="q">My staff aren't tech people &mdash; they'll never take to this.</p>
+      <p class="a">It's built for the phones they already carry, with <strong>one simple screen per role</strong> &mdash; a waiter only sees the till, housekeeping only sees rooms. We train your team on-site, and most staff are confidently running their part the same day. If someone can use WhatsApp, they can use this.</p>
     </div>
   </div>
 </section>
@@ -305,26 +330,24 @@
 <!-- ============ TOOLKIT ============ -->
 <section class="kit">
   <div class="wrap">
-    <div class="reveal-anim">
-      <p class="eyebrow">The complete toolkit</p>
-      <h2>Nothing left in a notebook.</h2>
-      <p class="lead">Every corner of the operation, already included in the Full Hotel setup.</p>
+    <p class="eyebrow anim">The complete toolkit</p>
+    <h2 class="split">Nothing left in a notebook.</h2>
+    <p class="lead anim">Every corner of the operation, already included in the Full Hotel setup.</p>
+    <div class="modules stagger">
+      <div class="mod"><h3>Bookings &amp; Reservations</h3><p>Calendar, rate plans, packages, group bookings, tentative holds, blocked dates and online booking from your website.</p></div>
+      <div class="mod"><h3>Front Desk</h3><p>Check-in / check-out, in-house guests, arrivals, no-show handling, and a running guest folio for every stay.</p></div>
+      <div class="mod"><h3>Housekeeping</h3><p>Live room-status board, cleaning assignments and maintenance flags &mdash; front desk always knows what's sellable.</p></div>
+      <div class="mod"><h3>Restaurant &amp; POS</h3><p>Fast till, tabs, covers, splits, tips, deals, and dedicated Kitchen, Bar and Coffee display screens.</p></div>
+      <div class="mod"><h3>Stock &amp; Inventory</h3><p>Ingredients, recipes with food-cost, batch tracking, wastage, stock counts, barcode receiving and low-stock alerts.</p></div>
+      <div class="mod"><h3>Conference &amp; Events</h3><p>Enquiries to quotations to confirmed bookings, with their own branded invoices and receipts.</p></div>
+      <div class="mod"><h3>Gym &amp; Fitness</h3><p>Package memberships, barcode check-in, a public slot-booking calendar, renewal reminders and attendance insight.</p></div>
+      <div class="mod"><h3>Finance &amp; Accounting</h3><p>Invoices, receipts, quotations, credit notes, refunds, VAT &amp; tourism levy, end-of-day and a full accounting dashboard.</p></div>
+      <div class="mod"><h3>Website &amp; Content</h3><p>Gallery, media, guest reviews, events page and footer &mdash; update the public site from the same admin.</p></div>
+      <div class="mod"><h3>Reports &amp; Dashboard</h3><p>A live operations pulse plus one-tap insights into revenue, occupancy, outstanding money and what needs attention now.</p></div>
+      <div class="mod"><h3>Staff &amp; Permissions</h3><p>Every person sees only their area. Sensitive changes are locked to managers and written to an audit trail.</p></div>
+      <div class="mod"><h3>Runs as an App</h3><p>Install on any phone, tablet or desktop. No app store, no downloads for staff, and it keeps working offline.</p></div>
     </div>
-    <div class="modules">
-      <div class="mod reveal-anim"><h3>Bookings &amp; Reservations</h3><p>Calendar, rate plans, packages, group bookings, tentative holds, blocked dates and online booking from your website.</p></div>
-      <div class="mod reveal-anim"><h3>Front Desk</h3><p>Check-in / check-out, in-house guests, arrivals, no-show handling, and a running guest folio for every stay.</p></div>
-      <div class="mod reveal-anim"><h3>Housekeeping</h3><p>Live room-status board, cleaning assignments and maintenance flags — front desk always knows what's sellable.</p></div>
-      <div class="mod reveal-anim"><h3>Restaurant &amp; POS</h3><p>Fast till, tabs, covers, splits, tips, deals, and dedicated Kitchen, Bar and Coffee display screens.</p></div>
-      <div class="mod reveal-anim"><h3>Stock &amp; Inventory</h3><p>Ingredients, recipes with food-cost, batch tracking, wastage, stock counts, barcode receiving and low-stock alerts.</p></div>
-      <div class="mod reveal-anim"><h3>Conference &amp; Events</h3><p>Enquiries to quotations to confirmed bookings, with their own branded invoices and receipts.</p></div>
-      <div class="mod reveal-anim"><h3>Gym &amp; Fitness</h3><p>Package memberships, barcode check-in, a public slot-booking calendar, renewal reminders and attendance insight.</p></div>
-      <div class="mod reveal-anim"><h3>Finance &amp; Accounting</h3><p>Invoices, receipts, quotations, credit notes, refunds, VAT &amp; tourism levy, end-of-day and a full accounting dashboard.</p></div>
-      <div class="mod reveal-anim"><h3>Website &amp; Content</h3><p>Gallery, media, guest reviews, events page and footer — update the public site from the same admin.</p></div>
-      <div class="mod reveal-anim"><h3>Reports &amp; Dashboard</h3><p>A live operations pulse plus one-tap insights into revenue, occupancy, outstanding money and what needs attention now.</p></div>
-      <div class="mod reveal-anim"><h3>Staff &amp; Permissions</h3><p>Every person sees only their area. Sensitive changes are locked to managers and written to an audit trail.</p></div>
-      <div class="mod reveal-anim"><h3>Runs as an App</h3><p>Install on any phone, tablet or desktop. No app store, no downloads for staff, and it keeps working offline.</p></div>
-    </div>
-    <div class="objection reveal-anim">
+    <div class="objection anim">
       <p class="lbl">You're already thinking</p>
       <p class="q">Will I have to buy new computers and equipment to run all this?</p>
       <p class="a">No new hardware to buy. It runs in the browser on <strong>the phones, tablets and computers you already have</strong>. A cheap tablet at the till and a phone per section is plenty. Barcode scanning even works through a phone camera.</p>
@@ -334,60 +357,60 @@
 
 <!-- ============ VALUE ============ -->
 <section class="value">
-  <div class="wrap reveal-anim">
-    <p class="eyebrow">Why it pays for itself</p>
-    <h2 style="font-size:clamp(1.9rem,1.3rem+2.4vw,2.9rem);max-width:22ch;margin:0 0 6px;">The value isn't a feature. It's the money you stop leaking.</h2>
-    <div class="stat-row">
-      <div class="stat"><div class="fig">4→1</div><div class="cap">Four separate systems — PMS, POS, gym, accounts — replaced by one you actually own.</div></div>
+  <div class="wrap">
+    <p class="eyebrow anim">Why it pays for itself</p>
+    <h2 class="split" style="font-size:clamp(1.9rem,1.3rem+2.4vw,2.9rem);max-width:22ch;margin:0 0 6px;">The value isn't a feature. It's the money you stop leaking.</h2>
+    <div class="stat-row stagger">
+      <div class="stat"><div class="fig">4 &rarr; 1</div><div class="cap">Four separate systems &mdash; PMS, POS, gym, accounts &mdash; replaced by one you actually own.</div></div>
       <div class="stat"><div class="fig">0</div><div class="cap">Sales re-typed between systems. Every order, every payment, posts once and reconciles itself.</div></div>
-      <div class="stat"><div class="fig">Daily</div><div class="cap">A defensible VAT &amp; revenue position — not a month-end guess you hope survives an audit.</div></div>
-      <div class="stat"><div class="fig">24/7</div><div class="cap">Taking orders and payments, online or off — a dropped connection never stops a sale.</div></div>
+      <div class="stat"><div class="fig">Daily</div><div class="cap">A defensible VAT &amp; revenue position &mdash; not a month-end guess you hope survives an audit.</div></div>
+      <div class="stat"><div class="fig">24/7</div><div class="cap">Taking orders and payments, online or off &mdash; a dropped connection never stops a sale.</div></div>
     </div>
-    <div class="objection">
+    <div class="objection anim">
       <p class="lbl">You're already thinking</p>
-      <p class="q">Alright — what is this actually going to cost me?</p>
-      <p class="a">Less than the leaks and far less than four foreign subscriptions. It's <strong>priced in kwacha for Malawian hotels</strong>, hosted locally, with no per-guest or dollar billing. Show us what you spend now on booking, POS and accounting tools, and we'll put a clear number next to it — most owners find it pays for itself on the money it stops losing.</p>
+      <p class="q">Alright &mdash; what is this actually going to cost me?</p>
+      <p class="a">Less than the leaks and far less than four foreign subscriptions. It's <strong>priced in kwacha for Malawian hotels</strong>, hosted locally, with no per-guest or dollar billing. Show us what you spend now on booking, POS and accounting tools, and we'll put a clear number next to it &mdash; most owners find it pays for itself on the money it stops losing.</p>
     </div>
   </div>
 </section>
 
 <!-- ============ MALAWI FIT ============ -->
 <section class="fit">
-  <div class="wrap reveal-anim">
-    <p class="eyebrow">Made for here, not translated for here</p>
-    <h2>Built for how Malawi actually runs.</h2>
-    <div class="fit-list">
-      <div class="fit-item"><h3>It survives the power &amp; the network</h3><p>Offline-first by design. When the line drops, the till keeps working and syncs the moment it's back — no lost sales, no frozen desk.</p></div>
-      <div class="fit-item"><h3>Kwacha, VAT &amp; levy, done right</h3><p>Currency, MRA 16.5% VAT and tourism levy are handled natively — including whether your prices include VAT or add it on top.</p></div>
+  <div class="wrap">
+    <p class="eyebrow anim">Made for here, not translated for here</p>
+    <h2 class="split">Built for how Malawi actually runs.</h2>
+    <div class="fit-list stagger">
+      <div class="fit-item"><h3>It survives the power &amp; the network</h3><p>Offline-first by design. When the line drops, the till keeps working and syncs the moment it's back &mdash; no lost sales, no frozen desk.</p></div>
+      <div class="fit-item"><h3>Kwacha, VAT &amp; levy, done right</h3><p>Currency, MRA 16.5% VAT and tourism levy are handled natively &mdash; including whether your prices include VAT or add it on top.</p></div>
       <div class="fit-item"><h3>Records the way guests pay</h3><p>Cash, card, bank transfer and mobile money are all captured on the books, so the day balances against what's really in hand.</p></div>
       <div class="fit-item"><h3>Runs on the phones you already have</h3><p>Mobile-first throughout. Staff work from their own phones; guests book and reserve from theirs. No new hardware to buy.</p></div>
       <div class="fit-item"><h3>One affordable system, not four foreign bills</h3><p>Instead of paying in dollars for four overseas subscriptions, you run one system, hosted locally, priced for here.</p></div>
-      <div class="fit-item"><h3>Grows with the property</h3><p>Add the restaurant, the gym, a conference wing — the same system flexes to fit, so it's never outgrown.</p></div>
+      <div class="fit-item"><h3>Grows with the property</h3><p>Add the restaurant, the gym, a conference wing &mdash; the same system flexes to fit, so it's never outgrown.</p></div>
     </div>
-    <div class="objection">
+    <div class="objection anim">
       <p class="lbl">You're already thinking</p>
       <p class="q">Does it actually connect to Airtel Money and Mpamba?</p>
-      <p class="a">Every mobile-money payment is <strong>captured on the books as it's taken</strong> — with provider and reference — so your day balances against the cash and wallets in hand. Direct, automatic reconciliation with Airtel Money / TNM Mpamba is on the roadmap and can be built for your property.</p>
+      <p class="a">Every mobile-money payment is <strong>captured on the books as it's taken</strong> &mdash; with provider and reference &mdash; so your day balances against the cash and wallets in hand. Direct, automatic reconciliation with Airtel Money / TNM Mpamba is on the roadmap and can be built for your property.</p>
     </div>
   </div>
 </section>
 
 <!-- ============ ASSURANCE ============ -->
 <section>
-  <div class="wrap reveal-anim">
-    <p class="eyebrow">Peace of mind, built in</p>
-    <h2 style="font-size:clamp(1.7rem,1.2rem+2vw,2.5rem);max-width:20ch;margin:0 0 4px;">Your data is guarded, your staff are gated, your history is kept.</h2>
-    <div class="assure">
-      <span>Role-based access for every staff member</span>
-      <span>Full audit trail on sensitive changes</span>
-      <span>Secure by design — protected forms &amp; data</span>
-      <span>Automatic database backups</span>
-      <span>Branded, professional guest documents</span>
-      <span>Nothing tied to one person's memory</span>
+  <div class="wrap">
+    <p class="eyebrow anim">Peace of mind, built in</p>
+    <h2 class="split" style="font-size:clamp(1.7rem,1.2rem+2vw,2.5rem);max-width:20ch;margin:0 0 4px;">Your data is guarded, your staff are gated, your history is kept.</h2>
+    <div class="stagger" style="display:flex;flex-wrap:wrap;gap:10px 26px;margin-top:34px;">
+      <span style="font-size:14px;color:var(--ink-soft);">&#10003;&nbsp; Role-based access for every staff member</span>
+      <span style="font-size:14px;color:var(--ink-soft);">&#10003;&nbsp; Full audit trail on sensitive changes</span>
+      <span style="font-size:14px;color:var(--ink-soft);">&#10003;&nbsp; Secure by design &mdash; protected forms &amp; data</span>
+      <span style="font-size:14px;color:var(--ink-soft);">&#10003;&nbsp; Automatic database backups</span>
+      <span style="font-size:14px;color:var(--ink-soft);">&#10003;&nbsp; Branded, professional guest documents</span>
+      <span style="font-size:14px;color:var(--ink-soft);">&#10003;&nbsp; Nothing tied to one person's memory</span>
     </div>
-    <div class="objection">
+    <div class="objection anim">
       <p class="lbl">You're already thinking</p>
-      <p class="q">Where does my data live — and is it mine, or am I locked in?</p>
+      <p class="q">Where does my data live &mdash; and is it mine, or am I locked in?</p>
       <p class="a">It's <strong>your data, always exportable</strong>, hosted securely on servers close to home and backed up automatically. You're never held hostage: no guest record, booking or figure is trapped inside the system, and you can take it with you whenever you wish.</p>
     </div>
   </div>
@@ -395,73 +418,103 @@
 
 <!-- ============ STRAIGHT ANSWERS ============ -->
 <section class="faq">
-  <div class="wrap reveal-anim">
-    <p class="eyebrow">Straight answers</p>
-    <h2>The rest of what you're wondering — answered plainly.</h2>
-    <p class="lead">No small print, no dodging. If a question isn't here, it gets the same honest answer in person.</p>
-    <div class="qa-grid">
-      <div class="qa">
-        <h3>How long until we're up and running?</h3>
-        <p>Days, not months. We load your rooms, rates and menu, train the team on-site, and go live area by area — usually within the <strong>first week</strong>.</p>
-      </div>
-      <div class="qa">
-        <h3>What happens to our existing bookings and records?</h3>
-        <p>They come with you. We <strong>bring your current reservations, guests and price list in</strong> at setup so nothing starts from a blank page.</p>
-      </div>
-      <div class="qa">
-        <h3>If something breaks, who do we call?</h3>
-        <p>A real person, locally — not an overseas ticket queue. <strong>Support and updates are included</strong>, and because it's web-based we can fix things without visiting the property.</p>
-      </div>
-      <div class="qa">
-        <h3>Will the MRA accept these invoices and VAT figures?</h3>
-        <p>Yes. Invoices and receipts are <strong>sequentially numbered, never reused</strong>, carry your VAT number, and apply MRA 16.5% VAT and tourism levy correctly — an audit-ready trail, not a month-end guess.</p>
-      </div>
-      <div class="qa">
-        <h3>Can staff steal or fiddle the numbers?</h3>
-        <p>Much harder. Everyone has their own login, pricing and refunds are <strong>locked to managers</strong>, and every sensitive change is stamped with who did it and when.</p>
-      </div>
-      <div class="qa">
-        <h3>What if we grow, or open another property?</h3>
-        <p>It scales with you. Turn on more of the system as you expand, and the <strong>same setup can run a second venue</strong> — a bar, a lodge, a gym — without starting over.</p>
-      </div>
-      <div class="qa">
-        <h3>Does it need constant internet to work?</h3>
-        <p>No. The till and desk keep running offline and <strong>sync automatically</strong> when the connection returns — built for Malawian power and network realities.</p>
-      </div>
-      <div class="qa">
-        <h3>What if we only want part of it for now?</h3>
-        <p>That's the design. Start with rooms and finance, <strong>add the restaurant or gym later</strong> — you only ever run what you've switched on.</p>
-      </div>
+  <div class="wrap">
+    <p class="eyebrow anim">Straight answers</p>
+    <h2 class="split">The rest of what you're wondering &mdash; answered plainly.</h2>
+    <p class="lead anim">No small print, no dodging. If a question isn't here, it gets the same honest answer in person.</p>
+    <div class="qa-grid stagger">
+      <div class="qa"><h3>How long until we're up and running?</h3><p>Days, not months. We load your rooms, rates and menu, train the team on-site, and go live area by area &mdash; usually within the <strong>first week</strong>.</p></div>
+      <div class="qa"><h3>What happens to our existing bookings and records?</h3><p>They come with you. We <strong>bring your current reservations, guests and price list in</strong> at setup so nothing starts from a blank page.</p></div>
+      <div class="qa"><h3>If something breaks, who do we call?</h3><p>A real person, locally &mdash; not an overseas ticket queue. <strong>Support and updates are included</strong>, and because it's web-based we can fix things without visiting the property.</p></div>
+      <div class="qa"><h3>Will the MRA accept these invoices and VAT figures?</h3><p>Yes. Invoices and receipts are <strong>sequentially numbered, never reused</strong>, carry your VAT number, and apply MRA 16.5% VAT and tourism levy correctly &mdash; an audit-ready trail, not a month-end guess.</p></div>
+      <div class="qa"><h3>Can staff steal or fiddle the numbers?</h3><p>Much harder. Everyone has their own login, pricing and refunds are <strong>locked to managers</strong>, and every sensitive change is stamped with who did it and when.</p></div>
+      <div class="qa"><h3>What if we grow, or open another property?</h3><p>It scales with you. Turn on more of the system as you expand, and the <strong>same setup can run a second venue</strong> &mdash; a bar, a lodge, a gym &mdash; without starting over.</p></div>
+      <div class="qa"><h3>Does it need constant internet to work?</h3><p>No. The till and desk keep running offline and <strong>sync automatically</strong> when the connection returns &mdash; built for Malawian power and network realities.</p></div>
+      <div class="qa"><h3>What if we only want part of it for now?</h3><p>That's the design. Start with rooms and finance, <strong>add the restaurant or gym later</strong> &mdash; you only ever run what you've switched on.</p></div>
     </div>
   </div>
 </section>
 
 <!-- ============ CLOSE ============ -->
 <section class="close">
-  <div class="wrap reveal-anim">
-    <p class="eyebrow">The invitation</p>
-    <h2>Stop running the hotel from memory. Start running it from <em>one screen.</em></h2>
-    <p class="lead">Rosalyn's already has the rooms, the restaurant, the reputation. This is the system that ties them together — so every guest is looked after, and every kwacha is accounted for.</p>
-    <p class="lead" style="color:var(--wood);font-family:var(--serif);font-size:1.35rem;max-width:30ch;margin-inline:auto;">Let's set up your live demo, with your rooms and your rates, and let you feel a day run through it.</p>
-    <div class="signoff">
+  <div class="wrap">
+    <p class="eyebrow anim">The invitation</p>
+    <h2 class="split">Stop running the hotel from memory. Start running it from <em>one screen.</em></h2>
+    <p class="lead anim">Rosalyn's already has the rooms, the restaurant, the reputation. This is the system that ties them together &mdash; so every guest is looked after, and every kwacha is accounted for.</p>
+    <p class="lead anim" style="color:var(--wood);font-family:var(--serif);font-size:1.35rem;max-width:30ch;margin-inline:auto;">Let's set up your live demo, with your rooms and your rates, and let you feel a day run through it.</p>
+    <div class="signoff anim">
       <strong>Rosalyn's Beach Hotel Management System</strong>
-      One system for the whole property — reservations, restaurant, gym, conference and finance, made for Malawi.
+      One system for the whole property &mdash; reservations, restaurant, gym, conference and finance, made for Malawi.
     </div>
   </div>
 </section>
 
 <script>
   (function () {
-    var els = document.querySelectorAll('.reveal-anim');
-    if (!('IntersectionObserver' in window) || window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
-      els.forEach(function (e) { e.classList.add('in'); });
+    var reduce = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+    // Split flagged headings into word-by-word reveal spans (preserving <em>).
+    document.querySelectorAll('.split').forEach(function (h) {
+      var walk = function (node) {
+        Array.prototype.slice.call(node.childNodes).forEach(function (child) {
+          if (child.nodeType === 3) {
+            if (child.textContent.trim() === '') return;
+            var frag = document.createDocumentFragment();
+            child.textContent.split(/(\s+)/).forEach(function (tok) {
+              if (tok === '') return;
+              if (/^\s+$/.test(tok)) { frag.appendChild(document.createTextNode(tok)); return; }
+              var w = document.createElement('span'); w.className = 'word';
+              var inner = document.createElement('span'); inner.className = 'inner';
+              inner.textContent = tok;
+              w.appendChild(inner);
+              frag.appendChild(w);
+            });
+            node.replaceChild(frag, child);
+          } else if (child.nodeType === 1) {
+            walk(child);
+          }
+        });
+      };
+      walk(h);
+    });
+
+    if (reduce) {
+      document.querySelectorAll('.anim, .stagger, .split').forEach(function (e) { e.classList.add('in'); });
       return;
     }
+
+    // Stagger word delays per heading.
+    document.querySelectorAll('.split').forEach(function (h) {
+      var inners = h.querySelectorAll('.word .inner');
+      Array.prototype.forEach.call(inners, function (inner, i) {
+        inner.style.transitionDelay = Math.min(i * 55, 700) + 'ms';
+      });
+    });
+    // Stagger group children.
+    document.querySelectorAll('.stagger').forEach(function (g) {
+      Array.prototype.slice.call(g.children).forEach(function (c, i) {
+        c.style.transitionDelay = Math.min(i * 70, 560) + 'ms';
+      });
+    });
+
     var io = new IntersectionObserver(function (entries) {
       entries.forEach(function (en) {
         if (en.isIntersecting) { en.target.classList.add('in'); io.unobserve(en.target); }
       });
-    }, { threshold: 0.12, rootMargin: '0px 0px -8% 0px' });
-    els.forEach(function (e) { io.observe(e); });
+    }, { threshold: 0.15, rootMargin: '0px 0px -8% 0px' });
+    document.querySelectorAll('.anim, .stagger, .split').forEach(function (e) { io.observe(e); });
+
+    // Scroll progress bar.
+    var bar = document.getElementById('progress');
+    var onScroll = function () {
+      var el = document.documentElement;
+      var max = el.scrollHeight - el.clientHeight;
+      bar.style.width = (max > 0 ? (el.scrollTop / max) * 100 : 0) + '%';
+    };
+    window.addEventListener('scroll', onScroll, { passive: true });
+    onScroll();
   })();
 </script>
+
+</body>
+</html>

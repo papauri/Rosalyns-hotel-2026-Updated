@@ -103,9 +103,99 @@
         })();
     }
 
-    // ── On load: honour ?focus= / hash. ────────────────────────────────────
+    // ── Group flash ─────────────────────────────────────────────────────────
+    // A dashboard insight modal's "Open full page" link lands on the filtered
+    // list; ?flash= then briefly pulses the rows the card was about so the user
+    // sees exactly what they drilled into. Two forms:
+    //   ?flash=status:checked-in   → every [data-status="checked-in"] row
+    //   ?flash=results             → every visible row in [data-flash-scope]
+    var GROUP_FLASH_CLASS = 'rh-flash-group';
+
+    function isVisibleEl(el) {
+        if (!el || el.hidden) return false;
+        return el.offsetParent !== null || el.getClientRects().length > 0;
+    }
+
+    function resolveGroup(spec) {
+        if (!spec) return [];
+        if (spec === 'results') {
+            var scope = document.querySelector('[data-flash-scope]');
+            if (!scope) return [];
+            return Array.prototype.slice.call(scope.querySelectorAll('tbody > tr')).filter(isVisibleEl);
+        }
+        var m = /^([a-z][a-z0-9_-]*):(.+)$/i.exec(spec);
+        if (!m) return [];
+        var key = m[1].toLowerCase();
+        var val = m[2];
+        var esc = (window.CSS && CSS.escape) ? CSS.escape(val) : val.replace(/["\\]/g, '\\$&');
+        var sel = '[data-' + key + '="' + esc + '"]';
+        var nodes;
+        try { nodes = document.querySelectorAll(sel); } catch (e) { return []; }
+        return Array.prototype.slice.call(nodes).filter(isVisibleEl);
+    }
+
+    function pulse(el) {
+        if (!el) return;
+        el.classList.remove(GROUP_FLASH_CLASS);
+        void el.offsetWidth;
+        el.classList.add(GROUP_FLASH_CLASS);
+        el.addEventListener('animationend', function handler() {
+            el.classList.remove(GROUP_FLASH_CLASS);
+            el.removeEventListener('animationend', handler);
+        });
+    }
+
+    function flashGroup(spec) {
+        if (!spec) return;
+        // "results" flashes whatever the active tab currently shows, so it must
+        // run AFTER the page's tab-filter has hidden non-matching rows — a short
+        // initial defer lets that settle before we read visibility.
+        if (spec === 'results') {
+            setTimeout(function () { flashGroupNow(spec); }, 300);
+            return;
+        }
+        flashGroupNow(spec);
+    }
+
+    function flashGroupNow(spec) {
+        // Allow a touch longer than single-focus: tab-switching JS may still be
+        // hiding/showing rows when we first look.
+        var deadline = Date.now() + RETRY_MS + 600;
+        (function attempt() {
+            var els = resolveGroup(spec);
+            if (els.length) {
+                els[0].scrollIntoView({
+                    behavior: reducedMotion() ? 'auto' : 'smooth',
+                    block: 'center',
+                    inline: 'nearest'
+                });
+                if (reducedMotion()) {
+                    els.forEach(function (el) {
+                        el.classList.add(GROUP_FLASH_CLASS);
+                        setTimeout(function () { el.classList.remove(GROUP_FLASH_CLASS); }, 1600);
+                    });
+                    return;
+                }
+                // Gentle stagger so a run of rows ripples rather than blinking at once.
+                els.forEach(function (el, i) {
+                    setTimeout(function () { pulse(el); }, Math.min(i * 55, 550));
+                });
+                return;
+            }
+            if (Date.now() < deadline) { setTimeout(attempt, RETRY_STEP); }
+        })();
+    }
+
+    function getFlashSpec() {
+        try {
+            return new URLSearchParams(window.location.search).get('flash');
+        } catch (e) { return null; }
+    }
+
+    // ── On load: honour ?focus= / hash and ?flash= group. ──────────────────
     function init() {
         focusWhenReady(getFocusValue());
+        flashGroup(getFlashSpec());
     }
     if (document.readyState === 'loading') {
         document.addEventListener('DOMContentLoaded', init);
@@ -141,4 +231,5 @@
 
     // Expose for programmatic use (e.g. after AJAX table loads).
     window.rhDeepLinkFlash = function (value) { focusWhenReady(value); };
+    window.rhFlashGroup = function (spec) { flashGroup(spec); };
 })();

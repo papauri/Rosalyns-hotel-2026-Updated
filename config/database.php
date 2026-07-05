@@ -57,15 +57,23 @@ if (!defined('BALANCE_TOLERANCE')) {
     define('BALANCE_TOLERANCE', 0.01);
 }
 
+// Opt-in connection diagnostics. These logged the host/db/user on EVERY request,
+// which floods the production error log with noise (and repeats the credentials
+// hostname each hit). Set DB_DEBUG=1 in the environment to re-enable while
+// troubleshooting. Connection FAILURES are always logged below regardless.
+$dbDebug = in_array(strtolower((string)getenv('DB_DEBUG')), ['1', 'true', 'on', 'yes'], true);
+
 // Create PDO connection with performance optimizations
 try {
-    // Diagnostic logging
-    error_log("Database Connection Attempt:");
-    error_log("  Host: " . DB_HOST);
-    error_log("  Port: " . DB_PORT);
-    error_log("  Database: " . DB_NAME);
-    error_log("  User: " . DB_USER);
-    error_log("  Environment Variables Set: " . (getenv('DB_HOST') ? 'YES' : 'NO'));
+    // Diagnostic logging (opt-in only)
+    if ($dbDebug) {
+        error_log("Database Connection Attempt:");
+        error_log("  Host: " . DB_HOST);
+        error_log("  Port: " . DB_PORT);
+        error_log("  Database: " . DB_NAME);
+        error_log("  User: " . DB_USER);
+        error_log("  Environment Variables Set: " . (getenv('DB_HOST') ? 'YES' : 'NO'));
+    }
 
     $dsn = "mysql:host=" . DB_HOST . ";port=" . DB_PORT . ";dbname=" . DB_NAME . ";charset=" . DB_CHARSET;
     $options = [
@@ -115,7 +123,9 @@ try {
     // database.php is included more than once via require_once).
     _expireStaleTentativeBookings($pdo);
 
-    error_log("Database Connection Successful!");
+    if ($dbDebug) {
+        error_log("Database Connection Successful!");
+    }
 } catch (PDOException $e) {
     // Always show a beautiful custom error page (sleeping bear)
     $errorMsg = htmlspecialchars($e->getMessage());

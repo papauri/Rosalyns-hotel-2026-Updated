@@ -2473,7 +2473,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
 // Shared filter inputs (used by on-screen table and CSV export)
 $search_query = trim($_GET['search'] ?? '');
-$filter_status = $_GET['filter_status'] ?? '';
+// Accept ?status= as an alias for ?filter_status= so dashboard insight cards and
+// stat tiles that deep-link with ?status=checked-in land on the matching tab
+// (server-filtered + tab activated + row flash), not just the unfiltered list.
+$filter_status = $_GET['filter_status'] ?? ($_GET['status'] ?? '');
 $filter_date_from = $_GET['date_from'] ?? '';
 $filter_date_to = $_GET['date_to'] ?? '';
 $has_active_room_filters = $search_query !== '' || $filter_status !== '' || $filter_date_from !== '' || $filter_date_to !== '';
@@ -3252,7 +3255,7 @@ $today_str = $today->format('Y-m-d');
             </div>
         </div>
 
-        <div id="booking-results" data-active-tab="<?php echo htmlspecialchars($active_tab_override ?: 'all', ENT_QUOTES); ?>" data-admin-pagination-scope>
+        <div id="booking-results" data-active-tab="<?php echo htmlspecialchars($active_tab_override ?: 'all', ENT_QUOTES); ?>" data-admin-pagination-scope data-flash-scope>
             <?php if ($has_active_room_filters): ?>
                 <div style="background: #eef3ff; border: 1px solid #cfd8ff; border-radius: 10px; padding: 12px 14px; margin-bottom: 14px; display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap;">
                     <div style="display: flex; align-items: center; gap: 8px; color: #1f2d6b;">
@@ -4204,6 +4207,13 @@ $today_str = $today->format('Y-m-d');
                         break;
                     case 'month-bookings':
                         isVisible = isMonthBooking;
+                        break;
+                    default:
+                        // Generic status-named tab (e.g. "expired") that has no
+                        // bespoke rule above — match the row's status directly so
+                        // deep links like ?status=expired still show their rows
+                        // instead of hiding everything.
+                        isVisible = status === tabName;
                         break;
                 }
 

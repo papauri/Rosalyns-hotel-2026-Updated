@@ -567,7 +567,7 @@ if ($is_card_insight_ajax) {
                     ['key' => 'status', 'label' => 'Status'],
                     ['key' => 'payment', 'label' => 'Payment'],
                 ];
-                $payload['link'] = ['href' => 'bookings.php?filter=checkin_today', 'label' => 'Open check-ins list'];
+                $payload['link'] = ['href' => 'bookings.php?filter=checkin_today&flash=results', 'label' => 'Open check-ins list'];
                 $stmt = $pdo->prepare("SELECT b.id AS booking_id, b.booking_reference, b.guest_name, b.check_out_date, b.status, b.payment_status,
                                               r.name AS room_name, ir.room_number, ir.room_name AS individual_room_name
                                        FROM bookings b
@@ -611,7 +611,7 @@ if ($is_card_insight_ajax) {
                     ['key' => 'checkout', 'label' => 'Check-out'],
                     ['key' => 'amount_due', 'label' => 'Outstanding'],
                 ];
-                $payload['link'] = ['href' => 'bookings.php?filter=checkout_today', 'label' => 'Open check-outs list'];
+                $payload['link'] = ['href' => 'bookings.php?filter=checkout_today&flash=results', 'label' => 'Open check-outs list'];
                 $stmt = $pdo->prepare("SELECT b.id AS booking_id, b.booking_reference, b.guest_name, b.check_out_date, b.amount_due,
                                               r.name AS room_name, ir.room_number, ir.room_name AS individual_room_name
                                        FROM bookings b
@@ -655,7 +655,7 @@ if ($is_card_insight_ajax) {
                     ['key' => 'total', 'label' => 'Total'],
                     ['key' => 'amount_due', 'label' => 'Outstanding'],
                 ];
-                $payload['link'] = ['href' => 'bookings.php?status=pending', 'label' => 'Open pending bookings'];
+                $payload['link'] = ['href' => 'bookings.php?status=pending&flash=status:pending', 'label' => 'Open pending bookings'];
                 $stmt = $pdo->query("SELECT id AS booking_id, booking_reference, guest_name, check_in_date, number_of_nights, total_amount, amount_due
                                      FROM bookings
                                      WHERE status = 'pending'
@@ -686,7 +686,7 @@ if ($is_card_insight_ajax) {
                     ['key' => 'checkout', 'label' => 'Check-out'],
                     ['key' => 'amount_due', 'label' => 'Outstanding'],
                 ];
-                $payload['link'] = ['href' => 'bookings.php?status=checked-in', 'label' => 'Open in-house guests'];
+                $payload['link'] = ['href' => 'bookings.php?status=checked-in&flash=status:checked-in', 'label' => 'Open in-house guests'];
                 $stmt = $pdo->query("SELECT b.id AS booking_id, b.booking_reference, b.guest_name, b.check_out_date, b.amount_due,
                                             r.name AS room_name, ir.room_number, ir.room_name AS individual_room_name
                                      FROM bookings b
@@ -791,7 +791,7 @@ if ($is_card_insight_ajax) {
                     ['key' => 'expired_at', 'label' => 'Expired At'],
                     ['key' => 'amount_due', 'label' => 'Amount Due'],
                 ];
-                $payload['link'] = ['href' => 'bookings.php?status=expired', 'label' => 'Open expired bookings'];
+                $payload['link'] = ['href' => 'bookings.php?status=expired&flash=status:expired', 'label' => 'Open expired bookings'];
                 $stmt = $pdo->query("SELECT id AS booking_id, booking_reference, guest_name, check_in_date, expired_at, amount_due
                                      FROM bookings
                                      WHERE status = 'expired' AND expired_at >= DATE_SUB(NOW(), INTERVAL 24 HOUR)

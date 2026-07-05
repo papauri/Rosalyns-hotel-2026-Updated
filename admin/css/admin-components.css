@@ -50,6 +50,40 @@ tr.rh-deeplink-flash > td {
 }
 
 /* ============================================
+   GROUP FLASH — highlights a SET of rows (e.g. every in-house guest) when a
+   dashboard insight "Open full page" link lands on the filtered list. A gentle
+   double pulse so a run of rows reads as "these are the ones", without the
+   harder single-target flash above.
+   ============================================ */
+.rh-flash-group {
+    animation: rhFlashGroup 0.85s ease-in-out 2;
+    border-radius: 8px;
+}
+
+@keyframes rhFlashGroup {
+    0%, 100% { background-color: transparent; }
+    45% { background-color: color-mix(in srgb, var(--color-lux-gold, #C8A45A) 30%, transparent); }
+}
+
+tr.rh-flash-group > td {
+    animation: rhFlashGroupCell 0.85s ease-in-out 2;
+}
+
+@keyframes rhFlashGroupCell {
+    0%, 100% { background-color: transparent; }
+    45% { background-color: color-mix(in srgb, var(--color-lux-gold, #C8A45A) 26%, transparent); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .rh-flash-group,
+    tr.rh-flash-group > td {
+        animation: none;
+        background-color: color-mix(in srgb, var(--color-lux-gold, #C8A45A) 22%, transparent);
+        transition: background-color 0.4s ease;
+    }
+}
+
+/* ============================================
    MODAL STYLES
    ============================================ */
 
