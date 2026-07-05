@@ -16,7 +16,9 @@ if (!hasPermission((int)$user['id'], 'stock_management')) {
 
 $message = '';
 $error = '';
-$stations = rh_station_definitions();
+// Only manage hours for stations this preset actually runs (Kitchen/Bar/Coffee
+// follow station_kds/bds/cds). Historical labels still resolve via the full map.
+$stations = rh_enabled_station_definitions();
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if (!validateCsrfToken($_POST['csrf_token'] ?? '')) {

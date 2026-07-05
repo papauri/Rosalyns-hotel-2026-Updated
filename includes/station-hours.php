@@ -39,6 +39,62 @@ if (!function_exists('rh_station_setting_key')) {
     }
 }
 
+if (!function_exists('rh_station_module_key')) {
+    /**
+     * Map a station to the feature-module flag that turns it on for a preset.
+     * kitchen → station_kds, bar → station_bds, coffee_bar → station_cds.
+     */
+    function rh_station_module_key(string $station): string
+    {
+        return [
+            'kitchen'    => 'station_kds',
+            'bar'        => 'station_bds',
+            'coffee_bar' => 'station_cds',
+        ][$station] ?? '';
+    }
+}
+
+if (!function_exists('rh_station_enabled')) {
+    /**
+     * Is this station live for the current preset? Fails open when the module
+     * system isn't loaded (e.g. CLI) so historical reporting never breaks.
+     */
+    function rh_station_enabled(string $station): bool
+    {
+        if (!function_exists('moduleEnabled')) {
+            return true;
+        }
+        $moduleKey = rh_station_module_key($station);
+        if ($moduleKey === '') {
+            return true;
+        }
+        // A station only makes sense when POS itself is on.
+        if (!moduleEnabled('pos')) {
+            return false;
+        }
+        return moduleEnabled($moduleKey);
+    }
+}
+
+if (!function_exists('rh_enabled_station_definitions')) {
+    /**
+     * The station definitions that are actually enabled for this preset, used
+     * by the hours editor, report filters and the union reporting window so
+     * they never include a station the hotel doesn't run. Falls back to the
+     * full set if the filter would leave nothing (keeps the UI/union valid).
+     */
+    function rh_enabled_station_definitions(): array
+    {
+        $all = rh_station_definitions();
+        $enabled = array_filter(
+            $all,
+            static fn(string $station): bool => rh_station_enabled($station),
+            ARRAY_FILTER_USE_KEY
+        );
+        return $enabled !== [] ? $enabled : $all;
+    }
+}
+
 if (!function_exists('rh_station_is_valid_time')) {
     function rh_station_is_valid_time(string $time): bool
     {
@@ -177,7 +233,9 @@ if (!function_exists('rh_station_union_window_for_date')) {
     function rh_station_union_window_for_date(string $businessDate): array
     {
         $windows = [];
-        foreach (array_keys(rh_station_definitions()) as $station) {
+        // Only span the stations this preset actually runs, so the "All
+        // Stations" reporting window isn't stretched by a disabled station.
+        foreach (array_keys(rh_enabled_station_definitions()) as $station) {
             $windows[] = rh_station_window_for_date($station, $businessDate);
         }
 

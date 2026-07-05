@@ -27,6 +27,60 @@ function isAjaxRequest(): bool
         && strtolower($_SERVER['HTTP_X_REQUESTED_WITH']) === 'xmlhttprequest';
 }
 
+/**
+ * Ensure the booking_status_log audit table exists. Extend-stay, admin
+ * checkout-date change and room-upgrade all write an audit row here; on
+ * installs where this table was never created the INSERT threw a fatal
+ * "table doesn't exist" and aborted the whole action (after the booking row
+ * had already been updated, leaving the guest silently extended but the UI
+ * showing an error). Self-heal the schema, matching the ensure* pattern used
+ * across the app. Idempotent and cheap (CREATE TABLE IF NOT EXISTS).
+ */
+function ensureBookingStatusLogTable(PDO $pdo): void
+{
+    static $done = false;
+    if ($done) {
+        return;
+    }
+    $done = true;
+    try {
+        $pdo->exec(
+            "CREATE TABLE IF NOT EXISTS booking_status_log (
+                id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+                booking_id INT NOT NULL,
+                old_status VARCHAR(32) DEFAULT NULL,
+                new_status VARCHAR(32) DEFAULT NULL,
+                changed_by INT DEFAULT NULL,
+                change_reason VARCHAR(500) DEFAULT NULL,
+                created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                INDEX idx_bsl_booking (booking_id),
+                INDEX idx_bsl_created (created_at)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci"
+        );
+    } catch (Throwable $e) {
+        // Logging must never block the actual booking operation.
+        error_log('ensureBookingStatusLogTable: ' . $e->getMessage());
+    }
+}
+
+/**
+ * Write a booking_status_log row without ever letting an audit failure break
+ * the surrounding action (missing table, column drift, etc. are swallowed).
+ */
+function logBookingStatusChange(PDO $pdo, int $bookingId, ?string $oldStatus, ?string $newStatus, ?int $changedBy, string $reason): void
+{
+    try {
+        ensureBookingStatusLogTable($pdo);
+        $stmt = $pdo->prepare(
+            "INSERT INTO booking_status_log (booking_id, old_status, new_status, changed_by, change_reason, created_at)
+             VALUES (?, ?, ?, ?, ?, NOW())"
+        );
+        $stmt->execute([$bookingId, $oldStatus, $newStatus, $changedBy, mb_substr($reason, 0, 500)]);
+    } catch (Throwable $e) {
+        error_log('logBookingStatusChange (booking ' . $bookingId . '): ' . $e->getMessage());
+    }
+}
+
 function getSignedDateDiffDays(DateTimeInterface $fromDate, DateTimeInterface $toDate): int
 {
     $diff = $fromDate->diff($toDate);
@@ -47,6 +101,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
     try {
         $action = $_POST['action'] ?? '';
+
+        // Ensure the audit table exists up front (before any transaction) so its
+        // CREATE-TABLE DDL can't trigger an implicit commit mid-transaction, and
+        // so the later logBookingStatusChange() calls never hit a missing table.
+        ensureBookingStatusLogTable($pdo);
 
         if ($action === 'resend_email') {
             $booking_id = (int)($_POST['booking_id'] ?? 0);
@@ -2141,16 +2200,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             // Recalculate amount_due so it reflects the new total correctly
             recalculateBookingFinancials($booking_id);
 
-            // Log the extension
-            $log_stmt = $pdo->prepare("
-                INSERT INTO booking_status_log (booking_id, old_status, new_status, changed_by, change_reason, created_at)
-                VALUES (?, 'checked-in', 'checked-in', ?, ?, NOW())
-            ");
-            $log_stmt->execute([
+            // Log the extension (never fatal — must not undo the successful update)
+            logBookingStatusChange(
+                $pdo,
                 $booking_id,
+                'checked-in',
+                'checked-in',
                 $user['id'] ?? null,
                 "Stay extended from {$oldCheckout} to {$new_checkout}. New total: K " . number_format($newTotal, 2)
-            ]);
+            );
 
             header('Content-Type: application/json');
             echo json_encode([
@@ -2254,10 +2312,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
             $logReason = "Admin checkout date change: {$oldCheckout_acd} → {$new_checkout} ({$newNights_acd} nights)"
                 . ($change_reason ? '. Reason: ' . $change_reason : '');
-            $pdo->prepare("
-                INSERT INTO booking_status_log (booking_id, old_status, new_status, changed_by, change_reason, created_at)
-                VALUES (?, 'checked-in', 'checked-in', ?, ?, NOW())
-            ")->execute([$booking_id, $user['id'] ?? null, $logReason]);
+            logBookingStatusChange($pdo, $booking_id, 'checked-in', 'checked-in', $user['id'] ?? null, $logReason);
 
             rh_log_event('bookings', 'warning', 'Admin changed checkout date', [
                 'booking_id'   => $booking_id,
@@ -2398,19 +2453,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     }
                 }
 
-                // Log the upgrade
-                $log_stmt = $pdo->prepare("
-                    INSERT INTO booking_status_log (
-                        booking_id, old_status, new_status, changed_by, change_reason, created_at
-                    ) VALUES (?, ?, ?, ?, ?, NOW())
-                ");
-                $log_stmt->execute([
+                // Log the upgrade (non-fatal — the table is ensured up front so
+                // this normally succeeds; a logging error must not roll back the
+                // upgrade that already applied within this transaction).
+                logBookingStatusChange(
+                    $pdo,
                     $booking_id,
                     $booking['status'],
                     $booking['status'],
                     $user['id'] ?? null,
                     "Room type upgraded from {$booking['room_id']} ({$booking['old_room_name']}) to {$new_room_id} ({$new_room['name']}). Price difference: K " . number_format($price_difference, 2)
-                ]);
+                );
 
                 $pdo->commit();
 

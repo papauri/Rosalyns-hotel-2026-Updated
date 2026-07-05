@@ -32,8 +32,13 @@ $currency_symbol = getSetting('currency_symbol') ?: 'MWK';
 $site_name = getSetting('site_name') ?: 'Hotel';
 
 /* === Filters === */
-$STATION_OPTIONS = ['all' => 'All Stations', 'kitchen' => 'Kitchen', 'bar' => 'Bar', 'coffee_bar' => 'Coffee Bar'];
-$STATION_LABEL   = ['kitchen' => 'Kitchen', 'bar' => 'Bar', 'coffee_bar' => 'Coffee Bar'];
+// Full label map keeps historical rows readable even if a station was later
+// switched off; the filter dropdown only offers the stations this preset runs.
+$STATION_LABEL = ['kitchen' => 'Kitchen', 'bar' => 'Bar', 'coffee_bar' => 'Coffee Bar'];
+$STATION_OPTIONS = ['all' => 'All Stations'];
+foreach (rh_enabled_station_definitions() as $stationKey => $definition) {
+    $STATION_OPTIONS[$stationKey] = $definition['label'];
+}
 
 // Staff are pinned to their own station, admin/manager can pick anything.
 $role = $user['role'] ?? '';
