@@ -62,8 +62,10 @@ if ($dbAvailable && isset($pdo)) {
     try { $stats['menu_items']       = $q("SELECT (SELECT COUNT(*) FROM food_menu WHERE is_available=1)+(SELECT COUNT(*) FROM drink_menu WHERE is_available=1)"); } catch (Throwable $e) {}
 }
 
+$vatPricingMode = getSetting('vat_pricing_mode', 'exclusive') === 'inclusive'
+    ? 'prices include VAT' : 'VAT added on top';
 $vatStatus = in_array($vatEnabled, ['1', 1, true, 'true', 'on'], true)
-    ? "Enabled @ {$vatRate}%" : "Disabled";
+    ? "Enabled @ {$vatRate}% ({$vatPricingMode})" : "Disabled";
 $levyStatus = in_array($levyEnabled, ['1', 1, true, 'true', 'on'], true)
     ? "Enabled @ {$levyPct}%" : "Disabled";
 

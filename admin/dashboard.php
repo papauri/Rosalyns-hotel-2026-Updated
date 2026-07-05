@@ -396,7 +396,7 @@ if ($is_card_insight_ajax) {
         'pending_conference'        => $mod_conference,
         'today_conferences'         => $mod_conference,
         'outstanding_balances'      => $mod_finance,
-        'open_tabs'                 => $mod_pos,
+        'open_tabs'                 => $mod_stock,
         'room_service_reminders_due'=> $mod_pos && $mod_bookings,
         'room_service_pending'      => $mod_pos && $mod_bookings,
         'kitchen_tickets'           => $mod_pos && $mod_station_kds,
@@ -1774,13 +1774,19 @@ $currency_symbol = getSetting('currency_symbol');
                 <div class="stat-label"><?php echo isRestaurantEnabled() ? 'Restaurant Revenue Today' : 'POS Revenue Today'; ?></div>
                 <div class="stat-sub">Gross takings settled today</div>
             </a>
-            <a class="stat-card <?php echo $ops['open_tabs'] > 0 ? 'stat-warn' : ''; ?> js-dashboard-insight" data-insight-card="open_tabs" href="<?php echo $mod_stock ? 'stock-orders.php?status=placed' : 'pos.php'; ?>" title="<?php echo isRestaurantEnabled() ? 'Open tabs awaiting payment' : 'Placed orders awaiting payment'; ?>">
+            <?php /* "Placed order awaiting payment" is only a real workflow where the
+                     order pipeline exists (stock module: restaurant tabs, retail/
+                     supermarket held orders). A gym snack till (pos on, stock off)
+                     settles at the point of sale, so this card is not relevant there. */ ?>
+            <?php if ($mod_stock): ?>
+            <a class="stat-card <?php echo $ops['open_tabs'] > 0 ? 'stat-warn' : ''; ?> js-dashboard-insight" data-insight-card="open_tabs" href="stock-orders.php?status=placed" title="<?php echo isRestaurantEnabled() ? 'Open tabs awaiting payment' : 'Placed orders awaiting payment'; ?>">
                 <span class="stat-cta">Action →</span>
                 <div class="stat-icon"><i class="fas fa-hourglass-half"></i></div>
                 <div class="stat-value"><?php echo (int)$ops['open_tabs']; ?></div>
                 <div class="stat-label"><?php echo isRestaurantEnabled() ? 'Open Tabs' : 'Pending Orders'; ?></div>
                 <div class="stat-sub"><span class="kpi-currency"><?php echo $currency_symbol; ?></span><?php echo number_format($ops['open_tabs_value'], 2); ?> outstanding</div>
             </a>
+            <?php endif; ?>
             <?php endif; ?>
             <?php if ($mod_gym && !$mod_bookings): ?>
             <?php /* Gym-first businesses — membership register front and centre. */ ?>
@@ -1887,8 +1893,8 @@ $currency_symbol = getSetting('currency_symbol');
         <!-- Operations Pulse: real-time restaurant / room-service / KDS pipeline -->
         <h3 class="section-title" style="margin-top:6px;"><i class="fas fa-bolt"></i> Operations Pulse</h3>
         <div class="ops-grid">
-            <?php if ($mod_pos): ?>
-            <a class="ops-card js-dashboard-insight" data-insight-card="open_tabs" href="<?php echo $mod_stock ? 'stock-orders.php?status=placed' : 'pos.php'; ?>" title="<?php echo isRestaurantEnabled() ? 'Open restaurant tabs awaiting payment' : 'Placed orders awaiting payment'; ?>">
+            <?php if ($mod_stock): ?>
+            <a class="ops-card js-dashboard-insight" data-insight-card="open_tabs" href="stock-orders.php?status=placed" title="<?php echo isRestaurantEnabled() ? 'Open restaurant tabs awaiting payment' : 'Placed orders awaiting payment'; ?>">
                 <div class="ops-icon" style="background:#e67e22;"><i class="fas fa-receipt"></i></div>
                 <div class="ops-body">
                     <div class="ops-value"><?php echo $ops['open_tabs']; ?></div>
@@ -3072,7 +3078,7 @@ $currency_symbol = getSetting('currency_symbol');
                         return '<tr>' + cells + '</tr>';
                     }).join('');
                     _insightBody.innerHTML = summaryHtml + '<div class="dashboard-insight-modal__table-wrap">' +
-                        '<table class="dashboard-insight-modal__table">' +
+                        '<table class="dashboard-insight-modal__table no-card-mobile">' +
                         '<thead><tr>' + headHtml + '</tr></thead>' +
                         '<tbody>' + bodyHtml + '</tbody>' +
                         '</table>' +

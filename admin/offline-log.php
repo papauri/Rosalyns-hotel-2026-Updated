@@ -182,7 +182,7 @@ function fmt_lag(?int $s): string {
                             <td data-label="Entity">
                                 <?php if ($r['entity_reference']): ?>
                                     <?php if ($entityLink): ?>
-                                        <a href="<?php echo htmlspecialchars($entityLink); ?>" style="color:#8B7355; text-decoration:none;">
+                                        <a href="<?php echo htmlspecialchars($entityLink); ?>" target="_blank" rel="noopener" style="color:#8B7355; text-decoration:none;">
                                             <?php echo htmlspecialchars($r['entity_reference']); ?> <i class="fas fa-external-link-alt" style="font-size:10px;"></i>
                                         </a>
                                     <?php else: ?>

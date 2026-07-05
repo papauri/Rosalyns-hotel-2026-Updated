@@ -247,7 +247,7 @@ $all_vars = [
     [
         'cat' => 'Pricing & Payment',
         'tag' => '{{vat_amount}}',
-        'desc' => 'VAT portion of the total booking cost.',
+        'desc' => 'VAT on the booking. In "added on top" pricing mode this is the VAT amount; in "prices include VAT" mode it renders the rate only (e.g. "Included at 16.5%") since the amount is already inside the price; blank/— when VAT is disabled.',
         'example' => '25,000',
         'tpl' => 'booking_received, booking_confirmed'
     ],

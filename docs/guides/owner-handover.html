@@ -473,7 +473,7 @@
         <h3>Booking settings</h3>
         <p>Configure at <strong>Admin &rarr; Booking Settings</strong>:</p>
         <ul class="checklist tight">
-          <li>VAT rate (16.5% Malawi standard)</li>
+          <li>VAT rate (16.5% Malawi standard), status, and pricing mode — VAT added on top of prices, or prices already include VAT (set in Finance &rarr; Accounting &rarr; VAT Settings)</li>
           <li>Tourism levy percentage</li>
           <li>Standard check-in and check-out times</li>
           <li>Advance booking window (how far ahead guests can book)</li>
@@ -552,7 +552,7 @@
       </div>
       <div>
         <h3>Invoicing</h3>
-        <p>Invoices are numbered sequentially <code>INV-YYYY-NNNNNN</code> and can never be reused or deleted. Each invoice shows itemised accommodation + F&amp;B charges, calculates VAT (16.5%) and tourism levy separately, is generated as PDF server-side, can be emailed to the guest directly, and is archived permanently under <strong>Admin &rarr; Invoices</strong>.</p>
+        <p>Invoices are numbered sequentially <code>INV-YYYY-NNNNNN</code> and can never be reused or deleted. Each invoice shows itemised accommodation + F&amp;B charges, applies VAT and tourism levy according to your VAT pricing mode (added on top, or already included in the price), is generated as PDF server-side, can be emailed to the guest directly, and is archived permanently under <strong>Admin &rarr; Invoices</strong>.</p>
         <p>The <strong>Invoices</strong> page shows a receivables aging panel. Outstanding invoices are bucketed by age since the invoice was created (0–30 days, 31–60, 61–90, 90+). The Outstanding KPI shows only money owed <em>by guests</em> — pending refunds (money owed to guests) are excluded to prevent misreading your receivables position.</p>
         <h3 style="margin-top:1.5rem;">Refunds &amp; Credit Notes</h3>
         <p>Process cash refunds at <strong>Admin &rarr; Payment Refund</strong>. Enter amount, reason, and method. The accounting dashboard records the refund against the original payment. Refunds do not auto-cancel bookings &mdash; cancel separately if needed.</p>

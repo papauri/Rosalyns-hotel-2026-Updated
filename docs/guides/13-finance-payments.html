@@ -85,8 +85,9 @@
                         </tr>
                         <tr>
                             <td><strong>Amount</strong></td>
-                            <td>Gross amount before VAT if VAT-inclusive, or the net amount if you track VAT
-                                separately.</td>
+                            <td>The amount charged to the customer for this line. The system derives the VAT split from it
+                                automatically using your pricing mode (see <a href="#vat">VAT &amp; tax</a>) — you don't
+                                enter VAT by hand.</td>
                         </tr>
                         <tr>
                             <td><strong>Method</strong></td>
@@ -544,8 +545,10 @@
             <section id="quotations">
                 <h2>6. Quotations</h2>
                 <p><code>/admin/quotations.php</code> — manage quotations (price proposals) sent to guests before
-                    payment is collected. Quotations are typically used for tentative bookings and conference
-                    inquiries.</p>
+                    payment is collected. Quotations cover every booking type — <strong>room, conference, event and
+                    gym</strong> — and the <strong>Type</strong> filter only lists the types your <a
+                    href="16-business-presets.html">business preset</a> actually uses. Each type generates its own
+                    branded PDF that respects the VAT pricing mode above.</p>
 
                 <h3>Quotation statuses</h3>
                 <table>
@@ -644,12 +647,16 @@
                     </thead>
                     <tbody>
                         <tr>
-                            <td><strong>VAT enabled</strong></td>
-                            <td>Tick to apply VAT to all new payments. Untick for zero-rated periods.</td>
+                            <td><strong>VAT status</strong></td>
+                            <td>Enabled or Disabled. Disable for zero-rated periods or businesses that don't charge VAT — no VAT is applied or shown anywhere.</td>
+                        </tr>
+                        <tr>
+                            <td><strong>Pricing mode</strong></td>
+                            <td>How your listed prices relate to VAT. Two options — see below. This is the setting that changes how totals and documents behave.</td>
                         </tr>
                         <tr>
                             <td><strong>VAT rate (%)</strong></td>
-                            <td>Numeric, 0–100. Current Malawi standard rate is 16.5%.</td>
+                            <td>Numeric, 0–100. Current Malawi standard rate is 16.5%. A rate of 0 is treated the same as VAT disabled.</td>
                         </tr>
                         <tr>
                             <td><strong>VAT number</strong></td>
@@ -658,16 +665,57 @@
                     </tbody>
                 </table>
 
-                <p>VAT is calculated automatically on every Add Payment form:</p>
+                <h3>Pricing mode — the two ways VAT can work</h3>
+                <p>Businesses handle VAT differently, so the system supports both approaches. Pick the one that matches how
+                    you quote your prices:</p>
+
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Mode</th>
+                            <th>What it means</th>
+                            <th>On invoices / receipts / quotations</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr>
+                            <td><strong>VAT added on top of prices</strong><br>(exclusive)</td>
+                            <td>Your prices are pre-tax. VAT is added on top, so the customer pays more than the listed
+                                price. This is the classic behaviour.</td>
+                            <td>Shows the VAT <strong>amount</strong> as a separate line, then a higher grand total.</td>
+                        </tr>
+                        <tr>
+                            <td><strong>Prices already include VAT</strong><br>(inclusive)</td>
+                            <td>Your listed prices already contain VAT. The total the customer pays <strong>equals your
+                                listed price</strong> — it never inflates. VAT is worked out inside that figure for your
+                                own records.</td>
+                            <td>Shows only the VAT <strong>rate</strong> (e.g. "Included at 16.5%") and a note that prices
+                                are VAT-inclusive — never a separate amount, because it's already in the price.</td>
+                        </tr>
+                    </tbody>
+                </table>
+
+                <p>The maths behind each mode (on a listed price of MWK&nbsp;1,000 at 16.5%):</p>
                 <div
                     style="background:var(--sand,#f5f0e8);border-radius:8px;padding:0.75rem 1rem;font-family:monospace;font-size:0.9rem;margin:0.5rem 0;">
-                    VAT amount = payment amount &times; (VAT rate &divide; 100)<br>
-                    Total = payment amount + VAT amount
+                    <strong>Added on top (exclusive):</strong><br>
+                    VAT = 1,000 &times; 16.5% = 165 &nbsp;&rarr;&nbsp; customer pays 1,165<br><br>
+                    <strong>Included in price (inclusive):</strong><br>
+                    Net = 1,000 &divide; 1.165 = 858.37 &nbsp;&rarr;&nbsp; VAT = 141.63 &nbsp;&rarr;&nbsp; customer pays 1,000<br><br>
+                    <strong>Disabled:</strong><br>
+                    VAT = 0 &nbsp;&rarr;&nbsp; customer pays 1,000
                 </div>
 
                 <div class="callout note">
-                    VAT settings are stored in <code>site_settings</code>. Changes take effect on the next Add Payment
-                    action — they do not retroactively modify existing payment records.
+                    Whichever mode you use, the <strong>net (pre-VAT) figure</strong> is always what's stored as the
+                    payment amount, and the accounting dashboard / reports always show the correct net-vs-VAT split.
+                    Only the <em>customer-facing</em> documents differ. The same setting applies to every module — rooms,
+                    conference, gym, events and the POS till.
+                </div>
+
+                <div class="callout note">
+                    VAT settings are stored in <code>site_settings</code>. Changes take effect on the next transaction —
+                    they do not retroactively modify existing payment records.
                 </div>
             </section>
 
@@ -796,7 +844,8 @@
                 <h3>VAT Settings form</h3>
                 <p>Scroll to the bottom of the page to update:</p>
                 <ul class="checklist">
-                    <li><strong>VAT enabled / disabled</strong> — affects all new payments going forward. Does not retroactively change existing records.</li>
+                    <li><strong>VAT status (enabled / disabled)</strong> — affects all new transactions going forward. Does not retroactively change existing records.</li>
+                    <li><strong>Pricing mode</strong> — "VAT added on top of prices" or "Prices already include VAT". See <a href="#vat">VAT &amp; tax</a> above for what each does to totals and documents.</li>
                     <li><strong>VAT rate (%)</strong> — Malawi standard is 16.5%. Update here when the rate changes.</li>
                     <li><strong>VAT number</strong> — printed on every invoice and receipt PDF.</li>
                 </ul>
