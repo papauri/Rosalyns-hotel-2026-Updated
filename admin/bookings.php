@@ -3416,6 +3416,8 @@ $today_str = $today->format('Y-m-d');
                                     }
                                     ?>
                                     <tr <?php echo $row_style; ?>
+                                        id="booking-<?php echo (int)$booking['id']; ?>"
+                                        data-focus="booking-<?php echo (int)$booking['id']; ?>"
                                         data-status="<?php echo htmlspecialchars($booking['status'], ENT_QUOTES); ?>"
                                         data-payment-status="<?php echo htmlspecialchars($booking['actual_payment_status'] ?? $booking['payment_status'], ENT_QUOTES); ?>"
                                         data-check-in="<?php echo htmlspecialchars($booking['check_in_date'], ENT_QUOTES); ?>"

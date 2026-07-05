@@ -836,7 +836,10 @@ if ($is_card_insight_ajax) {
                 }
                 usort($rows, static fn($a, $b) => (float)$b['amount_due'] <=> (float)$a['amount_due']);
                 $rows = array_slice($rows, 0, 30);
-                $ob_links = ['booking' => 'booking-details.php?id=', 'conference' => 'conference-management.php?id=', 'gym' => 'gym-inquiries.php?id=', 'event' => 'events-inquiries.php?id='];
+                // Land on the record's own page/row (scrolled + flashed) rather
+                // than dumping the user on a general list. Bookings have a detail
+                // page; the inquiry lists deep-link to the anchored row.
+                $ob_links = ['booking' => 'booking-details.php?id=', 'conference' => 'conference-management.php#enquiry-', 'gym' => 'gym-inquiries.php#inquiry-', 'event' => 'events-inquiries.php#inquiry-'];
                 foreach ($rows as $row) {
                     $bid = (int)($row['id'] ?? 0);
                     $payload['rows'][] = [

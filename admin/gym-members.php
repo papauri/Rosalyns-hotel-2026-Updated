@@ -710,7 +710,7 @@ $gm_currency = (string)getSetting('currency_symbol', 'K');
                         $statusColor = ['active' => '#2e7d32', 'expired' => '#9e4040', 'suspended' => '#B18247', 'cancelled' => '#6c757d'][$m['status']] ?? '#6c757d';
                         $expPill = gym_days_to_expiry($m['expiry_date'] ?? null, (string)$m['status'], (int)$gm_reminder_cfg['days']);
                     ?>
-                        <tr>
+                        <tr id="member-<?php echo (int)$m['id']; ?>" data-focus="member-<?php echo (int)$m['id']; ?>">
                             <td><strong><?php echo htmlspecialchars($m['member_number']); ?></strong></td>
                             <td><?php echo htmlspecialchars($m['full_name']); ?></td>
                             <td style="font-size:.85rem;color:#7a6f63;">

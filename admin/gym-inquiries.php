@@ -538,7 +538,7 @@ try {
                     </tr>
                     <?php else: ?>
                     <?php foreach ($gym_inquiries as $inquiry): ?>
-                    <tr>
+                    <tr id="inquiry-<?php echo (int)$inquiry['id']; ?>" data-focus="inquiry-<?php echo (int)$inquiry['id']; ?>">
                         <td><strong><?php echo htmlspecialchars($inquiry['reference_number']); ?></strong></td>
                         <td><?php echo htmlspecialchars($inquiry['name']); ?></td>
                         <td>

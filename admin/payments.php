@@ -569,7 +569,7 @@ $quickActive = function ($s, $e) use ($startDate, $endDate) {
                     <span class="acct-panel__sub">Within current filters</span>
                 </div>
                 <div class="acct-table-wrap">
-                    <table class="acct-table">
+                    <table class="acct-table fit-or-card">
                         <thead>
                             <tr>
                                 <th>Source</th>
@@ -614,7 +614,7 @@ $quickActive = function ($s, $e) use ($startDate, $endDate) {
                     <span class="acct-panel__sub">Within current filters</span>
                 </div>
                 <div class="acct-table-wrap">
-                    <table class="acct-table">
+                    <table class="acct-table fit-or-card">
                         <thead>
                             <tr>
                                 <th>Method</th>
@@ -772,7 +772,7 @@ $quickActive = function ($s, $e) use ($startDate, $endDate) {
 
         <!-- Payments Table -->
         <div class="table-container">
-            <table class="table">
+            <table class="table fit-or-card">
                 <thead>
                     <tr>
                         <th>Reference</th>
@@ -790,7 +790,7 @@ $quickActive = function ($s, $e) use ($startDate, $endDate) {
                 <tbody>
                     <?php if (!empty($payments)): ?>
                         <?php foreach ($payments as $payment): ?>
-                            <tr>
+                            <tr id="payment-<?php echo (int)$payment['id']; ?>" data-focus="payment-<?php echo (int)$payment['id']; ?>">
                                 <td><strong><?php echo htmlspecialchars($payment['payment_reference']); ?></strong></td>
                                 <td>
                                     <div><?php echo htmlspecialchars($payment['booking_description']); ?></div>

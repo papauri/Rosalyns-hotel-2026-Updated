@@ -4,6 +4,52 @@
  */
 
 /* ============================================
+   DEEP-LINK FLASH HIGHLIGHT
+   Applied once by admin-deeplink.js when a link jumps to a specific
+   row / card / section, so the user sees exactly what they followed.
+   ============================================ */
+
+.rh-deeplink-flash {
+    animation: rhDeeplinkFlash 1.5s cubic-bezier(0.4, 0, 0.2, 1) 1;
+    border-radius: 8px;
+}
+
+@keyframes rhDeeplinkFlash {
+    0% {
+        background-color: color-mix(in srgb, var(--color-lux-gold, #C8A45A) 42%, transparent);
+        box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-lux-gold, #C8A45A) 55%, transparent);
+    }
+    60% {
+        background-color: color-mix(in srgb, var(--color-lux-gold, #C8A45A) 22%, transparent);
+        box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-lux-gold, #C8A45A) 30%, transparent);
+    }
+    100% {
+        background-color: transparent;
+        box-shadow: 0 0 0 3px transparent;
+    }
+}
+
+/* Table rows can't take box-shadow reliably across browsers — tint the cells. */
+tr.rh-deeplink-flash > td {
+    animation: rhDeeplinkFlashCell 1.5s cubic-bezier(0.4, 0, 0.2, 1) 1;
+}
+
+@keyframes rhDeeplinkFlashCell {
+    0%   { background-color: color-mix(in srgb, var(--color-lux-gold, #C8A45A) 40%, transparent); }
+    60%  { background-color: color-mix(in srgb, var(--color-lux-gold, #C8A45A) 20%, transparent); }
+    100% { background-color: transparent; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .rh-deeplink-flash,
+    tr.rh-deeplink-flash > td {
+        animation: none;
+        background-color: color-mix(in srgb, var(--color-lux-gold, #C8A45A) 24%, transparent);
+        transition: background-color 0.4s ease;
+    }
+}
+
+/* ============================================
    MODAL STYLES
    ============================================ */
 

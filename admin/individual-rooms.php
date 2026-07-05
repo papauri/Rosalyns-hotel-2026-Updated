@@ -1040,7 +1040,7 @@ $currency = htmlspecialchars(getSetting('currency_symbol'));
                                     }
                                 }
                                 ?>
-                                <tr data-room-status="<?php echo $displayStatus; ?>">
+                                <tr data-room-status="<?php echo $displayStatus; ?>" id="room-<?php echo (int)$room['id']; ?>" data-focus="room-<?php echo (int)$room['id']; ?>">
                                     <td>
                                         <input type="checkbox" name="room_ids[]" value="<?php echo $room['id']; ?>" onchange="updateBulkActions()">
                                     </td>
