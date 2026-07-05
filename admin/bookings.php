@@ -67,7 +67,7 @@ function ensureBookingStatusLogTable(PDO $pdo): void
  * Write a booking_status_log row without ever letting an audit failure break
  * the surrounding action (missing table, column drift, etc. are swallowed).
  */
-function logBookingStatusChange(PDO $pdo, int $bookingId, ?string $oldStatus, ?string $newStatus, ?int $changedBy, string $reason): void
+function bookings_log_status_change(PDO $pdo, int $bookingId, ?string $oldStatus, ?string $newStatus, ?int $changedBy, string $reason): void
 {
     try {
         ensureBookingStatusLogTable($pdo);
@@ -77,7 +77,7 @@ function logBookingStatusChange(PDO $pdo, int $bookingId, ?string $oldStatus, ?s
         );
         $stmt->execute([$bookingId, $oldStatus, $newStatus, $changedBy, mb_substr($reason, 0, 500)]);
     } catch (Throwable $e) {
-        error_log('logBookingStatusChange (booking ' . $bookingId . '): ' . $e->getMessage());
+        error_log('bookings_log_status_change (booking ' . $bookingId . '): ' . $e->getMessage());
     }
 }
 
@@ -104,7 +104,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
         // Ensure the audit table exists up front (before any transaction) so its
         // CREATE-TABLE DDL can't trigger an implicit commit mid-transaction, and
-        // so the later logBookingStatusChange() calls never hit a missing table.
+        // so the later bookings_log_status_change() calls never hit a missing table.
         ensureBookingStatusLogTable($pdo);
 
         if ($action === 'resend_email') {
@@ -2201,7 +2201,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             recalculateBookingFinancials($booking_id);
 
             // Log the extension (never fatal — must not undo the successful update)
-            logBookingStatusChange(
+            bookings_log_status_change(
                 $pdo,
                 $booking_id,
                 'checked-in',
@@ -2312,7 +2312,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
             $logReason = "Admin checkout date change: {$oldCheckout_acd} → {$new_checkout} ({$newNights_acd} nights)"
                 . ($change_reason ? '. Reason: ' . $change_reason : '');
-            logBookingStatusChange($pdo, $booking_id, 'checked-in', 'checked-in', $user['id'] ?? null, $logReason);
+            bookings_log_status_change($pdo, $booking_id, 'checked-in', 'checked-in', $user['id'] ?? null, $logReason);
 
             rh_log_event('bookings', 'warning', 'Admin changed checkout date', [
                 'booking_id'   => $booking_id,
@@ -2456,7 +2456,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 // Log the upgrade (non-fatal — the table is ensured up front so
                 // this normally succeeds; a logging error must not roll back the
                 // upgrade that already applied within this transaction).
-                logBookingStatusChange(
+                bookings_log_status_change(
                     $pdo,
                     $booking_id,
                     $booking['status'],

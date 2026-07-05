@@ -29,6 +29,11 @@ $paymentMethod = isset($_GET['payment_method']) ? $_GET['payment_method'] : '';
 $startDate = isset($_GET['start_date']) ? $_GET['start_date'] : '';
 $endDate = isset($_GET['end_date']) ? $_GET['end_date'] : '';
 $searchText = trim((string)($_GET['search_text'] ?? ''));
+// "Outstanding balances" view: shows accounts (bookings/conference/gym/event)
+// that still owe money — i.e. amount_due > 0 — NOT payment-ledger rows. This is
+// what the dashboard "Outstanding Balances" card counts; those accounts often
+// have zero payment rows yet, so they can never appear in the payments list.
+$showOutstanding = (($_GET['balance'] ?? '') === 'outstanding');
 $has_active_payment_filters = $bookingType !== '' || $bookingId > 0 || $status !== '' || $paymentMethod !== '' || $startDate !== '' || $endDate !== '' || $searchText !== '';
 
 // Preset scoping: by default the list shows only rows whose module is enabled
@@ -181,6 +186,41 @@ $params[] = $offset;
 $stmt = $pdo->prepare($sql);
 $stmt->execute($params);
 $payments = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+// ── Outstanding balances (accounts still owing) ────────────────────────────
+// Built from the source tables, scoped to the enabled modules — mirrors the
+// dashboard "Outstanding Balances" card so the numbers line up exactly.
+$outstandingRows = [];
+$outstandingTotal = 0.0;
+if ($showOutstanding) {
+    $confRef = $conferenceFields['reference'];
+    $confCompany = $conferenceFields['company'];
+    $confContact = $conferenceFields['contact_name'] ?? 'contact_person';
+    $outstandingSources = [];
+    if ($mod_bookings) {
+        $outstandingSources[] = "SELECT 'room' AS src, id, booking_reference AS ref, guest_name AS client, status, total_amount, amount_paid, amount_due FROM bookings WHERE amount_due > 0 AND status IN ('pending','confirmed','checked-in')";
+    }
+    if ($mod_conference) {
+        $outstandingSources[] = "SELECT 'conference' AS src, id, {$confRef} AS ref, COALESCE(NULLIF({$confCompany},''), {$confContact}) AS client, status, total_amount, amount_paid, amount_due FROM conference_inquiries WHERE amount_due > 0 AND status NOT IN ('cancelled')";
+    }
+    if ($mod_gym) {
+        $outstandingSources[] = "SELECT 'gym' AS src, id, reference_number AS ref, name AS client, status, total_amount, amount_paid, amount_due FROM gym_inquiries WHERE amount_due > 0 AND status NOT IN ('cancelled','closed')";
+    }
+    if ($mod_events) {
+        $outstandingSources[] = "SELECT 'event' AS src, id, reference_number AS ref, name AS client, status, total_amount, amount_paid, amount_due FROM event_inquiries WHERE amount_due > 0 AND status NOT IN ('cancelled')";
+    }
+    foreach ($outstandingSources as $osql) {
+        try {
+            foreach ($pdo->query($osql)->fetchAll(PDO::FETCH_ASSOC) as $oRow) {
+                $outstandingRows[] = $oRow;
+                $outstandingTotal += (float)($oRow['amount_due'] ?? 0);
+            }
+        } catch (Throwable $e) {
+            // A module's table may not exist yet — skip it.
+        }
+    }
+    usort($outstandingRows, static fn($a, $b) => (float)$b['amount_due'] <=> (float)$a['amount_due']);
+}
 
 // Get unique payment methods for filter
 $methodsStmt = $pdo->query("
@@ -770,6 +810,84 @@ $quickActive = function ($s, $e) use ($startDate, $endDate) {
             </div>
         <?php endif; ?>
 
+        <!-- Outstanding balances toggle -->
+        <div style="display:flex; gap:10px; flex-wrap:wrap; margin:0 0 14px;">
+            <?php if ($showOutstanding): ?>
+                <a href="payments.php" class="btn-reset" style="padding:9px 16px; border-radius:var(--radius); text-decoration:none; display:inline-flex; align-items:center; gap:8px;">
+                    <i class="fas fa-arrow-left"></i> Back to payment ledger
+                </a>
+                <span class="acct-pill acct-pill--pending" style="align-self:center;">
+                    <i class="fas fa-hand-holding-dollar"></i> <?php echo count($outstandingRows); ?> account<?php echo count($outstandingRows) === 1 ? '' : 's'; ?> owing · <?php echo $currency_symbol . number_format($outstandingTotal, 0); ?>
+                </span>
+            <?php else: ?>
+                <a href="payments.php?balance=outstanding" class="btn-filter" style="text-decoration:none; display:inline-flex; align-items:center; gap:8px;">
+                    <i class="fas fa-hand-holding-dollar"></i> View Outstanding Balances
+                </a>
+            <?php endif; ?>
+        </div>
+
+        <?php if ($showOutstanding): ?>
+        <!-- Outstanding Balances Table -->
+        <div class="table-container">
+            <table class="table fit-or-card">
+                <thead>
+                    <tr>
+                        <th>Reference</th>
+                        <th>Client</th>
+                        <th>Type</th>
+                        <th>Total</th>
+                        <th>Paid</th>
+                        <th>Outstanding</th>
+                        <th>Status</th>
+                        <th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <?php if (!empty($outstandingRows)): ?>
+                        <?php
+                        $srcMeta = [
+                            'room'       => ['label' => 'Room',       'badge' => 'room',       'link' => 'booking-details.php?id='],
+                            'conference' => ['label' => 'Conference', 'badge' => 'conference', 'link' => 'conference-management.php?id='],
+                            'gym'        => ['label' => 'Gym',        'badge' => 'gym',        'link' => 'gym-inquiries.php?id='],
+                            'event'      => ['label' => 'Event',      'badge' => 'event',      'link' => 'events-inquiries.php?id='],
+                        ];
+                        foreach ($outstandingRows as $oRow):
+                            $src = (string)($oRow['src'] ?? '');
+                            $meta = $srcMeta[$src] ?? ['label' => ucfirst($src), 'badge' => $src, 'link' => '#'];
+                            $oid = (int)($oRow['id'] ?? 0);
+                            $viewUrl = $meta['link'] . $oid;
+                        ?>
+                            <tr>
+                                <td data-label="Reference"><strong><?php echo htmlspecialchars((string)($oRow['ref'] ?? '—')); ?></strong></td>
+                                <td data-label="Client"><?php echo htmlspecialchars((string)($oRow['client'] ?? '—')); ?></td>
+                                <td data-label="Type"><span class="badge badge-<?php echo htmlspecialchars($meta['badge']); ?>"><?php echo htmlspecialchars($meta['label']); ?></span></td>
+                                <td data-label="Total"><?php echo $currency_symbol . number_format((float)($oRow['total_amount'] ?? 0), 0); ?></td>
+                                <td data-label="Paid"><?php echo $currency_symbol . number_format((float)($oRow['amount_paid'] ?? 0), 0); ?></td>
+                                <td data-label="Outstanding"><strong style="color:#c0392b;"><?php echo $currency_symbol . number_format((float)($oRow['amount_due'] ?? 0), 0); ?></strong></td>
+                                <td data-label="Status"><span class="badge badge-<?php echo htmlspecialchars((string)($oRow['status'] ?? '')); ?>"><?php echo htmlspecialchars(ucfirst(str_replace('_', ' ', (string)($oRow['status'] ?? '')))); ?></span></td>
+                                <td data-label="Actions">
+                                    <div class="quick-actions">
+                                        <a href="<?php echo htmlspecialchars($viewUrl); ?>" class="btn btn-primary btn-sm" title="View account"><i class="fas fa-eye"></i></a>
+                                        <?php if ($src === 'room'): ?>
+                                            <a href="payment-add.php?booking_id=<?php echo $oid; ?>" class="btn btn-success btn-sm" title="Record a payment"><i class="fas fa-plus"></i> Collect</a>
+                                        <?php endif; ?>
+                                    </div>
+                                </td>
+                            </tr>
+                        <?php endforeach; ?>
+                    <?php else: ?>
+                        <tr>
+                            <td colspan="8" class="empty-state">
+                                <i class="fas fa-circle-check"></i>
+                                <p>No outstanding balances — every account is fully paid.</p>
+                            </td>
+                        </tr>
+                    <?php endif; ?>
+                </tbody>
+            </table>
+        </div>
+        <?php else: ?>
+
         <!-- Payments Table -->
         <div class="table-container">
             <table class="table fit-or-card">
@@ -932,6 +1050,7 @@ $quickActive = function ($s, $e) use ($startDate, $endDate) {
                 Showing <?php echo $offset + 1; ?> to <?php echo min($offset + $limit, $total); ?> of <?php echo $total; ?> payments
             </p>
         <?php endif; ?>
+        <?php endif; // end !$showOutstanding payments-table branch ?>
     </div>
 
     <script>
