@@ -419,6 +419,9 @@
 .package-card.featured {
     border-color: var(--color-primary, #8B7355);
     box-shadow: 0 8px 32px rgba(139, 115, 85, 0.2);
+    /* Extra top room so the "Most Popular" badge sits cleanly inside the card
+       instead of overlapping the accent bar / icon. */
+    padding-top: calc(var(--spacing-xl, 32px) + 18px);
 }
 
 .package-card.featured::before {
@@ -434,9 +437,10 @@
 
 .popular-badge {
     position: absolute;
-    top: -12px;
+    top: 16px;
     left: 50%;
     transform: translateX(-50%);
+    z-index: 3;
     padding: 6px 20px;
     background: linear-gradient(135deg, var(--color-primary, #8B7355), var(--color-primary-dark, #6B5740));
     color: white;
@@ -446,6 +450,7 @@
     letter-spacing: 0.1em;
     border-radius: var(--radius-full, 999px);
     white-space: nowrap;
+    box-shadow: 0 4px 12px rgba(139, 115, 85, 0.32);
 }
 
 .package-icon {

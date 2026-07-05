@@ -119,6 +119,27 @@
     flex: 1;
 }
 
+/* Rich header: a stacked block (pill + title + subtitle) beside the close
+   button. Keeps multi-line headers uniform with the single-line pattern. */
+.modal__header:has(.modal__header-content) {
+    align-items: flex-start;
+}
+
+.modal__header-content {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 0.4rem;
+}
+
+.modal__header-content p {
+    margin: 0;
+    font-size: var(--text-sm, 0.9rem);
+    color: var(--color-text-secondary);
+    line-height: var(--leading-relaxed, 1.6);
+}
+
 /* ============================================
    MODAL CLOSE BUTTON
    ============================================ */

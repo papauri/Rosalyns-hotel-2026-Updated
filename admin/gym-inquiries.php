@@ -95,6 +95,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['inquiry_action'])) {
 
         if ($action === 'update_status') {
             $new_status = $_POST['new_status'] ?? 'new';
+            $allowed_gym_statuses = ['new', 'contacted', 'confirmed', 'converted', 'closed', 'cancelled'];
+            if (!in_array($new_status, $allowed_gym_statuses, true)) {
+                throw new Exception('Invalid status value.');
+            }
 
             // Fetch inquiry before updating for email context
             $fetch = $pdo->prepare("SELECT * FROM gym_inquiries WHERE id = ?");
@@ -687,23 +691,23 @@ try {
                 <div class="inquiry-details">
                     <div class="detail-item">
                         <label>Reference Number</label>
-                        <span><strong>${inquiry.reference_number}</strong></span>
+                        <span><strong>${escapeHtml(inquiry.reference_number)}</strong></span>
                     </div>
                     <div class="detail-item">
                         <label>Full Name</label>
-                        <span>${inquiry.name}</span>
+                        <span>${escapeHtml(inquiry.name)}</span>
                     </div>
                     <div class="detail-item">
                         <label>Email</label>
-                        <span><a href="mailto:${inquiry.email}">${inquiry.email}</a></span>
+                        <span><a href="mailto:${encodeURIComponent(inquiry.email || '')}">${escapeHtml(inquiry.email)}</a></span>
                     </div>
                     <div class="detail-item">
                         <label>Phone</label>
-                        <span><a href="tel:${inquiry.phone}">${inquiry.phone}</a></span>
+                        <span><a href="tel:${encodeURIComponent(inquiry.phone || '')}">${escapeHtml(inquiry.phone)}</a></span>
                     </div>
                     <div class="detail-item">
                         <label>Membership Type</label>
-                        <span>${inquiry.membership_type || 'N/A'}</span>
+                        <span>${escapeHtml(inquiry.membership_type || 'N/A')}</span>
                     </div>
                     <div class="detail-item">
                         <label>Preferred Date</label>
@@ -732,7 +736,7 @@ try {
                     ${inquiry.message ? `
                     <div class="detail-item" style="grid-column: 1 / -1;">
                         <label>Message / Goals</label>
-                        <span style="white-space: pre-wrap; background: #f8f9fa; padding: 12px; border-radius: 6px;">${inquiry.message}</span>
+                        <span style="white-space: pre-wrap; background: #f8f9fa; padding: 12px; border-radius: 6px;">${escapeHtml(inquiry.message)}</span>
                     </div>
                     ` : ''}
                     ${financialHtml}

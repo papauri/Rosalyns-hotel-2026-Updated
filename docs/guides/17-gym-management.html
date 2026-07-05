@@ -182,6 +182,29 @@
       </section>
 
       <section>
+        <h2>Calendar &amp; slot booking <span class="pill gold">gym</span></h2>
+        <p>An optional booking calendar that lets members plan their visit and keeps the floor from getting
+          overcrowded. Turn it on in <strong>Gym Schedule → Slot Booking Settings</strong>; it is off by default.</p>
+        <ul class="checklist">
+          <li><strong>Set your opening hours.</strong> On the Gym Schedule admin page, set open/close times for each
+            weekday (untick a day to close it). The system divides each open day into time slots automatically.</li>
+          <li><strong>Set the slot rules.</strong> Capacity per slot (how many people are allowed on the floor at once),
+            slot length in minutes (default 60), and how many days ahead members can book (default 7).</li>
+          <li><strong>Members book from their phones — no login.</strong> When enabled, a <em>"View gym schedule"</em>
+            button appears on the public gym page linking to <code>gym-schedule.php</code>. There, anyone sees a clear
+            day-by-day calendar showing how full each hour is, and reserves a slot with just their name and a phone or
+            email (member number optional). Full slots can't be over-booked — capacity is enforced.</li>
+          <li><strong>See the day at a glance (admin).</strong> Gym Schedule shows every hour of the chosen day with a
+            fill meter and the list of who's booked in. Managers (<code>gym_packages</code>) can mark a reservation
+            <em>attended</em> or cancel it; anyone with gym access can view the day.</li>
+        </ul>
+        <div class="callout note">
+          Opening hours and slot capacity are stored live and take effect immediately on the public page. Classes you've
+          set up under Gym Packages / classes show up against their hour on both the public and admin calendars.
+        </div>
+      </section>
+
+      <section>
         <h2>Gym Reports <span class="pill gold">gym_reports</span></h2>
         <p>The date-filtered operations report for the owner: members by status, new joiners and churn, expiring soon,
           <strong>unpaid members with total outstanding</strong>, attendance analytics (busiest check-in and check-out

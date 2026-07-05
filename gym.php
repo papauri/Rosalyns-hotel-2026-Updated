@@ -10,6 +10,8 @@ require_once 'includes/section-headers.php';
 require_once 'includes/public-csrf.php';
 
 $gymEnabled = isGymEnabled();
+// Slot booking is optional — only surface the schedule CTA when it's on.
+$gymSlotBookingEnabled = in_array(getSetting('gym_slot_booking_enabled', '0'), ['1', 1, true, 'true', 'on'], true);
 
 // Start session for any session-based functionality
 if (session_status() === PHP_SESSION_NONE) {
@@ -520,6 +522,16 @@ try {
                     'description' => 'Join our expert-led classes designed for all fitness levels'
                 ], 'text-center'); ?>
 
+                <?php if ($gymSlotBookingEnabled): ?>
+                <div style="max-width:720px;margin:0 auto 32px;padding:20px 24px;border:1px solid #d8cfc0;border-radius:14px;background:#fbf8f3;display:flex;flex-wrap:wrap;gap:16px;align-items:center;justify-content:center;text-align:center;">
+                    <div style="flex:1;min-width:240px;text-align:left;">
+                        <div style="font-family:'Cormorant Garamond',serif;font-size:1.4rem;color:#3e3930;">Plan your visit — reserve a slot</div>
+                        <div style="color:#6d6455;font-size:.92rem;">See how busy the gym is by the hour and book your workout time so you can train without the crowds.</div>
+                    </div>
+                    <a href="gym-schedule.php" class="btn btn-primary" style="white-space:nowrap;"><i class="fas fa-calendar-day"></i> View gym schedule</a>
+                </div>
+                <?php endif; ?>
+
                 <div class="schedule-grid" id="schedule-grid">
                     <?php if (!empty($gymClasses)): ?>
                         <?php foreach ($gymClasses as $idx => $class): ?>
@@ -710,13 +722,13 @@ try {
             <div class="modal__backdrop" data-close-booking></div>
             <div class="modal__wrapper">
                 <div class="modal__container">
-                    <button class="modal__close" aria-label="Close booking form" data-close-booking>
-                        <span aria-hidden="true">&times;</span>
-                    </button>
                     <div class="modal__header">
-                        <span class="booking-pill">Gym Booking</span>
-                        <h3 class="modal__title" id="bookingModal-title">Request a Session</h3>
-                        <p>Complete form and our team will confirm your booking via email.</p>
+                        <div class="modal__header-content">
+                            <span class="booking-pill">Gym Booking</span>
+                            <h3 class="modal__title" id="bookingModal-title">Request a Session</h3>
+                            <p>Complete form and our team will confirm your booking via email.</p>
+                        </div>
+                        <button class="modal__close" aria-label="Close booking form" data-close-booking></button>
                     </div>
                     <div class="modal__body">
                         <form method="POST" class="booking-form" novalidate>

@@ -942,6 +942,17 @@
     text-align: left;
 }
 
+/* Alternating sides. The base placement below (date → col 1, content → col 3)
+   is the "right" arrangement; left-side items swap the two so the timeline
+   zig-zags around the centre line instead of stacking every card on one side. */
+.ue-timeline-item--left .ue-timeline-content {
+    grid-column: 1;
+}
+
+.ue-timeline-item--left .ue-timeline-date {
+    grid-column: 3;
+}
+
 .ue-timeline-marker {
     grid-column: 2;
     width: 16px;
@@ -949,7 +960,7 @@
     background: var(--color-primary, #8B7355);
     border: 3px solid var(--color-white, #FFFFFF);
     border-radius: 50%;
-    box-shadow: 0 0 0 0 4px rgba(139, 115, 85, 0.2);
+    box-shadow: 0 0 0 4px rgba(139, 115, 85, 0.2);
     z-index: 1;
 }
 
@@ -982,6 +993,7 @@
 }
 
 .ue-card-modern {
+    text-align: left;
     background: var(--color-card-background, #FAF8F5);
     border: 1px solid color-mix(in srgb, var(--color-border, #DCCFC2) 74%, transparent 26%);
     border-radius: var(--premium-card-radius, var(--section-radius, var(--radius-lg, 12px)));
@@ -1670,7 +1682,17 @@
         grid-column: 2;
         grid-row: 2;
     }
-    
+
+    /* Single-column stack: cancel the desktop left-side swap so left/right
+       items both flow marker → date → content in one column. */
+    .ue-timeline-item--left .ue-timeline-content {
+        grid-column: 2;
+    }
+
+    .ue-timeline-item--left .ue-timeline-date {
+        grid-column: 2;
+    }
+
     .cookie-banner__inner {
         flex-direction: column;
         align-items: stretch;
