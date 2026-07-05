@@ -65,12 +65,16 @@ function ensureSitePagesTable(PDO $pdo): bool
     $defaults = [
         ['home', 'Home', 'index.php', 'fa-home', 10, 1, 1, 'Main landing page'],
         ['rooms', 'Rooms', 'rooms-gallery.php', 'fa-bed', 20, 1, 1, 'Room gallery and listings'],
+        ['rooms-showcase', 'Rooms Showcase', 'rooms-showcase.php', 'fa-images', 25, 0, 1, 'Alternate room showcase layout'],
         ['restaurant', 'Restaurant', 'restaurant.php', 'fa-utensils', 30, 1, 1, 'Restaurant and menu'],
         ['gym', 'Gym', 'gym.php', 'fa-dumbbell', 40, 1, 1, 'Gym and fitness centre'],
+        ['gym-schedule', 'Gym Schedule', 'gym-schedule.php', 'fa-calendar-day', 45, 1, 1, 'Gym class timetable and slot booking'],
         ['conference', 'Conference', 'conference.php', 'fa-briefcase', 50, 1, 1, 'Conference facilities'],
         ['events', 'Events', 'events.php', 'fa-calendar-alt', 60, 1, 1, 'Hotel events'],
         ['guest-services', 'Guest Services', 'guest-services.php', 'fa-concierge-bell', 80, 0, 1, 'Guest services page'],
         ['contact-us', 'Contact Us', 'contact-us.php', 'fa-envelope', 90, 0, 1, 'Contact page'],
+        ['privacy-policy', 'Privacy Policy', 'privacy-policy.php', 'fa-user-shield', 95, 0, 1, 'Privacy policy page'],
+        ['booking-lookup', 'Booking Lookup', 'booking-lookup.php', 'fa-search', 96, 0, 1, 'Guest booking lookup / manage'],
         ['booking', 'Book Now', 'booking.php', 'fa-calendar-check', 100, 1, 1, 'Booking page CTA'],
     ];
 
@@ -419,6 +423,17 @@ try {
             <?php showAlert($error, 'error'); ?>
         <?php endif; ?>
 
+        <!-- Preset awareness note -->
+        <div class="security-note" style="border-left-color:#8B7355;background:#fdf8f0;">
+            <i class="fas fa-puzzle-piece" style="color:#8B7355;"></i>
+            <div>
+                <strong>Modules &amp; presets:</strong>
+                A page only goes live when <em>both</em> its status here is <strong>Enabled</strong> <em>and</em> its business module is switched on for the active preset.
+                Pages tagged <span class="badge badge-module-off" style="vertical-align:middle;"><i class="fas fa-ban"></i> preset off</span> stay hidden until you enable their module in
+                <a href="module-settings.php">Module Settings</a> — enabling them here alone won't surface them.
+            </div>
+        </div>
+
         <!-- Security Note -->
         <div class="security-note">
             <i class="fas fa-shield-alt"></i>
@@ -448,6 +463,7 @@ try {
                             <tr>
                                 <th style="width:40px"></th>
                                 <th>Page</th>
+                                <th>Module / Preset</th>
                                 <th>Status</th>
                                 <th>Navigation</th>
                                 <th>Order</th>
@@ -455,8 +471,13 @@ try {
                             </tr>
                         </thead>
                         <tbody id="pagesTbody">
-                            <?php foreach ($pages as $page): ?>
-                                <tr data-id="<?php echo $page['id']; ?>">
+                            <?php foreach ($pages as $page):
+                                $pgFeature = function_exists('rh_front_page_feature')
+                                    ? rh_front_page_feature($page['file_path'])
+                                    : null;
+                                $pgModuleOff = $pgFeature !== null && !$pgFeature['enabled'];
+                            ?>
+                                <tr data-id="<?php echo $page['id']; ?>" class="<?php echo $pgModuleOff ? 'pm-row-muted' : ''; ?>">
                                     <td data-label="">
                                         <span class="drag-handle" title="Drag to reorder"><i class="fas fa-grip-vertical"></i></span>
                                     </td>
@@ -472,9 +493,26 @@ try {
                                             </div>
                                         </div>
                                     </td>
+                                    <td data-label="Module / Preset">
+                                        <?php if ($pgFeature === null): ?>
+                                            <span class="badge badge-core" title="Shown on every business preset"><i class="fas fa-globe"></i> Always on</span>
+                                        <?php elseif ($pgFeature['enabled']): ?>
+                                            <span class="badge badge-module-on" title="The '<?php echo htmlspecialchars($pgFeature['label']); ?>' module is enabled for this preset">
+                                                <i class="fas fa-puzzle-piece"></i> <?php echo htmlspecialchars($pgFeature['label']); ?>
+                                            </span>
+                                        <?php else: ?>
+                                            <span class="badge badge-module-off" title="The '<?php echo htmlspecialchars($pgFeature['label']); ?>' module is OFF for the active preset, so this page stays hidden regardless of its status.">
+                                                <i class="fas fa-ban"></i> <?php echo htmlspecialchars($pgFeature['label']); ?> · preset off
+                                            </span>
+                                        <?php endif; ?>
+                                    </td>
                                     <td data-label="Status">
-                                        <?php if ($page['is_enabled']): ?>
-                                            <span class="badge badge-enabled"><i class="fas fa-check-circle"></i> Enabled</span>
+                                        <?php if ($pgModuleOff): ?>
+                                            <span class="badge badge-disabled" title="Hidden because its module is off in Module Settings, even though the page itself is set to <?php echo (int)$page['is_enabled'] === 1 ? 'enabled' : 'disabled'; ?>.">
+                                                <i class="fas fa-eye-slash"></i> Hidden by preset
+                                            </span>
+                                        <?php elseif ($page['is_enabled']): ?>
+                                            <span class="badge badge-enabled"><i class="fas fa-check-circle"></i> Live</span>
                                         <?php else: ?>
                                             <span class="badge badge-disabled"><i class="fas fa-times-circle"></i> Disabled</span>
                                         <?php endif; ?>

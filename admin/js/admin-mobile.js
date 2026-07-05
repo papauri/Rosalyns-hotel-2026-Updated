@@ -239,6 +239,38 @@
         }
 
         const viewportWidth = window.innerWidth || document.documentElement.clientWidth || 0;
+
+        // "fit-or-card": keep a REAL table at ANY width for as long as every
+        // column fits inside the container (wrapping allowed) — only fall back
+        // to cards when it would otherwise overflow horizontally. This is the
+        // behaviour finance/accounting tables want: a proper table on mobile
+        // whenever it fits, cards (never a sideways scroll) when it doesn't.
+        if (table.classList.contains('fit-or-card')) {
+            const availableWidth = getTableAvailableWidth(table);
+            if (availableWidth <= 0) {
+                return false;
+            }
+            const host = getMeasureHost();
+            const clone = table.cloneNode(true);
+            // Render constrained to the real available width and let cells wrap
+            // at natural word boundaries (NOT mid-word), then check whether the
+            // content still forces overflow. Measuring with word-wrapping — not
+            // character-level breaking — means a table only counts as "fits"
+            // when it's genuinely readable: a long unbreakable payment reference
+            // keeps its column wide and pushes a busy table to cards, while a
+            // compact summary table stays a real table.
+            clone.style.cssText = 'position:static;width:' + availableWidth + 'px;max-width:' + availableWidth + 'px;table-layout:auto;';
+            clone.querySelectorAll('th, td').forEach(function (cell) {
+                cell.style.whiteSpace = 'normal';
+                cell.style.overflowWrap = 'normal';
+                cell.style.wordBreak = 'normal';
+            });
+            host.appendChild(clone);
+            const overflows = clone.scrollWidth > availableWidth + 2;
+            host.removeChild(clone);
+            return overflows;
+        }
+
         if (table.classList.contains('tablet-table')) {
             // Always card on phones
             if (viewportWidth <= 640) {

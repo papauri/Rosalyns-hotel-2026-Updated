@@ -112,6 +112,27 @@
     color: #5f6b7a;
 }
 
+.page-management-page .badge-core {
+    background: #eef2f7;
+    color: #4a5568;
+}
+
+.page-management-page .badge-module-on {
+    background: #f3ece1;
+    color: #7a5f36;
+}
+
+.page-management-page .badge-module-off {
+    background: #fde0d6;
+    color: #9a4a1f;
+}
+
+/* Rows whose module is off for the active preset are dimmed so it's clear at a
+   glance that their status here is currently overridden. */
+.page-management-page .pm-row-muted td:not(:last-child) {
+    opacity: 0.62;
+}
+
 .action-group {
     display: inline-flex;
     gap: 6px;

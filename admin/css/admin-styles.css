@@ -1270,6 +1270,23 @@ table.mobile-enhanced td[data-label="Actions"] .actions-row .actions-more-toggle
     overflow-y: visible !important;
 }
 
+/* "fit-or-card" tables: JS keeps them as a real table for as long as every
+   column fits the container, then swaps to .mobile-enhanced cards when it
+   wouldn't. While it stays a table, force cells to wrap so the fit is real —
+   this is what lets the JS measurement match what the browser paints, so the
+   table never spills into a sideways scroll. */
+table.fit-or-card:not(.mobile-enhanced) {
+    width: 100%;
+    table-layout: auto;
+}
+
+table.fit-or-card:not(.mobile-enhanced) th,
+table.fit-or-card:not(.mobile-enhanced) td {
+    white-space: normal;
+    overflow-wrap: normal;
+    word-break: normal;
+}
+
 @media (max-width: 600px) {
     table.mobile-enhanced tbody {
         grid-template-columns: 1fr;

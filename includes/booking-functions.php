@@ -38,6 +38,46 @@ function rh_module_and_setting_enabled(string $moduleKey, string $settingKey): b
     return getSetting($settingKey, '1') === '1';
 }
 
+/**
+ * Single source of truth mapping a public page file to the business
+ * module/feature that governs it. Used by both the page guard (front-end
+ * access control) and Page Management (admin UI) so the two never drift.
+ *
+ * Returns null for global pages (home, contact, policies) that every preset
+ * shows. Otherwise returns:
+ *   ['module' => <module key>, 'label' => <human label>, 'enabled' => <bool>]
+ * where 'enabled' reflects BOTH the preset module state and the legacy
+ * per-feature setting (via the is*Enabled() helpers).
+ */
+function rh_front_page_feature(string $filePath): ?array {
+    $file = basename(trim(str_replace('\\', '/', $filePath)));
+
+    // file => [module key, display label, resolver function]
+    static $map = [
+        'rooms-gallery.php'      => ['bookings',   'Rooms & Booking', 'isBookingEnabled'],
+        'rooms-showcase.php'     => ['bookings',   'Rooms & Booking', 'isBookingEnabled'],
+        'room.php'               => ['bookings',   'Rooms & Booking', 'isBookingEnabled'],
+        'booking.php'            => ['bookings',   'Rooms & Booking', 'isBookingEnabled'],
+        'booking-lookup.php'     => ['bookings',   'Rooms & Booking', 'isBookingEnabled'],
+        'check-availability.php' => ['bookings',   'Rooms & Booking', 'isBookingEnabled'],
+        'restaurant.php'         => ['restaurant', 'Restaurant',      'isRestaurantEnabled'],
+        'menu-pdf.php'           => ['restaurant', 'Restaurant',      'isRestaurantEnabled'],
+        'gym.php'                => ['gym',        'Gym & Fitness',   'isGymEnabled'],
+        'gym-schedule.php'       => ['gym',        'Gym & Fitness',   'isGymEnabled'],
+        'conference.php'         => ['conference', 'Conference',      'isConferenceEnabled'],
+        'events.php'             => ['events',     'Events',          'isEventsEnabled'],
+    ];
+
+    if (!isset($map[$file])) {
+        return null;
+    }
+
+    [$moduleKey, $label, $resolver] = $map[$file];
+    $enabled = function_exists($resolver) ? (bool)$resolver() : true;
+
+    return ['module' => $moduleKey, 'label' => $label, 'enabled' => $enabled];
+}
+
 function isBookingEnabled(): bool {
     return rh_module_and_setting_enabled('bookings', 'booking_system_enabled');
 }
