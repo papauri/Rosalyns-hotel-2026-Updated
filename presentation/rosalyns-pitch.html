@@ -59,7 +59,7 @@
   section { padding: 84px 0; border-top: 1px solid var(--line-soft); position: relative; }
   section:first-of-type { border-top: 0; }
 
-  h1, h2, h3 { font-family: var(--serif); font-weight: 400; line-height: 1.12; text-wrap: balance; letter-spacing: .002em; }
+  h1, h2, h3 { font-family: var(--serif); font-weight: 400; line-height: 1.12; text-wrap: balance; letter-spacing: .002em; color: var(--ink); }
   .eyebrow {
     font-size: 12px; letter-spacing: .22em; text-transform: uppercase;
     color: var(--gold); font-weight: 600; margin: 0 0 18px;
@@ -99,12 +99,14 @@
   .pain .n { font-family: var(--serif); font-size: 1.6rem; color: var(--wood); display: block; margin-bottom: 6px; }
   .pain p { font-size: 15px; margin: 0; color: var(--ink-soft); }
 
-  /* ---- Reveal band ---- */
-  .reveal { background: var(--ink); color: var(--sand); border: 0; }
+  /* ---- Reveal band ----
+     Always a warm near-black ground in both themes, so its text is fixed
+     warm-cream (NOT the --sand token, which flips dark in dark mode). */
+  .reveal { background: var(--ink); color: #efe7d8; border: 0; }
   :root[data-theme="dark"] .reveal { background: #17140f; }
   @media (prefers-color-scheme: dark) { .reveal { background: #17140f; } }
   .reveal .eyebrow { color: var(--gold-soft); }
-  .reveal h2 { font-size: clamp(2rem, 1.4rem + 2.8vw, 3.3rem); color: var(--sand); max-width: 20ch; margin: 0 0 22px; }
+  .reveal h2 { font-size: clamp(2rem, 1.4rem + 2.8vw, 3.3rem); color: #f4eee1; max-width: 20ch; margin: 0 0 22px; }
   .reveal h2 em { font-style: italic; color: var(--gold-soft); }
   .reveal p { color: #cfc6b5; }
   .reveal .lead { color: #ded5c3; }
@@ -160,9 +162,9 @@
   .objection .a { font-size: 15.5px; color: var(--ink-soft); margin: 0; line-height: 1.6; }
   .objection .a strong { color: var(--ink); }
   .reveal .objection { background: rgba(255,255,255,.05); border-color: rgba(255,255,255,.14); }
-  .reveal .objection .q { color: var(--sand); }
+  .reveal .objection .q { color: #f4eee1; }
   .reveal .objection .a { color: #cfc6b5; }
-  .reveal .objection .a strong { color: var(--sand); }
+  .reveal .objection .a strong { color: #f4eee1; }
 
   /* ---- FAQ / straight answers ---- */
   .faq h2 { font-size: clamp(1.9rem, 1.3rem + 2.4vw, 2.9rem); margin: 0 0 8px; }
