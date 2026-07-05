@@ -816,6 +816,7 @@ if ($is_card_insight_ajax) {
                 $payload['subtitle'] = 'Accounts with amount due still unpaid';
                 $payload['columns'] = [
                     ['key' => 'reference', 'label' => 'Reference'],
+                    ['key' => 'department', 'label' => 'Department'],
                     ['key' => 'guest', 'label' => 'Client'],
                     ['key' => 'status', 'label' => 'Status'],
                     ['key' => 'total', 'label' => 'Total'],
@@ -840,10 +841,16 @@ if ($is_card_insight_ajax) {
                 // than dumping the user on a general list. Bookings have a detail
                 // page; the inquiry lists deep-link to the anchored row.
                 $ob_links = ['booking' => 'booking-details.php?id=', 'conference' => 'conference-management.php#enquiry-', 'gym' => 'gym-inquiries.php#inquiry-', 'event' => 'events-inquiries.php#inquiry-'];
+                // Which department the receivable belongs to, so the modal makes
+                // clear whether an outstanding balance is for a room booking, the
+                // gym, an event, etc.
+                $ob_departments = ['booking' => 'Rooms', 'conference' => 'Conference', 'gym' => 'Gym', 'event' => 'Events'];
                 foreach ($rows as $row) {
                     $bid = (int)($row['id'] ?? 0);
+                    $src = (string)($row['src'] ?? '');
                     $payload['rows'][] = [
-                        'reference' => ['href' => ($ob_links[$row['src']] ?? 'payments.php?q=') . $bid, 'label' => (string)$row['ref']],
+                        'reference' => ['href' => ($ob_links[$src] ?? 'payments.php?q=') . $bid, 'label' => (string)$row['ref']],
+                        'department' => $ob_departments[$src] ?? ucfirst($src),
                         'guest' => (string)$row['who'],
                         'status' => ucfirst((string)$row['status']),
                         'total' => $formatMoney((float)($row['total_amount'] ?? 0)),

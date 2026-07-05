@@ -84,7 +84,17 @@ $sql = "
             WHEN p.booking_type = 'gym' THEN gi.phone
             WHEN p.booking_type = 'event' THEN ei.phone
             ELSE NULL
-        END as contact_phone
+        END as contact_phone,
+        -- Outstanding balance still owed on the underlying account (not the
+        -- individual payment). Restaurant/POS orders settle at the till, so
+        -- they carry no receivable.
+        CASE
+            WHEN p.booking_type = 'room' THEN b.amount_due
+            WHEN p.booking_type = 'conference' THEN ci.amount_due
+            WHEN p.booking_type = 'gym' THEN gi.amount_due
+            WHEN p.booking_type = 'event' THEN ei.amount_due
+            ELSE NULL
+        END as account_amount_due
     FROM payments p
     LEFT JOIN bookings b ON p.booking_type = 'room' AND p.booking_id = b.id
     LEFT JOIN conference_inquiries ci ON p.booking_type = 'conference' AND p.booking_id = ci.id
@@ -898,6 +908,7 @@ $quickActive = function ($s, $e) use ($startDate, $endDate) {
                         <th>Type</th>
                         <th>Payment Date</th>
                         <th>Amount</th>
+                        <th>Outstanding</th>
                         <th>Method</th>
                         <th>Status</th>
                         <th>Created</th>
@@ -935,6 +946,20 @@ $quickActive = function ($s, $e) use ($startDate, $endDate) {
                                     <?php if ($payment['vat_amount'] > 0): ?>
                                         <br><small style="color: #666;">(incl. <?php echo $currency_symbol; ?><?php echo number_format($payment['vat_amount'], 0); ?> VAT)</small>
                                     <?php endif; ?>
+                                </td>
+                                <td>
+                                    <?php
+                                    // Outstanding balance on the underlying account. NULL means the
+                                    // source type carries no receivable (e.g. restaurant/POS).
+                                    $acctDue = $payment['account_amount_due'];
+                                    if ($acctDue === null) {
+                                        echo '<span style="color:#999;">—</span>';
+                                    } elseif ((float)$acctDue > 0.001) {
+                                        echo '<strong style="color:#c0392b;">' . $currency_symbol . number_format((float)$acctDue, 0) . '</strong>';
+                                    } else {
+                                        echo '<span style="color:#1f7a45;"><i class="fas fa-check-circle"></i> Settled</span>';
+                                    }
+                                    ?>
                                 </td>
                                 <td><?php echo ucfirst(str_replace('_', ' ', $payment['payment_method'])); ?></td>
                                 <td>
@@ -1003,7 +1028,7 @@ $quickActive = function ($s, $e) use ($startDate, $endDate) {
                         <?php endforeach; ?>
                     <?php else: ?>
                         <tr>
-                            <td colspan="10" class="empty-state">
+                            <td colspan="11" class="empty-state">
                                 <i class="fas fa-inbox"></i>
                                 <p><?php echo $has_active_payment_filters ? 'No payments match your current search filters.' : 'No payments found'; ?></p>
                                 <?php if ($has_active_payment_filters): ?>
@@ -1061,8 +1086,50 @@ $quickActive = function ($s, $e) use ($startDate, $endDate) {
                 return;
             }
 
+            // Instant, client-side filter of the rows currently on the page — the
+            // table narrows as you type with no reload, so it feels immediate.
+            // A debounced server submit still runs behind it so matches on OTHER
+            // pages (the list is paginated) are pulled in too.
+            const table = document.querySelector('.table-container table');
+            const tbody = table ? table.querySelector('tbody') : null;
+
+            function instantFilter(query) {
+                if (!tbody) return;
+                const q = query.trim().toLowerCase();
+                const rows = tbody.querySelectorAll('tr');
+                let shown = 0;
+                rows.forEach(function(row) {
+                    // Skip the "no results" placeholder row.
+                    if (row.querySelector('.empty-state')) return;
+                    const match = q === '' || row.textContent.toLowerCase().indexOf(q) !== -1;
+                    row.style.display = match ? '' : 'none';
+                    if (match) shown++;
+                });
+
+                // Live "no local matches" hint row so an empty filtered view isn't
+                // just a blank table while the server search catches up.
+                let hint = tbody.querySelector('.js-payments-filter-empty');
+                if (q !== '' && shown === 0) {
+                    if (!hint) {
+                        hint = document.createElement('tr');
+                        hint.className = 'js-payments-filter-empty';
+                        const colCount = table.querySelectorAll('thead th').length || 11;
+                        hint.innerHTML = '<td colspan="' + colCount + '" style="text-align:center; color:#888; padding:22px;">'
+                            + '<i class="fas fa-magnifying-glass"></i> No matches on this page — searching all records…</td>';
+                        tbody.appendChild(hint);
+                    }
+                    hint.style.display = '';
+                } else if (hint) {
+                    hint.style.display = 'none';
+                }
+            }
+
             let searchDebounceTimer = null;
             searchInput.addEventListener('input', function() {
+                // 1) Immediate visual filter of the loaded rows.
+                instantFilter(searchInput.value);
+
+                // 2) Debounced authoritative server search across all pages.
                 window.clearTimeout(searchDebounceTimer);
                 searchDebounceTimer = window.setTimeout(function() {
                     const query = searchInput.value.trim();
@@ -1071,6 +1138,11 @@ $quickActive = function ($s, $e) use ($startDate, $endDate) {
                     }
                 }, 450);
             });
+
+            // Apply once on load so a value restored from the URL filters instantly.
+            if (searchInput.value.trim() !== '') {
+                instantFilter(searchInput.value);
+            }
         })();
     </script>
 
