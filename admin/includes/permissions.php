@@ -60,6 +60,7 @@ function getAllRoles()
                 'gym_financials',
                 'gym_checkin',
                 'gym_reports',
+                'gym_logs',
                 'menu',
                 'events',
                 'events_bookings',
@@ -535,6 +536,14 @@ function getAllPermissions()
             'icon' => 'fa-chart-line',
             'category' => 'Property',
             'page' => 'gym-reports.php',
+            'group' => 'gym'
+        ],
+        'gym_logs' => [
+            'label' => 'Gym Member History',
+            'description' => 'View the full change/audit log for gym membership records (identity, pricing, status)',
+            'icon' => 'fa-clock-rotate-left',
+            'category' => 'Property',
+            'page' => 'gym-members.php',
             'group' => 'gym'
         ],
 

@@ -44,12 +44,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['gm_action'])) {
             $name = trim((string)($_POST['full_name'] ?? ''));
             $email = trim((string)($_POST['email'] ?? ''));
             $phone = trim((string)($_POST['phone'] ?? ''));
+            $packageId = (int)($_POST['package_id'] ?? 0);
             $type = trim((string)($_POST['membership_type'] ?? ''));
             $start = trim((string)($_POST['start_date'] ?? ''));
             $expiry = trim((string)($_POST['expiry_date'] ?? ''));
-            $fee = $_POST['monthly_fee'] !== '' ? (float)($_POST['monthly_fee'] ?? 0) : null;
+            $fee = ($_POST['monthly_fee'] ?? '') !== '' ? (float)($_POST['monthly_fee'] ?? 0) : null;
             $status = in_array($_POST['status'] ?? '', $gm_statuses, true) ? (string)$_POST['status'] : 'active';
             $notes = trim((string)($_POST['notes'] ?? ''));
+            $changeReason = trim((string)($_POST['change_reason'] ?? ''));
+            $isComplimentary = !empty($_POST['is_complimentary']) ? 1 : 0;
 
             if ($name === '' || mb_strlen($name) > 255) {
                 $gm_json(false, 'Member name is required (max 255 characters).');
@@ -65,72 +68,127 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['gm_action'])) {
                 $gm_json(false, 'Expiry date must be a valid date or left empty.');
             }
             if ($fee !== null && ($fee < 0 || $fee > 99999999)) {
-                $gm_json(false, 'Monthly fee must be zero or a positive amount.');
+                $gm_json(false, 'Fee must be zero or a positive amount.');
             }
 
             // Identity & accounting protection (AD-style): a member record is a
-            // person, not a reusable slot. Renaming it — or repricing the
-            // membership away from the package — requires the gym_financials
-            // permission, and every such change is audit-logged. Prevents
-            // staff "recycling" one member's card/fee for someone else.
+            // person, not a reusable slot. Renaming it — or repricing away from
+            // the package — requires the gym_financials permission, is
+            // rate-limited, and every change is audit-logged. Prevents staff
+            // "recycling" one member's card/fee for someone else.
             $gm_can_financials = hasPermission((int)($user['id'] ?? 0), 'gym_financials');
+            $gm_is_admin = ($user['role'] ?? '') === 'admin';
 
-            // Package pricing is the accounting source of truth: when the
-            // selected membership type matches an active package, the fee is
-            // taken FROM the package unless a privileged user overrides it.
-            $typeIsActivePackage = false;
-            if ($type !== '') {
+            // ── Package is the source of truth ──────────────────────────────
+            // A chosen package sets the display name, the fee, the complimentary
+            // flag, and (with the start date) the expiry. Non-privileged staff
+            // can ONLY enrol against a real package, never free-type a price.
+            $pkgDurationDays = null;
+            if ($packageId > 0) {
                 try {
-                    $pkgStmt = $pdo->prepare("SELECT price FROM gym_packages WHERE name = ? AND is_active = 1 LIMIT 1");
-                    $pkgStmt->execute([$type]);
-                    $pkgPrice = $pkgStmt->fetchColumn();
-                    if ($pkgPrice !== false) {
-                        $typeIsActivePackage = true;
-                        if (!$gm_can_financials || $fee === null) {
-                            $fee = (float)$pkgPrice;
-                        }
+                    $pkgStmt = $pdo->prepare("SELECT name, price, duration_days, is_complimentary FROM gym_packages WHERE id = ? AND is_active = 1 LIMIT 1");
+                    $pkgStmt->execute([$packageId]);
+                    $pkg = $pkgStmt->fetch(PDO::FETCH_ASSOC);
+                } catch (Throwable $e) { $pkg = false; }
+                if (!$pkg) {
+                    $gm_json(false, 'The selected package is no longer available. Refresh and try again.');
+                }
+                $type = (string)$pkg['name'];
+                $isComplimentary = (int)$pkg['is_complimentary'] === 1 ? 1 : $isComplimentary;
+                $pkgDurationDays = $pkg['duration_days'] !== null ? (int)$pkg['duration_days'] : null;
+                // Complimentary → always free. Otherwise the package price is
+                // authoritative unless a financials user typed an override.
+                if ($isComplimentary) {
+                    $fee = 0.0;
+                } elseif (!$gm_can_financials || $fee === null) {
+                    $fee = (float)$pkg['price'];
+                }
+                // Expiry auto-computes from start + package duration unless a
+                // financials user supplied an explicit override date.
+                if ($expiry === '' || !$gm_can_financials) {
+                    $expiry = (string)(gymComputeExpiry($start, $pkgDurationDays) ?? '');
+                }
+            } else {
+                // No package selected.
+                if ($isComplimentary) {
+                    $fee = 0.0;
+                    if ($type === '') { $type = 'Complimentary'; }
+                } elseif (!$gm_can_financials) {
+                    // Non-privileged staff cannot enrol a paid member without a
+                    // package (no free-typed pricing / open-ended memberships).
+                    if ($memberId === 0) {
+                        $gm_json(false, 'Choose a membership package. Only a manager can enrol a member without one.');
                     }
-                } catch (Throwable $e) { /* packages table optional */ }
-            }
-            // Non-privileged staff can never invent a fee for a non-package
-            // type — on enrolment that means no fee is recorded until a
-            // manager sets one (or a real package is chosen).
-            if (!$gm_can_financials && !$typeIsActivePackage && $memberId === 0) {
-                $fee = null;
+                }
             }
 
             if ($memberId > 0) {
-                $curStmt = $pdo->prepare("SELECT full_name, membership_type, monthly_fee FROM gym_members WHERE id = ?");
+                $curStmt = $pdo->prepare("SELECT * FROM gym_members WHERE id = ?");
                 $curStmt->execute([$memberId]);
                 $cur = $curStmt->fetch(PDO::FETCH_ASSOC);
                 if (!$cur) {
                     $gm_json(false, 'Member not found.');
                 }
 
-                if (!$gm_can_financials) {
-                    if ($name !== (string)$cur['full_name']) {
-                        $gm_json(false, 'Member name changes require a manager (legal name changes only — a membership is not transferable to another person).');
+                $nameChanged = $name !== (string)$cur['full_name'];
+
+                // ── Name-change guards ──────────────────────────────────────
+                // A membership is not transferable to another person. Name edits
+                // are for genuine legal-name corrections only.
+                if ($nameChanged) {
+                    if (!$gm_can_financials) {
+                        $gm_json(false, 'Member name changes require a manager (legal name corrections only — a membership is not transferable to another person).');
                     }
+                    if ($changeReason === '' || mb_strlen($changeReason) < 5) {
+                        $gm_json(false, 'A reason (min 5 characters) is required to change a member\'s name. This is recorded in the audit log.');
+                    }
+                    // Rate-limit churn: non-admins get max 2 name changes / 180 days.
+                    $priorChanges = (int)($cur['name_change_count'] ?? 0);
+                    $lastChanged = $cur['name_last_changed_at'] ?? null;
+                    $within180 = $lastChanged !== null && (strtotime($lastChanged) > strtotime('-180 days'));
+                    if (!$gm_is_admin && $within180 && $priorChanges >= 2) {
+                        $gm_json(false, 'This member\'s name has already been changed twice in the last 180 days. Only an administrator can change it again — contact one to proceed.');
+                    }
+                }
+
+                if (!$gm_can_financials) {
                     // Fee is never hand-set by non-privileged users: it either
                     // follows a real package (derived above) or stays as stored.
-                    // Changing the type to free text does NOT unlock the fee.
-                    if (!$typeIsActivePackage) {
+                    if ($packageId === 0 && !$isComplimentary) {
                         $fee = $cur['monthly_fee'] !== null ? (float)$cur['monthly_fee'] : null;
                     }
                 }
 
-                $stmt = $pdo->prepare("UPDATE gym_members SET full_name=?, email=?, phone=?, membership_type=?, start_date=?, expiry_date=?, monthly_fee=?, status=?, notes=? WHERE id=?");
-                $stmt->execute([$name, $email ?: null, $phone ?: null, $type ?: null, $start, $expiry ?: null, $fee, $status, $notes ?: null, $memberId]);
+                // Name-change bookkeeping for the guard.
+                $newNameCount = (int)($cur['name_change_count'] ?? 0) + ($nameChanged ? 1 : 0);
+                $nameChangedAtSql = $nameChanged ? date('Y-m-d H:i:s') : ($cur['name_last_changed_at'] ?? null);
 
-                // Audit identity/pricing changes so misuse is traceable.
-                if (function_exists('logActivity')) {
-                    $changes = [];
-                    if ($name !== (string)$cur['full_name']) { $changes[] = "name '{$cur['full_name']}' → '$name'"; }
-                    if ($type !== (string)($cur['membership_type'] ?? '')) { $changes[] = "package '{$cur['membership_type']}' → '$type'"; }
-                    if ((string)$fee !== (string)$cur['monthly_fee']) { $changes[] = "fee {$cur['monthly_fee']} → {$fee}"; }
-                    if ($changes) {
-                        try { logActivity((int)$user['id'], 'gym_member_updated', 'Member #' . $memberId . ': ' . implode('; ', $changes)); } catch (Throwable $e) { /* fine */ }
-                    }
+                $stmt = $pdo->prepare("UPDATE gym_members SET full_name=?, email=?, phone=?, membership_type=?, start_date=?, expiry_date=?, monthly_fee=?, is_complimentary=?, status=?, notes=?, name_change_count=?, name_last_changed_at=? WHERE id=?");
+                $stmt->execute([$name, $email ?: null, $phone ?: null, $type ?: null, $start, $expiry ?: null, $fee, $isComplimentary, $status, $notes ?: null, $newNameCount, $nameChangedAtSql, $memberId]);
+
+                // ── Full audit trail ────────────────────────────────────────
+                $before = [
+                    'full_name' => (string)$cur['full_name'],
+                    'membership_type' => (string)($cur['membership_type'] ?? ''),
+                    'start_date' => (string)($cur['start_date'] ?? ''),
+                    'expiry_date' => (string)($cur['expiry_date'] ?? ''),
+                    'monthly_fee' => $cur['monthly_fee'],
+                    'is_complimentary' => (int)($cur['is_complimentary'] ?? 0),
+                    'status' => (string)($cur['status'] ?? ''),
+                ];
+                $after = [
+                    'full_name' => $name,
+                    'membership_type' => (string)$type,
+                    'start_date' => $start,
+                    'expiry_date' => (string)$expiry,
+                    'monthly_fee' => $fee,
+                    'is_complimentary' => $isComplimentary,
+                    'status' => $status,
+                ];
+                if (function_exists('logGymMemberAudit')) {
+                    $auditAction = $nameChanged ? 'name_changed' : 'updated';
+                    $auditNote = $nameChanged ? ('Name change reason: ' . $changeReason) : ($changeReason ?: null);
+                    logGymMemberAudit($memberId, $auditAction, $before, $after, $auditNote, (string)($cur['member_number'] ?? ''));
                 }
                 $gm_json(true, 'Member updated.');
             }
@@ -140,8 +198,21 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['gm_action'])) {
                 $chk->execute([$memberNumber]);
             } while ((int)$chk->fetchColumn() > 0);
             $inquiryId = (int)($_POST['gym_inquiry_id'] ?? 0);
-            $stmt = $pdo->prepare("INSERT INTO gym_members (member_number, full_name, email, phone, membership_type, start_date, expiry_date, monthly_fee, status, notes, gym_inquiry_id, created_by) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)");
-            $stmt->execute([$memberNumber, $name, $email ?: null, $phone ?: null, $type ?: null, $start, $expiry ?: null, $fee, $status, $notes ?: null, $inquiryId ?: null, (int)($user['id'] ?? 0)]);
+            $stmt = $pdo->prepare("INSERT INTO gym_members (member_number, full_name, email, phone, membership_type, start_date, expiry_date, monthly_fee, is_complimentary, status, notes, gym_inquiry_id, created_by) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)");
+            $stmt->execute([$memberNumber, $name, $email ?: null, $phone ?: null, $type ?: null, $start, $expiry ?: null, $fee, $isComplimentary, $status, $notes ?: null, $inquiryId ?: null, (int)($user['id'] ?? 0)]);
+            $newMemberId = (int)$pdo->lastInsertId();
+
+            if (function_exists('logGymMemberAudit')) {
+                logGymMemberAudit($newMemberId, $isComplimentary ? 'complimentary_granted' : 'enrolled', null, [
+                    'full_name' => $name,
+                    'membership_type' => (string)$type,
+                    'start_date' => $start,
+                    'expiry_date' => (string)$expiry,
+                    'monthly_fee' => $fee,
+                    'is_complimentary' => $isComplimentary,
+                    'status' => $status,
+                ], $notes ?: null, $memberNumber);
+            }
 
             // Converting an inquiry: mark the sales lead converted so the
             // pipeline reflects reality. Best-effort — never blocks enrolment.
@@ -390,14 +461,47 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['gm_action'])) {
             if ($status === '') {
                 $gm_json(false, 'Invalid status.');
             }
+            $prevStmt = $pdo->prepare("SELECT status, member_number FROM gym_members WHERE id = ?");
+            $prevStmt->execute([$memberId]);
+            $prevRow = $prevStmt->fetch(PDO::FETCH_ASSOC);
             $pdo->prepare("UPDATE gym_members SET status=? WHERE id=?")->execute([$status, $memberId]);
+            if ($prevRow && function_exists('logGymMemberAudit')) {
+                logGymMemberAudit($memberId, 'status_changed',
+                    ['status' => (string)$prevRow['status']],
+                    ['status' => $status], null, (string)$prevRow['member_number']);
+            }
             $gm_json(true, 'Member marked ' . $status . '.');
         }
 
         if ($action === 'member_delete') {
             $memberId = (int)($_POST['id'] ?? 0);
+            // Deleting a membership record is destructive and loses the audit
+            // trail's subject — restrict to managers with financials rights.
+            if (!hasPermission((int)($user['id'] ?? 0), 'gym_financials')) {
+                $gm_json(false, 'Deleting a member requires a manager. Mark them cancelled instead to preserve their history.');
+            }
+            $delStmt = $pdo->prepare("SELECT full_name, member_number, membership_type, monthly_fee, status FROM gym_members WHERE id = ?");
+            $delStmt->execute([$memberId]);
+            $delRow = $delStmt->fetch(PDO::FETCH_ASSOC);
+            if ($delRow && function_exists('logGymMemberAudit')) {
+                logGymMemberAudit($memberId, 'deleted', $delRow, null, 'Member record permanently deleted', (string)$delRow['member_number']);
+            }
             $pdo->prepare("DELETE FROM gym_members WHERE id=?")->execute([$memberId]);
             $gm_json(true, 'Member deleted.');
+        }
+
+        if ($action === 'member_history') {
+            $memberId = (int)($_POST['id'] ?? 0);
+            // History exposes past identity/pricing — gate behind gym_logs.
+            if (!hasPermission((int)($user['id'] ?? 0), 'gym_logs')) {
+                header('Content-Type: application/json');
+                echo json_encode(['success' => false, 'message' => 'You do not have permission to view member history.']);
+                exit;
+            }
+            $entries = function_exists('getGymMemberAuditLog') ? getGymMemberAuditLog($memberId, 100) : [];
+            header('Content-Type: application/json');
+            echo json_encode(['success' => true, 'entries' => $entries]);
+            exit;
         }
 
         $gm_json(false, 'Unknown action.');
@@ -465,21 +569,20 @@ $gm_reminder_cfg   = gym_reminder_settings();
 $gm_reminder_ready = !$gm_table_missing && gym_reminder_log_table_exists($pdo);
 $gm_reminder_run   = $gm_reminder_ready ? gym_reminder_last_run($pdo) : ['last_sent_at' => null, 'sent_today' => 0, 'total' => 0];
 
-// Package names for the membership-type datalist (best effort)
+// Active packages drive the enrolment modal: id, price, duration (for auto
+// expiry) and the complimentary flag, all consumed by the modal JS so the
+// register never diverges from package pricing.
 $gm_packages = [];
 try {
-    $gm_packages = $pdo->query("SELECT name FROM gym_packages WHERE is_active=1 ORDER BY display_order ASC, name ASC")->fetchAll(PDO::FETCH_COLUMN);
+    $gm_packages = $pdo->query("SELECT id, name, price, duration_days, duration_label, is_complimentary FROM gym_packages WHERE is_active=1 ORDER BY display_order ASC, name ASC")->fetchAll(PDO::FETCH_ASSOC);
 } catch (PDOException $e) { /* optional */ }
 
-// Package → price map (accounting source of truth for membership fees) and
-// the caller's pricing privilege, both consumed by the modal JS.
-$gm_package_prices = [];
-try {
-    foreach ($pdo->query("SELECT name, price FROM gym_packages WHERE is_active=1")->fetchAll(PDO::FETCH_ASSOC) as $pkgRow) {
-        $gm_package_prices[(string)$pkgRow['name']] = (float)$pkgRow['price'];
-    }
-} catch (PDOException $e) { /* optional */ }
 $gm_can_financials_ui = hasPermission((int)($user['id'] ?? 0), 'gym_financials');
+$gm_can_logs_ui = hasPermission((int)($user['id'] ?? 0), 'gym_logs');
+// Free "hotel guest" memberships only make sense when the gym is part of a
+// hotel (bookings module on) rather than the main preset. Used to surface the
+// complimentary option in the modal.
+$gm_is_hotel_context = function_exists('moduleEnabled') && moduleEnabled('bookings');
 
 $gm_currency = (string)getSetting('currency_symbol', 'K');
 ?>
@@ -702,25 +805,42 @@ $gm_currency = (string)getSetting('currency_symbol', 'K');
                         <input type="text" id="gmPhone" maxlength="50" style="width:100%;padding:9px;border:1px solid #d3cbc0;border-radius:4px;">
                     </div>
                 </div>
+                <input type="hidden" id="gmType" value="">
                 <label style="display:block;font-weight:600;margin-bottom:4px;">Membership package</label>
-                <input type="text" id="gmType" maxlength="100" list="gmPackages" style="width:100%;padding:9px;border:1px solid #d3cbc0;border-radius:4px;margin-bottom:12px;" placeholder="e.g. Monthly Unlimited">
-                <datalist id="gmPackages">
-                    <?php foreach ($gm_packages as $p): ?><option value="<?php echo htmlspecialchars($p); ?>"></option><?php endforeach; ?>
-                </datalist>
+                <select id="gmPackage" onchange="gmApplyPackage()" style="width:100%;padding:9px;border:1px solid #d3cbc0;border-radius:4px;margin-bottom:12px;">
+                    <option value="0">— Select a package —</option>
+                    <?php foreach ($gm_packages as $p): ?>
+                        <option value="<?php echo (int)$p['id']; ?>"
+                            data-name="<?php echo htmlspecialchars($p['name'], ENT_QUOTES); ?>"
+                            data-price="<?php echo htmlspecialchars((string)$p['price'], ENT_QUOTES); ?>"
+                            data-days="<?php echo $p['duration_days'] !== null ? (int)$p['duration_days'] : ''; ?>"
+                            data-comp="<?php echo (int)($p['is_complimentary'] ?? 0); ?>">
+                            <?php echo htmlspecialchars($p['name']); ?><?php echo !empty($p['duration_label']) ? ' · ' . htmlspecialchars($p['duration_label']) : ''; ?><?php echo (int)($p['is_complimentary'] ?? 0) ? ' (Free)' : ' · ' . htmlspecialchars($gm_currency) . number_format((float)$p['price'], 0); ?>
+                        </option>
+                    <?php endforeach; ?>
+                    <?php if ($gm_can_financials_ui): ?><option value="custom">Custom (manager) — set fee &amp; dates manually</option><?php endif; ?>
+                </select>
+                <?php if ($gm_is_hotel_context): ?>
+                <label style="display:flex;align-items:center;gap:8px;margin-bottom:12px;cursor:pointer;font-weight:600;">
+                    <input type="checkbox" id="gmComplimentary" onchange="gmApplyComplimentary()">
+                    <span>Complimentary — free entry for a hotel guest</span>
+                </label>
+                <?php endif; ?>
                 <div style="display:flex;gap:12px;margin-bottom:12px;">
                     <div style="flex:1;">
                         <label style="display:block;font-weight:600;margin-bottom:4px;">Start date</label>
-                        <input type="date" id="gmStart" style="width:100%;padding:9px;border:1px solid #d3cbc0;border-radius:4px;">
+                        <input type="date" id="gmStart" onchange="gmRecalcExpiry()" style="width:100%;padding:9px;border:1px solid #d3cbc0;border-radius:4px;">
                     </div>
                     <div style="flex:1;">
-                        <label style="display:block;font-weight:600;margin-bottom:4px;">Expiry <span style="font-weight:400;color:#9a8f82;">(optional)</span></label>
-                        <input type="date" id="gmExpiry" style="width:100%;padding:9px;border:1px solid #d3cbc0;border-radius:4px;">
+                        <label style="display:block;font-weight:600;margin-bottom:4px;">Expiry <span id="gmExpiryHint" style="font-weight:400;color:#9a8f82;">(auto from package)</span></label>
+                        <input type="date" id="gmExpiry" <?php echo $gm_can_financials_ui ? '' : 'readonly'; ?> style="width:100%;padding:9px;border:1px solid #d3cbc0;border-radius:4px;<?php echo $gm_can_financials_ui ? '' : 'background:#f3efe8;'; ?>">
                     </div>
                 </div>
                 <div style="display:flex;gap:12px;margin-bottom:12px;">
                     <div style="flex:1;">
-                        <label style="display:block;font-weight:600;margin-bottom:4px;">Monthly fee (<?php echo htmlspecialchars($gm_currency); ?>)</label>
-                        <input type="number" id="gmFee" min="0" step="0.01" style="width:100%;padding:9px;border:1px solid #d3cbc0;border-radius:4px;">
+                        <label style="display:block;font-weight:600;margin-bottom:4px;">Fee (<?php echo htmlspecialchars($gm_currency); ?>)</label>
+                        <input type="number" id="gmFee" min="0" step="0.01" <?php echo $gm_can_financials_ui ? '' : 'readonly'; ?> style="width:100%;padding:9px;border:1px solid #d3cbc0;border-radius:4px;<?php echo $gm_can_financials_ui ? '' : 'background:#f3efe8;'; ?>">
+                        <small style="color:#9a8f82;">Set by the package. <?php echo $gm_can_financials_ui ? 'Override allowed.' : 'Managers can override.'; ?></small>
                     </div>
                     <div style="flex:1;">
                         <label style="display:block;font-weight:600;margin-bottom:4px;">Status</label>
@@ -729,12 +849,36 @@ $gm_currency = (string)getSetting('currency_symbol', 'K');
                         </select>
                     </div>
                 </div>
+                <div id="gmReasonWrap" style="display:none;margin-bottom:12px;">
+                    <label style="display:block;font-weight:600;margin-bottom:4px;color:#b45309;"><i class="fas fa-triangle-exclamation"></i> Reason for name change <span style="font-weight:400;">(required — audit logged)</span></label>
+                    <input type="text" id="gmChangeReason" maxlength="255" placeholder="e.g. Legal name correction — marriage" style="width:100%;padding:9px;border:1px solid #e0b070;border-radius:4px;background:#fffaf0;">
+                    <small style="color:#9a8f82;">A membership belongs to one person and is not transferable. Name edits are for genuine legal corrections only.</small>
+                </div>
                 <label style="display:block;font-weight:600;margin-bottom:4px;">Notes <span style="font-weight:400;color:#9a8f82;">(optional)</span></label>
                 <textarea id="gmNotes" rows="2" style="width:100%;padding:9px;border:1px solid #d3cbc0;border-radius:4px;"></textarea>
             </div>
-            <div class="mm-modal-foot" style="display:flex;justify-content:flex-end;gap:10px;padding:14px 18px;">
-                <button class="mm-btn mm-btn-ghost" onclick="gmClose('gmModal')">Cancel</button>
-                <button class="mm-btn mm-btn-primary" onclick="gmSave()">Save Member</button>
+            <div class="mm-modal-foot" style="display:flex;justify-content:space-between;align-items:center;gap:10px;padding:14px 18px;">
+                <button id="gmHistoryBtn" class="mm-btn mm-btn-ghost" style="display:none;align-items:center;gap:6px;" data-id="0" onclick="gmShowHistory(this.getAttribute('data-id'))"><i class="fas fa-clock-rotate-left"></i> History</button>
+                <div style="display:flex;gap:10px;margin-left:auto;">
+                    <button class="mm-btn mm-btn-ghost" onclick="gmClose('gmModal')">Cancel</button>
+                    <button class="mm-btn mm-btn-primary" onclick="gmSave()">Save Member</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Member change history modal -->
+    <div class="mm-modal" id="gmHistoryModal">
+        <div class="mm-modal-card sm">
+            <div class="mm-modal-head">
+                <h3>Member Change History</h3>
+                <button type="button" class="mm-modal-close" onclick="gmClose('gmHistoryModal')" aria-label="Close">&times;</button>
+            </div>
+            <div class="mm-modal-body" id="gmHistoryBody" style="max-height:60vh;overflow-y:auto;">
+                <p style="color:#9a8f82;">Loading…</p>
+            </div>
+            <div class="mm-modal-foot" style="display:flex;justify-content:flex-end;padding:14px 18px;">
+                <button class="mm-btn mm-btn-ghost" onclick="gmClose('gmHistoryModal')">Close</button>
             </div>
         </div>
     </div>
@@ -772,8 +916,12 @@ $gm_currency = (string)getSetting('currency_symbol', 'K');
         // render (unlike the head fetch-shim), so gm* requests never depend on
         // page-load order to carry a token.
         var GM_CSRF = <?php echo json_encode($csrf_token); ?>;
-        var GM_PKG_PRICES = <?php echo json_encode($gm_package_prices); ?>;
         var GM_CAN_FIN = <?php echo $gm_can_financials_ui ? 'true' : 'false'; ?>;
+        var GM_CAN_LOGS = <?php echo $gm_can_logs_ui ? 'true' : 'false'; ?>;
+        // Active packages keyed by id: {name, price, days, comp} — drives auto price + expiry.
+        var GM_PACKAGES = <?php echo json_encode(array_column(array_map(function ($p) {
+            return [(int)$p['id'], ['name' => (string)$p['name'], 'price' => (float)$p['price'], 'days' => $p['duration_days'] !== null ? (int)$p['duration_days'] : null, 'comp' => (int)($p['is_complimentary'] ?? 0)]];
+        }, $gm_packages), 1, 0)); ?>;
 
         function gmOpen(id) { document.getElementById(id).classList.add('open'); }
         function gmClose(id) { document.getElementById(id).classList.remove('open'); }
@@ -793,6 +941,8 @@ $gm_currency = (string)getSetting('currency_symbol', 'K');
                 .catch(function () { gmToast('Network error — please try again.', false); });
         }
 
+        var gmOrigName = '';
+
         function gmOpenModal(m) {
             document.getElementById('gmModalTitle').textContent = m ? 'Edit Member' : 'Enrol Member';
             document.getElementById('gmId').value = m ? m.id : 0;
@@ -806,36 +956,104 @@ $gm_currency = (string)getSetting('currency_symbol', 'K');
             document.getElementById('gmFee').value = m && m.monthly_fee != null ? m.monthly_fee : '';
             document.getElementById('gmStatus').value = m ? (m.status || 'active') : 'active';
             document.getElementById('gmNotes').value = m ? (m.notes || '') : '';
+            gmOrigName = m ? (m.full_name || '') : '';
 
-            // Identity & pricing locks (AD-style): editing an EXISTING member,
-            // non-privileged staff cannot rename them or hand-edit the fee —
-            // the fee follows the selected package (accounting source of truth).
+            // Match the package select to the stored membership type (by name).
+            var pkgSel = document.getElementById('gmPackage');
+            var matched = '0';
+            var storedType = m ? (m.membership_type || '') : '';
+            for (var i = 0; i < pkgSel.options.length; i++) {
+                if (pkgSel.options[i].getAttribute('data-name') === storedType && storedType !== '') { matched = pkgSel.options[i].value; break; }
+            }
+            // Existing non-package members held for a manager show as "Custom".
+            if (matched === '0' && m && storedType !== '' && GM_CAN_FIN) { matched = 'custom'; }
+            pkgSel.value = matched;
+
+            var compEl = document.getElementById('gmComplimentary');
+            if (compEl) { compEl.checked = m ? !!(m.is_complimentary == 1) : false; }
+
+            // Change-reason field only relevant when editing an existing member.
+            var reasonWrap = document.getElementById('gmReasonWrap');
+            if (reasonWrap) { reasonWrap.style.display = 'none'; }
+            document.getElementById('gmChangeReason') && (document.getElementById('gmChangeReason').value = '');
+
+            // History button visible for privileged users on existing members.
+            var histBtn = document.getElementById('gmHistoryBtn');
+            if (histBtn) { histBtn.style.display = (m && GM_CAN_LOGS) ? 'inline-flex' : 'none'; if (m) histBtn.setAttribute('data-id', m.id); }
+
+            // Identity lock: non-privileged staff cannot rename an EXISTING member.
             var nameEl = document.getElementById('gmName');
-            var feeEl = document.getElementById('gmFee');
             var lockIdentity = !!m && !GM_CAN_FIN;
             nameEl.readOnly = lockIdentity;
             nameEl.style.background = lockIdentity ? '#f3efe8' : '';
             nameEl.title = lockIdentity ? 'Name changes require a manager — memberships are not transferable.' : '';
-            feeEl.readOnly = !GM_CAN_FIN;
-            feeEl.style.background = !GM_CAN_FIN ? '#f3efe8' : '';
-            feeEl.title = !GM_CAN_FIN ? 'Fee is set by the selected package. Overrides require a manager.' : '';
 
             gmOpen('gmModal');
             setTimeout(function () { document.getElementById(lockIdentity ? 'gmEmail' : 'gmName').focus(); }, 60);
         }
 
-        // Selecting a package auto-fills its price as the fee — keeps member
-        // fees aligned with gym_packages for accounting.
-        document.getElementById('gmType').addEventListener('change', function () {
-            var p = GM_PKG_PRICES[this.value.trim()];
-            if (p != null) { document.getElementById('gmFee').value = p; }
-        });
+        // Choosing a package fills the hidden type, the fee and the auto expiry.
+        function gmApplyPackage() {
+            var sel = document.getElementById('gmPackage');
+            var val = sel.value;
+            var compEl = document.getElementById('gmComplimentary');
+            if (val === '0' || val === 'custom') {
+                document.getElementById('gmType').value = (val === 'custom') ? (document.getElementById('gmType').value || '') : '';
+                document.getElementById('gmExpiryHint').textContent = (val === 'custom') ? '(set manually)' : '(auto from package)';
+                return;
+            }
+            var p = GM_PACKAGES[val];
+            if (!p) { return; }
+            document.getElementById('gmType').value = p.name;
+            if (compEl) { compEl.checked = !!p.comp; }
+            document.getElementById('gmFee').value = p.comp ? 0 : p.price;
+            gmRecalcExpiry();
+        }
+
+        function gmApplyComplimentary() {
+            var comp = document.getElementById('gmComplimentary');
+            if (comp && comp.checked) { document.getElementById('gmFee').value = 0; }
+        }
+
+        // Expiry = start + package duration (days). Managers may override after.
+        function gmRecalcExpiry() {
+            var sel = document.getElementById('gmPackage');
+            var p = GM_PACKAGES[sel.value];
+            var start = document.getElementById('gmStart').value;
+            var hint = document.getElementById('gmExpiryHint');
+            if (!p || p.days == null || !start) { if (hint) hint.textContent = '(open-ended)'; return; }
+            var d = new Date(start + 'T00:00:00');
+            d.setDate(d.getDate() + (p.days - 1));
+            document.getElementById('gmExpiry').value = d.toISOString().slice(0, 10);
+            if (hint) hint.textContent = '(auto: ' + p.days + ' days)';
+        }
 
         function gmSave() {
             var name = document.getElementById('gmName').value.trim();
             var start = document.getElementById('gmStart').value;
             if (!name) { gmToast('Member name is required.', false); return; }
             if (!start) { gmToast('Start date is required.', false); return; }
+
+            // Surface the name-change reason field when the name actually changed.
+            var reasonWrap = document.getElementById('gmReasonWrap');
+            var reasonEl = document.getElementById('gmChangeReason');
+            var isEdit = parseInt(document.getElementById('gmId').value, 10) > 0;
+            if (isEdit && name !== gmOrigName) {
+                if (reasonWrap && reasonWrap.style.display === 'none') {
+                    reasonWrap.style.display = 'block';
+                    if (reasonEl) reasonEl.focus();
+                    gmToast('Name changed — please give a reason (audit logged).', false);
+                    return;
+                }
+                if (reasonEl && reasonEl.value.trim().length < 5) {
+                    gmToast('A reason (min 5 characters) is required to change the name.', false);
+                    return;
+                }
+            }
+
+            var pkgSel = document.getElementById('gmPackage');
+            var pkgId = (pkgSel.value === 'custom' || pkgSel.value === '0') ? 0 : pkgSel.value;
+            var compEl = document.getElementById('gmComplimentary');
             gmPost({
                 gm_action: 'member_save',
                 id: document.getElementById('gmId').value,
@@ -843,13 +1061,50 @@ $gm_currency = (string)getSetting('currency_symbol', 'K');
                 full_name: name,
                 email: document.getElementById('gmEmail').value.trim(),
                 phone: document.getElementById('gmPhone').value.trim(),
+                package_id: pkgId,
                 membership_type: document.getElementById('gmType').value.trim(),
+                is_complimentary: compEl && compEl.checked ? 1 : 0,
                 start_date: start,
                 expiry_date: document.getElementById('gmExpiry').value,
                 monthly_fee: document.getElementById('gmFee').value,
                 status: document.getElementById('gmStatus').value,
+                change_reason: reasonEl ? reasonEl.value.trim() : '',
                 notes: document.getElementById('gmNotes').value.trim()
             });
+        }
+
+        function gmShowHistory(id) {
+            var body = document.getElementById('gmHistoryBody');
+            body.innerHTML = '<p style="color:#9a8f82;">Loading…</p>';
+            gmOpen('gmHistoryModal');
+            var fd = new FormData();
+            fd.append('csrf_token', GM_CSRF);
+            fd.append('gm_action', 'member_history');
+            fd.append('id', id);
+            fetch(window.location.pathname, { method: 'POST', body: fd, credentials: 'same-origin', headers: { 'X-Requested-With': 'XMLHttpRequest' } })
+                .then(function (r) { return r.json(); })
+                .then(function (d) {
+                    if (!d.success) { body.innerHTML = '<p style="color:#c0392b;">' + gmEscape(d.message || 'Could not load history.') + '</p>'; return; }
+                    var e = d.entries || [];
+                    if (!e.length) { body.innerHTML = '<p style="color:#9a8f82;">No changes recorded yet.</p>'; return; }
+                    var actLabel = { enrolled: 'Enrolled', updated: 'Updated', name_changed: 'Name changed', status_changed: 'Status changed', deleted: 'Deleted', complimentary_granted: 'Complimentary granted', repriced: 'Repriced', package_changed: 'Package changed', renewed: 'Renewed' };
+                    body.innerHTML = e.map(function (r) {
+                        var fields = (r.changed_fields || []).join(', ');
+                        var who = gmEscape(r.performed_by_name || 'system');
+                        var when = gmFmtDT(r.performed_at);
+                        var note = r.note ? '<div style="color:#7a6f63;font-size:.78rem;margin-top:2px;">' + gmEscape(r.note) + '</div>' : '';
+                        var diff = '';
+                        if (r.old_values && r.new_values && fields) {
+                            diff = '<div style="font-size:.76rem;color:#5a5147;margin-top:3px;">' + (r.changed_fields || []).map(function (f) {
+                                return '<span style="display:inline-block;margin-right:10px;"><strong>' + gmEscape(f) + ':</strong> ' + gmEscape(r.old_values[f]) + ' → ' + gmEscape(r.new_values[f]) + '</span>';
+                            }).join('') + '</div>';
+                        }
+                        return '<div style="border-left:3px solid #8B7355;padding:6px 0 6px 10px;margin-bottom:10px;">' +
+                            '<div><strong>' + gmEscape(actLabel[r.action] || r.action) + '</strong> · <span style="color:#9a8f82;font-size:.78rem;">' + when + ' by ' + who + '</span></div>' +
+                            diff + note + '</div>';
+                    }).join('');
+                })
+                .catch(function () { body.innerHTML = '<p style="color:#c0392b;">Network error loading history.</p>'; });
         }
 
         function gmStatus(id, status) { gmPost({ gm_action: 'member_status', id: id, status: status }); }
@@ -1089,8 +1344,16 @@ $gm_currency = (string)getSetting('currency_symbol', 'K');
             document.getElementById('gmName').value = q.get('enrol_name') || '';
             document.getElementById('gmEmail').value = q.get('enrol_email') || '';
             document.getElementById('gmPhone').value = q.get('enrol_phone') || '';
-            document.getElementById('gmType').value = q.get('enrol_type') || '';
+            var enrolType = q.get('enrol_type') || '';
+            document.getElementById('gmType').value = enrolType;
             document.getElementById('gmInquiryId').value = parseInt(q.get('enrol_inquiry_id') || '0', 10) || 0;
+            // Match the inquiry's package by name so price + expiry auto-fill.
+            if (enrolType) {
+                var pkgSel = document.getElementById('gmPackage');
+                for (var i = 0; i < pkgSel.options.length; i++) {
+                    if (pkgSel.options[i].getAttribute('data-name') === enrolType) { pkgSel.value = pkgSel.options[i].value; gmApplyPackage(); break; }
+                }
+            }
         })();
 
         // SPA-proof: expose the handlers used by inline onclick attributes
@@ -1101,6 +1364,8 @@ $gm_currency = (string)getSetting('currency_symbol', 'K');
         window.gmStatus = gmStatus; window.gmDelete = gmDelete; window.gmResendCard = gmResendCard;
         window.gmShowLog = gmShowLog; window.gmVisitsPage = gmVisitsPage; window.gmSaveReminderSettings = gmSaveReminderSettings;
         window.gmRunReminders = gmRunReminders; window.gmConfirm = gmConfirm;
+        window.gmApplyPackage = gmApplyPackage; window.gmApplyComplimentary = gmApplyComplimentary;
+        window.gmRecalcExpiry = gmRecalcExpiry; window.gmShowHistory = gmShowHistory;
     </script>
 
     <?php require_once 'includes/admin-footer.php'; ?>

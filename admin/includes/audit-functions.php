@@ -471,6 +471,124 @@ if (!function_exists('logBookingAudit')) {
     }
 }
 
+/* ─────────────────────────────────────────────────────────────────────────
+ * Gym member audit log — a membership record is a person, not a reusable slot.
+ * Every identity/pricing/status change is recorded here so misuse (recycling a
+ * card, silently repricing, churning a name) is fully traceable by admins.
+ * ───────────────────────────────────────────────────────────────────────── */
+if (!function_exists('ensureGymMemberAuditTable')) {
+    function ensureGymMemberAuditTable(PDO $pdo): bool {
+        if (auditTableExists($pdo, 'gym_member_audit_log')) return true;
+        try {
+            // IF NOT EXISTS keeps this idempotent even if auditTableExists()'s
+            // per-request static cache is stale after a first-time create.
+            $pdo->exec("CREATE TABLE IF NOT EXISTS gym_member_audit_log (
+                id INT UNSIGNED NOT NULL AUTO_INCREMENT,
+                member_id INT UNSIGNED NOT NULL,
+                member_number VARCHAR(32) DEFAULT NULL,
+                action VARCHAR(64) NOT NULL,
+                old_values JSON NULL,
+                new_values JSON NULL,
+                changed_fields JSON NULL,
+                note TEXT NULL,
+                performed_by INT UNSIGNED DEFAULT NULL,
+                performed_by_name VARCHAR(255) DEFAULT NULL,
+                performed_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                ip_address VARCHAR(45) DEFAULT NULL,
+                user_agent VARCHAR(500) DEFAULT NULL,
+                PRIMARY KEY (id),
+                KEY idx_gmal_member (member_id),
+                KEY idx_gmal_action (action),
+                KEY idx_gmal_performed_at (performed_at)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='Audit log for gym membership changes'");
+            return true;
+        } catch (Throwable $e) {
+            error_log('ensureGymMemberAuditTable failed: ' . $e->getMessage());
+            return false;
+        }
+    }
+}
+
+/**
+ * Log a gym-member action. Safe no-op if the table cannot be created.
+ *
+ * @param string $action e.g. 'enrolled', 'updated', 'name_changed', 'repriced',
+ *                        'status_changed', 'package_changed', 'renewed', 'deleted',
+ *                        'card_emailed', 'complimentary_granted'
+ */
+if (!function_exists('logGymMemberAudit')) {
+    function logGymMemberAudit(int $memberId, string $action, ?array $oldValues = null, ?array $newValues = null, ?string $note = null, ?string $memberNumber = null): bool {
+        global $pdo, $user;
+        if ($memberId <= 0) return false;
+        if (!ensureGymMemberAuditTable($pdo)) return false;
+
+        $changedFields = [];
+        if (is_array($oldValues) && is_array($newValues)) {
+            foreach ($newValues as $k => $v) {
+                $ov = $oldValues[$k] ?? null;
+                if ((string)$ov !== (string)$v) $changedFields[] = $k;
+            }
+        }
+
+        $performedBy = isset($user['id']) ? (int)$user['id'] : null;
+        $performedByName = $user['full_name'] ?? ($user['username'] ?? null);
+
+        try {
+            if (empty($memberNumber)) {
+                $r = $pdo->prepare("SELECT member_number FROM gym_members WHERE id = ?");
+                $r->execute([$memberId]);
+                $memberNumber = (string)($r->fetchColumn() ?: '');
+            }
+            $stmt = $pdo->prepare("INSERT INTO gym_member_audit_log
+                (member_id, member_number, action, old_values, new_values, changed_fields, note, performed_by, performed_by_name, ip_address, user_agent)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
+            $stmt->execute([
+                $memberId,
+                $memberNumber ?: null,
+                $action,
+                $oldValues !== null ? json_encode($oldValues, JSON_UNESCAPED_UNICODE | JSON_PARTIAL_OUTPUT_ON_ERROR) : null,
+                $newValues !== null ? json_encode($newValues, JSON_UNESCAPED_UNICODE | JSON_PARTIAL_OUTPUT_ON_ERROR) : null,
+                !empty($changedFields) ? json_encode($changedFields) : null,
+                $note,
+                $performedBy,
+                $performedByName,
+                $_SERVER['REMOTE_ADDR'] ?? null,
+                substr((string)($_SERVER['HTTP_USER_AGENT'] ?? ''), 0, 500) ?: null,
+            ]);
+            return true;
+        } catch (Throwable $e) {
+            error_log('logGymMemberAudit failed: ' . $e->getMessage());
+            return false;
+        }
+    }
+}
+
+/**
+ * Fetch recent audit entries for a gym member (most recent first).
+ */
+if (!function_exists('getGymMemberAuditLog')) {
+    function getGymMemberAuditLog(int $memberId, int $limit = 100): array {
+        global $pdo;
+        if (!auditTableExists($pdo, 'gym_member_audit_log')) return [];
+        try {
+            $stmt = $pdo->prepare("SELECT * FROM gym_member_audit_log WHERE member_id = ? ORDER BY performed_at DESC, id DESC LIMIT ?");
+            $stmt->bindValue(1, $memberId, PDO::PARAM_INT);
+            $stmt->bindValue(2, $limit, PDO::PARAM_INT);
+            $stmt->execute();
+            $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
+            foreach ($rows as &$r) {
+                $r['old_values'] = $r['old_values'] !== null ? json_decode($r['old_values'], true) : null;
+                $r['new_values'] = $r['new_values'] !== null ? json_decode($r['new_values'], true) : null;
+                $r['changed_fields'] = $r['changed_fields'] !== null ? json_decode($r['changed_fields'], true) : [];
+            }
+            return $rows;
+        } catch (Throwable $e) {
+            error_log('getGymMemberAuditLog failed: ' . $e->getMessage());
+            return [];
+        }
+    }
+}
+
 /**
  * Fetch recent audit entries for a booking.
  */

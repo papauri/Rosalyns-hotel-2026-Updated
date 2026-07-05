@@ -87,6 +87,70 @@ function mm_get_allowed_source_columns(): array
     ];
 }
 
+/**
+ * Resolve the single module a media item belongs to, or null when it is global
+ * chrome (home, about, contact, main gallery) that every preset shows.
+ * Source-table attribution is most reliable; page_slug is the fallback for hero
+ * images (which are stored against page_heroes but tagged with the front page).
+ */
+function mm_item_module_key(array $item): ?string
+{
+    $tableModule = [
+        'restaurant_gallery'     => 'restaurant_page',
+        'gym_content'            => 'gym',
+        'conference_rooms'       => 'conference',
+        'rooms'                  => 'bookings',
+        'individual_room_photos' => 'bookings',
+        'hotel_gallery'          => 'bookings',
+        'events'                 => 'events',
+    ];
+
+    foreach (explode(' | ', (string)($item['source_links'] ?? '')) as $lp) {
+        $tbl = strtolower(trim((string)(explode(':', $lp)[0] ?? '')));
+        if ($tbl !== '' && isset($tableModule[$tbl])) {
+            return $tableModule[$tbl];
+        }
+    }
+
+    $slug = strtolower(trim((string)($item['page_slug'] ?? '')));
+    if ($slug !== '') {
+        // Ordered so the more specific page wins (e.g. "conference" before the
+        // generic "room" needle). Each preset-owned front page maps to its module.
+        $slugRules = [
+            'restaurant_page' => ['restaurant', 'dining', 'menu', 'bar'],
+            'gym'             => ['gym', 'fitness', 'wellness'],
+            'conference'      => ['conference', 'meeting'],
+            'events'          => ['event'],
+            'bookings'        => ['room', 'accommodation', 'suite'],
+        ];
+        foreach ($slugRules as $module => $needles) {
+            foreach ($needles as $needle) {
+                if (strpos($slug, $needle) !== false) {
+                    return $module;
+                }
+            }
+        }
+    }
+
+    return null; // global — visible on every preset
+}
+
+/**
+ * A media item is shown only when the module that owns its page is enabled for
+ * this installation's preset. Global chrome (module key null) is always shown.
+ */
+function mm_item_visible_for_preset(array $item): bool
+{
+    $module = mm_item_module_key($item);
+    if ($module === null) {
+        return true;
+    }
+    if (!function_exists('rh_module_key_enabled')) {
+        return true;
+    }
+    return rh_module_key_enabled($module);
+}
+
 function mm_sync_page_hero_media(PDO $pdo): void
 {
     if (!function_exists('upsertManagedMediaForSource')) {
@@ -581,6 +645,8 @@ if ($media_css_version === '' || $media_css_version === '0') {
                                     <select name="link_source_table" class="mm-input" id="mm-link-table-create">
                                         <option value="">— None —</option>
                                         <?php foreach (array_keys(mm_get_allowed_source_columns()) as $tbl): ?>
+                                            <?php // Hide source tables whose module is off for this preset.
+                                            if (!mm_item_visible_for_preset(['source_links' => $tbl . '::'])) { continue; } ?>
                                             <option value="<?= htmlspecialchars($tbl) ?>"><?= htmlspecialchars($tbl) ?></option>
                                         <?php endforeach; ?>
                                     </select>
@@ -614,7 +680,9 @@ if ($media_css_version === '' || $media_css_version === '0') {
             $mediaUrl = trim((string)($item['media_url'] ?? ''));
             $isActive = (int)($item['is_active'] ?? 0) === 1;
 
-            return $itemId > 0 && $mediaUrl !== '' && $isActive;
+            // Only show media whose owning page/module is active for this preset —
+            // a gym install shouldn't see restaurant or conference imagery.
+            return $itemId > 0 && $mediaUrl !== '' && $isActive && mm_item_visible_for_preset($item);
         }));
 
         $allSlugs = array_filter(array_unique(array_map(static function ($item) {

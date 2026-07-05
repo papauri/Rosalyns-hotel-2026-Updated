@@ -7855,6 +7855,23 @@ function restoreStockForMenuItem(int $menuItemId, string $menuType, float $porti
             ? $originalSourceType
             : 'room_service';
 
+        // Idempotency guard — mirrors the dup-check on the deduction side. A void
+        // restore for a given charge/line is written as a 'void_restore' adjustment
+        // keyed on that charge id. If one already exists, this charge was already
+        // put back; a retried or double-clicked void must NOT add the stock again.
+        if ($originalChargeId !== null) {
+            $restoreDupCheck = $pdo->prepare("
+                SELECT id FROM stock_adjustments
+                WHERE source_type = 'void_restore' AND source_id = ?
+                LIMIT 1
+            ");
+            $restoreDupCheck->execute([$originalChargeId]);
+            if ($restoreDupCheck->fetchColumn()) {
+                if ($ownTx && $pdo->inTransaction()) $pdo->commit();
+                return true;
+            }
+        }
+
         $byBatch = []; // batch_id => qty to add back
         $byIngredient = []; // ingredient_id => qty to add back (fallback / aggregate)
 

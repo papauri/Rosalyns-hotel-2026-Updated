@@ -116,6 +116,10 @@ $mod_station_bds = moduleEnabled('station_bds');
 $mod_station_cds = moduleEnabled('station_cds');
 $mod_station_room_service = moduleEnabled('station_room_service');
 $mod_events      = function_exists('isEventsEnabled') && isEventsEnabled();
+// Presets that invoice a named client in advance and can therefore carry an
+// outstanding balance. Pure-POS presets (bar, retail, supermarket) settle at
+// the till, so an "Outstanding Balances" tile would always read zero for them.
+$mod_receivables = $mod_bookings || $mod_conference || $mod_gym || $mod_events;
 
 if (!$is_card_insight_ajax) {
 
@@ -395,7 +399,7 @@ if ($is_card_insight_ajax) {
         'expired_bookings'          => $mod_bookings,
         'pending_conference'        => $mod_conference,
         'today_conferences'         => $mod_conference,
-        'outstanding_balances'      => $mod_finance,
+        'outstanding_balances'      => $mod_finance && $mod_receivables,
         'open_tabs'                 => $mod_stock,
         'room_service_reminders_due'=> $mod_pos && $mod_bookings,
         'room_service_pending'      => $mod_pos && $mod_bookings,
@@ -1872,8 +1876,29 @@ $currency_symbol = getSetting('currency_symbol');
             </a>
             <?php endif; ?>
 
-            <?php if ($mod_finance): ?>
-            <a class="stat-card <?php echo $finance['outstanding'] > 0 ? 'stat-alert' : 'stat-good'; ?> js-dashboard-insight" data-insight-card="outstanding_balances" href="payments.php?balance=outstanding" title="View bookings with outstanding balances">
+            <?php if ($mod_gym && $mod_bookings): ?>
+            <?php /* Booking-led presets that also run a gym (Full Hotel, Hotel + gym):
+                     the gym hero block above is booking-less only, so surface the key
+                     membership numbers here too. New inquiries already appear in the
+                     Guest Services Queue, so this stays to the two register metrics. */ ?>
+            <a class="stat-card stat-good" href="gym-members.php" title="Open the membership register">
+                <span class="stat-cta">View →</span>
+                <div class="stat-icon"><i class="fas fa-id-card"></i></div>
+                <div class="stat-value"><?php echo (int)$gymDash['active_members']; ?></div>
+                <div class="stat-label">Active Gym Members</div>
+                <div class="stat-sub">Currently enrolled memberships</div>
+            </a>
+            <a class="stat-card <?php echo $gymDash['expiring_members'] > 0 ? 'stat-warn' : ''; ?>" href="gym-members.php?filter=expiring" title="Gym memberships expiring within 30 days">
+                <span class="stat-cta">Action →</span>
+                <div class="stat-icon"><i class="fas fa-hourglass-end"></i></div>
+                <div class="stat-value"><?php echo (int)$gymDash['expiring_members']; ?></div>
+                <div class="stat-label">Gym Memberships Expiring</div>
+                <div class="stat-sub">Renewals due in the next 30 days</div>
+            </a>
+            <?php endif; ?>
+
+            <?php if ($mod_finance && $mod_receivables): ?>
+            <a class="stat-card <?php echo $finance['outstanding'] > 0 ? 'stat-alert' : 'stat-good'; ?> js-dashboard-insight" data-insight-card="outstanding_balances" href="payments.php?balance=outstanding" title="View accounts with outstanding balances">
                 <span class="stat-cta">Collect →</span>
                 <div class="stat-icon"><i class="fas fa-money-bill-wave"></i></div>
                 <div class="stat-value">
@@ -2142,15 +2167,15 @@ $currency_symbol = getSetting('currency_symbol');
                         </button>
                     </li>
                     <?php endif; ?>
-                    <?php if ($mod_pos): ?>
+                    <?php if ($mod_stock): ?>
                     <li>
                         <span class="pri"><i class="fas fa-receipt" style="color:#e67e22;"></i> <?php echo isRestaurantEnabled() ? 'Open restaurant tabs' : 'Pending orders'; ?></span>
-                        <a href="<?php echo $mod_stock ? 'stock-orders.php?status=placed' : 'pos.php'; ?>" style="text-decoration:none;">
+                        <a href="stock-orders.php?status=placed" style="text-decoration:none;">
                             <span class="pulse-pill <?php echo $ops['open_tabs'] > 0 ? 'amber' : 'green'; ?>"><?php echo $ops['open_tabs']; ?></span>
                         </a>
                     </li>
                     <?php endif; ?>
-                    <?php if ($mod_finance): ?>
+                    <?php if ($mod_finance && $mod_receivables): ?>
                     <li>
                         <span class="pri"><i class="fas fa-money-check-alt" style="color:#dc3545;"></i> <?php echo $mod_bookings ? 'Bookings' : 'Accounts'; ?> with balance due</span>
                         <a href="payments.php?balance=outstanding" style="text-decoration:none;">

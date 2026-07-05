@@ -2084,6 +2084,12 @@ if (in_array($user['role'] ?? '', ['admin', 'manager'], true)) {
         </div>
 
         <div class="till-grid">
+            <?php /* Room Service only exists for a hotel — it charges to a guest
+                     room folio. Non-hotel presets (bar, gym, retail, supermarket)
+                     have no rooms, so the whole Restaurant/Room-Service toggle is
+                     dropped and the till stays in single-menu mode. */ ?>
+            <?php $posRoomServiceOn = moduleEnabled('bookings') && moduleEnabled('station_room_service'); ?>
+            <?php if ($posRoomServiceOn): ?>
             <!-- Menu mode toggle: flicks the visible menu between Restaurant (POS) and Room Service.
              Selecting Room Service also auto-sets the order type so the location field expects a room. -->
             <div class="menu-mode" role="tablist" aria-label="Menu mode" data-active-mode="restaurant">
@@ -2094,6 +2100,7 @@ if (in_array($user['role'] ?? '', ['admin', 'manager'], true)) {
                     <i class="fas fa-bed"></i> <span>Room Service</span>
                 </button>
             </div>
+            <?php endif; ?>
 
             <!-- Categories -->
             <div class="cats-wrap" id="catsWrap">

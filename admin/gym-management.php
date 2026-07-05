@@ -12,6 +12,7 @@ $csrf_token = $csrf_token ?? generateCsrfToken();
 $site_name  = $site_name  ?? getSetting('site_name', 'Hotel');
 
 require_once '../includes/facebook-functions.php';
+require_once __DIR__ . '/includes/gym-analytics-lib.php'; // gymDurationLabelFromDays()
 $fb_gym_posting_on = isFacebookPostingEnabled()
     && getSetting('facebook_gym_enabled', '1') === '1';
 
@@ -28,19 +29,32 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
         $action = $_POST['action'] ?? '';
 
+        // Structured duration: days drive membership expiry; label is display text.
+        // When the label is left blank we auto-derive a friendly one from the days.
+        $gm_pkg_days = ($_POST['duration_days'] ?? '') !== '' ? max(0, (int)$_POST['duration_days']) : null;
+        $gm_pkg_comp = isset($_POST['is_complimentary']) ? 1 : 0;
+        $gm_pkg_label = trim($_POST['duration_label'] ?? '');
+        if ($gm_pkg_label === '' && $gm_pkg_days !== null && $gm_pkg_days > 0) {
+            $gm_pkg_label = gymDurationLabelFromDays($gm_pkg_days);
+        }
+        // Complimentary packages are always free regardless of the price field.
+        $gm_pkg_price = $gm_pkg_comp ? 0.0 : (float)($_POST['price'] ?? 0);
+
         if ($action === 'add') {
             $stmt = $pdo->prepare("
                 INSERT INTO gym_packages
-                    (name, icon_class, includes_text, duration_label, price, currency_code,
+                    (name, icon_class, includes_text, duration_label, duration_days, price, is_complimentary, currency_code,
                      cta_text, cta_link, is_featured, is_active, display_order)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ");
             $stmt->execute([
                 trim($_POST['name']),
                 trim($_POST['icon_class'] ?? 'fas fa-leaf'),
                 trim($_POST['includes_text'] ?? ''),
-                trim($_POST['duration_label'] ?? ''),
-                (float)($_POST['price'] ?? 0),
+                $gm_pkg_label,
+                $gm_pkg_days,
+                $gm_pkg_price,
+                $gm_pkg_comp,
                 trim($_POST['currency_code'] ?? 'MWK'),
                 trim($_POST['cta_text'] ?? 'Book Package'),
                 trim($_POST['cta_link'] ?? '#book'),
@@ -59,8 +73,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         if ($action === 'update') {
             $stmt = $pdo->prepare("
                 UPDATE gym_packages
-                SET name = ?, icon_class = ?, includes_text = ?, duration_label = ?,
-                    price = ?, currency_code = ?, cta_text = ?, cta_link = ?,
+                SET name = ?, icon_class = ?, includes_text = ?, duration_label = ?, duration_days = ?,
+                    price = ?, is_complimentary = ?, currency_code = ?, cta_text = ?, cta_link = ?,
                     is_featured = ?, is_active = ?, display_order = ?
                 WHERE id = ?
             ");
@@ -68,8 +82,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 trim($_POST['name']),
                 trim($_POST['icon_class'] ?? 'fas fa-leaf'),
                 trim($_POST['includes_text'] ?? ''),
-                trim($_POST['duration_label'] ?? ''),
-                (float)($_POST['price'] ?? 0),
+                $gm_pkg_label,
+                $gm_pkg_days,
+                $gm_pkg_price,
+                $gm_pkg_comp,
                 trim($_POST['currency_code'] ?? 'MWK'),
                 trim($_POST['cta_text'] ?? 'Book Package'),
                 trim($_POST['cta_link'] ?? '#book'),
@@ -141,7 +157,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 // ── Fetch packages ───────────────────────────────────────────────────────────
 try {
     $stmt = $pdo->query("
-        SELECT id, name, icon_class, includes_text, duration_label, price,
+        SELECT id, name, icon_class, includes_text, duration_label, duration_days, price, is_complimentary,
                currency_code, cta_text, cta_link, is_featured, is_active, display_order
         FROM gym_packages
         ORDER BY display_order ASC, name ASC
@@ -256,6 +272,8 @@ if ($gym_css_version === '' || $gym_css_version === '0') {
                             'icon_class'    => $pkg['icon_class'] ?? 'fas fa-leaf',
                             'includes_text' => $pkg['includes_text'] ?? '',
                             'duration_label' => $pkg['duration_label'] ?? '',
+                            'duration_days' => isset($pkg['duration_days']) && $pkg['duration_days'] !== null ? (int)$pkg['duration_days'] : '',
+                            'is_complimentary' => (int)($pkg['is_complimentary'] ?? 0),
                             'price'         => (float)$pkg['price'],
                             'currency_code' => $pkg['currency_code'] ?? 'MWK',
                             'cta_text'      => $pkg['cta_text'] ?? 'Book Package',
@@ -421,8 +439,29 @@ if ($gym_css_version === '' || $gym_css_version === '0') {
                     </div>
                     <div class="form-row" style="margin-bottom:14px;">
                         <div class="form-group">
-                            <label class="form-label">Duration Label</label>
-                            <input type="text" name="duration_label" class="form-control" placeholder="e.g. 5 Days, 1 Month">
+                            <label class="form-label">Duration (days)</label>
+                            <input type="number" name="duration_days" class="form-control" min="0" step="1" placeholder="e.g. 30 monthly, 365 yearly" list="gymDurationPresets">
+                            <datalist id="gymDurationPresets">
+                                <option value="1">1 Day pass</option>
+                                <option value="7">1 Week</option>
+                                <option value="30">Monthly</option>
+                                <option value="90">Quarterly</option>
+                                <option value="180">6 Months</option>
+                                <option value="365">Yearly</option>
+                            </datalist>
+                            <small class="form-text text-muted">Drives membership expiry. Leave blank / 0 for open-ended.</small>
+                        </div>
+                        <div class="form-group">
+                            <label class="form-label">Duration Label <small>(optional — auto-set from days)</small></label>
+                            <input type="text" name="duration_label" class="form-control" placeholder="Auto: Monthly, Yearly…">
+                        </div>
+                    </div>
+                    <div class="form-row" style="margin-bottom:14px;">
+                        <div class="form-group">
+                            <label class="form-label" style="display:flex;align-items:center;gap:6px;cursor:pointer;">
+                                <input type="checkbox" name="is_complimentary" value="1"> Complimentary (free — e.g. hotel guest)
+                            </label>
+                            <small class="form-text text-muted">Free packages ignore the price field and record no fee.</small>
                         </div>
                         <div class="form-group">
                             <label class="form-label">Display Order</label>
@@ -496,8 +535,21 @@ if ($gym_css_version === '' || $gym_css_version === '0') {
                     </div>
                     <div class="form-row" style="margin-bottom:14px;">
                         <div class="form-group">
-                            <label class="form-label">Duration Label</label>
+                            <label class="form-label">Duration (days)</label>
+                            <input type="number" name="duration_days" id="editGymDurationDays" class="form-control" min="0" step="1" list="gymDurationPresets">
+                            <small class="form-text text-muted">Drives membership expiry. Blank / 0 = open-ended.</small>
+                        </div>
+                        <div class="form-group">
+                            <label class="form-label">Duration Label <small>(optional)</small></label>
                             <input type="text" name="duration_label" id="editGymDuration" class="form-control">
+                        </div>
+                    </div>
+                    <div class="form-row" style="margin-bottom:14px;">
+                        <div class="form-group">
+                            <label class="form-label" style="display:flex;align-items:center;gap:6px;cursor:pointer;">
+                                <input type="checkbox" name="is_complimentary" id="editGymComplimentary" value="1"> Complimentary (free — e.g. hotel guest)
+                            </label>
+                            <small class="form-text text-muted">Free packages ignore the price field.</small>
                         </div>
                         <div class="form-group">
                             <label class="form-label">Display Order</label>
@@ -940,7 +992,9 @@ if ($gym_css_version === '' || $gym_css_version === '0') {
             document.getElementById('editGymIconClass').value = pkg.icon_class || 'fas fa-leaf';
             document.getElementById('editGymPrice').value = pkg.price || 0;
             document.getElementById('editGymCurrency').value = pkg.currency_code || 'MWK';
+            document.getElementById('editGymDurationDays').value = (pkg.duration_days === 0 || pkg.duration_days) ? pkg.duration_days : '';
             document.getElementById('editGymDuration').value = pkg.duration_label || '';
+            document.getElementById('editGymComplimentary').checked = !!pkg.is_complimentary;
             document.getElementById('editGymOrder').value = pkg.display_order || 0;
             document.getElementById('editGymIncludes').value = pkg.includes_text || '';
             document.getElementById('editGymCtaText').value = pkg.cta_text || 'Book Package';

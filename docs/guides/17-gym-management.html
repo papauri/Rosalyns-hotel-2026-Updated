@@ -57,8 +57,9 @@
             <tr>
               <td><strong>1. Packages</strong></td>
               <td>Gym Packages</td>
-              <td>Define what you sell — name, price, duration. Package prices are the accounting source of truth for
-                member fees.</td>
+              <td>Define what you sell — name, price, and <strong>duration in days</strong> (30 = monthly, 365 = yearly,
+                etc., which drives each member's expiry date). Tick <strong>Complimentary</strong> for a free package
+                (e.g. hotel-guest access). Package prices are the accounting source of truth for member fees.</td>
             </tr>
             <tr>
               <td><strong>2. Inquiry</strong></td>
@@ -95,10 +96,25 @@
           frequency over the last 30 days, their personal <strong>peak workout slot</strong>, and a marketing
           <strong>segment chip</strong>.</p>
         <ul class="checklist">
-          <li><strong>Fees follow the package.</strong> Selecting a package auto-fills its price; only a manager
-            (<code>gym_financials</code>) can override a fee, and free-text package names never unlock it.</li>
-          <li><strong>Names are protected.</strong> Renaming a member needs a manager — memberships are not
-            transferable to another person, and every identity or price change is audit-logged.</li>
+          <li><strong>Enrolment is package-driven.</strong> Pick a package from the dropdown and it fills in the
+            membership name, the fee, and — from the <strong>start date plus the package's duration</strong> — the
+            expiry date automatically. You choose the start date; the system works out when it ends (monthly = +30 days,
+            yearly = +365, a 5-day pass = +5, and so on). No more picking a from/to range by hand.</li>
+          <li><strong>Fees follow the package.</strong> The price comes straight from the package; only a manager
+            (<code>gym_financials</code>) can override the fee or the auto expiry, or enrol a "Custom" member without a
+            package. Ordinary staff must always pick a package.</li>
+          <li><strong>Free entry for hotel guests.</strong> When the gym is part of a hotel (not the standalone Gym
+            preset), a <strong>Complimentary</strong> option appears — enrol a staying guest with zero fee. You can also
+            mark any package itself as complimentary in Gym Packages so it's always free.</li>
+          <li><strong>Names are protected against churn.</strong> Renaming a member needs a manager, requires a typed
+            <strong>reason</strong> (recorded in the log), and is <strong>rate-limited</strong> — no more than two name
+            changes per 180 days unless an administrator overrides. Memberships belong to one person and are not
+            transferable, so name edits are for genuine legal corrections only.</li>
+          <li><strong>Full change history.</strong> Every enrolment, edit, name change, reprice, status change and
+            deletion is written to an audit log. Managers with <strong>Gym Member History</strong>
+            (<code>gym_logs</code>) see a <strong>History</strong> button on each member showing who changed what, when,
+            and the before/after values. Deleting a member also needs <code>gym_financials</code> — mark them
+            <em>cancelled</em> instead to keep their record.</li>
           <li><strong>Resend card</strong> re-emails the member's barcode card any time.</li>
         </ul>
         <div class="callout note">

@@ -9,6 +9,46 @@
  * functions are unit-testable with plain arrays.
  */
 
+if (!function_exists('gymDurationLabelFromDays')) {
+    /**
+     * Friendly duration label from a day count, snapping common gym periods
+     * to their natural names (monthly / quarterly / yearly) and falling back
+     * to "N days / weeks / months" otherwise.
+     */
+    function gymDurationLabelFromDays(int $days): string
+    {
+        if ($days <= 0)   return 'Open-ended';
+        if ($days === 1)  return '1 Day';
+        if ($days === 7)  return '1 Week';
+        if ($days === 14) return '2 Weeks';
+        if ($days === 30 || $days === 31) return 'Monthly';
+        if ($days === 90 || $days === 91) return 'Quarterly';
+        if ($days === 180 || $days === 182) return '6 Months';
+        if ($days === 365 || $days === 366) return 'Yearly';
+        if ($days % 365 === 0) return ($days / 365) . ' Years';
+        if ($days % 30 === 0)  return ($days / 30) . ' Months';
+        if ($days % 7 === 0)   return ($days / 7) . ' Weeks';
+        return $days . ' Days';
+    }
+}
+
+if (!function_exists('gymComputeExpiry')) {
+    /**
+     * Compute a membership expiry date from a start date + duration in days.
+     * Returns Y-m-d, or null when the package is open-ended (no duration).
+     * The expiry is the last day the membership is valid: start + (days - 1)
+     * so a 1-day pass bought today expires today.
+     */
+    function gymComputeExpiry(string $startYmd, ?int $days): ?string
+    {
+        if ($days === null || $days <= 0) return null;
+        $start = DateTime::createFromFormat('Y-m-d', $startYmd);
+        if (!$start) return null;
+        $start->modify('+' . ($days - 1) . ' days');
+        return $start->format('Y-m-d');
+    }
+}
+
 if (!function_exists('gym_frequency_label')) {
     /**
      * Visit-frequency label from visits in the last 30 days.
