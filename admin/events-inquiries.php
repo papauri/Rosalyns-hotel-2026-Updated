@@ -21,67 +21,10 @@ $error = '';
 $_can_events_financials = hasPermission((int)($user['id'] ?? 0), 'events_financials');
 $currency_symbol = (string)getSetting('currency_symbol', 'K');
 
-/**
- * Recompute an event inquiry's amount_paid/amount_due/deposit_paid from the
- * payments table and persist them (mirrors syncGymInquiryPaymentSnapshot /
- * syncConferenceEnquiryPaymentSnapshot).
- */
-function syncEventInquiryPaymentSnapshot(PDO $pdo, int $inquiryId): ?array
-{
-    $inquiryStmt = $pdo->prepare("SELECT id, total_amount, deposit_required FROM event_inquiries WHERE id = ? LIMIT 1");
-    $inquiryStmt->execute([$inquiryId]);
-    $inquiry = $inquiryStmt->fetch(PDO::FETCH_ASSOC);
-
-    if (!$inquiry) {
-        return null;
-    }
-
-    $paidStmt = $pdo->prepare("
-        SELECT COALESCE(SUM(CASE WHEN payment_status IN ('completed', 'paid') AND COALESCE(payment_type, '') != 'refund' THEN total_amount ELSE 0 END), 0) AS amount_paid
-        FROM payments
-        WHERE booking_type = 'event'
-          AND booking_id = ?
-          AND deleted_at IS NULL
-    ");
-    $paidStmt->execute([$inquiryId]);
-    $amountPaid = (float)($paidStmt->fetchColumn() ?? 0);
-
-    $lastPaymentStmt = $pdo->prepare("
-        SELECT MAX(payment_date) AS last_payment_date
-        FROM payments
-        WHERE booking_type = 'event'
-          AND booking_id = ?
-          AND payment_status IN ('completed', 'paid')
-          AND COALESCE(payment_type, '') != 'refund'
-          AND deleted_at IS NULL
-    ");
-    $lastPaymentStmt->execute([$inquiryId]);
-    $lastPaymentDate = $lastPaymentStmt->fetchColumn() ?: null;
-
-    $totalAmount = (float)($inquiry['total_amount'] ?? 0);
-    $depositRequired = (float)($inquiry['deposit_required'] ?? 0);
-    $amountDue = max(0, $totalAmount - $amountPaid);
-    $depositPaid = min($amountPaid, $depositRequired);
-
-    $syncStmt = $pdo->prepare("
-        UPDATE event_inquiries
-        SET amount_paid = ?,
-            amount_due = ?,
-            deposit_paid = ?,
-            last_payment_date = ?,
-            updated_at = NOW()
-        WHERE id = ?
-    ");
-    $syncStmt->execute([$amountPaid, $amountDue, $depositPaid, $lastPaymentDate, $inquiryId]);
-
-    return [
-        'total_amount' => $totalAmount,
-        'amount_paid' => $amountPaid,
-        'amount_due' => $amountDue,
-        'deposit_required' => $depositRequired,
-        'deposit_paid' => $depositPaid,
-    ];
-}
+// Receivable-account payment sync (syncEventInquiryPaymentSnapshot) lives in the
+// shared include so payment-add.php and this page compute identical balances.
+// amount_due is derived from the LOCKED invoiced gross (total_with_vat) — rate-safe.
+require_once __DIR__ . '/includes/finance-account-sync.php';
 
 // Handle status updates, deletions and financial actions
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['inquiry_action'])) {

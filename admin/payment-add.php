@@ -7,6 +7,7 @@ require_once '../config/email.php';
 require_once '../config/invoice.php';
 require_once 'includes/finance-schema.php';
 require_once 'includes/booking-lifecycle.php';
+require_once 'includes/finance-account-sync.php';
 require_once '../includes/idempotency.php';
 require_once '../includes/finance-sequences.php';
 
@@ -46,11 +47,15 @@ if ($editId) {
 $paymentTransactionValue = $payment[$paymentTransactionColumn] ?? '';
 
 // Module flags — the booking picker only offers account types whose module
-// is enabled for this installation's business preset.
+// is enabled for this installation's business preset. Gym and event carry
+// receivable balances too, so they are collectible here (not just from their
+// own inquiry pages).
 $pa_mod_bookings = function_exists('moduleEnabled') && moduleEnabled('bookings');
 $pa_mod_conf     = function_exists('moduleEnabled') && moduleEnabled('conference');
-$pa_any_booking  = $pa_mod_bookings || $pa_mod_conf;
-$pa_default_type = $pa_mod_bookings ? 'room' : ($pa_mod_conf ? 'conference' : 'room');
+$pa_mod_gym      = function_exists('moduleEnabled') && moduleEnabled('gym');
+$pa_mod_event    = function_exists('isEventsEnabled') && isEventsEnabled();
+$pa_any_booking  = $pa_mod_bookings || $pa_mod_conf || $pa_mod_gym || $pa_mod_event;
+$pa_default_type = $pa_mod_bookings ? 'room' : ($pa_mod_conf ? 'conference' : ($pa_mod_gym ? 'gym' : ($pa_mod_event ? 'event' : 'room')));
 
 // Get booking type and ID from query params for new payment
 $bookingType = isset($_GET['booking_type']) ? $_GET['booking_type'] : '';
@@ -118,8 +123,38 @@ if ($bookingType && $bookingId) {
         $stmt->execute([$bookingId]);
         $bookingDetails = $stmt->fetch(PDO::FETCH_ASSOC);
         $outstandingAmount = $bookingDetails['amount_due'] ?? 0;
+    } elseif ($bookingType === 'gym') {
+        $stmt = $pdo->prepare("
+            SELECT id, reference_number AS enquiry_reference, name AS contact_name,
+                   name AS organization_name, email AS contact_email,
+                   total_amount, total_with_vat, amount_paid, amount_due, vat_rate,
+                   created_at AS start_date, preferred_date AS end_date,
+                   deposit_required, deposit_paid
+            FROM gym_inquiries WHERE id = ?
+        ");
+        $stmt->execute([$bookingId]);
+        $bookingDetails = $stmt->fetch(PDO::FETCH_ASSOC);
+        $outstandingAmount = $bookingDetails['amount_due'] ?? 0;
+    } elseif ($bookingType === 'event') {
+        $stmt = $pdo->prepare("
+            SELECT id, reference_number AS enquiry_reference, name AS contact_name,
+                   name AS organization_name, email AS contact_email,
+                   total_amount, total_with_vat, amount_paid, amount_due, vat_rate,
+                   created_at AS start_date, created_at AS end_date,
+                   deposit_required, deposit_paid
+            FROM event_inquiries WHERE id = ?
+        ");
+        $stmt->execute([$bookingId]);
+        $bookingDetails = $stmt->fetch(PDO::FETCH_ASSOC);
+        $outstandingAmount = $bookingDetails['amount_due'] ?? 0;
     }
 }
+
+// Unified card display figures. "Total" must be the GROSS grand total (incl. VAT
+// and, for rooms, folio extras) so it always equals Paid + Outstanding and can
+// never read lower than the amount due. total_amount alone is the net base.
+$paidDisplay = (float)($bookingDetails['amount_paid'] ?? 0);
+$grandTotalDisplay = $paidDisplay + (float)$outstandingAmount;
 
 // Process form submission
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
@@ -149,8 +184,22 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $ccEmails = str_replace(["\r", "\n"], '', $_POST['cc_emails'] ?? '');
     $processedBy = $user['full_name'] ?? ($user['username'] ?? 'System');
 
+    $allowedPaymentTypes = ['room', 'conference', 'restaurant', 'gym', 'event'];
+    $typeEnabled = [
+        'room'       => $pa_mod_bookings,
+        'conference' => $pa_mod_conf,
+        'gym'        => $pa_mod_gym,
+        'event'      => $pa_mod_event,
+    ];
+    // Existing ledger rows must remain editable even if their module/preset is
+    // currently off, or if they are POS/restaurant rows created by the till.
+    $editingExistingPaymentType = $editId && $payment && $bookingType === (string)($payment['booking_type'] ?? '');
+
     // Validate
-    if (!$bookingType || !$bookingId || !$paymentMethod) {
+    if (!in_array($bookingType, $allowedPaymentTypes, true)
+        || (!$editingExistingPaymentType && empty($typeEnabled[$bookingType]))) {
+        $_SESSION['alert'] = ['type' => 'error', 'message' => 'This account type is not available for the active preset.'];
+    } elseif (!$bookingId || !$paymentMethod) {
         $_SESSION['alert'] = ['type' => 'error', 'message' => 'Please fill in all required fields'];
     } elseif ($paymentAmount <= 0) {
         $_SESSION['alert'] = ['type' => 'error', 'message' => 'Payment amount must be greater than zero'];
@@ -160,6 +209,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         try {
             if ($editId) {
                 // Update existing payment
+                // The entered amount is the GROSS received. Extract VAT so the row
+                // stays consistent: payment_amount (NET) + vat_amount = total_amount.
+                $paymentVatRate = $vatRate;
+                $paymentVatAmount = $paymentVatRate > 0 ? round($paymentAmount * ($paymentVatRate / (100 + $paymentVatRate)), 2) : 0.0;
+                $totalAmount = $paymentAmount;                       // gross = what was received
+                $paymentNet  = round($paymentAmount - $paymentVatAmount, 2);
+
                 $updateFields = [
                     'payment_date = ?',
                     'payment_amount = ?',
@@ -173,7 +229,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
                 $params = [
                     $paymentDate,
-                    $paymentAmount,
+                    $paymentNet,
                     $paymentMethod,
                     $paymentStatus,
                     $transactionReference ?: null,
@@ -182,10 +238,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     $processedBy
                 ];
 
-                // paymentAmount is the gross (VAT-inclusive) amount received — extract VAT portion.
-                $paymentVatRate = $vatRate;
-                $paymentVatAmount = $paymentVatRate > 0 ? round($paymentAmount * ($paymentVatRate / (100 + $paymentVatRate)), 2) : 0.0;
-                $totalAmount = $paymentAmount; // gross = what was entered
                 $updateFields[] = 'vat_rate = ?';
                 $updateFields[] = 'vat_amount = ?';
                 $updateFields[] = 'total_amount = ?';
@@ -215,6 +267,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     updateRoomBookingPayments($pdo, $bookingId);
                 } elseif ($bookingType === 'conference') {
                     updateConferenceEnquiryPayments($pdo, $bookingId);
+                } elseif ($bookingType === 'gym') {
+                    syncGymInquiryPaymentSnapshot($pdo, $bookingId);
+                } elseif ($bookingType === 'event') {
+                    syncEventInquiryPaymentSnapshot($pdo, $bookingId);
                 }
                 // restaurant payments are tracked via stock_orders — no separate balance update needed
 
@@ -249,9 +305,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     }
                 }
 
+                // The entered amount is the GROSS received (VAT-inclusive). Extract
+                // the VAT portion so the payment row is internally consistent:
+                // payment_amount (NET) + vat_amount = total_amount (GROSS).
                 $paymentVatRate = $vatRate;
                 $paymentVatAmount = $paymentVatRate > 0 ? round($paymentAmount * ($paymentVatRate / (100 + $paymentVatRate)), 2) : 0.0;
-                $totalAmount = $paymentAmount; // gross = what was entered
+                $totalAmount = $paymentAmount;                       // gross = what was received
+                $paymentNet  = round($paymentAmount - $paymentVatAmount, 2); // ex-VAT portion
 
                 // Generate payment reference
                 do {
@@ -279,6 +339,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     $refStmt->execute([$bookingId]);
                     $refData = $refStmt->fetch(PDO::FETCH_ASSOC);
                     $bookingReference = $refData['conference_reference'] ?? '';
+                } elseif ($bookingType === 'gym') {
+                    $refStmt = $pdo->prepare("SELECT reference_number FROM gym_inquiries WHERE id = ?");
+                    $refStmt->execute([$bookingId]);
+                    $bookingReference = (string)($refStmt->fetchColumn() ?: '');
+                } elseif ($bookingType === 'event') {
+                    $refStmt = $pdo->prepare("SELECT reference_number FROM event_inquiries WHERE id = ?");
+                    $refStmt->execute([$bookingId]);
+                    $bookingReference = (string)($refStmt->fetchColumn() ?: '');
                 }
 
                 $stmt = $pdo->prepare("
@@ -297,7 +365,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     $bookingId,
                     $bookingReference,
                     $paymentDate,
-                    $paymentAmount,
+                    $paymentNet,
                     $paymentVatRate,
                     $paymentVatAmount,
                     $totalAmount,
@@ -319,6 +387,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     updateRoomBookingPayments($pdo, $bookingId);
                 } elseif ($bookingType === 'conference') {
                     updateConferenceEnquiryPayments($pdo, $bookingId);
+                } elseif ($bookingType === 'gym') {
+                    syncGymInquiryPaymentSnapshot($pdo, $bookingId);
+                } elseif ($bookingType === 'event') {
+                    syncEventInquiryPaymentSnapshot($pdo, $bookingId);
                 }
                 // restaurant payments are tracked via stock_orders — no separate balance update needed
 
@@ -492,71 +564,49 @@ function updateRoomBookingPayments(PDO $pdo, int $bookingId)
 
 function updateConferenceEnquiryPayments(PDO $pdo, int $enquiryId)
 {
-    $enquiryStmt = $pdo->prepare("SELECT total_amount, deposit_required FROM conference_inquiries WHERE id = ?");
+    $enquiryStmt = $pdo->prepare("SELECT total_amount, total_with_vat, deposit_required FROM conference_inquiries WHERE id = ?");
     $enquiryStmt->execute([$enquiryId]);
     $enquiry = $enquiryStmt->fetch(PDO::FETCH_ASSOC);
 
     if (!$enquiry) return;
 
-    $totalAmount = (float)$enquiry['total_amount'];
     $depositRequired = (float)$enquiry['deposit_required'];
 
-    $paidStmt = $pdo->prepare("
-        SELECT
-            SUM(CASE WHEN payment_status IN ('completed', 'paid') AND COALESCE(payment_type, '') != 'refund' THEN total_amount ELSE 0 END) as paid,
-            SUM(CASE WHEN payment_status IN ('completed', 'paid') AND COALESCE(payment_type, '') != 'refund' THEN vat_amount ELSE 0 END) as vat_paid
-        FROM payments
-        WHERE booking_type = 'conference'
-        AND booking_id = ?
-        AND deleted_at IS NULL
-    ");
-    $paidStmt->execute([$enquiryId]);
-    $paid = $paidStmt->fetch(PDO::FETCH_ASSOC);
+    // amount_paid is the sum of GROSS completed non-refund payments (auditable).
+    $amountPaid = rh_sum_account_paid($pdo, 'conference', $enquiryId);
 
-    $amountPaid = (float)($paid['paid'] ?? 0);
-    $vatPaid = (float)($paid['vat_paid'] ?? 0);
-    $amountDue = max(0, $totalAmount - $amountPaid);
+    // amount_due is measured against the invoiced GROSS grand total. Prefer the
+    // locked total_with_vat so a conference invoiced at a historical VAT rate is
+    // never re-based to the current rate; only compute from net when it was
+    // never populated. Invariant: total_with_vat = amount_paid + amount_due.
+    $grossTotal = rh_account_gross_total($enquiry);
+    $amountDue = max(0.0, round($grossTotal - $amountPaid, 2));
     $depositPaid = min($amountPaid, $depositRequired);
+    $lastPaymentDate = rh_last_account_payment_date($pdo, 'conference', $enquiryId);
 
-    $lastPaymentStmt = $pdo->prepare("
-        SELECT MAX(payment_date) as last_payment_date
-        FROM payments
-        WHERE booking_type = 'conference'
-        AND booking_id = ?
-        AND payment_status IN ('completed', 'paid')
-        AND COALESCE(payment_type, '') != 'refund'
-        AND deleted_at IS NULL
-    ");
-    $lastPaymentStmt->execute([$enquiryId]);
-    $lastPayment = $lastPaymentStmt->fetch(PDO::FETCH_ASSOC);
-
-    // VAT per installation mode (exclusive on top / inclusive extracted / off).
-    $vatParts = vat_components($totalAmount);
-    $vatRate = $vatParts['rate'];
-    $vatAmount = $vatParts['vat'];
-    $totalWithVat = $vatParts['total'];
-
-    $updateStmt = $pdo->prepare("
-        UPDATE conference_inquiries
-        SET amount_paid = ?,
-            amount_due = ?,
-            vat_rate = ?,
-            vat_amount = ?,
-            total_with_vat = ?,
-            deposit_paid = ?,
-            last_payment_date = ?
-        WHERE id = ?
-    ");
-    $updateStmt->execute([
-        $amountPaid,
-        $amountDue,
-        $vatRate,
-        $vatAmount,
-        $totalWithVat,
-        $depositPaid,
-        $lastPayment['last_payment_date'],
-        $enquiryId
-    ]);
+    // Only (re)populate the VAT breakdown when it was never locked, to keep the
+    // stored figure faithful to the original invoice's rate.
+    $storedGross = (float)($enquiry['total_with_vat'] ?? 0);
+    if ($storedGross > 0.001) {
+        $updateStmt = $pdo->prepare("
+            UPDATE conference_inquiries
+            SET amount_paid = ?, amount_due = ?, deposit_paid = ?, last_payment_date = ?
+            WHERE id = ?
+        ");
+        $updateStmt->execute([$amountPaid, $amountDue, $depositPaid, $lastPaymentDate, $enquiryId]);
+    } else {
+        $vatParts = vat_components((float)$enquiry['total_amount']);
+        $updateStmt = $pdo->prepare("
+            UPDATE conference_inquiries
+            SET amount_paid = ?, amount_due = ?, vat_rate = ?, vat_amount = ?,
+                total_with_vat = ?, deposit_paid = ?, last_payment_date = ?
+            WHERE id = ?
+        ");
+        $updateStmt->execute([
+            $amountPaid, $amountDue, $vatParts['rate'], $vatParts['vat'],
+            $vatParts['total'], $depositPaid, $lastPaymentDate, $enquiryId
+        ]);
+    }
 }
 ?>
 <!DOCTYPE html>
@@ -680,14 +730,12 @@ function updateConferenceEnquiryPayments(PDO $pdo, int $enquiryId)
                                     <?php if ($bookingType === 'room'): ?>
                                         <div><dt>Check-in</dt><dd><?php echo date('M j, Y', strtotime($bookingDetails['check_in_date'])); ?></dd></div>
                                         <div><dt>Check-out</dt><dd><?php echo date('M j, Y', strtotime($bookingDetails['check_out_date'])); ?></dd></div>
-                                        <div><dt>Total</dt><dd><?php echo $currency_symbol . number_format($bookingDetails['total_amount'], 0); ?></dd></div>
-                                        <div><dt>Paid</dt><dd><?php echo $currency_symbol . number_format($bookingDetails['amount_paid'], 0); ?></dd></div>
                                     <?php else: ?>
-                                        <div><dt>Start</dt><dd><?php echo date('M j, Y', strtotime($bookingDetails['start_date'])); ?></dd></div>
-                                        <div><dt>End</dt><dd><?php echo date('M j, Y', strtotime($bookingDetails['end_date'])); ?></dd></div>
-                                        <div><dt>Total</dt><dd><?php echo $currency_symbol . number_format($bookingDetails['total_amount'], 0); ?></dd></div>
-                                        <div><dt>Paid</dt><dd><?php echo $currency_symbol . number_format($bookingDetails['amount_paid'], 0); ?></dd></div>
+                                        <div><dt>Start</dt><dd><?php echo !empty($bookingDetails['start_date']) ? date('M j, Y', strtotime($bookingDetails['start_date'])) : '—'; ?></dd></div>
+                                        <div><dt>End</dt><dd><?php echo !empty($bookingDetails['end_date']) ? date('M j, Y', strtotime($bookingDetails['end_date'])) : '—'; ?></dd></div>
                                     <?php endif; ?>
+                                    <div><dt>Total (incl. VAT<?php echo $bookingType === 'room' ? ' &amp; extras' : ''; ?>)</dt><dd><?php echo $currency_symbol . number_format($grandTotalDisplay, 0); ?></dd></div>
+                                    <div><dt>Paid</dt><dd><?php echo $currency_symbol . number_format($paidDisplay, 0); ?></dd></div>
                                 </dl>
                             </div>
 
@@ -698,8 +746,7 @@ function updateConferenceEnquiryPayments(PDO $pdo, int $enquiryId)
                             <div class="pa-picker" id="pa-picker">
                                 <p style="margin:0;padding:0.9rem 1rem;background:var(--finance-warning-bg,#fff8e6);border:1px solid var(--finance-warning-border,#e8c98a);border-radius:8px;font-size:0.87rem;color:var(--finance-muted,#6b6156);">
                                     <i class="fas fa-circle-info"></i>
-                                    Room and conference accounts are disabled for this business type.
-                                    POS sales are settled at the till<?php if (function_exists('moduleEnabled') && moduleEnabled('gym')): ?>, and gym payments are recorded from Gym Inquiries<?php endif; ?><?php if (function_exists('isEventsEnabled') && isEventsEnabled()): ?>, and event payments from Event Bookings<?php endif; ?>.
+                                    No receivable account types are enabled for this business preset. POS sales are settled at the till; enable rooms, conference, gym or events in Module Settings to record account payments here.
                                 </p>
                             </div>
                             <?php else: ?>
@@ -714,6 +761,16 @@ function updateConferenceEnquiryPayments(PDO $pdo, int $enquiryId)
                                     <?php if ($pa_mod_conf): ?>
                                     <button type="button" class="pa-type-btn <?php echo $pa_default_type === 'conference' ? 'is-active' : ''; ?>" data-type="conference" id="pa-type-conference">
                                         <i class="fas fa-users"></i> Conference
+                                    </button>
+                                    <?php endif; ?>
+                                    <?php if ($pa_mod_gym): ?>
+                                    <button type="button" class="pa-type-btn <?php echo $pa_default_type === 'gym' ? 'is-active' : ''; ?>" data-type="gym" id="pa-type-gym">
+                                        <i class="fas fa-dumbbell"></i> Gym
+                                    </button>
+                                    <?php endif; ?>
+                                    <?php if ($pa_mod_event): ?>
+                                    <button type="button" class="pa-type-btn <?php echo $pa_default_type === 'event' ? 'is-active' : ''; ?>" data-type="event" id="pa-type-event">
+                                        <i class="fas fa-calendar-star"></i> Event
                                     </button>
                                     <?php endif; ?>
                                 </div>
@@ -829,7 +886,7 @@ function updateConferenceEnquiryPayments(PDO $pdo, int $enquiryId)
                             <div>
                                 <label class="pa-label" for="pa-amount">
                                     Payment Amount <span class="pa-required">*</span>
-                                    <button type="button" class="wm-help" data-tooltip="Enter the amount received <?php echo $vatEnabled ? 'before VAT' : ''; ?>. Leave blank if the booking is fully paid and you are recording an adjustment." aria-label="Help">?</button>
+                                    <button type="button" class="wm-help" data-tooltip="Enter the total amount received<?php echo $vatEnabled ? ' (including VAT — the VAT portion is shown below)' : ''; ?>. This is what reduces the balance due. Leave blank only if fully paid and recording an adjustment." aria-label="Help">?</button>
                                 </label>
                                 <div class="pa-amount-wrap">
                                     <span class="pa-currency"><?php echo htmlspecialchars($currency_symbol); ?></span>
@@ -994,17 +1051,24 @@ function updateConferenceEnquiryPayments(PDO $pdo, int $enquiryId)
         }
         function el(id) { return document.getElementById(id); }
 
-        /* ── Live calculation preview ─────────────────────────── */
+        /* ── Live calculation preview ─────────────────────────────
+           The amount entered is the GROSS received (what the payer actually
+           hands over, VAT included) — this is exactly what is stored as the
+           payment's total_amount and what reduces the account balance. We
+           EXTRACT the VAT portion from it (never add on top), so the preview
+           matches how the payment is recorded and reconciles against the
+           account's gross outstanding. */
         function updatePreview() {
-            const amount = parseFloat(amountInput.value) || 0;
-            const vat    = VAT_ENABLED ? amount * (VAT_RATE / 100) : 0;
-            const total  = amount + vat;
+            const gross = parseFloat(amountInput.value) || 0;
+            const net   = VAT_ENABLED && VAT_RATE > 0 ? gross / (1 + VAT_RATE / 100) : gross;
+            const vat   = gross - net;
 
-            el('prev-subtotal').textContent = fmt(amount);
+            el('prev-subtotal').textContent = fmt(net);
             if (VAT_ENABLED && el('prev-vat')) el('prev-vat').textContent = fmt(vat);
-            el('prev-total').textContent    = fmt(total);
+            el('prev-total').textContent    = fmt(gross);
 
-            // Outstanding meter
+            // Outstanding meter — compare the gross received against the gross due.
+            const total = gross;
             const dueEl = el('pa-meter');
             if (dueEl && _linkedDue !== null) {
                 dueEl.style.display = '';
@@ -1180,8 +1244,15 @@ function updateConferenceEnquiryPayments(PDO $pdo, int $enquiryId)
             _linkedDue    = parseFloat(b.amount_due) || 0;
 
             // Populate selected card
-            const typeLabel = _activeType === 'room' ? 'Room Booking' : 'Conference Booking';
-            el('psc-type').textContent = typeLabel;
+            const typeLabels = { room: 'Room Booking', conference: 'Conference Booking', gym: 'Gym Membership', event: 'Event Booking' };
+            el('psc-type').textContent = typeLabels[_activeType] || 'Booking';
+
+            // Grand total (gross, incl. VAT + any room folio extras) = paid + due,
+            // so the card's Total always reconciles with Paid + Amount Due and is
+            // never lower than the outstanding balance.
+            const _paid  = parseFloat(b.amount_paid) || 0;
+            const _due   = parseFloat(b.amount_due) || 0;
+            const _grand = _paid + _due;
 
             if (_activeType === 'room') {
                 el('psc-name').textContent = b.guest_name || '';
@@ -1189,16 +1260,16 @@ function updateConferenceEnquiryPayments(PDO $pdo, int $enquiryId)
                 el('psc-meta').innerHTML   =
                     _metaItem('Check-in',  b.check_in_date) +
                     _metaItem('Check-out', b.check_out_date) +
-                    _metaItem('Total',     fmt(b.total_amount)) +
-                    _metaItem('Paid',      fmt(b.amount_paid));
+                    _metaItem('Total (incl. VAT & extras)', fmt(_grand)) +
+                    _metaItem('Paid',      fmt(_paid));
             } else {
                 el('psc-name').textContent = b.organization_name || b.contact_name || '';
                 el('psc-ref').textContent  = b.enquiry_reference || '';
                 el('psc-meta').innerHTML   =
                     _metaItem('Start', b.start_date) +
                     _metaItem('End',   b.end_date) +
-                    _metaItem('Total', fmt(b.total_amount)) +
-                    _metaItem('Paid',  fmt(b.amount_paid));
+                    _metaItem('Total (incl. VAT)', fmt(_grand)) +
+                    _metaItem('Paid',  fmt(_paid));
             }
 
             const dueEl = el('psc-due');
@@ -1288,10 +1359,15 @@ function updateConferenceEnquiryPayments(PDO $pdo, int $enquiryId)
         /* ── Initial render ───────────────────────────────────── */
         updatePreview();
 
-        // Populate outstanding meter for pre-linked bookings
+        // Populate outstanding meter for pre-linked bookings, and — when arriving
+        // to collect a specific account (e.g. the "Collect" button) — prefill the
+        // full gross outstanding so a full settlement is one click. Skips edits.
         if (PRE_BOOKING) {
             const meter = el('pa-meter');
             if (meter) meter.style.display = '';
+            if (!IS_EDIT && PRE_DUE > 0 && amountInput && !amountInput.value) {
+                amountInput.value = PRE_DUE.toFixed(2);
+            }
             updatePreview();
         }
 

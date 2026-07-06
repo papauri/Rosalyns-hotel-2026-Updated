@@ -39,7 +39,7 @@ $searchTerm = $_GET['q'] ?? '';
 $recent = isset($_GET['recent']) ? (int)$_GET['recent'] : 0;
 
 // Validate booking type
-if (!in_array($type, ['room', 'conference'])) {
+if (!in_array($type, ['room', 'conference', 'gym', 'event'], true)) {
     echo json_encode(['error' => 'Invalid booking type', 'bookings' => []]);
     exit;
 }
@@ -165,6 +165,40 @@ try {
             $stmt->execute([$searchTerm, $searchTerm, $searchTerm, $searchTerm, $searchTerm, $searchTerm]);
         }
 
+        $bookings = $stmt->fetchAll(PDO::FETCH_ASSOC);
+    } elseif ($type === 'gym' || $type === 'event') {
+        // Gym & event receivable accounts share the same shape. The grand total
+        // shown to the collector is the gross invoiced amount (amount_paid +
+        // amount_due), computed client-side; here we return the raw figures.
+        $tbl = $type === 'gym' ? 'gym_inquiries' : 'event_inquiries';
+        // gym inquiries carry a preferred_date; event inquiries have no event-date
+        // column of their own (the date lives on the linked events row), so fall
+        // back to the enquiry created date for the display range.
+        $dateCol = $type === 'gym' ? 'preferred_date' : 'created_at';
+        $baseCols = "id,
+                     reference_number AS enquiry_reference,
+                     name AS organization_name,
+                     name AS contact_name,
+                     email AS contact_email,
+                     {$dateCol} AS start_date,
+                     {$dateCol} AS end_date,
+                     total_amount,
+                     total_with_vat,
+                     amount_paid,
+                     amount_due,
+                     phone AS contact_phone";
+        if ($recent) {
+            $stmt = $pdo->prepare("SELECT {$baseCols} FROM {$tbl}
+                                   WHERE created_at >= DATE_SUB(NOW(), INTERVAL 30 DAY)
+                                   ORDER BY created_at DESC LIMIT 10");
+            $stmt->execute();
+        } else {
+            $like = '%' . $searchTerm . '%';
+            $stmt = $pdo->prepare("SELECT {$baseCols} FROM {$tbl}
+                                   WHERE (reference_number LIKE ? OR name LIKE ? OR id LIKE ? OR email LIKE ? OR phone LIKE ?)
+                                   ORDER BY created_at DESC LIMIT 20");
+            $stmt->execute([$like, $like, $like, $like, $like]);
+        }
         $bookings = $stmt->fetchAll(PDO::FETCH_ASSOC);
     }
 

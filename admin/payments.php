@@ -871,16 +871,20 @@ $quickActive = function ($s, $e) use ($startDate, $endDate) {
                                 <td data-label="Reference"><strong><?php echo htmlspecialchars((string)($oRow['ref'] ?? '—')); ?></strong></td>
                                 <td data-label="Client"><?php echo htmlspecialchars((string)($oRow['client'] ?? '—')); ?></td>
                                 <td data-label="Type"><span class="badge badge-<?php echo htmlspecialchars($meta['badge']); ?>"><?php echo htmlspecialchars($meta['label']); ?></span></td>
-                                <td data-label="Total"><?php echo $currency_symbol . number_format((float)($oRow['total_amount'] ?? 0), 0); ?></td>
+                                <?php
+                                // Grand total (gross, incl. VAT + any room folio extras) is
+                                // paid + due — the authoritative invoiced total, so Outstanding
+                                // can never exceed Total. total_amount alone is the NET base.
+                                $oGrand = (float)($oRow['amount_paid'] ?? 0) + (float)($oRow['amount_due'] ?? 0);
+                                ?>
+                                <td data-label="Total"><?php echo $currency_symbol . number_format($oGrand, 0); ?></td>
                                 <td data-label="Paid"><?php echo $currency_symbol . number_format((float)($oRow['amount_paid'] ?? 0), 0); ?></td>
                                 <td data-label="Outstanding"><strong style="color:#c0392b;"><?php echo $currency_symbol . number_format((float)($oRow['amount_due'] ?? 0), 0); ?></strong></td>
                                 <td data-label="Status"><span class="badge badge-<?php echo htmlspecialchars((string)($oRow['status'] ?? '')); ?>"><?php echo htmlspecialchars(ucfirst(str_replace('_', ' ', (string)($oRow['status'] ?? '')))); ?></span></td>
                                 <td data-label="Actions">
                                     <div class="quick-actions">
                                         <a href="<?php echo htmlspecialchars($viewUrl); ?>" class="btn btn-primary btn-sm" title="View account"><i class="fas fa-eye"></i></a>
-                                        <?php if ($src === 'room'): ?>
-                                            <a href="payment-add.php?booking_id=<?php echo $oid; ?>" class="btn btn-success btn-sm" title="Record a payment"><i class="fas fa-plus"></i> Collect</a>
-                                        <?php endif; ?>
+                                        <a href="payment-add.php?booking_type=<?php echo htmlspecialchars($src); ?>&booking_id=<?php echo $oid; ?>" class="btn btn-success btn-sm" title="Record a payment against this account"><i class="fas fa-plus"></i> Collect</a>
                                     </div>
                                 </td>
                             </tr>

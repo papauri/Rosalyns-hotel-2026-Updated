@@ -819,16 +819,21 @@ if ($is_card_insight_ajax) {
                     ['key' => 'department', 'label' => 'Department'],
                     ['key' => 'guest', 'label' => 'Client'],
                     ['key' => 'status', 'label' => 'Status'],
-                    ['key' => 'total', 'label' => 'Total'],
+                    ['key' => 'total', 'label' => 'Total (incl. VAT & extras)'],
+                    ['key' => 'paid', 'label' => 'Paid'],
                     ['key' => 'due', 'label' => 'Outstanding'],
                 ];
                 $payload['link'] = ['href' => 'payments.php?balance=outstanding', 'label' => 'Open outstanding balances'];
-                // Pull receivables only from modules this preset runs.
+                // Pull receivables only from modules this preset runs. The grand total
+                // shown is amount_paid + amount_due (the gross, VAT-inclusive amount
+                // owed, plus any folio extras for rooms) so Outstanding can never
+                // exceed Total — total_amount alone is the NET base and would read
+                // lower than the gross balance due.
                 $ob_union = [];
-                if ($mod_bookings)   { $ob_union[] = "SELECT id, booking_reference AS ref, guest_name AS who, status, total_amount, amount_due, 'booking' AS src FROM bookings WHERE amount_due > 0 AND status IN ('pending','confirmed','checked-in')"; }
-                if ($mod_conference) { $ob_union[] = "SELECT id, inquiry_reference AS ref, COALESCE(NULLIF(company_name,''), contact_person) AS who, status, total_amount, amount_due, 'conference' AS src FROM conference_inquiries WHERE amount_due > 0 AND status NOT IN ('cancelled')"; }
-                if ($mod_gym)        { $ob_union[] = "SELECT id, reference_number AS ref, name AS who, status, total_amount, amount_due, 'gym' AS src FROM gym_inquiries WHERE amount_due > 0 AND status NOT IN ('cancelled','closed')"; }
-                if ($mod_events)     { $ob_union[] = "SELECT id, reference_number AS ref, name AS who, status, total_amount, amount_due, 'event' AS src FROM event_inquiries WHERE amount_due > 0 AND status NOT IN ('cancelled')"; }
+                if ($mod_bookings)   { $ob_union[] = "SELECT id, booking_reference AS ref, guest_name AS who, status, amount_paid, amount_due, 'booking' AS src FROM bookings WHERE amount_due > 0 AND status IN ('pending','confirmed','checked-in')"; }
+                if ($mod_conference) { $ob_union[] = "SELECT id, inquiry_reference AS ref, COALESCE(NULLIF(company_name,''), contact_person) AS who, status, amount_paid, amount_due, 'conference' AS src FROM conference_inquiries WHERE amount_due > 0 AND status NOT IN ('cancelled')"; }
+                if ($mod_gym)        { $ob_union[] = "SELECT id, reference_number AS ref, name AS who, status, amount_paid, amount_due, 'gym' AS src FROM gym_inquiries WHERE amount_due > 0 AND status NOT IN ('cancelled','closed')"; }
+                if ($mod_events)     { $ob_union[] = "SELECT id, reference_number AS ref, name AS who, status, amount_paid, amount_due, 'event' AS src FROM event_inquiries WHERE amount_due > 0 AND status NOT IN ('cancelled')"; }
                 $rows = [];
                 foreach ($ob_union as $obSql) {
                     try {
@@ -848,13 +853,21 @@ if ($is_card_insight_ajax) {
                 foreach ($rows as $row) {
                     $bid = (int)($row['id'] ?? 0);
                     $src = (string)($row['src'] ?? '');
+                    $rowPaid = (float)($row['amount_paid'] ?? 0);
+                    $rowDue  = (float)($row['amount_due'] ?? 0);
+                    // Grand total (gross, incl. VAT and any room folio extras) is the
+                    // sum of what has been paid and what is still owed. This is the
+                    // authoritative invoiced total and guarantees Paid + Outstanding
+                    // reconcile to Total on the card.
+                    $rowGrand = $rowPaid + $rowDue;
                     $payload['rows'][] = [
                         'reference' => ['href' => ($ob_links[$src] ?? 'payments.php?q=') . $bid, 'label' => (string)$row['ref']],
                         'department' => $ob_departments[$src] ?? ucfirst($src),
                         'guest' => (string)$row['who'],
                         'status' => ucfirst((string)$row['status']),
-                        'total' => $formatMoney((float)($row['total_amount'] ?? 0)),
-                        'due' => $formatMoney((float)($row['amount_due'] ?? 0)),
+                        'total' => $formatMoney($rowGrand),
+                        'paid' => $formatMoney($rowPaid),
+                        'due' => $formatMoney($rowDue),
                     ];
                 }
                 $payload['empty'] = 'No outstanding balances right now.';
