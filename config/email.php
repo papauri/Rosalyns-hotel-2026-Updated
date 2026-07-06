@@ -1138,8 +1138,8 @@ if (!function_exists('hotel_load_tcpdf')) {
         }
 
         $candidates = [
-            __DIR__ . '/../vendor/autoload.php',
             __DIR__ . '/../vendor/tecnickcom/tcpdf/tcpdf.php',
+            __DIR__ . '/../vendor/autoload.php',
             __DIR__ . '/../TCPDF/tcpdf.php',
         ];
         foreach ($candidates as $file) {
