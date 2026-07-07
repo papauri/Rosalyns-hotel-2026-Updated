@@ -3,8 +3,10 @@
 /* Font Awesome — loaded once here so every admin page gets icons automatically */
 @import url('https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.7.2/css/all.min.css');
 
-/* Import responsive/mobile overrides */
-@import url('admin-responsive.css');
+/* Import responsive/mobile overrides.
+   Bump ?v= whenever admin-responsive.css changes — the import is cached
+   separately from this file, so versioning here is what busts it. */
+@import url('admin-responsive.css?v=20260708');
 
 /* ============================================
    ADMIN CSS VARIABLES (missing from theme)

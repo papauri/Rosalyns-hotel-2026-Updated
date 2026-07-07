@@ -274,8 +274,8 @@ $active_tab = $_GET['tab'] ?? 'links';
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,300;0,400;0,500;0,600;1,300;1,400;1,500&family=Jost:wght@300;400;500;600&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="css/admin-styles.css">
-    <link rel="stylesheet" href="css/admin-components.css">
+    <link rel="stylesheet" href="css/admin-styles.css?v=<?php echo @filemtime(__DIR__ . '/css/admin-styles.css'); ?>">
+    <link rel="stylesheet" href="css/admin-components.css?v=<?php echo @filemtime(__DIR__ . '/css/admin-components.css'); ?>">
     <style>
         .fm-tabs { display:flex; gap:0; border-bottom:2px solid var(--border-color,#e5e7eb); margin-bottom:24px; flex-wrap:wrap; }
         .fm-tab  { padding:12px 24px; cursor:pointer; font-weight:500; font-size:14px; border-bottom:3px solid transparent; margin-bottom:-2px; color:var(--text-secondary,#6b7280); text-decoration:none; display:flex; align-items:center; gap:8px; transition:all .18s; }

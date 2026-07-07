@@ -1957,7 +1957,7 @@ if (in_array($user['role'] ?? '', ['admin', 'manager'], true)) {
     <link rel="manifest" href="manifest.php">
     <link href="https://fonts.googleapis.com/css2?family=Jost:wght@400;500;600;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.7.2/css/all.min.css">
-    <link rel="stylesheet" href="css/pos-overrides.css">
+    <link rel="stylesheet" href="css/pos-overrides.css?v=<?php echo @filemtime(__DIR__ . '/css/pos-overrides.css'); ?>">
     <script src="js/station-sounds.js"></script>
     <script>
     /* Load BarcodeDetector polyfill for Firefox / Safari / older browsers.

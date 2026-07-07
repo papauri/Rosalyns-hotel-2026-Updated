@@ -273,7 +273,7 @@ $site_name = getSetting('site_name');
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.7.2/css/all.min.css">
     <link rel="manifest" href="manifest.php">
     <!-- Keep login page lean: do not load full frontend bundle to avoid duplicate imports -->
-    <link rel="stylesheet" href="css/admin-auth.css">
+    <link rel="stylesheet" href="css/admin-auth.css?v=<?php echo @filemtime(__DIR__ . '/css/admin-auth.css'); ?>">
 </head>
 
 <body>

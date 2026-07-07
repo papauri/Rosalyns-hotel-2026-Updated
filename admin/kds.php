@@ -201,7 +201,7 @@ $bootstrap['fingerprint'] = md5(
     <meta name="apple-mobile-web-app-title" content="RH KDS">
     <link rel="manifest" href="manifest.php">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.7.2/css/all.min.css">
-    <link rel="stylesheet" href="css/kds.css">
+    <link rel="stylesheet" href="css/kds.css?v=<?php echo @filemtime(__DIR__ . '/css/kds.css'); ?>">
     <style>
         :root {
             --kds-station-color: <?php echo $STATION_COLOR; ?>;

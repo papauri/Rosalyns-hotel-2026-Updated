@@ -1172,9 +1172,9 @@ unset($_SESSION['success_message'], $_SESSION['error_message']);
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,300;0,400;0,500;0,600;1,300;1,400;1,500&family=Jost:wght@300;400;500;600&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="css/admin-styles.css">
-    <link rel="stylesheet" href="css/admin-components.css">
-    <link rel="stylesheet" href="css/booking-details.css">
+    <link rel="stylesheet" href="css/admin-styles.css?v=<?php echo @filemtime(__DIR__ . '/css/admin-styles.css'); ?>">
+    <link rel="stylesheet" href="css/admin-components.css?v=<?php echo @filemtime(__DIR__ . '/css/admin-components.css'); ?>">
+    <link rel="stylesheet" href="css/booking-details.css?v=<?php echo @filemtime(__DIR__ . '/css/booking-details.css'); ?>">
     <style>
         :root {
             --bd-status-bg: <?php echo htmlspecialchars($current_status['bg']); ?>;

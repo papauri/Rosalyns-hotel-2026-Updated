@@ -400,9 +400,9 @@ try {
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Page Management - <?php echo htmlspecialchars($site_name); ?></title>
-    <link rel="stylesheet" href="css/admin-styles.css">
-    <link rel="stylesheet" href="css/admin-components.css">
-    <link rel="stylesheet" href="css/page-management.css">
+    <link rel="stylesheet" href="css/admin-styles.css?v=<?php echo @filemtime(__DIR__ . '/css/admin-styles.css'); ?>">
+    <link rel="stylesheet" href="css/admin-components.css?v=<?php echo @filemtime(__DIR__ . '/css/admin-components.css'); ?>">
+    <link rel="stylesheet" href="css/page-management.css?v=<?php echo @filemtime(__DIR__ . '/css/page-management.css'); ?>">
 </head>
 
 <body>

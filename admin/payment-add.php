@@ -620,10 +620,10 @@ function updateConferenceEnquiryPayments(PDO $pdo, int $enquiryId)
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,300;0,400;0,500;0,600;1,300;1,400;1,500&family=Jost:wght@300;400;500;600&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="css/admin-styles.css">
-    <link rel="stylesheet" href="css/admin-components.css">
-    <link rel="stylesheet" href="css/admin-finance.css">
-    <link rel="stylesheet" href="css/payment-add.css">
+    <link rel="stylesheet" href="css/admin-styles.css?v=<?php echo @filemtime(__DIR__ . '/css/admin-styles.css'); ?>">
+    <link rel="stylesheet" href="css/admin-components.css?v=<?php echo @filemtime(__DIR__ . '/css/admin-components.css'); ?>">
+    <link rel="stylesheet" href="css/admin-finance.css?v=<?php echo @filemtime(__DIR__ . '/css/admin-finance.css'); ?>">
+    <link rel="stylesheet" href="css/payment-add.css?v=<?php echo @filemtime(__DIR__ . '/css/payment-add.css'); ?>">
     <link rel="stylesheet" href="css/admin-walkme.css" data-no-spa>
 </head>
 

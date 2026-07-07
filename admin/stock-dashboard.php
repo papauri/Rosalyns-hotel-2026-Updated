@@ -167,9 +167,9 @@ $csrf_token = generateCsrfToken();
     <title>Stock Dashboard</title>
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@400;500;600&family=Jost:wght@300;400;500;600&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="css/admin-styles.css">
-    <link rel="stylesheet" href="css/admin-components.css">
-    <link rel="stylesheet" href="css/stock-dashboard.css">
+    <link rel="stylesheet" href="css/admin-styles.css?v=<?php echo @filemtime(__DIR__ . '/css/admin-styles.css'); ?>">
+    <link rel="stylesheet" href="css/admin-components.css?v=<?php echo @filemtime(__DIR__ . '/css/admin-components.css'); ?>">
+    <link rel="stylesheet" href="css/stock-dashboard.css?v=<?php echo @filemtime(__DIR__ . '/css/stock-dashboard.css'); ?>">
 </head>
 <body>
     <?php require_once 'includes/admin-header.php'; ?>
