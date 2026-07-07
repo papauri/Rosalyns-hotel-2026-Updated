@@ -125,6 +125,7 @@ $_nav_groups = [
         ['gym-members.php',           'fas fa-id-card',      'Gym Members',       'gym',               '', 'gym'],
         ['gym-checkin.php',           'fas fa-barcode',      'Gym Check-In',      'gym_checkin',       '', 'gym'],
         ['gym-schedule.php',          'fas fa-calendar-day', 'Gym Schedule',      'gym',               '', 'gym'],
+        ['gym-classes.php',           'fas fa-people-group', 'Gym Classes',       'gym',               '', 'gym'],
         ['gym-reports.php',           'fas fa-chart-line',   'Gym Reports',       'gym_reports',       '', 'gym'],
         ['menu-management.php',       (function_exists('isRestaurantEnabled') && isRestaurantEnabled()) ? 'fas fa-utensils' : 'fas fa-box-open', (function_exists('isRestaurantEnabled') && isRestaurantEnabled()) ? 'Menu' : 'Products', 'menu', '', 'pos'],
         ['events-management.php',     'fas fa-calendar-alt', 'Events',            'events',            '', ['website_cms', 'events']],

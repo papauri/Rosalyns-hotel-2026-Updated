@@ -6625,14 +6625,43 @@ function sendGymMemberCardEmail(array $member): array
         $name     = (string)($member['full_name'] ?? 'Member');
         $siteName = $email_site_name ?: getSetting('site_name', 'Gym');
 
-        // Barcode PNG (CODE 128 — same symbology the check-in scanner reads)
-        $barcodePng = '';
+        // Barcode: CODE 128 symbology — same the check-in scanner reads.
+        // Uses TCPDF's SVG renderer (zero image-library dependency) for the
+        // inline display, and PNG (needs GD/Imagick) for the attachable file.
+        $barcodePng  = '';
+        $barcodeSvg  = '';
         try {
             if (!class_exists('TCPDFBarcode')) {
-                require_once __DIR__ . '/../vendor/tecnickcom/tcpdf/tcpdf_barcodes_1d.php';
+                foreach ([
+                    __DIR__ . '/../vendor/tecnickcom/tcpdf/tcpdf_barcodes_1d.php',
+                    __DIR__ . '/../TCPDF/tcpdf_barcodes_1d.php',
+                ] as $bcPath) {
+                    if (is_file($bcPath)) {
+                        require_once $bcPath;
+                        break;
+                    }
+                }
             }
-            $bc = new TCPDFBarcode($memberNumber, 'C128');
-            $barcodePng = (string)$bc->getBarcodePngData(3, 80, [0, 0, 0]);
+            if (class_exists('TCPDFBarcode')) {
+                $bc = new TCPDFBarcode($memberNumber, 'C128');
+
+                // PNG for attachment — only works when GD or Imagick is available
+                $pngData = $bc->getBarcodePngData(3, 80, [0, 0, 0]);
+                if (is_object($pngData) && method_exists($pngData, 'getImageBlob')) {
+                    $pngData = $pngData->getImageBlob();
+                }
+                if (is_string($pngData) && $pngData !== '') {
+                    $barcodePng = $pngData;
+                }
+
+                // SVG for inline display — ALWAYS works (no image library needed)
+                $barcodeSvg = trim((string)$bc->getBarcodeSVGcode(3, 80, 'black'));
+                if ($barcodeSvg === '' || stripos($barcodeSvg, '<svg') === false) {
+                    $barcodeSvg = ''; // defensive: treat garbage as empty
+                }
+            } else {
+                error_log('sendGymMemberCardEmail: TCPDFBarcode not found — upload vendor/ (composer install) or a TCPDF/ folder with tcpdf_barcodes_1d.php');
+            }
         } catch (Throwable $bcEx) {
             error_log('sendGymMemberCardEmail barcode generation failed: ' . $bcEx->getMessage());
         }
@@ -6641,14 +6670,23 @@ function sendGymMemberCardEmail(array $member): array
             ? date('F j, Y', strtotime((string)$member['expiry_date']))
             : 'No expiry set';
 
-        $barcodeBlock = $barcodePng !== ''
-            ? '<div style="background:#ffffff;border:2px dashed #C8A45A;border-radius:10px;padding:22px;text-align:center;margin:20px 0;">
-                   <img src="cid:gymmembercard" alt="Member barcode ' . htmlspecialchars($memberNumber) . '" style="max-width:100%;height:auto;">
-                   <div style="font-size:20px;font-weight:bold;letter-spacing:3px;color:#1A1A1A;margin-top:10px;">' . htmlspecialchars($memberNumber) . '</div>
-               </div>'
-            : '<div style="background:#ffffff;border:2px dashed #C8A45A;border-radius:10px;padding:22px;text-align:center;margin:20px 0;">
-                   <div style="font-size:26px;font-weight:bold;letter-spacing:4px;color:#1A1A1A;">' . htmlspecialchars($memberNumber) . '</div>
-               </div>';
+        // Inline barcode block — prefers SVG (works everywhere), falls back to
+        // PNG CID, then text-only member number.
+        if ($barcodeSvg !== '') {
+            $barcodeBlock = '<div style="background:#ffffff;border:2px dashed #C8A45A;border-radius:10px;padding:22px;text-align:center;margin:20px 0;">'
+                . $barcodeSvg
+                . '<div style="font-size:20px;font-weight:bold;letter-spacing:3px;color:#1A1A1A;margin-top:10px;">' . htmlspecialchars($memberNumber) . '</div>'
+                . '</div>';
+        } elseif ($barcodePng !== '') {
+            $barcodeBlock = '<div style="background:#ffffff;border:2px dashed #C8A45A;border-radius:10px;padding:22px;text-align:center;margin:20px 0;">'
+                . '<img src="cid:gymmembercard" alt="Member barcode ' . htmlspecialchars($memberNumber) . '" style="max-width:100%;height:auto;">'
+                . '<div style="font-size:20px;font-weight:bold;letter-spacing:3px;color:#1A1A1A;margin-top:10px;">' . htmlspecialchars($memberNumber) . '</div>'
+                . '</div>';
+        } else {
+            $barcodeBlock = '<div style="background:#ffffff;border:2px dashed #C8A45A;border-radius:10px;padding:22px;text-align:center;margin:20px 0;">'
+                . '<div style="font-size:26px;font-weight:bold;letter-spacing:4px;color:#1A1A1A;">' . htmlspecialchars($memberNumber) . '</div>'
+                . '</div>';
+        }
 
         $htmlBody = '
             <h1 style="color: #8B7355; text-align: center;">Your Membership Card</h1>
@@ -6726,6 +6764,69 @@ function sendGymMemberCardEmail(array $member): array
         error_log('sendGymMemberCardEmail Error: ' . $e->getMessage());
         return ['success' => false, 'message' => $e->getMessage()];
     }
+}
+
+/**
+ * Upcoming-class reminder for an enrolled gym member.
+ *
+ * Sent from the Gym Classes page ("Send reminder") to everyone enrolled in a
+ * class. Warm, non-transactional: the class name, when it runs, the level, and
+ * a short description, plus the member's number so they can check in on arrival.
+ *
+ * @param array $member  member_number, full_name, email
+ * @param array $class   title, day_label, time_label, level_label, description
+ */
+function sendGymClassReminderEmail(array $member, array $class): array
+{
+    global $email_site_name, $email_from_email;
+
+    $toEmail = trim((string)($member['email'] ?? ''));
+    if ($toEmail === '' || !filter_var($toEmail, FILTER_VALIDATE_EMAIL)) {
+        return ['success' => false, 'message' => 'Member has no valid email address.'];
+    }
+    $name     = (string)($member['full_name'] ?? 'Member');
+    $siteName = $email_site_name ?: getSetting('site_name', 'Gym');
+
+    $title   = (string)($class['title'] ?? 'your class');
+    $day     = trim((string)($class['day_label'] ?? ''));
+    $time    = trim((string)($class['time_label'] ?? ''));
+    $level   = trim((string)($class['level_label'] ?? ''));
+    $desc    = trim((string)($class['description'] ?? ''));
+    $memberNo = trim((string)($member['member_number'] ?? ''));
+
+    $when = trim($day . ($day && $time ? ' · ' : '') . $time);
+
+    $detailRow = static function (string $label, string $value): string {
+        if ($value === '') { return ''; }
+        return '<table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="margin:0;"><tr>'
+            . '<td style="padding:9px 10px 9px 0;font-weight:bold;color:#1A1A1A;width:40%;vertical-align:top;border-bottom:1px solid #e8e0d4;">' . htmlspecialchars($label) . '</td>'
+            . '<td style="padding:9px 0 9px 6px;color:#333;text-align:left;vertical-align:top;border-bottom:1px solid #e8e0d4;">' . htmlspecialchars($value) . '</td>'
+            . '</tr></table>';
+    };
+
+    $htmlBody = '
+        <h1 style="color:#8B7355;text-align:center;">Class Reminder</h1>
+        <p>Dear ' . htmlspecialchars($name) . ',</p>
+        <p>This is a friendly reminder that you are enrolled in <strong>' . htmlspecialchars($title) . '</strong> at <strong>' . htmlspecialchars($siteName) . '</strong>.'
+        . ($desc !== '' ? ' ' . htmlspecialchars($desc) : '') . '</p>
+        <div style="background:#FAF6F0;border:2px solid #C8A45A;padding:20px;margin:20px 0;border-radius:10px;">
+            <h2 style="color:#8B7355;margin-top:0;text-align:left;">' . htmlspecialchars($title) . '</h2>'
+            . $detailRow('When:', $when)
+            . $detailRow('Level:', $level)
+            . ($memberNo !== '' ? $detailRow('Your Member #:', $memberNo) : '')
+            . '</div>
+        <div style="background:#d4edda;padding:15px;border-left:4px solid #28a745;border-radius:5px;margin:20px 0;">
+            <p style="color:#155724;margin:0;">Please arrive a few minutes early and bring your membership barcode so we can check you in. See you there!</p>
+        </div>
+        <p>Questions? Contact us at <a href="mailto:' . htmlspecialchars((string)$email_from_email) . '">' . htmlspecialchars((string)$email_from_email) . '</a>'
+        . (getSetting('phone_main') ? ' or call ' . htmlspecialchars((string)getSetting('phone_main')) : '') . '.</p>'
+        . rh_gym_data_notice();
+
+    $subject = 'Reminder: ' . $title . ($when !== '' ? ' — ' . $when : '') . ' · ' . $siteName;
+    $altBody = 'Reminder: you are enrolled in ' . $title . ($when !== '' ? ' (' . $when . ')' : '') . ' at ' . $siteName . '.'
+        . ($memberNo !== '' ? ' Your member number is ' . $memberNo . '.' : '');
+
+    return sendEmail($toEmail, $name, $subject, wrapEmailTemplate($htmlBody, $subject), $altBody);
 }
 
 /**
