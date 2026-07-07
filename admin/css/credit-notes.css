@@ -358,47 +358,7 @@
     text-align: center;
 }
 
-/* ── Status Badges ──────────────────────────────────────────── */
-.status-badge {
-    display: inline-block;
-    padding: 3px 9px;
-    border-radius: 999px;
-    font-size: clamp(0.63rem, 0.73vw, 0.73rem);
-    font-weight: 600;
-    text-transform: uppercase;
-    letter-spacing: 0.04em;
-    white-space: nowrap;
-}
-
-.status-badge--success {
-    background: var(--finance-success-bg, #ecfdf3);
-    color: var(--finance-success, #1f7a42);
-    border: 1px solid var(--finance-success-border, #bbf7d0);
-}
-
-.status-badge--warning {
-    background: var(--finance-warning-bg, #fff7ed);
-    color: var(--finance-warning, #b7791f);
-    border: 1px solid var(--finance-warning-border, #fed7aa);
-}
-
-.status-badge--info {
-    background: var(--finance-info-bg, #eff6ff);
-    color: var(--finance-info, #1d4ed8);
-    border: 1px solid var(--finance-info-border, #bfdbfe);
-}
-
-.status-badge--danger {
-    background: var(--finance-danger-bg, #fef2f2);
-    color: var(--finance-danger, #C62828);
-    border: 1px solid var(--finance-danger-border, #fecaca);
-}
-
-.status-badge--muted {
-    background: #f3f4f6;
-    color: #6b7280;
-    border: 1px solid #d1d5db;
-}
+/* Status badges use the global .badge system (admin-styles.css) */
 
 /* ── Alert banners ──────────────────────────────────────────── */
 .credit-notes-page .alert--success {

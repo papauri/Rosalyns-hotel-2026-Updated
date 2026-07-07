@@ -516,7 +516,7 @@ $nav_categories = getNavCategories();
                         </span>
                     </td>
                     <td>
-                        <span class="status-badge <?php echo $u['is_active'] ? 'active' : 'inactive'; ?>">
+                        <span class="badge <?php echo $u['is_active'] ? 'badge-active' : 'badge-inactive'; ?>">
                             <i class="fas fa-circle"></i>
                             <?php echo $u['is_active'] ? 'Active' : 'Inactive'; ?>
                         </span>

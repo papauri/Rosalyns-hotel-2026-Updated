@@ -281,64 +281,8 @@ body {
    BADGES
    ============================================ */
 
-.finance-page .badge,
-.finance-page .badge-sm,
-.finance-page .status-badge {
-    border-radius: 999px;
-    padding: 5px 11px;
-    font-size: 11px;
-    font-weight: 600;
-    letter-spacing: 0.02em;
-    text-transform: uppercase;
-    border: 1px solid transparent;
-    display: inline-block;
-}
-
-.finance-page .badge-pending,
-.finance-page .badge-partial {
-    background: var(--finance-warning-bg);
-    color: #9a3412;
-    border-color: var(--finance-warning-border);
-}
-
-.finance-page .badge-paid,
-.finance-page .badge-completed {
-    background: var(--finance-success-bg);
-    color: #166534;
-    border-color: var(--finance-success-border);
-}
-
-.finance-page .badge-refunded,
-.finance-page .badge-cancelled,
-.finance-page .badge-failed {
-    background: var(--finance-danger-bg);
-    color: #991b1b;
-    border-color: var(--finance-danger-border);
-}
-
-.finance-page .badge-room {
-    background: var(--finance-info-bg);
-    color: #1e40af;
-    border-color: var(--finance-info-border);
-}
-
-.finance-page .badge-conference {
-    background: #f5f3ff;
-    color: #5b21b6;
-    border-color: #ddd6fe;
-}
-
-.finance-page .badge-gym {
-    background: #fef2f2;
-    color: #b91c1c;
-    border-color: #fecaca;
-}
-
-.finance-page .badge-event {
-    background: #ecfdf5;
-    color: #065f46;
-    border-color: #a7f3d0;
-}
+/* Badge colours and shape come from the global system in admin-styles.css
+   (.badge / .badge-sm / .badge-<status>) so finance badges match every page. */
 
 /* ============================================
    BUTTONS

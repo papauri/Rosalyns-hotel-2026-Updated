@@ -151,55 +151,7 @@
     align-items: center;
 }
 
-.event-badge {
-    font-size: 11px;
-    padding: 4px 8px;
-    border-radius: 999px;
-    display: inline-flex;
-    align-items: center;
-    gap: 4px;
-    font-weight: 600;
-}
-
-.event-badge.badge-active {
-    background: #edf7f0;
-    color: #1f7a42;
-}
-
-.event-badge.badge-inactive {
-    background: #fef2f2;
-    color: #a03030;
-}
-
-.event-badge.badge-featured {
-    background: linear-gradient(135deg, var(--gold, #8B7355) 0%, #c49b2e 100%);
-    color: var(--deep-navy, #111111);
-}
-
-.event-badge.badge-upcoming {
-    background: #e8f5e9;
-    color: #2e7d32;
-}
-
-.event-badge.badge-free {
-    background: #e3f2fd;
-    color: #1565c0;
-}
-
-.event-badge.badge-price {
-    background: #fff8e1;
-    color: #f57c00;
-}
-
-.event-badge.badge-video {
-    background: #f3e5f5;
-    color: #7b1fa2;
-}
-
-.event-badge.badge-expired {
-    background: #fef2f2;
-    color: #991b1b;
-}
+/* Event card badges use the global .badge system (admin-styles.css) */
 
 /* Event Card Actions */
 .event-card-actions {

@@ -1829,3 +1829,78 @@
         if (prefix) prefix.textContent = currencyField.value.trim() || 'MWK';
     });
 }());
+
+/* ============================================================
+   INSTANT FILTERS (global)
+   Any GET filter form auto-applies: selects and date inputs
+   submit on change; text/search inputs debounce-submit after
+   typing pauses. The typed value and caret survive the reload.
+   Opt out per form with data-no-autofilter, per field with
+   data-no-autofilter on the input.
+   ============================================================ */
+(function initInstantFilters() {
+    'use strict';
+
+    function isFilterForm(form) {
+        if (!form || form.hasAttribute('data-no-autofilter')) return false;
+        if (form.hasAttribute('data-live-search-form')) return false; /* page has its own live search */
+        var method = (form.getAttribute('method') || 'get').toLowerCase();
+        return method === 'get';
+    }
+
+    function submitForm(form) {
+        if (typeof form.requestSubmit === 'function') form.requestSubmit();
+        else form.submit();
+    }
+
+    /* Restore focus + caret to the filter field after a debounce reload */
+    var FOCUS_KEY = 'rhInstantFilterFocus';
+    try {
+        var saved = sessionStorage.getItem(FOCUS_KEY);
+        if (saved) {
+            sessionStorage.removeItem(FOCUS_KEY);
+            var info = JSON.parse(saved);
+            if (info && info.page === location.pathname && info.name) {
+                var field = document.querySelector('form[method="get" i] [name="' + info.name + '"], form[method="GET"] [name="' + info.name + '"]');
+                if (field && (field.type === 'text' || field.type === 'search')) {
+                    field.focus();
+                    var pos = field.value.length;
+                    try { field.setSelectionRange(pos, pos); } catch (e) { /* non-text input */ }
+                }
+            }
+        }
+    } catch (e) { /* sessionStorage unavailable */ }
+
+    document.addEventListener('change', function (e) {
+        var el = e.target;
+        if (!el || el.hasAttribute('data-no-autofilter')) return;
+        if (el.hasAttribute('onchange')) return; /* page already auto-applies this field */
+        var tag = el.tagName;
+        var isSelect = tag === 'SELECT';
+        var isDate = tag === 'INPUT' && (el.type === 'date' || el.type === 'month');
+        if (!isSelect && !isDate) return;
+        var form = el.closest('form');
+        if (!isFilterForm(form)) return;
+        submitForm(form);
+    });
+
+    var debounceTimer = null;
+    document.addEventListener('input', function (e) {
+        var el = e.target;
+        if (!el || el.tagName !== 'INPUT') return;
+        if (el.type !== 'text' && el.type !== 'search') return;
+        if (el.hasAttribute('data-no-autofilter')) return;
+        /* Only auto-apply named fields that read as filters/searches */
+        var name = (el.getAttribute('name') || '').toLowerCase();
+        if (!name || !/search|filter|q\b|query|keyword/.test(name)) return;
+        var form = el.closest('form');
+        if (!isFilterForm(form)) return;
+        clearTimeout(debounceTimer);
+        debounceTimer = setTimeout(function () {
+            try {
+                sessionStorage.setItem(FOCUS_KEY, JSON.stringify({ page: location.pathname, name: el.getAttribute('name') }));
+            } catch (err) { /* ignore */ }
+            submitForm(form);
+        }, 650);
+    });
+}());

@@ -295,7 +295,7 @@ $site_name = getSetting('site_name');
                     <span><i class="fas fa-clock"></i> <?php echo date('M j, Y g:ia', strtotime($inq['created_at'])); ?></span>
                 </div>
             </div>
-            <span class="status-badge <?php echo htmlspecialchars($inq['status']); ?>">
+            <span class="badge badge-<?php echo htmlspecialchars($inq['status']); ?>">
                 <?php echo htmlspecialchars($inq['status']); ?>
             </span>
         </div>

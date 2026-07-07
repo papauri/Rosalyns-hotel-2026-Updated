@@ -391,14 +391,14 @@ if ($gallery_css_version === '' || $gallery_css_version === '0') {
                             <div class="gallery-card-desc"><?php echo htmlspecialchars(substr($item['description'] ?? '', 0, 80)); ?></div>
 
                             <div class="gallery-card-meta">
-                                <span class="gallery-badge badge-category"><?php echo htmlspecialchars(ucfirst($item['category'] ?? 'general')); ?></span>
+                                <span class="badge badge-category"><?php echo htmlspecialchars(ucfirst($item['category'] ?? 'general')); ?></span>
                                 <?php if ($item['is_active']): ?>
-                                    <span class="gallery-badge badge-active"><i class="fas fa-check"></i> Active</span>
+                                    <span class="badge badge-active"><i class="fas fa-check"></i> Active</span>
                                 <?php else: ?>
-                                    <span class="gallery-badge badge-inactive"><i class="fas fa-times"></i> Inactive</span>
+                                    <span class="badge badge-inactive"><i class="fas fa-times"></i> Inactive</span>
                                 <?php endif; ?>
                                 <?php if (!empty($item['video_path'])): ?>
-                                    <span class="gallery-badge badge-video"><i class="fas fa-video"></i> Video</span>
+                                    <span class="badge badge-video"><i class="fas fa-video"></i> Video</span>
                                 <?php endif; ?>
                                 <span class="gallery-order">Order: <?php echo $item['display_order']; ?></span>
                             </div>

@@ -157,46 +157,7 @@
     font-size: 12px;
 }
 
-.status-badge {
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    border-radius: 999px;
-    padding: 4px 9px;
-    font-size: 12px;
-    font-weight: 600;
-    border: 1px solid transparent;
-}
-
-.status-badge.status-available {
-    background: #e8f8ef;
-    color: #0f7a49;
-    border-color: #bce9d0;
-}
-
-.status-badge.status-occupied {
-    background: #eaf1ff;
-    color: #3558a8;
-    border-color: #c9d8ff;
-}
-
-.status-badge.status-cleaning {
-    background: #fff6e6;
-    color: #9a6800;
-    border-color: #ffe2a6;
-}
-
-.status-badge.status-maintenance {
-    background: #ffeceb;
-    color: #a12622;
-    border-color: #ffc9c6;
-}
-
-.status-badge.status-out_of_order {
-    background: #f0f2f5;
-    color: #4b5563;
-    border-color: #d8dde6;
-}
+/* Status badges use the global .badge system (admin-styles.css) */
 
 .actions-cell {
     display: flex;

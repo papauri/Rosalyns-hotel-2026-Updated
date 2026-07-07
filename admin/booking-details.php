@@ -1596,7 +1596,7 @@ unset($_SESSION['success_message'], $_SESSION['error_message']);
                                 <span class="currency"><?php echo $currency_symbol; ?></span>
                                 <?php echo number_format($display_total, 2); ?>
                             </div>
-                            <div class="info-value status-badge <?php echo $status_class; ?>">
+                            <div class="info-value badge badge-<?php echo $status_class; ?>">
                                 <i class="fas <?php echo $status_class === 'paid' ? 'fa-check-circle' : 'fa-exclamation-circle'; ?>"></i>
                                 <?php echo $status_labels[$payment_status] ?? ucfirst($payment_status); ?>
                             </div>

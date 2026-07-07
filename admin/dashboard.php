@@ -1790,7 +1790,7 @@ $currency_symbol = getSetting('currency_symbol');
             <?php /* POS-first businesses (bar, retail, supermarket, gym) — their overview
                      is orders and takings, not check-ins. Hotels keep the booking-centric
                      overview; their POS numbers live in Operations Pulse below. */ ?>
-            <a class="stat-card stat-info" href="pos.php" title="Open the POS till">
+            <a class="stat-card stat-info" href="pos.php" target="_blank" rel="noopener" title="Open the POS till">
                 <span class="stat-cta">Open →</span>
                 <div class="stat-icon"><i class="fas fa-receipt"></i></div>
                 <div class="stat-value"><?php echo (int)$ops['orders_today']; ?></div>
@@ -1980,7 +1980,7 @@ $currency_symbol = getSetting('currency_symbol');
             <?php endif; ?>
 
             <?php if ($mod_station_kds): ?>
-            <a class="ops-card js-dashboard-insight" data-insight-card="kitchen_tickets" href="kds.php" title="Open Kitchen Display System">
+            <a class="ops-card js-dashboard-insight" data-insight-card="kitchen_tickets" href="kds.php" target="_blank" rel="noopener" title="Open Kitchen Display System">
                 <div class="ops-icon" style="background:#dc3545;"><i class="fas fa-utensils"></i></div>
                 <div class="ops-body">
                     <div class="ops-value"><?php echo $ops['kds_kitchen_pending']; ?></div>
@@ -1990,7 +1990,7 @@ $currency_symbol = getSetting('currency_symbol');
             </a>
             <?php endif; ?>
             <?php if ($mod_station_bds): ?>
-            <a class="ops-card js-dashboard-insight" data-insight-card="bar_tickets" href="bds.php" title="Open Bar Display System">
+            <a class="ops-card js-dashboard-insight" data-insight-card="bar_tickets" href="bds.php" target="_blank" rel="noopener" title="Open Bar Display System">
                 <div class="ops-icon" style="background:#6f42c1;"><i class="fas fa-cocktail"></i></div>
                 <div class="ops-body">
                     <div class="ops-value"><?php echo $ops['kds_bar_pending']; ?></div>
@@ -2000,7 +2000,7 @@ $currency_symbol = getSetting('currency_symbol');
             </a>
             <?php endif; ?>
             <?php if ($mod_station_cds): ?>
-            <a class="ops-card js-dashboard-insight" data-insight-card="coffee_tickets" href="cds.php" title="Open Coffee Display System">
+            <a class="ops-card js-dashboard-insight" data-insight-card="coffee_tickets" href="cds.php" target="_blank" rel="noopener" title="Open Coffee Display System">
                 <div class="ops-icon" style="background:#8B5A2B;"><i class="fas fa-mug-hot"></i></div>
                 <div class="ops-body">
                     <div class="ops-value"><?php echo $ops['kds_coffee_pending']; ?></div>
@@ -2322,7 +2322,7 @@ $currency_symbol = getSetting('currency_symbol');
                                     <td data-label="Status"><span class="badge badge-<?php echo htmlspecialchars($rs['status']); ?>"><?php echo ucfirst($rs['status']); ?></span></td>
                                     <td data-label="Actions">
                                         <a href="stock-orders.php?id=<?php echo (int)$rs['id']; ?>" class="btn btn-primary btn-sm">View</a>
-                                        <a href="pos.php?settle=<?php echo (int)$rs['id']; ?>" class="btn btn-success btn-sm">Take Payment</a>
+                                        <a href="pos.php?settle=<?php echo (int)$rs['id']; ?>" target="_blank" rel="noopener" class="btn btn-success btn-sm">Take Payment</a>
                                     </td>
                                 </tr>
                             <?php endforeach; ?>

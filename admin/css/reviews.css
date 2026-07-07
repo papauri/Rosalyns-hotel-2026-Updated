@@ -298,20 +298,7 @@
     margin-left: 4px;
 }
 
-.badge-pending {
-    background: #fff3cd;
-    color: #856404;
-}
-
-.badge-approved {
-    background: #d4edda;
-    color: #155724;
-}
-
-.badge-rejected {
-    background: #f8d7da;
-    color: #721c24;
-}
+/* Review status badges use the global .badge system (admin-styles.css) */
 
 .review-date,
 .review-room {

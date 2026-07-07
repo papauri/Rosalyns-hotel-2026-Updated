@@ -623,26 +623,26 @@ $fb_events_posting_on = getSetting('facebook_posting_enabled', '0') === '1'
 
                                 <div class="event-card-meta">
                                     <?php if ($event['is_expired']): ?>
-                                        <span class="event-badge badge-expired"><i class="fas fa-calendar-times"></i> Expired</span>
+                                        <span class="badge badge-expired"><i class="fas fa-calendar-times"></i> Expired</span>
                                     <?php endif; ?>
                                     <?php if ($event['is_active']): ?>
-                                        <span class="event-badge badge-active"><i class="fas fa-check-circle"></i> Active</span>
+                                        <span class="badge badge-active"><i class="fas fa-check-circle"></i> Active</span>
                                     <?php else: ?>
-                                        <span class="event-badge badge-inactive"><i class="fas fa-times-circle"></i> Inactive</span>
+                                        <span class="badge badge-inactive"><i class="fas fa-times-circle"></i> Inactive</span>
                                     <?php endif; ?>
                                     <?php if ($event['is_featured']): ?>
-                                        <span class="event-badge badge-featured"><i class="fas fa-star"></i> Featured</span>
+                                        <span class="badge badge-featured"><i class="fas fa-star"></i> Featured</span>
                                     <?php endif; ?>
                                     <?php if (!empty($event['show_in_upcoming'])): ?>
-                                        <span class="event-badge badge-upcoming"><i class="fas fa-bullhorn"></i> Upcoming Section</span>
+                                        <span class="badge badge-upcoming"><i class="fas fa-bullhorn"></i> Upcoming Section</span>
                                     <?php endif; ?>
                                     <?php if ($event['ticket_price'] == 0): ?>
-                                        <span class="event-badge badge-free"><i class="fas fa-ticket-alt"></i> Free</span>
+                                        <span class="badge badge-free"><i class="fas fa-ticket-alt"></i> Free</span>
                                     <?php else: ?>
-                                        <span class="event-badge badge-price"><i class="fas fa-tag"></i> <?php echo htmlspecialchars(getSetting('currency_symbol')); ?><?php echo number_format($event['ticket_price'], 2); ?></span>
+                                        <span class="badge badge-price"><i class="fas fa-tag"></i> <?php echo htmlspecialchars(getSetting('currency_symbol')); ?><?php echo number_format($event['ticket_price'], 2); ?></span>
                                     <?php endif; ?>
                                     <?php if (!empty($event['video_path'])): ?>
-                                        <span class="event-badge badge-video"><i class="fas fa-video"></i> Video</span>
+                                        <span class="badge badge-video"><i class="fas fa-video"></i> Video</span>
                                     <?php endif; ?>
                                     <span style="font-size:11px; color:#999;">Order: <?php echo $event['display_order']; ?></span>
                                 </div>

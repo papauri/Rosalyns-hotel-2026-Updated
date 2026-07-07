@@ -468,7 +468,7 @@ if (($payment['payment_type'] ?? '') === 'refund' && !empty($payment['original_p
                 <div class="detail-row">
                     <span class="detail-label">Status</span>
                     <span class="detail-value">
-                        <span class="status-badge badge-<?php echo $payment['payment_status']; ?>">
+                        <span class="badge badge-<?php echo $payment['payment_status']; ?>">
                             <?php echo ucfirst(str_replace('_', ' ', $payment['payment_status'])); ?>
                         </span>
                     </span>
@@ -580,7 +580,7 @@ if (($payment['payment_type'] ?? '') === 'refund' && !empty($payment['original_p
                         <?php if ($bookingDetails['amounts']['vat_amount'] > 0): ?>
                             <p><strong>VAT:</strong> <?php echo $currency_symbol; ?><?php echo number_format($bookingDetails['amounts']['vat_amount'], 0); ?> (<?php echo $bookingDetails['amounts']['vat_rate']; ?>%)</p>
                         <?php endif; ?>
-                        <p><strong>Status:</strong> <span class="status-badge badge-<?php echo $bookingDetails['status']; ?>"><?php echo ucfirst($bookingDetails['status']); ?></span></p>
+                        <p><strong>Status:</strong> <span class="badge badge-<?php echo $bookingDetails['status']; ?>"><?php echo ucfirst($bookingDetails['status']); ?></span></p>
                     <?php elseif ($bookingDetails['type'] === 'conference'): ?>
                         <p><strong>Reference:</strong> <?php echo htmlspecialchars($bookingDetails['reference']); ?></p>
                         <p><strong>Organization:</strong> <?php echo htmlspecialchars($bookingDetails['organization']['name']); ?></p>
@@ -597,7 +597,7 @@ if (($payment['payment_type'] ?? '') === 'refund' && !empty($payment['original_p
                         <?php if ($bookingDetails['amounts']['vat_amount'] > 0): ?>
                             <p><strong>VAT:</strong> <?php echo $currency_symbol; ?><?php echo number_format($bookingDetails['amounts']['vat_amount'], 0); ?> (<?php echo $bookingDetails['amounts']['vat_rate']; ?>%)</p>
                         <?php endif; ?>
-                        <p><strong>Status:</strong> <span class="status-badge badge-<?php echo $bookingDetails['status']; ?>"><?php echo ucfirst($bookingDetails['status']); ?></span></p>
+                        <p><strong>Status:</strong> <span class="badge badge-<?php echo $bookingDetails['status']; ?>"><?php echo ucfirst($bookingDetails['status']); ?></span></p>
                     <?php elseif (in_array($bookingDetails['type'], ['gym', 'event'], true)): ?>
                         <p><strong>Reference:</strong> <?php echo htmlspecialchars($bookingDetails['reference']); ?></p>
                         <p><strong><?php echo htmlspecialchars($bookingDetails['person']['label']); ?>:</strong> <?php echo htmlspecialchars($bookingDetails['person']['name']); ?></p>
@@ -613,7 +613,7 @@ if (($payment['payment_type'] ?? '') === 'refund' && !empty($payment['original_p
                         <?php if ($bookingDetails['amounts']['vat_amount'] > 0): ?>
                             <p><strong>VAT:</strong> <?php echo $currency_symbol; ?><?php echo number_format($bookingDetails['amounts']['vat_amount'], 0); ?> (<?php echo $bookingDetails['amounts']['vat_rate']; ?>%)</p>
                         <?php endif; ?>
-                        <p><strong>Status:</strong> <span class="status-badge badge-<?php echo $bookingDetails['status']; ?>"><?php echo ucfirst($bookingDetails['status']); ?></span></p>
+                        <p><strong>Status:</strong> <span class="badge badge-<?php echo $bookingDetails['status']; ?>"><?php echo ucfirst($bookingDetails['status']); ?></span></p>
                     <?php else: ?>
                         <p><strong>Reference:</strong> <?php echo htmlspecialchars($bookingDetails['reference']); ?></p>
                         <p><strong>Customer:</strong> <?php echo htmlspecialchars($bookingDetails['customer']['name']); ?></p>
@@ -622,7 +622,7 @@ if (($payment['payment_type'] ?? '') === 'refund' && !empty($payment['original_p
                         <?php endif; ?>
                         <p><strong>Total Amount:</strong> <?php echo $currency_symbol; ?><?php echo number_format($bookingDetails['amounts']['total_amount'], 0); ?></p>
                         <p><strong>Estimated Stock Cost:</strong> <?php echo $currency_symbol; ?><?php echo number_format($bookingDetails['amounts']['total_cost'], 0); ?></p>
-                        <p><strong>Status:</strong> <span class="status-badge badge-<?php echo $bookingDetails['status']; ?>"><?php echo ucfirst($bookingDetails['status']); ?></span></p>
+                        <p><strong>Status:</strong> <span class="badge badge-<?php echo $bookingDetails['status']; ?>"><?php echo ucfirst($bookingDetails['status']); ?></span></p>
                     <?php endif; ?>
                 </div>
 
@@ -658,7 +658,7 @@ if (($payment['payment_type'] ?? '') === 'refund' && !empty($payment['original_p
                             </div>
                             <div class="payment-item-amount">
                                 <?php echo $currency_symbol; ?><?php echo number_format($otherPayment['total_amount'], 0); ?>
-                                <span class="status-badge badge-<?php echo $otherPayment['payment_status']; ?>" style="margin-left: 8px;">
+                                <span class="badge badge-<?php echo $otherPayment['payment_status']; ?>" style="margin-left: 8px;">
                                     <?php echo ucfirst(str_replace('_', ' ', $otherPayment['payment_status'])); ?>
                                 </span>
                             </div>

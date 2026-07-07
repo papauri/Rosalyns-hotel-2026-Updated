@@ -681,15 +681,15 @@ $fb_rooms_posting_on = getSetting('facebook_posting_enabled', '0') === '1'
 
                             <div class="room-card-meta">
                                 <?php if ($room['is_active']): ?>
-                                    <span class="room-badge badge-active"><i class="fas fa-check"></i> Active</span>
+                                    <span class="badge badge-active"><i class="fas fa-check"></i> Active</span>
                                 <?php else: ?>
-                                    <span class="room-badge badge-inactive"><i class="fas fa-times"></i> Inactive</span>
+                                    <span class="badge badge-inactive"><i class="fas fa-times"></i> Inactive</span>
                                 <?php endif; ?>
                                 <?php if ($room['is_featured']): ?>
-                                    <span class="room-badge badge-featured"><i class="fas fa-star"></i> Featured</span>
+                                    <span class="badge badge-featured"><i class="fas fa-star"></i> Featured</span>
                                 <?php endif; ?>
                                 <?php if (!empty($room['video_path'])): ?>
-                                    <span class="room-badge badge-video"><i class="fas fa-video"></i> Video</span>
+                                    <span class="badge badge-video"><i class="fas fa-video"></i> Video</span>
                                 <?php endif; ?>
                             </div>
 

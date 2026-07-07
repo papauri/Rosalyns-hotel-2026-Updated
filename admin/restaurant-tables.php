@@ -1005,7 +1005,7 @@ foreach ($tables as $table) {
                 <h1><i class="fas fa-chair"></i> Restaurant Tables</h1>
                 <p>Set the dine-in table range and optional sitting capacity used by POS duplicate-order protection.</p>
             </div>
-            <a href="pos.php" class="btn btn-secondary"><i class="fas fa-cash-register"></i> Open POS</a>
+            <a href="pos.php" target="_blank" rel="noopener" class="btn btn-secondary"><i class="fas fa-cash-register"></i> Open POS</a>
         </div>
 
         <?php if ($message !== ''): ?><?php showAlert($message, 'success'); ?><?php endif; ?>

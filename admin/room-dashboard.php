@@ -229,11 +229,11 @@ $roomStatuses = getRoomStatuses();
                     </div>
                 </div>
                 <?php if ($room['hk_status']): ?>
-                <span class="room-status-badge <?php echo $room['hk_status']; ?>">
+                <span class="badge badge-<?php echo $room['hk_status']; ?>">
                     <?php echo ucfirst(str_replace('_', ' ', $room['hk_status'])); ?>
                 </span>
                 <?php else: ?>
-                <span class="room-status-badge cleaning">Needs Cleaning</span>
+                <span class="badge badge-cleaning">Needs Cleaning</span>
                 <?php endif; ?>
                 <?php if ($room['assigned_to_name']): ?>
                 <div style="font-size: 12px; color: #666;">
@@ -285,7 +285,7 @@ $roomStatuses = getRoomStatuses();
                         <?php endif; ?>
                     </div>
                 </div>
-                <span class="room-status-badge inspection">Inspection Pending</span>
+                <span class="badge badge-inspection">Inspection Pending</span>
                 <div class="room-actions">
                     <form method="POST" style="display: inline;" onsubmit="return confirmPass(this)">
                         <input type="hidden" name="action" value="pass_inspection">

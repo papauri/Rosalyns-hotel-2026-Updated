@@ -58,7 +58,9 @@ if (!function_exists('_renderNavLink')) {
         $hrefPath   = (string)(parse_url($href, PHP_URL_PATH) ?: $href);
         $isActive   = (strpos($href, '../') !== 0 && basename($hrefPath) === $current_page) ? ' active' : '';
         $iconAttr   = $iconStyle !== '' ? ' style="' . htmlspecialchars($iconStyle) . '"' : '';
-        $extra      = (strpos($href, '../') === 0) ? ' target="_blank" rel="noopener"' : '';
+        // Full-screen station pages and external guides always open in a new tab
+        $_newTabPages = ['pos.php', 'kds.php', 'bds.php', 'cds.php'];
+        $extra      = (strpos($href, '../') === 0 || in_array(basename($hrefPath), $_newTabPages, true)) ? ' target="_blank" rel="noopener"' : '';
         $linkClass  = 'admin-nav-link' . $isActive;
         $navKey     = trim((string)preg_replace('/[^a-z0-9]+/', '-', strtolower($href)), '-');
         echo '<li class="nav-item" data-nav-key="' . htmlspecialchars($navKey) . '" data-nav-label="' . htmlspecialchars($label) . '">'

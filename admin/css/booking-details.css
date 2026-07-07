@@ -257,29 +257,10 @@
     font-weight: 700;
 }
 
-.info-value.status-badge {
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
+/* Payment status colours come from the global .badge system (admin-styles.css) */
+.info-value.badge {
     padding: 6px 14px;
-    border-radius: 20px;
     font-size: 12px;
-    font-weight: 600;
-}
-
-.info-value.status-badge.paid {
-    background: #edf7f0;
-    color: #1f7a42;
-}
-
-.info-value.status-badge.unpaid {
-    background: #fef2f2;
-    color: #a03030;
-}
-
-.info-value.status-badge.partial {
-    background: #fef9ec;
-    color: #92690a;
 }
 
 .guest-contact-actions {
@@ -1879,7 +1860,7 @@
     vertical-align: middle;
 }
 
-.story-card .info-value.status-badge {
+.story-card .info-value.badge {
     font-size: 0.64rem;
     padding: 0.28rem 0.7rem;
     gap: 0.32rem;

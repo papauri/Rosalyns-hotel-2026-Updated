@@ -451,7 +451,7 @@ $calendarMonthLabel = $monthNames[$currentMonth] . ' ' . $currentYear;
                                 <span class="room-price">
                                     <?php echo getSetting('currency_symbol') . ' ' . number_format($indRoom['price_per_night'], 2); ?>/night
                                 </span>
-                                <span class="current-status-badge status-<?php echo $indRoom['status']; ?>">
+                                <span class="badge badge-<?php echo $indRoom['status']; ?> current-status-badge">
                                     <?php echo ucfirst($indRoom['status']); ?>
                                 </span>
                             </div>

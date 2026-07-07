@@ -3245,6 +3245,7 @@ body {
 .badge {
     display: inline-flex;
     align-items: center;
+    justify-content: center;
     gap: 5px;
     padding: 3px 10px;
     border-radius: 999px;
@@ -3252,6 +3253,17 @@ body {
     font-weight: 600;
     line-height: 1.6;
     border: 1px solid transparent;
+    white-space: nowrap;
+    max-width: 100%;
+    vertical-align: middle;
+    text-transform: capitalize;
+}
+
+/* Badge icons stay proportional and never stretch the pill */
+.badge > i,
+.badge > svg {
+    font-size: 0.9em;
+    flex-shrink: 0;
 }
 
 .badge-confirmed,
@@ -3288,10 +3300,261 @@ body {
 }
 
 .badge-completed,
-.badge-checked-out {
+.badge-checked-out,
+.badge-archived,
+.badge-inactive,
+.badge-disabled,
+.badge-module-off,
+.badge-nav-no,
+.badge-neutral,
+.badge-secondary {
     background: rgba(107, 114, 128, 0.14);
     color: #374151;
     border-color: rgba(107, 114, 128, 0.25);
+}
+
+.badge-no-show {
+    background: rgba(120, 113, 108, 0.14);
+    color: #57534e;
+    border-color: rgba(120, 113, 108, 0.30);
+}
+
+/* Payment lifecycle */
+.badge-partial,
+.badge-partially-paid,
+.badge-unpaid,
+.badge-overdue {
+    background: rgba(245, 158, 11, 0.14);
+    color: #b45309;
+    border-color: rgba(245, 158, 11, 0.30);
+}
+
+.badge-refunded,
+.badge-partially-refunded {
+    background: rgba(168, 85, 247, 0.12);
+    color: #7e22ce;
+    border-color: rgba(168, 85, 247, 0.25);
+}
+
+/* Document lifecycle */
+.badge-draft {
+    background: rgba(107, 114, 128, 0.14);
+    color: #374151;
+    border-color: rgba(107, 114, 128, 0.25);
+}
+
+.badge-sent,
+.badge-generated,
+.badge-quoted {
+    background: rgba(59, 130, 246, 0.12);
+    color: #1d4ed8;
+    border-color: rgba(59, 130, 246, 0.25);
+}
+
+/* Revenue-source / booking-type badges (uniform across finance + reports) */
+.badge-room {
+    background: rgba(59, 130, 246, 0.12);
+    color: #1e40af;
+    border-color: rgba(59, 130, 246, 0.28);
+}
+
+.badge-conference {
+    background: rgba(139, 92, 246, 0.12);
+    color: #5b21b6;
+    border-color: rgba(139, 92, 246, 0.28);
+}
+
+.badge-restaurant,
+.badge-pos {
+    background: rgba(20, 184, 166, 0.12);
+    color: #0f766e;
+    border-color: rgba(20, 184, 166, 0.28);
+}
+
+.badge-bar {
+    background: rgba(94, 53, 177, 0.12);
+    color: #5e35b1;
+    border-color: rgba(94, 53, 177, 0.28);
+}
+
+.badge-gym {
+    background: rgba(239, 68, 68, 0.10);
+    color: #b91c1c;
+    border-color: rgba(239, 68, 68, 0.24);
+}
+
+.badge-event {
+    background: rgba(16, 185, 129, 0.12);
+    color: #065f46;
+    border-color: rgba(16, 185, 129, 0.28);
+}
+
+/* Stock levels */
+.badge-critical {
+    background: rgba(239, 68, 68, 0.12);
+    color: #b91c1c;
+    border-color: rgba(239, 68, 68, 0.25);
+}
+
+.badge-low {
+    background: rgba(245, 158, 11, 0.14);
+    color: #b45309;
+    border-color: rgba(245, 158, 11, 0.30);
+}
+
+.badge-ok {
+    background: rgba(16, 185, 129, 0.12);
+    color: #047857;
+    border-color: rgba(16, 185, 129, 0.25);
+}
+
+.badge-no-recipe {
+    background: rgba(107, 114, 128, 0.14);
+    color: #374151;
+    border-color: rgba(107, 114, 128, 0.25);
+}
+
+/* Module / page-management states */
+.badge-core,
+.badge-enabled,
+.badge-module-on,
+.badge-nav-yes {
+    background: rgba(16, 185, 129, 0.12);
+    color: #047857;
+    border-color: rgba(16, 185, 129, 0.25);
+}
+
+/* Inquiry workflow */
+.badge-new {
+    background: rgba(239, 68, 68, 0.12);
+    color: #b91c1c;
+    border-color: rgba(239, 68, 68, 0.25);
+}
+
+.badge-read {
+    background: rgba(245, 158, 11, 0.14);
+    color: #b45309;
+    border-color: rgba(245, 158, 11, 0.30);
+}
+
+.badge-replied,
+.badge-resolved,
+.badge-approved {
+    background: rgba(16, 185, 129, 0.12);
+    color: #047857;
+    border-color: rgba(16, 185, 129, 0.25);
+}
+
+.badge-rejected {
+    background: rgba(239, 68, 68, 0.12);
+    color: #b91c1c;
+    border-color: rgba(239, 68, 68, 0.25);
+}
+
+.badge-muted {
+    background: rgba(107, 114, 128, 0.14);
+    color: #374151;
+    border-color: rgba(107, 114, 128, 0.25);
+}
+
+/* Room operational states */
+.badge-available {
+    background: rgba(16, 185, 129, 0.12);
+    color: #047857;
+    border-color: rgba(16, 185, 129, 0.25);
+}
+
+.badge-occupied {
+    background: rgba(59, 130, 246, 0.12);
+    color: #1d4ed8;
+    border-color: rgba(59, 130, 246, 0.25);
+}
+
+.badge-maintenance {
+    background: rgba(245, 158, 11, 0.14);
+    color: #b45309;
+    border-color: rgba(245, 158, 11, 0.30);
+}
+
+.badge-cleaning {
+    background: rgba(168, 85, 247, 0.12);
+    color: #7e22ce;
+    border-color: rgba(168, 85, 247, 0.25);
+}
+
+.badge-blocked,
+.badge-out_of_order {
+    background: rgba(239, 68, 68, 0.12);
+    color: #b91c1c;
+    border-color: rgba(239, 68, 68, 0.25);
+}
+
+.badge-reserved {
+    background: rgba(245, 158, 11, 0.14);
+    color: #b45309;
+    border-color: rgba(245, 158, 11, 0.30);
+}
+
+.badge-inspection {
+    background: rgba(6, 182, 212, 0.12);
+    color: #0e7490;
+    border-color: rgba(6, 182, 212, 0.28);
+}
+
+.badge-urgent {
+    background: #dc3545;
+    color: #fff;
+    border-color: #dc3545;
+}
+
+/* Content flags (events / rooms / gallery cards) — uniform across pages */
+.badge-featured {
+    background: rgba(200, 164, 90, 0.16);
+    color: #8a6d1f;
+    border-color: rgba(200, 164, 90, 0.40);
+}
+
+.badge-video {
+    background: rgba(168, 85, 247, 0.12);
+    color: #7e22ce;
+    border-color: rgba(168, 85, 247, 0.25);
+}
+
+.badge-upcoming {
+    background: rgba(16, 185, 129, 0.12);
+    color: #047857;
+    border-color: rgba(16, 185, 129, 0.25);
+}
+
+.badge-free {
+    background: rgba(59, 130, 246, 0.12);
+    color: #1d4ed8;
+    border-color: rgba(59, 130, 246, 0.25);
+}
+
+.badge-price {
+    background: rgba(245, 158, 11, 0.14);
+    color: #b45309;
+    border-color: rgba(245, 158, 11, 0.30);
+}
+
+.badge-category {
+    background: rgba(99, 102, 241, 0.12);
+    color: #4338ca;
+    border-color: rgba(99, 102, 241, 0.25);
+}
+
+/* Small badge modifier (dense tables) */
+.badge-sm {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 2px 8px;
+    border-radius: 999px;
+    font-size: 10.5px;
+    font-weight: 600;
+    line-height: 1.5;
+    border: 1px solid transparent;
 }
 
 /* ---------- Buttons ---------- */

@@ -161,20 +161,7 @@
     margin-bottom: 12px;
 }
 
-.room-badge {
-    font-size: 11px;
-    padding: 4px 8px;
-    border-radius: 999px;
-    display: inline-flex;
-    align-items: center;
-    gap: 4px;
-    font-weight: 600;
-}
-
-.badge-video {
-    background: #eef2ff;
-    color: #3730a3;
-}
+/* Room card badges use the global .badge system (admin-styles.css) */
 
 .room-card-actions {
     display: flex;

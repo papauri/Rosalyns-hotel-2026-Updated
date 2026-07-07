@@ -614,7 +614,7 @@ $modalsHtml = ob_get_clean();
                                     $statusLabels = ['active' => 'Active', 'partially_applied' => 'Partial', 'fully_applied' => 'Used', 'voided' => 'Voided', 'expired' => 'Expired'];
                                     $statusClass  = ['active' => 'success', 'partially_applied' => 'warning', 'fully_applied' => 'info', 'voided' => 'danger', 'expired' => 'muted'];
                                     ?>
-                                    <span class="status-badge status-badge--<?php echo $statusClass[$cn['status']] ?? 'info'; ?>">
+                                    <span class="badge badge-<?php echo $statusClass[$cn['status']] ?? 'info'; ?>">
                                         <?php echo $statusLabels[$cn['status']] ?? ucfirst((string)$cn['status']); ?>
                                     </span>
                                     <?php if ($expiresSoon): ?>

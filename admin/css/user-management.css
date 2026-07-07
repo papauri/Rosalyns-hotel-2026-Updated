@@ -209,7 +209,7 @@
     }
 
     .users-table.mobile-enhanced .role-badge,
-    .users-table.mobile-enhanced .status-badge {
+    .users-table.mobile-enhanced .badge {
         min-height: 2rem;
         font-size: clamp(0.7rem, 0.66rem + 0.18vw, 0.8rem);
         border-radius: 999px;
@@ -318,27 +318,8 @@
     color: #6c757d;
 }
 
-.status-badge {
-    display: inline-flex;
-    align-items: center;
-    gap: 4px;
-    padding: 4px 10px;
-    border-radius: 12px;
-    font-size: 10px;
-    font-weight: 600;
-}
-
-.status-badge.active {
-    background: #d4edda;
-    color: #155724;
-}
-
-.status-badge.inactive {
-    background: #f8d7da;
-    color: #721c24;
-}
-
-.status-badge i {
+/* Active/inactive badges use the global .badge system (admin-styles.css) */
+.users-table .badge i {
     font-size: 6px;
 }
 

@@ -159,35 +159,7 @@
     align-items: center;
 }
 
-.gallery-badge {
-    font-size: 11px;
-    padding: 4px 8px;
-    border-radius: 999px;
-    display: inline-flex;
-    align-items: center;
-    gap: 4px;
-    font-weight: 600;
-}
-
-.gallery-badge.badge-category {
-    background: #eef2ff;
-    color: #3730a3;
-}
-
-.gallery-badge.badge-active {
-    background: #edf7f0;
-    color: #1f7a42;
-}
-
-.gallery-badge.badge-inactive {
-    background: #fef2f2;
-    color: #a03030;
-}
-
-.gallery-badge.badge-video {
-    background: #f0f7ff;
-    color: #1a7a96;
-}
+/* Gallery card badges use the global .badge system (admin-styles.css) */
 
 /* Gallery Card Actions */
 .gallery-card-actions {

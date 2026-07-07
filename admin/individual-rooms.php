@@ -1071,7 +1071,7 @@ $currency = htmlspecialchars(getSetting('currency_symbol'));
                                             'out_of_order' => 'Out of Order|Completely unusable — excluded from all availability searches. Use for rooms with serious or long-term issues.',
                                         ];
                                         ?>
-                                        <span class="status-badge status-<?php echo $displayStatus; ?>"
+                                        <span class="badge badge-<?php echo $displayStatus; ?>"
                                             data-help="<?php echo htmlspecialchars($_statusHelp[$displayStatus] ?? $statusLabel, ENT_QUOTES, 'UTF-8'); ?>">
                                             <i class="fas fa-<?php echo $statusIcon; ?>"></i>
                                             <?php echo $statusLabel; ?>
@@ -1366,7 +1366,7 @@ $currency = htmlspecialchars(getSetting('currency_symbol'));
                     <p id="rdSubtitle" class="room-detail-subtitle">—</p>
                 </div>
                 <div class="room-detail-header-meta">
-                    <span id="rdStatusBadge" class="status-badge"></span>
+                    <span id="rdStatusBadge" class="badge"></span>
                     <span id="rdPrice" class="room-detail-price"></span>
                 </div>
                 <button class="modal-close" onclick="closeRoomDetailModal()" style="position:absolute;top:14px;right:16px;">&times;</button>
@@ -2177,7 +2177,7 @@ $currency = htmlspecialchars(getSetting('currency_symbol'));
             document.getElementById('rdTitle').textContent = '—';
             document.getElementById('rdSubtitle').textContent = '—';
             document.getElementById('rdStatusBadge').textContent = '';
-            document.getElementById('rdStatusBadge').className = 'status-badge';
+            document.getElementById('rdStatusBadge').className = 'badge';
             document.getElementById('rdPrice').textContent = '';
             document.getElementById('rdSpinner').style.display = '';
             document.getElementById('rdContent').style.display = 'none';
@@ -2336,7 +2336,7 @@ $currency = htmlspecialchars(getSetting('currency_symbol'));
 
             const statusBadge = document.getElementById('rdStatusBadge');
             statusBadge.textContent = _statusLabels[room.status] || room.status;
-            statusBadge.className = 'status-badge status-' + room.status;
+            statusBadge.className = 'badge badge-' + room.status;
 
             // Calendar link
             document.getElementById('rdCalLink').href = 'calendar.php?filter_room_id=' + room.id;

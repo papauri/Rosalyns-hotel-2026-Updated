@@ -408,7 +408,7 @@ $receiptPlaceholderTokens = array_keys($templatePreviewMap);
                                 <td>
                                     <strong class="tbl-ref"><?php echo htmlspecialchars((string)($payment['receipt_number'] ?: '—')); ?></strong>
                                     <?php if (empty($payment['receipt_number'])): ?>
-                                        <span class="status-badge status-badge--warning" style="margin-top:3px;display:inline-block;">Missing</span>
+                                        <span class="badge badge-warning" style="margin-top:3px;display:inline-block;">Missing</span>
                                     <?php endif; ?>
                                 </td>
                                 <td>
@@ -416,13 +416,13 @@ $receiptPlaceholderTokens = array_keys($templatePreviewMap);
                                     <small class="text-muted"><?php echo htmlspecialchars((string)($payment['recorded_by_name'] ?? 'System')); ?></small>
                                 </td>
                                 <td>
-                                    <span class="status-badge status-badge--info"><?php echo htmlspecialchars(ucfirst((string)$payment['booking_type'])); ?></span>
+                                    <span class="badge badge-info"><?php echo htmlspecialchars(ucfirst((string)$payment['booking_type'])); ?></span>
                                     <small class="text-muted" style="display:block;margin-top:2px;"><?php echo htmlspecialchars((string)$payment['booking_reference']); ?></small>
                                 </td>
                                 <td><?php echo htmlspecialchars(date('d M Y', strtotime((string)$payment['payment_date']))); ?></td>
                                 <td class="text-right"><strong><?php echo receipts_money((float)$payment['total_amount'], $currency_symbol); ?></strong></td>
                                 <td>
-                                    <span class="status-badge <?php echo !empty($payment['receipt_generated']) ? 'status-badge--success' : 'status-badge--warning'; ?>">
+                                    <span class="badge <?php echo !empty($payment['receipt_generated']) ? 'badge-success' : 'badge-warning'; ?>">
                                         <?php echo !empty($payment['receipt_generated']) ? 'PDF ready' : 'Needs PDF'; ?>
                                     </span>
                                     <?php if (!empty($payment['receipt_emailed_at'])): ?>
