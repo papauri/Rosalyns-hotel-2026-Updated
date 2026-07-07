@@ -6626,10 +6626,15 @@ function sendGymMemberCardEmail(array $member): array
         $siteName = $email_site_name ?: getSetting('site_name', 'Gym');
 
         // Barcode: CODE 128 symbology — same the check-in scanner reads.
-        // Uses TCPDF's SVG renderer (zero image-library dependency) for the
-        // inline display, and PNG (needs GD/Imagick) for the attachable file.
+        // PNG (GD/Imagick) is the primary format: a CID-embedded <img> is the
+        // only barcode rendering that displays in ALL email clients, and the
+        // same bytes are attached so members can save the card to their phone.
+        // Gmail/Outlook/Yahoo strip inline <svg>, so SVG is never inlined —
+        // when no image library exists we render the bars as an HTML table
+        // (client-safe) and attach the SVG file as the saveable copy.
         $barcodePng  = '';
         $barcodeSvg  = '';
+        $barcodeBars = [];
         try {
             if (!class_exists('TCPDFBarcode')) {
                 foreach ([
@@ -6645,19 +6650,24 @@ function sendGymMemberCardEmail(array $member): array
             if (class_exists('TCPDFBarcode')) {
                 $bc = new TCPDFBarcode($memberNumber, 'C128');
 
-                // PNG for attachment — only works when GD or Imagick is available
+                // PNG — needs GD or Imagick; returns false (not an exception) without them
                 $pngData = $bc->getBarcodePngData(3, 80, [0, 0, 0]);
                 if (is_object($pngData) && method_exists($pngData, 'getImageBlob')) {
-                    $pngData = $pngData->getImageBlob();
+                    $pngData = $pngData->getImageBlob(); // Imagick branch returns an object
                 }
                 if (is_string($pngData) && $pngData !== '') {
                     $barcodePng = $pngData;
-                }
-
-                // SVG for inline display — ALWAYS works (no image library needed)
-                $barcodeSvg = trim((string)$bc->getBarcodeSVGcode(3, 80, 'black'));
-                if ($barcodeSvg === '' || stripos($barcodeSvg, '<svg') === false) {
-                    $barcodeSvg = ''; // defensive: treat garbage as empty
+                } else {
+                    // No image library: SVG attachment + HTML-bars inline fallback
+                    $barcodeSvg = trim((string)$bc->getBarcodeSVGcode(3, 80, 'black'));
+                    if (stripos($barcodeSvg, '<svg') === false) {
+                        $barcodeSvg = ''; // defensive: treat garbage as empty
+                    }
+                    $bcArr = $bc->getBarcodeArray();
+                    if (!empty($bcArr['bcode'])) {
+                        $barcodeBars = $bcArr['bcode'];
+                    }
+                    error_log('sendGymMemberCardEmail: no GD/Imagick — using HTML bars + SVG attachment for ' . $memberNumber);
                 }
             } else {
                 error_log('sendGymMemberCardEmail: TCPDFBarcode not found — upload vendor/ (composer install) or a TCPDF/ folder with tcpdf_barcodes_1d.php');
@@ -6670,16 +6680,24 @@ function sendGymMemberCardEmail(array $member): array
             ? date('F j, Y', strtotime((string)$member['expiry_date']))
             : 'No expiry set';
 
-        // Inline barcode block — prefers SVG (works everywhere), falls back to
-        // PNG CID, then text-only member number.
-        if ($barcodeSvg !== '') {
-            $barcodeBlock = '<div style="background:#ffffff;border:2px dashed #C8A45A;border-radius:10px;padding:22px;text-align:center;margin:20px 0;">'
-                . $barcodeSvg
-                . '<div style="font-size:20px;font-weight:bold;letter-spacing:3px;color:#1A1A1A;margin-top:10px;">' . htmlspecialchars($memberNumber) . '</div>'
-                . '</div>';
-        } elseif ($barcodePng !== '') {
+        // Inline barcode block — PNG CID first (renders in every client),
+        // HTML-bars table when no image library, then text-only member number.
+        if ($barcodePng !== '') {
             $barcodeBlock = '<div style="background:#ffffff;border:2px dashed #C8A45A;border-radius:10px;padding:22px;text-align:center;margin:20px 0;">'
                 . '<img src="cid:gymmembercard" alt="Member barcode ' . htmlspecialchars($memberNumber) . '" style="max-width:100%;height:auto;">'
+                . '<div style="font-size:20px;font-weight:bold;letter-spacing:3px;color:#1A1A1A;margin-top:10px;">' . htmlspecialchars($memberNumber) . '</div>'
+                . '</div>';
+        } elseif (!empty($barcodeBars)) {
+            // One table cell per CODE 128 bar/space — survives Gmail/Outlook,
+            // which strip <svg>, and scans from the screen.
+            $barsHtml = '';
+            foreach ($barcodeBars as $bar) {
+                $bw  = max(1, (int)round((float)($bar['w'] ?? 1) * 2));
+                $col = !empty($bar['t']) ? '#000000' : '#ffffff';
+                $barsHtml .= '<td width="' . $bw . '" style="padding:0;width:' . $bw . 'px;height:80px;background-color:' . $col . ';line-height:0;font-size:0;">&nbsp;</td>';
+            }
+            $barcodeBlock = '<div style="background:#ffffff;border:2px dashed #C8A45A;border-radius:10px;padding:22px;text-align:center;margin:20px 0;">'
+                . '<table role="presentation" cellpadding="0" cellspacing="0" border="0" align="center" style="border-collapse:collapse;margin:0 auto;background:#ffffff;"><tr>' . $barsHtml . '</tr></table>'
                 . '<div style="font-size:20px;font-weight:bold;letter-spacing:3px;color:#1A1A1A;margin-top:10px;">' . htmlspecialchars($memberNumber) . '</div>'
                 . '</div>';
         } else {
@@ -6754,6 +6772,9 @@ function sendGymMemberCardEmail(array $member): array
         if ($barcodePng !== '') {
             $mail->addStringEmbeddedImage($barcodePng, 'gymmembercard', 'member-card-' . $memberNumber . '.png', 'base64', 'image/png');
             $mail->addStringAttachment($barcodePng, 'member-card-' . $memberNumber . '.png', 'base64', 'image/png');
+        } elseif ($barcodeSvg !== '') {
+            // No PNG possible on this host — attach the SVG so the card is still saveable
+            $mail->addStringAttachment($barcodeSvg, 'member-card-' . $memberNumber . '.svg', 'base64', 'image/svg+xml');
         }
         $mail->Body = hotel_embed_logo_cid($mail, wrapEmailTemplate($htmlBody, $subject));
         $mail->AltBody = $altBody;
