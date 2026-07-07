@@ -2495,6 +2495,12 @@
         flex-direction: column;
     }
 
+    /* Stacked cards take their natural height — flex:1 equal-height
+       distribution clips the taller card (overflow is hidden) */
+    .story-center-col .story-card {
+        flex: 0 0 auto;
+    }
+
     .story-steps-track {
         display: none;
     }
