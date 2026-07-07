@@ -592,10 +592,29 @@ if (!isset($dailyTrend)) {
 
         $cat_cash_today = 0;
         try {
-            $cashStmt = $pdo->prepare("SELECT COALESCE(SUM(total_amount),0) FROM payments WHERE payment_status IN ('completed','paid') AND payment_method IN ('cash','mobile_money') AND DATE(payment_date)=CURRENT_DATE() AND deleted_at IS NULL");
+            // Refund rows also sit at payment_status='completed' — they must reduce, not inflate, the drawer.
+            $cashStmt = $pdo->prepare("SELECT COALESCE(SUM(CASE
+                    WHEN COALESCE(payment_type,'') <> 'refund' AND payment_status IN ('completed','paid') THEN total_amount
+                    WHEN payment_type = 'refund' AND refund_status IN ('completed','processing') THEN -total_amount
+                    ELSE 0 END),0)
+                FROM payments
+                WHERE payment_method IN ('cash','mobile_money') AND DATE(payment_date)=CURRENT_DATE() AND deleted_at IS NULL");
             $cashStmt->execute();
             $cat_cash_today = (float)$cashStmt->fetchColumn();
         } catch (Throwable $e) { /* ignore */
+        }
+
+        // Tourism levy accrued on bookings taken in the period (levy is charged on the
+        // booking, not per payment, so it is accrual-based; excludes dead bookings).
+        $cat_levy_period = 0.0;
+        $levyEnabled = in_array(getSetting('tourism_levy_enabled'), ['1', 1, true, 'true', 'on'], true);
+        if ($levyEnabled && $mod_bookings) {
+            try {
+                $levyStmt = $pdo->prepare("SELECT COALESCE(SUM(tourism_levy_amount),0) FROM bookings WHERE status NOT IN ('cancelled','expired','no-show') AND DATE(created_at) BETWEEN ? AND ?");
+                $levyStmt->execute([$startDate, $endDate]);
+                $cat_levy_period = (float)$levyStmt->fetchColumn();
+            } catch (Throwable $e) { /* ignore */
+            }
         }
 
         $cat_cash_period = 0.0;
@@ -889,6 +908,7 @@ if (!isset($dailyTrend)) {
                 <div class="acct-kpi__meta">
                     <span><?php echo $vatEnabled ? 'Enabled @ ' . htmlspecialchars($vatRate) . '%' : 'Disabled'; ?></span>
                     <?php if ($vatEnabled && $vatNumber): ?><span>VAT&nbsp;# <?php echo htmlspecialchars($vatNumber); ?></span><?php endif; ?>
+                    <?php if (!empty($levyEnabled)): ?><span title="Tourism levy accrued on bookings taken in this period — remit to the Malawi Tourism Council">Tourism levy <?php echo $currency_symbol . number_format($cat_levy_period, 2); ?></span><?php endif; ?>
                 </div>
                 <div class="acct-kpi__hint"><i class="fas fa-table-list"></i> Open detail</div>
             </div>

@@ -225,23 +225,23 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $payment
             if ($payment['booking_type'] === 'room') {
                 recalculateBookingFinancials((int)$payment['booking_id']);
             } elseif ($payment['booking_type'] === 'conference') {
-                $cfPaidStmt = $pdo->prepare("
-                    SELECT COALESCE(SUM(CASE
-                        WHEN payment_status IN ('completed','paid') AND COALESCE(payment_type, '') != 'refund' THEN total_amount
-                        WHEN payment_type = 'refund' AND refund_status IN ('completed','processing') THEN -total_amount
-                        ELSE 0
-                    END), 0) AS amt_paid
-                    FROM payments
-                    WHERE booking_type = 'conference' AND booking_id = ? AND deleted_at IS NULL
-                ");
-                $cfPaidStmt->execute([$payment['booking_id']]);
-                $cfAmtPaid = max(0.0, (float)($cfPaidStmt->fetchColumn() ?? 0));
-                $cfUpdStmt = $pdo->prepare("
-                    UPDATE conference_inquiries
-                    SET amount_paid = ?, amount_due = GREATEST(0, total_amount - ?), updated_at = NOW()
-                    WHERE id = ?
-                ");
-                $cfUpdStmt->execute([$cfAmtPaid, $cfAmtPaid, $payment['booking_id']]);
+                require_once __DIR__ . '/includes/finance-account-sync.php';
+                $cfStmt = $pdo->prepare("SELECT total_amount, total_with_vat FROM conference_inquiries WHERE id = ? LIMIT 1");
+                $cfStmt->execute([$payment['booking_id']]);
+                if ($cfRow = $cfStmt->fetch(PDO::FETCH_ASSOC)) {
+                    // Paid nets out settled refunds; due is measured against the
+                    // invoiced GROSS (locked total_with_vat), never the net total.
+                    $cfAmtPaid = rh_sum_account_paid($pdo, 'conference', (int)$payment['booking_id']);
+                    $cfDue = max(0.0, round(rh_account_gross_total($cfRow) - $cfAmtPaid, 2));
+                    $pdo->prepare("UPDATE conference_inquiries SET amount_paid = ?, amount_due = ?, updated_at = NOW() WHERE id = ?")
+                        ->execute([$cfAmtPaid, $cfDue, $payment['booking_id']]);
+                }
+            } elseif ($payment['booking_type'] === 'gym') {
+                require_once __DIR__ . '/includes/finance-account-sync.php';
+                syncGymInquiryPaymentSnapshot($pdo, (int)$payment['booking_id']);
+            } elseif ($payment['booking_type'] === 'event') {
+                require_once __DIR__ . '/includes/finance-account-sync.php';
+                syncEventInquiryPaymentSnapshot($pdo, (int)$payment['booking_id']);
             }
 
             $pdo->commit();

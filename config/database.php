@@ -6085,8 +6085,11 @@ function addBookingCharge(int $bookingId, string $chargeType, string $descriptio
         $vatEnabled = getSetting('vat_enabled') === '1';
         $vatRate = $vatEnabled ? (float)getSetting('vat_rate') : 0;
 
-        // unitPrice is the VAT-inclusive (gross) price — same convention used everywhere
-        // in the system (room rates, menu items). Extract net and VAT from gross.
+        // unitPrice is the VAT-inclusive (gross) price — F&B/menu convention shared
+        // with the POS (pos_calculateRestaurantVatParts): the displayed menu price is
+        // what the guest pays, so net/VAT are extracted from gross regardless of
+        // vat_pricing_mode. (Room/conference/gym accounts instead use vat_components(),
+        // which honours the exclusive/inclusive mode.)
         $lineTotal    = round($quantity * $unitPrice, 2);
         if ($vatRate > 0) {
             $lineSubtotal = round($lineTotal / (1 + ($vatRate / 100)), 2);

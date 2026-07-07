@@ -32,8 +32,7 @@ $fnb = [
                 COALESCE(oi.station, 'kitchen') AS station,
                 COUNT(DISTINCT o.id) AS orders,
                 SUM(oi.quantity) AS items_qty,
-                SUM(oi.line_total) AS revenue,
-                SUM(COALESCE(oi.line_total - (oi.line_total * 0), 0)) AS gross
+                SUM(oi.line_total) AS revenue
             FROM stock_orders o
             JOIN stock_order_items oi ON oi.order_id = o.id
             WHERE o.created_at BETWEEN ? AND ?

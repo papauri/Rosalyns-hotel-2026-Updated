@@ -173,7 +173,7 @@ try {
 
 $gross_revenue = (float)$rev['room_gross'] + (float)$rev['conf_gross'] + (float)$rev['fnb_gross'] + (float)$rev['gym_gross'] + (float)$rev['events_gross'];
 $net_revenue   = $gross_revenue - (float)$rev['refunds'];
-$total_vat     = (float)$rev['room_vat'] + (float)$rev['conf_vat'] + (float)$rev['fnb_vat'] - (float)($rev['refund_vat'] ?? 0);
+$total_vat     = (float)$rev['room_vat'] + (float)$rev['conf_vat'] + (float)$rev['fnb_vat'] + (float)$rev['gym_vat'] + (float)$rev['events_vat'] - (float)($rev['refund_vat'] ?? 0);
 
 // ADR / RevPAR — based on room payments today
 $adr    = $rooms_occupied > 0 ? ((float)$rev['room_gross'] / $rooms_occupied) : 0;

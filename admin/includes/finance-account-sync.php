@@ -47,20 +47,25 @@ if (!function_exists('rh_account_gross_total')) {
 
 if (!function_exists('rh_sum_account_paid')) {
     /**
-     * Sum of GROSS completed, non-refund payments recorded against an account,
-     * from the immutable ledger. This is the auditable "amount paid".
+     * Net GROSS cash held against an account from the immutable ledger:
+     * completed non-refund payments minus completed/processing refunds.
+     * Matches recalculateBookingFinancials() so every account type treats
+     * refunds identically. Floored at 0 (over-refunds never show negative paid).
      */
     function rh_sum_account_paid(PDO $pdo, string $bookingType, int $bookingId): float
     {
         $stmt = $pdo->prepare(
             "SELECT COALESCE(SUM(
                 CASE WHEN payment_status IN ('completed','paid') AND COALESCE(payment_type,'') <> 'refund'
-                     THEN total_amount ELSE 0 END), 0) AS paid
+                     THEN total_amount
+                     WHEN payment_type = 'refund' AND refund_status IN ('completed','processing')
+                     THEN -total_amount
+                     ELSE 0 END), 0) AS paid
              FROM payments
              WHERE booking_type = ? AND booking_id = ? AND deleted_at IS NULL"
         );
         $stmt->execute([$bookingType, $bookingId]);
-        return (float)($stmt->fetchColumn() ?: 0);
+        return max(0.0, (float)($stmt->fetchColumn() ?: 0));
     }
 }
 

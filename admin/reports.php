@@ -184,10 +184,12 @@ try {
     // 2. Revenue by Booking Type (date filtered)
     $revenueByTypeStmt = $pdo->prepare("
         SELECT booking_type, COUNT(*) as count,
-               COALESCE(SUM(total_amount), 0) as total_revenue,
-               COALESCE(SUM(vat_amount), 0) as total_vat
+               COALESCE(SUM(CASE WHEN payment_status IN ('completed', 'paid') AND COALESCE(payment_type, '') != 'refund' THEN total_amount ELSE 0 END), 0) as total_revenue,
+               COALESCE(SUM(CASE WHEN payment_status IN ('completed', 'paid') AND COALESCE(payment_type, '') != 'refund' THEN vat_amount
+                                 WHEN payment_type = 'refund' AND refund_status IN ('completed','processing') THEN -vat_amount
+                                 ELSE 0 END), 0) as total_vat
         FROM payments
-        WHERE payment_status IN ('completed', 'paid') AND COALESCE(payment_type, '') != 'refund' AND deleted_at IS NULL
+        WHERE (payment_status IN ('completed', 'paid') OR payment_type = 'refund') AND deleted_at IS NULL
         AND payment_date >= ? AND payment_date <= ?
         GROUP BY booking_type
     ");
@@ -275,10 +277,12 @@ try {
     // 7. VAT Collected
     $vatCollectedStmt = $pdo->prepare("
         SELECT DATE(payment_date) as date, COUNT(*) as transaction_count,
-               COALESCE(SUM(vat_amount), 0) as vat_collected,
-               COALESCE(SUM(total_amount), 0) as total_revenue
+               COALESCE(SUM(CASE WHEN payment_status IN ('completed', 'paid') AND COALESCE(payment_type, '') != 'refund' THEN vat_amount
+                                 WHEN payment_type = 'refund' AND refund_status IN ('completed','processing') THEN -vat_amount
+                                 ELSE 0 END), 0) as vat_collected,
+               COALESCE(SUM(CASE WHEN payment_status IN ('completed', 'paid') AND COALESCE(payment_type, '') != 'refund' THEN total_amount ELSE 0 END), 0) as total_revenue
         FROM payments
-        WHERE payment_status IN ('completed', 'paid') AND COALESCE(payment_type, '') != 'refund' AND deleted_at IS NULL
+        WHERE (payment_status IN ('completed', 'paid') OR payment_type = 'refund') AND deleted_at IS NULL
         AND payment_date >= ? AND payment_date <= ?
         GROUP BY DATE(payment_date) ORDER BY date ASC
     ");

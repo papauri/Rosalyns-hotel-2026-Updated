@@ -175,7 +175,6 @@ function buildEodPdf(
     $pdf->setPrintHeader(false);
     $pdf->setPrintFooter(true);
     $pdf->SetMargins($LM, 14, $LM);
-    $pdf->AliasNbPages();
     $pdf->AddPage();
 
     $y = 5.0;  // current cursor (below the 2.5mm gold strip)
@@ -386,9 +385,9 @@ function buildEodPdf(
     // ── LEFT: Revenue by Source ───────────────────────────────────────────────
     $secL('Revenue by Source');
     $i = 0;
-    if ($eodModBookings)   { $rowL('Rooms',       $m((float)$rev['room_gross']), false, $i++); }
-    if ($eodModConference) { $rowL('Conferences', $m((float)$rev['conf_gross']), false, $i++); }
-    $rowL(isRestaurantEnabled() ? 'F&B / POS' : 'POS', $m((float)$rev['fnb_gross']),  false, $i++);
+    if ($eodModBookings)   { $rowL('Rooms',       $m((float)($rev['room_gross'] ?? 0)), false, $i++); }
+    if ($eodModConference) { $rowL('Conferences', $m((float)($rev['conf_gross'] ?? 0)), false, $i++); }
+    $rowL(isRestaurantEnabled() ? 'F&B / POS' : 'POS', $m((float)($rev['fnb_gross'] ?? 0)),  false, $i++);
     if ($eodModGym    || (float)($rev['gym_gross'] ?? 0) > 0)    { $rowL('Gym',    $m((float)($rev['gym_gross'] ?? 0)),    false, $i++); }
     if ($eodModEvents || (float)($rev['events_gross'] ?? 0) > 0) { $rowL('Events', $m((float)($rev['events_gross'] ?? 0)), false, $i++); }
 
@@ -402,7 +401,7 @@ function buildEodPdf(
     $yL += $ROW;
     $i = 0;
 
-    if ((float)$rev['refunds'] > 0) {
+    if ((float)($rev['refunds'] ?? 0) > 0) {
         $pdf->SetFillColorArray($CREAM);
         $pdf->SetDrawColorArray($DIVIDER);
         $pdf->SetFont('helvetica', '', 7.5);

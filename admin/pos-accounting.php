@@ -181,12 +181,12 @@ function rh_pos_accounting_shift_totals(PDO $pdo, int $userId, string $dayStart,
 {
     $stmt = $pdo->prepare("
         SELECT
-            COALESCE(SUM(CASE WHEN payment_method = 'cash' THEN total_amount ELSE 0 END), 0) AS cash,
-            COALESCE(SUM(CASE WHEN payment_method = 'mobile_money' THEN total_amount ELSE 0 END), 0) AS mobile,
-            COALESCE(SUM(CASE WHEN payment_method IN ('card_manual','card_pos') THEN total_amount ELSE 0 END), 0) AS card,
+            COALESCE(SUM(CASE WHEN payment_method = 'cash' THEN total_amount + COALESCE(tip_amount,0) ELSE 0 END), 0) AS cash,
+            COALESCE(SUM(CASE WHEN payment_method = 'mobile_money' THEN total_amount + COALESCE(tip_amount,0) ELSE 0 END), 0) AS mobile,
+            COALESCE(SUM(CASE WHEN payment_method IN ('card_manual','card_pos') THEN total_amount + COALESCE(tip_amount,0) ELSE 0 END), 0) AS card,
             COUNT(*) AS orders_count,
             COALESCE(SUM(CASE WHEN created_at < ? THEN 1 ELSE 0 END), 0) AS settled_from_tabs_count,
-            COALESCE(SUM(CASE WHEN created_at < ? THEN total_amount ELSE 0 END), 0) AS settled_from_tabs_amount
+            COALESCE(SUM(CASE WHEN created_at < ? THEN total_amount + COALESCE(tip_amount,0) ELSE 0 END), 0) AS settled_from_tabs_amount
         FROM stock_orders
         WHERE created_by = ?
           AND status = 'paid'
@@ -381,9 +381,9 @@ try {
             au.username,
             COUNT(so.id) AS order_count,
             COALESCE(SUM(CASE WHEN so.status = 'paid' THEN so.total_amount ELSE 0 END), 0) AS paid_total,
-            COALESCE(SUM(CASE WHEN so.status = 'paid' AND so.payment_method = 'cash' THEN so.total_amount ELSE 0 END), 0) AS expected_cash,
-            COALESCE(SUM(CASE WHEN so.status = 'paid' AND so.payment_method = 'mobile_money' THEN so.total_amount ELSE 0 END), 0) AS expected_mobile,
-            COALESCE(SUM(CASE WHEN so.status = 'paid' AND so.payment_method IN ('card_manual','card_pos') THEN so.total_amount ELSE 0 END), 0) AS expected_card,
+            COALESCE(SUM(CASE WHEN so.status = 'paid' AND so.payment_method = 'cash' THEN so.total_amount + COALESCE(so.tip_amount,0) ELSE 0 END), 0) AS expected_cash,
+            COALESCE(SUM(CASE WHEN so.status = 'paid' AND so.payment_method = 'mobile_money' THEN so.total_amount + COALESCE(so.tip_amount,0) ELSE 0 END), 0) AS expected_mobile,
+            COALESCE(SUM(CASE WHEN so.status = 'paid' AND so.payment_method IN ('card_manual','card_pos') THEN so.total_amount + COALESCE(so.tip_amount,0) ELSE 0 END), 0) AS expected_card,
             COALESCE(SUM(CASE WHEN so.status = 'voided' THEN so.total_amount ELSE 0 END), 0) AS voided_total,
             COALESCE(SUM(CASE WHEN so.status = 'voided' THEN 1 ELSE 0 END), 0) AS voided_count,
             COALESCE(SUM(CASE WHEN so.status = 'placed' THEN 1 ELSE 0 END), 0) AS open_tabs
@@ -468,9 +468,9 @@ try {
         SELECT
             COUNT(*) AS orders,
             COALESCE(SUM(CASE WHEN status = 'paid' THEN total_amount ELSE 0 END), 0) AS paid_total,
-            COALESCE(SUM(CASE WHEN status = 'paid' AND payment_method = 'cash' THEN total_amount ELSE 0 END), 0) AS cash,
-            COALESCE(SUM(CASE WHEN status = 'paid' AND payment_method = 'mobile_money' THEN total_amount ELSE 0 END), 0) AS mobile,
-            COALESCE(SUM(CASE WHEN status = 'paid' AND payment_method IN ('card_manual','card_pos') THEN total_amount ELSE 0 END), 0) AS card,
+            COALESCE(SUM(CASE WHEN status = 'paid' AND payment_method = 'cash' THEN total_amount + COALESCE(tip_amount,0) ELSE 0 END), 0) AS cash,
+            COALESCE(SUM(CASE WHEN status = 'paid' AND payment_method = 'mobile_money' THEN total_amount + COALESCE(tip_amount,0) ELSE 0 END), 0) AS mobile,
+            COALESCE(SUM(CASE WHEN status = 'paid' AND payment_method IN ('card_manual','card_pos') THEN total_amount + COALESCE(tip_amount,0) ELSE 0 END), 0) AS card,
             COALESCE(SUM(CASE WHEN status = 'voided' THEN 1 ELSE 0 END), 0) AS voids,
             COALESCE(SUM(CASE WHEN status = 'voided' THEN total_amount ELSE 0 END), 0) AS voided_total
         FROM stock_orders

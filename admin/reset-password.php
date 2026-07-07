@@ -22,6 +22,7 @@ if (isset($_SESSION['admin_user_id'])) {
 }
 
 require_once '../config/database.php';
+require_once __DIR__ . '/../config/security.php';
 
 $error_message = '';
 $token = $_GET['token'] ?? $_POST['token'] ?? '';
@@ -81,8 +82,10 @@ if (!empty($token)) {
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && $valid_token) {
     $password = $_POST['password'] ?? '';
     $confirm_password = $_POST['confirm_password'] ?? '';
-    
-    if (empty($password)) {
+
+    if (!validateCsrfToken($_POST['csrf_token'] ?? '')) {
+        $error_message = 'Your session expired. Please try again.';
+    } elseif (empty($password)) {
         $error_message = 'Please enter a new password.';
     } elseif (strlen($password) < 8) {
         $error_message = 'Password must be at least 8 characters long.';
@@ -167,6 +170,7 @@ $site_name = getSetting('site_name');
 
             <?php if ($valid_token): ?>
                 <form method="POST">
+                    <?php echo getCsrfField(); ?>
                     <input type="hidden" name="token" value="<?php echo htmlspecialchars($token); ?>">
                     
                     <div class="form-group">

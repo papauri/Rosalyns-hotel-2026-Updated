@@ -937,10 +937,36 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $refundTotal = (float)$refRow['total_amount'] + (float)($refRow['tip_amount'] ?? 0);
                 $pdo->prepare("UPDATE stock_orders SET status='refunded', refunded_at=NOW(), refund_reason=? WHERE id=?")
                     ->execute([$refundReason, $refundOrderId]);
-                // Create negative payment record for ledger reversal
+                // Create refund record for ledger reversal (canonical columns so refund reports pick it up)
                 try {
-                    $pdo->prepare("INSERT INTO payments (booking_type, booking_id, payment_type, payment_method, amount, notes, recorded_by, created_at) VALUES ('restaurant', ?, 'refund', ?, ?, ?, ?, NOW())")
-                        ->execute([$refundOrderId, pos_mapMethod($refRow['payment_method'] ?? 'cash'), -abs($refundTotal), 'Refund: ' . $refundReason, $user['id']]);
+                    // POS menu prices are gross — extract VAT from within (same as the sale sync)
+                    $refVat = pos_calculateRestaurantVatParts((float)$refRow['total_amount']);
+                    $refTip = (float)($refRow['tip_amount'] ?? 0);
+                    $origPayStmt = $pdo->prepare("SELECT id FROM payments WHERE booking_type='restaurant' AND COALESCE(payment_type,'') != 'refund' AND deleted_at IS NULL AND (payment_reference = ? OR booking_id = ?) ORDER BY id DESC LIMIT 1");
+                    $origPayStmt->execute(['POS-' . $refRow['reference'], $refundOrderId]);
+                    $origPaymentId = (int)$origPayStmt->fetchColumn() ?: null;
+                    $pdo->prepare("INSERT INTO payments (
+                            payment_reference, booking_type, booking_id, booking_reference,
+                            payment_date, payment_amount, vat_rate, vat_amount, total_amount,
+                            payment_method, payment_type, payment_status, status,
+                            original_payment_id, refund_reason, refund_status, refund_amount,
+                            notes, recorded_by, created_at
+                        ) VALUES (?, 'restaurant', ?, ?, CURDATE(), ?, ?, ?, ?, ?, 'refund', 'completed', 'completed', ?, ?, 'completed', ?, ?, ?, NOW())")
+                        ->execute([
+                            'REF-POS-' . $refRow['reference'],
+                            $refundOrderId,
+                            $refRow['reference'],
+                            $refVat['net'] + $refTip,
+                            $refVat['vat_rate'],
+                            $refVat['vat'],
+                            $refundTotal,
+                            pos_mapMethod($refRow['payment_method'] ?? 'cash'),
+                            $origPaymentId,
+                            $refundReason,
+                            $refundTotal,
+                            'Refund: ' . $refundReason,
+                            $user['id'],
+                        ]);
                 } catch (Throwable $payEx) {
                     error_log('refund_order payment insert: ' . $payEx->getMessage());
                 }

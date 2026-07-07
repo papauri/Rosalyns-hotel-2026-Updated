@@ -282,7 +282,10 @@ if (!$is_card_insight_ajax) {
 
     if ($mod_finance) {
         try {
-            $r = $pdo->query("SELECT COUNT(*) c, COALESCE(SUM(payment_amount),0) v FROM payments WHERE DATE(payment_date)=CURDATE() AND payment_status IN ('paid','completed','partial') AND deleted_at IS NULL AND COALESCE(payment_type, '') <> 'refund'")->fetch(PDO::FETCH_ASSOC);
+            // Gross takings today. POS sales sync into payments as booking_type='restaurant',
+            // so counting them here AND adding restaurant_rev_today would double-count —
+            // exclude restaurant rows from the ledger sum and add the POS gross figure once.
+            $r = $pdo->query("SELECT COUNT(*) c, COALESCE(SUM(total_amount),0) v FROM payments WHERE DATE(payment_date)=CURDATE() AND payment_status IN ('paid','completed','partial') AND deleted_at IS NULL AND COALESCE(payment_type, '') <> 'refund' AND booking_type <> 'restaurant'")->fetch(PDO::FETCH_ASSOC);
             $finance['payments_today'] = (int)$r['c'];
             $finance['revenue_today']  = (float)$r['v'];
             $finance['revenue_today'] += (float)($ops['restaurant_rev_today'] ?? 0);

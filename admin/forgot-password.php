@@ -22,6 +22,7 @@ if (isset($_SESSION['admin_user_id'])) {
 }
 
 require_once '../config/database.php';
+require_once __DIR__ . '/../config/security.php';
 
 $error_message = '';
 $success_message = '';
@@ -31,7 +32,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $ip    = $_SERVER['REMOTE_ADDR'] ?? 'unknown';
     $ua    = substr($_SERVER['HTTP_USER_AGENT'] ?? '', 0, 500);
 
-    if (empty($email)) {
+    if (!validateCsrfToken($_POST['csrf_token'] ?? '')) {
+        $error_message = 'Your session expired. Please try again.';
+    } elseif (empty($email)) {
         $error_message = 'Please enter your email address.';
     } elseif (!filter_var($email, FILTER_VALIDATE_EMAIL)) {
         $error_message = 'Please enter a valid email address.';
@@ -208,6 +211,7 @@ $site_name = getSetting('site_name');
             <?php endif; ?>
 
             <form method="POST">
+                <?php echo getCsrfField(); ?>
                 <div class="form-group">
                     <label for="email">Email Address</label>
                     <div class="input-wrapper">
