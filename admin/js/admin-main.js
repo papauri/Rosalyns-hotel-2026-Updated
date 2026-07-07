@@ -1904,3 +1904,44 @@
         }, 650);
     });
 }());
+
+/* ── Stale CSRF auto-recovery ─────────────────────────────────────────────
+   A tab left open across a re-login holds an outdated csrf_token, so its
+   next AJAX action fails with "Security token invalid". Instead of making
+   the user decode that, detect the response globally, tell them what is
+   happening, and reload once to mint a fresh token. sessionStorage guard
+   prevents a reload loop if the token is still invalid after refresh. */
+(function () {
+    'use strict';
+    if (!window.fetch) return;
+    var GUARD = 'rhCsrfAutoReloaded';
+    var origFetch = window.fetch;
+    window.fetch = function () {
+        var call = origFetch.apply(this, arguments);
+        return call.then(function (resp) {
+            try {
+                var ct = (resp.headers.get('content-type') || '');
+                if (resp.ok && ct.indexOf('application/json') !== -1) {
+                    resp.clone().json().then(function (data) {
+                        var msg = (data && (data.message || data.error) || '');
+                        if (data && data.success === false && /security token invalid/i.test(msg)) {
+                            if (sessionStorage.getItem(GUARD)) return; // avoid loop
+                            try { sessionStorage.setItem(GUARD, '1'); } catch (e) {}
+                            if (window.Alert && Alert.show) {
+                                Alert.show('Your session was refreshed — reloading the page…', 'info');
+                            }
+                            setTimeout(function () { location.reload(); }, 1200);
+                        }
+                    }).catch(function () { /* not JSON we care about */ });
+                }
+            } catch (e) { /* never break the original call */ }
+            return resp;
+        });
+    };
+    /* Clear the guard once a page load produces a working token again */
+    document.addEventListener('DOMContentLoaded', function () {
+        setTimeout(function () {
+            try { sessionStorage.removeItem(GUARD); } catch (e) {}
+        }, 5000);
+    });
+}());
