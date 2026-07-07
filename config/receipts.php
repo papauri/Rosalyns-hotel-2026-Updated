@@ -194,7 +194,7 @@ if (!function_exists('receipt_placeholders')) {
         // Use public HTTPS URL — email clients (Gmail/Outlook) block data: URIs
         $logoSrc  = function_exists('hotel_email_logo_url') ? hotel_email_logo_url() : '';
         $logoHtml = $logoSrc !== ''
-            ? '<img src="' . htmlspecialchars($logoSrc, ENT_QUOTES, 'UTF-8') . '" alt="' . htmlspecialchars($siteName, ENT_QUOTES, 'UTF-8') . '" style="max-width:160px;height:auto;display:block;margin:0 auto;">'
+            ? '<img src="' . htmlspecialchars($logoSrc, ENT_QUOTES, 'UTF-8') . '" alt="' . htmlspecialchars($siteName, ENT_QUOTES, 'UTF-8') . '" style="max-width:110px;height:auto;display:block;margin:0 auto;">'
             : '';
 
         return [

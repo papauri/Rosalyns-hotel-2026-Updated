@@ -10,7 +10,7 @@ if (!function_exists('quotationPdfLogoHtml')) {
             return '';
         }
 
-        return '<img src="' . htmlspecialchars($logoSrc, ENT_QUOTES, 'UTF-8') . '" alt="Logo" height="88" style="height:88px;width:auto;display:block;margin:0 auto;">';
+        return '<img src="' . htmlspecialchars($logoSrc, ENT_QUOTES, 'UTF-8') . '" alt="Logo" height="64" style="height:64px;width:auto;display:block;margin:0 auto;">';
     }
 }
 

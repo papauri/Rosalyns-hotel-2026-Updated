@@ -596,7 +596,7 @@ if (!function_exists('generateCreditNotePDF')) {
             if ($tcpdfAvailable && function_exists('hotel_default_credit_note_document_html') && function_exists('renderBookingDocumentTemplate') && function_exists('bookingRenderPdfFromHtml')) {
                 $logoSrc = function_exists('hotel_invoice_logo_src') ? hotel_invoice_logo_src() : '';
                 $logoHtml = $logoSrc !== ''
-                    ? '<img src="' . htmlspecialchars($logoSrc, ENT_QUOTES, 'UTF-8') . '" alt="' . htmlspecialchars($siteName, ENT_QUOTES, 'UTF-8') . '" height="96" style="height:96px;width:auto;display:block;margin:0 auto;">'
+                    ? '<img src="' . htmlspecialchars($logoSrc, ENT_QUOTES, 'UTF-8') . '" alt="' . htmlspecialchars($siteName, ENT_QUOTES, 'UTF-8') . '" height="64" style="height:64px;width:auto;display:block;margin:0 auto;">'
                     : '';
 
                 $html = renderBookingDocumentTemplate('credit_note_document', [
@@ -926,7 +926,7 @@ if (!function_exists('sendCreditNoteEmail')) {
                 if (!empty($dbTpl['html_body'])) {
                     $cnLogoUrl  = function_exists('hotel_email_logo_url') ? hotel_email_logo_url() : '';
                     $cnLogoHtml = $cnLogoUrl !== ''
-                        ? '<img src="' . htmlspecialchars($cnLogoUrl, ENT_QUOTES, 'UTF-8') . '" alt="' . htmlspecialchars($site_name, ENT_QUOTES, 'UTF-8') . '" style="max-width:160px;height:auto;display:block;margin:0 auto;">'
+                        ? '<img src="' . htmlspecialchars($cnLogoUrl, ENT_QUOTES, 'UTF-8') . '" alt="' . htmlspecialchars($site_name, ENT_QUOTES, 'UTF-8') . '" style="max-width:110px;height:auto;display:block;margin:0 auto;">'
                         : '';
                     $cnPlaceholders = [
                         '{{site_name}}'          => htmlspecialchars($site_name),

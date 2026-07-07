@@ -341,7 +341,7 @@ function buildInvoiceHTML(array $booking, string $invoice_number, string $site_n
         ? hotel_invoice_logo_src()
         : getInvoiceLogoUrl();
     $logo_html = !empty($logo_url)
-        ? '<img src="' . htmlspecialchars($logo_url) . '" alt="' . htmlspecialchars($site_name) . '" height="116" style="height:116px; width:auto; display:block; margin:0 auto;">'
+        ? '<img src="' . htmlspecialchars($logo_url) . '" alt="' . htmlspecialchars($site_name) . '" height="64" style="height:64px; width:auto; display:block; margin:0 auto;">'
         : '';
 
     // Guest counts
@@ -980,7 +980,7 @@ function sendInvoiceEmailToGuestWithCC(array $booking, string $invoice_file, arr
         $logo_url = getInvoiceLogoUrl();
         $logo_html_email = '';
         if (!empty($logo_url)) {
-            $logo_html_email = '<img src="' . htmlspecialchars($logo_url) . '" alt="' . htmlspecialchars($email_site_name) . '" style="max-width: 180px; height: auto; display: block; margin: 0 auto 15px auto;">';
+            $logo_html_email = '<img src="' . htmlspecialchars($logo_url) . '" alt="' . htmlspecialchars($email_site_name) . '" style="max-width: 110px; height: auto; display: block; margin: 0 auto 15px auto;">';
         }
 
         // Prepare email content - Stunning State-of-the-Art Design
@@ -1666,7 +1666,7 @@ function buildConferenceInvoiceHTML(array $enquiry, string $invoice_number, stri
     $logo_url = getInvoiceLogoUrl();
     $logo_html = '';
     if (!empty($logo_url)) {
-        $logo_html = '<img src="' . htmlspecialchars($logo_url) . '" alt="' . htmlspecialchars($site_name) . '" style="max-width: 280px; height: auto; margin-bottom: 20px; display: block; margin-left: auto; margin-right: auto;">';
+        $logo_html = '<img src="' . htmlspecialchars($logo_url) . '" alt="' . htmlspecialchars($site_name) . '" style="max-width: 110px; height: auto; margin-bottom: 20px; display: block; margin-left: auto; margin-right: auto;">';
     }
 
     // Get VAT settings - more flexible check
@@ -1741,7 +1741,7 @@ function buildConferenceInvoiceHTML(array $enquiry, string $invoice_number, stri
         if (function_exists('hotel_default_conference_invoice_document_html') && function_exists('renderBookingDocumentTemplate')) {
             $logoSrc = function_exists('hotel_invoice_logo_src') ? hotel_invoice_logo_src() : getInvoiceLogoUrl();
             $logoHtml = $logoSrc !== ''
-                ? '<img src="' . htmlspecialchars($logoSrc, ENT_QUOTES, 'UTF-8') . '" alt="' . htmlspecialchars($site_name, ENT_QUOTES, 'UTF-8') . '" height="96" style="height:96px;width:auto;display:block;margin:0 auto;">'
+                ? '<img src="' . htmlspecialchars($logoSrc, ENT_QUOTES, 'UTF-8') . '" alt="' . htmlspecialchars($site_name, ENT_QUOTES, 'UTF-8') . '" height="64" style="height:64px;width:auto;display:block;margin:0 auto;">'
                 : '';
             $amountPaid = (float)($enquiry['amount_paid'] ?? $totalWithVat);
             $balanceDue = (float)($enquiry['amount_due'] ?? max(0, $totalWithVat - $amountPaid));
@@ -2036,7 +2036,7 @@ function sendConferenceInvoiceEmailToClient(array $enquiry, string $invoice_file
             : '';
         $ciLogoSrc  = function_exists('hotel_email_logo_url') ? hotel_email_logo_url() : '';
         $ciLogoHtml = $ciLogoSrc !== ''
-            ? '<img src="' . htmlspecialchars($ciLogoSrc, ENT_QUOTES, 'UTF-8') . '" alt="' . htmlspecialchars((string)$email_site_name, ENT_QUOTES, 'UTF-8') . '" style="max-width:160px;height:auto;display:block;margin:0 auto;">'
+            ? '<img src="' . htmlspecialchars($ciLogoSrc, ENT_QUOTES, 'UTF-8') . '" alt="' . htmlspecialchars((string)$email_site_name, ENT_QUOTES, 'UTF-8') . '" style="max-width:110px;height:auto;display:block;margin:0 auto;">'
             : '';
 
         $templateVars = [
@@ -2159,7 +2159,7 @@ function buildGymInvoiceHTML(array $inquiry, string $invoice_number, string $sit
     $logo_url = getInvoiceLogoUrl();
     $logo_html = '';
     if (!empty($logo_url)) {
-        $logo_html = '<img src="' . htmlspecialchars($logo_url) . '" alt="' . htmlspecialchars($site_name) . '" style="max-width: 280px; height: auto; margin-bottom: 20px; display: block; margin-left: auto; margin-right: auto;">';
+        $logo_html = '<img src="' . htmlspecialchars($logo_url) . '" alt="' . htmlspecialchars($site_name) . '" style="max-width: 110px; height: auto; margin-bottom: 20px; display: block; margin-left: auto; margin-right: auto;">';
     }
 
     $vatEnabled = in_array(getSetting('vat_enabled'), ['1', 1, true, 'true', 'on'], true);
@@ -2549,7 +2549,7 @@ function buildEventInvoiceHTML(array $inquiry, string $invoice_number, string $s
     $logo_url = getInvoiceLogoUrl();
     $logo_html = '';
     if (!empty($logo_url)) {
-        $logo_html = '<img src="' . htmlspecialchars($logo_url) . '" alt="' . htmlspecialchars($site_name) . '" style="max-width: 280px; height: auto; margin-bottom: 20px; display: block; margin-left: auto; margin-right: auto;">';
+        $logo_html = '<img src="' . htmlspecialchars($logo_url) . '" alt="' . htmlspecialchars($site_name) . '" style="max-width: 110px; height: auto; margin-bottom: 20px; display: block; margin-left: auto; margin-right: auto;">';
     }
 
     $vatEnabled = in_array(getSetting('vat_enabled'), ['1', 1, true, 'true', 'on'], true);

@@ -595,6 +595,14 @@ if (!function_exists('hotel_email_logo_url')) {
 if (!function_exists('hotel_embed_logo_cid')) {
     function hotel_embed_logo_cid(PHPMailer $mail, string $html): string
     {
+        // CID embedding disabled (2026-07-08): Gmail/Outlook list CID-embedded
+        // images in the attachment strip, so the logo showed up as a downloadable
+        // "logo.png" on every email. The templates already reference the public
+        // HTTPS logo URL, which renders inline without any attachment — so this
+        // helper now returns the HTML unchanged.
+        return $html;
+
+        /* Legacy CID-embedding path (disabled — kept for reference):
         $candidates = [
             (string)getSetting('site_logo', ''),
             (string)getSetting('logo_url', ''),
@@ -650,6 +658,7 @@ if (!function_exists('hotel_embed_logo_cid')) {
         }
 
         return $html;
+        */
     }
 }
 
@@ -760,9 +769,8 @@ if (!function_exists('hotel_japandi_document_shell')) {
             . '<table style="width:100%;border-collapse:collapse;" cellpadding="0" cellspacing="0">'
             . '<tr><td bgcolor="#f5f2eb" style="background-color:#f5f2eb;padding:0;"><table style="width:100%;border-collapse:collapse;" cellpadding="0" cellspacing="0"><tr>'
             . '<td bgcolor="#f5f2eb" style="background-color:#f5f2eb;padding:48px 48px 36px;vertical-align:top;">'
-            . '<div style="max-width:120px;margin-bottom:16px;color:#9b8f7e;">{{logo_html}}</div>'
-            . '<div style="font-family:Georgia,\'Times New Roman\',serif;font-size:24px;color:#3e3930;letter-spacing:0.04em;line-height:1;font-weight:400;">{{site_name}}</div>'
-            . '<div style="width:30px;height:2px;background-color:#c2b8a6;margin:16px 0;"> </div>'
+            . '<div style="max-width:110px;margin-bottom:16px;color:#9b8f7e;">{{logo_html}}</div>'
+            . '<div style="font-family:Georgia,\'Times New Roman\',serif;font-size:24px;color:#3e3930;letter-spacing:0.04em;line-height:1;font-weight:400;margin-bottom:16px;">{{site_name}}</div>'
             . '<div style="font-size:10px;color:#6d6455;letter-spacing:0.08em;line-height:1.7;">{{address}}</div>'
             . '<div style="font-size:10px;color:#6d6455;letter-spacing:0.04em;margin-top:4px;">{{contact_phone}} &nbsp;&middot;&nbsp; {{contact_email}}</div>'
             . $headerExtra
@@ -1314,7 +1322,6 @@ if (!function_exists('hotel_premium_email_html')) {
             . '<div style="margin-bottom:16px;color:#9b8f7e;">{{logo_html}}</div>'
             . '<div style="font-family:\'Noto Serif JP\',\'DM Serif Display\',Georgia,serif;'
             . 'font-size:24px;color:#3e3930;letter-spacing:0.04em;line-height:1;font-weight:400;">{{site_name}}</div>'
-            . '<div style="width:30px;height:1px;background:#c2b8a6;margin:16px auto;"></div>'
             . '</td></tr>'
             /* ── injected inner content ── */
             . $inner_html
@@ -1968,7 +1975,7 @@ function buildBookingEmailVariables(array $booking, ?array $room = null, array $
     // Use public HTTPS URL — email clients (Gmail/Outlook) block data: URIs
     $logoSrc  = function_exists('hotel_email_logo_url') ? hotel_email_logo_url() : '';
     $logoHtml = $logoSrc !== ''
-        ? '<img src="' . htmlspecialchars($logoSrc, ENT_QUOTES, 'UTF-8') . '" alt="' . htmlspecialchars((string)$email_site_name, ENT_QUOTES, 'UTF-8') . '" style="max-width:160px;height:auto;display:block;margin:0 auto;">'
+        ? '<img src="' . htmlspecialchars($logoSrc, ENT_QUOTES, 'UTF-8') . '" alt="' . htmlspecialchars((string)$email_site_name, ENT_QUOTES, 'UTF-8') . '" style="max-width:110px;height:auto;display:block;margin:0 auto;">'
         : '';
     $vars['logo_html']     = $logoHtml;
     $vars['address']       = htmlspecialchars((string)getSetting('hotel_address', getSetting('address', '')), ENT_QUOTES, 'UTF-8');
@@ -2502,7 +2509,7 @@ function sendAdminNotificationEmail(array $booking)
         $logoHtml     = $logoSrc !== ''
             ? '<img src="' . htmlspecialchars($logoSrc, ENT_QUOTES, 'UTF-8') . '" alt="'
                 . htmlspecialchars($email_site_name, ENT_QUOTES, 'UTF-8')
-                . '" style="max-width:160px;height:auto;display:block;margin:0 auto;">'
+                . '" style="max-width:110px;height:auto;display:block;margin:0 auto;">'
             : '';
         $htmlBody = strtr($htmlBody, [
             '{{logo_html}}'     => $logoHtml,
@@ -4870,7 +4877,7 @@ function wrapEmailTemplate(string $content, string $title = '')
     $logo_html = '';
     if (!empty($logo_url)) {
         $logo_html = '<img src="' . htmlspecialchars($logo_url) . '" alt="' . htmlspecialchars($site_name) . '"
-                          style="max-width:200px;height:auto;display:block;margin:0 auto 14px;">';
+                          style="max-width:110px;height:auto;display:block;margin:0 auto 12px;">';
     }
 
     // Contact rows — each item stacks vertically in its own table row so they always centre
@@ -4928,17 +4935,16 @@ function wrapEmailTemplate(string $content, string $title = '')
         <tr>
             <td align="center" valign="top">
 
-                <!-- Email card -->
+                <!-- Email card (paper-white japandi body; header shares the same background) -->
                 <table role="presentation" class="ew-card"
-                       style="width:100%;max-width:620px;background:#ffffff;border-radius:12px;
+                       style="width:100%;max-width:620px;background:#FFFDF9;border-radius:12px;
                               overflow:hidden;border:1px solid #D6CDBF;"
                        cellspacing="0" cellpadding="0">
 
                     <!-- ─── HEADER ─── -->
                     <tr>
                         <td align="center"
-                            style="background:linear-gradient(150deg,#FAF6F0 0%,#EEE0C8 100%);
-                                   padding:36px 40px 28px;border-bottom:2px solid #D6CDBF;">
+                            style="background-color:#FFFDF9;padding:36px 40px 28px;">
                             ' . $logo_html . '
                             <p style="margin:0;font-family:Georgia,\'Times New Roman\',serif;
                                        color:' . $dark . ';
@@ -4946,13 +4952,6 @@ function wrapEmailTemplate(string $content, string $title = '')
                                        font-weight:600;letter-spacing:2.5px;text-transform:uppercase;">
                                 ' . htmlspecialchars($site_name) . '
                             </p>
-                        </td>
-                    </tr>
-
-                    <!-- ─── GOLD ACCENT LINE ─── -->
-                    <tr>
-                        <td style="height:3px;
-                                   background:linear-gradient(90deg,' . $accent . ' 0%,#C8A45A 50%,' . $accent . ' 100%);">
                         </td>
                     </tr>
 
