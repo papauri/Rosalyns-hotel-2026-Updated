@@ -39,9 +39,9 @@ try {
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Jost:wght@300;400;500;600;700&display=swap" rel="stylesheet">
-<!-- BarcodeDetector polyfill for desktop Chrome / Firefox / Safari -->
+<!-- BarcodeDetector polyfill for desktop Chrome / Firefox / Safari (self-hosted) -->
 <script type="module">
-import { BarcodeDetectorPolyfill } from 'https://cdn.jsdelivr.net/npm/@undecaf/barcode-detector-polyfill@0.9.21/dist/es2017/index.js';
+import { BarcodeDetectorPolyfill } from './js/barcode-detector-polyfill.js';
 if (!('BarcodeDetector' in window)) { window.BarcodeDetector = BarcodeDetectorPolyfill; }
 </script>
 <style>
