@@ -29,6 +29,12 @@
     background: none;
     min-height: 44px;
     white-space: nowrap;
+    /* Container safety: a button can shrink within a flex/grid parent and never
+       exceed it, so its label can't push the button past its column. Paired with
+       the existing `overflow: hidden`, an over-long label clips gracefully instead
+       of spilling over the button's own rounded edges. */
+    min-width: 0;
+    max-width: 100%;
 }
 
 .btn:disabled {

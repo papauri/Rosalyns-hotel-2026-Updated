@@ -2609,7 +2609,7 @@
 
 .summary-sections-grid {
     display: grid;
-    grid-template-columns: repeat(4, 1fr);
+    grid-template-columns: repeat(4, minmax(0, 1fr));
     gap: 0 28px;
     align-items: start;
 }
@@ -3582,7 +3582,7 @@
 /* Occupancy guide cards — tighter, more refined */
 .booking-page .occupancy-type-group {
     display: grid;
-    grid-template-columns: repeat(3, 1fr);
+    grid-template-columns: repeat(3, minmax(0, 1fr));
     gap: 10px;
 }
 
@@ -4289,7 +4289,7 @@
 
     /* 4. Occupancy guide tiles: always fit in a row with room to breathe */
     .booking-page .occupancy-type-group {
-        grid-template-columns: repeat(3, 1fr) !important;
+        grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
         gap: 10px;
     }
 
@@ -4368,7 +4368,7 @@
 /* ── Grid: 3 columns on desktop ───────────────────────────────── */
 .booking-page .room-selection {
     display: grid !important;
-    grid-template-columns: repeat(3, 1fr) !important;
+    grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
     gap: 18px !important;
     margin-bottom: 0 !important;
     align-items: stretch;
@@ -4417,7 +4417,7 @@
    ══════════════════════════════════════ */
 @media (min-width: 769px) and (max-width: 1024px) {
     .booking-page .room-selection {
-        grid-template-columns: repeat(2, 1fr) !important;
+        grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
         gap: 16px !important;
     }
 
@@ -4436,7 +4436,7 @@
    ══════════════════════════════════════ */
 @media (min-width: 601px) and (max-width: 768px) {
     .booking-page .room-selection {
-        grid-template-columns: repeat(2, 1fr) !important;
+        grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
         gap: 14px !important;
     }
 
@@ -4582,7 +4582,7 @@
    ══════════════════════════════════════ */
 @media (min-width: 1600px) {
     .booking-page .room-selection {
-        grid-template-columns: repeat(4, 1fr) !important;
+        grid-template-columns: repeat(4, minmax(0, 1fr)) !important;
         gap: 20px !important;
     }
 
@@ -4784,7 +4784,7 @@
 /* ── Package cards: 2-col grid on desktop/tablet ─────────────── */
 .booking-page #packagesList {
     display: grid;
-    grid-template-columns: repeat(2, 1fr);
+    grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: 14px;
 }
 

@@ -10,7 +10,7 @@
 
 .editorial-booking-form {
     display: grid;
-    grid-template-columns: repeat(2, 1fr);
+    grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: clamp(0.75rem, 1.2vw, 1.1rem);
     align-items: end;
 }
@@ -53,17 +53,25 @@
     justify-content: center;
     gap: 0.6rem;
     min-height: 50px;
-    padding: 0 clamp(1.2rem, 2vw, 2rem);
+    padding: 0.55rem clamp(1.2rem, 2vw, 2rem);
     background: linear-gradient(140deg, #C9A060 0%, #B18247 48%, #916535 100%);
     color: #ffffff;
     border: 1px solid rgba(145, 101, 53, 0.45);
     border-radius: var(--radius-full, 9999px);
-    font-size: 0.82rem;
+    font-size: clamp(0.74rem, 0.7rem + 0.2vw, 0.82rem);
     font-weight: 700;
-    letter-spacing: 0.1em;
+    letter-spacing: 0.08em;
     text-transform: uppercase;
     font-family: var(--font-sans, 'Jost', sans-serif);
     cursor: pointer;
+    /* Never exceed the grid cell, and let the label wrap to a second line rather
+       than spilling over the pill when the column is tight or the page is zoomed.
+       (Was `white-space: nowrap` with no width guard — the label overflowed the
+       button on narrow columns and at high zoom.) */
+    min-width: 0;
+    max-width: 100%;
+    text-align: center;
+    overflow-wrap: break-word;
     box-shadow:
         0 4px 20px rgba(177, 130, 71, 0.38),
         inset 0 1px 0 rgba(255, 255, 255, 0.22);
@@ -71,7 +79,11 @@
         transform 260ms cubic-bezier(0.22, 1, 0.36, 1),
         box-shadow 260ms cubic-bezier(0.22, 1, 0.36, 1),
         filter 260ms cubic-bezier(0.22, 1, 0.36, 1);
-    white-space: nowrap;
+    /* Allow the label to wrap under pressure instead of overflowing the pill.
+       In its normal desktop/full-width state it still sits on one line. */
+    white-space: normal;
+    text-wrap: balance;
+    line-height: 1.15;
 }
 
 .editorial-booking-submit:hover {
@@ -152,7 +164,9 @@
 /* Desktop only: 5-column row with inline submit */
 @media (min-width: 1025px) {
     .landing-main .editorial-booking-form {
-        grid-template-columns: repeat(4, minmax(0, 1fr)) minmax(180px, 1fr);
+        /* Submit column is content-sized (`auto`) so the CTA is never narrower than
+           its label; the four field columns (minmax(0,1fr)) shrink to make room. */
+        grid-template-columns: repeat(4, minmax(0, 1fr)) auto;
     }
     .landing-main .editorial-booking-form .editorial-booking-submit {
         grid-column: auto;
@@ -163,7 +177,7 @@
 /* Tablet: 2-column grid, submit full width */
 @media (max-width: 1024px) {
     .landing-main .editorial-booking-form {
-        grid-template-columns: repeat(2, 1fr);
+        grid-template-columns: repeat(2, minmax(0, 1fr));
     }
     .landing-main .editorial-booking-form .editorial-booking-submit,
     .landing-main .editorial-booking-form .editorial-booking-field:last-of-type {
@@ -629,9 +643,9 @@
     box-shadow: var(--premium-shadow-soft, 0 14px 34px rgba(46, 40, 33, 0.075));
 }
 
-.editorial-about-stats {
-    justify-content: space-between;
-}
+/* Base .editorial-about-stats layout is defined once, lower in this file, as a
+   resilient auto-fit grid. (An earlier `justify-content: space-between` override
+   here was removed — it only applied to the old flex layout and fought the grid.) */
 
 .editorial-rooms-section .section-header {
     margin-bottom: clamp(1.15rem, 2vw, 1.9rem);
@@ -1557,7 +1571,7 @@
     }
 
     .editorial-booking-form {
-        grid-template-columns: repeat(2, 1fr);
+        grid-template-columns: repeat(2, minmax(0, 1fr));
     }
 
     /* Submit spans both columns on tablet */
@@ -1567,7 +1581,7 @@
     }
 
     .landing-main .editorial-booking-form {
-        grid-template-columns: repeat(2, 1fr);
+        grid-template-columns: repeat(2, minmax(0, 1fr));
     }
 
     .landing-main .editorial-booking-form .editorial-booking-submit,
@@ -1949,10 +1963,15 @@
     letter-spacing: 0.02em;
 }
 
-/* Stats */
+/* Stats — auto-fit grid so any number of stats stays on one balanced row on wide
+   screens and reflows to fewer columns as space tightens (narrow viewport OR browser
+   zoom), instead of overflowing the 60ch content card. `minmax(min(100%, 8rem), 1fr)`
+   guarantees a track can always shrink to the container width, so it can never push
+   past its parent — the root cause of the old flex row bursting its container. */
 .editorial-about-stats {
-    display: flex;
-    gap: var(--space-8, 2rem);
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, 8rem), 1fr));
+    gap: clamp(1rem, 1.6vw, 2rem);
     margin-bottom: var(--space-8, 2rem);
     padding-top: var(--space-6, 1.5rem);
     border-top: 1px solid var(--color-border-light, #F5F3F0);
@@ -1962,14 +1981,20 @@
     display: flex;
     flex-direction: column;
     gap: var(--space-1, 0.25rem);
+    /* Allow the grid/flex child to shrink below its content's intrinsic width so a
+       long stat number or label wraps instead of forcing horizontal overflow. */
+    min-width: 0;
 }
 
 .editorial-about-stat .stat-number {
     font-family: var(--font-serif, 'Cormorant Garamond', Georgia, serif);
-    font-size: var(--text-4xl, 2.25rem);
+    /* Fluid instead of a fixed 2.25rem: scales smoothly with viewport and zoom,
+       bounded so it grows a touch on large screens without bursting the card. */
+    font-size: clamp(1.75rem, 1.35rem + 1.6vw, 2.4rem);
     font-weight: var(--font-light, 300);
     line-height: 1;
     color: var(--color-primary, #8B7355);
+    overflow-wrap: break-word;
 }
 
 .editorial-about-stat .stat-label {
@@ -1979,6 +2004,7 @@
     text-transform: uppercase;
     letter-spacing: 0.1em;
     color: var(--color-text-muted, #6B6B6B);
+    overflow-wrap: break-word;
 }
 
 /* CTA Buttons */
