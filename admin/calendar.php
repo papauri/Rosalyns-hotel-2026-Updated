@@ -611,7 +611,9 @@ $calendarMonthLabel = $monthNames[$currentMonth] . ' ' . $currentYear;
         </div>
     </div>
 
-    <script src="js/admin-components.js"></script>
+    <?php /* admin-components.js (CalendarTooltip) is loaded once, cache-busted, by admin-footer.php.
+             A second unversioned copy here caused double-init and a stale-cache race that made the
+             booking hover tooltips need two reloads before working. */ ?>
     <script>
         (function() {
             'use strict';

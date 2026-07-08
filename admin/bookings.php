@@ -3680,9 +3680,13 @@ $today_str = $today->format('Y-m-d');
                                                     <!-- Note: Cancel button is hidden for checked-in bookings -->
                                                 <?php endif; ?>
                                                 <?php
-                                                // Paid button: only show for pending or confirmed bookings that are not yet paid
-                                                // Hide for tentative, checked-in, checked-out, cancelled, no-show
-                                                $can_mark_paid = in_array($booking['status'], ['pending', 'confirmed']) && $booking['payment_status'] !== 'paid';
+                                                // One-click "mark as paid" records the FULL total as settled, so it is
+                                                // only valid when nothing has been paid yet. A partial booking still has
+                                                // an outstanding balance — marking it paid here would silently discard
+                                                // that balance, so those must go through Record Payment / Consolidation
+                                                // in the More menu instead. Also hide for tentative and all final states.
+                                                $can_mark_paid = in_array($booking['status'], ['pending', 'confirmed'], true)
+                                                    && !in_array($booking['payment_status'], ['paid', 'partial', 'completed'], true);
                                                 ?>
                                                 <?php if ($can_mark_paid && $_perm_pay): ?>
                                                     <button class="quick-action paid" title="Record payment as paid" aria-label="Record payment as paid" onclick="updatePayment(<?php echo $booking['id']; ?>, 'paid')">
@@ -5222,8 +5226,8 @@ $today_str = $today->format('Y-m-d');
                             <option value="">-- Select Email Type --</option>
                             <option value="booking_received">Booking Received (Initial confirmation)</option>
                             <option value="booking_confirmed">Booking Confirmed</option>
-                            <option value="tentative_confirmed">Tentative Booking Confirmed</option>
-                            <option value="tentative_converted">Tentative Converted to Confirmed</option>
+                            <option value="tentative_confirmed" id="opt_tentative_confirmed">Tentative Booking Confirmed</option>
+                            <option value="tentative_converted" id="opt_tentative_converted">Tentative Converted to Confirmed</option>
                             <option value="booking_cancelled">Booking Cancelled</option>
                             <option value="invoice">Invoice</option>
                             <option value="booking_reminder" id="opt_booking_reminder" style="display:none;">&#9888; Check-in Reminder (Late / Overdue)</option>
@@ -6260,6 +6264,15 @@ $today_str = $today->format('Y-m-d');
             if (reminderOpt) {
                 reminderOpt.style.display = isLateOrOverdue ? '' : 'none';
             }
+
+            // Tentative email types only make sense for tentative bookings — hiding
+            // them elsewhere stops a confirmed booking from offering a "Tentative"
+            // email type in the dropdown.
+            const isTentative = bookingStatus === 'tentative';
+            ['opt_tentative_confirmed', 'opt_tentative_converted'].forEach(function (id) {
+                const opt = document.getElementById(id);
+                if (opt) opt.style.display = isTentative ? '' : 'none';
+            });
 
             // Set default email type based on booking status
             const emailTypeSelect = document.getElementById('email_type');

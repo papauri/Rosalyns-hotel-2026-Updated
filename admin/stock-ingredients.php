@@ -371,6 +371,38 @@ if (!$error || strpos($error, 'Stock tables not yet') === false) {
         }
         sort($categories);
 
+        // Export to Excel (CSV — opens directly in Excel). Mirrors the CSV export
+        // convention used on stock-reports.php. Must run before any HTML output.
+        if (isset($_GET['export']) && $_GET['export'] === 'csv') {
+            $fname = 'stock-management-' . date('Ymd-His') . '.csv';
+            header('Content-Type: text/csv; charset=utf-8');
+            header('Content-Disposition: attachment; filename="' . $fname . '"');
+            $out = fopen('php://output', 'w');
+            // UTF-8 BOM so Excel renders accented characters and the currency symbol correctly
+            fwrite($out, "\xEF\xBB\xBF");
+            fputcsv($out, ['Name', 'Category', 'Unit', 'Current Qty', 'Min Qty', 'Reorder Point', 'Par Level', 'Lead Time (days)', 'Cost/Unit', 'Stock Value', 'Next Expiry', 'Status']);
+            foreach ($ingredients as $row) {
+                $qty  = (float)($row['current_quantity'] ?? 0);
+                $cost = (float)($row['cost_per_unit'] ?? 0);
+                fputcsv($out, [
+                    $row['name'] ?? '',
+                    $row['category'] ?? '',
+                    $row['unit'] ?? '',
+                    $qty,
+                    (float)($row['min_quantity'] ?? 0),
+                    (float)($row['reorder_point'] ?? 0),
+                    (float)($row['par_level'] ?? 0),
+                    (int)($row['lead_time_days'] ?? 0),
+                    number_format($cost, 2, '.', ''),
+                    number_format($qty * $cost, 2, '.', ''),
+                    $row['next_expiry'] ?? '',
+                    !empty($row['is_archived']) ? 'Archived' : 'Active',
+                ]);
+            }
+            fclose($out);
+            exit;
+        }
+
         // Pull batches (last 60d + every batch with stock left or expiring) for the manage-batches modal
         $bstmt = $pdo->query("
             SELECT id, ingredient_id, batch_number, quantity_received, quantity_remaining,
@@ -438,7 +470,12 @@ $stockNounLow = $stockIsFood ? 'ingredient' : 'stock item';
     <div class="content stock-ingredients-page">
         <div class="page-header">
             <h2 class="page-title"><i class="fas <?php echo $stockIsFood ? 'fa-carrot' : 'fa-boxes-stacked'; ?>" style="color:var(--color-primary,#8A775F);"></i> <?php echo $stockNounPl; ?></h2>
-            <button class="btn-add" onclick="openIngredientModal()"><i class="fas fa-plus"></i> Add <?php echo $stockNoun; ?></button>
+            <div style="display:flex; gap:8px; flex-wrap:wrap;">
+                <?php if (!empty($ingredients)): ?>
+                    <a class="btn-secondary" href="?export=csv" style="display:inline-flex; align-items:center; gap:6px; text-decoration:none;" title="Download all <?php echo strtolower($stockNounPl); ?> as an Excel-compatible spreadsheet"><i class="fas fa-file-excel"></i> Export to Excel</a>
+                <?php endif; ?>
+                <button class="btn-add" onclick="openIngredientModal()"><i class="fas fa-plus"></i> Add <?php echo $stockNoun; ?></button>
+            </div>
         </div>
 
         <?php if ($message): showAlert($message, 'success');

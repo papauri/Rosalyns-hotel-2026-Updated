@@ -9,7 +9,9 @@ require_once 'admin-init.php';
 
 $message = '';
 $error = '';
-$autoOpenCombinations = false;
+// Allow other pages (e.g. room-management.php) to deep-link straight into the
+// joined-room manager via ?combinations=1.
+$autoOpenCombinations = isset($_GET['combinations']) && $_GET['combinations'] === '1';
 
 function saveRoomAmenities(PDO $pdo, int $roomId, string $amenitiesRaw): void
 {

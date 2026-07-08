@@ -67,16 +67,30 @@
     border-color: #f87171;
 }
 
-/* Event Card Image */
-.event-card-image,
-.event-card .no-image-placeholder {
+/* Event Card Image — a single fixed-height media box crops both images and
+   video consistently (object-fit: cover), matching the other card pages. */
+.event-card-media {
     height: 160px;
+    width: 100%;
+    overflow: hidden;
+    background: #000;
+}
+
+.event-card-media > * {
+    height: 100%;
     width: 100%;
 }
 
 .event-card-image {
+    height: 100%;
+    width: 100%;
     object-fit: cover;
     display: block;
+}
+
+.event-card .no-image-placeholder {
+    height: 160px;
+    width: 100%;
 }
 
 .event-card .no-image-placeholder {

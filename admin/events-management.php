@@ -576,10 +576,9 @@ $fb_events_posting_on = getSetting('facebook_posting_enabled', '0') === '1'
                             }
                             ?>
 
+                            <div class="event-card-media">
                             <?php if ($hasVideo): ?>
-                                <div style="width: 100%; aspect-ratio: 16/10; overflow: hidden; background: #000;">
-                                    <?php echo renderVideoEmbed($event['video_path'], $event['video_type'], ['autoplay' => false, 'muted' => false, 'style' => 'width: 100%; height: 100%; object-fit: cover;']); ?>
-                                </div>
+                                <?php echo renderVideoEmbed($event['video_path'], $event['video_type'], ['autoplay' => false, 'muted' => false, 'style' => 'width: 100%; height: 100%; object-fit: cover;']); ?>
                             <?php elseif ($imgSrc): ?>
                                 <img src="<?php echo htmlspecialchars($imgSrc); ?>"
                                     alt="<?php echo htmlspecialchars($event['title']); ?>"
@@ -589,6 +588,7 @@ $fb_events_posting_on = getSetting('facebook_posting_enabled', '0') === '1'
                             <?php else: ?>
                                 <div class="no-image-placeholder"><i class="fas fa-calendar-alt"></i></div>
                             <?php endif; ?>
+                            </div>
 
                             <div class="event-card-body">
                                 <div class="event-card-title"><?php echo htmlspecialchars($event['title']); ?></div>

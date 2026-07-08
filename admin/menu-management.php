@@ -1609,7 +1609,11 @@ if ($stockReady) {
                     if (m) m.style.display = 'none';
                 };
 
-                document.addEventListener('DOMContentLoaded', function() {
+                // Run immediately if the DOM is already parsed — this inline block
+                // can execute after DOMContentLoaded has fired, in which case a plain
+                // addEventListener('DOMContentLoaded') never runs and the Share/submit
+                // buttons stay dead until a reload happens to change the timing.
+                function _fbMenuBindSubmits() {
                     // ── Single menu item submit ────────────────────────────────
                     var submitBtn = document.getElementById('fbMenuSubmitBtn');
                     if (submitBtn) {
@@ -1724,7 +1728,13 @@ if ($stockReady) {
                                 });
                         });
                     }
-                });
+                }
+
+                if (document.readyState === 'loading') {
+                    document.addEventListener('DOMContentLoaded', _fbMenuBindSubmits);
+                } else {
+                    _fbMenuBindSubmits();
+                }
             }());
         </script>
     <?php endif; ?>

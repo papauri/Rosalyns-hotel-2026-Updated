@@ -605,6 +605,9 @@ $fb_rooms_posting_on = getSetting('facebook_posting_enabled', '0') === '1'
             <h2 class="page-title"><i class="fas fa-bed"></i> Manage Hotel Rooms</h2>
             <div style="display:flex; gap:10px; align-items:center;">
                 <span style="font-size:12px; color:#999;"><i class="fas fa-arrows-alt"></i> Drag cards to reorder</span>
+                <a class="btn-action" href="individual-rooms.php?combinations=1" style="background:#f5f0e8; color:#3e3930; padding:12px 24px; font-size:14px; border-radius:8px; text-decoration:none; border:1px solid #d3cbc0;" title="Pair adjoining physical rooms into one bookable joined-room unit">
+                    <i class="fas fa-link"></i> Joined Rooms
+                </a>
                 <button class="btn-action" type="button" style="background:var(--gold,#8B7355); color:var(--deep-navy,#111111); padding:12px 24px; font-size:14px; border-radius:8px;" onclick="openAddModal()">
                     <i class="fas fa-plus"></i> Add New Room
                 </button>
