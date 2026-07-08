@@ -160,6 +160,7 @@ function rh_is_feature_link_hidden(string $rawHref): bool {
         'restaurant'    => 'isRestaurantEnabled',
         'menu'          => 'isRestaurantEnabled',
         'gym'           => 'isGymEnabled',
+        'gym-schedule'  => 'isGymEnabled',
         'conference'    => 'isConferenceEnabled',
         'booking'       => 'isBookingEnabled',
         'rooms-gallery' => 'isBookingEnabled',

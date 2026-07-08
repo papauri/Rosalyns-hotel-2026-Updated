@@ -18,6 +18,15 @@ require_once 'admin/includes/gym-schedule-lib.php';
 
 $site_name  = getSetting('site_name');
 $gymEnabled = isGymEnabled();
+
+// Module gate: when Gym & Fitness is switched off, this page must not exist on
+// the public site at all (same intent as gym.php's disabled state). The in-page
+// "slot booking unavailable" notice below only covers the gym-on/slots-off case.
+if (!$gymEnabled) {
+    header('Location: ' . (defined('BASE_URL') ? BASE_URL : '/'));
+    exit;
+}
+
 $cfg = gymScheduleSettings();
 $currency = (string)getSetting('currency_symbol', 'K');
 
