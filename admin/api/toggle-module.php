@@ -25,8 +25,32 @@ $allowed = ['bookings', 'housekeeping', 'pos', 'stock', 'conference', 'gym', 'fi
             'station_kds', 'station_bds', 'station_cds', 'station_room_service'];
 $locked  = ['finance']; // These modules cannot be disabled — always required
 
+// Guest-facing page flags: not rows in enabled_modules, they ride site settings.
+// Exposed here so the Module Settings UI can toggle them like any other module.
+$front_end_flags = [
+    'events_page'     => 'events_system_enabled',
+    'restaurant_page' => 'restaurant_system_enabled',
+];
+
 $module_key = trim((string)($_POST['module_key'] ?? ''));
 $is_enabled = (int)!empty($_POST['is_enabled']);
+
+if (isset($front_end_flags[$module_key])) {
+    try {
+        updateSetting($front_end_flags[$module_key], $is_enabled ? '1' : '0');
+        if (function_exists('rh_log_event')) {
+            rh_log_event('admin/module-settings', $is_enabled ? 'info' : 'warning',
+                'Guest page ' . ($is_enabled ? 'enabled' : 'disabled') . ': ' . $module_key,
+                ['user' => $user['username'] ?? '', 'user_id' => $user['id'] ?? null, 'module' => $module_key]
+            );
+        }
+        echo json_encode(['success' => true, 'module_key' => $module_key, 'is_enabled' => (bool)$is_enabled]);
+    } catch (Throwable $e) {
+        error_log('toggle-module (front-end flag): ' . $e->getMessage());
+        echo json_encode(['success' => false, 'error' => 'Database error — please try again.']);
+    }
+    exit;
+}
 
 if (!in_array($module_key, $allowed, true)) {
     echo json_encode(['success' => false, 'error' => 'Invalid module key.']);

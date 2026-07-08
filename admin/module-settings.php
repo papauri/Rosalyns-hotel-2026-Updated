@@ -114,8 +114,31 @@ $modules_meta = [
 require_once __DIR__ . '/includes/module-presets.php';
 $presets = getBusinessPresets();
 
+// Guest-facing page flags (site settings, not enabled_modules rows) — surfaced
+// in the UI below and included in the preset "Active" match.
+$front_end_state = [
+    'events_page'     => getSetting('events_system_enabled', '1') === '1',
+    'restaurant_page' => getSetting('restaurant_system_enabled', '1') === '1',
+];
+
+$front_end_meta = [
+    'events_page' => [
+        'icon'  => 'fas fa-calendar-day',
+        'color' => '#B18247',
+        'label' => 'Events Page',
+        'desc'  => 'Guest events page, event bookings and the admin events inbox.',
+    ],
+    'restaurant_page' => [
+        'icon'  => 'fas fa-utensils',
+        'color' => '#c82333',
+        'label' => 'Restaurant Page',
+        'desc'  => 'Guest restaurant page, dine-in tables, recipes and station reports.',
+    ],
+];
+
 // Work out which preset (if any) matches the installation's current module state,
-// so the matching preset button can be highlighted as "Active".
+// so the matching preset button can be highlighted as "Active". Front-end page
+// flags are part of the match — a preset isn't "Active" if e.g. events differs.
 $current_module_snapshot = [];
 foreach (array_merge(array_keys($modules_meta), array_keys($station_meta)) as $mk) {
     $current_module_snapshot[$mk] = ($module_state[$mk] ?? true) ? 1 : 0;
@@ -124,8 +147,17 @@ $active_preset_key = null;
 foreach ($presets as $preset_key => $preset) {
     if (empty(array_diff_assoc($preset['modules'], $current_module_snapshot))
         && empty(array_diff_assoc($current_module_snapshot, $preset['modules']))) {
-        $active_preset_key = $preset_key;
-        break;
+        $fe_match = true;
+        foreach (($preset['front_end'] ?? []) as $fe_key => $fe_val) {
+            if (isset($front_end_state[$fe_key]) && ((int)$front_end_state[$fe_key]) !== (int)$fe_val) {
+                $fe_match = false;
+                break;
+            }
+        }
+        if ($fe_match) {
+            $active_preset_key = $preset_key;
+            break;
+        }
     }
 }
 ?>
@@ -531,6 +563,42 @@ foreach ($presets as $preset_key => $preset) {
             </div>
             <?php endforeach; ?>
         </div>
+
+        <div class="ms-section-title">Guest Website Pages</div>
+
+        <div class="ms-grid">
+            <?php foreach ($front_end_meta as $fe_key => $fe_meta):
+                $fe_enabled = $front_end_state[$fe_key];
+            ?>
+            <div class="ms-card <?php echo $fe_enabled ? '' : 'is-disabled'; ?>" id="ms-card-<?php echo htmlspecialchars($fe_key); ?>">
+                <div class="ms-card-header">
+                    <div class="ms-card-icon" style="background:#fdf8f0;color:<?php echo htmlspecialchars($fe_meta['color']); ?>;">
+                        <i class="<?php echo htmlspecialchars($fe_meta['icon']); ?>"></i>
+                    </div>
+                    <div class="ms-card-title-block">
+                        <div class="ms-card-title"><?php echo htmlspecialchars($fe_meta['label']); ?></div>
+                        <p class="ms-card-desc"><?php echo htmlspecialchars($fe_meta['desc']); ?></p>
+                    </div>
+                </div>
+                <div class="ms-card-footer">
+                    <span class="ms-status-label <?php echo $fe_enabled ? 'enabled' : 'disabled'; ?>" id="ms-label-<?php echo htmlspecialchars($fe_key); ?>">
+                        <i class="fas fa-<?php echo $fe_enabled ? 'check-circle' : 'times-circle'; ?>"></i>
+                        <?php echo $fe_enabled ? 'Enabled' : 'Disabled'; ?>
+                    </span>
+                    <label class="ms-toggle" aria-label="Toggle <?php echo htmlspecialchars($fe_meta['label']); ?>">
+                        <input type="checkbox"
+                               id="ms-toggle-<?php echo htmlspecialchars($fe_key); ?>"
+                               data-module="<?php echo htmlspecialchars($fe_key); ?>"
+                               data-has-warn="0"
+                               data-warn-text=""
+                               data-label="<?php echo htmlspecialchars($fe_meta['label']); ?>"
+                               <?php echo $fe_enabled ? 'checked' : ''; ?>>
+                        <span class="ms-toggle-slider"></span>
+                    </label>
+                </div>
+            </div>
+            <?php endforeach; ?>
+        </div>
     </div>
 
     <!-- Confirmation dialog for modules with warnings -->
@@ -735,7 +803,8 @@ foreach ($presets as $preset_key => $preset) {
         var extraModuleLabels = {
             station_kds: 'Kitchen Display (KDS)', station_bds: 'Bar Display (BDS)',
             station_cds: 'Coffee Bar Display (CDS)', station_room_service: 'Room Service Station',
-            restaurant_page: 'Restaurant / food-service pages'
+            restaurant_page: 'Restaurant / food-service pages',
+            events_page: 'Events page & event bookings'
         };
         function moduleLabel(key) { return S.moduleLabels[key] || extraModuleLabels[key] || key; }
 

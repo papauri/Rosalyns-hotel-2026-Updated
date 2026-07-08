@@ -52,6 +52,14 @@
         return (crypto && crypto.randomUUID) ? crypto.randomUUID() : 'cli-' + Date.now() + '-' + Math.random().toString(36).slice(2, 10);
     }
 
+    /* Non-blocking notification — uses the admin toast system when available;
+     * never window.alert(), which freezes the till mid-service. */
+    function notify(msg, type) {
+        if (typeof Alert !== 'undefined' && Alert.show) { Alert.show(msg, type || 'info'); return; }
+        const label = document.getElementById('rhOfflineLabel');
+        if (label) { label.textContent = msg; }
+    }
+
     /* ── Header connectivity pill ────────────────────────────────────────────
      * The <div id="rhConnPill"> is injected by admin-header.php.
      * We update its colours + label in real-time as the network state changes.
@@ -119,33 +127,51 @@
         if (pending) pending.textContent = `${n} queued`;
     }
 
+    let isFlushing = false;
+
     async function flush() {
         if (!navigator.onLine) return;
-        const items = await listAll();
-        for (const it of items) {
-            try {
-                const fd = new FormData();
-                for (const [k, v] of (it.fields || [])) fd.append(k, v);
-                const resp = await fetch(it.url, { method: 'POST', body: fd, credentials: 'include' });
-                if (resp.ok || resp.status === 409) {
-                    // 409 Conflict means server already processed this UUID (duplicate) — safe to drop.
-                    await deleteEntry(it.id);
-                } else if (resp.status >= 500) {
-                    // Server error — keep item in queue and stop flushing; retry on next online event.
+        // Concurrency guard: 'online' event, SW Background Sync message and the
+        // "Retry now" button can all fire together — a parallel flush would
+        // replay the same entry twice before the first deleteEntry lands.
+        if (isFlushing) return;
+        isFlushing = true;
+        try {
+            const items = await listAll();
+            for (const it of items) {
+                try {
+                    const fd = new FormData();
+                    for (const [k, v] of (it.fields || [])) fd.append(k, v);
+                    const resp = await fetch(it.url, { method: 'POST', body: fd, credentials: 'include' });
+                    // Session expired: the POST was redirected to the login page and the
+                    // write NEVER happened — the 200 belongs to login.php, not our handler.
+                    // Keep the item and stop; it will replay after the user logs back in.
+                    if (resp.redirected && /login\.php/i.test(resp.url)) {
+                        notify('Session expired — log in again to sync ' + items.length + ' queued action(s).', 'error');
+                        break;
+                    }
+                    if (resp.ok || resp.status === 409) {
+                        // 409 Conflict means server already processed this UUID (duplicate) — safe to drop.
+                        await deleteEntry(it.id);
+                    } else if (resp.status >= 500) {
+                        // Server error — keep item in queue and stop flushing; retry on next online event.
+                        break;
+                    } else if (resp.status === 302 || (resp.status >= 300 && resp.status < 400)) {
+                        // Redirect — treated as success (form handler redirects on success).
+                        await deleteEntry(it.id);
+                    }
+                    // 4xx errors other than 409 (e.g. 400 bad request, 403 forbidden) — item is
+                    // unrecoverable; remove it so it doesn't block the queue forever.
+                    else {
+                        await deleteEntry(it.id);
+                    }
+                } catch (e) {
+                    // Network failure — stop flushing; item stays in queue.
                     break;
-                } else if (resp.status === 302 || (resp.status >= 300 && resp.status < 400)) {
-                    // Redirect — treated as success (form handler redirects on success).
-                    await deleteEntry(it.id);
                 }
-                // 4xx errors other than 409 (e.g. 400 bad request, 403 forbidden) — item is
-                // unrecoverable; remove it so it doesn't block the queue forever.
-                else {
-                    await deleteEntry(it.id);
-                }
-            } catch (e) {
-                // Network failure — stop flushing; item stays in queue.
-                break;
             }
+        } finally {
+            isFlushing = false;
         }
         refreshBanner();
     }
@@ -170,7 +196,7 @@
         const fields = []; for (const [k, v] of fd.entries()) fields.push([k, typeof v === 'string' ? v : '']);
         await enqueue({ url: f.action || location.href, fields, when: Date.now() });
         refreshBanner();
-        alert('You are offline. Action saved locally and will sync automatically when the connection returns.');
+        notify('You are offline — action saved locally and will sync automatically when the connection returns.', 'info');
     }, true);
 
     window.addEventListener('online', () => { flush(); refreshBanner(); });
@@ -211,6 +237,12 @@
         });
     }
 
-    document.addEventListener('DOMContentLoaded', refreshBanner);
+    // On every page load: refresh the banner AND flush any leftover queue.
+    // Without this, items queued before a tab close only replay after another
+    // offline→online transition (or Background Sync, which not all browsers have).
+    document.addEventListener('DOMContentLoaded', function () {
+        refreshBanner();
+        if (navigator.onLine) { count().then(function (n) { if (n > 0) flush(); }).catch(function () { }); }
+    });
     document.addEventListener('click', e => { if (e.target && e.target.id === 'rhOfflineRetry') flush(); });
 })();

@@ -52,6 +52,15 @@ if (!$preset_restaurant && $current_restaurant) {
     $modules_enabled[] = 'restaurant_page';
 }
 
+// Same for the guest events page flag
+$preset_events = (bool)($presets[$preset_key]['front_end']['events_page'] ?? true);
+$current_events = !function_exists('isEventsEnabled') || isEventsEnabled();
+if (!$preset_events && $current_events) {
+    $modules_disabled[] = 'events_page';
+} elseif ($preset_events && !$current_events) {
+    $modules_enabled[] = 'events_page';
+}
+
 // Human-readable admin-menu / guest-site areas per module key, so the dialog
 // can say exactly which menus appear or disappear. Mirrors admin-header.php.
 $menu_area_map = [
@@ -67,12 +76,13 @@ $menu_area_map = [
     'station_cds'          => 'Coffee Bar Display (CDS)',
     'station_room_service' => 'Room Service station',
     'restaurant_page'      => 'Restaurant Tables, Recipes, Station Hours/Reports + guest Restaurant page',
+    'events_page'          => 'Events Management & Event Inquiries + guest Events page',
 ];
 $menus_removed = array_values(array_filter(array_map(fn($k) => $menu_area_map[$k] ?? null, $modules_disabled)));
 $menus_added   = array_values(array_filter(array_map(fn($k) => $menu_area_map[$k] ?? null, $modules_enabled)));
 
-// restaurant_page isn't a real module — strip before permission lookups below
-$modules_disabled_real = array_values(array_diff($modules_disabled, ['restaurant_page']));
+// restaurant_page / events_page aren't real modules — strip before permission lookups below
+$modules_disabled_real = array_values(array_diff($modules_disabled, ['restaurant_page', 'events_page']));
 
 $affected_permissions = [];
 foreach ($modules_disabled_real as $module_key) {
