@@ -454,17 +454,17 @@
     const CalendarTooltip = {
         // Initialize tooltip functionality
         init: function () {
-            // Only proceed if calendar booking tooltips exist on the page
-            const triggers = document.querySelectorAll('.calendar-booking-tooltip-trigger');
-            if (triggers.length === 0) return;
+            // Always attach delegation once — even if triggers aren't in the DOM
+            // yet (SW/render race). This guarantees hover works without a reload,
+            // because content is also created lazily on first hover/focus.
+            if (!this._delegated) {
+                this.setupEventDelegation();
+                this._delegated = true;
+            }
 
-            // Generate and inject tooltip content for each booking indicator
-            triggers.forEach(trigger => {
-                this.createTooltipContent(trigger);
-            });
-
-            // Set up event delegation for dynamically added elements
-            this.setupEventDelegation();
+            // Eagerly build content for any triggers already present.
+            document.querySelectorAll('.calendar-booking-tooltip-trigger')
+                .forEach(trigger => this.createTooltipContent(trigger));
         },
 
         // Get clipping/placement boundaries for a trigger
@@ -640,6 +640,9 @@
                     return;
                 }
 
+                // Lazily build content on first hover so tooltips work even if
+                // init() ran before the calendar DOM settled (SW/render race).
+                this.createTooltipContent(trigger);
                 this.updateTooltipPlacement(trigger);
             });
 
@@ -647,6 +650,7 @@
                 if (!(e.target instanceof Element)) return;
                 const trigger = e.target.closest('.calendar-booking-tooltip-trigger');
                 if (!trigger) return;
+                this.createTooltipContent(trigger);
                 this.updateTooltipPlacement(trigger);
             });
 

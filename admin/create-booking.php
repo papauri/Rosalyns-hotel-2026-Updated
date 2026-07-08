@@ -365,6 +365,22 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['create_booking'])) {
         }
         if (empty($room_lines)) throw new Exception('Please select at least one room type.');
 
+        // ── Capacity guard (authoritative) ───────────────────────────────────
+        // The whole party must physically fit in the allocated rooms. max_guests
+        // here is already the GREATEST of the room-type cap, any individual-room
+        // override, and any joined-room combination — so a large party must be
+        // split across enough rooms before the booking is accepted.
+        $total_capacity = 0;
+        foreach ($room_lines as $line) {
+            $total_capacity += (int)$line['qty'] * max(1, (int)($line['room_data']['max_guests'] ?? 1));
+        }
+        if ($number_of_guests > $total_capacity) {
+            throw new Exception(
+                'The selected rooms hold up to ' . $total_capacity . ' guest(s), but ' . $number_of_guests .
+                ' were entered. Add more rooms (or a larger room type) so everyone is accommodated.'
+            );
+        }
+
         $total_rooms_booked = array_sum(array_column($room_lines, 'qty'));
         // Individual room selection only valid for single-room bookings
         if ($total_rooms_booked > 1) {
@@ -2315,6 +2331,17 @@ try {
             return getVisibleLines().length;
         }
 
+        // Physical guest capacity of ONE room of this type. max_guests is already the
+        // GREATEST of the room-type cap, any individual-room override, and any joined-
+        // room combination (see the roomsData query).
+        function roomPhysicalCap(room) {
+            return Math.max(1, parseInt(room?.max_guests || 1, 10));
+        }
+
+        // Re-entrancy guard so the auto-split routine can add/retype lines without the
+        // change handlers it triggers recursing back into it.
+        let _autoSplitting = false;
+
         // ── Room line management ──────────────────────────────────────────────────
         function addRoomLine() {
             const idx = _lineCount++;
@@ -2402,15 +2429,21 @@ try {
                 return;
             }
 
+            // Occupancy options are gated by BOTH the room's occupancy policy AND its
+            // physical capacity — a 2-guest room never offers "Triple".
+            const cap = roomPhysicalCap(room);
             Array.from(occSel.options).forEach(opt => {
-                if (opt.value === 'single') opt.disabled = !room.single_enabled;
-                if (opt.value === 'double') opt.disabled = !room.double_enabled;
-                if (opt.value === 'triple') opt.disabled = !room.triple_enabled;
+                if (opt.value === 'single') opt.disabled = !room.single_enabled || cap < 1;
+                if (opt.value === 'double') opt.disabled = !room.double_enabled || cap < 2;
+                if (opt.value === 'triple') opt.disabled = !room.triple_enabled || cap < 3;
             });
             if (occSel.selectedOptions[0]?.disabled) {
-                const first = Array.from(occSel.options).find(o => !o.disabled);
-                if (first) occSel.value = first.value;
+                // Fall back to the highest still-valid occupancy (seats the most guests).
+                const valid = Array.from(occSel.options).filter(o => !o.disabled);
+                if (valid.length) occSel.value = valid[valid.length - 1].value;
             }
+            // If one room of this type can't seat the whole party, split into more.
+            autoSplitForCapacity(idx);
             refreshIndividualRoomSection();
             calculateTotal();
             updateGroupSummary();
@@ -2583,10 +2616,65 @@ try {
             });
         }
 
+        // ── Auto-split a large party across rooms ─────────────────────────────────
+        // When the guest count exceeds what one room of the chosen type physically
+        // holds, add more rooms of the SAME type until everyone is seated — bounded by
+        // how many of that type are actually available for the dates. This is what a
+        // front-desk manager does with a big group.
+        function autoSplitForCapacity(triggerIdx) {
+            if (_autoSplitting) return;
+            const guests = parseInt(el('numGuests')?.value || '1', 10);
+            const lines = getVisibleLines();
+            if (!lines.length) return;
+
+            const trigEl = (typeof triggerIdx === 'number') ? el('room-line-' + triggerIdx) : null;
+            const baseLine = (trigEl && !trigEl.hasAttribute('data-removed')) ? trigEl : lines[0];
+            const roomId = parseInt(baseLine.querySelector('.line-room-select')?.value || '0', 10);
+            const room = roomsData.find(r => r.id === roomId);
+            if (!room) return;
+
+            const cap = roomPhysicalCap(room);
+            if (guests <= cap) return; // one room seats everyone — nothing to split
+
+            // Rooms of this type bookable for the chosen dates (fall back to the static
+            // inventory count before an availability check has run).
+            const info = _availMap[roomId];
+            const availOfType = info
+                ? (info.available ? Math.max(1, parseInt(info.rooms_left || 1, 10)) : 0)
+                : Math.max(1, parseInt(room.rooms_available || 1, 10));
+            if (availOfType < 1) return; // sold out — server capacity guard will flag it
+
+            const needed = Math.min(Math.ceil(guests / cap), availOfType, 20);
+            const current = lines.length;
+            if (needed <= current) return;
+
+            _autoSplitting = true;
+            try {
+                for (let i = current; i < needed; i++) addRoomLine();
+                // Homogenise: every line becomes the same room type as the trigger.
+                getVisibleLines().forEach(ln => {
+                    const sel = ln.querySelector('.line-room-select');
+                    if (sel && !sel.disabled && sel.value !== String(roomId)) {
+                        sel.value = String(roomId);
+                        updateLineRoom(parseInt(ln.id.replace('room-line-', ''), 10));
+                    }
+                });
+                const disp = el('roomsCounterDisplay');
+                if (disp) disp.textContent = getVisibleLines().length;
+            } finally {
+                _autoSplitting = false;
+            }
+            autoOccupancy();
+            updateGroupSummary();
+            refreshIndividualRoomSection();
+        }
+
         function guestsChanged() {
             const guests = parseInt(el('numGuests')?.value || '1', 10);
             const current = getVisibleLines().length;
             if (current > guests) adjustTotalRooms(guests - current);
+            // Expand the allocation if a single room can no longer hold the party.
+            autoSplitForCapacity();
             autoOccupancy();
             calculateTotal();
             updateGroupSummary();
@@ -2598,9 +2686,31 @@ try {
         function updateGroupSummary() {
             const pill = el('groupSummaryPill');
             const txt = el('groupSummaryText');
-            if (!pill || !txt) return;
-            const total = getTotalRooms();
             const guests = parseInt(el('numGuests')?.value || '1', 10);
+            const total = getTotalRooms();
+
+            // Capacity hint next to the rooms counter — tells the manager at a glance
+            // whether the current allocation seats the whole party.
+            const hint = el('roomsCounterHint');
+            if (hint) {
+                let seats = 0;
+                getVisibleLines().forEach(ln => {
+                    const rid = parseInt(ln.querySelector('.line-room-select')?.value || '0', 10);
+                    const rm = roomsData.find(r => r.id === rid);
+                    if (rm) seats += roomPhysicalCap(rm);
+                });
+                if (seats === 0) {
+                    hint.textContent = '';
+                } else if (guests > seats) {
+                    hint.textContent = `Seats only ${seats} of ${guests} guests — add another room or pick a larger type.`;
+                    hint.style.color = '#c0392b';
+                } else {
+                    hint.textContent = `Seats ${seats} guest${seats !== 1 ? 's' : ''} · party of ${guests} fits.`;
+                    hint.style.color = '#2a7d4f';
+                }
+            }
+
+            if (!pill || !txt) return;
             if (total > 1) {
                 txt.textContent = `Group booking: ${total} rooms · ${guests} guest${guests !== 1 ? 's' : ''} · ~${(guests / total).toFixed(1)} guests/room`;
                 pill.style.display = 'flex';
