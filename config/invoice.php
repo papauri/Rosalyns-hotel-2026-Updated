@@ -1674,22 +1674,34 @@ function buildConferenceInvoiceHTML(array $enquiry, string $invoice_number, stri
     $vatRate = $vatEnabled ? (float)getSetting('vat_rate') : 0;
     $vatNumber = getSetting('vat_number');
 
-    // Get payment details for this conference enquiry
+    // Get payment details for this conference enquiry — genuine receipts plus
+    // settled refunds (refund rows also sit at payment_status='completed' and
+    // must show as negative, not as extra payments).
     $paymentsStmt = $pdo->prepare("
         SELECT * FROM payments
         WHERE booking_type = 'conference' AND booking_id = ?
-        AND payment_status = 'completed' AND deleted_at IS NULL
+        AND deleted_at IS NULL
+        AND ((payment_status IN ('completed','paid') AND COALESCE(payment_type,'') <> 'refund')
+             OR (payment_type = 'refund' AND refund_status IN ('completed','processing')))
         ORDER BY payment_date ASC
     ");
     $paymentsStmt->execute([$enquiry['id']]);
     $payments = $paymentsStmt->fetchAll(PDO::FETCH_ASSOC);
 
-    // Calculate totals — VAT per installation mode (on top / extracted / off).
+    // Totals — prefer the VAT breakdown LOCKED on the record at invoice time so a
+    // re-sent invoice never re-bases to the current rate; only compute fresh when
+    // the record was never populated.
     $subtotal = (float)$enquiry['total_amount'];
-    $vatParts = vat_components($subtotal);
-    $vatRate = $vatParts['rate'];
-    $vatAmount = $vatParts['vat'];
-    $totalWithVat = $vatParts['total'];
+    if ((float)($enquiry['total_with_vat'] ?? 0) > 0.001) {
+        $vatRate      = (float)($enquiry['vat_rate'] ?? $vatRate);
+        $vatAmount    = (float)($enquiry['vat_amount'] ?? 0);
+        $totalWithVat = (float)$enquiry['total_with_vat'];
+    } else {
+        $vatParts = vat_components($subtotal);
+        $vatRate = $vatParts['rate'];
+        $vatAmount = $vatParts['vat'];
+        $totalWithVat = $vatParts['total'];
+    }
 
     // Build payment details HTML
     $paymentDetailsHTML = '';
@@ -1698,9 +1710,10 @@ function buildConferenceInvoiceHTML(array $enquiry, string $invoice_number, stri
                     <h4 style="color: #1A1A1A; margin-top: 0;">Payment History</h4>';
 
         foreach ($payments as $payment) {
+            $isRefundRow = (($payment['payment_type'] ?? '') === 'refund');
             $paymentDetailsHTML .= '<div style="display: flex; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid #ddd;">
-                        <span>' . date('M j, Y', strtotime($payment['payment_date'])) . ' (' . ucfirst(str_replace('_', ' ', $payment['payment_method'])) . ')</span>
-                        <span>' . $currency_symbol . ' ' . number_format($payment['total_amount'], 2) . '</span>
+                        <span>' . date('M j, Y', strtotime($payment['payment_date'])) . ' (' . ($isRefundRow ? 'Refund — ' : '') . ucfirst(str_replace('_', ' ', $payment['payment_method'])) . ')</span>
+                        <span>' . ($isRefundRow ? '-' : '') . $currency_symbol . ' ' . number_format($payment['total_amount'], 2) . '</span>
                     </div>';
         }
 
@@ -2025,12 +2038,20 @@ function sendConferenceInvoiceEmailToClient(array $enquiry, string $invoice_file
         $currency_symbol = getSetting('currency_symbol');
 
         // VAT / tax vars for conference invoice email
-        $ciVatEnabled = in_array(getSetting('vat_enabled'), ['1', 1, true, 'true', 'on'], true);
-        $ciVatRate    = $ciVatEnabled ? (float)getSetting('vat_rate') : 0.0;
         $ciVatNum     = (string)getSetting('vat_number', '');
         $ciSubtotal   = (float)($enquiry['total_amount'] ?? 0);
-        $ciVatAmt     = $ciVatEnabled ? ($ciSubtotal * $ciVatRate / 100.0) : 0.0;
-        $ciTotalWithVat = $ciSubtotal + $ciVatAmt;
+        // Match the attached PDF invoice: use the VAT breakdown locked on the
+        // record; only compute from the current mode when never populated.
+        if ((float)($enquiry['total_with_vat'] ?? 0) > 0.001) {
+            $ciVatRate      = (float)($enquiry['vat_rate'] ?? 0);
+            $ciVatAmt       = (float)($enquiry['vat_amount'] ?? 0);
+            $ciTotalWithVat = (float)$enquiry['total_with_vat'];
+        } else {
+            $ciVatParts     = vat_components($ciSubtotal);
+            $ciVatRate      = $ciVatParts['rate'];
+            $ciVatAmt       = $ciVatParts['vat'];
+            $ciTotalWithVat = $ciVatParts['total'];
+        }
         $ciVatNumHtml = $ciVatNum !== ''
             ? '<p style="margin:8px 0 0;font-size:11px;color:#9b8f7e;text-align:center;">VAT Reg. No.: ' . htmlspecialchars($ciVatNum, ENT_QUOTES, 'UTF-8') . '</p>'
             : '';
@@ -2166,30 +2187,41 @@ function buildGymInvoiceHTML(array $inquiry, string $invoice_number, string $sit
     $vatRate = $vatEnabled ? (float)getSetting('vat_rate') : 0;
     $vatNumber = getSetting('vat_number');
 
+    // Genuine receipts plus settled refunds (shown negative).
     $paymentsStmt = $pdo->prepare("
         SELECT * FROM payments
         WHERE booking_type = 'gym' AND booking_id = ?
-        AND payment_status = 'completed' AND deleted_at IS NULL
+        AND deleted_at IS NULL
+        AND ((payment_status IN ('completed','paid') AND COALESCE(payment_type,'') <> 'refund')
+             OR (payment_type = 'refund' AND refund_status IN ('completed','processing')))
         ORDER BY payment_date ASC
     ");
     $paymentsStmt->execute([$inquiry['id']]);
     $payments = $paymentsStmt->fetchAll(PDO::FETCH_ASSOC);
 
     $subtotal = (float)$inquiry['total_amount'];
-    // VAT per installation mode (exclusive on top / inclusive extracted / off).
-    $vatParts = vat_components($subtotal);
-    $vatRate = $vatParts['rate'];
-    $vatAmount = $vatParts['vat'];
-    $totalWithVat = $vatParts['total'];
+    // Prefer the VAT breakdown locked on the record at invoice time; only
+    // compute from the current mode when it was never populated.
+    if ((float)($inquiry['total_with_vat'] ?? 0) > 0.001) {
+        $vatRate      = (float)($inquiry['vat_rate'] ?? $vatRate);
+        $vatAmount    = (float)($inquiry['vat_amount'] ?? 0);
+        $totalWithVat = (float)$inquiry['total_with_vat'];
+    } else {
+        $vatParts = vat_components($subtotal);
+        $vatRate = $vatParts['rate'];
+        $vatAmount = $vatParts['vat'];
+        $totalWithVat = $vatParts['total'];
+    }
 
     $paymentDetailsHTML = '';
     if (!empty($payments)) {
         $paymentDetailsHTML = '<div style="margin-top: 20px; padding: 15px; background: #f8f9fa; border-radius: 5px;">
                     <h4 style="color: #1A1A1A; margin-top: 0;">Payment History</h4>';
         foreach ($payments as $payment) {
+            $isRefundRow = (($payment['payment_type'] ?? '') === 'refund');
             $paymentDetailsHTML .= '<div style="display: flex; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid #ddd;">
-                        <span>' . date('M j, Y', strtotime($payment['payment_date'])) . ' (' . ucfirst(str_replace('_', ' ', $payment['payment_method'])) . ')</span>
-                        <span>' . $currency_symbol . ' ' . number_format($payment['total_amount'], 2) . '</span>
+                        <span>' . date('M j, Y', strtotime($payment['payment_date'])) . ' (' . ($isRefundRow ? 'Refund — ' : '') . ucfirst(str_replace('_', ' ', $payment['payment_method'])) . ')</span>
+                        <span>' . ($isRefundRow ? '-' : '') . $currency_symbol . ' ' . number_format($payment['total_amount'], 2) . '</span>
                     </div>';
         }
         $paymentDetailsHTML .= '</div>';
@@ -2556,30 +2588,41 @@ function buildEventInvoiceHTML(array $inquiry, string $invoice_number, string $s
     $vatRate = $vatEnabled ? (float)getSetting('vat_rate') : 0;
     $vatNumber = getSetting('vat_number');
 
+    // Genuine receipts plus settled refunds (shown negative).
     $paymentsStmt = $pdo->prepare("
         SELECT * FROM payments
         WHERE booking_type = 'event' AND booking_id = ?
-        AND payment_status = 'completed' AND deleted_at IS NULL
+        AND deleted_at IS NULL
+        AND ((payment_status IN ('completed','paid') AND COALESCE(payment_type,'') <> 'refund')
+             OR (payment_type = 'refund' AND refund_status IN ('completed','processing')))
         ORDER BY payment_date ASC
     ");
     $paymentsStmt->execute([$inquiry['id']]);
     $payments = $paymentsStmt->fetchAll(PDO::FETCH_ASSOC);
 
     $subtotal = (float)$inquiry['total_amount'];
-    // VAT per installation mode (exclusive on top / inclusive extracted / off).
-    $vatParts = vat_components($subtotal);
-    $vatRate = $vatParts['rate'];
-    $vatAmount = $vatParts['vat'];
-    $totalWithVat = $vatParts['total'];
+    // Prefer the VAT breakdown locked on the record at invoice time; only
+    // compute from the current mode when it was never populated.
+    if ((float)($inquiry['total_with_vat'] ?? 0) > 0.001) {
+        $vatRate      = (float)($inquiry['vat_rate'] ?? $vatRate);
+        $vatAmount    = (float)($inquiry['vat_amount'] ?? 0);
+        $totalWithVat = (float)$inquiry['total_with_vat'];
+    } else {
+        $vatParts = vat_components($subtotal);
+        $vatRate = $vatParts['rate'];
+        $vatAmount = $vatParts['vat'];
+        $totalWithVat = $vatParts['total'];
+    }
 
     $paymentDetailsHTML = '';
     if (!empty($payments)) {
         $paymentDetailsHTML = '<div style="margin-top: 20px; padding: 15px; background: #f8f9fa; border-radius: 5px;">
                     <h4 style="color: #1A1A1A; margin-top: 0;">Payment History</h4>';
         foreach ($payments as $payment) {
+            $isRefundRow = (($payment['payment_type'] ?? '') === 'refund');
             $paymentDetailsHTML .= '<div style="display: flex; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid #ddd;">
-                        <span>' . date('M j, Y', strtotime($payment['payment_date'])) . ' (' . ucfirst(str_replace('_', ' ', $payment['payment_method'])) . ')</span>
-                        <span>' . $currency_symbol . ' ' . number_format($payment['total_amount'], 2) . '</span>
+                        <span>' . date('M j, Y', strtotime($payment['payment_date'])) . ' (' . ($isRefundRow ? 'Refund — ' : '') . ucfirst(str_replace('_', ' ', $payment['payment_method'])) . ')</span>
+                        <span>' . ($isRefundRow ? '-' : '') . $currency_symbol . ' ' . number_format($payment['total_amount'], 2) . '</span>
                     </div>';
         }
         $paymentDetailsHTML .= '</div>';

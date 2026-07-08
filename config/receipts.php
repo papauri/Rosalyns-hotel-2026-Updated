@@ -186,7 +186,11 @@ if (!function_exists('receipt_placeholders')) {
         $receiptNumber = (string)($payment['receipt_number'] ?? '');
 
         $vatEnabled  = in_array(getSetting('vat_enabled'), ['1', 1, true, 'true', 'on'], true);
-        $vatRateNum  = $vatEnabled ? (float)getSetting('vat_rate') : 0.0;
+        // Rate stored on this payment wins — a receipt re-sent after a rate
+        // change must keep its original rate label.
+        $vatRateNum  = (float)($payment['vat_rate'] ?? 0) > 0
+            ? (float)$payment['vat_rate']
+            : ($vatEnabled ? (float)getSetting('vat_rate') : 0.0);
         $vatNumStr   = (string)getSetting('vat_number', '');
         $vatNumHtml  = $vatNumStr !== ''
             ? '<p style="margin:8px 0 0;font-size:11px;color:#9b8f7e;text-align:center;">VAT Reg. No.: ' . htmlspecialchars($vatNumStr, ENT_QUOTES, 'UTF-8') . '</p>'
@@ -279,6 +283,11 @@ if (!function_exists('receipt_build_pos_style_html')) {
         $netAmount     = (float)($payment['payment_amount'] ?? 0);
         $vatAmount     = (float)($payment['vat_amount'] ?? 0);
         $totalAmount   = (float)($payment['total_amount'] ?? 0);
+        // Label the VAT line with the rate stored on THIS payment, not the
+        // current setting — old receipts must not re-label after a rate change.
+        if ((float)($payment['vat_rate'] ?? 0) > 0) {
+            $vatRate = (float)$payment['vat_rate'];
+        }
         $tipAmount     = (float)($payment['tip_amount'] ?? 0);
         $isRefund      = (string)($payment['payment_type'] ?? '') === 'refund';
 

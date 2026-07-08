@@ -563,10 +563,75 @@
       </section>
 
       <section>
-        <h2>Tips</h2>
-        <div class="callout tip">
-          The Till works <strong>offline</strong> &mdash; your orders queue locally and sync when the internet returns.
+        <h2>Working offline <span class="pill green">automatic</span></h2>
+        <p class="lead">The Till keeps trading when the internet drops. Nothing is lost, nothing double-charges, and
+          you can see exactly what happened afterwards.</p>
+
+        <h3>What the cashier sees</h3>
+        <ol class="steps">
+          <li>The connection pill in the header turns <strong>red — "Offline"</strong>. The Till keeps working:
+            the page, menu and buttons are already stored on the device.</li>
+          <li>The cashier builds and fires orders exactly as normal. Each order is <strong>saved on the till
+              itself</strong> and a message confirms: <em>"You are offline — action saved locally and will sync
+              automatically when the connection returns."</em></li>
+          <li>A dark banner at the bottom counts what is waiting, e.g. <strong>"Offline — queued · 3 queued"</strong>.
+            Keep serving — every order stacks up safely.</li>
+          <li>When the internet returns, the pill turns <strong>amber — "Syncing 3…"</strong> while queued orders are
+            sent to the server one by one, then <strong>green — "Online"</strong> when done. No one has to press
+            anything (a <strong>Retry now</strong> button exists if you're impatient).</li>
+        </ol>
+
+        <h3>The guarantees</h3>
+        <table>
+          <thead>
+            <tr>
+              <th>Worry</th>
+              <th>What actually happens</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>"Will the order be charged twice if it syncs twice?"</td>
+              <td>No. Every queued order carries a unique fingerprint. If the same order arrives twice, the server
+                recognises it and keeps only one.</td>
+            </tr>
+            <tr>
+              <td>"What if the till is closed before the internet returns?"</td>
+              <td>The queue lives on the device, not the page. Queued orders sync automatically the next time the
+                Till page is opened with a connection.</td>
+            </tr>
+            <tr>
+              <td>"What if the cashier was logged out while offline?"</td>
+              <td>Syncing pauses and asks them to log in again. The queued orders wait and sync right after login —
+                they are not discarded.</td>
+            </tr>
+            <tr>
+              <td>"Will the report show the wrong time?"</td>
+              <td>No. Each order records <em>when it was actually taken</em> and <em>when it synced</em> — both are
+                kept.</td>
+            </tr>
+          </tbody>
+        </table>
+
+        <h3>Checking afterwards — the Offline Log</h3>
+        <p>Every order that was taken offline and synced later is listed in <strong>Admin → Offline Log</strong>
+          (<code>/admin/offline-log.php</code>): who took it, on which page, when it was queued and when it arrived.
+          Use it to reconcile end-of-day totals after an outage — e.g. "order taken 14:02, synced 14:40" explains a
+          burst of orders appearing at once.</p>
+
+        <div class="callout warn">
+          <strong>One limitation to know:</strong> while offline, the till uses the menu and prices it last saw. If
+          you change a price during an outage, orders queued before the change keep the price the cashier saw on
+          screen. Avoid editing menu prices while tills are known to be offline.
         </div>
+        <div class="callout note">
+          The same offline protection covers <strong>reception's Create Booking</strong> and <strong>Add
+            Payment</strong> pages — forms queue on the device and sync with the same no-duplicates guarantee.
+        </div>
+      </section>
+
+      <section>
+        <h2>Tips</h2>
         <ul class="checklist">
           <li>All hard buttons are at least 44px tall &mdash; designed for touch.</li>
           <li>Press <code>?</code> on a keyboard to see the help bubbles.</li>

@@ -3163,9 +3163,6 @@ $today_str = $today->format('Y-m-d');
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="csrf-token" content="<?= htmlspecialchars($csrf_token, ENT_QUOTES) ?>">
-    <script>
-        const _currencySymbol = <?= json_encode($currency_symbol) ?>;
-    </script>
     <title>All Bookings - Admin Panel</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -3874,6 +3871,16 @@ $today_str = $today->format('Y-m-d');
     </div>
 
     <script>
+        // Currency symbol, declared INSIDE #rh-admin-page so the admin SPA
+        // re-runs it on every navigation to this page. The head-level copy only
+        // executes on a full page load; when arriving here via an SPA link from
+        // another page the head is never re-run, so without this in-content copy
+        // fmt()/openCheckoutSettlementModal() below would hit
+        // "_currencySymbol is not defined". Kept on window so the later
+        // fmtMWK block (a separate SPA IIFE scope) resolves it too.
+        window._currencySymbol = <?= json_encode($currency_symbol) ?>;
+        var _currencySymbol = window._currencySymbol;
+
         // Ensure Alert is defined (fallback for early script execution)
         if (typeof Alert === 'undefined') {
             window.Alert = {

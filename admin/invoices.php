@@ -331,7 +331,10 @@ try {
         SELECT
             COUNT(*) as total_invoices,
             COUNT(CASE WHEN invoice_generated = 1 THEN 1 END) as invoices_generated,
-            SUM(total_amount) as total_revenue
+            COALESCE(SUM(CASE
+                WHEN payment_status IN ('completed','paid') AND COALESCE(payment_type,'') <> 'refund' THEN total_amount
+                WHEN payment_type = 'refund' AND refund_status IN ('completed','processing') THEN -total_amount
+                ELSE 0 END), 0) as total_revenue
         FROM payments
         WHERE deleted_at IS NULL
     ");
@@ -344,8 +347,8 @@ try {
             COALESCE(SUM(CASE WHEN payment_status IN ('completed','paid') AND COALESCE(payment_type, '') <> 'refund' THEN 1 ELSE 0 END), 0) AS paid_count,
             COALESCE(SUM(CASE WHEN payment_status IN ('pending','partial') AND COALESCE(payment_type, '') <> 'refund' THEN total_amount ELSE 0 END), 0) AS outstanding_total,
             COALESCE(SUM(CASE WHEN payment_status IN ('pending','partial') AND COALESCE(payment_type, '') <> 'refund' THEN 1 ELSE 0 END), 0) AS outstanding_count,
-            COALESCE(SUM(CASE WHEN payment_type = 'refund' THEN total_amount ELSE 0 END), 0) AS refunded_total,
-            COALESCE(SUM(CASE WHEN payment_type = 'refund' THEN 1 ELSE 0 END), 0) AS refunded_count,
+            COALESCE(SUM(CASE WHEN payment_type = 'refund' AND refund_status IN ('completed','processing') THEN total_amount ELSE 0 END), 0) AS refunded_total,
+            COALESCE(SUM(CASE WHEN payment_type = 'refund' AND refund_status IN ('completed','processing') THEN 1 ELSE 0 END), 0) AS refunded_count,
             COALESCE(SUM(CASE WHEN YEAR(payment_date)=YEAR(CURDATE()) AND MONTH(payment_date)=MONTH(CURDATE()) AND payment_status IN ('completed','paid') AND COALESCE(payment_type, '') <> 'refund' THEN total_amount ELSE 0 END), 0) AS mtd_collected
         FROM payments
         WHERE deleted_at IS NULL

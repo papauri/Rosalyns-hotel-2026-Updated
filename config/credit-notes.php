@@ -276,9 +276,13 @@ if (!function_exists('applyCreditNote')) {
                 }
             }
 
-            // VAT settings
+            // VAT split — use the rate LOCKED on the credit note at issue time so the
+            // application mirrors the original refund's tax treatment; fall back to
+            // the current setting only for legacy notes issued without a rate.
             $vatEnabled = in_array(getSetting('vat_enabled'), ['1', 1, true, 'true', 'on'], true);
-            $vatRate    = $vatEnabled ? (float)getSetting('vat_rate') : 0.0;
+            $vatRate    = (float)($cn['vat_rate'] ?? 0) > 0
+                ? (float)$cn['vat_rate']
+                : ($vatEnabled ? (float)getSetting('vat_rate') : 0.0);
             $vatAmount  = $vatRate > 0 ? round($amountToApply * ($vatRate / (100 + $vatRate)), 2) : 0.0;
             $netAmount  = $amountToApply - $vatAmount;
 
@@ -360,7 +364,12 @@ if (!function_exists('applyCreditNote')) {
                 $notes ?: null,
             ]);
 
-            // Recalculate booking balances
+            // Recalculate booking balances — every receivable type must resync or the
+            // applied credit shows in the ledger but the account still reads unpaid.
+            $syncInclude = __DIR__ . '/../admin/includes/finance-account-sync.php';
+            if (is_file($syncInclude)) {
+                require_once $syncInclude;
+            }
             if ($bookingType === 'room') {
                 if (function_exists('recalculateBookingFinancials')) {
                     recalculateBookingFinancials($bookingId);
@@ -368,9 +377,15 @@ if (!function_exists('applyCreditNote')) {
                     updateRoomBookingPayments($pdo, $bookingId);
                 }
             } elseif ($bookingType === 'conference') {
-                if (function_exists('updateConferenceEnquiryPayments')) {
+                if (function_exists('syncConferenceInquiryPaymentSnapshot')) {
+                    syncConferenceInquiryPaymentSnapshot($pdo, $bookingId);
+                } elseif (function_exists('updateConferenceEnquiryPayments')) {
                     updateConferenceEnquiryPayments($pdo, $bookingId);
                 }
+            } elseif ($bookingType === 'gym' && function_exists('syncGymInquiryPaymentSnapshot')) {
+                syncGymInquiryPaymentSnapshot($pdo, $bookingId);
+            } elseif ($bookingType === 'event' && function_exists('syncEventInquiryPaymentSnapshot')) {
+                syncEventInquiryPaymentSnapshot($pdo, $bookingId);
             }
 
             $pdo->commit();

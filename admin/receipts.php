@@ -187,7 +187,7 @@ $summaryStmt = $pdo->prepare("SELECT COUNT(*) AS total_receipts,
         COALESCE(SUM(CASE WHEN p.receipt_number IS NULL OR p.receipt_number = '' THEN 1 ELSE 0 END), 0) AS missing_receipts,
         COALESCE(SUM(CASE WHEN p.receipt_generated = 1 THEN 1 ELSE 0 END), 0) AS generated_receipts,
         COALESCE(SUM(CASE WHEN p.receipt_emailed_at IS NOT NULL THEN 1 ELSE 0 END), 0) AS emailed_receipts,
-        COALESCE(SUM(p.total_amount), 0) AS receipt_value
+        COALESCE(SUM(CASE WHEN COALESCE(p.payment_type,'') = 'refund' THEN -p.total_amount ELSE p.total_amount END), 0) AS receipt_value
     FROM payments p $whereSql");
 $summaryStmt->execute($params);
 $summary = $summaryStmt->fetch(PDO::FETCH_ASSOC) ?: [];
