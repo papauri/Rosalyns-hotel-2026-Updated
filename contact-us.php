@@ -425,16 +425,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['contact_form'])) {
 
                                 <div class="form-group">
                                     <label for="contact-name">Full Name *</label>
-                                    <input type="text" id="contact-name" name="name" required minlength="2" maxlength="150" placeholder="Your full name" value="<?php echo htmlspecialchars($_POST['name'] ?? ''); ?>">
+                                    <input type="text" id="contact-name" name="name" required minlength="2" maxlength="150" autocomplete="name" autocapitalize="words" placeholder="Your full name" value="<?php echo htmlspecialchars($_POST['name'] ?? ''); ?>">
                                 </div>
                                 <div class="form-group">
                                     <label for="contact-email">Email Address *</label>
-                                    <input type="email" id="contact-email" name="email" required maxlength="255" placeholder="your@email.com" value="<?php echo htmlspecialchars($_POST['email'] ?? ''); ?>">
+                                    <input type="email" id="contact-email" name="email" required maxlength="255" autocomplete="email" inputmode="email" autocapitalize="off" spellcheck="false" placeholder="your@email.com" value="<?php echo htmlspecialchars($_POST['email'] ?? ''); ?>">
                                 </div>
                                 <div class="form-row">
                                     <div class="form-group">
                                         <label for="contact-phone">Phone Number</label>
-                                        <input type="tel" id="contact-phone" name="phone" maxlength="50" placeholder="+1 234 567 890" value="<?php echo htmlspecialchars($_POST['phone'] ?? ''); ?>">
+                                        <input type="tel" id="contact-phone" name="phone" maxlength="50" autocomplete="tel" inputmode="tel" placeholder="+1 234 567 890" value="<?php echo htmlspecialchars($_POST['phone'] ?? ''); ?>">
                                     </div>
                                     <div class="form-group">
                                         <label for="contact-subject">Subject *</label>

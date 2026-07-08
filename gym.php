@@ -737,29 +737,29 @@ try {
                             <div class="form-grid">
                                 <div class="form-group">
                                     <label for="full_name">Full Name *</label>
-                                    <input type="text" id="full_name" name="full_name" required>
+                                    <input type="text" id="full_name" name="full_name" autocomplete="name" autocapitalize="words" required>
                                 </div>
                                 <div class="form-group">
                                     <label for="email">Email *</label>
-                                    <input type="email" id="email" name="email" required>
+                                    <input type="email" id="email" name="email" autocomplete="email" inputmode="email" autocapitalize="off" spellcheck="false" required>
                                 </div>
                                 <div class="form-group">
                                     <label for="phone">Phone *</label>
-                                    <input type="tel" id="phone" name="phone" required>
+                                    <input type="tel" id="phone" name="phone" autocomplete="tel" inputmode="tel" required>
                                 </div>
                                 <div class="form-group">
                                     <label for="guests">Guests</label>
-                                    <input type="number" id="guests" name="guests" min="1" max="10" placeholder="1">
+                                    <input type="number" id="guests" name="guests" min="1" max="10" inputmode="numeric" placeholder="1">
                                 </div>
                                 <div class="form-group">
                                     <label for="preferred_date">Preferred Date *</label>
                                     <input type="date" id="preferred_date" name="preferred_date" min="<?php echo date('Y-m-d'); ?>" required>
-                                    <small class="field-error" id="preferred_date_error" class="field-error"></small>
+                                    <small class="field-error" id="preferred_date_error"></small>
                                 </div>
                                 <div class="form-group">
                                     <label for="preferred_time">Preferred Time *</label>
                                     <input type="time" id="preferred_time" name="preferred_time" required>
-                                    <small class="field-error" id="preferred_time_error" class="field-error"></small>
+                                    <small class="field-error" id="preferred_time_error"></small>
                                 </div>
                                 <div class="form-group full">
                                     <label for="package_choice">Select Package *</label>

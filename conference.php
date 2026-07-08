@@ -483,36 +483,36 @@ function resolveConferenceImage(?string $imagePath): string
             <div class="form-row">
                 <div class="form-group">
                     <label>Company Name *</label>
-                    <input type="text" name="company_name" required>
+                    <input type="text" name="company_name" autocomplete="organization" autocapitalize="words" required>
                 </div>
                 <div class="form-group">
                     <label>Contact Person *</label>
-                    <input type="text" name="contact_person" required>
+                    <input type="text" name="contact_person" autocomplete="name" autocapitalize="words" required>
                 </div>
             </div>
 
             <div class="form-row">
                 <div class="form-group">
                     <label>Email *</label>
-                    <input type="email" name="email" required>
+                    <input type="email" name="email" autocomplete="email" inputmode="email" autocapitalize="off" spellcheck="false" required>
                 </div>
                 <div class="form-group">
                     <label>Phone *</label>
-                    <input type="tel" name="phone" required>
+                    <input type="tel" name="phone" autocomplete="tel" inputmode="tel" required>
                 </div>
             </div>
 
             <div class="form-group">
                 <label>Event Date *</label>
                 <input type="date" name="event_date" id="event_date" min="' . date('Y-m-d') . '" required>
-                <small class="field-error" id="event_date_error" class="field-error"></small>
+                <small class="field-error" id="event_date_error"></small>
             </div>
 
             <div class="form-row">
                 <div class="form-group">
                     <label>Start Time *</label>
                     <input type="time" name="start_time" id="start_time" required>
-                    <small class="field-error" id="start_time_error" class="field-error"></small>
+                    <small class="field-error" id="start_time_error"></small>
                 </div>
                 <div class="form-group">
                     <label>End Time *</label>
@@ -523,7 +523,7 @@ function resolveConferenceImage(?string $imagePath): string
             <div class="form-row">
                 <div class="form-group">
                     <label>Number of Attendees *</label>
-                    <input type="number" name="number_of_attendees" min="1" required>
+                    <input type="number" name="number_of_attendees" min="1" inputmode="numeric" required>
                 </div>
                 <div class="form-group">
                     <label>Event Type</label>

@@ -1423,9 +1423,18 @@
 }
 
 .details-grid {
-    grid-template-columns: 1fr;
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(min(100%, 340px), 1fr));
     gap: clamp(0.75rem, 1vw + 0.35rem, 1.15rem);
-    align-items: stretch;
+    align-items: start;
+}
+
+/* Full-width bands: the step story + wide table cards need the whole row.
+   Everything else (timeline, notes, actions) flows multiple-per-row. */
+.details-grid > .story-grid,
+.details-grid > .folio-card,
+.details-grid > .invoices-card {
+    grid-column: 1 / -1;
 }
 
 /* ── Story grid: asymmetric 3-panel (guest | stay+room | payment) ── */

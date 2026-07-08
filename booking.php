@@ -1289,19 +1289,19 @@ try {
                     <div class="form-grid">
                         <div class="form-group">
                             <label for="guest_name" class="required">Full Name</label>
-                            <input type="text" id="guest_name" name="guest_name" class="form-control" required autocomplete="name" placeholder="Your full name" value="<?php echo isset($_POST['guest_name']) ? htmlspecialchars($_POST['guest_name']) : ''; ?>">
+                            <input type="text" id="guest_name" name="guest_name" class="form-control" required autocomplete="name" autocapitalize="words" placeholder="Your full name" value="<?php echo isset($_POST['guest_name']) ? htmlspecialchars($_POST['guest_name']) : ''; ?>">
                         </div>
                         <div class="form-group">
                             <label for="guest_email" class="required">Email Address</label>
-                            <input type="email" id="guest_email" name="guest_email" class="form-control" required autocomplete="email" placeholder="your@email.com" value="<?php echo isset($_POST['guest_email']) ? htmlspecialchars($_POST['guest_email']) : ''; ?>">
+                            <input type="email" id="guest_email" name="guest_email" class="form-control" required autocomplete="email" inputmode="email" autocapitalize="off" spellcheck="false" placeholder="your@email.com" value="<?php echo isset($_POST['guest_email']) ? htmlspecialchars($_POST['guest_email']) : ''; ?>">
                         </div>
                         <div class="form-group">
                             <label for="guest_phone" class="required">Phone Number</label>
-                            <input type="tel" id="guest_phone" name="guest_phone" class="form-control" required autocomplete="tel" placeholder="+265 999 123 456" value="<?php echo isset($_POST['guest_phone']) ? htmlspecialchars($_POST['guest_phone']) : ''; ?>">
+                            <input type="tel" id="guest_phone" name="guest_phone" class="form-control" required autocomplete="tel" inputmode="tel" placeholder="+265 999 123 456" value="<?php echo isset($_POST['guest_phone']) ? htmlspecialchars($_POST['guest_phone']) : ''; ?>">
                         </div>
                         <div class="form-group">
                             <label for="guest_country">Country</label>
-                            <input type="text" id="guest_country" name="guest_country" class="form-control" value="<?php echo isset($_POST['guest_country']) ? htmlspecialchars($_POST['guest_country']) : ''; ?>">
+                            <input type="text" id="guest_country" name="guest_country" class="form-control" autocomplete="country-name" autocapitalize="words" value="<?php echo isset($_POST['guest_country']) ? htmlspecialchars($_POST['guest_country']) : ''; ?>">
                         </div>
                     </div>
                     <div class="form-group">
@@ -1332,6 +1332,7 @@ try {
                             class="form-control"
                             min="0"
                             max="19"
+                            inputmode="numeric"
                             value="<?php echo isset($_POST['child_guests']) ? (int)$_POST['child_guests'] : 0; ?>">
                         <small id="childGuestHint" class="form-hint">Children must be accompanied by at least 1 adult. Children under 12.</small>
                     </div>

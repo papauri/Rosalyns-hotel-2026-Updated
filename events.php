@@ -457,19 +457,19 @@ $site_logo = getSetting('site_logo');
                             <div class="form-grid">
                                 <div class="form-group">
                                     <label for="event_full_name">Full Name *</label>
-                                    <input type="text" id="event_full_name" name="full_name" required>
+                                    <input type="text" id="event_full_name" name="full_name" autocomplete="name" autocapitalize="words" required>
                                 </div>
                                 <div class="form-group">
                                     <label for="event_email">Email *</label>
-                                    <input type="email" id="event_email" name="email" required>
+                                    <input type="email" id="event_email" name="email" autocomplete="email" inputmode="email" autocapitalize="off" spellcheck="false" required>
                                 </div>
                                 <div class="form-group">
                                     <label for="event_phone">Phone *</label>
-                                    <input type="tel" id="event_phone" name="phone" required>
+                                    <input type="tel" id="event_phone" name="phone" autocomplete="tel" inputmode="tel" required>
                                 </div>
                                 <div class="form-group">
                                     <label for="event_guests">Guests</label>
-                                    <input type="number" id="event_guests" name="guests" min="1" max="20" placeholder="1">
+                                    <input type="number" id="event_guests" name="guests" min="1" max="20" inputmode="numeric" placeholder="1">
                                 </div>
                                 <div class="form-group full">
                                     <label for="event_message">Message / Special Requests</label>
