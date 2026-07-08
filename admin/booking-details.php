@@ -1913,12 +1913,12 @@ unset($_SESSION['success_message'], $_SESSION['error_message']);
             </div>
 
             <!-- Notes Card -->
-            <div class="info-card notes-card" style="display:flex;flex-direction:column;">
+            <div class="info-card notes-card">
                 <div class="info-card-header">
                     <div class="icon notes"><i class="fas fa-sticky-note"></i></div>
                     <h3>Internal Notes</h3>
                 </div>
-                <div class="info-card-body" style="flex:1;">
+                <div class="info-card-body">
                     <div class="notes-form">
                         <form method="POST">
                             <textarea name="note_text" placeholder="Add a note about this booking..." required></textarea>

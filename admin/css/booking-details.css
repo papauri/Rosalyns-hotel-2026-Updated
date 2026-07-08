@@ -2525,3 +2525,175 @@
     font-size: clamp(0.88rem, 0.82rem + 0.2vw, 1.05rem);
 }
 
+/* ===========================================================
+   LOWER CARDS REFRESH — folio, timeline+notes, special, actions
+   Brings the wide cards into the same warm editorial language
+   as the overview row. Overrides the legacy grey styling above.
+   =========================================================== */
+
+/* ── Folio / Charges ── */
+.folio-card .info-card-body {
+    padding-top: 0.9rem;
+}
+
+.folio-header {
+    margin-bottom: 0.9rem;
+    padding-bottom: 0.75rem;
+    border-bottom: 1px solid color-mix(in srgb, var(--color-lux-clay-100, #ECE1D6) 70%, transparent);
+}
+
+.folio-table th {
+    color: var(--color-lux-gold, #B18247);
+    font-weight: 600;
+    letter-spacing: 0.1em;
+    border-bottom: 1px solid color-mix(in srgb, var(--color-lux-clay-100, #ECE1D6) 90%, transparent);
+    background: color-mix(in srgb, var(--color-lux-clay-50, #F3ECE4) 34%, var(--color-white, #fff));
+}
+
+.folio-table td {
+    border-bottom: 1px solid color-mix(in srgb, var(--color-lux-clay-100, #ECE1D6) 42%, transparent);
+}
+
+.folio-table tbody tr:hover {
+    background: color-mix(in srgb, var(--color-lux-clay-50, #F3ECE4) 40%, var(--color-white, #fff));
+}
+
+.folio-summary {
+    gap: clamp(1.25rem, 3vw, 2.5rem);
+    margin-top: 0.9rem;
+    padding: 0.85rem 1rem;
+    border-top: none;
+    border-radius: 0.85rem;
+    background: linear-gradient(135deg,
+            color-mix(in srgb, var(--color-lux-clay-50, #F3ECE4) 55%, var(--color-white, #fff)) 0%,
+            var(--color-white, #fff) 100%);
+    border: 1px solid color-mix(in srgb, var(--color-lux-clay-100, #ECE1D6) 60%, transparent);
+}
+
+/* ── Timeline + Notes row: equal-height warm cards ── */
+.timeline-notes-row .info-card {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+}
+
+.timeline-notes-row .info-card-body {
+    display: flex;
+    flex-direction: column;
+    flex: 1;
+    min-height: 0;
+}
+
+.timeline-list {
+    max-height: 22rem;
+    scrollbar-width: thin;
+    scrollbar-color: color-mix(in srgb, var(--color-lux-clay-100, #ECE1D6) 90%, transparent) transparent;
+}
+
+.timeline-item {
+    padding: 0.7rem 0.25rem;
+    border-bottom: 1px solid color-mix(in srgb, var(--color-lux-clay-100, #ECE1D6) 45%, transparent);
+}
+
+.timeline-item:hover {
+    background: color-mix(in srgb, var(--color-lux-clay-50, #F3ECE4) 32%, var(--color-white, #fff));
+    border-radius: 0.6rem;
+}
+
+.timeline-title {
+    color: var(--color-lux-ink, #231F1C);
+}
+
+.timeline-time {
+    white-space: nowrap;
+    font-variant-numeric: tabular-nums;
+    color: var(--color-text-secondary, #8a7a68);
+}
+
+/* ── Notes ── */
+.notes-form textarea {
+    border: 1px solid color-mix(in srgb, var(--color-lux-clay-100, #ECE1D6) 95%, transparent);
+    background: color-mix(in srgb, var(--color-lux-clay-50, #F3ECE4) 22%, var(--color-white, #fff));
+    transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.notes-form textarea:focus {
+    outline: none;
+    border-color: var(--color-lux-gold, #B18247);
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-lux-gold, #B18247) 16%, transparent);
+    background: var(--color-white, #fff);
+}
+
+.notes-list {
+    flex: 1;
+    min-height: 0;
+    max-height: 17rem;
+    overflow-y: auto;
+    scrollbar-width: thin;
+    scrollbar-color: color-mix(in srgb, var(--color-lux-clay-100, #ECE1D6) 90%, transparent) transparent;
+}
+
+.note-item {
+    background: color-mix(in srgb, var(--color-lux-clay-50, #F3ECE4) 45%, var(--color-white, #fff));
+    border: 1px solid color-mix(in srgb, var(--color-lux-clay-100, #ECE1D6) 55%, transparent);
+    border-left: 3px solid color-mix(in srgb, var(--color-lux-gold, #B18247) 55%, transparent);
+}
+
+.note-author {
+    font-size: 0.68rem;
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--color-lux-gold, #B18247);
+}
+
+.note-time {
+    font-variant-numeric: tabular-nums;
+    color: var(--color-text-secondary, #8a7a68);
+}
+
+/* ── Special Requests: quote-style panel ── */
+.booking-special-card .info-card-body {
+    padding-top: 0.9rem;
+}
+
+.booking-special-card__content {
+    position: relative;
+    padding: 0.9rem 1.1rem 0.9rem 1.3rem;
+    border-radius: 0.85rem;
+    background: linear-gradient(135deg,
+            color-mix(in srgb, var(--color-lux-clay-50, #F3ECE4) 55%, var(--color-white, #fff)) 0%,
+            var(--color-white, #fff) 100%);
+    border: 1px solid color-mix(in srgb, var(--color-lux-clay-100, #ECE1D6) 60%, transparent);
+    border-left: 3px solid color-mix(in srgb, var(--color-lux-gold, #B18247) 60%, transparent);
+    font-family: 'Cormorant Garamond', serif;
+    font-size: clamp(0.98rem, 0.92rem + 0.18vw, 1.12rem);
+    font-style: italic;
+    color: var(--color-lux-ink, #231F1C);
+}
+
+/* ── Quick Actions ── */
+.actions-card .info-card-body {
+    padding-top: 0.9rem;
+}
+
+.booking-actions-group {
+    border-color: color-mix(in srgb, var(--color-lux-clay-100, #ECE1D6) 75%, transparent);
+    background: color-mix(in srgb, var(--color-lux-clay-50, #F3ECE4) 30%, var(--color-white, #fff));
+}
+
+.booking-actions-group__title {
+    font-size: 0.66rem;
+    font-weight: 600;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--color-lux-gold, #B18247);
+}
+
+.actions-card .action-btn {
+    justify-content: center;
+    min-height: 2.6rem;
+    border-radius: 0.7rem;
+    font-size: 0.78rem;
+}
+
