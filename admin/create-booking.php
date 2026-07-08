@@ -3451,7 +3451,10 @@ try {
             }
         })();
     </script>
-    <script src="js/admin-components.js" defer></script>
+    <?php /* admin-components.js is loaded once, cache-busted, by admin-footer.php below.
+             A second unversioned copy here can be served stale by the service worker and,
+             via the __rhComponentsLoaded guard, blocks the fresh copy from initialising —
+             the same "works only after two reloads" race fixed on calendar.php. */ ?>
 <?php require_once 'includes/admin-footer.php'; ?>
 </body>
 
