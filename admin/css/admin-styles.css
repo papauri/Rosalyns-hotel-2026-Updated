@@ -2907,6 +2907,14 @@ body {
 /* Section title with accent bar */
 .section-title {
     position: relative;
+    /* Flex + gap so the leading <i> icon keeps a consistent space from the title
+       text. Without display:flex here this rule would override the base
+       .section-title (which is flex) back to block and the gap would collapse,
+       leaving the icon jammed against the text. The ::before accent bar is
+       absolutely positioned, so it is unaffected by flex layout. */
+    display: flex;
+    align-items: center;
+    gap: 8px;
     padding: 0 0 0 14px;
     margin: 4px 0 18px;
     font-family: 'Jost', sans-serif;
