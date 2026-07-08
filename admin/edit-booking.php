@@ -310,6 +310,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $booking) {
                     || $check_out !== ($booking['check_out_date'] ?? '');
 
                 if ($room_changed || $datesChanged) {
+                    // Serialise against concurrent creates/edits on this room type using
+                    // the SAME per-room row lock the booking-creation flows take, BEFORE
+                    // re-checking availability. Without it the check-then-update window
+                    // lets an edit and a new booking both grab the last room → overbooking.
+                    $pdo->prepare("SELECT id FROM rooms WHERE id = ? FOR UPDATE")->execute([$room_id]);
                     $availCheck = checkRoomAvailability($room_id, $check_in, $check_out, $booking_id);
                     if (empty($availCheck['available'])) {
                         $pdo->rollBack();

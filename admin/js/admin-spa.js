@@ -30,6 +30,7 @@
     var _loaderTimer = null;
     var _loaderShownAt = 0;
     var _loaderMinVisibleMs = 320;
+    var _spaDocProxy = null; // document shim for re-executed inline scripts
 
     function _getLoaderBrandName() {
         var brand = document.querySelector('.admin-header-brand h1');
@@ -282,6 +283,44 @@
         return names;
     }
 
+    /**
+     * A `document` shim for re-executed inline scripts. On SPA navigation the
+     * document was parsed long ago, so the real `DOMContentLoaded` never fires
+     * again — any inline `document.addEventListener('DOMContentLoaded', fn)`
+     * would silently no-op, leaving page init (prices, tooltips, allocators…)
+     * dead until a full reload. The shim runs such callbacks immediately;
+     * everything else passes straight through to the real document.
+     */
+    function _getSpaDocProxy() {
+        if (_spaDocProxy) return _spaDocProxy;
+        if (typeof Proxy === 'undefined') return document; // legacy fallback
+        _spaDocProxy = new Proxy(document, {
+            get: function (target, prop) {
+                if (prop === 'addEventListener') {
+                    return function (type, listener, options) {
+                        if (type === 'DOMContentLoaded' && listener) {
+                            Promise.resolve().then(function () {
+                                try {
+                                    var evt = new Event('DOMContentLoaded');
+                                    typeof listener === 'function'
+                                        ? listener.call(target, evt)
+                                        : listener.handleEvent(evt);
+                                } catch (e) { console.error('[SPA] DOMContentLoaded handler failed', e); }
+                            });
+                            return;
+                        }
+                        return target.addEventListener(type, listener, options);
+                    };
+                }
+                var val = target[prop];
+                return typeof val === 'function' ? val.bind(target) : val;
+            }
+        });
+        return _spaDocProxy;
+    }
+    // Expose so re-executed inline scripts (own global scope) can reach the shim.
+    window.__rhSpaGetDoc = _getSpaDocProxy;
+
     function _buildInlineScriptSource(source) {
         var exports = _collectInlineScriptExports(source);
         var exportLines = exports.map(function (name) {
@@ -292,7 +331,7 @@
             '(function(window, document){',
             source,
             exportLines.join('\n'),
-            '})(window, document);'
+            '})(window, (window.__rhSpaGetDoc ? window.__rhSpaGetDoc() : document));'
         ].join('\n');
     }
 

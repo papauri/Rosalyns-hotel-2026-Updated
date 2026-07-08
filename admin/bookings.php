@@ -651,6 +651,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
                 // Handle room availability changes
                 if (in_array($current_status, ['pending', 'tentative'], true) && $new_status === 'confirmed') {
+                    // Serialise on the room-type row (same lock the creation flows take)
+                    // BEFORE the availability re-check + rooms_available decrement, so two
+                    // simultaneous confirmations can't both claim the last room.
+                    $pdo->prepare("SELECT id FROM rooms WHERE id = ? FOR UPDATE")->execute([$room_id]);
                     // Check availability before confirming
                     $availabilityCheck = checkRoomAvailability($room_id, $current_booking['check_in_date'], $current_booking['check_out_date'], $booking_id);
                     if (!$availabilityCheck['available']) {
@@ -2152,6 +2156,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $extVatAmount    = $extVatRate > 0 ? round($newTotal * ($extVatRate / 100), 2) : 0.0;
             $extTotalWithVat = round($newTotal + $extVatAmount, 2);
 
+            // Atomicity: lock the room-type row, then run the conflict check + update in
+            // one transaction so a concurrent booking or extend can't slip into the newly
+            // extended nights between the check and the write (overbooking).
+            $pdo->beginTransaction();
+            $pdo->prepare("SELECT id FROM rooms WHERE id = ? FOR UPDATE")->execute([$bk['room_id']]);
+
             // Check for conflicts — fetch actual booking details so the error is actionable
             $blockingStatuses = getBookingStatusesThatBlockAvailability(false);
             $placeholders = implode(',', array_fill(0, count($blockingStatuses), '?'));
@@ -2171,6 +2181,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $conflictRows = $conflict_stmt->fetchAll(PDO::FETCH_ASSOC);
 
             if (!empty($conflictRows)) {
+                $pdo->rollBack();
                 $details = array_map(function ($c) {
                     $in  = date('d M Y', strtotime($c['check_in_date']));
                     $out = date('d M Y', strtotime($c['check_out_date']));
@@ -2199,6 +2210,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
             // Recalculate amount_due so it reflects the new total correctly
             recalculateBookingFinancials($booking_id);
+            $pdo->commit();
 
             // Log the extension (never fatal — must not undo the successful update)
             bookings_log_status_change(

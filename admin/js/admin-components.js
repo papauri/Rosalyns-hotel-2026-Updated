@@ -106,26 +106,38 @@
         // Initialize modal event listeners
         init: function () {
             this.syncModalTableLabels(document);
+            // Only wire the (document-level) delegation once. Using delegation
+            // instead of per-element binding means modal buttons injected later
+            // by admin-spa.js navigation work without a reload.
+            if (this._delegated) return;
+            this._delegated = true;
 
-            // Close button clicks
-            document.querySelectorAll('[data-modal-close]').forEach(btn => {
-                btn.addEventListener('click', (e) => {
-                    const modal = btn.closest('[data-modal]');
+            // Open / close via delegation (works for SPA-swapped content)
+            document.addEventListener('click', (e) => {
+                if (!(e.target instanceof Element)) return;
+
+                const openBtn = e.target.closest('[data-modal-open]');
+                if (openBtn) {
+                    e.preventDefault();
+                    this.open(openBtn.dataset.modalOpen);
+                    return;
+                }
+
+                const closeBtn = e.target.closest('[data-modal-close]');
+                if (closeBtn) {
+                    const modal = closeBtn.closest('[data-modal]');
                     if (modal) this.close(modal.id);
-                });
-            });
+                    return;
+                }
 
-            // Overlay clicks
-            document.querySelectorAll('[data-modal-overlay]').forEach(overlay => {
-                overlay.addEventListener('click', (e) => {
-                    if (e.target === overlay) {
-                        const modalId = overlay.id.replace('-overlay', '');
-                        const modal = document.getElementById(modalId);
-                        if (modal && modal.dataset.closeOnOverlay !== 'false') {
-                            this.close(modalId);
-                        }
+                const overlay = e.target.closest('[data-modal-overlay]');
+                if (overlay && e.target === overlay) {
+                    const modalId = overlay.id.replace('-overlay', '');
+                    const modal = document.getElementById(modalId);
+                    if (modal && modal.dataset.closeOnOverlay !== 'false') {
+                        this.close(modalId);
                     }
-                });
+                }
             });
 
             // Escape key
@@ -137,15 +149,6 @@
                         this.close(topModalId);
                     }
                 }
-            });
-
-            // Open buttons
-            document.querySelectorAll('[data-modal-open]').forEach(btn => {
-                btn.addEventListener('click', (e) => {
-                    e.preventDefault();
-                    const modalId = btn.dataset.modalOpen;
-                    this.open(modalId);
-                });
             });
         }
     };
@@ -285,6 +288,11 @@
         },
 
         init: function () {
+            // Guard: delegation + queue flush must run once, not on every
+            // SPA re-scan (would leak listeners and reset the toast queue).
+            if (this._delegated) return;
+            this._delegated = true;
+
             // Close button delegation
             document.addEventListener('click', (e) => {
                 const closeBtn = e.target.closest('[data-alert-close]');
@@ -899,20 +907,25 @@
     // INITIALIZATION
     // ============================================
 
-    // Initialize on DOM ready
-    if (document.readyState === 'loading') {
-        document.addEventListener('DOMContentLoaded', () => {
-            Modal.init();
-            Alert.init();
-            CalendarTooltip.init();
-            ButtonLoader.init();
-        });
-    } else {
+    function initAllComponents() {
         Modal.init();
         Alert.init();
         CalendarTooltip.init();
         ButtonLoader.init();
     }
+
+    // Initialize on DOM ready
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', initAllComponents);
+    } else {
+        initAllComponents();
+    }
+
+    // Re-scan after admin-spa.js swaps in new page content. This external script
+    // is loaded once and is NOT re-executed on SPA navigation, so without this
+    // hook modal buttons / tooltips / table labels in freshly swapped content
+    // would stay dead until a full reload. All inits are idempotent/guarded.
+    document.addEventListener('rh:content-updated', initAllComponents);
 
     // ============================================
     // GLOBAL TAB HANDLER
