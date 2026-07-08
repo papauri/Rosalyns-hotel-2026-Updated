@@ -568,9 +568,17 @@ $fb_events_posting_on = getSetting('facebook_posting_enabled', '0') === '1'
                     <?php foreach ($events as $event): ?>
                         <div class="event-card <?php echo $event['is_expired'] ? 'expired' : ''; ?>">
                             <?php
-                            // Prioritize video over image
-                            $hasVideo = !empty($event['video_path']);
+                            // Prioritize video over image — but a URL ending in an image
+                            // extension is NOT a video (legacy data sometimes stored an image
+                            // in video_path). Treat those as images so they crop instead of
+                            // being embedded in an iframe at full size.
+                            $rawVideo = $event['video_path'] ?? '';
+                            $videoIsImage = $rawVideo !== '' && preg_match('/\.(jpe?g|png|webp|gif|avif)([?#].*)?$/i', $rawVideo);
+                            $hasVideo = $rawVideo !== '' && !$videoIsImage;
                             $imgSrc = $event['image_path'] ?? '';
+                            if ($imgSrc === '' && $videoIsImage) {
+                                $imgSrc = $rawVideo;
+                            }
                             if ($imgSrc && !preg_match('#^https?://#i', $imgSrc)) {
                                 $imgSrc = '../' . $imgSrc;
                             }

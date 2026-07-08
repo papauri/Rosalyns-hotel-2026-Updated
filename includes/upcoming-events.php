@@ -56,7 +56,7 @@ try {
     if ($ue_col_exists) {
         $ue_stmt = $pdo->prepare("
             SELECT id, title, description, event_date, start_time, end_time,
-                   location, ticket_price, image_path
+                   location, ticket_price, image_path, video_path
             FROM events
             WHERE is_active = 1
               AND show_in_upcoming = 1
@@ -72,7 +72,7 @@ try {
     if (empty($upcoming_events_list)) {
         $ue_legacy_stmt = $pdo->prepare("
             SELECT id, title, description, event_date, start_time, end_time,
-                   location, ticket_price, image_path
+                   location, ticket_price, image_path, video_path
             FROM events
             WHERE is_active = 1
               AND event_date >= CURDATE()
@@ -126,6 +126,12 @@ $ue_currency = getSetting('currency_symbol');
                 if ($ue_start && $ue_end) $ue_time_str = $ue_start . ' – ' . $ue_end;
                 $ue_raw_desc = strip_tags($ue_event['description'] ?? '');
                 $ue_desc = htmlspecialchars(strlen($ue_raw_desc) > 120 ? substr($ue_raw_desc, 0, 117) . '...' : $ue_raw_desc);
+                // Fall back to video_path when it actually holds an image URL — legacy
+                // data sometimes stored the event picture there instead of image_path.
+                if (empty($ue_event['image_path']) && !empty($ue_event['video_path'])
+                    && preg_match('/\.(jpe?g|png|webp|gif|avif)([?#].*)?$/i', $ue_event['video_path'])) {
+                    $ue_event['image_path'] = $ue_event['video_path'];
+                }
                 $ue_has_image = !empty($ue_event['image_path']);
                 $ue_price = floatval($ue_event['ticket_price']);
                 // Use standard odd/even logic for timeline sides
