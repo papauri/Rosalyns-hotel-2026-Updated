@@ -166,11 +166,12 @@
 /* Desktop only: 5-column row with inline submit */
 @media (min-width: 1025px) {
     .landing-main .editorial-booking-form {
-        /* Fields flow across the row and wrap as needed (works for any field count —
-           this install has 5 fields, the original layout assumed 4). The submit is a
-           full-width pill on its own row (rule below), so it never gets squeezed into
-           a narrow column and cramped. */
-        grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+        /* Wide screens: the 5 booking fields divide the full container into 5 EQUAL
+           columns (each ~1/5), so every field — including the long "Children (under 12)"
+           label — has room to sit on one line. Explicit `repeat(5, …)` also makes the
+           submit's `grid-column: 1 / -1` span the whole row correctly (that does not
+           work reliably with `repeat(auto-fit, …)`). Mobile/tablet layouts unchanged. */
+        grid-template-columns: repeat(5, minmax(0, 1fr));
     }
     .landing-main .editorial-booking-form .editorial-booking-submit {
         /* Own full-width row, but the pill itself is content-sized and left-aligned —
