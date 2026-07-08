@@ -1258,7 +1258,9 @@ if ($is_card_insight_ajax) {
 
             case 'total_revenue_today':
                 $payload['title'] = 'Total Revenue Today';
-                $payload['subtitle'] = 'Payments ledger plus settled restaurant orders';
+                $payload['subtitle'] = $mod_pos
+                    ? ('Payments ledger plus settled ' . (isRestaurantEnabled() ? 'restaurant' : 'POS') . ' orders')
+                    : 'Payments ledger';
                 $payload['columns'] = [
                     ['key' => 'source', 'label' => 'Source'],
                     ['key' => 'reference', 'label' => 'Reference'],
@@ -1281,6 +1283,7 @@ if ($is_card_insight_ajax) {
                                            AND payment_status IN ('paid','completed','partial')
                                            AND deleted_at IS NULL
                                            AND COALESCE(payment_type, '') <> 'refund'
+                                           AND booking_type <> 'restaurant'
                                          ORDER BY COALESCE(created_at, CONCAT(payment_date, ' 00:00:00')) DESC
                                          LIMIT 20");
                 foreach ($payStmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
@@ -1296,6 +1299,7 @@ if ($is_card_insight_ajax) {
                     ];
                 }
 
+                if ($mod_pos) {
                 $restStmt = $pdo->query("SELECT id AS order_id, reference, order_type, payment_method, total_amount, COALESCE(paid_at, created_at) AS ts
                                           FROM stock_orders
                                           WHERE status IN ('paid','completed')
@@ -1305,7 +1309,7 @@ if ($is_card_insight_ajax) {
                 foreach ($restStmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
                     $combined[] = [
                         'order_id' => (int)($row['order_id'] ?? 0),
-                        'source' => 'Restaurant',
+                        'source' => isRestaurantEnabled() ? 'Restaurant' : 'POS',
                         'reference' => (string)$row['reference'],
                         'context' => ucwords(str_replace('_', ' ', (string)$row['order_type'])),
                         'method' => ucwords(str_replace('_', ' ', (string)($row['payment_method'] ?? 'N/A'))),
@@ -1313,6 +1317,7 @@ if ($is_card_insight_ajax) {
                         'time' => $formatDateTime((string)$row['ts']),
                         '_ts' => (string)$row['ts'],
                     ];
+                }
                 }
 
                 usort($combined, static function (array $a, array $b): int {
@@ -1442,76 +1447,126 @@ if ($is_card_insight_ajax) {
                 break;
 
             case 'guest_services_queue':
-                $payload['title'] = 'Guest Services Queue';
-                $payload['subtitle'] = 'Front-desk and guest communication workloads';
+                // Only queues from modules this preset runs — a gym must not see
+                // "Today's check-ins", a shop must not see gym inquiries. Mirrors
+                // the row gating of the Guest Services widget on the dashboard.
+                $payload['title'] = ($mod_bookings ? 'Guest' : 'Customer') . ' Services Queue';
+                $payload['subtitle'] = $mod_bookings
+                    ? 'Front-desk and guest communication workloads'
+                    : 'Customer communication workloads';
                 $payload['columns'] = [
                     ['key' => 'queue', 'label' => 'Queue'],
                     ['key' => 'count', 'label' => 'Open'],
                     ['key' => 'priority', 'label' => 'Priority'],
                     ['key' => 'detail', 'label' => 'Detail'],
                 ];
-                $payload['link'] = ['href' => 'reviews.php?status=pending', 'label' => 'Open guest services pages'];
+                $payload['link'] = $mod_website_cms
+                    ? ['href' => 'reviews.php?status=pending', 'label' => 'Open guest services pages']
+                    : ($mod_gym
+                        ? ['href' => 'gym-inquiries.php', 'label' => 'Open gym inquiries']
+                        : ['href' => 'bookings.php', 'label' => 'Open bookings']);
 
-                $pendingReviews = (int)$pdo->query("SELECT COUNT(*) FROM reviews WHERE status = 'pending'")->fetchColumn();
-                $unreadContact = (int)$pdo->query("SELECT COUNT(*) FROM contact_inquiries WHERE status = 'new'")->fetchColumn();
-                $pendingGym = (int)$pdo->query("SELECT COUNT(*) FROM gym_inquiries WHERE status IN ('pending', 'new')")->fetchColumn();
-                $todayCheckinsStmt = $pdo->prepare("SELECT COUNT(*) FROM bookings WHERE check_in_date = ? AND status IN ('confirmed', 'pending')");
-                $todayCheckinsStmt->execute([$today]);
-                $todayCheckins = (int)$todayCheckinsStmt->fetchColumn();
-                $inHouseGuests = (int)$pdo->query("SELECT COUNT(*) FROM bookings WHERE status = 'checked-in'")->fetchColumn();
-
-                $payload['rows'][] = [
-                    'queue' => 'Reviews awaiting moderation',
-                    'count' => (string)$pendingReviews,
-                    'priority' => $pendingReviews > 0 ? 'Medium' : 'Low',
-                    'detail' => 'Guest feedback waiting publication decision',
-                    'action' => ['href' => 'reviews.php?status=pending', 'label' => 'Reviews', 'target' => '_blank'],
-                ];
-                $payload['rows'][] = [
-                    'queue' => 'Unread contact inquiries',
-                    'count' => (string)$unreadContact,
-                    'priority' => $unreadContact > 0 ? 'High' : 'Low',
-                    'detail' => 'Website contact messages awaiting first response',
-                    'action' => ['href' => 'contact-inquiries.php', 'label' => 'Contacts', 'target' => '_blank'],
-                ];
-                $payload['rows'][] = [
-                    'queue' => 'Gym inquiries pending',
-                    'count' => (string)$pendingGym,
-                    'priority' => $pendingGym > 0 ? 'Medium' : 'Low',
-                    'detail' => 'Membership/wellness requests not yet closed',
-                    'action' => ['href' => 'gym-inquiries.php', 'label' => 'Gym', 'target' => '_blank'],
-                ];
-                $payload['rows'][] = [
-                    'queue' => "Today's check-ins",
-                    'count' => (string)$todayCheckins,
-                    'priority' => $todayCheckins > 0 ? 'High' : 'Low',
-                    'detail' => 'Arrivals that need front-desk readiness',
-                    'action' => ['href' => 'bookings.php?filter=checkin_today', 'label' => 'Arrivals', 'target' => '_blank'],
-                ];
-                $payload['rows'][] = [
-                    'queue' => 'In-house guests',
-                    'count' => (string)$inHouseGuests,
-                    'priority' => 'Monitor',
-                    'detail' => 'Current occupied stays requiring guest support',
-                    'action' => ['href' => 'bookings.php?status=checked-in', 'label' => 'In-house', 'target' => '_blank'],
-                ];
-                $payload['empty'] = 'No guest-services queues are active right now.';
+                if ($mod_website_cms) {
+                    $pendingReviews = (int)$pdo->query("SELECT COUNT(*) FROM reviews WHERE status = 'pending'")->fetchColumn();
+                    $unreadContact = (int)$pdo->query("SELECT COUNT(*) FROM contact_inquiries WHERE status = 'new'")->fetchColumn();
+                    $payload['rows'][] = [
+                        'queue' => 'Reviews awaiting moderation',
+                        'count' => (string)$pendingReviews,
+                        'priority' => $pendingReviews > 0 ? 'Medium' : 'Low',
+                        'detail' => ($mod_bookings ? 'Guest' : 'Customer') . ' feedback waiting publication decision',
+                        'action' => ['href' => 'reviews.php?status=pending', 'label' => 'Reviews', 'target' => '_blank'],
+                    ];
+                    $payload['rows'][] = [
+                        'queue' => 'Unread contact inquiries',
+                        'count' => (string)$unreadContact,
+                        'priority' => $unreadContact > 0 ? 'High' : 'Low',
+                        'detail' => 'Website contact messages awaiting first response',
+                        'action' => ['href' => 'contact-inquiries.php', 'label' => 'Contacts', 'target' => '_blank'],
+                    ];
+                }
+                if ($mod_gym) {
+                    $pendingGym = (int)$pdo->query("SELECT COUNT(*) FROM gym_inquiries WHERE status IN ('pending', 'new')")->fetchColumn();
+                    $payload['rows'][] = [
+                        'queue' => 'Gym inquiries pending',
+                        'count' => (string)$pendingGym,
+                        'priority' => $pendingGym > 0 ? 'Medium' : 'Low',
+                        'detail' => 'Membership/wellness requests not yet closed',
+                        'action' => ['href' => 'gym-inquiries.php', 'label' => 'Gym', 'target' => '_blank'],
+                    ];
+                }
+                if ($mod_website_cms && $mod_events) {
+                    try {
+                        $pendingEventsQueue = (int)$pdo->query("SELECT COUNT(*) FROM event_inquiries WHERE status = 'pending'")->fetchColumn();
+                        $payload['rows'][] = [
+                            'queue' => 'Event bookings pending',
+                            'count' => (string)$pendingEventsQueue,
+                            'priority' => $pendingEventsQueue > 0 ? 'Medium' : 'Low',
+                            'detail' => 'Event inquiries awaiting confirmation',
+                            'action' => ['href' => 'events-inquiries.php', 'label' => 'Events', 'target' => '_blank'],
+                        ];
+                    } catch (Throwable $e) { /* events table may not exist yet */ }
+                }
+                if ($mod_bookings) {
+                    $todayCheckinsStmt = $pdo->prepare("SELECT COUNT(*) FROM bookings WHERE check_in_date = ? AND status IN ('confirmed', 'pending')");
+                    $todayCheckinsStmt->execute([$today]);
+                    $todayCheckins = (int)$todayCheckinsStmt->fetchColumn();
+                    $inHouseGuests = (int)$pdo->query("SELECT COUNT(*) FROM bookings WHERE status = 'checked-in'")->fetchColumn();
+                    $payload['rows'][] = [
+                        'queue' => "Today's check-ins",
+                        'count' => (string)$todayCheckins,
+                        'priority' => $todayCheckins > 0 ? 'High' : 'Low',
+                        'detail' => 'Arrivals that need front-desk readiness',
+                        'action' => ['href' => 'bookings.php?filter=checkin_today', 'label' => 'Arrivals', 'target' => '_blank'],
+                    ];
+                    $payload['rows'][] = [
+                        'queue' => 'In-house guests',
+                        'count' => (string)$inHouseGuests,
+                        'priority' => 'Monitor',
+                        'detail' => 'Current occupied stays requiring guest support',
+                        'action' => ['href' => 'bookings.php?status=checked-in', 'label' => 'In-house', 'target' => '_blank'],
+                    ];
+                }
+                $payload['empty'] = 'No customer-services queues are active right now.';
                 break;
 
             case 'operations_facilities':
+                // Each metric only appears when its module is on — a gym or shop
+                // must never see hotel rows (maintenance, housekeeping, room
+                // service). Mirrors the Operations & Facilities widget gating.
                 $payload['title'] = 'Operations & Facilities';
-                $payload['subtitle'] = 'Maintenance, housekeeping, service and payment pressure points';
+                $payload['subtitle'] = $mod_housekeeping
+                    ? 'Maintenance, housekeeping, service and payment pressure points'
+                    : 'Service and payment pressure points';
                 $payload['columns'] = [
                     ['key' => 'metric', 'label' => 'Metric'],
                     ['key' => 'current', 'label' => 'Current'],
                     ['key' => 'detail', 'label' => 'Detail'],
                 ];
-                $payload['link'] = ['href' => 'room-maintenance.php', 'label' => 'Open operations tools'];
+                $payload['link'] = $mod_housekeeping
+                    ? ['href' => 'room-maintenance.php', 'label' => 'Open operations tools']
+                    : ($mod_stock
+                        ? ['href' => 'stock-orders.php', 'label' => 'Open orders']
+                        : ['href' => 'payments.php', 'label' => 'Open payments']);
 
-                $maintenanceOpen = (int)$pdo->query("SELECT COUNT(*) FROM individual_rooms WHERE status IN ('maintenance', 'out_of_order')")->fetchColumn();
-                $housekeepingDue = (int)$pdo->query("SELECT COUNT(*) FROM housekeeping_assignments WHERE status IN ('pending', 'in_progress') AND (due_date IS NULL OR due_date <= CURDATE())")->fetchColumn();
-                $roomServiceOpen = (int)$pdo->query("SELECT COUNT(*) FROM stock_orders WHERE order_type = 'room_service' AND status IN ('placed', 'pending', 'confirmed')")->fetchColumn();
-                $roomServiceReminderPending = (int)$pdo->query("SELECT COUNT(*)
+                if ($mod_housekeeping) {
+                    $maintenanceOpen = (int)$pdo->query("SELECT COUNT(*) FROM individual_rooms WHERE status IN ('maintenance', 'out_of_order')")->fetchColumn();
+                    $housekeepingDue = (int)$pdo->query("SELECT COUNT(*) FROM housekeeping_assignments WHERE status IN ('pending', 'in_progress') AND (due_date IS NULL OR due_date <= CURDATE())")->fetchColumn();
+                    $payload['rows'][] = [
+                        'metric' => 'Rooms in maintenance / out of order',
+                        'current' => (string)$maintenanceOpen,
+                        'detail' => $maintenanceOpen > 0 ? 'Unavailable inventory requiring engineering follow-up' : 'No rooms blocked by maintenance',
+                        'action' => ['href' => 'room-maintenance.php', 'label' => 'Maintenance', 'target' => '_blank'],
+                    ];
+                    $payload['rows'][] = [
+                        'metric' => 'Housekeeping due today',
+                        'current' => (string)$housekeepingDue,
+                        'detail' => 'Assignments in pending/in-progress status due now',
+                        'action' => ['href' => 'housekeeping.php', 'label' => 'Housekeeping', 'target' => '_blank'],
+                    ];
+                }
+                if ($mod_pos && $mod_bookings) {
+                    $roomServiceOpen = (int)$pdo->query("SELECT COUNT(*) FROM stock_orders WHERE order_type = 'room_service' AND status IN ('placed', 'pending', 'confirmed')")->fetchColumn();
+                    $roomServiceReminderPending = (int)$pdo->query("SELECT COUNT(*)
                                         FROM bookings b
                                         INNER JOIN individual_rooms ir ON ir.id = b.individual_room_id
                                         WHERE b.status = 'checked-in'
@@ -1525,53 +1580,52 @@ if ($is_card_insight_ajax) {
                                                             AND (o.status IN ('completed', 'paid') OR o.kitchen_status = 'served')
                                                             AND DATE(COALESCE(o.served_at, o.updated_at, o.created_at)) = CURDATE()
                                                 )")->fetchColumn();
-                $roomServiceReminderDue = $roomServiceReminderDueNow ? $roomServiceReminderPending : 0;
-                $openTabsStmt = $pdo->query("SELECT COUNT(*) AS c, COALESCE(SUM(total_amount), 0) AS v FROM stock_orders WHERE status = 'placed'")->fetch(PDO::FETCH_ASSOC);
-                $openTabsCount = (int)($openTabsStmt['c'] ?? 0);
-                $openTabsValue = (float)($openTabsStmt['v'] ?? 0);
-                $outstandingCount = 0;
-                $outstandingValue = 0.0;
-                if ($mod_bookings) {
-                    $outstandingStmt = $pdo->query("SELECT COUNT(*) AS c, COALESCE(SUM(amount_due), 0) AS v FROM bookings WHERE amount_due > 0 AND status IN ('pending', 'confirmed', 'checked-in')")->fetch(PDO::FETCH_ASSOC);
-                    $outstandingCount = (int)($outstandingStmt['c'] ?? 0);
-                    $outstandingValue = (float)($outstandingStmt['v'] ?? 0);
-                }
-
-                $payload['rows'][] = [
-                    'metric' => 'Rooms in maintenance / out of order',
-                    'current' => (string)$maintenanceOpen,
-                    'detail' => $maintenanceOpen > 0 ? 'Unavailable inventory requiring engineering follow-up' : 'No rooms blocked by maintenance',
-                    'action' => ['href' => 'room-maintenance.php', 'label' => 'Maintenance', 'target' => '_blank'],
-                ];
-                $payload['rows'][] = [
-                    'metric' => 'Housekeeping due today',
-                    'current' => (string)$housekeepingDue,
-                    'detail' => 'Assignments in pending/in-progress status due now',
-                    'action' => ['href' => 'housekeeping.php', 'label' => 'Housekeeping', 'target' => '_blank'],
-                ];
-                $payload['rows'][] = [
-                    'metric' => 'Room-service orders open',
-                    'current' => (string)$roomServiceOpen,
-                    'detail' => 'Orders awaiting fulfilment or settlement',
-                    'action' => ['href' => 'stock-orders.php?type=room_service', 'label' => 'Room Service', 'target' => '_blank'],
-                ];
-                $payload['rows'][] = [
-                    'metric' => 'Room-service reminders due',
-                    'current' => (string)$roomServiceReminderDue,
-                    'detail' => $roomServiceReminderDueNow
-                        ? ('Reminder active now - ' . $roomServiceReminderDue . ' occupied room(s) pending today')
-                        : ('Reminder starts at ' . $roomServiceReminderTime . ' (' . $roomServiceReminderTimezone . ')'),
-                    'action' => ['href' => 'housekeeping.php', 'label' => 'Housekeeping', 'target' => '_blank'],
-                ];
-                $payload['rows'][] = [
-                    'metric' => 'Open restaurant tabs',
-                    'current' => (string)$openTabsCount,
-                    'detail' => $formatMoney($openTabsValue) . ' awaiting payment',
-                    'action' => ['href' => $mod_stock ? 'stock-orders.php?status=placed' : 'pos.php', 'label' => 'Open Tabs', 'target' => '_blank'],
-                ];
-                if ($mod_bookings) {
+                    $roomServiceReminderDue = $roomServiceReminderDueNow ? $roomServiceReminderPending : 0;
                     $payload['rows'][] = [
-                        'metric' => 'Bookings with balance due',
+                        'metric' => 'Room-service orders open',
+                        'current' => (string)$roomServiceOpen,
+                        'detail' => 'Orders awaiting fulfilment or settlement',
+                        'action' => ['href' => 'stock-orders.php?type=room_service', 'label' => 'Room Service', 'target' => '_blank'],
+                    ];
+                    $payload['rows'][] = [
+                        'metric' => 'Room-service reminders due',
+                        'current' => (string)$roomServiceReminderDue,
+                        'detail' => $roomServiceReminderDueNow
+                            ? ('Reminder active now - ' . $roomServiceReminderDue . ' occupied room(s) pending today')
+                            : ('Reminder starts at ' . $roomServiceReminderTime . ' (' . $roomServiceReminderTimezone . ')'),
+                        'action' => ['href' => 'housekeeping.php', 'label' => 'Housekeeping', 'target' => '_blank'],
+                    ];
+                }
+                if ($mod_stock) {
+                    $openTabsStmt = $pdo->query("SELECT COUNT(*) AS c, COALESCE(SUM(total_amount), 0) AS v FROM stock_orders WHERE status = 'placed'")->fetch(PDO::FETCH_ASSOC);
+                    $openTabsCount = (int)($openTabsStmt['c'] ?? 0);
+                    $openTabsValue = (float)($openTabsStmt['v'] ?? 0);
+                    $payload['rows'][] = [
+                        'metric' => isRestaurantEnabled() ? 'Open restaurant tabs' : 'Pending orders',
+                        'current' => (string)$openTabsCount,
+                        'detail' => $formatMoney($openTabsValue) . ' awaiting payment',
+                        'action' => ['href' => 'stock-orders.php?status=placed', 'label' => isRestaurantEnabled() ? 'Open Tabs' : 'Orders', 'target' => '_blank'],
+                    ];
+                }
+                if ($mod_finance && $mod_receivables) {
+                    // Same multi-module receivables union as the Outstanding
+                    // Balances tile — not just bookings.
+                    $outstandingCount = 0;
+                    $outstandingValue = 0.0;
+                    $ofUnion = [];
+                    if ($mod_bookings)   { $ofUnion[] = "SELECT COUNT(*) c, COALESCE(SUM(amount_due),0) v FROM bookings WHERE amount_due > 0 AND status IN ('pending','confirmed','checked-in')"; }
+                    if ($mod_conference) { $ofUnion[] = "SELECT COUNT(*) c, COALESCE(SUM(amount_due),0) v FROM conference_inquiries WHERE amount_due > 0 AND status NOT IN ('cancelled')"; }
+                    if ($mod_gym)        { $ofUnion[] = "SELECT COUNT(*) c, COALESCE(SUM(amount_due),0) v FROM gym_inquiries WHERE amount_due > 0 AND status NOT IN ('cancelled','closed')"; }
+                    if ($mod_events)     { $ofUnion[] = "SELECT COUNT(*) c, COALESCE(SUM(amount_due),0) v FROM event_inquiries WHERE amount_due > 0 AND status NOT IN ('cancelled')"; }
+                    foreach ($ofUnion as $ofSql) {
+                        try {
+                            $ofRow = $pdo->query($ofSql)->fetch(PDO::FETCH_ASSOC);
+                            $outstandingCount += (int)($ofRow['c'] ?? 0);
+                            $outstandingValue += (float)($ofRow['v'] ?? 0);
+                        } catch (Throwable $e) { /* module table may not exist yet */ }
+                    }
+                    $payload['rows'][] = [
+                        'metric' => ($mod_bookings ? 'Bookings' : 'Accounts') . ' with balance due',
                         'current' => (string)$outstandingCount,
                         'detail' => $formatMoney($outstandingValue) . ' still receivable',
                         'action' => ['href' => 'payments.php?balance=outstanding', 'label' => 'Balances', 'target' => '_blank'],
@@ -1953,8 +2007,9 @@ $currency_symbol = getSetting('currency_symbol');
                     <div class="ops-sub"><?php echo '<span class="kpi-currency">' . $currency_symbol . '</span>' . number_format($ops['open_tabs_value'], 2); ?> outstanding</div>
                 </div>
             </a>
+            <?php endif; // mod_stock — open tabs ?>
 
-            <?php if ($mod_bookings): ?>
+            <?php if ($mod_pos && $mod_bookings): ?>
             <a class="ops-card js-dashboard-insight" data-insight-card="room_service_pending" href="stock-orders.php?type=room_service" title="Room-service orders in flight">
                 <div class="ops-icon" style="background:#8e44ad;"><i class="fas fa-concierge-bell"></i></div>
                 <div class="ops-body">
@@ -1979,7 +2034,7 @@ $currency_symbol = getSetting('currency_symbol');
             </a>
             <?php endif; ?>
 
-            <?php if ($mod_station_kds): ?>
+            <?php if ($mod_pos && $mod_station_kds): ?>
             <a class="ops-card js-dashboard-insight" data-insight-card="kitchen_tickets" href="kds.php" target="_blank" rel="noopener" title="Open Kitchen Display System">
                 <div class="ops-icon" style="background:#dc3545;"><i class="fas fa-utensils"></i></div>
                 <div class="ops-body">
@@ -1989,7 +2044,7 @@ $currency_symbol = getSetting('currency_symbol');
                 </div>
             </a>
             <?php endif; ?>
-            <?php if ($mod_station_bds): ?>
+            <?php if ($mod_pos && $mod_station_bds): ?>
             <a class="ops-card js-dashboard-insight" data-insight-card="bar_tickets" href="bds.php" target="_blank" rel="noopener" title="Open Bar Display System">
                 <div class="ops-icon" style="background:#6f42c1;"><i class="fas fa-cocktail"></i></div>
                 <div class="ops-body">
@@ -1999,7 +2054,7 @@ $currency_symbol = getSetting('currency_symbol');
                 </div>
             </a>
             <?php endif; ?>
-            <?php if ($mod_station_cds): ?>
+            <?php if ($mod_pos && $mod_station_cds): ?>
             <a class="ops-card js-dashboard-insight" data-insight-card="coffee_tickets" href="cds.php" target="_blank" rel="noopener" title="Open Coffee Display System">
                 <div class="ops-icon" style="background:#8B5A2B;"><i class="fas fa-mug-hot"></i></div>
                 <div class="ops-body">
@@ -2009,6 +2064,7 @@ $currency_symbol = getSetting('currency_symbol');
                 </div>
             </a>
             <?php endif; ?>
+            <?php if ($mod_pos): ?>
             <a class="ops-card js-dashboard-insight" data-insight-card="restaurant_revenue_today" href="reports.php?type=accounting&range=today" title="<?php echo isRestaurantEnabled() ? "Today's restaurant revenue" : "Today's POS revenue"; ?>">
                 <div class="ops-icon" style="background:#16a085;"><i class="fas fa-cash-register"></i></div>
                 <div class="ops-body">
@@ -2025,7 +2081,7 @@ $currency_symbol = getSetting('currency_symbol');
                 <div class="ops-body">
                     <div class="ops-value"><?php echo '<span class="kpi-currency">' . $currency_symbol . '</span>' . number_format($finance['revenue_today'], 2); ?></div>
                     <div class="ops-label">Total Revenue Today</div>
-                    <div class="ops-sub"><?php echo $finance['payments_today']; ?> payment(s)<?php echo $mod_pos ? ' + restaurant' : ''; ?></div>
+                    <div class="ops-sub"><?php echo $finance['payments_today']; ?> payment(s)<?php echo $mod_pos ? (isRestaurantEnabled() ? ' + restaurant' : ' + POS') : ''; ?></div>
                 </div>
             </a>
             <a class="ops-card js-dashboard-insight" data-insight-card="refunds_pending" href="payments.php?refund_status=pending" title="Refunds in queue">
