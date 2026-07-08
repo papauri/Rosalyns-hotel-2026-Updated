@@ -769,36 +769,34 @@
        the menu + Book Now CTA need. Fixed px here previously overflowed the bar and the
        header clipped the rightmost CTA off-screen. */
     .header__logo-media {
-        width: clamp(96px, 11.5vw, 140px);
-        height: clamp(96px, 11.5vw, 140px);
+        width: clamp(84px, 9vw, 132px);
+        height: clamp(84px, 9vw, 132px);
     }
 
     .header__logo-image {
-        height: clamp(90px, 10.8vw, 132px);
+        height: clamp(78px, 8.4vw, 124px);
     }
 
     .header__logo-text {
-        font-size: clamp(1.15rem, 0.9rem + 0.6vw, 1.55rem);
+        font-size: clamp(1rem, 0.82rem + 0.4vw, 1.45rem);
     }
 
     .header__menu {
         display: flex;
         margin-left: auto;
         gap: 0;
-        /* Let the link row compress before anything overflows the bar. */
-        min-width: 0;
     }
 
     .header__menu-link {
-        font-size: clamp(0.72rem, 0.62rem + 0.26vw, 0.88rem);
-        padding: 0.65rem clamp(0.45rem, 0.8vw, 0.9rem);
-        letter-spacing: 0.06em;
+        font-size: clamp(0.68rem, 0.62rem + 0.13vw, 0.84rem);
+        padding: 0.55rem clamp(0.32rem, 0.44vw, 0.72rem);
+        letter-spacing: 0.02em;
     }
 
     .header__cta {
         display: inline-flex;
         min-height: 42px;
-        padding: 0.6rem clamp(0.7rem, 1.1vw, 1.1rem);
+        padding: 0.6rem clamp(0.7rem, 1vw, 1.1rem);
         font-size: clamp(0.72rem, 0.62rem + 0.2vw, 0.86rem);
     }
 
@@ -834,38 +832,36 @@
         transform-origin: left center;
     }
 
+    /* Compact enough that a full 7-link nav + brand + Book Now CTA fits ~1280–1439px
+       laptops/tablets (Surface Pro) without overflowing or clipping. Larger screens
+       (>=1440px, next block) restore the generous sizing. */
     .header__logo-media {
-        width: clamp(128px, 11.5vw, 165px);
-        height: clamp(128px, 11.5vw, 165px);
+        width: clamp(104px, 8.4vw, 150px);
+        height: clamp(104px, 8.4vw, 150px);
     }
 
     .header__logo-image {
-        height: clamp(120px, 10.8vw, 156px);
+        height: clamp(98px, 7.9vw, 142px);
     }
 
     .header__logo-text {
-        font-size: clamp(1.28rem, 1.05rem + 0.58vw, 1.75rem);
+        font-size: clamp(1.05rem, 0.85rem + 0.42vw, 1.5rem);
     }
 
     .header__menu {
         gap: var(--space-1, 0.25rem);
-        transform: translateX(clamp(0.4rem, 0.7vw, 0.9rem));
     }
 
     .header__menu-link {
-        font-size: clamp(0.8rem, 0.72rem + 0.2vw, 0.96rem);
-        padding: 0.75rem clamp(0.65rem, 0.9vw, 1rem);
-        letter-spacing: 0.08em;
+        font-size: clamp(0.72rem, 0.66rem + 0.14vw, 0.84rem);
+        padding: 0.6rem clamp(0.38rem, 0.5vw, 0.7rem);
+        letter-spacing: 0.03em;
     }
 
     .header__cta {
         min-height: 46px;
-        padding: 0.7rem clamp(1rem, 1.2vw, 1.3rem);
-        font-size: clamp(0.78rem, 0.72rem + 0.16vw, 0.92rem);
-    }
-
-    .header__actions {
-        transform: translateX(clamp(0.3rem, 0.7vw, 0.9rem));
+        padding: 0.7rem clamp(0.85rem, 1vw, 1.2rem);
+        font-size: clamp(0.74rem, 0.7rem + 0.14vw, 0.86rem);
     }
 }
 
