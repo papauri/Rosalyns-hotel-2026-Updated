@@ -414,6 +414,57 @@ try {
         $posTotals = $posTotalsStmt->fetch(PDO::FETCH_ASSOC) ?: ['gross_revenue' => 0, 'cogs' => 0];
     }
 
+    // Inventory shrinkage — real stock losses NOT captured in COGS: wastage,
+    // negative stock-count variance, expired batches and recalls. Valued at the
+    // weighted cost recorded on each adjustment. This is a direct hit to margin.
+    $stock_shrinkage = ['wastage' => 0.0, 'variance' => 0.0, 'expiry' => 0.0, 'recall' => 0.0, 'total' => 0.0];
+    try {
+        $shrStmt = $pdo->prepare("
+            SELECT source_type, COALESCE(SUM(ABS(quantity_change) * cost_at_time), 0) AS loss
+            FROM stock_adjustments
+            WHERE quantity_change < 0
+              AND source_type IN ('wastage','variance','expiry','recall')
+              AND created_at BETWEEN ? AND ?
+            GROUP BY source_type
+        ");
+        $shrStmt->execute([$startDate . ' 00:00:00', $endDate . ' 23:59:59']);
+        foreach ($shrStmt->fetchAll(PDO::FETCH_ASSOC) as $r) {
+            $stock_shrinkage[$r['source_type']] = (float)$r['loss'];
+        }
+        $stock_shrinkage['total'] = $stock_shrinkage['wastage'] + $stock_shrinkage['variance']
+            + $stock_shrinkage['expiry'] + $stock_shrinkage['recall'];
+    } catch (Throwable $e) {
+        // Older adjustments enums may lack 'variance' — non-fatal.
+    }
+
+    // Folio F&B revenue memo — food/drink/minibar/room-service charged to a room
+    // booking is collected under booking_type='room', so it is BURIED inside Room
+    // revenue in the source table above. This accrual-based breakout gives the
+    // accounts team F&B-department visibility WITHOUT altering the payment-based
+    // totals (so nothing is double-counted).
+    $folio_fnb = ['food' => 0.0, 'drink' => 0.0, 'other' => 0.0, 'total' => 0.0];
+    try {
+        $ffStmt = $pdo->prepare("
+            SELECT
+                COALESCE(SUM(CASE WHEN charge_type = 'food' THEN line_total ELSE 0 END), 0) AS food,
+                COALESCE(SUM(CASE WHEN charge_type = 'drink' THEN line_total ELSE 0 END), 0) AS drink,
+                COALESCE(SUM(CASE WHEN charge_type IN ('minibar','room_service','breakfast') THEN line_total ELSE 0 END), 0) AS other
+            FROM booking_charges
+            WHERE voided = 0
+              AND charge_type IN ('food','drink','minibar','room_service','breakfast')
+              AND posted_at BETWEEN ? AND ?
+        ");
+        $ffStmt->execute([$startDate . ' 00:00:00', $endDate . ' 23:59:59']);
+        if ($ff = $ffStmt->fetch(PDO::FETCH_ASSOC)) {
+            $folio_fnb['food']  = (float)$ff['food'];
+            $folio_fnb['drink'] = (float)$ff['drink'];
+            $folio_fnb['other'] = (float)$ff['other'];
+            $folio_fnb['total'] = $folio_fnb['food'] + $folio_fnb['drink'] + $folio_fnb['other'];
+        }
+    } catch (Throwable $e) {
+        // non-fatal
+    }
+
     // Daily revenue trend (last 14 days within the selected range, capped to range)
     $trendStartCandidate = max(strtotime($startDate), strtotime('-13 days', strtotime($endDate)));
     $trendStart = date('Y-m-d', $trendStartCandidate);
@@ -544,6 +595,12 @@ if (!isset($posTotals)) {
 }
 if (!isset($dailyTrend)) {
     $dailyTrend = [];
+}
+if (!isset($stock_shrinkage)) {
+    $stock_shrinkage = ['wastage' => 0.0, 'variance' => 0.0, 'expiry' => 0.0, 'recall' => 0.0, 'total' => 0.0];
+}
+if (!isset($folio_fnb)) {
+    $folio_fnb = ['food' => 0.0, 'drink' => 0.0, 'other' => 0.0, 'total' => 0.0];
 }
 
 ?>
@@ -1767,8 +1824,31 @@ if (!isset($dailyTrend)) {
                         Pulled from <code>stock_orders</code>. COGS uses recorded recipe cost at order time.
                         Total margin: <strong><?php echo $currency_symbol . number_format($pos_margin, 2); ?></strong>
                         (<?php echo number_format($pos_margin_pct, 1); ?>%) on <?php echo $currency_symbol . number_format($pos_gross, 2); ?> gross.
+                        <?php if ($stock_shrinkage['total'] > 0): ?>
+                            &nbsp;·&nbsp; Stock losses (shrinkage): <strong style="color:#a25048;"><?php echo $currency_symbol . number_format($stock_shrinkage['total'], 2); ?></strong>
+                            → net F&amp;B contribution <strong><?php echo $currency_symbol . number_format($pos_margin - $stock_shrinkage['total'], 2); ?></strong>.
+                        <?php endif; ?>
                     </p>
                 </header>
+                <?php if ($stock_shrinkage['total'] > 0): ?>
+                    <div class="acct-panel__sub" style="padding:0 16px 8px;font-size:.85rem;color:#8a8172;">
+                        Shrinkage breakdown —
+                        Wastage: <?php echo $currency_symbol . number_format($stock_shrinkage['wastage'], 2); ?> ·
+                        Count variance: <?php echo $currency_symbol . number_format($stock_shrinkage['variance'], 2); ?> ·
+                        Expiry: <?php echo $currency_symbol . number_format($stock_shrinkage['expiry'], 2); ?> ·
+                        Recall: <?php echo $currency_symbol . number_format($stock_shrinkage['recall'], 2); ?>
+                    </div>
+                <?php endif; ?>
+                <?php if ($folio_fnb['total'] > 0): ?>
+                    <div class="acct-panel__sub" style="padding:0 16px 12px;font-size:.85rem;color:#8a8172;">
+                        <i class="fas fa-circle-info"></i> <strong>Folio F&amp;B (room service / minibar):</strong>
+                        <?php echo $currency_symbol . number_format($folio_fnb['total'], 2); ?> accrued
+                        (food <?php echo $currency_symbol . number_format($folio_fnb['food'], 2); ?>,
+                        drink <?php echo $currency_symbol . number_format($folio_fnb['drink'], 2); ?>,
+                        other <?php echo $currency_symbol . number_format($folio_fnb['other'], 2); ?>).
+                        Charged to room bookings, so it is included within <em>Room</em> revenue above — shown here for F&amp;B-department visibility, not added on top.
+                    </div>
+                <?php endif; ?>
                 <div class="acct-table-wrap">
                     <table class="acct-table">
                         <thead>

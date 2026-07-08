@@ -5473,8 +5473,12 @@ function assignIndividualRoomToBooking(int $bookingId, int $individualRoomId, bo
             return false;
         }
 
-        // Verify individual room exists and is available
-        $roomStmt = $pdo->prepare("SELECT id, room_type_id, status FROM individual_rooms WHERE id = ?");
+        // Verify individual room exists and is available.
+        // FOR UPDATE locks this room row for the transaction so two admins
+        // assigning the SAME room concurrently serialize: the second blocks here,
+        // then its availability re-check below sees the first (now committed)
+        // booking and is correctly rejected — closing a double-assignment race.
+        $roomStmt = $pdo->prepare("SELECT id, room_type_id, status FROM individual_rooms WHERE id = ? FOR UPDATE");
         $roomStmt->execute([$individualRoomId]);
         $room = $roomStmt->fetch(PDO::FETCH_ASSOC);
 

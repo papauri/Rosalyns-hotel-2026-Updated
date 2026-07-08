@@ -2776,6 +2776,13 @@ try {
         $params[]        = $filter_date_to;
     }
 
+    // Overdue arrivals (no-show candidates): booking whose arrival date has
+    // passed while still confirmed/pending — i.e. never checked in. Surfaced
+    // from the Room Dashboard no-show alert.
+    if (($_GET['arrival'] ?? '') === 'overdue') {
+        $where_clauses[] = "b.check_in_date < CURDATE() AND b.status IN ('confirmed','pending')";
+    }
+
     $where_sql       = !empty($where_clauses)       ? 'WHERE ' . implode(' AND ', $where_clauses)       : '';
     $stats_where_sql = !empty($stats_where_clauses) ? 'WHERE ' . implode(' AND ', $stats_where_clauses) : '';
 

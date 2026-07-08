@@ -885,85 +885,11 @@ function updateRoomBookingPayments(PDO $pdo, int $bookingId)
  */
 function updateConferenceEnquiryPayments(PDO $pdo, int $enquiryId)
 {
-    // Get enquiry total
-    $enquiryStmt = $pdo->prepare("SELECT total_amount, deposit_required FROM conference_inquiries WHERE id = ?");
-    $enquiryStmt->execute([$enquiryId]);
-    $enquiry = $enquiryStmt->fetch(PDO::FETCH_ASSOC);
-
-    if (!$enquiry) {
-        return;
-    }
-
-    $totalAmount = (float)$enquiry['total_amount'];
-    $depositRequired = (float)$enquiry['deposit_required'];
-
-    // Calculate paid amounts
-    $paidStmt = $pdo->prepare("
-        SELECT
-            SUM(CASE
-                WHEN payment_status IN ('completed', 'paid') AND COALESCE(payment_type, '') != 'refund' THEN total_amount
-                WHEN COALESCE(payment_type, '') = 'refund' AND refund_status IN ('completed','processing') THEN -COALESCE(refund_amount, total_amount)
-                ELSE 0
-            END) as paid,
-            SUM(CASE
-                WHEN payment_status IN ('completed', 'paid') AND COALESCE(payment_type, '') != 'refund' THEN vat_amount
-                WHEN COALESCE(payment_type, '') = 'refund' AND refund_status IN ('completed','processing') THEN -vat_amount
-                ELSE 0
-            END) as vat_paid
-        FROM payments
-        WHERE booking_type = 'conference'
-        AND booking_id = ?
-        AND deleted_at IS NULL
-    ");
-    $paidStmt->execute([$enquiryId]);
-    $paid = $paidStmt->fetch(PDO::FETCH_ASSOC);
-
-    $amountPaid = (float)($paid['paid'] ?? 0);
-    $vatPaid = (float)($paid['vat_paid'] ?? 0);
-    $amountDue = max(0, $totalAmount - $amountPaid);
-
-    // Calculate deposit paid
-    $depositPaid = min($amountPaid, $depositRequired);
-
-    // Get last payment date
-    $lastPaymentStmt = $pdo->prepare("
-        SELECT MAX(payment_date) as last_payment_date
-        FROM payments
-        WHERE booking_type = 'conference'
-        AND booking_id = ?
-        AND payment_status IN ('completed', 'paid')
-        AND COALESCE(payment_type, '') != 'refund'
-        AND deleted_at IS NULL
-    ");
-    $lastPaymentStmt->execute([$enquiryId]);
-    $lastPayment = $lastPaymentStmt->fetch(PDO::FETCH_ASSOC);
-
-    // VAT per installation mode (exclusive on top / inclusive extracted / off).
-    $vatParts = vat_components($totalAmount);
-    $vatRate = $vatParts['rate'];
-    $vatAmount = $vatParts['vat'];
-    $totalWithVat = $vatParts['total'];
-
-    // Update enquiry
-    $updateStmt = $pdo->prepare("
-        UPDATE conference_inquiries
-        SET amount_paid = ?,
-            amount_due = ?,
-            vat_rate = ?,
-            vat_amount = ?,
-            total_with_vat = ?,
-            deposit_paid = ?,
-            last_payment_date = ?
-        WHERE id = ?
-    ");
-    $updateStmt->execute([
-        $amountPaid,
-        $amountDue,
-        $vatRate,
-        $vatAmount,
-        $totalWithVat,
-        $depositPaid,
-        $lastPayment['last_payment_date'],
-        $enquiryId
-    ]);
+    // Delegated to the single source of truth. The previous implementation here
+    // computed amount_due against the NET total_amount (understating balances
+    // when VAT is exclusive) and re-based total_with_vat to the current rate.
+    // syncConferenceInquiryPaymentSnapshot uses the gross/locked model shared
+    // with rooms/gym/events so every collection path produces identical balances.
+    require_once __DIR__ . '/../admin/includes/finance-account-sync.php';
+    syncConferenceInquiryPaymentSnapshot($pdo, $enquiryId);
 }

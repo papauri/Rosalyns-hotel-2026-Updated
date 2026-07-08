@@ -418,22 +418,48 @@ function processGuestCheckout(int $bookingId, ?int $performedBy = null, array $o
             return ['success' => false, 'message' => 'Booking not found or guest not checked in'];
         }
 
+        // Recalculate financials first so the returned balance and the final
+        // invoice reflect any folio charges added right up to checkout.
+        if (function_exists('recalculateBookingFinancials')) {
+            recalculateBookingFinancials($bookingId);
+        }
+        $balStmt = $pdo->prepare("SELECT amount_due FROM bookings WHERE id = ?");
+        $balStmt->execute([$bookingId]);
+        $outstandingBalance = round((float)($balStmt->fetchColumn() ?: 0), 2);
+
         // Update booking status
         $pdo->prepare("UPDATE bookings SET status = 'checked-out', checkout_completed_at = NOW(), updated_at = NOW() WHERE id = ?")->execute([$bookingId]);
 
-        // Restore room type availability
+        // Restore room type availability (coarse per-type counter — one decrement
+        // per booking at creation, so one restore here).
         $pdo->prepare("UPDATE rooms SET rooms_available = rooms_available + 1 WHERE id = ?")->execute([$booking['room_type_id']]);
 
         $workflowResults = [];
+        $nextStatus = $options['room_status'] ?? ROOM_STATUS_CLEANING;
 
-        // Handle individual room if assigned
+        // Collect EVERY individual room held by this booking: the primary
+        // (bookings.individual_room_id) plus any additional rooms tracked in
+        // booking_rooms (multi-room bookings). Previously only the primary was
+        // released, so secondary rooms stayed 'occupied' forever after checkout.
+        $roomsToRelease = [];
         if (!empty($booking['individual_room_id'])) {
-            $roomId = $booking['individual_room_id'];
+            $roomsToRelease[(int)$booking['individual_room_id']] = true;
+        }
+        try {
+            $brStmt = $pdo->prepare("SELECT individual_room_id FROM booking_rooms WHERE booking_id = ? AND released_at IS NULL AND individual_room_id IS NOT NULL");
+            $brStmt->execute([$bookingId]);
+            foreach ($brStmt->fetchAll(PDO::FETCH_COLUMN) as $rid) {
+                $roomsToRelease[(int)$rid] = true;
+            }
+        } catch (Throwable $e) {
+            // booking_rooms may not exist on older schemas — primary handled above.
+        }
 
-            // Determine next room status based on options
-            $nextStatus = $options['room_status'] ?? ROOM_STATUS_CLEANING;
-
-            // Update room status
+        $primaryRoomId = (int)($booking['individual_room_id'] ?? 0);
+        foreach (array_keys($roomsToRelease) as $roomId) {
+            if ($roomId <= 0) {
+                continue;
+            }
             $roomResult = updateRoomStatus(
                 $roomId,
                 $nextStatus,
@@ -441,9 +467,7 @@ function processGuestCheckout(int $bookingId, ?int $performedBy = null, array $o
                 $performedBy,
                 ['force' => true, 'notes' => $booking['booking_reference']]
             );
-            $workflowResults['room_update'] = $roomResult;
-
-            // Create housekeeping assignment if going to cleaning
+            $hkResult = null;
             if ($nextStatus === ROOM_STATUS_CLEANING) {
                 $hkResult = createHousekeepingAssignment(
                     $roomId,
@@ -453,14 +477,29 @@ function processGuestCheckout(int $bookingId, ?int $performedBy = null, array $o
                         'notes' => "Turnover after {$booking['guest_name']} checkout"
                     ]
                 );
-                $workflowResults['housekeeping'] = $hkResult;
             }
 
-            // Log to room maintenance log
+            // Preserve the flat primary-room keys the caller reads for messaging;
+            // record every room (incl. secondaries) under 'rooms' for completeness.
+            if ($roomId === $primaryRoomId || !isset($workflowResults['room_update'])) {
+                $workflowResults['room_update'] = $roomResult;
+                if ($hkResult !== null) {
+                    $workflowResults['housekeeping'] = $hkResult;
+                }
+            }
+            $workflowResults['rooms'][$roomId] = ['room_update' => $roomResult, 'housekeeping' => $hkResult];
+
             $pdo->prepare("
                 INSERT INTO room_maintenance_log (individual_room_id, status_from, status_to, reason, performed_by, created_at)
                 VALUES (?, 'occupied', ?, ?, ?, NOW())
             ")->execute([$roomId, $nextStatus, "Checkout: {$booking['booking_reference']}", $performedBy]);
+        }
+
+        // Release all room holds so availability and future checkouts stay clean.
+        try {
+            $pdo->prepare("UPDATE booking_rooms SET released_at = NOW() WHERE booking_id = ? AND released_at IS NULL")->execute([$bookingId]);
+        } catch (Throwable $e) {
+            // older schema without booking_rooms — safe to ignore
         }
 
         // Generate final invoice
@@ -472,11 +511,15 @@ function processGuestCheckout(int $bookingId, ?int $performedBy = null, array $o
 
         return [
             'success' => true,
-            'message' => 'Guest checked out successfully',
+            'message' => $outstandingBalance > 0.01
+                ? 'Guest checked out. Outstanding balance of ' . number_format($outstandingBalance, 2) . ' remains on the account.'
+                : 'Guest checked out successfully',
             'data' => [
                 'booking_id' => $bookingId,
                 'booking_reference' => $booking['booking_reference'],
                 'room_number' => $booking['room_number'] ?? null,
+                'outstanding_balance' => $outstandingBalance,
+                'rooms_released' => array_keys($roomsToRelease),
                 'workflow' => $workflowResults
             ]
         ];
@@ -858,6 +901,17 @@ function getRoomDashboardSummary(): array
         ");
         $availableNow = (int)$availableStmt->fetchColumn();
 
+        // No-show candidates: confirmed/pending bookings whose arrival date has
+        // passed without a check-in. These silently hold room availability, so
+        // staff need to review and mark them no-show (or check them in late).
+        $noShowStmt = $pdo->query("
+            SELECT COUNT(*) as count
+            FROM bookings
+            WHERE status IN ('confirmed', 'pending')
+              AND check_in_date < CURDATE()
+        ");
+        $noShowCandidates = (int)$noShowStmt->fetchColumn();
+
         return [
             'status_counts' => $statusCounts,
             'cleaning_queue' => $cleaningCount,
@@ -865,6 +919,7 @@ function getRoomDashboardSummary(): array
             'checkouts_today' => $checkoutsToday,
             'checkins_today' => $checkinsToday,
             'available_now' => $availableNow,
+            'no_show_candidates' => $noShowCandidates,
             'occupancy_rate' => calculateOccupancyRate($statusCounts)
         ];
     } catch (PDOException $e) {

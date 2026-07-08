@@ -90,59 +90,11 @@ function uploadConferenceImage(array $fileInput): ?string
 
 function syncConferenceEnquiryPaymentSnapshot(PDO $pdo, int $enquiryId): ?array
 {
-    $enquiryStmt = $pdo->prepare("SELECT id, total_amount, deposit_required FROM conference_inquiries WHERE id = ? LIMIT 1");
-    $enquiryStmt->execute([$enquiryId]);
-    $enquiry = $enquiryStmt->fetch(PDO::FETCH_ASSOC);
-
-    if (!$enquiry) {
-        return null;
-    }
-
-    $paidStmt = $pdo->prepare("
-        SELECT COALESCE(SUM(CASE WHEN payment_status IN ('completed', 'paid') AND COALESCE(payment_type, '') != 'refund' THEN total_amount ELSE 0 END), 0) AS amount_paid
-        FROM payments
-        WHERE booking_type = 'conference'
-          AND booking_id = ?
-          AND deleted_at IS NULL
-    ");
-    $paidStmt->execute([$enquiryId]);
-    $amountPaid = (float)($paidStmt->fetchColumn() ?? 0);
-
-    $lastPaymentStmt = $pdo->prepare("
-        SELECT MAX(payment_date) AS last_payment_date
-        FROM payments
-        WHERE booking_type = 'conference'
-          AND booking_id = ?
-          AND payment_status IN ('completed', 'paid')
-          AND COALESCE(payment_type, '') != 'refund'
-          AND deleted_at IS NULL
-    ");
-    $lastPaymentStmt->execute([$enquiryId]);
-    $lastPaymentDate = $lastPaymentStmt->fetchColumn() ?: null;
-
-    $totalAmount = (float)($enquiry['total_amount'] ?? 0);
-    $depositRequired = (float)($enquiry['deposit_required'] ?? 0);
-    $amountDue = max(0, $totalAmount - $amountPaid);
-    $depositPaid = min($amountPaid, $depositRequired);
-
-    $syncStmt = $pdo->prepare("
-        UPDATE conference_inquiries
-        SET amount_paid = ?,
-            amount_due = ?,
-            deposit_paid = ?,
-            last_payment_date = ?,
-            updated_at = NOW()
-        WHERE id = ?
-    ");
-    $syncStmt->execute([$amountPaid, $amountDue, $depositPaid, $lastPaymentDate, $enquiryId]);
-
-    return [
-        'total_amount' => $totalAmount,
-        'amount_paid' => $amountPaid,
-        'amount_due' => $amountDue,
-        'deposit_required' => $depositRequired,
-        'deposit_paid' => $depositPaid,
-    ];
+    // Delegated to the single source of truth (gross/locked model shared with
+    // rooms/gym/events). The previous local copy computed amount_due against the
+    // NET total, understating balances when VAT is exclusive.
+    require_once __DIR__ . '/includes/finance-account-sync.php';
+    return syncConferenceInquiryPaymentSnapshot($pdo, $enquiryId);
 }
 
 $is_ajax = !empty($_SERVER['HTTP_X_REQUESTED_WITH']) && strtolower($_SERVER['HTTP_X_REQUESTED_WITH']) === 'xmlhttprequest';
@@ -346,6 +298,47 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['enquiry_action'])) {
         if ($action === 'confirm') {
             if (($enquiry['status'] ?? '') !== 'pending') {
                 throw new Exception('Only pending enquiries can be confirmed.');
+            }
+
+            // Double-booking guard: block confirmation if the same conference room
+            // is already confirmed for this date with an overlapping time window.
+            // (Two pending enquiries can coexist; only confirmation commits the room.)
+            $roomId    = (int)($enquiry['conference_room_id'] ?? 0);
+            $eventDate = (string)($enquiry['event_date'] ?? '');
+            $startTime = (string)($enquiry['start_time'] ?? '');
+            $endTime   = (string)($enquiry['end_time'] ?? '');
+            if ($roomId > 0 && $eventDate !== '') {
+                if ($startTime !== '' && $endTime !== '') {
+                    // Standard half-open overlap: other.start < this.end AND other.end > this.start.
+                    $clashStmt = $pdo->prepare("
+                        SELECT inquiry_reference, start_time, end_time
+                        FROM conference_inquiries
+                        WHERE conference_room_id = ? AND event_date = ? AND id <> ?
+                          AND status = 'confirmed'
+                          AND start_time < ? AND end_time > ?
+                        LIMIT 1
+                    ");
+                    $clashStmt->execute([$roomId, $eventDate, $enquiry_id, $endTime, $startTime]);
+                } else {
+                    // Missing times → treat any confirmed booking that day as a clash.
+                    $clashStmt = $pdo->prepare("
+                        SELECT inquiry_reference, start_time, end_time
+                        FROM conference_inquiries
+                        WHERE conference_room_id = ? AND event_date = ? AND id <> ?
+                          AND status = 'confirmed'
+                        LIMIT 1
+                    ");
+                    $clashStmt->execute([$roomId, $eventDate, $enquiry_id]);
+                }
+                if ($clash = $clashStmt->fetch(PDO::FETCH_ASSOC)) {
+                    throw new Exception(sprintf(
+                        'This room is already confirmed for %s (%s–%s) under %s. Choose a different room or time before confirming.',
+                        date('M j, Y', strtotime($eventDate)),
+                        $clash['start_time'] ? date('H:i', strtotime($clash['start_time'])) : '—',
+                        $clash['end_time'] ? date('H:i', strtotime($clash['end_time'])) : '—',
+                        $clash['inquiry_reference'] ?: 'another confirmed enquiry'
+                    ));
+                }
             }
 
             $stmt = $pdo->prepare("UPDATE conference_inquiries SET status = 'confirmed', updated_at = NOW() WHERE id = ?");

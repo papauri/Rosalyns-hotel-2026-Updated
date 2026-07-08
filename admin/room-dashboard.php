@@ -116,6 +116,18 @@ $roomStatuses = getRoomStatuses();
     </div>
     <?php endif; ?>
 
+    <?php if (($summary['no_show_candidates'] ?? 0) > 0): ?>
+    <div class="alert alert-warning" style="background: #fff3cd; color: #856404; padding: 12px 20px; border-radius: 8px; margin-bottom: 20px; display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px;">
+        <span>
+            <i class="fas fa-user-clock"></i>
+            <strong><?php echo (int)$summary['no_show_candidates']; ?></strong>
+            confirmed booking<?php echo (int)$summary['no_show_candidates'] === 1 ? '' : 's'; ?>
+            passed the arrival date without checking in — review and mark no-show to free the room(s).
+        </span>
+        <a href="bookings.php?arrival=overdue" style="background:#856404;color:#fff;padding:6px 14px;border-radius:4px;text-decoration:none;font-size:.85rem;white-space:nowrap;">Review arrivals</a>
+    </div>
+    <?php endif; ?>
+
     <!-- Today's Stats -->
     <div class="today-stats">
         <div class="today-stat">

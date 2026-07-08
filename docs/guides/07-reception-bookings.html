@@ -241,6 +241,13 @@
           Use <strong>Filter → check-in today</strong> at the start of every shift. Use <strong>check-out today</strong>
           before lunch to prepare folios for departing guests.
         </div>
+
+        <h3>No-show review</h3>
+        <p>When a confirmed (or pending) booking's arrival date passes without a check-in, it silently keeps holding the
+          room. The <strong>Room Dashboard</strong> now shows a <strong>no-show alert</strong> counting these bookings,
+          with a <em>Review arrivals</em> button that opens the bookings list filtered to overdue arrivals
+          (<code>bookings.php?arrival=overdue</code>). Review each one and either check the guest in late or mark it
+          <span class="status-badge sb-noshow"><strong>no-show</strong></span> to free the room.</p>
       </section>
 
       <!-- ══════════════════════════════════════════════════════════
@@ -588,6 +595,11 @@
           </li>
           <li>A <strong>final consolidated invoice</strong> is auto-generated as a PDF and emailed to the guest.</li>
         </ol>
+        <div class="callout note"><strong>Multi-room bookings:</strong> check-out now releases <em>every</em> room on the
+          booking — each is sent to <em>cleaning</em> with its own housekeeping task, not just the first room.</div>
+        <div class="callout warn"><strong>Outstanding balance:</strong> the balance is recalculated at the moment of
+          check-out (so any last-minute folio charges are included) and the confirmation tells you if money is still
+          owed. Take payment before the guest leaves whenever possible.</div>
       </section>
 
       <!-- ══════════════════════════════════════════════════════════

@@ -59,11 +59,23 @@
             </tr>
             <tr>
               <td><strong>Stock Ingredients</strong> <code>stock-ingredients.php</code></td>
-              <td>Master list of every item: name, unit, par level, current count, supplier.</td>
+              <td>Master list of every item: name, unit, current count, cost, <strong>reorder point</strong>, <strong>par level</strong>, preferred supplier &amp; lead time.</td>
+            </tr>
+            <tr>
+              <td><strong>Suppliers</strong> <code>stock-suppliers.php</code></td>
+              <td>Supplier master — contact, lead time, payment terms, total purchased. Replaces typing supplier names free-hand.</td>
+            </tr>
+            <tr>
+              <td><strong>Reorder / Buying</strong> <code>stock-reorder.php</code></td>
+              <td>Everything at or below its reorder point, with a suggested order quantity, grouped by supplier. One click turns a group into a draft purchase order.</td>
+            </tr>
+            <tr>
+              <td><strong>Purchase Orders</strong> <code>purchase-orders.php</code></td>
+              <td>Raise, send and receive purchase orders. Receiving posts stock straight into the batch/FIFO ledger with full supplier traceability.</td>
             </tr>
             <tr>
               <td><strong>Stock Receipts</strong></td>
-              <td>Goods-in (delivery from supplier) &mdash; restocks ingredients.</td>
+              <td>Goods-in (delivery from supplier) &mdash; restocks ingredients. Now lets you pick a supplier from the master list.</td>
             </tr>
             <tr>
               <td><strong>Stock Variance</strong></td>
@@ -78,13 +90,49 @@
       </section>
 
       <section>
+        <h2>Procurement — suppliers, reordering &amp; purchase orders</h2>
+        <p>Buying stock now follows a proper retail flow so nothing runs out unnoticed and every delivery is traceable to a supplier.</p>
+
+        <h3>1. Set up your suppliers</h3>
+        <ol class="steps">
+          <li>Go to <strong>Stock → Suppliers</strong> and add each supplier: contact, phone/email, <strong>lead time</strong> (days from order to delivery) and payment terms.</li>
+          <li>Existing suppliers were created automatically from the names already on your past deliveries — check the list and tidy any duplicates.</li>
+        </ol>
+
+        <h3>2. Tell each item when to reorder</h3>
+        <ol class="steps">
+          <li>Open <strong>Stock → Ingredients</strong>, edit an item.</li>
+          <li>Set the <strong>reorder point</strong> (the level that triggers a top-up — usually enough to cover the supplier's lead time) and the <strong>par level</strong> (the level you want to order back up to).</li>
+          <li>Pick the item's <strong>preferred supplier</strong> so it groups correctly on the buying report.</li>
+        </ol>
+        <div class="callout note">If you leave reorder point at 0, the item falls back to its old <em>min quantity</em> for low-stock alerts — nothing breaks, you just don't get a purchase suggestion for it.</div>
+
+        <h3>3. Reorder / Buying report</h3>
+        <ol class="steps">
+          <li>Open <strong>Stock → Reorder / Buying</strong> (also reachable from the "Running low" tile on the Stock Dashboard).</li>
+          <li>It lists everything at or below its reorder point, with a <strong>suggested quantity</strong> = par level − what's on hand − what's already on order, grouped by supplier.</li>
+          <li>Click <strong>Create draft PO</strong> on a supplier group to turn those lines into a purchase order in one step.</li>
+        </ol>
+
+        <h3>4. Purchase orders</h3>
+        <ol class="steps">
+          <li>On <strong>Stock → Purchase Orders</strong> a PO moves through <span class="pill blue">draft</span> → <span class="pill amber">sent</span> → <span class="pill amber">partial</span> / <span class="pill green">received</span> → <span class="pill">closed</span>.</li>
+          <li>Add or edit lines while it is <strong>draft</strong>, then <strong>Mark as sent</strong> when you place it with the supplier.</li>
+          <li>When the delivery arrives, open the PO and enter the <strong>Receive now</strong> quantity (and expiry, if any) per line, then <strong>Receive stock</strong>. Partial deliveries are supported — the PO stays <em>partial</em> until every line is fully received.</li>
+        </ol>
+        <div class="callout note">Receiving against a PO creates the batch, updates the weighted-average cost and links the batch to the supplier automatically — exactly the same engine as a manual stock receipt, so costs stay consistent.</div>
+      </section>
+
+      <section>
         <h2>A typical day</h2>
 
         <h3>1. Morning — receive deliveries</h3>
         <ol class="steps">
-          <li>Go to <strong>Stock Receipts → New Receipt</strong> — or use <strong>Stock → Barcode Receive</strong> on
+          <li>If the delivery is against a purchase order, open it on <strong>Stock → Purchase Orders</strong> and use
+            <strong>Receive stock</strong> — this reconciles what you ordered against what arrived.</li>
+          <li>For an ad-hoc delivery, go to <strong>Stock Receipts → New Receipt</strong> — or use <strong>Stock → Barcode Receive</strong> on
             mobile to scan deliveries with your phone camera (faster for large deliveries).</li>
-          <li>Pick the supplier.</li>
+          <li>Pick the supplier from the master list.</li>
           <li>Add each item delivered with <strong>quantity</strong> and <strong>unit cost</strong>.</li>
           <li>Save. Stock is added to the relevant ingredients automatically.</li>
         </ol>

@@ -341,8 +341,13 @@
                 <ul class="checklist">
                     <li><strong>Revenue by order type</strong> — walk-in, room service, tab: orders, gross, COGS, voids.</li>
                     <li><strong>Gross margin</strong> — gross revenue minus COGS from <code>stock_orders.total_cost</code>. If COGS is zero for any type, the margin will be inflated — this usually means ingredient costs have not been entered on those recipes.</li>
+                    <li><strong>Inventory shrinkage</strong> — the value of stock lost to <em>wastage</em>, <em>stock-count variance</em>, <em>expiry</em> and <em>recalls</em> for the period. This is a real hit to margin that COGS does not capture, so the panel also shows the <strong>net F&amp;B contribution</strong> (margin minus shrinkage) with a breakdown by loss type.</li>
+                    <li><strong>Folio F&amp;B (room service / minibar)</strong> — food &amp; drink billed to room folios. Because it is collected under the room booking, it is <em>included inside Room revenue</em> above; this memo line shows it separately for F&amp;B-department visibility and is <strong>not</strong> added on top (so nothing double-counts).</li>
                     <li><strong>Daily revenue trend</strong> — last 14 days: room, conference, F&amp;B, and refunds per day as a visual breakdown.</li>
                 </ul>
+                <div class="callout note">Conference outstanding balances now use the same VAT-inclusive (gross) basis as
+                    rooms, gym and events — a fix that previously understated what conference clients still owed when VAT
+                    is charged on top.</div>
 
                 <h3>Compliance checks — what to do</h3>
                 <table>

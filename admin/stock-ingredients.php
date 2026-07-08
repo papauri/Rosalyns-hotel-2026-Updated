@@ -8,6 +8,7 @@
  */
 require_once 'admin-init.php';
 require_once '../includes/alert.php';
+require_once 'includes/procurement-schema.php';
 
 $user = [
     'id' => $_SESSION['admin_user_id'],
@@ -23,6 +24,8 @@ $currency_symbol = getSetting('currency_symbol');
 // Ensure migration has been run
 if (!ensureStockTablesExist()) {
     $error = 'Stock tables not yet created. Please run admin/migrations/015_stock_management.php first.';
+} else {
+    ensureProcurementSchema($pdo);
 }
 
 // ---- POST handling ----
@@ -40,6 +43,10 @@ if (!$error && $_SERVER['REQUEST_METHOD'] === 'POST') {
                 $minQty = max(0, (float)($_POST['min_quantity'] ?? 0));
                 $yield = max(0.1, min(100, (float)($_POST['yield_percent'] ?? 100)));
                 $notes = trim($_POST['notes'] ?? '');
+                $reorderPoint = max(0, (float)($_POST['reorder_point'] ?? 0));
+                $parLevel     = max(0, (float)($_POST['par_level'] ?? 0));
+                $leadTime     = max(0, (int)($_POST['lead_time_days'] ?? 0));
+                $prefSupplier = (int)($_POST['preferred_supplier_id'] ?? 0) ?: null;
 
                 if ($name === '' || $unit === '') {
                     throw new RuntimeException('Name and unit are required.');
@@ -47,19 +54,20 @@ if (!$error && $_SERVER['REQUEST_METHOD'] === 'POST') {
 
                 if ($action === 'add') {
                     $stmt = $pdo->prepare("
-                        INSERT INTO stock_ingredients (name, category, unit, min_quantity, yield_percent, notes)
-                        VALUES (?, ?, ?, ?, ?, ?)
+                        INSERT INTO stock_ingredients (name, category, unit, min_quantity, yield_percent, notes, reorder_point, par_level, lead_time_days, preferred_supplier_id)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     ");
-                    $stmt->execute([$name, $category ?: 'General', $unit, $minQty, $yield, $notes]);
+                    $stmt->execute([$name, $category ?: 'General', $unit, $minQty, $yield, $notes, $reorderPoint, $parLevel, $leadTime, $prefSupplier]);
                     $message = "Ingredient \"{$name}\" added.";
                 } else {
                     $id = (int)($_POST['id'] ?? 0);
                     $stmt = $pdo->prepare("
                         UPDATE stock_ingredients
-                        SET name = ?, category = ?, unit = ?, min_quantity = ?, yield_percent = ?, notes = ?, updated_at = NOW()
+                        SET name = ?, category = ?, unit = ?, min_quantity = ?, yield_percent = ?, notes = ?,
+                            reorder_point = ?, par_level = ?, lead_time_days = ?, preferred_supplier_id = ?, updated_at = NOW()
                         WHERE id = ?
                     ");
-                    $stmt->execute([$name, $category ?: 'General', $unit, $minQty, $yield, $notes, $id]);
+                    $stmt->execute([$name, $category ?: 'General', $unit, $minQty, $yield, $notes, $reorderPoint, $parLevel, $leadTime, $prefSupplier, $id]);
                     $message = "Ingredient updated.";
                 }
             } elseif ($action === 'archive') {
@@ -88,8 +96,23 @@ if (!$error && $_SERVER['REQUEST_METHOD'] === 'POST') {
                 $id = (int)($_POST['id'] ?? 0);
                 $qty = (float)($_POST['quantity'] ?? 0);
                 $cost = max(0, (float)($_POST['cost_per_unit'] ?? 0));
+                $supplierId = (int)($_POST['supplier_id'] ?? 0);
                 $supplier = trim($_POST['supplier_name'] ?? '');
                 $supplierContact = trim($_POST['supplier_contact'] ?? '');
+                // If a master supplier is chosen, use its details for the legacy
+                // free-text columns so batch/log rows stay human-readable.
+                if ($supplierId > 0) {
+                    $supRow = $pdo->prepare("SELECT name, contact_name, phone FROM stock_suppliers WHERE id = ? LIMIT 1");
+                    $supRow->execute([$supplierId]);
+                    if ($sup = $supRow->fetch(PDO::FETCH_ASSOC)) {
+                        $supplier = (string)$sup['name'];
+                        if ($supplierContact === '') {
+                            $supplierContact = (string)($sup['contact_name'] ?: $sup['phone'] ?: '');
+                        }
+                    } else {
+                        $supplierId = 0;
+                    }
+                }
                 $expiry = trim($_POST['expiry_date'] ?? '');
                 $alertDays = max(0, (int)($_POST['expiry_alert_days'] ?? 7));
                 $batchNotes = trim($_POST['notes'] ?? '');
@@ -111,14 +134,15 @@ if (!$error && $_SERVER['REQUEST_METHOD'] === 'POST') {
                 $bIns = $pdo->prepare("
                     INSERT INTO stock_batches
                         (ingredient_id, batch_number, quantity_received, quantity_remaining, cost_per_unit,
-                         supplier_name, supplier_contact, received_date, expiry_date, expiry_alert_days, status, notes, created_by)
-                    VALUES (?, '', ?, ?, ?, ?, ?, CURDATE(), ?, ?, 'active', ?, ?)
+                         supplier_id, supplier_name, supplier_contact, received_date, expiry_date, expiry_alert_days, status, notes, created_by)
+                    VALUES (?, '', ?, ?, ?, ?, ?, ?, CURDATE(), ?, ?, 'active', ?, ?)
                 ");
                 $bIns->execute([
                     $id,
                     $qty,
                     $qty,
                     $cost,
+                    $supplierId ?: null,
                     $supplier ?: null,
                     $supplierContact ?: null,
                     $expiry !== '' ? $expiry : null,
@@ -133,9 +157,9 @@ if (!$error && $_SERVER['REQUEST_METHOD'] === 'POST') {
                 // Stock-in log
                 $logIns = $pdo->prepare("
                     INSERT INTO stock_in_log
-                        (ingredient_id, batch_id, quantity, cost_per_unit, cost_total, supplier_name, supplier_contact,
+                        (ingredient_id, batch_id, quantity, cost_per_unit, cost_total, supplier_id, supplier_name, supplier_contact,
                          avg_cost_before, avg_cost_after, notes, created_by)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ");
                 $logIns->execute([
                     $id,
@@ -143,6 +167,7 @@ if (!$error && $_SERVER['REQUEST_METHOD'] === 'POST') {
                     $qty,
                     $cost,
                     $qty * $cost,
+                    $supplierId ?: null,
                     $supplier ?: null,
                     $supplierContact ?: null,
                     $oldAvg,
@@ -328,6 +353,10 @@ if (!empty($_SESSION['stock_err'])) {
 $ingredients = [];
 $categories = [];
 $batchesByIngredient = [];
+$supplierOptions = [];
+try {
+    $supplierOptions = $pdo->query("SELECT id, name FROM stock_suppliers WHERE is_active = 1 ORDER BY name")->fetchAll(PDO::FETCH_ASSOC);
+} catch (Throwable $e) { $supplierOptions = []; }
 if (!$error || strpos($error, 'Stock tables not yet') === false) {
     try {
         $stmt = $pdo->query("
@@ -635,6 +664,31 @@ $stockNounLow = $stockIsFood ? 'ingredient' : 'stock item';
                         <input type="text" name="notes" id="ing_notes" maxlength="500">
                     </div>
                 </div>
+                <div class="form-row">
+                    <div>
+                        <label>Reorder point <i class="help" data-tip="When stock hits this level, the item appears in the Reorder / Buying report. Usually set to cover your supplier's lead time. Falls back to Min quantity if left at 0.">?</i></label>
+                        <input type="number" name="reorder_point" id="ing_reorder" step="0.001" min="0" value="0">
+                    </div>
+                    <div>
+                        <label>Par level (order up to) <i class="help" data-tip="Target stock level to top up to when reordering. Suggested order = Par − on hand − on order.">?</i></label>
+                        <input type="number" name="par_level" id="ing_par" step="0.001" min="0" value="0">
+                    </div>
+                </div>
+                <div class="form-row">
+                    <div>
+                        <label>Preferred supplier <i class="help" data-tip="Default supplier used to group this item on the Reorder report and pre-fill purchase orders.">?</i></label>
+                        <select name="preferred_supplier_id" id="ing_supplier">
+                            <option value="0">— None —</option>
+                            <?php foreach ($supplierOptions as $so): ?>
+                                <option value="<?php echo (int)$so['id']; ?>"><?php echo htmlspecialchars($so['name']); ?></option>
+                            <?php endforeach; ?>
+                        </select>
+                    </div>
+                    <div>
+                        <label>Supplier lead time (days) <i class="help" data-tip="Typical days from placing an order to delivery. Used to prioritise urgent reorders.">?</i></label>
+                        <input type="number" name="lead_time_days" id="ing_lead" min="0" max="365" value="0">
+                    </div>
+                </div>
                 <div class="modal-actions">
                     <button type="button" class="btn-secondary" onclick="closeModal('ingredientModal')">Cancel</button>
                     <button type="submit" class="btn-primary">Save</button>
@@ -664,8 +718,15 @@ $stockNounLow = $stockIsFood ? 'ingredient' : 'stock item';
                 </div>
                 <div class="form-row">
                     <div>
-                        <label>Supplier name <i class="help" data-tip="Optional — who supplied this batch. Useful for traceability and recall.">?</i></label>
-                        <input type="text" name="supplier_name" maxlength="200">
+                        <label>Supplier <i class="help" data-tip="Pick a supplier from your master list for traceability and reorder history. Choose 'Other' to type a one-off name.">?</i></label>
+                        <select name="supplier_id" id="si_supplier" onchange="toggleSupplierOther(this)">
+                            <option value="0">— Select supplier —</option>
+                            <?php foreach ($supplierOptions as $so): ?>
+                                <option value="<?php echo (int)$so['id']; ?>"><?php echo htmlspecialchars($so['name']); ?></option>
+                            <?php endforeach; ?>
+                            <option value="0" data-other="1">— Other / one-off —</option>
+                        </select>
+                        <input type="text" name="supplier_name" id="si_supplier_other" maxlength="200" placeholder="Supplier name" style="display:none;margin-top:6px;">
                     </div>
                     <div>
                         <label>Supplier contact <i class="help" data-tip="Phone or email — handy if you need to reorder or report a quality issue.">?</i></label>
@@ -843,12 +904,24 @@ $stockNounLow = $stockIsFood ? 'ingredient' : 'stock item';
                 document.getElementById('ing_min').value = data.min_quantity || 0;
                 document.getElementById('ing_yield').value = data.yield_percent || 100;
                 document.getElementById('ing_notes').value = data.notes || '';
+                document.getElementById('ing_reorder').value = data.reorder_point || 0;
+                document.getElementById('ing_par').value = data.par_level || 0;
+                document.getElementById('ing_lead').value = data.lead_time_days || 0;
+                document.getElementById('ing_supplier').value = data.preferred_supplier_id || 0;
             } else {
                 document.getElementById('ingredientModalTitle').textContent = 'Add <?php echo $stockNoun; ?>';
                 document.getElementById('ing_action').value = 'add';
                 document.getElementById('ing_id').value = '';
             }
             openModal('ingredientModal');
+        }
+
+        function toggleSupplierOther(sel) {
+            var opt = sel.options[sel.selectedIndex];
+            var other = document.getElementById('si_supplier_other');
+            var isOther = opt && opt.getAttribute('data-other') === '1';
+            other.style.display = isOther ? 'block' : 'none';
+            if (!isOther) { other.value = ''; }
         }
 
         function openStockInModal(id, name, unit, lastCost, currentQty) {

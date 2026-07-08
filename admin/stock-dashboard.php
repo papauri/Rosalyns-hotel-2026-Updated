@@ -8,6 +8,7 @@
 require_once 'admin-init.php';
 require_once '../includes/alert.php';
 require_once dirname(__DIR__) . '/config/cache.php';
+require_once 'includes/procurement-schema.php';
 
 $user = [
     'id' => $_SESSION['admin_user_id'],
@@ -22,18 +23,23 @@ $currency_symbol = getSetting('currency_symbol');
 
 if (!ensureStockTablesExist()) {
     $error = 'Stock tables not yet created. Please run admin/migrations/015_stock_management.php first.';
+} else {
+    ensureProcurementSchema($pdo);
 }
 
 // Auto-run expiry sweep
 if (!$error) runStockExpiryCheck();
 
-$cacheKey = 'stock_dashboard_metrics_v3';
+// Effective reorder threshold: reorder_point when set, otherwise min_quantity.
+$reorderThresholdExpr = "(CASE WHEN reorder_point > 0 THEN reorder_point ELSE min_quantity END)";
+
+$cacheKey = 'stock_dashboard_metrics_v4';
 $metrics = function_exists('getCache') ? getCache($cacheKey) : null;
 if (!$metrics && !$error) {
     try {
         $metrics = [];
         $metrics['ingredient_count'] = (int)$pdo->query("SELECT COUNT(*) FROM stock_ingredients WHERE is_archived = 0")->fetchColumn();
-        $metrics['low_stock'] = (int)$pdo->query("SELECT COUNT(*) FROM stock_ingredients WHERE is_archived = 0 AND min_quantity > 0 AND current_quantity <= min_quantity AND current_quantity > 0")->fetchColumn();
+        $metrics['low_stock'] = (int)$pdo->query("SELECT COUNT(*) FROM stock_ingredients WHERE is_archived = 0 AND {$reorderThresholdExpr} > 0 AND current_quantity <= {$reorderThresholdExpr} AND current_quantity > 0")->fetchColumn();
         $metrics['critical_stock'] = (int)$pdo->query("SELECT COUNT(*) FROM stock_ingredients WHERE is_archived = 0 AND current_quantity <= 0")->fetchColumn();
         $metrics['total_inventory_value'] = (float)$pdo->query("SELECT COALESCE(SUM(GREATEST(0, current_quantity) * cost_per_unit), 0) FROM stock_ingredients WHERE is_archived = 0")->fetchColumn();
         $metrics['active_batches'] = (int)$pdo->query("SELECT COUNT(*) FROM stock_batches WHERE status = 'active' AND quantity_remaining > 0")->fetchColumn();
@@ -129,9 +135,9 @@ if (!$error) {
         ")->fetchAll(PDO::FETCH_ASSOC);
 
         $lowStock = $pdo->query("
-            SELECT name, current_quantity, min_quantity, unit FROM stock_ingredients
-            WHERE is_archived = 0 AND min_quantity > 0 AND current_quantity > 0 AND current_quantity <= min_quantity
-            ORDER BY (current_quantity / min_quantity) ASC LIMIT 10
+            SELECT name, current_quantity, {$reorderThresholdExpr} AS min_quantity, unit FROM stock_ingredients
+            WHERE is_archived = 0 AND {$reorderThresholdExpr} > 0 AND current_quantity > 0 AND current_quantity <= {$reorderThresholdExpr}
+            ORDER BY (current_quantity / {$reorderThresholdExpr}) ASC LIMIT 10
         ")->fetchAll(PDO::FETCH_ASSOC);
 
         $totalAlerts = count($criticalIng) + count($expiringSoon) + count($expiredBatches) + count($lowStock);
@@ -459,10 +465,10 @@ $csrf_token = generateCsrfToken();
                     <div class="sdash-health-stat__value"><?php echo number_format((int)$metrics['critical_stock']); ?></div>
                     <div class="sdash-health-stat__label">Out of stock</div>
                 </div>
-                <div class="sdash-health-stat <?php echo ($metrics['low_stock'] ?? 0) > 0 ? 'sdash-health-stat--warn' : ''; ?>">
+                <a href="stock-reorder.php" class="sdash-health-stat <?php echo ($metrics['low_stock'] ?? 0) > 0 ? 'sdash-health-stat--warn' : ''; ?>" style="text-decoration:none;color:inherit;" title="Open the Reorder / Buying report">
                     <div class="sdash-health-stat__value"><?php echo number_format((int)$metrics['low_stock']); ?></div>
-                    <div class="sdash-health-stat__label">Running low</div>
-                </div>
+                    <div class="sdash-health-stat__label">Running low &rsaquo;</div>
+                </a>
                 <div class="sdash-health-stat">
                     <div class="sdash-health-stat__value"><?php echo number_format((int)$metrics['active_batches']); ?></div>
                     <div class="sdash-health-stat__label">Active batches</div>
