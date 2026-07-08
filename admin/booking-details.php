@@ -1333,38 +1333,10 @@ unset($_SESSION['success_message'], $_SESSION['error_message']);
             </div>
         <?php endif; ?>
 
-        <div class="booking-story-intro">
-            <div class="story-intro-text">
-                <h2>Booking Journey</h2>
-                <p>Follow the booking from guest details to stay, room setup, and payment.</p>
-            </div>
-            <div class="story-steps-track">
-                <div class="story-track-step">
-                    <div class="track-step-num">1</div>
-                    <div class="track-step-label">Guest</div>
-                </div>
-                <div class="story-track-line"></div>
-                <div class="story-track-step">
-                    <div class="track-step-num">2</div>
-                    <div class="track-step-label">Stay</div>
-                </div>
-                <div class="story-track-line"></div>
-                <div class="story-track-step">
-                    <div class="track-step-num">3</div>
-                    <div class="track-step-label">Room</div>
-                </div>
-                <div class="story-track-line"></div>
-                <div class="story-track-step">
-                    <div class="track-step-num">4</div>
-                    <div class="track-step-label">Payment</div>
-                </div>
-            </div>
-        </div>
-
         <!-- Details Grid -->
         <div class="details-grid">
 
-            <!-- Story Cards: asymmetric 3-panel grid -->
+            <!-- Overview cards: equal 4-up row (guest / stay / room / payment) -->
             <div class="story-grid">
 
             <!-- Guest Information Card -->
@@ -1372,10 +1344,8 @@ unset($_SESSION['success_message'], $_SESSION['error_message']);
                 <div class="info-card-header">
                     <div class="icon guest"><i class="fas fa-user"></i></div>
                     <div class="story-head-text">
-                        <span class="story-eyebrow">Step 1</span>
                         <h3>Guest Information</h3>
                     </div>
-                    <span class="story-step-num">1</span>
                 </div>
                 <div class="info-card-body">
                     <div class="info-row">
@@ -1458,18 +1428,13 @@ unset($_SESSION['success_message'], $_SESSION['error_message']);
                 </div>
             </div>
 
-            <!-- Center column: Stay + Room stacked -->
-            <div class="story-center-col">
-
             <!-- Stay Duration Card -->
             <div class="info-card story-card story-card--stay">
                 <div class="info-card-header">
                     <div class="icon stay"><i class="fas fa-calendar-alt"></i></div>
                     <div class="story-head-text">
-                        <span class="story-eyebrow">Step 2</span>
                         <h3>Stay Duration</h3>
                     </div>
-                    <span class="story-step-num">2</span>
                 </div>
                 <div class="info-card-body">
                     <div class="stay-duration-display">
@@ -1499,10 +1464,8 @@ unset($_SESSION['success_message'], $_SESSION['error_message']);
                 <div class="info-card-header">
                     <div class="icon room"><i class="fas fa-bed"></i></div>
                     <div class="story-head-text">
-                        <span class="story-eyebrow">Step 3</span>
                         <h3>Room Details</h3>
                     </div>
-                    <span class="story-step-num">3</span>
                 </div>
                 <div class="info-card-body">
                     <div class="room-info-display">
@@ -1562,17 +1525,13 @@ unset($_SESSION['success_message'], $_SESSION['error_message']);
                 </div>
             </div>
 
-            </div><!-- /.story-center-col -->
-
             <!-- Payment Information Card -->
             <div class="info-card story-card story-card--payment">
                 <div class="info-card-header">
                     <div class="icon payment"><i class="fas fa-credit-card"></i></div>
                     <div class="story-head-text">
-                        <span class="story-eyebrow">Step 4</span>
                         <h3>Payment Information</h3>
                     </div>
-                    <span class="story-step-num">4</span>
                 </div>
                 <div class="info-card-body">
                     <div class="payment-summary">

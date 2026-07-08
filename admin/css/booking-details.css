@@ -1344,84 +1344,6 @@
     color: var(--color-lux-ink, #231F1C);
 }
 
-.booking-story-intro {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    flex-wrap: wrap;
-    gap: 1rem;
-    margin-bottom: clamp(0.85rem, 1vw + 0.4rem, 1.2rem);
-    padding: clamp(0.85rem, 1vw + 0.4rem, 1.1rem) clamp(1rem, 1.2vw + 0.45rem, 1.4rem);
-    background: linear-gradient(135deg,
-        color-mix(in srgb, var(--color-lux-clay-50, #F3ECE4) 45%, #fff) 0%,
-        #fff 100%);
-    border: 1px solid color-mix(in srgb, var(--color-lux-clay-100, #ECE1D6) 65%, transparent);
-    border-radius: clamp(0.75rem, 0.8vw + 0.3rem, 1rem);
-}
-
-.story-intro-text h2 {
-    margin: 0 0 0.2rem;
-    font-family: 'Cormorant Garamond', serif;
-    font-size: clamp(1.15rem, 1rem + 0.45vw, 1.45rem);
-    font-weight: 600;
-    color: var(--color-lux-ink, #231F1C);
-    line-height: 1.15;
-}
-
-.story-intro-text p {
-    margin: 0;
-    font-size: clamp(0.72rem, 0.69rem + 0.1vw, 0.82rem);
-    color: var(--color-text-secondary, #5E554D);
-}
-
-/* ── Step track ── */
-.story-steps-track {
-    display: flex;
-    align-items: center;
-    gap: 0;
-    flex-shrink: 0;
-}
-
-.story-track-step {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    gap: 0.3rem;
-}
-
-.track-step-num {
-    width: 2rem;
-    height: 2rem;
-    border-radius: 50%;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    font-family: 'Cormorant Garamond', serif;
-    font-size: 0.95rem;
-    font-weight: 700;
-    color: var(--color-lux-gold, #B18247);
-    background: color-mix(in srgb, var(--color-lux-gold, #B18247) 14%, #fff);
-    border: 1.5px solid color-mix(in srgb, var(--color-lux-gold, #B18247) 35%, transparent);
-    box-shadow: 0 2px 6px color-mix(in srgb, var(--color-lux-gold, #B18247) 18%, transparent);
-}
-
-.track-step-label {
-    font-size: 0.58rem;
-    font-weight: 600;
-    letter-spacing: 0.09em;
-    text-transform: uppercase;
-    color: var(--color-text-secondary, #8a7a68);
-}
-
-.story-track-line {
-    width: clamp(2rem, 3vw + 0.5rem, 4rem);
-    height: 1.5px;
-    margin-bottom: 1.3rem; /* align with circle centres */
-    background: linear-gradient(90deg,
-        color-mix(in srgb, var(--color-lux-gold, #B18247) 40%, transparent),
-        color-mix(in srgb, var(--color-lux-gold, #B18247) 20%, transparent));
-}
-
 .details-grid {
     display: grid;
     grid-template-columns: repeat(auto-fill, minmax(min(100%, 340px), 1fr));
@@ -1437,26 +1359,27 @@
     grid-column: 1 / -1;
 }
 
-/* ── Story grid: asymmetric 3-panel (guest | stay+room | payment) ── */
+/* ── Overview grid: equal 4-up row (guest | stay | room | payment) ── */
 .story-grid {
     display: grid;
-    grid-template-columns: minmax(0, 2fr) minmax(0, 1.85fr) minmax(0, 1.55fr);
+    grid-template-columns: repeat(4, minmax(0, 1fr));
     gap: clamp(0.75rem, 1vw + 0.35rem, 1.15rem);
     align-items: stretch;
 }
 
-.story-center-col {
-    display: flex;
-    flex-direction: column;
-    gap: clamp(0.75rem, 1vw + 0.35rem, 1.15rem);
-}
-
-.story-center-col .story-card {
-    flex: 1;
-}
-
 .story-card {
     grid-column: auto;
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    min-width: 0;
+}
+
+.story-card .info-card-body {
+    display: flex;
+    flex-direction: column;
+    flex: 1;
+    min-width: 0;
 }
 
 /* ── Story card header: icon + eyebrow/title + numbered badge ── */
@@ -1476,14 +1399,6 @@
     min-width: 0;
 }
 
-.story-eyebrow {
-    font-size: 0.58rem;
-    font-weight: 600;
-    letter-spacing: 0.14em;
-    text-transform: uppercase;
-    color: var(--color-lux-gold, #B18247);
-}
-
 .story-card .info-card-header h3 {
     font-family: 'Cormorant Garamond', serif;
     font-size: clamp(1rem, 0.92rem + 0.3vw, 1.18rem);
@@ -1492,21 +1407,16 @@
     color: var(--color-lux-ink, #231F1C);
 }
 
-.story-step-num {
-    margin-left: auto;
-    flex-shrink: 0;
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    width: 1.55rem;
-    height: 1.55rem;
-    border-radius: 50%;
-    font-family: 'Cormorant Garamond', serif;
-    font-size: 0.92rem;
-    font-weight: 600;
-    color: var(--color-primary, #8A775F);
-    background: color-mix(in srgb, var(--color-primary, #8A775F) 12%, var(--color-white, #fff));
-    border: 1px solid color-mix(in srgb, var(--color-primary, #8A775F) 26%, transparent);
+/* Guest history: keep the past-stays list from stretching the 4-up row */
+.gh-past-list {
+    max-height: 11rem;
+    overflow-y: auto;
+    padding-right: 0.25rem;
+}
+
+/* Quarter-width columns: let the check-in/out boxes wrap gracefully */
+.story-card .date-range {
+    flex-wrap: wrap;
 }
 
 .folio-card {
@@ -2466,24 +2376,9 @@
 }
 
 /* Breakpoints in descending order so narrower queries always win the cascade */
-@media (max-width: 75rem) {
+@media (max-width: 80rem) {
     .story-grid {
-        grid-template-columns: minmax(0, 1.6fr) minmax(0, 1.4fr);
-    }
-    .story-card--payment {
-        grid-column: 1 / -1;
-    }
-    .story-center-col {
-        flex-direction: row;
-    }
-}
-
-@media (max-width: 68rem) {
-    .story-grid {
-        grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-    }
-    .story-card--payment {
-        grid-column: 1 / -1;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
     }
 }
 
@@ -2496,22 +2391,9 @@
         grid-template-columns: 1fr;
     }
 
-    .story-card--payment {
-        grid-column: auto;
-    }
-
-    .story-center-col {
-        flex-direction: column;
-    }
-
-    /* Stacked cards take their natural height — flex:1 equal-height
-       distribution clips the taller card (overflow is hidden) */
-    .story-center-col .story-card {
-        flex: 0 0 auto;
-    }
-
-    .story-steps-track {
-        display: none;
+    /* Stacked cards take their natural height */
+    .story-card {
+        height: auto;
     }
 
     .room-meta-grid {
@@ -2529,12 +2411,6 @@
     .booking-actions-flow>.action-btn,
     .booking-actions-flow>.booking-action-form .action-btn {
         flex: 1 1 100%;
-    }
-}
-
-@media (max-width: 22rem) {
-    .booking-story-intro h2 {
-        font-size: 0.98rem;
     }
 }
 
