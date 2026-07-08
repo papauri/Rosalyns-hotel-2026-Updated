@@ -142,6 +142,11 @@ $nextDate = ($viewObj < $maxDate) ? (clone $viewObj)->modify('+1 day')->format('
         .gs-badge.full { background: #f7e6e6; color: #a03030; }
         .gs-reserve { border: 0; background: #8B7355; color: #fff; border-radius: 8px; padding: 9px 12px; font-weight: 600; cursor: pointer; font-size: .86rem; }
         .gs-reserve:disabled { background: #cfc6b8; cursor: not-allowed; }
+        /* Pin the reserve button to the bottom of every card so it lines up in one row
+           across all cards, regardless of whether a card has the optional class-name
+           line (.gs-slot__cls) above. Full width keeps the buttons uniform too.
+           Scoped to .gs-slot so the modal's "Confirm reservation" button is unaffected. */
+        .gs-slot .gs-reserve { margin-top: auto; width: 100%; }
         .gs-closed { text-align: center; padding: 48px 20px; color: #9a8f82; }
         .gs-modal-backdrop { position: fixed; inset: 0; background: rgba(30,26,22,.55); display: none; align-items: center; justify-content: center; z-index: 3000; padding: 16px; }
         .gs-modal-backdrop.open { display: flex; }
