@@ -434,7 +434,7 @@ $site_logo = getSetting('site_logo');
         </section>
 
         <!-- Event Booking Modal -->
-        <div class="modal modal--md" id="eventBookingModal" data-booking-modal role="dialog" aria-modal="true" aria-labelledby="eventBookingModal-title">
+        <div class="modal modal--lg" id="eventBookingModal" data-booking-modal role="dialog" aria-modal="true" aria-labelledby="eventBookingModal-title">
             <div class="modal__backdrop" data-close-event-booking></div>
             <div class="modal__wrapper">
                 <div class="modal__container">
@@ -442,9 +442,11 @@ $site_logo = getSetting('site_logo');
                         <span aria-hidden="true">&times;</span>
                     </button>
                     <div class="modal__header">
-                        <span class="booking-pill">Event Booking</span>
-                        <h3 class="modal__title" id="eventBookingModal-title">Book <span id="eventBookingModalEventName">This Event</span></h3>
-                        <p>Complete the form and our team will confirm your booking via email.</p>
+                        <div class="modal__header-content">
+                            <span class="booking-pill">Event Booking</span>
+                            <h3 class="modal__title" id="eventBookingModal-title">Book <span id="eventBookingModalEventName">This Event</span></h3>
+                            <p>Complete the form and our team will confirm your booking via email.</p>
+                        </div>
                     </div>
                     <div class="modal__body">
                         <?php if ($bookingError): ?>

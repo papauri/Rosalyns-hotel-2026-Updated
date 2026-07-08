@@ -13,6 +13,15 @@
  * If no custom order is set, categories display in natural database order
  */
 require_once 'config/database.php';
+require_once 'config/base-url.php';
+require_once 'includes/booking-functions.php';
+
+// Module gate: the print menu belongs to the Restaurant module. When it's off,
+// this page must not be reachable (consistent with restaurant.php). Redirect home.
+if (function_exists('isRestaurantEnabled') && !isRestaurantEnabled()) {
+    header('Location: ' . (defined('BASE_URL') ? BASE_URL : '/'));
+    exit;
+}
 
 function cleanText(mixed $value, string $fallback = ''): string
 {

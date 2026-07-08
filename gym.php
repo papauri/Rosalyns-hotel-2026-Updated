@@ -718,7 +718,7 @@ try {
         </section>
 
         <!-- Booking Modal -->
-        <div class="modal modal--md" id="bookingModal" data-booking-modal role="dialog" aria-modal="true" aria-labelledby="bookingModal-title">
+        <div class="modal modal--lg" id="bookingModal" data-booking-modal role="dialog" aria-modal="true" aria-labelledby="bookingModal-title">
             <div class="modal__backdrop" data-close-booking></div>
             <div class="modal__wrapper">
                 <div class="modal__container">

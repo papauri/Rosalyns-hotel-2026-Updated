@@ -56,6 +56,86 @@
     box-shadow: var(--shadow-md, 0 4px 6px rgba(0, 0, 0, 0.1));
 }
 
+/* ============================================================
+   BOOKING MODAL FORM — standardized (shared: gym.php, events.php)
+   These forms sit inside .modal__body. The .booking-form card styling above is for
+   the standalone booking page; inside a modal it produced a cramped "card-in-a-card"
+   (a 600px white box with its own shadow inside the modal). Neutralise it so the form
+   fills the modal, and define the pieces the markup uses that had no CSS at all
+   (.form-consent, .checkbox label, .booking-pill, .privacy-note, .full spanning).
+   ============================================================ */
+.modal__body .booking-form {
+    max-width: none;
+    margin: 0;
+    padding: 0;
+    background: transparent;
+    border-radius: 0;
+    box-shadow: none;
+}
+
+/* Full-width fields span every column of the form grid. */
+.modal__body .form-grid .full,
+.modal__body .form-grid .form-group.full,
+.modal__body .form-grid .form-consent.full {
+    grid-column: 1 / -1;
+}
+
+/* Consent row: inline checkbox + label (was undefined, so the box stacked above the
+   text and centered). Matches the .checkbox-group pattern used elsewhere. */
+.form-consent {
+    margin-top: var(--space-1, 0.25rem);
+}
+
+.form-consent .checkbox {
+    display: flex;
+    align-items: flex-start;
+    gap: var(--space-3, 0.75rem);
+    cursor: pointer;
+    font-size: var(--text-sm, 0.875rem);
+    line-height: 1.5;
+    color: var(--color-text-secondary, #4A5568);
+    margin: 0;
+}
+
+.form-consent .checkbox input[type="checkbox"] {
+    width: 18px;
+    height: 18px;
+    accent-color: var(--color-primary, #8B7355);
+    flex-shrink: 0;
+    margin-top: 2px;
+}
+
+/* Eyebrow pill above the modal title. */
+.booking-pill {
+    display: inline-block;
+    align-self: flex-start;
+    padding: 4px 12px;
+    margin-bottom: 8px;
+    border-radius: var(--radius-full, 9999px);
+    background: color-mix(in srgb, var(--color-primary, #8B7355) 12%, transparent 88%);
+    color: var(--color-primary, #8B7355);
+    font-family: var(--font-sans, 'Jost', sans-serif);
+    font-size: 0.7rem;
+    font-weight: 600;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    line-height: 1.4;
+}
+
+/* Small privacy note under the submit button. */
+.privacy-note {
+    margin: var(--space-3, 0.75rem) 0 0;
+    font-size: var(--text-xs, 0.75rem);
+    line-height: 1.5;
+    color: var(--color-text-muted, #6B6B6B);
+}
+
+/* Submit fills the modal footer width and sits with breathing room above the note. */
+.modal__body .booking-form .btn.full-width {
+    width: 100%;
+    margin-top: var(--space-5, 1.25rem);
+}
+
 .booking-form__title {
     font-size: var(--text-2xl, 1.5rem);
     font-weight: 600;

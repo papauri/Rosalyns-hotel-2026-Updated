@@ -159,6 +159,7 @@ function rh_is_feature_link_hidden(string $rawHref): bool {
     $map = [
         'restaurant'    => 'isRestaurantEnabled',
         'menu'          => 'isRestaurantEnabled',
+        'menu-pdf'      => 'isRestaurantEnabled',
         'gym'           => 'isGymEnabled',
         'gym-schedule'  => 'isGymEnabled',
         'conference'    => 'isConferenceEnabled',
