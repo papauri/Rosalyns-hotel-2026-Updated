@@ -18,6 +18,12 @@ Database/
 logs/backup.log
 *.sql.gz
 
+# Generated documents & local data - never tracked (PII)
+data/*.db
+invoices/*.pdf
+invoices/invoice-preview-check.html
+quotations/*.pdf
+
 # Email configuration with credentials - NEVER commit this!
 config/email.local.php
 config/email-password.php
