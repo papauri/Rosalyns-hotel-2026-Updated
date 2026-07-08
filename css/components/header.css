@@ -764,13 +764,17 @@
         flex-shrink: 0;
     }
 
+    /* Fluid logo: scales with viewport so it stays large on wide screens but shrinks
+       on ~1024–1366px laptops/tablets (e.g. Surface Pro), freeing the horizontal room
+       the menu + Book Now CTA need. Fixed px here previously overflowed the bar and the
+       header clipped the rightmost CTA off-screen. */
     .header__logo-media {
-        width: 140px;
-        height: 140px;
+        width: clamp(96px, 11.5vw, 140px);
+        height: clamp(96px, 11.5vw, 140px);
     }
 
     .header__logo-image {
-        height: 132px;
+        height: clamp(90px, 10.8vw, 132px);
     }
 
     .header__logo-text {
@@ -781,6 +785,8 @@
         display: flex;
         margin-left: auto;
         gap: 0;
+        /* Let the link row compress before anything overflows the bar. */
+        min-width: 0;
     }
 
     .header__menu-link {
@@ -829,12 +835,12 @@
     }
 
     .header__logo-media {
-        width: 165px;
-        height: 165px;
+        width: clamp(128px, 11.5vw, 165px);
+        height: clamp(128px, 11.5vw, 165px);
     }
 
     .header__logo-image {
-        height: 156px;
+        height: clamp(120px, 10.8vw, 156px);
     }
 
     .header__logo-text {
@@ -880,12 +886,12 @@
     }
 
     .header__logo-media {
-        width: 180px;
-        height: 180px;
+        width: clamp(150px, 12vw, 180px);
+        height: clamp(150px, 12vw, 180px);
     }
 
     .header__logo-image {
-        height: 170px;
+        height: clamp(142px, 11.3vw, 170px);
     }
 
     .header__menu {

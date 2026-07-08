@@ -402,4 +402,34 @@ $_js_v = function ($f) {
     })();
 </script>
 
+<!-- Stale service-worker cleanup (public site).
+     The public site uses NO service worker. An earlier deploy registered one at a
+     broader scope; a stale copy still controls public pages and returns network-error
+     responses (the "FetchEvent ... resulted in a network error" console errors on
+     index.php). Unregister any SW visible to this public page and reload once so the
+     page loads controller-free. The admin SW (scope .../admin/) is explicitly excluded
+     and never touched. -->
+<script>
+    (function () {
+        if (!('serviceWorker' in navigator)) return;
+        try {
+            navigator.serviceWorker.getRegistrations().then(function (regs) {
+                var stale = (regs || []).filter(function (r) {
+                    return (r.scope || '').indexOf('/admin/') === -1; // never the admin SW
+                });
+                if (!stale.length) return;
+                Promise.all(stale.map(function (r) { return r.unregister().catch(function () { return false; }); }))
+                    .then(function () {
+                        // Only reload if a stale SW is actually controlling THIS page,
+                        // and only once (guard against a reload loop).
+                        if (navigator.serviceWorker.controller && !sessionStorage.getItem('rhSwCleaned')) {
+                            sessionStorage.setItem('rhSwCleaned', '1');
+                            window.location.reload();
+                        }
+                    });
+            }).catch(function () {});
+        } catch (e) { /* non-fatal */ }
+    })();
+</script>
+
 <?php require_once __DIR__ . '/cookie-consent.php'; ?>

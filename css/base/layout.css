@@ -70,10 +70,17 @@ body.privacy-page {
     padding: 0;
 }
 
-/* Scroll container for special scroll effects */
+/* Scroll container for special scroll effects.
+   Use `overflow-x: clip`, NOT `hidden`: per the CSS spec, `overflow-x: hidden`
+   with the default `overflow-y: visible` forces overflow-y to compute to `auto`,
+   which turns this mid-page wrapper into its OWN vertical scroll area — that is the
+   phantom inner scrollbar, and the nested scroller is what makes scrolling feel slow
+   (scroll chaining). `clip` is compatible with `overflow-y: visible`, so the page
+   keeps a single, smooth scroll context while horizontal overflow is still contained. */
 .scroll-container {
     width: 100%;
-    overflow-x: hidden;
+    overflow-x: clip;
+    overflow-y: visible;
 }
 
 /* ============================================
