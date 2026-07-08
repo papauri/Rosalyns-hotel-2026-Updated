@@ -19,6 +19,9 @@
     display: flex;
     flex-direction: column;
     gap: var(--space-2, 0.5rem);
+    /* Allow the field to shrink/grow within its grid track instead of being pinned
+       to its control's intrinsic width. */
+    min-width: 0;
 }
 
 .editorial-booking-label {
@@ -31,6 +34,10 @@
 }
 
 .editorial-booking-input {
+    /* Fill the grid cell — date/select controls otherwise render at their narrow
+       intrinsic width and leave the field looking cramped with empty space. */
+    width: 100%;
+    box-sizing: border-box;
     min-height: 50px;
     padding: var(--space-3, 0.75rem) var(--space-4, 1rem);
     border: 1px solid color-mix(in srgb, var(--color-border, #E8E4DD) 78%, transparent 22%);
