@@ -3178,7 +3178,7 @@ try {
         }
 
         // ── Init ──────────────────────────────────────────────────────────────────
-        document.addEventListener('DOMContentLoaded', function() {
+        function initBookingForm() {
             addRoomLine();
             const ci = el('checkInDate').value;
             const co = el('checkOutDate').value;
@@ -3186,7 +3186,15 @@ try {
             calculateTotal();
             updateGroupSummary();
             onBookingStatusChange();
-        });
+        }
+        // Run immediately if the DOM is already parsed (bfcache / SW-served page
+        // where DOMContentLoaded has already fired), otherwise wait for it.
+        // A DOMContentLoaded-only listener left the allocator empty until a reload.
+        if (document.readyState === 'loading') {
+            document.addEventListener('DOMContentLoaded', initBookingForm);
+        } else {
+            initBookingForm();
+        }
 
         // ═══════════════════════════════════════════════════════════════════
         // Returning Guest Lookup
