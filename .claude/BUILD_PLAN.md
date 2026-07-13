@@ -53,6 +53,13 @@ explicit confirmation):**
 - [x] Online payment capture at booking time — RESOLVED 2026-07-14: owner chose to keep
       manual settlement-at-check-in. No gateway built. Decided: no.
 
+**Round 2 — owner-added scope (2026-07-14, added after the first PROJECT COMPLETE):**
+- [x] Admin list views (e.g. "All Room Bookings" in `admin/bookings.php`) render as data
+      tables on standard laptop screens (≥1024px, 14-15in), with the card layout reserved
+      for tablet/mobile breakpoints. Fix at the shared-component level if a common admin
+      responsive pattern is causing the premature card-switch, so the fix applies
+      consistently rather than page-by-page.
+
 ## Future Ideas (not in scope — logged only, never auto-queued)
 
 - OTA/channel-manager sync (rate parity, subscription cost — needs owner input first)
@@ -119,6 +126,7 @@ Kept for traceability — every item below maps 1:1 onto a PROJECT COMPLETE WHEN
 | P3-02 | Tablet pass on POS + KDS (`admin/pos.php`, `admin/kds.php`) | Tablet UX: POS + KDS | done (evidence-based no-action — already tablet-optimized) |
 | P3-03 | Tablet pass on check-in + housekeeping (**check-in UI is `admin/booking-details.php`, NOT process-checkin.php — see correction below**, `admin/housekeeping.php`) | Tablet UX: check-in + housekeeping | done |
 | P3-04 | Public-page visual consistency sweep (per-module CSS drift) | Accessibility: public-page CSS consistency | done |
+| P3-05 | Raise the admin list-table card-switch threshold so `.tablet-table` tables (e.g. `bookings.php` "All Room Bookings") stay real data tables on laptop/desktop (>1024px viewport); cards reserved for tablet/mobile (≤1024px). Shared fix in `admin/js/admin-mobile.js`. | Round 2: admin list views render as tables on ≥1024px laptops | done |
 
 ## Blocked / decisions needed from owner
 
@@ -780,6 +788,146 @@ mid-loop, so `git diff`/`git status` against HEAD shows the ENTIRE run's cumulat
 the two named CSS files against this brief — do NOT diff against HEAD project-wide and do NOT flag
 files from earlier already-approved tasks as scope creep.
 
+## P3-05 investigation + dispatch — admin list tables render as tables on laptops (build-planner, 2026-07-14)
+
+**Closes the Round 2 checklist item** ("Admin list views (e.g. 'All Room Bookings' in
+`admin/bookings.php`) render as data tables on standard laptop screens (≥1024px, 14-15in), with
+the card layout reserved for tablet/mobile breakpoints. Fix at the shared-component level…").
+Check-then-fix like the other Phase 3 tasks. Investigated read-only first; the root cause is a
+SHARED JS component, so ONE change fixes it consistently across every admin list view (exactly
+what the owner asked for — not page-by-page).
+
+### Investigation findings (evidence-based)
+- **The table→card switch is driven by JavaScript, NOT a CSS media query.** The card styling
+  (`admin/css/admin-styles.css:958+`, `table.mobile-enhanced { … }` making `thead/tr/td` render as
+  stacked blocks with `td[data-label]::before` labels) is applied ONLY when the `.mobile-enhanced`
+  class is present. That class is added/removed at runtime by `admin/js/admin-mobile.js`
+  (admin-styles.css:956 comment: "Any table marked .mobile-enhanced by admin-mobile.js gets card
+  view."). So the *threshold* the owner is complaining about lives in the JS decision function, and
+  the CSS needs NO change.
+- **`bookings.php` "All Room Bookings" table is `class="booking-table bookings-table tablet-table"`**
+  (bookings.php:**3441**; a second results table at :**3843** is `booking-table tablet-table`). The
+  `tablet-table` class routes it through the `tablet-table` branch of `shouldUseCardLayout(table)`
+  in `admin/js/admin-mobile.js` (lines **274–296**):
+  ```js
+  if (table.classList.contains('tablet-table')) {
+      if (viewportWidth <= 640) { return true; }          // phone → cards
+      const availableWidth = getTableAvailableWidth(table);
+      // clone measured at white-space:nowrap (max-content / intrinsic width)
+      …
+      return availableWidth < intrinsicWidth;              // ← the premature-card culprit
+  }
+  ```
+- **Why it cards on a 15" laptop:** `intrinsicWidth` is measured with `white-space:nowrap`
+  (admin-mobile.js:284) — the table's full single-line max-content width with NO wrapping. A wide
+  multi-column bookings table (reference, guest, room, check-in, check-out, status, payment/balance,
+  actions) has an intrinsic nowrap width of roughly 1300–1500px. On a 14–15" laptop the admin
+  content area *after the sidebar* is ~1000–1080px (`getTableAvailableWidth` returns the container
+  clientWidth, admin-mobile.js:183–197, not the viewport). So `availableWidth (~1050) < intrinsicWidth
+  (~1400)` is essentially ALWAYS true for this table → it collapses to cards even though a real table
+  would simply wrap cell text and/or scroll and fit fine. That is the "premature card-switch."
+- **This IS the shared admin responsive pattern the owner suspected.** `shouldUseCardLayout()` is the
+  single decision function for ALL admin list tables (`getCardableTables()`, admin-mobile.js:131–166,
+  selects every `.table/.admin-table/.booking-table/.bookings-table/.report-table/.users-table/…`
+  and every table inside `.admin-content/.table-responsive/…`). Every list view tagged `.tablet-table`
+  hits the exact same branch, so fixing this one branch fixes them all consistently — no per-page
+  edits. **Blast radius = every `.tablet-table` admin list view** (bookings.php confirmed; the shared
+  branch covers all others by construction). The `fit-or-card` finance branch (lines 248–272) and the
+  default non-`tablet-table` branch (297–319) are deliberately left untouched — see "Do NOT touch."
+- **Target breakpoint = 1024px viewport**, matching the codebase's established tablet-band ceiling
+  (`admin/css/kds.css:23` `@media (max-width:1024px)`; P3-02/P3-03 both used 1024 as the tablet
+  band). Above 1024px = laptop/desktop = real table (owner's 14/15" laptops sit at 1280–1920).
+  ≤1024px = tablet-landscape-and-below = current card behaviour retained. This is a pure JS-threshold
+  change; the `.table-responsive` wrapper around the table (bookings.php:3440) already supplies
+  `overflow-x:auto` (bookings.css:1517–1520) so a wide table scrolls horizontally on a laptop instead
+  of collapsing to cards.
+
+### Dispatch brief → frontend-specialist (single shared JS-threshold change; behavioural, no markup/CSS/logic-shape change)
+Edit ONE function in `C:\Users\john-paul.chirwa\OneDrive\MSP\Rosalyns-hotel-2026\admin\js\admin-mobile.js`.
+Inside `shouldUseCardLayout(table)`, in the **`if (table.classList.contains('tablet-table'))` block
+(lines 274–296)**, add a laptop/desktop guard IMMEDIATELY AFTER the existing phone check
+(`if (viewportWidth <= 640) { return true; }`) and BEFORE the `const availableWidth = …` line:
+
+```js
+// Owner rule (2026-07-14, P3-05): reserve card layout for tablet/mobile.
+// On standard laptop/desktop viewports (> 1024px) always keep a real data
+// table — the .table-responsive wrapper supplies horizontal scroll when a
+// wide table doesn't fit, rather than collapsing to cards.
+if (viewportWidth > 1024) {
+    return false;
+}
+```
+
+Net effect of the `tablet-table` branch after the edit:
+- viewport ≤ 640px (phone) → cards (unchanged);
+- viewport 641–1024px (tablet) → existing intrinsic-width logic, cards when it doesn't fit (unchanged);
+- viewport > 1024px (laptop/desktop) → always a real table (NEW — the fix).
+
+`viewportWidth` is already defined at the top of the function (admin-mobile.js:241) and is in scope
+inside this branch, so no new variable is needed. The resize handler (`enhanceMobileTables`,
+:322–334) re-invokes `shouldUseCardLayout` on every resize, so this threshold also governs
+resize/rotation transitions automatically — no separate listener change.
+
+**Do NOT touch:**
+- The `fit-or-card` branch (lines 248–272) — finance/accounting tables that intentionally measure
+  *with* wrapping and card-on-genuine-overflow at any width; leave their design intent intact.
+- The default non-`tablet-table` branch (lines 297–319) — its `viewportWidth <= 768`,
+  `columnCount >= 6 && availableWidth <= 960`, and overflow checks stay as-is.
+- The `viewportWidth <= 640` phone early-return (keep it — phones still get cards).
+- Any CSS file (`admin-styles.css`, `admin-components.css`, `bookings.css`, `kds.css`, etc.) — the
+  card CSS is correct and is not media-query-gated; only the JS threshold changes.
+- Any `.php` file, any table markup/columns, any table styling, `getCardableTables()`,
+  `getTableAvailableWidth()`, `getRequiredTableWidth()`, `transformTableToCards()`,
+  `restoreTableFromCards()`, or any other function in admin-mobile.js.
+- No new libraries, no build step, no minification, no reformatting of untouched lines.
+
+### ASSUMPTIONS (2026-07-14, P3-05)
+- Card layout is reserved for `viewportWidth <= 1024` (tablet-landscape and below); `> 1024` is
+  treated as "standard laptop/desktop" and always shows a real table. 1024 chosen to match the
+  codebase's existing tablet-band ceiling (kds.css `@media (max-width:1024px)`, P3-02/P3-03) and the
+  checklist item's "≥1024px" laptop framing. Owner's 14/15" laptops (1280–1920px viewport) are
+  comfortably above the threshold.
+- Only the `tablet-table` branch is changed. The owner's example (bookings.php) and the "common admin
+  responsive pattern" they described are the `tablet-table` list views; changing this one shared
+  branch fixes all of them consistently. The `fit-or-card` finance tables are a separate, deliberate
+  design (real table when it fits with wrapping, cards only on true overflow — already laptop-friendly)
+  and are intentionally out of scope to avoid altering finance-table readability behaviour.
+- A wide table on a laptop now horizontally scrolls inside `.table-responsive` (overflow-x:auto,
+  bookings.css:1517) rather than collapsing to cards — this is the intended best-in-class PMS
+  behaviour (Cloudbeds/Mews show dense scrollable tables on desktop, never cards) and matches the
+  owner's explicit "I want the tables on standard screens" request.
+- On-device pixel-perfect verification needs a real browser at various widths and is flagged
+  best-effort; the fix is driven by the measured JS decision logic, not fabricated.
+
+### Acceptance criteria (P3-05)
+1. `admin/js/admin-mobile.js` `shouldUseCardLayout()` gains, inside the `tablet-table` branch and
+   after the `viewportWidth <= 640` return, a `if (viewportWidth > 1024) { return false; }` guard
+   (with the explanatory comment). No other line of the function or file is changed.
+2. `node --check admin/js/admin-mobile.js` (or equivalent JS syntax check) passes — no syntax error,
+   balanced braces.
+3. Behavioural verification (QA traces the decision function): for a `.tablet-table` at
+   `window.innerWidth = 1366` (or any value > 1024), `shouldUseCardLayout()` returns `false` (real
+   table); at `innerWidth = 1000` (641–1024 band) the pre-existing intrinsic-width logic still runs;
+   at `innerWidth = 600` (≤640) it still returns `true` (cards).
+4. No CSS file, no `.php` file, no table markup, and no other function in admin-mobile.js is modified;
+   no file outside `admin/js/admin-mobile.js` is touched.
+5. No regression to the `fit-or-card` or default branches (untouched), and phones (≤640) / tablets
+   (641–1024) keep their current card behaviour.
+
+### QA gate → qa-auditor **sonnet**
+Logic/behaviour gate, not lint-only: this is a runtime decision-function change in a shared JS
+component that governs table↔card rendering across the entire admin panel. A naive edit could put the
+guard in the wrong branch (affecting `fit-or-card`/default), break the phone/tablet bands, or place it
+after `availableWidth` such that it no longer covers all `tablet-table` cases. QA must trace the
+branch logic (confirm the guard is inside the `tablet-table` block, after `<=640`, before the
+intrinsic-width measure) and confirm the three viewport bands behave as specified — haiku lint would
+miss a mis-placed guard.
+**⚠ QA scope-verification note (recurring false-positive guard):** this session NEVER commits
+mid-loop, so `git diff`/`git status` against HEAD shows the ENTIRE run's cumulative uncommitted work
+(P2-02/03, P2-04, P3-01, P3-03, P3-04, etc.), NOT this task's scope. Verify scope by reading the
+CONTENT of `admin/js/admin-mobile.js` against this brief — do NOT diff against HEAD project-wide and
+do NOT flag files from earlier already-approved tasks as scope creep.
+
 ## Minor follow-ups (non-blocking, log only)
 - **Section-CSS tokenization (found during P3-04):** the 9 public section CSS files hardcode ~225
   `color:#hex` text values and never reference `var(--color-text-muted)`/`--color-text-secondary`,
@@ -914,6 +1062,9 @@ visibility explicit + rate-limit, without gating on admin session.
 - **P1-01** (2026-07-13): ASSUMPTION: room #1 (VIP Beach Front Villa) has `rooms_available = 0` in live data, which would make an availability assertion against a hardcoded room id meaningless. The specialist scanned `$rooms` for one with `rooms_available > 0` instead. Correct call — flagging so future smoke-test additions know live data has at least one fully-booked-out room and shouldn't assume room #1 is available.
 
 ## Completed
+- **P3-05** (2026-07-14, QA: PASS/sonnet, first attempt) — Root cause was JS, not CSS: `admin/js/admin-mobile.js`'s `shouldUseCardLayout()` compared a `.tablet-table`'s container width (post-sidebar, ~1000-1080px) against its intrinsic nowrap width (~1300-1500px for a wide table), so wide tables collapsed to cards almost regardless of actual screen size. Added a single guard clause (`if (viewportWidth > 1024) return false;`) after the existing phone check — since this is the single shared decision function for every `.tablet-table` admin list view, one change fixes bookings.php's "All Room Bookings" and every other list view using the same pattern consistently, exactly as requested. Phone (≤640) and tablet (641-1024) bands unchanged; the untouched `.table-responsive` wrapper already provides horizontal scroll for tables wider than the viewport.
+
+**PROJECT COMPLETE — Round 2.** All 15 checklist items now checked (14 original + 1 owner-added).
 - **P3-04** (2026-07-14, QA: PASS/haiku, first attempt) — Investigated public-page CSS across all modules: the structural layer (`css/base/variables.css` design tokens + `css/main.css` shared components) is already consistent by single-source construction, and the ~225 hardcoded section-file text colors cluster tightly in the warm-Japandi brown family (no perceptible drift) — both closed as evidence-based no-action, wholesale tokenization deliberately not queued (open-ended, out of the checklist item's intent). Found one genuine, finite drift: `contact.css` and `restaurant.css` used cool neutral greys (#333/#666/#999) breaking the warm palette used everywhere else. Converged 11 `color:` declarations onto values already in the site's vocabulary (#1A1A1A/#6B5740/#8B7355) — zero new colors introduced, all on light surfaces so contrast strictly improved. QA passed clean on the first attempt with the scope-verification warning included.
 
 **PROJECT COMPLETE WHEN checklist: 13 of 14 items now checked.** The sole remaining item (online payment capture, P2-01) is owner-blocked — not agent-completable per the hard-stop rails (no code/credential decisions without explicit confirmation). All buildable work in the approved scope is done.

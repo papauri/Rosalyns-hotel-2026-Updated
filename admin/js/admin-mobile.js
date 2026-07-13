@@ -276,6 +276,13 @@
             if (viewportWidth <= 640) {
                 return true;
             }
+            // Owner rule (2026-07-14, P3-05): reserve card layout for tablet/mobile.
+            // On standard laptop/desktop viewports (> 1024px) always keep a real data
+            // table — the .table-responsive wrapper supplies horizontal scroll when a
+            // wide table doesn't fit, rather than collapsing to cards.
+            if (viewportWidth > 1024) {
+                return false;
+            }
             const availableWidth = getTableAvailableWidth(table);
             // Clone-measure intrinsic width using a detached host (avoids triggering
             // the MutationObserver that watches body subtree).
