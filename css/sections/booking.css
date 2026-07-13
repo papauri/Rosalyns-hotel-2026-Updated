@@ -3266,7 +3266,7 @@
 
 .booking-page .form-hint {
     font-size: 0.73rem;
-    color: #9B8A72;
+    color: #736149;
     margin-top: 7px;
     display: flex;
     align-items: flex-start;
@@ -3379,7 +3379,7 @@
 
 .booking-page .room-price-period {
     font-size: 0.68rem;
-    color: #9B8A72;
+    color: #736149;
     text-transform: uppercase;
     letter-spacing: 0.09em;
     font-family: 'Jost', sans-serif;
@@ -3690,7 +3690,7 @@
 .booking-page .occupancy-type-label > span:not(.price-display) {
     display: block;
     font-size: 0.7rem;
-    color: #9B8A72;
+    color: #736149;
     margin-bottom: 6px;
 }
 
@@ -3847,7 +3847,7 @@
 .booking-page .room-option .room-price-period {
     font-family: 'Jost', sans-serif !important;
     font-size: 0.67rem !important;
-    color: #9B8A72 !important;
+    color: #736149 !important;
     text-transform: uppercase;
     letter-spacing: 0.08em;
     display: inline !important;
@@ -3995,7 +3995,7 @@
 }
 
 .bsum-per-night {
-    color: #9B8A72;
+    color: #736149;
     font-size: 0.72rem;
 }
 
@@ -4033,7 +4033,7 @@
     font-weight: 700;
     text-transform: uppercase;
     letter-spacing: 0.1em;
-    color: #9B8A72;
+    color: #736149;
     display: flex;
     align-items: center;
     gap: 4px;
@@ -4079,7 +4079,7 @@
     font-size: 0.6rem;
     text-transform: uppercase;
     letter-spacing: 0.1em;
-    color: #9B8A72;
+    color: #736149;
     margin-top: 2px;
 }
 
@@ -4102,7 +4102,7 @@
 }
 
 .bsum-child-charge {
-    color: #9B8A72;
+    color: #736149;
     font-size: 0.78rem;
 }
 
@@ -4143,7 +4143,7 @@
 .bsum-total-note {
     font-family: 'Jost', sans-serif;
     font-size: 0.72rem;
-    color: #9B8A72;
+    color: #736149;
     display: flex;
     align-items: center;
     gap: 5px;
@@ -5120,7 +5120,7 @@
     overflow-wrap: break-word;
     word-break: break-word;
     font-size: 0.78rem;
-    color: #9B8A72;
+    color: #736149;
     line-height: 1.4;
 }
 

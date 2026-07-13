@@ -107,7 +107,7 @@ function rt_apply_payment_to_order(PDO $pdo, array $user, array $order, string $
 
     $extras = ['tendered' => null, 'change' => null, 'mp' => null, 'mr' => null, 'l4' => null, 'auth' => null];
     if ($paymentMethod === 'cash') {
-        if ($tendered + 0.001 < $totalAmount) {
+        if ($tendered < $totalAmount - BALANCE_TOLERANCE) {
             throw new RuntimeException('Tendered ' . number_format($tendered, 2) . ' < total ' . number_format($totalAmount, 2));
         }
         $extras['tendered'] = round($tendered, 2);

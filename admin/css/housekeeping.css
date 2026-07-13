@@ -765,3 +765,38 @@
 #recurringOptions .form-group:last-child {
     margin-bottom: 0;
 }
+
+/* Tablet touch-target pass: raise housekeeping controls to the 44px
+   WCAG/touch minimum. Occupied-room card / stat cards / dashboard grid
+   are intentionally untouched — already well above 44px. */
+@media (max-width: 1024px) {
+    .hk-inline-control {
+        min-height: 44px;
+    }
+
+    .btn-quick {
+        min-height: 44px;
+    }
+
+    .btn-quick-assign {
+        min-height: 44px;
+    }
+
+    .bulk-actions .btn {
+        min-height: 44px;
+    }
+
+    .hk-row-actions {
+        flex-wrap: wrap;
+    }
+
+    .hk-row-actions .btn {
+        min-height: 44px;
+        min-width: 44px;
+    }
+
+    .housekeeping-modal-content select,
+    .housekeeping-modal-content .btn {
+        min-height: 44px;
+    }
+}

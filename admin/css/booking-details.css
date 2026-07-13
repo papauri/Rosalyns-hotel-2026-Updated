@@ -2697,3 +2697,17 @@
     font-size: 0.78rem;
 }
 
+/* Tablet touch-target pass: raise action buttons to the 44px minimum.
+   .actions-card .action-btn is included alongside .action-btn because a
+   higher-specificity unconditional rule above (line ~2693) sets
+   min-height: 2.6rem (~41.6px) and would otherwise keep winning the
+   cascade at this breakpoint. */
+@media (max-width: 1024px) {
+    .action-btn,
+    .actions-card .action-btn {
+        display: inline-flex;
+        align-items: center;
+        min-height: 44px;
+    }
+}
+

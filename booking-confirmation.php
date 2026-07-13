@@ -186,7 +186,7 @@ try {
                             <div class="conf-card-title"><i class="fas fa-bed"></i> Your Stay</div>
                             <div class="conf-room-name">
                                 <?php echo htmlspecialchars($booking['room_name']); ?>
-                                <?php if ($split_count > 1): ?><span style="font-size:0.85rem;color:#9B8A72;"> (<?php echo $split_count; ?> rooms)</span><?php endif; ?>
+                                <?php if ($split_count > 1): ?><span style="font-size:0.85rem;color:#736149;"> (<?php echo $split_count; ?> rooms)</span><?php endif; ?>
                             </div>
                             <div class="conf-dates-row">
                                 <div class="conf-date-block">

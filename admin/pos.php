@@ -384,7 +384,7 @@ function pos_applyPaymentToOrder(PDO $pdo, array $user, int $orderId, string $re
     ];
 
     if ($paymentMethod === 'cash') {
-        if ($tendered + 0.001 < $amountDue) throw new RuntimeException('Tendered ' . number_format($tendered, 2) . ' < amount due ' . number_format($amountDue, 2));
+        if ($tendered < $amountDue - BALANCE_TOLERANCE) throw new RuntimeException('Tendered ' . number_format($tendered, 2) . ' < amount due ' . number_format($amountDue, 2));
         $extras['tendered'] = round($tendered, 2);
         $extras['change']   = round($tendered - $amountDue, 2);
     } elseif ($paymentMethod === 'mobile_money') {

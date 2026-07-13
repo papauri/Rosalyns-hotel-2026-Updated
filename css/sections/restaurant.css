@@ -1064,7 +1064,7 @@
 /* Fallback: Ensure menu panels have content even when empty */
 .menu-panel:empty::before {
     content: "Loading menu content...";
-    color: #666;
+    color: #6B5740;
     font-style: italic;
     padding: 20px;
     text-align: center;

@@ -14,10 +14,22 @@ ini_set('display_errors', 0);
 try {
     // Load database configuration
     require_once __DIR__ . '/../config/database.php';
-    
+    require_once __DIR__ . '/../includes/public-csrf.php';
+
+    if (session_status() !== PHP_SESSION_ACTIVE) {
+        session_start();
+    }
+
+    // Lightweight rate limiting: 60 requests per 60 seconds per session
+    if (!pub_rate_limit('page_content', 60, 60)) {
+        http_response_code(429);
+        echo json_encode(['error' => 'Too many requests']);
+        exit;
+    }
+
     // Get the requested page
     $page = $_GET['page'] ?? '';
-    
+
     // Define allowed pages for SPA navigation
     $allowed_pages = [
         'index' => 'index.php',
@@ -31,24 +43,46 @@ try {
         'contact-us' => 'contact-us.php',
         'guest-services' => 'guest-services.php'
     ];
-    
+
     // Validate page parameter
     if (empty($page) || !isset($allowed_pages[$page])) {
         http_response_code(404);
         echo json_encode(['error' => 'Page not found', 'allowed' => array_keys($allowed_pages)]);
         exit;
     }
-    
+
     // Get the file path
     $file_path = __DIR__ . '/../' . $allowed_pages[$page];
-    
+
     // Check if file exists
     if (!file_exists($file_path)) {
         http_response_code(404);
         echo json_encode(['error' => 'File not found']);
         exit;
     }
-    
+
+    // Explicit visibility guard — mirrors includes/page-guard.php logic
+    // (same skip-list, same site_pages.is_enabled lookup) instead of relying
+    // solely on the included page's own guard.
+    $_pgc_file = $allowed_pages[$page];
+    $_pgc_skip = ['index.php', 'booking-confirmation.php', 'review-confirmation.php', 'submit-review.php', 'test-base-url.php', 'contact-us.php'];
+    if (!in_array($_pgc_file, $_pgc_skip, true)) {
+        try {
+            $_pgc_stmt = $pdo->prepare("SELECT is_enabled FROM site_pages WHERE file_path = ? LIMIT 1");
+            $_pgc_stmt->execute([$_pgc_file]);
+            $_pgc_row = $_pgc_stmt->fetch(PDO::FETCH_ASSOC);
+
+            // Row present and explicitly disabled -> block
+            if ($_pgc_row !== false && !(int)$_pgc_row['is_enabled']) {
+                http_response_code(403);
+                echo json_encode(['error' => 'Page is disabled']);
+                exit;
+            }
+        } catch (PDOException $e) {
+            // Table doesn't exist yet — allow all pages, consistent with page-guard.php
+        }
+    }
+
     // Handle room.php with slug parameter
     if ($page === 'room' && isset($_GET['slug'])) {
         $_GET['room'] = $_GET['slug'];

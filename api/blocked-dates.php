@@ -24,24 +24,24 @@ if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
     exit;
 }
 
-// Include database configuration
-require_once __DIR__ . '/../config/database.php';
-
-// Include API authentication
-require_once __DIR__ . '/index.php';
-
-// Initialize API auth
-$apiAuth = new ApiAuth($pdo);
-
-// Authenticate request
-$authResult = $apiAuth->authenticate();
-if (!$authResult['success']) {
-    ApiResponse::error($authResult['message'], 401);
+// Prevent direct access - must be accessed through api/index.php router
+if (!defined('API_ACCESS_ALLOWED') || !isset($auth) || !isset($client)) {
+    http_response_code(403);
+    header('Content-Type: application/json');
+    echo json_encode([
+        'success' => false,
+        'error' => 'Direct access to this endpoint is not allowed',
+        'code' => 403,
+        'message' => 'Please use the API router at /api/blocked-dates'
+    ]);
     exit;
 }
 
-// Get authenticated admin user
-$admin_user = $authResult['user'];
+// getBlockedDates()/blockRoomDate()/etc. are defined in config/database.php,
+// already loaded by the router before this file is included.
+
+// Get authenticated API client (used in place of $admin_user for created_by tracking)
+$admin_user = $client;
 
 /**
  * Send JSON response

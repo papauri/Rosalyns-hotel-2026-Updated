@@ -748,7 +748,7 @@
 .contact-detail-content strong {
     display: block;
     margin-bottom: 6px;
-    color: #666;
+    color: #6B5740;
     font-size: 0.75rem;
     font-weight: 500;
     text-transform: uppercase;
@@ -757,7 +757,7 @@
 
 .contact-detail-content a,
 .contact-detail-content span {
-    color: #333;
+    color: #1A1A1A;
     text-decoration: none;
     font-size: 0.95rem;
     line-height: 1.8;
@@ -797,7 +797,7 @@
     transition: all 0.3s ease;
     border: 1px solid rgba(0, 0, 0, 0.12);
     background: #fff;
-    color: #333;
+    color: #1A1A1A;
     letter-spacing: 0.5px;
     text-transform: uppercase;
 }
@@ -815,7 +815,7 @@
 
 .btn-email {
     background: #fff;
-    color: #333;
+    color: #1A1A1A;
 }
 
 .btn-email:hover {
@@ -853,7 +853,7 @@
     justify-content: center;
     border-radius: 2px;
     background: transparent;
-    color: #666;
+    color: #6B5740;
     font-size: 1.1rem;
     transition: all 0.3s ease;
     text-decoration: none;
@@ -903,7 +903,7 @@
     margin-bottom: 8px;
     font-weight: 400;
     font-size: 0.75rem;
-    color: #666;
+    color: #6B5740;
     letter-spacing: 1px;
     text-transform: uppercase;
 }
@@ -919,7 +919,7 @@
     font-family: inherit;
     transition: all 0.3s ease;
     background: #fff;
-    color: #333;
+    color: #1A1A1A;
 }
 
 .contact-form .form-group input:focus,
@@ -932,7 +932,7 @@
 
 .contact-form .form-group input::placeholder,
 .contact-form .form-group textarea::placeholder {
-    color: #999;
+    color: #8B7355;
 }
 
 .contact-form .form-group textarea {
@@ -956,7 +956,7 @@
     align-items: flex-start;
     gap: 12px;
     font-size: 0.85rem;
-    color: #666;
+    color: #6B5740;
     cursor: pointer;
     line-height: 1.5;
 }
@@ -1037,7 +1037,7 @@
 }
 
 .contact-form-success p {
-    color: #666;
+    color: #6B5740;
     font-size: 1rem;
 }
 

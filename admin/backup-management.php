@@ -138,8 +138,8 @@ $error   = '';
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $action = $_POST['action'] ?? '';
 
-    // CSRF-lite: all POST actions require the same-session nonce
-    if (empty($_POST['_tok']) || $_POST['_tok'] !== ($_SESSION['backup_tok'] ?? '')) {
+    // CSRF: all POST actions require the standard admin CSRF token
+    if (!validateCsrfToken($_POST['_tok'] ?? '')) {
         $error = 'Invalid form token. Please refresh and try again.';
     } else {
 
@@ -202,15 +202,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $error = 'Only administrators can perform a restore.';
         }
     }
-    // Regenerate token after use
-    $_SESSION['backup_tok'] = bin2hex(random_bytes(16));
 }
-
-// Always ensure a fresh token exists for the page forms
-if (empty($_SESSION['backup_tok'])) {
-    $_SESSION['backup_tok'] = bin2hex(random_bytes(16));
-}
-$tok = htmlspecialchars($_SESSION['backup_tok']);
 
 // ── Download action (GET) ────────────────────────────────────────────────────
 if (isset($_GET['download']) && $user['role'] === 'admin') {
@@ -380,7 +372,7 @@ $current_page = 'backup-management.php';
 
             <!-- Run backup button -->
             <form method="POST">
-                <input type="hidden" name="_tok" value="<?php echo $tok; ?>">
+                <input type="hidden" name="_tok" value="<?php echo htmlspecialchars($csrf_token); ?>">
                 <input type="hidden" name="action" value="run_backup">
                 <button type="submit" class="btn-run" id="runBtn">
                     <i class="fas fa-play-circle"></i> Run Backup Now
@@ -442,7 +434,7 @@ $current_page = 'backup-management.php';
                             <p><i class="fas fa-exclamation-triangle"></i> This will OVERWRITE the live database with the selected backup. This cannot be undone.</p>
                             <span class="file-path" id="restoreFilePath"></span>
                             <form method="POST" id="restoreForm">
-                                <input type="hidden" name="_tok" value="<?php echo $tok; ?>">
+                                <input type="hidden" name="_tok" value="<?php echo htmlspecialchars($csrf_token); ?>">
                                 <input type="hidden" name="action" value="restore">
                                 <input type="hidden" name="backup_file" id="restoreFileInput">
                                 <button type="button" class="btn-cancel" onclick="hideRestoreConfirm()">Cancel</button>

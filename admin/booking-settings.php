@@ -676,6 +676,22 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 throw new Exception('Failed to save booking notification email settings');
             }
 
+            // Guest communication lifecycle emails (pre-arrival reminder / post-stay review request)
+            $prearrival_enabled = isset($_POST['booking_prearrival_reminder_enabled']) ? '1' : '0';
+            $prearrival_days = (int)($_POST['booking_prearrival_reminder_days'] ?? 1);
+            if ($prearrival_days < 1) $prearrival_days = 1;
+            if ($prearrival_days > 14) $prearrival_days = 14;
+
+            $poststay_enabled = isset($_POST['booking_poststay_review_enabled']) ? '1' : '0';
+            $poststay_days = (int)($_POST['booking_poststay_review_days'] ?? 1);
+            if ($poststay_days < 0) $poststay_days = 0;
+            if ($poststay_days > 14) $poststay_days = 14;
+
+            updateSetting('booking_prearrival_reminder_enabled', $prearrival_enabled);
+            updateSetting('booking_prearrival_reminder_days', (string)$prearrival_days);
+            updateSetting('booking_poststay_review_enabled', $poststay_enabled);
+            updateSetting('booking_poststay_review_days', (string)$poststay_days);
+
             $message = "Booking notification email updated successfully!";
         } elseif (isset($_POST['service_channel_settings'])) {
             $conference_enabled = isset($_POST['conference_system_enabled']) ? '1' : '0';
@@ -993,6 +1009,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 $current_max_days = (int)getSetting('max_advance_booking_days', 30);
 $current_booking_notification_email = getSetting('booking_notification_email', getSetting('admin_notification_email', ''));
 $current_booking_notification_cc_emails = getSetting('booking_notification_cc_emails', '');
+$current_prearrival_reminder_enabled = getSetting('booking_prearrival_reminder_enabled', '0') === '1';
+$current_prearrival_reminder_days = (int)getSetting('booking_prearrival_reminder_days', '1');
+$current_poststay_review_enabled = getSetting('booking_poststay_review_enabled', '0') === '1';
+$current_poststay_review_days = (int)getSetting('booking_poststay_review_days', '1');
 
 $current_conference_system_enabled = getSetting('conference_system_enabled', '1') === '1';
 $current_gym_system_enabled = getSetting('gym_system_enabled', '1') === '1';
@@ -1629,6 +1649,36 @@ foreach ($canonicalTemplateDefaults as $templateKey => $templateDefaults) {
                             class="form-control" value="<?php echo htmlspecialchars($current_booking_notification_cc_emails ?? ''); ?>"
                             placeholder="accounts@example.com, manager@example.com">
                         <p class="help-text"><i class="fas fa-info-circle"></i> Optional comma-separated CC recipients for all new booking admin notifications.</p>
+                    </div>
+
+                    <h3 style="margin-top:24px;">Guest communication emails</h3>
+
+                    <div class="form-group">
+                        <label style="display:flex; align-items:center; gap:10px;">
+                            <input type="checkbox" name="booking_prearrival_reminder_enabled" value="1" <?php echo $current_prearrival_reminder_enabled ? 'checked' : ''; ?>>
+                            <span>Send pre-arrival reminder email to guests</span>
+                        </label>
+                    </div>
+                    <div class="form-group">
+                        <label for="booking_prearrival_reminder_days">Days before check-in</label>
+                        <input type="number" id="booking_prearrival_reminder_days" name="booking_prearrival_reminder_days"
+                            class="form-control" min="1" max="14" style="max-width:120px;"
+                            value="<?php echo htmlspecialchars((string)$current_prearrival_reminder_days); ?>">
+                        <p class="help-text"><i class="fas fa-info-circle"></i> Sends once per booking, 1-14 days before check-in date.</p>
+                    </div>
+
+                    <div class="form-group">
+                        <label style="display:flex; align-items:center; gap:10px;">
+                            <input type="checkbox" name="booking_poststay_review_enabled" value="1" <?php echo $current_poststay_review_enabled ? 'checked' : ''; ?>>
+                            <span>Send post-stay review request email to guests</span>
+                        </label>
+                    </div>
+                    <div class="form-group">
+                        <label for="booking_poststay_review_days">Days after check-out</label>
+                        <input type="number" id="booking_poststay_review_days" name="booking_poststay_review_days"
+                            class="form-control" min="0" max="14" style="max-width:120px;"
+                            value="<?php echo htmlspecialchars((string)$current_poststay_review_days); ?>">
+                        <p class="help-text"><i class="fas fa-info-circle"></i> Sends once per booking, 0-14 days after check-out date (0 = checkout day).</p>
                     </div>
 
                     <button type="submit" class="btn-submit">

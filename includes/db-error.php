@@ -255,7 +255,7 @@ $siteName = getenv('SITE_NAME') ?: "Hotel Management System";
     </div>
 
     <script>
-        <?php if (isset($errorMsg)): ?>
+        <?php if (!empty($dbDebug) && isset($errorMsg)): ?>
         console.error('DB Error: <?php echo addslashes($errorMsg); ?>');
         <?php endif; ?>
 

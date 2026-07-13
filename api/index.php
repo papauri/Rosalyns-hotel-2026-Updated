@@ -400,7 +400,12 @@ try {
         case strpos($endpoint, 'housekeeping/') === 0:
             require_once __DIR__ . '/housekeeping.php';
             break;
-            
+
+        case 'blocked-dates':
+        case strpos($endpoint, 'blocked-dates/') === 0:
+            require_once __DIR__ . '/blocked-dates.php';
+            break;
+
         case 'availability':
             if ($method === 'GET') {
                 require_once __DIR__ . '/availability.php';

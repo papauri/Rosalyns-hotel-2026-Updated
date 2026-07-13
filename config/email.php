@@ -6927,3 +6927,110 @@ function sendGymRenewalReminderEmail(array $member, int $daysLeft): array
 
     return sendEmail($toEmail, $name, $subject, wrapEmailTemplate($htmlBody, 'Membership Renewal Reminder'), $altBody);
 }
+
+/**
+ * Pre-arrival reminder — warm nudge sent N days before check-in by the guest
+ * lifecycle engine (admin/includes/guest-lifecycle-lib.php).
+ *
+ * @param array $booking Row from the bookings table (id, booking_reference,
+ *                        room_id, guest_name, guest_email, check_in_date,
+ *                        check_out_date, status).
+ */
+function sendPreArrivalReminderEmail(array $booking): array
+{
+    global $pdo, $email_site_name;
+
+    $toEmail = trim((string)($booking['guest_email'] ?? ''));
+    if ($toEmail === '' || !filter_var($toEmail, FILTER_VALIDATE_EMAIL)) {
+        return ['success' => false, 'message' => 'Booking has no valid guest email address.'];
+    }
+
+    $name = (string)($booking['guest_name'] ?? 'Guest');
+    $siteName = $email_site_name ?: getSetting('site_name', 'Hotel');
+    $reference = (string)($booking['booking_reference'] ?? '');
+
+    $roomName = '';
+    if (!empty($booking['room_id'])) {
+        try {
+            $stmt = $pdo->prepare("SELECT name FROM rooms WHERE id = ?");
+            $stmt->execute([$booking['room_id']]);
+            $room = $stmt->fetch(PDO::FETCH_ASSOC);
+            if ($room) {
+                $roomName = (string)$room['name'];
+            }
+        } catch (Throwable $e) {
+            error_log('sendPreArrivalReminderEmail room lookup: ' . $e->getMessage());
+        }
+    }
+
+    $checkInDate = !empty($booking['check_in_date']) ? date('l, F j, Y', strtotime((string)$booking['check_in_date'])) : '';
+    $checkInTime = trim((string)getSetting('check_in_time', ''));
+
+    $htmlBody = '
+        <h1 style="color: #8B7355; text-align: center;">Your Stay Is Coming Up</h1>
+        <p>Dear ' . htmlspecialchars($name) . ',</p>
+        <p>We look forward to welcoming you to <strong>' . htmlspecialchars($siteName) . '</strong> soon! Here is a quick reminder of your upcoming stay.</p>
+        <div style="background: #FAF6F0; border: 2px solid #C8A45A; padding: 20px; margin: 20px 0; border-radius: 10px;">
+            <h2 style="color: #8B7355; margin-top: 0;text-align:left;">Booking Details</h2>'
+            . ($reference !== '' ? '<table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="margin:0;"><tr><td style="padding:10px 10px 10px 0;font-weight:bold;color:#1A1A1A;width:44%;vertical-align:top;border-bottom:1px solid #e8e0d4;">Booking Reference:</td><td style="padding:10px 0 10px 6px;color:#8B7355;font-weight:bold;font-size:18px;text-align:left;vertical-align:top;border-bottom:1px solid #e8e0d4;">' . htmlspecialchars($reference) . '</td></tr></table>' : '')
+            . ($roomName !== '' ? '<table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="margin:0;"><tr><td style="padding:10px 10px 10px 0;font-weight:bold;color:#1A1A1A;width:44%;vertical-align:top;border-bottom:1px solid #e8e0d4;">Room:</td><td style="padding:10px 0 10px 6px;color:#333;text-align:left;vertical-align:top;border-bottom:1px solid #e8e0d4;">' . htmlspecialchars($roomName) . '</td></tr></table>' : '')
+            . ($checkInDate !== '' ? '<table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="margin:0;"><tr><td style="padding:10px 10px 10px 0;font-weight:bold;color:#1A1A1A;width:44%;vertical-align:top;">Check-in Date:</td><td style="padding:10px 0 10px 6px;color:#333;text-align:left;vertical-align:top;">' . htmlspecialchars($checkInDate) . '</td></tr></table>' : '') . '
+        </div>
+        <div style="background: #FDF6EC; padding: 15px; border-left: 4px solid #8B7355; border-radius: 5px; margin: 20px 0;">
+            <p style="color: #5C4A32; margin: 0;">
+                Check-in is available from' . ($checkInTime !== '' ? ' <strong>' . htmlspecialchars($checkInTime) . '</strong>' : ' the afternoon') . '. If your plans have changed or you have any special requests, just reply to this email and we will be happy to help.
+            </p>
+        </div>
+        <p style="margin:28px 0 0;font-size:14px;color:#777;text-align:center;font-style:italic;">We look forward to welcoming you!</p>';
+
+    $subject = 'We look forward to welcoming you — ' . $siteName;
+    $altBody = 'Dear ' . $name . ', this is a reminder that your stay at ' . $siteName
+        . ($reference !== '' ? ' (booking ' . $reference . ')' : '')
+        . ($checkInDate !== '' ? ' begins ' . $checkInDate : ' begins soon')
+        . '. We look forward to welcoming you.';
+
+    return sendEmail($toEmail, $name, $subject, wrapEmailTemplate($htmlBody, 'Your Stay Is Coming Up'), $altBody);
+}
+
+/**
+ * Post-stay review request — thank-you note sent N days after check-out by
+ * the guest lifecycle engine (admin/includes/guest-lifecycle-lib.php), with
+ * a link to submit-review.php (optionally pre-selecting the room they stayed in).
+ *
+ * @param array $booking Row from the bookings table (id, booking_reference,
+ *                        room_id, guest_name, guest_email, check_in_date,
+ *                        check_out_date, status).
+ */
+function sendPostStayReviewRequestEmail(array $booking): array
+{
+    global $email_site_name, $email_site_url;
+
+    $toEmail = trim((string)($booking['guest_email'] ?? ''));
+    if ($toEmail === '' || !filter_var($toEmail, FILTER_VALIDATE_EMAIL)) {
+        return ['success' => false, 'message' => 'Booking has no valid guest email address.'];
+    }
+
+    $name = (string)($booking['guest_name'] ?? 'Guest');
+    $siteName = $email_site_name ?: getSetting('site_name', 'Hotel');
+
+    $base = $email_site_url !== '' ? $email_site_url : (defined('BASE_URL') ? (string)BASE_URL : '');
+    $reviewLink = rtrim($base, '/') . '/submit-review.php';
+    if (!empty($booking['room_id'])) {
+        $reviewLink .= '?room_id=' . (int)$booking['room_id'];
+    }
+
+    $htmlBody = '
+        <h1 style="color: #8B7355; text-align: center;">How Was Your Stay?</h1>
+        <p>Dear ' . htmlspecialchars($name) . ',</p>
+        <p>Thank you for staying with <strong>' . htmlspecialchars($siteName) . '</strong>! We hope you had a wonderful experience.</p>
+        <p>Your feedback means a great deal to us and helps other guests plan their stay. Would you take a moment to share a review?</p>
+        <div style="text-align: center; margin: 30px 0;">
+            <a href="' . htmlspecialchars($reviewLink) . '" style="background: #8B7355; color: #ffffff; padding: 14px 32px; border-radius: 6px; text-decoration: none; font-weight: bold; display: inline-block;">Leave a Review</a>
+        </div>
+        <p style="margin:28px 0 0;font-size:14px;color:#777;text-align:center;font-style:italic;">Thank you for choosing ' . htmlspecialchars($siteName) . ' — we hope to welcome you back soon.</p>';
+
+    $subject = 'How was your stay? — ' . $siteName;
+    $altBody = 'Dear ' . $name . ', thank you for staying with ' . $siteName . '. We would love to hear about your experience — leave a review here: ' . $reviewLink;
+
+    return sendEmail($toEmail, $name, $subject, wrapEmailTemplate($htmlBody, 'How Was Your Stay?'), $altBody);
+}

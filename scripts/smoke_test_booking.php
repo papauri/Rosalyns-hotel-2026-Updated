@@ -11,6 +11,7 @@ require_once __DIR__ . '/../includes/booking-functions.php';
 require_once __DIR__ . '/../includes/booking-timeline.php';
 require_once __DIR__ . '/../includes/idempotency.php';
 require_once __DIR__ . '/../config/email.php';
+require_once __DIR__ . '/../includes/pricing.php';
 
 $pass = 0;
 $fail = 0;
@@ -68,7 +69,7 @@ $checkIn  = date('Y-m-d', strtotime('+30 days'));
 $checkOut = date('Y-m-d', strtotime('+32 days'));
 $avail = checkRoomAvailability((int)$testRoom['id'], $checkIn, $checkOut);
 assert_true(isset($avail['available']), 'checkRoomAvailability() returns available key');
-echo "  Result for dates $checkIn→$checkOut: " . ($avail['available'] ? 'AVAILABLE' : 'NOT AVAILABLE - ' . ($avail['error'] ?? '')) . "\n";
+echo "  Result for dates {$checkIn}→{$checkOut}: " . ($avail['available'] ? 'AVAILABLE' : 'NOT AVAILABLE - ' . ($avail['error'] ?? '')) . "\n";
 
 // ── 5. Standard booking INSERT (smoke) ───────────────────────────────────────
 echo "\n=== 5. Standard booking creation ===\n";
@@ -250,8 +251,65 @@ assert_true(function_exists('sendAdminBookingExpiredNotification'), 'sendAdminBo
 assert_true(function_exists('sendBookingCancelledEmail'), 'sendBookingCancelledEmail() is defined');
 assert_true(function_exists('sendTentativeBookingConvertedEmail'), 'sendTentativeBookingConvertedEmail() is defined');
 
-// ── 13. Cleanup ───────────────────────────────────────────────────────────────
-echo "\n=== 13. Cleanup ===\n";
+// ── 14. checkAvailability() wrapper ────────────────────────────────────────────
+echo "\n=== 14. checkAvailability() wrapper ===\n";
+// Pick a room from the already-fetched $rooms set that actually has free capacity
+// (rooms_available > 0) — a room with 0 available rooms configured would never
+// show as available regardless of date, which would make this a false failure.
+$availTestRoom = $testRoom;
+foreach ($rooms as $r) {
+    if ((int)$r['rooms_available'] > 0) {
+        $availTestRoom = $r;
+        break;
+    }
+}
+echo "  Using room #{$availTestRoom['id']}: {$availTestRoom['name']} for availability check\n";
+$farCheckIn  = date('Y-m-d', strtotime('+400 days'));
+$farCheckOut = date('Y-m-d', strtotime('+401 days'));
+$availResult = checkAvailability((int)$availTestRoom['id'], $farCheckIn, $farCheckOut);
+assert_true(isset($availResult['available']) && is_bool($availResult['available']), 'checkAvailability() returns bool available key');
+assert_true(isset($availResult['conflicts']) && is_array($availResult['conflicts']), 'checkAvailability() returns array conflicts key');
+assert_true($availResult['available'] === true, 'checkAvailability() reports far-future free date range as available',
+    $availResult['available'] === true ? '' : ('error=' . ($availResult['error'] ?? 'unknown')));
+
+// ── 15. applyDynamicPricing() calculation ──────────────────────────────────────
+echo "\n=== 15. applyDynamicPricing() calculation ===\n";
+$priceRoomId   = (int)$testRoom['id'];
+$priceBase     = (float)$testRoom['price_per_night'];
+$priceCheckIn  = date('Y-m-d', strtotime('+90 days'));
+$priceCheckOut = date('Y-m-d', strtotime('+92 days'));
+$priceNights   = 2;
+$pricing = applyDynamicPricing($pdo, $priceRoomId, $priceCheckIn, $priceCheckOut, $priceNights, $priceBase);
+
+assert_true(array_key_exists('final_price', $pricing) && is_numeric($pricing['final_price']), 'applyDynamicPricing() returns numeric final_price');
+assert_true(array_key_exists('original_price', $pricing) && is_numeric($pricing['original_price']), 'applyDynamicPricing() returns numeric original_price');
+assert_true(array_key_exists('discount_amount', $pricing) && is_numeric($pricing['discount_amount']), 'applyDynamicPricing() returns numeric discount_amount');
+
+$finalPrice    = (float)$pricing['final_price'];
+$originalPrice = (float)$pricing['original_price'];
+$discountAmt   = (float)$pricing['discount_amount'];
+
+assert_true($finalPrice >= 0, 'final_price is non-negative', "final_price=$finalPrice");
+assert_true($finalPrice <= $originalPrice + BALANCE_TOLERANCE, 'final_price does not exceed original_price beyond tolerance',
+    "final_price=$finalPrice original_price=$originalPrice");
+assert_true($discountAmt >= -BALANCE_TOLERANCE, 'discount_amount is not a negative surcharge beyond tolerance', "discount_amount=$discountAmt");
+assert_true(
+    abs(($originalPrice - $discountAmt) - $finalPrice) <= BALANCE_TOLERANCE,
+    'original_price - discount_amount reconciles with final_price within BALANCE_TOLERANCE',
+    "original=$originalPrice discount=$discountAmt final=$finalPrice"
+);
+
+// ── 16. applyDynamicPricing() zero-nights guard ────────────────────────────────
+echo "\n=== 16. applyDynamicPricing() zero-nights guard ===\n";
+$zeroNightsPricing = applyDynamicPricing($pdo, $priceRoomId, $priceCheckIn, $priceCheckOut, 0, $priceBase);
+assert_true(
+    abs((float)$zeroNightsPricing['final_price'] - $priceBase) <= BALANCE_TOLERANCE,
+    'applyDynamicPricing() with nights=0 returns final_price === base_price (guard path)',
+    "final_price={$zeroNightsPricing['final_price']} base_price=$priceBase"
+);
+
+// ── 17. Cleanup ───────────────────────────────────────────────────────────────
+echo "\n=== 17. Cleanup ===\n";
 if (!empty($createdIds)) {
     $placeholders = implode(',', array_fill(0, count($createdIds), '?'));
     $pdo->prepare("DELETE FROM bookings WHERE id IN ($placeholders)")->execute($createdIds);
