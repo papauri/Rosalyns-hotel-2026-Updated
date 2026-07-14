@@ -33,6 +33,8 @@ $site_url = rtrim($site_url, '/');
 // Output robots.txt content
 echo "User-agent: *\n";
 echo "Disallow: /admin/\n";
+echo "Disallow: /api/\n";
+echo "Disallow: /includes/\n";
 echo "Disallow: /private/\n";
 echo "Disallow: /tmp/\n";
 echo "Disallow: /cache/\n";

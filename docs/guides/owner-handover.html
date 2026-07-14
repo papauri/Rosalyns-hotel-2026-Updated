@@ -325,7 +325,7 @@
         <h3>Security rules</h3>
         <ul class="checklist">
           <li><strong>5 failed logins</strong> &rarr; account locked for 15 minutes.</li>
-          <li><strong>10 failed attempts</strong> from the same IP &rarr; 1-hour IP block.</li>
+          <li><strong>10 failed attempts</strong> from the same IP &rarr; 15-minute IP block.</li>
           <li>Never share your admin password by email, chat, or phone.</li>
           <li>Password resets via the <em>Forgot Password</em> link &mdash; or by the developer via server CLI.</li>
           <li>Every login is logged with timestamp and IP address.</li>
@@ -824,7 +824,7 @@
         <ul class="checklist">
           <li>Every login, password change, and role change is logged.</li>
           <li>5 failed logins &rarr; 15-minute account lockout.</li>
-          <li>10 failed attempts from one IP &rarr; 1-hour IP block.</li>
+          <li>10 failed attempts from one IP &rarr; 15-minute IP block.</li>
           <li>Passwords stored as bcrypt hashes &mdash; never plain text.</li>
           <li>Reset tokens: one-use, hashed, expire after 1 hour.</li>
           <li>All database queries use prepared statements &mdash; SQL injection is architecturally impossible.</li>
@@ -881,7 +881,7 @@
       </div>
       <div class="card">
         <h3>Health Check</h3>
-        <p>Run a full system diagnostic from the server: <code>php scripts/health-check.php</code>. Verifies database connectivity, file permissions, SMTP, and table integrity. Run after any server migration or major update.</p>
+        <p>Run the smoke tests from the server for a quick diagnostic: <code>php scripts/smoke_test_booking.php</code> and <code>php scripts/smoke_test_finance.php</code>. These verify database connectivity, booking logic, and finance sequence numbering. Run after any server migration or major update.</p>
       </div>
     </div>
   </div>
@@ -967,7 +967,7 @@
         <h3>&#128421; Admin panel returns 500 error</h3>
         <ol class="steps">
           <li>Check <code>logs/error.log</code> on the server for the most recent error.</li>
-          <li>Run <code>php scripts/health-check.php</code> for a full diagnostic.</li>
+          <li>Run <code>php scripts/smoke_test_booking.php</code> to verify database connectivity and core logic.</li>
           <li>Try <strong>Cache Management &rarr; Full Clear</strong> if any page is accessible.</li>
           <li>Contact the developer with the last 50 lines of <code>logs/error.log</code> and the timestamp.</li>
         </ol>
@@ -976,7 +976,7 @@
         <h3>&#128274; Locked admin account</h3>
         <ul class="checklist tight">
           <li>Wait 15 minutes for automatic unlock (5-attempt lockout).</li>
-          <li>Wait 1 hour for automatic IP unblock (10-attempt IP block).</li>
+          <li>Wait 15 minutes for automatic IP unblock (10-attempt IP block).</li>
           <li>Use <em>Forgot Password</em> to reset via email if the account is accessible.</li>
           <li>If the owner account is completely locked, the developer can reset via server CLI.</li>
           <li>Never try to brute-force your own account &mdash; it compounds the lockout.</li>
@@ -1075,7 +1075,7 @@
         <ol class="steps">
           <li>Clear the page cache at <strong>Admin &rarr; Cache Management</strong>. Fixes 80% of visual issues.</li>
           <li>Check <strong>Admin &rarr; System Logs</strong> &mdash; the error is usually in the most recent entry.</li>
-          <li>Run <code>php scripts/health-check.php</code> on the server for a full diagnostic.</li>
+          <li>Run <code>php scripts/smoke_test_booking.php</code> to verify database connectivity and core logic.</li>
           <li>Check the relevant staff guide below.</li>
           <li>Contact the developer with: the page URL, what you expected, what happened, and the last 50 lines of <code>logs/error.log</code>.</li>
         </ol>

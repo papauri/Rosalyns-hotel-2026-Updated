@@ -1243,7 +1243,7 @@ footer.handover .links a:hover { color: var(--gold); }
         <ul class="checklist" style="margin-top:0.5rem;">
           <li>Passwords stored as <strong>bcrypt</strong> hashes — never in plain text</li>
           <li>5 failed logins → 15-minute account lockout</li>
-          <li>10 failed logins from one IP → 1-hour IP block</li>
+          <li>10 failed logins from one IP → 15-minute IP block</li>
           <li>Reset tokens are one-use, hashed, expire after 1 hour</li>
         </ul>
       </div>
@@ -1517,8 +1517,8 @@ footer.handover .links a:hover { color: var(--gold); }
     <ol class="steps">
       <li>Go to <strong>Admin → Cache Management</strong> and clear the page cache. Most visual glitches disappear.</li>
       <li>Check <code>logs/error.log</code> on the server — the most recent PHP error is at the bottom.</li>
-      <li>Run <code>php scripts/inspect_schema.php</code> from the server CLI — full database health check.</li>
-      <li>Run <code>php scripts/audit_migrations.php</code> — verify all migrations have been applied.</li>
+      <li>Run <code>php scripts/smoke_test_booking.php</code> from the server CLI — verifies database connectivity and core booking logic.</li>
+      <li>Run <code>php scripts/smoke_test_finance.php</code> from the server CLI — verifies finance sequence numbering and database health.</li>
       <li>Contact the developer with: the timestamp, the URL, and the last 50 lines of <code>logs/error.log</code>.</li>
     </ol>
 
@@ -1544,8 +1544,8 @@ footer.handover .links a:hover { color: var(--gold); }
     <table>
       <thead><tr><th>Script</th><th>Does what</th></tr></thead>
       <tbody>
-        <tr><td><code>scripts/inspect_schema.php</code></td><td>Checks all expected tables exist</td></tr>
-        <tr><td><code>scripts/audit_migrations.php</code></td><td>Lists applied / missing migrations</td></tr>
+        <tr><td><code>scripts/smoke_test_booking.php</code></td><td>Verifies database connectivity and booking availability logic</td></tr>
+        <tr><td><code>scripts/smoke_test_finance.php</code></td><td>Verifies finance sequence numbering and money-tolerance paths</td></tr>
         <tr><td><code>scripts/daily_reports.php</code></td><td>Sends the morning digest email (run manually to test)</td></tr>
         <tr><td><code>scripts/expire_tentative_bookings.php</code></td><td>Sweeps and flags overdue tentative holds for staff review — does not cancel them automatically</td></tr>
         <tr><td><code>scripts/patch_amount_due_drift.php</code></td><td>Recalculates booking financial totals in bulk</td></tr>

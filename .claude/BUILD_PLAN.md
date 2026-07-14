@@ -83,6 +83,19 @@ explicit confirmation):**
 - [x] All three of the above visually polished to match the site's existing Japandi theme
       (warm neutral palette, existing typography/spacing conventions — no new design system)
 
+**Round 5 — owner-approved scope (2026-07-15, crawler hygiene):**
+- [x] `robots.txt` added at project root disallowing `/admin/`, `/api/`, `/includes/`, and any
+      other internal-only paths from search-engine indexing — R5-01: discovered `robots.php`
+      + `.htaccess:124` (`RewriteRule ^robots\.txt$ robots.php`) already existed and were
+      already live; the only real gap was `/api/` and `/includes/` missing from the disallow
+      list, added directly (2-line fix, `php -l` clean, no QA dispatch needed for a change
+      this size)
+- [x] `sitemap.xml` added at project root listing the real public-facing pages — already
+      fully built and live: `generate-sitemap.php` + `.htaccess:121`
+      (`RewriteRule ^sitemap\.xml$ generate-sitemap.php`) generate a real dynamic sitemap
+      (static public pages + active rooms + active events from the DB). No gap, no change
+      needed.
+
 ## Future Ideas (not in scope — logged only, never auto-queued)
 
 - OTA/channel-manager sync (rate parity, subscription cost — needs owner input first)
@@ -482,11 +495,11 @@ is JS delegation the CSS never touches.)
 | R4-01 | Create a guest-facing FAQ page `faq.php` at project root, built on the standard public static-content-page shell (model: `privacy-policy.php`), matching the existing Japandi theme/nav/footer. Static content only — no form, no POST, no new CSS/DB. | Round 4: Guest-facing FAQ page built on the public site, matching existing site theme/nav/footer | done |
 | R4-02 | Verify the `docs/guides/` staff/admin guide library (17 topical guides + `99-admin-dashboard-full-guide.html` + `owner-handover.*` + `index.html`) against current app behavior; correct every guide that describes removed/renamed/changed functionality. Split into 3 batches (a/b/c) by drift risk — see batching plan below. | Round 4: guide library verified accurate & corrected | done — all 6 sub-batches (a, b1, b2, b3, c) QA-passed |
 | R4-02a | Batch A — highest drift risk (booking/reception/housekeeping/finance/reports cluster, touched most this session): verify & correct `05-room-service.html`, `06-housekeeping.html`, `07-reception-bookings.html`, `13-finance-payments.html`, `14-reports-eod.html`. | Round 4: guide library verified accurate & corrected | done |
-| R4-02b | Batch B — lower drift risk (stations barely touched this session): verify & correct `01-pos-till.html`, `02-kds-kitchen.html`, `03-bds-bar.html`, `04-cds-coffee.html`, `08-stock-orders.html`, `09-packages-rates.html`, `10-conference-events.html`, `11-social-facebook-sharing.html`, `12-email-templates.php`, `15-pwa-install-guide.html`, `16-business-presets.html`, `17-gym-management.html`. Split into 3 sub-batches (b1/b2/b3) for careful per-file verification — see split plan below. | Round 4: guide library verified accurate & corrected | in-progress |
+| R4-02b | Batch B — lower drift risk (stations barely touched this session): verify & correct `01-pos-till.html`, `02-kds-kitchen.html`, `03-bds-bar.html`, `04-cds-coffee.html`, `08-stock-orders.html`, `09-packages-rates.html`, `10-conference-events.html`, `11-social-facebook-sharing.html`, `12-email-templates.php`, `15-pwa-install-guide.html`, `16-business-presets.html`, `17-gym-management.html`. Split into 3 sub-batches (b1/b2/b3) for careful per-file verification — see split plan below. | Round 4: guide library verified accurate & corrected | done |
 | R4-02b1 | Sub-batch B1 — POS/KDS station playbooks (cohesive cluster, confirmed already tablet-optimized in P3-02, functionally unchanged): verify & correct `01-pos-till.html`, `02-kds-kitchen.html`, `03-bds-bar.html`, `04-cds-coffee.html`. | Round 4: guide library verified accurate & corrected | done |
 | R4-02b2 | Sub-batch B2 — ops/config guides: `08-stock-orders.html`, `09-packages-rates.html`, `10-conference-events.html`, `11-social-facebook-sharing.html`, `12-email-templates.php`. Spot-check `09-packages-rates.html` (rates/packages config) more carefully. | Round 4: guide library verified accurate & corrected | done (QA content-criteria 3/3 PASS; scope-violation flag was the recurring git-HEAD-baseline false positive — overridden by direct inspection, all flagged files belong to other already-passed tasks this session) |
 | R4-02b3 | Sub-batch B3 — `15-pwa-install-guide.html`, `16-business-presets.html`, `17-gym-management.html`. Spot-check `16-business-presets.html` (presets config) more carefully. | Round 4: guide library verified accurate & corrected | done (QA PASS 4/4, first attempt — explicit git-command ban in the dispatch brief eliminated the recurring false positive) |
-| R4-02c | Batch C — aggregators/consistency: `99-admin-dashboard-full-guide.html`, `owner-handover.html`, `owner-handover.php`, `index.html`. Cross-check they don't contradict the per-guide corrections from A/B (link targets, feature claims, guide count in `index.html` hero "17 Guides"). | Round 4: guide library verified accurate & corrected | queued (dispatch after R4-02b passes) |
+| R4-02c | Batch C — aggregators/consistency: `99-admin-dashboard-full-guide.html`, `owner-handover.html`, `owner-handover.php`, `index.html`. Cross-check they don't contradict the per-guide corrections from A/B (link targets, feature claims, guide count in `index.html` hero "17 Guides"). | Round 4: guide library verified accurate & corrected | done |
 | R4-03 | Extend the in-app `data-help` tooltip framework (already loaded site-wide via `admin/includes/admin-header.php`; no framework change) to the 3 highest-traffic ops pages currently missing `data-help` attributes: `admin/bookings.php`, `admin/booking-details.php` (check-in/folio screen), `admin/housekeeping.php`. Add a tight handful of `data-help="Title\|Description"` attributes to each page's primary action controls only — no exhaustive coverage, no logic/CSS/framework change. | Round 4: in-app data-help tooltip framework audited for coverage gaps beyond POS/KDS and extended to high-traffic pages missing it | done |
 | R4-04 | Visual-polish review of the three Round-4 deliverables against the site's Japandi theme. **Outcome: verified consistent, no dispatch needed** (evidence below). | Round 4: all three of the above visually polished to match the site's existing Japandi theme | done — verified consistent, no code change required |
 
@@ -1914,6 +1927,14 @@ visibility explicit + rate-limit, without gating on admin session.
 - **P1-01** (2026-07-13): ASSUMPTION: room #1 (VIP Beach Front Villa) has `rooms_available = 0` in live data, which would make an availability assertion against a hardcoded room id meaningless. The specialist scanned `$rooms` for one with `rooms_available > 0` instead. Correct call — flagging so future smoke-test additions know live data has at least one fully-booked-out room and shouldn't assume room #1 is available.
 
 ## Completed
+- **R5-01** (2026-07-15, no QA dispatch — 2-line addition, verified directly with `php -l`) —
+  Investigated before building: `robots.php` and `generate-sitemap.php` already existed and
+  were already wired up via `.htaccess:121,124` rewrite rules, live at the real
+  `/robots.txt` and `/sitemap.xml` URLs crawlers request. Sitemap needed zero changes. Robots
+  disallow list was missing `/api/` and `/includes/` — added both. Avoided building a
+  duplicate/parallel robots-sitemap system that would have shadowed working code.
+
+**PROJECT COMPLETE — Round 5.** All 25 checklist items now checked.
 - **R4-01** (2026-07-15, QA: PASS/haiku, first attempt) — New guest-facing `faq.php`, modeled
   exactly on privacy-policy.php's shell. Six sections (booking flow, manual payment, managing/
   cancelling a booking, reviews + lifecycle emails, amenities, contact) using only verifiable
