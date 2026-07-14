@@ -60,13 +60,23 @@ explicit confirmation):**
       responsive pattern is causing the premature card-switch, so the fix applies
       consistently rather than page-by-page.
 
+**Round 3 — owner-approved scope (2026-07-14, added after the second PROJECT COMPLETE):**
+- [x] `SYSTEM_MAP.md` corrected: remove the stale "DEAD" flag on `includes/seo-meta.php`
+      at both flagged locations (it's a live dependency of `booking-confirmation.php:88`)
+- [x] `includes/security.php` / `config/security.php` duplication consolidated into one
+      canonical file, all callers updated, no behavior change (investigation found
+      `includes/security.php` doesn't exist — end-state already true, fixed a stale
+      SYSTEM_MAP.md phantom row instead of forcing an unneeded merge)
+- [x] `scripts/smoke_test_booking.php` section 8 no longer leaves state that causes a
+      duplicate-key failure on repeated runs (test-isolation fix only, no production code)
+- [x] `admin/bookings.php`'s inline check-in shortcut meets the same 44px tablet
+      touch-target standard already applied to the canonical check-in screen in P3-03
+
 ## Future Ideas (not in scope — logged only, never auto-queued)
 
 - OTA/channel-manager sync (rate parity, subscription cost — needs owner input first)
 - Framework rewrite / migrating off procedural PHP
 - Multi-property support
-- `includes/security.php` / `config/security.php` duplicate-file consolidation (flagged
-  during P0-02/P1-04 investigation — not dead code, just a future tidy-up)
 - Any deliverable discovered mid-build that isn't one of the checklist items above gets
   logged here with a one-line description and "needs owner approval to add to scope" —
   it does NOT get queued into a phase table.
@@ -127,6 +137,333 @@ Kept for traceability — every item below maps 1:1 onto a PROJECT COMPLETE WHEN
 | P3-03 | Tablet pass on check-in + housekeeping (**check-in UI is `admin/booking-details.php`, NOT process-checkin.php — see correction below**, `admin/housekeeping.php`) | Tablet UX: check-in + housekeeping | done |
 | P3-04 | Public-page visual consistency sweep (per-module CSS drift) | Accessibility: public-page CSS consistency | done |
 | P3-05 | Raise the admin list-table card-switch threshold so `.tablet-table` tables (e.g. `bookings.php` "All Room Bookings") stay real data tables on laptop/desktop (>1024px viewport); cards reserved for tablet/mobile (≤1024px). Shared fix in `admin/js/admin-mobile.js`. | Round 2: admin list views render as tables on ≥1024px laptops | done |
+
+## Round 3 — owner-approved scope (2026-07-14)
+| ID | Task | Checklist item | Status |
+|----|------|-----------|--------|
+| R3-01 | Correct `SYSTEM_MAP.md`: remove the stale "DEAD" flag on `includes/seo-meta.php` at both flagged locations (lines 193 & 230) — it is a live dependency of `booking-confirmation.php:88`. Doc-only, no application code. | Round 3: SYSTEM_MAP.md seo-meta.php DEAD flag corrected | done |
+| R3-02 | Resolve the `includes/security.php` / `config/security.php` "duplication". Investigation found **`includes/security.php` does not exist** — there is only ONE file (`config/security.php`) and all 7 callers already require it. The consolidated end-state the checklist describes already holds; there is NO code merge to do. Only actionable residue: correct the phantom "duplicate" row in `SYSTEM_MAP.md` (line 156). Doc-only, no application code. | Round 3: security.php duplication consolidated into one canonical file | done |
+| R3-03 | Make `scripts/smoke_test_booking.php` test-isolation-safe: add an idempotent pre-test purge of leftover SMOKETEST rows and a guaranteed (shutdown-function) cleanup so an aborted prior run can never leave state that duplicate-keys the next run. Test-only file — zero production/application code. | Round 3: smoke_test_booking.php section 8 no longer leaves duplicate-key state on repeated runs | done |
+| R3-04 | Raise the `admin/bookings.php` inline check-in shortcut (`.actions-row .quick-action.checkin` / `.checkin--urgent`, styled in `admin/css/bookings.css`) to a ≥44px touch target in the 768–1024px tablet band via a `@media (max-width: 1024px)` block, mirroring P3-03. CSS-only, no JS. | Round 3: bookings.php inline check-in meets the 44px tablet touch-target standard | done |
+
+### R3-01 — dispatch brief
+
+**Goal:** Fix the two stale "DEAD" annotations on `includes/seo-meta.php` in
+`.claude/SYSTEM_MAP.md` so the map reflects reality: the file is an ACTIVE dependency of
+the guest-facing booking confirmation page, not dead code. Documentation correction only —
+touch NO application code.
+
+**Specialist:** codebase-scout (haiku) — it owns SYSTEM_MAP.md and made the original
+(incorrect) entries, so it makes the correction. No backend/frontend/ui agent needed.
+
+**Exact edits (2 locations in `.claude/SYSTEM_MAP.md`):**
+
+1. **Line 193** (includes-layer inventory row). Current text ends with:
+   `...Fixes quote encoding; **DEAD: Not referenced from any page** | None | ~200 lines`
+   Replace the `**DEAD: Not referenced from any page**` clause with:
+   `**ACTIVE** — required by `booking-confirmation.php:88` (`require_once 'includes/seo-meta.php'`) to build the confirmation page `<head>` meta from `$seo_data``
+   Update the incoming-references cell (currently `None`) to reference
+   `booking-confirmation.php:88`.
+
+2. **Line 230** (dead-file evidence table row). Current row:
+   `| `includes/seo-meta.php` | **DEAD** | No references found in grep search. File contains SEO meta tag builders but never require'd or included from any page. Consider removing or documenting deprecation. |`
+   Replace with an ACTIVE row:
+   `| `includes/seo-meta.php` | **ACTIVE** | Required via `require_once 'includes/seo-meta.php'` at `booking-confirmation.php:88` (builds confirmation-page meta from `$seo_data`, lines 81-89). Original Phase-0 "zero references" grep missed this include — corrected 2026-07-14. |`
+
+**What NOT to touch:** any file other than `.claude/SYSTEM_MAP.md`; the summary lines at
+356/651/785 ("NO DEAD FILES DETECTED") are correct and stay as-is; do not renumber or
+reflow other table rows.
+
+**Acceptance criteria:**
+- Grep for `DEAD` in `.claude/SYSTEM_MAP.md` returns zero matches on the `seo-meta.php`
+  rows (both line 193 and line 230 now read `**ACTIVE**`).
+- Both corrected entries cite `booking-confirmation.php:88` as the live reference.
+- No changes to any `.php` file (git diff touches only `.claude/SYSTEM_MAP.md`).
+- SYSTEM_MAP.md summary line 356 ("NO DEAD FILES DETECTED") remains accurate and now
+  consistent with the corrected includes rows.
+
+### R3-02 — investigation findings
+
+**The premise is false — there is no duplication.** Deep investigation (2026-07-14):
+
+- `includes/security.php` **does not exist**. `Glob **/security.php` returns exactly one
+  file: `config/security.php`. There is no second copy anywhere in the tree.
+- `config/security.php` (206 lines) is the single canonical security helper. It contains:
+  `sendSecurityHeaders()` (CSP/HSTS/X-Frame-Options), `sanitizeInput()`,
+  `sanitizeInputArray()`, `generateCsrfToken()`, `validateCsrfToken()`, `getCsrfField()`,
+  `requireCsrfValidation()`, `logSecurityEvent()`.
+- **All 7 callers already require the canonical file** (`require_once .../config/security.php`):
+  `api/cancel-order.php:25`, `api/kds-action.php:22`, `api/pos-notifications.php:19`,
+  `api/pos-tab-detail.php:16`, `api/void-order.php:19`, `admin/admin-init.php:53`,
+  `admin/api/api-init.php:37`. Zero callers reference `includes/security.php`.
+- The only mentions of `includes/security.php` anywhere are (a) the checklist line itself
+  and the Future-Ideas note in this file, and (b) one stale row in `SYSTEM_MAP.md:156`
+  that describes `includes/security.php` as a "Duplicate of config/security.php" — a
+  phantom entry for a file that is not on disk.
+
+**Conclusion:** The end-state the checklist describes ("consolidated into one canonical
+file, all callers updated, no behavior change") is ALREADY TRUE. `config/security.php` is
+the sole file; every caller uses it; there is nothing to merge, no caller to repoint, and
+**no application code should be changed** (forcing a merge here would be inventing risk
+where none exists). The only residue is a documentation inaccuracy in SYSTEM_MAP.md.
+
+ASSUMPTION: `includes/security.php` was either never committed or was consolidated in an
+earlier, unlogged pass; git history is not needed to act — the current tree is
+authoritative and shows a single canonical file.
+
+### R3-02 — dispatch brief
+
+**Goal:** Correct the phantom "duplicate" row for `includes/security.php` in
+`.claude/SYSTEM_MAP.md` so the map reflects reality: only `config/security.php` exists and
+it is the single canonical security helper. Documentation correction only — touch NO
+application code (there is none to change; see findings above).
+
+**Specialist:** codebase-scout (haiku) — it owns SYSTEM_MAP.md and wrote the original
+(incorrect) phantom-duplicate row, so it makes the correction. No backend/frontend/ui
+agent is warranted: there is no code merge, no caller repoint, no `.php` file to edit.
+
+**Exact edit (1 location in `.claude/SYSTEM_MAP.md`):**
+
+- **Line 156**, current row:
+  `` | `includes/security.php` | Duplicate of config/security.php included in some places | Same as config/security.php | Redundant — config/security.php is the primary | None | Avoid dual-include | ``
+  This describes a file that does not exist on disk (`Glob **/security.php` → only
+  `config/security.php`). Remove this row entirely. If a placeholder is preferred over
+  deletion, replace it with a note row:
+  `` | `includes/security.php` | **DOES NOT EXIST** — no such file in the tree (verified `Glob **/security.php` → only `config/security.php`). All 7 security callers require `config/security.php` directly. Row retained only to correct the earlier phantom-duplicate entry. | — | — | — | — | ``
+- **Line 145** (the `config/security.php` row) is CORRECT and stays as-is; do NOT touch it.
+
+**What NOT to touch:** any `.php` file (zero application-code changes); `config/security.php`
+itself; the `config/security.php` inventory row at line 145; any other SYSTEM_MAP row.
+
+**Acceptance criteria:**
+- `Glob **/security.php` in the repo still returns exactly one file (`config/security.php`) —
+  proving no file was created/moved.
+- `git diff` touches only `.claude/SYSTEM_MAP.md` (no `.php` files, no callers changed).
+- SYSTEM_MAP.md no longer presents `includes/security.php` as an existing duplicate; the
+  line-156 row is removed or replaced with the "DOES NOT EXIST" note above.
+- Grep for `includes/security.php` across the repo returns matches only in `.claude/`
+  planning docs, never in a `require`/`include` statement in application code.
+
+**QA gate:** qa-auditor **haiku** — this is a documentation-only correction with zero
+application-code changes; no security logic is touched, so the sonnet logic/security gate
+is not required. (Parent flagged "likely sonnet" on the assumption real security code would
+be merged; that assumption is void because there is nothing to merge.)
+
+**QA gate:** qa-auditor (haiku) — doc-only, no logic/security surface. Verify the two rows
+now read ACTIVE, cite booking-confirmation.php:88, and that no application code changed.
+
+### R3-03 — investigation findings (2026-07-14)
+
+**File:** `scripts/smoke_test_booking.php` (324 lines, live-DB smoke test, cleans up its own
+data). Relevant regions: section 5 standard-booking insert (lines 74–112), section 8
+tentative-booking insert (lines 142–191), section 17 cleanup (lines 311–317).
+
+**What section 8 creates:** one `bookings` row with
+`booking_reference = 'SMOKETEST-TENT-' . time()` (line 144),
+`client_uuid = bin2hex(random_bytes(16))` (line 145), `status='tentative'`, dates +60/+62
+days. Its id is appended to `$createdIds` (line 177). Section 5 similarly creates
+`'SMOKETEST-' . time()` (line 77).
+
+**Which unique key it collides on:** SYSTEM_MAP.md:158/215 documents a **UNIQUE DB index on
+`bookings.client_uuid`** (the "ultimate guarantee" for idempotency), and `booking.php:661`
+treats **`booking_reference`** as unique via an app-level COUNT check. `client_uuid` is
+freshly randomised each run so it cannot collide across runs. **`booking_reference` is the
+cross-run collision surface:** `time()` has 1-second resolution, so two runs launched inside
+the same wall-clock second generate the *identical* `SMOKETEST-TENT-<time>` /
+`SMOKETEST-<time>` reference. If the earlier run's cleanup left that row behind, the next
+same-second run's INSERT hits a duplicate reference.
+
+**Why cleanup can fail to run (the root cause):** the section-17 cleanup DELETE (lines
+313–317) is a single statement at the very END of the script — it is **not** wrapped in
+try/finally and **not** registered as a shutdown hook. The `assert_true()` helper does not
+throw, but sections 9–16 call real library functions (`getExpiredTentativeBookings()`,
+`markTentativeBookingExpired()`, `applyDynamicPricing()`, `checkAvailability()`) and do raw
+`$stmt->fetch()` then index into the result (e.g. `$expiredRow['status']` at line 210,
+`$cancelledRow['status']` at line 241) with no null guard. Any Throwable or fatal there
+aborts the script BEFORE line 313, orphaning both the section-5 and section-8 rows. On the
+next run those orphans sit in the table waiting for a same-second (or reused-fixture)
+collision.
+
+**Minimal, column-agnostic fix (test-only):** two complementary changes that make the script
+idempotent regardless of which column carries the constraint:
+1. **Idempotent pre-test purge** — before any INSERT, delete leftover fixtures from prior
+   aborted runs. This alone guarantees no duplicate-key on rerun even after a dirty exit.
+2. **Guaranteed cleanup** — run the section-17 cleanup via `register_shutdown_function` (or a
+   try/finally spanning the create→cleanup region) so an early Throwable can no longer orphan
+   rows in the first place.
+
+Both edits touch ONLY `scripts/smoke_test_booking.php`. No production/application code, no
+`includes/`, no schema change.
+
+ASSUMPTION: the SMOKETEST fixtures are safe to purge unconditionally by their fixed
+`booking_reference` prefix (`SMOKETEST-`, `SMOKETEST-TENT-`) and fixed test emails
+(`smoketest@rosalyns.test`, `tenttest@rosalyns.test`) — these strings appear nowhere in real
+booking data. Purging by prefix+test-email is the same delete surface the script already owns
+via `$createdIds`; it only additionally sweeps rows a prior crash abandoned.
+
+### R3-03 — dispatch brief → backend-specialist
+
+**Goal:** Make `scripts/smoke_test_booking.php` re-runnable back-to-back with no duplicate-key
+failure, by (a) purging any leftover SMOKETEST fixtures before the inserts and (b) guaranteeing
+the cleanup runs even if the script aborts mid-way. **Test-only file — change NOTHING outside
+`scripts/smoke_test_booking.php`; no production/application/`includes/`/schema changes.**
+
+**Specialist:** backend-specialist (sonnet).
+
+**Exact edits (all inside `C:\Users\john-paul.chirwa\OneDrive\MSP\Rosalyns-hotel-2026\scripts\smoke_test_booking.php`):**
+
+1. **Add an idempotent pre-test purge** immediately after section 1's DB-connectivity check
+   (after line 44, before section 2). Use a prepared statement to delete leftover fixtures:
+   `DELETE FROM bookings WHERE booking_reference LIKE 'SMOKETEST-%' OR guest_email IN
+   ('smoketest@rosalyns.test','tenttest@rosalyns.test')`. Echo a one-line notice of how many
+   rows it swept (e.g. `"  Pre-test purge: removed N leftover fixture row(s)\n"`). This runs
+   BEFORE the section-5 and section-8 inserts so any orphan from a prior aborted run is gone.
+
+2. **Guarantee the cleanup runs on abort.** Convert the section-17 cleanup (lines 311–317)
+   into a cleanup that executes even if a Throwable aborts sections 9–16. Preferred approach:
+   register a shutdown handler near the top (after `$createdIds = [];` at line 18) that DELETEs
+   `$createdIds` (guard with `if (!empty($createdIds))` and `try/catch` so the shutdown handler
+   never itself fatals), and reduce section 17 to a no-op notice (or keep it but make the
+   shutdown the guarantor). Because `$createdIds` is a global populated as rows are inserted,
+   the shutdown handler must read it via `global $createdIds;` (or `use (&$createdIds)` on a
+   closure). Ensure the DELETE is a prepared statement with `IN (...)` placeholders exactly as
+   the current section-17 code does.
+
+3. (Optional hardening, only if trivial) strengthen the per-run identifier so same-second
+   reruns never collide even before the purge takes effect: change `'SMOKETEST-' . time()`
+   (line 77) and `'SMOKETEST-TENT-' . time()` (line 144) to append a short random suffix, e.g.
+   `. time() . '-' . bin2hex(random_bytes(3))`. Keep the `SMOKETEST-`/`SMOKETEST-TENT-`
+   prefixes intact so the pre-test purge in edit 1 still matches them.
+
+**What NOT to touch:** every assertion, every section's logic, the DB helper includes at the
+top, any `includes/` or `config/` file, the schema, and any other script. Do not change what
+the test asserts — only its setup/cleanup isolation.
+
+**Acceptance criteria (R3-03):**
+1. `php -l scripts/smoke_test_booking.php` passes.
+2. Running the script twice in immediate succession (`php scripts/smoke_test_booking.php` then
+   again) produces the **same pass/fail summary both times** and **neither run emits a
+   duplicate-key / SQLSTATE 23000 error** in section 5 or section 8.
+3. After a normal run completes, `SELECT COUNT(*) FROM bookings WHERE booking_reference LIKE
+   'SMOKETEST-%'` returns 0 (no fixtures left behind).
+4. Even if the script is aborted mid-run (e.g. simulate by a Throwable before section 17), the
+   NEXT run starts clean — the pre-test purge removes the orphan and the run does not
+   duplicate-key. (QA may verify by inserting a matching orphan row by hand, then confirming a
+   fresh run purges it and passes.)
+5. The delete surface is limited to the SMOKETEST fixtures (prefix + the two test emails) — no
+   real booking data is touched. Purge/cleanup DELETEs are prepared statements.
+6. Only `scripts/smoke_test_booking.php` is modified (git diff touches no other file).
+
+**QA gate:** qa-auditor **haiku** — this is a test-isolation change to a standalone smoke
+script; no production code, no money/security logic, no reused booking-creation path (the
+inserts are inline SQL local to the script, not a shared function). Haiku verifies `php -l`,
+that only the one file changed, that the purge/cleanup DELETEs are prepared statements scoped
+to the SMOKETEST fixtures, and that a double-run leaves zero fixtures. Escalate to sonnet ONLY
+if the specialist unexpectedly touches a shared `includes/` booking helper (it should not).
+
+### R3-04 — investigation findings (2026-07-14)
+
+**What the "inline check-in shortcut" actually is.** In `admin/bookings.php` each booking
+row renders a row of icon-only quick-action buttons inside `<div class="actions-row">`. The
+inline check-in control is a `<button class="quick-action checkin ...">` (standard) at
+**bookings.php:3654** and its urgent/late variant `<button class="quick-action checkin--urgent
+...">` at **bookings.php:3643** (rendered when `$is_missed_checkin`). Both carry
+`data-action="check-in"` and are handled by the delegated click listener at
+**bookings.php:7480** (`event.target.closest('[data-action]')`) which opens the check-in modal
+— so the control is a **button, not a link, and its click behaviour is pure JS delegation
+unaffected by sizing**. (The modal's own submit button `#checkin_submit_btn` at
+bookings.php:5404 is a full-width `.btn.btn-primary` inside `.modal-footer` and already meets
+touch size; the checklist item is about the *inline row shortcut*, i.e. the `.quick-action`.)
+
+**Which CSS actually styles it (verified, not assumed).** `Grep .quick-action` across
+`admin/css/*.css` returns 6 files, but the canonical, highest-specificity rule that sizes the
+bookings row buttons is in **`admin/css/bookings.css`** under the scoped selector
+**`.actions-row .quick-action`** (base rule at **bookings.css:660–679**). The other five files'
+`.quick-action` matches are unrelated components (finance/user-management/conference/admin-
+components) that do not use the `.actions-row .quick-action` compound and do not style
+bookings.php's row. `bookings.php` links `bookings.css` as its page stylesheet.
+
+**Current computed height at 768–1024px (computed the P3-03 way, from the CSS).**
+- Base `.actions-row .quick-action` (bookings.css:665–668): `width: 28px; height: 28px;
+  min-width: 28px; padding: 0` → a fixed **28×28px** icon square.
+- The only tablet-band override is `@media (min-width: 36rem)` (bookings.css:695–710), scoped to
+  `table.mobile-enhanced td[data-label="Action"|"Actions"] .actions-row .quick-action`, which
+  sets `width: auto; min-width: 7.25–9.2rem; padding-inline: …` and reveals the text label — it
+  widens the button but **sets no height**, so `height: 28px` from the base rule still governs.
+- Per P3-05 the bookings list renders as `mobile-enhanced` cards at ≤1024px, so in the
+  768–1024px band the check-in button is the wide labelled variant but still **28px tall**.
+- No existing rule raises `.quick-action` height in the ≤1024px band (`@media (max-width: 64rem)`
+  at bookings.css:134 targets only `.bookings-alert-banner__action`, not `.quick-action`).
+- **Conclusion: the inline check-in shortcut computes to 28px tall at 768–1024px — 16px under
+  the 44px standard.** Width already clears 44px in the labelled state; the deficient axis is
+  height. No JS change is needed (behaviour is data-action delegation; only sizing is wrong).
+
+ASSUMPTION: raising the shared base selector `.actions-row .quick-action` (rather than only the
+`.checkin`/`.checkin--urgent` modifiers) is the correct mechanism, because every button in the
+row shares that base rule and its 28px height. Lifting only the check-in button to 44px would
+leave its siblings at 28px and produce a mis-aligned, uneven action row — itself a layout
+regression. Raising the shared control keeps the row uniform and, as a free correctness bonus,
+brings the sibling actions (checkout, cancel, confirm, etc.) up to the same tablet touch
+standard. The checklist item (check-in shortcut ≥44px) is satisfied either way; the shared-
+selector route is the one that introduces NO alignment regression.
+
+### R3-04 — dispatch brief → frontend-specialist
+
+**Goal:** In the 768–1024px tablet band, make the `admin/bookings.php` inline check-in shortcut
+(and, via the shared base rule, its row siblings) a ≥44px touch target, matching the P3-03
+standard. **CSS-only, single file, single new media block. Do NOT touch JS, markup, or any
+other CSS file.**
+
+**Specialist:** frontend-specialist (sonnet — CSS responsive work; no logic).
+
+**Exact edit (one file: `C:\Users\john-paul.chirwa\OneDrive\MSP\Rosalyns-hotel-2026\admin\css\bookings.css`):**
+- Add ONE new `@media (max-width: 1024px)` block (mirroring P3-03's kds.css-style breakpoint —
+  use `1024px` literal to match P3-03's convention, not `64rem`, so the tablet touch rule is
+  greppable as its own block) containing exactly:
+  ```
+  @media (max-width: 1024px) {
+      .actions-row .quick-action {
+          min-height: 44px;
+          min-width: 44px;
+      }
+  }
+  ```
+  `min-height: 44px` overrides the base `height: 28px` floor (used height becomes 44px);
+  `min-width: 44px` guarantees the icon-only fallback is also ≥44px square while NOT shrinking
+  the wider labelled variant (that rule's higher-specificity `min-width: 7.25rem` still wins).
+- Place the block near the existing `.actions-row .quick-action` rules (after line ~935, i.e.
+  after the urgent-state rules) or at the end of the quick-action section — wherever it reads
+  cleanly; it must be a self-contained new block, not edits woven into existing rules.
+
+**What NOT to touch:** `admin/bookings.php` (no markup/JS change — the button already has correct
+`data-action`, `aria-label`, `title`); the base `.actions-row .quick-action` rule at lines
+660–679 (leave the 28px desktop base intact — desktop data-table rows stay compact per P3-05);
+the `@media (min-width: 36rem)` labelled-button rule (lines 695–710); the `@media (max-width:
+64rem)` alert-banner block (line 134); the other five CSS files that also contain `.quick-action`;
+any JS file; any other page. No new selectors beyond `.actions-row .quick-action` inside the one
+new media block. No `!important`.
+
+**Acceptance criteria (R3-04):**
+1. `admin/bookings.php`'s inline check-in button (`.actions-row .quick-action.checkin` and
+   `.checkin--urgent`) computes to a **height ≥ 44px** at viewport widths 768px and 1024px
+   (verify from the CSS: the new `@media (max-width: 1024px)` `min-height: 44px` governs).
+2. The touch-target increase applies to the shared `.actions-row .quick-action` control so the
+   whole action row stays vertically uniform (no single tall button among 28px siblings) — i.e.
+   **no alignment/layout regression beyond the intended height increase**.
+3. Above 1024px (laptop/desktop data-table view) the buttons stay at the existing compact 28px —
+   the new rule is inside `@media (max-width: 1024px)` and does not leak upward.
+4. Change is confined to a single new `@media (max-width: 1024px)` block targeting only
+   `.actions-row .quick-action` in `admin/css/bookings.css`; **git diff touches no other file**
+   and no other selector/rule is modified. No JS, no markup, no `!important`.
+5. CSS remains valid (no syntax error; the file still parses — balanced braces).
+
+**QA gate:** qa-auditor **haiku** — pure CSS sizing change, identical shape to P3-03's haiku
+gate (min-height touch-target bump in a `@media (max-width: 1024px)` block). No PHP, no money,
+no security, no logic surface. Haiku verifies: only `admin/css/bookings.css` changed; exactly
+one new `@media (max-width: 1024px)` block; it sets `min-height: 44px` (and `min-width: 44px`)
+on `.actions-row .quick-action`; braces balanced; the base 28px desktop rule and the labelled-
+button rule are untouched. (No sonnet needed — no JS logic is involved; the check-in behaviour
+is JS delegation the CSS never touches.)
 
 ## Blocked / decisions needed from owner
 
@@ -936,13 +1273,8 @@ do NOT flag files from earlier already-approved tasks as scope creep.
   wholesale tokenization pass is NOT queued (open-ended, regression-prone, beyond the checklist
   item's intent). A future maintainability pass could converge the warm-brown text values onto the
   existing tokens — not required for visual consistency, logged only.
-- **bookings.php inline check-in shortcut (found during P3-03):** `admin/bookings.php` (8609-line
-  list page) has its own inline check-in action separate from the canonical `booking-details.php`
-  check-in screen and loads its own CSS (not booking-details.css). Not touched by P3-03's tight
-  scope. A future tablet-touch pass on the bookings.php list actions could mirror the P3-03 pattern —
-  not queued (would be an untraced scope expansion of the checklist item, whose intent is satisfied
-  by the canonical check-in screen).
-- `scripts/smoke_test_booking.php` section 8 (tentative booking check) can leave state that causes a duplicate-key failure on the next run if the prior run's cleanup didn't fully complete — test-isolation hardening candidate, not urgent.
+- (bookings.php inline check-in touch targets and smoke_test_booking.php section 8 flakiness —
+  both promoted to Round 3 scope 2026-07-14, see PROJECT COMPLETE WHEN above.)
 - **Recurring QA gate false-positive (seen 2× — P1-03g, P3-01):** qa-auditor sometimes defaults to `git diff`/`git status` against HEAD as its scope signal, sees the whole session's cumulative uncommitted work (this project never commits mid-loop), and incorrectly FAILs a task for "touching" files that actually belong to other, already-approved tasks earlier in the session. Every qa-auditor dispatch brief going forward should explicitly state: this session never commits, HEAD is stale by the entire run, and scope should be verified by reading the CONTENT of the dispatched task's named files, not by diffing against HEAD project-wide.
 
 ## P1-05 dispatch (build-planner investigation, 2026-07-13)
@@ -1062,6 +1394,26 @@ visibility explicit + rate-limit, without gating on admin session.
 - **P1-01** (2026-07-13): ASSUMPTION: room #1 (VIP Beach Front Villa) has `rooms_available = 0` in live data, which would make an availability assertion against a hardcoded room id meaningless. The specialist scanned `$rooms` for one with `rooms_available > 0` instead. Correct call — flagging so future smoke-test additions know live data has at least one fully-booked-out room and shouldn't assume room #1 is available.
 
 ## Completed
+- **R3-01** (2026-07-14, QA: PASS/haiku, first attempt) — Corrected two stale "DEAD" flags on
+  `includes/seo-meta.php` in SYSTEM_MAP.md (lines 193, 230); it's an active dependency of
+  `booking-confirmation.php:88`. Doc-only.
+- **R3-02** (2026-07-14, QA: PASS/haiku, first attempt) — Investigation found the checklist
+  premise was false: `includes/security.php` doesn't exist on disk, only `config/security.php`
+  does, and all 7 real callers already require it correctly. No merge needed — removed a stale
+  phantom "duplicate" row from SYSTEM_MAP.md instead of forcing an unwarranted code change.
+- **R3-03** (2026-07-14, QA: PASS/haiku, first attempt) — `scripts/smoke_test_booking.php` was
+  losing rows to `time()`-collision (1s resolution) and unguarded aborts skipping the
+  end-of-script cleanup. Added a `register_shutdown_function` cleanup (fires even on a mid-test
+  Throwable), an idempotent pre-test purge of leftover SMOKETEST fixtures, and random suffixes
+  on the two time()-based test references. Test-only file, zero production code touched.
+- **R3-04** (2026-07-14, QA: PASS/haiku, first attempt) — `admin/bookings.php`'s inline
+  check-in shortcut (`.actions-row .quick-action`, styled in `admin/css/bookings.css`) was
+  fixed at 28px tall with no tablet-band override, 16px under the 44px standard. Added one
+  `@media (max-width:1024px)` block setting `min-height/min-width:44px`, mirroring P3-03's
+  pattern exactly. Desktop/laptop density (P3-05) untouched above 1024px.
+
+**PROJECT COMPLETE — Round 3.** All 4 Round 3 items now checked (19 of 19 total across all
+rounds: 14 original + 1 Round 2 + 4 Round 3).
 - **P3-05** (2026-07-14, QA: PASS/sonnet, first attempt) — Root cause was JS, not CSS: `admin/js/admin-mobile.js`'s `shouldUseCardLayout()` compared a `.tablet-table`'s container width (post-sidebar, ~1000-1080px) against its intrinsic nowrap width (~1300-1500px for a wide table), so wide tables collapsed to cards almost regardless of actual screen size. Added a single guard clause (`if (viewportWidth > 1024) return false;`) after the existing phone check — since this is the single shared decision function for every `.tablet-table` admin list view, one change fixes bookings.php's "All Room Bookings" and every other list view using the same pattern consistently, exactly as requested. Phone (≤640) and tablet (641-1024) bands unchanged; the untouched `.table-responsive` wrapper already provides horizontal scroll for tables wider than the viewport.
 
 **PROJECT COMPLETE — Round 2.** All 15 checklist items now checked (14 original + 1 owner-added).

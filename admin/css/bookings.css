@@ -692,6 +692,13 @@ body .modal-overlay.active {
     line-height: 1.1;
 }
 
+@media (max-width: 1024px) {
+    .actions-row .quick-action {
+        min-height: 44px;
+        min-width: 44px;
+    }
+}
+
 @media (min-width: 36rem) {
 
     table.mobile-enhanced td[data-label="Action"] .actions-row .quick-action,

@@ -17,6 +17,21 @@ $pass = 0;
 $fail = 0;
 $createdIds = [];
 
+// Ensure fixtures created during this run are removed even if a later section
+// throws before the section-17 cleanup block executes. Reads $createdIds by
+// reference so it sees IDs pushed after registration.
+register_shutdown_function(function () use (&$createdIds, $pdo) {
+    if (empty($createdIds)) {
+        return;
+    }
+    try {
+        $placeholders = implode(',', array_fill(0, count($createdIds), '?'));
+        $pdo->prepare("DELETE FROM bookings WHERE id IN ($placeholders)")->execute($createdIds);
+    } catch (Throwable $e) {
+        // Best-effort cleanup; do not mask the original failure.
+    }
+});
+
 function ok(string $label): void {
     global $pass;
     $pass++;
@@ -41,6 +56,20 @@ try {
 } catch (Throwable $e) {
     fail('Live DB reachable', $e->getMessage());
     exit(1);
+}
+
+// ── 1.5 Pre-test purge — remove leftover fixtures from prior aborted runs ─────
+echo "\n=== 1.5 Pre-test purge ===\n";
+try {
+    $purged = $pdo->prepare("
+        DELETE FROM bookings
+        WHERE booking_reference LIKE 'SMOKETEST-%'
+           OR guest_email IN (?, ?)
+    ");
+    $purged->execute(['smoketest@rosalyns.test', 'tenttest@rosalyns.test']);
+    ok('Leftover SMOKETEST fixtures purged (' . $purged->rowCount() . ' row(s))');
+} catch (Throwable $e) {
+    fail('Pre-test purge', $e->getMessage());
 }
 
 // ── 2. Schema check — critical booking columns ────────────────────────────────
@@ -74,7 +103,7 @@ echo "  Result for dates {$checkIn}→{$checkOut}: " . ($avail['available'] ? 'A
 // ── 5. Standard booking INSERT (smoke) ───────────────────────────────────────
 echo "\n=== 5. Standard booking creation ===\n";
 $refPrefix = getSetting('booking_reference_prefix', 'LSH');
-$testRef = 'SMOKETEST-' . time();
+$testRef = 'SMOKETEST-' . time() . '-' . bin2hex(random_bytes(3));
 $clientUuid = bin2hex(random_bytes(16));
 
 $nights = 2;
@@ -141,7 +170,7 @@ assert_true(
 
 // ── 8. Tentative booking creation ────────────────────────────────────────────
 echo "\n=== 8. Tentative booking ===\n";
-$tentRef   = 'SMOKETEST-TENT-' . time();
+$tentRef   = 'SMOKETEST-TENT-' . time() . '-' . bin2hex(random_bytes(3));
 $tentUuid  = bin2hex(random_bytes(16));
 $tentExpiry = date('Y-m-d H:i:s', strtotime('+48 hours'));
 $tentIn    = date('Y-m-d', strtotime('+60 days'));
