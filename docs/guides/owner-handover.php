@@ -737,12 +737,12 @@ footer.handover .links a:hover { color: var(--gold); }
     <h3>Booking lifecycle</h3>
     <ol class="steps">
       <li><strong>Pending</strong> — the website request lands. A confirmation email fires immediately.</li>
-      <li><strong>Tentative</strong> — hold a room for <?= $tentHours ?> hours while the guest decides. Auto-expires and releases the room if not confirmed. The cron script <code>scripts/expire_tentative_bookings.php</code> runs every 15 minutes.</li>
+      <li><strong>Tentative</strong> — hold a room for <?= $tentHours ?> hours while the guest decides. The cron script <code>scripts/expire_tentative_bookings.php</code> runs every 15 minutes and flags any hold past its window, but it does <strong>not</strong> auto-cancel or release the room — a staff member must review and manually cancel expired tentatives.</li>
       <li><strong>Confirmed</strong> — room is reserved. Guest gets a full confirmation with room details and policy.</li>
       <li><strong>Checked-in</strong> — front desk opens the folio; live room availability decrements.</li>
       <li><strong>Checked-out</strong> — final invoice emailed automatically with VAT (<em><?= $vatStatus ?></em>) and tourism levy (<em><?= $levyStatus ?></em>).</li>
       <li><strong>Cancelled</strong> — soft-cancel only. Audit trail preserved, room availability restored automatically.</li>
-      <li><strong>Expired</strong> — a tentative booking whose <?= $tentHours ?>-hour window passed without action.</li>
+      <li><strong>Expired</strong> — a tentative booking whose <?= $tentHours ?>-hour window passed without action. It stays flagged until a manager manually cancels it; the room is not released automatically.</li>
     </ol>
 
     <blockquote>"Never delete a booking — always cancel. The system protects your audit trail."</blockquote>
@@ -788,7 +788,7 @@ footer.handover .links a:hover { color: var(--gold); }
       <li>Click the booking → <strong>Check Out</strong>.</li>
       <li>Review the folio — add any outstanding charges (minibar, parking, extras).</li>
       <li>Confirm payment method; the system generates the final invoice, emails it, and archives it under Admin → Invoices.</li>
-      <li>Room status moves to <em>dirty</em> — housekeeping picks it up for cleaning.</li>
+      <li>A housekeeping assignment is created at <em>Pending</em> — housekeeping picks it up for cleaning.</li>
     </ol>
 
     <h3>Walk-ins &amp; same-day bookings</h3>
@@ -907,15 +907,16 @@ footer.handover .links a:hover { color: var(--gold); }
     <h2>Housekeeping &amp; maintenance</h2>
     <p class="lead">Live room status — every cleaner knows exactly which rooms need attention and which are ready for a new guest.</p>
 
-    <h3>Room statuses</h3>
+    <h3>Housekeeping assignment statuses</h3>
+    <p>Housekeeping work is tracked per room as <strong>assignments</strong>, not a single room-wide status flag. Each assignment moves through:</p>
     <table>
       <thead><tr><th>Status</th><th>Meaning</th><th>Booking impact</th></tr></thead>
       <tbody>
-        <tr><td><strong>Clean</strong></td><td>Ready for check-in</td><td>Bookable</td></tr>
-        <tr><td><strong>Dirty</strong></td><td>Guest just checked out or departed</td><td>Bookable (front desk sees note)</td></tr>
-        <tr><td><strong>Inspected</strong></td><td>Supervisor signed off</td><td>Bookable</td></tr>
-        <tr><td><strong>Out of service</strong></td><td>Under maintenance or repair</td><td>Blocked — removed from inventory</td></tr>
-        <tr><td><strong>Do Not Disturb</strong></td><td>Guest declined cleaning</td><td>Occupied</td></tr>
+        <tr><td><strong>Pending</strong></td><td>Task created, not yet started</td><td>Room may still be occupied or vacant</td></tr>
+        <tr><td><strong>In Progress</strong></td><td>Housekeeper tapped Start — currently cleaning</td><td>Room may still be occupied or vacant</td></tr>
+        <tr><td><strong>Completed</strong></td><td>Housekeeper marked the task done</td><td>Bookable, pending verification</td></tr>
+        <tr><td><strong>Verified</strong></td><td>Supervisor signed off — locked, cannot be edited further</td><td>Bookable</td></tr>
+        <tr><td><strong>Blocked</strong></td><td>Task can't proceed (e.g. maintenance issue)</td><td>Serious cases move to Room Maintenance, which removes the room from bookable inventory</td></tr>
       </tbody>
     </table>
 
@@ -923,7 +924,7 @@ footer.handover .links a:hover { color: var(--gold); }
     <p>Admin → Room Maintenance lets you schedule preventive tasks (AC service, plumbing checks, linen replacement) for individual rooms. Scheduled maintenance can block a room during the window.</p>
 
     <h3>Room dashboard</h3>
-    <p>The visual floor plan at <code>Admin → Room Dashboard</code> shows every room's live status in a colour-coded grid — green (clean), yellow (dirty), grey (OOS). Click any room to update status or view the full audit log.</p>
+    <p>The visual floor plan at <code>Admin → Room Dashboard</code> shows every room's live assignment status in a colour-coded grid — amber (pending), blue (in progress), green (completed), purple (verified), red (blocked). Click any room to update status or view the full audit log.</p>
 
     <h3>Individual rooms vs room types</h3>
     <p>The system has two layers: <em>room types</em> (e.g., "Deluxe Sea View") and <em>individual rooms</em> (e.g., room 204). Both can have their own photos, amenities, and pricing. An individual room can be blocked without affecting its room type's overall availability.</p>
@@ -1161,14 +1162,17 @@ footer.handover .links a:hover { color: var(--gold); }
         <tr><td>Booking created (pending)</td><td>Guest: booking received confirmation</td></tr>
         <tr><td>Booking confirmed</td><td>Guest: full confirmation with room details</td></tr>
         <tr><td>Tentative booking created</td><td>Guest: hold confirmation with expiry time</td></tr>
-        <tr><td>Tentative booking expires</td><td>Guest: expiry notice + admin: room released alert</td></tr>
+        <tr><td>Tentative booking expires</td><td>Guest: expiry notice; admin: alert to review and manually cancel (the room is not auto-released)</td></tr>
         <tr><td>Check-in</td><td>Guest: welcome email</td></tr>
         <tr><td>Check-out / invoice</td><td>Guest: invoice PDF as email attachment</td></tr>
         <tr><td>Booking cancelled</td><td>Guest: cancellation confirmation + admin alert</td></tr>
+        <tr><td>Pre-arrival reminder <em>(opt-in, off by default)</em></td><td>Guest: reminder sent a configurable number of days before check-in</td></tr>
+        <tr><td>Post-stay review request <em>(opt-in, off by default)</em></td><td>Guest: review request sent a configurable number of days after check-out</td></tr>
         <tr><td>New review submitted</td><td>Admin: review notification</td></tr>
         <tr><td>Contact form</td><td>Admin: contact form submission</td></tr>
       </tbody>
     </table>
+    <p>The pre-arrival reminder and post-stay review request are toggled independently under <strong>Admin → Booking Settings → Guest communication emails</strong>, where you also set the days-before / days-after timing.</p>
 
     <h3>SMTP configuration</h3>
     <p>Email is sent via SMTP (PHPMailer). Configure at <strong>Admin → Site Settings → Email</strong>: host, port, username, password, sender name, sender email. All values are stored in the <code>site_settings</code> table — no config files to edit.</p>
@@ -1197,7 +1201,7 @@ footer.handover .links a:hover { color: var(--gold); }
       <div class="role-item"><div class="role-dot"></div><div><strong>manager</strong><small>All operations; cannot edit other managers or admins</small></div></div>
       <div class="role-item"><div class="role-dot"></div><div><strong>receptionist</strong><small>Bookings, check-in/out, folio, payments</small></div></div>
       <div class="role-item"><div class="role-dot"></div><div><strong>accountant</strong><small>Accounting dashboard, reports, invoices — read-only for operations</small></div></div>
-      <div class="role-item"><div class="role-dot"></div><div><strong>housekeeping</strong><small>Room status board only</small></div></div>
+      <div class="role-item"><div class="role-dot"></div><div><strong>housekeeping</strong><small>Housekeeping assignment board only</small></div></div>
       <div class="role-item"><div class="role-dot"></div><div><strong>room_service</strong><small>Place room-service orders; no folio or payment access</small></div></div>
       <div class="role-item"><div class="role-dot"></div><div><strong>restaurant_staff</strong><small>POS till; stock deductions via recipes</small></div></div>
       <div class="role-item"><div class="role-dot"></div><div><strong>chef</strong><small>KDS kitchen display only</small></div></div>
@@ -1313,7 +1317,7 @@ footer.handover .links a:hover { color: var(--gold); }
     <table>
       <thead><tr><th>Schedule</th><th>Command</th><th>Purpose</th></tr></thead>
       <tbody>
-        <tr><td><code>*/15 * * * *</code></td><td><code>php scripts/expire_tentative_bookings.php</code></td><td>Release expired tentative holds</td></tr>
+        <tr><td><code>*/15 * * * *</code></td><td><code>php scripts/expire_tentative_bookings.php</code></td><td>Flags overdue tentative holds for staff review (does not auto-cancel)</td></tr>
         <tr><td><code>0 7 * * *</code></td><td><code>php scripts/daily_reports.php</code></td><td>Morning email digest to manager</td></tr>
         <tr><td><code>0 2 * * *</code></td><td><code>php scripts/backup_database.php --quiet</code></td><td>Nightly gzipped database backup with rotation</td></tr>
       </tbody>
@@ -1369,7 +1373,7 @@ footer.handover .links a:hover { color: var(--gold); }
     <h3>Every morning</h3>
     <ul class="checklist">
       <li>Front desk opens Dashboard — today's arrivals, departures, and current occupancy.</li>
-      <li>Housekeeping reviews the room status board — clean / dirty / inspected.</li>
+      <li>Housekeeping reviews the assignment board — Pending / In Progress / Completed / Verified / Blocked.</li>
       <li>Check for new tentative bookings approaching expiry (<?= $tentHours ?>-hour window).</li>
       <li>Verify yesterday's outstanding folios — chase any unpaid balances.</li>
     </ul>
@@ -1465,7 +1469,7 @@ footer.handover .links a:hover { color: var(--gold); }
         <div class="num">6</div>
         <div>
           <div class="title">Housekeeping</div>
-          <div class="sub">Room status board, clean/dirty/inspected workflow, out-of-service rooms. For housekeeping.</div>
+          <div class="sub">Assignment board, Pending/In Progress/Completed/Verified/Blocked workflow, out-of-service rooms. For housekeeping.</div>
           <span class="pill gold">5 min read</span>
         </div>
       </a>
@@ -1543,7 +1547,7 @@ footer.handover .links a:hover { color: var(--gold); }
         <tr><td><code>scripts/inspect_schema.php</code></td><td>Checks all expected tables exist</td></tr>
         <tr><td><code>scripts/audit_migrations.php</code></td><td>Lists applied / missing migrations</td></tr>
         <tr><td><code>scripts/daily_reports.php</code></td><td>Sends the morning digest email (run manually to test)</td></tr>
-        <tr><td><code>scripts/expire_tentative_bookings.php</code></td><td>Sweeps and expires overdue tentative holds</td></tr>
+        <tr><td><code>scripts/expire_tentative_bookings.php</code></td><td>Sweeps and flags overdue tentative holds for staff review — does not cancel them automatically</td></tr>
         <tr><td><code>scripts/patch_amount_due_drift.php</code></td><td>Recalculates booking financial totals in bulk</td></tr>
       </tbody>
     </table>

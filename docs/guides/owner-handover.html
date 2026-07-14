@@ -435,7 +435,7 @@
         <h3>Room Types</h3>
         <p>Manage at <strong>Admin &rarr; Room Management</strong>. Each type has: name, description, photos (gallery-linked), base nightly rate (MWK), capacity (adults + children), amenities list, <em>featured</em> toggle (homepage), and active/inactive toggle.</p>
         <h3 style="margin-top:1.5rem;">Individual Rooms</h3>
-        <p>Each physical room unit has its own record at <strong>Admin &rarr; Individual Rooms</strong>: room number, floor, type assignment, current status, and notes. Status flows: <em>available &rarr; occupied &rarr; dirty &rarr; cleaning &rarr; inspected &rarr; available</em>. Out-of-service rooms are removed from bookable inventory immediately.</p>
+        <p>Each physical room unit has its own record at <strong>Admin &rarr; Individual Rooms</strong>: room number, floor, type assignment, current status, and notes. Room occupancy (available/occupied) is separate from housekeeping, which tracks cleaning as <em>assignments</em> moving through Pending &rarr; In Progress &rarr; Completed &rarr; Verified. Out-of-service rooms are removed from bookable inventory immediately.</p>
         <h3 style="margin-top:1.5rem;">Room Dashboard</h3>
         <p><strong>Admin &rarr; Room Dashboard</strong> shows a live colour-coded grid of every room on every floor. Reception uses this for an instant hotel snapshot at any moment of the day.</p>
       </div>
@@ -460,7 +460,7 @@
     <div class="flow">
       <div class="flow-step"><span class="step-num">1</span><div class="step-label">Pending</div><div class="step-sub">Website request arrives</div></div>
       <div class="flow-arrow">&rarr;</div>
-      <div class="flow-step"><span class="step-num">2</span><div class="step-label">Tentative</div><div class="step-sub">Held 48 h, auto-expires</div></div>
+      <div class="flow-step"><span class="step-num">2</span><div class="step-label">Tentative</div><div class="step-sub">Held 48 h, flagged if not confirmed</div></div>
       <div class="flow-arrow">&rarr;</div>
       <div class="flow-step"><span class="step-num">3</span><div class="step-label">Confirmed</div><div class="step-sub">Email sent, room reserved</div></div>
       <div class="flow-arrow">&rarr;</div>
@@ -481,7 +481,7 @@
           <li>Idempotency window (prevents duplicate bookings from double-taps)</li>
         </ul>
         <h3 style="margin-top:1.5rem;">Tentative bookings</h3>
-        <p>Tentative bookings arrive from the website and are held for 48 hours. Manage at <strong>Admin &rarr; Tentative Bookings</strong>. Auto-expiry releases the room back to inventory.</p>
+        <p>Tentative bookings arrive from the website and are held for 48 hours. Manage at <strong>Admin &rarr; Tentative Bookings</strong>. Expiry only flags the hold &mdash; it does <strong>not</strong> auto-cancel or release the room. A staff member must review and manually cancel expired tentatives to free the room.</p>
       </div>
       <div>
         <h3>Walk-in bookings</h3>
@@ -521,7 +521,7 @@
       </div>
       <div class="card">
         <h3>Priority &amp; Stacking</h3>
-        <p>Set a priority order so the correct plan wins when multiple apply. Toggle <em>stacking</em> to allow or block compound discounts. Plans are calculated and stored at booking time &mdash; not recalculated at check-in.</p>
+        <p>Set a priority number &mdash; <strong>higher number = higher priority</strong>, evaluated first when multiple plans apply. Toggle <em>stacking</em> to allow or block compound discounts. Plans are calculated and stored at booking time &mdash; not recalculated at check-in.</p>
       </div>
     </div>
   </div>
@@ -669,19 +669,18 @@
     <p class="lead">A clean room is a sellable room. The system tracks every status transition with a full audit log.</p>
     <div class="two-col-prose">
       <div>
-        <h3>Room status flow</h3>
+        <h3>Housekeeping assignment status</h3>
         <div class="timeline">
-          <div class="tl-item"><h4>Available (Green)</h4><p>Clean, inspected, and ready to book.</p></div>
-          <div class="tl-item"><h4>Occupied (Blue)</h4><p>Guest checked in. Locked from new bookings.</p></div>
-          <div class="tl-item"><h4>Checkout (Amber)</h4><p>Guest checked out. Assigned to housekeeping.</p></div>
-          <div class="tl-item"><h4>Dirty / Cleaning (Orange)</h4><p>Housekeeper assigned and working.</p></div>
-          <div class="tl-item"><h4>Inspected (Teal)</h4><p>Supervisor inspected. Moves to Available on approval.</p></div>
-          <div class="tl-item"><h4>Maintenance / Out-of-Service (Red)</h4><p>Removed from bookable inventory until cleared.</p></div>
+          <div class="tl-item"><h4>Pending (Amber)</h4><p>Task created, not yet started.</p></div>
+          <div class="tl-item"><h4>In Progress (Blue)</h4><p>Housekeeper tapped Start &mdash; currently cleaning.</p></div>
+          <div class="tl-item"><h4>Completed (Green)</h4><p>Housekeeper marked the task done.</p></div>
+          <div class="tl-item"><h4>Verified (Purple)</h4><p>Supervisor signed off &mdash; locked, cannot be edited further.</p></div>
+          <div class="tl-item"><h4>Blocked (Red)</h4><p>Task can't proceed (e.g. maintenance issue). Serious cases move to Room Maintenance, removed from bookable inventory.</p></div>
         </div>
       </div>
       <div>
         <h3>Assignments</h3>
-        <p>Assign rooms at <strong>Admin &rarr; Housekeeping</strong>. Assignment types: checkout cleanup, regular cleaning, deep clean, turndown service, maintenance support. Each housekeeper sees only their assigned rooms. Every status change is logged with timestamp and user.</p>
+        <p>Housekeeping work is tracked per room as <strong>assignments</strong>, not a single room-wide status flag. Assign rooms at <strong>Admin &rarr; Housekeeping</strong>. Assignment types: checkout cleanup, regular cleaning, deep clean, turndown service, maintenance support. Each housekeeper sees only their assigned rooms. Every status change is logged with timestamp and user.</p>
         <h3 style="margin-top:1.5rem;">Maintenance requests</h3>
         <p>Housekeeping staff can flag a fault directly from their dashboard. The fault routes to <strong>Admin &rarr; Room Maintenance</strong> where the manager sets priority and assigns a technician. The room is blocked until the fault is resolved and manually cleared.</p>
       </div>
@@ -706,7 +705,7 @@
       </div>
       <div class="card">
         <h3>Gym &amp; Wellness</h3>
-        <p>The gym page is fully DB-driven: facilities grid, class schedule, and membership packages. Inquiries go through a three-step pipeline at <strong>Admin &rarr; Gym Inquiries</strong>: <em>new &rarr; contacted &rarr; converted</em>. Automated emails trigger at each stage.</p>
+        <p>The gym page is fully DB-driven: facilities grid, class schedule, and membership packages. Inquiries go through a three-step pipeline at <strong>Admin &rarr; Gym Inquiries</strong>: <em>new &rarr; contacted &rarr; converted</em>. Clicking <strong>Mark Contacted</strong> or <strong>Mark Converted</strong> sends a notification email to the enquirer &mdash; not to staff.</p>
       </div>
       <div class="card">
         <h3>Contact Inquiries</h3>
@@ -798,11 +797,11 @@
           <li>Booking confirmation &mdash; on status change to <em>Confirmed</em></li>
           <li>Booking cancellation &mdash; on cancel</li>
           <li>Check-out invoice &mdash; PDF attached, sent on checkout</li>
-          <li>Review request &mdash; 24 hours after checkout</li>
-          <li>Gym inquiry acknowledgement &mdash; on form submission</li>
+          <li>Gym inquiry &mdash; Mark Contacted / Mark Converted, sent to the enquirer</li>
           <li>Contact inquiry acknowledgement &mdash; on form submission</li>
         </ul>
-        <p style="margin-top:1rem;">SMTP credentials are in the <code>.env</code> file on the server. Never store email passwords in the admin panel or in code.</p>
+        <p style="margin-top:1rem;">Two further guest emails exist but are <strong>opt-in, off by default</strong>: a <strong>pre-arrival reminder</strong> and a <strong>post-stay review request</strong>, each with a configurable days-before / days-after timing. Enable them under <strong>Admin &rarr; Booking Settings &rarr; Guest communication emails</strong>.</p>
+        <p style="margin-top:1rem;">SMTP is configured at <strong>Admin &rarr; Booking Settings &rarr; Email Settings</strong> (host, port, username, password, sender name/email) and stored in the <code>site_settings</code> table &mdash; no server config files to edit.</p>
       </div>
       <div>
         <h3>WhatsApp</h3>
@@ -906,7 +905,7 @@
         </ul>
         <h3 style="margin-top:1.5rem;">Every day &mdash; close of business</h3>
         <ul class="checklist">
-          <li>All checkout rooms moved to <em>inspected</em> status.</li>
+          <li>All checkout rooms have a housekeeping assignment created; supervisor verifies completed ones.</li>
           <li>POS / KDS / BDS / CDS run daily reports at end-of-shift.</li>
           <li>Bar and kitchen stock variance walked.</li>
           <li>Cash drawer reconciled against POS shift total.</li>
@@ -929,7 +928,7 @@
           <li>Run <strong>Accounting Dashboard</strong> &mdash; export VAT &amp; tourism levy for tax filing.</li>
           <li>Print stock variance summary and file it.</li>
           <li>Review <strong>User Management</strong> &mdash; deactivate any leavers immediately.</li>
-          <li>Rotate SMTP password and update in <code>.env</code>.</li>
+          <li>Rotate SMTP password and update it in <strong>Admin &rarr; Booking Settings &rarr; Email Settings</strong>.</li>
           <li>Download a database backup and store off-site.</li>
           <li>Review <strong>Visitor Analytics</strong> for conversion trends &mdash; adjust rate plans if needed.</li>
           <li>Audit <strong>API Keys</strong> &mdash; revoke any that are unused.</li>
@@ -1016,7 +1015,7 @@
       <div>
         <h4>System configuration</h4>
         <ul class="checklist tight">
-          <li>SMTP credentials in <code>.env</code> tested &mdash; test email sent and received.</li>
+          <li>SMTP credentials in Booking Settings &rarr; Email Settings tested &mdash; test email sent and received.</li>
           <li>VAT rate set correctly in Booking Settings (16.5%).</li>
           <li>Tourism levy percentage confirmed.</li>
           <li>Check-in and check-out times set.</li>
@@ -1084,7 +1083,7 @@
         <ul class="checklist tight">
           <li>The developer never needs your admin password &mdash; only CLI server access.</li>
           <li>Never share admin credentials by email, WhatsApp, or phone.</li>
-          <li>Rotate the SMTP password monthly and update <code>.env</code>.</li>
+          <li>Rotate the SMTP password monthly and update it in Booking Settings &rarr; Email.</li>
           <li>Revoke any API keys that are no longer in use.</li>
         </ul>
       </div>

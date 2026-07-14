@@ -886,6 +886,20 @@ $templates = [
     ],
 
     [
+        'key' => 'booking_reminder',
+        'name' => 'Check-in Reminder (Late / Overdue)',
+        'desc' => 'Sent to a guest whose booking is late or overdue for check-in.',
+        'triggers' => 'Admin → Bookings → Send Reminder'
+    ],
+
+    [
+        'key' => 'refund_notification',
+        'name' => 'Refund Notification Email',
+        'desc' => 'Sent to the guest when a refund is issued against one of their payments.',
+        'triggers' => 'Admin → Payments → Refund'
+    ],
+
+    [
         'key' => 'payment_invoice',
         'name' => 'Room Invoice Email',
         'desc' => 'Sent with a PDF invoice attachment after a payment is recorded.',
@@ -1507,6 +1521,10 @@ Total: {{currency_symbol}} {{total_amount_formatted}}.</code></pre>
 
                 <div class="callout">
                     <strong>Tip:</strong> The template key cannot be changed. When the system looks up a template (e.g. <code>booking_confirmed</code>), it uses the key — not the display name. You can safely rename the display name without breaking email delivery.
+                </div>
+
+                <div class="callout note">
+                    <strong>Pre-arrival &amp; post-stay emails aren't in this table.</strong> The automatic <strong>pre-arrival reminder</strong> and <strong>post-stay review request</strong> guest emails are opt-in (off by default) — enable them under <strong>Booking Settings → Booking Notification Email → Guest communication emails</strong>, where you also set how many days before check-in / after check-out they fire. Their wording is fixed in code rather than stored in <code>booking_email_templates</code>, so they don't use <code>{{tag}}</code> substitution and can't be edited from this screen.
                 </div>
             </section>
 

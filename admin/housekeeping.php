@@ -1197,11 +1197,11 @@ foreach ($assignments as $a) {
                 <form method="POST" style="display:inline;">
                     <input type="hidden" name="action" value="auto_create_checkout">
                     <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf_token); ?>">
-                    <button class="btn btn-warning" type="button" onclick="hkConfirm(this.closest('form'), 'Auto-create checkout cleanup assignments for all rooms that need it?', 'Auto-Create', 'btn-warning')">
+                    <button class="btn btn-warning" type="button" data-help="Auto-Create Checkout Cleanup|Automatically generate cleaning assignments for every room that has a guest checking out and needs housekeeping." onclick="hkConfirm(this.closest('form'), 'Auto-create checkout cleanup assignments for all rooms that need it?', 'Auto-Create', 'btn-warning')">
                         <i class="fas fa-magic"></i> Auto-Create Checkout Cleanup
                     </button>
                 </form>
-                <button class="btn btn-primary" type="button" onclick="openModal()"><i class="fas fa-plus"></i> Add Assignment</button>
+                <button class="btn btn-primary" type="button" onclick="openModal()" data-help="Add Assignment|Manually create a new housekeeping task for a room and assign it to a staff member."><i class="fas fa-plus"></i> Add Assignment</button>
             </div>
         </div>
 
@@ -1424,7 +1424,7 @@ foreach ($assignments as $a) {
                                                 <input type="hidden" name="action" value="mark_started">
                                                 <input type="hidden" name="id" value="<?php echo $row['id']; ?>">
                                                 <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf_token); ?>">
-                                                <button class="btn btn-warning btn-sm" type="button" title="Mark as started" onclick="hkConfirm(this.closest('form'), 'Mark this assignment as started?', 'Start', 'btn-warning')"><i class="fas fa-play"></i></button>
+                                                <button class="btn btn-warning btn-sm" type="button" title="Mark as started" data-help="Start|Mark this cleaning assignment as in progress and record the start time." onclick="hkConfirm(this.closest('form'), 'Mark this assignment as started?', 'Start', 'btn-warning')"><i class="fas fa-play"></i></button>
                                             </form>
                                         <?php endif; ?>
                                         <?php if (in_array($row['status'], ['pending', 'in_progress'], true)): ?>
@@ -1432,7 +1432,7 @@ foreach ($assignments as $a) {
                                                 <input type="hidden" name="action" value="mark_complete">
                                                 <input type="hidden" name="id" value="<?php echo $row['id']; ?>">
                                                 <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf_token); ?>">
-                                                <button class="btn btn-success btn-sm" type="button" title="Mark done" onclick="hkConfirm(this.closest('form'), 'Mark this assignment as completed?', 'Mark Done', 'btn-success')"><i class="fas fa-check"></i></button>
+                                                <button class="btn btn-success btn-sm" type="button" title="Mark done" data-help="Mark Done|Mark this cleaning assignment as completed. The room is then ready for a supervisor to verify." onclick="hkConfirm(this.closest('form'), 'Mark this assignment as completed?', 'Mark Done', 'btn-success')"><i class="fas fa-check"></i></button>
                                             </form>
                                         <?php endif; ?>
                                         <?php if ($row['status'] !== 'verified'): ?>
@@ -1444,7 +1444,7 @@ foreach ($assignments as $a) {
                                                 <input type="hidden" name="action" value="verify_assignment">
                                                 <input type="hidden" name="id" value="<?php echo $row['id']; ?>">
                                                 <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf_token); ?>">
-                                                <button class="btn btn-success btn-sm" type="button" title="Verify" onclick="hkConfirm(this.closest('form'), 'Mark this assignment as verified? This cannot be undone.', 'Verify', 'btn-success')"><i class="fas fa-check-double"></i></button>
+                                                <button class="btn btn-success btn-sm" type="button" title="Verify" data-help="Verify|Confirm the completed cleaning meets standard and close out this assignment. This cannot be undone." onclick="hkConfirm(this.closest('form'), 'Mark this assignment as verified? This cannot be undone.', 'Verify', 'btn-success')"><i class="fas fa-check-double"></i></button>
                                             </form>
                                         <?php endif; ?>
                                         <form method="POST" style="display:inline;">

@@ -72,6 +72,17 @@ explicit confirmation):**
 - [x] `admin/bookings.php`'s inline check-in shortcut meets the same 44px tablet
       touch-target standard already applied to the canonical check-in screen in P3-03
 
+**Round 4 — owner-approved scope (2026-07-14, guides & help systems):**
+- [x] Guest-facing FAQ page built on the public site, matching existing site theme/nav/footer
+- [x] Existing staff/admin guide library (`docs/guides/*.html` + `docs/guides/owner-handover.*`
+      — 17 topical guides + full admin dashboard guide + index) verified accurate against
+      current app behavior; corrections applied wherever a guide describes removed, renamed,
+      or changed functionality
+- [x] In-app `data-help` tooltip framework (`admin/includes/help-tooltips.php`) audited for
+      coverage gaps on admin pages beyond POS/KDS and extended to high-traffic pages missing it
+- [x] All three of the above visually polished to match the site's existing Japandi theme
+      (warm neutral palette, existing typography/spacing conventions — no new design system)
+
 ## Future Ideas (not in scope — logged only, never auto-queued)
 
 - OTA/channel-manager sync (rate parity, subscription cost — needs owner input first)
@@ -464,6 +475,515 @@ one new `@media (max-width: 1024px)` block; it sets `min-height: 44px` (and `min
 on `.actions-row .quick-action`; braces balanced; the base 28px desktop rule and the labelled-
 button rule are untouched. (No sonnet needed — no JS logic is involved; the check-in behaviour
 is JS delegation the CSS never touches.)
+
+## Round 4 — owner-approved scope (2026-07-14, guides & help systems)
+| ID | Task | Checklist item | Status |
+|----|------|-----------|--------|
+| R4-01 | Create a guest-facing FAQ page `faq.php` at project root, built on the standard public static-content-page shell (model: `privacy-policy.php`), matching the existing Japandi theme/nav/footer. Static content only — no form, no POST, no new CSS/DB. | Round 4: Guest-facing FAQ page built on the public site, matching existing site theme/nav/footer | done |
+| R4-02 | Verify the `docs/guides/` staff/admin guide library (17 topical guides + `99-admin-dashboard-full-guide.html` + `owner-handover.*` + `index.html`) against current app behavior; correct every guide that describes removed/renamed/changed functionality. Split into 3 batches (a/b/c) by drift risk — see batching plan below. | Round 4: guide library verified accurate & corrected | done — all 6 sub-batches (a, b1, b2, b3, c) QA-passed |
+| R4-02a | Batch A — highest drift risk (booking/reception/housekeeping/finance/reports cluster, touched most this session): verify & correct `05-room-service.html`, `06-housekeeping.html`, `07-reception-bookings.html`, `13-finance-payments.html`, `14-reports-eod.html`. | Round 4: guide library verified accurate & corrected | done |
+| R4-02b | Batch B — lower drift risk (stations barely touched this session): verify & correct `01-pos-till.html`, `02-kds-kitchen.html`, `03-bds-bar.html`, `04-cds-coffee.html`, `08-stock-orders.html`, `09-packages-rates.html`, `10-conference-events.html`, `11-social-facebook-sharing.html`, `12-email-templates.php`, `15-pwa-install-guide.html`, `16-business-presets.html`, `17-gym-management.html`. Split into 3 sub-batches (b1/b2/b3) for careful per-file verification — see split plan below. | Round 4: guide library verified accurate & corrected | in-progress |
+| R4-02b1 | Sub-batch B1 — POS/KDS station playbooks (cohesive cluster, confirmed already tablet-optimized in P3-02, functionally unchanged): verify & correct `01-pos-till.html`, `02-kds-kitchen.html`, `03-bds-bar.html`, `04-cds-coffee.html`. | Round 4: guide library verified accurate & corrected | done |
+| R4-02b2 | Sub-batch B2 — ops/config guides: `08-stock-orders.html`, `09-packages-rates.html`, `10-conference-events.html`, `11-social-facebook-sharing.html`, `12-email-templates.php`. Spot-check `09-packages-rates.html` (rates/packages config) more carefully. | Round 4: guide library verified accurate & corrected | done (QA content-criteria 3/3 PASS; scope-violation flag was the recurring git-HEAD-baseline false positive — overridden by direct inspection, all flagged files belong to other already-passed tasks this session) |
+| R4-02b3 | Sub-batch B3 — `15-pwa-install-guide.html`, `16-business-presets.html`, `17-gym-management.html`. Spot-check `16-business-presets.html` (presets config) more carefully. | Round 4: guide library verified accurate & corrected | done (QA PASS 4/4, first attempt — explicit git-command ban in the dispatch brief eliminated the recurring false positive) |
+| R4-02c | Batch C — aggregators/consistency: `99-admin-dashboard-full-guide.html`, `owner-handover.html`, `owner-handover.php`, `index.html`. Cross-check they don't contradict the per-guide corrections from A/B (link targets, feature claims, guide count in `index.html` hero "17 Guides"). | Round 4: guide library verified accurate & corrected | queued (dispatch after R4-02b passes) |
+| R4-03 | Extend the in-app `data-help` tooltip framework (already loaded site-wide via `admin/includes/admin-header.php`; no framework change) to the 3 highest-traffic ops pages currently missing `data-help` attributes: `admin/bookings.php`, `admin/booking-details.php` (check-in/folio screen), `admin/housekeeping.php`. Add a tight handful of `data-help="Title\|Description"` attributes to each page's primary action controls only — no exhaustive coverage, no logic/CSS/framework change. | Round 4: in-app data-help tooltip framework audited for coverage gaps beyond POS/KDS and extended to high-traffic pages missing it | done |
+| R4-04 | Visual-polish review of the three Round-4 deliverables against the site's Japandi theme. **Outcome: verified consistent, no dispatch needed** (evidence below). | Round 4: all three of the above visually polished to match the site's existing Japandi theme | done — verified consistent, no code change required |
+
+### R4-04 — investigation findings (2026-07-15)
+
+Standard applied: "matches the existing Japandi theme (warm neutral palette, existing
+typography/spacing — no new design system)." For internal staff docs this means *not
+jarring/inconsistent* with the public site's warm-neutral family, not byte-identical hex.
+
+**(1) `faq.php` — consistent by construction. No change.**
+Confirmed by reading the file: it loads the public shell exactly like `privacy-policy.php` —
+`css/base/critical.css` + `css/main.css`, `includes/header.php`/`footer.php`, the same
+Cormorant Garamond + Jost Google-fonts link, and reuses the public
+`.privacy-page`/`.privacy-container`/`.privacy-header`/`.privacy-nav`/`.policy-section`/
+`.contact-card` classes. **No `<style>` block and no inline `style=` attributes anywhere.**
+It inherits the live theme with zero deviation.
+
+**(2) `docs/guides/assets/guide-theme.css` — already in the Japandi warm-neutral family. No re-theme.**
+Direct hex/font comparison against `css/base/variables.css`:
+- **Typography is identical to the site**: body `font-family: 'Jost'` = site `--font-sans`;
+  headings `'Cormorant Garamond', serif` = site `--font-serif`. Same typographic system, not a foreign one.
+- **Palette is the same warm family** (guide vs. site token):
+  brown `#8b7355` ≈ `--color-japandi-wood #8A775F`; cream `#f8f3e9` ≈ `--color-japandi-paper #F6F2EC`;
+  ink/dark `#1a1a1a`/`#2a2a2a` ≈ `--color-japandi-charcoal #2A2723`; gold `#d4a843` sits in the
+  same warm-gold band as `--color-lux-gold #B18247` / legacy `#C8A45A` (a touch brighter, but warm, not cool).
+- **No clashing signals**: no cool greys/blues, no cold shadows, no alien font stack. Only the
+  status-pill accents (`#2d6a2d`, `#1c4f87`, etc.) are conventional semantic colors, same as the
+  site's `--color-success/info/...`.
+  Verdict: coherent and warm — meets the "not jarring" bar for internal docs without any restyle.
+
+**(3) `data-help` tooltip framework — pre-existing, untouched. No visual work.**
+R4-03 added only markup `data-help` attributes to 3 admin pages; it did not create or edit the
+framework. `admin/css/help-tooltips.css` and `admin/includes/help-tooltips.php` are pre-existing
+and already in production use on POS/KDS with the admin theme. Nothing new was built to style.
+
+**Non-blocking note (logged, NOT queued):** guide gold `#d4a843` is marginally brighter/more
+saturated than the public `--color-lux-gold #B18247`. Within the warm-gold family and acceptable
+for internal staff docs; a one-line token nudge would tighten it but is not required to satisfy
+the checklist and is not worth a dispatch. Not scoped.
+
+### R4-03 — investigation findings (2026-07-14)
+
+**Coverage audit — which admin pages actually carry `data-help` attributes today**
+(`Grep "data-help=" admin/**/*.php`, 121 occurrences across 6 files):
+- `admin/pos.php` (31), `admin/kds.php` (22) — the two pages the framework doc-comment names.
+- `admin/end-of-day-report.php` (29), `admin/individual-rooms.php` (35),
+  `admin/blocked-dates.php` (2) — already covered.
+- `admin/includes/help-tooltips.php` (2) — the framework's own toggle button markup.
+
+**The framework itself needs NO change.** `admin/includes/help-tooltips.php` is included
+site-wide by `admin/includes/admin-header.php`, so every admin page already loads the toggle
+button + JS. Coverage is purely a function of whether a page's controls carry
+`data-help="Title|Description"` attributes. This task only ADDS those attributes; it does not
+touch `help-tooltips.php`, its CSS, or any JS/PHP logic.
+
+**High-traffic ops pages that are MISSING coverage** (verified 0 occurrences each):
+`admin/bookings.php`, `admin/booking-details.php`, `admin/housekeeping.php`,
+`admin/payments.php`, `admin/invoices.php` — none carry a single `data-help` attribute.
+
+**Chosen targets — the 3 core ops pages** (per PROJECT_CONTEXT core problem: front-desk & ops
+staff manage reservations, check-ins, housekeeping): `bookings.php` (master reservation list),
+`booking-details.php` (the canonical check-in + folio screen, per P3-03), `housekeeping.php`
+(cleaning/turnover ops).
+
+ASSUMPTION: `payments.php`/`invoices.php` are intentionally EXCLUDED this pass. They are
+read/report/CSV-export oriented (payments.php's controls are filters + `?export=csv`, not
+discrete guest-action buttons), so they benefit far less from action tooltips than the three
+transactional ops screens. The checklist says "high-traffic pages missing it," not "all pages";
+covering the three screens staff touch every shift satisfies the item without disproportionate
+sprawl. If the owner later wants finance-page tooltips, log as a follow-up — not queued now.
+
+**Exact controls to annotate (verified line numbers — specialist should match by markup, lines
+may shift):**
+
+`admin/bookings.php`:
+- New Booking button (~line 3322: `<i class="fas fa-plus"></i> New Booking`).
+- Filter/apply button in the toolbar (~3305: `.bookings-toolbar__button--filter`).
+- Per-row quick-actions (rendered in the booking loop — annotate ONE instance of each variant;
+  it is fine that the attribute repeats per row): `.quick-action.confirm` (~3609 "Confirm
+  booking"), `.quick-action.checkin` (~3654), `.quick-action.checkout` (~3686),
+  `.quick-action.paid` (~3704 "Record payment as paid").
+
+`admin/booking-details.php`:
+- Check In submit button (~2027: `.action-btn.checkin`).
+- Check Out submit button (~2041: `.action-btn.checkout`).
+- Assign Room / Change Room link (~2016/2020: `.action-btn.assign-room` / `.change-room`).
+- Add Charge folio button (~1623: `.folio-btn.primary`, `openAddChargeModal()`).
+
+`admin/housekeeping.php`:
+- Auto-Create checkout-cleanup button (~1200: `btn btn-warning`, `auto_create_checkout`).
+- Add Assignment button (~1204: `openModal()`).
+- Row status buttons: Start (~1427), Mark Done (~1435), Verify (~1447) — annotate ONE instance
+  of each (loop-rendered, repetition across rows is expected and harmless).
+
+Keep descriptions short and staff-oriented, matching the existing POS style
+(`data-help="Recent orders|Last 10 orders you rang up."`): `"Title|One-sentence what-it-does"`.
+
+### R4-03 — dispatch brief → frontend-specialist
+
+**Goal:** Add `data-help="Title|Description"` attributes to the primary action controls on three
+admin ops pages so the already-loaded in-app help framework surfaces tooltips there. **Attribute
+additions ONLY — no logic, no CSS, no JS, no framework change. Do NOT edit
+`admin/includes/help-tooltips.php`, `admin/css/help-tooltips.css`, `admin-header.php`, or any
+`.js` file.**
+
+**Specialist:** frontend-specialist (sonnet — markup edits across three PHP templates).
+
+**Files to edit (exactly three):**
+1. `C:\Users\john-paul.chirwa\OneDrive\MSP\Rosalyns-hotel-2026\admin\bookings.php`
+2. `C:\Users\john-paul.chirwa\OneDrive\MSP\Rosalyns-hotel-2026\admin\booking-details.php`
+3. `C:\Users\john-paul.chirwa\OneDrive\MSP\Rosalyns-hotel-2026\admin\housekeeping.php`
+
+**Edits:** add a `data-help="Title|Description"` attribute to each control listed under
+"Exact controls to annotate" in the findings above (a tight handful per page — 4-6 controls
+each, not every button). Match the existing convention from `admin/pos.php` (a `Title` + `|` +
+one short sentence). Suggested copy (specialist may refine wording, keep it this short):
+- bookings.php New Booking → `"New booking|Create a walk-in or phone reservation."`
+- bookings.php Filter → `"Apply filters|Narrow the list by status, dates, or search."`
+- bookings.php Confirm → `"Confirm booking|Move a tentative/pending booking to confirmed."`
+- bookings.php Check-in quick-action → `"Check in|Check the guest in and mark the room occupied."`
+- bookings.php Checkout quick-action → `"Check out|Check the guest out and finalise the folio."`
+- bookings.php Record payment → `"Record payment|Mark this booking's balance as paid."`
+- booking-details.php Check In → `"Check in|Admit the guest; requires an assigned room and a payment on file."`
+- booking-details.php Check Out → `"Check out|Depart the guest and generate the final invoice."`
+- booking-details.php Assign/Change Room → `"Assign room|Give this booking a physical room before check-in."`
+- booking-details.php Add Charge → `"Add charge|Post an extra item to the guest folio."`
+- housekeeping.php Auto-Create → `"Auto-create cleanups|Queue checkout-cleaning for every room that needs it."`
+- housekeeping.php Add Assignment → `"Add assignment|Assign a cleaning or maintenance task to a room."`
+- housekeeping.php Start → `"Start task|Mark this assignment in progress."`
+- housekeeping.php Mark Done → `"Mark done|Flag the cleaning as completed, awaiting verification."`
+- housekeeping.php Verify → `"Verify|Confirm the room passed inspection (cannot be undone)."`
+
+**What NOT to touch:** `admin/includes/help-tooltips.php`, `admin/css/help-tooltips.css`,
+`admin/includes/admin-header.php`, any `.js`, any other admin page, any DB/query/PHP logic,
+existing `title`/`aria-label`/`onclick`/`data-action` attributes (leave them intact — just add
+`data-help` alongside). Do not restructure markup, do not rename classes, do not add controls.
+Do not use `|` inside the Title or Description text (it is the framework's delimiter).
+
+**Acceptance criteria (R4-03):**
+1. `php -l` passes on all three edited files.
+2. Each of the three pages goes from 0 `data-help` occurrences to a handful (4-6 controls each),
+   added only on the controls named in findings — no exhaustive per-element coverage.
+3. Every added attribute uses the exact `data-help="Title|Description"` format (single `|`
+   delimiter, no `|` inside either half), matching the `admin/pos.php` convention.
+4. `admin/includes/help-tooltips.php`, its CSS, `admin-header.php`, and all `.js` files are
+   UNCHANGED (git diff touches only the three named `.php` files).
+5. No pre-existing attribute (`title`, `aria-label`, `onclick`, `data-action`, permission
+   guards) is removed or altered; `data-help` is added alongside them.
+6. No PHP logic, query, or CSRF/permission code is modified — this is a markup-attribute-only
+   change.
+
+**QA gate:** qa-auditor **haiku** — pure HTML-attribute additions to three templates, no logic/
+money/security/CSS/JS surface. Haiku verifies: `php -l` clean on all three; only those three
+files changed; `help-tooltips.php`/CSS/`admin-header.php`/JS untouched; each added attribute is
+well-formed `data-help="Title|Desc"` with a single delimiter; no existing attribute removed.
+Escalate to sonnet ONLY if the specialist unexpectedly edits `help-tooltips.php`, any `.js`, or
+any PHP logic (per the brief it must not).
+
+### R4-01 — investigation findings (2026-07-14)
+
+**Confirmed nothing like it exists.** No `faq.php` / `help.php` anywhere in root (Glob).
+This is a genuinely new page.
+
+**The canonical static-content-page shell (verified against `privacy-policy.php`, the
+closest existing analog — a display-only, no-form informational page):**
+- **Top-of-file (before any output):**
+  `if (session_status() !== PHP_SESSION_ACTIVE) { session_start(); }` then
+  `require_once 'config/database.php';` and `require_once 'includes/page-guard.php';`
+  (page-guard only redirects pages that exist in `site_pages` with `is_enabled = 0`; a page
+  NOT registered in `site_pages` — like the new faq.php — falls through and renders, exactly
+  as privacy-policy.php does). Pull site fields via `getSetting()` (`site_name`,
+  `email_main`, `phone_main`).
+- **`$seo_data` array** (`title`, `description`, `type => 'website'`) built BEFORE `<head>`,
+  then `<?php require_once 'includes/seo-meta.php'; ?>` as the first thing inside `<head>`
+  after `<meta charset="UTF-8">` (same pattern as `privacy-policy.php:31` /
+  `booking-confirmation.php:88`).
+- **`<head>` asset order (copy from privacy-policy.php:32-38):** the two `preconnect` links,
+  the Google Fonts `Cormorant Garamond + Jost` stylesheet link, then
+  `<link rel="stylesheet" href="css/base/critical.css">` and
+  `<link rel="stylesheet" href="css/main.css">`. Do NOT invent a new per-page CSS file —
+  reuse the shared `main.css` cascade and existing content-page classes (`.privacy-page` /
+  `.privacy-container` / `.privacy-nav` TOC / `.policy-section`) so it introduces no new
+  design system.
+- **`<body>` shell:** `<?php require_once 'includes/loader.php'; ?>` then
+  `<?php require_once 'includes/header.php'; ?>` (site nav — driven by `site_pages`,
+  active-highlight via `is_nav_active()` on `basename(PHP_SELF)`), the `<main
+  id="main-content" class="...-page">…</main>` content, then
+  `<script src="js/main.js" defer></script>` and `<?php require_once 'includes/footer.php'; ?>`
+  before `</body>`.
+- Every echoed dynamic value (site name, email, phone) through `htmlspecialchars(...)`
+  (privacy-policy.php:50, 277-282).
+
+**FAQ content — derive ONLY from what the codebase proves (do NOT fabricate specifics):**
+- Booking process: guests submit a request on `booking.php`; a booking is created `tentative`
+  (awaiting confirmation) or `pending` (confirmed, unpaid) and an automated confirmation
+  email is sent (SYSTEM_MAP P0-07; booking.php:807-811).
+- Payment: settled manually at check-in — NO online payment gateway (owner decision
+  2026-07-14; booking.php:268-274).
+- Manage/cancel a booking: guests use `booking-lookup.php` (look up by reference + email;
+  cancel supported).
+- Reviews & lifecycle: post-stay review via `submit-review.php`; system also sends pre-arrival
+  reminder + post-stay review-request emails (admin-toggleable — P2-02/P2-03).
+- On-site amenities bookable: restaurant (`restaurant.php`), gym (`gym.php` /
+  `gym-schedule.php`), conference (`conference.php`), events (`events.php`), all linked from
+  `guest-services.php`.
+- Contact: general enquiries via `contact-us.php`, plus phone/email from settings
+  (`phone_main`, `email_main`).
+- **PLACEHOLDER (clearly mark, do NOT fabricate):** exact check-in/check-out clock times,
+  parking, pet policy, room count, exact prices, exact cancellation-deadline windows,
+  breakfast/gym access hours. The codebase has no verifiable values for these — use generic
+  structurally-correct Q&A scaffolding with an obvious placeholder marker (e.g. "Check-in is
+  from [CHECK-IN TIME — confirm with hotel]" or `<!-- PLACEHOLDER: owner to supply -->`).
+
+ASSUMPTION: the FAQ page does not need to auto-appear in the top nav to satisfy "matching
+site nav/footer" — the requirement is that it USES the shared `header.php` nav + `footer.php`
+(which it will). Registering `faq.php` as a `site_pages` nav row is a separate admin/DB action
+(out of scope for a static-page build); the page is reachable by direct URL and may be linked
+from the footer. Editing the nav DB / `site_pages` is NOT part of this task.
+
+### R4-01 — dispatch brief → frontend-specialist
+
+**Goal:** Create ONE new file,
+`C:\Users\john-paul.chirwa\OneDrive\MSP\Rosalyns-hotel-2026\faq.php`, a guest-facing FAQ page
+on the standard public static-content-page shell, matching the existing Japandi theme, nav,
+and footer. Static display page — NO form, NO POST handler, NO new DB table, NO new CSS file.
+
+**Specialist:** frontend-specialist (sonnet). ui-designer runs AFTER (visual polish to the
+Japandi theme — warm neutral palette, existing typography/spacing; no new design system).
+
+**Model file to copy the shell from (read it first):**
+`C:\Users\john-paul.chirwa\OneDrive\MSP\Rosalyns-hotel-2026\privacy-policy.php` — replicate its
+top-of-file requires, `$seo_data` + `includes/seo-meta.php` head pattern, the exact `<head>`
+asset block (preconnect + fonts + `css/base/critical.css` + `css/main.css`), the `loader.php`
+/ `header.php` body open, the `<main id="main-content">` wrapper with a TOC-style in-page nav +
+`.policy-section`-style sections, and the closing `<script src="js/main.js" defer></script>` +
+`includes/footer.php` tail. Do NOT copy any form/CSRF machinery — FAQ has no form.
+
+**Build requirements:**
+1. New file `faq.php` at project root only.
+2. Use the shell above verbatim in structure. Reuse existing content-page CSS classes
+   (`.privacy-container`, `.privacy-nav`, `.policy-section`, headings) OR plain semantic markup
+   that inherits `css/main.css` — do NOT add a new stylesheet or a substantive `<style>` block.
+3. Populate the FAQ with the verifiable questions listed in findings (booking process, manual
+   payment-at-check-in, cancel/manage via booking-lookup, confirmation & reference, reviews +
+   lifecycle emails, on-site amenities, how to contact us).
+4. For any hotel-specific fact NOT verifiable from the codebase, use clearly-marked placeholder
+   text — do NOT fabricate. See the PLACEHOLDER list in findings.
+5. Escape every echoed dynamic value with `htmlspecialchars(...)`.
+6. An in-page table-of-contents (anchor links) like privacy-policy.php's `.privacy-nav` is
+   encouraged, plus a closing "still have questions?" block linking to `contact-us.php`.
+
+**What NOT to touch:** any existing `.php` file (single NEW file — do not edit
+privacy-policy.php, header.php, footer.php, booking.php, the `site_pages` DB, or nav config);
+no new CSS/JS files; no new DB table; no form/POST/CSRF; no `alert()`. Do not register the page
+in `site_pages`/the nav DB (out of scope — see ASSUMPTION).
+
+**Acceptance criteria (R4-01):**
+1. `php -l faq.php` passes.
+2. `faq.php` includes, in order: `config/database.php`, `includes/page-guard.php` at top;
+   `includes/seo-meta.php` inside `<head>` (with `$seo_data` defined before it);
+   `includes/loader.php`, `includes/header.php` after `<body>`; `js/main.js` and
+   `includes/footer.php` before `</body>` — same shell as privacy-policy.php.
+3. The page loads `css/base/critical.css` and `css/main.css` and defines NO new stylesheet
+   file and no substantive `<style>` block.
+4. The page contains NO `<form>`, NO `$_POST` handling, NO CSRF token, NO new DB write, NO
+   new `CREATE TABLE`.
+5. FAQ answers cover the verifiable topics and every non-verifiable specific (check-in/out
+   times, parking, pets, prices, room count) is a clearly-marked placeholder — nothing
+   fabricated.
+6. Every echoed dynamic value is wrapped in `htmlspecialchars(...)`.
+7. Only ONE file is added (git status shows a single new file `faq.php`); no existing file is
+   modified.
+
+**QA gate:** qa-auditor **haiku** — new static content page, no security-sensitive logic, no
+money, no POST/CSRF, no DB write. Haiku verifies: `php -l` passes; only `faq.php` was added and
+no other file changed; the shell includes match privacy-policy.php (seo-meta + header + footer +
+main.css); no `<form>`/`$_POST`/`CREATE TABLE`; all echoed dynamic values are
+`htmlspecialchars`-escaped; placeholders present for non-verifiable facts (nothing fabricated).
+**Escalate to sonnet ONLY if the specialist unexpectedly adds a form/POST handler** (then CSRF +
+validation apply) — per the brief it should not.
+
+**Follow-up (do NOT dispatch yet):** ui-designer visual-polish pass over the just-created
+`faq.php` to align with the Japandi theme; covered by the Round-4 "visually polished" checklist
+line, queued after R4-01's QA passes.
+
+### R4-02 — batching plan & rationale
+
+**Why batched, not one 17-file task:** verifying 17+ doc files against live admin behavior in
+a single dispatch is unscoped and un-QA-able. Split by drift risk from THIS build system's
+changes:
+- **Batch A (R4-02a)** — the guides describing areas the build system actually changed this
+  session: bookings/reception (P3-05/R3-04 touch targets & table behavior; P2-02/P2-03 added
+  guest lifecycle emails toggleable in `admin/booking-settings.php`), finance/reports (money
+  paths), housekeeping (P3-03 tablet pass), room-service (folio posting). Highest chance of
+  real inaccuracy.
+- **Batch B (R4-02b)** — station playbooks (POS/KDS/BDS/CDS/stock/gym/packages/conference/
+  social/pwa/presets/email-tags) that were NOT functionally changed this session. Lower drift
+  risk, still verified for stale claims.
+- **Batch C (R4-02c)** — the aggregators (`99` admin bible, `owner-handover.*`, `index.html`)
+  that link to and summarise the others; verified LAST so they stay consistent with whatever
+  A and B corrected.
+
+**Per-batch acceptance criteria (apply to every batch):**
+1. No guide in the batch describes functionality that does not exist in the current codebase
+   (every page URL, button label, status value, setting, and menu item named in the guide is
+   real per `SYSTEM_MAP.md` / the named admin file).
+2. No guide claims automated online payment capture at booking time — the confirmed decision
+   (P2-01) is manual settlement at check-in. Any guide asserting a live online gateway/auto-
+   capture is a real inaccuracy and must be corrected to manual-settlement language.
+3. No guide is silent about a toggleable feature that CHANGED this session in a way staff would
+   need to know — specifically the pre-arrival reminder (P2-02) and post-stay review-request
+   (P2-03) emails, now configurable in `admin/booking-settings.php` (keys
+   `booking_prearrival_reminder_enabled` / `_days`, `booking_poststay_review_enabled` / `_days`).
+   Where a guide already enumerates guest emails/booking settings it must mention these two.
+4. Corrections are CONTENT-only edits to the guide files themselves — no application code, no
+   CSS/JS/theme changes (theme polish is R4-04's job), no new files, no renamed files.
+5. Every edited file remains structurally valid (balanced tags; exactly one HTML document per
+   `.html` file; `.php` guide files still `php -l` clean).
+
+### R4-02a — dispatch brief → frontend-specialist
+
+**Goal:** Verify and correct the five highest-drift guides — `05-room-service.html`,
+`06-housekeeping.html`, `07-reception-bookings.html`, `13-finance-payments.html`,
+`14-reports-eod.html` (all under `C:\Users\john-paul.chirwa\OneDrive\MSP\Rosalyns-hotel-2026\docs\guides\`)
+— against current app behavior. Fix anything that describes removed/renamed/changed
+functionality. **Content edits to those five HTML files only.**
+
+**Specialist:** frontend-specialist (sonnet) — these are HTML content/documentation files;
+the work is reading + editing prose/tables/markup, not app logic.
+
+**Reference, do NOT re-scan the whole app:** `.claude/SYSTEM_MAP.md` is the source of truth for
+what pages/tables/endpoints exist. For the two targeted verifications below you MAY `Grep`/`Read`
+the specific named admin file only — do not open-endedly audit `admin/`.
+
+**Known drift already found (fix these, then verify the rest):**
+
+1. **`07-reception-bookings.html` has an orphaned duplicate document.** The real page ends with
+   `</body></html>` at **line ~1016-1018**. Everything AFTER that first `</html>` — a second
+   `<main class="content">…</main>`, a second `<footer>`, and a second `</body></html>` (lines
+   ~1020-1178) — is a leftover older draft appended past the document close. It is invalid HTML
+   AND self-contradicts the authoritative content: the orphan says tentatives are *"auto-cancelled"*
+   at expiry (line ~1135), but the correct, current behavior stated earlier (lines ~686-689) is
+   *"Expiry does NOT automatically cancel — it only flags; a manager must manually cancel."*
+   **Delete the entire orphaned trailing block** so the file is one valid document ending at the
+   first `</html>`. Confirm the retained content's tentative-expiry description is the "manual
+   cancel" one (matches `admin/tentative-bookings.php` behavior per SYSTEM_MAP.md).
+
+2. **Guest lifecycle emails are undocumented.** P2-02/P2-03 (done this session) added a pre-arrival
+   reminder email and a post-stay review-request email, both toggleable in
+   `admin/booking-settings.php` (Grep that file for `booking_prearrival_reminder_enabled`,
+   `booking_prearrival_reminder_days`, `booking_poststay_review_enabled`,
+   `booking_poststay_review_days` to confirm the "Guest communication emails" card and its four
+   inputs). `07-reception-bookings.html` §19 "Booking settings" (table around lines 885-935) and
+   its email-template list currently omit them. Add a row/paragraph documenting: pre-arrival
+   reminder (off by default, N days before check-in) and post-stay review request (off by default,
+   N days after check-out, links to the public `submit-review.php` review form). Keep it brief and
+   in the existing table/callout style — do not restyle.
+
+**Then verify (correct only if wrong), per the acceptance criteria above:**
+- Every page URL cited in the five guides resolves to a real admin page in SYSTEM_MAP.md
+  (`/admin/bookings.php`, `/admin/create-booking.php`, `/admin/tentative-bookings.php`,
+  `/admin/blocked-dates.php`, `/admin/calendar.php`, `/admin/booking-settings.php`,
+  `/admin/housekeeping.php`, plus the finance/reports/room-service pages the guides name).
+- Booking-status set, payment-method set, folio charge types, and refund/invoice flows described
+  in `07` and `13` match SYSTEM_MAP.md's documented enums/behavior (no invented statuses).
+- No claim of automated online payment capture anywhere in the five guides (P2-01 = manual
+  settlement). The payment-method lists (cash/card/mobile money/bank transfer/cheque/other) are
+  correct as manual methods — flag only an actual "auto-charge card at booking"-style claim.
+- `13-finance-payments.html` and `14-reports-eod.html`: verify sequence-number formats
+  (`INV-YYYY-NNNNNN` etc.), EOD/Z-report and shift-close descriptions match the current pages
+  per SYSTEM_MAP.md; correct any renamed page/label.
+
+**What NOT to touch:** any guide outside the five named (01-04, 08-12, 15-17, 99, `owner-handover.*`,
+`index.html` are batches B/C — leave them); `docs/guides/assets/*` (theme CSS/JS — that's R4-04);
+any application `.php`/`.css`/`.js` under `admin/`, `includes/`, `config/`, `api/`, or root; no new
+files; no file renames. Do not restyle or re-theme — content corrections only.
+
+**Acceptance criteria (R4-02a):**
+1. `07-reception-bookings.html` contains exactly ONE `<html>…</html>` document (the orphaned
+   trailing block after the first `</html>` is gone); Grep for `</html>` in that file returns a
+   single match; the tentative-expiry description is the "manual cancel, does not auto-cancel" one
+   with no surviving contradictory "auto-cancelled" statement.
+2. The pre-arrival reminder and post-stay review-request emails (P2-02/P2-03) are documented in
+   `07-reception-bookings.html` (booking-settings and/or email section), named as toggleable and
+   off by default, with the post-stay email linking to `submit-review.php`.
+3. No guide among the five claims automated online payment capture at booking time; any such claim
+   is corrected to manual settlement at check-in.
+4. Every admin page URL, booking/payment status, folio type, and setting named in the five guides
+   exists in the current app per `SYSTEM_MAP.md` (or the specifically-grepped admin file); any that
+   does not is corrected or removed.
+5. Edits are confined to the five named files in `docs/guides/`; `git diff` touches no application
+   code, no `docs/guides/assets/*`, and no guide outside the five. Each edited `.html` remains a
+   single valid, tag-balanced document.
+6. The specialist returns a short per-guide note listing what was found and changed (or "verified,
+   no change") for each of the five — so QA can confirm coverage.
+
+**QA gate:** qa-auditor **haiku** — this is a documentation content-accuracy task, not
+security/logic. Haiku verifies: only the five named `docs/guides/*.html` files changed (no app
+code, no `assets/*`, no out-of-batch guide); `07` now has a single `</html>` and no surviving
+"tentative auto-cancelled" contradiction; the P2-02/P2-03 emails are documented in `07`; no guide
+claims automated online payment capture; each edited file is tag-balanced. (No sonnet: no code,
+money, or security surface is touched — the guides are prose/tables.)
+
+### R4-02b — split plan & rationale (2026-07-14)
+
+**Why sub-split Batch B:** 12 doc files verified against live admin behavior in one dispatch is
+too large to do carefully or QA cleanly — the same reason R4-02 was batched at all. Even at
+"lower drift risk," each guide must still be really verified (page URLs exist, no false online-
+payment-capture claim, no invented statuses/settings), not skimmed. Split into three cohesive,
+QA-able sub-batches; dispatch one at a time:
+- **R4-02b1** — POS/KDS station playbooks `01-pos-till`, `02-kds-kitchen`, `03-bds-bar`,
+  `04-cds-coffee`. One cohesive cluster (BDS/CDS are thin wrappers of KDS per SYSTEM_MAP.md
+  lines 395-397); confirmed already tablet-optimized in P3-02 with no functional change.
+- **R4-02b2** — `08-stock-orders`, `09-packages-rates`, `10-conference-events`,
+  `11-social-facebook-sharing`, `12-email-templates.php`. `09` (rates/packages) gets a deeper
+  spot-check — "rates/packages" is config-adjacent and could drift.
+- **R4-02b3** — `15-pwa-install-guide`, `16-business-presets`, `17-gym-management`. `16`
+  (business presets) gets a deeper spot-check for the same config-drift reason.
+
+**All five per-batch acceptance criteria from the R4-02 batching plan above apply to every
+sub-batch** (no non-existent functionality; no online-payment-capture claim; guest-lifecycle
+emails noted where a guide enumerates them; content-only edits; each file stays structurally
+valid). Dispatch b1 now; b2 and b3 stay queued until the prior sub-batch's QA passes.
+
+### R4-02b1 — dispatch brief → frontend-specialist
+
+**Goal:** Verify and correct the four POS/KDS station guides — `01-pos-till.html`,
+`02-kds-kitchen.html`, `03-bds-bar.html`, `04-cds-coffee.html` (all under
+`C:\Users\john-paul.chirwa\OneDrive\MSP\Rosalyns-hotel-2026\docs\guides\`) — against current app
+behavior. Fix anything that describes removed/renamed/changed functionality. **Content edits to
+those four HTML files only. Lower drift risk is NOT a licence to skim — actually verify each
+guide's claims against SYSTEM_MAP.md before declaring it accurate.**
+
+**Specialist:** frontend-specialist (sonnet) — HTML content/documentation editing, not app logic.
+
+**Reference, do NOT re-scan the whole app:** `.claude/SYSTEM_MAP.md` is the source of truth for
+what pages/tables/endpoints exist. Grounding facts already pulled from it for this sub-batch:
+- POS till = `admin/pos.php`; server-side price lookup (never client-submitted); order lifecycle:
+  place_order → fireKitchen (`stock_kds_events` event='fired') → KDS workflow → `settle_tab`
+  payment → void — SYSTEM_MAP.md lines 442-476, 484.
+- KDS = `admin/kds.php` (kitchen view). **`admin/bds.php` (bar) and `admin/cds.php` (coffee bar)
+  are THIN WRAPPERS that just configure `kds.php`** with `bds_view` / `cds_view` permissions —
+  SYSTEM_MAP.md lines 395-397. Any guide implying BDS/CDS are separate standalone systems with
+  their own codebase is drift; they share `kds.php`'s board, ticket states, and workflow.
+- Ticket workflow states live on `stock_order_items.kds_status` (pending → started → ready →
+  served, plus void), audited in `stock_kds_events` — SYSTEM_MAP.md lines 451-457, 472.
+- Station hours (kitchen/bar/coffee-bar open/close) configured in `admin/station-settings.php`,
+  keys like `station_kitchen_open_time` via `includes/station-hours.php` — SYSTEM_MAP.md lines
+  188, 407. Station day/production reporting = `admin/kds-report.php` — SYSTEM_MAP.md line 398.
+For any claim NOT covered by these grounding facts you MAY `Grep`/`Read` the specific named admin
+file only (`admin/pos.php`, `admin/kds.php`, `admin/bds.php`, `admin/cds.php`,
+`admin/station-settings.php`, `admin/kds-report.php`) — do not open-endedly audit `admin/`.
+
+**Verify (correct only if wrong), per the five per-batch acceptance criteria above:**
+- Every page URL / permission name / button label / status value / setting the four guides cite
+  resolves to something real per SYSTEM_MAP.md (or the specifically-grepped admin file). Watch for
+  BDS/CDS being described as anything other than kds.php wrappers.
+- Ticket-state names in the guides match the real `kds_status` set (pending/started/ready/served/
+  void) — no invented states.
+- No guide claims automated online payment capture. POS settlement is manual (`settle_tab` records
+  a payment; methods are cash/card/mobile money/bank transfer/etc.) — flag only an actual
+  "auto-charge card"-style claim, not the normal manual method list.
+- Station-hours / station-report references point at `station-settings.php` / `kds-report.php`
+  under their current names; correct any renamed page or stale label.
+- P2-02/P2-03 guest-lifecycle emails: these POS/KDS station guides almost certainly do NOT
+  enumerate guest booking emails, so criterion 3 likely needs NO edit here — add the pre-arrival/
+  post-stay note ONLY if one of these four guides actually lists guest booking-lifecycle emails
+  (it would be out of place to inject it into a POS till playbook). Note this explicitly in your
+  per-guide report.
+
+**What NOT to touch:** any guide outside the four named (05-17, 99, `owner-handover.*`,
+`index.html` are other batches — leave them); `docs/guides/assets/*` (theme CSS/JS — that is
+R4-04); any application `.php`/`.css`/`.js` under `admin/`, `includes/`, `config/`, `api/`, or
+root; no new files; no renames. Do not restyle or re-theme — content corrections only.
+
+**Acceptance criteria (R4-02b1):**
+1. No claim in the four guides describes functionality absent from the current app — every page
+   URL, permission, button label, ticket state, and setting named exists per `SYSTEM_MAP.md` (or
+   the specifically-grepped admin file); any that does not is corrected or removed.
+2. BDS (`03`) and CDS (`04`) are described consistently with reality: they are `kds.php`-driven
+   displays (bar / coffee-bar views via `bds_view` / `cds_view`), not separate standalone systems.
+3. Ticket-workflow state names match the real `kds_status` set; no invented statuses survive.
+4. No guide among the four claims automated online payment capture at booking/order time; any such
+   claim is corrected to manual settlement.
+5. Edits are confined to the four named files in `docs/guides/`; `git diff` touches no application
+   code, no `docs/guides/assets/*`, and no guide outside the four. Each edited `.html` remains a
+   single valid, tag-balanced document (Grep `</html>` returns exactly one match per file).
+6. The specialist returns a short per-guide note — what was found and changed, or "verified, no
+   change" — for each of the four, and explicitly states whether the P2-02/P2-03 email note was
+   applicable (expected: not applicable to POS/KDS station guides).
+
+**QA gate:** qa-auditor **haiku** — documentation content-accuracy task, not security/logic.
+Haiku verifies: only the four named `docs/guides/*.html` files changed (no app code, no
+`assets/*`, no out-of-batch guide); each edited file has exactly one `</html>` and is tag-balanced;
+BDS/CDS are described as kds.php wrappers; no guide claims automated online payment capture; the
+per-guide coverage note is present for all four. (No sonnet: no code, money, or security surface —
+the guides are prose/tables.)
 
 ## Blocked / decisions needed from owner
 
@@ -1394,6 +1914,34 @@ visibility explicit + rate-limit, without gating on admin session.
 - **P1-01** (2026-07-13): ASSUMPTION: room #1 (VIP Beach Front Villa) has `rooms_available = 0` in live data, which would make an availability assertion against a hardcoded room id meaningless. The specialist scanned `$rooms` for one with `rooms_available > 0` instead. Correct call — flagging so future smoke-test additions know live data has at least one fully-booked-out room and shouldn't assume room #1 is available.
 
 ## Completed
+- **R4-01** (2026-07-15, QA: PASS/haiku, first attempt) — New guest-facing `faq.php`, modeled
+  exactly on privacy-policy.php's shell. Six sections (booking flow, manual payment, managing/
+  cancelling a booking, reviews + lifecycle emails, amenities, contact) using only verifiable
+  facts; unconfirmed specifics (exact times/policies/prices) left as "contact front desk"
+  placeholders rather than fabricated.
+- **R4-02** (2026-07-15, 6 sub-batches a/b1/b2/b3/c, all QA PASS) — Verified/corrected all 17
+  topical staff guides + 3 aggregator docs in docs/guides/ against real app behavior. Found and
+  fixed real drift: an orphaned duplicate HTML document, wrong housekeeping status vocabulary,
+  a rate-plan priority-direction contradiction, a wrong email-recipient claim, missing template
+  registry rows, two wrong button labels, a wrong permission-gating claim, and an incorrect
+  SMTP-credentials-location claim in owner-handover docs. Batch b3's QA gate needed an explicit
+  git-command ban in the dispatch brief to finally kill the recurring git-HEAD-baseline false
+  positive that had hit this session 3 times — worked cleanly on the first try after that.
+- **R4-03** (2026-07-15, QA: PASS/haiku, first attempt) — Added 15 `data-help` tooltip
+  attributes across bookings.php, booking-details.php, and housekeeping.php, extending the
+  existing (already site-wide) tooltip framework's coverage to the 3 highest-traffic ops
+  workflows. Framework itself untouched — attribute-only addition.
+- **R4-04** (2026-07-15, build-planner investigation, no dispatch needed) — Checked all three
+  Round 4 deliverables against the site's Japandi tokens: faq.php inherits the theme exactly
+  by construction (no inline styles); docs/guides/assets/guide-theme.css already uses the same
+  fonts and the same warm-neutral/gold family as the public site (not byte-identical, but not
+  jarring for internal docs); the tooltip framework's CSS was never touched by R4-03. No polish
+  dispatch was invented where none was warranted.
+
+**PROJECT COMPLETE — Round 4.** All 23 checklist items now checked (19 from Rounds 1-3 + 4
+Round 4 items). This session also added a token-cost tracking layer (`.claude/COST_LOG.md`,
+`.claude/scripts/gen-dashboard.js`, `.claude/dashboard.html`, a 35k-token high-cost confirm
+gate) to `/build-loop` itself, used live starting with R4-02b1.
 - **R3-01** (2026-07-14, QA: PASS/haiku, first attempt) — Corrected two stale "DEAD" flags on
   `includes/seo-meta.php` in SYSTEM_MAP.md (lines 193, 230); it's an active dependency of
   `booking-confirmation.php:88`. Doc-only.

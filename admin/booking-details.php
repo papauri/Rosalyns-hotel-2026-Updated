@@ -1620,7 +1620,7 @@ unset($_SESSION['success_message'], $_SESSION['error_message']);
                     <div class="folio-header">
                         <div class="folio-actions">
                             <?php if ($bPerms['can_add_charge']): ?>
-                                <button class="folio-btn primary" onclick="openAddChargeModal()">
+                                <button class="folio-btn primary" onclick="openAddChargeModal()" data-help="Add Charge|Add a manual line item to this guest's folio — e.g. minibar, damages, or a service fee — with a custom description and amount.">
                                     <i class="fas fa-plus"></i> Add Charge
                                 </button>
                                 <button class="folio-btn secondary" onclick="openMenuModal()">
@@ -2013,7 +2013,7 @@ unset($_SESSION['success_message'], $_SESSION['error_message']);
                                     ?>
 
                                     <?php if (!$room_assigned): ?>
-                                        <a href="bookings.php?action=assign-room&booking_id=<?php echo $booking_id; ?>" class="action-btn assign-room">
+                                        <a href="bookings.php?action=assign-room&booking_id=<?php echo $booking_id; ?>" class="action-btn assign-room" data-help="Assign Room|Pick a specific physical room for this confirmed booking. Required before check-in can proceed.">
                                             <i class="fas fa-key"></i> Assign Room
                                         </a>
                                     <?php else: ?>
@@ -2024,7 +2024,7 @@ unset($_SESSION['success_message'], $_SESSION['error_message']);
 
                                     <form method="POST" class="booking-action-form" data-admin-confirm="Check in this guest and mark the assigned room occupied?" data-admin-confirm-title="Check in guest" data-admin-confirm-ok="Check in" data-admin-confirm-icon="fa-right-to-bracket" data-admin-submit-text="Checking in...">
                                         <input type="hidden" name="booking_action" value="checkin">
-                                        <button type="submit" class="action-btn checkin" <?php echo ($can_checkin && $room_assigned && $checkin_date_reached) ? '' : 'disabled title="' . htmlspecialchars($checkin_disabled_reason) . '"'; ?>>
+                                        <button type="submit" class="action-btn checkin" data-help="Check In|Check the guest into their assigned room and mark the room occupied. Requires payment recorded, a room assigned, and the check-in date to have arrived." <?php echo ($can_checkin && $room_assigned && $checkin_date_reached) ? '' : 'disabled title="' . htmlspecialchars($checkin_disabled_reason) . '"'; ?>>
                                             <i class="fas fa-right-to-bracket"></i> Check In
                                         </button>
                                     </form>
@@ -2038,7 +2038,7 @@ unset($_SESSION['success_message'], $_SESSION['error_message']);
                                 <?php if ($booking['status'] == 'checked-in'): ?>
                                     <form method="POST" class="booking-action-form" data-admin-confirm="Check out this guest and generate the final invoice where applicable?" data-admin-confirm-title="Check out guest" data-admin-confirm-ok="Check out" data-admin-confirm-icon="fa-right-from-bracket" data-admin-submit-text="Checking out...">
                                         <input type="hidden" name="booking_action" value="checkout">
-                                        <button type="submit" class="action-btn checkout">
+                                        <button type="submit" class="action-btn checkout" data-help="Check Out|Check the guest out, release the room, and generate the final invoice where applicable.">
                                             <i class="fas fa-right-from-bracket"></i> Check Out
                                         </button>
                                     </form>

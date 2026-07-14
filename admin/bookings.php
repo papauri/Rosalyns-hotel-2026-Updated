@@ -3284,7 +3284,8 @@ $today_str = $today->format('Y-m-d');
                     <input type="text" name="search" value="<?php echo htmlspecialchars($search_query); ?>"
                         data-live-search-input="room-bookings"
                         placeholder="Search ref, guest, phone, room no, payment ref..."
-                        class="bookings-toolbar__input bookings-toolbar__input--search">
+                        class="bookings-toolbar__input bookings-toolbar__input--search"
+                        data-help="Search Bookings|Search by booking reference, guest name, phone number, room number, or payment reference. Results update automatically as you type.">
                 </div>
                 <select name="filter_status" class="bookings-toolbar__input bookings-toolbar__input--status">
                     <option value="">All Statuses</option>
@@ -3318,7 +3319,7 @@ $today_str = $today->format('Y-m-d');
                 <a href="tentative-bookings.php" class="bookings-toolbar__action bookings-toolbar__action--tentative">
                     <i class="fas fa-hourglass-half"></i> Tentative<?php if ($tentative > 0): ?> <span class="bookings-toolbar__badge"><?php echo $tentative; ?></span><?php endif; ?>
                 </a>
-                <a href="create-booking.php" class="bookings-toolbar__action bookings-toolbar__action--new">
+                <a href="create-booking.php" class="bookings-toolbar__action bookings-toolbar__action--new" data-help="New Booking|Open the full reservation form to create a new room booking for a guest.">
                     <i class="fas fa-plus"></i> New Booking
                 </a>
             </div>
@@ -3606,7 +3607,7 @@ $today_str = $today->format('Y-m-d');
                                                     // Only show "Make Tentative" button if no payment exists
                                                     $can_make_tentative = !in_array($booking['payment_status'], ['paid', 'partial'], true);
                                                     ?>
-                                                    <button class="quick-action confirm" title="Confirm booking" aria-label="Confirm booking" onclick="updateStatus(<?php echo $booking['id']; ?>, 'confirmed')">
+                                                    <button class="quick-action confirm" title="Confirm booking" aria-label="Confirm booking" data-help="Confirm Booking|Move this pending booking to Confirmed status so it appears in the confirmed queue and can proceed to check-in." onclick="updateStatus(<?php echo $booking['id']; ?>, 'confirmed')">
                                                         <i class="fas fa-circle-check"></i>
                                                     </button>
                                                     <button class="quick-action cancel" title="Cancel booking" aria-label="Cancel booking" onclick="openCancelBookingModal(<?php echo $booking['id']; ?>, '<?php echo htmlspecialchars($booking['booking_reference'], ENT_QUOTES); ?>', '<?php echo htmlspecialchars($booking['guest_name'], ENT_QUOTES); ?>')">
@@ -3651,7 +3652,7 @@ $today_str = $today->format('Y-m-d');
                                                         <?php endif; ?>
                                                     <?php else: ?>
                                                         <?php if ($_perm_checkin): ?>
-                                                            <button type="button" class="quick-action checkin <?php echo $can_checkin ? '' : 'disabled'; ?>" data-action="check-in" data-booking-id="<?php echo $booking['id']; ?>" data-booking-ref="<?php echo htmlspecialchars($booking['booking_reference'], ENT_QUOTES); ?>" data-guest-name="<?php echo $guest_name; ?>" data-check-in-date="<?php echo $check_in_date; ?>" data-payment-status="<?php echo $payment_status; ?>" data-room-assigned="<?php echo $room_assigned_bool; ?>" data-booking-status="<?php echo $booking_status; ?>" <?php if (!$can_checkin): ?> title="<?php echo htmlspecialchars($checkin_error); ?>" <?php else: ?> title="Check in guest" <?php endif; ?> aria-label="Check in guest">
+                                                            <button type="button" class="quick-action checkin <?php echo $can_checkin ? '' : 'disabled'; ?>" data-action="check-in" data-booking-id="<?php echo $booking['id']; ?>" data-booking-ref="<?php echo htmlspecialchars($booking['booking_reference'], ENT_QUOTES); ?>" data-guest-name="<?php echo $guest_name; ?>" data-check-in-date="<?php echo $check_in_date; ?>" data-payment-status="<?php echo $payment_status; ?>" data-room-assigned="<?php echo $room_assigned_bool; ?>" data-booking-status="<?php echo $booking_status; ?>" data-help="Check In Guest|Check the guest into their room now. Requires at least partial payment and the check-in date to have arrived." <?php if (!$can_checkin): ?> title="<?php echo htmlspecialchars($checkin_error); ?>" <?php else: ?> title="Check in guest" <?php endif; ?> aria-label="Check in guest">
                                                                 <i class="fas fa-right-to-bracket"></i>
                                                             </button>
                                                         <?php endif; ?>
@@ -3683,7 +3684,7 @@ $today_str = $today->format('Y-m-d');
                                                         <?php endif; ?>
                                                     <?php else: ?>
                                                         <?php if ($_perm_checkout): ?>
-                                                            <button class="quick-action checkout" <?php if (!$checkout_allowed): ?>disabled title="Check-out date is too far in the future" <?php else: ?>title="Checkout guest" <?php endif; ?> aria-label="Checkout guest" onclick="checkoutBooking(<?php echo $booking['id']; ?>, '<?php echo htmlspecialchars($booking['booking_reference'], ENT_QUOTES); ?>')">
+                                                            <button class="quick-action checkout" <?php if (!$checkout_allowed): ?>disabled title="Check-out date is too far in the future" <?php else: ?>title="Checkout guest" <?php endif; ?> aria-label="Checkout guest" data-help="Checkout Guest|Check the guest out and close their stay. Available from the check-out date up to one day early." onclick="checkoutBooking(<?php echo $booking['id']; ?>, '<?php echo htmlspecialchars($booking['booking_reference'], ENT_QUOTES); ?>')">
                                                                 <i class="fas fa-right-from-bracket"></i>
                                                             </button>
                                                         <?php endif; ?>
@@ -3701,7 +3702,7 @@ $today_str = $today->format('Y-m-d');
                                                     && !in_array($booking['payment_status'], ['paid', 'partial', 'completed'], true);
                                                 ?>
                                                 <?php if ($can_mark_paid && $_perm_pay): ?>
-                                                    <button class="quick-action paid" title="Record payment as paid" aria-label="Record payment as paid" onclick="updatePayment(<?php echo $booking['id']; ?>, 'paid')">
+                                                    <button class="quick-action paid" title="Record payment as paid" aria-label="Record payment as paid" data-help="Record Payment as Paid|Mark the full outstanding balance as paid in one click. Only available before any payment has been recorded — use Record Payment in the More menu for partial payments." onclick="updatePayment(<?php echo $booking['id']; ?>, 'paid')">
                                                         <i class="fas fa-money-bill-wave"></i>
                                                     </button>
                                                 <?php endif; ?>

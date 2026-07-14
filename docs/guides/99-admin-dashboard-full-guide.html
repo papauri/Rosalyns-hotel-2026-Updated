@@ -267,8 +267,9 @@
             <li><strong>Edit booking</strong> &mdash; anything except dates while in-house.</li>
             <li><strong>Tentative bookings</strong> &mdash; <code>/admin/tentative-bookings.php</code> — pending queue
               with one-click <em>Convert</em> (fires confirmation email + status flip) or <em>Cancel</em> with reason.
-              Every action logs who did it and when. Tentatives auto-expire if not actioned within the configured
-              window.</li>
+              Every action logs who did it and when. Holds past the configured window are flagged as expired but are
+              <strong>not</strong> auto-cancelled — a staff member must manually cancel an expired tentative to
+              release the room.</li>
           </ul>
         </section>
 
@@ -292,8 +293,8 @@
             </li>
             <li>Adjustments are percentage or fixed; set active date ranges, minimum/maximum nights, specific days of
               the week, and booking lead-time windows.</li>
-            <li>Priority ordering decides which plan wins when multiple plans match; <em>is_stacking</em> controls
-              whether plans compound.</li>
+            <li>Priority ordering decides which plan wins when multiple plans match — <strong>higher number = higher
+                priority</strong>, evaluated first; <em>is_stacking</em> controls whether plans compound.</li>
             <li>Scope to all rooms or specific room types; disable/enable without deleting.</li>
           </ul>
           <div class="callout note">Rate plans run automatically at booking time — no manual discounting needed. Review
@@ -308,9 +309,10 @@
             <li><code>/admin/individual-rooms.php</code> &mdash; manage physical room instances (e.g. "Executive 101").
               Set per-room occupancy tier overrides, child price multiplier, floor, notes, amenities, and photos. All
               status changes logged to <code>room_maintenance_log</code>.</li>
-            <li><code>/admin/room-dashboard.php</code> &mdash; real-time housekeeping status board. Quick-action
-              buttons: Mark Clean, Pass Inspection, Fail Inspection (with reason). KPI bar: check-outs today, check-ins
-              today, rooms by status.</li>
+            <li><code>/admin/room-dashboard.php</code> &mdash; real-time, read-only overview of every room's
+              housekeeping assignment status (Pending / In Progress / Completed / Verified / Blocked) and occupancy.
+              KPI bar: check-outs today, check-ins today, rooms by status. Status is actioned on
+              <code>/admin/housekeeping.php</code> (Start, Mark Done, Verify, or set Blocked with a reason).</li>
             <li><code>/admin/room-maintenance.php</code> &mdash; priority-based maintenance task system (urgent / high /
               medium / low). Full lifecycle: pending → in_progress → completed → verified → cancelled. Supports
               recurring schedules and staff assignment with workload tracking.</li>
@@ -476,8 +478,9 @@
           <h3>Gym Inquiries <code>/admin/gym-inquiries.php</code></h3>
           <ul class="checklist">
             <li>Inbox for fitness centre membership leads submitted via the public <code>/gym.php</code> page.</li>
-            <li>Status pipeline: <strong>new</strong> → <strong>contacted</strong> (sends notification email) →
-              <strong>converted</strong> (sends member welcome email). Each transition is logged.
+            <li>Status pipeline: <strong>new</strong> → <strong>contacted</strong> (sends a notification email to
+              the enquirer) → <strong>converted</strong> (sends a member welcome email to the enquirer). Each
+              transition is logged.
             </li>
             <li>Filterable by status tab; searchable by name, email, phone, reference number. Delete with confirmation
               modal.</li>
@@ -790,6 +793,10 @@
               to insert live data (guest name, booking reference, totals, dates, hotel info, and more).
               <strong><a href="12-email-templates.php">→ Full variable &amp; HTML tag reference (Guide 12)</a></strong>
             </li>
+            <li><strong>Guest communication emails</strong> (Booking Settings) &mdash; a <strong>pre-arrival
+              reminder</strong> and a <strong>post-stay review request</strong>, each opt-in and off by default, with
+              a configurable days-before / days-after send time. Their wording is fixed in code, not stored in
+              <code>booking_email_templates</code>.</li>
           </ul>
         </section>
 

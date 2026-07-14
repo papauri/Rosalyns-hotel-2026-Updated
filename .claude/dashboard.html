@@ -1,0 +1,176 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Build Cost Dashboard — Rosalyn's Hotel 2026</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
+<style>
+  :root { --bg:#f5f2eb; --text:#3e3930; --accent:#8B7355; --gold:#C8A45A; --border:#d5cfc4; --card:#faf8f4; }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg:#16140f; --text:#e8e2d5; --accent:#c9a879; --gold:#d8b968; --border:#3a352b; --card:#1e1b14; }
+  }
+  * { box-sizing: border-box; }
+  body { margin:0; font-family:'DM Sans',system-ui,sans-serif; background:var(--bg); color:var(--text); padding:24px; }
+  h1 { font-family:'DM Serif Display',Georgia,serif; font-weight:400; letter-spacing:0.01em; margin:0 0 4px; }
+  .sub { color:var(--accent); margin-bottom:24px; font-size:0.9rem; }
+  .grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(280px,1fr)); gap:20px; margin-bottom:24px; }
+  .card { background:var(--card); border:1px solid var(--border); border-radius:2px; padding:20px; box-shadow:0 4px 16px rgba(70,60,50,0.08); }
+  .card h2 { margin:0 0 12px; font-size:1rem; letter-spacing:0.04em; text-transform:uppercase; color:var(--accent); }
+  .stat { font-size:2rem; font-weight:600; }
+  .stat-label { font-size:0.8rem; color:var(--accent); }
+  .bar-track { background:var(--border); border-radius:4px; height:10px; margin-top:8px; overflow:hidden; }
+  .bar-fill { background:var(--gold); height:100%; }
+  table { width:100%; border-collapse:collapse; font-size:0.85rem; }
+  th, td { text-align:left; padding:8px 10px; border-bottom:1px solid var(--border); }
+  th { color:var(--accent); text-transform:uppercase; font-size:0.75rem; letter-spacing:0.04em; }
+  tr.flagged { background:rgba(200,84,84,0.08); }
+  .table-wrap { overflow-x:auto; }
+  .note { font-size:0.78rem; color:var(--accent); margin-top:8px; }
+</style>
+</head>
+<body>
+<h1>Build Cost Dashboard</h1>
+<div class="sub">Rosalyn's Hotel 2026 — generated from .claude/COST_LOG.md, refreshed each /build-loop cycle</div>
+
+<div class="grid">
+  <div class="card">
+    <h2>Running total (this log)</h2>
+    <div class="stat">696,239</div>
+    <div class="stat-label">tokens across 9 dispatches</div>
+  </div>
+  <div class="card">
+    <h2>Vs. session cap (approx.)</h2>
+    <div class="stat">100.0%</div>
+    <div class="bar-track"><div class="bar-fill" style="width:100.0%"></div></div>
+    <div class="note">of ~250,000 token ballpark for a Pro 5-hour window — not an official figure</div>
+  </div>
+  <div class="card">
+    <h2>Vs. weekly cap (approx.)</h2>
+    <div class="stat">46.4%</div>
+    <div class="bar-track"><div class="bar-fill" style="width:46.4%"></div></div>
+    <div class="note">of ~1,500,000 token ballpark for a Pro weekly window — not an official figure</div>
+  </div>
+</div>
+
+<div class="grid">
+  <div class="card"><h2>Cost per task</h2><canvas id="taskChart"></canvas></div>
+  <div class="card"><h2>Cost per agent type</h2><canvas id="agentChart"></canvas></div>
+  <div class="card"><h2>Cost per phase</h2><canvas id="phaseChart"></canvas></div>
+</div>
+
+<div class="card">
+  <h2>Dispatch log</h2>
+  <div class="table-wrap">
+  <table>
+    <thead><tr><th>Time</th><th>Task</th><th>Agent</th><th>Model</th><th>Est.</th><th>Actual</th><th>Accuracy</th><th>Flag</th></tr></thead>
+    <tbody>
+        <tr class="">
+          <td>2026-07-15 #1</td>
+          <td>R4-02b1</td>
+          <td>frontend-specialist</td>
+          <td>sonnet</td>
+          <td>8,600</td>
+          <td>59,437</td>
+          <td>691%</td>
+          <td></td>
+        </tr>
+        <tr class="">
+          <td>2026-07-15 #2</td>
+          <td>R4-02b1</td>
+          <td>qa-auditor</td>
+          <td>haiku</td>
+          <td>2,700</td>
+          <td>40,433</td>
+          <td>1497%</td>
+          <td></td>
+        </tr>
+        <tr class="flagged">
+          <td>2026-07-15 #3</td>
+          <td>R4-02b2</td>
+          <td>frontend-specialist</td>
+          <td>sonnet</td>
+          <td>75,000</td>
+          <td>128,478</td>
+          <td>171%</td>
+          <td>⚠ HIGH-COST — owner confirmed proceed</td>
+        </tr>
+        <tr class="flagged">
+          <td>2026-07-15 #4</td>
+          <td>R4-02b2</td>
+          <td>qa-auditor</td>
+          <td>haiku</td>
+          <td>40,000</td>
+          <td>62,338</td>
+          <td>156%</td>
+          <td>⚠ HIGH-COST — covered by prior owner approval for this batch</td>
+        </tr>
+        <tr class="flagged">
+          <td>2026-07-15 #5</td>
+          <td>R4-02b3</td>
+          <td>frontend-specialist</td>
+          <td>sonnet</td>
+          <td>57,500</td>
+          <td>97,076</td>
+          <td>169%</td>
+          <td>⚠ HIGH-COST — covered by prior owner approval for this batch</td>
+        </tr>
+        <tr class="flagged">
+          <td>2026-07-15 #6</td>
+          <td>R4-02b3</td>
+          <td>qa-auditor</td>
+          <td>haiku</td>
+          <td>40,000</td>
+          <td>32,812</td>
+          <td>82%</td>
+          <td>⚠ HIGH-COST — covered by prior owner approval for this batch</td>
+        </tr>
+        <tr class="flagged">
+          <td>2026-07-15 #7</td>
+          <td>R4-02c</td>
+          <td>frontend-specialist</td>
+          <td>sonnet</td>
+          <td>83,000</td>
+          <td>159,368</td>
+          <td>192%</td>
+          <td>⚠ HIGH-COST — covered by prior owner approval for this batch</td>
+        </tr>
+        <tr class="flagged">
+          <td>2026-07-15 #8</td>
+          <td>R4-02c</td>
+          <td>qa-auditor</td>
+          <td>haiku</td>
+          <td>45,000</td>
+          <td>75,047</td>
+          <td>167%</td>
+          <td>⚠ HIGH-COST — covered by prior owner approval for this batch</td>
+        </tr>
+        <tr class="">
+          <td>2026-07-15 #9</td>
+          <td>R4-04</td>
+          <td>build-planner</td>
+          <td>opus</td>
+          <td>19,500</td>
+          <td>41,250</td>
+          <td>212%</td>
+          <td></td>
+        </tr></tbody>
+  </table>
+  </div>
+</div>
+
+<script>
+const palette = ['#8B7355','#C8A45A','#6B5740','#A38A6B','#D8C4A0','#5C4A34'];
+function bar(id, labels, data) {
+  new Chart(document.getElementById(id), {
+    type: 'bar',
+    data: { labels, datasets: [{ data, backgroundColor: palette }] },
+    options: { plugins: { legend: { display: false } }, scales: { y: { beginAtZero: true } } }
+  });
+}
+bar('taskChart', ["R4-02b1","R4-02b2","R4-02b3","R4-02c","R4-04"], [99870,190816,129888,234415,41250]);
+bar('agentChart', ["frontend-specialist","qa-auditor","build-planner"], [444359,210630,41250]);
+bar('phaseChart', ["R4"], [696239]);
+</script>
+</body>
+</html>

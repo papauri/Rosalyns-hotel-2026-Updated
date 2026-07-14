@@ -181,7 +181,7 @@
                     <li>Optionally restrict to specific <strong>days of the week</strong>, minimum/maximum nights, or
                         room types.
                     </li>
-                    <li>Set a <strong>priority</strong> number — lower number = higher priority when multiple plans
+                    <li>Set a <strong>priority</strong> number — higher number = higher priority when multiple plans
                         match.</li>
                     <li>Toggle <strong>Stacking</strong> to allow this plan to compound with others on the same booking,
                         or leave
@@ -211,7 +211,7 @@
                 <ol class="steps">
                     <li>System collects all active plans that match the booking's dates, room type, nights, and lead
                         time.</li>
-                    <li>Plans are sorted by priority (lowest number first).</li>
+                    <li>Plans are sorted by priority (highest number first).</li>
                     <li>If the top-priority plan has <em>stacking OFF</em>, only that plan is applied.</li>
                     <li>If it has <em>stacking ON</em>, the next-priority matching plan is also applied, and so on down
                         the stack.

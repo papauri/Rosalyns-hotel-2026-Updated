@@ -9,6 +9,10 @@ Run this loop. Do NOT stop between tasks — pull the next queued task automatic
 
 ## The cycle (repeat until a stop condition)
 
+Before EVERY agent dispatch in every step below (plan/build/polish/gate), follow the
+**cost estimation & logging** procedure in the next section — it is not optional and not
+a separate pass, it's part of each dispatch.
+
 1. **Plan** — spawn `build-planner` (opus): it reads `.claude/PROJECT_CONTEXT.md`,
    `.claude/BUILD_PLAN.md`, `.claude/SYSTEM_MAP.md`, marks ONE task `in-progress`, and
    returns a dispatch brief with exact paths + acceptance criteria. If the needed area
@@ -34,6 +38,32 @@ Run this loop. Do NOT stop between tasks — pull the next queued task automatic
    ```
 6. **Advance immediately** to step 1 for the next queued task in the same run.
 
+## Cost estimation & logging (every agent dispatch, non-negotiable)
+
+`.claude/COST_LOG.md` is the ledger; `.claude/scripts/gen-dashboard.js` renders it. The
+orchestrator (you) owns this — dispatched agents do not log their own cost.
+
+1. **Before dispatching** any agent (build-planner, specialist, ui-designer, qa-auditor,
+   codebase-scout): estimate the prompt's token cost as `chars(prompt) ÷ 4` for input,
+   plus a fixed overhead per model (~3000 for opus, ~2000 for sonnet, ~1000 for haiku) for
+   system prompt/tool defs, plus an assumed output budget by task type (planning ≈ 3000,
+   build ≈ 4000, polish ≈ 2000, QA gate ≈ 1500 — adjust up for large/multi-file dispatches).
+   Append one row to `.claude/COST_LOG.md`'s table: timestamp, task ID, agent, model, est.
+   in, est. out, est. total, cost tier (see COST_LOG.md's tier weights), leave Actual/
+   Accuracy/Flag columns as `—` for now.
+2. **High-cost gate:** if the estimated total exceeds **35,000 tokens** (see COST_LOG.md's
+   threshold note — calibrated for a Pro plan, adjustable), do NOT dispatch automatically.
+   Mark the row's Flag column `HIGH-COST — awaiting confirm`, then use AskUserQuestion to
+   confirm with the owner before proceeding: state the task, the agent/model, and the
+   estimated token count. Proceed only on explicit approval; if declined, mark the
+   BUILD_PLAN.md task `blocked: owner declined high-cost dispatch` and move to the next task.
+3. **After the agent completes** and its task-notification arrives with a `subagent_tokens`
+   figure: update that same COST_LOG.md row — fill Actual Tokens with the real
+   `subagent_tokens` value, and Accuracy with `round(actual/estimate × 100)%`.
+4. **Refresh the dashboard** every 3 completed tasks (same cadence as `/compact`) and at
+   the end of every run: `node .claude/scripts/gen-dashboard.js` (deterministic, no LLM
+   call — regenerates `.claude/dashboard.html` in place, same URL/file every time).
+
 ## Cost & safety rails (every cycle, non-negotiable)
 
 - `/compact` after every 3 completed tasks; `/clear` when switching phases.
@@ -41,7 +71,6 @@ Run this loop. Do NOT stop between tasks — pull the next queued task automatic
 - Model tiers: haiku for read-only/lint/lookup; sonnet for build work; NEVER Fable 5 or
   Opus for routine execution — Opus only for build-planner; Fable 5 only for setup/replanning.
 - Max 2 specialist subagents running concurrently.
-- Print a `/cost` checkpoint after every full loop cycle.
 - NEVER commit or push. NEVER run destructive SQL (DROP/TRUNCATE/DELETE without WHERE).
 - Anything needing the owner's decision → mark `blocked:` with the specific question in
   BUILD_PLAN.md and move on to the next task.

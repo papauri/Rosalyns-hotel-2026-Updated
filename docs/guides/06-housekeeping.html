@@ -31,7 +31,7 @@
     <div class="deck">
       <div class="eyebrow">Guide 06 &middot; Housekeeping</div>
       <h1>Housekeeping</h1>
-      <p class="lead">Track every individual room's clean / dirty / inspected status. Every change is logged with old →
+      <p class="lead">Track every individual room's Pending / In Progress / Completed / Verified / Blocked status. Every change is logged with old →
         new state and timestamp.</p>
       <div class="meta">
         <span>URL <strong>/admin/housekeeping.php</strong></span>
@@ -45,7 +45,9 @@
     <div class="deck">
 
       <section>
-        <h2>Status colours</h2>
+        <h2>Assignment statuses</h2>
+        <p>Housekeeping work is tracked as <strong>assignments</strong> against a room (not a single room-wide
+          status flag). Each assignment moves through:</p>
         <table>
           <thead>
             <tr>
@@ -55,24 +57,24 @@
           </thead>
           <tbody>
             <tr>
-              <td><span class="pill green">Clean</span></td>
-              <td>Ready for the next guest.</td>
+              <td><span class="pill amber">Pending</span></td>
+              <td>Task created, not yet started.</td>
             </tr>
             <tr>
-              <td><span class="pill amber">Dirty</span></td>
-              <td>Guest has checked out / room needs service.</td>
+              <td><span class="pill blue">In Progress</span></td>
+              <td>Housekeeper has tapped Start — currently cleaning.</td>
             </tr>
             <tr>
-              <td><span class="pill blue">In progress</span></td>
-              <td>Housekeeper currently cleaning.</td>
+              <td><span class="pill green">Completed</span></td>
+              <td>Housekeeper marked the task done.</td>
             </tr>
             <tr>
-              <td><span class="pill purple">Inspected</span></td>
-              <td>Manager-verified clean.</td>
+              <td><span class="pill purple">Verified</span></td>
+              <td>Supervisor confirmed the completed task — locked, cannot be edited further.</td>
             </tr>
             <tr>
-              <td><span class="pill red">Out of service</span></td>
-              <td>Maintenance issue, blocked from booking.</td>
+              <td><span class="pill red">Blocked</span></td>
+              <td>Task cannot proceed (e.g. maintenance issue) — set via the assignment's status field.</td>
             </tr>
           </tbody>
         </table>
@@ -81,22 +83,23 @@
       <section>
         <h2>A typical morning</h2>
         <ol class="steps">
-          <li>Sign in. The board shows every room grouped by floor.</li>
-          <li>Tap a <strong>dirty</strong> card → choose <strong>Start cleaning</strong> → status moves to <em>In
-              progress</em>, timer starts.</li>
-          <li>When done, tap <strong>Mark clean</strong>.</li>
-          <li>The supervisor walks through and taps <strong>Inspected</strong> on each green card to mark it ready for
-            the next arrival.</li>
+          <li>Sign in. The <strong>All Assignments</strong> table lists every task, filterable by status and
+            searchable by room or staff name.</li>
+          <li>On a <strong>Pending</strong> row, tap <strong>Start</strong> → status moves to <em>In Progress</em>.
+          </li>
+          <li>When done, tap <strong>Mark Done</strong> → status moves to <em>Completed</em>.</li>
+          <li>The supervisor reviews completed rows and taps <strong>Verify</strong> to mark the task
+            <em>Verified</em> — this cannot be undone.</li>
         </ol>
       </section>
 
       <section>
-        <h2>Out of service</h2>
+        <h2>Maintenance issues</h2>
         <ol class="steps">
-          <li>Tap a card → <strong>Mark out of service</strong>.</li>
-          <li>Type a reason (e.g. "AC not cooling, parts ordered").</li>
-          <li>The room is removed from the <strong>bookable inventory</strong> automatically.</li>
-          <li>Once fixed, tap <strong>Return to clean</strong>.</li>
+          <li>Set a task's status to <strong>Blocked</strong> if the room can't be cleaned due to a maintenance
+            issue, and add a note explaining why.</li>
+          <li>Serious out-of-order rooms (unbookable until fixed) are handled on the separate
+            <strong>Room Maintenance</strong> page, which removes the room from bookable inventory.</li>
         </ol>
       </section>
 
@@ -104,15 +107,15 @@
         <h2>Audit history</h2>
         <ul class="checklist">
           <li>Every status change is saved to <code>housekeeping_audit_log</code>.</li>
-          <li>Tap a room name to see who changed what, when, and the reason.</li>
+          <li>Tap <strong>View History</strong> on an assignment row to see who changed it, when, and what changed.
+          </li>
         </ul>
       </section>
 
       <section>
         <h2>Tips</h2>
-        <div class="callout tip">If a guest reports a dirty room, mark it <strong>dirty</strong> immediately &mdash; the
-          room stays bookable but supervisors get an alert.</div>
-        <p>Always sign out at end of shift &mdash; the next housekeeper sees their own action history.</p>
+        <div class="callout tip">If a guest reports an issue with a room, create or edit an assignment for it and
+          set the status appropriately &mdash; this keeps the room on staff's task list.</div>
       </section>
 
     </div>
