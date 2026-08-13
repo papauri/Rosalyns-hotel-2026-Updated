@@ -10,6 +10,11 @@ Vanilla PHP (≥7.4, no framework) hotel website + PMS. PDO/MySQL (creds via `.e
 This project runs on an agent build system. **Default to `/build-loop`** for build work —
 do not re-derive plans or re-scan the repo ad hoc.
 
+- `.claude/CORE_SYSTEM_BRIEF.md` — **every agent's Step 0.** The whole system in one page:
+  14 core functional domains → primary files, who uses each surface, non-negotiable
+  conventions, safety rails, output discipline (no code in the terminal).
+- `.claude/COVERAGE_MATRIX.md` — per-domain sweep status; how the loop guarantees it
+  touches every aspect of the system. Planner owns Status, scout owns Mapped.
 - `.claude/PROJECT_CONTEXT.md` — goals, users, best-in-class bar (Cloudbeds/Mews/
   Little Hotelier), ranked gaps. Required reading for build-planner before any planning.
 - `.claude/BUILD_PLAN.md` — phased backlog (P0 Learn → P1 Stabilise → P2 Complete →
