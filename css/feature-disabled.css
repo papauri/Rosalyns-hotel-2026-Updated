@@ -87,11 +87,14 @@
     font-size: 1.1rem;
 }
 
+/* #9a8f82 measured 3.17:1 on the card's white ground — under the 4.5:1 AA
+   floor, and at 0.72rem this counts as small text. Deepened to 4.67:1
+   while keeping the same warm-grey character. */
 .feature-disabled-contact-card span {
     font-size: 0.72rem;
     text-transform: uppercase;
     letter-spacing: 0.04em;
-    color: #9a8f82;
+    color: #7A736B;
 }
 
 .feature-disabled-contact-card strong {

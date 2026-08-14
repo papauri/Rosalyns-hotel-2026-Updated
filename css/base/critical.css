@@ -329,11 +329,14 @@ body .editorial-header * {
     color: #1A1A1A !important;
 }
 
+/* Hardcoded #8B7355 measured 4.02:1 on the #F7F3EE section grounds, under
+   the 4.5:1 AA floor for this 13-15px label. Track --color-primary (now
+   deepened for the same reason) so the two can't drift apart again. */
 .section-header__label,
 .editorial-header .section-header__label,
 body .section-header__label,
 body .editorial-header .section-header__label {
-    color: #8B7355 !important;
+    color: var(--color-primary, #7A6A52) !important;
 }
 
 .section-header__title,

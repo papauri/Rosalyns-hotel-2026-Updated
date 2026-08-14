@@ -9,8 +9,14 @@
        COLOR PALETTE
        ============================================ */
 
-   /* Japandi Brand Colors */
-   --color-primary: #8A775F;
+   /* Japandi Brand Colors
+      --color-primary was #8A775F, which gave only 4.3:1 with white text on
+      primary buttons and ~4.1:1 for small labels on the warm grounds — both
+      under the 4.5:1 AA floor for normal-size text. Deepened to keep the
+      same warm-earth hue while clearing AA (5.2:1 on white, 4.7:1 on the
+      #F7F3EE section grounds). Guest frontend only: the admin console
+      loads nothing from css/, only its own admin/css/* sheets. */
+   --color-primary: #7A6A52;
    --color-primary-light: #B9A78F;
    --color-primary-dark: #5F5343;
    --color-accent-muted: #A5806D;
