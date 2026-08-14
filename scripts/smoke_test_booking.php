@@ -103,7 +103,14 @@ echo "  Result for dates {$checkIn}→{$checkOut}: " . ($avail['available'] ? 'A
 // ── 5. Standard booking INSERT (smoke) ───────────────────────────────────────
 echo "\n=== 5. Standard booking creation ===\n";
 $refPrefix = getSetting('booking_reference_prefix', 'LSH');
-$testRef = 'SMOKETEST-' . time() . '-' . bin2hex(random_bytes(3));
+// bookings.booking_reference is varchar(20) and the server's sql_mode has no
+// STRICT_TRANS_TABLES, so an over-length reference is silently TRUNCATED on
+// insert rather than rejected. The old value ('SMOKETEST-' + time() + '-' +
+// 6 hex) was 27 chars, so what came back out of the DB never equalled what
+// went in and sections 7 and 10 failed against a value that had never been
+// stored. Keep the 'SMOKETEST-' prefix — the leftover purge above matches on
+// it — and fill exactly the remaining 10 characters with entropy.
+$testRef = 'SMOKETEST-' . bin2hex(random_bytes(5)); // 10 + 10 = 20 chars
 $clientUuid = bin2hex(random_bytes(16));
 
 $nights = 2;
@@ -170,7 +177,10 @@ assert_true(
 
 // ── 8. Tentative booking creation ────────────────────────────────────────────
 echo "\n=== 8. Tentative booking ===\n";
-$tentRef   = 'SMOKETEST-TENT-' . time() . '-' . bin2hex(random_bytes(3));
+// Same varchar(20) limit as $testRef above. The old value was 32 chars and
+// truncated to 'SMOKETEST-TENT-' plus 5 digits of the timestamp, which would
+// collide on the UNIQUE index for any two runs within the same ~27 hours.
+$tentRef   = 'SMOKETEST-T' . bin2hex(random_bytes(4)); // 11 + 8 = 19 chars
 $tentUuid  = bin2hex(random_bytes(16));
 $tentExpiry = date('Y-m-d H:i:s', strtotime('+48 hours'));
 $tentIn    = date('Y-m-d', strtotime('+60 days'));

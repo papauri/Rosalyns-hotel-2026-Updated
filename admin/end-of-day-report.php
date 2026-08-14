@@ -705,8 +705,7 @@ if ($mod_bookings) {
                    COALESCE(SUM(p.total_amount), 0) AS revenue
             FROM payments p
             INNER JOIN bookings b  ON b.id = p.booking_id
-            INNER JOIN individual_rooms ir ON ir.id = b.room_id
-            INNER JOIN room_types rt ON rt.id = ir.room_type_id
+            INNER JOIN rooms rt ON rt.id = b.room_id
             WHERE DATE(p.payment_date) = :d
               AND p.payment_status IN ('completed','paid')
               AND COALESCE(p.payment_type,'') <> 'refund'

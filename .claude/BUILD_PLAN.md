@@ -1000,6 +1000,45 @@ the guides are prose/tables.)
 
 ## Blocked / decisions needed from owner
 
+### X-03 — two more missing tables, both currently masked (raised 2026-08-15)
+
+Found by the same audit that caught `room_inspections` (X-01b): every table name in SQL
+across `admin/`, `includes/`, `api/`, `config/`, `scripts/` was extracted with PHP's
+tokenizer and diffed against `information_schema`. Three tables were referenced but absent.
+One (`room_inspections`) was fixed without schema change; these two cannot be, because the
+feature genuinely has no table behind it. **Both are missing in Liwonde Sun too.**
+
+1. **`stock_payments`** — `admin/includes/reports-extra-tabs.php:65,205`, the "payment split"
+   panel of the F&B/POS tab in `admin/reports.php`. Wrapped in `rp_safe()`, which catches and
+   returns `[]`, so the panel permanently renders **"No payments recorded"** — it looks like
+   real data ("no payments today") rather than a broken query.
+   · options: (a) create the table and populate it from the POS payment path;
+   (b) repoint the query at the existing `payments` table filtered to POS/F&B;
+   (c) remove the panel. · recommend: (b) if POS payments already land in `payments` —
+   confirm first; otherwise (c) rather than leave a panel that lies.
+
+2. **`room_features`** — `api/spatial-loading.php:267` (`getRoomFeatures()`). Catches and
+   returns `[]`, so rooms silently render with no feature list. Note `api/spatial-loading.php`
+   is **not referenced by `api/index.php`'s router**, so this endpoint may be dead code.
+   · options: (a) confirm dead and remove (deletion = owner decision);
+   (b) create the table; (c) leave as-is. · recommend: (a) — verify it is unrouted and
+   unreferenced, then remove rather than carry a broken endpoint.
+
+### X-02 — MySQL `sql_mode` has no `STRICT_TRANS_TABLES` (raised 2026-08-15)
+
+The server reports `sql_mode = NO_ENGINE_SUBSTITUTION`. Any value longer than its column is
+**silently truncated on insert instead of raising an error**. This is what made the booking
+smoke test compare against a reference that had never been stored (see X-01 above), and the
+same applies to live guest data: an over-length guest name, email, or special request is
+quietly cut rather than rejected. Confirmed identically on the Liwonde Sun fork, so it is a
+property of how these databases are provisioned, not a one-off.
+
+· options: (a) enable `STRICT_TRANS_TABLES` and fix whatever then starts erroring — correct,
+but may surface latent over-length inserts across the app; (b) leave as-is and rely on
+application-side length validation; (c) enable on a staging copy first and measure the fallout.
+· recommend: (c) then (a). Not urgent, but it means "it saved fine" is not currently proof
+that the stored data is intact.
+
 ### P1-04 — RESOLVED, no longer blocked (corrected 2026-07-14)
 
 **The original deletion candidate was a false positive.** During P3-01 investigation,
@@ -1927,6 +1966,51 @@ visibility explicit + rate-limit, without gating on admin session.
 - **P1-01** (2026-07-13): ASSUMPTION: room #1 (VIP Beach Front Villa) has `rooms_available = 0` in live data, which would make an availability assertion against a hardcoded room id meaningless. The specialist scanned `$rooms` for one with `rooms_available > 0` instead. Correct call — flagging so future smoke-test additions know live data has at least one fully-booked-out room and shouldn't assume room #1 is available.
 
 ## Completed
+- **X-01** (2026-08-15, owner-directed cross-repo fix, no QA dispatch — verified by running
+  the query and both smoke suites) — Two defects found while porting the build system to the
+  Liwonde Sun fork and fixed in **both** repos, since the two projects share this backend and
+  differ only in the guest-facing site.
+  1. **EOD room-type revenue panel was silently dead.** `admin/end-of-day-report.php:709`
+     joined a `room_types` table that **does not exist in this database** (confirmed:
+     `SHOW TABLES LIKE 'room_types'` returns nothing; running the query raises
+     `SQLSTATE[42S02] … room_types doesn't exist`), and also joined `individual_rooms.id` to
+     `bookings.room_id` — the wrong column, since `bookings.room_id` points at `rooms.id`
+     while the physical-unit FK is `bookings.individual_room_id`. The whole query sat in a
+     `try/catch` that only wrote to `error_log`, so "Room type revenue breakdown today"
+     rendered **empty on every EOD load** while quietly filling the log. Its own siblings,
+     `admin/api/end-of-day-pdf.php:256` and `admin/api/end-of-day-send.php:350`, already had
+     the correct `INNER JOIN rooms rt ON rt.id = b.room_id` — the on-screen report had drifted
+     from the PDF and email versions of the same figure. After the fix the panel returns real
+     data (3 room types, top row 6,690,750). A repo-wide grep confirms no other query uses the
+     wrong-FK pattern, in either repo.
+  1b. **`updateRoomStatus()` was dead in the water — bootstrap deadlock.**
+     `includes/room-management.php:157` did `LEFT JOIN room_inspections`, a table that does
+     not exist. The **only** code that creates it is `createRoomInspection()` (line 325,
+     lazy `CREATE TABLE`), reachable solely via `handleStatusWorkflow()` at line 191 of the
+     same function — i.e. *after* the query that already threw. So the table could never be
+     created, and every `updateRoomStatus()` call returned
+     `Database error: … room_inspections doesn't exist`. Proven with a bogus room id: before,
+     `success:false / "Database error: …"`; after, `success:false / "Room not found"`.
+     **Blast radius:** check-in (`admin/process-checkin.php:315`), room dashboard manual
+     status change (`admin/room-dashboard.php:60`), `api/individual-rooms.php:60`, plus
+     `markRoomClean`, `passRoomInspection`, `failRoomInspection`, `processGuestCheckout` and
+     `autoReleaseStaleCleaningRooms`. Separately `getRoomsRequiringInspection()`
+     (`room-dashboard.php:76`) catches the same error and returns `[]`, so the dashboard's
+     inspection queue always rendered empty. Fixed with **no schema change**: the joined
+     column `inspection_status` was selected and never read anywhere in the codebase, so the
+     join was dropped. ⚠️ **Consequence to note:** with the deadlock cleared, moving a room to
+     `inspection` status will now actually reach `createRoomInspection()` and execute its
+     `CREATE TABLE` — app-code DDL that until now could never fire. Pre-creating
+     `room_inspections` via a proper migration instead is an owner call.
+  2. **`smoke_test_booking.php` failed 4/54 deterministically.** `bookings.booking_reference`
+     is `varchar(20)`, the fixture generated 27 characters, and this server's
+     `sql_mode` is `NO_ENGINE_SUBSTITUTION` — **no `STRICT_TRANS_TABLES`** — so MySQL
+     truncated the value on insert instead of erroring, and every later assertion compared
+     against a reference that had never been stored. Fixture references now fit the column.
+     Both suites green in both repos: **booking 54/54, finance 21/21.** This was a defect in
+     the test, not the application. *Not* claimed as the fix for the separately-logged
+     "section 8 flakiness" below — the pre-test purge at line 70 should already prevent the
+     cross-run UNIQUE collision that truncation would otherwise cause, so that remains open.
 - **R5-01** (2026-07-15, no QA dispatch — 2-line addition, verified directly with `php -l`) —
   Investigated before building: `robots.php` and `generate-sitemap.php` already existed and
   were already wired up via `.htaccess:121,124` rewrite rules, live at the real
