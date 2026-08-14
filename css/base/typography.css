@@ -259,7 +259,11 @@ a:focus-visible {
 
 .section-header__title {
     font-family: var(--font-serif);
-    font-size: clamp(2.2rem, 1.62rem + 2.65vw, 4rem);
+    /* The 2.65vw term kept this growing with the window on top of the rem
+       base, reaching 67-72px on an ordinary desktop — larger than the
+       heading needs to be, and the loudest part of the zoomed-in feel.
+       Gentler slope with a 48px ceiling; the mobile end barely moves. */
+    font-size: clamp(1.9rem, 1.35rem + 1.55vw, 3rem);
     font-weight: 500;
     line-height: 1.02;
     letter-spacing: -0.02em;

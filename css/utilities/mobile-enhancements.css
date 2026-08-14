@@ -24,8 +24,13 @@
     --safe-area-left: env(safe-area-inset-left, 0px);
     --safe-area-right: env(safe-area-inset-right, 0px);
 
-    /* Fluid root sizing — uses clamp() so typography & spacing scale smoothly */
-    --rh-base-font: clamp(14px, 0.55vw + 12px, 18px);
+    /* Fluid root sizing — uses clamp() so typography & spacing scale smoothly.
+       This caps the root at 16px, the browser default. It previously topped
+       out at 18px, which silently enlarged every rem-based size on the guest
+       site by 12.5% — body copy landed at 19.4px and section headings at
+       67px, which is what made the pages read as permanently zoomed in.
+       The mobile end is unchanged (~14px at 390px). */
+    --rh-base-font: clamp(14px, 0.35vw + 12.6px, 16px);
 }
 
 /* ============================================
@@ -247,15 +252,18 @@ table { border-collapse: collapse; }
     }
 }
 
+/* These steps still grow the root on very large displays so the site stays
+   legible from a distance, but 20px/24px was a 25%/50% jump over the
+   default and made 4K screens look enormous. Eased to a gentler ramp. */
 @media (min-width: 2560px) {
-    :root { --rh-base-font: 20px; }
+    :root { --rh-base-font: 17px; }
     .container,
     .content-container,
     .page-container { max-width: 2200px; }
 }
 
 @media (min-width: 3840px) {
-    :root { --rh-base-font: 24px; }
+    :root { --rh-base-font: 18px; }
     .container,
     .content-container,
     .page-container { max-width: 3200px; }

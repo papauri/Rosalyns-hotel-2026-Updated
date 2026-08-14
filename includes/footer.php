@@ -345,6 +345,11 @@ $_js_v = function ($f) {
 <script src="js/modal.js?v=<?php echo $_js_v('modal.js'); ?>" defer></script>
 <script src="js/navigation-unified.js?v=<?php echo $_js_v('navigation-unified.js'); ?>" defer></script>
 <script src="js/scroll-lazy-animations.js?v=<?php echo $_js_v('scroll-lazy-animations.js'); ?>" defer></script>
+<!-- Must execute before page-transitions.js: that script checks for
+     window.inertiaScroll at init time and falls back to unsmoothed
+     scrolling if it is not there yet. Both are deferred, so load order
+     here is execution order. -->
+<script src="js/inertia-scroll.js?v=<?php echo $_js_v('inertia-scroll.js'); ?>" defer></script>
 <script src="js/page-transitions.js?v=<?php echo $_js_v('page-transitions.js'); ?>" defer></script>
 <script src="js/pwa-install.js?v=<?php echo $_js_v('pwa-install.js'); ?>" defer></script>
 

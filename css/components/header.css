@@ -1056,6 +1056,62 @@
     color: var(--header-nav-color-scrolled);
 }
 
+/* ============================================
+   HERO-LESS PAGES — force the solid treatment
+   ============================================
+   The header's default state is transparent with white text, which only
+   works because a dark hero sits behind it. Seven guest pages have no
+   hero at all (gym, booking, booking-lookup, check-availability, faq,
+   privacy-policy, 404), so that white text landed on the cream page
+   background at roughly 1.1:1 — effectively invisible until the user
+   scrolled far enough for JS to add .header--scrolled.
+
+   Keyed off the absence of a .hero rather than a list of page classes,
+   so any future hero-less page is covered automatically. */
+
+body:not(:has(.hero)) .header {
+    background: var(--header-bg-scrolled);
+    backdrop-filter: blur(14px) saturate(120%);
+    -webkit-backdrop-filter: blur(14px) saturate(120%);
+    box-shadow: 0 14px 36px rgba(24, 21, 18, 0.11);
+    border-bottom-color: color-mix(in srgb, var(--color-lux-clay-500, #8F7660) 34%, transparent 66%);
+}
+
+body:not(:has(.hero)) .header::before,
+body:not(:has(.hero)) .header::after {
+    opacity: 1;
+}
+
+body:not(:has(.hero)) .header__logo,
+body:not(:has(.hero)) .header__menu-link,
+body:not(:has(.hero)) .header__toggle {
+    color: var(--header-nav-color-scrolled);
+    text-shadow: none;
+}
+
+body:not(:has(.hero)) .header__logo:hover,
+body:not(:has(.hero)) .header__logo:focus,
+body:not(:has(.hero)) .header__menu-link:hover {
+    color: var(--header-nav-hover-scrolled);
+}
+
+body:not(:has(.hero)) .header__menu-link:hover {
+    background: var(--header-nav-hover-bg-scrolled);
+}
+
+body:not(:has(.hero)) .header__logo-kicker {
+    color: var(--header-nav-color-secondary-scrolled);
+    text-shadow: none;
+    letter-spacing: 0.16em;
+    font-weight: var(--font-semibold, 600);
+}
+
+body:not(:has(.hero)) .header__menu-link--active {
+    color: #C9A060;
+    background: var(--header-nav-active-bg-scrolled);
+    font-weight: var(--font-semibold, 600);
+}
+
 
 /* ============================================
    REDUCED MOTION SUPPORT
