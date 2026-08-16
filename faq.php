@@ -10,6 +10,7 @@ if (session_status() !== PHP_SESSION_ACTIVE) {
 
 require_once 'config/database.php';
 require_once 'includes/page-guard.php';
+require_once 'includes/booking-functions.php';
 
 $site_name = getSetting('site_name', 'Our Hotel');
 $site_email = getSetting('email_main', 'info@example.com');
@@ -17,6 +18,23 @@ $site_address = getSetting('address_line1', '');
 $site_phone = getSetting('phone_main', '');
 $current_page = 'faq';
 $page_title = 'Frequently Asked Questions';
+
+// Amenity links — only surface pages whose module/feature is currently on, so
+// an installation with the Gym module switched off doesn't advertise a gym or
+// a gym schedule. Mirrors the header nav and footer link gating.
+$faq_amenities = [];
+if (function_exists('isRestaurantEnabled') && isRestaurantEnabled()) {
+    $faq_amenities[] = ['label' => 'Restaurant', 'href' => 'restaurant.php'];
+}
+if (function_exists('isGymEnabled') && isGymEnabled()) {
+    $faq_amenities[] = ['label' => 'Gym', 'href' => 'gym.php', 'schedule_href' => 'gym-schedule.php'];
+}
+if (function_exists('isConferenceEnabled') && isConferenceEnabled()) {
+    $faq_amenities[] = ['label' => 'Conference', 'href' => 'conference.php'];
+}
+if (function_exists('isEventsEnabled') && isEventsEnabled()) {
+    $faq_amenities[] = ['label' => 'Events', 'href' => 'events.php'];
+}
 
 $seo_data = [
     'title' => "Frequently Asked Questions - $site_name",
@@ -105,10 +123,22 @@ $seo_data = [
             <!-- Section 5: On-Site Amenities -->
             <section class="policy-section" id="amenities">
                 <h2><i class="fas fa-concierge-bell"></i> On-Site Amenities</h2>
-                <h3>What amenities are available on-site?</h3>
-                <p><?php echo htmlspecialchars($site_name); ?> offers an on-site <a href="restaurant.php">restaurant</a>, a <a href="gym.php">gym</a>, and <a href="conference.php">conference</a> and <a href="events.php">events</a> facilities.</p>
-                <h3>Can I book or enquire about these directly?</h3>
-                <p>Yes. Each amenity has its own page where you can view details and submit a booking or enquiry: <a href="restaurant.php">Restaurant</a>, <a href="gym.php">Gym</a> (see also the <a href="gym-schedule.php">gym schedule</a>), <a href="conference.php">Conference</a>, and <a href="events.php">Events</a>.</p>
+                <?php if (!empty($faq_amenities)): ?>
+                    <h3>What amenities are available on-site?</h3>
+                    <p>
+                        <?php echo htmlspecialchars($site_name); ?> offers
+                        <?php foreach ($faq_amenities as $_i => $_am): ?>
+                            <?php if ($_i > 0) { echo $_i === count($faq_amenities) - 1 ? ' and ' : ', '; } ?>
+                            <a href="<?php echo htmlspecialchars($_am['href']); ?>"><?php echo htmlspecialchars(strtolower($_am['label'])); ?></a><?php if (!empty($_am['schedule_href'])): ?> (see also the <a href="<?php echo htmlspecialchars($_am['schedule_href']); ?>">gym schedule</a>)<?php endif; ?>
+                        <?php endforeach; ?>
+                        facilities.
+                    </p>
+                    <h3>Can I book or enquire about these directly?</h3>
+                    <p>Yes. Each amenity has its own page (linked above) where you can view details and submit a booking or enquiry.</p>
+                <?php else: ?>
+                    <h3>What amenities are available on-site?</h3>
+                    <p>Please contact the front desk for the facilities currently available at <?php echo htmlspecialchars($site_name); ?>.</p>
+                <?php endif; ?>
                 <p>Contact the front desk for current hours, availability, and any specific policy details for these facilities.</p>
             </section>
 

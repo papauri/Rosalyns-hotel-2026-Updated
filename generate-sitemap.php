@@ -5,6 +5,7 @@
  */
 
 require_once 'config/database.php';
+require_once 'includes/booking-functions.php';
 
 header('Content-Type: application/xml; charset=utf-8');
 
@@ -33,6 +34,14 @@ $static_pages = [
 ];
 
 foreach ($static_pages as $page) {
+    // Skip pages whose owning module/feature is switched off (same map the
+    // header nav uses) so a gym-less preset doesn't advertise gym.php.
+    if (function_exists('rh_front_page_feature')) {
+        $_sp_feature = rh_front_page_feature(ltrim($page['url'], '/'));
+        if ($_sp_feature !== null && empty($_sp_feature['enabled'])) {
+            continue;
+        }
+    }
     echo '<url>';
     echo '<loc>' . htmlspecialchars($base_url . $page['url']) . '</loc>';
     echo '<lastmod>' . $current_date . '</lastmod>';
@@ -43,9 +52,13 @@ foreach ($static_pages as $page) {
 
 // Dynamic room pages
 try {
-    $stmt = $pdo->query("SELECT slug, updated_at FROM rooms WHERE is_active = 1");
-    $rooms = $stmt->fetchAll(PDO::FETCH_ASSOC);
-    
+    if (!isBookingEnabled()) {
+        $rooms = [];
+    } else {
+        $stmt = $pdo->query("SELECT slug, updated_at FROM rooms WHERE is_active = 1");
+        $rooms = $stmt->fetchAll(PDO::FETCH_ASSOC);
+    }
+
     foreach ($rooms as $room) {
         $lastmod = !empty($room['updated_at']) ? date('Y-m-d', strtotime($room['updated_at'])) : $current_date;
         
@@ -62,9 +75,13 @@ try {
 
 // Dynamic event pages
 try {
-    $stmt = $pdo->query("SELECT id, updated_at FROM events WHERE is_active = 1");
-    $events = $stmt->fetchAll(PDO::FETCH_ASSOC);
-    
+    if (!isEventsEnabled()) {
+        $events = [];
+    } else {
+        $stmt = $pdo->query("SELECT id, updated_at FROM events WHERE is_active = 1");
+        $events = $stmt->fetchAll(PDO::FETCH_ASSOC);
+    }
+
     foreach ($events as $event) {
         $lastmod = !empty($event['updated_at']) ? date('Y-m-d', strtotime($event['updated_at'])) : $current_date;
         

@@ -89,6 +89,12 @@ $unifiedServices = [];
 
 // 1. Add Guest Services from DB
 foreach ($dbServices as $service) {
+    // Keep admin-managed rows in sync with module state — a row linking to a
+    // switched-off feature (e.g. gym-schedule.php when Gym & Fitness is off)
+    // must not render, same as the footer link lists and the header nav.
+    if (function_exists('rh_is_feature_link_hidden') && rh_is_feature_link_hidden((string)($service['link_url'] ?? ''))) {
+        continue;
+    }
     $unifiedServices[] = [
         'type'        => 'service',
         'key'         => $service['service_key'],
@@ -104,6 +110,9 @@ foreach ($dbServices as $service) {
 
 // 2. Add Facilities from DB
 foreach ($dbFacilities as $facility) {
+    if (function_exists('rh_is_feature_link_hidden') && rh_is_feature_link_hidden((string)($facility['page_url'] ?? ''))) {
+        continue;
+    }
     $unifiedServices[] = [
         'type'        => 'facility',
         'key'         => 'facility_' . $facility['id'],

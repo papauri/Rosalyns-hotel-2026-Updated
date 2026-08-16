@@ -126,6 +126,19 @@ if ($header_logo_kicker === '') {
 
             $eventsEnabled = function_exists('isEventsEnabled') ? isEventsEnabled() : true;
             $_nav_pages = array_values(array_filter($_nav_pages, function ($navp) use ($bookingEnabled, $conferenceEnabled, $gymEnabled, $restaurantEnabled, $eventsEnabled) {
+                // Gate by the page's owning module via the single source of truth
+                // (rh_front_page_feature: file_path → module map). This also hides
+                // rows whose page_key differs from the module name — e.g. the seeded
+                // "gym-schedule" nav row must disappear when Gym & Fitness is off.
+                if (function_exists('rh_front_page_feature')) {
+                    $_feature = rh_front_page_feature((string)($navp['file_path'] ?? ''));
+                    if ($_feature !== null) {
+                        return !empty($_feature['enabled']);
+                    }
+                    return true; // global page (home, contact, policies…)
+                }
+
+                // Fallback: legacy page_key checks when booking-functions.php is absent
                 $key = $navp['page_key'] ?? '';
                 if ($key === 'rooms' && !$bookingEnabled) {
                     return false;
@@ -133,7 +146,7 @@ if ($header_logo_kicker === '') {
                 if ($key === 'conference' && !$conferenceEnabled) {
                     return false;
                 }
-                if ($key === 'gym' && !$gymEnabled) {
+                if (($key === 'gym' || $key === 'gym-schedule') && !$gymEnabled) {
                     return false;
                 }
                 if ($key === 'restaurant' && !$restaurantEnabled) {
