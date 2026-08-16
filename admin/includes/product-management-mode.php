@@ -186,7 +186,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['pm_action'])) {
                 $dup = $pdo->prepare("SELECT id, item_name FROM menu_items WHERE barcode = ? AND id != ?");
                 $dup->execute([$barcode, $itemId]);
                 if ($dupRow = $dup->fetch(PDO::FETCH_ASSOC)) {
-                    $pm_json(false, 'Barcode already assigned to "' . $dupRow['item_name'] . '".');
+                    $pm_json(false, 'Barcode already assigned to "' . htmlspecialchars($dupRow['item_name']) . '".');
                 }
             }
 

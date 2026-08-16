@@ -67,12 +67,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['gs_action'])) {
         }
 
         if ($action === 'cancel_reservation') {
+            if (!$gs_can_edit) { $gs_json(false, 'You do not have permission to cancel reservations.'); }
             $id = (int)($_POST['id'] ?? 0);
             $res = gymScheduleCancelReservation($pdo, (string)$id, false);
             $gs_json($res['ok'], $res['message']);
         }
 
         if ($action === 'mark_status') {
+            if (!$gs_can_edit) { $gs_json(false, 'You do not have permission to change reservation status.'); }
             $id = (int)($_POST['id'] ?? 0);
             $newStatus = in_array($_POST['status'] ?? '', ['attended', 'no_show', 'booked'], true) ? (string)$_POST['status'] : '';
             if ($newStatus === '') { $gs_json(false, 'Invalid status.'); }

@@ -205,6 +205,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $_SESSION['alert'] = ['type' => 'error', 'message' => 'Payment amount must be greater than zero'];
     } elseif ($paymentAmount > 99999999) {
         $_SESSION['alert'] = ['type' => 'error', 'message' => 'Payment amount exceeds the maximum allowed value'];
+    } elseif (
+        $editId && $payment
+        && in_array((string)$payment['payment_status'], ['completed', 'paid'], true)
+        && in_array($paymentStatus, ['refunded', 'cancelled'], true)
+    ) {
+        // A payment that was actually collected must not be un-collected by editing
+        // its status directly — that removes it from the paid total with no refund
+        // row, no refund_amount, and no money-out audit trail. Route through the
+        // dedicated refund flow instead, which creates a proper refund record.
+        $_SESSION['alert'] = ['type' => 'error', 'message' => 'This payment has already been collected. Use "Process Refund" from the payment details page to refund it — changing the status here would remove it from the books with no refund record.'];
     } else {
         try {
             if ($editId) {

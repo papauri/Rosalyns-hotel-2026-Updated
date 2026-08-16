@@ -448,6 +448,7 @@ $pending_count = $pending_stmt->fetch(PDO::FETCH_ASSOC)['count'];
             const formData = new FormData();
             formData.append('review_id', reviewId);
             formData.append('response', responseText);
+            formData.append('csrf_token', _pageCsrf);
 
             setButtonLoading(btnEl, true);
             showLoadingOverlay('Submitting response...');
@@ -497,7 +498,8 @@ $pending_count = $pending_stmt->fetch(PDO::FETCH_ASSOC)['count'];
 
             const data = {
                 review_id: reviewId,
-                status: newStatus
+                status: newStatus,
+                _csrf: _pageCsrf
             };
 
             setButtonLoading(btnEl, true);
@@ -540,7 +542,7 @@ $pending_count = $pending_stmt->fetch(PDO::FETCH_ASSOC)['count'];
             setButtonLoading(btnEl, true);
             showLoadingOverlay('Deleting review...');
 
-            fetch('api/reviews.php?review_id=' + encodeURIComponent(reviewId), {
+            fetch('api/reviews.php?review_id=' + encodeURIComponent(reviewId) + '&_csrf=' + encodeURIComponent(_pageCsrf), {
                 method: 'DELETE',
                 credentials: 'same-origin',
                 headers: { 'X-Requested-With': 'XMLHttpRequest' }

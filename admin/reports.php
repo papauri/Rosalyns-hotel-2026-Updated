@@ -321,12 +321,13 @@ try {
     // REFUND ANALYSIS QUERIES
     // ============================================
 
-    // 9. Refund Breakdown by Reason
+    // 9. Refund Breakdown by Reason (completed/processing refunds only — money that
+    // actually left the business, matching the net-revenue logic used elsewhere)
     $refundReasonStmt = $pdo->prepare("
         SELECT refund_reason, COUNT(*) as count,
                COALESCE(SUM(refund_amount), 0) as total_amount
         FROM payments
-        WHERE payment_type = 'refund' AND deleted_at IS NULL
+        WHERE payment_type = 'refund' AND refund_status IN ('completed','processing') AND deleted_at IS NULL
         AND payment_date >= ? AND payment_date <= ?
         GROUP BY refund_reason
         ORDER BY total_amount DESC

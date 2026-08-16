@@ -11,6 +11,8 @@ declare(strict_types=1);
 
 require_once __DIR__ . '/api-init.php';
 
+requireApiPermission('system_logs');
+
 header('Content-Type: application/json');
 header('Cache-Control: no-store');
 

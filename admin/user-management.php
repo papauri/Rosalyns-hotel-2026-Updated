@@ -497,7 +497,7 @@ $nav_categories = getNavCategories();
             </thead>
             <tbody>
                 <?php foreach ($all_users as $u): ?>
-                <tr data-role="<?php echo $u['role']; ?>">
+                <tr data-role="<?php echo htmlspecialchars((string)$u['role']); ?>">
                     <td>
                         <div class="user-info">
                             <div class="user-avatar">
@@ -510,7 +510,7 @@ $nav_categories = getNavCategories();
                         </div>
                     </td>
                     <td>
-                        <span class="role-badge <?php echo $u['role']; ?>">
+                        <span class="role-badge <?php echo htmlspecialchars((string)$u['role']); ?>">
                             <i class="fas <?php echo $all_roles[$u['role']]['icon'] ?? 'fa-user'; ?>"></i>
                             <?php echo $all_roles[$u['role']]['label'] ?? ucfirst($u['role']); ?>
                         </span>

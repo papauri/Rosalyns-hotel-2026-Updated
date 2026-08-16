@@ -427,7 +427,8 @@ try {
         $pageId = getSetting('facebook_page_id', '');
         $postUrl = '';
         if ($pageId !== '' && !empty($result['post_id'])) {
-            $postUrl = 'https://www.facebook.com/' . $pageId . '/posts/' . explode('_', $result['post_id'])[1] ?? $result['post_id'];
+            $postIdParts = explode('_', $result['post_id']);
+            $postUrl = 'https://www.facebook.com/' . $pageId . '/posts/' . ($postIdParts[1] ?? $result['post_id']);
         }
         echo json_encode([
             'success'  => true,

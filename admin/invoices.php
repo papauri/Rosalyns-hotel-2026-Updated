@@ -687,8 +687,8 @@ $totalAging = (float)$aging['bucket_0_30'] + (float)$aging['bucket_31_60'] + (fl
                                         <strong><?php echo htmlspecialchars($invoice['booking_reference']); ?></strong>
                                     </td>
                                     <td>
-                                        <span class="badge badge-<?php echo $invoice['booking_type']; ?>">
-                                            <?php echo ucfirst($invoice['booking_type']); ?>
+                                        <span class="badge badge-<?php echo htmlspecialchars((string)$invoice['booking_type']); ?>">
+                                            <?php echo htmlspecialchars(ucfirst((string)$invoice['booking_type'])); ?>
                                         </span>
                                     </td>
                                     <td>
@@ -706,8 +706,8 @@ $totalAging = (float)$aging['bucket_0_30'] + (float)$aging['bucket_31_60'] + (fl
                                         </strong>
                                     </td>
                                     <td>
-                                        <span class="badge badge-<?php echo $invoice['payment_status']; ?>">
-                                            <?php echo ucfirst(str_replace('_', ' ', $invoice['payment_status'])); ?>
+                                        <span class="badge badge-<?php echo htmlspecialchars((string)$invoice['payment_status']); ?>">
+                                            <?php echo htmlspecialchars(ucfirst(str_replace('_', ' ', (string)$invoice['payment_status']))); ?>
                                         </span>
                                         <?php if ($invoice['payment_type'] === 'refund'): ?>
                                             <br><small style="color: var(--finance-danger);">Refund</small>

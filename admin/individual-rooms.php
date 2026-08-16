@@ -80,8 +80,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $photos_list = trim($_POST['photos_list'] ?? '');
 
             // Validate
+            $validRoomStatuses = ['available', 'occupied', 'maintenance', 'cleaning', 'out_of_order'];
             if (empty($room_type_id) || empty($room_number)) {
                 $error = 'Room type and room number are required.';
+            } elseif (!in_array($status, $validRoomStatuses, true)) {
+                $error = 'Invalid room status.';
             } else {
                 // Check if room number already exists
                 $check = $pdo->prepare("SELECT COUNT(*) FROM individual_rooms WHERE room_number = ?");
@@ -244,39 +247,53 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             if (!in_array($new_status, $validStatuses)) {
                 $error = 'Invalid status.';
             } else {
-                // Get current status
-                $currentStmt = $pdo->prepare("SELECT status FROM individual_rooms WHERE id = ?");
-                $currentStmt->execute([$id]);
-                $current = $currentStmt->fetch(PDO::FETCH_ASSOC);
+                $pdo->beginTransaction();
+                try {
+                    // Lock the row so a concurrent status change can't race with this one
+                    $currentStmt = $pdo->prepare("SELECT status FROM individual_rooms WHERE id = ? FOR UPDATE");
+                    $currentStmt->execute([$id]);
+                    $current = $currentStmt->fetch(PDO::FETCH_ASSOC);
 
-                if ($current) {
-                    $old_status = $current['status'];
+                    if ($current) {
+                        $old_status = $current['status'];
 
-                    // Update status
-                    $stmt = $pdo->prepare("UPDATE individual_rooms SET status = ? WHERE id = ?");
-                    $stmt->execute([$new_status, $id]);
+                        // Update status
+                        $stmt = $pdo->prepare("UPDATE individual_rooms SET status = ? WHERE id = ?");
+                        $stmt->execute([$new_status, $id]);
 
-                    // Log the change
-                    $logStmt = $pdo->prepare("
-                        INSERT INTO room_maintenance_log (individual_room_id, status_from, status_to, reason, performed_by)
-                        VALUES (?, ?, ?, ?, ?)
-                    ");
-                    $logStmt->execute([$id, $old_status, $new_status, $reason, $user['id'] ?? null]);
+                        // Log the change
+                        $logStmt = $pdo->prepare("
+                            INSERT INTO room_maintenance_log (individual_room_id, status_from, status_to, reason, performed_by)
+                            VALUES (?, ?, ?, ?, ?)
+                        ");
+                        $logStmt->execute([$id, $old_status, $new_status, $reason, $user['id'] ?? null]);
 
-                    $message = 'Room status updated successfully!';
-                } else {
-                    $error = 'Room not found.';
+                        $pdo->commit();
+                        $message = 'Room status updated successfully!';
+                    } else {
+                        $pdo->rollBack();
+                        $error = 'Room not found.';
+                    }
+                } catch (Throwable $e) {
+                    $pdo->rollBack();
+                    throw $e;
                 }
             }
         } elseif ($action === 'delete_individual_room') {
             $id = (int)$_POST['id'];
 
-            // Check for active bookings
+            // Check for active bookings, including joined-room bookings via booking_rooms
             $bookingsCheck = $pdo->prepare("
-                SELECT COUNT(*) FROM bookings
-                WHERE individual_room_id = ? AND status IN ('pending', 'confirmed', 'checked-in') AND check_out_date >= CURDATE()
+                SELECT COUNT(*) FROM bookings b
+                WHERE b.status IN ('pending', 'confirmed', 'checked-in') AND b.check_out_date >= CURDATE()
+                  AND (b.individual_room_id = ? OR EXISTS (
+                        SELECT 1 FROM booking_rooms br
+                        WHERE br.booking_id = b.id
+                          AND br.individual_room_id = ?
+                          AND br.released_at IS NULL
+                  ))
             ");
-            $bookingsCheck->execute([$id]);
+            $bookingsCheck->execute([$id, $id]);
             if ($bookingsCheck->fetchColumn() > 0) {
                 $error = 'Cannot delete room with active bookings.';
             } else {
@@ -295,28 +312,35 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 if (!in_array($new_status, $validStatuses)) {
                     $error = 'Invalid status.';
                 } else {
-                    foreach ($room_ids as $room_id) {
-                        $room_id = (int)$room_id;
+                    $pdo->beginTransaction();
+                    try {
+                        foreach ($room_ids as $room_id) {
+                            $room_id = (int)$room_id;
 
-                        // Get current status
-                        $currentStmt = $pdo->prepare("SELECT status FROM individual_rooms WHERE id = ?");
-                        $currentStmt->execute([$room_id]);
-                        $current = $currentStmt->fetch(PDO::FETCH_ASSOC);
+                            // Lock the row so a concurrent status change can't race with this one
+                            $currentStmt = $pdo->prepare("SELECT status FROM individual_rooms WHERE id = ? FOR UPDATE");
+                            $currentStmt->execute([$room_id]);
+                            $current = $currentStmt->fetch(PDO::FETCH_ASSOC);
 
-                        if ($current) {
-                            // Update status
-                            $stmt = $pdo->prepare("UPDATE individual_rooms SET status = ? WHERE id = ?");
-                            $stmt->execute([$new_status, $room_id]);
+                            if ($current) {
+                                // Update status
+                                $stmt = $pdo->prepare("UPDATE individual_rooms SET status = ? WHERE id = ?");
+                                $stmt->execute([$new_status, $room_id]);
 
-                            // Log the change
-                            $logStmt = $pdo->prepare("
-                                INSERT INTO room_maintenance_log (individual_room_id, status_from, status_to, reason, performed_by)
-                                VALUES (?, ?, ?, 'Bulk status change', ?)
-                            ");
-                            $logStmt->execute([$room_id, $current['status'], $new_status, $user['id'] ?? null]);
+                                // Log the change
+                                $logStmt = $pdo->prepare("
+                                    INSERT INTO room_maintenance_log (individual_room_id, status_from, status_to, reason, performed_by)
+                                    VALUES (?, ?, ?, 'Bulk status change', ?)
+                                ");
+                                $logStmt->execute([$room_id, $current['status'], $new_status, $user['id'] ?? null]);
+                            }
                         }
+                        $pdo->commit();
+                        $message = count($room_ids) . ' rooms updated successfully!';
+                    } catch (Throwable $e) {
+                        $pdo->rollBack();
+                        throw $e;
                     }
-                    $message = count($room_ids) . ' rooms updated successfully!';
                 }
             }
         } elseif ($action === 'get_assignable_bookings') {
@@ -1049,7 +1073,7 @@ $currency = htmlspecialchars(getSetting('currency_symbol'));
                                     <td>
                                         <button type="button" class="room-number-btn"
                                             onclick="openRoomDetailModal(<?php echo (int)$room['id']; ?>)">
-                                            <?php echo htmlspecialchars($room['room_number']); ?>
+                                            <?php echo htmlspecialchars($room['room_number'], ENT_QUOTES); ?>
                                         </button>
                                         <?php if ($room['room_name']): ?>
                                             <div class="room-name"><?php echo htmlspecialchars($room['room_name']); ?></div>
@@ -1169,13 +1193,13 @@ $currency = htmlspecialchars(getSetting('currency_symbol'));
                                                 disabled
                                                 style="opacity:0.45;cursor:not-allowed;"
                                                 <?php else: ?>
-                                                onclick="openAssignBookingModal(<?php echo $room['id']; ?>, '<?php echo htmlspecialchars($room['room_number']); ?>', <?php echo $room['room_type_id']; ?>)"
+                                                onclick="openAssignBookingModal(<?php echo $room['id']; ?>, '<?php echo htmlspecialchars($room['room_number'], ENT_QUOTES); ?>', <?php echo $room['room_type_id']; ?>)"
                                                 <?php endif; ?>
                                                 data-help="<?php echo $assignHelp; ?>">
                                                 <i class="fas fa-door-open"></i> Assign
                                             </button>
                                             <button class="btn btn-success btn-sm" type="button"
-                                                onclick="openStatusModal(<?php echo $room['id']; ?>, '<?php echo $room['status']; ?>', '<?php echo htmlspecialchars($room['room_number']); ?>', '<?php echo $statusActiveGuest; ?>', '<?php echo $statusActiveRef; ?>', '<?php echo $statusActiveOut; ?>')"
+                                                onclick="openStatusModal(<?php echo $room['id']; ?>, '<?php echo $room['status']; ?>', '<?php echo htmlspecialchars($room['room_number'], ENT_QUOTES); ?>', '<?php echo $statusActiveGuest; ?>', '<?php echo $statusActiveRef; ?>', '<?php echo $statusActiveOut; ?>')"
                                                 data-help="Change Status|Manually update this room's physical status — e.g. set to Cleaning after a checkout, or Maintenance when repairs are needed.">
                                                 <i class="fas fa-exchange-alt"></i> Status
                                             </button>
@@ -1185,7 +1209,7 @@ $currency = htmlspecialchars(getSetting('currency_symbol'));
                                                 style="opacity:0.45;cursor:not-allowed;"
                                                 data-help="Cannot Delete|This room has an active booking in progress. Check out the guest before deleting this room."
                                                 <?php else: ?>
-                                                onclick="confirmDelete(<?php echo $room['id']; ?>, '<?php echo htmlspecialchars($room['room_number']); ?>')"
+                                                onclick="confirmDelete(<?php echo $room['id']; ?>, '<?php echo htmlspecialchars($room['room_number'], ENT_QUOTES); ?>')"
                                                 data-help="Delete Room|Permanently remove this room record. Rooms with active or upcoming bookings cannot be deleted."
                                                 <?php endif; ?>>
                                                 <i class="fas fa-trash"></i>

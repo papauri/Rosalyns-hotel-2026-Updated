@@ -24,6 +24,7 @@ header('Content-Type: application/json');
 
 // Include database configuration (corrected relative path)
 require_once __DIR__ . '/../../config/database.php';
+require_once __DIR__ . '/../../config/security.php';
 require_once __DIR__ . '/../includes/permissions.php';
 
 // Include email configuration (corrected relative path)
@@ -116,6 +117,14 @@ if ($method === 'POST') {
     // Also merge with $_POST for form data
     if (!empty($_POST)) {
         $input = array_merge($input, $_POST);
+    }
+}
+
+// CSRF validation for state-changing requests
+if ($method === 'POST') {
+    $csrfToken = (string)($input['_csrf'] ?? $input['csrf_token'] ?? '');
+    if (!validateCsrfToken($csrfToken)) {
+        sendError('Invalid CSRF token', 403);
     }
 }
 

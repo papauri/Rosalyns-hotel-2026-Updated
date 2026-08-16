@@ -907,6 +907,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
             if (empty($room_ids)) {
                 $error = 'No rooms selected.';
+            } elseif ($hasPriority && !in_array($priority, $validPriorities, true)) {
+                $error = 'Invalid priority.';
             } else {
                 $pdo->beginTransaction();
                 $created = 0;
@@ -1400,9 +1402,9 @@ foreach ($assignments as $a) {
                         <?php foreach ($assignments as $row): ?>
                             <tr data-status="<?php echo htmlspecialchars((string)$row['status']); ?>" data-priority="<?php echo htmlspecialchars((string)($row['priority'] ?? '')); ?>" data-type="<?php echo htmlspecialchars((string)($row['assignment_type'] ?? '')); ?>" data-room="<?php echo htmlspecialchars(trim((string)($row['room_number'] ?? '') . ' ' . (string)($row['room_name'] ?? ''))); ?>" data-assignee="<?php echo htmlspecialchars((string)($row['assigned_to_name'] ?? 'Unassigned')); ?>" data-due-date="<?php echo htmlspecialchars((string)($row['due_date'] ?? '')); ?>">
                                 <td><strong><?php echo htmlspecialchars($row['room_number'] . ' ' . ($row['room_name'] ?? '')); ?></strong></td>
-                                <td><span class="type-badge <?php echo htmlspecialchars($row['assignment_type'] ?? ''); ?>"><?php echo ucfirst(str_replace('_', ' ', $row['assignment_type'] ?? '')); ?></span></td>
-                                <td><span class="priority-badge <?php echo htmlspecialchars($row['priority'] ?? ''); ?>"><?php echo ucfirst($row['priority'] ?? ''); ?></span></td>
-                                <td><span class="status-pill <?php echo htmlspecialchars($row['status']); ?>"><?php echo ucfirst(str_replace('_', ' ', $row['status'])); ?></span></td>
+                                <td><span class="type-badge <?php echo htmlspecialchars($row['assignment_type'] ?? ''); ?>"><?php echo htmlspecialchars(ucfirst(str_replace('_', ' ', $row['assignment_type'] ?? ''))); ?></span></td>
+                                <td><span class="priority-badge <?php echo htmlspecialchars($row['priority'] ?? ''); ?>"><?php echo htmlspecialchars(ucfirst($row['priority'] ?? '')); ?></span></td>
+                                <td><span class="status-pill <?php echo htmlspecialchars($row['status']); ?>"><?php echo htmlspecialchars(ucfirst(str_replace('_', ' ', $row['status']))); ?></span></td>
                                 <td>
                                     <span><?php echo date('M j', strtotime($row['due_date'])); ?></span>
                                     <?php if (!empty($row['scheduled_time'])): ?>

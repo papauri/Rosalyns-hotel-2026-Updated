@@ -26,6 +26,7 @@ header('Content-Type: application/json');
 
 // Include database configuration - FIXED PATH
 require_once __DIR__ . '/../../config/database.php';
+require_once __DIR__ . '/../../config/security.php';
 require_once __DIR__ . '/../includes/permissions.php';
 
 // Include cache configuration - FIXED PATH
@@ -151,6 +152,14 @@ if ($method === 'POST' || $method === 'PUT') {
     // Also merge with $_POST for form data
     if (!empty($_POST)) {
         $input = array_merge($input, $_POST);
+    }
+}
+
+// CSRF validation for all state-changing requests
+if (in_array($method, ['POST', 'PUT', 'DELETE'], true)) {
+    $csrfToken = (string)($input['_csrf'] ?? $input['csrf_token'] ?? $_GET['_csrf'] ?? '');
+    if (!validateCsrfToken($csrfToken)) {
+        sendError('Invalid CSRF token', 403);
     }
 }
 

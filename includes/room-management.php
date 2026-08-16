@@ -150,11 +150,22 @@ function updateRoomStatus(int $roomId, string $newStatus, string $reason = '', ?
     try {
         $pdo->beginTransaction();
 
-        // Get current room status
+        // Get current room status.
+        //
+        // This previously did `LEFT JOIN room_inspections`, which deadlocked the
+        // whole function: `room_inspections` is created lazily by
+        // createRoomInspection() below, that is only reached via
+        // handleStatusWorkflow() further down this same function, and this query
+        // threw before ever getting there. The table therefore could never be
+        // created, and EVERY updateRoomStatus() call returned
+        // "Database error: ... room_inspections doesn't exist" — breaking check-in,
+        // the room dashboard, mark-clean, inspections and guest checkout.
+        // The joined column (`inspection_status`) was selected and never read
+        // anywhere in the codebase, so dropping the join restores the function
+        // with no behaviour change and no schema change.
         $stmt = $pdo->prepare("
-            SELECT ir.*, irs.status as inspection_status
+            SELECT ir.*
             FROM individual_rooms ir
-            LEFT JOIN room_inspections irs ON ir.id = irs.individual_room_id AND irs.status = 'pending'
             WHERE ir.id = ?
         ");
         $stmt->execute([$roomId]);

@@ -990,6 +990,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
             if (empty($room_ids)) {
                 $error = 'No rooms selected.';
+            } elseif ($hasPriority && !in_array($priority, $validPriorities, true)) {
+                $error = 'Invalid priority.';
+            } elseif ($hasMaintenanceType && !in_array($maintenance_type, $validMaintenanceTypes, true)) {
+                $error = 'Invalid maintenance type.';
             } else {
                 $pdo->beginTransaction();
                 $created = 0;
@@ -1569,14 +1573,14 @@ try {
                                 <td><?php echo htmlspecialchars($row['title']); ?></td>
                                 <td>
                                     <?php if ($hasMaintenanceType): ?>
-                                        <span class="type-badge <?php echo $row['maintenance_type']; ?>"><?php echo ucfirst($row['maintenance_type']); ?></span>
+                                        <span class="type-badge <?php echo htmlspecialchars((string)$row['maintenance_type']); ?>"><?php echo htmlspecialchars(ucfirst((string)$row['maintenance_type'])); ?></span>
                                     <?php else: ?>
                                         -
                                     <?php endif; ?>
                                 </td>
                                 <td>
                                     <?php if ($hasPriority): ?>
-                                        <span class="priority-badge <?php echo $row['priority']; ?>"><?php echo ucfirst($row['priority']); ?></span>
+                                        <span class="priority-badge <?php echo htmlspecialchars((string)$row['priority']); ?>"><?php echo htmlspecialchars(ucfirst((string)$row['priority'])); ?></span>
                                     <?php else: ?>
                                         -
                                     <?php endif; ?>

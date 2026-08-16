@@ -935,8 +935,8 @@ $quickActive = function ($s, $e) use ($startDate, $endDate) {
                                     <?php endif; ?>
                                 </td>
                                 <td>
-                                    <span class="badge badge-<?php echo $payment['booking_type']; ?>">
-                                        <?php echo ucfirst($payment['booking_type']); ?>
+                                    <span class="badge badge-<?php echo htmlspecialchars((string)$payment['booking_type']); ?>">
+                                        <?php echo htmlspecialchars(ucfirst((string)$payment['booking_type'])); ?>
                                     </span>
                                 </td>
                                 <td>
@@ -967,8 +967,8 @@ $quickActive = function ($s, $e) use ($startDate, $endDate) {
                                 </td>
                                 <td><?php echo ucfirst(str_replace('_', ' ', $payment['payment_method'])); ?></td>
                                 <td>
-                                    <span class="badge badge-<?php echo $payment['payment_status']; ?>">
-                                        <?php echo ucfirst(str_replace('_', ' ', $payment['payment_status'])); ?>
+                                    <span class="badge badge-<?php echo htmlspecialchars((string)$payment['payment_status']); ?>">
+                                        <?php echo htmlspecialchars(ucfirst(str_replace('_', ' ', (string)$payment['payment_status']))); ?>
                                     </span>
                                 </td>
                                 <td>
