@@ -229,7 +229,8 @@ function buildAccountingSummary(string $startDate, string $endDate): array
                 SUM(vat_amount) AS vat
          FROM payments
          WHERE deleted_at IS NULL
-           AND payment_status IN ('completed','paid','partial')
+           AND payment_status IN ('completed','paid')
+           AND COALESCE(payment_type, '') <> 'refund'
            AND payment_date BETWEEN :s AND :e
          GROUP BY booking_type"
     );
@@ -253,7 +254,8 @@ function buildAccountingSummary(string $startDate, string $endDate): array
         "SELECT payment_method, COUNT(*) AS tx_count, SUM(total_amount) AS gross
          FROM payments
          WHERE deleted_at IS NULL
-           AND payment_status IN ('completed','paid','partial')
+           AND payment_status IN ('completed','paid')
+           AND COALESCE(payment_type, '') <> 'refund'
            AND payment_date BETWEEN :s AND :e
          GROUP BY payment_method
          ORDER BY gross DESC"

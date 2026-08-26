@@ -1117,6 +1117,12 @@ $folio_total_amount = $vat_is_inclusive
     : $folio_subtotal_before_vat + $folio_total_vat;
 $folio_amount_paid = (float)($folio_summary['amount_paid'] ?? $booking['amount_paid'] ?? 0);
 $folio_balance_due = max(0.0, $folio_total_amount - $folio_amount_paid);
+// Money owed BACK to the guest (overpayment, or a stay shortened after payment).
+// Balance Due is clamped at zero, so without this the credit is invisible here.
+$folio_credit_balance = max(0.0, $folio_amount_paid - $folio_total_amount);
+if ($folio_credit_balance <= BALANCE_TOLERANCE) {
+    $folio_credit_balance = (float)($booking['credit_balance'] ?? 0);
+}
 $booking_levy_amount = (float)($booking['tourism_levy_amount'] ?? 0);
 $booking_levy_percent = (float)($booking['tourism_levy_percent'] ?? 0);
 $booking_room_total_with_tax = $vat_is_inclusive
@@ -1316,10 +1322,17 @@ unset($_SESSION['success_message'], $_SESSION['error_message']);
                 <span class="booking-kpi-card__label">Amount Paid</span>
                 <strong class="booking-kpi-card__value"><?php echo $currency_symbol; ?><?php echo number_format($folio_amount_paid, 2); ?></strong>
             </div>
+            <?php if ($folio_credit_balance > BALANCE_TOLERANCE): ?>
+            <div class="booking-kpi-card booking-kpi-card--attention">
+                <span class="booking-kpi-card__label">Credit Owed to Guest</span>
+                <strong class="booking-kpi-card__value"><?php echo $currency_symbol; ?><?php echo number_format($folio_credit_balance, 2); ?></strong>
+            </div>
+            <?php else: ?>
             <div class="booking-kpi-card <?php echo $folio_balance_due > 0 ? 'booking-kpi-card--attention' : ''; ?>">
                 <span class="booking-kpi-card__label">Balance Due</span>
                 <strong class="booking-kpi-card__value"><?php echo $currency_symbol; ?><?php echo number_format($folio_balance_due, 2); ?></strong>
             </div>
+            <?php endif; ?>
             <div class="booking-kpi-card">
                 <span class="booking-kpi-card__label">Room Status</span>
                 <strong class="booking-kpi-card__value"><?php echo htmlspecialchars($room_status_label); ?></strong>

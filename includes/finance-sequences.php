@@ -6,12 +6,53 @@ declare(strict_types=1);
  * Atomic finance numbering helpers for receipt and invoice sequences.
  */
 
+if (!function_exists('finance_sequence_table_exists')) {
+    /**
+     * Cheap existence probe. Deliberately a SELECT, not DDL: in MySQL any DDL —
+     * including CREATE TABLE IF NOT EXISTS against a table that already exists —
+     * triggers an implicit COMMIT, which would silently end a caller's transaction.
+     */
+    function finance_sequence_table_exists(PDO $pdo): bool
+    {
+        try {
+            $stmt = $pdo->prepare(
+                "SELECT COUNT(*) FROM information_schema.TABLES
+                 WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'finance_sequences'"
+            );
+            $stmt->execute();
+            return (int)$stmt->fetchColumn() > 0;
+        } catch (Throwable $e) {
+            error_log('[finance-sequences] existence probe failed: ' . $e->getMessage());
+            return false;
+        }
+    }
+}
+
 if (!function_exists('finance_ensure_sequence_tables')) {
     function finance_ensure_sequence_tables(PDO $pdo): void
     {
         static $checked = false;
-        if ($checked || $pdo->inTransaction()) {
+        if ($checked) {
             return;
+        }
+
+        // Fast path: already provisioned. Confirming by SELECT rather than by running
+        // the CREATE keeps this safe to call from inside a transaction.
+        if (finance_sequence_table_exists($pdo)) {
+            $checked = true;
+            return;
+        }
+
+        // Table is genuinely missing. The CREATE cannot run here without committing
+        // the caller's transaction out from under it, so fail loudly instead of
+        // returning quietly and letting the INSERT below die with an opaque
+        // "table doesn't exist" that rolls back the caller's whole unit of work.
+        if ($pdo->inTransaction()) {
+            throw new RuntimeException(
+                'finance_sequences table is missing and cannot be created inside a transaction. '
+                . 'Load includes/finance-sequences.php (or call finance_ensure_sequence_tables) '
+                . 'before opening the transaction.'
+            );
         }
 
         $pdo->exec("CREATE TABLE IF NOT EXISTS finance_sequences (
@@ -209,5 +250,55 @@ if (!function_exists('finance_next_credit_note_number')) {
         }
 
         throw new RuntimeException('Unable to allocate a unique credit note number.');
+    }
+}
+
+if (!function_exists('finance_next_refund_reference')) {
+    /**
+     * Allocate a unique refund reference (REF-YYYY-NNNNNN).
+     *
+     * Refund rows live in the payments table alongside receipts and invoices, so they
+     * get the same atomic allocation rather than a random number nobody checks.
+     */
+    function finance_next_refund_reference(PDO $pdo, ?string $refundDate = null): string
+    {
+        $prefix = trim(finance_sequence_setting('refund_prefix', 'REF'));
+        if ($prefix === '') {
+            $prefix = 'REF';
+        }
+
+        $scope        = finance_sequence_scope_from_date($refundDate);
+        $startNumber  = max(1, (int)finance_sequence_setting('refund_start_number', '1'));
+        $sequenceName = 'refund:' . finance_sequence_key_fragment($prefix);
+
+        for ($attempt = 0; $attempt < 1000; $attempt++) {
+            $nextNumber = finance_next_sequence_number($pdo, $sequenceName, $scope, $startNumber);
+            $refundRef  = $prefix . '-' . $scope . '-' . str_pad((string)$nextNumber, 6, '0', STR_PAD_LEFT);
+
+            $stmt = $pdo->prepare("SELECT COUNT(*) FROM payments WHERE payment_reference = ?");
+            $stmt->execute([$refundRef]);
+            if ((int)$stmt->fetchColumn() === 0) {
+                return $refundRef;
+            }
+        }
+
+        throw new RuntimeException('Unable to allocate a unique refund reference.');
+    }
+}
+
+/**
+ * Eager bootstrap.
+ *
+ * Every caller of this file requires it at the top of the script, before any
+ * transaction is opened, so provisioning the sequence table here means the lazy
+ * path above never has to create DDL from inside someone's transaction. Guarded
+ * so that including this file without a live connection stays harmless — the
+ * lazy path then still handles it (and raises a clear error if it cannot).
+ */
+if (isset($GLOBALS['pdo']) && $GLOBALS['pdo'] instanceof PDO && !$GLOBALS['pdo']->inTransaction()) {
+    try {
+        finance_ensure_sequence_tables($GLOBALS['pdo']);
+    } catch (Throwable $financeBootstrapError) {
+        error_log('[finance-sequences] bootstrap failed: ' . $financeBootstrapError->getMessage());
     }
 }

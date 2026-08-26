@@ -3277,7 +3277,7 @@ function getRoomTypeIndividualAvailabilitySummary(int $room_id, string $check_in
     $blockingStatuses = getBookingStatusesThatBlockAvailability(false);
     $placeholders = implode(',', array_fill(0, count($blockingStatuses), '?'));
     $sql = "
-        SELECT child_guests
+        SELECT child_guests, check_in_date, check_out_date
         FROM bookings
         WHERE room_id = ?
         AND individual_room_id IS NULL
@@ -3294,14 +3294,22 @@ function getRoomTypeIndividualAvailabilitySummary(int $room_id, string $check_in
     $unassignedStmt = $pdo->prepare($sql);
     $unassignedStmt->execute($params);
     $unassignedBookingsRows = $unassignedStmt->fetchAll(PDO::FETCH_ASSOC);
-    $unassignedBookings = count($unassignedBookingsRows);
-    $unassignedChildBookings = 0;
+    // Unassigned bookings hold a room out of the pool for the nights they cover, not
+    // for the whole requested range — two sequential holds occupy one room, not two.
+    // Measure each group's PEAK concurrent demand across the requested nights, the
+    // same way physical capacity is measured in checkRoomAvailability().
+    $unassignedChildRows = [];
+    $unassignedAdultRows = [];
     foreach ($unassignedBookingsRows as $unassignedBooking) {
         if ((int)($unassignedBooking['child_guests'] ?? 0) > 0) {
-            $unassignedChildBookings++;
+            $unassignedChildRows[] = $unassignedBooking;
+        } else {
+            $unassignedAdultRows[] = $unassignedBooking;
         }
     }
-    $unassignedAdultBookings = max(0, $unassignedBookings - $unassignedChildBookings);
+    $unassignedBookings      = peakConcurrentOccupancy($unassignedBookingsRows, $check_in_date, $check_out_date);
+    $unassignedChildBookings = peakConcurrentOccupancy($unassignedChildRows, $check_in_date, $check_out_date);
+    $unassignedAdultBookings = peakConcurrentOccupancy($unassignedAdultRows, $check_in_date, $check_out_date);
     $adultOverflowIntoChildRooms = max(0, $unassignedAdultBookings - $nonChildEligibleAvailableCount);
     $availableCount = count($availableRooms);
     $childEligibleRemainingRooms = max(0, $childEligibleAvailableCount - $unassignedChildBookings - $adultOverflowIntoChildRooms);
@@ -3338,6 +3346,73 @@ function isRoomAvailable(int $room_id, string $check_in_date, string $check_out_
         error_log("Error checking room availability: " . $e->getMessage());
         return false;
     }
+}
+
+/**
+ * Peak number of bookings occupying a room type on any single night of a window.
+ *
+ * Hotel capacity is a per-night quantity: a booking occupies the room type on every
+ * night from its check-in date up to (but NOT including) its check-out date, because
+ * the room is released on checkout morning. Counting rows that merely overlap the
+ * requested range overstates demand whenever those rows are sequential rather than
+ * concurrent.
+ *
+ * Implemented as a sweep line over clipped date boundaries, so cost is proportional
+ * to the number of conflicting bookings rather than to the length of the stay.
+ *
+ * @param array  $conflicts  Rows with check_in_date / check_out_date (Y-m-d or datetime)
+ * @param string $windowStart Requested check-in  (Y-m-d, inclusive)
+ * @param string $windowEnd   Requested check-out (Y-m-d, exclusive)
+ * @return int Highest concurrent occupancy across the nights in the window
+ */
+function peakConcurrentOccupancy(array $conflicts, string $windowStart, string $windowEnd): int
+{
+    $windowStart = substr($windowStart, 0, 10);
+    $windowEnd   = substr($windowEnd, 0, 10);
+
+    // Zero- or negative-length window contains no nights, so nothing is occupied.
+    if ($windowStart >= $windowEnd) {
+        return 0;
+    }
+
+    $delta = [];
+    foreach ($conflicts as $conflict) {
+        $start = substr((string)($conflict['check_in_date'] ?? ''), 0, 10);
+        $end   = substr((string)($conflict['check_out_date'] ?? ''), 0, 10);
+        if ($start === '' || $end === '') {
+            continue;
+        }
+
+        // Clip to the requested window — nights outside it are irrelevant here.
+        if ($start < $windowStart) { $start = $windowStart; }
+        if ($end   > $windowEnd)   { $end   = $windowEnd; }
+
+        // Shares no night with the window (adjacent stays, same-day turnover).
+        if ($start >= $end) {
+            continue;
+        }
+
+        $delta[$start] = ($delta[$start] ?? 0) + 1;
+        $delta[$end]   = ($delta[$end]   ?? 0) - 1;
+    }
+
+    if (empty($delta)) {
+        return 0;
+    }
+
+    // Y-m-d sorts lexicographically in chronological order.
+    ksort($delta);
+
+    $running = 0;
+    $peak    = 0;
+    foreach ($delta as $change) {
+        $running += $change;
+        if ($running > $peak) {
+            $peak = $running;
+        }
+    }
+
+    return $peak;
 }
 
 /**
@@ -3539,10 +3614,18 @@ function checkRoomAvailability(int $room_id, string $check_in_date, string $chec
         $stmt->execute($params);
         $conflicts = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
-        // Check availability by counting overlapping bookings
-        // The rooms_available field is a general inventory count, not specific to requested dates
-        // So we need to count actual bookings for the requested dates
-        $overlapping_bookings = count($conflicts);
+        // Capacity is consumed per NIGHT, not per overlapping booking. Two bookings
+        // that both overlap the requested range but not each other (e.g. Jan 1-2 and
+        // Jan 3-4 against a Jan 1-10 request) occupy one room on any given night, not
+        // two. A flat count($conflicts) treats them as concurrent and falsely reports
+        // the room type as full — turning away bookings the calendar shows as free
+        // (getBookedDatesForRoom() below already counts per-day and would disagree).
+        //
+        // Sweep the requested window instead and take PEAK concurrent occupancy:
+        // each conflict is clipped to the requested nights, then counted as +1 on its
+        // first shared night and -1 on its checkout day (checkout frees the room that
+        // morning, so a booking ending on date D does not occupy night D).
+        $overlapping_bookings = peakConcurrentOccupancy($conflicts, $check_in_date, $check_out_date);
 
         // Calculate remaining rooms for the requested dates
         $remaining_rooms = $total_capacity - $overlapping_bookings;
@@ -3843,13 +3926,24 @@ function validateBookingWithAvailability(array $data, ?int $exclude_booking_id =
             }
         }
     } else {
-        // Then check room availability
+        // Then check room availability.
+        // child_rooms_needed must reflect how many rooms of the allocation actually
+        // carry children — a party auto-split across several rooms can need more than
+        // one child-friendly room, and defaulting to 1 lets children be placed in rooms
+        // whose policy forbids them. Callers that have already built an allocation pass
+        // the real count; otherwise fall back to 1 when children are present.
+        $childGuests = (int)($data['child_guests'] ?? 0);
+        $childRoomsNeeded = isset($data['child_rooms_needed'])
+            ? max(1, (int)$data['child_rooms_needed'])
+            : ($childGuests > 0 ? 1 : 0);
+
         $availability = checkRoomAvailability(
             $data['room_id'],
             $data['check_in_date'],
             $data['check_out_date'],
             $exclude_booking_id,
-            (int)($data['child_guests'] ?? 0)
+            $childGuests,
+            max(1, $childRoomsNeeded)
         );
     }
 
@@ -6054,6 +6148,11 @@ function ensureBookingChargesTable(PDO $pdo): void
         $ensureColumn('bookings', 'checkout_completed_at', "ALTER TABLE bookings ADD COLUMN checkout_completed_at DATETIME NULL COMMENT 'When checkout was completed'");
         $ensureColumn('bookings', 'folio_charges_total', "ALTER TABLE bookings ADD COLUMN folio_charges_total DECIMAL(10,2) NOT NULL DEFAULT 0.00 COMMENT 'Total of all folio charge lines (including VAT)'");
         $ensureColumn('bookings', 'primary_booking_id', "ALTER TABLE bookings ADD COLUMN primary_booking_id INT UNSIGNED NULL DEFAULT NULL COMMENT 'For group bookings: ID of the primary (lead) booking. NULL on the primary itself.'");
+        // Money owed BACK to the guest — e.g. a stay shortened after payment. amount_due
+        // is clamped at 0 and cannot carry a negative, so without this column an
+        // overpayment was invisible to every finance page (it lived only inside the
+        // metadata JSON of booking_date_adjustments).
+        $ensureColumn('bookings', 'credit_balance', "ALTER TABLE bookings ADD COLUMN credit_balance DECIMAL(10,2) NOT NULL DEFAULT 0.00 COMMENT 'Amount owed back to the guest (overpayment / shortened stay). Settled via refund or credit note.'");
     } catch (Throwable $e) {
         error_log('ensureBookingChargesTable warning: ' . $e->getMessage());
     }
@@ -6504,10 +6603,18 @@ function recalculateBookingFinancials(int $bookingId): bool
         if ($baseTotalWithVat <= 0) {
             $baseTotalWithVat = $baseAmount + (float)($booking['vat_amount'] ?? 0);
         }
-        $totalAmount = $baseAmount + $chargesSubtotal;
-        $totalVat = (float)$booking['vat_amount'] + $chargesVat;
+        // NOTE: bookings.total_amount and bookings.vat_amount deliberately stay as the
+        // ROOM-only figures — folio charges are tracked separately in
+        // folio_charges_total, and adjustBookingDates() relies on that split. Do not be
+        // tempted to fold $chargesSubtotal / $chargesVat back into those columns; the
+        // balance below is what reflects the full bill.
         $totalWithVat = $baseTotalWithVat + $chargesTotal; // charges_total already includes VAT
-        $amountDue = max(0, $totalWithVat - $amountPaid);
+        $balance   = $totalWithVat - $amountPaid;
+        $amountDue = max(0, $balance);
+        // Overpayment is money owed back to the guest. Keep it on the booking so it
+        // stays correct as charges and payments move — otherwise a credit written by
+        // adjustBookingDates() would go stale the moment a folio charge is added.
+        $creditBalance = $balance < -BALANCE_TOLERANCE ? round(-$balance, 2) : 0.00;
         $paymentStatus = $amountDue <= BALANCE_TOLERANCE ? 'paid' : ($amountPaid > BALANCE_TOLERANCE ? 'partial' : 'unpaid');
 
         // Update booking
@@ -6515,6 +6622,7 @@ function recalculateBookingFinancials(int $bookingId): bool
             UPDATE bookings
             SET amount_paid = ?,
                 amount_due = ?,
+                credit_balance = ?,
                 folio_charges_total = ?,
                 last_payment_date = ?,
                 payment_status = ?,
@@ -6525,6 +6633,7 @@ function recalculateBookingFinancials(int $bookingId): bool
         $updateStmt->execute([
             $amountPaid,
             $amountDue,
+            $creditBalance,
             $chargesTotal,
             $payments['last_payment_date'] ?? null,
             $paymentStatus,
@@ -6902,7 +7011,7 @@ function processBookingDateAdjustment(int $bookingId, string $newCheckIn, string
         $folioStmt = $pdo->prepare("
             SELECT COALESCE(SUM(line_total), 0) as folio_total
             FROM booking_charges
-            WHERE booking_id = ? AND status != 'voided'
+            WHERE booking_id = ? AND voided = 0
         ");
         $folioStmt->execute([$bookingId]);
         $folioData = $folioStmt->fetch(PDO::FETCH_ASSOC);
@@ -6940,6 +7049,7 @@ function processBookingDateAdjustment(int $bookingId, string $newCheckIn, string
                 vat_amount = ?,
                 child_supplement_total = ?,
                 amount_due = ?,
+                credit_balance = ?,
                 payment_status = ?,
                 updated_at = NOW()
             WHERE id = ?
@@ -6952,8 +7062,9 @@ function processBookingDateAdjustment(int $bookingId, string $newCheckIn, string
             $newRoomTotal, // Store room total only (folio charges tracked separately)
             $calculation['vat_amount'],
             $calculation['new_child_supplement'],
-            max(0, $newAmountDue), // Don't allow negative amount_due (credit tracked in metadata)
-            $newPaymentStatus,
+            max(0, $newAmountDue), // amount_due never goes negative — the overpayment
+            round($creditBalance, 2), // is carried in credit_balance instead, so money
+            $newPaymentStatus,        // owed back to the guest is visible to finance.
             $bookingId
         ]);
 

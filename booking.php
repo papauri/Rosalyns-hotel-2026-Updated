@@ -396,6 +396,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
         // For availability check, cap at occupancy pricing tier (this is for pricing, not capacity)
         $validation_payload = $sanitized_data;
+
+        // Tell the availability check how many CHILD-FRIENDLY rooms this allocation
+        // actually needs. Without it the check assumes one, and a party split across
+        // several rooms with children in more than one of them passes validation even
+        // when the room type has too few child-eligible rooms free.
+        $validation_payload['child_rooms_needed'] = 0;
+        foreach ($bookingAllocation as $allocatedRoom) {
+            if ((int)($allocatedRoom['children'] ?? 0) > 0) {
+                $validation_payload['child_rooms_needed']++;
+            }
+        }
+
         if ((int)$validation_payload['number_of_guests'] > $maxOccupancyPerBooking) {
             $validation_payload['number_of_guests'] = $maxOccupancyPerBooking;
             $validation_payload['child_guests'] = min((int)$validation_payload['child_guests'], max(0, $maxOccupancyPerBooking - 1));
@@ -448,12 +460,41 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $room = $selected_room;
         $number_of_nights = $validation_result['availability']['nights'];
 
-        if (roomTypeHasActiveCombinations((int)$room['id'])) {
+        // Joined-room types: reserve ONE combination per room this booking needs, up
+        // front, and keep that queue for both pricing and assignment. Previously every
+        // split room was priced off combination[0] while the insert loop re-queried and
+        // assigned a different combination each iteration — so rooms 2..n could be
+        // charged one combination's price_override and given another's.
+        $usesCombinations   = roomTypeHasActiveCombinations((int)$room['id']);
+        $combinationQueue   = [];
+        if ($usesCombinations) {
             $availableCombinationsForPricing = getAvailableRoomCombinations((int)$room['id'], $check_in_date, $check_out_date);
             if (empty($availableCombinationsForPricing)) {
                 throw new Exception('All joined rooms for this room type are already reserved for those dates.');
             }
-            $pricingCombination = $availableCombinationsForPricing[0];
+            // Two combinations can list the same physical room (101+102 and 102+103 are
+            // both individually available), so the queue cannot simply be the first N —
+            // it must be N combinations that share no physical room between them.
+            $claimedPhysicalRooms = [];
+            foreach ($availableCombinationsForPricing as $candidateCombination) {
+                if (count($combinationQueue) >= $roomsNeeded) {
+                    break;
+                }
+                $candidateRoomIds = [(int)$candidateCombination['room_a_id'], (int)$candidateCombination['room_b_id']];
+                if (array_intersect($candidateRoomIds, $claimedPhysicalRooms)) {
+                    continue;
+                }
+                $claimedPhysicalRooms = array_merge($claimedPhysicalRooms, $candidateRoomIds);
+                $combinationQueue[] = $candidateCombination;
+            }
+
+            if (count($combinationQueue) < $roomsNeeded) {
+                $availableJoined = count($combinationQueue);
+                throw new Exception("Only {$availableJoined} joined-room combination" . ($availableJoined === 1 ? '' : 's') . " available for {$check_in_date} to {$check_out_date}, but your group requires {$roomsNeeded}. Please adjust your guest count or dates.");
+            }
+
+            // Headline figures shown to the guest come from the first combination.
+            $pricingCombination = $combinationQueue[0];
             $combinedRate = $pricingCombination['price_override'] !== null && $pricingCombination['price_override'] !== ''
                 ? (float)$pricingCombination['price_override']
                 : (float)$room['price_per_night'];
@@ -616,11 +657,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     booking_reference, room_id, guest_name, guest_email, guest_phone,
                     guest_country, guest_address, number_of_guests, adult_guests, child_guests,
                     child_price_multiplier, check_in_date, check_out_date, number_of_nights,
-                    total_amount, amount_due, total_with_vat, child_supplement_total, tourism_levy_amount, tourism_levy_percent,
+                    total_amount, amount_due, vat_rate, vat_amount, total_with_vat, child_supplement_total, tourism_levy_amount, tourism_levy_percent,
                     special_requests, status,
                     is_tentative, tentative_expires_at, occupancy_type, client_uuid,
                     rate_plan_id, rate_plan_label, rate_plan_discount, package_total
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ");
             // Build per-row idempotency tag. The first row uses the client uuid verbatim;
             // split-bookings get a deterministic suffix so each row stays unique while
@@ -642,7 +683,21 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $childrenThisBooking = (int)$allocationPart['children'];
                 $occThisBooking = $allocationPart['occupancy_type'];
 
-                $baseRateThisBooking = bookingPriceForOccupancy($room, $occThisBooking);
+                // Price this room off the combination it will actually be assigned,
+                // not off the first one in the list.
+                $roomForThisBooking = $room;
+                if ($usesCombinations) {
+                    $comboThisBooking = $combinationQueue[$i];
+                    $comboRate = ($comboThisBooking['price_override'] !== null && $comboThisBooking['price_override'] !== '')
+                        ? (float)$comboThisBooking['price_override']
+                        : (float)$selected_room['price_per_night'];
+                    $roomForThisBooking['price_per_night']        = $comboRate;
+                    $roomForThisBooking['price_single_occupancy'] = $comboRate;
+                    $roomForThisBooking['price_double_occupancy'] = $comboRate;
+                    $roomForThisBooking['price_triple_occupancy'] = $comboRate;
+                }
+
+                $baseRateThisBooking = bookingPriceForOccupancy($roomForThisBooking, $occThisBooking);
                 $dynamicThisBooking = applyDynamicPricing($pdo, $room_id, $check_in_date, $check_out_date, $number_of_nights, $baseRateThisBooking);
                 $rateThisBooking = (float)$dynamicThisBooking['final_price'];
                 // Packages added to first booking only; subsequent splits get 0
@@ -655,6 +710,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     $tourismLevyThisBooking = ($baseThisBooking + $childSupplementThisBooking) * ($tourism_levy_percent / 100);
                 }
                 $totalThisBooking = $baseThisBooking + $childSupplementThisBooking + $tourismLevyThisBooking + $pkgTotalThisBooking;
+
+                // Record the VAT split, exactly as admin/create-booking.php does. Guest
+                // prices are VAT-INCLUSIVE, so vat_components() extracts the tax from the
+                // priced amount and leaves the total untouched — the guest pays what they
+                // were quoted, and the books get a real VAT figure instead of a zero.
+                // (Under 'exclusive' mode this same call would add VAT on top; the mode
+                // setting is the single control, and it is not this file's decision.)
+                $vatThisBooking      = vat_components($totalThisBooking);
+                $vatRateThisBooking  = $vatThisBooking['rate'];
+                $vatAmtThisBooking   = $vatThisBooking['vat'];
+                $totalWithVatBooking = $vatThisBooking['total'];
 
                 $refForBooking = ($i === 0) ? $booking_reference : ($booking_reference . '-' . ($i + 1));
                 if ($i > 0) {
@@ -689,9 +755,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     $check_in_date,
                     $check_out_date,
                     $number_of_nights,
-                    $totalThisBooking,
-                    $totalThisBooking,
-                    $totalThisBooking,
+                    $totalThisBooking,      // total_amount   — priced amount
+                    $totalWithVatBooking,   // amount_due     — what the guest owes
+                    $vatRateThisBooking,
+                    $vatAmtThisBooking,
+                    $totalWithVatBooking,   // total_with_vat
                     $childSupplementThisBooking,
                     $tourismLevyThisBooking,
                     $tourism_levy_percent,
@@ -708,14 +776,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 ]);
 
                 $newBookingId = (int)$pdo->lastInsertId();
-                if (roomTypeHasActiveCombinations($room_id)) {
-                    $availableCombinations = getAvailableRoomCombinations($room_id, $check_in_date, $check_out_date, $newBookingId);
-                    if (empty($availableCombinations)) {
-                        throw new Exception('Joined rooms are no longer available for those dates. Please choose another date or room type.');
-                    }
-                    $assignment = assignRoomCombinationToBooking($newBookingId, (int)$availableCombinations[0]['id']);
+                if ($usesCombinations) {
+                    // Assign the exact combination this room was priced from above.
+                    // assignRoomCombinationToBooking() re-validates availability under
+                    // the transaction's lock, so a combination taken since the queue was
+                    // built still fails here rather than being silently double-booked.
+                    $assignment = assignRoomCombinationToBooking($newBookingId, (int)$combinationQueue[$i]['id']);
                     if (empty($assignment['success'])) {
-                        throw new Exception($assignment['message'] ?: 'Failed to reserve joined rooms for this booking.');
+                        throw new Exception($assignment['message'] ?: 'Joined rooms are no longer available for those dates. Please choose another date or room type.');
                     }
                 }
 

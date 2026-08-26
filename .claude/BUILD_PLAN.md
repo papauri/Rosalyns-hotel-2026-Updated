@@ -11,6 +11,65 @@
 > approval," never silently queued. /build-loop stops (not pauses) once every item below
 > is `[x]`.
 
+## Logic audit — 2026-08-26 (owner-requested review, outside the completion checklist)
+
+Read-only review of booking / availability / pricing / payments / finance reporting found
+14 logic defects. **All 14 now resolved** — 11 fixed in the review pass, the remaining 3
+actioned after the owner's decisions on 2026-08-26. `php -l` clean across 10 changed files;
+smoke tests 54/54 booking, 21/21 finance. Nothing committed.
+
+### Owner decisions (2026-08-26) and what was done
+
+- **VAT: "prices are meant to be VAT-inclusive."** Set `vat_pricing_mode` from `exclusive`
+  to `inclusive` via `updateSetting()` (reversible from Accounting Dashboard → VAT →
+  Pricing Mode). `vat_components()` now EXTRACTS tax instead of adding it, so quoted
+  totals never inflate. `booking.php` now records `vat_rate` / `vat_amount` /
+  `total_with_vat` on every public booking (previously all zero / equal to total);
+  `conference.php` likewise for its quoted day rate. `events.php` and `gym.php` needed no
+  change — they capture enquiries with no money attached, so the earlier review note
+  overstated them.
+  **Side effect the owner should know:** front-desk quotes via `admin/create-booking.php`
+  now come out ~17.5% LOWER than before, because that path was adding VAT on top under
+  `exclusive`. That is the intended correction, not a regression.
+  **Not actioned, deliberately:** the 13 historical bookings whose VAT was computed
+  on-top under the old mode are left untouched. They record what was actually charged and
+  collected; rewriting them would misstate the books. Worth a separate commercial review
+  of whether those guests were overcharged.
+
+- **Backfill: "go ahead."** One row corrected — payments `id=109` /
+  `PAY-20260708-000096`, `payment_amount` 427,000.00 → 363,404.26 against
+  `vat_amount` 63,595.74 and `total_amount` 427,000.00. Reconciliation asserted before
+  the write. Verified after: 0 rows store gross in the net column, and 0 rows anywhere in
+  `payments` fail `payment_amount + vat_amount = total_amount`.
+
+- **Credit balance: "new column might be better."** Added
+  `bookings.credit_balance DECIMAL(10,2) NOT NULL DEFAULT 0.00` via the existing
+  `$ensureColumn` migration pattern. `adjustBookingDates()` now persists the credit there
+  instead of only inside the `booking_date_adjustments.metadata` JSON, and
+  `recalculateBookingFinancials()` maintains it on every payment/charge change so it can
+  never go stale. Surfaced in `admin/booking-details.php` as a "Credit Owed to Guest" KPI
+  card, replacing the always-zero "Balance Due" card when a credit exists. The folio
+  summary already had an Overpayment row, so no duplicate was added there.
+
+### Fixed in the review pass
+`config/database.php` — folio query hit a non-existent `booking_charges.status` column, so
+every stay extension failed and rolled back (confirmed live: table has `voided`, no
+`status`); availability counted overlapping rows instead of peak per-night occupancy, in
+both `checkRoomAvailability()` and the unassigned-hold count (new `peakConcurrentOccupancy()`
+helper, 12 unit cases); `validateBookingWithAvailability()` dropped `child_rooms_needed`;
+removed a dead charges-total computation. `includes/report-builders.php` — accounting
+summary counted completed refunds as revenue (live: 2 rows, 1,033,700 overstated).
+`admin/create-booking.php` — `payment_amount` now net. `includes/finance-sequences.php` —
+sequence table could never be created when first needed inside a transaction; added an
+existence probe, a clear error, an eager bootstrap, and `finance_next_refund_reference()`.
+`includes/booking-functions.php` — no-show refund reference was unchecked `rand()`; fallback
+availability check contradicted the canonical one on tentative-blocking and capacity column.
+`admin/payment-refund.php` — refund caps now respect `BALANCE_TOLERANCE`, VAT split derived
+after the locked clamp, reference via the sequence allocator. `booking.php` — split bookings
+were priced off one joined-room combination and assigned another; now one overlap-free
+combination reserved per room. `admin/rate-plans.php` — hidden date inputs no longer submit
+stale windows.
+
 ## PROJECT COMPLETE WHEN
 
 **Safety net & audit (Phase 0/1 — closes gap #1):**

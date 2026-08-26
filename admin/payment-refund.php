@@ -9,6 +9,7 @@
 require_once 'admin-init.php';
 
 require_once '../includes/alert.php';
+require_once '../includes/finance-sequences.php';
 require_once 'includes/finance-schema.php';
 
 $message = '';
@@ -100,9 +101,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $payment
             if ($refund_amount <= 0) {
                 throw new Exception('Refund amount must be greater than zero.');
             }
-            if ($refund_amount > $maxRefundable) {
+            // Compare through BALANCE_TOLERANCE: a full refund typed as the displayed
+            // amount must not be rejected by a sub-cent floating-point residue, with an
+            // error quoting a figure identical to the one just entered.
+            if ($refund_amount > $maxRefundable + BALANCE_TOLERANCE) {
                 throw new Exception('Refund amount cannot exceed remaining refundable balance (' . $currency_symbol . number_format($maxRefundable, 2) . ').');
             }
+            // Clamp to the true balance so tolerance can never write out more than is owed.
+            $refund_amount = min($refund_amount, $maxRefundable);
             if (!in_array($refund_reason, ['early_checkout', 'late_checkout_charge', 'cancellation', 'service_issue', 'overpayment', 'other'], true)) {
                 throw new Exception('Invalid refund reason.');
             }
@@ -127,19 +133,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $payment
                 default => 'pending',
             };
 
-            // Calculate VAT portion of refund (pro-rated)
             $vat_rate = $payment['vat_rate'] ?? 0;
-            $vat_amount = round($refund_amount * ($vat_rate / (100 + $vat_rate)), 2);
-            $payment_amount = $refund_amount - $vat_amount;
 
-            // Generate refund reference
-            $year = date('Y');
-            do {
-                $refundRef = 'REF-' . $year . '-' . str_pad((string)random_int(1, 999999), 6, '0', STR_PAD_LEFT);
-                $refundRefCheck = $pdo->prepare("SELECT COUNT(*) FROM payments WHERE payment_reference = ? LIMIT 1");
-                $refundRefCheck->execute([$refundRef]);
-                $refundRefExists = ((int)$refundRefCheck->fetchColumn()) > 0;
-            } while ($refundRefExists);
+            // Generate refund reference via the atomic sequence allocator, the same way
+            // receipts, invoices and credit notes are numbered. The previous
+            // random-then-recheck loop was a check-then-use race between concurrent
+            // refunds and produced non-sequential references in the ledger.
+            $refundRef = finance_next_refund_reference($pdo, date('Y-m-d'));
 
             // Start transaction — open BEFORE re-validating to prevent concurrent
             // over-refund (two simultaneous requests both passing the pre-transaction check).
@@ -160,9 +160,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $payment
             $lockedRefundedStmt->execute([$payment_id]);
             $lockedAlreadyRefunded = (float)$lockedRefundedStmt->fetchColumn();
             $lockedMaxRefundable   = max(0, (float)$lockedPayment['total_amount'] - $lockedAlreadyRefunded);
-            if ($refund_amount > $lockedMaxRefundable) {
+            if ($refund_amount > $lockedMaxRefundable + BALANCE_TOLERANCE) {
                 throw new Exception('Refund amount exceeds available balance. Remaining: ' . $currency_symbol . number_format($lockedMaxRefundable, 2) . '.');
             }
+            $refund_amount = min($refund_amount, $lockedMaxRefundable);
+
+            // Split the refund into net + VAT only now that the amount is final — the
+            // locked re-check above can clamp it, and deriving these earlier would write
+            // a VAT figure that no longer matches the amount actually refunded.
+            $vat_amount     = round($refund_amount * ($vat_rate / (100 + $vat_rate)), 2);
+            $payment_amount = round($refund_amount - $vat_amount, 2);
 
             // Insert refund record
             $insertStmt = $pdo->prepare("

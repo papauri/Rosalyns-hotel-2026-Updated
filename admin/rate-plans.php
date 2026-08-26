@@ -897,6 +897,16 @@ $dayNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
         function onRuleTypeChange(type, plan) {
             document.querySelectorAll('.rule-fields').forEach(el => el.classList.remove('visible'));
 
+            // Rule fields are hidden with a class, not disabled, so FormData still
+            // submits them. Switching a plan from Seasonal to any other rule type would
+            // otherwise carry its old date window into the database, where it sits as
+            // dead data that _planMatchesStay() ignores for every non-seasonal rule —
+            // misleading to read, and a trap if window gating is ever added.
+            if (type !== 'seasonal') {
+                document.getElementById('fieldStartDate').value = '';
+                document.getElementById('fieldEndDate').value = '';
+            }
+
             if (type === 'seasonal') {
                 document.getElementById('fields-seasonal').classList.add('visible');
                 if (plan) {

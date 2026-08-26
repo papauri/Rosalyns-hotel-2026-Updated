@@ -523,19 +523,40 @@ function checkAvailability(int $roomId, string $checkIn, string $checkOut): arra
             return $result;
         }
 
-        // Check for overlapping bookings
-        // Note: 'tentative' bookings do NOT block availability (can be overwritten)
-        // Note: 'cancelled' bookings do NOT block availability (free up the room)
+        // Check for overlapping bookings.
+        //
+        // This must agree with checkRoomAvailability() in config/database.php, which is
+        // the function that actually runs in this deployment — the two previously
+        // disagreed on both points below, and this comment asserted the opposite of the
+        // live behaviour:
+        //   - 'tentative' DOES block: a tentative hold reserves a room from the pool
+        //     until it is cancelled, expires, or converts. Expired holds do not.
+        //   - capacity comes from rooms.total_rooms, not rooms.rooms_available.
+        // 'cancelled', 'expired' and 'no-show' do not block — they free the room.
+        $blockingStatuses = function_exists('getBookingStatusesThatBlockAvailability')
+            ? getBookingStatusesThatBlockAvailability(false)
+            : ['pending', 'tentative', 'confirmed', 'checked-in'];
+        $placeholders = implode(',', array_fill(0, count($blockingStatuses), '?'));
+
         $bookingsStmt = $pdo->prepare("
-            SELECT COUNT(*) FROM bookings
+            SELECT check_in_date, check_out_date FROM bookings
             WHERE room_id = ?
-            AND status IN ('pending', 'confirmed', 'checked-in')
+            AND status IN ({$placeholders})
+            AND NOT (status = 'tentative' AND tentative_expires_at IS NOT NULL AND tentative_expires_at < NOW())
             AND NOT (check_out_date <= ? OR check_in_date >= ?)
         ");
-        $bookingsStmt->execute([$roomId, $checkIn, $checkOut]);
-        $overlappingBookings = (int)$bookingsStmt->fetchColumn();
-        
-        if ($overlappingBookings >= $room['rooms_available']) {
+        $bookingsStmt->execute(array_merge([$roomId], $blockingStatuses, [$checkIn, $checkOut]));
+        $overlappingRows = $bookingsStmt->fetchAll(PDO::FETCH_ASSOC);
+
+        // Capacity is consumed per night, so count PEAK concurrent occupancy rather than
+        // every row that merely overlaps the range (see peakConcurrentOccupancy()).
+        $overlappingBookings = function_exists('peakConcurrentOccupancy')
+            ? peakConcurrentOccupancy($overlappingRows, $checkIn, $checkOut)
+            : count($overlappingRows);
+
+        $totalCapacity = (int)($room['total_rooms'] ?? $room['rooms_available'] ?? 1);
+
+        if ($totalCapacity <= 0 || $overlappingBookings >= $totalCapacity) {
             $result['available'] = false;
             $result['error'] = 'No rooms available for selected dates';
         }
@@ -597,7 +618,11 @@ function createNoShowRefund(array $booking, int $adminUserId, PDO $pdo): array
     $vatRate   = (float)($originalPayment['vat_rate'] ?? 0);
     $vatAmount = round($refundAmount * ($vatRate / (100 + $vatRate)), 2);
     $payAmount = $refundAmount - $vatAmount;
-    $refundRef = 'REF-' . date('Y') . '-' . str_pad((string)rand(1, 999999), 6, '0', STR_PAD_LEFT);
+
+    // Allocate the reference atomically. The previous unchecked rand() could hand two
+    // no-show refunds the same reference, making them indistinguishable in the ledger.
+    require_once __DIR__ . '/finance-sequences.php';
+    $refundRef = finance_next_refund_reference($pdo, date('Y-m-d'));
 
     $pdo->prepare("
         INSERT INTO payments (

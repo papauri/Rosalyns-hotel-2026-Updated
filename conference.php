@@ -240,6 +240,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         // Use full day rate for pricing
         $total_amount = $room['daily_rate'];
 
+        // Quoted rates are VAT-inclusive, so record the split without inflating the
+        // quote — otherwise the enquiry lands in admin with vat_amount = 0 and the
+        // tax silently disappears from the conference books.
+        $conference_vat        = vat_components((float)$total_amount);
+        $conference_vat_rate   = $conference_vat['rate'];
+        $conference_vat_amount = $conference_vat['vat'];
+        $conference_total_wv   = $conference_vat['total'];
+
         // Generate unique inquiry reference
         do {
             $inquiry_reference = 'CONF-' . date('Y') . '-' . str_pad(rand(1, 99999), 5, '0', STR_PAD_LEFT);
@@ -252,8 +260,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             INSERT INTO conference_inquiries (
                 inquiry_reference, conference_room_id, company_name, contact_person,
                 email, phone, event_date, start_time, end_time, number_of_attendees,
-                event_type, special_requirements, catering_required, av_equipment, total_amount
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                event_type, special_requirements, catering_required, av_equipment, total_amount,
+                vat_rate, vat_amount, total_with_vat
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ");
 
         $insert_stmt->execute([
@@ -271,7 +280,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $special_requirements,
             $catering,
             $av_equipment,
-            $total_amount
+            $total_amount,
+            $conference_vat_rate,
+            $conference_vat_amount,
+            $conference_total_wv
         ]);
 
         // Set success and generate reference after validation passes

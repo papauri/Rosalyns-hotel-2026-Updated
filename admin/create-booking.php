@@ -709,6 +709,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['create_booking'])) {
                 $pay_ref  = $payment_reference_base . ($bi > 0 ? '-' . ($bi + 1) : '');
                 $pay_uuid = ($__incomingClientUuid ?? '') ? ($__incomingClientUuid . ':pay' . ($bi > 0 ? $bi : '')) : null;
                 $pay_vat  = ($vat_rate_db > 0) ? round($this_amount * ($vat_rate_db / (100 + $vat_rate_db)), 2) : 0.0;
+                // Invariant across every payments write: payment_amount (NET) +
+                // vat_amount = total_amount (GROSS). accounting-dashboard.php sums
+                // payment_amount as total_collected_excl_vat, so storing the gross
+                // figure here overstated net collections by the VAT on every booking
+                // taken at the front desk.
+                $pay_net  = round($this_amount - $pay_vat, 2);
                 $receipt_number = finance_next_receipt_number($pdo, date('Y-m-d'));
 
                 $pdo->prepare("
@@ -722,10 +728,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['create_booking'])) {
                     $pay_ref,
                     $cb['id'],
                     $cb['ref'],
-                    $this_amount,
+                    $pay_net,      // payment_amount is always the ex-VAT figure
                     $vat_rate_db,
                     $pay_vat,
-                    $this_amount,
+                    $this_amount,  // total_amount is the gross figure actually collected
                     $payment_method,
                     $payment_type_val,
                     $receipt_number,
