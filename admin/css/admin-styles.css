@@ -2130,16 +2130,24 @@ table.fit-or-card:not(.mobile-enhanced) td {
     gap: 24px;
 }
 
+/* `1fr` is shorthand for `minmax(auto, 1fr)`, and that `auto` floors each track at
+   its content's min-content width — so a track containing something wide (a menu
+   grid, a wide table) cannot shrink and instead pushes its siblings out of the
+   container. On room-service-dashboard.php at 1024px this resolved to
+   `1957.72px 122.573px` inside an 859px box, placing the order cart at x=2088
+   where the page's overflow:hidden clipped it away entirely — the cart was
+   unreachable on a tablet. minmax(0, 1fr) lets tracks be narrower than their
+   content, which is what makes the columns share the row as intended. */
 .grid-2 {
-    grid-template-columns: repeat(2, 1fr);
+    grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
 .grid-3 {
-    grid-template-columns: repeat(3, 1fr);
+    grid-template-columns: repeat(3, minmax(0, 1fr));
 }
 
 .grid-4 {
-    grid-template-columns: repeat(4, 1fr);
+    grid-template-columns: repeat(4, minmax(0, 1fr));
 }
 
 /* ============================================

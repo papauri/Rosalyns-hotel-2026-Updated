@@ -266,6 +266,20 @@
     gap: 0;
     margin-bottom: 8px;
     border-bottom: 2px solid var(--admin-surface-border, #eaecef);
+    /* The category strip grows with the menu — this install has enough categories
+       to run past the container, and the page clips with overflow-x:hidden, so the
+       later tabs (Cocktails, Coffee, Desserts) were unreachable rather than merely
+       off-screen. Scroll the strip instead of letting it overflow, matching the
+       till's stats row. min-width:0 lets it shrink inside its grid track. */
+    min-width: 0;
+    overflow-x: auto;
+    overflow-y: hidden;
+    scrollbar-width: none;
+    -webkit-overflow-scrolling: touch;
+}
+
+.menu-tabs::-webkit-scrollbar {
+    display: none;
 }
 
 .menu-tabs button {
@@ -274,6 +288,9 @@
     padding: 8px 14px;
     cursor: pointer;
     font-size: 13px;
+    /* Tabs must keep their width inside a scrolling strip, not compress to nothing. */
+    flex: 0 0 auto;
+    white-space: nowrap;
     font-weight: 600;
     color: #6c757d;
     border-bottom: 2px solid transparent;
@@ -352,6 +369,27 @@
 
 @media (max-width: 900px) {
     .grid-2 {
-        grid-template-columns: 1fr !important;
+        /* minmax(0,1fr), not 1fr: a single `1fr` track is still floored at its
+           content's min-content width, so stacking to one column did not stop the
+           menu grid forcing the row to 1958px and overflowing the page. */
+        grid-template-columns: minmax(0, 1fr) !important;
+    }
+}
+
+/* Staff touch targets — Room Service dashboard.
+   This is a station screen operated on a tablet alongside KDS/BDS/CDS, so it gets
+   the same 44px minimum, keyed to pointer type rather than width for the same
+   reason: a 1366px tablet is touch, a 1366px laptop is not.
+   btn-fire ("Send to kitchen") is the primary action on this screen and measured
+   40px; the category tabs measured 37px and the menu-edit button 39px.
+   NOTE: the shared admin sidebar on this page (admin-nav-link at 33px,
+   nav-favorite-btn at 28x28) is deliberately NOT touched here — it is chrome on
+   every admin page and resizing it belongs in its own change, not this one. */
+@media (pointer: coarse) {
+
+    .btn-fire,
+    .btn-rs-edit-menu,
+    .menu-tabs button {
+        min-height: 44px;
     }
 }

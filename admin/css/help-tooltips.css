@@ -88,11 +88,11 @@
 .rh-help-toggle:not([data-inline="1"]) {
     position: fixed !important;
     left: auto !important;
-    width: clamp(40px, 2.35rem + 0.36vw, 48px) !important;
-    height: clamp(40px, 2.35rem + 0.36vw, 48px) !important;
+    width: clamp(44px, 2.35rem + 0.36vw, 48px) !important;
+    height: clamp(44px, 2.35rem + 0.36vw, 48px) !important;
     max-width: none !important;
-    min-width: clamp(40px, 2.35rem + 0.36vw, 48px) !important;
-    min-height: clamp(40px, 2.35rem + 0.36vw, 48px) !important;
+    min-width: clamp(44px, 2.35rem + 0.36vw, 48px) !important;
+    min-height: clamp(44px, 2.35rem + 0.36vw, 48px) !important;
     display: inline-flex !important;
     flex: 0 0 auto !important;
     align-items: center;

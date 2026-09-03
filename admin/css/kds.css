@@ -4354,3 +4354,40 @@ body.station-screen .t-foot button.is-primary {
         min-height: auto;
     }
 }
+
+/* ─────────────────────────────────────────────────────────────────────────────
+   Staff touch targets — KDS / BDS / CDS.
+
+   These display systems run on wall-mounted or counter touchscreens and are
+   operated by kitchen and bar staff, often at a glance and without looking
+   closely. Measured at 360–1920px, twenty-two controls sat under the 44px
+   minimum: the drawer filters (All / New / Cooking / Ready) at 40px, the drawer
+   link and settings buttons at 39–41px, the drawer collapse handle at 36×36,
+   and the station controls at 33–36px — Pause, which stops online orders
+   reaching the kitchen, was the smallest of them.
+
+   Keyed to pointer type rather than screen width, matching the POS: a 1366px
+   kitchen tablet is touch and a 1366px back-office laptop is not, so width
+   would catch the wrong devices. Mouse-driven screens keep the denser layout.
+   ───────────────────────────────────────────────────────────────────────────── */
+@media (pointer: coarse) {
+
+    .kds-drawer .drawer-filter button,
+    .kds-drawer .drawer-links button,
+    .kds-drawer .drawer-links a,
+    .drawer-fullscreen-btn,
+    .drawer-settings-btn,
+    .sound-toggle-drawer,
+    .station-panel__sound-test,
+    .station-control__pause,
+    .station-control__save {
+        min-height: 44px;
+    }
+
+    /* Icon-only controls need width as well as height. */
+    .kds-drawer__collapse,
+    .rh-help-toggle {
+        min-width: 44px;
+        min-height: 44px;
+    }
+}

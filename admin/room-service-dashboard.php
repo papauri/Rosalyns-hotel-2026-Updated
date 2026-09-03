@@ -570,7 +570,13 @@ $current_page = basename($_SERVER['PHP_SELF']);
                 <form method="POST" id="rsOrderForm">
                     <input type="hidden" name="csrf_token" value="<?php echo $csrf_token; ?>">
                     <input type="hidden" name="action" value="place_rs_order">
-                    <div class="grid-2" style="display:grid; grid-template-columns:1fr 1fr; gap:18px;">
+                    <?php /* minmax(0,1fr) not 1fr: plain `1fr` floors each track at its
+                             content's min-content width, so the menu column could not shrink
+                             and pushed the order cart to x=2088 inside an 859px box, where the
+                             page's overflow:hidden clipped it away — the cart was unreachable
+                             on a tablet. This inline style also overrode the .grid-2 rule in
+                             admin-styles.css, so it has to be fixed here. */ ?>
+                    <div class="grid-2" style="display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr); gap:18px;">
                         <div>
                             <label style="font-size:12px; font-weight:600; color:#6c757d; text-transform:uppercase;">Checked-in booking</label>
                             <select name="booking_id" id="rsBooking" required style="width:100%; padding:10px; border:1px solid #d8dde3; border-radius:6px; margin:6px 0 14px;">
