@@ -4125,571 +4125,521 @@ a.recent-toggle span {
     width: 80px;
     height: 80px;
     margin: 0 auto 18px;
-    width: min(96vw, 1400px);
-    height: min(94dvh, 940px);
-    max-width: 96vw;
-    max-height: 94dvh;
+}
+
+.pos-ready-icon-ring {
+    position: absolute;
+    inset: -8px;
+    border-radius: 50%;
+    border: 3px solid rgba(34, 197, 94, .6);
+    animation: pro-pulse-ring 1.4s ease-out infinite;
+}
+
+.pos-ready-icon-ring:nth-child(2) {
+    inset: -18px;
+    border-color: rgba(34, 197, 94, .3);
+    animation-delay: .35s;
+}
+
+.pos-ready-icon {
+    width: 80px;
+    height: 80px;
+    border-radius: 50%;
+    background: rgba(34, 197, 94, .15);
+    border: 2px solid rgba(34, 197, 94, .5);
     display: flex;
-    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    font-size: 36px;
+    color: #4ade80;
+    animation: pro-badge-pop .35s cubic-bezier(.22, .61, .36, 1) forwards;
+}
+
+.pos-ready-queue-badge {
+    position: absolute;
+    top: -6px;
+    right: -6px;
+    background: #ef4444;
+    color: #fff;
+    font-size: 13px;
+    font-weight: 800;
+    width: 26px;
+    height: 26px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border: 2px solid #0f1a13;
+    font-family: 'Jost', sans-serif;
+}
+
+.pos-ready-label {
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: .12em;
+    color: #4ade80;
+    font-family: 'Jost', sans-serif;
+    margin-bottom: 6px;
+}
+
+.pos-ready-heading {
+    font-size: clamp(22px, 5vw, 30px);
+    font-weight: 700;
+    color: #f0fdf4;
+    font-family: 'Jost', sans-serif;
+    line-height: 1.15;
+    margin: 0 0 4px;
+}
+
+.pos-ready-ref {
+    font-size: clamp(14px, 3.5vw, 18px);
+    color: #86efac;
+    font-family: 'Jost', sans-serif;
+    font-weight: 600;
+    margin-bottom: 2px;
+}
+
+.pos-ready-detail {
+    font-size: 13px;
+    color: #6b9e78;
+    font-family: 'Jost', sans-serif;
+    margin-bottom: 22px;
+    line-height: 1.5;
+}
+
+.pos-ready-next-hint {
+    font-size: 12px;
+    color: #4b7a58;
+    font-family: 'Jost', sans-serif;
+    margin-top: -14px;
+    margin-bottom: 16px;
+}
+
+.pos-ready-dismiss {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 9px;
+    width: 100%;
+    padding: 16px 24px;
+    background: #16a34a;
+    border: none;
+    border-radius: 12px;
+    color: #fff;
+    font-size: 16px;
+    font-weight: 700;
+    font-family: 'Jost', sans-serif;
+    cursor: pointer;
+    touch-action: manipulation;
+    transition: background .15s, transform .1s;
+    min-height: 56px;
+}
+
+.pos-ready-dismiss:active {
+    background: #15803d;
+    transform: scale(.97);
+}
+
+.pos-ready-auto-bar {
+    height: 4px;
+    background: rgba(34, 197, 94, .15);
+    border-radius: 0 0 18px 18px;
+    margin: 16px -40px -28px;
     overflow: hidden;
+}
+
+.pos-ready-auto-bar-fill {
+    height: 100%;
+    background: #22c55e;
+    width: 100%;
+    transition: width linear;
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .pos-ready-card {
+        animation: none;
+    }
 
     .pos-ready-icon-ring {
-        position: absolute;
-        inset: -8px;
-        border-radius: 50%;
-        border: 3px solid rgba(34, 197, 94, .6);
-        animation: pro-pulse-ring 1.4s ease-out infinite;
+        animation: none;
     }
 
-    .pos-ready-icon-ring:nth-child(2) {
-        inset: -18px;
-        border-color: rgba(34, 197, 94, .3);
-        animation-delay: .35s;
+    #pos-ready-overlay {
+        animation: none;
+    }
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   POS MOBILE MODAL FIXES — phones ≤ 640px
+   Ensures all overlays sit ABOVE the till-bar and render fully.
+   ═══════════════════════════════════════════════════════════════ */
+@media (max-width: 640px) {
+
+    /* Overlay must cover everything including the till-bar */
+    .overlay,
+    .modal-overlay {
+        padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
+        box-sizing: border-box;
     }
 
-    .pos-ready-icon {
-        width: 80px;
-        height: 80px;
-        border-radius: 50%;
-        background: rgba(34, 197, 94, .15);
-        border: 2px solid rgba(34, 197, 94, .5);
-        display: flex;
+    /* Modal: full-width, constrained height, scrollable */
+    .modal,
+    .modal-content {
+        width: calc(100vw - 16px) !important;
+        max-width: calc(100vw - 16px) !important;
+        padding-bottom: 11px;
+        overflow-y: auto;
+        -webkit-overflow-scrolling: touch;
+        border-radius: 16px;
+    }
+
+    /* Larger close button tap target */
+    .modal-head .close,
+    .modal-header .close,
+    .modal-header .modal-close {
+        min-width: 44px;
+        min-height: 44px;
         align-items: center;
         justify-content: center;
-        font-size: 36px;
-        color: #4ade80;
-        animation: pro-badge-pop .35s cubic-bezier(.22, .61, .36, 1) forwards;
+        font-size: 22px;
+        flex-shrink: 0;
     }
 
-    .pos-ready-queue-badge {
-        position: absolute;
-        top: -6px;
-        right: -6px;
-        background: #ef4444;
-        color: #fff;
-        font-size: 13px;
-        font-weight: 800;
-        width: 26px;
-        height: 26px;
-        border-radius: 50%;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        border: 2px solid #0f1a13;
-        font-family: 'Jost', sans-serif;
+    .modal-head,
+    .modal-header {
+        padding: 12px 14px;
+        flex-wrap: wrap;
+        gap: 8px;
     }
 
-    .pos-ready-label {
-        font-size: 11px;
-        font-weight: 700;
-        text-transform: uppercase;
-        letter-spacing: .12em;
-        color: #4ade80;
-        font-family: 'Jost', sans-serif;
-        margin-bottom: 6px;
+    .modal-head h3,
+    .modal-header h3 {
+        font-size: 15px;
     }
 
-    .pos-ready-heading {
-        font-size: clamp(22px, 5vw, 30px);
-        font-weight: 700;
-        color: #f0fdf4;
-        font-family: 'Jost', sans-serif;
-        line-height: 1.15;
-        margin: 0 0 4px;
+    /* FOH item cards: faster scan + faster tap on phone */
+    .grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+        gap: clamp(0.5rem, 2vw, 0.7rem) !important;
     }
 
-    .pos-ready-ref {
-        font-size: clamp(14px, 3.5vw, 18px);
-        color: #86efac;
-        font-family: 'Jost', sans-serif;
-        font-weight: 600;
-        margin-bottom: 2px;
-    }
-
-    .pos-ready-detail {
-        font-size: 13px;
-        color: #6b9e78;
-        font-family: 'Jost', sans-serif;
-        margin-bottom: 22px;
-        line-height: 1.5;
-    }
-
-    .pos-ready-next-hint {
-        font-size: 12px;
-        color: #4b7a58;
-        font-family: 'Jost', sans-serif;
-        margin-top: -14px;
-        margin-bottom: 16px;
-    }
-
-    .pos-ready-dismiss {
-        display: inline-flex;
-        align-items: center;
-        justify-content: center;
-        gap: 9px;
-        width: 100%;
-        padding: 16px 24px;
-        background: #16a34a;
-        border: none;
-        border-radius: 12px;
-        color: #fff;
-        font-size: 16px;
-        font-weight: 700;
-        font-family: 'Jost', sans-serif;
-        cursor: pointer;
-        touch-action: manipulation;
-        transition: background .15s, transform .1s;
-        min-height: 56px;
-    }
-
-    .pos-ready-dismiss:active {
-        background: #15803d;
-        transform: scale(.97);
-    }
-
-    .pos-ready-auto-bar {
-        height: 4px;
-        background: rgba(34, 197, 94, .15);
-        border-radius: 0 0 18px 18px;
-        margin: 16px -40px -28px;
+    .item {
+        position: relative;
+        min-height: clamp(7.2rem, 24vw, 8.8rem);
+        padding: clamp(0.62rem, 2.6vw, 0.82rem);
+        border-radius: clamp(0.72rem, 2.8vw, 0.95rem);
+        border: 1px solid rgba(138, 119, 95, 0.24);
+        background: linear-gradient(160deg, var(--color-white, #fff) 0%, rgba(243, 236, 228, 0.92) 100%);
+        box-shadow: 0 9px 22px rgba(35, 31, 28, 0.09);
+        display: grid;
+        grid-template-rows: auto 1fr auto;
+        gap: clamp(0.24rem, 1vw, 0.4rem);
         overflow: hidden;
     }
 
-    .pos-ready-auto-bar-fill {
-        height: 100%;
-        background: #22c55e;
-        width: 100%;
-        transition: width linear;
+    .item::after {
+        content: '+';
+        position: absolute;
+        top: clamp(0.4rem, 1.7vw, 0.52rem);
+        right: clamp(0.4rem, 1.7vw, 0.52rem);
+        width: clamp(1.15rem, 4.7vw, 1.35rem);
+        height: clamp(1.15rem, 4.7vw, 1.35rem);
+        border-radius: 999px;
+        display: grid;
+        place-items: center;
+        font-size: clamp(0.76rem, 2.8vw, 0.9rem);
+        font-weight: 700;
+        color: var(--color-primary, #8A775F);
+        background: rgba(138, 119, 95, 0.12);
     }
 
-    @media (prefers-reduced-motion: reduce) {
-        .pos-ready-card {
-            animation: none;
-        }
+    .item>div {
+        min-width: 0;
+    }
 
-        .pos-ready-icon-ring {
-            animation: none;
-        }
+    .item>div:last-child {
+        display: grid;
+        gap: 0.14rem;
+        margin-top: auto;
+    }
 
-        #pos-ready-overlay {
-            animation: none;
-        }
+    .item .badge {
+        display: inline-flex;
+        align-items: center;
+        width: fit-content;
+        padding: 0.14rem 0.44rem;
+        border-radius: 999px;
+        background: rgba(138, 119, 95, 0.12);
+        color: var(--color-primary, #8A775F);
+        font-size: clamp(0.58rem, 2.3vw, 0.68rem);
+        font-weight: 700;
+        letter-spacing: 0.05em;
+    }
 
-        font-size: 12px;
+    .item .nm {
+        margin-top: clamp(0.24rem, 0.9vw, 0.34rem);
+        font-size: clamp(0.78rem, 3vw, 0.92rem);
+        line-height: 1.3;
+        color: var(--color-lux-ink, #231F1C);
+        display: -webkit-box;
+        -webkit-line-clamp: 2;
+        -webkit-box-orient: vertical;
+        overflow: hidden;
+        text-overflow: ellipsis;
+    }
 
-        /* ═══════════════════════════════════════════════════════════════
-   POS MOBILE MODAL FIXES — phones ≤ 640px
-   Ensures all overlays sit ABOVE the till-bar and render fully
-    padding: 8px 7px;
-   ═══════════════════════════════════════════════════════════════ */
-        @media (max-width: 640px) {
+    .item .pr {
+        font-size: clamp(0.82rem, 3.2vw, 1rem);
+        line-height: 1.25;
+        color: var(--color-primary, #8A775F);
+    }
 
-            /* Overlay must cover everything including the till-bar */
-            .overlay,
-            .modal-overlay {
-                padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
-                box-sizing: border-box;
-                padding: 8px 7px;
+    .item .st {
+        display: inline-flex;
+        align-items: center;
+        width: fit-content;
+        padding: 0.08rem 0.4rem;
+        border-radius: 999px;
+        font-size: clamp(0.6rem, 2.4vw, 0.7rem);
+        line-height: 1.25;
+        color: var(--color-text-secondary, #5E554D);
+        background: rgba(75, 85, 99, 0.08);
+        margin-top: 0.1rem;
+    }
 
-                /* Modal: full-width, constrained height, scrollable */
-                .modal,
-                .modal-content {
-                    width: calc(100vw - 16px) !important;
-                    max-width: calc(100vw - 16px) !important;
-                    padding-bottom: 11px;
-                    overflow-y: auto;
-                    -webkit-overflow-scrolling: touch;
-                    border-radius: 16px;
-                    font-size: 10px;
+    .item .st.low {
+        color: var(--color-error, #C62828);
+        background: rgba(200, 35, 51, 0.14);
+    }
 
-                    /* Larger close button tap target */
-                    .modal-head .close,
-                    .modal-header .close,
-                    .modal-header .modal-close {
-                        min-width: 44px;
-                        min-height: 44px;
-                        font-size: 12px;
-                        align-items: center;
-                        justify-content: center;
-                        font-size: 22px;
-                        flex-shrink: 0;
-                        font-size: 11px;
+    .item.is-pressing {
+        transform: scale(0.97);
+        box-shadow: 0 5px 12px rgba(35, 31, 28, 0.16);
+    }
 
-                        /* Modal head: allow wrapping on narrow screens */
-                        .modal-head,
-                        .modal-header {
-                            padding: 12px 14px;
-                            flex-wrap: wrap;
-                            gap: 8px;
-                        }
+    .item.oos {
+        opacity: 0.58;
+        filter: grayscale(0.1);
+    }
 
-                        .modal-head h3,
-                        .modal-header h3 {
-                            font-size: 15px;
-                        }
+    .item.oos::after {
+        content: '!';
+        color: var(--color-error, #C62828);
+        background: rgba(200, 35, 51, 0.14);
+    }
 
-                        /* FOH item cards: faster scan + faster tap on phone */
-                        .grid {
-                            grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
-                            gap: clamp(0.5rem, 2vw, 0.7rem) !important;
-                        }
+    /* Modal inputs / selects: larger touch targets */
+    .modal-body input,
+    .modal-body select,
+    .modal-body textarea {
+        min-height: 46px;
+        font-size: 16px;
+        /* prevents iOS auto-zoom on focus */
+    }
 
-                        .item {
-                            position: relative;
-                            min-height: clamp(7.2rem, 24vw, 8.8rem);
-                            padding: clamp(0.62rem, 2.6vw, 0.82rem);
-                            border-radius: clamp(0.72rem, 2.8vw, 0.95rem);
-                            border: 1px solid rgba(138, 119, 95, 0.24);
-                            background: linear-gradient(160deg, var(--color-white, #fff) 0%, rgba(243, 236, 228, 0.92) 100%);
-                            box-shadow: 0 9px 22px rgba(35, 31, 28, 0.09);
-                            display: grid;
-                            grid-template-rows: auto 1fr auto;
-                            gap: clamp(0.24rem, 1vw, 0.4rem);
-                            overflow: hidden;
-                        }
+    /* Modal footer buttons: full-width stacked on very small screens */
+    .modal-foot,
+    .modal-footer {
+        padding: 10px 14px calc(10px + env(safe-area-inset-bottom));
+        flex-wrap: wrap;
+        gap: 8px;
+    }
 
-                        .item::after {
-                            content: '+';
-                            position: absolute;
-                            top: clamp(0.4rem, 1.7vw, 0.52rem);
-                            right: clamp(0.4rem, 1.7vw, 0.52rem);
-                            width: clamp(1.15rem, 4.7vw, 1.35rem);
-                            height: clamp(1.15rem, 4.7vw, 1.35rem);
-                            border-radius: 999px;
-                            display: grid;
-                            place-items: center;
-                            font-size: clamp(0.76rem, 2.8vw, 0.9rem);
-                            font-weight: 700;
-                            color: var(--color-primary, #8A775F);
-                            background: rgba(138, 119, 95, 0.12);
-                        }
+    .modal-foot button,
+    .modal-foot a.btn-cancel,
+    .modal-foot a.btn-confirm,
+    .modal-footer button,
+    .modal-footer a.btn-cancel,
+    .modal-footer a.btn-confirm {
+        flex: 1 1 calc(50% - 4px);
+        min-height: 48px;
+        font-size: 14px;
+    }
 
-                        .item>div {
-                            min-width: 0;
-                        }
+    /* Today's Orders modal: full viewport */
+    #restoOrdersOverlay .modal,
+    #tabDetailOverlay .modal {
+        width: 100vw !important;
+        max-width: 100vw !important;
+        height: calc(100dvh - env(safe-area-inset-top) - env(safe-area-inset-bottom)) !important;
+        max-height: none !important;
+        border-radius: 0;
+        display: flex;
+        flex-direction: column;
+        overflow: hidden;
+    }
 
-                        .item>div:last-child {
-                            display: grid;
-                            gap: 0.14rem;
-                            margin-top: auto;
-                        }
+    #restoOrdersOverlay .modal>div:last-child,
+    #tabDetailOverlay .modal>div[id] {
+        flex: 1;
+        overflow-y: auto;
+        -webkit-overflow-scrolling: touch;
+    }
 
-                        .item .badge {
-                            display: inline-flex;
-                            align-items: center;
-                            width: fit-content;
-                            padding: 0.14rem 0.44rem;
-                            border-radius: 999px;
-                            background: rgba(138, 119, 95, 0.12);
-                            color: var(--color-primary, #8A775F);
-                            font-size: clamp(0.58rem, 2.3vw, 0.68rem);
-                            font-weight: 700;
-                            letter-spacing: 0.05em;
-                        }
+    /* Tabs overlay: full screen on phone */
+    #tabsOverlay .modal {
+        width: 100vw !important;
+        max-width: 100vw !important;
+        max-height: calc(100dvh - env(safe-area-inset-top) - env(safe-area-inset-bottom)) !important;
+        border-radius: 0;
+    }
 
-                        .item .nm {
-                            margin-top: clamp(0.24rem, 0.9vw, 0.34rem);
-                            font-size: clamp(0.78rem, 3vw, 0.92rem);
-                            line-height: 1.3;
-                            color: var(--color-lux-ink, #231F1C);
-                            display: -webkit-box;
-                            -webkit-line-clamp: 2;
-                            -webkit-box-orient: vertical;
-                            overflow: hidden;
-                            text-overflow: ellipsis;
-                        }
+    /* Payment overlay: push above keyboard */
+    #payOverlay {
+        align-items: flex-start;
+        padding-top: max(env(safe-area-inset-top), 8px);
+        overflow-y: auto;
+    }
 
-                        .item .pr {
-                            font-size: clamp(0.82rem, 3.2vw, 1rem);
-                            line-height: 1.25;
-                            color: var(--color-primary, #8A775F);
-                        }
+    #payOverlay .modal {
+        margin: 0 auto;
+        border-radius: 16px;
+        max-height: none !important;
+    }
 
-                        .item .st {
-                            display: inline-flex;
-                            align-items: center;
-                            width: fit-content;
-                            padding: 0.08rem 0.4rem;
-                            border-radius: 999px;
-                            font-size: clamp(0.6rem, 2.4vw, 0.7rem);
-                            line-height: 1.25;
-                            color: var(--color-text-secondary, #5E554D);
-                            background: rgba(75, 85, 99, 0.08);
-                            margin-top: 0.1rem;
-                        }
+    /* Success modal: stay centered */
+    #successOverlay .success-modal {
+        width: calc(100vw - 32px) !important;
+        max-width: calc(100vw - 32px) !important;
+        padding: 24px 18px;
+    }
 
-                        .item .st.low {
-                            color: var(--color-error, #C62828);
-                            background: rgba(200, 35, 51, 0.14);
-                        }
+    /* Shift close overlay: full screen */
+    #closeShiftOverlay .modal {
+        width: 100vw !important;
+        max-width: 100vw !important;
+        max-height: calc(100dvh - env(safe-area-inset-top) - env(safe-area-inset-bottom)) !important;
+        border-radius: 0;
+    }
 
-                        .item.is-pressing {
-                            transform: scale(0.97);
-                            box-shadow: 0 5px 12px rgba(35, 31, 28, 0.16);
-                        }
+    /* Filter buttons inside orders header: wrap properly */
+    #restoOrdersOverlay .modal-head {
+        align-items: flex-start;
+    }
 
-                        .item.oos {
-                            opacity: 0.58;
-                            filter: grayscale(0.1);
-                        }
+    #restoOrdersOverlay .modal-head>div:last-child {
+        width: 100%;
+        flex-wrap: wrap;
+    }
 
-                        .item.oos::after {
-                            content: '!';
-                            color: var(--color-error, #C62828);
-                            background: rgba(200, 35, 51, 0.14);
-                        }
+    #restoOrdersOverlay .modal-head button:not(.close) {
+        flex: 1;
+        min-height: 38px;
+        font-size: 13px;
+    }
 
-                        /* Modal inputs / selects: larger touch targets */
-                        .modal-body input,
-                        .modal-body select,
-                        .modal-body textarea {
-                            min-height: 46px;
-                            font-size: 16px;
-                            /* prevents iOS auto-zoom on focus */
-                        }
+    /* Station note + reason modal: comfortable sizing */
+    #stationNoteOverlay .modal,
+    #posReasonOverlay .modal {
+        width: calc(100vw - 20px) !important;
+        max-width: calc(100vw - 20px) !important;
+    }
 
-                        /* Modal footer buttons: full-width stacked on very small screens */
-                        .modal-foot,
-                        .modal-footer {
-                            padding: 10px 14px calc(10px + env(safe-area-inset-bottom));
-                            flex-wrap: wrap;
-                            gap: 8px;
-                        }
+    /* Pay tab overlay */
+    #payTabOverlay .modal {
+        width: calc(100vw - 16px) !important;
+        max-width: calc(100vw - 16px) !important;
+        max-height: calc(100dvh - env(safe-area-inset-top) - env(safe-area-inset-bottom) - 24px) !important;
+    }
+}
 
-                        .modal-foot button,
-                        .modal-foot a.btn-cancel,
-                        .modal-foot a.btn-confirm,
-                        .modal-footer button,
-                        .modal-footer a.btn-cancel,
-                        .modal-footer a.btn-confirm {
-                            flex: 1 1 calc(50% - 4px);
-                            min-height: 48px;
-                            font-size: 14px;
-                        }
-
-                        /* Today's Orders modal: full viewport */
-                        #restoOrdersOverlay .modal,
-                        #tabDetailOverlay .modal {
-                            width: 100vw !important;
-                            max-width: 100vw !important;
-                            height: calc(100dvh - env(safe-area-inset-top) - env(safe-area-inset-bottom)) !important;
-                            max-height: none !important;
-                            border-radius: 0;
-                            display: flex;
-                            flex-direction: column;
-                            overflow: hidden;
-                        }
-
-                        #restoOrdersOverlay .modal>div:last-child,
-                        #tabDetailOverlay .modal>div[id] {
-                            flex: 1;
-                            overflow-y: auto;
-                            -webkit-overflow-scrolling: touch;
-                        }
-
-                        /* Tabs overlay: full screen on phone */
-                        #tabsOverlay .modal {
-                            width: 100vw !important;
-                            max-width: 100vw !important;
-                            max-height: calc(100dvh - env(safe-area-inset-top) - env(safe-area-inset-bottom)) !important;
-                            border-radius: 0;
-                        }
-
-                        /* Payment overlay: push above keyboard */
-                        #payOverlay {
-                            align-items: flex-start;
-                            padding-top: max(env(safe-area-inset-top), 8px);
-                            overflow-y: auto;
-                        }
-
-                        #payOverlay .modal {
-                            margin: 0 auto;
-                            border-radius: 16px;
-                            max-height: none !important;
-                        }
-
-                        /* Success modal: stay centered */
-                        #successOverlay .success-modal {
-                            width: calc(100vw - 32px) !important;
-                            max-width: calc(100vw - 32px) !important;
-                            padding: 24px 18px;
-                        }
-
-                        /* Shift close overlay: full screen */
-                        #closeShiftOverlay .modal {
-                            width: 100vw !important;
-                            max-width: 100vw !important;
-                            max-height: calc(100dvh - env(safe-area-inset-top) - env(safe-area-inset-bottom)) !important;
-                            border-radius: 0;
-                        }
-
-                        /* Filter buttons inside orders header: wrap properly */
-                        #restoOrdersOverlay .modal-head {
-                            align-items: flex-start;
-                        }
-
-                        #restoOrdersOverlay .modal-head>div:last-child {
-                            width: 100%;
-                            flex-wrap: wrap;
-                        }
-
-                        #restoOrdersOverlay .modal-head button:not(.close) {
-                            flex: 1;
-                            min-height: 38px;
-                            font-size: 13px;
-                        }
-
-                        /* Station note + reason modal: comfortable sizing */
-                        #stationNoteOverlay .modal,
-                        #posReasonOverlay .modal {
-                            width: calc(100vw - 20px) !important;
-                            max-width: calc(100vw - 20px) !important;
-                        }
-
-                        /* Pay tab overlay */
-                        #payTabOverlay .modal {
-                            width: calc(100vw - 16px) !important;
-                            max-width: calc(100vw - 16px) !important;
-                            max-height: calc(100dvh - env(safe-area-inset-top) - env(safe-area-inset-bottom) - 24px) !important;
-                        }
-                    }
-
-                    /* ==========================================================================
+/* ==========================================================================
    POS TOP BAR MODERNIZATION
    - 901px-1700px: clean compact bar (no wrapped action clutter), use menu sheet
    - 1701px+: keep inline actions, modernized and horizontally scroll-safe
    ========================================================================== */
 
-                    /* Compact desktops + tablets: remove cluttered wrapped action row */
-                    @media (min-width: 901px) and (max-width: 1700px) {
-                        .till-bar .tb-row1 {
-                            min-height: clamp(3.75rem, 4.8vw, 4.2rem);
-                            height: auto;
-                            padding: 0 clamp(0.65rem, 1vw, 0.95rem);
-                            gap: clamp(0.4rem, 0.65vw, 0.62rem);
-                            flex-wrap: nowrap;
-                            align-items: center;
-                            border-bottom: 1px solid rgba(255, 255, 255, 0.06);
-                        }
+/* Compact desktops + tablets: remove cluttered wrapped action row */
+@media (min-width: 901px) and (max-width: 1700px) {
+    .till-bar .tb-row1 {
+        min-height: clamp(3.75rem, 4.8vw, 4.2rem);
+        height: auto;
+        padding: 0 clamp(0.65rem, 1vw, 0.95rem);
+        gap: clamp(0.4rem, 0.65vw, 0.62rem);
+        flex-wrap: nowrap;
+        align-items: center;
+        border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+    }
 
-                        .till-bar .brand {
-                            flex: 1 1 auto;
-                            min-width: 0;
-                            min-height: clamp(3.75rem, 4.8vw, 4.2rem);
-                            height: auto;
-                            padding: 0;
-                            border-right: none;
-                            background: transparent;
-                            justify-content: center;
-                        }
+    .till-bar .brand {
+        flex: 1 1 auto;
+        min-width: 0;
+        min-height: clamp(3.75rem, 4.8vw, 4.2rem);
+        height: auto;
+        padding: 0;
+        border-right: none;
+        background: transparent;
+        justify-content: center;
+    }
 
-                        .till-bar .brand-name {
-                            font-size: clamp(1rem, 1vw + 0.55rem, 1.28rem);
-                            letter-spacing: 0.01em;
-                        }
+    .till-bar .brand-name {
+        font-size: clamp(1rem, 1vw + 0.55rem, 1.28rem);
+        letter-spacing: 0.01em;
+    }
 
-                        .till-bar .brand-label {
-                            font-size: clamp(0.45rem, 0.2vw + 0.35rem, 0.56rem);
-                            letter-spacing: 0.14em;
-                        }
+    .till-bar .brand-label {
+        font-size: clamp(0.45rem, 0.2vw + 0.35rem, 0.56rem);
+        letter-spacing: 0.14em;
+    }
 
-                        .till-bar .brand-cashier {
-                            font-size: clamp(0.56rem, 0.28vw + 0.45rem, 0.66rem);
-                            max-width: 100%;
-                            overflow: hidden;
-                            text-overflow: ellipsis;
-                        }
+    .till-bar .brand-cashier {
+        font-size: clamp(0.56rem, 0.28vw + 0.45rem, 0.66rem);
+        max-width: 100%;
+        overflow: hidden;
+        text-overflow: ellipsis;
+    }
 
-                        .till-bar .tb-actions {
-                            display: none !important;
-                        }
+    .till-bar .tb-actions {
+        display: none !important;
+    }
 
-                        .till-bar .pos-mobile-menu-btn {
-                            display: inline-flex !important;
-                            margin-left: auto;
-                            min-width: clamp(3rem, 2.3vw + 2rem, 4rem);
-                            height: clamp(2.4rem, 2vw + 1.8rem, 2.85rem);
-                            padding: 0 clamp(0.75rem, 0.65vw, 1rem);
-                            border-radius: 999px;
-                            box-shadow: 0 10px 22px rgba(15, 15, 20, 0.26);
-                        }
+    .till-bar .pos-mobile-menu-btn {
+        display: inline-flex !important;
+        margin-left: auto;
+        min-width: clamp(3rem, 2.3vw + 2rem, 4rem);
+        height: clamp(2.4rem, 2vw + 1.8rem, 2.85rem);
+        padding: 0 clamp(0.75rem, 0.65vw, 1rem);
+        border-radius: 999px;
+        box-shadow: 0 10px 22px rgba(15, 15, 20, 0.26);
+    }
 
-                        .till-bar .tb-row2 {
-                            height: clamp(2.25rem, 2.3vw, 2.6rem);
-                            padding: 0 clamp(0.4rem, 0.7vw, 0.65rem);
-                            border-top: 1px solid rgba(255, 255, 255, 0.06);
-                        }
-                    }
-
-                    /* Ultra-wide desktops: keep inline actions, but make them modern + non-cramping */
-                    @media (min-width: 1701px) {
-                        .till-bar .tb-actions {
-                            margin-left: auto;
-                            justify-content: flex-end;
-                            flex-wrap: nowrap;
-                            gap: clamp(0.35rem, 0.4vw, 0.55rem);
-                            padding: 0 clamp(0.75rem, 0.8vw, 1.2rem);
-                            overflow-x: auto;
-                            overflow-y: hidden;
-                            scrollbar-width: thin;
-                            scrollbar-color: color-mix(in srgb, var(--color-primary, #8A775F) 70%, transparent) transparent;
-                        }
-
-                        .till-bar .tb-actions::-webkit-scrollbar {
-                            height: 0.32rem;
-                        }
-
-                        .till-bar .tb-actions::-webkit-scrollbar-thumb {
-                            background: color-mix(in srgb, var(--color-primary, #8A775F) 70%, transparent);
-                            border-radius: 999px;
-                        }
-
-                        .till-bar button.recent-toggle,
-                        .till-bar a.recent-toggle,
-                        .till-bar a.exit,
-                        .till-bar a.logout {
-                            min-height: clamp(2.05rem, 0.5vw + 1.8rem, 2.3rem);
-                            border-radius: 999px;
-                        }
-                    }
-
-
-/* ─────────────────────────────────────────────────────────────────────────────
-   Explicit closers for five blocks that were never closed.
-
-   The file has ended five levels deep since its first commit (2026-05-26), so
-   this is how it has always shipped, not recent damage. Browsers recover by
-   closing open blocks at EOF, which is exactly what these braces now do — so
-   adding them changes no rendering. It makes the file parse as written rather
-   than as recovered, which is what any linter, minifier or bundler needs.
-
-   They close, innermost first:
-     .modal-content  <  .modal-overlay  <  @media (max-width: 640px)
-       <  @media (prefers-reduced-motion: reduce)  <  .pos-ready-icon-wrap
-
-   KNOWN, NOT FIXED HERE: because those blocks never closed, the ~530 lines
-   above are nested inside .pos-ready-icon-wrap rather than sitting at the top
-   level, so the POS modal styling they contain has never applied — .modal-content,
-   .modal-header and .modal-footer resolve to zero reachable rules. The region is
-   also internally inconsistent (.pos-ready-icon-wrap carries modal dimensions,
-   .modal-close declares font-size three times, a declaration sits inside a
-   comment banner), and no commit in either repo has a balanced version to restore
-   from. Re-scoping it would switch on 530 lines of CSS that have never run in
-   production, which is a design change needing visual review — deliberately out
-   of scope for a brace fix.
-   ───────────────────────────────────────────────────────────────────────────── */
+    .till-bar .tb-row2 {
+        height: clamp(2.25rem, 2.3vw, 2.6rem);
+        padding: 0 clamp(0.4rem, 0.7vw, 0.65rem);
+        border-top: 1px solid rgba(255, 255, 255, 0.06);
+    }
 }
 
-/* closes .modal-content */
+/* Ultra-wide desktops: keep inline actions, but make them modern + non-cramping */
+@media (min-width: 1701px) {
+    .till-bar .tb-actions {
+        margin-left: auto;
+        justify-content: flex-end;
+        flex-wrap: nowrap;
+        gap: clamp(0.35rem, 0.4vw, 0.55rem);
+        padding: 0 clamp(0.75rem, 0.8vw, 1.2rem);
+        overflow-x: auto;
+        overflow-y: hidden;
+        scrollbar-width: thin;
+        scrollbar-color: color-mix(in srgb, var(--color-primary, #8A775F) 70%, transparent) transparent;
+    }
+
+    .till-bar .tb-actions::-webkit-scrollbar {
+        height: 0.32rem;
+    }
+
+    .till-bar .tb-actions::-webkit-scrollbar-thumb {
+        background: color-mix(in srgb, var(--color-primary, #8A775F) 70%, transparent);
+        border-radius: 999px;
+    }
+
+    .till-bar button.recent-toggle,
+    .till-bar a.recent-toggle,
+    .till-bar a.exit,
+    .till-bar a.logout {
+        min-height: clamp(2.05rem, 0.5vw + 1.8rem, 2.3rem);
+        border-radius: 999px;
+    }
 }
 
-/* closes .overlay, .modal-overlay */
-}
-
-/* closes @media (max-width: 640px) */
-}
-
-/* closes @media (prefers-reduced-motion: reduce) */
-}
-
-/* closes .pos-ready-icon-wrap */
