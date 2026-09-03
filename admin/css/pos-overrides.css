@@ -205,6 +205,23 @@ a.recent-toggle {
     box-sizing: border-box;
 }
 
+/* Staff touch targets on the till bar.
+   These action chips (Recent, Help, Admin, Sign out) are 36px tall by design, which
+   is fine under a mouse but short of the 44px minimum on the 1024–1366px tablets the
+   till actually runs on. Screen width is the wrong test — a 1366px tablet is touch
+   and a 1366px laptop is not — so this keys off the pointer type and leaves the
+   compact desktop chrome untouched. */
+@media (pointer: coarse) {
+
+    .till-bar .tb-actions button,
+    .till-bar .tb-actions a,
+    button.recent-toggle,
+    a.recent-toggle {
+        height: auto;
+        min-height: 44px;
+    }
+}
+
 button.recent-toggle:hover,
 a.recent-toggle:hover {
     background: rgba(232, 201, 122, .11);
@@ -1094,6 +1111,12 @@ a.recent-toggle span {
         padding: 10px 10px calc(90px + env(safe-area-inset-bottom));
         display: grid;
         grid-template-rows: auto minmax(0, 1fr);
+        /* Without an explicit column the implicit one is sized to min-content, which
+           resolved to 386.5px inside a 320px .menu — so the toolbar and the item grid
+           both stretched to 387px and the overflow:hidden below silently clipped them.
+           minmax(0, 1fr) lets the column be narrower than its content instead, which
+           is what allows the children to reflow rather than be cut off. */
+        grid-template-columns: minmax(0, 1fr);
         gap: 10px;
         min-height: 0;
         align-content: start;
@@ -1110,6 +1133,11 @@ a.recent-toggle span {
 
     .menu .toolbar input {
         flex: 1;
+        /* A flex item defaults to min-width:auto, so `flex:1` could not shrink the
+           search field below its min-content (216px). With three 46-50px buttons
+           beside it the toolbar's floor was 387px — wider than a 320px screen, and
+           the overflow was clipped rather than scrollable. */
+        min-width: 0;
         min-height: 46px;
         padding: 10px 13px;
         font-size: 14px;
@@ -1275,7 +1303,13 @@ a.recent-toggle span {
     }
 
     #grid {
-        grid-template-columns: repeat(2, 1fr) !important;
+        /* `repeat(2, 1fr)` is really `minmax(auto, 1fr)`, and that `auto` floors each
+           track at the item's min-content — so on a 320px screen the two tracks
+           resolved to 182.6px each (387px total) inside a 320px `.menu` that clips
+           with overflow:hidden, cutting ~67px off the second column permanently.
+           Matching the defensive pattern used by the base `.grid` rule keeps two
+           columns wherever they genuinely fit and drops to one when they do not. */
+        grid-template-columns: repeat(auto-fill, minmax(min(140px, 100%), 1fr)) !important;
         gap: 6px !important;
     }
 }
@@ -1818,14 +1852,18 @@ a.recent-toggle span {
     color: #c82333;
     cursor: pointer;
     font-size: 13px;
+    /* Staff touch target: this is a destructive control (empties the cart) sitting
+       beside the close button, and it measured 57x36. */
+    min-height: 44px;
+    padding: 0 10px;
 }
 
 .cart-close-btn {
     display: flex;
     align-items: center;
     justify-content: center;
-    width: 36px;
-    height: 36px;
+    width: 44px;
+    height: 44px;
     background: transparent;
     border: none;
     border-radius: 8px;
