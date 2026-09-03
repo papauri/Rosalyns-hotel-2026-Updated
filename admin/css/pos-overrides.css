@@ -4653,3 +4653,43 @@ a.recent-toggle span {
                         }
                     }
 
+
+/* ─────────────────────────────────────────────────────────────────────────────
+   Explicit closers for five blocks that were never closed.
+
+   The file has ended five levels deep since its first commit (2026-05-26), so
+   this is how it has always shipped, not recent damage. Browsers recover by
+   closing open blocks at EOF, which is exactly what these braces now do — so
+   adding them changes no rendering. It makes the file parse as written rather
+   than as recovered, which is what any linter, minifier or bundler needs.
+
+   They close, innermost first:
+     .modal-content  <  .modal-overlay  <  @media (max-width: 640px)
+       <  @media (prefers-reduced-motion: reduce)  <  .pos-ready-icon-wrap
+
+   KNOWN, NOT FIXED HERE: because those blocks never closed, the ~530 lines
+   above are nested inside .pos-ready-icon-wrap rather than sitting at the top
+   level, so the POS modal styling they contain has never applied — .modal-content,
+   .modal-header and .modal-footer resolve to zero reachable rules. The region is
+   also internally inconsistent (.pos-ready-icon-wrap carries modal dimensions,
+   .modal-close declares font-size three times, a declaration sits inside a
+   comment banner), and no commit in either repo has a balanced version to restore
+   from. Re-scoping it would switch on 530 lines of CSS that have never run in
+   production, which is a design change needing visual review — deliberately out
+   of scope for a brace fix.
+   ───────────────────────────────────────────────────────────────────────────── */
+}
+
+/* closes .modal-content */
+}
+
+/* closes .overlay, .modal-overlay */
+}
+
+/* closes @media (max-width: 640px) */
+}
+
+/* closes @media (prefers-reduced-motion: reduce) */
+}
+
+/* closes .pos-ready-icon-wrap */
