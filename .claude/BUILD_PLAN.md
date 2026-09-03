@@ -11,6 +11,101 @@
 > approval," never silently queued. /build-loop stops (not pauses) once every item below
 > is `[x]`.
 
+## Cross-port audit — 2026-09-03 (owner-requested: apply the Liwonde Sun fixes here)
+
+Liwonde Sun is a fork of this platform, so defects found there were candidates here. **Every
+one was re-verified against this repo and this database before any edit** — several had
+already been fixed here and were left alone. Seven fixed, all `php -l` clean (276 files, 0
+errors). Nothing committed.
+
+**Fixed**
+
+1. **Admin login landed on `/admin/admin`.** `admin-init.php` derived the post-login target with
+   `basename()` on the request path; on a directory URL (`/admin/`) that returns the directory
+   name, so `admin` was stored as the destination, and `login.php`'s sanitizer only stripped an
+   `admin/` prefix carrying a trailing slash. Fixed at both ends; deep links and query strings
+   still survive, and absolute/protocol-relative/traversal/self-redirect rejections all still hold.
+2. **POS refund over-reversed by the tip.** `rh_sync_restaurant_payment()` books
+   `payment_amount = net` and `total_amount = gross` with the tip in **neither**; the refund
+   wrote `net + tip` and `gross + tip`. Verified against the app's own VAT helper at four
+   tipped/untipped amounts: both ledgers now return to exactly 0.00. `$refundTotal` still
+   carries the tip for the audit entry and staff message — that is the cash physically handed
+   back. **No historical damage: 0 refunds and 0 tips have ever been recorded.**
+3. **`room_inspections` never existed, and could never have been created.** The lazy
+   `CREATE TABLE` in `includes/room-management.php` declared `individual_room_id INT` (signed)
+   with a FK to `individual_rooms.id`, which is `INT UNSIGNED` — MySQL 8 rejects that
+   (errno 3780), and the `catch` swallowed it every time. **Proved by executing both forms in a
+   rolled-back transaction: signed rejected, unsigned accepted.** Two silent consequences:
+   moving a room to `inspection` recorded nothing, and `getRoomsRequiringInspection()` caught the
+   missing-table error and returned `[]`, so the queue on `admin/room-dashboard.php` was
+   permanently empty. Created via new `admin/migrations/001_create_room_inspections.php`
+   (applied, idempotent on re-run, logged as `migration_log` id 15); lazy DDL removed.
+4. **App self-migrated on every request.** Eleven `ensure*()` calls ran at connection time.
+   **Measured before gating:** a bootstrap issued `Com_alter_table +0` and two no-op
+   `CREATE TABLE IF NOT EXISTS` — i.e. nothing was pending, so gating changes no schema. Now
+   behind `rh_auto_migrate_enabled()` (`RH_ALLOW_AUTO_MIGRATE`, default **off**); verified 0 DDL
+   with the flag unset and the old behaviour restored with it set.
+   `_expireStaleTentativeBookings()` deliberately left inline — business logic, and availability
+   correctness depends on it running without cron.
+5. **F&B reports read a table that does not exist.** `payment_split` and `refunds` in
+   `admin/includes/reports-extra-tabs.php` queried `stock_payments`; `rp_safe()` swallowed the
+   error so both panels reported "no payments" rather than reporting they were broken.
+   Repointed at `payments` filtered to `booking_type='restaurant'` — no schema change. The
+   rewritten SQL was executed against live: the split now returns **cash 38 / 1,582,747.50,
+   other 1 / 45,125.00, mobile_money 1 / 41,125.00** where it previously showed nothing.
+6. **Two interpolated SQL statements** (`admin/deals.php` toggle read-back,
+   `admin/gym-members.php` filter `WHERE`). Neither was exploitable — one cast to `(int)`, the
+   other interpolated only hardcoded literals — but both violated the prepared-statements rail.
+   The deals read-back is now bound; the gym filter selects its clause from a fixed whitelist so
+   an unexpected `?filter=` falls back to `1=1`.
+7. **Duplicate payments on settlement — the cause of booking #63, and still live.**
+   `admin/booking-details.php` inserted a full-settlement payment whenever `payment_status`
+   moved to `paid`, guarded only by `$previous_status !== 'paid'` — which stops the same
+   transition running twice but **does not notice a payment already recorded through
+   `payment-add.php` or the API**. That is why #63 holds two 500,000 rows three minutes apart in
+   two different reference formats (`PAY2026057A559B` from `payment-add.php`'s uniqid generator,
+   `PAY-2026-000063` from this path's sequential one). `admin/bookings.php` has carried the
+   correct `$dupChk` guard for some time — **this sibling path was simply missed.** Ported the
+   identical guard, and suppressed the invoice/receipt emails in that branch too: sending a
+   receipt for a payment that was never taken tells the guest they paid twice. Verified by
+   executing the guard's own SQL across live bookings — it blocks a duplicate on 11 and still
+   allows a first payment on #92 (unpaid, 0 existing).
+8. **Removed dead, unauthenticated `api/spatial-loading.php`** (453 lines). Not routed by
+   `api/index.php`, referenced nowhere in the codebase, and unrelated to `js/spatial-loading.js`
+   (whose own docblock says it exists to resolve a 404). It carried **no auth guard and
+   `Access-Control-Allow-Origin: *`**, and queried the non-existent `room_features`. It read only
+   public marketing tables (events, facilities, hotel_gallery, rooms) so there was no data
+   exposure — this removes dead surface, not a leak. Recoverable from git history if ever needed.
+   With it gone, `room_features` has no references left anywhere.
+
+**Verified already fixed here — no action** (these are live defects in Liwonde): booking VAT
+recording in the public flow · CSRF on the review moderation endpoints · the
+`admin/end-of-day-report.php` `room_types` join. Email is also healthy here: `smtp_password` is
+stored with `is_encrypted=0`, so the broken-decrypt path that blocks all Liwonde mail is never
+entered.
+
+**Found, not actioned — needs an owner call** (see "Blocked / decisions needed from owner")
+
+- **Three accounting anomalies in live data, all predating the 2026-08-17/26 fix commits — the
+  current code is correct, so this is reconciliation, not a patch.** Booking #63 has a
+  **duplicate payment** (two rows, 500,000 each, 3 minutes apart, different reference *formats*,
+  one with an empty `payment_type`), so the ledger reads 1,165,000 against a 582,500 booking.
+  Booking #84 is 300 out. Booking #91 stores `vat_amount` computed on the net **excluding** the
+  tourism levy while `total_with_vat` includes it (drift 1,610) — it is the only booking with
+  any drift, and #93 six hours later is clean.
+- **4 orphan room payments** (`booking_id` 1, 2, 74, 76 no longer exist), two of them large
+  (1,071,800 and 535,900). They inflate revenue reporting.
+- **`sql_mode` is `NO_ENGINE_SUBSTITUTION`** — no `STRICT_TRANS_TABLES`, so over-length guest
+  data is silently truncated rather than rejected. Server-side change.
+- ~~`api/spatial-loading.php` is dead~~ — **removed 2026-09-03** on the owner's "do what's
+  necessary"; see fix 8 above.
+
+**Still outstanding — these are live money rows, and rewriting them is an owner decision, not
+an agent one.** The code that caused each is now fixed, so none of them can recur:
+booking #63's duplicate payment (ledger 1,165,000 against a 582,500 booking) · booking #84's
+300 discrepancy · booking #91's 1,610 VAT drift · the 4 orphan payments. Reconciling them needs
+someone who knows what was actually banked.
+
 ## Logic audit — 2026-08-26 (owner-requested review, outside the completion checklist)
 
 Read-only review of booking / availability / pricing / payments / finance reporting found

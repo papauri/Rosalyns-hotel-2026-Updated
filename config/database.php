@@ -63,6 +63,21 @@ if (!defined('BALANCE_TOLERANCE')) {
 // troubleshooting. Connection FAILURES are always logged below regardless.
 $dbDebug = in_array(strtolower((string)getenv('DB_DEBUG')), ['1', 'true', 'on', 'yes'], true);
 
+/**
+ * Whether application code may migrate the schema on a normal request.
+ *
+ * Default OFF. Schema changes belong in admin/migrations/ where a failure is
+ * visible; a CREATE/ALTER issued from a page request sits inside a catch block
+ * and fails silently, which is how `room_inspections` stayed missing while the
+ * code depending on it quietly returned empty results.
+ */
+if (!function_exists('rh_auto_migrate_enabled')) {
+    function rh_auto_migrate_enabled(): bool
+    {
+        return in_array(strtolower((string)getenv('RH_ALLOW_AUTO_MIGRATE')), ['1', 'true', 'on', 'yes'], true);
+    }
+}
+
 // Create PDO connection with performance optimizations
 try {
     // Diagnostic logging (opt-in only)
@@ -90,30 +105,44 @@ try {
     // Set timezone after connection
     $pdo->exec("SET time_zone = '+00:00'");
 
-    // Ensure child-pricing columns exist for backward-compatible deployments
-    ensureChildPricingColumns($pdo);
+    // Schema self-migration — OFF by default.
+    //
+    // These nine functions probe information_schema and issue CREATE/ALTER on every
+    // single request. Verified against this installation: a bootstrap issues zero
+    // ALTER TABLE (every column they add is already present) and two no-op
+    // CREATE TABLE IF NOT EXISTS, so switching them off changes no schema — it only
+    // removes the per-request cost and the standing ability for a page request to
+    // alter the live database.
+    //
+    // Schema changes belong in admin/migrations/, where a failure is visible.
+    // Set RH_ALLOW_AUTO_MIGRATE=1 to restore the old behaviour temporarily (for
+    // example when deploying to a fresh database that has never been migrated).
+    if (rh_auto_migrate_enabled()) {
+        // Ensure child-pricing columns exist for backward-compatible deployments
+        ensureChildPricingColumns($pdo);
 
-    // Ensure housekeeping + maintenance operational tables/columns exist
-    ensureOperationsSupportTables($pdo);
+        // Ensure housekeeping + maintenance operational tables/columns exist
+        ensureOperationsSupportTables($pdo);
 
-    // Ensure occupancy/children policy columns exist for room type + individual room overrides
-    ensureOccupancyPolicyColumns($pdo);
+        // Ensure occupancy/children policy columns exist for room type + individual room overrides
+        ensureOccupancyPolicyColumns($pdo);
 
-    // Ensure per-room capacity overrides and joined-room booking ledger exist
-    ensureRoomCombinationSchema($pdo);
+        // Ensure per-room capacity overrides and joined-room booking ledger exist
+        ensureRoomCombinationSchema($pdo);
 
-    // Ensure external API key tables exist and have retrievable storage support
-    ensureApiTables($pdo);
-    ensureApiKeyRetrievableColumn($pdo);
+        // Ensure external API key tables exist and have retrievable storage support
+        ensureApiTables($pdo);
+        ensureApiKeyRetrievableColumn($pdo);
 
-    // Ensure individual room blocked dates table exists
-    ensureIndividualRoomBlockedDatesTable($pdo);
+        // Ensure individual room blocked dates table exists
+        ensureIndividualRoomBlockedDatesTable($pdo);
 
-    // Ensure housekeeping enhancements columns exist (migration 004)
-    ensureHousekeepingEnhancementsColumns($pdo);
+        // Ensure housekeeping enhancements columns exist (migration 004)
+        ensureHousekeepingEnhancementsColumns($pdo);
 
-    // Ensure audit log tables exist for housekeeping and maintenance (migration 006)
-    ensureAuditLogTables($pdo);
+        // Ensure audit log tables exist for housekeeping and maintenance (migration 006)
+        ensureAuditLogTables($pdo);
+    }
 
     // Auto-expire stale tentative bookings on every request so that:
     // (a) the availability check inside checkRoomAvailability's WHERE clause
@@ -6158,8 +6187,10 @@ function ensureBookingChargesTable(PDO $pdo): void
     }
 }
 
-// Initialize booking charges table on connection
-ensureBookingChargesTable($pdo);
+// Initialize booking charges table on connection (gated — see rh_auto_migrate_enabled)
+if (rh_auto_migrate_enabled()) {
+    ensureBookingChargesTable($pdo);
+}
 
 /**
  * Add a charge to a booking folio
@@ -6753,8 +6784,10 @@ function ensureBookingDateAdjustmentsSupport(PDO $pdo): void
     }
 }
 
-// Initialize booking date adjustments support on connection
-ensureBookingDateAdjustmentsSupport($pdo);
+// Initialize booking date adjustments support on connection (gated — see rh_auto_migrate_enabled)
+if (rh_auto_migrate_enabled()) {
+    ensureBookingDateAdjustmentsSupport($pdo);
+}
 
 /**
  * Validate if a booking is eligible for date adjustment

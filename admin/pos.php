@@ -941,10 +941,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 try {
                     // POS menu prices are gross — extract VAT from within (same as the sale sync)
                     $refVat = pos_calculateRestaurantVatParts((float)$refRow['total_amount']);
-                    $refTip = (float)($refRow['tip_amount'] ?? 0);
                     $origPayStmt = $pdo->prepare("SELECT id FROM payments WHERE booking_type='restaurant' AND COALESCE(payment_type,'') != 'refund' AND deleted_at IS NULL AND (payment_reference = ? OR booking_id = ?) ORDER BY id DESC LIMIT 1");
                     $origPayStmt->execute(['POS-' . $refRow['reference'], $refundOrderId]);
                     $origPaymentId = (int)$origPayStmt->fetchColumn() ?: null;
+                    // The refund must reverse exactly what the sale booked, no more.
+                    // rh_sync_restaurant_payment() books payment_amount = net and
+                    // total_amount = gross, with the tip in NEITHER. Reversing net+tip
+                    // and gross+tip therefore left the ledger short by the tip on a
+                    // transaction that netted zero. Tips are handled separately by
+                    // pos-accounting.php for till reconciliation, so they stay out of
+                    // the revenue ledger on both legs.
+                    $refLedgerNet   = $refVat['net'];
+                    $refLedgerGross = (float)$refRow['total_amount'];
                     $pdo->prepare("INSERT INTO payments (
                             payment_reference, booking_type, booking_id, booking_reference,
                             payment_date, payment_amount, vat_rate, vat_amount, total_amount,
@@ -956,14 +964,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                             'REF-POS-' . $refRow['reference'],
                             $refundOrderId,
                             $refRow['reference'],
-                            $refVat['net'] + $refTip,
+                            $refLedgerNet,
                             $refVat['vat_rate'],
                             $refVat['vat'],
-                            $refundTotal,
+                            $refLedgerGross,
                             pos_mapMethod($refRow['payment_method'] ?? 'cash'),
                             $origPaymentId,
                             $refundReason,
-                            $refundTotal,
+                            $refLedgerGross,
                             'Refund: ' . $refundReason,
                             $user['id'],
                         ]);

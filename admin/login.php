@@ -35,10 +35,12 @@ function admin_sanitize_redirect(?string $rawRedirect): string
         return '';
     }
 
-    // Keep redirects inside admin pages only.
+    // Keep redirects inside admin pages only. Strip a leading "admin" segment
+    // whether or not it carries a trailing slash — a bare "admin" used to survive
+    // this and resolve relative to /admin/, producing /admin/admin.
     $decoded = ltrim($decoded, '/');
-    if (str_starts_with($decoded, 'admin/')) {
-        $decoded = substr($decoded, 6);
+    if ($decoded === 'admin' || str_starts_with($decoded, 'admin/')) {
+        $decoded = ltrim(substr($decoded, 5), '/');
     }
 
     if ($decoded === '' || str_starts_with(strtolower($decoded), 'login.php') || str_contains($decoded, '..')) {
@@ -46,6 +48,14 @@ function admin_sanitize_redirect(?string $rawRedirect): string
     }
 
     if (preg_match('/^[A-Za-z0-9._\-\/\?&=%#]+$/', $decoded) !== 1) {
+        return '';
+    }
+
+    // The target must name an actual admin page. Without this any bare path
+    // segment passes the character check above and is emitted as a relative
+    // Location, which the browser resolves against /admin/ into a 404.
+    $targetPath = strtolower((string)preg_replace('/[?#].*$/', '', $decoded));
+    if (substr($targetPath, -4) !== '.php') {
         return '';
     }
 

@@ -131,7 +131,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['ajax_action'])) {
             $id = (int)($_POST['id'] ?? 0);
             if ($id < 1) throw new InvalidArgumentException('Invalid ID.');
             $pdo->prepare("UPDATE pos_deals SET is_active = 1 - is_active WHERE id=?")->execute([$id]);
-            echo json_encode(['ok' => true, 'active' => (int)$pdo->query("SELECT is_active FROM pos_deals WHERE id=$id")->fetchColumn()]);
+            $readBack = $pdo->prepare("SELECT is_active FROM pos_deals WHERE id=?");
+            $readBack->execute([$id]);
+            echo json_encode(['ok' => true, 'active' => (int)$readBack->fetchColumn()]);
 
         } elseif ($action === 'delete') {
             $id = (int)($_POST['id'] ?? 0);

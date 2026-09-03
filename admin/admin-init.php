@@ -38,7 +38,15 @@ if (!isset($_SESSION['admin_user_id'])) {
     $requestQuery = (string)parse_url($requestUri, PHP_URL_QUERY);
     $requestedFile = basename($requestPath);
 
-    if ($requestedFile !== '' && $requestedFile !== 'login.php') {
+    // basename() on a directory URL ("/admin/" or "/admin") returns the directory
+    // name rather than a page, so hitting the admin root stored "admin" as the
+    // post-login destination and landed the user on /admin/admin. Only a real
+    // .php page is a valid destination; anything else falls through to the plain
+    // login below, which then sends the user to their role's default page.
+    $isAdminPage = strtolower(substr($requestedFile, -4)) === '.php'
+        && strtolower($requestedFile) !== 'login.php';
+
+    if ($isAdminPage) {
         $redirectTarget = $requestedFile . ($requestQuery !== '' ? '?' . $requestQuery : '');
         $_SESSION['admin_redirect_after_login'] = $redirectTarget;
         header('Location: login.php?redirect=' . rawurlencode($redirectTarget));

@@ -1011,32 +1011,50 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['update_payment'])) {
         $update_stmt->execute([$payment_status, $booking_id]);
 
         if ($payment_status === 'paid' && $previous_status !== 'paid') {
-            $payment_reference = 'PAY-' . date('Y') . '-' . str_pad($booking_id, 6, '0', STR_PAD_LEFT);
-            $receipt_number = finance_next_receipt_number($pdo, date('Y-m-d'));
-
-            $insert_payment = $pdo->prepare("
-                INSERT INTO payments (
-                    payment_reference, booking_type, booking_id, booking_reference,
-                    payment_date, payment_amount, vat_rate, vat_amount, total_amount,
-                    payment_method, payment_type, payment_status, invoice_generated,
-                    receipt_number, status, notes, recorded_by
-                ) VALUES (?, 'room', ?, ?, CURDATE(), ?, ?, ?, ?, 'cash', 'full_payment', 'completed', 1, ?, 'completed', ?, ?)
+            // Guard: skip the insert if a completed payment already exists for this
+            // booking. `$previous_status !== 'paid'` only stops the same transition
+            // running twice — it does NOT notice a payment already recorded through
+            // payment-add.php or the API, so settling here booked the full amount a
+            // second time under a different reference format. admin/bookings.php has
+            // carried this guard for a while; this path was missed.
+            $dupChk = $pdo->prepare("
+                SELECT COUNT(*) FROM payments
+                WHERE booking_type = 'room' AND booking_id = ?
+                  AND payment_status IN ('completed','paid') AND COALESCE(payment_type, '') != 'refund'
+                  AND deleted_at IS NULL
             ");
-            $insert_payment->execute([
-                $payment_reference,
-                $booking_id,
-                $booking['booking_reference'],
-                $paymentSubtotal,
-                $paymentVatRate,
-                $paymentVatAmount,
-                $paymentTotalWithVat,
-                $receipt_number,
-                $paymentNotes,
-                $user['id']
-            ]);
-            $new_payment_id = (int)$pdo->lastInsertId();
+            $dupChk->execute([$booking_id]);
+            $paymentAlreadyRecorded = (int)$dupChk->fetchColumn() > 0;
 
-            logBookingPayment($booking_id, $booking['booking_reference'], $paymentTotalWithVat, 'full_payment', 'cash', 'completed', $user['id'], $payment_reference);
+            $new_payment_id = 0;
+            if (!$paymentAlreadyRecorded) {
+                $payment_reference = 'PAY-' . date('Y') . '-' . str_pad($booking_id, 6, '0', STR_PAD_LEFT);
+                $receipt_number = finance_next_receipt_number($pdo, date('Y-m-d'));
+
+                $insert_payment = $pdo->prepare("
+                    INSERT INTO payments (
+                        payment_reference, booking_type, booking_id, booking_reference,
+                        payment_date, payment_amount, vat_rate, vat_amount, total_amount,
+                        payment_method, payment_type, payment_status, invoice_generated,
+                        receipt_number, status, notes, recorded_by
+                    ) VALUES (?, 'room', ?, ?, CURDATE(), ?, ?, ?, ?, 'cash', 'full_payment', 'completed', 1, ?, 'completed', ?, ?)
+                ");
+                $insert_payment->execute([
+                    $payment_reference,
+                    $booking_id,
+                    $booking['booking_reference'],
+                    $paymentSubtotal,
+                    $paymentVatRate,
+                    $paymentVatAmount,
+                    $paymentTotalWithVat,
+                    $receipt_number,
+                    $paymentNotes,
+                    $user['id']
+                ]);
+                $new_payment_id = (int)$pdo->lastInsertId();
+
+                logBookingPayment($booking_id, $booking['booking_reference'], $paymentTotalWithVat, 'full_payment', 'cash', 'completed', $user['id'], $payment_reference);
+            }
 
             $update_amounts = $pdo->prepare("
                 UPDATE bookings
@@ -1059,15 +1077,22 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['update_payment'])) {
                 }
             }
 
-            require_once '../config/invoice.php';
-            $invoice_result = sendPaymentInvoiceEmail($booking_id);
+            if ($paymentAlreadyRecorded) {
+                // No new payment was taken, so no invoice or receipt is due — emailing
+                // one here would tell the guest they had paid a second time.
+                $_SESSION['success_message'] = 'Payment status updated. A completed payment was already '
+                    . 'recorded for this booking, so no second payment was created.' . $auto_assign_msg;
+            } else {
+                require_once '../config/invoice.php';
+                $invoice_result = sendPaymentInvoiceEmail($booking_id);
 
-            require_once '../config/receipts.php';
-            $receipt_result = receipt_auto_send($pdo, $new_payment_id, $user);
+                require_once '../config/receipts.php';
+                $receipt_result = receipt_auto_send($pdo, $new_payment_id, $user);
 
-            $_SESSION['success_message'] = 'Payment status updated. Payment recorded.' . $auto_assign_msg .
-                ($invoice_result['success'] ? ' Invoice sent!' : ' (Invoice email failed)') .
-                ($receipt_result['success'] ? ' Receipt emailed.' : '');
+                $_SESSION['success_message'] = 'Payment status updated. Payment recorded.' . $auto_assign_msg .
+                    ($invoice_result['success'] ? ' Invoice sent!' : ' (Invoice email failed)') .
+                    ($receipt_result['success'] ? ' Receipt emailed.' : '');
+            }
         } else {
             $_SESSION['success_message'] = 'Payment status updated.';
         }

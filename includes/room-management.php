@@ -337,26 +337,13 @@ function createRoomInspection(int $roomId, ?int $performedBy): array
 {
     global $pdo;
 
+    // `room_inspections` is created by admin/migrations/001_create_room_inspections.php.
+    // The lazy CREATE TABLE that used to live here could never succeed: it declared
+    // individual_room_id as signed INT with a foreign key to individual_rooms.id,
+    // which is INT UNSIGNED, so MySQL 8 rejected the constraint (errno 3780) and the
+    // catch below swallowed the failure on every attempt. Schema changes belong in a
+    // migration where a failure is visible, not on a page request where it is not.
     try {
-        // Check if inspections table exists
-        $tableCheck = $pdo->query("SHOW TABLES LIKE 'room_inspections'");
-        if ($tableCheck->rowCount() === 0) {
-            // Create inspections table
-            $pdo->exec("
-                CREATE TABLE room_inspections (
-                    id INT AUTO_INCREMENT PRIMARY KEY,
-                    individual_room_id INT NOT NULL,
-                    status ENUM('pending', 'passed', 'failed') DEFAULT 'pending',
-                    inspector_id INT,
-                    checklist JSON,
-                    notes TEXT,
-                    inspected_at DATETIME,
-                    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-                    FOREIGN KEY (individual_room_id) REFERENCES individual_rooms(id) ON DELETE CASCADE
-                )
-            ");
-        }
-
         // Create inspection task
         $stmt = $pdo->prepare("
             INSERT INTO room_inspections (individual_room_id, status, created_at)
