@@ -99,14 +99,22 @@ button {
     display: none;
 }
 
-/* Brand block */
+/* Brand block — the hotel "logo" here is a text lockup, not an image.
+   In a flex column the default align-items:stretch made every child as wide as the
+   block itself, so .brand-name reported 992px on a 1024px screen instead of the
+   ~180px its text needs. flex-start sizes each line to its own content, which is
+   what keeps the lockup compact enough to sit beside the actions instead of
+   forcing them onto a second row. */
 .till-bar .brand {
     display: flex;
     flex-direction: column;
     justify-content: center;
+    align-items: flex-start;
     padding: 0 22px;
     border-right: 1px solid rgba(255, 255, 255, .07);
-    flex-shrink: 0;
+    flex: 0 1 auto;
+    min-width: 0;
+    max-width: 100%;
     gap: 2px;
     height: 100%;
     background: rgba(232, 201, 122, .03);
@@ -120,6 +128,10 @@ button {
     letter-spacing: .03em;
     white-space: nowrap;
     line-height: 1.1;
+    /* A long property name must ellipsis rather than widen the bar. */
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
 }
 
 .till-bar .brand-label {
@@ -507,41 +519,17 @@ a.recent-toggle span {
     }
 }
 
-/* 1024px–1540px: tb-actions wraps below brand — always visible, never overlaps brand */
-@media (min-width: 1024px) and (max-width: 1540px) {
-    .till-bar .tb-row1 {
-        height: auto;
-        min-height: 72px;
-        flex-wrap: wrap;
-        align-items: stretch;
-    }
-
-    .till-bar .brand {
-        align-self: center;
-    }
-
-    .till-bar .pos-mobile-menu-btn {
-        display: none;
-    }
-
-    .till-bar .tb-actions {
-        order: 10;
-        flex: 1 1 100%;
-        flex-wrap: wrap;
-        justify-content: flex-end;
-        height: auto;
-        min-height: 40px;
-        padding: 6px 12px;
-        border-top: 1px solid rgba(255, 255, 255, .04);
-        background: rgba(255, 255, 255, .02);
-        gap: 4px;
-        align-items: center;
-    }
-
-    .till-bar .brand-name {
-        font-size: 17px;
-    }
-
+/* 1281px–1540px: stats-row sizing only.
+   This block used to be "tb-actions wraps below brand", spanning 1024px–1540px. Every
+   rule it had for .tb-actions and .pos-mobile-menu-btn was already dead: a pre-existing
+   block at 1281px–1700px hides .tb-actions and shows the hamburger with !important, so
+   this block's `display:none` on the hamburger lost outright while its .tb-actions
+   styling applied to a hidden element. Worse, at exactly 1024px it matched at the same
+   time as the ≤1024px mobile block, which is why the brand stretched to full width at
+   1024px but sized correctly at 1112px.
+   The action row is now the hamburger's job everywhere below 1700px, so the contradictory
+   rules are gone and only the stats-row layout remains. */
+@media (min-width: 1281px) and (max-width: 1540px) {
     .till-bar .tb-row2 {
         display: grid;
         grid-template-columns: repeat(5, minmax(0, 1fr));
@@ -1611,8 +1599,14 @@ a.recent-toggle span {
     }
 }
 
-/* ≤900px: collapse tb-actions to hamburger */
-@media (max-width: 900px) {
+/* ≤1280px: collapse tb-actions to the hamburger (mobile navbar).
+   This used to stop at 900px, which left every tablet showing the full action row.
+   Because that row wraps to its own line, the till bar grew to 196px tall at
+   912–1024px and 171px at 1112–1280px — a quarter of a 1024x768 landscape tablet
+   spent on chrome, pushing the till itself off screen. Tablets now get the same
+   compact bar as phones; the actions live in the hamburger menu, which already
+   contains all of them. */
+@media (max-width: 1280px) {
     .till-bar .tb-actions {
         display: none !important;
     }
