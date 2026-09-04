@@ -2205,38 +2205,43 @@ if (in_array($user['role'] ?? '', ['admin', 'manager'], true)) {
                     <button class="recent-toggle" onclick="toggleRecent()" data-help="Recent orders|Last 10 orders you rang up."><i class="fas fa-receipt"></i> Recent</button>
                     <button class="recent-toggle" onclick="openTabsTray()" data-help="Open tabs|Unpaid kitchen orders."><i class="fas fa-utensils"></i> Tabs <span id="tabBadge" <?php echo empty($openTabs) ? ' style="display:none;"' : ''; ?>><?php echo count($openTabs); ?></span></button>
                     <button class="recent-toggle" onclick="openStationNoteModal()" data-help="Station note|Quick note to Kitchen/Bar/Coffee."><i class="fas fa-paper-plane"></i> Note</button>
-                    <?php if ($posCanFloat): ?>
-                    <button class="recent-toggle" onclick="openFloatModal()" data-help="Opening float|Record the opening cash float for your shift."><i class="fas fa-coins"></i> Float</button>
-                    <?php endif; ?>
                     <button class="recent-toggle" onclick="openCloseShift()" data-help="Close shift (Z-report)|End-of-shift cash count."><i class="fas fa-cash-register"></i> Close Shift</button>
 
                     <?php if ($isManagerOrAdmin): ?>
                         <div class="tb-sep"></div>
-                        <!-- Live screens (manager/admin only) -->
-                        <?php if (moduleEnabled('station_kds')): ?>
-                        <a class="recent-toggle" href="kds.php" target="_blank" style="text-decoration:none;"><i class="fas fa-utensils"></i> Kitchen<span id="kitchenBadge" style="<?php echo ($adminStationsInit['counts']['kitchen']['open_total'] ?? 0) > 0 ? '' : 'display:none;'; ?>"><?php echo (int)($adminStationsInit['counts']['kitchen']['open_total'] ?? 0); ?></span></a>
-                        <?php endif; ?>
-                        <?php if (moduleEnabled('station_bds')): ?>
-                        <a class="recent-toggle" href="bds.php" target="_blank" style="text-decoration:none;"><i class="fas fa-wine-glass"></i> Bar<span id="barBadge" style="<?php echo ($adminStationsInit['counts']['bar']['open_total'] ?? 0) > 0 ? '' : 'display:none;'; ?>"><?php echo (int)($adminStationsInit['counts']['bar']['open_total'] ?? 0); ?></span></a>
-                        <?php endif; ?>
-                        <?php if (moduleEnabled('station_cds')): ?>
-                        <a class="recent-toggle" href="cds.php" target="_blank" style="text-decoration:none;"><i class="fas fa-mug-hot"></i> Coffee<span id="coffeeBadge" style="<?php echo ($adminStationsInit['counts']['coffee_bar']['open_total'] ?? 0) > 0 ? '' : 'display:none;'; ?>"><?php echo (int)($adminStationsInit['counts']['coffee_bar']['open_total'] ?? 0); ?></span></a>
-                        <?php endif; ?>
-                        <button class="recent-toggle" onclick="openStationsTray()"><i class="fas fa-layer-group"></i> Stations<span id="stationsBadge" style="<?php $tot = ($adminStationsInit['counts']['kitchen']['open_total'] ?? 0) + ($adminStationsInit['counts']['bar']['open_total'] ?? 0) + ($adminStationsInit['counts']['coffee_bar']['open_total'] ?? 0);
+                        <?php /* The three per-station links (Kitchen/Bar/Coffee) collapsed into this
+                                  one control: the Stations tray it opens already shows each station's
+                                  live counts AND carries direct links to those boards, so four
+                                  toolbar buttons were showing what one plus a tray already covers.
+                                  The badge sums all stations so nothing is lost at a glance. */ ?>
+                        <button class="recent-toggle" onclick="openStationsTray()" data-help="Stations|Live Kitchen, Bar and Coffee boards with ticket counts, and links to open each screen."><i class="fas fa-layer-group"></i> Stations<span id="stationsBadge" style="<?php $tot = ($adminStationsInit['counts']['kitchen']['open_total'] ?? 0) + ($adminStationsInit['counts']['bar']['open_total'] ?? 0) + ($adminStationsInit['counts']['coffee_bar']['open_total'] ?? 0);
                                                                                                                                                                 echo $tot > 0 ? '' : 'display:none;'; ?>"><?php echo $tot; ?></span></button>
-                        <?php if (moduleEnabled('stock')): ?>
-                        <a class="recent-toggle" href="stock-orders.php"><i class="fas fa-list"></i> All Orders</a>
-                        <?php endif; ?>
+                        <?php /* Hidden badge targets kept so the live stations poller can keep
+                                  updating per-station counts without null checks. */ ?>
+                        <span id="kitchenBadge" hidden></span><span id="barBadge" hidden></span><span id="coffeeBadge" hidden></span>
                     <?php endif; ?>
                     <?php if ($posCanToggle86): ?>
                         <button class="recent-toggle" id="eightySixModeBtn" onclick="toggle86Mode()" data-help="86 Mode|Toggle item availability. When active, click any item to mark it as 86'd (unavailable) or to re-enable it. All sessions reload the menu."><i class="fas fa-ban"></i> 86</button>
                     <?php endif; ?>
+                    <button type="button" class="rh-help-toggle recent-toggle" data-inline="1" id="rhHelpToggle" aria-label="Toggle help tooltips" data-help="Help mode|Turn tooltip hints on or off for POS actions."><span class="dot"></span><i class="fas fa-question-circle"></i> <span id="rhHelpLabel">Help</span></button>
 
                     <div class="tb-sep"></div>
-                    <!-- Nav -->
-                    <a class="recent-toggle" href="../docs/guides/01-pos-till.html" target="_blank" rel="noopener" style="text-decoration:none;"><i class="fas fa-book-open"></i> POS Guide</a>
-                    <button type="button" class="rh-help-toggle recent-toggle" data-inline="1" id="rhHelpToggle" aria-label="Toggle help tooltips" data-help="Help mode|Turn tooltip hints on or off for POS actions."><span class="dot"></span><i class="fas fa-question-circle"></i> <span id="rhHelpLabel">Help</span></button>
-                    <button class="recent-toggle" onclick="RHSounds.openSettings()" title="Sound settings"><i class="fas fa-sliders"></i> Sounds</button> <?php if (!$isFullScreen): ?><a class="exit" href="dashboard.php"><i class="fas fa-arrow-left"></i> Admin</a><?php endif; ?>
+                    <?php /* Everything below is used once a shift or less. Kept one tap away rather
+                              than occupying the bar staff scan all service. */ ?>
+                    <div class="tb-more">
+                        <button type="button" class="recent-toggle tb-more__btn" id="posMoreBtn" onclick="togglePosMoreMenu(event)" aria-expanded="false" aria-haspopup="true"><i class="fas fa-ellipsis"></i> More</button>
+                        <div class="tb-more__menu" id="posMoreMenu" hidden>
+                            <?php if ($posCanFloat): ?>
+                            <button type="button" onclick="closePosMoreMenu(); openFloatModal();"><i class="fas fa-coins"></i> Opening float</button>
+                            <?php endif; ?>
+                            <?php if ($isManagerOrAdmin && moduleEnabled('stock')): ?>
+                            <a href="stock-orders.php"><i class="fas fa-list"></i> All orders</a>
+                            <?php endif; ?>
+                            <button type="button" onclick="closePosMoreMenu(); RHSounds.openSettings();"><i class="fas fa-sliders"></i> Sound settings</button>
+                            <a href="../docs/guides/01-pos-till.html" target="_blank" rel="noopener"><i class="fas fa-book-open"></i> POS guide</a>
+                            <?php if (!$isFullScreen): ?><a href="dashboard.php"><i class="fas fa-arrow-left"></i> Admin dashboard</a><?php endif; ?>
+                        </div>
+                    </div>
                     <a class="logout" href="logout.php"><i class="fas fa-sign-out-alt"></i> Sign out</a>
                 </div>
 
@@ -6728,6 +6733,42 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
             }
         }
 
+
+        /* Toolbar overflow menu (Float, All orders, Sounds, Guide, Admin). */
+        function closePosMoreMenu() {
+            const menu = document.getElementById('posMoreMenu');
+            const btn = document.getElementById('posMoreBtn');
+            if (!menu) return;
+            menu.setAttribute('hidden', '');
+            if (btn) {
+                btn.setAttribute('aria-expanded', 'false');
+                btn.classList.remove('is-open');
+            }
+        }
+
+        function togglePosMoreMenu(e) {
+            if (e) e.stopPropagation();
+            const menu = document.getElementById('posMoreMenu');
+            const btn = document.getElementById('posMoreBtn');
+            if (!menu) return;
+            const opening = menu.hasAttribute('hidden');
+            if (opening) {
+                menu.removeAttribute('hidden');
+                btn.setAttribute('aria-expanded', 'true');
+                btn.classList.add('is-open');
+            } else {
+                closePosMoreMenu();
+            }
+        }
+
+        document.addEventListener('click', function(e) {
+            const menu = document.getElementById('posMoreMenu');
+            if (!menu || menu.hasAttribute('hidden')) return;
+            if (!e.target.closest('.tb-more')) closePosMoreMenu();
+        });
+        document.addEventListener('keydown', function(e) {
+            if (e.key === 'Escape') closePosMoreMenu();
+        });
 
         /* Show/hide a tab card's secondary actions (Details, KOT, Cancel, Lifecycle, Void).
            Scoped to the card that was tapped so other open cards stay as they were. */

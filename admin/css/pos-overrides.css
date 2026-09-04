@@ -4721,3 +4721,69 @@ a.recent-toggle span {
 @media (prefers-reduced-motion: reduce) {
     .pos-drag-grip { transition: none; }
 }
+
+/* ── Toolbar overflow menu ───────────────────────────────────────
+ * Once-a-shift actions (float, sound settings, guide, admin) live here so the bar
+ * staff scan all service stays short. */
+.tb-more {
+    position: relative;
+    display: inline-flex;
+}
+
+.tb-more__btn.is-open {
+    background: #e6ded1;
+    color: #3f3a32;
+}
+
+.tb-more__menu {
+    position: absolute;
+    top: calc(100% + 6px);
+    right: 0;
+    z-index: 100200;
+    min-width: 208px;
+    padding: 6px;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    background: #fff;
+    border: 1px solid #e0d7c8;
+    border-radius: 10px;
+    box-shadow: 0 12px 32px rgba(31, 31, 36, .18);
+}
+
+.tb-more__menu[hidden] {
+    display: none;
+}
+
+.tb-more__menu > a,
+.tb-more__menu > button {
+    display: flex;
+    align-items: center;
+    gap: 9px;
+    width: 100%;
+    padding: 9px 11px;
+    border: 0;
+    border-radius: 7px;
+    background: transparent;
+    color: #4a433c;
+    font: inherit;
+    font-size: 13px;
+    text-align: left;
+    text-decoration: none;
+    cursor: pointer;
+    white-space: nowrap;
+}
+
+.tb-more__menu > a:hover,
+.tb-more__menu > button:hover,
+.tb-more__menu > a:focus-visible,
+.tb-more__menu > button:focus-visible {
+    background: #f4f1ea;
+    color: #1f1f24;
+}
+
+.tb-more__menu i {
+    width: 15px;
+    text-align: center;
+    color: #8a7f72;
+}
