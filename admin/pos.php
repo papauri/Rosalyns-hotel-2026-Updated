@@ -2827,36 +2827,40 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
                                         data-help="Settle tab|Close this tab — take payment and mark the order as paid.">
                                         <i class="fas fa-credit-card"></i> Settle
                                     </button>
+                                    <button type="button" class="tc-btn tc-btn-more" onclick="toggleTabCardActions(this)" aria-expanded="false">
+                                        <i class="fas fa-ellipsis"></i> More
+                                    </button>
+                                </div>
+                                <?php /* Occasional and destructive actions live behind "More": a tab card showed
+                                          seven buttons at once, which is a lot to scan mid-service when only
+                                          "Add items" and "Settle" are used routinely. Keeping Cancel and Void
+                                          one tap further back is a safety gain too. */ ?>
+                                <div class="tc-actions tc-actions--secondary" hidden>
                                     <button type="button" onclick="openTabDetail(<?php echo (int)$t['id']; ?>)"
-                                        class="tc-btn tc-btn-detail"
-                                        data-help="View details|See all items, kitchen status, and the full audit trail for this tab.">
+                                        class="tc-btn tc-btn-detail">
                                         <i class="fas fa-receipt"></i> Details
                                     </button>
                                     <button type="button"
                                         onclick="openPosPageModal('stock-receipt.php?id=<?php echo (int)$t['id']; ?>&print=1&kot=1','Print KOT','fas fa-print')"
-                                        class="tc-btn tc-btn-kot"
-                                        data-help="Print KOT|Reprint the kitchen ticket for this open tab.">
+                                        class="tc-btn tc-btn-kot">
                                         <i class="fas fa-print"></i> KOT
                                     </button>
                                     <?php if ($canCancelBeforePrep): ?>
                                         <button type="button"
                                             onclick="cancelOpenOrder(<?php echo (int)$t['id']; ?>, <?php echo json_encode((string)$t['reference']); ?>)"
-                                            class="tc-btn tc-btn-cancel"
-                                            data-help="Cancel before prep|Cancels this order only while all items are still pending. Nothing has been cooked yet.">
+                                            class="tc-btn tc-btn-cancel">
                                             <i class="fas fa-circle-xmark"></i> Cancel
                                         </button>
                                     <?php endif; ?>
                                     <?php if (in_array($user['role'] ?? '', ['admin', 'manager'], true)): ?>
                                         <button type="button"
                                             onclick="openPosPageModal('order-lifecycle.php?id=<?php echo (int)$t['id']; ?>','Timeline','fas fa-stream')"
-                                            class="tc-btn tc-btn-log"
-                                            data-help="Lifecycle|See every event for this order with full timestamps and user info.">
+                                            class="tc-btn tc-btn-log">
                                             <i class="fas fa-stream"></i> Lifecycle
                                         </button>
                                         <button type="button"
                                             onclick="adminVoidTab(<?php echo (int)$t['id']; ?>, <?php echo json_encode((string)$t['reference']); ?>)"
-                                            class="tc-btn tc-btn-void"
-                                            data-help="Void order|Admin/manager only. Cancels the order, restores stock, clears station boards.">
+                                            class="tc-btn tc-btn-void">
                                             <i class="fas fa-ban"></i> Void
                                         </button>
                                     <?php endif; ?>
@@ -6725,6 +6729,20 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
         }
 
 
+        /* Show/hide a tab card's secondary actions (Details, KOT, Cancel, Lifecycle, Void).
+           Scoped to the card that was tapped so other open cards stay as they were. */
+        function toggleTabCardActions(btn) {
+            const card = btn.closest('.tab-card');
+            if (!card) return;
+            const panel = card.querySelector('.tc-actions--secondary');
+            if (!panel) return;
+            const open = panel.hasAttribute('hidden');
+            if (open) panel.removeAttribute('hidden');
+            else panel.setAttribute('hidden', '');
+            btn.setAttribute('aria-expanded', open ? 'true' : 'false');
+            btn.classList.toggle('is-open', open);
+        }
+
         function openTabsTray() {
             const overlay = document.getElementById('tabsOverlay');
             if (!overlay) return;
@@ -7111,8 +7129,8 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
                     byOther ? `<span class="tc-meta-pill"><i class="fas fa-user-tie"></i> ${escHtml(t.opened_by || 'staff')}</span>` : `<span class="tc-meta-pill"><i class="fas fa-user-check"></i> You</span>`
                 ].filter(Boolean).join('');
                 const managerTools = posCanManageTabs ? `
-                    <button type="button" onclick="openPosPageModal('order-lifecycle.php?id=${orderId}','Timeline','fas fa-stream')" class="tc-btn tc-btn-log" data-help="Lifecycle|See every event for this order with full timestamps and user info."><i class="fas fa-stream"></i> Lifecycle</button>
-                    <button type="button" onclick="adminVoidTab(${orderId}, ${actionRef})" class="tc-btn tc-btn-void" data-help="Void order|Admin/manager only. Cancels the order, restores stock, clears station boards."><i class="fas fa-ban"></i> Void</button>` : '';
+                    <button type="button" onclick="openPosPageModal('order-lifecycle.php?id=${orderId}','Timeline','fas fa-stream')" class="tc-btn tc-btn-log"><i class="fas fa-stream"></i> Lifecycle</button>
+                    <button type="button" onclick="adminVoidTab(${orderId}, ${actionRef})" class="tc-btn tc-btn-void"><i class="fas fa-ban"></i> Void</button>` : '';
                 return `<article class="tab-card${isStale ? ' stale' : ''}" data-order-id="${orderId}" data-is-stale="${isStale ? '1' : '0'}">
                     <div class="tc-row1">
                         <label class="tc-select-wrap" aria-label="Select ${ref}">
@@ -7137,9 +7155,12 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
                     <div class="tc-actions">
                         ${parseInt(t.split_paid_count||0) === 0 ? `<button type="button" onclick="startAddToTab(${orderId}, ${actionRef}, ${parseFloat(t.total_amount || 0) || 0})" class="tc-btn tc-btn-add" data-help="Add items|Add another round to this tab. Returns you to the menu; the next Fire adds to this tab."><i class="fas fa-plus"></i> Add items</button>` : ''}
                         <button type="button" onclick="openPayForTab(${orderId}, ${parseFloat(t.total_amount || 0) || 0}, ${actionRef}, ${canSettle ? 'true' : 'false'}, ${parseInt(t.split_count||1)||1}, ${parseInt(t.split_paid_count||0)||0})" class="tc-btn tc-btn-settle" data-help="Settle tab|Close this tab — take payment and mark the order as paid."><i class="fas fa-credit-card"></i> Settle</button>
-                        <button type="button" onclick="openTabDetail(${orderId})" class="tc-btn tc-btn-detail" data-help="View details|See all items, kitchen status, and the full audit trail for this tab."><i class="fas fa-receipt"></i> Details</button>
-                        <button type="button" onclick="openPosPageModal('stock-receipt.php?id=${orderId}&print=1&kot=1','Print KOT','fas fa-print')" class="tc-btn tc-btn-kot" data-help="Print KOT|Reprint the kitchen ticket for this open tab."><i class="fas fa-print"></i> KOT</button>
-                        ${canCancelBeforePrep ? `<button type="button" onclick="cancelOpenOrder(${orderId}, ${actionRef})" class="tc-btn tc-btn-cancel" data-help="Cancel before prep|Cancels this order only while all items are still pending. Nothing has been cooked yet."><i class="fas fa-circle-xmark"></i> Cancel</button>` : ''}
+                        <button type="button" class="tc-btn tc-btn-more" onclick="toggleTabCardActions(this)" aria-expanded="false"><i class="fas fa-ellipsis"></i> More</button>
+                    </div>
+                    <div class="tc-actions tc-actions--secondary" hidden>
+                        <button type="button" onclick="openTabDetail(${orderId})" class="tc-btn tc-btn-detail"><i class="fas fa-receipt"></i> Details</button>
+                        <button type="button" onclick="openPosPageModal('stock-receipt.php?id=${orderId}&print=1&kot=1','Print KOT','fas fa-print')" class="tc-btn tc-btn-kot"><i class="fas fa-print"></i> KOT</button>
+                        ${canCancelBeforePrep ? `<button type="button" onclick="cancelOpenOrder(${orderId}, ${actionRef})" class="tc-btn tc-btn-cancel"><i class="fas fa-circle-xmark"></i> Cancel</button>` : ''}
                         ${managerTools}
                     </div>
                 </article>`;
@@ -9471,21 +9492,35 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
                 function constrainWidgetToViewport(el, storageKey) {
                     if (!el) return;
                     if (window.getComputedStyle(el).display === 'none') return;
+
+                    /* Only touch widgets the user has actually dragged. This used to run on every
+                     * load and resize regardless, and because applyAbsPos() strips the CSS
+                     * bottom/right anchoring in favour of hard left/top pixels — then SAVED them —
+                     * a widget that had never been moved got permanently pinned to wherever it
+                     * happened to be measured. That is how the inbox and My Orders pills ended up
+                     * parked in the middle of the order panel with no way back: the corner
+                     * defaults could never apply again. Undragged widgets now keep their CSS
+                     * anchoring and stay in their corners. */
+                    var hasUserPosition = false;
+                    try {
+                        hasUserPosition = !!(storageKey && localStorage.getItem(storageKey));
+                    } catch (_) {}
+                    if (!hasUserPosition) return;
+
                     var pad = 8;
                     var r = el.getBoundingClientRect();
                     var maxL = Math.max(pad, window.innerWidth - r.width - pad);
                     var maxT = Math.max(pad, window.innerHeight - r.height - pad);
                     var nextL = Math.max(pad, Math.min(maxL, r.left));
                     var nextT = Math.max(pad, Math.min(maxT, r.top));
+                    if (nextL === r.left && nextT === r.top) return;
                     applyAbsPos(el, nextL, nextT);
-                    if (storageKey) {
-                        try {
-                            localStorage.setItem(storageKey, JSON.stringify({
-                                left: nextL,
-                                top: nextT
-                            }));
-                        } catch (_) {}
-                    }
+                    try {
+                        localStorage.setItem(storageKey, JSON.stringify({
+                            left: nextL,
+                            top: nextT
+                        }));
+                    } catch (_) {}
                 }
 
                 function syncFloatingWidgetsToViewport() {
@@ -9547,7 +9582,7 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
                 <i class="fas fa-inbox"></i>
                 <span id="posInboxBadge" style="display:none;position:absolute;top:-3px;right:-3px;background:#c82333;color:#fff;font-size:10px;font-weight:800;padding:2px 5px;border-radius:10px;min-width:18px;text-align:center;line-height:1.4;"></span>
             </button>
-            <div id="posInboxDragHandle" title="Drag to reposition" style="width:20px;height:52px;display:flex;align-items:center;justify-content:center;cursor:grab;color:rgba(134,239,172,0.5);font-size:13px;touch-action:none;user-select:none;-webkit-user-select:none;border-radius:10px;background:rgba(29,74,46,0.55);border:1px solid rgba(134,239,172,0.15);transition:background 0.15s,color 0.15s;">
+            <div id="posInboxDragHandle" class="pos-drag-grip" title="Drag to reposition" style="width:20px;height:52px;display:flex;align-items:center;justify-content:center;cursor:grab;color:rgba(134,239,172,0.5);font-size:13px;touch-action:none;user-select:none;-webkit-user-select:none;border-radius:10px;background:rgba(29,74,46,0.55);border:1px solid rgba(134,239,172,0.15);transition:background 0.15s,color 0.15s;">
                 <i class="fas fa-grip-vertical"></i>
             </div>
         </div>
@@ -9574,7 +9609,7 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
                 <span>My Orders</span>
                 <span id="myOrdersBadge" style="display:none;background:#fff;color:#8B7355;font-size:11px;font-weight:800;padding:2px 7px;border-radius:10px;min-width:20px;text-align:center;line-height:1.4;">0</span>
             </button>
-            <div id="myOrdersDragHandle" title="Drag to reposition" style="width:20px;height:52px;display:flex;align-items:center;justify-content:center;cursor:grab;color:rgba(255,255,255,0.45);font-size:13px;touch-action:none;user-select:none;-webkit-user-select:none;border-radius:10px;background:rgba(139,115,85,0.5);border:1px solid rgba(255,255,255,0.12);transition:background 0.15s,color 0.15s;">
+            <div id="myOrdersDragHandle" class="pos-drag-grip" title="Drag to reposition" style="width:20px;height:52px;display:flex;align-items:center;justify-content:center;cursor:grab;color:rgba(255,255,255,0.45);font-size:13px;touch-action:none;user-select:none;-webkit-user-select:none;border-radius:10px;background:rgba(139,115,85,0.5);border:1px solid rgba(255,255,255,0.12);transition:background 0.15s,color 0.15s;">
                 <i class="fas fa-grip-vertical"></i>
             </div>
         </div>

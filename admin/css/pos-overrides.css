@@ -3407,6 +3407,43 @@ a.recent-toggle span {
     gap: 5px;
 }
 
+/* Secondary actions revealed by "More". Muted so the eye still lands on Settle when
+   a card is expanded — this row is the exception, not the working surface. */
+.tc-actions--secondary {
+    margin-top: 5px;
+    padding-top: 6px;
+    border-top: 1px dashed #e6ded1;
+}
+
+/* The [hidden] attribute is only a low-specificity UA rule (display:none), so the
+   display:flex on .tc-actions silently overrode it and the panel rendered open no
+   matter what the attribute said. Restate it explicitly. */
+.tc-actions--secondary[hidden] {
+    display: none;
+}
+
+.tc-actions--secondary .tc-btn {
+    background: #f6f3ee;
+    border-color: #e0d7c8;
+    color: #6f665d;
+}
+
+.tc-actions--secondary .tc-btn:hover {
+    background: #efe9e0;
+    color: #4a433c;
+}
+
+.tc-btn-more {
+    background: #f2efe9;
+    border-color: #ded5c6;
+    color: #6f665d;
+}
+
+.tc-btn-more.is-open {
+    background: #e6ded1;
+    color: #4a433c;
+}
+
 .tc-btn {
     display: inline-flex;
     align-items: center;
@@ -4658,3 +4695,29 @@ a.recent-toggle span {
     }
 }
 
+
+/* ── Floating widget drag grips ──────────────────────────────────
+ * The inbox and My Orders widgets each carried a permanently visible grab bar.
+ * Repositioning is a once-per-terminal setup act, not a per-service one, so the
+ * grip now fades back until you hover (or focus) the widget. On touch tills there
+ * is no hover, so it stays faintly visible there rather than becoming unreachable. */
+.pos-drag-grip {
+    opacity: 0.18;
+    transition: opacity .15s ease;
+}
+
+#posInboxWidget:hover .pos-drag-grip,
+#myOrdersWidget:hover .pos-drag-grip,
+#posInboxWidget:focus-within .pos-drag-grip,
+#myOrdersWidget:focus-within .pos-drag-grip,
+.pos-drag-grip:active {
+    opacity: 1;
+}
+
+@media (hover: none) {
+    .pos-drag-grip { opacity: 0.4; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .pos-drag-grip { transition: none; }
+}
