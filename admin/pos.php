@@ -4467,6 +4467,12 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
                 const m = (o.payment_method || '').replace(/_/g, ' ');
                 return `<span style="display:inline-flex;align-items:center;gap:4px;background:#d1fae5;color:#065f46;font-size:10.5px;font-weight:700;padding:2px 8px;border-radius:10px;"><i class="fas fa-check-circle"></i> Paid${m ? ' · ' + escHtml(m) : ''}</span>`;
             }
+            /* 'refunded' was missing, so a refunded order fell through to the opened_as_tab
+               branch below and was labelled "Open tab" — telling staff that money still needed
+               collecting on an order that had already been paid AND handed back. */
+            if (o.status === 'refunded') {
+                return `<span style="display:inline-flex;align-items:center;gap:4px;background:#ede9fe;color:#5b21b6;font-size:10.5px;font-weight:700;padding:2px 8px;border-radius:10px;"><i class="fas fa-rotate-left"></i> Refunded</span>`;
+            }
             if (o.opened_as_tab == 1 || o.opened_as_tab === '1') {
                 return `<span style="display:inline-flex;align-items:center;gap:4px;background:#fef3c7;color:#92400e;font-size:10.5px;font-weight:700;padding:2px 8px;border-radius:10px;"><i class="fas fa-clock"></i> Open tab</span>`;
             }
@@ -4559,7 +4565,7 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
             ${isLive || o.kitchen_status === 'ready' ? `<div style="height:5px;background:#f3f4f6;border-radius:3px;overflow:hidden;"><div style="height:100%;width:${progress}%;background:${ringClr};transition:width .4s ease;"></div></div>` : ''}
                 <div style="display:flex;justify-content:flex-end;gap:6px;flex-wrap:wrap;margin-top:8px;">
                     <span style="display:inline-flex;align-items:center;gap:4px;background:#f8fafc;color:#334155;border:1px solid #e2e8f0;border-radius:999px;padding:2px 8px;font-size:10px;font-weight:700;"><i class="fas fa-receipt"></i> Details</span>
-                    ${o.opened_as_tab == 1 || o.opened_as_tab === '1' ? '<span style="display:inline-flex;align-items:center;gap:4px;background:#fef3c7;color:#92400e;border:1px solid #fde68a;border-radius:999px;padding:2px 8px;font-size:10px;font-weight:700;"><i class="fas fa-credit-card"></i> Settle later</span>' : ''}
+                    ${(String(o.opened_as_tab) === '1' && String(o.status) === 'placed') ? '<span style="display:inline-flex;align-items:center;gap:4px;background:#fef3c7;color:#92400e;border:1px solid #fde68a;border-radius:999px;padding:2px 8px;font-size:10px;font-weight:700;"><i class="fas fa-credit-card"></i> Settle later</span>' : ''}
                 </div>
         </a>`;
             }).join('');
@@ -6754,12 +6760,35 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
             const opening = menu.hasAttribute('hidden');
             if (opening) {
                 menu.removeAttribute('hidden');
+                positionPosMoreMenu();
                 btn.setAttribute('aria-expanded', 'true');
                 btn.classList.add('is-open');
             } else {
                 closePosMoreMenu();
             }
         }
+
+        /* The menu is position:fixed (see pos-overrides.css) so the toolbar's overflow can't
+           clip it, which means its coordinates have to be set from the button each time. */
+        function positionPosMoreMenu() {
+            const menu = document.getElementById('posMoreMenu');
+            const btn = document.getElementById('posMoreBtn');
+            if (!menu || !btn || menu.hasAttribute('hidden')) return;
+            const b = btn.getBoundingClientRect();
+            const m = menu.getBoundingClientRect();
+            const pad = 8;
+            let left = b.right - m.width;
+            left = Math.max(pad, Math.min(left, window.innerWidth - m.width - pad));
+            let top = b.bottom + 6;
+            if (top + m.height > window.innerHeight - pad) {
+                top = Math.max(pad, b.top - m.height - 6); // flip above if it would overflow
+            }
+            menu.style.left = Math.round(left) + 'px';
+            menu.style.top = Math.round(top) + 'px';
+        }
+
+        window.addEventListener('resize', positionPosMoreMenu);
+        window.addEventListener('scroll', positionPosMoreMenu, true);
 
         document.addEventListener('click', function(e) {
             const menu = document.getElementById('posMoreMenu');

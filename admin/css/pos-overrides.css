@@ -4735,10 +4735,13 @@ a.recent-toggle span {
     color: #3f3a32;
 }
 
+/* Fixed, not absolute: .tb-actions carries overflow-x:auto / overflow-y:hidden so the bar can
+   scroll sideways, and that clipped an absolutely-positioned child out of sight. The menu
+   opened correctly every time — display:flex, correct aria — but was invisible, which reads
+   as "the button does nothing". Fixed positioning escapes every ancestor's clipping; the
+   coordinates are set from the button's rect when it opens. */
 .tb-more__menu {
-    position: absolute;
-    top: calc(100% + 6px);
-    right: 0;
+    position: fixed;
     z-index: 100200;
     min-width: 208px;
     padding: 6px;

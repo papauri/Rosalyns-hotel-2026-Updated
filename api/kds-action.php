@@ -703,7 +703,10 @@ try {
                    COALESCE(o.is_priority, 0) AS is_priority,
                    COUNT(oi.id) AS item_total,
                    SUM(CASE WHEN oi.kds_status <> 'void' THEN 1 ELSE 0 END) AS active_item_total,
-                   GROUP_CONCAT(CASE WHEN oi.kds_status <> 'void' THEN CONCAT(CAST(oi.quantity AS CHAR), 'x ', oi.item_name) END ORDER BY oi.id SEPARATOR ', ') AS items_summary,
+                   /* quantity is DECIMAL, so a plain CAST renders 1.000x English Breakfast.
+                      Trim trailing zeros and any bare decimal point so the till reads 1x for
+                      whole numbers while still showing 1.5x where the fraction matters. */
+                   GROUP_CONCAT(CASE WHEN oi.kds_status <> 'void' THEN CONCAT(TRIM(TRAILING '.' FROM TRIM(TRAILING '0' FROM CAST(oi.quantity AS CHAR))), 'x ', oi.item_name) END ORDER BY oi.id SEPARATOR ', ') AS items_summary,
                    SUM(CASE WHEN oi.kds_status = 'pending'   THEN 1 ELSE 0 END) AS items_pending,
                    SUM(CASE WHEN oi.kds_status = 'preparing' THEN 1 ELSE 0 END) AS items_preparing,
                    SUM(CASE WHEN oi.kds_status = 'ready'     THEN 1 ELSE 0 END) AS items_ready,

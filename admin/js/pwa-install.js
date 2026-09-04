@@ -30,8 +30,20 @@
     let deferredPrompt = null;
     let bannerEl = null;
 
+    /* The banner is fixed at top-right, which on the POS till and the station displays lands
+     * directly on top of the toolbar's right-hand controls — 86, Help, More and Sign out became
+     * physically unclickable, because the banner won the hit test. Those screens are worked all
+     * shift by staff who are not the person deciding to install an app, and the 14-day dismiss
+     * window meant it came back and re-blocked the same buttons periodically. Suppress it there;
+     * the dashboard and every other admin page still offer it, which is where a manager would
+     * install from anyway. */
+    function isFrontOfHouseScreen() {
+        const b = document.body;
+        return !!b && (b.classList.contains('pos-screen') || b.classList.contains('station-screen'));
+    }
+
     window.addEventListener('beforeinstallprompt', function (e) {
-        if (isDismissed()) {
+        if (isDismissed() || isFrontOfHouseScreen()) {
             // If the banner is in dismiss cooldown, do not intercept the native prompt lifecycle.
             return;
         }
