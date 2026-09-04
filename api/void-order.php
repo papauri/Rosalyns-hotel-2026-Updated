@@ -50,7 +50,15 @@ $details = $reason . ($notes !== '' ? "\nNotes: " . $notes : '');
 // Reuse helper directly (inlined below).
 function v_restoreFromPosOrder(PDO $pdo, int $orderId, ?int $doneBy): void {
     $byBatch = []; $byIngredient = [];
-    $sel = $pdo->prepare("SELECT sa.id AS adjustment_id, sa.ingredient_id, sa.quantity_change, sbd.batch_id, sbd.quantity_deducted FROM stock_adjustments sa LEFT JOIN stock_batch_deductions sbd ON sbd.adjustment_id = sa.id WHERE sa.source_type = 'pos_order' AND sa.source_id = ?");
+    /* source_id on a 'pos_order' adjustment is the stock_order_items.id, NOT the order id —
+     * every deduction path passes the ITEM id (kds-action.php bump/ready, and
+     * rh_auto_serve_bar_items) so that two lines sharing an ingredient don't collide on the
+     * idempotency check. Looking these up by order id therefore matched nothing and silently
+     * restored NO stock on void, while still reporting "Stock restored." to the user.
+     * Matching on item ids only (not `OR source_id = orderId`) is deliberate: order ids and
+     * order-item ids come from different sequences, so an order-id match could collide with
+     * an unrelated order's line and credit back stock that was never sold. */
+    $sel = $pdo->prepare("SELECT sa.id AS adjustment_id, sa.ingredient_id, sa.quantity_change, sbd.batch_id, sbd.quantity_deducted FROM stock_adjustments sa LEFT JOIN stock_batch_deductions sbd ON sbd.adjustment_id = sa.id WHERE sa.source_type = 'pos_order' AND sa.source_id IN (SELECT id FROM stock_order_items WHERE order_id = ?)");
     $sel->execute([$orderId]);
     $seen = [];
     foreach ($sel->fetchAll(PDO::FETCH_ASSOC) as $h) {
@@ -94,7 +102,11 @@ function v_voidRoomServiceFolioCharges(PDO $pdo, int $orderId, string $reason, i
     // If stock was already deducted via the POS order path (source_type='pos_order'),
     // v_restoreFromPosOrder() has already restored it. Only call restoreStockForMenuItem()
     // for deductions recorded under source_type='room_service' to avoid double-restoration.
-    $posAdjStmt = $pdo->prepare("SELECT COUNT(*) FROM stock_adjustments WHERE source_type = 'pos_order' AND source_id = ?");
+    /* Same item-id keying as v_restoreFromPosOrder above. This guard MUST agree with it:
+     * it decides whether the folio path should also restore, so an order-id lookup here
+     * (always 0 rows) would let both paths credit the same stock back twice now that the
+     * POS restore actually finds its rows. */
+    $posAdjStmt = $pdo->prepare("SELECT COUNT(*) FROM stock_adjustments WHERE source_type = 'pos_order' AND source_id IN (SELECT id FROM stock_order_items WHERE order_id = ?)");
     $posAdjStmt->execute([$orderId]);
     $stockAlreadyRestoredViaPosPath = (int)$posAdjStmt->fetchColumn() > 0;
 
@@ -168,7 +180,10 @@ try {
                 (float)$origVoidPay['total_amount'],
                 $origVoidPay['payment_method'],
                 (int)$origVoidPay['id'],
-                mb_substr($details, 0, 255),
+                /* refund_reason is an ENUM, not free text — see the matching note in
+                 * admin/pos.php's refund_order. 'cancellation' is the closest listed member
+                 * for a void; the operator's wording goes to `notes` below. */
+                'cancellation',
                 (float)$origVoidPay['total_amount'],
                 'Void: ' . $details,
                 (int)$user['id'],

@@ -24,6 +24,20 @@ if (!function_exists('rh_ensure_system_event_log_table')) {
             return;
         }
 
+        /* NEVER run this DDL inside someone else's transaction. CREATE TABLE is an implicit
+         * COMMIT in MySQL, so a first-of-request rh_log_event() fired from inside a business
+         * transaction silently committed that transaction mid-flight: the caller's later
+         * commit() then threw "There is no active transaction" and reported failure to the
+         * user for work that had, in fact, already been permanently written. That is exactly
+         * how a POS settlement came back as an error after the payment row was committed —
+         * the sort of thing that gets a guest charged twice. Skipping the lazy create while a
+         * transaction is open costs nothing: the log write below degrades to a no-op for this
+         * one call, and the table gets created on the next call outside a transaction. Same
+         * guard finance_ensure_sequence_tables() already uses for the same reason. */
+        if ($pdo->inTransaction()) {
+            return;
+        }
+
         try {
             $pdo->exec("\n                CREATE TABLE IF NOT EXISTS system_event_log (\n                    id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,\n                    source VARCHAR(80) NOT NULL,\n                    level VARCHAR(20) NOT NULL DEFAULT 'info',\n                    message VARCHAR(1000) NOT NULL,\n                    context_json LONGTEXT NULL,\n                    user_id INT NULL,\n                    username VARCHAR(100) NULL,\n                    ip_address VARCHAR(45) NULL,\n                    request_uri VARCHAR(500) NULL,\n                    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,\n                    INDEX idx_system_event_created (created_at),\n                    INDEX idx_system_event_source (source),\n                    INDEX idx_system_event_level (level)\n                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci\n            ");
             $checked = true;

@@ -348,6 +348,22 @@ function pos_forceServeKitchenItems(PDO $pdo, int $orderId, array $actor, ?int $
     $rows = $sel->fetchAll(PDO::FETCH_ASSOC);
     if (!$rows) return 0;
 
+    /* Same pre-check the KDS bump does. Without it, force-serving a tab whose ingredients are
+     * exhausted drove stock negative, and the resulting "went negative" warning called
+     * rh_log_event() — which used to run CREATE TABLE IF NOT EXISTS and implicitly COMMIT this
+     * transaction mid-settlement, so the payment persisted while the caller reported failure.
+     * An override for un-bumped tickets must not double as an override for absent stock. */
+    $undeducted = array_values(array_filter($rows, static fn(array $r): bool => (int)$r['stock_deducted'] === 0));
+    if ($undeducted) {
+        $shortages = rh_stock_shortages_for_items($pdo, $undeducted);
+        if ($shortages) {
+            throw new RuntimeException(rh_stock_shortage_message(
+                $shortages,
+                'Receive stock or adjust the recipe before force-serving this tab.'
+            ));
+        }
+    }
+
     foreach ($rows as $r) {
         if ((int)$r['stock_deducted'] === 0) {
             $ok = deductStockForMenuItem((int)$r['menu_item_id'], (string)$r['menu_type'], (float)$r['quantity'], 'pos_order', (int)$r['id'], (int)$actor['id']);
@@ -1070,7 +1086,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                             $refVat['gross'],
                             pos_mapMethod($refRow['payment_method'] ?? 'cash'),
                             $origPaymentId,
-                            $refundReason,
+                            /* payments.refund_reason is an ENUM
+                             * ('early_checkout','late_checkout_charge','cancellation',
+                             * 'service_issue','overpayment','other') — NOT free text. Binding the
+                             * cashier's typed reason here made MySQL reject the row with
+                             * "Data truncated for column 'refund_reason'", and because the insert
+                             * used to sit in a swallow-and-log try/catch, every POS refund since
+                             * this code was written silently failed to reach the ledger. The
+                             * operator's wording is preserved in `notes` (TEXT) just below. */
+                            'other',
                             $refVat['gross'],
                             'Refund: ' . $refundReason,
                             $user['id'],

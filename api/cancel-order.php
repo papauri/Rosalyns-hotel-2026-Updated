@@ -47,7 +47,10 @@ function c_restore_from_pos_order(PDO $pdo, int $orderId, ?int $doneBy): void
     $byBatch = [];
     $byIngredient = [];
 
-    $sel = $pdo->prepare("SELECT sa.id AS adjustment_id, sa.ingredient_id, sa.quantity_change, sbd.batch_id, sbd.quantity_deducted FROM stock_adjustments sa LEFT JOIN stock_batch_deductions sbd ON sbd.adjustment_id = sa.id WHERE sa.source_type = 'pos_order' AND sa.source_id = ?");
+    /* source_id on a 'pos_order' adjustment is the stock_order_items.id, not the order id —
+     * see the matching note in api/void-order.php. Keyed by order id this matched nothing and
+     * silently restored NO stock on cancel. */
+    $sel = $pdo->prepare("SELECT sa.id AS adjustment_id, sa.ingredient_id, sa.quantity_change, sbd.batch_id, sbd.quantity_deducted FROM stock_adjustments sa LEFT JOIN stock_batch_deductions sbd ON sbd.adjustment_id = sa.id WHERE sa.source_type = 'pos_order' AND sa.source_id IN (SELECT id FROM stock_order_items WHERE order_id = ?)");
     $sel->execute([$orderId]);
 
     $seenAdjustments = [];
@@ -145,7 +148,9 @@ function c_void_room_service_folio_charges(PDO $pdo, int $orderId, string $reaso
 
     // If stock was already restored via the POS adjustment trail (source_type='pos_order'),
     // don't restore again from the folio charge path.
-    $posAdjStmt = $pdo->prepare("SELECT COUNT(*) FROM stock_adjustments WHERE source_type = 'pos_order' AND source_id = ?");
+    /* Must agree with c_restore_from_pos_order's keying, or both paths credit the same
+     * stock back twice now that the POS restore actually finds its rows. */
+    $posAdjStmt = $pdo->prepare("SELECT COUNT(*) FROM stock_adjustments WHERE source_type = 'pos_order' AND source_id IN (SELECT id FROM stock_order_items WHERE order_id = ?)");
     $posAdjStmt->execute([$orderId]);
     $stockAlreadyRestoredViaPosPath = (int)$posAdjStmt->fetchColumn() > 0;
 
