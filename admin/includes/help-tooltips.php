@@ -102,7 +102,13 @@ define('RH_HELP_TOOLTIPS_RENDERED', true);
         let enabled = storedHelpPref !== null
             ? storedHelpPref === '1'
             : !isFrontOfHouseScreen;
-        if (!toggle) enabled = true;
+        /* "No visible toggle, so force help on" exists so back-office pages can't end up with
+         * badges permanently unavailable. It must NOT apply to the till: below 1280px the
+         * toolbar (and the inline toggle inside it) is display:none, pickPrimaryToggle() only
+         * returns VISIBLE toggles, so every tablet and phone till hit this branch and forced
+         * badges back on — on exactly the screens with least room for them. Those screens do
+         * have a reachable control: "Help Tooltips" in the hamburger menu. */
+        if (!toggle && !isFrontOfHouseScreen) enabled = true;
         let hoverTimer = null;
         let pressTimer = null;
         let activeEl = null;
