@@ -11,6 +11,7 @@ require_once '../includes/alert.php';
 require_once __DIR__ . '/../includes/finance-sequences.php';
 require_once __DIR__ . '/../includes/restaurant-location-locks.php';
 require_once __DIR__ . '/includes/restaurant-payment-sync.php';
+require_once __DIR__ . '/../includes/station-hours.php';
 
 $user = [
     'id' => $_SESSION['admin_user_id'],
@@ -1073,19 +1074,36 @@ if (!$error || strpos($error, 'not yet') === false) {
             }
         }
 
-        // Today's shift summary (for drawer reconciliation visibility — anti-cheat)
-        $shift = $pdo->query("
+        // Today's shift summary (for drawer reconciliation visibility — anti-cheat).
+        // Tender split reads per-leg from stock_order_splits for split orders: the order row's
+        // payment_method only ever holds the LAST leg's tender, so a mixed-tender split used to
+        // report its whole value under one tender — in the very figure meant to catch drawer
+        // discrepancies. Window is the trading window, not DATE(created_at)=CURDATE(), so
+        // after-midnight trading counts against the session it belongs to.
+        $soShiftWindow = rh_station_union_business_window();
+        $shiftStmt = $pdo->prepare("
             SELECT
                 COUNT(*) AS orders_today,
                 COALESCE(SUM(CASE WHEN status='paid' THEN total_amount ELSE 0 END), 0) AS revenue_today,
-                COALESCE(SUM(CASE WHEN status='paid' AND payment_method='cash' THEN total_amount ELSE 0 END), 0) AS cash_today,
-                COALESCE(SUM(CASE WHEN status='paid' AND payment_method='mobile_money' THEN total_amount ELSE 0 END), 0) AS mobile_today,
-                COALESCE(SUM(CASE WHEN status='paid' AND payment_method IN ('card_manual','card_pos') THEN total_amount ELSE 0 END), 0) AS card_today,
+                COALESCE(SUM(CASE
+                    WHEN status='paid' AND COALESCE(split_count,1) <= 1 AND payment_method='cash' THEN total_amount
+                    WHEN status='paid' AND COALESCE(split_count,1) > 1 THEN COALESCE((SELECT SUM(CASE WHEN s.payment_method='cash' THEN s.split_amount ELSE 0 END) FROM stock_order_splits s WHERE s.order_id = stock_orders.id), 0)
+                    ELSE 0 END), 0) AS cash_today,
+                COALESCE(SUM(CASE
+                    WHEN status='paid' AND COALESCE(split_count,1) <= 1 AND payment_method='mobile_money' THEN total_amount
+                    WHEN status='paid' AND COALESCE(split_count,1) > 1 THEN COALESCE((SELECT SUM(CASE WHEN s.payment_method='mobile_money' THEN s.split_amount ELSE 0 END) FROM stock_order_splits s WHERE s.order_id = stock_orders.id), 0)
+                    ELSE 0 END), 0) AS mobile_today,
+                COALESCE(SUM(CASE
+                    WHEN status='paid' AND COALESCE(split_count,1) <= 1 AND payment_method IN ('card_manual','card_pos') THEN total_amount
+                    WHEN status='paid' AND COALESCE(split_count,1) > 1 THEN COALESCE((SELECT SUM(CASE WHEN s.payment_method IN ('card_manual','card_pos') THEN s.split_amount ELSE 0 END) FROM stock_order_splits s WHERE s.order_id = stock_orders.id), 0)
+                    ELSE 0 END), 0) AS card_today,
                 COALESCE(SUM(CASE WHEN status='voided' THEN total_amount ELSE 0 END), 0) AS voided_today,
                 SUM(CASE WHEN status='voided' THEN 1 ELSE 0 END) AS void_count_today
             FROM stock_orders
-            WHERE DATE(created_at) = CURDATE()
-        ")->fetch(PDO::FETCH_ASSOC) ?: [];
+            WHERE created_at >= ? AND created_at < ?
+        ");
+        $shiftStmt->execute([$soShiftWindow['start_sql'], $soShiftWindow['end_sql']]);
+        $shift = $shiftStmt->fetch(PDO::FETCH_ASSOC) ?: [];
 
         $opsStmt = $pdo->query("
             SELECT

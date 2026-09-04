@@ -4,6 +4,7 @@ require_once 'admin-init.php';
 /** @var string $csrf_token */
 /** @var PDO $pdo */
 require_once 'includes/finance-schema.php';
+require_once '../includes/station-hours.php';
 
 if (!hasPermission((int)($user['id'] ?? 0), 'pos_accounting')) {
     header('Location: dashboard.php?error=access_denied');
@@ -16,8 +17,12 @@ $businessDate = $_GET['date'] ?? date('Y-m-d');
 if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $businessDate) || !strtotime($businessDate)) {
     $businessDate = date('Y-m-d');
 }
-$dayStart = $businessDate . ' 00:00:00';
-$dayEnd = $businessDate . ' 23:59:59';
+// Use the actual trading window for this business date, not calendar midnight — a sale made
+// after midnight during an open trading window must land in the same day's accounting as its
+// receipt number and shift close (see .claude/POS_KDS_ACCOUNTING_PLAN.md D4).
+$dayWindow = rh_station_union_window_for_date($businessDate);
+$dayStart = $dayWindow['start_sql'];
+$dayEnd = $dayWindow['end_sql'];
 $message = '';
 $error = '';
 
@@ -236,8 +241,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $postedDate = $_POST['business_date'] ?? $businessDate;
         if (preg_match('/^\d{4}-\d{2}-\d{2}$/', $postedDate) && strtotime($postedDate)) {
             $businessDate = $postedDate;
-            $dayStart = $businessDate . ' 00:00:00';
-            $dayEnd = $businessDate . ' 23:59:59';
+            $dayWindow = rh_station_union_window_for_date($businessDate);
+            $dayStart = $dayWindow['start_sql'];
+            $dayEnd = $dayWindow['end_sql'];
         }
 
         try {
@@ -381,12 +387,24 @@ try {
             au.username,
             COUNT(so.id) AS order_count,
             COALESCE(SUM(CASE WHEN so.status = 'paid' THEN so.total_amount ELSE 0 END), 0) AS paid_total,
-            COALESCE(SUM(CASE WHEN so.status = 'paid' AND so.payment_method = 'cash' THEN so.total_amount + COALESCE(so.tip_amount,0) ELSE 0 END), 0) AS expected_cash,
-            COALESCE(SUM(CASE WHEN so.status = 'paid' AND so.payment_method = 'mobile_money' THEN so.total_amount + COALESCE(so.tip_amount,0) ELSE 0 END), 0) AS expected_mobile,
-            COALESCE(SUM(CASE WHEN so.status = 'paid' AND so.payment_method IN ('card_manual','card_pos') THEN so.total_amount + COALESCE(so.tip_amount,0) ELSE 0 END), 0) AS expected_card,
+            /* so.payment_method only ever holds the LAST split leg's tender, so a mixed-tender
+             * split must be read from stock_order_splits (each leg's own method) instead —
+             * otherwise the whole tab is misreported under one tender. */
+            COALESCE(SUM(CASE
+                WHEN so.status = 'paid' AND COALESCE(so.split_count,1) <= 1 AND so.payment_method = 'cash' THEN so.total_amount + COALESCE(so.tip_amount,0)
+                WHEN so.status = 'paid' AND COALESCE(so.split_count,1) > 1 THEN COALESCE((SELECT SUM(CASE WHEN s.payment_method='cash' THEN s.split_amount + COALESCE(s.tip_amount,0) ELSE 0 END) FROM stock_order_splits s WHERE s.order_id = so.id), 0)
+                ELSE 0 END), 0) AS expected_cash,
+            COALESCE(SUM(CASE
+                WHEN so.status = 'paid' AND COALESCE(so.split_count,1) <= 1 AND so.payment_method = 'mobile_money' THEN so.total_amount + COALESCE(so.tip_amount,0)
+                WHEN so.status = 'paid' AND COALESCE(so.split_count,1) > 1 THEN COALESCE((SELECT SUM(CASE WHEN s.payment_method='mobile_money' THEN s.split_amount + COALESCE(s.tip_amount,0) ELSE 0 END) FROM stock_order_splits s WHERE s.order_id = so.id), 0)
+                ELSE 0 END), 0) AS expected_mobile,
+            COALESCE(SUM(CASE
+                WHEN so.status = 'paid' AND COALESCE(so.split_count,1) <= 1 AND so.payment_method IN ('card_manual','card_pos') THEN so.total_amount + COALESCE(so.tip_amount,0)
+                WHEN so.status = 'paid' AND COALESCE(so.split_count,1) > 1 THEN COALESCE((SELECT SUM(CASE WHEN s.payment_method IN ('card_manual','card_pos') THEN s.split_amount + COALESCE(s.tip_amount,0) ELSE 0 END) FROM stock_order_splits s WHERE s.order_id = so.id), 0)
+                ELSE 0 END), 0) AS expected_card,
             COALESCE(SUM(CASE WHEN so.status = 'voided' THEN so.total_amount ELSE 0 END), 0) AS voided_total,
             COALESCE(SUM(CASE WHEN so.status = 'voided' THEN 1 ELSE 0 END), 0) AS voided_count,
-            COALESCE(SUM(CASE WHEN so.status = 'placed' THEN 1 ELSE 0 END), 0) AS open_tabs
+            COALESCE(SUM(CASE WHEN so.status = 'placed' AND so.order_type != 'room_service' THEN 1 ELSE 0 END), 0) AS open_tabs
         FROM admin_users au
         INNER JOIN stock_orders so ON so.created_by = au.id
         WHERE so.created_at BETWEEN ? AND ? OR so.paid_at BETWEEN ? AND ? OR so.voided_at BETWEEN ? AND ?
@@ -468,9 +486,20 @@ try {
         SELECT
             COUNT(*) AS orders,
             COALESCE(SUM(CASE WHEN status = 'paid' THEN total_amount ELSE 0 END), 0) AS paid_total,
-            COALESCE(SUM(CASE WHEN status = 'paid' AND payment_method = 'cash' THEN total_amount + COALESCE(tip_amount,0) ELSE 0 END), 0) AS cash,
-            COALESCE(SUM(CASE WHEN status = 'paid' AND payment_method = 'mobile_money' THEN total_amount + COALESCE(tip_amount,0) ELSE 0 END), 0) AS mobile,
-            COALESCE(SUM(CASE WHEN status = 'paid' AND payment_method IN ('card_manual','card_pos') THEN total_amount + COALESCE(tip_amount,0) ELSE 0 END), 0) AS card,
+            /* payment_method only ever holds the LAST split leg's tender — see expected_cash
+             * above for the same fix applied per-cashier. */
+            COALESCE(SUM(CASE
+                WHEN status = 'paid' AND COALESCE(split_count,1) <= 1 AND payment_method = 'cash' THEN total_amount + COALESCE(tip_amount,0)
+                WHEN status = 'paid' AND COALESCE(split_count,1) > 1 THEN COALESCE((SELECT SUM(CASE WHEN s.payment_method='cash' THEN s.split_amount + COALESCE(s.tip_amount,0) ELSE 0 END) FROM stock_order_splits s WHERE s.order_id = stock_orders.id), 0)
+                ELSE 0 END), 0) AS cash,
+            COALESCE(SUM(CASE
+                WHEN status = 'paid' AND COALESCE(split_count,1) <= 1 AND payment_method = 'mobile_money' THEN total_amount + COALESCE(tip_amount,0)
+                WHEN status = 'paid' AND COALESCE(split_count,1) > 1 THEN COALESCE((SELECT SUM(CASE WHEN s.payment_method='mobile_money' THEN s.split_amount + COALESCE(s.tip_amount,0) ELSE 0 END) FROM stock_order_splits s WHERE s.order_id = stock_orders.id), 0)
+                ELSE 0 END), 0) AS mobile,
+            COALESCE(SUM(CASE
+                WHEN status = 'paid' AND COALESCE(split_count,1) <= 1 AND payment_method IN ('card_manual','card_pos') THEN total_amount + COALESCE(tip_amount,0)
+                WHEN status = 'paid' AND COALESCE(split_count,1) > 1 THEN COALESCE((SELECT SUM(CASE WHEN s.payment_method IN ('card_manual','card_pos') THEN s.split_amount + COALESCE(s.tip_amount,0) ELSE 0 END) FROM stock_order_splits s WHERE s.order_id = stock_orders.id), 0)
+                ELSE 0 END), 0) AS card,
             COALESCE(SUM(CASE WHEN status = 'voided' THEN 1 ELSE 0 END), 0) AS voids,
             COALESCE(SUM(CASE WHEN status = 'voided' THEN total_amount ELSE 0 END), 0) AS voided_total
         FROM stock_orders
@@ -523,6 +552,7 @@ try {
                 </label>
                 <button type="submit" class="acct-btn acct-btn--primary"><i class="fas fa-filter"></i> Apply</button>
                 <a href="shift-close-report.php?date=<?php echo urlencode($businessDate); ?>" class="acct-btn acct-btn--ghost"><i class="fas fa-print"></i> Z-report</a>
+                <a href="pos-drift-report.php" class="acct-btn acct-btn--ghost" title="Read-only report quantifying historical tip/VAT and split-tender accounting drift"><i class="fas fa-magnifying-glass-chart"></i> Drift report</a>
             </form>
         </div>
 

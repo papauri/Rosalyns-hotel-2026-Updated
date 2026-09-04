@@ -293,6 +293,16 @@ try {
     $pdo->prepare("UPDATE payments SET payment_status='cancelled', status='failed', notes=CONCAT(COALESCE(notes,''), '\nCANCELLED-BEFORE-PREP: ', ?), updated_at=NOW() WHERE booking_type='restaurant' AND booking_id=? AND payment_type<>'refund' AND deleted_at IS NULL")
         ->execute([$details, $orderId]);
 
+    /* Retract any outstanding collection ping / unacknowledged station note — a cancelled
+     * order must stop asking the floor to collect it (see the same cleanup in void-order.php). */
+    try {
+        $pdo->prepare("DELETE FROM pos_ready_notifications WHERE order_id = ?")->execute([$orderId]);
+        $pdo->prepare("UPDATE station_messages SET pos_acknowledged = 1, pos_acknowledged_at = NOW(), pos_acknowledged_by = ? WHERE order_id = ? AND source = 'station' AND COALESCE(pos_acknowledged, 0) = 0")
+            ->execute([$userId, $orderId]);
+    } catch (Throwable $e) {
+        error_log('cancel-order notification cleanup: ' . $e->getMessage());
+    }
+
     $actorName = (string)($user['full_name'] ?? $user['username'] ?? 'user');
     $pdo->prepare("INSERT INTO stock_order_audit (order_id, actor_id, actor_name, event, details, ip_address) VALUES (?, ?, ?, 'cancelled_before_prep', ?, ?)")
         ->execute([$orderId, $userId, $actorName, $details, $ip]);

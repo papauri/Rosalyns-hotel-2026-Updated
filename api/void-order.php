@@ -19,6 +19,7 @@ require_once __DIR__ . '/../config/database.php';
 require_once __DIR__ . '/../config/security.php';
 require_once __DIR__ . '/../admin/includes/permissions.php';
 require_once __DIR__ . '/../admin/includes/offline-log.php';
+require_once __DIR__ . '/../includes/station-hours.php';
 if (session_status() !== PHP_SESSION_ACTIVE) session_start();
 
 function vjerr(string $m, int $code = 400): void { http_response_code($code); echo json_encode(['ok'=>false,'error'=>$m]); exit; }
@@ -134,8 +135,57 @@ try {
          ->execute([(int)$user['id'], mb_substr($details, 0, 500), $orderId]);
     $pdo->prepare("UPDATE stock_order_items SET kds_status='void', served_at=COALESCE(served_at, NOW()), bumped_by=? WHERE order_id=? AND kds_status NOT IN ('served','void')")
          ->execute([(int)$user['id'], $orderId]);
-    $pdo->prepare("UPDATE payments SET payment_status='cancelled', status='failed', notes=CONCAT(COALESCE(notes,''), '\nVOID: ', ?), updated_at=NOW() WHERE booking_type='restaurant' AND booking_id=? AND payment_type<>'refund' AND deleted_at IS NULL")
-         ->execute([$details, $orderId]);
+
+    // Reverse the original sale with a contra row (payment_type='refund' — the same category
+    // every other report already nets out), the same way admin/pos.php's refund_order does.
+    // This USED TO overwrite the original payment row to status='cancelled'/'failed' in place,
+    // which erased the original sale figure and left nothing in `payments` explaining why a
+    // report summing payment_status='completed' and a report summing stock_orders.status would
+    // disagree. The original row now stays untouched as the historical record of what was
+    // charged; only a paid order gets (or needs) a reversal.
+    $origVoidPayStmt = $pdo->prepare("SELECT id, payment_amount, vat_rate, vat_amount, total_amount, payment_method, receipt_number FROM payments WHERE booking_type='restaurant' AND booking_id=? AND COALESCE(payment_type,'') != 'refund' AND deleted_at IS NULL ORDER BY id DESC LIMIT 1");
+    $origVoidPayStmt->execute([$orderId]);
+    $origVoidPay = $origVoidPayStmt->fetch(PDO::FETCH_ASSOC);
+    if ($origVoidPay) {
+        $voidBusinessDate = function_exists('rh_station_union_business_window')
+            ? (rh_station_union_business_window()['business_date'] ?? date('Y-m-d'))
+            : date('Y-m-d');
+        $pdo->prepare("INSERT INTO payments (
+                payment_reference, booking_type, booking_id, booking_reference,
+                payment_date, payment_amount, vat_rate, vat_amount, total_amount,
+                payment_method, payment_type, payment_status, status,
+                original_payment_id, refund_reason, refund_status, refund_amount,
+                notes, recorded_by, created_at
+            ) VALUES (?, 'restaurant', ?, ?, ?, ?, ?, ?, ?, ?, 'refund', 'completed', 'completed', ?, ?, 'completed', ?, ?, ?, NOW())")
+            ->execute([
+                'VOID-' . ($order['reference'] ?? ('ORD' . $orderId)),
+                $orderId,
+                $order['reference'] ?? null,
+                $voidBusinessDate,
+                (float)$origVoidPay['payment_amount'],
+                (float)$origVoidPay['vat_rate'],
+                (float)$origVoidPay['vat_amount'],
+                (float)$origVoidPay['total_amount'],
+                $origVoidPay['payment_method'],
+                (int)$origVoidPay['id'],
+                mb_substr($details, 0, 255),
+                (float)$origVoidPay['total_amount'],
+                'Void: ' . $details,
+                (int)$user['id'],
+            ]);
+    }
+
+    /* Retract any outstanding "ready for collection" ping and unacknowledged station note for
+     * this order. The POS poll only suppresses a notification while items are still in
+     * progress — once every item is 'void' that check passes, so a voided order would keep
+     * telling a waiter to go and collect food that no longer exists. */
+    try {
+        $pdo->prepare("DELETE FROM pos_ready_notifications WHERE order_id = ?")->execute([$orderId]);
+        $pdo->prepare("UPDATE station_messages SET pos_acknowledged = 1, pos_acknowledged_at = NOW(), pos_acknowledged_by = ? WHERE order_id = ? AND source = 'station' AND COALESCE(pos_acknowledged, 0) = 0")
+             ->execute([(int)$user['id'], $orderId]);
+    } catch (Throwable $e) {
+        error_log('void-order notification cleanup: ' . $e->getMessage());
+    }
 
     $actorName = $user['full_name'] ?? $user['username'] ?? 'admin';
     $pdo->prepare("INSERT INTO stock_order_audit (order_id, actor_id, actor_name, event, details, ip_address) VALUES (?, ?, ?, 'voided', ?, ?)")

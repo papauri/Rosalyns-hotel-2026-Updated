@@ -94,6 +94,7 @@ function getAllRoles()
                 'pos_discount',
                 'pos_86',
                 'pos_refund',
+                'pos_force_serve',
                 'restaurant_table_settle',
                 'kds_view',
                 'stock_count',
@@ -626,6 +627,14 @@ function getAllPermissions()
             'label' => 'POS Refunds',
             'description' => 'Process refunds on paid POS orders from the Recent panel',
             'icon' => 'fa-rotate-left',
+            'category' => 'Stations',
+            'page' => 'pos.php',
+            'group' => 'stations'
+        ],
+        'pos_force_serve' => [
+            'label' => 'POS Force-Serve Tab',
+            'description' => 'Settle a tab whose kitchen items were never bumped (e.g. stranded from an earlier shift), forcing them to served so the tab can be paid',
+            'icon' => 'fa-triangle-exclamation',
             'category' => 'Stations',
             'page' => 'pos.php',
             'group' => 'stations'
@@ -1366,6 +1375,7 @@ function getPermissionForPage(string $page)
         'visitor-analytics.php' => 'visitor_analytics',
         'pos-accounting.php' => 'pos_accounting',
         'shift-close-report.php' => 'pos_accounting',
+        'pos-drift-report.php' => 'pos_accounting',
         'quotations.php' => 'create_booking',
         'gym-members.php' => 'gym',
         'gym-checkin.php' => 'gym_checkin',
@@ -1455,6 +1465,7 @@ function getModuleForPage(string $page)
         'accounting-dashboard.php' => 'finance',
         'pos-accounting.php' => ['finance', 'pos'],
         'shift-close-report.php' => ['finance', 'pos'],
+        'pos-drift-report.php' => ['finance', 'pos'],
         'payments.php' => 'finance',
         'payment-details.php' => 'finance',
         'payment-refund.php' => 'finance',

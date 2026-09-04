@@ -3209,6 +3209,7 @@ a.recent-toggle span {
 
 .tab-cards-list {
     display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
     gap: 6px;
 }
 
@@ -3478,6 +3479,10 @@ a.recent-toggle span {
 }
 
 @media (max-width: 760px) {
+    .tab-cards-list {
+        grid-template-columns: 1fr;
+    }
+
     .tabs-tray-tools__headline {
         flex-direction: column;
         align-items: stretch;
@@ -3502,6 +3507,16 @@ a.recent-toggle span {
         flex: 1 1 calc(50% - 3px);
         justify-content: center;
     }
+}
+
+/* ── Open Tabs Tray ──────────────────────────────────────────────
+ * Was an inline style="width:760px;" with no max-width, so on a 600–768px
+ * tablet the tray overflowed the viewport — and because it was inline it
+ * outranked the @media (max-width:760px) block above that was written to
+ * fix exactly this. Moved to CSS so that block can actually take effect. */
+#tabsOverlay .modal {
+    width: 900px;
+    max-width: 96vw;
 }
 
 /* ── Tab Detail Overlay ─────────────────────────────────────────── */

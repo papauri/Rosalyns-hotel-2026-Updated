@@ -8,6 +8,7 @@ require_once '../includes/alert.php';
 require_once __DIR__ . '/../includes/finance-sequences.php';
 require_once __DIR__ . '/../includes/restaurant-location-locks.php';
 require_once __DIR__ . '/includes/restaurant-payment-sync.php';
+require_once __DIR__ . '/includes/restaurant-order-serve.php';
 
 /** @var PDO $pdo */
 /** @var array $user */
@@ -902,6 +903,12 @@ if (!rh_restaurant_tables_exist($pdo)) {
                 if (($order['status'] ?? '') !== 'placed') {
                     throw new RuntimeException('This table tab has already been settled or closed.');
                 }
+
+                /* Drinks are handed over at the table, so auto-serve them (deducting stock) the
+                 * same way the till does. Without this, settling here left un-bumped bar lines
+                 * at stock_deducted=0 and kds_status='pending' — stock never came off the shelf
+                 * and the ticket stayed on the bar display under an already-paid order. */
+                rh_auto_serve_bar_items($pdo, $orderId, $user);
 
                 $extras = rt_apply_payment_to_order($pdo, $user, $order, $paymentMethod, $_POST);
                 rt_log_order_audit($pdo, (int)$order['id'], (int)$user['id'], (string)($user['full_name'] ?? ''), 'paid_from_tab', [

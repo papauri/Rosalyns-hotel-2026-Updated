@@ -223,7 +223,35 @@ function kds_notify_pos_collection(PDO $pdo, int $orderId, string $station, stri
         }
 
         $safeItemName = trim($itemName) !== '' ? trim($itemName) : 'An item';
-        $message = $stationLabel . ' READY FOR COLLECTION: ' . $safeItemName . ' on order ' . (string)($order['reference'] ?? '') . ' (' . $locationLabel . ').';
+
+        /* Collapse into ONE outstanding collection note per order+station instead of one per
+         * item. Marking six items on a table individually used to raise six separate URGENT
+         * notes for the same trip to the same pass, which buried the genuinely distinct
+         * messages next to them. If an unacknowledged note for this order+station already
+         * exists, restate it with the running item count and bump it to the top instead. */
+        $pendingStmt = $pdo->prepare("SELECT id FROM station_messages
+            WHERE order_id = ? AND station = ? AND source = 'station'
+              AND COALESCE(pos_acknowledged, 0) = 0
+              AND message LIKE '%READY FOR COLLECTION%'
+            ORDER BY id DESC LIMIT 1");
+        $pendingStmt->execute([$orderId, $station]);
+        $existingNoteId = (int)$pendingStmt->fetchColumn();
+
+        $collectedStmt = $pdo->prepare("SELECT COUNT(*) FROM stock_order_items
+            WHERE order_id = ? AND station = ? AND kds_status = 'collection'");
+        $collectedStmt->execute([$orderId, $station]);
+        $collectedCount = (int)$collectedStmt->fetchColumn();
+
+        $subject = $collectedCount > 1
+            ? $collectedCount . ' items'
+            : $safeItemName;
+        $message = $stationLabel . ' READY FOR COLLECTION: ' . $subject . ' on order ' . (string)($order['reference'] ?? '') . ' (' . $locationLabel . ').';
+
+        if ($existingNoteId > 0) {
+            $pdo->prepare("UPDATE station_messages SET message = ?, created_at = NOW(), seen_at = NULL WHERE id = ?")
+                ->execute([$message, $existingNoteId]);
+            return;
+        }
 
         $pdo->prepare("INSERT INTO station_messages
             (station, message, sent_by, sent_by_name, source, priority, order_id, order_ref, to_user_id, is_acknowledged, acknowledged_at)
@@ -392,17 +420,22 @@ function kds_ensure_station_messages_table(PDO $pdo): void
 function kds_recent_station_messages(PDO $pdo, string $station): array
 {
     kds_ensure_station_messages_table($pdo);
-    /* Mark messages as seen by the station on first retrieval */
-    $pdo->prepare("UPDATE station_messages SET seen_at = NOW() WHERE station = ? AND seen_at IS NULL AND is_acknowledged = 0 AND created_at >= DATE_SUB(NOW(), INTERVAL 6 HOUR)")
+    /* Mark messages as seen by the station on first retrieval. No age cap: it must cover
+     * exactly what the SELECT below returns, or an old unacknowledged message renders
+     * permanently "unseen" because the marker skipped it while the list still showed it. */
+    $pdo->prepare("UPDATE station_messages SET seen_at = NOW() WHERE station = ? AND seen_at IS NULL AND is_acknowledged = 0")
         ->execute([$station]);
+    /* An UNACKNOWLEDGED message is outstanding work and stays on the board however old it is —
+     * dropping it after 6 hours hid the notes nobody had dealt with, which are precisely the
+     * ones that still needed dealing with. The 6-hour recency window now applies only to the
+     * already-replied informational rows, which are just context once handled. */
     $stmt = $pdo->prepare("SELECT id, station, message, sent_by, sent_by_name, source, priority, seen_at,
             reply_message, replied_at, replied_by_name, order_id, order_ref, created_at
         FROM station_messages
                 WHERE station = ?
-                    AND created_at >= DATE_SUB(NOW(), INTERVAL 6 HOUR)
                     AND (
                                 is_acknowledged = 0
-                                OR (source = 'station' AND reply_message IS NOT NULL)
+                                OR (source = 'station' AND reply_message IS NOT NULL AND created_at >= DATE_SUB(NOW(), INTERVAL 6 HOUR))
                             )
         ORDER BY priority DESC, created_at DESC, id DESC
                 LIMIT 25");
@@ -568,11 +601,17 @@ try {
                 OR
                 (sm.to_user_id = ? AND sm.source <> 'station' AND sm.created_at >= ? AND sm.created_at < ?)
                 OR
-                (sm.to_user_id = ? AND sm.source = 'station' AND COALESCE(sm.pos_acknowledged, 0) = 0 AND sm.created_at >= ?)
+                (sm.to_user_id = ? AND sm.source = 'station' AND COALESCE(sm.pos_acknowledged, 0) = 0)
             )
             ORDER BY sm.created_at DESC
             LIMIT 50");
-        $stmt->execute([$userId, $businessStart, $businessEnd, $userId, $businessStart, $businessEnd, $userId, $businessStart]);
+        /* Clause (c) deliberately carries NO time bound. It is the only clause covering notes
+         * that still REQUIRE FOH action, and an unacknowledged note does not stop mattering
+         * because a business window rolled over — bounding it by $businessStart silently hid
+         * exactly the notes someone still had to act on (same failure the KDS board had). The
+         * pos_acknowledged flag, not the clock, is what removes a note from this list. The two
+         * informational clauses above stay window-bounded: those are already-handled traffic. */
+        $stmt->execute([$userId, $businessStart, $businessEnd, $userId, $businessStart, $businessEnd, $userId]);
         jok(['messages' => $stmt->fetchAll(PDO::FETCH_ASSOC)]);
     }
 
@@ -1246,6 +1285,19 @@ try {
             $pdo->prepare("UPDATE stock_order_items SET kds_status='preparing', served_at=NULL, stock_deducted=0 WHERE order_id=? AND station=? AND kds_status IN ('served','collection')")->execute([$orderId, $STATION]);
         }
         $pdo->prepare("UPDATE stock_orders SET kitchen_status='recalled', served_at=NULL WHERE id=?")->execute([$orderId]);
+
+        /* Clear the ready-for-collection notification for this order+station. Without this the
+         * recall silently breaks the POS notification for the rest of the order's life:
+         * kds_maybe_notify_ready() dedupes on (order_id, station) with no expiry, so once the
+         * food is re-made and bumped ready a SECOND time it finds the stale row and returns
+         * early — the waiter is never told the re-fired order is ready. Deleting the row here
+         * restores the "notify once per ready cycle" behaviour the dedupe was meant to give. */
+        if ($isPrivileged && !$reqStation) {
+            $pdo->prepare("DELETE FROM pos_ready_notifications WHERE order_id=?")->execute([$orderId]);
+        } else {
+            $pdo->prepare("DELETE FROM pos_ready_notifications WHERE order_id=? AND station=?")->execute([$orderId, $STATION]);
+        }
+
         kds_log($pdo, $orderId, null, 'recalled', 'served', 'recalled', $user, $ip);
         $pdo->commit();
         jok(['order_id' => $orderId, 'order_status' => 'recalled', 'stock_restored' => count($itemsToRestore)]);
@@ -1390,7 +1442,6 @@ try {
         // opening time are still included (e.g. drinks ordered before bar opens at 11:00).
         // Ensure is_priority column exists before querying it (first-time migration safety)
         kds_ensure_column($pdo, 'stock_orders', 'is_priority', "TINYINT(1) NOT NULL DEFAULT 0");
-        $cutoff = $unionWindow['start_sql'];
         $allDay = kds_all_day_summary($pdo, $STATION, $stationWindow);
         $messages = kds_recent_station_messages($pdo, $STATION);
         $messageSig = kds_message_signature($messages);
@@ -1405,6 +1456,14 @@ try {
         $servedCountStmt->execute([$STATION, $stationWindow['start_sql'], $stationWindow['end_sql']]);
         $servedToday = (int)$servedCountStmt->fetchColumn();
 
+        /* No fired_at window here: kitchen_status IN ('new','in_progress','ready','recalled')
+         * already scopes this to unfinished tickets only — a fully served/voided order can
+         * never match it. Gating on top of that by "fired within the current business window"
+         * meant an order fired before the window opened (a late-running previous shift, a
+         * kitchen item nobody bumped in time) simply vanished from every station board with
+         * no way to see it, finish it, or settle its tab. The window is still used everywhere
+         * else (served-today counts, Z-report, accounting) — only this "what still needs
+         * doing" query drops it. */
         if ($isPrivileged && !$reqStation) {
             $st = $pdo->prepare("SELECT o.id, o.reference, o.table_number, o.customer_name, o.order_type, o.kitchen_status, o.fired_at, o.kitchen_printed_at, o.served_at, o.notes, o.created_at, o.created_by, COALESCE(o.is_priority,0) AS is_priority,
                                                                              COALESCE(NULLIF(u.full_name, ''), u.username, 'POS') AS ordered_by
@@ -1412,10 +1471,8 @@ try {
                                                                     LEFT JOIN admin_users u ON u.id = o.created_by
                                                                  WHERE o.kitchen_status IN ('new','in_progress','ready','recalled')
                                                                      AND o.fired_at IS NOT NULL
-                                                                     AND o.fired_at >= ?
-                                                                     AND o.fired_at < ?
                                                             ORDER BY COALESCE(o.is_priority,0) DESC, o.fired_at ASC");
-            $st->execute([$cutoff, $unionWindow['end_sql']]);
+            $st->execute();
         } else {
             $st = $pdo->prepare("SELECT o.id, o.reference, o.table_number, o.customer_name, o.order_type, o.kitchen_status, o.fired_at, o.kitchen_printed_at, o.served_at, o.notes, o.created_at, o.created_by, COALESCE(o.is_priority,0) AS is_priority,
                                                                              COALESCE(NULLIF(u.full_name, ''), u.username, 'POS') AS ordered_by
@@ -1423,11 +1480,9 @@ try {
                                                                     LEFT JOIN admin_users u ON u.id = o.created_by
                                  WHERE o.kitchen_status IN ('new','in_progress','ready','recalled')
                                    AND o.fired_at IS NOT NULL
-                                   AND o.fired_at >= ?
-                                   AND o.fired_at < ?
                                    AND EXISTS (SELECT 1 FROM stock_order_items oi WHERE oi.order_id = o.id AND oi.station = ? AND oi.kds_status NOT IN ('served','void'))
                               ORDER BY COALESCE(o.is_priority,0) DESC, o.fired_at ASC");
-            $st->execute([$cutoff, $unionWindow['end_sql'], $STATION]);
+            $st->execute([$STATION]);
         }
         $orders = $st->fetchAll(PDO::FETCH_ASSOC);
         /* Accept a board fingerprint from the client so we can skip the heavy
