@@ -1,33 +1,28 @@
-# Environment variables — NEVER commit the real .env file!
-# Copy .env.example → .env on the server and fill in credentials.
+# Environment variables - NEVER commit these!
 .env
 .env.local
 .env.production
 .env.*.local
 
-# .env.example is safe to commit (contains no real credentials)
-!.env.example
-
-# config/database.local.php now contains NO credentials and IS committed.
-# The real credentials live in .env (above).
-# config/database.local.php   ← removed from ignore
-
-# Database backups - generated locally / on server, never tracked
-backups/
-Database/
-logs/backup.log
-*.sql.gz
-
-# Generated documents & local data - never tracked (PII)
-data/*.db
-invoices/*.pdf
-invoices/invoice-preview-check.html
-quotations/*.pdf
+# Database configuration with credentials - NEVER commit this!
+config/database.local.php
+config/database.local.php.*
 
 # Email configuration with credentials - NEVER commit this!
 config/email.local.php
 config/email-password.php
 config/email-localhost.php
+
+# Database dumps - contain smtp_password and admin password hashes. NEVER commit!
+Database/*.sql
+Database/*.sql.gz
+Database/*.json
+Database/*.manifest.json
+
+# Generated backups from scripts/backup_database.php — same contents, same rule.
+# The script writes a deny-all .htaccess into backups/, but that only stops web
+# access; without this rule a dump could still be committed to the repo.
+backups/
 
 # IDE and Editor files
 .vscode/
@@ -37,10 +32,6 @@ config/email-localhost.php
 *~
 .DS_Store
 
-# Local Copilot customization files
-.github/copilot-instructions.md
-.github/instructions/*.md
-
 # OS files
 Thumbs.db
 Desktop.ini
@@ -49,7 +40,6 @@ Desktop.ini
 *.log
 logs/
 error.log
-error_log
 
 # Cache
 cache/
@@ -61,15 +51,14 @@ tmp/
 temp/
 *.tmp
 
-# Playwright MCP browser snapshots
-.playwright-mcp/
-*.yml
-
 # Composer (if using)
-#/vendor/
-#composer.lock
+/vendor/
+composer.lock
 
 # Node modules (if using)
 node_modules/
 package-lock.json
-*.sql
+
+# Claude Code — per-machine settings (absolute paths, local permission
+# allowlist). The rest of .claude/ is the shared build system and IS tracked.
+.claude/settings.local.json

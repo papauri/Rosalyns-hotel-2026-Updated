@@ -1347,9 +1347,21 @@ function pos_fetch_shift_summary(PDO $pdo, array $restaurantWindow, int $userId)
     $myShift = $pdo->prepare("
         SELECT COUNT(*) AS orders_today,
             COALESCE(SUM(total_amount),0) AS revenue_today,
-            COALESCE(SUM(CASE WHEN payment_method='cash' THEN total_amount ELSE 0 END),0) AS cash_today,
-            COALESCE(SUM(CASE WHEN payment_method='mobile_money' THEN total_amount ELSE 0 END),0) AS mobile_today,
-            COALESCE(SUM(CASE WHEN payment_method IN ('card_manual','card_pos') THEN total_amount ELSE 0 END),0) AS card_today,
+            /* Split orders book per-leg from stock_order_splits — the order row's
+             * payment_method only holds the LAST leg's tender, which would show a
+             * mixed cash+card split entirely under card in the till's live header. */
+            COALESCE(SUM(CASE
+                WHEN COALESCE(split_count,1) <= 1 AND payment_method='cash' THEN total_amount
+                WHEN COALESCE(split_count,1) > 1 THEN COALESCE((SELECT SUM(CASE WHEN s.payment_method='cash' THEN s.split_amount ELSE 0 END) FROM stock_order_splits s WHERE s.order_id = stock_orders.id),0)
+                ELSE 0 END),0) AS cash_today,
+            COALESCE(SUM(CASE
+                WHEN COALESCE(split_count,1) <= 1 AND payment_method='mobile_money' THEN total_amount
+                WHEN COALESCE(split_count,1) > 1 THEN COALESCE((SELECT SUM(CASE WHEN s.payment_method='mobile_money' THEN s.split_amount ELSE 0 END) FROM stock_order_splits s WHERE s.order_id = stock_orders.id),0)
+                ELSE 0 END),0) AS mobile_today,
+            COALESCE(SUM(CASE
+                WHEN COALESCE(split_count,1) <= 1 AND payment_method IN ('card_manual','card_pos') THEN total_amount
+                WHEN COALESCE(split_count,1) > 1 THEN COALESCE((SELECT SUM(CASE WHEN s.payment_method IN ('card_manual','card_pos') THEN s.split_amount ELSE 0 END) FROM stock_order_splits s WHERE s.order_id = stock_orders.id),0)
+                ELSE 0 END),0) AS card_today,
             COALESCE(SUM(CASE WHEN created_at < ? THEN 1 ELSE 0 END),0) AS settled_from_tabs_count,
             COALESCE(SUM(CASE WHEN created_at < ? THEN total_amount ELSE 0 END),0) AS settled_from_tabs_amount
         FROM stock_orders
