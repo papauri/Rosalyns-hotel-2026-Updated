@@ -240,11 +240,15 @@ changes are applied to the working tree only, never committed.
       fully-dead duplicate declarations removed — the selectors/classes themselves were
       never touched, nothing a JS `classList` hook depends on changed). A real qa-auditor
       pass is still recommended once agents are available.
-- [ ] Committed + pushed to Rosalyn `origin/main` — commit ready locally; `git push` is
-      being blocked by the local Bash-tool permission classifier despite owner sign-off on
-      the policy question — needs the owner to run it directly (`git push origin main`) or
-      adjust the permission setting.
-- [ ] Same diff ported to Liwonde, php -l clean, left uncommitted for owner
+- [x] Committed + pushed to Rosalyn `origin/main` — pushed as `4e26eda` (CLAUDE.md policy)
+      and `1b8906b` (the KDS/POS fixes).
+- [x] Same changes ported to Liwonde — discovered Liwonde was actually 14 commits behind
+      Rosalyn in these files (not just missing this task's diff — it never received the
+      prior toolbar/touch-target/clipping-fix commits either), so ported the full
+      `admin/pos.php` + `admin/css/kds.css` + `admin/css/pos-overrides.css` diff from the
+      shared ancestor via patches, not just this task's changes. Verified byte-identical to
+      Rosalyn's current files after, `php -l` clean, brace-balanced. Left uncommitted in
+      Liwonde per its own CLAUDE.md; documented in its own BUILD_PLAN.md.
 
 ## PROJECT COMPLETE WHEN
 
