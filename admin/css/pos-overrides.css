@@ -2039,10 +2039,13 @@ a.recent-toggle span {
     display: flex;
     flex-direction: column;
     align-items: center;
+    justify-content: center;
     gap: 3px;
     transition: border-color .15s, background .15s, color .15s;
     min-width: 0;
+    min-height: 44px;
     line-height: 1.1;
+    box-sizing: border-box;
 }
 
 .ctx-chip i {
@@ -3245,6 +3248,8 @@ a.recent-toggle span {
     display: inline-flex;
     align-items: center;
     justify-content: center;
+    min-width: 44px;
+    min-height: 44px;
     cursor: pointer;
 }
 
@@ -3449,8 +3454,8 @@ a.recent-toggle span {
     align-items: center;
     justify-content: center;
     gap: 5px;
-    min-height: 34px;
-    padding: 6px 8px;
+    min-height: 44px;
+    padding: 6px 10px;
     border-radius: 8px;
     font-size: 10.5px;
     font-weight: 700;

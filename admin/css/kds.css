@@ -1969,8 +1969,8 @@ body {
 
 /* Ticket footer actions */
 .t-foot {
-    display: grid;
-    grid-template-columns: repeat(5, minmax(0, 1fr));
+    display: flex;
+    flex-wrap: wrap;
     gap: clamp(0.35rem, 0.22rem + 0.28vw, 0.58rem);
     padding: clamp(0.46rem, 0.3rem + 0.35vw, 0.7rem);
     border-top: 1px solid rgba(255, 255, 255, 0.08);
@@ -1987,6 +1987,7 @@ body {
     align-items: center;
     justify-content: center;
     gap: 0.38rem;
+    flex: 1 1 calc(33.333% - 0.4rem);
     padding: clamp(0.48rem, 0.34rem + 0.18vw, 0.62rem) clamp(0.34rem, 0.2rem + 0.3vw, 0.58rem);
     border: 1px solid rgb(255 255 255 / 0.2);
     border-radius: 0.7rem;
@@ -1997,7 +1998,7 @@ body {
     text-transform: uppercase;
     letter-spacing: 0.02em;
     line-height: 1.06;
-    min-height: 2.92rem;
+    min-height: 2.85rem;
     touch-action: manipulation;
     box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.16), 0 10px 20px rgb(0 0 0 / 0.28);
     transition: transform 0.14s ease, filter 0.14s ease, box-shadow 0.14s ease, border-color 0.14s ease;
@@ -2185,16 +2186,6 @@ body {
     box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.2), 0 10px 20px rgb(0 0 0 / 0.3);
 }
 
-@media (max-width: 900px) {
-    .item-actions {
-        grid-template-columns: repeat(2, minmax(0, 1fr));
-    }
-
-    .t-foot {
-        grid-template-columns: repeat(5, minmax(0, 1fr));
-    }
-}
-
 @media (prefers-reduced-motion: reduce) {
 
     .item-actions button:not(:disabled):hover,
@@ -2358,10 +2349,6 @@ body {
         font-size: 11px;
     }
 
-    .t-items {
-        padding: 4px 5px;
-    }
-
     .item {
         margin: 0 0 4px;
         padding: 5px 6px;
@@ -2376,28 +2363,6 @@ body {
 
     .item .nm {
         font-size: clamp(11px, 0.9vw, 13px);
-    }
-
-    .item-actions {
-        grid-template-columns: repeat(3, minmax(0, 1fr));
-        gap: 0.28rem;
-    }
-
-    .item-actions button {
-        min-height: 2.4rem;
-        font-size: clamp(0.66rem, 0.58rem + 0.2vw, 0.76rem);
-        padding: 0.38rem 0.32rem;
-    }
-
-    .t-foot button {
-        min-height: 32px;
-        padding: 6px 5px;
-        font-size: 11px;
-    }
-
-    .t-foot {
-        gap: 5px;
-        padding: 6px;
     }
 }
 
@@ -2623,16 +2588,6 @@ body {
 
     .item {
         padding: 5px 6px;
-    }
-
-    .item-actions button {
-        min-height: 32px;
-        padding: 5px 2px;
-    }
-
-    .t-foot button {
-        min-height: 36px;
-        padding: 7px 5px;
     }
 }
 
@@ -4275,7 +4230,7 @@ body.station-screen .item-actions {
 }
 
 body.station-screen .item-actions button {
-    min-height: 2.2rem;
+    min-height: 2.85rem;
     padding: 0.34rem 0.28rem;
     border-radius: 0.52rem;
     font-size: clamp(0.56rem, 0.1vw + 0.54rem, 0.65rem);
@@ -4283,14 +4238,16 @@ body.station-screen .item-actions button {
 }
 
 body.station-screen .t-foot {
+    display: flex;
+    flex-wrap: wrap;
     gap: 0.28rem;
     padding: 0.4rem;
-    grid-template-columns: repeat(5, minmax(0, 1fr));
 }
 
 body.station-screen .t-foot button,
 body.station-screen .t-foot .b-log {
-    min-height: 2.72rem;
+    flex: 1 1 calc(33.333% - 0.3rem);
+    min-height: 2.85rem;
     padding: 0.4rem 0.22rem;
     font-size: clamp(0.52rem, 0.1vw + 0.5rem, 0.64rem);
     border-radius: 0.58rem;

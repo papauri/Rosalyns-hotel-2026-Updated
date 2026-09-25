@@ -165,6 +165,87 @@ were priced off one joined-room combination and assigned another; now one overla
 combination reserved per room. `admin/rate-plans.php` — hidden date inputs no longer submit
 stale windows.
 
+## POS/KDS UI simplification — 2026-09-26 (owner-requested, outside the completion checklist)
+
+Owner: "make sure the KDS fits perfectly on every screen with amazing simpler card and
+footer layout and same with POS ... make sure they work perfectly with the financial
+system and the stock system and menus." Scope: `admin/kds.php` + `admin/css/kds.css`
+(ticket card `.ticket`/`.t-items`/`.t-foot`, `.station-bottom`) and `admin/pos.php` +
+`admin/css/pos-overrides.css` (`.cart`/`.cart-foot`, `.tab-card`, `.till-bar`,
+`.pos-mobile-actions`).
+
+**Note:** a separate, concurrent set of 14 commits already landed on `origin/main` doing
+related work on these same files before this entry was written — toolbar decluttering
+("Thin the POS toolbar from sixteen controls to eight"), touch-target/clipping fixes,
+mobile navbar behaviour, and a fix for the same broken CSS brace-nesting bug this task
+independently found (`#pos-ready-overlay`/`.pos-ready-icon-wrap` in `pos-overrides.css` —
+already repaired upstream, block intentionally kept per escalation rule 8, still pending an
+owner decision on whether to wire it up or delete it). That prior work fixed specific bugs
+but did NOT do a systematic breakpoint consolidation — kds.css still has 39 `@media` blocks,
+pos-overrides.css 27, several overlapping (900px/1024px/1100px/1700px declared
+independently 3-4x in different rule groups). This task's goal is exactly that
+consolidation: one small breakpoint tier system, simplified card/footer visual structure,
+zero change to JS `fetch()`/API calls, PHP/SQL, CSRF, or permission logic (financial: money
+math untouched; stock: `stock_orders`/`stock_order_items` deduction untouched; menu:
+pricing/availability queries untouched — CSS/markup-only pass) — and must preserve, not
+regress, the 14 commits' recent fixes (toolbar control count, touch targets, clipping,
+mobile navbar). Identical to `Liwonde_Sun_Hotel_2026` byte-for-byte before this change
+(verified via diff) — build once against Rosalyn, then port the same diff to Liwonde.
+Liwonde's own CLAUDE.md forbids commit/push without explicit owner trigger, so that repo's
+changes are applied to the working tree only, never committed.
+
+- [x] KDS card/footer fixed (Rosalyn) — done directly (no subagents; both dispatched
+      frontend-specialists hit the account session rate limit mid-scout before any real
+      edit landed). Found that `admin/kds.php`'s `<body>` always carries class
+      `station-screen`, so the higher-specificity `body.station-screen .t-foot`/
+      `.item-actions button` rules (unconditional, no media query) always win over the
+      lower-specificity base rules and ALL their breakpoint overrides — meaning most of the
+      39 `@media` blocks touching `.ticket`/`.t-foot`/`.item-actions` were already provably
+      dead regardless of viewport width. Real bugs fixed: `.t-foot` was a fixed 5-column
+      grid inside a card capped at ~16-19.5rem wide by the board's own grid-auto-fill, so
+      the 5 footer buttons (Start All/Cancel/Rush/Bump/Log) were always cramped at every
+      screen size, not just small ones — converted to `flex-wrap` (both the base rule and
+      the live `body.station-screen` override) so buttons wrap 3+2 instead of squeezing;
+      `body.station-screen .item-actions button` was `min-height: 2.2rem` (35.2px, always
+      live) and `.t-foot button` `2.72rem` (43.5px) — both under the project's 44px
+      touch-target floor — bumped both to `2.85rem` (45.6px). Removed the now-provably-dead
+      duplicate declarations in the 901-1280px, max-height:720px, and max-width:900px tiers
+      that set the exact same properties the always-applying station-screen rule already
+      governs (verified by specificity: `body.station-screen .item-actions button` is
+      (0,0,2,2) vs. the removed `.item-actions button`'s (0,0,1,1) — provably 100% shadowed,
+      not a guess). `php -l` clean, brace count balanced (647/647), zero PHP touched.
+- [x] POS cart/footer/tab-card fixed (Rosalyn) — same direct approach (subagent rate
+      limited before any edit). `.cart-foot`/`.pay-btn`/`.park-btn` were already fine
+      (full-width stacked, well above 44px) — no fixed-grid cramping bug like KDS had. Found
+      two real touch-target violations instead: `.tc-btn` (open-tabs card action buttons —
+      KOT/Settle/Add/Detail/Cancel/Log/Void) was `min-height: 34px` with no responsive
+      override anywhere that raises it; `.tc-select-wrap` (the tab-card select checkbox,
+      wraps only an 18×18px indicator with no padding, so the actual tap target WAS 18×18px)
+      — both bumped to 44×44px minimum. Also gave `.ctx-chip` (service-type chips:
+      dine-in/takeaway/room-service/delivery) an explicit `min-height: 44px` — its
+      padding+font+icon stack landed at ~42px, just under the floor. `php -l` clean, brace
+      count balanced (634/634), zero PHP touched. Did NOT touch the `#pos-ready-overlay`
+      dead block (still pending the owner decision above) or the toolbar/navbar work from
+      the 14 upstream commits.
+- [ ] ui-designer polish pass on both (Rosalyn) — SKIPPED this cycle: account hit its
+      session rate limit (resets 5:30am Australia/Sydney), subagents unavailable. The fixes
+      above are narrow, numeric, and self-verified (brace balance + php -l + specificity
+      math, not a visual pass) — recommend a real polish/visual-QA pass once agents are
+      available again, this is not a substitute for one.
+- [x] Self-verified in place of qa-auditor (also rate-limited): confirmed via `git diff
+      --stat` that zero PHP/API files changed (`admin/kds.php`, `admin/pos.php`,
+      `admin/pos-accounting.php`, `api/kds-action.php`, `api/pos-notifications.php`,
+      `api/pos-tab-detail.php` all show no diff); confirmed no CSS class was renamed or
+      removed (only property *values* changed on existing selectors, and a small number of
+      fully-dead duplicate declarations removed — the selectors/classes themselves were
+      never touched, nothing a JS `classList` hook depends on changed). A real qa-auditor
+      pass is still recommended once agents are available.
+- [ ] Committed + pushed to Rosalyn `origin/main` — commit ready locally; `git push` is
+      being blocked by the local Bash-tool permission classifier despite owner sign-off on
+      the policy question — needs the owner to run it directly (`git push origin main`) or
+      adjust the permission setting.
+- [ ] Same diff ported to Liwonde, php -l clean, left uncommitted for owner
+
 ## PROJECT COMPLETE WHEN
 
 **Safety net & audit (Phase 0/1 — closes gap #1):**
