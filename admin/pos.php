@@ -406,8 +406,22 @@ function pos_applyPaymentToOrder(PDO $pdo, array $user, int $orderId, string $re
     $cardLast4       = strlen($cardLast4Raw) >= 4 ? substr($cardLast4Raw, -4) : null;
     $cardAuthCode    = trim($post['card_auth_code'] ?? '');
 
-    // Each split person pays their equal share of the menu total plus their own tip
-    $splitAmount = $splitCount > 1 ? round($totalAmount / $splitCount, 2) : $totalAmount;
+    // Each split person pays their equal share of the menu total plus their own tip.
+    //
+    // The last leg absorbs the rounding remainder. An even round($total/$n, 2) on
+    // every leg silently under-collects whenever the total does not divide cleanly
+    // — MWK 100.00 across 3 people took 33.33 three times and left 0.01 on the
+    // table — while pos_syncPayment still booked the full total to the ledger. The
+    // drawer then could not reconcile against the sales ledger, and the gap grew
+    // with every uneven split of the day.
+    if ($splitCount > 1) {
+        $evenShare = round($totalAmount / $splitCount, 2);
+        $splitAmount = ($splitNumber >= $splitCount)
+            ? round($totalAmount - ($evenShare * ($splitCount - 1)), 2)
+            : $evenShare;
+    } else {
+        $splitAmount = $totalAmount;
+    }
     $amountDue   = round($splitAmount + $tipAmount, 2);
 
     $extras = [
@@ -656,7 +670,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 if ($paymentMethod === 'card_pos') throw new RuntimeException('Card POS terminal is not enabled yet — use Card (manual).');
 
                 $pdo->beginTransaction();
-                $stmt = $pdo->prepare("SELECT id, reference, total_amount, status, order_type, created_by, COALESCE(split_count,1) AS split_count, COALESCE(split_paid_count,0) AS split_paid_count FROM stock_orders WHERE id=? FOR UPDATE");
+                /* discount_amount belongs in this SELECT: the $firstLeg guard below reads
+                 * it to refuse discounting a tab that has already been discounted
+                 * elsewhere (restaurant-tables.php settles the same rows). Without the
+                 * column the `?? 0` fallback always evaluated to 0, so the guard was
+                 * dead and a second discount overwrote the first — total_amount reduced
+                 * twice, discount_amount recording only the last one. */
+                $stmt = $pdo->prepare("SELECT id, reference, total_amount, status, order_type, created_by, COALESCE(discount_amount,0) AS discount_amount, COALESCE(split_count,1) AS split_count, COALESCE(split_paid_count,0) AS split_paid_count FROM stock_orders WHERE id=? FOR UPDATE");
                 $stmt->execute([$orderId]);
                 $row = $stmt->fetch(PDO::FETCH_ASSOC);
                 if (!$row) throw new RuntimeException('Order not found.');
@@ -725,11 +745,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $firstLeg = ($splitNumber === 1 && (int)$row['split_paid_count'] === 0 && (float)($row['discount_amount'] ?? 0) == 0);
 
                 if ($firstLeg) {
-                    // Deal discounts — auto-applied, no pos_discount permission required
+                    // Deal discounts — auto-applied, no pos_discount permission required,
+                    // therefore priced server-side from the tab's own lines. The client
+                    // figure only ever caps it downwards.
                     $dealDiscountRaw = max(0.0, round((float)($_POST['deal_discount_amount'] ?? 0), 2));
                     $dealIdsStr      = trim($_POST['deal_ids'] ?? '');
-                    $dealValidation  = ($dealDiscountRaw > 0) ? pos_validate_deal_discount($pdo, $dealIdsStr, (float)$row['total_amount']) : ['amount' => 0.0, 'reason' => ''];
-                    $dealDiscount    = min($dealDiscountRaw, round((float)$row['total_amount'] * 0.90, 2));
+                    $dealValidation  = ($dealDiscountRaw > 0)
+                        ? pos_validate_deal_discount($pdo, $dealIdsStr, (float)$row['total_amount'], pos_fetch_order_deal_lines($pdo, $orderId))
+                        : ['amount' => 0.0, 'reason' => ''];
+                    $dealDiscount    = round(min($dealDiscountRaw, (float)$dealValidation['amount']), 2);
                     if ($dealDiscount > 0) {
                         $dealReason = !empty($dealValidation['reason']) ? $dealValidation['reason'] : 'Deal discount';
                         $row['total_amount'] = max(0.01, round((float)$row['total_amount'] - $dealDiscount, 2));
@@ -1135,12 +1159,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 if ($posHasCoversCol && $coversPay > 0) {
                     $pdo->prepare("UPDATE stock_orders SET covers=? WHERE id=?")->execute([$coversPay, $orderId]);
                 }
-                // Deal discounts — auto-applied, no pos_discount permission required
+                // Deal discounts — auto-applied, no pos_discount permission required,
+                // therefore priced server-side from the order's own lines. The client
+                // figure only ever caps it downwards.
                 $dealDiscountRaw  = max(0.0, round((float)($_POST['deal_discount_amount'] ?? 0), 2));
                 $dealIdsStr       = trim($_POST['deal_ids'] ?? '');
-                $dealValidation   = ($dealDiscountRaw > 0) ? pos_validate_deal_discount($pdo, $dealIdsStr, $totalAmount) : ['amount' => 0.0, 'reason' => ''];
-                // Cap deal discount at 90% of order total — sanity guard
-                $dealDiscount = min($dealDiscountRaw, round($totalAmount * 0.90, 2));
+                $dealValidation   = ($dealDiscountRaw > 0)
+                    ? pos_validate_deal_discount($pdo, $dealIdsStr, $totalAmount, pos_fetch_order_deal_lines($pdo, $orderId))
+                    : ['amount' => 0.0, 'reason' => ''];
+                $dealDiscount = round(min($dealDiscountRaw, (float)$dealValidation['amount']), 2);
                 if ($dealDiscount > 0) {
                     $dealReason = !empty($dealValidation['reason']) ? $dealValidation['reason'] : 'Deal discount';
                     $totalAmount = max(0.01, round($totalAmount - $dealDiscount, 2));
@@ -1152,7 +1179,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 // Manual staff discount — requires pos_discount permission
                 $discountAmount = max(0.0, round((float)($_POST['discount_amount'] ?? 0), 2));
                 $discountReason = mb_substr(trim($_POST['discount_reason'] ?? ''), 0, 255);
-                if ($discountAmount > 0 && $discountAmount < $totalAmount) {
+                /* A discount at or above the order total used to fall through this
+                 * condition silently: no discount applied, no error raised, and the
+                 * guest charged the full amount the cashier had just discounted off
+                 * the screen. Clamp instead, matching the pay_existing path. */
+                if ($discountAmount > 0) {
                     if (!hasPermission($user['id'], 'pos_discount')) throw new RuntimeException('You do not have permission to apply discounts.');
                     $totalAmount = max(0.01, round($totalAmount - $discountAmount, 2));
                     // If a deal already set discount_amount, add to it
@@ -1319,10 +1350,25 @@ try {
 
 /**
  * Server-side deal validation: verify submitted deal IDs are genuinely active
- * right now and return the total capped deal discount to apply.
- * Deal discounts do NOT require pos_discount permission — they are automatic.
+ * right now AND recompute, from the order's own saved lines, what each of them is
+ * actually worth. Returns ['amount' => authoritative discount, 'reason' => names].
+ *
+ * Deal discounts do NOT require pos_discount permission — they are automatic —
+ * which is exactly why the amount has to be derived server-side. This function
+ * used to validate only the deal IDs and return amount = 0.0, and both callers
+ * then applied `min($_POST['deal_discount_amount'], 90% of total)`. That made the
+ * discount a client-supplied number: any till session could post a hand-crafted
+ * deal_discount_amount and knock 90% off a tab with no permission, no manager
+ * auth, and an audit line that recorded the forged figure as legitimate.
+ *
+ * The evaluation below mirrors applyDeals() in the page's JS so the cashier is
+ * never quoted one price and charged another; where the two disagree the lower
+ * of (client figure, server figure) wins, so a stale menu can only ever under-
+ * discount, never over-discount.
+ *
+ * @param array $orderLines Rows of ['menu_item_id','menu_type','quantity','unit_price']
  */
-function pos_validate_deal_discount(PDO $pdo, string $dealIdsStr, float $totalAmount): array
+function pos_validate_deal_discount(PDO $pdo, string $dealIdsStr, float $totalAmount, array $orderLines = []): array
 {
     $result = ['amount' => 0.0, 'reason' => ''];
     if (empty(trim($dealIdsStr))) return $result;
@@ -1336,7 +1382,12 @@ function pos_validate_deal_discount(PDO $pdo, string $dealIdsStr, float $totalAm
     $nowDow  = (int)date('N'); // 1=Mon … 7=Sun
 
     $stmt = $pdo->prepare("
-        SELECT id, name, days_of_week, start_time, end_time, valid_from, valid_to
+        SELECT id, name, deal_type, days_of_week, start_time, end_time, valid_from, valid_to,
+               applies_to, item_types, item_ids,
+               discount_percent, discount_fixed,
+               multi_buy_qty, multi_buy_pay,
+               spend_threshold, combo_requires,
+               max_uses_per_order, exclusive
         FROM pos_deals
         WHERE id IN ($placeholders) AND is_active = 1
           AND (valid_from IS NULL OR valid_from <= ?)
@@ -1345,24 +1396,150 @@ function pos_validate_deal_discount(PDO $pdo, string $dealIdsStr, float $totalAm
     $stmt->execute([...$ids, $nowDate, $nowDate]);
     $deals = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
-    $validNames = [];
+    $active = [];
     foreach ($deals as $d) {
         // Check day-of-week window
         if ($d['days_of_week']) {
-            $days = json_decode($d['days_of_week'], true) ?: [];
+            $days = array_map('intval', json_decode($d['days_of_week'], true) ?: []);
             if (!in_array($nowDow, $days, true)) continue;
         }
         // Check time window
         if ($d['start_time'] && $d['end_time']) {
             if ($nowTime < $d['start_time'] || $nowTime > $d['end_time']) continue;
         }
-        $validNames[] = $d['name'];
+        $active[] = $d;
     }
 
-    if (empty($validNames)) return $result;
+    if (empty($active)) return $result;
+    $result['reason'] = implode(', ', array_column($active, 'name'));
 
-    $result['reason'] = implode(', ', $validNames);
+    // No lines to price against — validate the IDs but authorise nothing.
+    if (empty($orderLines)) return $result;
+
+    $lines = [];
+    foreach ($orderLines as $l) {
+        $qty = (float)($l['quantity'] ?? 0);
+        if ($qty <= 0) continue;
+        $lines[] = [
+            'id'    => (int)($l['menu_item_id'] ?? 0),
+            'type'  => (string)($l['menu_type'] ?? ''),
+            'qty'   => $qty,
+            'price' => (float)($l['unit_price'] ?? 0),
+        ];
+    }
+    if (empty($lines)) return $result;
+
+    $qualifies = static function (array $deal, array $line): bool {
+        if (($deal['applies_to'] ?? '') === 'all') return true;
+        if (($deal['applies_to'] ?? '') === 'item_types') {
+            $types = json_decode((string)($deal['item_types'] ?? ''), true) ?: [];
+            return in_array($line['type'], array_map('strval', $types), true);
+        }
+        if (($deal['applies_to'] ?? '') === 'items') {
+            $itemIds = json_decode((string)($deal['item_ids'] ?? ''), true) ?: [];
+            return in_array($line['id'], array_map('intval', $itemIds), true);
+        }
+        return false;
+    };
+    $subtotalOf = static function (array $rows): float {
+        $s = 0.0;
+        foreach ($rows as $r) $s += $r['price'] * $r['qty'];
+        return $s;
+    };
+
+    // Mirror of the JS first pass: one exclusive deal firing suppresses all
+    // non-exclusive deals for this order.
+    $hasExclusive = false;
+    foreach ($active as $d) {
+        if (empty($d['exclusive'])) continue;
+        $q = array_values(array_filter($lines, fn($l) => $qualifies($d, $l)));
+        if (!$q && !in_array($d['deal_type'], ['spend_save', 'combo'], true)) continue;
+        if ($d['deal_type'] === 'spend_save' && $d['spend_threshold'] !== null && $totalAmount < (float)$d['spend_threshold']) continue;
+        $hasExclusive = true;
+        break;
+    }
+
+    $totalSaving = 0.0;
+    foreach ($active as $d) {
+        if ($hasExclusive && empty($d['exclusive'])) continue;
+        $qualifying = array_values(array_filter($lines, fn($l) => $qualifies($d, $l)));
+        $saving = 0.0;
+
+        switch ((string)$d['deal_type']) {
+            case 'happy_hour':
+            case 'percent_off':
+                if (!$qualifying) break;
+                $saving = round($subtotalOf($qualifying) * ((float)$d['discount_percent'] / 100), 2);
+                break;
+
+            case 'fixed_off':
+                if (!$qualifying && ($d['applies_to'] ?? '') !== 'all') break;
+                $saving = (float)$d['discount_fixed'];
+                if ($qualifying) $saving = min($saving, $subtotalOf($qualifying));
+                break;
+
+            case 'multi_buy':
+                if (!$qualifying) break;
+                $units = [];
+                foreach ($qualifying as $l) {
+                    for ($i = 0, $n = (int)floor($l['qty']); $i < $n; $i++) $units[] = $l['price'];
+                }
+                sort($units); // cheapest go free, same as the till
+                $groupSize = max(2, (int)($d['multi_buy_qty'] ?: 2));
+                $payFor    = max(1, (int)($d['multi_buy_pay'] ?: 1));
+                $groups    = intdiv(count($units), $groupSize);
+                if ($groups < 1) break;
+                if (!empty($d['max_uses_per_order'])) $groups = min($groups, (int)$d['max_uses_per_order']);
+                $free = $groups * max(0, $groupSize - $payFor);
+                $saving = round(array_sum(array_slice($units, 0, $free)), 2);
+                break;
+
+            case 'spend_save':
+                $threshold = (float)($d['spend_threshold'] ?? 0);
+                if ($totalAmount < $threshold) break;
+                if ((float)$d['discount_percent'] > 0) {
+                    $base = $qualifying ? $subtotalOf($qualifying) : $totalAmount;
+                    $saving = round($base * ((float)$d['discount_percent'] / 100), 2);
+                } elseif ((float)$d['discount_fixed'] > 0) {
+                    $saving = (float)$d['discount_fixed'];
+                }
+                break;
+
+            case 'combo':
+                $groups = json_decode((string)($d['combo_requires'] ?? ''), true) ?: [];
+                if (!$groups) break;
+                $comboItems = [];
+                $allMet = true;
+                foreach ($groups as $grp) {
+                    $types  = array_map('strval', $grp['item_types'] ?? []);
+                    $minQty = max(1, (int)($grp['min_qty'] ?? 1));
+                    $matching = array_values(array_filter($lines, fn($l) => in_array($l['type'], $types, true)));
+                    $grpQty = 0;
+                    foreach ($matching as $m) $grpQty += (int)floor($m['qty']);
+                    if ($grpQty < $minQty) { $allMet = false; break; }
+                    foreach ($matching as $m) $comboItems[$m['id']] = $m;
+                }
+                if (!$allMet) break;
+                $saving = round($subtotalOf(array_values($comboItems)) * ((float)$d['discount_percent'] / 100), 2);
+                break;
+        }
+
+        if ($saving > 0) $totalSaving += $saving;
+    }
+
+    // Same global sanity cap the till applies: deals can never take more than 90%.
+    $result['amount'] = min(round($totalSaving, 2), round($totalAmount * 0.90, 2));
     return $result;
+}
+
+/** Order lines in the shape pos_validate_deal_discount() prices against. */
+function pos_fetch_order_deal_lines(PDO $pdo, int $orderId): array
+{
+    $st = $pdo->prepare("SELECT menu_item_id, menu_type, quantity, unit_price
+                           FROM stock_order_items
+                          WHERE order_id = ? AND kds_status <> 'void'");
+    $st->execute([$orderId]);
+    return $st->fetchAll(PDO::FETCH_ASSOC) ?: [];
 }
 
 /* My-shift summary (per-cashier, based on payment time in this restaurant window). */
@@ -3413,20 +3590,52 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
     <script>
         /* ── RHPoll: persistent polling helper ──────────────────────────────
    Keep polling active even when this tab is not focused so notifications
-   continue to arrive without switching back to POS/KDS tabs. */
+   continue to arrive without switching back to POS/KDS tabs.
+
+   Three pollers at ~1s each is ~3 requests/second per till, held for the whole
+   shift. That is the right cost while a cashier is working the screen and pure
+   waste while the tab sits behind the KDS or a report: nobody is reading the
+   badges, and an alert arriving 3s later instead of 1s changes nothing. Hidden
+   tabs therefore poll at a quarter rate and snap back to full rate — with an
+   immediate catch-up run — the moment the tab is shown again. */
         const RHPoll = (() => {
-            const timers = new Map(); // fn -> interval id
-            return {
-                every(fn, ms) {
-                    if (timers.has(fn)) return;
-                    const id = setInterval(() => {
+            const jobs = new Map(); // fn -> {ms, id}
+            const HIDDEN_FACTOR = 4;
+
+            function interval(job) {
+                return document.hidden ? job.ms * HIDDEN_FACTOR : job.ms;
+            }
+
+            function arm(fn, job) {
+                clearInterval(job.id);
+                job.id = setInterval(() => {
+                    try {
+                        fn();
+                    } catch (e) {
+                        /* keep scheduler alive */
+                    }
+                }, interval(job));
+            }
+
+            document.addEventListener('visibilitychange', () => {
+                jobs.forEach((job, fn) => {
+                    arm(fn, job);
+                    if (!document.hidden) {
                         try {
                             fn();
                         } catch (e) {
-                            /* keep scheduler alive */
+                            /* catch-up run must not break rearming */
                         }
-                    }, ms);
-                    timers.set(fn, id);
+                    }
+                });
+            });
+
+            return {
+                every(fn, ms) {
+                    if (jobs.has(fn)) return;
+                    const job = { ms, id: 0 };
+                    jobs.set(fn, job);
+                    arm(fn, job);
                 }
             };
         })();
@@ -3463,12 +3672,43 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
         const posCheckedInRooms = <?php echo json_encode($checkedInRooms, JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_AMP | JSON_HEX_QUOT); ?>;
         const POS_LIVE_POLL_MS = 1000;
         const POS_INBOX_POLL_MS = 700;
-        const POS_NOTIFICATION_DURATION_MS = 120000;
+        /* An "order ready" card is the one alert a runner must not miss, so it holds
+           far longer than a toast — but 120s was long enough that a busy service kept
+           four of them permanently parked over the till bar. 30s clears in time for
+           the next round while still surviving a trip to the pass. */
+        const POS_NOTIFICATION_DURATION_MS = 30000;
         const POS_API_BASE = '../api/';
 
         function posApiUrl(path) {
             return POS_API_BASE + String(path || '').replace(/^\/+/, '');
         }
+
+        /* ── Alert-surface geometry ──────────────────────────────────────
+           The notification stack and the toast stack are both fixed to the top
+           right. Anchored at a flat 16px they landed squarely on the till bar's
+           right-hand cluster — More, Help, Sign out — and any alert still on
+           screen made those buttons untappable. Measure the bar (its height moves
+           with the stats row wrapping) and the floating FAB row at the bottom, and
+           publish both as CSS variables the two stacks are laid out against. */
+        function syncPosAlertBounds() {
+            const bar = document.querySelector('.till-bar');
+            const barHeight = Math.ceil(bar?.getBoundingClientRect().bottom || 112);
+            const inbox = document.getElementById('posInboxWidget');
+            const orders = document.getElementById('myOrdersWidget');
+            let fabHeight = 0;
+            [inbox, orders].forEach(el => {
+                if (!el || getComputedStyle(el).display === 'none') return;
+                const r = el.getBoundingClientRect();
+                fabHeight = Math.max(fabHeight, Math.ceil(window.innerHeight - r.top));
+            });
+            const root = document.documentElement.style;
+            root.setProperty('--rh-notif-top', (barHeight + 12) + 'px');
+            root.setProperty('--rh-notif-bottom', (Math.max(fabHeight, 24) + 12) + 'px');
+        }
+        window.syncPosAlertBounds = syncPosAlertBounds;
+        document.addEventListener('DOMContentLoaded', syncPosAlertBounds);
+        window.addEventListener('resize', syncPosAlertBounds);
+        window.addEventListener('orientationchange', syncPosAlertBounds);
 
         function posNewClientUuidValue() {
             return (window.crypto && typeof window.crypto.randomUUID === 'function') ?
@@ -3665,6 +3905,37 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
             return lines.join('\n');
         }
 
+        /* Confirm delivery of ready-order alerts. Fire-and-forget: a failed ack just
+           means the server re-offers the alert on the next poll, which the localStorage
+           seen-set then suppresses — the safe direction to fail in. */
+        const _ackedReadyIds = new Set();
+        function posAckReadyNotifications(ids) {
+            const pending = (ids || [])
+                .map(id => parseInt(id, 10))
+                .filter(id => id > 0 && !_ackedReadyIds.has(id));
+            if (!pending.length) return;
+            pending.forEach(id => _ackedReadyIds.add(id));
+            const payload = new URLSearchParams();
+            payload.set('csrf_token', posCsrfToken);
+            payload.set('ids', pending.join(','));
+            fetch(posApiUrl('pos-notifications.php?action=ack'), {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
+                    'Accept': 'application/json',
+                    'X-CSRF-Token': posCsrfToken,
+                },
+                body: payload.toString(),
+                credentials: 'same-origin',
+                keepalive: true,
+            }).then(r => {
+                // Let a rejected ack be retried on the next poll.
+                if (!r.ok) pending.forEach(id => _ackedReadyIds.delete(id));
+            }).catch(() => {
+                pending.forEach(id => _ackedReadyIds.delete(id));
+            });
+        }
+
         let _notifInFlight = false;
         async function pollReadyNotifications() {
             if (_notifInFlight) return;
@@ -3685,29 +3956,43 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
                 if (!r.ok) return;
                 const j = await r.json().catch(() => null);
                 if (j && j.ok && j.notifications && j.notifications.length) {
-                    j.notifications.forEach(n => {
+                    const stnLabel = {
+                        kitchen: 'Kitchen',
+                        bar: 'Bar',
+                        coffee_bar: 'Coffee Bar'
+                    };
+                    const fresh = j.notifications.filter(n => {
                         const readyKey = [n.order_id, n.station, n.reference || n.id].join(':');
-                        if (_seenReadyNotifications.has(readyKey)) return;
+                        if (_seenReadyNotifications.has(readyKey)) return false;
                         posRememberSeen(_seenReadyNotifications, POS_READY_SEEN_KEY, readyKey);
-                        const stnLabel = {
-                            kitchen: 'Kitchen',
-                            bar: 'Bar',
-                            coffee_bar: 'Coffee Bar'
-                        };
-                        const src = stnLabel[n.station] || 'Station';
-                        RHNotif.show({
-                            title: n.vibrate ? '🔔 Your order is ready!' : '✅ Order Ready',
-                            body: posReadyNotificationBody(n),
-                            type: n.vibrate ? 'urgent' : 'success',
-                            source: src,
-                            duration: POS_NOTIFICATION_DURATION_MS,
-                            sound: false,
+                        return true;
+                    });
+                    /* Confirm delivery for everything the server handed us, including
+                       rows this till has already shown (a repeat whose earlier ack was
+                       lost). The server no longer marks rows seen on poll, so without
+                       this the same alert would be re-sent every second for the rest of
+                       the business day. */
+                    posAckReadyNotifications(j.notifications.map(n => n.id));
+                    if (fresh.length) {
+                        fresh.forEach(n => {
+                            RHNotif.show({
+                                title: (n.vibrate ? '🔔 Your order is ready!' : '✅ Order Ready') + (n.reference ? ' · ' + n.reference : ''),
+                                body: posReadyNotificationBody(n),
+                                type: n.vibrate ? 'urgent' : 'success',
+                                source: stnLabel[n.station] || 'Station',
+                                duration: POS_NOTIFICATION_DURATION_MS,
+                                sound: false,
+                            });
                         });
-                        if (n.vibrate) RHSounds.play('urgent');
-                        else RHSounds.play('normal');
+                        /* One alert tone for the batch, pitched to whether any of these
+                           are this cashier's own orders. Playing per notification made a
+                           three-ticket pass sound like an alarm fault. */
+                        RHSounds.play(fresh.some(n => n.vibrate) ? 'urgent' : 'normal');
+                        /* ...and one refresh, not one per notification: the old loop fired
+                           two extra round-trips per ready order on a 1s poll. */
                         pollMyOrders(true);
                         refreshOpenTabs(false);
-                    });
+                    }
                 }
             } catch (e) {
                 /* swallow — network blip */
@@ -4295,13 +4580,18 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
                         posRememberSeen(_seenReplies, POS_INBOX_SEEN_KEY, posInboxReplyKey(m));
                         const stn = posInboxStationLabel(m.station);
                         RHNotif.show({
-                            title: stn + ' replied to your note',
+                            title: stn + ' replied to your note' + (m.order_ref ? ' \u00b7 ' + m.order_ref : ''),
                             body: '\u201c' + m.reply_message + '\u201d',
                             type: 'success',
                             source: stn,
                             duration: POS_NOTIFICATION_DURATION_MS,
+                            /* Silent per card; the batch plays one cue below. Leaving sound
+                               on here meant three replies landing together fired three
+                               overlapping chimes. */
+                            sound: false,
                         });
                     });
+                    RHSounds.play('success');
                     pollMyOrders(true);
                 }
                 /* Detect new direct station→POS notes (initiated by the station, not replies). */
@@ -4323,8 +4613,9 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
                             duration: POS_NOTIFICATION_DURATION_MS,
                             sound: false,
                         });
-                        RHSounds.play(isUrgent ? 'urgent' : 'normal');
                     });
+                    /* One cue for the batch, graded by the most severe note in it. */
+                    RHSounds.play(hasUrgentDirect ? 'urgent' : 'normal');
                     pollMyOrders(true);
                     if (!_inboxVisible) {
                         _inboxVisible = true;
@@ -7332,15 +7623,54 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
         }
 
         /* POS in-app toast notification (used by cancel/void and station note flows) */
-        function closePosToast(closeButton) {
-            const toast = closeButton?.closest?.('.toast');
-            if (toast) toast.remove();
+        const POS_TOAST_MAX = 3;
+
+        function posToastStack() {
+            let stack = document.getElementById('pos-toast-stack');
+            if (!stack) {
+                stack = document.createElement('div');
+                stack.id = 'pos-toast-stack';
+                stack.setAttribute('role', 'status');
+                stack.setAttribute('aria-live', 'polite');
+                document.body.appendChild(stack);
+            }
+            return stack;
         }
 
+        function closePosToast(closeButton) {
+            const toast = closeButton?.closest?.('.toast');
+            posRemoveToast(toast);
+        }
+
+        function posRemoveToast(toast) {
+            if (!toast || toast.dataset.leaving === '1') return;
+            toast.dataset.leaving = '1';
+            clearTimeout(toast._posTimer);
+            toast.classList.add('is-leaving');
+            setTimeout(() => toast.remove(), 200);
+        }
+
+        /* Toasts are transient acknowledgements ("Reply sent", "Tab refreshed"), not
+           alerts. They used to default to POS_NOTIFICATION_DURATION_MS — two whole
+           minutes — which meant a normal service shift left a permanent pile of them
+           over the till bar. Real alerts go through RHNotif, which has its own cap. */
         function posToast(msg, type, duration) {
-            const timeoutMs = duration || POS_NOTIFICATION_DURATION_MS;
+            const isErr = type === 'err';
+            const timeoutMs = duration || (isErr ? 9000 : 5000);
+            const stack = posToastStack();
+
+            /* Same message again just restarts the existing toast's clock. */
+            const existing = Array.from(stack.querySelectorAll('.toast'))
+                .find(t => t.dataset.leaving !== '1' && t.dataset.msg === msg && t.classList.contains(isErr ? 'err' : 'ok'));
+            if (existing) {
+                clearTimeout(existing._posTimer);
+                existing._posTimer = setTimeout(() => posRemoveToast(existing), timeoutMs);
+                return;
+            }
+
             const t = document.createElement('div');
-            t.className = 'toast ' + (type === 'err' ? 'err' : 'ok');
+            t.className = 'toast ' + (isErr ? 'err' : 'ok');
+            t.dataset.msg = msg;
             const text = document.createElement('span');
             text.className = 'toast__message';
             text.textContent = msg;
@@ -7355,8 +7685,14 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
                 closePosToast(close);
             });
             t.append(text, close);
-            document.body.appendChild(t);
-            setTimeout(() => t.remove(), timeoutMs);
+            stack.appendChild(t);
+
+            /* Retire the oldest once the stack is full so it can never grow into a
+               curtain over the buttons behind it. */
+            const live = Array.from(stack.querySelectorAll('.toast')).filter(x => x.dataset.leaving !== '1');
+            while (live.length > POS_TOAST_MAX) posRemoveToast(live.shift());
+
+            t._posTimer = setTimeout(() => posRemoveToast(t), timeoutMs);
         }
 
         document.addEventListener('click', event => {
@@ -7453,8 +7789,11 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
             setTimeout(() => posShowFriendlyError(posServerErrorMessage), 250);
         }
 
+        /* The server-rendered error toast is emitted before the stack exists — adopt
+           it so it participates in the same layout and cap as scripted toasts. */
         document.querySelectorAll('[data-pos-server-toast]').forEach(toast => {
-            setTimeout(() => toast.remove(), POS_NOTIFICATION_DURATION_MS);
+            posToastStack().appendChild(toast);
+            toast._posTimer = setTimeout(() => posRemoveToast(toast), 12000);
         });
 
         let activePosConfirm = null;
@@ -8343,9 +8682,22 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
             discount: 0,    // discount applied before splitting (first leg only)
         };
 
-        function ptUpdateDisplay() {
+        /* Split share for one leg, matching pos_applyPaymentToOrder() exactly: even
+           shares for every leg but the last, which absorbs the rounding remainder so
+           the legs add up to the order total to the cent. The till must quote the
+           same figure the server will demand, or the final cash payer is short-paid
+           by the remainder and the tender check rejects an exactly-correct payment. */
+        function ptShareFor(legNumber) {
             const baseTotal = Math.max(0, _pt.total - (_pt.discount || 0));
-            const share = _pt.ways > 1 ? baseTotal / _pt.ways : baseTotal;
+            const ways = _pt.ways > 1 ? _pt.ways : 1;
+            if (ways <= 1) return Math.round(baseTotal * 100) / 100;
+            const even = Math.round(baseTotal / ways * 100) / 100;
+            if (legNumber >= ways) return Math.round((baseTotal - even * (ways - 1)) * 100) / 100;
+            return even;
+        }
+
+        function ptUpdateDisplay() {
+            const share = ptShareFor(_pt.current);
             const tip = Math.max(0, parseFloat(document.getElementById('payTabTipInput').value) || 0);
             const due = share + tip;
 
@@ -8359,7 +8711,7 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
             const shareRow = document.getElementById('payTabShareRow');
             if (_pt.ways > 1) {
                 shareRow.style.display = '';
-                document.getElementById('payTabShareAmt').textContent = currencySymbol + ' ' + fmtMoney(share) + ' × ' + _pt.ways;
+                document.getElementById('payTabShareAmt').textContent = currencySymbol + ' ' + fmtMoney(ptShareFor(1)) + ' × ' + _pt.ways;
             } else {
                 shareRow.style.display = 'none';
             }
@@ -8393,8 +8745,6 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
             if (_pt.ways <= 1) { ledger.style.display = 'none'; return; }
 
             const sym = currencySymbol;
-            const baseTotal = Math.max(0, _pt.total - (_pt.discount || 0));
-            const share = Math.round(baseTotal / _pt.ways * 100) / 100;
             const mLabel = { cash: 'Cash', mobile_money: 'Mobile', card_manual: 'Card' };
 
             // Lock / unlock split-way buttons
@@ -8437,14 +8787,14 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
                         <span style="color:#92400e;flex-shrink:0;">→</span>
                         <span style="font-size:12px;font-weight:700;color:#92400e;min-width:64px;flex-shrink:0;">Person ${pNum}</span>
                         <span style="font-size:11px;color:#92400e;font-style:italic;">paying now</span>
-                        <span style="margin-left:auto;font-size:12px;color:#92400e;white-space:nowrap;">${sym} ${fmtMoney(share)} + tip</span>
+                        <span style="margin-left:auto;font-size:12px;color:#92400e;white-space:nowrap;">${sym} ${fmtMoney(ptShareFor(pNum))} + tip</span>
                     </div>`;
                 } else {
                     html += `<div style="display:flex;align-items:center;gap:6px;padding:8px 10px;background:#fff;${border}">
                         <span style="color:#d1d5db;flex-shrink:0;">○</span>
                         <span style="font-size:12px;color:#9ca3af;min-width:64px;flex-shrink:0;">Person ${pNum}</span>
                         <span style="font-size:11px;color:#d1d5db;">pending</span>
-                        <span style="margin-left:auto;font-size:12px;color:#d1d5db;white-space:nowrap;">${sym} ${fmtMoney(share)}</span>
+                        <span style="margin-left:auto;font-size:12px;color:#d1d5db;white-space:nowrap;">${sym} ${fmtMoney(ptShareFor(pNum))}</span>
                     </div>`;
                 }
             }
@@ -8468,8 +8818,7 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
         }
 
         function ptSetTipPct(pct) {
-            const baseTotal = Math.max(0, _pt.total - (_pt.discount || 0));
-            const share = _pt.ways > 1 ? baseTotal / _pt.ways : baseTotal;
+            const share = ptShareFor(_pt.current);
             const input = document.getElementById('payTabTipInput');
             input.value = pct > 0 ? (share * pct / 100).toFixed(2) : '';
             document.querySelectorAll('#payTabTipPresets .tip-preset-btn').forEach(b => b.classList.toggle('active', parseInt(b.dataset.pct) === pct));
@@ -8650,7 +8999,9 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
                 // Final payment (single or last split) — push last leg then show receipt
                 if (_pt.ways > 1) {
                     const mLabelF = { cash: 'Cash', mobile_money: 'Mobile', card_manual: 'Card' };
-                    const lastShare = Math.round(parseFloat(j.total || 0) / _pt.ways * 100) / 100;
+                    /* The closing leg carries the rounding remainder, so read the share
+                       for THIS leg rather than assuming an even division. */
+                    const lastShare = ptShareFor(_pt.current);
                     _pt.paid.push({
                         person:      _pt.current,
                         method:      j.payment_method,
@@ -9596,6 +9947,9 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
                 function syncFloatingWidgetsToViewport() {
                     constrainWidgetToViewport(document.getElementById('posInboxWidget'), 'rh_pos_inbox_pos');
                     constrainWidgetToViewport(document.getElementById('myOrdersWidget'), 'rh_pos_orders_pos');
+                    /* The FAB row is what sets the floor of the alert stacks — re-measure
+                       whenever it moves or the inbox pill appears for the first time. */
+                    if (typeof window.syncPosAlertBounds === 'function') window.syncPosAlertBounds();
                 }
 
                 window.__posClampFloatingWidgets = syncFloatingWidgetsToViewport;
@@ -9607,6 +9961,15 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
                     if (orders) makeWidgetDraggable(orders, 'rh_pos_orders_pos', document.getElementById('myOrdersDragHandle'));
                     window.addEventListener('resize', syncFloatingWidgetsToViewport);
                     setTimeout(syncFloatingWidgetsToViewport, 80);
+                    if ('ResizeObserver' in window) {
+                        var bounds = new ResizeObserver(function() {
+                            if (typeof window.syncPosAlertBounds === 'function') window.syncPosAlertBounds();
+                        });
+                        var bar = document.querySelector('.till-bar');
+                        if (bar) bounds.observe(bar);
+                        if (inbox) bounds.observe(inbox);
+                        if (orders) bounds.observe(orders);
+                    }
                 });
             }());
 

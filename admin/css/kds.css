@@ -310,6 +310,36 @@ body {
     border-color: #28a745;
 }
 
+/* Sound is switched on but the browser has not yet allowed audio: the button must
+   not read as a healthy green "Sound" while every chime is being dropped. */
+.toggle.on.needs-unlock,
+.toggle.needs-unlock {
+    background: #b45309;
+    border-color: #f59e0b;
+    color: #fff;
+    animation: kds-audio-armed-pulse 1.8s ease-in-out infinite;
+}
+
+@keyframes kds-audio-armed-pulse {
+
+    0%,
+    100% {
+        box-shadow: none;
+    }
+
+    50% {
+        box-shadow: 0 0 0 4px rgba(245, 158, 11, 0.28);
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+
+    .toggle.needs-unlock,
+    .toggle.on.needs-unlock {
+        animation: none;
+    }
+}
+
 .logout-link {
     color: #6c757d;
     font-size: clamp(10px, 0.75vw, 12px);

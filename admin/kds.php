@@ -441,19 +441,43 @@ $bootstrap['fingerprint'] = md5(
         /* ── RHPoll: persistent polling helper ──────────────────────────
        Keep station polling active even when this tab is not focused so
        live alerts continue without forcing tab switching. */
+        /* A station board in a background tab is a board nobody is reading. It keeps
+           polling so alerts still land, but at a quarter rate, and catches up
+           immediately when it comes back to the front. */
         const RHPoll = (() => {
-            const timers = new Map();
-            return {
-                every(fn, ms) {
-                    if (timers.has(fn)) return;
-                    const id = setInterval(() => {
+            const jobs = new Map();
+            const HIDDEN_FACTOR = 4;
+
+            function arm(fn, job) {
+                clearInterval(job.id);
+                job.id = setInterval(() => {
+                    try {
+                        fn();
+                    } catch (e) {
+                        /* keep scheduler alive */
+                    }
+                }, document.hidden ? job.ms * HIDDEN_FACTOR : job.ms);
+            }
+
+            document.addEventListener('visibilitychange', () => {
+                jobs.forEach((job, fn) => {
+                    arm(fn, job);
+                    if (!document.hidden) {
                         try {
                             fn();
                         } catch (e) {
-                            /* keep scheduler alive */
+                            /* catch-up run must not break rearming */
                         }
-                    }, ms);
-                    timers.set(fn, id);
+                    }
+                });
+            });
+
+            return {
+                every(fn, ms) {
+                    if (jobs.has(fn)) return;
+                    const job = { ms, id: 0 };
+                    jobs.set(fn, job);
+                    arm(fn, job);
                 }
             };
         })();
@@ -596,6 +620,12 @@ $bootstrap['fingerprint'] = md5(
             const bottomHeight = Math.ceil(bottom?.getBoundingClientRect().height || 108);
             document.documentElement.style.setProperty('--station-topbar-height', topHeight + 'px');
             document.documentElement.style.setProperty('--station-bottom-height', bottomHeight + 'px');
+            /* Park the notification stack clear of the topbar and the FOH Notes /
+               All Day / Online Flow panels. Fixed at top:16px it sat straight over
+               the topbar's right-hand cluster — Served, Help, Guide, Logout — so an
+               alert that stayed on screen made those buttons untappable. */
+            document.documentElement.style.setProperty('--rh-notif-top', (topHeight + 12) + 'px');
+            document.documentElement.style.setProperty('--rh-notif-bottom', (bottomHeight + 12) + 'px');
         }
 
         function elapsedSeconds(iso) {
@@ -1294,12 +1324,21 @@ $bootstrap['fingerprint'] = md5(
                 const newIds = new Set(j.tickets.map(t => t.id));
                 const arrived = [...newIds].filter(id => !knownIds.has(id));
                 if (arrived.length) {
+                    /* One card and one chime for the whole batch — naming the tables
+                       so the cook knows what landed without reading the board first. */
+                    const arrivedTickets = j.tickets.filter(t => arrived.includes(t.id));
+                    const where = arrivedTickets
+                        .map(t => t.table_number ? ('Table ' + t.table_number) : (t.reference || ''))
+                        .filter(Boolean)
+                        .slice(0, 4)
+                        .join(', ');
+                    const extra = arrivedTickets.length > 4 ? ' +' + (arrivedTickets.length - 4) + ' more' : '';
                     if (soundOn) RHSounds.play('normal');
                     RHNotif.show({
                         title: arrived.length === 1 ? 'New Ticket' : `${arrived.length} New Tickets`,
-                        body: 'Tap to start cooking.',
+                        body: (where ? where + extra + '\n' : '') + 'Tap Start when you pick the ticket up.',
                         type: 'normal',
-                        source: STATION === 'kitchen' ? 'Kitchen' : STATION === 'bar' ? 'Bar' : 'Coffee Bar',
+                        source: STATION_LABEL,
                         sound: false,
                     });
                 }
@@ -1308,19 +1347,30 @@ $bootstrap['fingerprint'] = md5(
                 const nextMessageIds = new Set(nextMessages.map(m => m.id));
                 const freshMessages = [...nextMessageIds].filter(id => !knownMessageIds.has(id));
                 if (hasPolledMessages && freshMessages.length) {
-                    const freshData = nextMessages.filter(m => freshMessages.includes(m.id) || freshMessages.includes(String(m.id)));
-                    const hasUrgent = freshData.some(m => m.priority === 'urgent');
-                    if (soundOn) RHSounds.play(hasUrgent ? 'urgent' : 'normal');
-                    freshData.forEach(m => {
-                        const sndr = m.sent_by_name ? m.sent_by_name + ' (FOH)' : 'FOH';
-                        RHNotif.show({
-                            title: hasUrgent ? '⚠ URGENT from FOH' : 'FOH Note',
-                            body: m.message || '',
-                            type: hasUrgent ? 'urgent' : 'info',
-                            source: sndr,
-                            sound: false,
+                    const freshData = nextMessages
+                        .filter(m => freshMessages.includes(m.id) || freshMessages.includes(String(m.id)))
+                        /* Station→FOH notes this display sent are echoed back by the feed.
+                           Alerting the cook to their own outgoing note is noise. */
+                        .filter(m => (m.source || '') !== 'station' && !m.is_outbound);
+                    if (freshData.length) {
+                        const hasUrgent = freshData.some(m => m.priority === 'urgent');
+                        /* One chime for the batch, pitched to the most severe note in it. */
+                        if (soundOn) RHSounds.play(hasUrgent ? 'urgent' : 'normal');
+                        freshData.forEach(m => {
+                            /* Urgency is per note. Grading every note in the batch by the
+                               single worst one turned routine "table 4 allergy noted" chits
+                               into red URGENT cards, and staff stop trusting the colour. */
+                            const isUrgent = m.priority === 'urgent';
+                            const sndr = m.sent_by_name ? m.sent_by_name + ' (FOH)' : 'FOH';
+                            RHNotif.show({
+                                title: (isUrgent ? '⚠ URGENT from FOH' : 'FOH Note') + (m.order_ref ? ' · ' + m.order_ref : ''),
+                                body: m.message || '',
+                                type: isUrgent ? 'urgent' : 'info',
+                                source: sndr,
+                                sound: false,
+                            });
                         });
-                    });
+                    }
                 }
                 knownMessageIds = nextMessageIds;
                 hasPolledMessages = true;
@@ -1428,7 +1478,9 @@ $bootstrap['fingerprint'] = md5(
                     const msg = stationActionSuccessMessage(action);
                     toast(msg);
                     if (action === 'bump_ticket') {
-                        if (soundOn) RHSounds.play('normal');
+                        /* 'success', not 'normal' — a cleared ticket must not sound like
+                           an arriving one, or the board trains staff to ignore both. */
+                        if (soundOn) RHSounds.play('success');
                         if (typeof RHNotif !== 'undefined' && RHNotif.show) {
                             RHNotif.show({ title: 'Ticket bumped', body: 'Cleared from board — delivered to the table.', type: 'success', source: STATION_LABEL, duration: 3500, sound: false });
                         }
@@ -2309,6 +2361,24 @@ $bootstrap['fingerprint'] = md5(
             currentFilter = e.currentTarget.dataset.filter;
             render();
         }));
+
+        /* Audio-armed indicator. A station screen left untouched since page load has
+           never satisfied the browser's user-gesture requirement, so every chime is
+           dropped silently — the one failure mode where the board looks healthy and
+           tickets still go unnoticed. Say so on the Sound button until it is armed. */
+        function syncStationAudioArmedState() {
+            const blocked = typeof RHSounds.needsUnlock === 'function' && RHSounds.needsUnlock();
+            const btn = document.getElementById('soundToggle');
+            if (btn) {
+                btn.classList.toggle('needs-unlock', blocked);
+                btn.title = blocked
+                    ? 'Alert sounds are blocked by the browser — tap the screen once to arm them'
+                    : '';
+            }
+            if (!blocked) clearInterval(window._kdsAudioArmTimer);
+        }
+        syncStationAudioArmedState();
+        window._kdsAudioArmTimer = setInterval(syncStationAudioArmedState, 2000);
 
         syncStationViewportMetrics();
         window.addEventListener('resize', syncStationViewportMetrics);

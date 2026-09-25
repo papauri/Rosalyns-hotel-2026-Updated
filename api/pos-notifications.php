@@ -7,8 +7,9 @@
  * Method: POST
  * Actions:
  *   poll   — return unseen notifications for the current user + global POS notifications.
- *            Marks them as seen immediately (optimistic).
- *   ack    — explicitly mark one notification as seen {id}.
+ *            Delivery is confirmed by the client, not assumed: see the note on the
+ *            poll branch below.
+ *   ack    — mark notification(s) as seen for this user {id} or {ids}.
  * Used by admin/pos.php to drive browser Notification + vibration when an order is ready.
  */
 
@@ -95,7 +96,6 @@ if ($action === 'poll') {
         $rows = $st->fetchAll(PDO::FETCH_ASSOC);
 
         $unseen = [];
-        $seenIds = [];
         foreach ($rows as $row) {
             $seenBy = json_decode($row['seen_by'] ?? '[]', true) ?: [];
             if (in_array($userId, $seenBy, true)) continue; // already seen by this user
@@ -110,52 +110,65 @@ if ($action === 'poll') {
                 'items_summary' => (string)($row['items_summary'] ?? ''),
                 'vibrate'     => ((int)$row['placed_by'] === $userId), // vibrate only for the order's cashier
             ];
-            $seenIds[] = (int)$row['id'];
         }
 
-        /* Mark all returned notifications as seen for this user — single round-trip */
-        if ($seenIds) {
-            $place = implode(',', array_fill(0, count($seenIds), '?'));
-            $sel   = $pdo->prepare("SELECT id, seen_by FROM pos_ready_notifications WHERE id IN ($place)");
-            $sel->execute($seenIds);
-            $existing = $sel->fetchAll(PDO::FETCH_KEY_PAIR);
-            $upd = $pdo->prepare("UPDATE pos_ready_notifications SET seen_by=? WHERE id=?");
-            $pdo->beginTransaction();
-            try {
-                foreach ($seenIds as $nId) {
-                    $current = json_decode($existing[$nId] ?? '[]', true) ?: [];
-                    if (!in_array($userId, $current, true)) {
-                        $current[] = $userId;
-                        $upd->execute([json_encode($current), $nId]);
-                    }
-                }
-                $pdo->commit();
-            } catch (Throwable $e) {
-                if ($pdo->inTransaction()) $pdo->rollBack();
-                throw $e;
-            }
-        }
-
+        /* Deliberately NOT marked seen here.
+         *
+         * This branch used to stamp every returned row as seen before the response
+         * left the server. "Your order is ready" is the one POS alert a runner must
+         * not miss, and any response lost on the way back — tab closed mid-flight,
+         * Wi-Fi drop on a tablet walking the floor, browser discarding a background
+         * tab — destroyed that alert permanently: the row was seen, so no later poll
+         * would ever return it again, and the food sat at the pass.
+         *
+         * Delivery is now confirmed by the client, which calls action=ack once the
+         * card is actually on screen. Re-delivery in the meantime is harmless: the
+         * till keeps its own localStorage seen-set keyed by order+station, so a
+         * repeat arriving before the ack lands is suppressed there rather than
+         * re-alerting the cashier. Rows stay bounded by the business-day window in
+         * the query above, so nothing accumulates past the shift. */
         pn_ok(['notifications' => $unseen]);
     } catch (Throwable $e) {
-        pn_err($e->getMessage(), 500);
+        error_log('pos-notifications poll: ' . $e->getMessage());
+        pn_err('Could not load notifications.', 500);
     }
 }
 
 if ($action === 'ack') {
-    $nId = (int)($_POST['id'] ?? 0);
-    if ($nId <= 0) pn_err('Missing id');
+    /* Accepts a single id or a comma-separated list so a batch of alerts rendered
+     * together is confirmed in one round-trip rather than one request each. */
+    $rawIds = trim((string)($_POST['ids'] ?? $_POST['id'] ?? ''));
+    $nIds = array_values(array_unique(array_filter(
+        array_map('intval', explode(',', $rawIds)),
+        static fn(int $v): bool => $v > 0
+    )));
+    if (!$nIds) pn_err('Missing id');
+    if (count($nIds) > 100) $nIds = array_slice($nIds, 0, 100);
     try {
-        $st = $pdo->prepare("SELECT seen_by FROM pos_ready_notifications WHERE id=?");
-        $st->execute([$nId]);
-        $current = json_decode($st->fetchColumn() ?: '[]', true) ?: [];
-        if (!in_array($userId, $current, true)) {
-            $current[] = $userId;
-            $pdo->prepare("UPDATE pos_ready_notifications SET seen_by=? WHERE id=?")->execute([json_encode($current), $nId]);
+        $place = implode(',', array_fill(0, count($nIds), '?'));
+        $sel = $pdo->prepare("SELECT id, seen_by FROM pos_ready_notifications WHERE id IN ($place)");
+        $sel->execute($nIds);
+        $existing = $sel->fetchAll(PDO::FETCH_KEY_PAIR);
+        $upd = $pdo->prepare("UPDATE pos_ready_notifications SET seen_by=? WHERE id=?");
+        $pdo->beginTransaction();
+        try {
+            foreach ($nIds as $nId) {
+                if (!array_key_exists($nId, $existing)) continue;
+                $current = json_decode($existing[$nId] ?? '[]', true) ?: [];
+                if (!in_array($userId, $current, true)) {
+                    $current[] = $userId;
+                    $upd->execute([json_encode($current), $nId]);
+                }
+            }
+            $pdo->commit();
+        } catch (Throwable $e) {
+            if ($pdo->inTransaction()) $pdo->rollBack();
+            throw $e;
         }
-        pn_ok();
+        pn_ok(['acked' => count($nIds)]);
     } catch (Throwable $e) {
-        pn_err($e->getMessage(), 500);
+        error_log('pos-notifications ack: ' . $e->getMessage());
+        pn_err('Could not acknowledge notifications.', 500);
     }
 }
 

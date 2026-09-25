@@ -164,6 +164,16 @@ button {
     color: rgba(255, 255, 255, .35);
     white-space: nowrap;
     line-height: 1;
+    /* Same reason .brand-name ellipses: a long cashier name must not widen the
+       lockup and push the action buttons off the end of the bar. */
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.till-bar .brand-cashier-name {
+    overflow: hidden;
+    text-overflow: ellipsis;
 }
 
 .till-bar .brand-cashier i {
@@ -191,7 +201,18 @@ button {
     justify-content: flex-end;
     flex-wrap: nowrap;
     min-width: 0;
-    overflow: visible;
+    /* The buttons are flex-shrink:0 and the row is justified to the end, so an
+       overflow spills LEFT — straight over the brand block and the cashier name.
+       Scrolling keeps every control reachable and nothing stacked on top of
+       anything else at the tighter end of the desktop range. Safe for the More
+       dropdown: .tb-more__menu is position:fixed, so it escapes this scrollport
+       rather than being clipped by it. */
+    overflow-x: auto;
+    scrollbar-width: none;
+}
+
+.till-bar .tb-actions::-webkit-scrollbar {
+    height: 0;
 }
 
 /* Action buttons */
@@ -2494,14 +2515,43 @@ a.recent-toggle span {
     color: #fff;
 }
 
-.toast {
+/* Toast stack.
+   Every toast used to be its own position:fixed element pinned to the same
+   top-right coordinates, so a second toast landed exactly on top of the first —
+   two messages, one readable — and while they sat there (for two full minutes on
+   the old timeout) they covered the till bar's Sign out / More / Help cluster.
+   They now live in one flow container that lays them out in a column, sits below
+   the till bar, and scrolls instead of growing without bound. */
+#pos-toast-stack {
     position: fixed;
-    top: max(0.875rem, env(safe-area-inset-top));
+    top: calc(var(--rh-notif-top, 0.875rem) + env(safe-area-inset-top));
     right: max(0.875rem, env(safe-area-inset-right));
-    z-index: 2000;
+    z-index: 99992;
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    gap: 0.5rem;
+    width: min(24rem, calc(100dvw - 2rem));
+    max-height: calc(100dvh - var(--rh-notif-top, 0.875rem) - var(--rh-notif-bottom, 6rem));
+    overflow: hidden;
+    pointer-events: none;
+}
+
+#pos-toast-stack .toast {
+    pointer-events: auto;
+}
+
+.toast {
+    /* Server-rendered toasts appear before the stack script runs — keep the
+       standalone fixed placement as the fallback for those. */
+    position: fixed;
+    top: calc(var(--rh-notif-top, 0.875rem) + env(safe-area-inset-top));
+    right: max(0.875rem, env(safe-area-inset-right));
+    z-index: 99992;
     display: flex;
     align-items: flex-start;
     gap: 0.75rem;
+    width: 100%;
     max-width: min(24rem, calc(100dvw - 2rem));
     padding: 0.875rem 1rem;
     border-radius: 0.625rem;
@@ -2510,15 +2560,73 @@ a.recent-toggle span {
     font-size: clamp(0.85rem, 0.8rem + 0.2vw, 0.95rem);
     line-height: 1.35;
     box-shadow: 0 4px 14px rgba(0, 0, 0, .2);
+    animation: pos-toast-in 0.18s cubic-bezier(.22, .61, .36, 1);
+}
+
+#pos-toast-stack .toast {
+    position: static;
+    flex: 0 0 auto;
+}
+
+.toast.is-leaving {
+    animation: pos-toast-out 0.18s ease forwards;
+}
+
+@keyframes pos-toast-in {
+    from {
+        transform: translateX(1.5rem);
+        opacity: 0;
+    }
+
+    to {
+        transform: none;
+        opacity: 1;
+    }
+}
+
+@keyframes pos-toast-out {
+    from {
+        transform: none;
+        opacity: 1;
+    }
+
+    to {
+        transform: translateX(1.5rem);
+        opacity: 0;
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+
+    .toast,
+    .toast.is-leaving {
+        animation: none;
+    }
+}
+
+@media (max-width: 640px) {
+    #pos-toast-stack {
+        left: 0.5rem;
+        right: 0.5rem;
+        width: auto;
+        align-items: stretch;
+    }
 }
 
 .toast__message {
+    /* Fill the row so the close button parks hard right instead of floating
+       against the end of the text, where its position moved with every message. */
+    flex: 1 1 auto;
     min-width: 0;
+    align-self: center;
 }
 
 .toast__close {
-    min-width: 1.75rem;
-    min-height: 1.75rem;
+    /* Touch target on a till screen — 1.75rem (28px) was well under the 44px floor
+       and cashiers were catching the toast body instead of the close button. */
+    min-width: 2.75rem;
+    min-height: 2.75rem;
+    margin: -0.5rem -0.5rem -0.5rem 0;
     border: 0;
     border-radius: 50%;
     background: rgba(255, 255, 255, 0.16);
