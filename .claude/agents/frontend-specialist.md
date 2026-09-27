@@ -22,19 +22,18 @@ public assets in per-module `css/` and `js/`. PWA: `sw.js`, `public-sw.js`, `man
 
 ## Task contract — every dispatch, in order
 
-1. **Restate** objective + acceptance criteria to yourself.
-2. **Plan** the exact files and the change in each. Outside the brief → report
+1. **Plan** the exact files and the change in each. Outside the brief → report
    `needs scope extension: <path> because <reason>`; do not edit it.
-3. **Execute** fully, in one pass. Classify with the **Escalation rule** in
+2. **Execute** fully, in one pass. Classify with the **Escalation rule** in
    CORE_SYSTEM_BRIEF.md: ASSUME-class → best choice, reported as `ASSUMPTION:`;
    ESCALATE-class — especially **adding, removing or reordering a step or required field in
    the public booking flow**, changing what a guest is charged or shown, removing an existing
    feature, or adding a dependency — build everything around it and report
    `BLOCKED: <exact decision> · options: <2–3 + consequence> · recommend: <one>`.
    Never decide a guest-visible flow change yourself; never stall on one either.
-4. **Verify** — `php -l` changed PHP; `node --check` changed JS when node is available;
+3. **Verify** — `php -l` changed PHP; `node --check` changed JS when node is available;
    confirm no horizontal scroll at 320px and that touch targets are ≥44×44px on staff screens.
-5. **Report** in the format below.
+4. **Report** in the format below.
 
 ## Conventions you MUST match
 
@@ -67,7 +66,7 @@ runs after you. Make it work and make it consistent; don't gold-plate.
 
 ```
 FILES: <paths>
-DONE: <≤4 lines>
+DONE: <what now works that didn't>
 LINT: <ok / file:line>
 ASSUMPTIONS: <lines, or —>
 BLOCKERS: <exact question, or —>

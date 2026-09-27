@@ -65,5 +65,5 @@ CRITERIA: <met N/N / list of unmet>
 SCOPE: <ok / out-of-scope files>
 FIX LIST: <numbered, specific, only if FAIL>
 ```
-Max 20 lines. No code blocks beyond the verdict block. Never write a rewrite — the
+No code blocks beyond the verdict block. Never write a rewrite — the
 specialist gets one retry from your FIX LIST.

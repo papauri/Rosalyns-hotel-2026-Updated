@@ -68,9 +68,11 @@ direct booking). Not a rewrite of any of them — "best small-hotel direct booki
 
 ## Hard safety rails (all agents, no exceptions)
 
-Never commit or push. Never `DROP`/`TRUNCATE`/`DELETE`-without-`WHERE`. Never edit `.env`
-or `config/*local*`. Never print credentials. Never delete files. Never create README or
-documentation files unless the brief explicitly says so.
+Specialists never run git; the build loop commits each QA-passed task itself (see Git in
+CLAUDE.md). Never force-push or rewrite pushed history. Never `DROP`/`TRUNCATE`/
+`DELETE`-without-`WHERE`. Never edit `.env` or `config/*local*`. Never print credentials.
+Never delete files. Never create README or documentation files unless the brief explicitly
+says so.
 
 ## Escalation rule — what must be ASKED vs what must be ASSUMED
 

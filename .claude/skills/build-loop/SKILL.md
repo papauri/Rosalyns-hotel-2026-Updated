@@ -33,7 +33,7 @@ inside a brief; cite the domain number and the SYSTEM_MAP.md section instead.
    - FAIL → send the FIX LIST to the same specialist for ONE retry, re-gate.
      Second FAIL → mark `failed-twice`, record why, continue with the next task.
 5. **Ticker** — print exactly ONE line per task to the terminal, nothing else:
-   `<task id> · <domain> · <PASS|FAIL|PARKED> · <≤8-word outcome>`
+   `<task id> · <domain> · <PASS|FAIL|PARKED> · <outcome, one short phrase>`
 6. **Advance immediately** — pull the next task in the batch; when the batch empties, run
    step 1 again. Never end a run just because a task finished.
 
@@ -70,7 +70,9 @@ it; agents don't log their own cost.
 - Model tiers: haiku read-only/lint/mapping · sonnet build/polish/logic-QA · opus planner
   only · never opus/Fable for routine execution.
 - Max 2 specialists concurrent.
-- NEVER commit or push. NEVER destructive SQL. NEVER edit `.env`. NEVER delete files.
+- Commit and push each QA-passed task to `origin/main`, one commit per task, after the gate
+  passes — never force-push, never rewrite pushed history.
+- NEVER destructive SQL. NEVER edit `.env`. NEVER delete files.
 - Non-blocking ambiguity → best assumption, logged as `ASSUMPTION:` in BUILD_PLAN.md.
 
 ## Escalation — the one thing you DO ask about

@@ -58,7 +58,7 @@ Everything else ambiguous → best choice, reported as `ASSUMPTION:`.
 
 ```
 FILES: <paths>
-DONE: <≤4 lines, what changed visually>
+DONE: <what changed visually>
 LINT: <ok / file:line>
 ASSUMPTIONS: <lines, or —>
 BLOCKERS: <needs-logic-change items, or —>

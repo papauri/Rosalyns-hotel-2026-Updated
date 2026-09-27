@@ -191,8 +191,8 @@ pricing/availability queries untouched — CSS/markup-only pass) — and must pr
 regress, the 14 commits' recent fixes (toolbar control count, touch targets, clipping,
 mobile navbar). Identical to `Liwonde_Sun_Hotel_2026` byte-for-byte before this change
 (verified via diff) — build once against Rosalyn, then port the same diff to Liwonde.
-Liwonde's own CLAUDE.md forbids commit/push without explicit owner trigger, so that repo's
-changes are applied to the working tree only, never committed.
+Both repos now commit and push each QA-passed task to their own `origin/main` (see Git in
+CLAUDE.md).
 
 - [x] KDS card/footer fixed (Rosalyn) — done directly (no subagents; both dispatched
       frontend-specialists hit the account session rate limit mid-scout before any real
@@ -2086,7 +2086,7 @@ do NOT flag files from earlier already-approved tasks as scope creep.
   existing tokens — not required for visual consistency, logged only.
 - (bookings.php inline check-in touch targets and smoke_test_booking.php section 8 flakiness —
   both promoted to Round 3 scope 2026-07-14, see PROJECT COMPLETE WHEN above.)
-- **Recurring QA gate false-positive (seen 2× — P1-03g, P3-01):** qa-auditor sometimes defaults to `git diff`/`git status` against HEAD as its scope signal, sees the whole session's cumulative uncommitted work (this project never commits mid-loop), and incorrectly FAILs a task for "touching" files that actually belong to other, already-approved tasks earlier in the session. Every qa-auditor dispatch brief going forward should explicitly state: this session never commits, HEAD is stale by the entire run, and scope should be verified by reading the CONTENT of the dispatched task's named files, not by diffing against HEAD project-wide.
+- **Recurring QA gate false-positive (seen 2× — P1-03g, P3-01), resolved by the commit-per-task policy:** qa-auditor used to default to `git diff`/`git status` against HEAD as its scope signal, see the whole session's cumulative uncommitted work, and incorrectly FAIL a task for "touching" files belonging to earlier, already-approved tasks. Since each QA-passed task is now committed before the next is dispatched (see Git in CLAUDE.md), HEAD is current and `git diff -- <the brief's files>` is the correct scope signal. The standing guidance is simply: scope a gate to the dispatched task's named files, never project-wide.
 
 ## P1-05 dispatch (build-planner investigation, 2026-07-13)
 

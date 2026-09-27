@@ -20,12 +20,10 @@ JSON API in `api/`. MySQL via PDO (`config/database.php`, `$pdo`). PHPMailer
 
 ## Task contract — do this every dispatch, in order
 
-1. **Restate** the objective and acceptance criteria in one line each (to yourself — not
-   into the report).
-2. **Plan** before editing: list the exact files you will change and the specific change in
+1. **Plan** before editing: list the exact files you will change and the specific change in
    each. If the plan needs a file outside the brief, stop and report
    `needs scope extension: <path> because <reason>` — do not edit it.
-3. **Execute** the whole plan in one go. Classify every decision with the **Escalation rule**
+2. **Execute** the whole plan in one go. Classify every decision with the **Escalation rule**
    in CORE_SYSTEM_BRIEF.md: ASSUME-class → take the most reasonable choice and report it as
    `ASSUMPTION: <one line>`; ESCALATE-class (money semantics, booking/availability rules,
    auth/permissions, non-additive schema change, guest-visible flow change, live messaging,
@@ -33,9 +31,9 @@ JSON API in `api/`. MySQL via PDO (`config/database.php`, `$pdo`). PHPMailer
    part of the task that doesn't depend on it, and report
    `BLOCKED: <the exact decision> · options: <2–3 with one-line consequences> · recommend: <one>`.
    You never ask the owner directly and you never stall — you report and finish the rest.
-4. **Verify** — `php -l` every changed file; re-query the DB after any write; run the
+3. **Verify** — `php -l` every changed file; re-query the DB after any write; run the
    smoke test named in the brief if there is one.
-5. **Report** in the output format below.
+4. **Report** in the output format below.
 
 ## Conventions you MUST match
 
@@ -66,7 +64,7 @@ JSON API in `api/`. MySQL via PDO (`config/database.php`, `$pdo`). PHPMailer
 
 ```
 FILES: <paths, comma separated>
-DONE: <≤4 lines, what now works that didn't>
+DONE: <what now works that didn't>
 LINT: <ok / file:line>
 ASSUMPTIONS: <lines, or —>
 BLOCKERS: <exact question, or —>

@@ -395,7 +395,8 @@ the duplicate, correct the comment.
 - **Port immediately.** Finish a task in Liwonde, QA it, port to Rosalyn in the same cycle, and
   re-run `diff` across the two trees. Drift is what created P0.0.
 - **`php -l` every changed file, both repos.**
-- **Never commit or push.** The owner triggers that.
+- **Commit and push each QA-passed task to `origin/main`** (see Git in CLAUDE.md) — one
+  commit per task, never force-push, never rewrite pushed history.
 - **Money invariants for qa-auditor:** comparisons via `BALANCE_TOLERANCE`; every ledger write
   paired with its reversal; sale and refund legs symmetric; no VAT on tips; no write outside a
   transaction that another write depends on.
