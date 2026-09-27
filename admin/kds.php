@@ -517,6 +517,9 @@ $bootstrap['fingerprint'] = md5(
         const _seenTicketMsgIds = new Set();
         /* Drafts of new station→FOH notes the cook is composing in each ticket card. */
         const _composerDrafts = {};
+        /* Ticket ids whose FOH note thread the cook has expanded. Threads stay folded
+           by default so a quiet ticket shows only food; unread notes force them open. */
+        const _openNoteThreads = new Set();
         /* Outbound notes this station has sent. Persisted client-side so the chat
            bubbles don't disappear when the next 8s feed-poll wipes state.messages. */
         const _outboundQueue = [];
@@ -807,11 +810,11 @@ $bootstrap['fingerprint'] = md5(
             const serviceLabel = orderTypeLabel(t.order_type);
             const guestLabel = t.customer_name || 'Walk-in guest';
             const orderNote = t.notes ? `<div class="t-orderNote"><i class="fas fa-exclamation-triangle"></i> ${escHtml(t.notes)}</div>` : '';
-            const placedLine = firedAt ? `<div class="t-placed"><i class="fas fa-clock"></i>Placed ${escHtml(fmtPlacedTime(firedAt))}</div>` : '';
+            const placedLine = firedAt ? `<span class="t-placed"><i class="fas fa-clock"></i>${escHtml(fmtPlacedTime(firedAt))}</span>` : '';
             const detailStrip = `<div class="t-detail-strip">
-                <span class="t-detail-chip"><i class="fas fa-user-tie"></i><b>FOH</b>${escHtml(orderedBy)}</span>
-                <span class="t-detail-chip"><i class="fas fa-user"></i><b>Guest</b>${escHtml(guestLabel)}</span>
-                <span class="t-detail-chip"><i class="fas fa-clipboard-list"></i><b>Lines</b>${ticketItems.length} · ${fmtQty(totalQty)} item${Math.abs(totalQty - 1) < 0.001 ? '' : 's'}</span>
+                <span class="t-detail-chip"><i class="fas fa-user-tie"></i>${escHtml(orderedBy)}</span>
+                <span class="t-detail-chip"><i class="fas fa-user"></i>${escHtml(guestLabel)}</span>
+                <span class="t-detail-chip"><i class="fas fa-clipboard-list"></i>${ticketItems.length} line${ticketItems.length === 1 ? '' : 's'} · ${fmtQty(totalQty)} item${Math.abs(totalQty - 1) < 0.001 ? '' : 's'}</span>
             </div>`;
             const allMyReady = myItems.filter(i => i.kds_status !== 'served').every(i => i.kds_status === 'ready');
             const hasPending = myItems.some(i => i.kds_status === 'pending');
@@ -868,40 +871,55 @@ $bootstrap['fingerprint'] = md5(
             <input type="text" class="t-foh-compose__input" id="ticket-compose-${t.id}" placeholder="Send a note to FOH about this ticket\u2026" value="${escHtml(composerDraft)}" maxlength="240" oninput="_composerDrafts[${t.id}] = this.value;" onkeydown="if(event.key==='Enter'){event.preventDefault(); sendTicketNoteToPOS(${t.id});}">
             <button class="t-foh-compose__send" data-loader-manual onclick="sendTicketNoteToPOS(${t.id}, this)" title="Send to FOH"><i class="fas fa-paper-plane"></i></button>
         </div>`;
-            const ticketMsgsHtml = ticketMsgs.length ?
-                `<div class="t-foh-notes" onclick="markTicketMsgsSeen(${t.id})">
-                <div class="t-foh-notes__head"><i class="fas fa-comments"></i> FOH note${ticketMsgs.length>1?'s':''} <span class="t-foh-notes__count">${ticketMsgs.length}</span>${unseenMsgs.length ? '<span class="t-foh-notes__new">NEW</span>' : ''}</div>
-                ${ticketMsgs.map(m => renderTicketMsg(m)).join('')}
-                ${composerHtml}
-            </div>` :
-                `<div class="t-foh-notes t-foh-notes--empty">${composerHtml}</div>`;
+            /* Notes stay folded until tapped so a quiet ticket is just the food.
+               Unread notes force the thread open — the cook must not miss them. */
+            const notesOpen = _openNoteThreads.has(String(t.id)) || unseenMsgs.length > 0 || !!composerDraft;
+            const ticketMsgsHtml = `<div class="t-foh-notes${ticketMsgs.length ? '' : ' t-foh-notes--empty'}${notesOpen ? ' is-open' : ''}">
+                <button type="button" class="t-foh-notes__head" onclick="toggleTicketNotes(${t.id})" aria-expanded="${notesOpen ? 'true' : 'false'}">
+                    <i class="fas fa-comments"></i>
+                    <span class="t-foh-notes__label">${ticketMsgs.length ? `FOH note${ticketMsgs.length > 1 ? 's' : ''}` : 'Message FOH'}</span>
+                    ${ticketMsgs.length ? `<span class="t-foh-notes__count">${ticketMsgs.length}</span>` : ''}
+                    ${unseenMsgs.length ? '<span class="t-foh-notes__new">NEW</span>' : ''}
+                    <i class="fas fa-angle-left t-foh-notes__chev"></i>
+                </button>
+                <div class="t-foh-notes__body" onclick="markTicketMsgsSeen(${t.id})">
+                    ${ticketMsgs.map(m => renderTicketMsg(m)).join('')}
+                    ${composerHtml}
+                </div>
+            </div>`;
             const rushBadge = isRush ? '<span class="t-rush-badge"><i class="fas fa-bolt"></i> RUSH</span>' : '';
             return `
             <div class="ticket t-${t.kitchen_status} ${isUrgent?'urgent':''}${flashClass}${rushClass}" data-id="${t.id}" data-status="${t.kitchen_status}" data-priority="${isRush?'1':'0'}">
                 <div class="t-head">
                     <div class="t-head-main">
                         <div class="t-table">${escHtml(tableLbl)}${rushBadge}</div>
-                        <div class="t-ref"><span class="t-ref__code">${escHtml(t.reference)}</span> <span class="t-status-pill s-${t.kitchen_status}">${t.kitchen_status.replace('_',' ')}</span></div>
+                        <div class="t-ref">
+                            <span class="t-ref__code">${escHtml(t.reference)}</span>
+                            <span class="t-service-pill t-service-pill--${escHtml(t.order_type || 'walk_in')}"><i class="fas ${t.order_type === 'room_service' ? 'fa-bell-concierge' : 'fa-utensils'}"></i> ${escHtml(serviceLabel)}</span>
+                            ${placedLine}
+                        </div>
                     </div>
                     <div class="t-timer-wrap">
                         <div class="t-timer ${ec}" data-fired="${firedAt||''}">${fmtElapsed(elapsed)}</div>
-                        <div class="t-timer-note">${escHtml(timerStatus(elapsed, t.kitchen_status, firedAt))}</div>
+                        <span class="t-status-pill s-${t.kitchen_status}">${escHtml(t.kitchen_status.replace('_',' '))}</span>
                     </div>
-                    <div class="t-meta"><span class="t-service-pill t-service-pill--${escHtml(t.order_type || 'walk_in')}"><i class="fas ${t.order_type === 'room_service' ? 'fa-bell-concierge' : 'fa-utensils'}"></i> ${escHtml(serviceLabel)}</span></div>
-                    ${placedLine}
                 </div>
+                <div class="t-timer-note ${ec}">${escHtml(timerStatus(elapsed, t.kitchen_status, firedAt))}</div>
                 ${detailStrip}
                 ${orderNote}
-                ${ticketMsgsHtml}
                 ${otherLabel}
+                ${ticketMsgsHtml}
                 ${nextStepHtml}
                 <div class="t-items">${items}</div>
                 <div class="t-foot">
-                    ${hasPending ? `<button class="b-start-all is-primary" data-loader-manual onclick="act('start_ticket',${t.id},null,this)" data-help="Start All|Mark every pending item on this ticket as &lsquo;preparing&rsquo;. Use it when you fire the whole ticket at once instead of starting each line individually."><i class="fas fa-fire"></i> Start All</button>` : `<button class="b-view" data-loader-manual onclick="openFullOrder(${t.id}, this)" data-help="View whole order|See every line on this order across all stations (Kitchen / Bar / Coffee Bar). Useful when timing your prep with the bar."><i class="fas fa-eye"></i> View order</button>`}
-                    ${canCancelBeforePrep ? `<button class="b-cancel" data-loader-manual onclick="cancelTicketBeforePrep(${t.id},this)" data-help="Cancel before prep|Fully cancels this order while all items are still pending. Stock is restored and the ticket disappears from all station boards."><i class="fas fa-xmark-circle"></i> Cancel</button>` : ''}
-                    <button class="b-rush${isRush?' is-rush':''}" data-loader-manual onclick="togglePriority(${t.id},this)" data-help="Rush / Priority|Flag this ticket as urgent so FOH knows it needs express service. A RUSH badge appears and the ticket is highlighted in red. Tap again to clear."><i class="fas fa-bolt"></i> ${isRush ? 'Un-rush' : 'Rush'}</button>
-                    <button class="b-bump-all${allMyReady ? ' is-primary' : ''}" data-loader-manual onclick="act('bump_ticket',${t.id},null,this)" ${!hasMyItems?'disabled':''} data-help="Bump ticket|Mark this whole ticket as DELIVERED to the customer and clear it from the kitchen board.\nUse Bump when the runner has carried the food to the table or pickup counter.\nIt does NOT undo the order, refund money, or restore stock — stock was already deducted at order placement. If you bumped by mistake, you have 10 minutes to use Recall."><i class="fas fa-check-double"></i> Bump</button>
-                    <a class="b-log" href="order-lifecycle.php?id=${t.id}" target="_blank" data-help="Order log|Open the full order lifecycle — placement, kitchen events, stock movements, and payment — in a new tab."><i class="fas fa-stream"></i> Log</a>
+                    ${hasPending
+                        ? `<button class="t-act t-act--primary tone-start" data-loader-manual onclick="act('start_ticket',${t.id},null,this)" data-help="Start All|Mark every pending item on this ticket as &lsquo;preparing&rsquo;. Use it when you fire the whole ticket at once instead of starting each line individually."><i class="fas fa-fire"></i> Start all lines</button>`
+                        : `<button class="t-act t-act--primary tone-bump" data-loader-manual onclick="act('bump_ticket',${t.id},null,this)" ${!hasMyItems?'disabled':''} data-help="Bump ticket|Mark this whole ticket as DELIVERED to the customer and clear it from the kitchen board.\nUse Bump when the runner has carried the food to the table or pickup counter.\nIt does NOT undo the order, refund money, or restore stock — stock was already deducted at order placement. If you bumped by mistake, you have 10 minutes to use Recall."><i class="fas fa-check-double"></i> Bump ticket</button>`}
+                    ${hasPending ? `<button class="t-act t-act--ghost" data-loader-manual onclick="act('bump_ticket',${t.id},null,this)" ${!hasMyItems?'disabled':''} title="Bump ticket" aria-label="Bump ticket" data-help="Bump ticket|Mark this whole ticket as DELIVERED to the customer and clear it from the kitchen board. It does NOT undo the order, refund money, or restore stock."><i class="fas fa-check-double"></i></button>` : ''}
+                    <button class="t-act t-act--ghost${isRush?' is-rush':''}" data-loader-manual onclick="togglePriority(${t.id},this)" title="${isRush ? 'Clear rush' : 'Mark rush'}" aria-label="${isRush ? 'Clear rush' : 'Mark rush'}" data-help="Rush / Priority|Flag this ticket as urgent so FOH knows it needs express service. A RUSH badge appears and the ticket is highlighted in red. Tap again to clear."><i class="fas fa-bolt"></i></button>
+                    <button class="t-act t-act--ghost" data-loader-manual onclick="openFullOrder(${t.id}, this)" title="View whole order" aria-label="View whole order" data-help="View whole order|See every line on this order across all stations (Kitchen / Bar / Coffee Bar). Useful when timing your prep with the bar."><i class="fas fa-eye"></i></button>
+                    ${canCancelBeforePrep ? `<button class="t-act t-act--ghost is-danger" data-loader-manual onclick="cancelTicketBeforePrep(${t.id},this)" title="Cancel before prep" aria-label="Cancel before prep" data-help="Cancel before prep|Fully cancels this order while all items are still pending. Stock is restored and the ticket disappears from all station boards."><i class="fas fa-xmark-circle"></i></button>` : ''}
+                    <a class="t-act t-act--ghost" href="order-lifecycle.php?id=${t.id}" target="_blank" title="Order log" aria-label="Order log" data-help="Order log|Open the full order lifecycle — placement, kitchen events, stock movements, and payment — in a new tab."><i class="fas fa-stream"></i></a>
                 </div>
             </div>`;
         }
@@ -941,6 +959,19 @@ $bootstrap['fingerprint'] = md5(
                 <button type="button" class="t-foh-msg__ack t-foh-msg__ack--dismiss" data-loader-manual onclick="ackStationMessage(${m.id}, this)" title="Dismiss"><i class="fas fa-times"></i></button>
             </div>
         </div>`;
+        }
+
+        /* Fold / unfold the FOH note thread on one ticket. Opening also clears the
+           unread flash so the card settles down. */
+        function toggleTicketNotes(ticketId) {
+            const key = String(ticketId);
+            if (_openNoteThreads.has(key)) {
+                _openNoteThreads.delete(key);
+            } else {
+                _openNoteThreads.add(key);
+                markTicketMsgsSeen(ticketId);
+            }
+            render();
         }
 
         /* Once the cook taps the FOH-notes block on a ticket, stop the flash. */
@@ -1066,9 +1097,29 @@ $bootstrap['fingerprint'] = md5(
             }
         }
 
+        /* Contextual lifecycle step for a single line. One dominant action at a time —
+           pending → Start → Ready → Collect → Served. Everything else is a quiet icon. */
+        const ITEM_STEP = {
+            pending: { action: 'start_item', icon: 'fa-fire', label: 'Start', tone: 'start', help: 'Start prepping|Tap when you actually pick this item up to prepare it. Stamps the started_at time so management can see your prep speed.' },
+            preparing: { action: 'ready_item', icon: 'fa-bell', label: 'Ready', tone: 'ready', help: 'Ready for pickup|Plate/glass is up and the runner can collect it. The whole ticket goes &lsquo;READY&rsquo; once every line for this station is ready.' },
+            in_progress: { action: 'ready_item', icon: 'fa-bell', label: 'Ready', tone: 'ready', help: 'Ready for pickup|Plate/glass is up and the runner can collect it. The whole ticket goes &lsquo;READY&rsquo; once every line for this station is ready.' },
+            ready: { action: 'collect_item', icon: 'fa-hand-holding', label: 'Collect', tone: 'collect', help: 'Mark for collection|Runner is collecting this item. Stock has been deducted. Moves the item to collection status before final served confirmation.' },
+            collection: { action: 'serve_item', icon: 'fa-check', label: 'Served', tone: 'serve', help: 'Item served|Mark this single item as delivered. Use it when one line is delivered before the rest of the ticket.' },
+        };
+        const ITEM_STATUS_LABEL = {
+            pending: 'Pending',
+            preparing: 'Cooking',
+            in_progress: 'Cooking',
+            ready: 'Ready',
+            collection: 'Collecting',
+            served: 'Served',
+            void: 'Voided',
+        };
+
         function itemHtml(it) {
             const isMine = it.is_mine == 1 || it.is_mine === true;
-            const note = it.notes ? `<div class="nt">→ ${escHtml(it.notes)}</div>` : '';
+            const st = String(it.kds_status || 'pending');
+            const note = it.notes ? `<div class="nt"><i class="fas fa-circle-exclamation"></i>${escHtml(it.notes)}</div>` : '';
             const qty = parseFloat(it.quantity);
             const qStr = qty % 1 === 0 ? qty : qty.toFixed(1);
             const stationLabel = {
@@ -1078,21 +1129,35 @@ $bootstrap['fingerprint'] = md5(
             } [it.station] || it.station;
             const otherStationBadge = !isMine ?
                 `<span class="item-station-badge stn-${escHtml(it.station)}">${escHtml(stationLabel)}</span>` : '';
-            const recipeCue = isMine ? '<span class="recipe-pill"><i class="fas fa-book-open"></i> Recipe</span>' : '';
-            const actions = isMine ? `<div class="item-actions">
-                <button class="b-start" data-loader-manual onclick="act('start_item',null,${it.id},this)" ${it.kds_status!=='pending'?'disabled':''} title="Start" data-help="Start prepping|Tap when you actually pick this item up to prepare it. Stamps the started_at time so management can see your prep speed."><i class="fas fa-fire"></i><span>Start</span></button>
-                <button class="b-ready" data-loader-manual onclick="act('ready_item',null,${it.id},this)" ${['served','ready','collection'].includes(it.kds_status)?'disabled':''} title="Ready" data-help="Ready for pickup|Plate/glass is up and the runner can collect it. The whole ticket goes &lsquo;READY&rsquo; once every line for this station is ready."><i class="fas fa-bell"></i><span>Ready</span></button>
-                <button class="b-collect" data-loader-manual onclick="act('collect_item',null,${it.id},this)" ${it.kds_status!=='ready'?'disabled':''} title="Collect" data-help="Mark for collection|Runner is collecting this item. Stock has been deducted. Moves the item to collection status before final served confirmation."><i class="fas fa-hand-holding"></i><span>Collect</span></button>
-                <button class="b-serve" data-loader-manual onclick="act('serve_item',null,${it.id},this)" ${it.kds_status==='served'?'disabled':''} title="Served" data-help="Item served|Mark this single item as delivered. Use it when one line is delivered before the rest of the ticket. Most staff just Bump the whole ticket instead."><i class="fas fa-check"></i><span>Served</span></button>
-                <button class="b-recipe" data-loader-manual onclick="openRecipeCard(${it.id}, this)" title="Recipe" data-help="Recipe card|Open the recipe and ingredient card for this ticket line. Use this when you need portion, yield or prep guidance without leaving the station screen."><i class="fas fa-book-open"></i><span>Recipe</span></button>
-                                <button class="b-86" data-loader-manual onclick="open86Modal(${it.id},'${escJsSingle(it.item_name)}',this)" ${['served','void'].includes(it.kds_status)?'disabled':''} title="86 item" data-help="86 this item|Ingredient ran out or item cannot be prepared. Removes it from the order and sends an urgent alert to FOH so they can offer the guest an alternative."><i class="fas fa-ban"></i><span>86</span></button>
-              </div>` : `<div class="item-actions item-actions--other"><span class="item-other-station-note"><i class="fas fa-eye-slash"></i></span></div>`;
-            return `<div class="item${isMine ? '' : ' item--other-station'}">
-            <div class="qty">${qStr}×</div>
-            <div class="info">
-                <div class="nm">${escHtml(it.item_name)}${otherStationBadge}${recipeCue}</div>
-                ${note}
-                <span class="badge b-${it.kds_status}">${it.kds_status}</span>
+
+            let actions;
+            if (!isMine) {
+                actions = `<div class="item-actions item-actions--other"><span class="item-other-station-note"><i class="fas fa-eye-slash"></i> Other station</span></div>`;
+            } else {
+                const step = ITEM_STEP[st];
+                const primary = step ?
+                    `<button class="item-act item-act--primary tone-${step.tone}" data-loader-manual onclick="act('${step.action}',null,${it.id},this)" data-help="${step.help}"><i class="fas ${step.icon}"></i><span>${step.label}</span></button>` :
+                    `<span class="item-act item-act--done"><i class="fas fa-circle-check"></i><span>${escHtml(ITEM_STATUS_LABEL[st] || st)}</span></span>`;
+                /* Skip-ahead: deliver a line without walking every step. */
+                const serveShortcut = (st === 'ready' || st === 'preparing' || st === 'in_progress') ?
+                    `<button class="item-act item-act--ghost" data-loader-manual onclick="act('serve_item',null,${it.id},this)" title="Mark served" aria-label="Mark served" data-help="Item served|Mark this single line as delivered without stepping through Collect. Most staff just Bump the whole ticket instead."><i class="fas fa-check-double"></i></button>` : '';
+                const eightySix = ['served', 'void'].includes(st) ? '' :
+                    `<button class="item-act item-act--ghost is-danger" data-loader-manual onclick="open86Modal(${it.id},'${escJsSingle(it.item_name)}',this)" title="86 this item" aria-label="86 this item" data-help="86 this item|Ingredient ran out or item cannot be prepared. Removes it from the order and sends an urgent alert to FOH so they can offer the guest an alternative."><i class="fas fa-ban"></i></button>`;
+                actions = `<div class="item-actions">
+                ${primary}
+                <button class="item-act item-act--ghost" data-loader-manual onclick="openRecipeCard(${it.id}, this)" title="Recipe card" aria-label="Recipe card" data-help="Recipe card|Open the recipe and ingredient card for this ticket line. Use this when you need portion, yield or prep guidance without leaving the station screen."><i class="fas fa-book-open"></i></button>
+                ${serveShortcut}
+                ${eightySix}
+              </div>`;
+            }
+            return `<div class="item is-${escHtml(st)}${isMine ? '' : ' item--other-station'}">
+            <div class="item__line">
+                <span class="qty">${qStr}<i>×</i></span>
+                <div class="info">
+                    <div class="nm">${escHtml(it.item_name)}${otherStationBadge}</div>
+                    ${note}
+                </div>
+                <span class="badge b-${escHtml(st)}">${escHtml(ITEM_STATUS_LABEL[st] || st)}</span>
             </div>
             ${actions}
         </div>`;
