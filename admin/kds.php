@@ -1335,15 +1335,27 @@ $bootstrap['fingerprint'] = md5(
             const d = new Date();
             document.getElementById('clock').textContent = d.toLocaleTimeString();
             document.querySelectorAll('.t-timer').forEach(el => {
-                const s = elapsedSeconds(el.dataset.fired);
-                el.innerHTML = fmtElapsed(s);
-                const status = el.closest('.ticket')?.dataset?.status;
-                el.classList.remove('warn', 'late');
-                const ec = elapsedClass(s, status);
-                if (ec) el.classList.add(ec);
-                const note = el.closest('.t-timer-wrap')?.querySelector('.t-timer-note');
-                if (note) note.textContent = timerStatus(s, status, el.dataset.fired);
-                if (s > 720 && status !== 'ready') el.closest('.ticket').classList.add('urgent');
+                /* One bad ticket must not stop the sweep: this loop is the only thing
+                   keeping every timer on the board live, so a throw here freezes the
+                   clock on every ticket after it. */
+                try {
+                    const s = elapsedSeconds(el.dataset.fired);
+                    el.innerHTML = fmtElapsed(s);
+                    const status = el.closest('.ticket')?.dataset?.status;
+                    el.classList.remove('warn', 'late', 'stale-ready');
+                    /* elapsedClass returns space-separated tokens ("stale-ready late").
+                       classList.add rejects those as a single argument, so spread them. */
+                    const ec = elapsedClass(s, status);
+                    if (ec) el.classList.add(...ec.split(/\s+/).filter(Boolean));
+                    const note = el.closest('.ticket')?.querySelector('.t-timer-note');
+                    if (note) {
+                        note.textContent = timerStatus(s, status, el.dataset.fired);
+                        note.className = 't-timer-note ' + ec;
+                    }
+                    if (s > 720 && status !== 'ready') el.closest('.ticket')?.classList.add('urgent');
+                } catch (e) {
+                    console.error('tickClock: timer update failed', e);
+                }
             });
         }
 

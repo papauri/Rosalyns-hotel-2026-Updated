@@ -1115,6 +1115,18 @@ body.kds-sidebar-resizing .kds-sidebar-resize-handle::after {
     color: var(--txt);
 }
 
+/* fmtElapsed wraps its units in <span class="u"> — "12 <u>min</u>", "1<u>h</u> 04<u>m</u>",
+   and whole-phrase states like "just fired" / "check FOH". The number is what carries at
+   distance, so the unit sits back at a smaller size and lower weight; a phrase-only state
+   still reads clearly because it keeps the timer's colour. */
+.t-timer .u {
+    font-size: .62em;
+    font-weight: 600;
+    letter-spacing: 0;
+    opacity: .72;
+    margin-left: 1px;
+}
+
 .t-timer.warn {
     color: var(--new);
 }
