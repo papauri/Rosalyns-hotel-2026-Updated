@@ -624,7 +624,7 @@ function rt_render_active_order_html(?array $order, bool $isActive, string $curr
     if ($canSettleTableOrders) {
         $actionsHtml .= '<button type="button" class="rt-order-action rt-order-action--button" data-rt-settle-order data-order-id="' . $orderId . '" data-order-ref="' . htmlspecialchars((string)($order['reference'] ?? ''), ENT_QUOTES, 'UTF-8') . '" data-order-total="' . htmlspecialchars((string)($order['total_amount'] ?? 0), ENT_QUOTES, 'UTF-8') . '"><i class="fas fa-cash-register"></i> Take payment</button>';
     }
-    $actionsHtml .= '<a href="order-lifecycle.php?id=' . $orderId . '" class="rt-order-action" target="_blank" rel="noopener"><i class="fas fa-receipt"></i> POS details</a>';
+    $actionsHtml .= '<button type="button" onclick="rhOpenLifecycle(' . $orderId . ')" class="rt-order-action"><i class="fas fa-receipt"></i> POS details</button>';
 
     return '<div class="rt-order-box">'
         . '<div class="rt-order-top"><strong class="rt-order-ref">' . $reference . '</strong><span class="rt-order-total">' . $totalAmount . '</span></div>'
@@ -1445,7 +1445,7 @@ foreach ($tables as $table) {
                 '<div class="rt-order-items">' + itemsHtml + '</div>' +
                 rtBuildServedItemsHtml(order) +
                 '<div class="rt-order-stations">' + stationsHtml + '</div>' +
-                '<div class="rt-order-actions">' + settleActionHtml + '<a href="order-lifecycle.php?id=' + orderId + '" class="rt-order-action" target="_blank" rel="noopener"><i class="fas fa-receipt"></i> POS details</a></div>' +
+                '<div class="rt-order-actions">' + settleActionHtml + '<button type="button" onclick="rhOpenLifecycle(' + orderId + ')" class="rt-order-action"><i class="fas fa-receipt"></i> POS details</button></div>' +
                 '</div>';
         }
 

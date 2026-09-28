@@ -27,6 +27,11 @@
 <?php require __DIR__ . '/offline-banner.php'; ?>
 <!-- Shared session flash toasts — renders any unconsumed success/error session messages -->
 <?php require __DIR__ . '/admin-flash.php'; ?>
+<!-- Shared order-log overlay. Included here rather than on each page so every
+     admin surface that links to order-lifecycle.php opens it in place instead of
+     a new tab; it renders a hidden div and is inert until rhOpenLifecycle() is
+     called, and self-guards against being included twice. -->
+<?php require __DIR__ . '/lifecycle-modal.php'; ?>
 
 </body>
 

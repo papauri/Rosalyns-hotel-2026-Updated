@@ -407,7 +407,7 @@ $current_page = basename($_SERVER['PHP_SELF']);
                                 $prepSec = ($r['fired_at'] && $r['served_at']) ? max(0, (int)(strtotime($r['served_at']) - strtotime($r['fired_at']))) : 0;
                             ?>
                                 <tr>
-                                    <td><a href="order-lifecycle.php?id=<?php echo (int)$r['order_id']; ?>" target="_blank" style="color:#8B7355; font-weight:600;"><?php echo htmlspecialchars($r['reference']); ?></a></td>
+                                    <td><button type="button" onclick="rhOpenLifecycle(<?php echo (int)$r['order_id']; ?>)" style="color:#8B7355; font-weight:600;"><?php echo htmlspecialchars($r['reference']); ?></button></td>
                                     <td><?php echo htmlspecialchars($r['order_type']); ?></td>
                                     <td><?php echo htmlspecialchars(($r['table_number'] ? 'T' . $r['table_number'] : '') . ($r['customer_name'] ? ' · ' . $r['customer_name'] : '')); ?></td>
                                     <td>

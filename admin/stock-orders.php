@@ -2197,7 +2197,7 @@ $csrf_token = generateCsrfToken();
                 _reviewFormId = formId || null;
                 var d = ORDER_REVIEW_DATA[orderId];
                 if (!d) {
-                    window.open('order-lifecycle.php?id=' + orderId, '_blank', 'noopener');
+                    rhOpenLifecycle(orderId);
                     return;
                 }
 
@@ -2300,7 +2300,7 @@ $csrf_token = generateCsrfToken();
                 // ── Reconcile action (admin/manager only) ─────────────────────
                 if (formId && REVIEW_CAN_RECONCILE) {
                     html += '<div style="padding-top:14px;border-top:1px solid #e9ecef;display:flex;gap:8px;justify-content:flex-end;flex-wrap:wrap;">';
-                    html += '<a href="order-lifecycle.php?id=' + orderId + '" target="_blank" rel="noopener" class="btn" style="background:#f8f9fa;color:#495057;border:1px solid #ced4da;text-decoration:none;padding:8px 16px;border-radius:6px;font-size:13px;">' +
+                    html += '<button type="button" onclick="rhOpenLifecycle(' + orderId + ')" class="btn" style="background:#f8f9fa;color:#495057;border:1px solid #ced4da;padding:8px 16px;border-radius:6px;font-size:13px;cursor:pointer;font:inherit;">' +
                         '<i class="fas fa-timeline"></i> Full Timeline</a>';
                     html += '<button type="button" onclick="_doReconcile()" style="padding:8px 18px;background:#8B7355;color:#fff;border:none;border-radius:6px;cursor:pointer;font-size:13px;font-weight:600;">' +
                         '<i class="fas fa-rotate"></i> Run Reconciliation &amp; Sync Accounting</button>';
@@ -2469,7 +2469,7 @@ $csrf_token = generateCsrfToken();
                             <td style="font-size:12px;"><?php echo htmlspecialchars($o['created_by_name'] ?: '—'); ?></td>
                             <td style="font-size:12px;"><?php echo htmlspecialchars(date('Y-m-d H:i', strtotime($o['created_at']))); ?></td>
                             <td>
-                                <a href="order-lifecycle.php?id=<?php echo (int)$o['id']; ?>" target="_blank" rel="noopener" class="mini-action"><i class="fas fa-stream"></i> Timeline</a>
+                                <button type="button" onclick="rhOpenLifecycle(<?php echo (int)$o['id']; ?>)" class="mini-action"><i class="fas fa-stream"></i> Timeline</button>
                                 <button type="button" class="mini-action"
                                     onclick="showOrderItems(<?php echo (int)$o['id']; ?>, <?php echo json_encode($o['reference']); ?>)"
                                     title="View line items for this order">
@@ -2493,7 +2493,7 @@ $csrf_token = generateCsrfToken();
                                     <?php endif; ?>
                                 <?php endif; ?>
                                 <?php if ($o['status'] === 'placed'): ?>
-                                    <a href="order-lifecycle.php?id=<?php echo (int)$o['id']; ?>" target="_blank" rel="noopener" class="mini-action primary" title="View live order status, items, and kitchen progress"><i class="fas fa-hourglass-half"></i> Open</a>
+                                    <button type="button" onclick="rhOpenLifecycle(<?php echo (int)$o['id']; ?>)" class="mini-action primary" title="View live order status, items, and kitchen progress"><i class="fas fa-hourglass-half"></i> Open</button>
                                     <?php if (($o['order_type'] ?? '') !== 'room_service'): ?>
                                         <button type="button" class="mini-action success"
                                             onclick="promptSettle(document.getElementById('sf-<?php echo (int)$o['id']; ?>'), <?php echo json_encode($o['reference']); ?>, <?php echo json_encode((float)$o['total_amount']); ?>)"

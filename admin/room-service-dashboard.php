@@ -656,7 +656,7 @@ $current_page = basename($_SERVER['PHP_SELF']);
                                 $fireDelaySec = $o['fired_at'] ? max(0, strtotime($o['fired_at']) - strtotime($o['created_at'])) : 0;
                             ?>
                                 <tr>
-                                    <td><a href="order-lifecycle.php?id=<?php echo (int)$o['id']; ?>" target="_blank" style="color:#8B7355; font-weight:600;"><?php echo htmlspecialchars($o['reference']); ?></a></td>
+                                    <td><button type="button" onclick="rhOpenLifecycle(<?php echo (int)$o['id']; ?>)" style="color:#8B7355; font-weight:600;"><?php echo htmlspecialchars($o['reference']); ?></button></td>
                                     <td>
                                         <strong><?php echo htmlspecialchars($o['table_number'] ?: '—'); ?></strong>
                                         <?php if ($o['customer_name']): ?><br><small style="color:#6c757d;"><?php echo htmlspecialchars($o['customer_name']); ?></small><?php endif; ?>
