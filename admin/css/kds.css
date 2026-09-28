@@ -3132,3 +3132,14 @@ body.kds-sidebar-resizing .station-bottom {
         transition-duration: .01ms !important;
     }
 }
+
+
+/* Order log rendered inside the shared modal rather than a new tab. */
+.rh-modal-frame {
+    width: 100%;
+    height: min(72vh, 780px);
+    border: 0;
+    display: block;
+    background: var(--surface);
+    border-radius: var(--r-sm);
+}

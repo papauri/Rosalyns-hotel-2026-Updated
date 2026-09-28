@@ -2798,7 +2798,7 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
                         <button class="a-receipt" onclick="closeSuccess(); openTabsTray();" data-help="View open tabs|Jump to the list of unpaid tickets. From there you can settle this tab when the customer is ready."><i class="fas fa-list"></i> View Tabs</button>
                     <?php endif; ?>
                     <?php if (in_array($user['role'] ?? '', ['admin', 'manager'], true)): ?>
-                        <button class="a-receipt a-lifecycle" onclick="openPosPageModal('order-lifecycle.php?id=<?php echo (int)$lastOrderId; ?>','Timeline','fas fa-stream')" data-help="Order lifecycle|See every event for this order — placement, kitchen actions, stock movements, payment — with timestamps and the user who did each."><i class="fas fa-stream"></i> Lifecycle</button>
+                        <button class="a-receipt a-lifecycle" onclick="openPosPageModal('order-lifecycle.php?embed=1&id=<?php echo (int)$lastOrderId; ?>','Timeline','fas fa-stream')" data-help="Order lifecycle|See every event for this order — placement, kitchen actions, stock movements, payment — with timestamps and the user who did each."><i class="fas fa-stream"></i> Lifecycle</button>
                     <?php endif; ?>
                     <button class="a-new" onclick="closeSuccess()" data-help="New order|Close this dialog and start ringing up the next order."><i class="fas fa-plus-circle"></i> New order</button>
                 </div>
@@ -3051,7 +3051,7 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
                                     <?php endif; ?>
                                     <?php if (in_array($user['role'] ?? '', ['admin', 'manager'], true)): ?>
                                         <button type="button"
-                                            onclick="openPosPageModal('order-lifecycle.php?id=<?php echo (int)$t['id']; ?>','Timeline','fas fa-stream')"
+                                            onclick="openPosPageModal('order-lifecycle.php?embed=1&id=<?php echo (int)$t['id']; ?>','Timeline','fas fa-stream')"
                                             class="tc-btn tc-btn-log">
                                             <i class="fas fa-stream"></i> Lifecycle
                                         </button>
@@ -7523,7 +7523,7 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
                     byOther ? `<span class="tc-meta-pill"><i class="fas fa-user-tie"></i> ${escHtml(t.opened_by || 'staff')}</span>` : `<span class="tc-meta-pill"><i class="fas fa-user-check"></i> You</span>`
                 ].filter(Boolean).join('');
                 const managerTools = posCanManageTabs ? `
-                    <button type="button" onclick="openPosPageModal('order-lifecycle.php?id=${orderId}','Timeline','fas fa-stream')" class="tc-btn tc-btn-log"><i class="fas fa-stream"></i> Lifecycle</button>
+                    <button type="button" onclick="openPosPageModal('order-lifecycle.php?embed=1&id=${orderId}','Timeline','fas fa-stream')" class="tc-btn tc-btn-log"><i class="fas fa-stream"></i> Lifecycle</button>
                     <button type="button" onclick="adminVoidTab(${orderId}, ${actionRef})" class="tc-btn tc-btn-void"><i class="fas fa-ban"></i> Void</button>` : '';
                 return `<article class="tab-card${isStale ? ' stale' : ''}" data-order-id="${orderId}" data-is-stale="${isStale ? '1' : '0'}">
                     <div class="tc-row1">
@@ -8260,7 +8260,7 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
                 detailActions.push(`<button type="button" class="tc-btn tc-btn-settle tdi-action" onclick="settleTabFromDetail(${parseInt(o.id, 10) || 0}, ${grossTotal}, ${JSON.stringify(String(o.reference || 'TAB'))})"><i class="fas fa-credit-card"></i> Settle tab</button>`);
             }
             detailActions.push(`<button type="button" class="tc-btn tc-btn-kot tdi-action" onclick="openPosPageModal('stock-receipt.php?id=${parseInt(o.id, 10) || 0}&print=1&kot=1','Print KOT','fas fa-print')"><i class="fas fa-print"></i> Print KOT</button>`);
-            detailActions.push(`<button type="button" class="tc-btn tc-btn-log tdi-action" onclick="openPosPageModal('order-lifecycle.php?id=${parseInt(o.id, 10) || 0}','Timeline','fas fa-stream')"><i class="fas fa-stream"></i> Timeline</button>`);
+            detailActions.push(`<button type="button" class="tc-btn tc-btn-log tdi-action" onclick="openPosPageModal('order-lifecycle.php?embed=1&id=${parseInt(o.id, 10) || 0}','Timeline','fas fa-stream')"><i class="fas fa-stream"></i> Timeline</button>`);
             if (canCancelBeforePrep) {
                 detailActions.push(`<button type="button" class="tc-btn tc-btn-cancel tdi-action" onclick="cancelOpenOrder(${parseInt(o.id, 10) || 0}, ${JSON.stringify(String(o.reference || 'TAB'))})"><i class="fas fa-circle-xmark"></i> Cancel</button>`);
             }
@@ -9869,7 +9869,7 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
                         '<td style="padding:7px 8px;text-align:right;">' + currencySymbol + ' ' + fmtMoney(o.total_amount) + '</td>' +
                         '<td style="padding:7px 8px;text-align:center;color:#6c757d;">' + escHtml(time) + '</td>' +
                         '<td style="padding:7px 8px;white-space:nowrap;">' +
-                        '<a href="order-lifecycle.php?id=' + o.id + '" target="_blank" style="font-size:11px;color:#8B7355;text-decoration:none;" title="Lifecycle log">Log</a>' +
+                        '<button type="button" onclick="openPosPageModal(&quot;order-lifecycle.php?embed=1&amp;id=' + o.id + '&quot;,&quot;Timeline&quot;,&quot;fas fa-stream&quot;)" style="font-size:11px;color:#8B7355;background:none;border:0;cursor:pointer;padding:0;font:inherit;" title="Lifecycle log">Log</button>' +
                         '</td></tr>';
                 });
                 html += '</tbody></table>';

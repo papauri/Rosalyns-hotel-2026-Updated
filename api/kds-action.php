@@ -542,10 +542,15 @@ try {
         $stmt = $pdo->prepare("INSERT INTO station_messages (station, message, sent_by, sent_by_name, source, priority, order_id, order_ref) VALUES (?, ?, ?, ?, ?, ?, ?, ?)");
         $source = hasPermission((int)$user['id'], 'pos_till') ? 'pos' : 'station';
         $stmt->execute([$STATION, $message, (int)$user['id'], $user['full_name'] ?? $user['username'] ?? '', $source, $priority, $linkedOrderId, $linkedOrderRef]);
+        /* Read the id BEFORE logging. rh_log_event() writes its own row, which moves
+           lastInsertId() to the log table — this used to hand the caller the log id
+           instead of the message id, so the station's reply targeted a row that did
+           not exist and the note silently never came back. */
+        $newMessageId = (int)$pdo->lastInsertId();
         if (function_exists('rh_log_event')) {
             rh_log_event('api/kds-action', 'info', 'Station note sent', ['station' => $STATION, 'priority' => $priority, 'order_ref' => $linkedOrderRef, 'user' => $user['username'] ?? '', 'source' => $source]);
         }
-        jok(['message_id' => (int)$pdo->lastInsertId(), 'station' => $STATION]);
+        jok(['message_id' => $newMessageId, 'station' => $STATION]);
     }
 
     if ($action === 'ack_message') {
@@ -560,6 +565,9 @@ try {
             $stmt = $pdo->prepare("UPDATE station_messages SET is_acknowledged = 1, acknowledged_by = ?, acknowledged_at = NOW() WHERE id = ? AND station = ?");
             $stmt->execute([(int)$user['id'], $messageId, $STATION]);
         }
+        if ($stmt->rowCount() === 0) {
+            jerr('That note is no longer available — refresh the board.', 409);
+        }
         jok(['message_id' => $messageId, 'replied' => $reply !== '']);
     }
 
@@ -571,6 +579,12 @@ try {
         kds_ensure_station_messages_table($pdo);
         $stmt = $pdo->prepare("UPDATE station_messages SET reply_message = ?, replied_at = NOW(), replied_by_name = ? WHERE id = ? AND station = ?");
         $stmt->execute([$reply, $user['full_name'] ?? $user['username'] ?? '', $messageId, $STATION]);
+        /* Nothing matched means the id is wrong or the note belongs to another
+           station. Reporting ok here told the cook "reply sent" while the cashier
+           received nothing — the one failure this channel must never have. */
+        if ($stmt->rowCount() === 0) {
+            jerr('That note is no longer available to reply to — refresh the board.', 409);
+        }
         jok(['message_id' => $messageId, 'replied_at' => date('Y-m-d H:i:s')]);
     }
 
@@ -683,10 +697,12 @@ try {
         $stmt = $pdo->prepare("INSERT INTO station_messages (station, message, sent_by, sent_by_name, source, priority, order_id, order_ref, to_user_id, is_acknowledged, acknowledged_at) VALUES (?, ?, ?, ?, 'station', ?, ?, ?, ?, 1, NOW())");
         /* is_acknowledged=1 so it doesn't show on the station's own board — it's an outgoing message. */
         $stmt->execute([$STATION, $message, (int)$user['id'], $user['full_name'] ?? $user['username'] ?? '', $priority, $linkedOrderId, (string)$row['reference'], $toUserId]);
+        /* Captured before logging — see the note in send_message. */
+        $newMessageId = (int)$pdo->lastInsertId();
         if (function_exists('rh_log_event')) {
             rh_log_event('api/kds-action', 'info', 'Station→POS note sent', ['station' => $STATION, 'order_ref' => $row['reference'], 'to_user_id' => $toUserId, 'user' => $user['username'] ?? '']);
         }
-        jok(['message_id' => (int)$pdo->lastInsertId(), 'to_user_id' => $toUserId]);
+        jok(['message_id' => $newMessageId, 'to_user_id' => $toUserId]);
     }
 
     if ($action === 'get_my_orders') {

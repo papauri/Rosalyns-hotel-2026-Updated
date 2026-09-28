@@ -862,7 +862,7 @@ $bootstrap['fingerprint'] = md5(
                     <button class="t-act t-act--note${noteCount ? ' has-notes' : ''}${unseenMsgs.length ? ' has-unread' : ''}" onclick="toggleTicketNotes(${t.id})" aria-expanded="${notesOpen ? 'true' : 'false'}" data-help="FOH notes|Messages between this station and the till for this ticket. Opens the thread and a box to reply."><i class="fas fa-comment-dots"></i>${noteCount ? `<span>${noteCount}</span>` : ''}</button>
                     <button class="t-act t-act--icon" data-loader-manual onclick="openFullOrder(${t.id}, this)" title="View whole order" aria-label="View whole order" data-help="View whole order|See every line on this order across all stations (Kitchen / Bar / Coffee Bar). Useful when timing your prep with the bar."><i class="fas fa-eye"></i></button>
                     ${canCancelBeforePrep ? `<button class="t-act t-act--icon is-danger" data-loader-manual onclick="cancelTicketBeforePrep(${t.id},this)" title="Cancel before prep" aria-label="Cancel before prep" data-help="Cancel before prep|Fully cancels this order while all items are still pending. Stock is restored and the ticket disappears from all station boards."><i class="fas fa-xmark-circle"></i></button>` : ''}
-                    <a class="t-act t-act--icon" href="order-lifecycle.php?id=${t.id}" target="_blank" title="Order log" aria-label="Order log" data-help="Order log|Open the full order lifecycle — placement, kitchen events, stock movements, and payment — in a new tab."><i class="fas fa-stream"></i></a>
+                    <button type="button" class="t-act t-act--icon" onclick="openOrderLog(${t.id})" title="Order log" aria-label="Order log" data-help="Order log|Open the full order lifecycle — placement, kitchen events, stock movements, and payment — over the board."><i class="fas fa-stream"></i></button>
                 </div>
                 ${ticketMsgsHtml}
             </div>`;
@@ -1889,6 +1889,28 @@ $bootstrap['fingerprint'] = md5(
         function closeModal() {
             if (Date.now() - _modalOpenedAt < 250) return; // guard against phantom touch clicks
             document.getElementById('rhModal').style.display = 'none';
+            /* Drop the frame so a closed log stops polling and the next open starts
+               clean rather than flashing the previous order. */
+            const body = document.getElementById('rhModalBody');
+            if (body && body.firstElementChild && body.firstElementChild.tagName === 'IFRAME') {
+                body.innerHTML = '';
+            }
+        }
+
+        /* The order log opens over the board, not in a new tab. A station screen
+           runs fullscreen on a wall or a counter tablet: a new tab takes the board
+           off the pass entirely, and there is often no visible browser chrome to
+           get back with. */
+        function openOrderLog(orderId) {
+            openModal('Order log');
+            const body = document.getElementById('rhModalBody');
+            if (!body) return;
+            const frame = document.createElement('iframe');
+            frame.src = 'order-lifecycle.php?embed=1&id=' + encodeURIComponent(orderId);
+            frame.title = 'Order lifecycle';
+            frame.className = 'rh-modal-frame';
+            body.innerHTML = '';
+            body.appendChild(frame);
         }
         document.addEventListener('keydown', e => {
             if (e.key === 'Escape') closeModal();

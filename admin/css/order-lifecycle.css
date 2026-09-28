@@ -410,3 +410,36 @@ body {
         grid-template-columns: 1fr 1fr;
     }
 }
+
+
+/* ── Embedded in a host panel (?embed=1) ────────────────────────────────────
+   Opened from the POS modal or the KDS drawer rather than as its own page, so
+   the outer page framing comes off: no centred max-width column floating in a
+   grey field, no page-level heading competing with the host's own title.     */
+.is-embed {
+    background: var(--color-surface, #fffdfb);
+}
+
+.is-embed .wrap {
+    max-width: none;
+    padding: 14px 16px 20px;
+}
+
+.is-embed .head {
+    margin-top: 0;
+}
+
+/* Says why the kitchen stages are blank when an order never reached a board. */
+.stage-note {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin: -4px 0 16px;
+    padding: 9px 12px;
+    border-radius: 8px;
+    background: #f3ede2;
+    border-left: 3px solid #9a7c53;
+    color: #4f3f2a;
+    font-size: 12.5px;
+    font-weight: 600;
+}

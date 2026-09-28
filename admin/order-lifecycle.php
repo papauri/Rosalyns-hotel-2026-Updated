@@ -17,6 +17,12 @@
  */
 require_once 'admin-init.php';
 
+/* Rendered inside a host panel (POS modal, KDS drawer) rather than as its own
+   page. Keeps its own <head> so its stylesheet loads in the frame without
+   leaking into the host, but drops the page-level heading and outer padding so
+   it reads as part of the surface that opened it. */
+$embed = isset($_GET['embed']) && $_GET['embed'] === '1';
+
 $user = [
     'id'        => $_SESSION['admin_user_id'],
     'role'      => $_SESSION['admin_role'],
@@ -237,11 +243,15 @@ function fmt_dur(?int $from, ?int $to) { if (!$from || !$to) return '—'; $s = 
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.7.2/css/all.min.css">
     <link rel="stylesheet" href="css/order-lifecycle.css?v=<?php echo @filemtime(__DIR__ . '/css/order-lifecycle.css'); ?>">
 </head>
-<body>
+<body class="<?php echo $embed ? 'is-embed' : ''; ?>">
 <div class="wrap">
     <div class="head">
         <div>
-            <h1><i class="fas fa-stream" style="color:var(--color-primary,#8A775F);"></i> Order lifecycle</h1>
+            <?php /* The host container already titles the panel, so the page-level
+                     heading is dropped when embedded rather than showing "Timeline"
+                     above "Order lifecycle". The reference, status and total stay —
+                     those are the context, not chrome. */ ?>
+            <?php if (!$embed): ?><h1><i class="fas fa-stream" style="color:var(--color-primary,#8A775F);"></i> Order lifecycle</h1><?php endif; ?>
             <div class="ref">
                 <strong><?php echo htmlspecialchars($order['reference']); ?></strong>
                 <?php $status = $order['status']; ?>
@@ -269,14 +279,26 @@ function fmt_dur(?int $from, ?int $to) { if (!$from || !$to) return '—'; $s = 
     </div>
     <?php endif; ?>
 
+    <?php /* Every metric names both ends of what it measures. The row used to read
+             as one chain — Placed → Fired → Ready → Served → Paid — while "→ Paid"
+             was actually measured from placement, not from served, so the same arrow
+             meant "time in this stage" in four tiles and "time since the start" in
+             the fifth. Payment often does not follow service at all (a walk-in pays
+             up front), so the baseline is stated rather than implied. */ ?>
     <div class="metrics">
-        <div class="metric"><div class="lbl">Placed</div><div class="val"><?php echo $placed ? date('H:i:s', $placed) : '—'; ?></div></div>
-        <div class="metric"><div class="lbl">→ Fired (kitchen)</div><div class="val"><?php echo fmt_dur($placed, $fired); ?></div></div>
-        <div class="metric <?php echo ($fired && $ready && ($ready - $fired) > 600) ? 'hot' : 'ok'; ?>"><div class="lbl">→ Ready</div><div class="val"><?php echo fmt_dur($fired, $ready); ?></div></div>
-        <div class="metric"><div class="lbl">→ Served</div><div class="val"><?php echo fmt_dur($ready, $served); ?></div></div>
-        <div class="metric"><div class="lbl">→ Paid</div><div class="val"><?php echo fmt_dur($placed, $paid); ?></div></div>
+        <div class="metric"><div class="lbl">Placed at</div><div class="val"><?php echo $placed ? date('H:i:s', $placed) : '—'; ?></div></div>
+        <div class="metric"><div class="lbl">Placed → fired</div><div class="val"><?php echo fmt_dur($placed, $fired); ?></div></div>
+        <div class="metric <?php echo ($fired && $ready && ($ready - $fired) > 600) ? 'hot' : 'ok'; ?>"><div class="lbl">Fired → ready</div><div class="val"><?php echo fmt_dur($fired, $ready); ?></div></div>
+        <div class="metric"><div class="lbl">Ready → served</div><div class="val"><?php echo fmt_dur($ready, $served); ?></div></div>
+        <div class="metric"><div class="lbl">Placed → paid</div><div class="val"><?php echo fmt_dur($placed, $paid); ?></div></div>
         <div class="metric"><div class="lbl">Total cycle</div><div class="val"><?php echo fmt_dur($placed, $paid ?: $served); ?></div></div>
     </div>
+    <?php if (!$fired && !$ready): ?>
+        <?php /* A bar/coffee-only order is auto-served and never reaches a kitchen
+                 board, so three empty stage tiles look like missing data rather than
+                 a path that does not apply. Say which it is. */ ?>
+        <div class="stage-note"><i class="fas fa-circle-info"></i> No kitchen stage recorded — this order was served without being fired to a station board.</div>
+    <?php endif; ?>
 
     <div class="items">
         <h2><i class="fas fa-list"></i> Items (<?php echo count($items); ?>)</h2>
