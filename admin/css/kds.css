@@ -24,37 +24,66 @@
 
 /* ── Tokens ──────────────────────────────────────────────────────────────── */
 :root {
-    /* Surfaces — cool neutral slate, no colour cast. */
-    --bg: #0a0d12;
-    --bg-2: #0e1219;
-    --surface: #151a23;
-    --surface-2: #1b212c;
-    --surface-3: #232a37;
-    --surface-4: #2c3542;
+    /* Japandi, matching the admin shell: warm paper body under a dark header,
+       exactly as admin-styles.css sets it up (--admin-bg / --admin-surface /
+       .admin-header). Values are the project's own tokens from
+       css/base/variables.css so the KDS reads as the same product as the rest
+       of the back office rather than a separate dark app. */
+    --bg: #f4f2ef;
+    /* --admin-bg */
+    --bg-2: #f4efe9;
+    /* --color-surface-soft */
+    --surface: #fffdfb;
+    /* --admin-surface */
+    --surface-2: #f8f4ef;
+    /* --color-surface-alt */
+    --surface-3: #eee6dc;
+    /* --color-surface-stone */
+    --surface-4: #e8dfd4;
+    /* --color-japandi-sand */
 
     /* Hairlines. */
-    --line: #29313f;
-    --line-soft: #1e2531;
-    --line-strong: #3a4454;
+    --line: #dccfc2;
+    /* --color-border */
+    --line-soft: #eae1d8;
+    /* --color-border-light */
+    --line-strong: #d6c9ba;
+    /* --color-divider */
 
     /* Text. */
-    --txt: #eef2f8;
-    --txt-2: #a3b0c2;
-    --txt-3: #6f7d91;
-    --txt-inv: #0a0d12;
+    --txt: #2a2723;
+    /* --color-japandi-charcoal */
+    --txt-2: #5e554d;
+    /* --color-japandi-ink-soft */
+    --txt-3: #7a6f63;
+    /* --color-text-muted */
+    --txt-inv: #fffdfb;
 
-    /* Status language — one hue per meaning, used everywhere. */
-    --new: #f5a524;
-    --cook: #3b82f6;
-    --ready: #22c55e;
-    --collect: #14b8a6;
-    --served: #64748b;
-    --late: #ef4444;
-    --rush: #ff3b30;
-    --info: #818cf8;
+    /* The dark band at the top, lifted from .admin-header. */
+    --chrome: linear-gradient(135deg, #111827 0%, #231f1c 100%);
+    --chrome-txt: #f3f0ec;
+    --chrome-txt-2: #a79c8e;
+    --chrome-line: #3a332c;
+
+    /* Status language — muted earth tones, taken from the admin's own semantic
+       borders. Nothing on this board is allowed to be a saturated primary. */
+    --new: #9a7c53;
+    /* --admin-warning-border, ochre */
+    --cook: #8a775f;
+    /* --color-japandi-wood */
+    --ready: #3f8f5a;
+    /* --admin-success-border, sage */
+    --collect: #7a6a52;
+    /* --color-primary */
+    --served: #a9a093;
+    --late: #956a5b;
+    /* --admin-danger-border, clay */
+    --rush: #8f5545;
+    --info: #2f6fad;
+    /* --admin-info-border */
 
     /* Station accent, injected per-station from kds.php. */
-    --kds-station-color: #f5a524;
+    --kds-station-color: #8a775f;
 
     /* Geometry. */
     --r-sm: 8px;
@@ -69,9 +98,10 @@
     --kds-sidebar-width: 248px;
     --nav-w: 0px;
 
-    --shadow-1: 0 1px 2px rgba(0, 0, 0, .4);
-    --shadow-2: 0 4px 16px rgba(0, 0, 0, .35);
-    --shadow-3: 0 16px 48px rgba(0, 0, 0, .55);
+    /* Soft and warm — on paper, depth comes from a whisper, not a drop. */
+    --shadow-1: 0 1px 2px rgba(42, 39, 35, .07);
+    --shadow-2: 0 4px 14px rgba(42, 39, 35, .10);
+    --shadow-3: 0 18px 48px rgba(42, 39, 35, .20);
 
     --ease: cubic-bezier(.4, 0, .2, 1);
 }
@@ -208,10 +238,26 @@ a {
     align-items: center;
     gap: 16px;
     padding: 0 14px;
-    background: rgba(14, 18, 25, .92);
-    backdrop-filter: saturate(140%) blur(12px);
-    -webkit-backdrop-filter: saturate(140%) blur(12px);
-    border-bottom: 1px solid var(--line);
+    /* Same dark band as .admin-header, so the station screen reads as part of
+       the back office rather than a separate application. */
+    background: var(--chrome);
+    color: var(--chrome-txt);
+    border-bottom: 0;
+
+    /* The bar is the one dark region on a light page. Rather than restating a
+       colour on each of its two dozen children, the surface and text tokens are
+       re-pointed for this subtree and every existing rule follows. */
+    --surface-2: rgba(255, 255, 255, .07);
+    --surface-3: rgba(255, 255, 255, .13);
+    --surface-4: rgba(255, 255, 255, .17);
+    --line: rgba(255, 255, 255, .14);
+    --line-soft: rgba(255, 255, 255, .08);
+    --line-strong: rgba(255, 255, 255, .26);
+    --txt: var(--chrome-txt);
+    --txt-2: var(--chrome-txt-2);
+    --txt-3: #8d8375;
+    --txt-inv: #231f1c;
+    --kds-station-color: #c2b49c;
     /* Last-resort guard: an unusually long hotel or station name must never
        push a horizontal scrollbar onto the whole document. The width ladder
        below is what actually keeps the bar fitting. */
@@ -812,7 +858,7 @@ body.kds-sidebar-resizing .kds-sidebar-resize-handle::after {
     position: fixed;
     inset: 0;
     z-index: 57;
-    background: rgba(5, 8, 12, .65);
+    background: rgba(42, 39, 35, .42);
     backdrop-filter: blur(2px);
     opacity: 0;
     visibility: hidden;
@@ -928,26 +974,28 @@ body.kds-sidebar-resizing .kds-sidebar-resize-handle::after {
    what made the board look busy.
    ═══════════════════════════════════════════════════════════════════════════ */
 .ticket {
-    --tk-ink: #11161d;
-    --tk-ink-2: #6b7684;
-    --tk-ink-3: #98a2ae;
-    --tk-line: #e1e6ec;
-    --tk-cool: #2f9e5e;
-    --tk-hot: #d9463c;
+    --tk-ink: #2a2723;
+    --tk-ink-2: #5e554d;
+    --tk-ink-3: #857a6e;
+    --tk-line: #eae1d8;
+    --tk-cool: #3f8f5a;
+    --tk-hot: #956a5b;
 
     display: flex;
     flex-direction: column;
-    background: #f5f7f9;
+    background: var(--surface);
     color: var(--tk-ink);
-    border-radius: 10px;
+    border: 1px solid var(--line);
+    border-radius: var(--admin-radius, 10px);
     overflow: hidden;
-    box-shadow: 0 1px 3px rgba(0, 0, 0, .45);
+    box-shadow: var(--shadow-1);
 }
 
 /* Rush and age escalate the whole card's outline, not its fill. */
 .ticket.is-rush,
 .ticket.urgent {
-    box-shadow: 0 0 0 2px var(--tk-hot), 0 1px 3px rgba(0, 0, 0, .45);
+    border-color: var(--tk-hot);
+    box-shadow: 0 0 0 1px var(--tk-hot), var(--shadow-1);
 }
 
 .ticket.has-foh-flash {
@@ -958,27 +1006,36 @@ body.kds-sidebar-resizing .kds-sidebar-resize-handle::after {
 
     0%,
     100% {
-        box-shadow: 0 0 0 0 rgba(129, 140, 248, .55), 0 1px 3px rgba(0, 0, 0, .45);
+        box-shadow: 0 0 0 0 rgba(149, 106, 91, .38), var(--shadow-1);
     }
 
     50% {
-        box-shadow: 0 0 0 4px rgba(129, 140, 248, .28), 0 1px 3px rgba(0, 0, 0, .45);
+        box-shadow: 0 0 0 4px rgba(149, 106, 91, .18), var(--shadow-1);
     }
 }
 
 /* ── Header strip ────────────────────────────────────────────────────────── */
+/* A calm ticket gets no colour at all — just warm stone under charcoal. Clay
+   is reserved for the ones that need a cook's attention now, which makes it
+   the only saturated thing anywhere on the board. */
 .t-head {
     padding: 7px 10px 8px;
-    color: #fff;
     flex: 0 0 auto;
 }
 
 .t-head.is-cool {
-    background: var(--tk-cool);
+    background: var(--surface-3);
+    color: var(--tk-ink);
+    border-bottom: 1px solid var(--line);
+}
+
+.t-head.is-cool .t-head-row--sub {
+    color: var(--tk-ink-2);
 }
 
 .t-head.is-hot {
     background: var(--tk-hot);
+    color: #fdfaf6;
 }
 
 .t-head-row {
@@ -1038,9 +1095,9 @@ body.kds-sidebar-resizing .kds-sidebar-resize-handle::after {
 /* ── Guest / kitchen note — the line most costly to miss ─────────────────── */
 .t-orderNote {
     padding: 6px 10px;
-    background: #fff4d6;
-    border-left: 3px solid #e0a800;
-    color: #7a5600;
+    background: #f3ede2;
+    border-left: 3px solid #9a7c53;
+    color: #4f3f2a;
     font-size: 12px;
     font-weight: 700;
     line-height: 1.35;
@@ -1050,7 +1107,7 @@ body.kds-sidebar-resizing .kds-sidebar-resize-handle::after {
 .t-other-pending {
     padding: 5px 10px;
     border-top: 1px solid var(--tk-line);
-    background: #eef1f5;
+    background: var(--bg-2);
     color: var(--tk-ink-2);
     font-size: 11px;
     font-weight: 600;
@@ -1081,11 +1138,11 @@ body.kds-sidebar-resizing .kds-sidebar-resize-handle::after {
 }
 
 .item.is-tappable:hover {
-    background: #e8edf3;
+    background: var(--surface-2);
 }
 
 .item.is-tappable:active {
-    background: #dde4ec;
+    background: var(--surface-3);
 }
 
 .qty {
@@ -1129,7 +1186,7 @@ body.kds-sidebar-resizing .kds-sidebar-resize-handle::after {
     font-weight: 700;
     letter-spacing: .03em;
     text-transform: uppercase;
-    color: #a8621b;
+    color: #8e6231;
     line-height: 1.3;
 }
 
@@ -1139,7 +1196,7 @@ body.kds-sidebar-resizing .kds-sidebar-resize-handle::after {
 
 /* Progress, encoded on the line itself. */
 .item.is-preparing {
-    box-shadow: inset 3px 0 0 #e0a800;
+    box-shadow: inset 3px 0 0 var(--new);
 }
 
 .item.is-ready {
@@ -1147,7 +1204,7 @@ body.kds-sidebar-resizing .kds-sidebar-resize-handle::after {
 }
 
 .item.is-collection {
-    box-shadow: inset 3px 0 0 #1f9c8f;
+    box-shadow: inset 3px 0 0 var(--collect);
 }
 
 .item.is-served .nm,
@@ -1163,7 +1220,7 @@ body.kds-sidebar-resizing .kds-sidebar-resize-handle::after {
 }
 
 .item--other-station {
-    background: #eef1f5;
+    background: var(--bg-2);
 }
 
 .item--other-station .nm {
@@ -1177,8 +1234,8 @@ body.kds-sidebar-resizing .kds-sidebar-resize-handle::after {
     height: 15px;
     padding: 0 5px;
     border-radius: 3px;
-    background: #d9e0e8;
-    color: #5b6674;
+    background: var(--surface-4);
+    color: var(--tk-ink-2);
     font-size: 9px;
     font-weight: 800;
     letter-spacing: .06em;
@@ -1191,11 +1248,11 @@ body.kds-sidebar-resizing .kds-sidebar-resize-handle::after {
 .item-state {
     flex: 0 0 auto;
     align-self: center;
-    font-size: 9.5px;
+    font-size: 10px;
     font-weight: 800;
-    letter-spacing: .08em;
+    letter-spacing: .07em;
     text-transform: uppercase;
-    color: #9aa4b1;
+    color: var(--tk-ink-3);
     white-space: nowrap;
 }
 
@@ -1207,7 +1264,7 @@ body.kds-sidebar-resizing .kds-sidebar-resize-handle::after {
 }
 
 .item.is-tappable:hover .item-state {
-    color: #5b6674;
+    color: var(--tk-ink-2);
 }
 
 .item-state.is-void {
@@ -1234,18 +1291,18 @@ body.kds-sidebar-resizing .kds-sidebar-resize-handle::after {
     border: 0;
     border-radius: 5px;
     background: transparent;
-    color: #b4bcc6;
+    color: #b6ada0;
     font-size: 11px;
     transition: background .12s var(--ease), color .12s var(--ease);
 }
 
 .item-tool:hover {
-    background: #dbe2ea;
-    color: #3a4450;
+    background: var(--surface-3);
+    color: var(--tk-ink);
 }
 
 .item-tool.is-danger:hover {
-    background: #fbe0de;
+    background: #f2e8e3;
     color: var(--tk-hot);
 }
 
@@ -1256,8 +1313,8 @@ body.kds-sidebar-resizing .kds-sidebar-resize-handle::after {
 .t-foot {
     display: flex;
     flex: 0 0 auto;
-    border-top: 1px solid #d8dee6;
-    background: #e9edf2;
+    border-top: 1px solid var(--line);
+    background: var(--bg-2);
 }
 
 .t-act {
@@ -1267,7 +1324,7 @@ body.kds-sidebar-resizing .kds-sidebar-resize-handle::after {
     padding: 0 6px;
     border: 0;
     background: transparent;
-    color: #4a5666;
+    color: var(--tk-ink-2);
     font-size: 10.5px;
     font-weight: 800;
     letter-spacing: .07em;
@@ -1281,41 +1338,41 @@ body.kds-sidebar-resizing .kds-sidebar-resize-handle::after {
 }
 
 .t-act+.t-act {
-    border-left: 1px solid #d8dee6;
+    border-left: 1px solid var(--line);
 }
 
 .t-act:hover {
-    background: #dae1e9;
+    background: var(--surface-3);
     color: var(--tk-ink);
 }
 
 .t-act.is-primary {
-    background: var(--tk-cool);
-    color: #fff;
+    background: #35794c;
+    color: #fdfaf6;
 }
 
 .t-act.is-primary:hover {
-    background: #27884f;
+    background: #2c6640;
 }
 
 .t-act.is-rush {
     background: var(--tk-hot);
-    color: #fff;
+    color: #fdfaf6;
 }
 
 .t-act.is-rush:hover {
-    background: #c23a31;
+    background: #7f5a4c;
 }
 
 .t-act.is-danger:hover {
-    background: #fbe0de;
+    background: #f2e8e3;
     color: var(--tk-hot);
 }
 
 .t-act:disabled {
     opacity: .35;
     background: transparent;
-    color: #9aa4b1;
+    color: var(--tk-ink-3);
     cursor: not-allowed;
 }
 
@@ -1332,12 +1389,12 @@ body.kds-sidebar-resizing .kds-sidebar-resize-handle::after {
 }
 
 .t-act--note.has-notes {
-    color: #3f6ad8;
+    color: var(--info);
 }
 
 .t-act--note.has-unread {
     background: var(--tk-hot);
-    color: #fff;
+    color: #fdfaf6;
     animation: note-pulse 1.8s var(--ease) infinite;
 }
 
@@ -1685,7 +1742,7 @@ body.kds-sidebar-resizing .station-bottom {
     margin-right: 6px;
     border-radius: var(--r-pill);
     background: var(--late);
-    color: #fff;
+    color: #fdfaf6;
     font-size: 9px;
     font-weight: 800;
     letter-spacing: .07em;
@@ -1943,7 +2000,7 @@ body.kds-sidebar-resizing .station-bottom {
 .rh-modal-bg {
     position: absolute;
     inset: 0;
-    background: rgba(4, 7, 11, .78);
+    background: rgba(42, 39, 35, .52);
     backdrop-filter: blur(4px);
     -webkit-backdrop-filter: blur(4px);
 }
@@ -2054,7 +2111,7 @@ body.kds-sidebar-resizing .station-bottom {
     border: 0;
     border-radius: var(--r-sm);
     background: var(--late);
-    color: #fff;
+    color: #fdfaf6;
     font-weight: 750;
 }
 
@@ -2650,7 +2707,7 @@ body.kds-sidebar-resizing .station-bottom {
     display: none;
     align-items: center;
     justify-content: center;
-    background: rgba(6, 9, 14, .84);
+    background: rgba(244, 242, 239, .86);
     backdrop-filter: blur(6px);
     -webkit-backdrop-filter: blur(6px);
 }
@@ -2751,7 +2808,7 @@ body.kds-sidebar-resizing .station-bottom {
     margin: -8px 0 0 -8px;
     border-radius: 50%;
     border: 2px solid rgba(255, 255, 255, .28);
-    border-top-color: #fff;
+    border-top-color: #fdfaf6;
     animation: spin .7s linear infinite;
 }
 
@@ -3045,7 +3102,7 @@ body.kds-sidebar-resizing .station-bottom {
 
     .t-act:hover {
         background: transparent;
-        color: #4a5666;
+        color: var(--tk-ink-2);
     }
 }
 
