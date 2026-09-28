@@ -914,79 +914,43 @@ body.kds-sidebar-resizing .kds-sidebar-resize-handle::after {
 /* ═══════════════════════════════════════════════════════════════════════════
    TICKET CARD
 
-   Anatomy, top to bottom:
-     status rail (4px, left edge)  — colour = kitchen status, red = late/rush
-     header      — table number + timer, the two things read from across a room
-     timer note  — silent when on time, loud when not
-     meta line   — FOH / guest / line count, one muted row
-     alerts      — order note, other-station wait
-     notes       — folded FOH thread
-     hint        — next step, one slim line
-     items       — the actual work
-     footer      — one verb + quiet icons
+   Modelled on a production kitchen rail rather than an app card. The board
+   chrome stays dark; the tickets themselves are light, because printed-docket
+   contrast is what a cook reads across a pass.
+
+   Colour is confined to one place — the header strip — and carries exactly one
+   meaning: green is fine, red needs attention now (late, or flagged rush).
+   Per-line progress is read from the line itself (struck through = done), so
+   the card never runs two colour languages at once.
+
+   The line IS the control: tapping it advances one step. That removes the
+   three-to-four buttons per line the previous pass carried, which is most of
+   what made the board look busy.
    ═══════════════════════════════════════════════════════════════════════════ */
 .ticket {
-    position: relative;
+    --tk-ink: #11161d;
+    --tk-ink-2: #6b7684;
+    --tk-ink-3: #98a2ae;
+    --tk-line: #e1e6ec;
+    --tk-cool: #2f9e5e;
+    --tk-hot: #d9463c;
+
     display: flex;
     flex-direction: column;
-    background: var(--surface);
-    border: 1px solid var(--line);
-    border-radius: var(--r-lg);
-    box-shadow: var(--shadow-1);
+    background: #f5f7f9;
+    color: var(--tk-ink);
+    border-radius: 10px;
     overflow: hidden;
-    transition: border-color .18s var(--ease), box-shadow .18s var(--ease);
+    box-shadow: 0 1px 3px rgba(0, 0, 0, .45);
 }
 
-/* Status rail. Default is the "new" amber; each status overrides the hue. */
-.ticket::before {
-    content: "";
-    position: absolute;
-    inset: 0 auto 0 0;
-    width: 4px;
-    background: var(--t-accent, var(--new));
-    z-index: 1;
-}
-
-.ticket {
-    --t-accent: var(--new);
-}
-
-.ticket.t-new {
-    --t-accent: var(--new);
-}
-
-.ticket.t-in_progress {
-    --t-accent: var(--cook);
-}
-
-.ticket.t-ready {
-    --t-accent: var(--ready);
-}
-
-.ticket.t-recalled {
-    --t-accent: var(--info);
-}
-
-.ticket.t-served {
-    --t-accent: var(--served);
-}
-
-/* Age escalation — the card border warms, it does not repaint the card. */
+/* Rush and age escalate the whole card's outline, not its fill. */
+.ticket.is-rush,
 .ticket.urgent {
-    --t-accent: var(--late);
-    border-color: color-mix(in srgb, var(--late) 45%, var(--line));
+    box-shadow: 0 0 0 2px var(--tk-hot), 0 1px 3px rgba(0, 0, 0, .45);
 }
 
-/* Rush is the loudest state on the board and the only one that glows. */
-.ticket.is-rush {
-    --t-accent: var(--rush);
-    border-color: color-mix(in srgb, var(--rush) 55%, var(--line));
-    box-shadow: 0 0 0 1px color-mix(in srgb, var(--rush) 30%, transparent), var(--shadow-2);
-}
-
-/* Unread FOH note — a soft breathing edge, not a strobe. */
 .ticket.has-foh-flash {
-    border-color: color-mix(in srgb, var(--info) 50%, var(--line));
     animation: foh-breathe 2.4s var(--ease) infinite;
 }
 
@@ -994,380 +958,151 @@ body.kds-sidebar-resizing .kds-sidebar-resize-handle::after {
 
     0%,
     100% {
-        box-shadow: 0 0 0 0 color-mix(in srgb, var(--info) 28%, transparent), var(--shadow-1);
+        box-shadow: 0 0 0 0 rgba(129, 140, 248, .55), 0 1px 3px rgba(0, 0, 0, .45);
     }
 
     50% {
-        box-shadow: 0 0 0 4px color-mix(in srgb, var(--info) 14%, transparent), var(--shadow-1);
+        box-shadow: 0 0 0 4px rgba(129, 140, 248, .28), 0 1px 3px rgba(0, 0, 0, .45);
     }
 }
 
-/* ── Header ──────────────────────────────────────────────────────────────── */
+/* ── Header strip ────────────────────────────────────────────────────────── */
 .t-head {
-    display: flex;
-    align-items: flex-start;
-    justify-content: space-between;
-    gap: 12px;
-    padding: 13px 14px 10px 17px;
+    padding: 7px 10px 8px;
+    color: #fff;
+    flex: 0 0 auto;
 }
 
-.t-head-main {
+.t-head.is-cool {
+    background: var(--tk-cool);
+}
+
+.t-head.is-hot {
+    background: var(--tk-hot);
+}
+
+.t-head-row {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 10px;
     min-width: 0;
-    flex: 1;
 }
 
 .t-table {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    font-size: 23px;
+    font-size: 15.5px;
     font-weight: 800;
-    letter-spacing: -.02em;
-    line-height: 1.15;
-    color: var(--txt);
-    overflow-wrap: anywhere;
-}
-
-.t-rush-badge {
-    display: inline-flex;
-    align-items: center;
-    gap: 4px;
-    height: 20px;
-    padding: 0 8px;
-    border-radius: var(--r-pill);
-    background: var(--rush);
-    color: #fff;
-    font-size: 10px;
-    font-weight: 800;
-    letter-spacing: .08em;
-    flex: 0 0 auto;
-}
-
-.t-ref {
-    display: flex;
-    align-items: center;
-    flex-wrap: wrap;
-    gap: 6px;
-    margin-top: 5px;
-}
-
-.t-ref__code {
-    font-family: ui-monospace, "SF Mono", "Cascadia Mono", Menlo, Consolas, monospace;
-    font-size: 11.5px;
-    font-weight: 600;
-    letter-spacing: .01em;
-    color: var(--txt-3);
-}
-
-.t-service-pill {
-    display: inline-flex;
-    align-items: center;
-    gap: 5px;
-    height: 20px;
-    padding: 0 8px;
-    border-radius: var(--r-pill);
-    background: var(--surface-3);
-    color: var(--txt-2);
-    font-size: 10.5px;
-    font-weight: 650;
-    letter-spacing: .02em;
-    white-space: nowrap;
-}
-
-.t-service-pill i {
-    font-size: 9.5px;
-    opacity: .8;
-}
-
-.t-service-pill--room_service {
-    background: color-mix(in srgb, var(--info) 16%, transparent);
-    color: color-mix(in srgb, var(--info) 80%, var(--txt));
-}
-
-.t-placed {
-    display: inline-flex;
-    align-items: center;
-    gap: 4px;
-    font-size: 11px;
-    color: var(--txt-3);
-    white-space: nowrap;
-}
-
-.t-placed i {
-    font-size: 9.5px;
-}
-
-/* Timer block — right-aligned, tabular, the second-biggest thing on the card. */
-.t-timer-wrap {
-    display: flex;
-    flex-direction: column;
-    align-items: flex-end;
-    gap: 5px;
-    flex: 0 0 auto;
-}
-
-.t-timer {
-    font-size: 25px;
-    font-weight: 750;
-    font-variant-numeric: tabular-nums;
-    letter-spacing: -.03em;
-    line-height: 1;
-    color: var(--txt);
-}
-
-/* fmtElapsed wraps its units in <span class="u"> — "12 <u>min</u>", "1<u>h</u> 04<u>m</u>",
-   and whole-phrase states like "just fired" / "check FOH". The number is what carries at
-   distance, so the unit sits back at a smaller size and lower weight; a phrase-only state
-   still reads clearly because it keeps the timer's colour. */
-.t-timer .u {
-    font-size: .62em;
-    font-weight: 600;
-    letter-spacing: 0;
-    opacity: .72;
-    margin-left: 1px;
-}
-
-.t-timer.warn {
-    color: var(--new);
-}
-
-.t-timer.late {
-    color: var(--late);
-}
-
-/* Ready but uncollected — the runner, not the cook, is the bottleneck. */
-.t-timer.stale-ready {
-    color: var(--ready);
-}
-
-.t-timer.stale-ready.warn {
-    color: var(--new);
-}
-
-.t-timer.stale-ready.late {
-    color: var(--late);
-    animation: pulse-soft 1.6s var(--ease) infinite;
-}
-
-.t-status-pill {
-    display: inline-flex;
-    align-items: center;
-    height: 21px;
-    padding: 0 9px;
-    border-radius: var(--r-pill);
-    font-size: 10px;
-    font-weight: 800;
-    letter-spacing: .09em;
-    text-transform: uppercase;
-    white-space: nowrap;
-    background: color-mix(in srgb, var(--t-accent) 16%, transparent);
-    color: color-mix(in srgb, var(--t-accent) 85%, var(--txt));
-    border: 1px solid color-mix(in srgb, var(--t-accent) 34%, transparent);
-}
-
-/* ── Timer note ──────────────────────────────────────────────────────────── */
-.t-timer-note {
-    padding: 0 14px 9px 17px;
-    font-size: 11.5px;
-    font-weight: 600;
-    letter-spacing: .01em;
-    color: var(--txt-3);
-}
-
-.t-timer-note.warn {
-    color: var(--new);
-}
-
-.t-timer-note.late {
-    color: var(--late);
-}
-
-.t-timer-note.stale-ready {
-    color: var(--ready);
-}
-
-.t-timer-note.stale-ready.warn {
-    color: var(--new);
-}
-
-.t-timer-note.stale-ready.late {
-    color: var(--late);
-}
-
-/* ── Meta line ───────────────────────────────────────────────────────────── */
-.t-detail-strip {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: center;
-    gap: 4px 14px;
-    padding: 0 14px 11px 17px;
-    border-bottom: 1px solid var(--line-soft);
-}
-
-.t-detail-chip {
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    min-width: 0;
-    font-size: 11.5px;
-    color: var(--txt-3);
+    letter-spacing: -.01em;
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
 }
 
-.t-detail-chip i {
-    font-size: 10px;
-    opacity: .7;
+.t-timer {
+    font-size: 15px;
+    font-weight: 750;
+    font-variant-numeric: tabular-nums;
+    letter-spacing: -.01em;
+    white-space: nowrap;
     flex: 0 0 auto;
 }
 
-/* ── Alerts ──────────────────────────────────────────────────────────────── */
-.t-orderNote,
-.t-other-pending {
-    display: flex;
-    align-items: flex-start;
-    gap: 8px;
-    margin: 10px 14px 0 17px;
-    padding: 9px 11px;
-    border-radius: var(--r-sm);
-    font-size: 12.5px;
-    font-weight: 600;
-    line-height: 1.4;
+/* fmtElapsed wraps units in <span class="u"> — the number carries, the unit sits back. */
+.t-timer .u {
+    font-size: .68em;
+    font-weight: 650;
+    opacity: .82;
+    margin-left: 1px;
 }
 
-.t-orderNote {
-    background: color-mix(in srgb, var(--new) 13%, transparent);
-    border-left: 3px solid var(--new);
-    color: color-mix(in srgb, var(--new) 55%, var(--txt));
-}
-
-.t-other-pending {
-    background: var(--surface-2);
-    border-left: 3px solid var(--served);
-    color: var(--txt-2);
-    font-weight: 550;
-}
-
-.t-orderNote i,
-.t-other-pending i {
+.t-head-row--sub {
     margin-top: 2px;
-    font-size: 11px;
-    flex: 0 0 auto;
-}
-
-/* ── Next-step hint ──────────────────────────────────────────────────────── */
-.t-next {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    margin: 10px 14px 0 17px;
-    font-size: 11.5px;
-    color: var(--txt-3);
-}
-
-.t-next__label {
-    font-size: 9.5px;
-    font-weight: 800;
-    letter-spacing: .1em;
-    text-transform: uppercase;
-    color: var(--txt-3);
-    opacity: .75;
-    flex: 0 0 auto;
-}
-
-.t-next__value {
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    font-weight: 600;
-    min-width: 0;
-}
-
-.t-next__value i {
     font-size: 10.5px;
+    font-weight: 600;
+    letter-spacing: .02em;
+    opacity: .82;
 }
 
-.t-next--start .t-next__value {
-    color: color-mix(in srgb, var(--new) 62%, var(--txt));
+.t-ref,
+.t-who {
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
 }
 
-.t-next--ready .t-next__value {
-    color: color-mix(in srgb, var(--cook) 62%, var(--txt));
+.t-who {
+    flex: 0 0 auto;
+    max-width: 45%;
 }
 
-.t-next--bump .t-next__value {
-    color: color-mix(in srgb, var(--ready) 62%, var(--txt));
+/* ── Guest / kitchen note — the line most costly to miss ─────────────────── */
+.t-orderNote {
+    padding: 6px 10px;
+    background: #fff4d6;
+    border-left: 3px solid #e0a800;
+    color: #7a5600;
+    font-size: 12px;
+    font-weight: 700;
+    line-height: 1.35;
 }
 
-.t-next--wait .t-next__value,
-.t-next--review .t-next__value {
-    color: var(--txt-2);
+/* ── Other stations still working ────────────────────────────────────────── */
+.t-other-pending {
+    padding: 5px 10px;
+    border-top: 1px solid var(--tk-line);
+    background: #eef1f5;
+    color: var(--tk-ink-2);
+    font-size: 11px;
+    font-weight: 600;
 }
 
 /* ═══════════════════════════════════════════════════════════════════════════
    ITEM LINES
-   Two rows: the food, then its one contextual action plus quiet icons.
    ═══════════════════════════════════════════════════════════════════════════ */
 .t-items {
-    display: flex;
-    flex-direction: column;
-    gap: 8px;
-    padding: 12px 14px 12px 17px;
+    flex: 1;
+    padding: 2px 0;
 }
 
 .item {
-    border-radius: var(--r);
-    background: var(--surface-2);
-    border: 1px solid var(--line-soft);
-    padding: 10px 11px;
-    transition: opacity .18s var(--ease);
-}
-
-.item.is-served {
-    opacity: .5;
-}
-
-.item.is-void {
-    opacity: .4;
-    text-decoration: line-through;
-}
-
-.item--other-station {
-    background: transparent;
-    border-style: dashed;
-    opacity: .62;
-}
-
-.item__line {
     display: flex;
     align-items: flex-start;
-    gap: 10px;
+    gap: 8px;
+    padding: 7px 8px 7px 10px;
+    transition: background .12s var(--ease);
+}
+
+.item+.item {
+    border-top: 1px solid var(--tk-line);
+}
+
+.item.is-tappable {
+    cursor: pointer;
+}
+
+.item.is-tappable:hover {
+    background: #e8edf3;
+}
+
+.item.is-tappable:active {
+    background: #dde4ec;
 }
 
 .qty {
-    display: inline-flex;
-    align-items: baseline;
-    justify-content: center;
-    min-width: 36px;
-    height: 34px;
-    padding: 7px 7px 0;
-    border-radius: var(--r-sm);
-    background: var(--surface-4);
-    color: var(--txt);
-    font-size: 16px;
-    font-weight: 750;
+    min-width: 24px;
+    font-size: 13.5px;
+    font-weight: 800;
     font-variant-numeric: tabular-nums;
-    line-height: 1;
+    color: var(--tk-ink);
     flex: 0 0 auto;
+    padding-top: 1px;
 }
 
 .qty i {
     font-style: normal;
-    font-size: 11px;
-    font-weight: 600;
-    opacity: .55;
-    margin-left: 1px;
+    font-size: .82em;
+    font-weight: 650;
+    opacity: .5;
 }
 
 .info {
@@ -1379,386 +1114,274 @@ body.kds-sidebar-resizing .kds-sidebar-resize-handle::after {
     display: flex;
     align-items: center;
     flex-wrap: wrap;
-    gap: 6px;
-    font-size: 15.5px;
+    gap: 5px;
+    font-size: 13.5px;
     font-weight: 650;
     line-height: 1.3;
-    color: var(--txt);
     overflow-wrap: anywhere;
 }
 
-/* Guest modification — the line most often missed, so it gets the accent. */
+/* Modifier — the reference's grey sub-line. Loud enough to catch, quiet
+   enough not to compete with the dish name. */
 .nt {
-    display: flex;
-    align-items: flex-start;
-    gap: 6px;
-    margin-top: 5px;
-    padding: 5px 8px;
-    border-radius: 6px;
-    background: color-mix(in srgb, var(--new) 12%, transparent);
-    color: color-mix(in srgb, var(--new) 58%, var(--txt));
-    font-size: 12.5px;
-    font-weight: 600;
-    line-height: 1.35;
+    margin-top: 1px;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: .03em;
+    text-transform: uppercase;
+    color: #a8621b;
+    line-height: 1.3;
 }
 
 .nt i {
-    margin-top: 2px;
-    font-size: 10px;
-    flex: 0 0 auto;
+    display: none;
+}
+
+/* Progress, encoded on the line itself. */
+.item.is-preparing {
+    box-shadow: inset 3px 0 0 #e0a800;
+}
+
+.item.is-ready {
+    box-shadow: inset 3px 0 0 var(--tk-cool);
+}
+
+.item.is-collection {
+    box-shadow: inset 3px 0 0 #1f9c8f;
+}
+
+.item.is-served .nm,
+.item.is-served .nt {
+    text-decoration: line-through;
+    color: var(--tk-ink-3);
+}
+
+.item.is-void .nm,
+.item.is-void .nt {
+    text-decoration: line-through;
+    color: var(--tk-hot);
+}
+
+.item--other-station {
+    background: #eef1f5;
+}
+
+.item--other-station .nm {
+    color: var(--tk-ink-2);
+    font-weight: 600;
 }
 
 .item-station-badge {
     display: inline-flex;
     align-items: center;
-    height: 18px;
-    padding: 0 7px;
-    border-radius: var(--r-pill);
-    background: var(--surface-4);
-    color: var(--txt-3);
-    font-size: 9.5px;
-    font-weight: 750;
+    height: 15px;
+    padding: 0 5px;
+    border-radius: 3px;
+    background: #d9e0e8;
+    color: #5b6674;
+    font-size: 9px;
+    font-weight: 800;
     letter-spacing: .06em;
     text-transform: uppercase;
 }
 
-.item-station-badge.stn-bar {
-    color: color-mix(in srgb, var(--info) 78%, var(--txt));
-    background: color-mix(in srgb, var(--info) 15%, transparent);
-}
-
-.item-station-badge.stn-coffee_bar {
-    color: color-mix(in srgb, var(--new) 75%, var(--txt));
-    background: color-mix(in srgb, var(--new) 14%, transparent);
-}
-
-/* Per-line status — the small, non-shouting readout. */
-.badge {
-    display: inline-flex;
-    align-items: center;
-    height: 20px;
-    padding: 0 8px;
-    border-radius: var(--r-pill);
+/* What a tap will do, in the quietest type on the card. The leading chevron is
+   what stops it being misread as the line's current status — "SERVE" with an
+   arrow is an instruction, "SERVED" on its own looks like a state. */
+.item-state {
+    flex: 0 0 auto;
+    align-self: center;
     font-size: 9.5px;
     font-weight: 800;
     letter-spacing: .08em;
     text-transform: uppercase;
+    color: #9aa4b1;
     white-space: nowrap;
-    flex: 0 0 auto;
-    background: var(--surface-4);
-    color: var(--txt-3);
 }
 
-.badge.b-pending {
-    background: color-mix(in srgb, var(--new) 15%, transparent);
-    color: color-mix(in srgb, var(--new) 82%, var(--txt));
+.item-state::before {
+    content: "\203A";
+    margin-right: 3px;
+    font-size: 1.15em;
+    opacity: .75;
 }
 
-.badge.b-preparing,
-.badge.b-in_progress {
-    background: color-mix(in srgb, var(--cook) 16%, transparent);
-    color: color-mix(in srgb, var(--cook) 82%, var(--txt));
+.item.is-tappable:hover .item-state {
+    color: #5b6674;
 }
 
-.badge.b-ready {
-    background: color-mix(in srgb, var(--ready) 16%, transparent);
-    color: color-mix(in srgb, var(--ready) 82%, var(--txt));
+.item-state.is-void {
+    color: var(--tk-hot);
 }
 
-.badge.b-collection {
-    background: color-mix(in srgb, var(--collect) 16%, transparent);
-    color: color-mix(in srgb, var(--collect) 82%, var(--txt));
+.item-state.is-void::before {
+    content: none;
 }
 
-.badge.b-served {
-    background: color-mix(in srgb, var(--served) 20%, transparent);
-    color: var(--txt-3);
-}
-
-.badge.b-void {
-    background: color-mix(in srgb, var(--late) 15%, transparent);
-    color: color-mix(in srgb, var(--late) 80%, var(--txt));
-}
-
-/* ── Line actions ────────────────────────────────────────────────────────── */
-.item-actions {
+/* ── Per-line tools ──────────────────────────────────────────────────────── */
+.item-tools {
     display: flex;
-    align-items: stretch;
-    gap: 6px;
-    margin-top: 9px;
-}
-
-.item-act {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    gap: 8px;
-    height: 44px;
-    border-radius: var(--r-sm);
-    border: 1px solid transparent;
-    font-size: 13.5px;
-    font-weight: 700;
-    letter-spacing: .01em;
-    transition: filter .14s var(--ease), background .14s var(--ease), color .14s var(--ease), border-color .14s var(--ease);
-}
-
-.item-act i {
-    font-size: 13px;
-}
-
-/* The one button the cook is meant to hit. Solid, dark ink, full remaining width. */
-.item-act--primary {
-    flex: 1;
-    min-width: 0;
-    color: var(--txt-inv);
-}
-
-.item-act--primary.tone-start {
-    background: var(--new);
-}
-
-.item-act--primary.tone-ready {
-    background: var(--cook);
-    color: #fff;
-}
-
-.item-act--primary.tone-collect {
-    background: var(--collect);
-}
-
-.item-act--primary.tone-serve {
-    background: var(--ready);
-}
-
-.item-act--primary:hover {
-    filter: brightness(1.1);
-}
-
-.item-act--primary:active {
-    filter: brightness(.94);
-}
-
-/* Terminal state — a readout, not a control. */
-.item-act--done {
-    flex: 1;
-    background: var(--surface-3);
-    color: var(--txt-3);
-    font-weight: 650;
-    cursor: default;
-}
-
-.item-act--ghost {
-    width: 44px;
+    gap: 1px;
     flex: 0 0 auto;
+    align-self: center;
+}
+
+.item-tool {
+    display: grid;
+    place-items: center;
+    width: 27px;
+    height: 27px;
+    border: 0;
+    border-radius: 5px;
     background: transparent;
-    border-color: var(--line);
-    color: var(--txt-3);
-}
-
-.item-act--ghost:hover {
-    background: var(--surface-3);
-    border-color: var(--line-strong);
-    color: var(--txt);
-}
-
-.item-act--ghost.is-danger:hover {
-    background: color-mix(in srgb, var(--late) 14%, transparent);
-    border-color: color-mix(in srgb, var(--late) 45%, transparent);
-    color: var(--late);
-}
-
-.item-act:disabled {
-    opacity: .38;
-    filter: none;
-}
-
-.item-actions--other {
-    margin-top: 7px;
-}
-
-.item-other-station-note {
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
+    color: #b4bcc6;
     font-size: 11px;
-    font-weight: 600;
-    letter-spacing: .04em;
-    text-transform: uppercase;
-    color: var(--txt-3);
+    transition: background .12s var(--ease), color .12s var(--ease);
+}
+
+.item-tool:hover {
+    background: #dbe2ea;
+    color: #3a4450;
+}
+
+.item-tool.is-danger:hover {
+    background: #fbe0de;
+    color: var(--tk-hot);
 }
 
 /* ═══════════════════════════════════════════════════════════════════════════
    TICKET FOOTER
+   One flat segmented bar. No fills except the single action that matters.
    ═══════════════════════════════════════════════════════════════════════════ */
 .t-foot {
     display: flex;
-    align-items: stretch;
-    gap: 7px;
-    padding: 11px 14px 13px 17px;
-    border-top: 1px solid var(--line-soft);
-    background: var(--bg-2);
+    flex: 0 0 auto;
+    border-top: 1px solid #d8dee6;
+    background: #e9edf2;
 }
 
 .t-act {
+    flex: 1;
+    min-width: 0;
+    min-height: 38px;
+    padding: 0 6px;
+    border: 0;
+    background: transparent;
+    color: #4a5666;
+    font-size: 10.5px;
+    font-weight: 800;
+    letter-spacing: .07em;
+    text-transform: uppercase;
+    white-space: nowrap;
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    gap: 9px;
-    height: 48px;
-    border-radius: var(--r-sm);
-    border: 1px solid transparent;
-    font-size: 14.5px;
-    font-weight: 750;
-    letter-spacing: .01em;
-    transition: filter .14s var(--ease), background .14s var(--ease), color .14s var(--ease), border-color .14s var(--ease);
+    gap: 5px;
+    transition: background .12s var(--ease), color .12s var(--ease);
 }
 
-.t-act i {
-    font-size: 14px;
+.t-act+.t-act {
+    border-left: 1px solid #d8dee6;
 }
 
-.t-act--primary {
-    flex: 1;
-    min-width: 0;
-    color: var(--txt-inv);
+.t-act:hover {
+    background: #dae1e9;
+    color: var(--tk-ink);
 }
 
-.t-act--primary.tone-start {
-    background: var(--new);
+.t-act.is-primary {
+    background: var(--tk-cool);
+    color: #fff;
 }
 
-.t-act--primary.tone-bump {
-    background: var(--ready);
+.t-act.is-primary:hover {
+    background: #27884f;
 }
 
-.t-act--primary:hover {
-    filter: brightness(1.1);
+.t-act.is-rush {
+    background: var(--tk-hot);
+    color: #fff;
 }
 
-.t-act--primary:active {
-    filter: brightness(.94);
+.t-act.is-rush:hover {
+    background: #c23a31;
 }
 
-.t-act--ghost {
-    width: 48px;
-    flex: 0 0 auto;
-    background: var(--surface-2);
-    border-color: var(--line);
-    color: var(--txt-3);
-}
-
-.t-act--ghost:hover {
-    background: var(--surface-3);
-    border-color: var(--line-strong);
-    color: var(--txt);
-}
-
-.t-act--ghost.is-rush {
-    background: color-mix(in srgb, var(--rush) 16%, transparent);
-    border-color: color-mix(in srgb, var(--rush) 45%, transparent);
-    color: var(--rush);
-}
-
-.t-act--ghost.is-danger:hover {
-    background: color-mix(in srgb, var(--late) 14%, transparent);
-    border-color: color-mix(in srgb, var(--late) 45%, transparent);
-    color: var(--late);
+.t-act.is-danger:hover {
+    background: #fbe0de;
+    color: var(--tk-hot);
 }
 
 .t-act:disabled {
-    opacity: .38;
-    filter: none;
+    opacity: .35;
+    background: transparent;
+    color: #9aa4b1;
+    cursor: not-allowed;
+}
+
+.t-act--icon {
+    flex: 0 0 38px;
+    padding: 0;
+    font-size: 12px;
+}
+
+.t-act--note {
+    flex: 0 0 44px;
+    padding: 0;
+    font-size: 12px;
+}
+
+.t-act--note.has-notes {
+    color: #3f6ad8;
+}
+
+.t-act--note.has-unread {
+    background: var(--tk-hot);
+    color: #fff;
+    animation: note-pulse 1.8s var(--ease) infinite;
+}
+
+@keyframes note-pulse {
+
+    0%,
+    100% {
+        opacity: 1;
+    }
+
+    50% {
+        opacity: .62;
+    }
+}
+
+.t-act--note span {
+    font-size: 10px;
+    font-weight: 800;
 }
 
 /* ═══════════════════════════════════════════════════════════════════════════
    FOH NOTE THREAD (inside a ticket)
    Folded by default — a quiet ticket should be food, not chat.
    ═══════════════════════════════════════════════════════════════════════════ */
+/* A drawer under the footer, opened by the footer's note button. It stays on
+   the dark surface deliberately: chat is a different kind of content from the
+   docket above it, and the existing message styling is built for dark. */
 .t-foh-notes {
-    margin: 10px 14px 0 17px;
-    border: 1px solid var(--line);
-    border-radius: var(--r);
-    background: var(--surface-2);
-    overflow: hidden;
+    display: none;
+    background: var(--bg-2);
+    border-top: 1px solid var(--line);
 }
 
-.t-foh-notes__head {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    width: 100%;
-    min-height: 44px;
-    padding: 0 11px;
-    border: 0;
-    background: transparent;
-    color: var(--txt-2);
-    font-size: 12px;
-    font-weight: 650;
-    text-align: left;
-}
-
-.t-foh-notes__head:hover {
-    background: var(--surface-3);
-}
-
-.t-foh-notes__head>i:first-child {
-    font-size: 12px;
-    color: var(--txt-3);
-}
-
-.t-foh-notes__label {
-    flex: 1;
-    min-width: 0;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-}
-
-.t-foh-notes__count {
-    display: inline-grid;
-    place-items: center;
-    min-width: 19px;
-    height: 19px;
-    padding: 0 6px;
-    border-radius: var(--r-pill);
-    background: var(--surface-4);
-    color: var(--txt-2);
-    font-size: 10.5px;
-    font-weight: 750;
-}
-
-.t-foh-notes__new {
-    display: inline-flex;
-    align-items: center;
-    height: 18px;
-    padding: 0 7px;
-    border-radius: var(--r-pill);
-    background: var(--info);
-    color: #fff;
-    font-size: 9px;
-    font-weight: 800;
-    letter-spacing: .08em;
-}
-
-.t-foh-notes__chev {
-    font-size: 12px;
-    color: var(--txt-3);
-    transition: transform .18s var(--ease);
-}
-
-.t-foh-notes.is-open .t-foh-notes__chev {
-    transform: rotate(-90deg);
+.t-foh-notes.is-open {
+    display: block;
 }
 
 .t-foh-notes__body {
-    display: none;
+    display: flex;
     flex-direction: column;
     gap: 8px;
-    padding: 2px 9px 9px;
-}
-
-.t-foh-notes.is-open .t-foh-notes__body {
-    display: flex;
+    padding: 9px;
+    max-height: 320px;
+    overflow-y: auto;
 }
 
 /* ── Message bubbles ─────────────────────────────────────────────────────── */
@@ -3344,38 +2967,18 @@ body.kds-sidebar-resizing .station-bottom {
         font-size: 22px;
     }
 
-    .t-items,
-    .t-foot {
-        padding-left: 15px;
-        padding-right: 12px;
-    }
-
-    .t-timer-note,
-    .t-detail-strip {
-        padding-left: 15px;
-        padding-right: 12px;
-    }
-
-    .t-orderNote,
-    .t-other-pending,
-    .t-next,
-    .t-foh-notes {
-        margin-left: 15px;
-        margin-right: 12px;
-    }
-
     .nm {
         font-size: 14.5px;
     }
 
-    /* Wrap the icon row under the primary action rather than squeezing it. */
-    .item-actions {
-        flex-wrap: wrap;
+    /* The footer's labelled actions keep their words; the icon-only ones shrink. */
+    .t-act {
+        font-size: 10px;
+        letter-spacing: .05em;
     }
 
-    .item-act--primary,
-    .item-act--done {
-        flex: 1 0 100%;
+    .t-act--icon {
+        flex: 0 0 34px;
     }
 
     .station-bottom {
@@ -3398,10 +3001,27 @@ body.kds-sidebar-resizing .station-bottom {
     .right .logout-link,
     .kds-drawer__collapse,
     .station-panel__sound-test,
-    .t-foh-notes__head,
     .rh-period-tabs button,
-    .kds-quick-reply-chip {
+    .kds-quick-reply-chip,
+    .t-act {
         min-height: 44px;
+    }
+
+    /* The whole line is the tap target, so it gets the height rather than a button. */
+    .item {
+        padding-top: 10px;
+        padding-bottom: 10px;
+    }
+
+    .item-tool {
+        width: 38px;
+        height: 38px;
+        font-size: 13px;
+    }
+
+    .t-act--icon,
+    .t-act--note {
+        flex: 0 0 44px;
     }
 
     .filter {
@@ -3419,11 +3039,13 @@ body.kds-sidebar-resizing .station-bottom {
     }
 
     /* Hover styling is noise on a touchscreen — only the active state reads. */
-    .t-act--ghost:hover,
-    .item-act--ghost:hover {
-        background: var(--surface-2);
-        border-color: var(--line);
-        color: var(--txt-3);
+    .item.is-tappable:hover {
+        background: transparent;
+    }
+
+    .t-act:hover {
+        background: transparent;
+        color: #4a5666;
     }
 }
 
