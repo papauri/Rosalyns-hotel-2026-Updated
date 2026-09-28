@@ -1246,6 +1246,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
  * Managers/admins also see unavailable items (is_available=0) with an 86 badge
  * so they can toggle availability from the till without leaving the POS. */
 $isManagerOrAdmin = in_array($user['role'] ?? '', ['admin', 'manager'], true);
+/* Takings are finance, not service. A cashier needs to know how many orders
+   they have put through; what the till has earned in cash, mobile money and
+   card is a manager's figure, and `pos_accounting` ("Review POS sales and
+   close cashier shifts") is the permission that already means exactly that.
+   restaurant_staff does not hold it, so FOH sees the order count only. */
+$posCanSeeTakings = hasPermission($user['id'], 'pos_accounting');
 $posCanRefund   = hasPermission($user['id'], 'pos_refund');
 $posCanDiscount = hasPermission($user['id'], 'pos_discount');
 $posCanToggle86 = hasPermission($user['id'], 'pos_86');
@@ -2382,38 +2388,45 @@ if (in_array($user['role'] ?? '', ['admin', 'manager'], true)) {
                     <button class="recent-toggle" onclick="toggleRecent()" data-help="Recent orders|Last 10 orders you rang up."><i class="fas fa-receipt"></i> Recent</button>
                     <button class="recent-toggle" onclick="openTabsTray()" data-help="Open tabs|Unpaid kitchen orders."><i class="fas fa-utensils"></i> Tabs <span id="tabBadge" <?php echo empty($openTabs) ? ' style="display:none;"' : ''; ?>><?php echo count($openTabs); ?></span></button>
                     <button class="recent-toggle" onclick="openStationNoteModal()" data-help="Station note|Quick note to Kitchen/Bar/Coffee."><i class="fas fa-paper-plane"></i> Note</button>
-                    <button class="recent-toggle" onclick="openCloseShift()" data-help="Close shift (Z-report)|End-of-shift cash count."><i class="fas fa-cash-register"></i> Close Shift</button>
 
-                    <?php if ($isManagerOrAdmin): ?>
-                        <div class="tb-sep"></div>
-                        <?php /* The three per-station links (Kitchen/Bar/Coffee) collapsed into this
-                                  one control: the Stations tray it opens already shows each station's
-                                  live counts AND carries direct links to those boards, so four
-                                  toolbar buttons were showing what one plus a tray already covers.
-                                  The badge sums all stations so nothing is lost at a glance. */ ?>
-                        <button class="recent-toggle" onclick="openStationsTray()" data-help="Stations|Live Kitchen, Bar and Coffee boards with ticket counts, and links to open each screen."><i class="fas fa-layer-group"></i> Stations<span id="stationsBadge" style="<?php $tot = ($adminStationsInit['counts']['kitchen']['open_total'] ?? 0) + ($adminStationsInit['counts']['bar']['open_total'] ?? 0) + ($adminStationsInit['counts']['coffee_bar']['open_total'] ?? 0);
-                                                                                                                                                                echo $tot > 0 ? '' : 'display:none;'; ?>"><?php echo $tot; ?></span></button>
-                        <?php /* Hidden badge targets kept so the live stations poller can keep
-                                  updating per-station counts without null checks. */ ?>
-                        <span id="kitchenBadge" hidden></span><span id="barBadge" hidden></span><span id="coffeeBadge" hidden></span>
-                    <?php endif; ?>
-                    <?php if ($posCanToggle86): ?>
-                        <button class="recent-toggle" id="eightySixModeBtn" onclick="toggle86Mode()" data-help="86 Mode|Toggle item availability. When active, click any item to mark it as 86'd (unavailable) or to re-enable it. All sessions reload the menu."><i class="fas fa-ban"></i> 86</button>
-                    <?php endif; ?>
-                    <button type="button" class="rh-help-toggle recent-toggle" data-inline="1" id="rhHelpToggle" aria-label="Toggle help tooltips" data-help="Help mode|Turn tooltip hints on or off for POS actions."><span class="dot"></span><i class="fas fa-question-circle"></i> <span id="rhHelpLabel">Help</span></button>
+                    <?php /* Hidden badge targets kept so the live stations poller can keep
+                              updating per-station counts without null checks. */ ?>
+                    <?php if ($isManagerOrAdmin): ?><span id="kitchenBadge" hidden></span><span id="barBadge" hidden></span><span id="coffeeBadge" hidden></span><?php endif; ?>
 
                     <div class="tb-sep"></div>
-                    <?php /* Everything below is used once a shift or less. Kept one tap away rather
-                              than occupying the bar staff scan all service. */ ?>
+                    <?php /* Only the three controls a cashier touches during service stay on the
+                              bar — Recent, Tabs and Note. Everything else here is used once a
+                              shift or less (close shift, 86, station boards) or is a preference
+                              (help, sound), so it lives one tap away in More.
+
+                              These are moved rather than hidden by width: a till is muscle
+                              memory, and a control that changes position with the screen is worse
+                              than one that is always in the same place. Duplicating them into both
+                              places was the other option and would have meant two elements sharing
+                              #eightySixModeBtn and #stationsBadge, which the live pollers key on. */ ?>
                     <div class="tb-more">
-                        <button type="button" class="recent-toggle tb-more__btn" id="posMoreBtn" onclick="togglePosMoreMenu(event)" aria-expanded="false" aria-haspopup="true"><i class="fas fa-ellipsis"></i> More</button>
+                        <button type="button" class="recent-toggle tb-more__btn" id="posMoreBtn" onclick="togglePosMoreMenu(event)" aria-expanded="false" aria-haspopup="true"><i class="fas fa-ellipsis"></i> More<span class="tb-more__dot" id="posMoreDot" hidden></span></button>
                         <div class="tb-more__menu" id="posMoreMenu" hidden>
+                            <div class="tb-more__group">Shift</div>
+                            <button type="button" onclick="closePosMoreMenu(); openCloseShift();" data-help="Close shift (Z-report)|End-of-shift cash count."><i class="fas fa-cash-register"></i> Close shift (Z-report)</button>
                             <?php if ($posCanFloat): ?>
                             <button type="button" onclick="closePosMoreMenu(); openFloatModal();"><i class="fas fa-coins"></i> Opening float</button>
+                            <?php endif; ?>
+
+                            <div class="tb-more__group">Kitchen</div>
+                            <?php if ($isManagerOrAdmin): ?>
+                            <button type="button" onclick="closePosMoreMenu(); openStationsTray();" data-help="Stations|Live Kitchen, Bar and Coffee boards with ticket counts, and links to open each screen."><i class="fas fa-layer-group"></i> Stations<span id="stationsBadge" style="<?php $tot = ($adminStationsInit['counts']['kitchen']['open_total'] ?? 0) + ($adminStationsInit['counts']['bar']['open_total'] ?? 0) + ($adminStationsInit['counts']['coffee_bar']['open_total'] ?? 0);
+                                                                                                                                                                echo $tot > 0 ? '' : 'display:none;'; ?>"><?php echo $tot; ?></span></button>
+                            <?php endif; ?>
+                            <?php if ($posCanToggle86): ?>
+                            <button type="button" id="eightySixModeBtn" onclick="closePosMoreMenu(); toggle86Mode();" data-help="86 Mode|Toggle item availability. When active, click any item to mark it as 86'd (unavailable) or to re-enable it. All sessions reload the menu."><i class="fas fa-ban"></i> 86 mode</button>
                             <?php endif; ?>
                             <?php if ($isManagerOrAdmin && moduleEnabled('stock')): ?>
                             <a href="stock-orders.php"><i class="fas fa-list"></i> All orders</a>
                             <?php endif; ?>
+
+                            <div class="tb-more__group">Settings</div>
+                            <button type="button" class="rh-help-toggle" data-inline="1" id="rhHelpToggle" aria-label="Toggle help tooltips" data-help="Help mode|Turn tooltip hints on or off for POS actions."><span class="dot"></span><i class="fas fa-question-circle"></i> <span id="rhHelpLabel">Help mode</span></button>
                             <button type="button" onclick="closePosMoreMenu(); RHSounds.openSettings();"><i class="fas fa-sliders"></i> Sound settings</button>
                             <a href="../docs/guides/01-pos-till.html" target="_blank" rel="noopener"><i class="fas fa-book-open"></i> POS guide</a>
                             <?php if (!$isFullScreen): ?><a href="dashboard.php"><i class="fas fa-arrow-left"></i> Admin dashboard</a><?php endif; ?>
@@ -2427,10 +2440,12 @@ if (in_array($user['role'] ?? '', ['admin', 'manager'], true)) {
             <!-- ROW 2: Shift stats (scrollable) -->
             <div class="tb-row2">
                 <span class="stat"><strong id="tbStatOrders"><?php echo (int)($shift['orders_today'] ?? 0); ?></strong><span class="stat-label">Orders</span></span>
-                <span class="stat"><strong id="tbStatRevenue"><?php echo $currency_symbol . ' ' . number_format((float)($shift['revenue_today'] ?? 0), 0); ?></strong><span class="stat-label">Revenue</span></span>
-                <span class="stat"><strong id="tbStatCash"><?php echo $currency_symbol . ' ' . number_format((float)($shift['cash_today'] ?? 0), 0); ?></strong><span class="stat-label">Cash</span></span>
-                <span class="stat"><strong id="tbStatMobile"><?php echo $currency_symbol . ' ' . number_format((float)($shift['mobile_today'] ?? 0), 0); ?></strong><span class="stat-label">Mobile</span></span>
-                <span class="stat"><strong id="tbStatCard"><?php echo $currency_symbol . ' ' . number_format((float)($shift['card_today'] ?? 0), 0); ?></strong><span class="stat-label">Card</span></span>
+<?php if ($posCanSeeTakings): ?>
+                    <span class="stat"><strong id="tbStatRevenue"><?php echo $currency_symbol . ' ' . number_format((float)($shift['revenue_today'] ?? 0), 0); ?></strong><span class="stat-label">Revenue</span></span>
+                    <span class="stat"><strong id="tbStatCash"><?php echo $currency_symbol . ' ' . number_format((float)($shift['cash_today'] ?? 0), 0); ?></strong><span class="stat-label">Cash</span></span>
+                    <span class="stat"><strong id="tbStatMobile"><?php echo $currency_symbol . ' ' . number_format((float)($shift['mobile_today'] ?? 0), 0); ?></strong><span class="stat-label">Mobile</span></span>
+                    <span class="stat"><strong id="tbStatCard"><?php echo $currency_symbol . ' ' . number_format((float)($shift['card_today'] ?? 0), 0); ?></strong><span class="stat-label">Card</span></span>
+                <?php endif; ?>
             </div>
 
         </div>
@@ -7049,6 +7064,18 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
             }
         }
 
+        /* Surfaces state that now lives behind the More menu. Today that is 86 mode,
+           which changes what tapping a menu item does and so must never be silently
+           on; the dot keeps that visible without putting the control back on the bar. */
+        function syncPosMoreIndicator() {
+            const dot = document.getElementById('posMoreDot');
+            if (!dot) return;
+            const active = typeof eightySixMode !== 'undefined' && eightySixMode;
+            dot.hidden = !active;
+            const btn = document.getElementById('posMoreBtn');
+            if (btn) btn.classList.toggle('has-active-mode', !!active);
+        }
+
         function togglePosMoreMenu(e) {
             if (e) e.stopPropagation();
             const menu = document.getElementById('posMoreMenu');
@@ -9404,6 +9431,11 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
             eightySixMode = !eightySixMode;
             const btn = document.getElementById('eightySixModeBtn');
             if (btn) btn.classList.toggle('mode-active', eightySixMode);
+            /* 86 mode lives in the More menu now, so an active mode would otherwise
+               be invisible behind a closed menu — and in that state tapping an item
+               toggles its availability instead of adding it to the order. Mark the
+               More button itself so the state is always on screen. */
+            syncPosMoreIndicator();
             renderMenu();
             posToastReady(eightySixMode ? '86 Mode ON — tap an item to toggle availability' : '86 Mode OFF', false);
         }
@@ -10004,11 +10036,13 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
     <?php require __DIR__ . '/includes/offline-banner.php'; ?>
 
     <!-- Station inbox widget -->
-    <!-- bottom offset clears the cart's Fire Order / Pay row: at 90px this
-         launcher overlapped the Pay button by ~780px², so a thumb aimed at the
-         top of Pay could open the inbox instead. Staff can still drag it; this
-         is only the default position. -->
-    <div id="posInboxWidget" style="display:none;position:fixed;bottom:132px;right:22px;z-index:99990;flex-direction:column;align-items:flex-end;gap:8px;">
+    <!-- Docked bottom-left, above My Orders, rather than bottom-right.
+         The cart is a full-height right-hand column, so every bottom-right
+         position this launcher took overlapped one of its controls - Pay at
+         90px, the order total at 132px, the order-type row at 190px. Moving it
+         out of that column removes the whole class of collision instead of
+         nudging it again. Staff can still drag it; this is only the default. -->
+    <div id="posInboxWidget" style="display:none;position:fixed;bottom:86px;left:22px;z-index:99990;flex-direction:column;align-items:flex-start;gap:8px;">
         <!-- Inbox slide-up panel -->
         <div id="posInboxPanel" style="display:none;width:320px;max-height:420px;background:#fff;border-radius:12px;box-shadow:0 8px 32px rgba(0,0,0,.22);border:1px solid #e5e7eb;overflow:hidden;">
             <div style="padding:11px 14px;border-bottom:1px solid #f3f4f6;display:flex;align-items:center;justify-content:space-between;">
