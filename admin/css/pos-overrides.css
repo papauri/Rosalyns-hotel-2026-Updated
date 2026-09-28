@@ -2522,17 +2522,25 @@ a.recent-toggle span {
    the old timeout) they covered the till bar's Sign out / More / Help cluster.
    They now live in one flow container that lays them out in a column, sits below
    the till bar, and scrolls instead of growing without bound. */
+/* Bottom-centre, deliberately away from the alert stack.
+   Both stacks used to sit at top-right on the same offsets and overlapped by
+   ~19,000px2; the alert stack carries the higher z-index, so any toast fired
+   while an alert was on screen was painted over and never seen. They also do
+   different jobs: an alert is something to act on, a toast is a receipt for
+   something the cashier just did, so separating them spatially is what makes
+   each one readable. */
 #pos-toast-stack {
     position: fixed;
-    top: calc(var(--rh-notif-top, 0.875rem) + env(safe-area-inset-top));
-    right: max(0.875rem, env(safe-area-inset-right));
+    bottom: calc(1rem + env(safe-area-inset-bottom));
+    left: 50%;
+    transform: translateX(-50%);
     z-index: 99992;
     display: flex;
     flex-direction: column;
-    align-items: flex-end;
+    align-items: center;
     gap: 0.5rem;
-    width: min(24rem, calc(100dvw - 2rem));
-    max-height: calc(100dvh - var(--rh-notif-top, 0.875rem) - var(--rh-notif-bottom, 6rem));
+    width: min(28rem, calc(100dvw - 2rem));
+    max-height: 50dvh;
     overflow: hidden;
     pointer-events: none;
 }
@@ -2606,8 +2614,11 @@ a.recent-toggle span {
 
 @media (max-width: 640px) {
     #pos-toast-stack {
+        /* Full-bleed on a phone; the centring transform from the base rule has
+           to be cleared or the stack sits half a screen to the left. */
         left: 0.5rem;
         right: 0.5rem;
+        transform: none;
         width: auto;
         align-items: stretch;
     }
@@ -2643,12 +2654,17 @@ a.recent-toggle span {
     background: rgba(255, 255, 255, 0.26);
 }
 
+/* Both fills carry white text, so they have to be dark enough to hold it. The
+   Bootstrap pair they used to use measured 3.13:1 (ok) and 4.53:1 (err) — the
+   success toast is the one a cashier sees on every single order, and it was
+   the harder of the two to read. Deepened to the same sage/clay family the
+   admin and station screens use. */
 .toast.ok {
-    background: #28a745;
+    background: #35794c;
 }
 
 .toast.err {
-    background: #dc3545;
+    background: #9e3b30;
 }
 
 /* recent-orders dropdown */

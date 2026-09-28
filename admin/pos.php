@@ -4230,7 +4230,13 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
             const badge = document.getElementById('posInboxBadge');
             const widget = document.getElementById('posInboxWidget');
             if (!badge || !widget) return;
-            const showWidget = window.innerWidth > 640 || (_inboxLastMsgs && _inboxLastMsgs.length > 0) || count > 0;
+            /* The launcher only floats when there is actually something to read.
+               It used to be pinned on every screen wider than 640px, which put a
+               permanent widget over the till for cashiers who had no messages at
+               all; an empty inbox has nothing to show. Station note in the
+               toolbar still opens the composer and its history either way, and
+               any incoming message shows this again immediately. */
+            const showWidget = (_inboxLastMsgs && _inboxLastMsgs.length > 0) || count > 0;
             widget.style.display = showWidget ? 'flex' : 'none';
             if (showWidget && typeof window.__posClampFloatingWidgets === 'function') {
                 setTimeout(window.__posClampFloatingWidgets, 0);
@@ -9998,7 +10004,11 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
     <?php require __DIR__ . '/includes/offline-banner.php'; ?>
 
     <!-- Station inbox widget -->
-    <div id="posInboxWidget" style="display:none;position:fixed;bottom:90px;right:22px;z-index:99990;flex-direction:column;align-items:flex-end;gap:8px;">
+    <!-- bottom offset clears the cart's Fire Order / Pay row: at 90px this
+         launcher overlapped the Pay button by ~780px², so a thumb aimed at the
+         top of Pay could open the inbox instead. Staff can still drag it; this
+         is only the default position. -->
+    <div id="posInboxWidget" style="display:none;position:fixed;bottom:132px;right:22px;z-index:99990;flex-direction:column;align-items:flex-end;gap:8px;">
         <!-- Inbox slide-up panel -->
         <div id="posInboxPanel" style="display:none;width:320px;max-height:420px;background:#fff;border-radius:12px;box-shadow:0 8px 32px rgba(0,0,0,.22);border:1px solid #e5e7eb;overflow:hidden;">
             <div style="padding:11px 14px;border-bottom:1px solid #f3f4f6;display:flex;align-items:center;justify-content:space-between;">

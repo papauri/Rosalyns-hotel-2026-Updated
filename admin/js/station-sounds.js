@@ -424,13 +424,13 @@
 .rh-nc--info .rh-nc-icon{background:rgba(212,168,67,.14);color:#d4a843;}
 .rh-nc--success .rh-nc-icon{background:rgba(34,211,238,.14);color:#22d3ee;}
 .rh-nc-text{flex:1;min-width:0;}
-.rh-nc-title{font-size:13px;font-weight:700;color:#f0f0f8;font-family:'Jost',sans-serif;line-height:1.2;margin-bottom:3px;}
-.rh-nc-source{display:inline-block;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.09em;padding:1px 7px;border-radius:5px;margin-bottom:5px;font-family:'Jost',sans-serif;}
+.rh-nc-title{font-size:14.5px;font-weight:700;color:#f0f0f8;font-family:'Jost',sans-serif;line-height:1.2;margin-bottom:3px;}
+.rh-nc-source{display:inline-block;font-size:10.5px;font-weight:700;text-transform:uppercase;letter-spacing:.09em;padding:1px 7px;border-radius:5px;margin-bottom:5px;font-family:'Jost',sans-serif;}
 .rh-nc--normal .rh-nc-source{background:rgba(16,185,129,.12);color:#34d399;}
 .rh-nc--urgent .rh-nc-source{background:rgba(244,63,94,.12);color:#fb7185;}
 .rh-nc--info .rh-nc-source{background:rgba(212,168,67,.12);color:#d4a843;}
 .rh-nc--success .rh-nc-source{background:rgba(34,211,238,.12);color:#22d3ee;}
-.rh-nc-body-text{font-size:12.5px;color:#9aa3af;font-family:'Jost',sans-serif;line-height:1.45;word-break:break-word;white-space:pre-line;}
+.rh-nc-body-text{font-size:13.5px;color:#aab3c0;font-family:'Jost',sans-serif;line-height:1.45;word-break:break-word;white-space:pre-line;}
 .rh-nc-close{position:absolute;top:4px;right:4px;width:34px;height:34px;display:flex;align-items:center;justify-content:center;background:none;border:none;color:#6b7280;font-size:14px;cursor:pointer;border-radius:8px;line-height:1;transition:color .12s,background .12s;}
 .rh-nc-close:hover,.rh-nc-close:focus-visible{color:#f0f0f8;background:rgba(255,255,255,.1);}
 .rh-nc-prog{height:3px;width:100%;background:#0f1118;}
@@ -468,7 +468,7 @@
        surface and becomes a curtain over the buttons underneath it — on a till that
        is the Pay button, on a station board it is Bump. Everything past the cap
        waits in _notifQueue and is announced by the overflow pill. */
-    const MAX_VISIBLE = 4;
+    const MAX_VISIBLE = 3;
     const _notifQueue = [];
     let _moreEl = null;
 
