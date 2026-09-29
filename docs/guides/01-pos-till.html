@@ -44,6 +44,9 @@
 
       <section>
         <h2>Layout (left → right)</h2>
+        <p>The till shares the <strong>Japandi palette used by the admin dashboard and the kitchen screens</strong> —
+          warm paper background, off-white panes, muted clay and sage accents, and a dark bar across the top. Staff
+          moving between the till, the KDS and the admin pages see one system rather than three.</p>
         <table>
           <thead>
             <tr>
@@ -67,9 +70,65 @@
             </tr>
           </tbody>
         </table>
-        <p>The top <strong>Till Bar</strong> always shows: cashier name, today's order count, today's revenue, today's
-          cash collected, plus links to <strong>Stations</strong> (KDS/BDS/CDS feed), <strong>Restaurant
-            Orders</strong>, and <strong>Sign Out</strong>.</p>
+      </section>
+
+      <section>
+        <h2>The Till Bar</h2>
+        <p>The bar across the top carries the cashier's name, the live figures they are allowed to see, and only the
+          controls that get touched <em>during</em> service:</p>
+        <div class="diagram">┌────────────────────────────────────────────────────────────────────────┐
+          │ Point of Sale · Amina        [Recent] [Tabs 3] [Note] │ [⋯ More] [Sign out] │
+          │ Orders 24 · Revenue 412,500 · Cash 180,000 · Mobile … · Card …              │
+          └────────────────────────────────────────────────────────────────────────┘</div>
+        <ul class="checklist">
+          <li><strong>Recent</strong> — the last 10 orders you rang up.</li>
+          <li><strong>Tabs</strong> — unpaid kitchen orders, with a count badge.</li>
+          <li><strong>Note</strong> — send a quick message to Kitchen, Bar or Coffee.</li>
+          <li><strong>More</strong> (<i class="fas fa-ellipsis"></i>) — everything used once a shift or less, grouped
+            under <em>Shift</em>, <em>Kitchen</em> and <em>Settings</em>.</li>
+          <li><strong>Sign out</strong>.</li>
+        </ul>
+        <p>What moved into <strong>More</strong>: <em>Close shift (Z-report)</em>, <em>Opening float</em>,
+          <em>Stations</em>, <em>86 mode</em>, <em>All orders</em>, <em>Help mode</em>, <em>Sound settings</em>, the
+          <em>POS guide</em>, and the link back to the <em>Admin dashboard</em>.</p>
+        <div class="callout note"><strong>These controls do not move with screen size.</strong> A till is muscle memory,
+          so Recent / Tabs / Note stay in the same place on a phone, a 10&Prime; tablet and a desktop, and everything
+          else is always one tap away under More — rather than appearing and disappearing as the window changes.</div>
+        <p>If you turn on <strong>86 mode</strong> and then close the More menu, a small dot appears on the More button
+          so you cannot forget the till is still in 86 mode.</p>
+      </section>
+
+      <section>
+        <h2>Who sees the takings</h2>
+        <p>The figures on the till bar are <strong>gated by permission</strong>, so a front-of-house cashier gets a till
+          that does its job without exposing the day's money.</p>
+        <table>
+          <thead>
+            <tr>
+              <th>Tile</th>
+              <th>Who sees it</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><strong>Orders</strong> (today's count)</td>
+              <td>Everyone who can open the till.</td>
+            </tr>
+            <tr>
+              <td><strong>Revenue · Cash · Mobile · Card</strong></td>
+              <td>Only users with the <code>pos_accounting</code> permission — typically supervisor, manager and admin.
+              </td>
+            </tr>
+          </tbody>
+        </table>
+        <p>Other till capabilities are permissioned the same way, so a role can be given exactly as much as it needs:
+          <code>pos_till</code> (use the till at all), <code>pos_float</code> (declare the opening float),
+          <code>pos_86</code> (mark items unavailable), <code>pos_discount</code>, <code>pos_refund</code> and
+          <code>pos_force_serve</code>. A control the user lacks permission for is not rendered at all, rather than shown
+          and then refused.</p>
+        <div class="callout note">Review these under <strong>Admin → Users → Permissions</strong>. A cashier who cannot
+          see Revenue can still take every kind of payment, park tabs and fire to the kitchen — the gate is on the
+          reporting figures, never on the work.</div>
       </section>
 
       <section>
@@ -133,9 +192,11 @@
             </ul>
           </li>
           <li>For settled tabs, use <strong>Receipt</strong> to open the printable receipt page.</li>
-          <li>Admin/manager tab cards also show a <strong>Lifecycle</strong> link that opens
-            <code>/admin/order-lifecycle.php</code> in a full page with Cancel and Void actions.
-          </li>
+          <li>Admin/manager tab cards also show a <strong>Lifecycle</strong> link. It opens the full order log
+            (<code>/admin/order-lifecycle.php</code>) <strong>in a panel over the till</strong>, with Cancel and Void
+            actions — your cart, table number and open tray are all still there when you close it with ✕ or
+            <kbd>Esc</kbd>. Nothing opens in a new tab any more, which matters most on a fullscreen till tablet with no
+            browser chrome to get back with.</li>
           <li><strong>Search</strong> the open tabs from the box in the tray header (or press <kbd>/</kbd> while the
             tray is open) — filter by reference, customer name, or table number. Handy on a busy night with many tabs.</li>
         </ul>
@@ -282,9 +343,34 @@
       </section>
 
       <section>
+        <h2>Sending a note to the kitchen</h2>
+        <p>Tap <strong>Note</strong> in the till bar. The modal asks for things in the order a cashier actually thinks
+          of them:</p>
+        <ol class="steps">
+          <li><strong>Type the message.</strong> The box is focused the moment the modal opens, so you can start typing
+            straight away without tapping anything first.</li>
+          <li><strong>Choose who it goes to</strong> — Kitchen, Bar or Coffee — and tick <strong>Urgent</strong> if it
+            cannot wait. Both sit on one row under the message.</li>
+          <li><strong>Attach it to an order</strong> only if you need to. The order picker is folded away by default;
+            open <em>Attach to an order</em> to pick one. If you opened the modal from an order, it is already selected
+            and the picker opens by itself showing that choice.</li>
+          <li>Tap <strong>Send</strong>. The note lands on the station board in about a second.</li>
+        </ol>
+        <div class="callout note">A note that cannot be delivered now says so. If a message has been dismissed or the
+          order has moved past it, the till shows a clear error rather than a success tick — so "sent" always means
+          sent.</div>
+      </section>
+
+      <section>
         <h2>Station replies &amp; notifications</h2>
         <ul class="checklist">
           <li>When kitchen/bar/coffee sends a note back, you get an in-app notification and sound alert on POS.</li>
+          <li>The <strong>inbox panel</strong> sits at the bottom-left of the till and appears only when there is
+            actually something in it — it does not take up space on a quiet till.</li>
+          <li>Notification cards use larger type and lighter body text than before, so they can be read at a glance
+            across a counter. At most three stack at once; older ones queue behind.</li>
+          <li>Confirmation and error <strong>toasts appear centred at the bottom</strong> of the till, clear of the cart
+            and the pay buttons, and clear of the on-screen keyboard.</li>
           <li>Use <strong>Sounds</strong> / <strong>Sound Settings</strong> to choose the normal alert, urgent alert,
             and
             volume for the till device.</li>
@@ -333,7 +419,8 @@
       <section>
         <h2>Closing your shift (Z-report)</h2>
         <ol class="steps">
-          <li>Tap <strong>Close Shift</strong> in the till bar (visible from cashier role and above).</li>
+          <li>Open <strong>More</strong> (<i class="fas fa-ellipsis"></i>) in the till bar and tap <strong>Close shift
+              (Z-report)</strong>, at the top under <em>Shift</em>.</li>
           <li>Type your <strong>counted cash drawer total</strong>. Include any cash tips in this count — the system adds expected tips to the expected cash total automatically.</li>
           <li>The variance is calculated automatically.</li>
           <li>If variance &gt; tolerance, an <strong>admin override + reason ≥ 5 chars</strong> is required.</li>
@@ -416,15 +503,18 @@
         <h2>Quick-86 item toggle <span class="pill amber">pos_86 — manager</span></h2>
         <p>Take a menu item off sale instantly — without leaving the POS — when you run out or need to pull it for any reason. Restaurant staff who lack <code>pos_86</code> will see the Manager Authorisation overlay when they tap the 86 button.</p>
         <ol class="steps">
-          <li>Tap the <strong>86</strong> button in the till bar.</li>
-          <li>The menu enters <strong>86 Mode</strong> — the button turns red and all tiles show "Tap to 86" or "Tap to enable".</li>
+          <li>Open <strong>More</strong> (<i class="fas fa-ellipsis"></i>) in the till bar and tap <strong>86
+              mode</strong>, under <em>Kitchen</em>.</li>
+          <li>The menu enters <strong>86 Mode</strong> — all tiles show "Tap to 86" or "Tap to enable", and a dot appears
+            on the <strong>More</strong> button so you can tell at a glance that 86 mode is still on.</li>
           <li>Tap any item tile to toggle its availability:
             <ul>
               <li>An <strong>available</strong> item gets an <span style="background:#c82333;color:#fff;font-size:11px;padding:1px 5px;border-radius:4px;">86</span> badge and is greyed out — it disappears from cashier screens.</li>
               <li>An <strong>86'd</strong> item (highlighted with green border) is re-enabled and returns to all screens.</li>
             </ul>
           </li>
-          <li>Tap <strong>86</strong> again to exit 86 Mode. Tapping items goes back to adding them to the cart.</li>
+          <li>Tap <strong>86 mode</strong> again from the More menu to exit. Tapping items goes back to adding them to
+            the cart, and the dot on More clears.</li>
         </ol>
         <div class="callout note">
           Changes take effect immediately — regular cashiers see the item disappear as soon as the page next renders. Each toggle is written to the order audit log and the system activity log.

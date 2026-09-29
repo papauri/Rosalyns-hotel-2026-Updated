@@ -46,27 +46,37 @@
 
       <section>
         <h2>Layout</h2>
-        <div class="diagram">┌──────────────────────────────────────────────────────────────────┐
-          │ [All] [New] [Cooking] [Ready] 🕒 21:14:02 🔊 Sound Logout │ ← top bar
-          ├──────────────────────────────────────────────────────────────────┤
-          │ │
-          │ Ticket #001 Ticket #002 Ticket #003 │
-          │ Table 4 Room 12 Takeaway │
-          │ ───────────── ───────────── ───────────── │
-          │ [ ] 2 × Steak [✓] 1 × Soup [ ] 1 × Pasta │
-          │ [ ] 1 × Salad [ ] 1 × Steak [ ] 2 × Wine │
-          │ [Start] [Bump] [Start] [Bump] [Start] [Bump] │
-          │ │
-          └──────────────────────────────────────────────────────────────────┘</div>
+        <div class="diagram">┌────────────────────────────────────────────────────────────────────┐
+          │ KITCHEN   [All] [New] [Cooking] [Ready]    21:14:02  🔊  Exit      │ ← top bar
+          ├────────────────────────────────────────────────────────────────────┤
+          │                                                                    │
+          │  ┌── #001 ─ Table 4 ──┐  ┌── #002 ─ Room 12 ─┐  ┌── #003 ────────┐ │
+          │  │ 12m 04s   COOKING  │  │ 2m 11s       NEW  │  │ 45 sec    NEW  │ │
+          │  │ ─────────────────  │  │ ────────────────  │  │ ─────────────  │ │
+          │  │ 2× Steak    Ready  │  │ 1× Soup   Start   │  │ 1× Pasta Start │ │  ← tap a line
+          │  │ 1× S̶a̶l̶a̶d̶   (done)  │  │ 1× Steak  Start   │  │ 2× Wine  Start │ │    to advance it
+          │  │ ─────────────────  │  │ ────────────────  │  │ ─────────────  │ │
+          │  │ Bump  Rush  💬 👁 ☰ │  │ Start all  Bump…  │  │ Start all …    │ │  ← ticket footer
+          │  └────────────────────┘  └───────────────────┘  └────────────────┘ │
+          │                                                                    │
+          ├────────────────────────────────────────────────────────────────────┤
+          │  FOH Notes          │  All Day            │  Online Flow           │ ← station dock
+          └────────────────────────────────────────────────────────────────────┘</div>
 
         <ul class="checklist">
-          <li>Tickets fly in from the right when fired by the till.</li>
-          <li>Cards turn <span class="pill amber">amber</span> after 5 min, <span class="pill red">red</span> after 10
-            min &mdash; keeps the kitchen on time.</li>
+          <li>Tickets fade in when fired by the till.</li>
+          <li>The board uses the same <strong>Japandi palette as the admin dashboard</strong> &mdash; warm paper
+            background, off-white cards, muted clay and sage accents. Status is carried by a coloured edge and a small
+            label, not by flooding the whole card, so a busy pass stays readable.</li>
+          <li>Cards warm to <span class="pill amber">amber</span> after 5 min and <span class="pill red">red</span> after
+            10 min &mdash; keeps the kitchen on time.</li>
           <li>A soft chime plays when a new ticket lands. Tap <strong>Sound</strong> to mute, or open
             <strong>Sound Settings</strong> to choose alert tones and volume for the station screen.</li>
           <li>Each ticket shows FOH/orderer, guest/service type, line count, item count, fired time and current status
             so the kitchen can identify who sent it without leaving the board.</li>
+          <li>Everything scales continuously with the screen &mdash; the same board is legible on a 10&Prime; counter
+            tablet and on a <strong>70&Prime; wall display</strong>, with no setting to change. Type, cards and the dock
+            all grow together; on a large screen you simply get more columns of larger tickets.</li>
         </ul>
       </section>
 
@@ -74,37 +84,41 @@
         <h2>Step-by-step</h2>
         <ol class="steps">
           <li><strong>A new ticket arrives</strong> &mdash; it appears on the board and chimes.</li>
-          <li>Tap <strong>Start</strong> on the ticket header (or on individual lines). The card border turns blue.</li>
-          <li>As you cook each item, tap <strong>Ready</strong> (<i class="fas fa-bell"></i>) on that line. This stamps
-            the ready time and <strong>deducts the ingredients from stock</strong> at this moment.</li>
+          <li><strong>Tap the line itself</strong> when you pick the item up. There are no per-line button rows any
+            more: the whole line is the control, and each tap moves it one step forward. The label on the right of the
+            line always tells you what the <em>next</em> tap will do.</li>
+          <li>Tap again when the plate is up &mdash; that is <strong>Ready</strong>, and it is the moment the
+            <strong>ingredients come off stock</strong>.</li>
           <li>If recipe stock is short, the board stops the action and shows a friendly stock dialog. Receive stock,
-            adjust the recipe, or 86 the item before trying Ready/Bump again.</li>
-          <li>Tap <strong>Collect</strong> (<i class="fas fa-hand-holding"></i>) to mark the item ready for collection
-            by the runner. The item moves to <em>collection</em> status and appears orange on the board.</li>
-          <li>Once the runner delivers the item, tap <strong>Serve</strong> (<i class="fas fa-check"></i>) or
-            <strong>Bump</strong> the whole ticket. The ticket disappears from the active board.
-          </li>
+            adjust the recipe, or 86 the item before trying again.</li>
+          <li>Tap once more for <strong>Collect</strong> when the runner takes it, and once more for
+            <strong>Serve</strong> when it reaches the guest. A finished line is <s>struck through</s> and stops
+            responding to taps.</li>
+          <li>When every line is done, tap <strong>Bump</strong> in the ticket footer. The ticket leaves the active
+            board.</li>
         </ol>
         <div class="callout note">
-          <strong>Stock deducts at Ready, not at fire.</strong> If an order is cancelled before you tap Ready on any
-          item, no stock is lost. This ensures physical prep and stock usage stay in sync.
+          <strong>Stock deducts at Ready, not at fire.</strong> If an order is cancelled before you tap a line up to
+          Ready, no stock is lost. This keeps physical prep and stock usage in sync.
         </div>
       </section>
 
       <section>
-        <h2>Item action buttons (per line)</h2>
+        <h2>Tapping a line: the four steps</h2>
+        <p>Every ticket line walks the same path. You never choose an action from a row of buttons &mdash; you just tap
+          the line, and the label on its right edge tells you where the next tap takes it.</p>
         <table>
           <thead>
             <tr>
-              <th>Button</th>
-              <th>When to use</th>
+              <th>Line shows</th>
+              <th>Tap it when</th>
               <th>Stock effect</th>
             </tr>
           </thead>
           <tbody>
             <tr>
               <td><span class="pill blue">Start</span></td>
-              <td>When you physically pick up the item to cook.</td>
+              <td>You physically pick the item up to cook it.</td>
               <td>None.</td>
             </tr>
             <tr>
@@ -114,21 +128,74 @@
             </tr>
             <tr>
               <td><span class="pill amber">Collect</span></td>
-              <td>Runner has taken the item for delivery.</td>
+              <td>The runner has taken the item for delivery.</td>
               <td>None (already deducted at Ready).</td>
             </tr>
             <tr>
               <td><span class="pill green">Serve</span></td>
-              <td>Individual item confirmed delivered to guest.</td>
+              <td>That single line is confirmed delivered to the guest.</td>
               <td>None.</td>
             </tr>
             <tr>
-              <td><span class="pill gold">Bump</span></td>
-              <td>All items on ticket complete — clears the board.</td>
-              <td>Deducts any items that were bumped without going through Ready first.</td>
+              <td><s>struck through</s></td>
+              <td>Nothing &mdash; the line is finished and no longer tappable.</td>
+              <td>None.</td>
             </tr>
           </tbody>
         </table>
+        <div class="callout note">Lines belonging to <strong>another station</strong> are shown for context with a
+          Kitchen / Bar / Coffee Bar badge, greyed out and not tappable. You can see what the bar is doing without being
+          able to touch their work.</div>
+      </section>
+
+      <section>
+        <h2>The ticket footer</h2>
+        <table>
+          <thead>
+            <tr>
+              <th>Control</th>
+              <th>What it does</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><span class="pill blue">Start all</span></td>
+              <td>Starts every pending line at once, for when you fire the whole ticket together. Only shown while some
+                line is still pending.</td>
+            </tr>
+            <tr>
+              <td><span class="pill gold">Bump</span></td>
+              <td>Marks the ticket delivered and clears it from the board. Deducts stock for anything not already taken
+                at Ready. Recallable for 10 minutes.</td>
+            </tr>
+            <tr>
+              <td><span class="pill red">Rush</span> / Un-rush</td>
+              <td>Toggles priority. Sorts the ticket to the top and alerts every station.</td>
+            </tr>
+            <tr>
+              <td><i class="fas fa-comment-dots"></i> Notes</td>
+              <td>Opens the FOH message thread for this ticket, with a reply box. The badge counts messages; an
+                indicator marks unread ones.</td>
+            </tr>
+            <tr>
+              <td><i class="fas fa-eye"></i> Whole order</td>
+              <td>Shows every line on the order across all three stations — useful for timing your prep with the bar.
+              </td>
+            </tr>
+            <tr>
+              <td><i class="fas fa-stream"></i> Log</td>
+              <td>Opens the full order lifecycle over the board (see below).</td>
+            </tr>
+            <tr>
+              <td><i class="fas fa-xmark-circle"></i> Cancel</td>
+              <td>Only appears while <em>all</em> lines are still pending. Cancels the order outright and restores
+                stock.</td>
+            </tr>
+          </tbody>
+        </table>
+        <p>Each line also carries two small icons on its right: <i class="fas fa-book-open"></i> <strong>Recipe</strong>
+          for portion and prep guidance, and <i class="fas fa-ban"></i> <strong>86</strong> to pull the item and alert
+          FOH. These act on the single line and do not advance it.</p>
       </section>
 
       <section>
@@ -167,13 +234,19 @@
       <section>
         <h2>FOH notes &amp; station messages</h2>
         <ul class="checklist">
-          <li>The <strong>bottom bar</strong> has three panels: FOH Messages, All-Day count, and Station Control.</li>
+          <li>The <strong>station dock</strong> along the bottom has three panels: <strong>FOH Notes</strong>,
+            <strong>All Day</strong> (running item counts) and <strong>Online Flow</strong>. The dock is a fixed band
+            that scrolls internally — it never pushes the board off-screen or slides under the taskbar, however many
+            notes arrive.</li>
           <li>Messages from POS (order notes updated by cashier) appear as <span class="pill red">URGENT</span> items
             with a red border and pulse animation.</li>
-          <li>You can <strong>reply</strong> to any message from the bottom bar — your reply goes back to the POS
+          <li>You can <strong>reply</strong> to any message from the dock — your reply goes back to the POS
             cashier's inbox.</li>
-          <li>You can also send a new note from inside a ticket card using the note composer at the bottom of the card.
-          </li>
+          <li>You can also open a ticket's own thread with the <i class="fas fa-comment-dots"></i> button in its footer
+            and reply in place, which keeps the conversation attached to that order.</li>
+          <li>If a note has been dismissed or the order has moved on, a reply is <strong>refused with a clear
+              message</strong> rather than silently disappearing — so a "sent" note on the pass really did reach the
+            till.</li>
           <li>POS receives station replies, ready alerts, and My Orders status updates within about 1 second. Ready
             popups include the first few ordered items and stay visible for 2 minutes unless the cashier closes them.</li>
           <li>Messages expire after 6 hours or can be dismissed by tapping the ✕ on each row.</li>
@@ -212,9 +285,11 @@
 
       <section>
         <h2>Order Lifecycle Log (ticket footer)</h2>
-        <p>Every KDS ticket card has a <strong>Log</strong> button in the footer alongside <em>Rush</em> and
-          <em>Bump</em>. Tapping it opens <code>/admin/order-lifecycle.php</code> in a new tab — a full audit trail
-          showing:</p>
+        <p>Every KDS ticket card has a <strong>Log</strong> (<i class="fas fa-stream"></i>) button in the footer
+          alongside <em>Rush</em> and <em>Bump</em>. It opens the full audit trail
+          (<code>/admin/order-lifecycle.php</code>) <strong>in a panel over the board</strong> — the station screen stays
+          exactly where it was behind it. Close it with the ✕ or the <kbd>Esc</kbd> key and you are back on the pass.</p>
+        <p>The log shows:</p>
         <ul class="checklist">
           <li>The exact second the order was placed, fired, each item marked Ready, collected, and served.</li>
           <li>Every stock deduction with ingredient name, quantity, and unit cost.</li>
@@ -222,6 +297,10 @@
           <li>A linked payment row if payment has been taken, and any void with reason and actor.</li>
           <li>Cancel or Void action buttons for admin and manager roles (when applicable).</li>
         </ul>
+        <p>Each timing row now names <strong>both ends of the interval</strong> it measures — <em>Placed → fired</em>,
+          <em>Fired → ready</em>, <em>Ready → served</em>, <em>Placed → paid</em>, <em>Total cycle</em> — so there is no
+          guessing which two stamps a duration is the gap between. If a ticket has not been fired or readied yet, the
+          log says so instead of showing an empty timing.</p>
         <div class="callout note">The Log button is visible to all station roles but the Cancel and Void action buttons
           inside the lifecycle page are restricted — Cancel requires admin/manager, Void requires admin only.</div>
       </section>
@@ -261,8 +340,8 @@
 
       <section>
         <h2>Tips</h2>
-        <div class="callout tip">Always tap <strong>Ready</strong> per item as you complete them &mdash; this is how
-          stock gets deducted. <strong>Bump</strong> when everything is done and collected.</div>
+        <div class="callout tip">Always tap each line up to <strong>Ready</strong> as you complete it &mdash; this is
+          how stock gets deducted. <strong>Bump</strong> when everything is done and collected.</div>
         <ul class="checklist">
           <li>If the kitchen network drops, the board still works; orders queue locally.</li>
           <li>Press <code>?</code> to peek at every button label.</li>
@@ -273,8 +352,10 @@
           </li>
           <li>Card sizes are uniform &mdash; short tickets stretch to match their neighbours in the same row so the grid
             always looks clean and nothing feels like a squeeze.</li>
-          <li>Action buttons show a spinner while the server records the change, preventing double taps on Start,
-            Ready, Collect, Serve, Rush, 86, and Bump.</li>
+          <li>A tapped line or button shows a spinner while the server records the change, so a double tap cannot
+            double-advance an item or bump a ticket twice.</li>
+          <li>The elapsed timers count continuously on every card. If you ever see them frozen, reload the board &mdash;
+            but this is no longer expected behaviour.</li>
         </ul>
       </section>
 
