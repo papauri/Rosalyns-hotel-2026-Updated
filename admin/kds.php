@@ -155,10 +155,16 @@ $bootstrap = [
 
 // Compute bootstrap fingerprint — seeded into JS to prevent a spurious full re-render on the first 500ms poll
 try {
+    /* Same rows and signature as kds_recent_station_messages()/kds_message_signature()
+       in api/kds-action.php, so the first poll matches and does not re-render. */
     $btMsgStmt = $pdo->prepare(
-        "SELECT id, priority, seen_at, reply_message, replied_at FROM station_messages
-         WHERE station = ? AND is_acknowledged = 0 AND created_at >= DATE_SUB(NOW(), INTERVAL 6 HOUR)
-         ORDER BY priority DESC, created_at DESC, id DESC LIMIT 10"
+        "SELECT id, priority, seen_at, reply_message, replied_at, COALESCE(pos_acknowledged, 0) AS pos_acknowledged
+           FROM station_messages
+          WHERE station = ?
+            AND ((source <> 'station' AND is_acknowledged = 0)
+                 OR (source = 'station' AND created_at >= DATE_SUB(NOW(), INTERVAL 6 HOUR)))
+          ORDER BY (source <> 'station') DESC, priority DESC, created_at DESC, id DESC
+          LIMIT 40"
     );
     $btMsgStmt->execute([$STATION]);
     $btMsgs = $btMsgStmt->fetchAll(PDO::FETCH_ASSOC);
@@ -172,6 +178,7 @@ $btMsgSig = implode(',', array_map(
         (string)($m['seen_at'] ?? ''),
         (string)($m['replied_at'] ?? ''),
         substr(sha1((string)($m['reply_message'] ?? '')), 0, 10),
+        (string)($m['pos_acknowledged'] ?? ''),
     ]),
     $btMsgs
 ));
@@ -247,6 +254,7 @@ $bootstrap['fingerprint'] = md5(
             </div>
             <div class="right">
                 <span class="clock" id="clock">--:--:--</span>
+                <button type="button" class="toggle kds-notes-btn" id="kdsNotesBtn" data-loader-manual onclick="openKdsNotes()" data-help="FOH notes|Every note from the till still waiting for this station, with quick replies."><i class="fas fa-comments"></i> <span>FOH notes</span> <b class="kds-notes-btn__count" id="kdsNotesCount" hidden></b></button>
                 <button class="toggle on" id="soundToggle" data-help="Sound chime|Play a sound when new tickets or notes arrive. Tap to mute."><i class="fas fa-volume-up"></i> <span>Sound</span></button>
                 <button id="soundSettingsBtn" title="Sound settings" aria-label="Open sound settings" onclick="RHSounds.openSettings()"><i class="fas fa-sliders"></i><span>Settings</span></button>
                 <button class="toggle" id="servedTodayBtn" data-loader-manual onclick="openServedToday('current', this)" data-help="Served menu|See served tickets for this station with guests, order taker, timestamps, item lines and station logs."><i class="fas fa-clipboard-check"></i> <span>Served</span></button>
@@ -294,6 +302,9 @@ $bootstrap['fingerprint'] = md5(
             <div class="drawer-links">
                 <button type="button" id="drawerFullscreenToggle" class="drawer-fullscreen-btn" onclick="toggleStationFullscreen(this)">
                     <i class="fas fa-expand"></i> <span>Enter Fullscreen</span>
+                </button>
+                <button type="button" data-loader-manual onclick="openKdsNotes()">
+                    <i class="fas fa-comments"></i> FOH Notes <b class="kds-notes-btn__count" id="kdsDrawerNotesCount" hidden></b>
                 </button>
                 <button id="drawerSoundToggle" class="sound-toggle-drawer on" onclick="toggleSoundFromDrawer(this)">
                     <i class="fas fa-volume-up" id="drawerSoundIcon"></i> <span id="drawerSoundLabel">Sound On</span>
@@ -358,7 +369,7 @@ $bootstrap['fingerprint'] = md5(
 
     <div class="station-bottom" aria-label="Station tools">
         <section class="station-panel" aria-labelledby="stationMessagesTitle">
-            <div class="station-panel__head" id="stationMessagesTitle"><span><i class="fas fa-comments"></i> FOH Notes</span><span id="stationMessageCount">0</span></div>
+            <div class="station-panel__head" id="stationMessagesTitle"><button type="button" class="station-panel__open" data-loader-manual onclick="openKdsNotes()" title="Open all FOH notes"><i class="fas fa-comments"></i> FOH Notes <i class="fas fa-up-right-and-down-left-from-center" aria-hidden="true"></i></button><span id="stationMessageCount">0</span></div>
             <div class="station-message-list" id="stationMessages">
                 <div class="station-empty-line">No active notes.</div>
             </div>
@@ -383,6 +394,41 @@ $bootstrap['fingerprint'] = md5(
     </div>
 
     <div class="toast" id="toast"></div>
+
+    <?php /* FOH notes window: every note from the till still waiting for this station,
+              large enough to read and answer from across the pass. */ ?>
+    <div class="kds-notes-overlay" id="kdsNotesOverlay" hidden onclick="if(event.target===this)closeKdsNotes()">
+        <div class="kds-notes" role="dialog" aria-modal="true" aria-labelledby="kdsNotesTitle">
+            <header class="kds-notes__top">
+                <h2 id="kdsNotesTitle"><i class="fas fa-comments"></i> FOH notes</h2>
+                <button type="button" class="kds-notes__close" data-loader-manual onclick="closeKdsNotes()" aria-label="Close"><i class="fas fa-xmark"></i></button>
+            </header>
+            <div class="kds-notes__list" id="kdsNotesList"></div>
+        </div>
+    </div>
+
+    <?php /* Incoming alert: a note from FOH, or FOH answering this station's note. Stays
+              until tapped and re-chimes while it waits. */ ?>
+    <div class="kds-alert-overlay" id="kdsAlertOverlay" hidden>
+        <div class="kds-alert" id="kdsAlertCard" role="alertdialog" aria-modal="true" aria-labelledby="kdsAlertTitle" aria-describedby="kdsAlertBody">
+            <div class="kds-alert__band">
+                <i class="fas fa-comment-dots" id="kdsAlertIcon" aria-hidden="true"></i>
+                <span id="kdsAlertKicker">FOH</span>
+                <span class="kds-alert__queue" id="kdsAlertQueue" hidden></span>
+            </div>
+            <div class="kds-alert__main">
+                <h2 class="kds-alert__title" id="kdsAlertTitle"></h2>
+                <p class="kds-alert__meta" id="kdsAlertMeta" hidden></p>
+                <div id="kdsAlertBody"></div>
+                <div class="kds-alert__replies" id="kdsAlertReplies" hidden></div>
+            </div>
+            <div class="kds-alert__actions">
+                <button type="button" class="kds-bigbtn" id="kdsAlertSecondary" data-loader-manual hidden></button>
+                <button type="button" class="kds-bigbtn kds-bigbtn--primary" id="kdsAlertPrimary" data-loader-manual></button>
+            </div>
+            <button type="button" class="kds-alert__all" id="kdsAlertAll" data-loader-manual onclick="kdsAlertDismissAll()" hidden>Close all — notes stay in FOH notes</button>
+        </div>
+    </div>
 
     <!-- ── Cancel-before-prep modal ──────────────────────────────────── -->
     <div id="kds-cancel-modal" class="rh-modal" style="display:none;" role="dialog" aria-modal="true" aria-labelledby="kds-cancel-title">
@@ -509,6 +555,7 @@ $bootstrap['fingerprint'] = md5(
         let knownIds = new Set(state.tickets.map(t => t.id));
         let knownMessageIds = new Set((state.messages || []).map(m => m.id));
         let hasPolledMessages = false;
+        let _kdsRepliesPrimed = false;
         let lastFeedFingerprint = state.fingerprint || ''; /* seeded from PHP bootstrap — prevents spurious flash on first 500ms poll */
         /* Per-message reply drafts (preserved across the 8s auto-refresh) and a
            Set of FOH messages the cook has acknowledged on the ticket card so the
@@ -812,7 +859,8 @@ $bootstrap['fingerprint'] = md5(
             const otherLabel = otherPending > 0 ? `<div class="t-other-pending">${otherPending} item${otherPending>1?'s':''} at other station${otherPending>1?'s':''}</div>` : '';
             // Embedded FOH notes for this ticket — flash until staff click them.
             const ticketMsgs = (state.messages || []).filter(m => m.order_ref && m.order_ref === t.reference);
-            const unseenMsgs = ticketMsgs.filter(m => !_seenTicketMsgIds.has(parseInt(m.id, 10)));
+            /* Only FOH's notes can be unread; the station's own outgoing notes cannot. */
+            const unseenMsgs = ticketMsgs.filter(m => isInboundNote(m) && !_seenTicketMsgIds.has(parseInt(m.id, 10)) && !_kdsSeen.has('note:' + m.id));
             const flashClass = unseenMsgs.length ? ' has-foh-flash' : '';
             const rushClass = isRush ? ' is-rush' : '';
             const composerDraft = _composerDrafts[t.id] || '';
@@ -924,6 +972,7 @@ $bootstrap['fingerprint'] = md5(
             if (!t) return;
             (state.messages || []).filter(m => m.order_ref === t.reference).forEach(m => {
                 _seenTicketMsgIds.add(parseInt(m.id, 10));
+                kdsRememberSeen('note:' + m.id);
             });
             const card = document.querySelector(`.ticket[data-id="${ticketId}"]`);
             if (card) card.classList.remove('has-foh-flash');
@@ -1171,7 +1220,7 @@ $bootstrap['fingerprint'] = md5(
                 const id = el.id.replace(/^reply-|^ticket-reply-/, '');
                 if (id && el.value) _replyDrafts[id] = el.value;
             });
-            const rows = (state.messages || []).filter(m => (m.source || '') !== 'station');
+            const rows = kdsInboundNotes();
             const urgentCount = rows.filter(m => m.priority === 'urgent').length;
             count.textContent = rows.length;
             count.className = urgentCount ? 'station-message-count--urgent' : '';
@@ -1209,6 +1258,7 @@ $bootstrap['fingerprint'] = md5(
             </div>`;
             }).join('') : '<div class="station-empty-line">No active notes.</div>';
             updateTabTitle();
+            renderKdsNotes();
         }
 
         function highlightTicketByRef(ref) {
@@ -1367,20 +1417,9 @@ $bootstrap['fingerprint'] = md5(
                         const hasUrgent = freshData.some(m => m.priority === 'urgent');
                         /* One chime for the batch, pitched to the most severe note in it. */
                         if (soundOn) RHSounds.play(hasUrgent ? 'urgent' : 'normal');
-                        freshData.forEach(m => {
-                            /* Urgency is per note. Grading every note in the batch by the
-                               single worst one turned routine "table 4 allergy noted" chits
-                               into red URGENT cards, and staff stop trusting the colour. */
-                            const isUrgent = m.priority === 'urgent';
-                            const sndr = m.sent_by_name ? m.sent_by_name + ' (FOH)' : 'FOH';
-                            RHNotif.show({
-                                title: (isUrgent ? '⚠ URGENT from FOH' : 'FOH Note') + (m.order_ref ? ' · ' + m.order_ref : ''),
-                                body: m.message || '',
-                                type: isUrgent ? 'urgent' : 'info',
-                                source: sndr,
-                                sound: false,
-                            });
-                        });
+                        /* Urgency stays per note: grading every note in a batch by the worst
+                           one turned routine chits red, and staff stop trusting the colour. */
+                        freshData.forEach(m => kdsAlertPush(kdsAlertFromNote(m)));
                     }
                 }
                 knownMessageIds = nextMessageIds;
@@ -1413,6 +1452,8 @@ $bootstrap['fingerprint'] = md5(
                 };
                 lastFeedFingerprint = j.fingerprint || '';
                 render();
+                kdsAlertCheckReplies(!_kdsRepliesPrimed);
+                _kdsRepliesPrimed = true;
             } catch (e) {
                 /* swallow — keep last state */
             }
@@ -1701,8 +1742,346 @@ $bootstrap['fingerprint'] = md5(
             if (e.key === 'Escape') {
                 closeCancelModal();
                 close86Modal();
+                if (!kdsAlertIsOpen()) closeKdsNotes();
             }
         });
+
+        /* ── FOH alerts and notes window ────────────────────────────────────
+           A note from FOH, or FOH answering a note this station sent, opens one
+           large card in the middle of the board. It stays until the cook taps it
+           and re-chimes while it waits; several queue behind each other ("1 of 3").
+           Corner cards timed out while hands were busy, and the small dock panel was
+           easy to miss from across the pass. */
+        const KDS_ALERT_REMIND_MS = 20000;
+        const KDS_ALERT_MAX_REMINDERS = 6;
+        const KDS_NOTE_REPLIES = ['On it', '5 minutes', '10 minutes', 'Out of stock', 'Need clarification'];
+        const _kdsAlerts = [];
+        let _kdsAlertTimer = null;
+        let _kdsAlertReminders = 0;
+        let _kdsAlertShownKey = '';
+
+        /* Read-state survives a reload. It lived only in memory, so after every refresh
+           each ticket with a note on it started flashing "unread" again. */
+        const KDS_SEEN_KEY = 'rh_kds_seen_v1_' + STATION;
+        const _kdsSeen = (() => {
+            try {
+                return new Set(JSON.parse(localStorage.getItem(KDS_SEEN_KEY) || '[]').map(String));
+            } catch (e) {
+                return new Set();
+            }
+        })();
+
+        function kdsRememberSeen(key) {
+            if (_kdsSeen.has(String(key))) return;
+            _kdsSeen.add(String(key));
+            try {
+                localStorage.setItem(KDS_SEEN_KEY, JSON.stringify(Array.from(_kdsSeen).slice(-600)));
+            } catch (e) {
+                /* storage unavailable — read-state just won't survive a reload */
+            }
+        }
+
+        /* A note FOH sent to this station (as opposed to one this station sent). */
+        function isInboundNote(m) {
+            return !!m && (m.source || '') !== 'station' && !m.is_outbound;
+        }
+
+        function kdsInboundNotes() {
+            return (state.messages || []).filter(isInboundNote);
+        }
+
+        /* Notes this station sent that FOH has answered in the last few hours. */
+        function kdsAnsweredOwnNotes() {
+            return (state.messages || []).filter(m => !isInboundNote(m) && m.reply_message && parseInt(m.id, 10) > 0);
+        }
+
+        function kdsAlertIsOpen() {
+            const o = document.getElementById('kdsAlertOverlay');
+            return !!o && !o.hidden;
+        }
+
+        function kdsAlertPush(alert) {
+            if (!alert || _kdsAlerts.some(a => a.key === alert.key)) return;
+            if (alert.urgent && _kdsAlerts.length > 1) {
+                const at = _kdsAlerts.findIndex((a, i) => i > 0 && !a.urgent);
+                if (at > 0) _kdsAlerts.splice(at, 0, alert);
+                else _kdsAlerts.push(alert);
+            } else {
+                _kdsAlerts.push(alert);
+            }
+            kdsAlertRender();
+        }
+
+        /* Drop cards for notes answered elsewhere (the dock, a ticket, another screen). */
+        function kdsAlertPrune() {
+            const live = new Set(kdsInboundNotes().map(m => parseInt(m.id, 10)));
+            let changed = false;
+            for (let i = _kdsAlerts.length - 1; i >= 0; i--) {
+                if (_kdsAlerts[i].kind === 'note' && !live.has(_kdsAlerts[i].msgId)) {
+                    _kdsAlerts.splice(i, 1);
+                    changed = true;
+                }
+            }
+            if (changed) kdsAlertRender();
+        }
+
+        function kdsAlertScheduleReminder() {
+            clearTimeout(_kdsAlertTimer);
+            if (!_kdsAlerts.length || _kdsAlertReminders >= KDS_ALERT_MAX_REMINDERS) return;
+            _kdsAlertTimer = setTimeout(() => {
+                if (!_kdsAlerts.length) return;
+                _kdsAlertReminders++;
+                if (soundOn) RHSounds.play(_kdsAlerts[0].urgent ? 'urgent' : 'normal');
+                kdsAlertScheduleReminder();
+            }, KDS_ALERT_REMIND_MS);
+        }
+
+        function kdsAlertRender() {
+            const overlay = document.getElementById('kdsAlertOverlay');
+            if (!overlay) return;
+            const a = _kdsAlerts[0];
+            if (!a) {
+                overlay.hidden = true;
+                clearTimeout(_kdsAlertTimer);
+                _kdsAlertShownKey = '';
+                return;
+            }
+            document.getElementById('kdsAlertCard').className = 'kds-alert kds-alert--' + a.tone;
+            document.getElementById('kdsAlertIcon').className = 'fas ' + a.icon;
+            document.getElementById('kdsAlertKicker').textContent = a.kicker;
+            document.getElementById('kdsAlertTitle').textContent = a.title;
+            const meta = document.getElementById('kdsAlertMeta');
+            meta.textContent = a.meta || '';
+            meta.hidden = !a.meta;
+            document.getElementById('kdsAlertBody').innerHTML =
+                (a.quote ? `<p class="kds-alert__quote-label">${escHtml(a.quoteLabel || '')}</p><blockquote class="kds-alert__quote kds-alert__quote--muted">${escHtml(a.quote)}</blockquote>` : '') +
+                `<blockquote class="kds-alert__quote">${escHtml(a.message)}</blockquote>`;
+            const replies = document.getElementById('kdsAlertReplies');
+            if (a.kind === 'note') {
+                replies.innerHTML = '<span class="kds-alert__replies-label">Quick reply to FOH:</span>' +
+                    KDS_NOTE_REPLIES.map(r => `<button type="button" class="kds-chip" data-loader-manual onclick="kdsAlertReply(${escHtml(JSON.stringify(r))}, this)">${escHtml(r)}</button>`).join('');
+                replies.hidden = false;
+            } else {
+                replies.innerHTML = '';
+                replies.hidden = true;
+            }
+            const primary = document.getElementById('kdsAlertPrimary');
+            primary.innerHTML = `<i class="fas fa-check" aria-hidden="true"></i> ${escHtml(a.primaryLabel)}`;
+            primary.onclick = kdsAlertPrimary;
+            const secondary = document.getElementById('kdsAlertSecondary');
+            secondary.textContent = a.secondaryLabel || '';
+            secondary.hidden = !a.secondaryLabel;
+            secondary.onclick = kdsAlertSecondary;
+            const queue = document.getElementById('kdsAlertQueue');
+            queue.hidden = _kdsAlerts.length < 2;
+            queue.textContent = '1 of ' + _kdsAlerts.length;
+            document.getElementById('kdsAlertAll').hidden = _kdsAlerts.length < 2;
+
+            overlay.hidden = false;
+            if (_kdsAlertShownKey !== a.key) {
+                _kdsAlertShownKey = a.key;
+                _kdsAlertReminders = 0;
+                kdsAlertScheduleReminder();
+                if (!overlay.contains(document.activeElement)) setTimeout(() => primary.focus(), 30);
+            }
+        }
+
+        function kdsAlertNext() {
+            const a = _kdsAlerts.shift();
+            if (a && a.seenKey) kdsRememberSeen(a.seenKey);
+            kdsAlertRender();
+        }
+
+        function kdsAlertPrimary() {
+            const a = _kdsAlerts[0];
+            if (!a) return;
+            kdsAlertNext();
+            if (a.kind === 'note') ackStationMessage(a.msgId);
+        }
+
+        function kdsAlertSecondary() {
+            const a = _kdsAlerts[0];
+            if (!a) return;
+            kdsAlertNext();
+            if (a.kind === 'reply' && a.orderRef) highlightTicketByRef(a.orderRef);
+        }
+
+        async function kdsAlertReply(text, button) {
+            const a = _kdsAlerts[0];
+            if (!a || a.kind !== 'note') return;
+            document.querySelectorAll('#kdsAlertReplies button').forEach(b => { b.disabled = true; });
+            await replyToMessage(a.msgId, button, text);
+            const stillOpen = kdsInboundNotes().some(m => parseInt(m.id, 10) === a.msgId);
+            if (!stillOpen && _kdsAlerts[0] === a) kdsAlertNext();
+            else document.querySelectorAll('#kdsAlertReplies button').forEach(b => { b.disabled = false; });
+        }
+
+        /* Close every queued card. Notes stay in FOH notes until answered or dismissed. */
+        function kdsAlertDismissAll() {
+            _kdsAlerts.splice(0).forEach(a => { if (a.seenKey) kdsRememberSeen(a.seenKey); });
+            kdsAlertRender();
+        }
+
+        function kdsAlertFromNote(m) {
+            const urgent = m.priority === 'urgent';
+            return {
+                key: 'note:' + m.id,
+                kind: 'note',
+                msgId: parseInt(m.id, 10),
+                tone: urgent ? 'urgent' : 'note',
+                urgent,
+                icon: urgent ? 'fa-triangle-exclamation' : 'fa-comment-dots',
+                kicker: 'From ' + (m.sent_by_name || 'FOH') + (urgent ? ' · urgent' : ''),
+                title: m.order_ref ? 'Note about ' + m.order_ref : 'Note from FOH',
+                meta: m.order_ref ? kdsTicketWhere(m.order_ref) : '',
+                message: m.message || '',
+                primaryLabel: 'Got it',
+                secondaryLabel: 'Later'
+            };
+        }
+
+        function kdsAlertFromReply(m) {
+            return {
+                key: 'reply:' + m.id,
+                seenKey: 'reply:' + m.id,
+                kind: 'reply',
+                tone: 'reply',
+                urgent: false,
+                icon: 'fa-reply',
+                kicker: (m.replied_by_name || 'FOH') + ' replied',
+                title: m.order_ref ? 'FOH answered — ' + m.order_ref : 'FOH answered your note',
+                meta: m.order_ref ? kdsTicketWhere(m.order_ref) : '',
+                quoteLabel: 'You asked',
+                quote: m.message || '',
+                message: m.reply_message || '',
+                orderRef: m.order_ref || '',
+                primaryLabel: 'OK',
+                secondaryLabel: m.order_ref ? 'Show ticket' : ''
+            };
+        }
+
+        function kdsTicketWhere(ref) {
+            const t = (state.tickets || []).find(x => x.reference === ref);
+            if (!t) return '';
+            return [t.table_number ? 'Table ' + t.table_number : '', String(t.order_type || '').replace(/_/g, ' '), t.customer_name || '']
+                .filter(Boolean).join(' · ');
+        }
+
+        /* Called after every feed update: raise cards for FOH replies not yet seen. */
+        function kdsAlertCheckReplies(isFirstPoll) {
+            kdsAnsweredOwnNotes().forEach(m => {
+                const key = 'reply:' + m.id;
+                if (_kdsSeen.has(key)) return;
+                /* On the first load, replies that landed while the screen was off are
+                   marked read rather than replayed as a burst of stale cards. */
+                if (isFirstPoll) {
+                    kdsRememberSeen(key);
+                    return;
+                }
+                kdsAlertPush(kdsAlertFromReply(m));
+                if (soundOn) RHSounds.play('success');
+            });
+            kdsAlertPrune();
+        }
+
+        /* ── FOH notes window ── */
+        let _kdsNotesSig = '';
+
+        function kdsNotesIsOpen() {
+            const o = document.getElementById('kdsNotesOverlay');
+            return !!o && !o.hidden;
+        }
+
+        function openKdsNotes() {
+            const o = document.getElementById('kdsNotesOverlay');
+            if (!o) return;
+            o.hidden = false;
+            _kdsNotesSig = '';
+            renderKdsNotes();
+            kdsAnsweredOwnNotes().forEach(m => kdsRememberSeen('reply:' + m.id));
+            if (typeof closeKdsDrawer === 'function') closeKdsDrawer();
+        }
+
+        function closeKdsNotes() {
+            const o = document.getElementById('kdsNotesOverlay');
+            if (o) o.hidden = true;
+        }
+
+        function kdsUpdateNotesCount() {
+            const inbound = kdsInboundNotes();
+            const urgent = inbound.some(m => m.priority === 'urgent');
+            ['kdsNotesCount', 'kdsDrawerNotesCount'].forEach(id => {
+                const el = document.getElementById(id);
+                if (!el) return;
+                el.textContent = inbound.length ? String(inbound.length) : '';
+                el.hidden = !inbound.length;
+            });
+            const btn = document.getElementById('kdsNotesBtn');
+            if (btn) {
+                btn.classList.toggle('has-notes', inbound.length > 0);
+                btn.classList.toggle('has-urgent', urgent);
+            }
+        }
+
+        function renderKdsNotes() {
+            kdsUpdateNotesCount();
+            if (!kdsNotesIsOpen()) return;
+            const list = document.getElementById('kdsNotesList');
+            if (!list) return;
+            const inbound = kdsInboundNotes();
+            const answered = kdsAnsweredOwnNotes();
+            /* Rebuild only when the notes changed, so typing and taps are not lost to
+               the board's once-a-second refresh. */
+            const sig = JSON.stringify([inbound.map(m => [m.id, m.priority]), answered.map(m => [m.id, m.reply_message])]);
+            if (sig === _kdsNotesSig) return;
+            _kdsNotesSig = sig;
+            list.querySelectorAll('.kds-notes__input').forEach(el => {
+                const id = el.id.replace('notes-reply-', '');
+                if (id) _replyDrafts[id] = el.value;
+            });
+            if (!inbound.length && !answered.length) {
+                list.innerHTML = '<div class="kds-notes__empty"><i class="fas fa-comments"></i><strong>No notes from FOH</strong><span>Notes from the till appear here, and pop up on the board the moment they arrive.</span></div>';
+                return;
+            }
+            let html = '';
+            if (inbound.length) {
+                html += `<h3 class="kds-notes__section">Needs you <span>${inbound.length}</span></h3>` + inbound.map(m => {
+                    const id = parseInt(m.id, 10);
+                    const urgent = m.priority === 'urgent';
+                    return `<article class="kds-notes__card${urgent ? ' is-urgent' : ''}">
+                        <header class="kds-notes__head">
+                            <strong>${escHtml(m.sent_by_name || 'FOH')}</strong>
+                            ${urgent ? '<span class="kds-notes__tag">Urgent</span>' : ''}
+                            ${m.order_ref ? `<button type="button" class="kds-notes__ref" onclick="closeKdsNotes(); highlightTicketByRef(${escHtml(JSON.stringify(m.order_ref))})"><i class="fas fa-receipt"></i> ${escHtml(m.order_ref)}</button>` : ''}
+                            <time>${escHtml(fmtTime(m.created_at))}</time>
+                        </header>
+                        <p class="kds-notes__msg">${escHtml(m.message || '')}</p>
+                        <div class="kds-notes__actions">
+                            <button type="button" class="kds-bigbtn kds-bigbtn--primary" data-loader-manual onclick="ackStationMessage(${id}, this)"><i class="fas fa-check"></i> Got it</button>
+                            ${KDS_NOTE_REPLIES.map(r => `<button type="button" class="kds-chip" data-loader-manual onclick="replyToMessage(${id}, this, ${escHtml(JSON.stringify(r))})">${escHtml(r)}</button>`).join('')}
+                        </div>
+                        <div class="kds-notes__row">
+                            <input type="text" class="kds-notes__input" id="notes-reply-${id}" maxlength="255" placeholder="Type a reply…" value="${escHtml(_replyDrafts[id] || '')}"
+                                oninput="_replyDrafts[${id}] = this.value;"
+                                onkeydown="if(event.key==='Enter'){event.preventDefault();replyToMessage(${id}, null, this.value);}">
+                            <button type="button" class="kds-bigbtn" data-loader-manual onclick="replyToMessage(${id}, this, document.getElementById('notes-reply-${id}').value)"><i class="fas fa-paper-plane"></i> Send</button>
+                        </div>
+                    </article>`;
+                }).join('');
+            }
+            if (answered.length) {
+                html += '<h3 class="kds-notes__section">FOH answered your notes</h3>' + answered.map(m => `<article class="kds-notes__card is-answered">
+                        <header class="kds-notes__head">
+                            <strong>${escHtml(m.replied_by_name || 'FOH')}</strong>
+                            ${m.order_ref ? `<button type="button" class="kds-notes__ref" onclick="closeKdsNotes(); highlightTicketByRef(${escHtml(JSON.stringify(m.order_ref))})"><i class="fas fa-receipt"></i> ${escHtml(m.order_ref)}</button>` : ''}
+                            <time>${escHtml(fmtTime(m.replied_at))}</time>
+                        </header>
+                        <p class="kds-notes__asked">You: ${escHtml(m.message || '')}</p>
+                        <p class="kds-notes__msg">${escHtml(m.reply_message || '')}</p>
+                    </article>`).join('');
+            }
+            list.innerHTML = html;
+        }
 
         async function ackStationMessage(messageId, triggerButton = null) {
             const mid = parseInt(messageId, 10);
@@ -1801,7 +2180,10 @@ $bootstrap['fingerprint'] = md5(
         }
 
         function updateTabTitle() {
-            const rows = state.messages || [];
+            /* Only notes FROM FOH that are still waiting. This used to count every row in
+               the feed, including the station's own outgoing notes, which the FOH Notes
+               panel never shows — so the title announced notes nobody could find. */
+            const rows = kdsInboundNotes();
             const urgentCount = rows.filter(m => m.priority === 'urgent').length;
             const total = rows.length;
             const base = <?php echo json_encode($STATION_LABEL . ($site_name ? ' — ' . $site_name : '')); ?>;
@@ -2430,20 +2812,15 @@ $bootstrap['fingerprint'] = md5(
         RHPoll.every(poll, 1000);
 
         /* ---- Reminder: re-ring for old unacknowledged urgent messages every 2 minutes ---- */
+        /* Urgent FOH notes still unanswered after 90 seconds come back as the alert
+           card every two minutes. This used to count every urgent row in the feed,
+           including the station's own "ready for collection" pings to the till, so it
+           announced "URGENT notes need attention!" about notes the panel never showed. */
         RHPoll.every(() => {
-            if (!soundOn) return;
-            const rows = state.messages || [];
-            const oldUrgent = rows.filter(m => m.priority === 'urgent' && elapsedSeconds(m.created_at) > 90);
-            if (oldUrgent.length > 0) {
-                RHSounds.play('urgent');
-                RHNotif.show({
-                    title: `${oldUrgent.length} URGENT note${oldUrgent.length > 1 ? 's' : ''} need attention!`,
-                    body: 'These messages have been waiting over 90 seconds.',
-                    type: 'urgent',
-                    source: 'Reminder',
-                    sound: false,
-                });
-            }
+            const waiting = kdsInboundNotes().filter(m => m.priority === 'urgent' && elapsedSeconds(m.created_at) > 90);
+            if (!waiting.length) return;
+            waiting.forEach(m => kdsAlertPush(kdsAlertFromNote(m)));
+            if (soundOn) RHSounds.play('urgent');
         }, 120000);
 
         /* ---- Burger / drawer nav ---- */

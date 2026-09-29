@@ -420,25 +420,32 @@ function kds_ensure_station_messages_table(PDO $pdo): void
 function kds_recent_station_messages(PDO $pdo, string $station): array
 {
     kds_ensure_station_messages_table($pdo);
-    /* Mark messages as seen by the station on first retrieval. No age cap: it must cover
-     * exactly what the SELECT below returns, or an old unacknowledged message renders
+    /* Mark FOH notes as seen by the station on first retrieval. It must cover exactly the
+     * inbound rows the SELECT below returns, or an old unacknowledged note renders
      * permanently "unseen" because the marker skipped it while the list still showed it. */
-    $pdo->prepare("UPDATE station_messages SET seen_at = NOW() WHERE station = ? AND seen_at IS NULL AND is_acknowledged = 0")
+    $pdo->prepare("UPDATE station_messages SET seen_at = NOW() WHERE station = ? AND source <> 'station' AND seen_at IS NULL AND is_acknowledged = 0")
         ->execute([$station]);
-    /* An UNACKNOWLEDGED message is outstanding work and stays on the board however old it is —
-     * dropping it after 6 hours hid the notes nobody had dealt with, which are precisely the
-     * ones that still needed dealing with. The 6-hour recency window now applies only to the
-     * already-replied informational rows, which are just context once handled. */
+    /* Two kinds of row, with different lifetimes:
+     *  - Notes FROM FOH (source <> 'station') are outstanding work until the station
+     *    replies or dismisses them (is_acknowledged = 1), however old they are.
+     *  - Notes the station SENT to FOH (source = 'station') are only context for the
+     *    ticket thread, so they are bounded to the last 6 hours. They used to be
+     *    selected by "is_acknowledged = 0" too, but nothing ever acknowledges a
+     *    station's own outgoing note (FOH records its side in pos_acknowledged), so
+     *    every note a station had ever sent stayed in its feed forever: the tab title
+     *    read "[22 notes]" over an empty FOH Notes panel, and those rows filled the
+     *    LIMIT, pushing real FOH notes off the board. */
     $stmt = $pdo->prepare("SELECT id, station, message, sent_by, sent_by_name, source, priority, seen_at,
-            reply_message, replied_at, replied_by_name, order_id, order_ref, created_at
+            reply_message, replied_at, replied_by_name, order_id, order_ref, created_at,
+            COALESCE(pos_acknowledged, 0) AS pos_acknowledged
         FROM station_messages
-                WHERE station = ?
-                    AND (
-                                is_acknowledged = 0
-                                OR (source = 'station' AND reply_message IS NOT NULL AND created_at >= DATE_SUB(NOW(), INTERVAL 6 HOUR))
-                            )
-        ORDER BY priority DESC, created_at DESC, id DESC
-                LIMIT 25");
+        WHERE station = ?
+          AND (
+                (source <> 'station' AND is_acknowledged = 0)
+                OR (source = 'station' AND created_at >= DATE_SUB(NOW(), INTERVAL 6 HOUR))
+              )
+        ORDER BY (source <> 'station') DESC, priority DESC, created_at DESC, id DESC
+        LIMIT 40");
     $stmt->execute([$station]);
     return $stmt->fetchAll(PDO::FETCH_ASSOC);
 }
@@ -452,6 +459,7 @@ function kds_message_signature(array $messages): string
             (string)($message['seen_at'] ?? ''),
             (string)($message['replied_at'] ?? ''),
             substr(sha1((string)($message['reply_message'] ?? '')), 0, 10),
+            (string)($message['pos_acknowledged'] ?? ''),
         ]);
     }, $messages));
 }

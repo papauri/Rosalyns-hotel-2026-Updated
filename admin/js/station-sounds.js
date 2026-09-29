@@ -682,6 +682,10 @@
 
     function _browserNotify(opts, type) {
         if (typeof Notification === 'undefined' || Notification.permission !== 'granted') return;
+        /* Only when the screen is out of sight. Firing a Windows notification for an
+           alert already on screen filled the notification centre with entries for
+           cards that had come and gone - the "notifications I can't see" staff hit. */
+        if (!document.hidden) return;
         try {
             new Notification(opts.title || '', {
                 body: opts.body || '',
