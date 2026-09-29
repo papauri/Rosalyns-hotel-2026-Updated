@@ -3516,55 +3516,71 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
             <div class="modal-head modal-header">
                 <h3><i class="fas fa-paper-plane"></i> Station note</h3><button class="close modal-close" onclick="closeStationNoteModal()">&times;</button>
             </div>
+            <?php /* Ordered the way a cashier actually uses it: the message first,
+                      then one row of routing. It previously opened on four decisions
+                      — station, priority, order, and a thread panel reading "No order
+                      selected" — before reaching the box you type in. Nothing is
+                      removed: every control and id is still here, just ordered by how
+                      often it is touched, with the two that are usually left alone
+                      folded away. */ ?>
             <div class="modal-body">
-                <label>Send to</label>
-                <select id="stationNoteTarget">
-                    <option value="kitchen">Kitchen</option>
-                    <option value="bar">Bar</option>
-                    <option value="coffee_bar">Coffee Bar</option>
-                </select>
-                <label style="margin-top:10px;">Priority</label>
-                <div style="display:flex;gap:8px;margin-bottom:6px;">
-                    <label style="display:flex;align-items:center;gap:6px;cursor:pointer;padding:7px 14px;border:1px solid #ddd;border-radius:14px;font-size:13px;user-select:none;">
-                        <input type="radio" name="stationNotePriority" id="snPriorityNormal" value="normal" checked> Normal
-                    </label>
-                    <label id="snPriorityUrgentLabel" style="display:flex;align-items:center;gap:6px;cursor:pointer;padding:7px 14px;border:2px solid #c82333;border-radius:14px;font-size:13px;color:#c82333;font-weight:600;user-select:none;">
+                <label for="stationNoteText">Message</label>
+                <input type="text" id="stationNoteText" maxlength="255" placeholder="Table 5 needs extra napkins" autocomplete="off">
+                <div style="display:flex; gap:6px; flex-wrap:wrap; margin-top:8px;">
+                    <?php foreach (['Hold last order', 'Extra napkins', 'Guest allergy', 'Rush pickup', 'Call waiter', 'Table ready'] as $t): ?>
+                        <button type="button" onclick="addStationNoteChip('<?php echo htmlspecialchars($t, ENT_QUOTES); ?>')" style="padding:7px 10px; background:#f4efe9; border:1px solid #dccfc2; border-radius:14px; cursor:pointer; font-size:12px; color:#5e554d;"><?php echo htmlspecialchars($t); ?></button>
+                    <?php endforeach; ?>
+                </div>
+
+                <div style="display:flex; align-items:flex-end; gap:10px; margin-top:14px;">
+                    <div style="flex:1; min-width:0;">
+                        <label for="stationNoteTarget">Send to</label>
+                        <select id="stationNoteTarget" style="margin:0;">
+                            <option value="kitchen">Kitchen</option>
+                            <option value="bar">Bar</option>
+                            <option value="coffee_bar">Coffee Bar</option>
+                        </select>
+                    </div>
+                    <?php /* Normal is the default, so only the exception needs a control.
+                              Both radios are kept so sendStationNote() reads them unchanged;
+                              the normal one is simply not something to click. */ ?>
+                    <input type="radio" name="stationNotePriority" id="snPriorityNormal" value="normal" checked hidden>
+                    <label id="snPriorityUrgentLabel" style="display:flex;align-items:center;gap:7px;cursor:pointer;padding:9px 14px;border:2px solid #c82333;border-radius:10px;font-size:13px;color:#c82333;font-weight:700;user-select:none;white-space:nowrap;">
                         <input type="radio" name="stationNotePriority" id="snPriorityUrgent" value="urgent"> <i class="fas fa-exclamation-triangle"></i> Urgent
                     </label>
                 </div>
-                <label>Link to order <span style="font-weight:400;color:#9ca3af;">(optional)</span></label>
-                <select id="stationNoteOrderId" style="margin-bottom:8px;">
-                    <option value="">— No specific order —</option>
-                    <?php if ($lastOrderId && $lastOrderRef): ?>
-                        <option value="<?php echo (int)$lastOrderId; ?>" data-ref="<?php echo htmlspecialchars($lastOrderRef); ?>">Last order: <?php echo htmlspecialchars($lastOrderRef); ?></option>
-                    <?php endif; ?>
-                    <?php foreach ($openTabs as $ot): ?>
-                        <option value="<?php echo (int)$ot['id']; ?>" data-ref="<?php echo htmlspecialchars($ot['reference']); ?>">
-                            <?php
-                            $label = $ot['reference'];
-                            if (!empty($ot['table_number'])) $label .= ' · Table ' . $ot['table_number'];
-                            elseif (!empty($ot['customer_name'])) $label .= ' · ' . $ot['customer_name'];
-                            echo htmlspecialchars($label);
-                            ?>
-                        </option>
-                    <?php endforeach; ?>
-                </select>
-                <div id="stationNoteHistoryWrap" style="margin:2px 0 10px;border:1px solid #e5e7eb;border-radius:8px;background:#f8fafc;">
-                    <div style="padding:8px 10px;border-bottom:1px solid #e5e7eb;">
-                        <strong style="font-size:12px;color:#4b5563;display:flex;align-items:center;gap:6px;"><i class="fas fa-message"></i> Order station thread</strong>
-                        <div id="stationNoteHistoryMeta" style="margin-top:4px;font-size:11px;color:#6b7280;">Select an order to view station messages received and sent.</div>
+
+                <details id="stationNoteOrderDetails" style="margin-top:12px;border:1px solid #e6ded1;border-radius:8px;background:#fbf8f4;">
+                    <summary style="padding:9px 11px;cursor:pointer;font-size:12.5px;font-weight:600;color:#5e554d;list-style:none;">
+                        <i class="fas fa-receipt"></i> Attach to an order &amp; see its thread
+                    </summary>
+                    <div style="padding:0 11px 11px;">
+                        <select id="stationNoteOrderId" style="margin-bottom:8px;">
+                            <option value="">— No specific order —</option>
+                            <?php if ($lastOrderId && $lastOrderRef): ?>
+                                <option value="<?php echo (int)$lastOrderId; ?>" data-ref="<?php echo htmlspecialchars($lastOrderRef); ?>">Last order: <?php echo htmlspecialchars($lastOrderRef); ?></option>
+                            <?php endif; ?>
+                            <?php foreach ($openTabs as $ot): ?>
+                                <option value="<?php echo (int)$ot['id']; ?>" data-ref="<?php echo htmlspecialchars($ot['reference']); ?>">
+                                    <?php
+                                    $label = $ot['reference'];
+                                    if (!empty($ot['table_number'])) $label .= ' · Table ' . $ot['table_number'];
+                                    elseif (!empty($ot['customer_name'])) $label .= ' · ' . $ot['customer_name'];
+                                    echo htmlspecialchars($label);
+                                    ?>
+                                </option>
+                            <?php endforeach; ?>
+                        </select>
+                        <div id="stationNoteHistoryWrap" style="border:1px solid #e6ded1;border-radius:8px;background:#fffdfb;">
+                            <div style="padding:8px 10px;border-bottom:1px solid #eae1d8;">
+                                <div id="stationNoteHistoryMeta" style="font-size:11px;color:#7a6f63;">Pick an order to see what has been sent and received about it.</div>
+                            </div>
+                            <div id="stationNoteHistoryList" style="max-height:170px;overflow-y:auto;padding:8px 10px;">
+                                <div style="font-size:12px;color:#a9a093;">No order selected.</div>
+                            </div>
+                        </div>
                     </div>
-                    <div id="stationNoteHistoryList" style="max-height:170px;overflow-y:auto;padding:8px 10px;">
-                        <div style="font-size:12px;color:#9ca3af;">No order selected.</div>
-                    </div>
-                </div>
-                <label>Message</label>
-                <input type="text" id="stationNoteText" maxlength="255" placeholder="Table 5 needs extra napkins">
-                <div style="display:flex; gap:6px; flex-wrap:wrap; margin-top:10px;">
-                    <?php foreach (['Hold last order', 'Extra napkins', 'Guest allergy', 'Rush pickup', 'Call waiter', 'Table ready'] as $t): ?>
-                        <button type="button" onclick="addStationNoteChip('<?php echo htmlspecialchars($t, ENT_QUOTES); ?>')" style="padding:7px 10px; background:#f0f0f0; border:1px solid #ddd; border-radius:14px; cursor:pointer; font-size:12px;"><?php echo htmlspecialchars($t); ?></button>
-                    <?php endforeach; ?>
-                </div>
+                </details>
             </div>
             <div class="modal-foot modal-footer">
                 <button type="button" class="btn-cancel" onclick="closeStationNoteModal()">Cancel</button>
@@ -5085,6 +5101,7 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
             if (textEl) textEl.value = '';
             if (orderEl && presetOrderId) orderEl.value = String(presetOrderId);
             loadStationNoteOrderHistory(orderEl?.value || '');
+            if (typeof window.syncStationNoteOrderDetails === 'function') window.syncStationNoteOrderDetails();
             document.getElementById('stationNoteOverlay').classList.add('show');
             setTimeout(() => textEl?.focus(), 60);
         }
@@ -5153,6 +5170,14 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
             document.getElementById('stationNoteOrderId')?.addEventListener('change', e => {
                 loadStationNoteOrderHistory(e.target?.value || '');
             });
+            /* The order picker is folded away by default, but when the modal is
+               opened from a tab the order is already chosen — in that case show the
+               thread rather than hiding the context behind a disclosure. */
+            window.syncStationNoteOrderDetails = function () {
+                const d = document.getElementById('stationNoteOrderDetails');
+                const sel = document.getElementById('stationNoteOrderId');
+                if (d && sel && sel.value) d.open = true;
+            };
             document.getElementById('stationNoteText')?.addEventListener('keydown', e => {
                 if (e.key === 'Enter') {
                     e.preventDefault();
