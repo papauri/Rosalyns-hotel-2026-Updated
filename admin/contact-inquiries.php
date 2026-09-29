@@ -205,7 +205,7 @@ $site_name = getSetting('site_name');
     </div>
     <?php endif; ?>
 
-    <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;margin-bottom:20px;">
+    <div class="page-header" style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;margin-bottom:20px;">
         <h2 class="section-title" style="margin:0;">
             <i class="fas fa-envelope"></i> Contact Inquiries
             <?php if ($new_count > 0): ?>

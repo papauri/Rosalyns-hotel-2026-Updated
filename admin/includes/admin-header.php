@@ -506,7 +506,7 @@ if ($_admin_back_target !== null) {
         document.body.classList.add('admin-dynamic-layout');
     }
 </script>
-<script src="js/admin-page-intro.js" defer></script>
+<script src="js/admin-page-intro.js?v=<?php echo @filemtime(__DIR__ . '/../js/admin-page-intro.js'); ?>" defer></script>
 <script src="js/admin-spa.js" defer></script>
 
 <?php /* Help FAB — rendered here, outside #rh-admin-page, so it survives SPA

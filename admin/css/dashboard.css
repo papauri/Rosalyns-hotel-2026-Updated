@@ -857,3 +857,34 @@ body.dashboard-insight-open {
     }
 }
 
+/* Phones: the guides become one swipeable row of chips. As a one-per-row list
+   (forced by the shared responsive grid rules) they pushed the day's figures a
+   full screen down, so the first thing staff saw on a phone was documentation. */
+@media (max-width: 640px) {
+    body #rh-admin-page .guide-menu-grid {
+        display: flex !important;
+        grid-template-columns: none !important;
+        flex-wrap: nowrap;
+        gap: 8px !important;
+        overflow-x: auto;
+        overscroll-behavior-x: contain;
+        scroll-snap-type: x proximity;
+        padding-bottom: 6px;
+        margin-bottom: 16px;
+        -webkit-overflow-scrolling: touch;
+        scrollbar-width: none;
+    }
+
+    body #rh-admin-page .guide-menu-grid::-webkit-scrollbar {
+        display: none;
+    }
+
+    body #rh-admin-page .guide-menu-grid .guide-menu-btn {
+        flex: 0 0 auto;
+        min-height: 44px;
+        padding: 0 14px;
+        border-radius: 999px;
+        white-space: nowrap;
+        scroll-snap-align: start;
+    }
+}

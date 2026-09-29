@@ -2790,3 +2790,61 @@ body.modal-open {
     gap: 10px;
     margin-top: 4px;
 }
+
+/* Phones: the header controls (network pill, password key, Logout, menu) used to
+   take ~270px of a 360px screen, squeezing the hotel name to nothing and clipping
+   its icon. Below 480px the network status shows as its coloured dot and the
+   buttons as icons, so the name has room. */
+@media (max-width: 480px) {
+    .admin-header {
+        padding: 0 10px !important;
+        gap: 6px !important;
+    }
+
+    .admin-header .admin-header-brand {
+        flex: 1 1 auto;
+        min-width: 0;
+        gap: 8px;
+        overflow: hidden;
+    }
+
+    .admin-header .admin-header-brand i {
+        flex-shrink: 0;
+    }
+
+    .admin-header .admin-header-brand h1 {
+        max-width: none !important;
+        font-size: 14px !important;
+    }
+
+    .admin-header .user-info {
+        gap: 6px !important;
+    }
+
+    .admin-header #rhConnPill {
+        padding: 0 !important;
+        width: 32px;
+        height: 32px;
+        justify-content: center;
+    }
+
+    .admin-header #rhConnLabel {
+        position: absolute;
+        width: 1px;
+        height: 1px;
+        overflow: hidden;
+        clip: rect(0 0 0 0);
+    }
+
+    .admin-header .btn-logout {
+        margin-right: 0 !important;
+        min-width: 40px;
+        min-height: 40px;
+        padding: 0 !important;
+        justify-content: center;
+    }
+
+    .admin-header .btn-logout span {
+        display: none;
+    }
+}

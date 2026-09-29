@@ -9,22 +9,30 @@
     box-sizing: border-box;
 }
 
+/* The card is centred with margin:auto inside a scrollable flex body, not with
+   align-items:center under overflow:hidden. That combination pushed the top and
+   bottom of the card off-screen whenever it was taller than the viewport — a
+   phone, landscape, or any screen with the keyboard open — and made them
+   unreachable, which hid the Sign In button on small screens. */
 body {
     margin: 0;
     font-family: 'Jost', sans-serif;
     background: linear-gradient(135deg, var(--auth-deep-navy) 0%, var(--auth-navy) 50%, #252525 100%);
     min-height: 100vh;
+    min-height: 100dvh;
     display: flex;
-    align-items: center;
-    justify-content: center;
     padding: 20px;
+    padding: max(20px, env(safe-area-inset-top)) max(16px, env(safe-area-inset-right)) max(20px, env(safe-area-inset-bottom)) max(16px, env(safe-area-inset-left));
     position: relative;
-    overflow: hidden;
+    overflow-x: hidden;
+    overflow-y: auto;
 }
 
+/* Fixed, so the drifting glow never adds scroll length or width. */
 body::before {
     content: '';
-    position: absolute;
+    position: fixed;
+    pointer-events: none;
     top: -50%;
     left: -50%;
     width: 200%;
@@ -42,6 +50,7 @@ body::before {
 .login-container {
     width: 100%;
     max-width: 440px;
+    margin: auto;
     position: relative;
     z-index: 1;
 }
@@ -336,12 +345,41 @@ body::before {
 
 @media (max-width: 480px) {
     .login-card {
-        padding: 36px 24px;
+        padding: 32px 22px;
         border-radius: 20px;
+    }
+
+    .login-header {
+        margin-bottom: 26px;
+    }
+
+    .login-header .logo {
+        width: 64px;
+        height: 64px;
+        margin-bottom: 14px;
     }
 
     .login-header h1 {
         font-size: 28px;
+    }
+}
+
+/* Short screens (landscape phones, keyboard open): tighten the vertical rhythm so
+   the form and Sign In fit without scrolling where possible. */
+@media (max-height: 640px) {
+    .login-card {
+        padding-top: 24px;
+        padding-bottom: 24px;
+    }
+
+    .login-header {
+        margin-bottom: 18px;
+    }
+
+    .login-header .logo {
+        width: 52px;
+        height: 52px;
+        margin-bottom: 10px;
     }
 }
 

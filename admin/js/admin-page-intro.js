@@ -2,7 +2,42 @@
     'use strict';
 
     const ROOT_ID = 'rh-admin-page';
-    const DEFAULT_SUBTITLE = 'Use this page to monitor activity and manage records.';
+    /* One line saying what each page is for. Pages not listed get no subtitle:
+       the old catch-all ("Use this page to monitor activity and manage records.")
+       appeared on every screen, told staff nothing, and cost a line of height on
+       phones where the content already starts below the fold. */
+    const PAGE_SUBTITLES = {
+        'dashboard.php': "Today's arrivals, departures and what needs attention.",
+        'bookings.php': 'Every room booking — search, filter and open one to manage it.',
+        'create-booking.php': 'Take a new room booking in six short steps.',
+        'calendar.php': 'Room occupancy by day.',
+        'tentative-bookings.php': 'Holds that expire unless confirmed.',
+        'room-dashboard.php': 'Live status of every room.',
+        'room-management.php': 'Room types, prices and what guests see online.',
+        'individual-rooms.php': 'Each physical room and its current state.',
+        'housekeeping.php': 'Cleaning tasks by room and who is on them.',
+        'room-maintenance.php': 'Repairs and scheduled maintenance.',
+        'blocked-dates.php': 'Dates rooms cannot be booked.',
+        'payments.php': 'Every payment received, refunded or credited.',
+        'payment-add.php': 'Record a payment against a booking or order.',
+        'invoices.php': 'Invoices issued to guests.',
+        'receipts.php': 'Receipts issued for payments.',
+        'credit-notes.php': 'Credits issued against invoices.',
+        'quotations.php': 'Quotes sent to guests.',
+        'accounting-dashboard.php': 'Revenue, balances and takings at a glance.',
+        'end-of-day-report.php': "The day's figures for closing.",
+        'reports.php': 'Performance across rooms, restaurant and gym.',
+        'pos-accounting.php': 'Restaurant takings by cashier and tender.',
+        'restaurant-tables.php': 'Tables, who is seated and open bills.',
+        'menu-management.php': 'Menu items, prices and availability.',
+        'stock-dashboard.php': 'Stock levels and what needs reordering.',
+        'user-management.php': 'Staff accounts and what each can access.',
+        'gym-members.php': 'Gym members and their memberships.'
+    };
+    function pageSubtitle() {
+        const page = (location.pathname.split('/').pop() || '').toLowerCase();
+        return PAGE_SUBTITLES[page] || '';
+    }
 
     const HEADER_SELECTORS = [
         '.rh-admin-page-header',
@@ -12,7 +47,8 @@
         '.page-header-row',
         '.admin-page-hero',
         '.acct-page-header',
-        '.cn-page-header'
+        '.cn-page-header',
+        '.dashboard-header'
     ];
 
     const TITLE_SELECTORS = [
@@ -221,16 +257,73 @@
         });
     }
 
+    /* Breadth-first over the first couple of levels. Many pages wrap their header
+       in a page container (e.g. .content > .create-booking-container > .page-header);
+       checking direct children only missed those, so a second, generated header was
+       stacked above the page's own and the title appeared twice. */
     function findExplicitHeaderContainer(root) {
-        const children = Array.from(root.children).filter((node) => node instanceof HTMLElement);
-        for (let i = 0; i < children.length; i += 1) {
-            const child = children[i];
-            if (HEADER_SELECTORS.some((selector) => child.matches(selector)) && !isHeadingElement(child)) {
+        const queue = Array.from(root.children).filter((node) => node instanceof HTMLElement).map((node) => [node, 0]);
+        let scanned = 0;
+        while (queue.length > 0 && scanned < 30) {
+            const [child, depth] = queue.shift();
+            scanned += 1;
+            if (child.matches('script, style, form, table, dialog, .modal, [role="dialog"], ' + TOP_SKIP_SELECTORS)) {
+                continue;
+            }
+            if (isHeaderLike(child)) {
                 return child;
+            }
+            if (depth < 2) {
+                Array.from(child.children).forEach((node) => {
+                    if (node instanceof HTMLElement) queue.push([node, depth + 1]);
+                });
             }
         }
 
         return null;
+    }
+
+    /* A known header class, or a page's own "<name>-head" / "<name>-header" block that
+       holds its h1 (qt-header, deals-head, restaurant-tables-head, ...). Without the
+       second form each bespoke header got a generated duplicate stacked above it. */
+    function isHeaderLike(el) {
+        if (isHeadingElement(el)) {
+            return false;
+        }
+        if (HEADER_SELECTORS.some((selector) => el.matches(selector))) {
+            return true;
+        }
+        const cls = typeof el.className === 'string' ? el.className : '';
+        if (/(^|\s)(card|modal|panel|table|widget|dialog|drawer|section|tab|accordion)-(head|header)(\s|$)/i.test(cls)) {
+            return false;
+        }
+        return /(^|\s)[a-z0-9_-]+-(head|header)(\s|$)/i.test(cls)
+            && !!el.querySelector(':scope > h1, :scope > div > h1, :scope > h2, :scope > div > h2');
+    }
+
+    /* The shared header adds a "Back to …" button above every sub-page. Pages that
+       also render their own link back to the same place showed two (or three) of
+       them; keep the shared one and drop the page's duplicate. */
+    function dedupeBackLinks() {
+        const page = document.getElementById(ROOT_ID);
+        if (!(page instanceof HTMLElement)) {
+            return;
+        }
+        const shared = page.querySelector(':scope > .content > a.btn-secondary.btn-sm[aria-label^="Back to"]');
+        if (!(shared instanceof HTMLAnchorElement)) {
+            return;
+        }
+        const target = (shared.pathname || '').split('/').pop();
+        if (!target) {
+            return;
+        }
+        page.querySelectorAll('a[href]').forEach((link) => {
+            if (link === shared || !(link instanceof HTMLAnchorElement)) return;
+            if ((link.pathname || '').split('/').pop() !== target) return;
+            if (!link.querySelector('.fa-arrow-left') && !/^\s*back/i.test(link.textContent || '')) return;
+            if (link.closest('nav, .admin-nav, table, .modal, dialog, form')) return;
+            link.remove();
+        });
     }
 
     function findTopTitleCandidate(root, header) {
@@ -339,12 +432,13 @@
         title.className = 'rh-admin-page-title';
         title.textContent = titleText;
 
-        const subtitle = document.createElement('p');
-        subtitle.className = 'rh-admin-page-subtitle rh-admin-page-subtitle--generated';
-        subtitle.textContent = subtitleText;
-
         intro.appendChild(title);
-        intro.appendChild(subtitle);
+        if (subtitleText) {
+            const subtitle = document.createElement('p');
+            subtitle.className = 'rh-admin-page-subtitle rh-admin-page-subtitle--generated';
+            subtitle.textContent = subtitleText;
+            intro.appendChild(subtitle);
+        }
         header.appendChild(intro);
 
         if (root.firstElementChild) {
@@ -386,12 +480,13 @@
             return;
         }
 
+        dedupeBackLinks();
         let header = findExplicitHeaderContainer(root);
         const sourceTitle = header ? findTitleElement(header) : findTopTitleCandidate(root, header);
         const canonicalTitle = resolveCanonicalTitle(sourceTitle);
 
         if (!(header instanceof HTMLElement)) {
-            createHeader(root, canonicalTitle, DEFAULT_SUBTITLE);
+            createHeader(root, canonicalTitle, pageSubtitle());
             if (shouldRemoveOriginalTitle(root, sourceTitle, canonicalTitle)) {
                 sourceTitle.remove();
             }
@@ -400,7 +495,7 @@
         }
 
         if (isHeadingElement(header)) {
-            const repairedHeader = createHeader(root, canonicalTitle, DEFAULT_SUBTITLE);
+            const repairedHeader = createHeader(root, canonicalTitle, pageSubtitle());
             if (shouldRemoveOriginalTitle(root, header, canonicalTitle)) {
                 header.remove();
             }
@@ -439,24 +534,34 @@
             intro.insertBefore(title, intro.firstElementChild || null);
         }
 
-        if (!(subtitle instanceof HTMLElement)) {
+        if (!(subtitle instanceof HTMLElement) && pageSubtitle()) {
             subtitle = document.createElement('p');
             subtitle.className = 'rh-admin-page-subtitle rh-admin-page-subtitle--generated';
-            subtitle.textContent = DEFAULT_SUBTITLE;
+            subtitle.textContent = pageSubtitle();
         }
 
-        if (!intro.contains(subtitle)) {
+        if (subtitle instanceof HTMLElement && !intro.contains(subtitle)) {
             intro.appendChild(subtitle);
         }
 
         title.classList.remove('section-title', 'page-title');
         title.classList.add('rh-admin-page-title');
+        /* Keep live badges (e.g. "3 new") that pages put inside their heading; only
+           icons are dropped when the title text is standardised. */
+        const titleExtras = Array.from(title.children).filter((node) => node.tagName !== 'I' && node.tagName !== 'svg');
         title.textContent = canonicalTitle;
+        titleExtras.forEach((node) => title.appendChild(node));
 
-        subtitle.classList.add('rh-admin-page-subtitle');
-        if (cleanText(subtitle.textContent) === '') {
-            subtitle.textContent = DEFAULT_SUBTITLE;
-            subtitle.classList.add('rh-admin-page-subtitle--generated');
+        if (subtitle instanceof HTMLElement) {
+            subtitle.classList.add('rh-admin-page-subtitle');
+            if (cleanText(subtitle.textContent) === '') {
+                if (pageSubtitle()) {
+                    subtitle.textContent = pageSubtitle();
+                    subtitle.classList.add('rh-admin-page-subtitle--generated');
+                } else {
+                    subtitle.remove();
+                }
+            }
         }
 
         root.dataset.rhPageHeaderNormalized = '1';
