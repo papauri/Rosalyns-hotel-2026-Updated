@@ -427,7 +427,8 @@ function kds_recent_station_messages(PDO $pdo, string $station): array
         ->execute([$station]);
     /* Two kinds of row, with different lifetimes:
      *  - Notes FROM FOH (source <> 'station') are outstanding work until the station
-     *    replies or dismisses them (is_acknowledged = 1), however old they are.
+     *    replies or dismisses them (is_acknowledged = 1), however old they are. Once
+     *    answered they stay for 6 hours as history for the station's FOH chat.
      *  - Notes the station SENT to FOH (source = 'station') are only context for the
      *    ticket thread, so they are bounded to the last 6 hours. They used to be
      *    selected by "is_acknowledged = 0" too, but nothing ever acknowledges a
@@ -437,15 +438,16 @@ function kds_recent_station_messages(PDO $pdo, string $station): array
      *    LIMIT, pushing real FOH notes off the board. */
     $stmt = $pdo->prepare("SELECT id, station, message, sent_by, sent_by_name, source, priority, seen_at,
             reply_message, replied_at, replied_by_name, order_id, order_ref, created_at,
+            COALESCE(is_acknowledged, 0) AS is_acknowledged,
             COALESCE(pos_acknowledged, 0) AS pos_acknowledged
         FROM station_messages
         WHERE station = ?
           AND (
-                (source <> 'station' AND is_acknowledged = 0)
+                (source <> 'station' AND (is_acknowledged = 0 OR created_at >= DATE_SUB(NOW(), INTERVAL 6 HOUR)))
                 OR (source = 'station' AND created_at >= DATE_SUB(NOW(), INTERVAL 6 HOUR))
               )
-        ORDER BY (source <> 'station') DESC, priority DESC, created_at DESC, id DESC
-        LIMIT 40");
+        ORDER BY (source <> 'station' AND is_acknowledged = 0) DESC, priority DESC, created_at DESC, id DESC
+        LIMIT 60");
     $stmt->execute([$station]);
     return $stmt->fetchAll(PDO::FETCH_ASSOC);
 }
@@ -460,6 +462,7 @@ function kds_message_signature(array $messages): string
             (string)($message['replied_at'] ?? ''),
             substr(sha1((string)($message['reply_message'] ?? '')), 0, 10),
             (string)($message['pos_acknowledged'] ?? ''),
+            (string)($message['is_acknowledged'] ?? ''),
         ]);
     }, $messages));
 }

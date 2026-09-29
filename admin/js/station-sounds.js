@@ -12,8 +12,14 @@
     'use strict';
 
     /* ─── Constants ────────────────────────────────────────────────────── */
-    const LS_KEY = 'rh_station_sounds_v2';
+    /* v3: new default sounds. Volume and mute carry over from v2; the sound
+       choices reset once so every screen picks up the new tones. */
+    const LS_KEY = 'rh_station_sounds_v3';
+    const LS_KEY_PREV = 'rh_station_sounds_v2';
     const NORMAL_SOUNDS = [
+        { id: 'message_pop', label: 'Message Pop (default)' },
+        { id: 'marimba', label: 'Marimba' },
+        { id: 'glass', label: 'Glass Ping' },
         { id: 'chime', label: 'Chime' },
         { id: 'bell', label: 'Bell' },
         { id: 'double_tap', label: 'Double Tap' },
@@ -24,6 +30,8 @@
         { id: 'water_drop', label: 'Water Drop' },
     ];
     const URGENT_SOUNDS = [
+        { id: 'priority_ring', label: 'Priority Ring (default)' },
+        { id: 'urgent_marimba', label: 'Urgent Marimba' },
         { id: 'alarm', label: 'Alarm' },
         { id: 'siren', label: 'Siren' },
         { id: 'rapid_beep', label: 'Rapid Beep' },
@@ -35,14 +43,22 @@
 
     /* ─── State ─────────────────────────────────────────────────────────── */
     let _ctx = null;
-    let _settings = { enabled: true, volume: 0.75, normal: 'chime', urgent: 'alarm' };
+    let _settings = { enabled: true, volume: 0.75, normal: 'message_pop', urgent: 'priority_ring' };
     let _toggleCbs = [];
     let _interactionUnlocked = false;
 
     /* ─── Persistence ───────────────────────────────────────────────────── */
     function _load() {
         try {
-            const s = JSON.parse(localStorage.getItem(LS_KEY) || '{}');
+            const cur = localStorage.getItem(LS_KEY);
+            if (!cur) {
+                /* First load on v3: keep the operator's volume and mute, not the old tones. */
+                const prev = JSON.parse(localStorage.getItem(LS_KEY_PREV) || '{}');
+                if (typeof prev.enabled === 'boolean') _settings.enabled = prev.enabled;
+                if (typeof prev.volume === 'number' && prev.volume >= 0 && prev.volume <= 1) _settings.volume = prev.volume;
+                return;
+            }
+            const s = JSON.parse(cur || '{}');
             if (typeof s.enabled === 'boolean') _settings.enabled = s.enabled;
             if (typeof s.volume === 'number' && s.volume >= 0 && s.volume <= 1) _settings.volume = s.volume;
             if (NORMAL_SOUNDS.find(x => x.id === s.normal)) _settings.normal = s.normal;
@@ -109,8 +125,47 @@
         osc.start(t); osc.stop(t + dur + 0.05);
     }
 
+    /* Struck-bell voice: a sine fundamental with a quieter octave partial, a very
+       fast attack and a natural exponential decay, run through a gentle low-pass
+       so it reads as warm rather than beepy. The new default tones are built on it. */
+    function _pluck(ctx, freq, t, dur, vol) {
+        const v = vol * _settings.volume;
+        const out = ctx.createGain();
+        const lp = ctx.createBiquadFilter();
+        lp.type = 'lowpass';
+        lp.frequency.value = Math.min(9000, freq * 5);
+        out.connect(lp); lp.connect(ctx.destination);
+        out.gain.setValueAtTime(0.0001, t);
+        out.gain.exponentialRampToValueAtTime(Math.max(0.0002, v), t + 0.008);
+        out.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+        [[1, 1], [2, 0.28], [3, 0.08]].forEach(([mult, level]) => {
+            const osc = ctx.createOscillator();
+            const g = ctx.createGain();
+            osc.type = 'sine';
+            osc.frequency.value = freq * mult;
+            g.gain.value = level;
+            osc.connect(g); g.connect(out);
+            osc.start(t); osc.stop(t + dur + 0.05);
+        });
+    }
+
     /* ─── Normal sound library ──────────────────────────────────────────── */
     const _normal = {
+        /* Default: a short upward "pop" into a bright two-note ping — the shape
+           people already read as "you have a message". */
+        message_pop(ctx, t) {
+            _sweep(ctx, 'sine', 420, 780, t, 0.07, 0.35);
+            _pluck(ctx, 1319, t + 0.06, 0.32, 0.42);
+            _pluck(ctx, 1760, t + 0.15, 0.42, 0.34);
+        },
+        marimba(ctx, t) {
+            _pluck(ctx, 784, t, 0.35, 0.55);
+            _pluck(ctx, 1047, t + 0.13, 0.45, 0.5);
+        },
+        glass(ctx, t) {
+            _pluck(ctx, 2093, t, 0.7, 0.32);
+            _pluck(ctx, 2637, t + 0.09, 0.6, 0.22);
+        },
         chime(ctx, t) {
             _tone(ctx, 'sine', 880, t, 0.40, 0.55);
             _tone(ctx, 'sine', 1175, t + 0.22, 0.45, 0.50);
@@ -147,6 +202,17 @@
 
     /* ─── Urgent sound library ──────────────────────────────────────────── */
     const _urgent = {
+        /* Default: three quick rising bell pairs — unmistakably "look now", carries
+           over a kitchen, but without the square-wave harshness of the old alarm. */
+        priority_ring(ctx, t) {
+            [0, 0.42, 0.84].forEach(d => {
+                _pluck(ctx, 988, t + d, 0.26, 0.7);
+                _pluck(ctx, 1319, t + d + 0.12, 0.3, 0.7);
+            });
+        },
+        urgent_marimba(ctx, t) {
+            [659, 880, 1047, 1319, 1047, 1319].forEach((f, i) => _pluck(ctx, f, t + i * 0.11, 0.24, 0.7));
+        },
         alarm(ctx, t) {
             [0, 0.14, 0.28, 0.42, 0.56].forEach(d => _tone(ctx, 'square', 1400, t + d, 0.10, 0.80));
         },
@@ -194,9 +260,9 @@
             if (!ctx || ctx.state !== 'running') return false;
             _lastPlayedAt[kind] = stamp;
             const now = ctx.currentTime;
-            if (kind === 'urgent') (_urgent[_settings.urgent] || _urgent.alarm)(ctx, now);
+            if (kind === 'urgent') (_urgent[_settings.urgent] || _urgent.priority_ring)(ctx, now);
             else if (kind === 'success') _successCue(ctx, now);
-            else (_normal[_settings.normal] || _normal.chime)(ctx, now);
+            else (_normal[_settings.normal] || _normal.message_pop)(ctx, now);
             return true;
         } catch (e) { /* audio blocked */ }
         return false;
@@ -206,8 +272,8 @@
        screen "a ticket arrived" and "you cleared a ticket" must not sound alike —
        staff act on the first and ignore the second. */
     function _successCue(ctx, t) {
-        _tone(ctx, 'sine', 784, t, 0.14, 0.34);
-        _tone(ctx, 'sine', 1175, t + 0.12, 0.22, 0.30);
+        _pluck(ctx, 1047, t, 0.22, 0.3);
+        _pluck(ctx, 1568, t + 0.09, 0.3, 0.26);
     }
 
     function preview(type, id) {
@@ -216,8 +282,8 @@
             const ctx = _getCtx();
             if (!ctx || ctx.state !== 'running') return;
             const now = ctx.currentTime;
-            if (type === 'urgent') (_urgent[id] || _urgent.alarm)(ctx, now);
-            else (_normal[id] || _normal.chime)(ctx, now);
+            if (type === 'urgent') (_urgent[id] || _urgent.priority_ring)(ctx, now);
+            else (_normal[id] || _normal.message_pop)(ctx, now);
         } catch (e) { }
     }
 
@@ -407,47 +473,55 @@
         s.id = 'rh-notif-style';
         s.textContent = `
 :root{--rh-notif-top:16px;--rh-notif-right:16px;--rh-notif-bottom:16px;}
-#rh-notif-stack{position:fixed;top:var(--rh-notif-top);right:var(--rh-notif-right);z-index:99993;display:flex;flex-direction:column;gap:10px;pointer-events:none;width:340px;max-width:calc(100vw - 32px);max-height:calc(100vh - var(--rh-notif-top) - var(--rh-notif-bottom));}
-.rh-nc{position:relative;background:#1a1e2a;border:1px solid #2a2f3e;border-radius:13px;padding:0;display:flex;flex-direction:column;box-shadow:0 10px 36px rgba(0,0,0,.65);pointer-events:all;cursor:default;overflow:hidden;animation:rh-nc-in .22s cubic-bezier(.22,.61,.36,1);flex:0 0 auto;}
-@keyframes rh-nc-in{from{transform:translateX(28px);opacity:0}to{transform:none;opacity:1}}
-@keyframes rh-nc-out{from{transform:none;opacity:1;max-height:200px}to{transform:translateX(28px);opacity:0;max-height:0;margin-bottom:0}}
+#rh-notif-stack{position:fixed;top:var(--rh-notif-top);right:var(--rh-notif-right);z-index:99993;display:flex;flex-direction:column;gap:10px;pointer-events:none;width:360px;max-width:calc(100vw - 32px);max-height:calc(100vh - var(--rh-notif-top) - var(--rh-notif-bottom));}
+/* Light cards in the Japandi palette both screens now use: an avatar circle that
+   says what kind of alert it is at a glance, who it is from, a bold one-line
+   title and the detail underneath. The old dark cards read as a system error. */
+.rh-nc{position:relative;background:#fffdfb;border:1px solid #e6ded1;border-radius:18px;display:flex;flex-direction:column;box-shadow:0 14px 34px rgba(42,39,35,.18),0 2px 6px rgba(42,39,35,.08);pointer-events:all;cursor:default;overflow:hidden;animation:rh-nc-in .26s cubic-bezier(.22,.61,.36,1);flex:0 0 auto;font-family:'Jost',system-ui,sans-serif;}
+.rh-nc.is-clickable{cursor:pointer;}
+@keyframes rh-nc-in{from{transform:translateX(32px) scale(.97);opacity:0}to{transform:none;opacity:1}}
+@keyframes rh-nc-out{from{transform:none;opacity:1;max-height:220px}to{transform:translateX(32px);opacity:0;max-height:0;margin-bottom:0}}
 .rh-nc.removing{animation:rh-nc-out .22s ease forwards;}
-.rh-nc--normal{border-left:4px solid #10b981;}
-.rh-nc--urgent{border-left:4px solid #f43f5e;}
-.rh-nc--info{border-left:4px solid #d4a843;}
-.rh-nc--success{border-left:4px solid #22d3ee;}
-.rh-nc-body{display:flex;align-items:flex-start;gap:12px;padding:13px 14px 11px;}
-.rh-nc-icon{width:34px;height:34px;border-radius:9px;display:flex;align-items:center;justify-content:center;font-size:15px;flex-shrink:0;margin-top:1px;}
-.rh-nc--normal .rh-nc-icon{background:rgba(16,185,129,.14);color:#34d399;}
-.rh-nc--urgent .rh-nc-icon{background:rgba(244,63,94,.14);color:#fb7185;animation:rh-nc-pulse 1s ease-in-out infinite;}
-@keyframes rh-nc-pulse{0%,100%{box-shadow:none}50%{box-shadow:0 0 0 5px rgba(244,63,94,.18);}}
-.rh-nc--info .rh-nc-icon{background:rgba(212,168,67,.14);color:#d4a843;}
-.rh-nc--success .rh-nc-icon{background:rgba(34,211,238,.14);color:#22d3ee;}
+.rh-nc-body{display:flex;align-items:flex-start;gap:12px;padding:14px 44px 12px 14px;}
+.rh-nc-icon{width:42px;height:42px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:17px;flex-shrink:0;color:#fff;}
+.rh-nc--normal .rh-nc-icon{background:#35794c;}
+.rh-nc--urgent .rh-nc-icon{background:#b3261e;animation:rh-nc-pulse 1.2s ease-in-out infinite;}
+.rh-nc--info .rh-nc-icon{background:#8a775f;}
+.rh-nc--success .rh-nc-icon{background:#2f6fad;}
+@keyframes rh-nc-pulse{0%,100%{box-shadow:0 0 0 0 rgba(179,38,30,.35)}50%{box-shadow:0 0 0 7px rgba(179,38,30,0)}}
 .rh-nc-text{flex:1;min-width:0;}
-.rh-nc-title{font-size:14.5px;font-weight:700;color:#f0f0f8;font-family:'Jost',sans-serif;line-height:1.2;margin-bottom:3px;}
-.rh-nc-source{display:inline-block;font-size:10.5px;font-weight:700;text-transform:uppercase;letter-spacing:.09em;padding:1px 7px;border-radius:5px;margin-bottom:5px;font-family:'Jost',sans-serif;}
-.rh-nc--normal .rh-nc-source{background:rgba(16,185,129,.12);color:#34d399;}
-.rh-nc--urgent .rh-nc-source{background:rgba(244,63,94,.12);color:#fb7185;}
-.rh-nc--info .rh-nc-source{background:rgba(212,168,67,.12);color:#d4a843;}
-.rh-nc--success .rh-nc-source{background:rgba(34,211,238,.12);color:#22d3ee;}
-.rh-nc-body-text{font-size:13.5px;color:#aab3c0;font-family:'Jost',sans-serif;line-height:1.45;word-break:break-word;white-space:pre-line;}
-.rh-nc-close{position:absolute;top:4px;right:4px;width:34px;height:34px;display:flex;align-items:center;justify-content:center;background:none;border:none;color:#6b7280;font-size:14px;cursor:pointer;border-radius:8px;line-height:1;transition:color .12s,background .12s;}
-.rh-nc-close:hover,.rh-nc-close:focus-visible{color:#f0f0f8;background:rgba(255,255,255,.1);}
-.rh-nc-prog{height:3px;width:100%;background:#0f1118;}
-.rh-nc-prog-bar{height:100%;background:currentColor;transition:width linear;}
-.rh-nc--normal .rh-nc-prog-bar{color:#10b981;}
-.rh-nc--urgent .rh-nc-prog-bar{color:#f43f5e;}
-.rh-nc--info .rh-nc-prog-bar{color:#d4a843;}
-.rh-nc--success .rh-nc-prog-bar{color:#22d3ee;}
+.rh-nc-meta{display:flex;align-items:center;gap:6px;margin-bottom:2px;font-size:12px;color:#7a6f63;}
+.rh-nc-source{font-weight:700;color:#5e554d;}
+.rh-nc-when::before{content:'·';margin-right:6px;}
+.rh-nc-title{font-size:15px;font-weight:700;color:#2a2723;line-height:1.25;}
+.rh-nc--urgent .rh-nc-title{color:#8a1c16;}
+.rh-nc-body-text{margin-top:3px;font-size:14px;color:#5e554d;line-height:1.4;word-break:break-word;white-space:pre-line;display:-webkit-box;-webkit-line-clamp:4;-webkit-box-orient:vertical;overflow:hidden;}
+.rh-nc-close{position:absolute;top:8px;right:8px;width:34px;height:34px;display:flex;align-items:center;justify-content:center;background:#f4efe9;border:none;color:#7a6f63;font-size:14px;cursor:pointer;border-radius:50%;line-height:1;transition:color .12s,background .12s;}
+.rh-nc-close:hover,.rh-nc-close:focus-visible{color:#2a2723;background:#e9e0d4;}
+.rh-nc-prog{height:3px;width:100%;background:#f1ebe3;}
+.rh-nc-prog-bar{height:100%;background:currentColor;opacity:.55;transition:width linear;}
+.rh-nc--normal .rh-nc-prog-bar{color:#35794c;}
+.rh-nc--urgent .rh-nc-prog-bar{color:#b3261e;}
+.rh-nc--info .rh-nc-prog-bar{color:#8a775f;}
+.rh-nc--success .rh-nc-prog-bar{color:#2f6fad;}
 /* Repeat counter — a second copy of the same alert bumps this instead of
    pushing another card onto a stack nobody can read. */
-.rh-nc-dupe{display:none;margin-left:6px;padding:1px 7px;border-radius:9px;font-size:10px;font-weight:800;background:rgba(255,255,255,.12);color:#f0f0f8;vertical-align:middle;}
+.rh-nc-dupe{display:none;margin-left:6px;padding:1px 8px;border-radius:9px;font-size:11px;font-weight:800;background:#f4efe9;color:#5e554d;vertical-align:middle;}
 .rh-nc-dupe.show{display:inline-block;}
 /* Overflow pill: how many alerts are queued behind the visible cards. */
-#rh-notif-more{display:none;align-items:center;justify-content:space-between;gap:10px;pointer-events:all;background:#12151d;border:1px solid #2a2f3e;border-radius:11px;padding:9px 12px;color:#9aa3af;font-size:12px;font-weight:700;font-family:'Jost',sans-serif;box-shadow:0 8px 26px rgba(0,0,0,.55);flex:0 0 auto;}
+#rh-notif-more{display:none;align-items:center;justify-content:space-between;gap:10px;pointer-events:all;background:#fffdfb;border:1px solid #e6ded1;border-radius:14px;padding:9px 12px;color:#5e554d;font-size:13px;font-weight:700;font-family:'Jost',sans-serif;box-shadow:0 8px 22px rgba(42,39,35,.14);flex:0 0 auto;}
 #rh-notif-more.show{display:flex;}
-#rh-notif-more button{min-height:32px;padding:0 12px;border-radius:8px;border:1px solid rgba(255,255,255,.14);background:rgba(255,255,255,.06);color:#d8ddf0;font-size:11px;font-weight:700;cursor:pointer;font-family:'Jost',sans-serif;}
-#rh-notif-more button:hover{background:rgba(255,255,255,.12);}
+#rh-notif-more button{min-height:34px;padding:0 12px;border-radius:999px;border:1px solid #dccfc2;background:#f4efe9;color:#2a2723;font-size:12px;font-weight:700;cursor:pointer;font-family:'Jost',sans-serif;}
+#rh-notif-more button:hover{background:#e9e0d4;}
+/* Station screens render at a fixed 1920px layout, so the same card needs to be
+   larger there to read across a kitchen. */
+body.station-screen #rh-notif-stack{width:480px;}
+body.station-screen .rh-nc-body{padding:18px 56px 16px 18px;gap:16px;}
+body.station-screen .rh-nc-icon{width:56px;height:56px;font-size:24px;}
+body.station-screen .rh-nc-meta{font-size:16px;}
+body.station-screen .rh-nc-title{font-size:22px;}
+body.station-screen .rh-nc-body-text{font-size:19px;}
+body.station-screen .rh-nc-close{width:44px;height:44px;font-size:18px;}
 /* Muted-audio prompt. A station screen that nobody has tapped cannot legally
    play audio, and silently dropping every chime is how tickets get missed. */
 #rh-sound-unlock{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(var(--rh-notif-bottom) + 8px);z-index:99994;display:none;align-items:center;gap:10px;padding:11px 16px;min-height:48px;border-radius:999px;background:#b45309;border:1px solid #f59e0b;color:#fff;font-size:13px;font-weight:700;font-family:'Jost',sans-serif;cursor:pointer;box-shadow:0 10px 30px rgba(0,0,0,.5);animation:rh-nc-pulse 1.6s ease-in-out infinite;}
@@ -583,13 +657,13 @@
         const duration = opts.duration != null ? opts.duration : (type === 'urgent' ? 12000 : 6000);
         const id = ++_notifIdSeq;
         const card = document.createElement('div');
-        card.className = `rh-nc rh-nc--${type}`;
+        card.className = `rh-nc rh-nc--${type}` + (typeof opts.onClick === 'function' ? ' is-clickable' : '');
         card.dataset.id = id;
         card.dataset.dedupe = _dedupeKey(opts);
         card.dataset.dupeCount = '1';
 
         const icon = _TYPE_ICON[type] || 'fa-bell';
-        const source = opts.source ? `<span class="rh-nc-source">${_esc(opts.source)}</span><br>` : '';
+        const source = `<div class="rh-nc-meta"><span class="rh-nc-source">${_esc(opts.source || 'Notification')}</span><span class="rh-nc-when">now</span></div>`;
         const bodyTxt = opts.body ? `<div class="rh-nc-body-text">${_esc(opts.body)}</div>` : '';
 
         card.innerHTML = `
@@ -668,6 +742,14 @@
         /* pointerenter/leave covers mouse AND stylus/touch hold — the original
            mouseenter pair did nothing at all on the touchscreen tills these
            screens actually run on. */
+        /* Optional tap action (e.g. open the chat); the close button keeps its own job. */
+        if (typeof opts.onClick === 'function') {
+            card.addEventListener('click', e => {
+                if (e.target.closest('.rh-nc-close')) return;
+                _dismiss(id);
+                try { opts.onClick(); } catch (err) { }
+            });
+        }
         card.addEventListener('pointerenter', _pause);
         card.addEventListener('pointerleave', _resume);
         card.addEventListener('pointercancel', _resume);

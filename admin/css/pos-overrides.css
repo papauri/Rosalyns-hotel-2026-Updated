@@ -2589,11 +2589,11 @@ a.recent-toggle span {
        and cashiers were catching the toast body instead of the close button. */
     min-width: 2.75rem;
     min-height: 2.75rem;
-    margin: -0.5rem -0.5rem -0.5rem 0;
+    margin: -0.375rem -0.375rem -0.375rem 0;
     border: 0;
     border-radius: 50%;
-    background: rgba(255, 255, 255, 0.16);
-    color: currentColor;
+    background: #f4efe9;
+    color: #7a6f63;
     cursor: pointer;
     display: inline-flex;
     align-items: center;
@@ -2603,20 +2603,52 @@ a.recent-toggle span {
 
 .toast__close:hover,
 .toast__close:focus-visible {
-    background: rgba(255, 255, 255, 0.26);
+    background: #e9e0d4;
+    color: #2a2723;
 }
 
-/* Both fills carry white text, so they have to be dark enough to hold it. The
-   Bootstrap pair they used to use measured 3.13:1 (ok) and 4.53:1 (err) — the
-   success toast is the one a cashier sees on every single order, and it was
-   the harder of the two to read. Deepened to the same sage/clay family the
-   admin and station screens use. */
-.toast.ok {
+/* Light cards with a coloured icon, matching the notification cards: the icon
+   says "done" or "problem" before the words are read, and dark text on a light
+   card reads more easily than the old solid green/red fills. */
+.toast.ok,
+.toast.err {
+    align-items: center;
+    background: #fffdfb;
+    color: #2a2723;
+    border: 1px solid #e6ded1;
+    border-radius: 1rem;
+    box-shadow: 0 14px 34px rgba(42, 39, 35, .18), 0 2px 6px rgba(42, 39, 35, .08);
+    font-weight: 500;
+}
+
+.toast.ok::before,
+.toast.err::before {
+    font-family: 'Font Awesome 6 Free';
+    font-weight: 900;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 2.25rem;
+    height: 2.25rem;
+    flex: 0 0 auto;
+    border-radius: 50%;
+    color: #fff;
+    font-size: 0.95rem;
+}
+
+.toast.ok::before {
+    content: '\f00c';
     background: #35794c;
 }
 
+.toast.err::before {
+    content: '\f071';
+    background: #b3261e;
+}
+
 .toast.err {
-    background: #9e3b30;
+    border-color: #efc9c4;
+    box-shadow: inset 4px 0 0 #b3261e, 0 14px 34px rgba(42, 39, 35, .18);
 }
 
 /* recent-orders dropdown */
