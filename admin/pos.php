@@ -2388,6 +2388,12 @@ if (in_array($user['role'] ?? '', ['admin', 'manager'], true)) {
                     <button class="recent-toggle" onclick="toggleRecent()" data-help="Recent orders|Last 10 orders you rang up."><i class="fas fa-receipt"></i> Recent</button>
                     <button class="recent-toggle" onclick="openTabsTray()" data-help="Open tabs|Unpaid kitchen orders."><i class="fas fa-utensils"></i> Tabs <span id="tabBadge" <?php echo empty($openTabs) ? ' style="display:none;"' : ''; ?>><?php echo count($openTabs); ?></span></button>
                     <button class="recent-toggle" onclick="openStationNoteModal()" data-help="Station note|Quick note to Kitchen/Bar/Coffee."><i class="fas fa-paper-plane"></i> Note</button>
+                    <?php /* My orders and Messages used to be two small floating pills in the
+                              bottom-left corner, over the menu grid. They now sit on the bar with
+                              the other service controls and open one large window, so the count
+                              is always in the same place and nothing floats over the till. */ ?>
+                    <button type="button" class="recent-toggle svc-launch" id="myOrdersBtn" onclick="toggleMyOrders(true)" data-help="My orders|Every order you rang up today, with kitchen and payment status."><i class="fas fa-list-check"></i> My orders <span id="myOrdersBadge" style="display:none;">0</span></button>
+                    <button type="button" class="recent-toggle svc-launch" id="posInboxBtn" onclick="togglePosInbox(true)" data-help="Messages|Notes from Kitchen, Bar and Coffee, and their replies to yours."><i class="fas fa-comments"></i> Messages <span id="posInboxBadge" style="display:none;"></span></button>
 
                     <?php /* Hidden badge targets kept so the live stations poller can keep
                               updating per-station counts without null checks. */ ?>
@@ -3703,11 +3709,6 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
         const posCheckedInRooms = <?php echo json_encode($checkedInRooms, JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_AMP | JSON_HEX_QUOT); ?>;
         const POS_LIVE_POLL_MS = 1000;
         const POS_INBOX_POLL_MS = 700;
-        /* An "order ready" card is the one alert a runner must not miss, so it holds
-           far longer than a toast — but 120s was long enough that a busy service kept
-           four of them permanently parked over the till bar. 30s clears in time for
-           the next round while still surviving a trip to the pass. */
-        const POS_NOTIFICATION_DURATION_MS = 30000;
         const POS_API_BASE = '../api/';
 
         function posApiUrl(path) {
@@ -3719,22 +3720,14 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
            right. Anchored at a flat 16px they landed squarely on the till bar's
            right-hand cluster — More, Help, Sign out — and any alert still on
            screen made those buttons untappable. Measure the bar (its height moves
-           with the stats row wrapping) and the floating FAB row at the bottom, and
-           publish both as CSS variables the two stacks are laid out against. */
+           with the stats row wrapping) and publish it as the CSS variable the two
+           stacks are laid out against. */
         function syncPosAlertBounds() {
             const bar = document.querySelector('.till-bar');
             const barHeight = Math.ceil(bar?.getBoundingClientRect().bottom || 112);
-            const inbox = document.getElementById('posInboxWidget');
-            const orders = document.getElementById('myOrdersWidget');
-            let fabHeight = 0;
-            [inbox, orders].forEach(el => {
-                if (!el || getComputedStyle(el).display === 'none') return;
-                const r = el.getBoundingClientRect();
-                fabHeight = Math.max(fabHeight, Math.ceil(window.innerHeight - r.top));
-            });
             const root = document.documentElement.style;
             root.setProperty('--rh-notif-top', (barHeight + 12) + 'px');
-            root.setProperty('--rh-notif-bottom', (Math.max(fabHeight, 24) + 12) + 'px');
+            root.setProperty('--rh-notif-bottom', '24px');
         }
         window.syncPosAlertBounds = syncPosAlertBounds;
         document.addEventListener('DOMContentLoaded', syncPosAlertBounds);
@@ -3890,22 +3883,12 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
             }
         }
 
-        function posShowNotification(title, body, vibrate) {
-            if (vibrate && navigator.vibrate && (!window.RHSounds || typeof RHSounds.isInteractionUnlocked !== 'function' || RHSounds.isInteractionUnlocked())) {
-                navigator.vibrate([300, 100, 300, 100, 600]);
-            }
-            RHNotif.show({
-                title,
-                body,
-                type: vibrate ? 'urgent' : 'success',
-                source: 'Station',
-                sound: true,
-                duration: POS_NOTIFICATION_DURATION_MS,
-            });
-        }
-
         function posCompactItemsSummary(summary, maxItems = 4) {
+            /* Quantities are DECIMAL, and some feeds send them raw ("1.000x Soup").
+               Read whole numbers as 1x and keep a real fraction as 1.5x. */
             const parts = String(summary || '')
+                .replace(/(\d+)\.0+x/g, '$1x')
+                .replace(/(\d+\.\d*?[1-9])0+x/g, '$1x')
                 .split(',')
                 .map(part => part.trim())
                 .filter(Boolean);
@@ -3920,20 +3903,6 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
             if (/^table\s+/i.test(raw)) return raw;
             if (/^\d+$/.test(raw)) return 'Table ' + raw;
             return raw;
-        }
-
-        function posReadyNotificationBody(notification) {
-            const message = String(notification.message || '').trim();
-            const tableLabel = posReadyLocationLabel(notification);
-            const itemSummary = posCompactItemsSummary(notification.items_summary || '', 4);
-            const itemCount = parseInt(notification.item_count || 0, 10) || 0;
-            const lines = [];
-            if (message) lines.push(message);
-            if (tableLabel) lines.push('Table/Location: ' + tableLabel);
-            if (!itemSummary) return lines.join('\n');
-            const countLabel = itemCount > 0 ? itemCount + ' item' + (itemCount === 1 ? '' : 's') : 'Items';
-            lines.push(countLabel + ': ' + itemSummary);
-            return lines.join('\n');
         }
 
         /* Confirm delivery of ready-order alerts. Fire-and-forget: a failed ack just
@@ -3987,11 +3956,6 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
                 if (!r.ok) return;
                 const j = await r.json().catch(() => null);
                 if (j && j.ok && j.notifications && j.notifications.length) {
-                    const stnLabel = {
-                        kitchen: 'Kitchen',
-                        bar: 'Bar',
-                        coffee_bar: 'Coffee Bar'
-                    };
                     const fresh = j.notifications.filter(n => {
                         const readyKey = [n.order_id, n.station, n.reference || n.id].join(':');
                         if (_seenReadyNotifications.has(readyKey)) return false;
@@ -4005,16 +3969,7 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
                        the business day. */
                     posAckReadyNotifications(j.notifications.map(n => n.id));
                     if (fresh.length) {
-                        fresh.forEach(n => {
-                            RHNotif.show({
-                                title: (n.vibrate ? '🔔 Your order is ready!' : '✅ Order Ready') + (n.reference ? ' · ' + n.reference : ''),
-                                body: posReadyNotificationBody(n),
-                                type: n.vibrate ? 'urgent' : 'success',
-                                source: stnLabel[n.station] || 'Station',
-                                duration: POS_NOTIFICATION_DURATION_MS,
-                                sound: false,
-                            });
-                        });
+                        fresh.forEach(n => posAlertPush(posAlertFromReady(n)));
                         /* One alert tone for the batch, pitched to whether any of these
                            are this cashier's own orders. Playing per notification made a
                            three-ticket pass sound like an alarm fault. */
@@ -4083,7 +4038,7 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
         }
 
         function normalizePosInboxMessages(messages) {
-            return (messages || []).filter(m => !isPosInboxDirectMessage(m) || isPosInboxDirectPending(m) || !!m.reply_message);
+            return (messages || []).filter(m => !posInboxIsCleared(m) && (!isPosInboxDirectMessage(m) || isPosInboxDirectPending(m) || !!m.reply_message));
         }
 
         function posInboxFindMessage(messageId) {
@@ -4179,129 +4134,218 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
             _inboxBadgeUpdate(posInboxPendingCount(messages));
         }
 
-        const POS_QUICK_REPLIES = ['On it!', 'Coming right up', '5 minutes', 'Almost ready', 'Noted, thanks', 'One moment please'];
+        const POS_QUICK_REPLIES = ['On my way', 'Coming now', '2 minutes', 'Noted, thanks'];
 
-        function posInboxReplyComposerHtml(message, _unused = false) {
-            const msgId = parseInt(message.id, 10) || 0;
-            if (msgId <= 0) return '';
-            const stationLabel = posInboxStationLabel(message.station);
-            const inputId = 'posInboxReplyInput-' + msgId;
-            const draft = _posReplyDrafts[String(msgId)] || '';
-            const quickChips = POS_QUICK_REPLIES.map(r =>
-                `<button type="button" onclick="quickSendPosReply(${msgId},'${r.replace(/'/g,"\\'")}',this)" ` +
-                `style="background:#f5f0ea;border:1px solid #c9b99a;border-radius:14px;padding:4px 10px;font-size:11px;font-weight:600;color:#6b4f2a;cursor:pointer;white-space:nowrap;transition:background .12s;"` +
-                ` onmouseover="this.style.background='#e8ddd0'" onmouseout="this.style.background='#f5f0ea'">${escHtml(r)}</button>`
-            ).join('');
-            return `<div style="margin-top:8px;display:grid;gap:6px;">` +
-                `<div style="display:flex;flex-wrap:wrap;gap:5px;">${quickChips}</div>` +
-                `<div style="display:flex;gap:6px;align-items:stretch;">` +
-                `<input type="text" id="${inputId}" maxlength="255" placeholder="Or type a custom reply…" ` +
-                `value="${escHtml(draft)}" ` +
-                `oninput="_posReplyDrafts['${msgId}'] = this.value;" ` +
-                `onkeydown="if(event.key==='Enter'){event.preventDefault();sendPosInboxReply(${msgId});}" ` +
-                `style="flex:1;min-width:0;min-height:38px;border:1px solid #d1d5db;border-radius:7px;padding:7px 10px;font-size:12px;color:#111;">` +
-                `<button type="button" data-pos-reply="${msgId}" onclick="sendPosInboxReply(${msgId}, this)" style="min-height:38px;padding:6px 12px;border:1px solid #8B7355;background:#8B7355;color:#fff;border-radius:7px;font-size:12px;font-weight:700;cursor:pointer;white-space:nowrap;">` +
-                `<i class="fas fa-paper-plane" style="margin-right:5px;"></i>Send</button>` +
-                `</div>` +
-                `<button type="button" data-pos-ack="${msgId}" onclick="ackPosInboxMessage(${msgId}, this)" ` +
-                `style="min-height:34px;padding:6px 12px;background:transparent;border:1px solid #d1d5db;border-radius:7px;font-size:12px;color:#6c757d;cursor:pointer;font-weight:600;display:flex;align-items:center;gap:6px;transition:background .12s,color .12s;" ` +
-                `onmouseover="this.style.background='#fee2e2';this.style.color='#b91c1c';this.style.borderColor='#fca5a5'" ` +
-                `onmouseout="this.style.background='transparent';this.style.color='#6c757d';this.style.borderColor='#d1d5db'">` +
-                `<i class="fas fa-times-circle"></i> Dismiss</button>` +
-                `</div>`;
+        /* Replies to this cashier's own notes stay in the server feed for the whole
+           business day. "Clear" used to drop them from the local list only, so the
+           next poll (under a second later) put them straight back. Remember the
+           cleared ids per user so a cleared reply stays cleared. */
+        const POS_INBOX_CLEARED_KEY = 'rh_pos_inbox_cleared_v1_u' + posUserId;
+        const _clearedInbox = posLoadSeenSet(POS_INBOX_CLEARED_KEY);
+
+        function posInboxIsCleared(message) {
+            return _clearedInbox.has(String(parseInt(message?.id, 10) || 0));
         }
 
         async function quickSendPosReply(msgId, text, triggerEl = null) {
             const input = document.getElementById('posInboxReplyInput-' + msgId);
             if (input) input.value = text;
             _posReplyDrafts[String(msgId)] = text;
-            return sendPosInboxReply(msgId, triggerEl);
+            /* A quick reply to a station's note answers it, so it also records the
+               FOH action - the station sees both, and the note leaves the list. */
+            const message = posInboxFindMessage(msgId);
+            return sendPosInboxReply(msgId, triggerEl, !!message && isPosInboxDirectPending(message));
         }
 
         function dismissPosInboxThread(messageIds) {
             const ids = new Set((messageIds || []).map(id => parseInt(id, 10) || 0).filter(Boolean));
             if (!ids.size) return;
+            ids.forEach(id => _clearedInbox.add(String(id)));
+            posSaveSeenSet(POS_INBOX_CLEARED_KEY, _clearedInbox);
             _inboxLastMsgs = (_inboxLastMsgs || []).filter(m => !ids.has(parseInt(m.id, 10) || 0));
             if (_inboxVisible) renderPosInbox(_inboxLastMsgs);
             updatePosInboxBadgesFromMessages(_inboxLastMsgs);
             _syncPosMobileBadges();
         }
 
-        function posInboxMarkReadBtn(messageIds, label = 'Mark as read') {
-            // IDs are integers — JSON.stringify produces e.g. [123,456], no HTML-unsafe chars
-            const idsJson = JSON.stringify((messageIds || []).map(id => parseInt(id, 10) || 0).filter(Boolean));
-            return `<button type="button" onclick="dismissPosInboxThread(${idsJson})" ` +
-                `style="margin-top:8px;display:inline-flex;align-items:center;gap:6px;padding:6px 14px;` +
-                `background:#f3f4f6;border:1px solid #d1d5db;border-radius:7px;font-size:12px;font-weight:600;` +
-                `color:#6c757d;cursor:pointer;transition:background .12s,color .12s;" ` +
-                `onmouseover="this.style.background='#e5e7eb';this.style.color='#374151'" ` +
-                `onmouseout="this.style.background='#f3f4f6';this.style.color='#6c757d'">` +
-                `<i class="fas fa-check"></i> ${escHtml(label)}</button>`;
+        /* ── Service window: My orders + Messages in one large modal ──────── */
+        let _svcTab = 'orders';
+
+        function posServiceIsOpen() {
+            const overlay = document.getElementById('posServiceOverlay');
+            return !!overlay && !overlay.hidden;
         }
 
-        function togglePosInbox(forceState = null) {
-            const opening = typeof forceState === 'boolean' ? forceState : !_inboxVisible;
-            _inboxVisible = opening;
-            const widget = document.getElementById('posInboxWidget');
-            const panel = document.getElementById('posInboxPanel');
-            if (widget) widget.classList.toggle('is-mobile-open', _inboxVisible && window.innerWidth <= 640);
-            if (panel) panel.style.display = _inboxVisible ? 'block' : 'none';
-            if (typeof window.__posClampFloatingWidgets === 'function') {
-                setTimeout(window.__posClampFloatingWidgets, 0);
-            }
+        function showPosServiceTab(tab) {
+            _svcTab = tab === 'messages' ? 'messages' : 'orders';
+            const showMessages = _svcTab === 'messages';
+            const ordersPane = document.getElementById('svcPaneOrders');
+            const messagesPane = document.getElementById('svcPaneMessages');
+            if (ordersPane) ordersPane.hidden = showMessages;
+            if (messagesPane) messagesPane.hidden = !showMessages;
+            document.querySelectorAll('.svc-tab').forEach(btn => {
+                const on = btn.dataset.svcTab === _svcTab;
+                btn.classList.toggle('is-active', on);
+                btn.setAttribute('aria-selected', on ? 'true' : 'false');
+            });
+            const open = posServiceIsOpen();
+            _inboxVisible = open && showMessages;
+            _myOrdersVisible = open && !showMessages;
             if (_inboxVisible) {
                 renderPosInbox(_inboxLastMsgs);
                 markInboxMessagesSeen(_inboxLastMsgs);
                 updatePosInboxBadgesFromMessages(_inboxLastMsgs);
+                pollStationReplies();
+            } else if (_myOrdersVisible) {
+                renderMyOrders(_myOrdersLast);
+                pollMyOrders(true);
             }
-            _syncPosMobileBadges();
+        }
+
+        function openPosService(tab) {
+            const overlay = document.getElementById('posServiceOverlay');
+            if (!overlay) return;
+            overlay.hidden = false;
+            document.body.classList.add('svc-open');
+            showPosServiceTab(tab);
+            setTimeout(() => document.querySelector('.svc-tab.is-active')?.focus(), 30);
+        }
+
+        function closePosService() {
+            const overlay = document.getElementById('posServiceOverlay');
+            if (overlay) overlay.hidden = true;
+            document.body.classList.remove('svc-open');
+            _inboxVisible = false;
+            _myOrdersVisible = false;
+        }
+
+        document.addEventListener('keydown', e => {
+            if (e.key !== 'Escape') return;
+            if (typeof posAlertIsOpen === 'function' && posAlertIsOpen()) return;
+            if (posServiceIsOpen()) closePosService();
+        });
+
+        function togglePosInbox(forceState = null) {
+            const opening = typeof forceState === 'boolean' ? forceState : !_inboxVisible;
+            if (opening) openPosService('messages');
+            else if (_inboxVisible) closePosService();
         }
 
         function _inboxBadgeUpdate(count) {
-            const badge = document.getElementById('posInboxBadge');
-            const widget = document.getElementById('posInboxWidget');
-            if (!badge || !widget) return;
-            /* The launcher only floats when there is actually something to read.
-               It used to be pinned on every screen wider than 640px, which put a
-               permanent widget over the till for cashiers who had no messages at
-               all; an empty inbox has nothing to show. Station note in the
-               toolbar still opens the composer and its history either way, and
-               any incoming message shows this again immediately. */
-            const showWidget = (_inboxLastMsgs && _inboxLastMsgs.length > 0) || count > 0;
-            widget.style.display = showWidget ? 'flex' : 'none';
-            if (showWidget && typeof window.__posClampFloatingWidgets === 'function') {
-                setTimeout(window.__posClampFloatingWidgets, 0);
-            }
-            if (count > 0) {
-                badge.textContent = count > 99 ? '99+' : String(count);
-                badge.style.display = 'flex';
-            } else {
-                badge.textContent = '';
-                badge.style.display = 'none';
-            }
+            const label = count > 99 ? '99+' : String(count);
+            ['posInboxBadge', 'svcMessagesCount'].forEach(id => {
+                const el = document.getElementById(id);
+                if (!el) return;
+                el.textContent = count > 0 ? label : '';
+                el.style.display = count > 0 ? '' : 'none';
+            });
+            document.getElementById('posInboxBtn')?.classList.toggle('has-pending', count > 0);
             _syncPosMobileBadges();
         }
 
         function showPosInboxAttention(urgent = false) {
-            const widget = document.getElementById('posInboxWidget');
             const button = document.getElementById('posInboxBtn');
-            if (widget) widget.style.display = 'flex';
-            if (typeof window.__posClampFloatingWidgets === 'function') {
-                setTimeout(window.__posClampFloatingWidgets, 0);
-            }
             if (!button) return;
-            button.style.background = urgent ? '#7f1d1d' : '#1d4a2e';
-            button.style.boxShadow = urgent ?
-                '0 0 0 4px rgba(220,38,38,.24), 0 8px 24px rgba(220,38,38,.5)' :
-                '0 0 0 4px rgba(34,197,94,.22), 0 8px 24px rgba(34,197,94,.35)';
+            button.classList.add('is-ringing');
+            button.classList.toggle('is-ringing--urgent', !!urgent);
             clearTimeout(window._posInboxAttentionTimer);
             window._posInboxAttentionTimer = setTimeout(() => {
-                button.style.background = '#1d4a2e';
-                button.style.boxShadow = '0 4px 14px rgba(0,0,0,.35)';
+                button.classList.remove('is-ringing', 'is-ringing--urgent');
             }, urgent ? 12000 : 8000);
         }
 
         const _posReplyDrafts = {};
+
+        function posInboxQuickRepliesHtml(msgId) {
+            return POS_QUICK_REPLIES.map(r =>
+                `<button type="button" class="svc-chip" onclick="quickSendPosReply(${msgId}, ${escHtml(JSON.stringify(r))}, this)">${escHtml(r)}</button>`
+            ).join('');
+        }
+
+        function posInboxStationIcon(station) {
+            return station === 'bar' ? 'fa-martini-glass' : (station === 'coffee_bar' ? 'fa-mug-hot' : 'fa-fire-burner');
+        }
+
+        /* A station's note to this cashier, with every message about the same order
+           folded into one card. A card that needs action carries one obvious button. */
+        function posInboxDirectCardHtml(thread) {
+            const lead = thread[thread.length - 1];
+            const pending = thread.filter(isPosInboxDirectPending);
+            const latestPending = pending[pending.length - 1] || null;
+            const urgent = thread.some(m => m.priority === 'urgent' || isCollectionDirectMessage(m));
+            const station = posInboxStationLabel(lead.station);
+            const ref = lead.order_ref || (lead.order_id ? 'Order #' + lead.order_id : '');
+            const where = posInboxOrderContext(lead);
+            const items = posCompactItemsSummary(lead.order_items_summary || '', 6);
+
+            const lines = thread.map(m => {
+                const mine = m.reply_message ?
+                    `<li class="svc-line svc-line--mine"><span class="svc-line__who">You</span>${escHtml(m.reply_message)}<time>${escHtml(stationNoteFmtTime(m.replied_at))}</time></li>` : '';
+                return `<li class="svc-line"><span class="svc-line__who">${escHtml(posInboxStationLabel(m.station))}</span>${escHtml(m.message || '')}<time>${escHtml(stationNoteFmtTime(m.created_at))}</time></li>${mine}`;
+            }).join('');
+
+            let actions;
+            if (latestPending) {
+                const id = parseInt(latestPending.id, 10) || 0;
+                const draft = _posReplyDrafts[String(id)] || '';
+                actions = `<div class="svc-card__actions">
+                        <button type="button" class="svc-btn svc-btn--primary svc-btn--big" data-pos-ack="${id}" onclick="ackPosInboxMessage(${id}, this)"><i class="fas fa-check"></i> Got it</button>
+                    </div>
+                    <div class="svc-reply">
+                        <span class="svc-reply__label">Or reply to ${escHtml(station)}:</span>
+                        <div class="svc-reply__chips">${posInboxQuickRepliesHtml(id)}</div>
+                        <div class="svc-reply__row">
+                            <input type="text" id="posInboxReplyInput-${id}" maxlength="255" placeholder="Type a reply…" value="${escHtml(draft)}" aria-label="Reply to ${escHtml(station)}"
+                                oninput="_posReplyDrafts['${id}'] = this.value;"
+                                onkeydown="if(event.key==='Enter'){event.preventDefault();sendPosInboxReply(${id}, null, true);}">
+                            <button type="button" class="svc-btn svc-btn--ghost" data-pos-reply="${id}" onclick="sendPosInboxReply(${id}, this, true)"><i class="fas fa-paper-plane"></i> Send</button>
+                        </div>
+                    </div>`;
+            } else {
+                actions = `<div class="svc-card__actions"><span class="svc-done"><i class="fas fa-circle-check"></i> Done</span>
+                    <button type="button" class="svc-btn svc-btn--ghost" onclick="dismissPosInboxThread(${JSON.stringify(thread.map(m => parseInt(m.id, 10) || 0))})">Clear</button></div>`;
+            }
+
+            return `<article class="svc-card svc-card--msg${urgent ? ' is-urgent' : ''}${latestPending ? ' is-pending' : ''}">
+                <header class="svc-card__head">
+                    <span class="svc-card__from"><i class="fas ${posInboxStationIcon(lead.station)}"></i> ${escHtml(station)}</span>
+                    ${urgent ? '<span class="svc-tag svc-tag--urgent">Urgent</span>' : ''}
+                    ${latestPending ? '<span class="svc-tag svc-tag--wait">Needs you</span>' : ''}
+                    <time class="svc-card__time">${escHtml(stationNoteFmtTime(lead.created_at))}</time>
+                </header>
+                ${ref || where ? `<p class="svc-card__order">${ref ? `<strong>${escHtml(ref)}</strong>` : ''}${ref && where ? ' · ' : ''}${escHtml(where)}</p>` : ''}
+                ${items ? `<p class="svc-card__items">${escHtml(items)}</p>` : ''}
+                <ul class="svc-lines">${lines}</ul>
+                ${actions}
+            </article>`;
+        }
+
+        /* A note this cashier sent, shown once the station has answered it. */
+        function posInboxOwnNoteCardHtml(m) {
+            const station = posInboxStationLabel(m.station);
+            let status;
+            if (m.reply_message) {
+                status = `<li class="svc-line"><span class="svc-line__who">${escHtml(m.replied_by_name || station)}</span>${escHtml(m.reply_message)}<time>${escHtml(stationNoteFmtTime(m.replied_at))}</time></li>`;
+            } else if (parseInt(m.is_acknowledged || 0, 10) === 1) {
+                status = `<li class="svc-line svc-line--status"><i class="fas fa-check-double"></i> ${escHtml(station)} acknowledged</li>`;
+            } else if (m.seen_at) {
+                status = `<li class="svc-line svc-line--status"><i class="fas fa-eye"></i> Seen by ${escHtml(station)}</li>`;
+            } else {
+                status = `<li class="svc-line svc-line--status"><i class="fas fa-hourglass-half"></i> Not seen yet</li>`;
+            }
+            return `<article class="svc-card svc-card--msg${m.priority === 'urgent' ? ' is-urgent' : ''}">
+                <header class="svc-card__head">
+                    <span class="svc-card__from"><i class="fas fa-reply"></i> Your note to ${escHtml(station)}</span>
+                    <time class="svc-card__time">${escHtml(stationNoteFmtTime(m.created_at))}</time>
+                </header>
+                ${m.order_ref ? `<p class="svc-card__order"><strong>${escHtml(m.order_ref)}</strong></p>` : ''}
+                <ul class="svc-lines">
+                    <li class="svc-line svc-line--mine"><span class="svc-line__who">You</span>${escHtml(m.message || '')}</li>
+                    ${status}
+                </ul>
+                <div class="svc-card__actions"><button type="button" class="svc-btn svc-btn--ghost" onclick="dismissPosInboxThread([${parseInt(m.id, 10) || 0}])">Clear</button></div>
+            </article>`;
+        }
 
         function renderPosInbox(messages) {
             const list = document.getElementById('posInboxList');
@@ -4309,130 +4353,267 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
             // Preserve any in-progress typed replies before rebuilding
             list.querySelectorAll('[id^="posInboxReplyInput-"]').forEach(el => {
                 const id = el.id.replace('posInboxReplyInput-', '');
-                if (id && el.value) _posReplyDrafts[id] = el.value;
+                if (id) _posReplyDrafts[id] = el.value;
             });
-            if (!messages.length) {
-                list.innerHTML = '<p style="text-align:center;color:#888;padding:20px;font-size:13px;">No active station notes right now.</p>';
+            const active = document.activeElement;
+            const focusedId = active && list.contains(active) && active.tagName === 'INPUT' ? active.id : '';
+
+            const threads = groupPosInboxDirectThreads(messages || []);
+            const needsYou = threads.filter(t => t.some(isPosInboxDirectPending));
+            const doneThreads = threads.filter(t => !t.some(isPosInboxDirectPending));
+            const ownNotes = (messages || []).filter(m => !isPosInboxDirectMessage(m));
+
+            if (!needsYou.length && !doneThreads.length && !ownNotes.length) {
+                list.innerHTML = '<div class="svc-empty"><i class="fas fa-comments"></i><strong>No messages</strong><span>Notes from Kitchen, Bar and Coffee land here, and pop up on screen the moment they arrive.</span></div>';
                 return;
             }
 
-            const directThreads = groupPosInboxDirectThreads(messages);
-            const directMessageIds = new Set();
-            directThreads.forEach(thread => thread.forEach(msg => directMessageIds.add(parseInt(msg.id, 10) || 0)));
-
-            const directHtml = directThreads.map(thread => {
-                const lead = thread[thread.length - 1] || null;
-                if (!lead) return '';
-                const leadId = parseInt(lead.id, 10) || 0;
-                const isUrgent = thread.some(m => m.priority === 'urgent');
-                const pendingMessages = thread.filter(isPosInboxDirectPending);
-                const latestPending = pendingMessages[pendingMessages.length - 1] || null;
-                const pendingCount = pendingMessages.length;
-
-                const orderRef = lead.order_ref ?
-                    escHtml(lead.order_ref) :
-                    (lead.order_id ? 'Order #' + escHtml(String(lead.order_id)) : 'Order not linked');
-                const orderContext = posInboxOrderContext(lead);
-                const dishSummary = lead.order_items_summary ?
-                    `<div style="margin-top:4px;font-size:12px;color:#5b3f1d;"><i class="fas fa-utensils" style="margin-right:4px;"></i>${escHtml(lead.order_items_summary)}</div>` :
-                    (lead.order_id ? '<div style="margin-top:4px;font-size:11px;color:#7c5a2b;"><i class="fas fa-utensils"></i> Dish details unavailable.</div>' : '');
-
-                const threadMessagesHtml = thread.map(m => {
-                    const stationName = posInboxStationLabel(m.station);
-                    const t = m.created_at ? stationNoteFmtTime(m.created_at) : '';
-                    const pending = isPosInboxDirectPending(m);
-                    const replyLine = m.reply_message ?
-                        `<div style="margin-top:6px;padding:6px 8px;background:#f0fdf4;border-left:3px solid #22c55e;border-radius:0 6px 6px 0;font-size:12px;color:#166534;"><i class="fas fa-reply"></i> <strong>You:</strong> ${escHtml(m.reply_message)}${m.replied_at ? ` <span style="color:#6b7280;">${escHtml(stationNoteFmtTime(m.replied_at))}</span>` : ''}</div>` : '';
-                    const actionLine = !pending ?
-                        `<div style="margin-top:5px;font-size:11px;color:#166534;"><i class="fas fa-check-circle"></i> Actioned${m.pos_acknowledged_at ? ` · ${escHtml(stationNoteFmtTime(m.pos_acknowledged_at))}` : ''}</div>` :
-                        '<div style="margin-top:5px;font-size:11px;color:#92400e;"><i class="fas fa-hourglass-half"></i> Waiting for FOH action</div>';
-
-                    return `<div style="margin-top:8px;padding:8px 9px;background:#fffdfa;border:1px solid #f3e7cd;border-radius:8px;">
-                        <div style="display:flex;align-items:center;justify-content:space-between;gap:6px;">
-                            <span style="font-size:11px;font-weight:700;color:${m.priority === 'urgent' ? '#c82333' : '#92400e'};text-transform:uppercase;letter-spacing:.04em;"><i class="fas fa-user-chef"></i> ${escHtml(stationName)}${m.priority === 'urgent' ? ' · URGENT' : ''}</span>
-                            <span style="font-size:11px;color:#9ca3af;">${escHtml(t)}</span>
-                        </div>
-                        <div style="margin-top:4px;font-size:13px;color:#111;font-weight:500;"><i class="fas fa-comment-dots" style="margin-right:4px;color:${m.priority === 'urgent' ? '#c82333' : '#92400e'};"></i>${escHtml(m.message || '')}</div>
-                        ${replyLine}
-                        ${actionLine}
-                    </div>`;
-                }).join('');
-
-                const replyComposer = latestPending ? posInboxReplyComposerHtml(latestPending, true) : '';
-
-                return `<div style="padding:10px 14px;border-bottom:1px solid #f3f4f6;background:#fffbeb;border-left:4px solid ${isUrgent ? '#c82333' : '#f59e0b'};">
-                    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:3px;gap:8px;">
-                        <span style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.04em;color:${isUrgent ? '#c82333' : '#92400e'};"><i class="fas fa-layer-group"></i> Order Thread${isUrgent ? ' · URGENT' : ''}</span>
-                        <span style="font-size:11px;color:#9ca3af;">${thread.length} msg${thread.length === 1 ? '' : 's'}</span>
-                    </div>
-                    <div style="margin-bottom:3px;"><span style="display:inline-block;background:#fef3c7;border:1px solid #fde68a;border-radius:5px;padding:1px 7px;font-size:11px;font-weight:700;color:#92400e;"><i class="fas fa-receipt" style="margin-right:3px;"></i>${orderRef}</span>${pendingCount > 0 ? `<span style="display:inline-block;margin-left:6px;background:#fff7ed;border:1px solid #fed7aa;border-radius:5px;padding:1px 7px;font-size:11px;font-weight:700;color:#9a3412;"><i class="fas fa-bell"></i> ${pendingCount} pending</span>` : ''}</div>
-                    ${orderContext ? `<div style="margin-top:3px;font-size:11px;color:#7c5a2b;"><i class="fas fa-location-dot" style="margin-right:4px;"></i>${escHtml(orderContext)}</div>` : ''}
-                    ${dishSummary}
-                    ${threadMessagesHtml}
-                    ${replyComposer}
-                    ${!latestPending && leadId > 0 ? posInboxMarkReadBtn(thread.map(m => m.id), 'Remove from list') : ''}
-                </div>`;
-            }).join('');
-
-            const otherHtml = messages.filter(m => !directMessageIds.has(parseInt(m.id, 10) || 0)).map(m => {
-                const stn = posInboxStationLabel(m.station);
-                const msgId = parseInt(m.id, 10) || 0;
-                const time = m.created_at ?
-                    new Date(m.created_at.replace(' ', 'T')).toLocaleTimeString([], {
-                        hour: '2-digit',
-                        minute: '2-digit'
-                    }) :
-                    '';
-                const isUrgent = m.priority === 'urgent';
-                /* Direct note from station → THIS POS user (source='station' + to_user_id set).
-                   These are not replies — they are fresh notes initiated by the station. */
-                const isStationDirect = isPosInboxDirectMessage(m);
-                if (isStationDirect) {
-                    return '';
+            let html = '';
+            if (needsYou.length) {
+                html += `<h3 class="svc-section">Needs you <span>${needsYou.length}</span></h3>` + needsYou.map(posInboxDirectCardHtml).join('');
+            }
+            if (ownNotes.length || doneThreads.length) {
+                html += '<h3 class="svc-section">Earlier today</h3>' +
+                    ownNotes.map(posInboxOwnNoteCardHtml).join('') +
+                    doneThreads.map(posInboxDirectCardHtml).join('');
+            }
+            list.innerHTML = html;
+            if (focusedId) {
+                const el = document.getElementById(focusedId);
+                if (el) {
+                    el.focus();
+                    if (typeof el.setSelectionRange === 'function') el.setSelectionRange(el.value.length, el.value.length);
                 }
-                let statusHtml = '';
-                if (m.reply_message) {
-                    const rt = m.replied_at ?
-                        new Date(m.replied_at.replace(' ', 'T')).toLocaleTimeString([], {
-                            hour: '2-digit',
-                            minute: '2-digit'
-                        }) :
-                        '';
-                    statusHtml = `<div style="margin-top:5px;padding:5px 8px;background:#f0fdf4;border-left:3px solid #22c55e;border-radius:0 5px 5px 0;font-size:12px;color:#166534;">
-                <i class="fas fa-reply"></i> <strong>${escHtml(m.replied_by_name || stn)}</strong>: ${escHtml(m.reply_message)} <span style="color:#9ca3af;">${rt}</span></div>`;
-                } else if (parseInt(m.is_acknowledged) === 1) {
-                    const at = m.acknowledged_at ?
-                        new Date(m.acknowledged_at.replace(' ', 'T')).toLocaleTimeString([], {
-                            hour: '2-digit',
-                            minute: '2-digit'
-                        }) :
-                        '';
-                    statusHtml = `<div style="margin-top:4px;font-size:11px;color:#22c55e;"><i class="fas fa-check-double"></i> Acknowledged ${at}</div>`;
-                } else if (m.seen_at) {
-                    statusHtml = `<div style="margin-top:4px;font-size:11px;color:#6c757d;"><i class="fas fa-eye"></i> Seen by station — awaiting action</div>`;
-                } else {
-                    statusHtml = `<div style="margin-top:4px;font-size:11px;color:#f59e0b;"><i class="fas fa-hourglass-half"></i> Not yet seen by station</div>`;
-                }
-                const isPending = !m.reply_message && parseInt(m.is_acknowledged || 0, 10) !== 1;
-                const replyComposer = isPending ? posInboxReplyComposerHtml(m, false) : posInboxMarkReadBtn([m.id]);
-                return `<div style="padding:10px 14px;border-bottom:1px solid #f3f4f6;">
-            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:3px;">
-                <span style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.04em;color:${isUrgent ? '#c82333' : '#6c757d'};">${escHtml(stn)}${isUrgent ? ' · <i class="fas fa-exclamation-triangle"></i> URGENT' : ''}</span>
-                <span style="font-size:11px;color:#9ca3af;">${time}</span>
-            </div>
-            ${m.order_ref ? `<div style="margin-bottom:3px;"><span style="display:inline-block;background:#f3f4f6;border:1px solid #e5e7eb;border-radius:5px;padding:1px 7px;font-size:11px;font-weight:700;color:#374151;"><i class="fas fa-receipt" style="margin-right:3px;"></i>${escHtml(m.order_ref)}</span></div>` : ''}
-            <div style="font-size:13px;color:#111;">${escHtml(m.message || '')}</div>
-            ${statusHtml}
-            ${replyComposer}
-        </div>`;
-            }).join('');
+            }
+        }
 
-            list.innerHTML = directHtml + otherHtml;
-            // Restore any in-progress drafts that survived the rebuild
-            Object.entries(_posReplyDrafts).forEach(([id, val]) => {
-                const el = list.querySelector('#posInboxReplyInput-' + id);
-                if (el && !el.value) el.value = val;
-            });
+        /* ── Incoming alerts ────────────────────────────────────────────────
+           Anything a station sends this cashier — a ready order, a note, a reply —
+           opens one large card in the middle of the till. Corner toasts timed out
+           and were missed during a rush; this stays until someone taps it and
+           re-chimes while it waits. Several arrivals queue behind each other
+           ("1 of 3") instead of stacking up on screen. */
+        const POS_ALERT_REMIND_MS = 20000;
+        const POS_ALERT_MAX_REMINDERS = 6;
+        const _posAlerts = [];
+        let _posAlertRemindTimer = null;
+        let _posAlertReminders = 0;
+        let _posAlertShownKey = '';
+
+        function posAlertIsOpen() {
+            const overlay = document.getElementById('posAlertOverlay');
+            return !!overlay && !overlay.hidden;
+        }
+
+        function posAlertPush(alert) {
+            if (!alert || !alert.key || _posAlerts.some(a => a.key === alert.key)) return;
+            /* Urgent alerts jump the queue, but never displace the card already showing. */
+            if (alert.urgent && _posAlerts.length > 1) {
+                const at = _posAlerts.findIndex((a, i) => i > 0 && !a.urgent);
+                if (at > 0) _posAlerts.splice(at, 0, alert);
+                else _posAlerts.push(alert);
+            } else {
+                _posAlerts.push(alert);
+            }
+            if (document.hidden && typeof Notification !== 'undefined' && Notification.permission === 'granted') {
+                try {
+                    new Notification(alert.title, {
+                        body: [alert.where, alert.items, alert.message].filter(Boolean).join('\n'),
+                        tag: alert.key
+                    });
+                } catch (e) {
+                    /* some platforms only allow notifications from a service worker */
+                }
+            }
+            if (alert.urgent && navigator.vibrate) navigator.vibrate([300, 100, 300]);
+            posAlertRender();
+        }
+
+        /* A station note answered from the Messages list, or on another till, no longer
+           needs its alert. */
+        function posAlertPrune(stillPendingIds) {
+            let changed = false;
+            for (let i = _posAlerts.length - 1; i >= 0; i--) {
+                const a = _posAlerts[i];
+                if (a.kind === 'direct' && !stillPendingIds.has(a.msgId)) {
+                    _posAlerts.splice(i, 1);
+                    changed = true;
+                }
+            }
+            if (changed) posAlertRender();
+        }
+
+        function posAlertScheduleReminder() {
+            clearTimeout(_posAlertRemindTimer);
+            if (!_posAlerts.length || _posAlertReminders >= POS_ALERT_MAX_REMINDERS) return;
+            _posAlertRemindTimer = setTimeout(() => {
+                if (!_posAlerts.length) return;
+                _posAlertReminders++;
+                RHSounds.play(_posAlerts[0].urgent ? 'urgent' : 'normal');
+                posAlertScheduleReminder();
+            }, POS_ALERT_REMIND_MS);
+        }
+
+        function posAlertRender() {
+            const overlay = document.getElementById('posAlertOverlay');
+            if (!overlay) return;
+            const a = _posAlerts[0];
+            if (!a) {
+                overlay.hidden = true;
+                clearTimeout(_posAlertRemindTimer);
+                _posAlertShownKey = '';
+                return;
+            }
+            const card = document.getElementById('posAlertCard');
+            card.className = 'pos-alert pos-alert--' + a.tone;
+            document.getElementById('posAlertIcon').className = 'fas ' + a.icon;
+            document.getElementById('posAlertKicker').textContent = a.kicker;
+            document.getElementById('posAlertTitle').textContent = a.title;
+
+            const where = document.getElementById('posAlertWhere');
+            where.textContent = a.where || '';
+            where.hidden = !a.where;
+
+            let body = '';
+            if (a.message) body += `<blockquote class="pos-alert__message">${escHtml(a.message)}</blockquote>`;
+            if (a.items) body += `<p class="pos-alert__items"><i class="fas fa-utensils" aria-hidden="true"></i> ${escHtml(a.items)}</p>`;
+            document.getElementById('posAlertBody').innerHTML = body;
+
+            const replies = document.getElementById('posAlertReplies');
+            if (a.kind === 'direct') {
+                replies.innerHTML = `<span class="pos-alert__replies-label">Quick reply to ${escHtml(a.station || a.kicker)}:</span>` +
+                    POS_QUICK_REPLIES.map(r => `<button type="button" class="svc-chip" onclick="posAlertReply(${escHtml(JSON.stringify(r))}, this)">${escHtml(r)}</button>`).join('');
+                replies.hidden = false;
+            } else {
+                replies.innerHTML = '';
+                replies.hidden = true;
+            }
+
+            const primary = document.getElementById('posAlertPrimary');
+            primary.innerHTML = `<i class="fas fa-check" aria-hidden="true"></i> ${escHtml(a.primaryLabel)}`;
+            primary.onclick = posAlertPrimary;
+            const secondary = document.getElementById('posAlertSecondary');
+            secondary.hidden = !a.secondaryLabel;
+            secondary.textContent = a.secondaryLabel || '';
+            secondary.onclick = posAlertSecondary;
+
+            const queue = document.getElementById('posAlertQueue');
+            queue.hidden = _posAlerts.length < 2;
+            queue.textContent = '1 of ' + _posAlerts.length;
+            document.getElementById('posAlertAll').hidden = _posAlerts.length < 2;
+
+            const firstShow = overlay.hidden;
+            overlay.hidden = false;
+            if (_posAlertShownKey !== a.key) {
+                _posAlertShownKey = a.key;
+                _posAlertReminders = 0;
+                posAlertScheduleReminder();
+                if (firstShow || document.activeElement === document.body || !overlay.contains(document.activeElement)) {
+                    setTimeout(() => primary.focus(), 30);
+                }
+            }
+        }
+
+        function posAlertNext() {
+            _posAlerts.shift();
+            posAlertRender();
+        }
+
+        function posAlertPrimary() {
+            const a = _posAlerts[0];
+            if (!a) return;
+            if (a.kind === 'direct' && a.msgId) ackPosInboxMessage(a.msgId);
+            posAlertNext();
+        }
+
+        function posAlertSecondary() {
+            const a = _posAlerts[0];
+            if (!a) return;
+            posAlertNext();
+            if (a.secondaryAction === 'order' && a.orderId) openTabDetail(a.orderId);
+            else if (a.secondaryAction === 'messages') togglePosInbox(true);
+        }
+
+        async function posAlertReply(text, button) {
+            const a = _posAlerts[0];
+            if (!a || a.kind !== 'direct') return;
+            document.querySelectorAll('#posAlertReplies button').forEach(b => { b.disabled = true; });
+            const sent = await quickSendPosReply(a.msgId, text, button);
+            if (sent && _posAlerts[0] === a) posAlertNext();
+            else document.querySelectorAll('#posAlertReplies button').forEach(b => { b.disabled = false; });
+        }
+
+        /* Close every queued card at once. Station notes are not marked done by
+           this — they stay under "Needs you" in Messages until someone answers them. */
+        function posAlertDismissAll() {
+            _posAlerts.length = 0;
+            posAlertRender();
+        }
+
+        function posAlertFromReady(n) {
+            const stations = { kitchen: 'Kitchen', bar: 'Bar', coffee_bar: 'Coffee Bar' };
+            const station = stations[n.station] || 'Station';
+            const itemCount = parseInt(n.item_count || 0, 10) || 0;
+            return {
+                key: 'ready:' + [n.order_id, n.station, n.reference || n.id].join(':'),
+                kind: 'ready',
+                tone: 'ready',
+                urgent: !!n.vibrate,
+                icon: 'fa-bell-concierge',
+                kicker: station,
+                title: (n.reference ? n.reference + ' is ready' : 'Order ready') + (n.vibrate ? ' — your order' : ''),
+                where: posReadyLocationLabel(n),
+                items: (itemCount ? itemCount + ' item' + (itemCount === 1 ? '' : 's') + ': ' : '') + posCompactItemsSummary(n.items_summary || '', 6),
+                message: String(n.message || '').trim(),
+                orderId: parseInt(n.order_id, 10) || 0,
+                primaryLabel: 'Got it',
+                secondaryLabel: n.order_id ? 'Open order' : '',
+                secondaryAction: 'order'
+            };
+        }
+
+        function posAlertFromDirect(m) {
+            const station = posInboxStationLabel(m.station);
+            const collection = isCollectionDirectMessage(m);
+            const urgent = m.priority === 'urgent' || collection;
+            return {
+                key: 'direct:' + m.id,
+                kind: 'direct',
+                station,
+                msgId: parseInt(m.id, 10) || 0,
+                tone: urgent ? 'urgent' : 'note',
+                urgent,
+                icon: collection ? 'fa-bell-concierge' : (urgent ? 'fa-triangle-exclamation' : posInboxStationIcon(m.station)),
+                kicker: station + (urgent && !collection ? ' · urgent' : ''),
+                title: collection ? 'Ready for collection' + (m.order_ref ? ' — ' + m.order_ref : '') : 'Message from ' + station + (m.order_ref ? ' — ' + m.order_ref : ''),
+                where: posInboxOrderContext(m),
+                items: posCompactItemsSummary(m.order_items_summary || '', 6),
+                message: m.message || '',
+                orderId: parseInt(m.order_id, 10) || 0,
+                primaryLabel: collection ? 'On my way' : 'Got it',
+                secondaryLabel: 'Later',
+                secondaryAction: ''
+            };
+        }
+
+        function posAlertFromReply(m) {
+            const station = posInboxStationLabel(m.station);
+            return {
+                key: 'reply:' + m.id,
+                kind: 'reply',
+                tone: 'reply',
+                urgent: false,
+                icon: 'fa-reply',
+                kicker: station,
+                title: station + ' replied' + (m.order_ref ? ' — ' + m.order_ref : ''),
+                where: m.message ? 'Your note: “' + m.message + '”' : '',
+                items: '',
+                message: m.reply_message || '',
+                orderId: parseInt(m.order_id, 10) || 0,
+                primaryLabel: 'OK',
+                secondaryLabel: 'Open messages',
+                secondaryAction: 'messages'
+            };
         }
 
         async function sendPosInboxReply(messageId, triggerButton = null, markActioned = false) {
@@ -4447,7 +4628,9 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
             }
 
             const input = document.getElementById('posInboxReplyInput-' + msgId);
-            const reply = (input?.value || '').trim().slice(0, 255);
+            /* The alert card sends quick replies without a text box on screen, so fall
+               back to the draft quickSendPosReply() stored. */
+            const reply = String((input ? input.value : _posReplyDrafts[String(msgId)]) || '').trim().slice(0, 255);
             if (!reply) {
                 posToastReady('Type a reply first.', true);
                 input?.focus();
@@ -4605,61 +4788,35 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
                 if (!j.ok) return;
                 const msgs = normalizePosInboxMessages(j.messages || []);
                 _inboxLastMsgs = msgs;
-                const widget = document.getElementById('posInboxWidget');
-                if (widget) {
-                    widget.style.display = msgs.length > 0 ? 'flex' : 'none';
-                }
-                /* Detect new replies we haven't notified about yet */
-                const newReplies = msgs.filter(m => m.reply_message && !_seenReplies.has(posInboxReplyKey(m)));
+                /* Station notes answered from Messages, or on another till, drop out of
+                   the alert queue. */
+                posAlertPrune(new Set(msgs.filter(isPosInboxDirectPending).map(m => parseInt(m.id, 10) || 0)));
+                /* New replies to this cashier's own notes. Direct station notes carry
+                   the cashier's own answer in reply_message, so they are excluded here -
+                   otherwise sending a reply announced itself back as "Kitchen replied". */
+                const newReplies = msgs.filter(m => !isPosInboxDirectMessage(m) && m.reply_message && !_seenReplies.has(posInboxReplyKey(m)));
                 if (newReplies.length > 0 && !_inboxVisible) {
                     showPosInboxAttention(false);
                     newReplies.forEach(m => {
                         posRememberSeen(_seenReplies, POS_INBOX_SEEN_KEY, posInboxReplyKey(m));
-                        const stn = posInboxStationLabel(m.station);
-                        RHNotif.show({
-                            title: stn + ' replied to your note' + (m.order_ref ? ' \u00b7 ' + m.order_ref : ''),
-                            body: '\u201c' + m.reply_message + '\u201d',
-                            type: 'success',
-                            source: stn,
-                            duration: POS_NOTIFICATION_DURATION_MS,
-                            /* Silent per card; the batch plays one cue below. Leaving sound
-                               on here meant three replies landing together fired three
-                               overlapping chimes. */
-                            sound: false,
-                        });
+                        posAlertPush(posAlertFromReply(m));
                     });
+                    /* One cue for the batch - three replies landing together used to
+                       fire three overlapping chimes. */
                     RHSounds.play('success');
-                    pollMyOrders(true);
                 }
-                /* Detect new direct station→POS notes (initiated by the station, not replies). */
+                /* New notes a station sent to this cashier. */
                 const newDirect = msgs.filter(m => isPosInboxDirectPending(m) && !_seenReplies.has(posInboxDirectKey(m)));
                 if (newDirect.length > 0) {
                     const hasUrgentDirect = newDirect.some(m => m.priority === 'urgent' || isCollectionDirectMessage(m));
                     showPosInboxAttention(hasUrgentDirect);
                     newDirect.forEach(m => {
                         posRememberSeen(_seenReplies, POS_INBOX_SEEN_KEY, posInboxDirectKey(m));
-                        const stn = posInboxStationLabel(m.station);
-                        const isCollectionAlert = isCollectionDirectMessage(m);
-                        const isUrgent = m.priority === 'urgent' || isCollectionAlert;
-                        const detail = [posCompactItemsSummary(m.order_items_summary || '', 4), m.message].filter(Boolean).join(' · ');
-                        RHNotif.show({
-                            title: isCollectionAlert ? '\u{1F514} READY FOR COLLECTION: ' + stn + (m.order_ref ? ' \u00b7 ' + m.order_ref : '') : (isUrgent ? '\u26a0 URGENT: ' + stn + (m.order_ref ? ' \u00b7 ' + m.order_ref : '') : stn + ' note' + (m.order_ref ? ' \u00b7 ' + m.order_ref : '')),
-                            body: detail || m.message || '',
-                            type: isUrgent ? 'urgent' : 'info',
-                            source: stn,
-                            duration: POS_NOTIFICATION_DURATION_MS,
-                            sound: false,
-                        });
+                        posAlertPush(posAlertFromDirect(m));
                     });
                     /* One cue for the batch, graded by the most severe note in it. */
                     RHSounds.play(hasUrgentDirect ? 'urgent' : 'normal');
                     pollMyOrders(true);
-                    if (!_inboxVisible) {
-                        _inboxVisible = true;
-                        const panel = document.getElementById('posInboxPanel');
-                        if (panel) panel.style.display = 'block';
-                        renderPosInbox(msgs);
-                    }
                 }
                 updatePosInboxBadgesFromMessages(msgs);
                 if (_inboxVisible) {
@@ -4697,208 +4854,143 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
         let _myOrdersPollInFlight = false;
         let _myOrdersLast = [];
 
-        function clampMyOrdersWidgetIntoView() {
-            if (typeof window.__posClampFloatingWidgets !== 'function') return;
-            window.__posClampFloatingWidgets();
-            setTimeout(() => {
-                if (typeof window.__posClampFloatingWidgets === 'function') {
-                    window.__posClampFloatingWidgets();
-                }
-            }, 60);
-        }
+        let _myOrdersFilter = 'open';
+        let _myOrdersRenderSig = '';
 
         function toggleMyOrders(forceState = null) {
             const opening = typeof forceState === 'boolean' ? forceState : !_myOrdersVisible;
-            _myOrdersVisible = opening;
-            const widget = document.getElementById('myOrdersWidget');
-            const panel = document.getElementById('myOrdersPanel');
-            if (widget) widget.classList.toggle('is-mobile-open', _myOrdersVisible && window.innerWidth <= 640);
-            if (panel) panel.style.display = _myOrdersVisible ? 'block' : 'none';
-            if (_myOrdersVisible) {
-                pollMyOrders();
-                clampMyOrdersWidgetIntoView();
-            }
+            if (opening) openPosService('orders');
+            else if (_myOrdersVisible) closePosService();
         }
 
         async function openMyOrdersCurrentDetail() {
-            showPosActionLoader('Loading orders…', 'Fetching your orders for today.');
-            try {
-                await pollMyOrders(true);
-            } finally {
-                hidePosActionLoader();
-            }
             toggleMyOrders(true);
-            // List is now visible — user taps a row to open its detail
         }
 
-        function myOrderStatusPill(o) {
+        function setMyOrdersFilter(filter) {
+            _myOrdersFilter = filter === 'all' ? 'all' : 'open';
+            document.querySelectorAll('[data-orders-filter]').forEach(btn => {
+                btn.classList.toggle('is-active', btn.dataset.ordersFilter === _myOrdersFilter);
+            });
+            _myOrdersRenderSig = '';
+            renderMyOrders(_myOrdersLast);
+        }
+
+        /* An order is still open while it owes money or the food/drink is not all out.
+           Paid-and-served, voided, cancelled and refunded orders are finished. */
+        function myOrderIsOpen(o) {
+            const status = String(o.status || '');
+            if (['voided', 'cancelled', 'refunded'].includes(status)) return false;
+            if (status === 'placed') return true;
+            return !['served', 'empty', 'voided', 'cancelled'].includes(String(o.kitchen_status || ''));
+        }
+
+        /* One plain-words line for where the food is — the thing a cashier actually asks. */
+        function myOrderKitchenStep(o) {
             const map = {
-                placed: {
-                    lbl: 'Placed',
-                    bg: '#fef3c7',
-                    fg: '#92400e',
-                    icon: 'fa-receipt'
-                },
-                preparing: {
-                    lbl: 'Preparing',
-                    bg: '#dbeafe',
-                    fg: '#1e40af',
-                    icon: 'fa-fire'
-                },
-                ready: {
-                    lbl: 'Ready',
-                    bg: '#bbf7d0',
-                    fg: '#166534',
-                    icon: 'fa-bell'
-                },
-                served: {
-                    lbl: 'Served',
-                    bg: '#e5e7eb',
-                    fg: '#374151',
-                    icon: 'fa-check-double'
-                },
-                paid: {
-                    lbl: 'Paid',
-                    bg: '#d1fae5',
-                    fg: '#065f46',
-                    icon: 'fa-check-circle'
-                },
-                voided: {
-                    lbl: 'Voided',
-                    bg: '#fee2e2',
-                    fg: '#991b1b',
-                    icon: 'fa-ban'
-                },
-                cancelled: {
-                    lbl: 'Cancelled',
-                    bg: '#f3f4f6',
-                    fg: '#6b7280',
-                    icon: 'fa-circle-xmark'
-                },
-                empty: {
-                    lbl: 'Empty',
-                    bg: '#f3f4f6',
-                    fg: '#6b7280',
-                    icon: 'fa-circle-question'
-                }
+                placed: ['is-wait', 'fa-hourglass-half', 'Waiting for the station'],
+                preparing: ['is-cooking', 'fa-fire', 'Being made'],
+                ready: ['is-ready', 'fa-bell', 'Ready — collect it'],
+                served: ['is-done', 'fa-check-double', 'Served'],
+                voided: ['is-void', 'fa-ban', 'Voided'],
+                cancelled: ['is-void', 'fa-circle-xmark', 'Cancelled'],
+                empty: ['is-void', 'fa-circle-question', 'No items']
             };
-            const c = map[o.kitchen_status] || map.placed;
-            return `<span style="display:inline-flex;align-items:center;gap:4px;background:${c.bg};color:${c.fg};font-size:10.5px;font-weight:700;padding:2px 8px;border-radius:10px;text-transform:uppercase;letter-spacing:.04em;"><i class="fas ${c.icon}"></i> ${c.lbl}</span>`;
+            return map[o.kitchen_status] || map.placed;
         }
 
-        function myOrderPaymentPill(o) {
-            if (o.status === 'voided' || o.status === 'cancelled') {
-                const label = o.status === 'voided' ? 'Voided' : 'Cancelled';
-                return `<span style="display:inline-flex;align-items:center;gap:4px;background:#fee2e2;color:#991b1b;font-size:10.5px;font-weight:700;padding:2px 8px;border-radius:10px;"><i class="fas fa-ban"></i> ${label}</span>`;
+        function myOrderMoneyStep(o) {
+            const status = String(o.status || '');
+            if (status === 'voided') return ['is-void', 'fa-ban', 'Voided'];
+            if (status === 'cancelled') return ['is-void', 'fa-circle-xmark', 'Cancelled'];
+            /* 'refunded' must be caught before the tab branch, or a refunded order reads
+               "Open tab" and tells staff money is still owed on an order already handed back. */
+            if (status === 'refunded') return ['is-void', 'fa-rotate-left', 'Refunded'];
+            if (status === 'paid') {
+                const method = String(o.payment_method || '').replace(/_/g, ' ');
+                return ['is-done', 'fa-circle-check', 'Paid' + (method ? ' · ' + method : '')];
             }
-            if (o.status === 'paid') {
-                const m = (o.payment_method || '').replace(/_/g, ' ');
-                return `<span style="display:inline-flex;align-items:center;gap:4px;background:#d1fae5;color:#065f46;font-size:10.5px;font-weight:700;padding:2px 8px;border-radius:10px;"><i class="fas fa-check-circle"></i> Paid${m ? ' · ' + escHtml(m) : ''}</span>`;
-            }
-            /* 'refunded' was missing, so a refunded order fell through to the opened_as_tab
-               branch below and was labelled "Open tab" — telling staff that money still needed
-               collecting on an order that had already been paid AND handed back. */
-            if (o.status === 'refunded') {
-                return `<span style="display:inline-flex;align-items:center;gap:4px;background:#ede9fe;color:#5b21b6;font-size:10.5px;font-weight:700;padding:2px 8px;border-radius:10px;"><i class="fas fa-rotate-left"></i> Refunded</span>`;
-            }
-            if (o.opened_as_tab == 1 || o.opened_as_tab === '1') {
-                return `<span style="display:inline-flex;align-items:center;gap:4px;background:#fef3c7;color:#92400e;font-size:10.5px;font-weight:700;padding:2px 8px;border-radius:10px;"><i class="fas fa-clock"></i> Open tab</span>`;
-            }
-            return `<span style="display:inline-flex;align-items:center;gap:4px;background:#fee2e2;color:#991b1b;font-size:10.5px;font-weight:700;padding:2px 8px;border-radius:10px;"><i class="fas fa-circle-exclamation"></i> Unpaid</span>`;
+            if (String(o.opened_as_tab) === '1') return ['is-owe', 'fa-clock', 'Open tab — not paid'];
+            return ['is-owe', 'fa-circle-exclamation', 'Not paid'];
         }
+
+        let _posServerClockSkew = 0;
 
         function fmtAgeFromIso(iso) {
             if (!iso) return '';
             const t = Date.parse(iso.replace(' ', 'T'));
             if (isNaN(t)) return '';
-            const sec = Math.max(0, Math.floor((Date.now() - t) / 1000));
-            if (sec < 60) return sec + 's ago';
+            const sec = Math.max(0, Math.floor((Date.now() - _posServerClockSkew - t) / 1000));
+            if (sec < 60) return 'just now';
             const m = Math.floor(sec / 60);
-            if (m < 60) return m + 'm ago';
+            if (m < 60) return m + ' min ago';
             const h = Math.floor(m / 60);
             return h + 'h ' + (m % 60) + 'm ago';
         }
 
-        function myOrderKdsBreakdown(o) {
-            const buckets = [
-                ['pending', 'Pending'],
-                ['preparing', 'Preparing'],
-                ['ready', 'Ready'],
-                ['collection', 'Collection'],
-                ['served', 'Served']
-            ];
-            const parts = buckets.map(([key, label]) => {
-                const value = parseInt(o['items_' + key] || 0, 10) || 0;
-                return value > 0 ? (label + ': ' + value) : '';
-            }).filter(Boolean);
-            if (!parts.length) {
-                const kitchen = String(o.kitchen_status || o.status || 'placed').replace(/_/g, ' ');
-                return 'KDS: ' + kitchen;
-            }
-            return 'KDS: ' + parts.join(' · ');
+        function myOrderCardHtml(o) {
+            const kitchen = myOrderKitchenStep(o);
+            const money = myOrderMoneyStep(o);
+            const where = o.table_number ? 'Table ' + o.table_number : String(o.order_type || 'walk_in').replace(/_/g, ' ');
+            const items = posCompactItemsSummary(o.items_summary || '', 5);
+            const stations = (o.stations || []).length > 1 ? (o.stations || []).map(st =>
+                `<span class="svc-station${st.done ? ' is-done' : ''}"><i class="fas ${st.done ? 'fa-check' : 'fa-hourglass-half'}"></i> ${escHtml(st.label || st.station || 'Station')}${st.done ? '' : ' · ' + (parseInt(st.pending || 0, 10) || 0) + ' to go'}</span>`
+            ).join('') : '';
+            const progress = Math.max(0, Math.min(100, parseInt(o.progress_percent || 0, 10) || 0));
+            const showProgress = ['placed', 'preparing', 'ready'].includes(o.kitchen_status);
+            return `<button type="button" class="svc-card svc-order ${kitchen[0]}${String(o.is_priority) === '1' ? ' is-rush' : ''}" onclick="openTabDetail(${parseInt(o.id, 10) || 0})">
+                <span class="svc-order__top">
+                    <strong class="svc-order__ref">${escHtml(o.reference || '')}</strong>
+                    ${String(o.is_priority) === '1' ? '<span class="svc-tag svc-tag--urgent">Rush</span>' : ''}
+                    <span class="svc-order__where">${escHtml(where)}${o.customer_name ? ' · ' + escHtml(o.customer_name) : ''}</span>
+                    <strong class="svc-order__total">${escHtml(currencySymbol)} ${fmtMoney(o.total_amount || 0)}</strong>
+                </span>
+                ${items ? `<span class="svc-order__items">${escHtml(items)}</span>` : ''}
+                <span class="svc-order__steps">
+                    <span class="svc-step ${kitchen[0]}"><i class="fas ${kitchen[1]}"></i> ${escHtml(kitchen[2])}</span>
+                    <span class="svc-step ${money[0]}"><i class="fas ${money[1]}"></i> ${escHtml(money[2])}</span>
+                    <span class="svc-order__age">${escHtml(fmtAgeFromIso(o.created_at))}</span>
+                </span>
+                ${stations ? `<span class="svc-order__stations">${stations}</span>` : ''}
+                ${showProgress ? `<span class="svc-progress" aria-hidden="true"><span style="width:${progress}%"></span></span>` : ''}
+            </button>`;
         }
 
         function renderMyOrders(orders) {
             const list = document.getElementById('myOrdersList');
-            const chip = document.getElementById('myOrdersTotalChip');
-            const badge = document.getElementById('myOrdersBadge');
             if (!list) return;
-            const todayCount = orders.length;
-            if (chip) chip.textContent = todayCount + (todayCount === 1 ? ' order' : ' orders');
-            if (badge) {
-                if (todayCount > 0) {
-                    badge.textContent = todayCount > 99 ? '99+' : String(todayCount);
-                    badge.style.display = '';
-                } else {
-                    badge.style.display = 'none';
-                }
-            }
-            if (!orders.length) {
-                list.innerHTML = '<p style="text-align:center;color:#9ca3af;padding:30px 18px;font-size:13px;">No orders fired yet today. Tap items in the menu to start a new order.</p>';
-                if (_myOrdersVisible) clampMyOrdersWidgetIntoView();
+            orders = orders || [];
+            const openOrders = orders.filter(myOrderIsOpen);
+            const setText = (id, value) => {
+                const el = document.getElementById(id);
+                if (el) el.textContent = value;
+            };
+            setText('myOrdersTotalChip', String(orders.length));
+            setText('myOrdersOpenCount', String(openOrders.length));
+            /* The toolbar badge counts orders still needing something, not every order
+               today — a number that only ever grows stops being read. */
+            ['myOrdersBadge', 'svcOrdersCount'].forEach(id => {
+                const el = document.getElementById(id);
+                if (!el) return;
+                el.textContent = openOrders.length > 99 ? '99+' : String(openOrders.length);
+                el.style.display = openOrders.length > 0 ? '' : 'none';
+            });
+            _syncPosMobileBadges();
+
+            const shown = _myOrdersFilter === 'all' ? orders : openOrders;
+            /* Skip the rebuild when nothing changed (the age labels tick per minute), so
+               a tap is never lost to the list being replaced under the finger. */
+            const sig = _myOrdersFilter + '|' + Math.floor(Date.now() / 60000) + '|' + JSON.stringify(shown);
+            if (sig === _myOrdersRenderSig) return;
+            _myOrdersRenderSig = sig;
+
+            if (!shown.length) {
+                list.innerHTML = orders.length ?
+                    '<div class="svc-empty"><i class="fas fa-circle-check"></i><strong>Nothing still open</strong><span>Everything you rang up today is paid and served. Tap “All today” to see it.</span></div>' :
+                    '<div class="svc-empty"><i class="fas fa-receipt"></i><strong>No orders yet today</strong><span>Orders you ring up appear here with their kitchen and payment status.</span></div>';
                 return;
             }
-            list.innerHTML = orders.map(o => {
-                const total = fmtMoney(o.total_amount || 0);
-                const items = parseInt(o.item_total || 0, 10);
-                const where = o.table_number ? 'Table ' + escHtml(o.table_number) : (o.order_type || 'walk_in').replace(/_/g, ' ');
-                const customer = o.customer_name ? ' · ' + escHtml(o.customer_name) : '';
-                const itemSummary = posCompactItemsSummary(o.items_summary || '', 4);
-                const stationSummary = (o.stations || []).map(st => {
-                    const done = !!st.done;
-                    return `<span style="display:inline-flex;align-items:center;gap:4px;background:${done ? '#ecfdf5' : '#fff7ed'};color:${done ? '#047857' : '#9a3412'};border:1px solid ${done ? '#a7f3d0' : '#fed7aa'};border-radius:9px;padding:1px 7px;font-size:10.5px;font-weight:700;"><i class="fas ${done ? 'fa-check' : 'fa-hourglass-half'}"></i>${escHtml(st.label || st.station || 'Station')}${done ? ' done' : ' · ' + parseInt(st.pending || 0, 10) + ' pending'}</span>`;
-                }).join('');
-                const progress = parseInt(o.progress_percent || 0, 10);
-                const isLive = o.kitchen_status === 'placed' || o.kitchen_status === 'preparing';
-                const ringClr = o.kitchen_status === 'ready' ? '#16a34a' :
-                    o.kitchen_status === 'preparing' ? '#2563eb' :
-                    o.kitchen_status === 'served' ? '#9ca3af' : '#f59e0b';
-                const kdsSummary = escHtml(myOrderKdsBreakdown(o));
-                return `<a href="#" onclick="openTabDetail(${o.id}); return false;" style="display:block;padding:11px 14px;border-bottom:1px solid #f3f4f6;text-decoration:none;color:inherit;cursor:pointer;${isLive ? 'background:#fffdf7;' : ''}">
-            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:5px;gap:8px;">
-                <div style="display:flex;align-items:center;gap:8px;min-width:0;">
-                    <strong style="font-size:13px;color:#1f1f24;white-space:nowrap;">${escHtml(o.reference)}</strong>
-                    <span style="font-size:11.5px;color:#6c757d;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${escHtml(where)}${customer}</span>
-                </div>
-                <strong style="font-size:13px;color:#1f1f24;white-space:nowrap;">${currencySymbol} ${total}</strong>
-            </div>
-            <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-bottom:6px;">
-                ${myOrderStatusPill(o)}
-                ${myOrderPaymentPill(o)}
-                <span style="font-size:10.5px;color:#9ca3af;margin-left:auto;"><i class="fas fa-clock"></i> ${escHtml(fmtAgeFromIso(o.created_at))} · ${items} item${items===1?'':'s'}</span>
-            </div>
-            <div style="font-size:10.5px;color:#5f6368;line-height:1.35;margin:-1px 0 6px;"><i class="fas fa-sitemap"></i> ${kdsSummary}</div>
-            ${itemSummary ? `<div style="font-size:10.5px;color:#6b7280;line-height:1.35;margin:-1px 0 6px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;"><i class="fas fa-list-check"></i> ${escHtml(itemSummary)}</div>` : ''}
-            ${stationSummary ? `<div style="display:flex;align-items:center;gap:5px;flex-wrap:wrap;margin:-1px 0 6px;">${stationSummary}</div>` : ''}
-            ${isLive || o.kitchen_status === 'ready' ? `<div style="height:5px;background:#f3f4f6;border-radius:3px;overflow:hidden;"><div style="height:100%;width:${progress}%;background:${ringClr};transition:width .4s ease;"></div></div>` : ''}
-                <div style="display:flex;justify-content:flex-end;gap:6px;flex-wrap:wrap;margin-top:8px;">
-                    <span style="display:inline-flex;align-items:center;gap:4px;background:#f8fafc;color:#334155;border:1px solid #e2e8f0;border-radius:999px;padding:2px 8px;font-size:10px;font-weight:700;"><i class="fas fa-receipt"></i> Details</span>
-                    ${(String(o.opened_as_tab) === '1' && String(o.status) === 'placed') ? '<span style="display:inline-flex;align-items:center;gap:4px;background:#fef3c7;color:#92400e;border:1px solid #fde68a;border-radius:999px;padding:2px 8px;font-size:10px;font-weight:700;"><i class="fas fa-credit-card"></i> Settle later</span>' : ''}
-                </div>
-        </a>`;
-            }).join('');
-            _syncPosMobileBadges();
-            if (_myOrdersVisible) clampMyOrdersWidgetIntoView();
+            list.innerHTML = shown.map(myOrderCardHtml).join('');
         }
 
         async function pollMyOrders(force = false) {
@@ -4920,6 +5012,11 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
                 if (!r.ok) return;
                 const j = await r.json().catch(() => null);
                 if (!j || !j.ok) return;
+                /* Ages are measured on the server's clock: order times come from the
+                   database, and a till whose own clock or timezone is off showed an order
+                   placed a minute ago as "10h ago". */
+                const serverNow = j.server_time ? Date.parse(String(j.server_time).replace(' ', 'T')) : NaN;
+                if (Number.isFinite(serverNow)) _posServerClockSkew = Date.now() - serverNow;
                 _myOrdersLast = Array.isArray(j.orders) ? j.orders : [];
                 renderMyOrders(_myOrdersLast);
             } catch (e) {
@@ -5157,7 +5254,6 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
                 if (orderId) loadStationNoteOrderHistory(orderId, {
                     silent: true
                 });
-                document.getElementById('posInboxWidget').style.display = 'flex';
                 setTimeout(pollStationReplies, 800); /* quick re-poll so the message appears in inbox */
             } catch (e) {
                 posToastReady('Network error sending station note.', true);
@@ -6338,54 +6434,10 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
             );
         }
 
-        async function openPosMobileInboxView() {
-            if (!isPosPhoneViewport()) {
-                togglePosInbox();
-                return;
-            }
-            showPosActionLoader('Loading inbox…', 'Checking station replies.');
-            try {
-                await pollStationReplies();
-            } finally {
-                hidePosActionLoader();
-            }
-            const messages = Array.isArray(_inboxLastMsgs) ? _inboxLastMsgs : [];
-            if (!messages.length) {
-                openPosMobileQuickView(
-                    '<i class="fas fa-inbox"></i> Station Inbox',
-                    posMobileQuickViewEmpty('fa-inbox', 'Inbox is clear', 'No station notes or replies right now.'), {
-                        subtitle: 'Live station communication'
-                    }
-                );
-                return;
-            }
-            const messageHtml = messages.map((message) => {
-                const station = posInboxStationLabel(message.station);
-                const urgent = message.priority === 'urgent';
-                const messageText = escHtml(message.message || 'No message body');
-                const contextText = escHtml(posInboxOrderContext(message) || (message.order_ref ? String(message.order_ref) : 'General note'));
-                const timeLabel = message.created_at ?
-                    new Date(String(message.created_at).replace(' ', 'T')).toLocaleTimeString([], {
-                        hour: '2-digit',
-                        minute: '2-digit'
-                    }) :
-                    '';
-                return '<article class="pos-mobile-quick-view-item pos-mobile-quick-view-item--inbox' + (urgent ? ' pos-mobile-quick-view-item--alert' : '') + '">' +
-                    '<div class="pos-mobile-quick-view-item__top">' +
-                    '<strong class="pos-mobile-quick-view-item__title">' + escHtml(station) + '</strong>' +
-                    '<span class="pos-mobile-quick-view-item__badge">' + (urgent ? 'Urgent' : 'Inbox') + '</span>' +
-                    '</div>' +
-                    '<p class="pos-mobile-quick-view-item__summary">' + messageText + '</p>' +
-                    '<p class="pos-mobile-quick-view-item__meta">' + contextText + '</p>' +
-                    '<div class="pos-mobile-quick-view-item__footer">' + (timeLabel ? '<span><i class="fas fa-clock"></i> ' + escHtml(timeLabel) + '</span>' : '<span><i class="fas fa-clock"></i> Just now</span>') + '</div>' +
-                    '</article>';
-            }).join('');
-            openPosMobileQuickView(
-                '<i class="fas fa-inbox"></i> Station Inbox',
-                '<div class="pos-mobile-quick-view-list">' + messageHtml + '</div>', {
-                    subtitle: messages.length + (messages.length === 1 ? ' message' : ' messages')
-                }
-            );
+        /* Phones get the same Messages window as the till - it goes full-screen there -
+           rather than a separate read-only list with no way to answer a station. */
+        function openPosMobileInboxView() {
+            togglePosInbox(true);
         }
 
         async function openPosMobileOrdersView() {
@@ -6410,8 +6462,6 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
             if (window.innerWidth > 1700) closePosMobileMenu();
             if (window.innerWidth > 640) {
                 document.getElementById('recentList')?.classList.remove('recent-list--mobile');
-                document.getElementById('posInboxWidget')?.classList.remove('is-mobile-open');
-                document.getElementById('myOrdersWidget')?.classList.remove('is-mobile-open');
             }
         }
         bindPosMobileMenuButton();
@@ -7709,9 +7759,9 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
         }
 
         /* Toasts are transient acknowledgements ("Reply sent", "Tab refreshed"), not
-           alerts. They used to default to POS_NOTIFICATION_DURATION_MS — two whole
-           minutes — which meant a normal service shift left a permanent pile of them
-           over the till bar. Real alerts go through RHNotif, which has its own cap. */
+           alerts. They used to default to the alert duration — two whole minutes —
+           which meant a normal service shift left a permanent pile of them over the
+           till bar. Real alerts go through the alert card (posAlertPush). */
         function posToast(msg, type, duration) {
             const isErr = type === 'err';
             const timeoutMs = duration || (isErr ? 9000 : 5000);
@@ -8122,8 +8172,9 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
         };
 
         async function openTabDetail(orderId) {
-            // Close the My Orders panel — it sits at z-index 99990 (above the modal) and intercepts clicks
-            toggleMyOrders(false);
+            /* Close the service window first: the order detail can lead straight into
+               payment, and that overlay must not open underneath it. */
+            closePosService();
 
             const overlay = document.getElementById('tabDetailOverlay');
             const body = document.getElementById('tdiBody');
@@ -9902,139 +9953,15 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
             }
         <?php endif; ?>
 
-            /* ── Draggable floating widgets ──────────────────────────────────── */
-            (function() {
-                /* handleEl: the element that initiates drag; el: the element that moves */
-                function makeWidgetDraggable(el, storageKey, handleEl) {
-                    try {
-                        var saved = JSON.parse(localStorage.getItem(storageKey) || 'null');
-                        if (saved && typeof saved.left === 'number' && typeof saved.top === 'number') {
-                            applyAbsPos(el, saved.left, saved.top);
-                            constrainWidgetToViewport(el);
-                        }
-                    } catch (_) {}
-
-                    var grip = handleEl || el;
-                    var ds = null;
-
-                    grip.addEventListener('pointerdown', function(e) {
-                        if (e.button !== 0 && e.pointerType === 'mouse') return;
-                        var r = el.getBoundingClientRect();
-                        ds = {
-                            sx: e.clientX,
-                            sy: e.clientY,
-                            ol: r.left,
-                            ot: r.top,
-                            moved: false
-                        };
-                        grip.setPointerCapture(e.pointerId);
-                        e.stopPropagation();
-                    });
-
-                    grip.addEventListener('pointermove', function(e) {
-                        if (!ds) return;
-                        var dx = e.clientX - ds.sx,
-                            dy = e.clientY - ds.sy;
-                        if (!ds.moved && Math.abs(dx) + Math.abs(dy) < 6) return;
-                        ds.moved = true;
-                        grip.style.cursor = 'grabbing';
-                        var maxL = window.innerWidth - el.offsetWidth - 4;
-                        var maxT = window.innerHeight - el.offsetHeight - 4;
-                        applyAbsPos(el, Math.max(4, Math.min(maxL, ds.ol + dx)), Math.max(4, Math.min(maxT, ds.ot + dy)));
-                    });
-
-                    grip.addEventListener('pointerup', function() {
-                        if (!ds) return;
-                        var wasMoved = ds.moved;
-                        ds = null;
-                        grip.style.cursor = 'grab';
-                        if (wasMoved) {
-                            var r = el.getBoundingClientRect();
-                            try {
-                                localStorage.setItem(storageKey, JSON.stringify({
-                                    left: r.left,
-                                    top: r.top
-                                }));
-                            } catch (_) {}
-                        }
-                        constrainWidgetToViewport(el, storageKey);
-                    });
-
-                    grip.addEventListener('pointercancel', function() {
-                        ds = null;
-                        grip.style.cursor = 'grab';
-                    });
+            /* The alert stacks sit under the till bar; re-measure when it reflows. */
+            document.addEventListener('DOMContentLoaded', function() {
+                var bar = document.querySelector('.till-bar');
+                if (bar && 'ResizeObserver' in window) {
+                    new ResizeObserver(function() {
+                        if (typeof window.syncPosAlertBounds === 'function') window.syncPosAlertBounds();
+                    }).observe(bar);
                 }
-
-                function applyAbsPos(el, left, top) {
-                    el.style.left = left + 'px';
-                    el.style.top = top + 'px';
-                    el.style.right = 'auto';
-                    el.style.bottom = 'auto';
-                }
-
-                function constrainWidgetToViewport(el, storageKey) {
-                    if (!el) return;
-                    if (window.getComputedStyle(el).display === 'none') return;
-
-                    /* Only touch widgets the user has actually dragged. This used to run on every
-                     * load and resize regardless, and because applyAbsPos() strips the CSS
-                     * bottom/right anchoring in favour of hard left/top pixels — then SAVED them —
-                     * a widget that had never been moved got permanently pinned to wherever it
-                     * happened to be measured. That is how the inbox and My Orders pills ended up
-                     * parked in the middle of the order panel with no way back: the corner
-                     * defaults could never apply again. Undragged widgets now keep their CSS
-                     * anchoring and stay in their corners. */
-                    var hasUserPosition = false;
-                    try {
-                        hasUserPosition = !!(storageKey && localStorage.getItem(storageKey));
-                    } catch (_) {}
-                    if (!hasUserPosition) return;
-
-                    var pad = 8;
-                    var r = el.getBoundingClientRect();
-                    var maxL = Math.max(pad, window.innerWidth - r.width - pad);
-                    var maxT = Math.max(pad, window.innerHeight - r.height - pad);
-                    var nextL = Math.max(pad, Math.min(maxL, r.left));
-                    var nextT = Math.max(pad, Math.min(maxT, r.top));
-                    if (nextL === r.left && nextT === r.top) return;
-                    applyAbsPos(el, nextL, nextT);
-                    try {
-                        localStorage.setItem(storageKey, JSON.stringify({
-                            left: nextL,
-                            top: nextT
-                        }));
-                    } catch (_) {}
-                }
-
-                function syncFloatingWidgetsToViewport() {
-                    constrainWidgetToViewport(document.getElementById('posInboxWidget'), 'rh_pos_inbox_pos');
-                    constrainWidgetToViewport(document.getElementById('myOrdersWidget'), 'rh_pos_orders_pos');
-                    /* The FAB row is what sets the floor of the alert stacks — re-measure
-                       whenever it moves or the inbox pill appears for the first time. */
-                    if (typeof window.syncPosAlertBounds === 'function') window.syncPosAlertBounds();
-                }
-
-                window.__posClampFloatingWidgets = syncFloatingWidgetsToViewport;
-
-                document.addEventListener('DOMContentLoaded', function() {
-                    var inbox = document.getElementById('posInboxWidget');
-                    var orders = document.getElementById('myOrdersWidget');
-                    if (inbox) makeWidgetDraggable(inbox, 'rh_pos_inbox_pos', document.getElementById('posInboxDragHandle'));
-                    if (orders) makeWidgetDraggable(orders, 'rh_pos_orders_pos', document.getElementById('myOrdersDragHandle'));
-                    window.addEventListener('resize', syncFloatingWidgetsToViewport);
-                    setTimeout(syncFloatingWidgetsToViewport, 80);
-                    if ('ResizeObserver' in window) {
-                        var bounds = new ResizeObserver(function() {
-                            if (typeof window.syncPosAlertBounds === 'function') window.syncPosAlertBounds();
-                        });
-                        var bar = document.querySelector('.till-bar');
-                        if (bar) bounds.observe(bar);
-                        if (inbox) bounds.observe(inbox);
-                        if (orders) bounds.observe(orders);
-                    }
-                });
-            }());
+            });
 
         // Auto-send receipt after redirect payment when contact info was captured
         if (posLastOrderId > 0 && !posJustParked && (posLastOrderEmail || posLastOrderPhone)) {
@@ -10060,60 +9987,58 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
     require __DIR__ . '/includes/help-tooltips.php'; ?>
     <?php require __DIR__ . '/includes/offline-banner.php'; ?>
 
-    <!-- Station inbox widget -->
-    <!-- Docked bottom-left, above My Orders, rather than bottom-right.
-         The cart is a full-height right-hand column, so every bottom-right
-         position this launcher took overlapped one of its controls - Pay at
-         90px, the order total at 132px, the order-type row at 190px. Moving it
-         out of that column removes the whole class of collision instead of
-         nudging it again. Staff can still drag it; this is only the default. -->
-    <div id="posInboxWidget" style="display:none;position:fixed;bottom:86px;left:22px;z-index:99990;flex-direction:column;align-items:flex-start;gap:8px;">
-        <!-- Inbox slide-up panel -->
-        <div id="posInboxPanel" style="display:none;width:320px;max-height:420px;background:#fff;border-radius:12px;box-shadow:0 8px 32px rgba(0,0,0,.22);border:1px solid #e5e7eb;overflow:hidden;">
-            <div style="padding:11px 14px;border-bottom:1px solid #f3f4f6;display:flex;align-items:center;justify-content:space-between;">
-                <strong style="font-size:13px;display:flex;align-items:center;gap:6px;"><i class="fas fa-inbox" style="color:#1d6a3e;"></i> Station Replies</strong>
-                <button onclick="togglePosInbox()" style="background:none;border:none;cursor:pointer;font-size:17px;color:#9ca3af;line-height:1;">&times;</button>
-            </div>
-            <div id="posInboxList" style="max-height:340px;overflow-y:auto;">
-                <p style="text-align:center;color:#9ca3af;padding:20px;font-size:13px;">Loading…</p>
-            </div>
-        </div>
-        <!-- FAB row: inbox button + drag handle on the right -->
-        <div style="display:flex;align-items:center;gap:6px;">
-            <button id="posInboxBtn" onclick="togglePosInbox()" title="Station message inbox" style="width:52px;height:52px;border-radius:50%;background:#1d4a2e;border:none;color:#86efac;font-size:20px;cursor:pointer;box-shadow:0 4px 14px rgba(0,0,0,.35);display:flex;align-items:center;justify-content:center;position:relative;touch-action:manipulation;flex-shrink:0;">
-                <i class="fas fa-inbox"></i>
-                <span id="posInboxBadge" style="display:none;position:absolute;top:-3px;right:-3px;background:#c82333;color:#fff;font-size:10px;font-weight:800;padding:2px 5px;border-radius:10px;min-width:18px;text-align:center;line-height:1.4;"></span>
-            </button>
-            <div id="posInboxDragHandle" class="pos-drag-grip" title="Drag to reposition" style="width:20px;height:52px;display:flex;align-items:center;justify-content:center;cursor:grab;color:rgba(134,239,172,0.5);font-size:13px;touch-action:none;user-select:none;-webkit-user-select:none;border-radius:10px;background:rgba(29,74,46,0.55);border:1px solid rgba(134,239,172,0.15);transition:background 0.15s,color 0.15s;">
-                <i class="fas fa-grip-vertical"></i>
-            </div>
+    <?php /* Service window: My orders + Messages in one large modal. Replaces the two
+              small floating panels, which were easy to miss and covered the menu grid.
+              #myOrdersList and #posInboxList keep their ids so the pollers render into
+              them unchanged. */ ?>
+    <div class="svc-overlay" id="posServiceOverlay" hidden onclick="if(event.target===this)closePosService()">
+        <div class="svc-modal" role="dialog" aria-modal="true" aria-labelledby="svcTitle">
+            <header class="svc-head">
+                <h2 class="svc-title" id="svcTitle">Service</h2>
+                <div class="svc-tabs" role="tablist">
+                    <button type="button" class="svc-tab" role="tab" id="svcTabOrders" data-svc-tab="orders" onclick="showPosServiceTab('orders')"><i class="fas fa-list-check"></i> My orders <span class="svc-tab__count" id="svcOrdersCount"></span></button>
+                    <button type="button" class="svc-tab" role="tab" id="svcTabMessages" data-svc-tab="messages" onclick="showPosServiceTab('messages')"><i class="fas fa-comments"></i> Messages <span class="svc-tab__count svc-tab__count--alert" id="svcMessagesCount"></span></button>
+                </div>
+                <button type="button" class="svc-close" onclick="closePosService()" aria-label="Close"><i class="fas fa-xmark"></i></button>
+            </header>
+            <section class="svc-pane" id="svcPaneOrders" role="tabpanel" aria-labelledby="svcTabOrders">
+                <div class="svc-filter" role="group" aria-label="Which orders">
+                    <button type="button" class="svc-filter__btn is-active" data-orders-filter="open" onclick="setMyOrdersFilter('open')">Still open <span id="myOrdersOpenCount">0</span></button>
+                    <button type="button" class="svc-filter__btn" data-orders-filter="all" onclick="setMyOrdersFilter('all')">All today <span id="myOrdersTotalChip">0</span></button>
+                </div>
+                <div class="svc-list" id="myOrdersList"><p class="svc-empty">Loading…</p></div>
+            </section>
+            <section class="svc-pane" id="svcPaneMessages" role="tabpanel" aria-labelledby="svcTabMessages" hidden>
+                <div class="svc-list" id="posInboxList"><p class="svc-empty">Loading…</p></div>
+                <footer class="svc-foot">
+                    <button type="button" class="svc-btn svc-btn--ghost" onclick="closePosService(); openStationNoteModal();"><i class="fas fa-paper-plane"></i> Send a note to a station</button>
+                </footer>
+            </section>
         </div>
     </div>
 
-    <!-- My orders live tracker — floating bottom-left -->
-    <div id="myOrdersWidget" style="position:fixed;bottom:22px;left:22px;z-index:99990;display:flex;flex-direction:column;align-items:flex-start;gap:8px;">
-        <div id="myOrdersPanel" style="display:none;width:380px;max-width:calc(100vw - 44px);max-height:520px;background:#fff;border-radius:12px;box-shadow:0 8px 32px rgba(0,0,0,.22);border:1px solid #e5e7eb;overflow:hidden;">
-            <div style="padding:11px 14px;border-bottom:1px solid #f3f4f6;display:flex;align-items:center;justify-content:space-between;background:linear-gradient(135deg,#fdf8f3,#f5efe5);">
-                <strong style="font-size:13px;display:flex;align-items:center;gap:6px;color:#5a4a36;"><i class="fas fa-list-check" style="color:#8B7355;"></i> My Orders Today</strong>
-                <div style="display:flex;align-items:center;gap:10px;">
-                    <span id="myOrdersTotalChip" style="font-size:11px;color:#6c757d;background:#fff;padding:2px 8px;border-radius:9px;border:1px solid #e5e7eb;">0</span>
-                    <button onclick="toggleMyOrders()" style="background:none;border:none;cursor:pointer;font-size:17px;color:#9ca3af;line-height:1;">&times;</button>
-                </div>
+    <?php /* Incoming alert: one big card in the middle of the screen for anything a
+              station sends this cashier — a ready order, a note, a reply. It stays up
+              until someone taps it, and re-chimes while it waits, so a busy cashier
+              cannot miss it the way a corner toast was missed. */ ?>
+    <div class="pos-alert-overlay" id="posAlertOverlay" hidden>
+        <div class="pos-alert" id="posAlertCard" role="alertdialog" aria-modal="true" aria-labelledby="posAlertTitle" aria-describedby="posAlertBody">
+            <div class="pos-alert__band" id="posAlertBand">
+                <i class="fas fa-bell" id="posAlertIcon" aria-hidden="true"></i>
+                <span id="posAlertKicker">Kitchen</span>
+                <span class="pos-alert__queue" id="posAlertQueue" hidden></span>
             </div>
-            <div id="myOrdersList" style="max-height:460px;overflow-y:auto;">
-                <p style="text-align:center;color:#9ca3af;padding:24px 18px;font-size:13px;">Loading…</p>
+            <div class="pos-alert__main">
+                <h2 class="pos-alert__title" id="posAlertTitle"></h2>
+                <p class="pos-alert__where" id="posAlertWhere" hidden></p>
+                <div id="posAlertBody"></div>
+                <div class="pos-alert__replies" id="posAlertReplies" hidden></div>
             </div>
-        </div>
-        <!-- FAB row: my-orders button + drag handle on the right -->
-        <div style="display:flex;align-items:center;gap:6px;">
-            <button id="myOrdersBtn" onclick="openMyOrdersCurrentDetail()" title="My orders — live status" style="height:52px;padding:0 18px;border-radius:26px;background:linear-gradient(135deg,#8B7355,#6f5b41);border:none;color:#fff;font-size:13px;font-weight:600;cursor:pointer;box-shadow:0 4px 14px rgba(0,0,0,.35);display:flex;align-items:center;gap:9px;position:relative;touch-action:manipulation;">
-                <i class="fas fa-list-check"></i>
-                <span>My Orders</span>
-                <span id="myOrdersBadge" style="display:none;background:#fff;color:#8B7355;font-size:11px;font-weight:800;padding:2px 7px;border-radius:10px;min-width:20px;text-align:center;line-height:1.4;">0</span>
-            </button>
-            <div id="myOrdersDragHandle" class="pos-drag-grip" title="Drag to reposition" style="width:20px;height:52px;display:flex;align-items:center;justify-content:center;cursor:grab;color:rgba(255,255,255,0.45);font-size:13px;touch-action:none;user-select:none;-webkit-user-select:none;border-radius:10px;background:rgba(139,115,85,0.5);border:1px solid rgba(255,255,255,0.12);transition:background 0.15s,color 0.15s;">
-                <i class="fas fa-grip-vertical"></i>
+            <div class="pos-alert__actions">
+                <button type="button" class="svc-btn svc-btn--ghost" id="posAlertSecondary" hidden></button>
+                <button type="button" class="svc-btn svc-btn--primary" id="posAlertPrimary"></button>
             </div>
+            <button type="button" class="pos-alert__all" id="posAlertAll" onclick="posAlertDismissAll()" hidden>Got them all — close</button>
         </div>
     </div>
 

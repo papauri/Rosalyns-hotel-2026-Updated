@@ -297,49 +297,47 @@
       </section>
 
       <section>
-        <h2>My Orders tracker</h2>
-        <p>The <strong>My Orders</strong> panel (bottom-left of the POS till) shows every live order you have fired this
-          shift, refreshed every second so KDS/BDS/CDS changes appear almost immediately.</p>
+        <h2>My orders</h2>
+        <p>Tap <strong>My orders</strong> in the till bar. It opens a large window over the till listing every order
+          you rang up this business day, refreshed every second so station changes show almost at once. The number on
+          the button counts orders that are <strong>still open</strong> &mdash; not paid yet, or food and drink not all
+          out &mdash; so it drops back to nothing when your section is clear.</p>
         <table>
           <thead>
             <tr>
-              <th>Element</th>
+              <th>On each order card</th>
               <th>What it means</th>
             </tr>
           </thead>
           <tbody>
             <tr>
-              <td><span class="pill red">⚡ RUSH</span> badge</td>
-              <td>This order has been marked high-priority. All stations see it highlighted in red.</td>
+              <td>Left edge colour</td>
+              <td><strong>Amber</strong> waiting for the station &middot; <strong>blue</strong> being made &middot;
+                <strong>green</strong> ready to collect &middot; <strong>grey</strong> finished.</td>
             </tr>
             <tr>
-              <td>Station pips (🍳 · 🍺 · ☕)</td>
-              <td>One pip per station. <strong>Green tick</strong> = all items at that station done. <strong>Blue
-                  spinner + count</strong> = items still in progress.</td>
+              <td>First pill</td>
+              <td>Where the food is, in plain words: <em>Waiting for the station</em>, <em>Being made</em>,
+                <em>Ready &mdash; collect it</em>, <em>Served</em>.</td>
             </tr>
             <tr>
-              <td>Amber italic note</td>
-              <td>The order note currently visible on all station screens.</td>
+              <td>Second pill</td>
+              <td>The money: <em>Not paid</em>, <em>Open tab &mdash; not paid</em>, <em>Paid &middot; method</em>,
+                <em>Refunded</em> or <em>Voided</em>.</td>
             </tr>
             <tr>
-              <td>Small item summary</td>
-              <td>Shows the ordered items in small text. Long orders show the first few items plus a remaining count.
-              </td>
+              <td><span class="pill red">RUSH</span> tag</td>
+              <td>The order has been marked high-priority; every station sees it highlighted.</td>
             </tr>
             <tr>
-              <td><strong>Rush</strong> button</td>
-              <td>Toggles priority on/off. All stations get an instant <span class="pill red">URGENT</span> inbox
-                message when you set or clear Rush.</td>
-            </tr>
-            <tr>
-              <td><strong>Edit note</strong> button</td>
-              <td>Opens a text overlay to update the order note. All stations receive an <span
-                  class="pill red">URGENT</span> inbox message with the new text the moment you save.</td>
+              <td>Station pills</td>
+              <td>Shown when an order goes to more than one station &mdash; a tick when that station is done, or how many
+                items it still has to go.</td>
             </tr>
           </tbody>
         </table>
-        <div class="callout note">Rush and Edit note are only available while the order is in <strong>placed</strong>
-          status (kitchen not yet done). Once all stations have served, the buttons disappear.</div>
+        <p>Use <strong>Still open</strong> / <strong>All today</strong> at the top to switch the list. Tap any card to
+          open the order, where you can take payment.</p>
       </section>
 
       <section>
@@ -362,24 +360,26 @@
       </section>
 
       <section>
-        <h2>Station replies &amp; notifications</h2>
+        <h2>Alerts and messages</h2>
+        <p>Anything a station sends <em>you</em> opens as <strong>one large card in the middle of the till</strong>:</p>
         <ul class="checklist">
-          <li>When kitchen/bar/coffee sends a note back, you get an in-app notification and sound alert on POS.</li>
-          <li>The <strong>inbox panel</strong> sits at the bottom-left of the till and appears only when there is
-            actually something in it — it does not take up space on a quiet till.</li>
-          <li>Notification cards use larger type and lighter body text than before, so they can be read at a glance
-            across a counter. At most three stack at once; older ones queue behind.</li>
+          <li><strong>Order ready</strong> (green) &mdash; the order number, table and items. Tap <strong>Got it</strong>,
+            or <strong>Open order</strong> to go straight to it.</li>
+          <li><strong>Message from a station</strong> (brown, or <strong>red when urgent</strong>, including &ldquo;ready
+            for collection&rdquo;) &mdash; tap <strong>Got it</strong> to tell the station you have seen it, or tap a quick
+            reply such as <em>On my way</em> or <em>2 minutes</em>. <strong>Later</strong> keeps it waiting in Messages.</li>
+          <li><strong>Reply to your note</strong> (blue) &mdash; the station's answer to a note you sent.</li>
+          <li>The card stays until someone taps it and <strong>chimes again every 20 seconds</strong> while it waits, so it
+            cannot be missed during a rush. If several arrive together they queue &mdash; the band shows
+            &ldquo;1 of 3&rdquo; &mdash; and <strong>Got them all &mdash; close</strong> clears the lot.</li>
+          <li><strong>Messages</strong> in the till bar holds everything from today. It turns <strong>red with a
+            count</strong> while a station note is still waiting for you, listed under <strong>Needs you</strong> with the
+            same Got it and reply buttons. Tap <strong>Clear</strong> on an old message to remove it for good.</li>
           <li>Confirmation and error <strong>toasts appear centred at the bottom</strong> of the till, clear of the cart
             and the pay buttons, and clear of the on-screen keyboard.</li>
           <li>Use <strong>Sounds</strong> / <strong>Sound Settings</strong> to choose the normal alert, urgent alert,
             and
             volume for the till device.</li>
-          <li>Direct station messages (for your user) appear in the POS inbox as <strong>Station → You</strong>.</li>
-          <li>When all items at a station are <strong>Ready</strong> or in <strong>Collection</strong>, POS shows a
-            ready-collection alert with the item summary. <strong>The cashier who placed the order</strong> gets a
-            vibrating urgent banner ("🔔 Your order is ready!"). Other POS sessions get a quieter green banner.</li>
-          <li>Ready and station-message popups stay on POS for <strong>2 minutes</strong> and can be closed immediately
-            with the <strong>×</strong> button.</li>
           <li>If a tab was already paid elsewhere, stock is short, or there is nothing pending, POS shows a friendly
             dialog and refreshes the affected tray instead of leaving the cashier guessing.</li>
           <li>Important action buttons include a brief click lock to prevent accidental double taps.</li>
