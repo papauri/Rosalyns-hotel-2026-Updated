@@ -6171,7 +6171,8 @@ button.svc-card:focus-visible { outline: 3px solid #8A775F; outline-offset: 2px;
     text-align: center;
 }
 
-/* Lines */
+/* Lines: one row each, so an order of eight or ten lines fits without scrolling.
+   name + "@ price" (tap for a note) | stepper | line total */
 .cart-lines {
     flex: 1 1 auto;
     min-height: 0;
@@ -6181,92 +6182,73 @@ button.svc-card:focus-visible { outline: 3px solid #8A775F; outline-offset: 2px;
 }
 
 .cline {
-    display: block;
-    padding: 12px 14px 12px 16px;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto 76px;
+    align-items: center;
+    gap: 8px;
+    padding: 7px 12px 7px 14px;
     border-bottom: 1px solid #f0eae2;
 }
 
-.cline-top {
+.cline-info {
     display: flex;
+    flex-direction: column;
     align-items: flex-start;
-    justify-content: space-between;
-    gap: 10px;
+    gap: 1px;
+    min-width: 0;
+    padding: 2px 0;
+    border: none;
+    background: none;
+    font-family: inherit;
+    text-align: left;
+    cursor: pointer;
 }
 
 .cline .nm {
-    min-width: 0;
-    font-size: 15px;
+    max-width: 100%;
+    font-size: 14px;
     font-weight: 600;
-    line-height: 1.3;
+    line-height: 1.25;
     color: #2a2723;
     overflow-wrap: anywhere;
 }
 
-.cline-total {
-    flex-shrink: 0;
-    font-size: 15px;
-    font-weight: 700;
-    line-height: 1.3;
-    color: #2a2723;
-    white-space: nowrap;
-}
-
-.cline-bottom {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    margin-top: 6px;
-}
-
 .cline .ln-meta {
-    flex: 1 1 auto;
-    min-width: 0;
-    font-size: 12.5px;
-    color: #8c8279;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-}
-
-.cline .cline-act,
-.cline .rm {
-    flex-shrink: 0;
     display: inline-flex;
     align-items: center;
-    justify-content: center;
-    width: 38px;
-    height: 38px;
-    padding: 0;
-    border: none;
-    border-radius: 10px;
-    background: transparent;
-    color: #b8aea4;
-    font-size: 15px;
-    cursor: pointer;
+    gap: 6px;
+    font-size: 12px;
+    line-height: 1.2;
+    color: #8c8279;
+    white-space: nowrap;
 }
 
-.cline .cline-act:hover,
-.cline .cline-act:active {
-    background: #f4efe9;
-    color: #7a6a52;
+.cline .ln-meta i {
+    font-size: 11px;
+    color: #cfc5b9;
 }
 
-.cline .cline-act.has-note {
+.cline .ln-meta i.has-note {
     color: #c4891e;
 }
 
-.cline .rm:hover,
-.cline .rm:active {
-    background: #fdecee;
-    color: #b42318;
+.cline-note {
+    max-width: 100%;
+    margin-top: 3px;
+    padding: 2px 8px;
+    border-radius: 6px;
+    background: #fdf6ea;
+    color: #7a5a26;
+    font-size: 12px;
+    font-style: italic;
+    line-height: 1.3;
 }
 
 .cline .qty {
-    flex-shrink: 0;
     display: inline-flex;
     align-items: center;
     gap: 0;
-    padding: 3px;
+    padding: 2px;
     border-radius: 999px;
     background: #f4efe9;
 }
@@ -6275,19 +6257,24 @@ button.svc-card:focus-visible { outline: 3px solid #8A775F; outline-offset: 2px;
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    width: 36px;
-    height: 36px;
+    width: 32px;
+    height: 32px;
     padding: 0;
     border: none;
     border-radius: 50%;
     background: #fff;
     box-shadow: 0 1px 2px rgba(35, 31, 28, .16);
     color: #2a2723;
-    font-size: 19px;
+    font-size: 18px;
     font-weight: 600;
     line-height: 1;
     cursor: pointer;
     transition: transform .08s;
+}
+
+.cline .qty button i {
+    font-size: 13px;
+    color: #b42318;
 }
 
 .cline .qty button:active {
@@ -6295,14 +6282,14 @@ button.svc-card:focus-visible { outline: 3px solid #8A775F; outline-offset: 2px;
 }
 
 .cline .qty input {
-    width: 36px;
-    height: 36px;
+    width: 30px;
+    height: 32px;
     padding: 0;
     border: none;
     border-radius: 0;
     background: transparent;
     color: #2a2723;
-    font-size: 15px;
+    font-size: 14px;
     font-weight: 700;
     text-align: center;
     -moz-appearance: textfield;
@@ -6315,28 +6302,12 @@ button.svc-card:focus-visible { outline: 3px solid #8A775F; outline-offset: 2px;
     margin: 0;
 }
 
-.cline-note {
-    display: inline-flex;
-    align-items: flex-start;
-    gap: 6px;
-    max-width: 100%;
-    margin-top: 6px;
-    padding: 5px 10px;
-    border: 1px solid #ecd9b8;
-    border-radius: 10px;
-    background: #fdf6ea;
-    color: #7a5a26;
-    font-family: inherit;
-    font-size: 12.5px;
-    font-style: italic;
-    line-height: 1.3;
-    text-align: left;
-    cursor: pointer;
-}
-
-.cline-note i {
-    margin-top: 2px;
-    color: #c4891e;
+.cline-total {
+    font-size: 14px;
+    font-weight: 700;
+    color: #2a2723;
+    text-align: right;
+    white-space: nowrap;
 }
 
 .cart-empty {
@@ -6459,22 +6430,6 @@ button.svc-card:focus-visible { outline: 3px solid #8A775F; outline-offset: 2px;
         font-size: 16px;
     }
 
-    .cline {
-        padding-left: 14px;
-        padding-right: 10px;
-    }
-
-    .cline .cline-act,
-    .cline .rm {
-        width: 32px;
-    }
-
-    /* Too narrow for "@ unit price" beside the controls; the line total and the
-       menu card both show the price. The element stays as the flex spacer. */
-    .cline .ln-meta {
-        font-size: 0;
-    }
-
     .ctx-chips {
         padding: 3px;
     }
@@ -6531,8 +6486,8 @@ button.svc-card:focus-visible { outline: 3px solid #8A775F; outline-offset: 2px;
     }
 
     .cline {
-        padding-top: 9px;
-        padding-bottom: 9px;
+        padding-top: 5px;
+        padding-bottom: 5px;
     }
 
     .cart-foot {
@@ -6715,4 +6670,106 @@ button.svc-card:focus-visible { outline: 3px solid #8A775F; outline-offset: 2px;
     .modal-overlay.show > .success-modal {
         animation: none;
     }
+}
+
+/* ══════════════════════════════════════════════════════════════════════════
+   Display size (html.pos-zoomed, set in the <head> of pos.php)
+   The whole till is scaled with CSS zoom. Viewport units scale with it, so
+   anything sized to the screen is divided by the zoom to fill it again.
+   Media queries still see the real screen width, so a tablet keeps the tablet
+   layout, just smaller, with more of the menu and the order on screen.
+   ══════════════════════════════════════════════════════════════════════════ */
+html.pos-zoomed {
+    zoom: var(--pos-zoom, 1);
+}
+
+html.pos-zoomed,
+html.pos-zoomed body {
+    max-width: none;
+}
+
+html.pos-zoomed .till-wrap {
+    width: calc(100dvw / var(--pos-zoom));
+    max-width: none;
+    height: calc(100dvh / var(--pos-zoom));
+    min-height: 0;
+}
+
+/* The side columns are fixed widths, so they shrink with the zoom while the menu
+   (1fr) takes the space. Give them back some width so the order stays readable. */
+@media (min-width: 641px) and (max-width: 1366px) {
+    html.pos-zoomed {
+        --pos-tab-cats-w: 210px;
+        --pos-tab-cart-w: 440px;
+    }
+}
+
+html.pos-zoomed .modal,
+html.pos-zoomed .modal-content {
+    max-height: calc((100dvh - 32px) / var(--pos-zoom)) !important;
+    max-width: calc(96vw / var(--pos-zoom)) !important;
+}
+
+html.pos-zoomed .modal-body[style*="vh"] {
+    max-height: calc(74dvh / var(--pos-zoom)) !important;
+}
+
+html.pos-zoomed #posPageModal > .modal-content {
+    height: calc(90dvh / var(--pos-zoom)) !important;
+}
+
+html.pos-zoomed .svc-modal {
+    height: min(calc(86vh / var(--pos-zoom)), 900px);
+}
+
+html.pos-zoomed .pos-ready-card {
+    width: calc((100vw - 40px) / var(--pos-zoom));
+}
+
+/* More > Display size: − 60% + */
+.tb-more__zoom {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 6px 8px 6px 14px;
+    color: inherit;
+    font-size: 14px;
+}
+
+.tb-more__zoom > span:first-child {
+    display: inline-flex;
+    align-items: center;
+    gap: 10px;
+    white-space: nowrap;
+}
+
+.tb-more__zoom-ctl {
+    display: inline-flex;
+    align-items: center;
+    gap: 2px;
+    padding: 2px;
+    border-radius: 999px;
+    background: rgba(127, 127, 127, .14);
+}
+
+.tb-more__zoom-ctl button {
+    width: 36px;
+    height: 36px;
+    padding: 0;
+    border: none;
+    border-radius: 50%;
+    background: #fff;
+    color: #2a2723;
+    font-size: 18px;
+    font-weight: 700;
+    line-height: 1;
+    cursor: pointer;
+    box-shadow: 0 1px 2px rgba(0, 0, 0, .18);
+}
+
+.tb-more__zoom-ctl output {
+    min-width: 44px;
+    text-align: center;
+    font-weight: 700;
 }

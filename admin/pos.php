@@ -2028,6 +2028,29 @@ if (in_array($user['role'] ?? '', ['admin', 'manager'], true)) {
     <meta charset="UTF-8">
     <title>POS Till — <?php echo htmlspecialchars($siteName); ?></title>
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <script>
+    /* Display size. Staff found the till at 100% too large on tablets and preferred
+       how it looked at 60% browser zoom, so the till scales itself: 60% by default on
+       touch tablets, 100% elsewhere, and each device can change it under
+       More > Display size. Runs before the stylesheets so there is no resize flash. */
+    (function () {
+        var z = 1, tablet = false;
+        try { tablet = Math.min(screen.width, screen.height) >= 600 && window.matchMedia('(pointer: coarse)').matches; } catch (e) {}
+        if (tablet) z = 0.6;
+        try {
+            var saved = parseFloat(localStorage.getItem('rh_pos_zoom') || '');
+            if (saved >= 0.5 && saved <= 1) z = saved;
+        } catch (e) {}
+        window.__rhPosZoom = z;
+        if (z < 1) {
+            document.documentElement.style.setProperty('--pos-zoom', String(z));
+            document.documentElement.classList.add('pos-zoomed');
+        }
+    })();
+    /* Screen coordinates (getBoundingClientRect, pointer events) are in real pixels;
+       CSS lengths inside the scaled page are not. Divide by this before using one. */
+    window.posZoom = function () { return window.__rhPosZoom || 1; };
+    </script>
     <meta name="theme-color" content="#8B7355">
     <meta name="mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-capable" content="yes">
@@ -2433,6 +2456,14 @@ if (in_array($user['role'] ?? '', ['admin', 'manager'], true)) {
 
                             <div class="tb-more__group">Settings</div>
                             <button type="button" class="rh-help-toggle" data-inline="1" id="rhHelpToggle" aria-label="Toggle help tooltips" data-help="Help mode|Turn tooltip hints on or off for POS actions."><span class="dot"></span><i class="fas fa-question-circle"></i> <span id="rhHelpLabel">Help mode</span></button>
+                            <div class="tb-more__zoom">
+                                <span><i class="fas fa-magnifying-glass"></i> Display size</span>
+                                <span class="tb-more__zoom-ctl">
+                                    <button type="button" onclick="stepPosZoom(-1)" aria-label="Make the till smaller">&minus;</button>
+                                    <output id="posZoomVal">100%</output>
+                                    <button type="button" onclick="stepPosZoom(1)" aria-label="Make the till larger">+</button>
+                                </span>
+                            </div>
                             <button type="button" onclick="closePosMoreMenu(); RHSounds.openSettings();"><i class="fas fa-sliders"></i> Sound settings</button>
                             <a href="../docs/guides/01-pos-till.html" target="_blank" rel="noopener"><i class="fas fa-book-open"></i> POS guide</a>
                             <?php if (!$isFullScreen): ?><a href="dashboard.php"><i class="fas fa-arrow-left"></i> Admin dashboard</a><?php endif; ?>
@@ -3731,7 +3762,7 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
            stacks are laid out against. */
         function syncPosAlertBounds() {
             const bar = document.querySelector('.till-bar');
-            const barHeight = Math.ceil(bar?.getBoundingClientRect().bottom || 112);
+            const barHeight = Math.ceil((bar?.getBoundingClientRect().bottom || 112) / posZoom());
             const root = document.documentElement.style;
             root.setProperty('--rh-notif-top', (barHeight + 12) + 'px');
             root.setProperty('--rh-notif-bottom', '24px');
@@ -5461,8 +5492,8 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
             const clampWidth = (width) => {
                 const minWidth = 182;
                 const cart = document.getElementById('mainCart');
-                const gridWidth = Math.max(0, Math.floor(grid.getBoundingClientRect().width));
-                const cartWidth = (cart && !grid.classList.contains('order-menu-closed')) ? Math.floor(cart.getBoundingClientRect().width || 0) : 0;
+                const gridWidth = Math.max(0, Math.floor(grid.getBoundingClientRect().width / posZoom()));
+                const cartWidth = (cart && !grid.classList.contains('order-menu-closed')) ? Math.floor((cart.getBoundingClientRect().width || 0) / posZoom()) : 0;
                 const reserveForMenu = 330;
                 const maxWidth = Math.max(minWidth + 8, Math.min(460, gridWidth - cartWidth - reserveForMenu));
                 return Math.max(minWidth, Math.min(maxWidth, Math.round(width)));
@@ -5541,7 +5572,7 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
             };
 
             const onMove = (event) => {
-                applyWidth(event.clientX - grid.getBoundingClientRect().left, true);
+                applyWidth((event.clientX - grid.getBoundingClientRect().left) / posZoom(), true);
             };
 
             handle.addEventListener('pointerdown', (event) => {
@@ -5730,7 +5761,7 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
             const cats = document.getElementById('cats');
             if (cats && trigger) {
                 const rect = trigger.getBoundingClientRect();
-                cats.style.top = rect.bottom + 'px';
+                cats.style.top = (rect.bottom / posZoom()) + 'px';
             }
             wrap.classList.add('open');
             trigger.setAttribute('aria-expanded', 'true');
@@ -6569,23 +6600,22 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
             if (!cart.length) {
                 c.innerHTML = '<div class="cart-empty"><i class="fas fa-receipt"></i><strong>No items yet</strong><span>Tap a dish on the menu to start this order.</span></div>';
             } else {
+                // One row per line so more of the order fits without scrolling:
+                // name (tap for a note) | stepper | line total. At qty 1 the minus
+                // becomes a bin, since that tap removes the line.
                 c.innerHTML = cart.map((l, i) => `
             <div class="cline">
-                <div class="cline-top">
-                    <div class="nm">${escHtml(l.name)}</div>
-                    <div class="cline-total">${currencySymbol} ${fmtMoney(l.price * l.qty)}</div>
+                <button type="button" class="cline-info" onclick="openNote(${i})" aria-label="${l.note ? 'Edit' : 'Add'} note for ${escHtml(l.name)}">
+                    <span class="nm">${escHtml(l.name)}</span>
+                    <span class="ln-meta">@ ${fmtMoney(l.price)}<i class="fas fa-comment-dots${l.note ? ' has-note' : ''}"></i></span>
+                    ${l.note ? `<span class="cline-note">${escHtml(l.note)}</span>` : ''}
+                </button>
+                <div class="qty">
+                    <button type="button" onclick="bump(${i},-1)" aria-label="${l.qty <= 1 ? 'Remove' : 'One less'}">${l.qty <= 1 ? '<i class="fas fa-trash-can"></i>' : '−'}</button>
+                    <input type="number" min="0" max="1000" step="0.5" value="${l.qty}" onchange="setQty(${i}, this.value)" aria-label="Quantity">
+                    <button type="button" onclick="bump(${i},1)" aria-label="One more">+</button>
                 </div>
-                <div class="cline-bottom">
-                    <div class="ln-meta" title="${currencySymbol} ${fmtMoney(l.price)} each">@ ${fmtMoney(l.price)}</div>
-                    <button type="button" class="cline-act${l.note ? ' has-note' : ''}" onclick="openNote(${i})" aria-label="${l.note ? 'Edit note' : 'Add note'}"><i class="fas fa-comment-dots"></i></button>
-                    <button type="button" class="rm" onclick="rm(${i})" aria-label="Remove ${escHtml(l.name)}"><i class="fas fa-trash-can"></i></button>
-                    <div class="qty">
-                        <button type="button" onclick="bump(${i},-1)" aria-label="One less">−</button>
-                        <input type="number" min="0" max="1000" step="0.5" value="${l.qty}" onchange="setQty(${i}, this.value)" aria-label="Quantity">
-                        <button type="button" onclick="bump(${i},1)" aria-label="One more">+</button>
-                    </div>
-                </div>
-                ${l.note ? `<button type="button" class="cline-note" onclick="openNote(${i})"><i class="fas fa-comment-dots"></i> ${escHtml(l.note)}</button>` : ''}
+                <div class="cline-total">${fmtMoney(l.price * l.qty)}</div>
             </div>`).join('');
             }
             applyDeals();
@@ -7179,6 +7209,8 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
             const opening = menu.hasAttribute('hidden');
             if (opening) {
                 menu.removeAttribute('hidden');
+                const zoomOut = document.getElementById('posZoomVal');
+                if (zoomOut) zoomOut.textContent = Math.round(posZoom() * 100) + '%';
                 positionPosMoreMenu();
                 btn.setAttribute('aria-expanded', 'true');
                 btn.classList.add('is-open');
@@ -7193,17 +7225,56 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
             const menu = document.getElementById('posMoreMenu');
             const btn = document.getElementById('posMoreBtn');
             if (!menu || !btn || menu.hasAttribute('hidden')) return;
-            const b = btn.getBoundingClientRect();
-            const m = menu.getBoundingClientRect();
+            // Work in the scaled page's own pixels (see posZoom in <head>).
+            const z = posZoom();
+            const br = btn.getBoundingClientRect();
+            const mr = menu.getBoundingClientRect();
+            const b = { top: br.top / z, right: br.right / z, bottom: br.bottom / z };
+            const m = { width: mr.width / z, height: mr.height / z };
+            const vw = window.innerWidth / z;
+            const vh = window.innerHeight / z;
             const pad = 8;
             let left = b.right - m.width;
-            left = Math.max(pad, Math.min(left, window.innerWidth - m.width - pad));
+            left = Math.max(pad, Math.min(left, vw - m.width - pad));
             let top = b.bottom + 6;
-            if (top + m.height > window.innerHeight - pad) {
+            if (top + m.height > vh - pad) {
                 top = Math.max(pad, b.top - m.height - 6); // flip above if it would overflow
             }
             menu.style.left = Math.round(left) + 'px';
             menu.style.top = Math.round(top) + 'px';
+        }
+
+        const POS_ZOOM_STEPS = [0.5, 0.6, 0.7, 0.8, 0.9, 1];
+
+        function applyPosZoom(z) {
+            window.__rhPosZoom = z;
+            const root = document.documentElement;
+            if (z < 1) {
+                root.style.setProperty('--pos-zoom', String(z));
+                root.classList.add('pos-zoomed');
+            } else {
+                root.style.removeProperty('--pos-zoom');
+                root.classList.remove('pos-zoomed');
+            }
+            const out = document.getElementById('posZoomVal');
+            if (out) out.textContent = Math.round(z * 100) + '%';
+            if (typeof syncPosAlertBounds === 'function') syncPosAlertBounds();
+            if (typeof window.syncPosCatsResize === 'function') window.syncPosCatsResize();
+            positionPosMoreMenu();
+        }
+
+        function stepPosZoom(dir) {
+            const cur = posZoom();
+            let i = POS_ZOOM_STEPS.findIndex(v => Math.abs(v - cur) < 0.001);
+            if (i < 0) i = POS_ZOOM_STEPS.length - 1;
+            const next = POS_ZOOM_STEPS[Math.max(0, Math.min(POS_ZOOM_STEPS.length - 1, i + dir))];
+            try { localStorage.setItem('rh_pos_zoom', String(next)); } catch (_) {}
+            applyPosZoom(next);
+        }
+        if (document.readyState === 'loading') {
+            document.addEventListener('DOMContentLoaded', () => applyPosZoom(posZoom()));
+        } else {
+            applyPosZoom(posZoom());
         }
 
         window.addEventListener('resize', positionPosMoreMenu);

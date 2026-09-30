@@ -249,15 +249,21 @@ define('RH_HELP_TOOLTIPS_RENDERED', true);
             bubble.classList.add('show');
             bubble.setAttribute('aria-hidden', 'false');
             // Position after measure
-            const r = target.getBoundingClientRect();
+            // The POS can scale itself (window.__rhPosZoom); screen coordinates are
+            // in real pixels, so convert them to the page's own before placing.
+            const z = window.__rhPosZoom || 1;
+            const rr = target.getBoundingClientRect();
+            const r = { left: rr.left / z, top: rr.top / z, bottom: rr.bottom / z, width: rr.width / z };
+            const vw = window.innerWidth / z,
+                vh = window.innerHeight / z;
             const bw = bubble.offsetWidth,
                 bh = bubble.offsetHeight;
-            let bx = (typeof x === 'number') ? x + 12 : (r.left + r.width / 2 - bw / 2);
-            let by = (typeof y === 'number') ? y + 16 : (r.top - bh - 10);
+            let bx = (typeof x === 'number') ? x / z + 12 : (r.left + r.width / 2 - bw / 2);
+            let by = (typeof y === 'number') ? y / z + 16 : (r.top - bh - 10);
             if (by < 8) by = r.bottom + 10;
-            if (bx + bw > window.innerWidth - 8) bx = window.innerWidth - bw - 8;
+            if (bx + bw > vw - 8) bx = vw - bw - 8;
             if (bx < 8) bx = 8;
-            if (by + bh > window.innerHeight - 8) by = window.innerHeight - bh - 8;
+            if (by + bh > vh - 8) by = vh - bh - 8;
             bubble.style.left = bx + 'px';
             bubble.style.top = by + 'px';
             activeEl = target;
