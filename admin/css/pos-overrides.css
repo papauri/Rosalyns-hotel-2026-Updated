@@ -5748,8 +5748,8 @@ button.svc-card:focus-visible { outline: 3px solid #8A775F; outline-offset: 2px;
     }
 
     .till-grid > .menu-mode .menu-mode-btn {
-        min-height: 48px;
-        font-size: 15px;
+        min-height: 44px;
+        font-size: 14px;
     }
 
     /* Categories: one horizontal row of chips above the menu. A side column cost a
@@ -5768,12 +5768,16 @@ button.svc-card:focus-visible { outline: 3px solid #8A775F; outline-offset: 2px;
         display: none !important;
     }
 
+    /* The row scrolls sideways. The right edge fades out so it reads as "more this
+       way" rather than chips sliding under the order column. */
     .till-grid .cats {
         display: flex;
         flex-direction: row;
         flex-wrap: nowrap;
-        gap: 8px;
-        padding: 10px 12px;
+        gap: 6px;
+        padding: 8px 40px 8px 12px;
+        -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 44px), transparent);
+        mask-image: linear-gradient(to right, #000 calc(100% - 44px), transparent);
         border-right: none;
         background: transparent;
         overflow-x: auto;
@@ -5790,14 +5794,14 @@ button.svc-card:focus-visible { outline: 3px solid #8A775F; outline-offset: 2px;
     .till-grid .cat-btn {
         flex: 0 0 auto;
         width: auto;
-        min-height: 48px;
+        min-height: 44px;
         margin: 0;
-        padding: 0 18px;
+        padding: 0 14px;
         display: inline-flex;
         align-items: center;
-        gap: 8px;
+        gap: 6px;
         border-radius: 999px;
-        font-size: 15px;
+        font-size: 14px;
         font-weight: 500;
         white-space: nowrap;
     }
@@ -5848,24 +5852,73 @@ button.svc-card:focus-visible { outline: 3px solid #8A775F; outline-offset: 2px;
         font-size: 17px;
     }
 
+    /* Compact cards: name, then price and stock on one line. The item type label
+       is dropped here because the category chip above already says it, and it
+       cost every card a whole row. */
     #grid {
-        grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)) !important;
-        gap: 10px;
+        grid-template-columns: repeat(auto-fill, minmax(128px, 1fr)) !important;
+        gap: 8px;
     }
 
     #grid .item {
-        min-height: 108px;
-        padding: 12px 14px;
-        border-radius: 16px;
+        min-height: 78px;
+        height: auto;
+        padding: 10px 12px;
+        border-radius: 12px;
+        border-width: 1px;
+        display: flex;
+        flex-direction: column;
+        justify-content: space-between;
+        gap: 6px;
+        box-shadow: 0 2px 8px rgba(35, 31, 28, .06);
+    }
+
+    #grid .item::after {
+        top: 7px;
+        right: 7px;
+        width: 20px;
+        height: 20px;
+        font-size: 13px;
+    }
+
+    #grid .item .badge {
+        display: none;
     }
 
     #grid .item .nm {
-        font-size: 15px;
-        line-height: 1.3;
+        margin-top: 0;
+        padding-right: 20px;
+        font-size: 14px;
+        line-height: 1.25;
+        -webkit-line-clamp: 3;
+        line-clamp: 3;
+    }
+
+    #grid .item > div:nth-child(2) {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: baseline;
+        justify-content: space-between;
+        column-gap: 6px;
+        row-gap: 2px;
     }
 
     #grid .item .pr {
-        font-size: 17px;
+        margin-top: 0;
+        font-size: 14.5px;
+        white-space: nowrap;
+    }
+
+    #grid .item .st {
+        margin-top: 0;
+        padding: 0;
+        background: none;
+        font-size: 11px;
+        white-space: nowrap;
+    }
+
+    #grid .item .st.low {
+        background: none;
     }
 
     /* The order column. */
@@ -6052,9 +6105,6 @@ button.svc-card:focus-visible { outline: 3px solid #8A775F; outline-offset: 2px;
         --pos-tab-cart-w: 300px;
     }
 
-    #grid {
-        grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)) !important;
-    }
 
     .ctx-chip span {
         font-size: 11px;
@@ -6074,6 +6124,60 @@ button.svc-card:focus-visible { outline: 3px solid #8A775F; outline-offset: 2px;
 @media (min-width: 1181px) and (max-width: 1366px) {
     :root {
         --pos-tab-cart-w: 380px;
+    }
+}
+
+/* Short screens (landscape tablets with browser chrome, laptops): the order
+   footer would otherwise eat the order lines. Service chips go to one slim row
+   and the hint line goes, so at least three order lines stay visible. */
+@media (min-width: 641px) and (max-width: 1366px) and (max-height: 720px) {
+    .till-grid > .cart .cart-lines {
+        min-height: 150px;
+    }
+
+    .cart-head {
+        min-height: 50px;
+        padding-top: 4px;
+        padding-bottom: 4px;
+    }
+
+    .ctx-chip {
+        flex-direction: row;
+        gap: 6px;
+        min-height: 44px;
+    }
+
+    .ctx-chip i {
+        font-size: 14px;
+    }
+
+    .ctx-chips {
+        margin-bottom: 6px;
+    }
+
+    .service-ctx {
+        padding-bottom: 8px;
+        margin-bottom: 8px;
+    }
+
+    .ctx-fields input,
+    .ctx-fields select,
+    .ctx-fields > .ctx-covers-row > #ctxCovers {
+        min-height: 44px;
+    }
+
+    .total-row {
+        font-size: 20px;
+        margin-bottom: 8px;
+    }
+
+    .park-btn,
+    .pay-btn {
+        min-height: 52px;
+    }
+
+    #parkHint {
+        display: none;
     }
 }
 
