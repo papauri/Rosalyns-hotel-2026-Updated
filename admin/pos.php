@@ -5707,8 +5707,8 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
             const label = document.getElementById('catDropdownLabel');
             if (label) label.textContent = btn.querySelector('.count') ? btn.firstChild.textContent.trim() : btn.textContent.trim();
             closeCatDropdown();
-            // On tablets the categories are a sideways-scrolling row: bring the
-            // chosen chip fully into view so a half-hidden one never stays selected.
+            // Bring the chosen category fully into view in its scrolling list, so a
+            // half-hidden one never stays selected off-screen.
             if (btn.scrollIntoView) btn.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'nearest' });
             renderMenu();
         }

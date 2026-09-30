@@ -5731,20 +5731,25 @@ button.svc-card:focus-visible { outline: 3px solid #8A775F; outline-offset: 2px;
 /* ── Layout: menu + always-visible order column (tablets) ── */
 @media (min-width: 641px) and (max-width: 1366px) {
     :root {
+        --pos-tab-cats-w: 180px;
         --pos-tab-cart-w: 340px;
     }
 
+    /* Three columns: categories | menu | order. The Restaurant / Room Service
+       switch (hotels only) spans the top of the first two; without it row 1 is
+       empty and collapses to nothing. */
     .till-grid,
     .till-grid.order-menu-closed {
-        grid-template-columns: minmax(0, 1fr) var(--pos-tab-cart-w);
-        grid-template-rows: auto auto minmax(0, 1fr);
+        grid-template-columns: var(--pos-tab-cats-w) minmax(0, 1fr) var(--pos-tab-cart-w);
+        grid-template-rows: auto minmax(0, 1fr);
+        background: #f4efe9;
     }
 
     .till-grid > .menu-mode {
-        grid-column: 1;
+        grid-column: 1 / 3;
         grid-row: 1;
         inline-size: min(100% - 24px, 22rem);
-        margin: 10px 12px 0;
+        margin: 8px 12px;
     }
 
     .till-grid > .menu-mode .menu-mode-btn {
@@ -5752,39 +5757,32 @@ button.svc-card:focus-visible { outline: 3px solid #8A775F; outline-offset: 2px;
         font-size: 14px;
     }
 
-    /* Categories: one horizontal row of chips above the menu. A side column cost a
-       fifth of the screen width; a row costs 68px of height, which a landscape
-       tablet can spare far more easily once the order column takes its share. */
+    /* Categories: a vertical list down the left, where cashiers expect it. The
+       width is fixed per screen class (no drag handle on touch screens). */
     .till-grid > .cats-wrap {
         grid-column: 1;
         grid-row: 2;
         min-width: 0;
+        min-height: 0;
         overflow: hidden;
-        background: #f4efe9;
-        border-bottom: 1px solid #e6ded1;
     }
 
     #catsResizeHandle {
         display: none !important;
     }
 
-    /* The row scrolls sideways. The right edge fades out so it reads as "more this
-       way" rather than chips sliding under the order column. */
     .till-grid .cats {
         display: flex;
-        flex-direction: row;
-        flex-wrap: nowrap;
+        flex-direction: column;
         gap: 6px;
-        padding: 8px 40px 8px 12px;
-        -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 44px), transparent);
-        mask-image: linear-gradient(to right, #000 calc(100% - 44px), transparent);
-        border-right: none;
-        background: transparent;
-        overflow-x: auto;
-        overflow-y: hidden;
-        scrollbar-width: none;
-        overscroll-behavior-x: contain;
+        padding: 10px 8px 16px 10px;
+        border-right: 1px solid #e6ded1;
+        background: #f4efe9;
+        overflow-x: hidden;
+        overflow-y: auto;
+        overscroll-behavior-y: contain;
         -webkit-overflow-scrolling: touch;
+        scrollbar-width: none;
     }
 
     .till-grid .cats::-webkit-scrollbar {
@@ -5793,21 +5791,30 @@ button.svc-card:focus-visible { outline: 3px solid #8A775F; outline-offset: 2px;
 
     .till-grid .cat-btn {
         flex: 0 0 auto;
-        width: auto;
-        min-height: 44px;
+        width: 100%;
+        min-height: 52px;
         margin: 0;
-        padding: 0 14px;
-        display: inline-flex;
+        padding: 8px 10px 8px 12px;
+        display: flex;
         align-items: center;
-        gap: 6px;
-        border-radius: 999px;
+        justify-content: space-between;
+        gap: 8px;
+        border-radius: 12px;
         font-size: 14px;
         font-weight: 500;
-        white-space: nowrap;
+        line-height: 1.2;
+        text-align: left;
+        white-space: normal;
+        overflow-wrap: break-word;
+    }
+
+    .till-grid .cat-btn.active {
+        box-shadow: 0 4px 12px rgba(122, 106, 82, .28);
     }
 
     .till-grid .cat-btn .count {
         float: none;
+        flex-shrink: 0;
         display: inline-flex;
         align-items: center;
         justify-content: center;
@@ -5826,8 +5833,8 @@ button.svc-card:focus-visible { outline: 3px solid #8A775F; outline-offset: 2px;
     }
 
     .till-grid > .menu {
-        grid-column: 1;
-        grid-row: 3;
+        grid-column: 2;
+        grid-row: 2;
         min-width: 0;
         padding: 12px 14px 20px;
     }
@@ -5923,7 +5930,7 @@ button.svc-card:focus-visible { outline: 3px solid #8A775F; outline-offset: 2px;
 
     /* The order column. */
     .till-grid > .cart {
-        grid-column: 2;
+        grid-column: 3;
         grid-row: 1 / -1;
         display: flex !important;
         position: relative;
@@ -6102,7 +6109,21 @@ button.svc-card:focus-visible { outline: 3px solid #8A775F; outline-offset: 2px;
 
 @media (min-width: 641px) and (max-width: 899px) {
     :root {
-        --pos-tab-cart-w: 300px;
+        --pos-tab-cats-w: 144px;
+        --pos-tab-cart-w: 280px;
+    }
+
+    .till-grid .cat-btn {
+        min-height: 48px;
+        padding: 6px 8px 6px 10px;
+        font-size: 13px;
+    }
+
+    .till-grid .cat-btn .count {
+        min-width: 22px;
+        height: 20px;
+        padding: 0 5px;
+        font-size: 11px;
     }
 
 
@@ -6123,7 +6144,8 @@ button.svc-card:focus-visible { outline: 3px solid #8A775F; outline-offset: 2px;
 
 @media (min-width: 1181px) and (max-width: 1366px) {
     :root {
-        --pos-tab-cart-w: 380px;
+        --pos-tab-cats-w: 190px;
+        --pos-tab-cart-w: 370px;
     }
 }
 
@@ -6178,44 +6200,6 @@ button.svc-card:focus-visible { outline: 3px solid #8A775F; outline-offset: 2px;
 
     #parkHint {
         display: none;
-    }
-}
-
-/* Landscape tablets have the width to put the Restaurant / Room Service switch
-   beside the category chips, which gives the height back to the menu. The first
-   column is auto, so without the switch (non-hotel presets) it collapses to 0. */
-@media (min-width: 900px) and (max-width: 1366px) {
-    .till-grid,
-    .till-grid.order-menu-closed {
-        grid-template-columns: auto minmax(0, 1fr) var(--pos-tab-cart-w);
-        grid-template-rows: auto minmax(0, 1fr);
-        background: #f4efe9;
-    }
-
-    .till-grid > .menu-mode {
-        grid-column: 1;
-        grid-row: 1;
-        align-self: center;
-        inline-size: auto;
-        margin: 0 0 0 12px;
-    }
-
-    .till-grid > .menu-mode .menu-mode-btn {
-        padding: 0 16px;
-    }
-
-    .till-grid > .cats-wrap {
-        grid-column: 2;
-        grid-row: 1;
-    }
-
-    .till-grid > .menu {
-        grid-column: 1 / 3;
-        grid-row: 2;
-    }
-
-    .till-grid > .cart {
-        grid-column: 3;
     }
 }
 
