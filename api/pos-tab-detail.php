@@ -7,13 +7,14 @@
  *
  * GET  ?order_id=<int>
  * Auth: valid admin session (any role with POS access).
- *       restaurant_staff may only view their own orders.
+ *       Needs pos_till or stock_orders; without pos_all_tabs, only orders the user opened.
  */
 declare(strict_types=1);
 header('Content-Type: application/json; charset=utf-8');
 
 require_once __DIR__ . '/../config/database.php';
 require_once __DIR__ . '/../config/security.php';
+require_once __DIR__ . '/../admin/includes/permissions.php';
 if (session_status() !== PHP_SESSION_ACTIVE) session_start();
 
 function ptderr(string $msg, int $code = 400): never {
@@ -26,6 +27,7 @@ function ptderr(string $msg, int $code = 400): never {
 if (empty($_SESSION['admin_user'])) ptderr('Not authenticated', 401);
 /** @var array $user */
 $user = $_SESSION['admin_user'];
+if (!hasAnyPermission((int)$user['id'], ['pos_till', 'stock_orders'])) ptderr('Forbidden', 403);
 
 $orderId = (int)($_GET['order_id'] ?? 0);
 if ($orderId <= 0) ptderr('Missing or invalid order_id');
@@ -42,8 +44,8 @@ try {
     $order = $stmt->fetch(PDO::FETCH_ASSOC);
     if (!$order) ptderr('Order not found', 404);
 
-    /* Scope: restaurant_staff can only see their own orders */
-    if (($user['role'] ?? '') === 'restaurant_staff' && (int)$order['created_by'] !== (int)$user['id']) {
+    /* Scope: without pos_all_tabs, only orders the user opened */
+    if (!hasPermission((int)$user['id'], 'pos_all_tabs') && (int)$order['created_by'] !== (int)$user['id']) {
         ptderr('Forbidden', 403);
     }
 

@@ -26,8 +26,7 @@ require_once __DIR__ . '/../includes/restaurant-location-locks.php';
 /** @var PDO $pdo */
 
 if (!hasPermission((int)$_SESSION['admin_user_id'], 'room_service_view')) {
-    header('Location: dashboard.php?error=access_denied');
-    exit;
+    rhDenyAndRedirectHome((int)$_SESSION['admin_user_id'], (string)($_SESSION['admin_role'] ?? ''), basename($_SERVER['PHP_SELF']));
 }
 
 $user = [

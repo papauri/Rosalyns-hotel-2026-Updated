@@ -8,7 +8,7 @@ require_once '../config/receipts.php';
 require_once 'includes/finance-schema.php';
 
 if (!hasPermission((int)($user['id'] ?? 0), 'receipts')) {
-    header('Location: dashboard.php?error=access_denied');
+    rhDenyAndRedirectHome((int)$_SESSION['admin_user_id'], (string)($_SESSION['admin_role'] ?? ''), basename($_SERVER['PHP_SELF']));
     exit;
 }
 

@@ -115,7 +115,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     <i class="fas fa-circle-check"></i>
                     <h2>Password updated</h2>
                     <p class="pwc-sub">Your new password takes effect at your next sign-in.</p>
-                    <a href="dashboard.php" class="pwc-btn" style="display:inline-block;width:auto;padding:12px 28px;text-decoration:none;">Back to Admin</a>
+                    <?php $pwcHome = rhUserHomePage((int)$_SESSION['admin_user_id'], (string)($_SESSION['admin_role'] ?? '')) ?? 'logout.php'; ?>
+                    <a href="<?php echo htmlspecialchars($pwcHome); ?>" class="pwc-btn" style="display:inline-block;width:auto;padding:12px 28px;text-decoration:none;"><?php echo $pwcHome === 'dashboard.php' ? 'Back to Admin' : 'Back to my screen'; ?></a>
                 </div>
             <?php elseif ($pwc_stage === 'otp'): ?>
                 <h2>Enter verification code</h2>

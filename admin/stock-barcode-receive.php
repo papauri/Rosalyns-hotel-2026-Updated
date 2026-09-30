@@ -19,7 +19,7 @@ if (!ensureStockTablesExist()) {
     http_response_code(500); exit('Stock tables missing.');
 }
 if (!hasPermission($user['id'], 'stock_management')) {
-    header('Location: dashboard.php?error=access_denied'); exit;
+    rhDenyAndRedirectHome((int)$_SESSION['admin_user_id'], (string)($_SESSION['admin_role'] ?? ''), basename($_SERVER['PHP_SELF'])); exit;
 }
 
 $csrf_token    = generateCsrfToken();

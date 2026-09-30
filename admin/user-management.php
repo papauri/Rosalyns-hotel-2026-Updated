@@ -13,7 +13,7 @@ $csrf_token = $csrf_token ?? generateCsrfToken();
 
 // Require access to user management module
 if (!hasPermission($user['id'], 'user_management')) {
-    header('Location: dashboard.php?error=access_denied');
+    rhDenyAndRedirectHome((int)$_SESSION['admin_user_id'], (string)($_SESSION['admin_role'] ?? ''), basename($_SERVER['PHP_SELF']));
     exit;
 }
 

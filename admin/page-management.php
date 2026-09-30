@@ -15,7 +15,7 @@ $csrf_token = $csrf_token ?? generateCsrfToken();
 $site_name = $site_name ?? getSetting('site_name', 'Hotel');
 
 if (!hasPermission((int)$user['id'], 'pages')) {
-    header('Location: dashboard.php?error=access_denied');
+    rhDenyAndRedirectHome((int)$_SESSION['admin_user_id'], (string)($_SESSION['admin_role'] ?? ''), basename($_SERVER['PHP_SELF']));
     exit;
 }
 

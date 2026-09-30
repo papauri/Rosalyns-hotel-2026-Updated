@@ -14,7 +14,7 @@ require_once __DIR__ . '/includes/restaurant-order-serve.php';
 /** @var array $user */
 
 if (!hasPermission((int)$user['id'], 'stock_management')) {
-    header('Location: dashboard.php?error=access_denied');
+    rhDenyAndRedirectHome((int)$_SESSION['admin_user_id'], (string)($_SESSION['admin_role'] ?? ''), basename($_SERVER['PHP_SELF']));
     exit;
 }
 

@@ -18,8 +18,7 @@ require_once __DIR__ . '/../config/email.php';
 require_once __DIR__ . '/../includes/station-hours.php';
 
 if (!hasPermission((int)$_SESSION['admin_user_id'], 'kds_reports')) {
-    header('Location: dashboard.php?error=access_denied');
-    exit;
+    rhDenyAndRedirectHome((int)$_SESSION['admin_user_id'], (string)($_SESSION['admin_role'] ?? ''), basename($_SERVER['PHP_SELF']));
 }
 
 $user = [

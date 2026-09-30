@@ -11,7 +11,7 @@ require_once '../includes/alert.php';
 require_once 'includes/admin-modal.php';
 
 if (!hasPermission((int)$user['id'], 'footer_management')) {
-    header('Location: dashboard.php?error=access_denied');
+    rhDenyAndRedirectHome((int)$_SESSION['admin_user_id'], (string)($_SESSION['admin_role'] ?? ''), basename($_SERVER['PHP_SELF']));
     exit;
 }
 

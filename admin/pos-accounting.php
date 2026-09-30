@@ -7,7 +7,7 @@ require_once 'includes/finance-schema.php';
 require_once '../includes/station-hours.php';
 
 if (!hasPermission((int)($user['id'] ?? 0), 'pos_accounting')) {
-    header('Location: dashboard.php?error=access_denied');
+    rhDenyAndRedirectHome((int)$_SESSION['admin_user_id'], (string)($_SESSION['admin_role'] ?? ''), basename($_SERVER['PHP_SELF']));
     exit;
 }
 

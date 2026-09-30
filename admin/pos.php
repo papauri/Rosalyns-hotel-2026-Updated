@@ -24,6 +24,15 @@ require_once __DIR__ . '/../includes/restaurant-location-locks.php';
 require_once __DIR__ . '/includes/restaurant-payment-sync.php';
 require_once __DIR__ . '/includes/restaurant-order-serve.php';
 
+/* Granular till permissions. These used to be hard-wired to role names
+   (admin/manager, or "restaurant_staff = own tabs only"), so a custom role or a
+   trusted cashier could not be given any one of them on its own. */
+$posCanAllTabs     = hasPermission($user['id'], 'pos_all_tabs');
+$posCanVoid        = hasPermission($user['id'], 'pos_void');
+$posCanStations    = hasPermission($user['id'], 'pos_stations_overview');
+$posCanOverrideShift = hasPermission($user['id'], 'pos_shift_override');
+$posHasAdminPortal = rhHasAdminPortal((int)$user['id']);
+
 $user = [
     'id'        => $_SESSION['admin_user_id'],
     'username'  => $_SESSION['admin_username'],
@@ -576,7 +585,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 if ((int)$tab['split_paid_count'] > 0) {
                     throw new RuntimeException('This tab is mid split-payment — finish settling it before adding more items.');
                 }
-                if (($user['role'] ?? '') === 'restaurant_staff' && (int)$tab['created_by'] !== (int)$user['id']) {
+                if (!$posCanAllTabs && (int)$tab['created_by'] !== (int)$user['id']) {
                     throw new RuntimeException('You can only add to tabs you opened.');
                 }
 
@@ -699,7 +708,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 if (($row['order_type'] ?? '') === 'room_service') {
                     throw new RuntimeException('Room-service orders are settled via the guest folio at check-out — they cannot be paid directly at the till.');
                 }
-                if (($user['role'] ?? '') === 'restaurant_staff' && (int)$row['created_by'] !== (int)$user['id']) {
+                if (!$posCanAllTabs && (int)$row['created_by'] !== (int)$user['id']) {
                     throw new RuntimeException('You can only settle tabs you opened.');
                 }
 
@@ -975,15 +984,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $vCash   = round($declCash   - (float)$E['cash'], 2);
                 $vMobile = round($declMobile - (float)$E['mobile'], 2);
                 $vCard   = round($declCard   - (float)$E['card'], 2);
-                // Balance enforcement: cashier must balance to within MWK 1.00 unless an admin/manager overrides.
-                $isPrivileged = in_array($user['role'] ?? '', ['admin', 'manager'], true);
+                // Balance enforcement: cashier must balance to within MWK 1.00 unless someone with
+                // the shift-override permission closes it with a reason.
+                $isPrivileged = $posCanOverrideShift;
                 $overrideRequested = !empty($_POST['admin_override']);
                 $overrideReason = trim($_POST['override_reason'] ?? '');
                 $threshold = 1.00; // tolerance for rounding
                 $maxVar = max(abs($vCash), abs($vMobile), abs($vCard));
                 if ($maxVar > $threshold) {
                     if (!$isPrivileged) {
-                        throw new RuntimeException('Shift does not balance (variance ' . number_format($maxVar, 2) . '). Recount the drawer or ask an admin/manager to close on your behalf with an override.');
+                        throw new RuntimeException('Shift does not balance (variance ' . number_format($maxVar, 2) . '). Recount the drawer or ask a supervisor to close on your behalf with an override.');
                     }
                     if (!$overrideRequested) {
                         throw new RuntimeException('Variance of ' . number_format($maxVar, 2) . ' exceeds tolerance. Tick the override box to record this close with a reason.');
@@ -1245,7 +1255,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
  * JS can filter per active mode. Categories are dynamic from menu_categories.
  * Managers/admins also see unavailable items (is_available=0) with an 86 badge
  * so they can toggle availability from the till without leaving the POS. */
-$isManagerOrAdmin = in_array($user['role'] ?? '', ['admin', 'manager'], true);
 /* Takings are finance, not service. A cashier needs to know how many orders
    they have put through; what the till has earned in cash, mobile money and
    card is a manager's figure, and `pos_accounting` ("Review POS sales and
@@ -1792,7 +1801,7 @@ $tabsSql = "SELECT o.id, o.reference, o.total_amount, o.table_number, o.customer
             LEFT JOIN admin_users u ON u.id = o.created_by
             WHERE o.status = 'placed' AND o.order_type != 'room_service' ";
 $tabsArgs = [];
-if (($user['role'] ?? '') === 'restaurant_staff') {
+if (!$posCanAllTabs) {
     $tabsSql .= " AND o.created_by = ? ";
     $tabsArgs[] = $user['id'];
 }
@@ -1832,7 +1841,7 @@ if (isset($_GET['ajax']) && $_GET['ajax'] === 'tabs') {
  * ============================================================ */
 if (isset($_GET['ajax']) && $_GET['ajax'] === 'stations') {
     header('Content-Type: application/json; charset=utf-8');
-    if (!in_array($user['role'] ?? '', ['admin', 'manager'], true)) {
+    if (!$posCanStations) {
         http_response_code(403);
         echo json_encode(['error' => 'forbidden']);
         exit;
@@ -1889,7 +1898,7 @@ if (isset($_GET['ajax']) && $_GET['ajax'] === 'stations') {
         }
 
         // Open-tabs count system-wide and current business-window totals. This endpoint is
-        // admin/manager-only (checked above), so there is no separate "visible to me" subset —
+        // pos_stations_overview-only (checked above), so there is no separate "visible to me" subset —
         // open_tabs_visible mirrors open_tabs_all and exists only because the JS badge reads
         // whichever one is present.
         $openAll = (int)$pdo->query("SELECT COUNT(*) FROM stock_orders WHERE status='placed' AND order_type != 'room_service'")->fetchColumn();
@@ -1923,7 +1932,7 @@ if (isset($_GET['ajax']) && $_GET['ajax'] === 'stations') {
  * ============================================================ */
 if (isset($_GET['ajax']) && $_GET['ajax'] === 'resto_orders') {
     header('Content-Type: application/json; charset=utf-8');
-    if (!in_array($user['role'] ?? '', ['admin', 'manager'], true)) {
+    if (!$posCanStations) {
         http_response_code(403);
         echo json_encode(['error' => 'forbidden']);
         exit;
@@ -1973,8 +1982,7 @@ if (!empty($_GET['settle']) && ctype_digit((string)$_GET['settle'])) {
     $settleStmt->execute([(int)$_GET['settle']]);
     $settleRow = $settleStmt->fetch(PDO::FETCH_ASSOC);
     if ($settleRow && $settleRow['status'] === 'placed') {
-        $isPrivileged = in_array($user['role'] ?? '', ['admin', 'manager'], true);
-        if ($isPrivileged || (int)$settleRow['created_by'] === (int)$user['id']) {
+        if ($posCanAllTabs || (int)$settleRow['created_by'] === (int)$user['id']) {
             $settleAuto = [
                 'id'    => (int)$settleRow['id'],
                 'total' => (float)$settleRow['total_amount'],
@@ -1985,12 +1993,11 @@ if (!empty($_GET['settle']) && ctype_digit((string)$_GET['settle'])) {
 }
 
 $csrf_token = generateCsrfToken();
-$isFullScreen = ($user['role'] ?? '') === 'restaurant_staff';
 
-/* Initial admin/manager "All Stations" snapshot rendered server-side so the
+/* Initial "All Stations" snapshot (pos_stations_overview) rendered server-side so the
  * panel works even before the JS poller fires. Same query shape as ?ajax=stations. */
 $adminStationsInit = ['counts' => ['kitchen' => ['open_total' => 0, 'pending' => 0, 'in_progress' => 0, 'ready' => 0], 'bar' => ['open_total' => 0, 'pending' => 0, 'in_progress' => 0, 'ready' => 0], 'coffee_bar' => ['open_total' => 0, 'pending' => 0, 'in_progress' => 0, 'ready' => 0]], 'open_tabs_all' => 0];
-if (in_array($user['role'] ?? '', ['admin', 'manager'], true)) {
+if ($posCanStations) {
     try {
         $cs = $pdo->prepare("
             SELECT oi.station,
@@ -2420,7 +2427,7 @@ if (in_array($user['role'] ?? '', ['admin', 'manager'], true)) {
 
                     <?php /* Hidden badge targets kept so the live stations poller can keep
                               updating per-station counts without null checks. */ ?>
-                    <?php if ($isManagerOrAdmin): ?><span id="kitchenBadge" hidden></span><span id="barBadge" hidden></span><span id="coffeeBadge" hidden></span><?php endif; ?>
+                    <?php if ($posCanStations): ?><span id="kitchenBadge" hidden></span><span id="barBadge" hidden></span><span id="coffeeBadge" hidden></span><?php endif; ?>
 
                     <div class="tb-sep"></div>
                     <?php /* Only the three controls a cashier touches during service stay on the
@@ -2443,14 +2450,14 @@ if (in_array($user['role'] ?? '', ['admin', 'manager'], true)) {
                             <?php endif; ?>
 
                             <div class="tb-more__group">Kitchen</div>
-                            <?php if ($isManagerOrAdmin): ?>
+                            <?php if ($posCanStations): ?>
                             <button type="button" onclick="closePosMoreMenu(); openStationsTray();" data-help="Stations|Live Kitchen, Bar and Coffee boards with ticket counts, and links to open each screen."><i class="fas fa-layer-group"></i> Stations<span id="stationsBadge" style="<?php $tot = ($adminStationsInit['counts']['kitchen']['open_total'] ?? 0) + ($adminStationsInit['counts']['bar']['open_total'] ?? 0) + ($adminStationsInit['counts']['coffee_bar']['open_total'] ?? 0);
                                                                                                                                                                 echo $tot > 0 ? '' : 'display:none;'; ?>"><?php echo $tot; ?></span></button>
                             <?php endif; ?>
                             <?php if ($posCanToggle86): ?>
                             <button type="button" id="eightySixModeBtn" onclick="closePosMoreMenu(); toggle86Mode();" data-help="86 Mode|Toggle item availability. When active, click any item to mark it as 86'd (unavailable) or to re-enable it. All sessions reload the menu."><i class="fas fa-ban"></i> 86 mode</button>
                             <?php endif; ?>
-                            <?php if ($isManagerOrAdmin && moduleEnabled('stock')): ?>
+                            <?php if (moduleEnabled('stock') && rhCanLinkTo((int)$user['id'], 'stock-orders.php')): ?>
                             <a href="stock-orders.php"><i class="fas fa-list"></i> All orders</a>
                             <?php endif; ?>
 
@@ -2466,7 +2473,7 @@ if (in_array($user['role'] ?? '', ['admin', 'manager'], true)) {
                             </div>
                             <button type="button" onclick="closePosMoreMenu(); RHSounds.openSettings();"><i class="fas fa-sliders"></i> Sound settings</button>
                             <a href="../docs/guides/01-pos-till.html" target="_blank" rel="noopener"><i class="fas fa-book-open"></i> POS guide</a>
-                            <?php if (!$isFullScreen): ?><a href="dashboard.php"><i class="fas fa-arrow-left"></i> Admin dashboard</a><?php endif; ?>
+                            <?php if ($posHasAdminPortal): ?><a href="dashboard.php"><i class="fas fa-arrow-left"></i> Admin dashboard</a><?php endif; ?>
                         </div>
                     </div>
                     <a class="logout" href="logout.php"><i class="fas fa-sign-out-alt"></i> Sign out</a>
@@ -2841,7 +2848,7 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
                     <?php else: ?>
                         <button class="a-receipt" onclick="closeSuccess(); openTabsTray();" data-help="View open tabs|Jump to the list of unpaid tickets. From there you can settle this tab when the customer is ready."><i class="fas fa-list"></i> View Tabs</button>
                     <?php endif; ?>
-                    <?php if (in_array($user['role'] ?? '', ['admin', 'manager'], true)): ?>
+                    <?php if ($posCanStations): ?>
                         <button class="a-receipt a-lifecycle" onclick="openPosPageModal('order-lifecycle.php?embed=1&id=<?php echo (int)$lastOrderId; ?>','Timeline','fas fa-stream')" data-help="Order lifecycle|See every event for this order — placement, kitchen actions, stock movements, payment — with timestamps and the user who did each."><i class="fas fa-stream"></i> Lifecycle</button>
                     <?php endif; ?>
                     <button class="a-new" onclick="closeSuccess()" data-help="New order|Close this dialog and start ringing up the next order."><i class="fas fa-plus-circle"></i> New order</button>
@@ -2850,7 +2857,7 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
                     <div style="margin-top:14px;padding:12px 12px 10px;border:1px solid #e5e7eb;border-radius:10px;background:#fbfaf7;text-align:left;">
                         <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:8px;">
                             <strong style="font-size:13px;color:#3f3a33;"><i class="fas fa-paper-plane" style="color:#8B7355;margin-right:6px;"></i>Send receipt now</strong>
-                            <a href="whatsapp-settings.php" target="_blank" rel="noopener" style="font-size:11px;color:#8B7355;text-decoration:none;"><i class="fas fa-sliders"></i> WhatsApp setup</a>
+                            <?php if (rhCanLinkTo((int)$user['id'], 'whatsapp-settings.php')): ?><a href="whatsapp-settings.php" target="_blank" rel="noopener" style="font-size:11px;color:#8B7355;text-decoration:none;"><i class="fas fa-sliders"></i> WhatsApp setup</a><?php endif; ?>
                         </div>
                         <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">
                             <form method="POST" action="stock-receipt.php?id=<?php echo (int)$lastOrderId; ?>" target="_blank" style="display:grid;gap:6px;">
@@ -2948,7 +2955,7 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
                             </div>
                             <div class="tabs-tray-tools__bulk-actions">
                                 <button type="button" class="tabs-bulk-btn tabs-bulk-btn--cancel" id="tabsBulkCancelBtn" onclick="bulkCancelTabs()" disabled><i class="fas fa-circle-xmark"></i> Bulk cancel</button>
-                                <?php if (in_array($user['role'] ?? '', ['admin', 'manager'], true)): ?>
+                                <?php if ($posCanVoid): ?>
                                     <button type="button" class="tabs-bulk-btn tabs-bulk-btn--void" id="tabsBulkVoidBtn" onclick="bulkVoidTabs()" disabled><i class="fas fa-ban"></i> Bulk void</button>
                                 <?php endif; ?>
                             </div>
@@ -2987,7 +2994,7 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
                             </div>
                             <div class="tabs-tray-tools__bulk-actions">
                                 <button type="button" class="tabs-bulk-btn tabs-bulk-btn--cancel" id="tabsBulkCancelBtn" onclick="bulkCancelTabs()" disabled><i class="fas fa-circle-xmark"></i> Bulk cancel</button>
-                                <?php if (in_array($user['role'] ?? '', ['admin', 'manager'], true)): ?>
+                                <?php if ($posCanVoid): ?>
                                     <button type="button" class="tabs-bulk-btn tabs-bulk-btn--void" id="tabsBulkVoidBtn" onclick="bulkVoidTabs()" disabled><i class="fas fa-ban"></i> Bulk void</button>
                                 <?php endif; ?>
                             </div>
@@ -3093,7 +3100,7 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
                                             <i class="fas fa-circle-xmark"></i> Cancel
                                         </button>
                                     <?php endif; ?>
-                                    <?php if (in_array($user['role'] ?? '', ['admin', 'manager'], true)): ?>
+                                    <?php if ($posCanStations): ?>
                                         <button type="button"
                                             onclick="openPosPageModal('order-lifecycle.php?embed=1&id=<?php echo (int)$t['id']; ?>','Timeline','fas fa-stream')"
                                             class="tc-btn tc-btn-log">
@@ -3180,7 +3187,7 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
 
                     <div id="shiftVarianceBox" style="margin-top:10px; padding:10px 12px; border-radius:8px; font-size:13px; display:none;"></div>
 
-                    <?php if (in_array($user['role'] ?? '', ['admin', 'manager'], true)): ?>
+                    <?php if ($posCanOverrideShift): ?>
                         <div id="shiftOverrideBox" style="display:none; margin-top:10px; padding:10px 12px; background:#fff3cd; border:1px solid #d4a843; border-radius:8px;">
                             <label style="display:flex; align-items:center; gap:8px; font-weight:600; color:#856404; margin-bottom:6px;">
                                 <input type="checkbox" name="admin_override" value="1" id="adminOverride" onchange="document.getElementById('overrideReason').required = this.checked;">
@@ -3487,8 +3494,8 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
         </div>
     </div>
 
-    <?php if (in_array($user['role'] ?? '', ['admin', 'manager'], true)): ?>
-        <!-- Admin/manager: Live "All Stations" panel — Kitchen + Bar + Coffee Bar in one view, polled every 10s -->
+    <?php if ($posCanStations): ?>
+        <!-- Live "All Stations" panel (pos_stations_overview) — Kitchen + Bar + Coffee Bar in one view, polled every 10s -->
         <div class="overlay modal-overlay" data-modal id="stationsOverlay">
             <div class="modal modal-content" style="width:980px; max-width:96vw; display:flex; flex-direction:column; max-height:94vh; overflow:hidden;">
                 <div class="modal-head modal-header" style="flex-shrink:0;">
@@ -3515,17 +3522,17 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
                     </div>
                 </div>
                 <div style="padding:12px 20px; border-top:1px solid #eaecef; display:flex; gap:8px; flex-wrap:wrap; font-size:12px; flex-shrink:0; background:#fafafa; border-radius:0 0 14px 14px;">
-                    <?php if (moduleEnabled('station_kds')): ?>
+                    <?php if (moduleEnabled('station_kds') && rhCanLinkTo((int)$user['id'], 'kds.php')): ?>
                     <a href="kds.php" target="_blank" style="padding:8px 12px; background:#d4a843; color:#1f1f24; text-decoration:none; border-radius:6px; font-weight:600;"><i class="fas fa-external-link-alt"></i> Kitchen</a>
                     <?php endif; ?>
-                    <?php if (moduleEnabled('station_bds')): ?>
+                    <?php if (moduleEnabled('station_bds') && rhCanLinkTo((int)$user['id'], 'bds.php')): ?>
                     <a href="bds.php" target="_blank" style="padding:8px 12px; background:#6f42c1; color:#fff; text-decoration:none; border-radius:6px; font-weight:600;"><i class="fas fa-external-link-alt"></i> Bar</a>
                     <?php endif; ?>
-                    <?php if (moduleEnabled('station_cds')): ?>
+                    <?php if (moduleEnabled('station_cds') && rhCanLinkTo((int)$user['id'], 'cds.php')): ?>
                     <a href="cds.php" target="_blank" style="padding:8px 12px; background:#8B5A2B; color:#fff; text-decoration:none; border-radius:6px; font-weight:600;"><i class="fas fa-external-link-alt"></i> Coffee</a>
                     <?php endif; ?>
                     <button type="button" onclick="openRestoOrdersModal()" style="padding:8px 14px; background:#1a5276; color:#fff; border:none; border-radius:6px; font-weight:600; font-size:12px; cursor:pointer;"><i class="fas fa-receipt"></i> Today's restaurant orders</button>
-                    <?php if (moduleEnabled('stock')): ?>
+                    <?php if (moduleEnabled('stock') && rhCanLinkTo((int)$user['id'], 'stock-orders.php')): ?>
                     <a href="stock-orders.php" style="padding:8px 12px; background:#3a3a40; color:#fff; text-decoration:none; border-radius:6px; font-weight:600;"><i class="fas fa-list"></i> Full orders list</a>
                     <?php endif; ?>
                 </div>
@@ -3733,7 +3740,8 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
         const posJustParked     = <?php echo $justParked ? 'true' : 'false'; ?>;
         const posUserId = <?php echo (int)$user['id']; ?>;
         const posCurrentUserName = <?php echo json_encode($user['full_name'] ?: $user['username']); ?>;
-        const posCanManageTabs = <?php echo $isManagerOrAdmin ? 'true' : 'false'; ?>;
+        const posCanVoid = <?php echo $posCanVoid ? 'true' : 'false'; ?>;
+        const posCanSeeTimeline = <?php echo $posCanStations ? 'true' : 'false'; ?>;
         const posCanRefund     = <?php echo $posCanRefund ? 'true' : 'false'; ?>;
         const posCanDiscount   = <?php echo $posCanDiscount ? 'true' : 'false'; ?>;
         const posCanToggle86   = <?php echo $posCanToggle86 ? 'true' : 'false'; ?>;
@@ -7426,7 +7434,7 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
                     </div>
                     <div class="tabs-tray-tools__bulk-actions">
                         <button type="button" class="tabs-bulk-btn tabs-bulk-btn--cancel" id="tabsBulkCancelBtn" onclick="bulkCancelTabs()" disabled><i class="fas fa-circle-xmark"></i> Bulk cancel</button>
-                        ${posCanManageTabs ? '<button type="button" class="tabs-bulk-btn tabs-bulk-btn--void" id="tabsBulkVoidBtn" onclick="bulkVoidTabs()" disabled><i class="fas fa-ban"></i> Bulk void</button>' : ''}
+                        ${posCanVoid ? '<button type="button" class="tabs-bulk-btn tabs-bulk-btn--void" id="tabsBulkVoidBtn" onclick="bulkVoidTabs()" disabled><i class="fas fa-ban"></i> Bulk void</button>' : ''}
                     </div>
                 </div>
             </div>`;
@@ -7567,8 +7575,8 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
         }
 
         async function bulkVoidTabs() {
-            if (!posCanManageTabs) {
-                posToast('Only admin/manager can void tabs in bulk.', 'err');
+            if (!posCanVoid) {
+                posToast('You do not have permission to void tabs.', 'err');
                 return;
             }
             const selected = getSelectedOpenTabs();
@@ -7579,7 +7587,7 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
             const reason = await posAskReason({
                 title: 'Bulk void tabs',
                 prompt: `Void <strong>${selected.length}</strong> selected tab${selected.length === 1 ? '' : 's'}? Stock will be restored for ready items and station tickets removed.`,
-                warn: 'Bulk void is permanent, admin/manager only, and fully audit-logged.',
+                warn: 'Bulk void is permanent and fully audit-logged.',
                 confirmLabel: 'Void selected',
                 confirmColor: '#c82333',
                 hasNotes: true,
@@ -7688,9 +7696,10 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
                     `<span class="tc-meta-pill"><i class="fas fa-clock"></i> Opened ${escHtml(openedAt)}</span>`,
                     byOther ? `<span class="tc-meta-pill"><i class="fas fa-user-tie"></i> ${escHtml(t.opened_by || 'staff')}</span>` : `<span class="tc-meta-pill"><i class="fas fa-user-check"></i> You</span>`
                 ].filter(Boolean).join('');
-                const managerTools = posCanManageTabs ? `
-                    <button type="button" onclick="openPosPageModal('order-lifecycle.php?embed=1&id=${orderId}','Timeline','fas fa-stream')" class="tc-btn tc-btn-log"><i class="fas fa-stream"></i> Lifecycle</button>
-                    <button type="button" onclick="adminVoidTab(${orderId}, ${actionRef})" class="tc-btn tc-btn-void"><i class="fas fa-ban"></i> Void</button>` : '';
+                const managerTools = (posCanSeeTimeline ? `
+                    <button type="button" onclick="openPosPageModal('order-lifecycle.php?embed=1&id=${orderId}','Timeline','fas fa-stream')" class="tc-btn tc-btn-log"><i class="fas fa-stream"></i> Lifecycle</button>` : '')
+                    + (posCanVoid ? `
+                    <button type="button" onclick="adminVoidTab(${orderId}, ${actionRef})" class="tc-btn tc-btn-void"><i class="fas fa-ban"></i> Void</button>` : '');
                 return `<article class="tab-card${isStale ? ' stale' : ''}" data-order-id="${orderId}" data-is-stale="${isStale ? '1' : '0'}">
                     <div class="tc-row1">
                         <label class="tc-select-wrap" aria-label="Select ${ref}">
@@ -8119,7 +8128,7 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
             const reason = await posAskReason({
                 title: 'Void order',
                 prompt: `Void <strong>${ref}</strong>? Stock will be restored for any items already marked Ready. The order will be removed from all station boards and any payment cancelled.`,
-                warn: 'Void is permanent and admin/manager only. This action is fully audit-logged.',
+                warn: 'Void is permanent. This action is fully audit-logged.',
                 confirmLabel: 'Void order',
                 confirmColor: '#c82333',
                 hasNotes: true,
@@ -8431,7 +8440,7 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
             if (canCancelBeforePrep) {
                 detailActions.push(`<button type="button" class="tc-btn tc-btn-cancel tdi-action" onclick="cancelOpenOrder(${parseInt(o.id, 10) || 0}, ${JSON.stringify(String(o.reference || 'TAB'))})"><i class="fas fa-circle-xmark"></i> Cancel</button>`);
             }
-            if (posCanManageTabs) {
+            if (posCanVoid) {
                 detailActions.push(`<button type="button" class="tc-btn tc-btn-void tdi-action" onclick="adminVoidTab(${parseInt(o.id, 10) || 0}, ${JSON.stringify(String(o.reference || 'TAB'))})"><i class="fas fa-ban"></i> Void</button>`);
             }
 
@@ -9808,9 +9817,9 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
             openPayForTab(<?php echo (int)$settleAuto['id']; ?>, <?php echo number_format($settleAuto['total'], 2, '.', ''); ?>, <?php echo json_encode($settleAuto['ref']); ?>);
         <?php endif; ?>
 
-        <?php if (in_array($user['role'] ?? '', ['admin', 'manager'], true)): ?>
+        <?php if ($posCanStations): ?>
             /* ============================================================
-             * Admin/manager: live "All Stations" poller.
+             * Live "All Stations" poller (pos_stations_overview).
              * Polls ?ajax=stations every few seconds; updates badges + tray content
              * if open (shows full ticket lists). Skips when tab is hidden
              * to spare the DB.
@@ -10169,21 +10178,21 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
                     <button type="button" class="pos-mobile-action" onclick="runPosMobileMenuAction('openCloseShift')"><i class="fas fa-cash-register"></i><span>Close Shift</span></button>
                 </div>
             </section>
-            <?php if (in_array($user['role'] ?? '', ['admin', 'manager'], true)): ?>
+            <?php if ($posCanStations): ?>
                 <section>
                     <h3 class="pm-group-title">Stations</h3>
                     <div class="pm-grid">
-                        <?php if (moduleEnabled('station_kds')): ?>
+                        <?php if (moduleEnabled('station_kds') && rhCanLinkTo((int)$user['id'], 'kds.php')): ?>
                         <a class="pm-action" href="kds.php" target="_blank" rel="noopener"><i class="fas fa-utensils"></i><span>Kitchen</span><span class="pm-badge" id="menuKitchenBadge" style="<?php echo ($adminStationsInit['counts']['kitchen']['open_total'] ?? 0) > 0 ? '' : 'display:none;'; ?>"><?php echo (int)($adminStationsInit['counts']['kitchen']['open_total'] ?? 0); ?></span></a>
                         <?php endif; ?>
-                        <?php if (moduleEnabled('station_bds')): ?>
+                        <?php if (moduleEnabled('station_bds') && rhCanLinkTo((int)$user['id'], 'bds.php')): ?>
                         <a class="pm-action" href="bds.php" target="_blank" rel="noopener"><i class="fas fa-wine-glass"></i><span>Bar</span><span class="pm-badge" id="menuBarBadge" style="<?php echo ($adminStationsInit['counts']['bar']['open_total'] ?? 0) > 0 ? '' : 'display:none;'; ?>"><?php echo (int)($adminStationsInit['counts']['bar']['open_total'] ?? 0); ?></span></a>
                         <?php endif; ?>
-                        <?php if (moduleEnabled('station_cds')): ?>
+                        <?php if (moduleEnabled('station_cds') && rhCanLinkTo((int)$user['id'], 'cds.php')): ?>
                         <a class="pm-action" href="cds.php" target="_blank" rel="noopener"><i class="fas fa-mug-hot"></i><span>Coffee</span><span class="pm-badge" id="menuCoffeeBadge" style="<?php echo ($adminStationsInit['counts']['coffee_bar']['open_total'] ?? 0) > 0 ? '' : 'display:none;'; ?>"><?php echo (int)($adminStationsInit['counts']['coffee_bar']['open_total'] ?? 0); ?></span></a>
                         <?php endif; ?>
                         <button type="button" class="pm-action" onclick="runPosMobileMenuAction('openStationsTray')"><i class="fas fa-layer-group"></i><span>All Stations</span></button>
-                        <?php if (moduleEnabled('stock')): ?>
+                        <?php if (moduleEnabled('stock') && rhCanLinkTo((int)$user['id'], 'stock-orders.php')): ?>
                         <a class="pm-action" href="stock-orders.php"><i class="fas fa-list"></i><span>All Orders</span></a>
                         <?php endif; ?>
                     </div>
@@ -10198,7 +10207,7 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
                     <button type="button" class="pm-action" onclick="runPosMobileMenuAction(function () { RHSounds.openSettings(); })"><i class="fas fa-sliders"></i><span>Sound Settings</span></button>
                     <button type="button" class="pm-action" onclick="runPosMobileMenuAction('toggleMobileHelp')"><i class="fas fa-question-circle"></i><span>Help Tooltips</span></button>
                     <a class="pm-action" href="../docs/guides/01-pos-till.html" target="_blank" rel="noopener"><i class="fas fa-book-open"></i><span>POS Guide</span></a>
-                    <?php if (!$isFullScreen): ?>
+                    <?php if ($posHasAdminPortal): ?>
                         <a class="pm-action" href="dashboard.php"><i class="fas fa-arrow-left"></i><span>Admin</span></a>
                     <?php endif; ?>
                     <a class="pm-action is-danger" href="logout.php"><i class="fas fa-sign-out-alt"></i><span>Sign Out</span></a>

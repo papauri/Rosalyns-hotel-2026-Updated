@@ -3,7 +3,7 @@
  * api/void-order.php — Admin/manager void of a restaurant order from any UI (POS, lifecycle, etc.).
  *
  *   POST: csrf_token, order_id, void_reason (>=8 chars), [void_notes]
- *   Auth: session admin_user with role admin|manager AND stock_orders permission.
+ *   Auth: session admin_user with the pos_void AND stock_orders permissions.
  *   Effects:
  *     - Restores stock (FIFO batch credit + adjustments row)
  *     - Marks order voided (kitchen_status='served', served_at stamped, void_reason+notes saved)
@@ -34,7 +34,7 @@ function v_column_exists(PDO $pdo, string $table, string $column): bool {
 if ($_SERVER['REQUEST_METHOD'] !== 'POST') vjerr('POST only', 405);
 if (empty($_SESSION['admin_user'])) vjerr('Not authenticated', 401);
 $user = $_SESSION['admin_user'];
-if (!in_array($user['role'] ?? '', ['admin','manager'], true)) vjerr('Only admins/managers may void', 403);
+if (!hasPermission((int)$user['id'], 'pos_void')) vjerr('You do not have permission to void orders', 403);
 if (!hasPermission((int)$user['id'], 'stock_orders')) vjerr('Forbidden', 403);
 if (!validateCsrfToken($_POST['csrf_token'] ?? '')) vjerr('Invalid CSRF token', 403);
 

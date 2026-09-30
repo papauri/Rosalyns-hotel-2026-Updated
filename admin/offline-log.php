@@ -14,7 +14,7 @@ require_once 'admin-init.php';
 require_once __DIR__ . '/includes/permissions.php';
 
 if (!hasPermission((int)$_SESSION['admin_user_id'], 'offline_log_view')) {
-    header('Location: dashboard.php?error=access_denied');
+    rhDenyAndRedirectHome((int)$_SESSION['admin_user_id'], (string)($_SESSION['admin_role'] ?? ''), basename($_SERVER['PHP_SELF']));
     exit;
 }
 

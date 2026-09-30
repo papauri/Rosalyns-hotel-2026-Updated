@@ -11,7 +11,7 @@ require_once 'includes/admin-modal.php';
 /** @var string $csrf_token */
 
 if (!hasPermission($user['id'], 'housekeeping')) {
-    header('Location: dashboard.php?error=access_denied');
+    rhDenyAndRedirectHome((int)$_SESSION['admin_user_id'], (string)($_SESSION['admin_role'] ?? ''), basename($_SERVER['PHP_SELF']));
     exit;
 }
 

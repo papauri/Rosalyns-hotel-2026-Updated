@@ -18,7 +18,7 @@ require_once __DIR__ . '/includes/gym-checkin-lib.php';
 /** @var string $csrf_token */
 
 if (!hasPermission((int)$user['id'], 'gym_checkin')) {
-    header('Location: dashboard.php?error=access_denied');
+    rhDenyAndRedirectHome((int)$_SESSION['admin_user_id'], (string)($_SESSION['admin_role'] ?? ''), basename($_SERVER['PHP_SELF']));
     exit;
 }
 

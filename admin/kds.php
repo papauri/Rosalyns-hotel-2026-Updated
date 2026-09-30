@@ -30,8 +30,7 @@ $STATION_GUIDE_LABEL = $STATION_GUIDE_LABEL ?? (
 );
 
 if (!hasPermission((int)$_SESSION['admin_user_id'], $STATION_PERM)) {
-    header('Location: dashboard.php?error=access_denied');
-    exit;
+    rhDenyAndRedirectHome((int)$_SESSION['admin_user_id'], (string)($_SESSION['admin_role'] ?? ''), basename($_SERVER['PHP_SELF']));
 }
 
 $user = [
@@ -42,7 +41,10 @@ $user = [
 ];
 $currency_symbol = getSetting('currency_symbol');
 $site_name = getSetting('site_name') ?: 'Hotel';
-$isFullScreen = in_array($user['role'] ?? '', [$STATION_ROLE], true);
+/* Links out of the board follow the user's permissions, not their role name:
+   admin-portal pages only with the Dashboard permission (see rhCanLinkTo). */
+$kdsUserId = (int)$user['id'];
+$kdsHasAdminPortal = rhHasAdminPortal($kdsUserId);
 $csrf_token = generateCsrfToken();
 $stationWindow = rh_station_business_window($STATION);
 $stationPreviousWindow = rh_station_previous_business_window($STATION, $stationWindow);
@@ -290,7 +292,7 @@ $bootstrap['fingerprint'] = md5(
                 <?php if (function_exists('hasPermission') && hasPermission((int)$user['id'], 'kds_reports')): ?>
                     <a href="kds-report.php?station=<?php echo urlencode($STATION); ?>" class="logout-link rh-report-link" data-help="Daily report|Open the end-of-day station report. CSV export and email delivery available."><i class="fas fa-file-invoice"></i> <span>Daily Report</span></a>
                 <?php endif; ?>
-                <?php if ($user['role'] !== $STATION_ROLE): ?>
+                <?php if ($kdsHasAdminPortal): ?>
                     <a href="dashboard.php" class="logout-link rh-dashboard-link" data-help="Back to admin|Returns to the admin dashboard. Station staff are locked to this screen — only managers/admins see this link."><i class="fas fa-arrow-left"></i> <span>Dashboard</span></a>
                 <?php endif; ?>
                 <a href="logout.php" class="logout-link" data-help="Sign out|End your session. Always sign out at the end of a shift so the next chef logs in as themselves — every action is logged per user."><i class="fas fa-sign-out-alt"></i> <span>Logout</span></a>
@@ -361,26 +363,32 @@ $bootstrap['fingerprint'] = md5(
                 <a href="<?php echo htmlspecialchars($STATION_GUIDE_HREF); ?>" target="_blank" rel="noopener">
                     <i class="fas fa-book-open"></i> <?php echo htmlspecialchars($STATION_GUIDE_LABEL); ?>
                 </a>
-                <?php if ($user['role'] !== $STATION_ROLE): ?>
+                <?php if ($kdsHasAdminPortal): ?>
                     <a href="dashboard.php">
                         <i class="fas fa-tachometer-alt"></i> Admin Dashboard
                     </a>
-                    <?php if (!function_exists('moduleEnabled') || moduleEnabled('bookings')): ?>
+                <?php endif; ?>
+                <?php if (rhCanLinkTo($kdsUserId, 'bookings.php')): ?>
                     <a href="bookings.php">
                         <i class="fas fa-calendar-check"></i> Bookings
                     </a>
-                    <?php endif; ?>
+                <?php endif; ?>
+                <?php if (rhCanLinkTo($kdsUserId, 'pos.php')): ?>
                     <a href="pos.php">
                         <i class="fas fa-cash-register"></i> POS / Restaurant Till
                     </a>
-                    <?php if (!function_exists('moduleEnabled') || moduleEnabled('bookings')): ?>
+                <?php endif; ?>
+                <?php if (rhCanLinkTo($kdsUserId, 'room-management.php')): ?>
                     <a href="room-management.php">
                         <i class="fas fa-door-open"></i> Rooms
                     </a>
-                    <?php endif; ?>
+                <?php endif; ?>
+                <?php if (rhCanLinkTo($kdsUserId, 'payments.php')): ?>
                     <a href="payments.php">
                         <i class="fas fa-credit-card"></i> Payments
                     </a>
+                <?php endif; ?>
+                <?php if (rhCanLinkTo($kdsUserId, 'reports.php')): ?>
                     <a href="reports.php">
                         <i class="fas fa-chart-bar"></i> Reports
                     </a>

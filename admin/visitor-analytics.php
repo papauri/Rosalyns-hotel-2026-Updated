@@ -11,7 +11,7 @@ $user = $user ?? ['id' => 0];
 $csrf_token = $csrf_token ?? generateCsrfToken();
 
 if (!hasPermission((int)$user['id'], 'visitor_analytics')) {
-    header('Location: dashboard.php?error=access_denied');
+    rhDenyAndRedirectHome((int)$_SESSION['admin_user_id'], (string)($_SESSION['admin_role'] ?? ''), basename($_SERVER['PHP_SELF']));
     exit;
 }
 

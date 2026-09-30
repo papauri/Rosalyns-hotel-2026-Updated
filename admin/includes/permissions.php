@@ -105,7 +105,11 @@ function getAllRoles()
                 'offline_log_view',
                 'room_service_view',
                 'room_service_manage',
-                'kds_reports'
+                'kds_reports',
+                'pos_all_tabs',
+                'pos_void',
+                'pos_stations_overview',
+                'pos_shift_override'
             ]
         ],
         'receptionist' => [
@@ -249,7 +253,8 @@ function getAllRoles()
                 'room_service_view',
                 'room_service_manage',
                 'pos_till',
-                'stock_orders'
+                'stock_orders',
+                'pos_all_tabs'
             ]
         ],
         'gym_staff' => [
@@ -635,6 +640,38 @@ function getAllPermissions()
             'label' => 'POS Force-Serve Tab',
             'description' => 'Settle a tab whose kitchen items were never bumped (e.g. stranded from an earlier shift), forcing them to served so the tab can be paid',
             'icon' => 'fa-triangle-exclamation',
+            'category' => 'Stations',
+            'page' => 'pos.php',
+            'group' => 'stations'
+        ],
+        'pos_all_tabs' => [
+            'label' => 'POS All Cashiers\' Tabs',
+            'description' => 'See, add to and settle every cashier\'s open tabs. Without it, staff only see and work on the tabs they opened',
+            'icon' => 'fa-users',
+            'category' => 'Stations',
+            'page' => 'pos.php',
+            'group' => 'stations'
+        ],
+        'pos_void' => [
+            'label' => 'POS Void Tabs',
+            'description' => 'Void open tabs from the till, one at a time or in bulk, and cancel orders before the kitchen starts them (audit-logged)',
+            'icon' => 'fa-ban',
+            'category' => 'Stations',
+            'page' => 'pos.php',
+            'group' => 'stations'
+        ],
+        'pos_stations_overview' => [
+            'label' => 'POS Station Overview',
+            'description' => 'From the till: live Kitchen, Bar and Coffee boards, today\'s order list and order timelines',
+            'icon' => 'fa-layer-group',
+            'category' => 'Stations',
+            'page' => 'pos.php',
+            'group' => 'stations'
+        ],
+        'pos_shift_override' => [
+            'label' => 'POS Shift Override',
+            'description' => 'Close a cashier shift that does not balance, with a recorded reason',
+            'icon' => 'fa-user-shield',
             'category' => 'Stations',
             'page' => 'pos.php',
             'group' => 'stations'
@@ -1306,8 +1343,11 @@ function requirePermission(string $permission_key)
     }
 
     if (!hasPermission($_SESSION['admin_user_id'], $permission_key)) {
-        header('Location: dashboard.php?error=access_denied');
-        exit;
+        rhDenyAndRedirectHome(
+            (int)$_SESSION['admin_user_id'],
+            (string)($_SESSION['admin_role'] ?? ''),
+            basename($_SERVER['PHP_SELF'] ?? '')
+        );
     }
 }
 
@@ -1738,3 +1778,137 @@ function getUserCountByRole()
     }
 }
 
+// ============================================
+// PAGE ACCESS, HOME PAGE AND LINK VISIBILITY
+// ============================================
+// Admin-portal access is the `dashboard` permission. A user without it works
+// only in station screens (POS, KDS/BDS/CDS, room service), so nothing should
+// link or redirect them into the portal. These helpers are the one place that
+// decides it, from permissions, never from the role name.
+
+/**
+ * Pages a user without admin-portal access may still be sent to: the station
+ * screens and the station-side pages they open (receipts, order timelines,
+ * the station report, changing their own password).
+ */
+function rhStationSidePages(): array
+{
+    return [
+        'pos.php', 'kds.php', 'bds.php', 'cds.php', 'room-service-dashboard.php',
+        'kds-report.php', 'stock-receipt.php', 'order-lifecycle.php', 'change-password.php',
+    ];
+}
+
+/**
+ * Whether the user may open $page: its permission (if it has one) and, for
+ * everyone but admins, the module the page belongs to. Mirrors admin-init.php.
+ */
+function rhCanOpenPage(int $user_id, string $page): bool
+{
+    global $pdo;
+    static $cache = [];
+    $key = $user_id . '|' . $page;
+    if (array_key_exists($key, $cache)) {
+        return $cache[$key];
+    }
+
+    $ok = true;
+    $perm = getPermissionForPage($page);
+    if ($perm !== null && !hasPermission($user_id, $perm)) {
+        $ok = false;
+    }
+
+    if ($ok) {
+        $module = getModuleForPage($page);
+        if ($module !== null) {
+            $role = '';
+            try {
+                $st = $pdo->prepare("SELECT role FROM admin_users WHERE id = ?");
+                $st->execute([$user_id]);
+                $role = (string)$st->fetchColumn();
+            } catch (Throwable $e) {
+                $role = '';
+            }
+            if ($role !== 'admin') {
+                foreach ((is_array($module) ? $module : [$module]) as $mk) {
+                    if (!rh_module_key_enabled((string)$mk)) {
+                        $ok = false;
+                        break;
+                    }
+                }
+            }
+        }
+    }
+
+    return $cache[$key] = $ok;
+}
+
+/** Admin-portal access: the Dashboard permission. */
+function rhHasAdminPortal(int $user_id): bool
+{
+    return rhCanOpenPage($user_id, 'dashboard.php');
+}
+
+/**
+ * Whether to show the user a link to $page: they can open it, and it is a
+ * station-side page unless they have admin-portal access.
+ */
+function rhCanLinkTo(int $user_id, string $page): bool
+{
+    if (!rhCanOpenPage($user_id, $page)) {
+        return false;
+    }
+    return in_array($page, rhStationSidePages(), true) || rhHasAdminPortal($user_id);
+}
+
+/**
+ * The user's landing page, from what they can actually open: their role's own
+ * station first, then the dashboard, then any station screen. Null when they
+ * can open none of them.
+ */
+function rhUserHomePage(int $user_id, string $role = ''): ?string
+{
+    $roleHome = [
+        'restaurant_staff' => 'pos.php',
+        'chef'             => 'kds.php',
+        'bar_staff'        => 'bds.php',
+        'coffee_staff'     => 'cds.php',
+        'room_service'     => 'room-service-dashboard.php',
+    ][$role] ?? null;
+
+    $candidates = array_unique(array_filter([
+        $roleHome, 'dashboard.php', 'pos.php', 'kds.php', 'bds.php', 'cds.php', 'room-service-dashboard.php',
+    ]));
+    foreach ($candidates as $page) {
+        if (rhCanOpenPage($user_id, $page)) {
+            return $page;
+        }
+    }
+    return null;
+}
+
+/**
+ * Send a user who may not see the current page to their own home page — never
+ * to an admin dashboard they cannot open. When they have no home, or are
+ * already on it, render a no-access page instead of looping.
+ */
+function rhDenyAndRedirectHome(int $user_id, string $role, string $current_page, string $error = 'access_denied'): void
+{
+    $home = rhUserHomePage($user_id, $role);
+    if ($home !== null && $home !== $current_page) {
+        header('Location: ' . $home . ($home === 'dashboard.php' ? '?error=' . rawurlencode($error) : ''));
+        exit;
+    }
+
+    http_response_code(403);
+    $username = (string)($_SESSION['admin_username'] ?? '');
+    echo '<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>No Access</title></head>'
+        . '<body style="font-family:system-ui,sans-serif;background:#f5f2eb;display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0;">'
+        . '<div style="background:#fff;border:1px solid #d5cfc4;border-radius:6px;padding:36px 40px;max-width:420px;text-align:center;">'
+        . '<div style="font-size:2rem;margin-bottom:10px;">&#128274;</div>'
+        . '<h1 style="font-size:1.1rem;color:#3e3930;margin:0 0 10px;">No accessible pages</h1>'
+        . '<p style="font-size:.9rem;color:#7a6f63;line-height:1.6;margin:0 0 20px;">Your account (' . htmlspecialchars($username) . ') does not currently have permission to view this area. Please contact your administrator.</p>'
+        . '<a href="logout.php" style="display:inline-block;background:#8B7355;color:#fff;padding:10px 22px;border-radius:4px;text-decoration:none;font-size:.9rem;">Sign out</a>'
+        . '</div></body></html>';
+    exit;
+}

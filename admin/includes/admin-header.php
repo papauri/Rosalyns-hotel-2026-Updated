@@ -29,6 +29,12 @@ if (!isset($user) || !is_array($user)) {
 // Get the current user's permissions (cached for this request)
 $_user_permissions = getUserPermissions((int)($user['id'] ?? 0));
 
+// Without the Dashboard permission a user has no admin portal: on the station-side
+// pages they can reach (station report, receipts, room service) the nav only
+// offers their station screens and those screens' guides.
+$_rh_station_only = !rhHasAdminPortal((int)($user['id'] ?? 0));
+$_rh_station_guides = ['01-pos-till.html', '02-kds-kitchen.html', '03-bds-bar.html', '04-cds-coffee.html', '05-room-service.html'];
+
 if (!function_exists('_canShowNavItem')) {
     /**
      * Check if a nav item should be shown for the current user.
@@ -49,6 +55,13 @@ if (!function_exists('_renderNavLink')) {
     function _renderNavLink(string $href, string $icon, string $label, ?string $perm, string $current_page, string $iconStyle = '', $moduleKey = null): void
     {
         if (!_canShowNavItem($perm)) return;
+        if (!empty($GLOBALS['_rh_station_only'])) {
+            $_hrefBase = basename((string)(parse_url($href, PHP_URL_PATH) ?: $href));
+            $_allowed = str_starts_with($href, '../')
+                ? in_array($_hrefBase, $GLOBALS['_rh_station_guides'] ?? [], true)
+                : in_array($_hrefBase, rhStationSidePages(), true);
+            if (!$_allowed) return;
+        }
         if ($moduleKey !== null && function_exists('rh_module_key_enabled')) {
             $keys = is_array($moduleKey) ? $moduleKey : [(string)$moduleKey];
             foreach ($keys as $_mk) {
@@ -290,6 +303,15 @@ if ($_admin_back_target === null && isset($_admin_parent_fallback_map[$current_p
         'page' => $_parent_page,
         'href' => $_parent_page,
     ];
+}
+
+// Never offer a "Back to" a page the user cannot open or, without portal
+// access, a page outside the station screens.
+if ($_admin_back_target !== null) {
+    $_back_page = basename((string)($_admin_back_target['page'] ?? ''));
+    if ($_back_page === '' || !rhCanLinkTo((int)($user['id'] ?? 0), $_back_page)) {
+        $_admin_back_target = null;
+    }
 }
 
 $_admin_back_label = '';

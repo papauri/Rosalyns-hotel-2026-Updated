@@ -62,6 +62,27 @@ function admin_sanitize_redirect(?string $rawRedirect): string
     return $decoded;
 }
 
+/**
+ * Where to land after login. Decided from the user's permissions (see
+ * rhUserHomePage), so an account that cannot open the dashboard is never sent
+ * there; the role only picks which of their pages comes first.
+ */
+function admin_default_route_for_user(int $userId, string $role): string
+{
+    // The already-signed-in check near the top runs before the database is
+    // loaded; it falls back to the role route, and admin-init.php sends the user
+    // on to a page they can open if that one is not it.
+    if (!isset($GLOBALS['pdo'])) {
+        return admin_default_route_for_role($role);
+    }
+    require_once __DIR__ . '/includes/permissions.php';
+    try {
+        return rhUserHomePage($userId, $role) ?? admin_default_route_for_role($role);
+    } catch (Throwable $e) {
+        return admin_default_route_for_role($role);
+    }
+}
+
 function admin_default_route_for_role(string $role): string
 {
     if ($role === 'restaurant_staff') {
@@ -98,7 +119,7 @@ if (isset($_SESSION['admin_user_id'])) {
         exit;
     }
 
-    header('Location: ' . admin_default_route_for_role((string)($_SESSION['admin_role'] ?? '')));
+    header('Location: ' . admin_default_route_for_user((int)$_SESSION['admin_user_id'], (string)($_SESSION['admin_role'] ?? '')));
     exit;
 }
 
@@ -224,7 +245,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         }
 
                         unset($_SESSION['admin_redirect_after_login']);
-                        header('Location: ' . admin_default_route_for_role((string)$user['role']));
+                        header('Location: ' . admin_default_route_for_user((int)$user['id'], (string)$user['role']));
                         exit;
                     } else {
                         // Failed login

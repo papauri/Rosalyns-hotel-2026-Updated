@@ -62,13 +62,13 @@ $st->execute([$orderId]);
 $order = $st->fetch(PDO::FETCH_ASSOC);
 if (!$order) { http_response_code(404); exit('Order not found.'); }
 
-if (($user['role'] ?? '') === 'restaurant_staff' && (int)$order['created_by'] !== (int)$user['id']) {
+if (!hasPermission((int)$user['id'], 'pos_all_tabs') && (int)$order['created_by'] !== (int)$user['id']) {
     http_response_code(403); exit('You can only view your own tabs.');
 }
 $isRoomService = ($order['order_type'] ?? '') === 'room_service';
 $locationLabel = lifecycleOrderLocationLabel($order);
 $isVoided     = in_array($order['status'] ?? '', ['voided', 'cancelled'], true);
-$canCancel    = in_array($user['role'] ?? '', ['admin', 'manager'], true)
+$canCancel    = hasPermission((int)$user['id'], 'pos_void')
              && in_array($order['status'] ?? '', ['placed', 'new'], true)
              && !in_array($order['kitchen_status'] ?? '', ['in_progress', 'ready', 'served'], true);
 $canVoid      = ($user['role'] ?? '') === 'admin'
@@ -371,7 +371,7 @@ function fmt_dur(?int $from, ?int $to) { if (!$from || !$to) return '—'; $s = 
         <a class="a-back" href="javascript:history.back()"><i class="fas fa-arrow-left"></i> Back</a>
         <a class="a-print" href="stock-receipt.php?id=<?php echo $orderId; ?>&print=1" target="_blank"><i class="fas fa-print"></i> Receipt</a>
         <a class="a-print" href="stock-receipt.php?id=<?php echo $orderId; ?>&print=1&kot=1" target="_blank"><i class="fas fa-print"></i> KOT</a>
-        <?php if (in_array($user['role'], ['admin','manager'], true)): ?>
+        <?php if (rhCanLinkTo((int)$user['id'], 'stock-orders.php')): ?>
             <a class="a-receipt" href="stock-orders.php"><i class="fas fa-list"></i> All orders</a>
         <?php endif; ?>
         <?php if ($canCancel): ?>
