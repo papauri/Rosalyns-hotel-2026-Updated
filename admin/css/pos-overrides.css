@@ -923,12 +923,12 @@ a.recent-toggle span {
     background: rgba(248, 113, 113, .12);
 }
 
-/* Category dropdown trigger — hidden on desktop, shown on ≤1024px */
+/* Category dropdown trigger — hidden on desktop and tablet, shown on phones (≤640px) */
 .cat-dropdown-trigger {
     display: none;
 }
 
-@media (max-width: 1024px) {
+@media (max-width: 640px) {
 
     html,
     body {
@@ -1306,7 +1306,7 @@ a.recent-toggle span {
     }
 }
 
-@media (min-width: 641px) and (max-width: 1024px) {
+@media (min-width: 641px) and (max-width: 1366px) {
     #grid {
         grid-template-columns: repeat(auto-fill, minmax(min(178px, 100%), 1fr)) !important;
         gap: 10px;
@@ -1564,14 +1564,10 @@ a.recent-toggle span {
     }
 }
 
-/* ≤1280px: collapse tb-actions to the hamburger (mobile navbar).
-   This used to stop at 900px, which left every tablet showing the full action row.
-   Because that row wraps to its own line, the till bar grew to 196px tall at
-   912–1024px and 171px at 1112–1280px — a quarter of a 1024x768 landscape tablet
-   spent on chrome, pushing the till itself off screen. Tablets now get the same
-   compact bar as phones; the actions live in the hamburger menu, which already
-   contains all of them. */
-@media (max-width: 1280px) {
+/* Phones (≤640px): collapse tb-actions to the hamburger. Tablets used to get this
+   too, which hid every service control behind a menu; they now get a single row of
+   large icon buttons instead (see "Tablet till" at the end of this file). */
+@media (max-width: 640px) {
     .till-bar .tb-actions {
         display: none !important;
     }
@@ -5558,4 +5554,723 @@ button.svc-card:focus-visible { outline: 3px solid #8A775F; outline-offset: 2px;
     .pos-alert { animation: none; }
     .till-bar .svc-launch.is-ringing { animation: none; }
     .svc-progress span { transition: none; }
+}
+
+
+/* ══════════════════════════════════════════════════════════════════════════
+   Tablet till
+   The till runs on tablets first (768–1366px, portrait and landscape). Three rules
+   drive everything below:
+   1. The order is always on screen. It sits in a fixed column to the right of the
+      menu; only phones (≤640px) slide it in as a drawer.
+   2. Service controls are always on the bar as large icon-over-label buttons, in
+      the same place at every width, never behind a menu.
+   3. Every control a finger hits is at least 44–48px, and modals keep their title
+      and action buttons pinned while the middle scrolls.
+   ══════════════════════════════════════════════════════════════════════════ */
+
+/* Quick-tender buttons in the pay window (all widths; replaces inline styles). */
+.quick-tend-row {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 8px;
+    margin-top: 10px;
+}
+
+.quick-tend {
+    min-height: 52px;
+    padding: 0 8px;
+    border: 1px solid #d6d8db;
+    background: #fff;
+    border-radius: 12px;
+    font-family: inherit;
+    font-size: 16px;
+    font-weight: 600;
+    color: #2a2723;
+    cursor: pointer;
+    transition: background .12s, border-color .12s, transform .08s;
+}
+
+.quick-tend:active {
+    transform: scale(.97);
+    background: #f4efe9;
+}
+
+.quick-tend--exact {
+    border-color: #28a745;
+    background: #e9f5ee;
+    color: #155724;
+}
+
+/* ── Bar: service controls always visible (tablets + compact desktops) ── */
+@media (min-width: 641px) and (max-width: 1700px) {
+    .till-bar .tb-row1 {
+        display: flex;
+        flex-wrap: nowrap;
+        align-items: center;
+        height: 68px;
+        min-height: 68px;
+        padding: 0 12px;
+        gap: 12px;
+    }
+
+    .till-bar .brand {
+        flex: 0 1 auto;
+        min-width: 0;
+        height: auto;
+        min-height: 0;
+        padding: 0;
+        border-right: none;
+        background: transparent;
+        justify-content: center;
+    }
+
+    .till-bar .brand-name,
+    .till-bar .brand-cashier {
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        max-width: 100%;
+    }
+
+    .till-bar .pos-mobile-menu-btn {
+        display: none !important;
+    }
+
+    .till-bar .tb-actions {
+        display: flex !important;
+        flex: 1 1 auto;
+        justify-content: flex-end;
+        align-items: center;
+        gap: 6px;
+        height: auto;
+        min-height: 0;
+        margin-left: auto;
+        padding: 0;
+        border: none;
+        background: transparent;
+        overflow-x: auto;
+        overflow-y: hidden;
+    }
+
+    .till-bar .tb-actions > button.recent-toggle,
+    .till-bar .tb-actions > .tb-more > button.recent-toggle,
+    .till-bar .tb-actions > a.logout {
+        position: relative;
+        flex-direction: column;
+        justify-content: center;
+        gap: 4px;
+        height: 54px;
+        min-height: 54px;
+        min-width: 66px;
+        padding: 0 10px;
+        border-radius: 14px;
+        font-size: 11.5px;
+        font-weight: 600;
+        line-height: 1;
+        color: #ece6dd;
+    }
+
+    .till-bar .tb-actions > button.recent-toggle i,
+    .till-bar .tb-actions > .tb-more > button.recent-toggle i,
+    .till-bar .tb-actions > a.logout i {
+        font-size: 18px;
+        opacity: 1;
+        color: #e8c97a;
+    }
+
+    .till-bar .tb-actions > a.logout i {
+        color: inherit;
+    }
+
+    .till-bar .tb-actions > button.recent-toggle:active,
+    .till-bar .tb-actions > .tb-more > button.recent-toggle:active {
+        transform: scale(.96);
+    }
+
+    /* Count badges ride the top-right corner instead of pushing the label sideways. */
+    .till-bar .tb-actions > button.recent-toggle > span {
+        position: absolute;
+        top: 4px;
+        right: 6px;
+        margin: 0;
+        min-width: 18px;
+        height: 18px;
+        font-size: 10px;
+        box-shadow: 0 0 0 2px #1a1714;
+    }
+
+    .till-bar .tb-sep {
+        height: 34px;
+    }
+
+    .till-bar .tb-row2 {
+        height: 34px;
+        min-height: 34px;
+    }
+}
+
+@media (min-width: 641px) and (max-width: 899px) {
+    .till-bar .brand-label {
+        display: none;
+    }
+
+    .till-bar .tb-actions > button.recent-toggle,
+    .till-bar .tb-actions > .tb-more > button.recent-toggle,
+    .till-bar .tb-actions > a.logout {
+        min-width: 58px;
+        padding: 0 6px;
+        font-size: 11px;
+    }
+
+    .till-bar .tb-sep {
+        display: none;
+    }
+}
+
+/* ── Layout: menu + always-visible order column (tablets) ── */
+@media (min-width: 641px) and (max-width: 1366px) {
+    :root {
+        --pos-tab-cart-w: 340px;
+    }
+
+    .till-grid,
+    .till-grid.order-menu-closed {
+        grid-template-columns: minmax(0, 1fr) var(--pos-tab-cart-w);
+        grid-template-rows: auto auto minmax(0, 1fr);
+    }
+
+    .till-grid > .menu-mode {
+        grid-column: 1;
+        grid-row: 1;
+        inline-size: min(100% - 24px, 22rem);
+        margin: 10px 12px 0;
+    }
+
+    .till-grid > .menu-mode .menu-mode-btn {
+        min-height: 48px;
+        font-size: 15px;
+    }
+
+    /* Categories: one horizontal row of chips above the menu. A side column cost a
+       fifth of the screen width; a row costs 68px of height, which a landscape
+       tablet can spare far more easily once the order column takes its share. */
+    .till-grid > .cats-wrap {
+        grid-column: 1;
+        grid-row: 2;
+        min-width: 0;
+        overflow: hidden;
+        background: #f4efe9;
+        border-bottom: 1px solid #e6ded1;
+    }
+
+    #catsResizeHandle {
+        display: none !important;
+    }
+
+    .till-grid .cats {
+        display: flex;
+        flex-direction: row;
+        flex-wrap: nowrap;
+        gap: 8px;
+        padding: 10px 12px;
+        border-right: none;
+        background: transparent;
+        overflow-x: auto;
+        overflow-y: hidden;
+        scrollbar-width: none;
+        overscroll-behavior-x: contain;
+        -webkit-overflow-scrolling: touch;
+    }
+
+    .till-grid .cats::-webkit-scrollbar {
+        display: none;
+    }
+
+    .till-grid .cat-btn {
+        flex: 0 0 auto;
+        width: auto;
+        min-height: 48px;
+        margin: 0;
+        padding: 0 18px;
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        border-radius: 999px;
+        font-size: 15px;
+        font-weight: 500;
+        white-space: nowrap;
+    }
+
+    .till-grid .cat-btn .count {
+        float: none;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        min-width: 24px;
+        height: 22px;
+        padding: 0 7px;
+        border-radius: 999px;
+        background: rgba(122, 106, 82, .12);
+        font-size: 12px;
+        font-weight: 600;
+        opacity: 1;
+    }
+
+    .till-grid .cat-btn.active .count {
+        background: rgba(255, 255, 255, .22);
+    }
+
+    .till-grid > .menu {
+        grid-column: 1;
+        grid-row: 3;
+        min-width: 0;
+        padding: 12px 14px 20px;
+    }
+
+    .menu .toolbar {
+        gap: 8px;
+        margin-bottom: 12px;
+    }
+
+    .menu .toolbar input {
+        min-width: 0;
+        min-height: 52px;
+        font-size: 16px;
+        border-radius: 14px;
+    }
+
+    .menu .toolbar button {
+        min-width: 52px;
+        min-height: 52px;
+        padding: 0 16px;
+        border-radius: 14px;
+        font-size: 17px;
+    }
+
+    #grid {
+        grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)) !important;
+        gap: 10px;
+    }
+
+    #grid .item {
+        min-height: 108px;
+        padding: 12px 14px;
+        border-radius: 16px;
+    }
+
+    #grid .item .nm {
+        font-size: 15px;
+        line-height: 1.3;
+    }
+
+    #grid .item .pr {
+        font-size: 17px;
+    }
+
+    /* The order column. */
+    .till-grid > .cart {
+        grid-column: 2;
+        grid-row: 1 / -1;
+        display: flex !important;
+        position: relative;
+        min-height: 0;
+        min-width: 0;
+        border-left: 1px solid #e6ded1;
+        box-shadow: -10px 0 30px rgba(35, 31, 28, .06);
+        z-index: 2;
+    }
+
+    .cart-close-btn,
+    .mobile-cart-toggle,
+    .till-grid.order-menu-closed .mobile-cart-toggle {
+        display: none !important;
+    }
+
+    .cart-head {
+        min-height: 60px;
+        padding: 8px 12px 8px 16px;
+    }
+
+    .cart-head h3 {
+        font-size: 18px;
+    }
+
+    .cart-head .clear {
+        min-height: 44px;
+        padding: 0 14px;
+        border-radius: 10px;
+        font-size: 14px;
+        font-weight: 600;
+    }
+
+    .cart-head .clear:active {
+        background: #fdecee;
+    }
+
+    .cart-lines {
+        padding: 4px 12px;
+    }
+
+    .cline {
+        gap: 8px;
+        padding: 10px 0;
+    }
+
+    .cline .nm {
+        font-size: 15px;
+    }
+
+    .cline .ln-meta {
+        font-size: 12px;
+    }
+
+    .cline .qty {
+        gap: 4px;
+    }
+
+    .cline .qty button {
+        width: 40px;
+        height: 40px;
+        border-radius: 12px;
+        font-size: 18px;
+    }
+
+    .cline .qty input {
+        width: 38px;
+        height: 40px;
+        padding: 4px;
+        border-radius: 10px;
+        font-size: 16px;
+    }
+
+    .cline .rm {
+        width: 34px;
+        height: 40px;
+        border-radius: 10px;
+        font-size: 17px;
+    }
+
+    .cline .rm:active {
+        background: #fdecee;
+    }
+
+    .cart-foot {
+        padding: 12px 14px calc(12px + env(safe-area-inset-bottom));
+        background: #fffdfb;
+        box-shadow: 0 -8px 20px rgba(15, 15, 20, .05);
+    }
+
+    .service-ctx {
+        padding-bottom: 10px;
+        margin-bottom: 10px;
+    }
+
+    .ctx-chip {
+        min-height: 52px;
+        border-radius: 12px;
+        font-size: 12px;
+    }
+
+    .ctx-chip i {
+        font-size: 16px;
+    }
+
+    .ctx-fields input,
+    .ctx-fields select {
+        min-height: 46px;
+        border-radius: 10px;
+        font-size: 16px;
+    }
+
+    /* Guest name and covers share one row: every line the footer gives back is
+       another order line visible above it. */
+    .ctx-fields {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) auto;
+        column-gap: 8px;
+        align-items: center;
+    }
+
+    .ctx-fields > select,
+    .ctx-fields > .ctx-location-hint {
+        grid-column: 1 / -1;
+    }
+
+    .ctx-fields > #ctxCustomer {
+        grid-column: 1;
+        min-width: 0;
+    }
+
+    .ctx-fields > .ctx-covers-row {
+        grid-column: 2;
+        margin-top: 0 !important;
+        gap: 6px !important;
+    }
+
+    .ctx-fields > .ctx-covers-row > span {
+        display: none;
+    }
+
+    .ctx-fields > .ctx-covers-row > #ctxCovers {
+        width: 64px !important;
+        min-height: 46px;
+        border-radius: 10px !important;
+        font-size: 16px !important;
+    }
+
+    .total-row {
+        align-items: baseline;
+        font-size: 24px;
+        margin-bottom: 10px;
+    }
+
+    .park-btn,
+    .pay-btn {
+        min-height: 60px;
+        padding: 0 10px;
+        border-radius: 14px;
+        font-size: 16px;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        gap: 8px;
+    }
+
+    .park-btn:not(:disabled):active,
+    .pay-btn:not(:disabled):active {
+        transform: scale(.98);
+    }
+
+    #parkHint {
+        margin-top: 6px !important;
+    }
+}
+
+@media (min-width: 641px) and (max-width: 899px) {
+    :root {
+        --pos-tab-cart-w: 300px;
+    }
+
+    #grid {
+        grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)) !important;
+    }
+
+    .ctx-chip span {
+        font-size: 11px;
+    }
+
+    /* Keep the people icon, drop the word, so the guest name field keeps its width. */
+    .ctx-fields > .ctx-covers-row > label {
+        font-size: 0 !important;
+    }
+
+    .ctx-fields > .ctx-covers-row > label i {
+        margin-right: 0 !important;
+        font-size: 15px;
+    }
+}
+
+@media (min-width: 1181px) and (max-width: 1366px) {
+    :root {
+        --pos-tab-cart-w: 380px;
+    }
+}
+
+/* Landscape tablets have the width to put the Restaurant / Room Service switch
+   beside the category chips, which gives the height back to the menu. The first
+   column is auto, so without the switch (non-hotel presets) it collapses to 0. */
+@media (min-width: 900px) and (max-width: 1366px) {
+    .till-grid,
+    .till-grid.order-menu-closed {
+        grid-template-columns: auto minmax(0, 1fr) var(--pos-tab-cart-w);
+        grid-template-rows: auto minmax(0, 1fr);
+        background: #f4efe9;
+    }
+
+    .till-grid > .menu-mode {
+        grid-column: 1;
+        grid-row: 1;
+        align-self: center;
+        inline-size: auto;
+        margin: 0 0 0 12px;
+    }
+
+    .till-grid > .menu-mode .menu-mode-btn {
+        padding: 0 16px;
+    }
+
+    .till-grid > .cats-wrap {
+        grid-column: 2;
+        grid-row: 1;
+    }
+
+    .till-grid > .menu {
+        grid-column: 1 / 3;
+        grid-row: 2;
+    }
+
+    .till-grid > .cart {
+        grid-column: 3;
+    }
+}
+
+/* ── Modals: pinned header and footer, big targets (tablet and up) ── */
+@media (min-width: 641px) {
+    .overlay,
+    .modal-overlay {
+        padding: 16px;
+        background: rgba(20, 17, 14, .55);
+        backdrop-filter: blur(2px);
+    }
+
+    .modal-overlay.show > .modal-content,
+    .overlay.show > .modal,
+    .modal-overlay.show > .success-modal {
+        animation: pos-modal-in .18s cubic-bezier(.2, .8, .2, 1);
+    }
+
+    .modal,
+    .modal-content {
+        border-radius: 20px;
+        max-height: calc(100dvh - 32px);
+        box-shadow: 0 24px 60px rgba(0, 0, 0, .28);
+        overscroll-behavior: contain;
+    }
+
+    .modal-head,
+    .modal-header {
+        position: sticky;
+        top: 0;
+        z-index: 3;
+        min-height: 64px;
+        padding: 12px 14px 12px 22px;
+        background: #fff;
+        gap: 12px;
+    }
+
+    .modal-head h3,
+    .modal-header h3 {
+        font-size: 19px;
+        line-height: 1.25;
+    }
+
+    .modal-head .close,
+    .modal-header .close,
+    .modal-header .modal-close {
+        flex-shrink: 0;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: 44px;
+        height: 44px;
+        border-radius: 50%;
+        background: rgba(127, 127, 127, .14);
+        font-size: 26px;
+        line-height: 1;
+    }
+
+    .modal-header input[type="search"],
+    .modal-header input[type="text"] {
+        min-height: 44px;
+        font-size: 15px;
+        border-radius: 12px;
+    }
+
+    .modal-body {
+        padding: 18px 22px;
+    }
+
+    .modal-body input,
+    .modal-body select,
+    .modal-body textarea {
+        min-height: 48px;
+        font-size: 16px;
+        border-radius: 10px;
+    }
+
+    .modal-body textarea {
+        min-height: 96px;
+    }
+
+    .modal-foot,
+    .modal-footer {
+        position: sticky;
+        bottom: 0;
+        z-index: 3;
+        padding: 14px 22px calc(14px + env(safe-area-inset-bottom));
+        background: #fff;
+        flex-wrap: wrap;
+    }
+
+    .modal-foot button,
+    .modal-foot a.btn-cancel,
+    .modal-foot a.btn-confirm,
+    .modal-footer button,
+    .modal-footer a.btn-cancel,
+    .modal-footer a.btn-confirm {
+        min-height: 56px;
+        border-radius: 14px;
+        font-size: 16px;
+    }
+
+    .modal-foot .btn-confirm,
+    .modal-footer .btn-confirm {
+        flex: 1.6;
+    }
+
+    /* Pay window: wider, and the four methods on one row. */
+    #payOverlay > .modal-content {
+        width: 640px;
+    }
+
+    #payOverlay .pay-method-grid {
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+        gap: 10px;
+    }
+
+    #payOverlay .pay-method-grid button {
+        min-height: 88px;
+        padding: 12px 6px;
+        border-radius: 14px;
+        font-size: 14px;
+        text-align: center;
+        line-height: 1.2;
+    }
+
+    #payOverlay .pay-method-grid button i {
+        font-size: 24px;
+    }
+
+    #payOverlay .discount-preset-btn {
+        min-height: 44px;
+        min-width: 56px;
+        border-radius: 10px;
+        font-size: 14px;
+    }
+
+    #payOverlay .change-banner {
+        font-size: 18px;
+    }
+}
+
+@keyframes pos-modal-in {
+    from {
+        opacity: 0;
+        transform: translateY(12px) scale(.98);
+    }
+
+    to {
+        opacity: 1;
+        transform: none;
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+
+    .modal-overlay.show > .modal-content,
+    .overlay.show > .modal,
+    .modal-overlay.show > .success-modal {
+        animation: none;
+    }
 }

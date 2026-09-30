@@ -2666,6 +2666,48 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
                         <button type="button" onclick="closePayModal()" style="margin-left:auto; background:transparent; border:none; color:#8B7355; font-size:12px; cursor:pointer; text-decoration:underline;">Change</button>
                     </div>
 
+                    <?php /* Payment method sits first: it is the one choice every sale needs, so on a
+                              tablet it is on screen without scrolling. Receipt details and discount follow. */ ?>
+                    <label>Payment method</label>
+                    <div class="pay-method-grid">
+                        <button type="button" data-method="cash" onclick="setMethod(this)"><i class="fas fa-money-bill-wave"></i> Cash</button>
+                        <button type="button" data-method="mobile_money" onclick="setMethod(this)"><i class="fas fa-mobile-alt"></i> Mobile Money</button>
+                        <button type="button" data-method="card_manual" onclick="setMethod(this)"><i class="fas fa-credit-card"></i> Card (manual)</button>
+                        <button type="button" class="disabled" data-method="card_pos" onclick="showCardPosUnavailable()"><i class="fas fa-microchip"></i> Card POS<br><small>(soon)</small></button>
+                    </div>
+                    <input type="hidden" name="payment_method" id="payment_method" value="">
+
+                    <div id="ext-cash" style="display:none;">
+                        <label>Tendered (<?php echo $currency_symbol; ?>)</label>
+                        <input type="number" step="0.01" min="0" name="tendered_amount" id="tendered" oninput="updChange()">
+                        <div class="change-banner">Change: <span id="changeOut"><?php echo $currency_symbol; ?> 0.00</span></div>
+                        <div class="quick-tend-row">
+                            <button type="button" onclick="quickTend(500)" class="quick-tend">+500</button>
+                            <button type="button" onclick="quickTend(1000)" class="quick-tend">+1k</button>
+                            <button type="button" onclick="quickTend(5000)" class="quick-tend">+5k</button>
+                            <button type="button" onclick="quickTendExact()" class="quick-tend quick-tend--exact">Exact</button>
+                        </div>
+                    </div>
+
+                    <div id="ext-mobile_money" style="display:none;">
+                        <label>Provider</label>
+                        <select name="mobile_wallet_provider">
+                            <option value="">Select…</option>
+                            <option>Airtel Money</option>
+                            <option>TNM Mpamba</option>
+                            <option>Mo626</option>
+                            <option>Other</option>
+                        </select>
+                        <label>Transaction reference</label>
+                        <input type="text" name="mobile_wallet_reference" placeholder="MP25.0123.A4567">
+                    </div>
+
+                    <div id="ext-card_manual" style="display:none;">
+                        <label>Card last 4 digits</label>
+                        <input type="text" name="card_last4" maxlength="4" pattern="\d{4}" placeholder="1234">
+                        <label>Authorisation code (from slip)</label>
+                        <input type="text" name="card_auth_code" maxlength="50">
+                    </div>
                     <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px;">
                         <div><label>Email (for receipt)</label><input type="email" name="customer_email"></div>
                         <div><label>Phone (for WhatsApp)</label><input type="text" name="customer_phone"></div>
@@ -2709,46 +2751,6 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
                         <input type="hidden" name="deal_ids" id="payDealIdsHidden" value="">
                     </div>
 
-                    <label>Payment method</label>
-                    <div class="pay-method-grid">
-                        <button type="button" data-method="cash" onclick="setMethod(this)"><i class="fas fa-money-bill-wave"></i> Cash</button>
-                        <button type="button" data-method="mobile_money" onclick="setMethod(this)"><i class="fas fa-mobile-alt"></i> Mobile Money</button>
-                        <button type="button" data-method="card_manual" onclick="setMethod(this)"><i class="fas fa-credit-card"></i> Card (manual)</button>
-                        <button type="button" class="disabled" data-method="card_pos" onclick="showCardPosUnavailable()"><i class="fas fa-microchip"></i> Card POS<br><small>(soon)</small></button>
-                    </div>
-                    <input type="hidden" name="payment_method" id="payment_method" value="">
-
-                    <div id="ext-cash" style="display:none;">
-                        <label>Tendered (<?php echo $currency_symbol; ?>)</label>
-                        <input type="number" step="0.01" min="0" name="tendered_amount" id="tendered" oninput="updChange()">
-                        <div class="change-banner">Change: <span id="changeOut"><?php echo $currency_symbol; ?> 0.00</span></div>
-                        <div style="display:grid; grid-template-columns:repeat(4,1fr); gap:6px; margin-top:8px;">
-                            <button type="button" onclick="quickTend(500)" style="padding:10px;border:1px solid #d6d8db;background:#fff;border-radius:6px;cursor:pointer;">+500</button>
-                            <button type="button" onclick="quickTend(1000)" style="padding:10px;border:1px solid #d6d8db;background:#fff;border-radius:6px;cursor:pointer;">+1k</button>
-                            <button type="button" onclick="quickTend(5000)" style="padding:10px;border:1px solid #d6d8db;background:#fff;border-radius:6px;cursor:pointer;">+5k</button>
-                            <button type="button" onclick="quickTendExact()" style="padding:10px;border:1px solid #28a745;background:#e9f5ee;color:#155724;border-radius:6px;cursor:pointer;font-weight:600;">Exact</button>
-                        </div>
-                    </div>
-
-                    <div id="ext-mobile_money" style="display:none;">
-                        <label>Provider</label>
-                        <select name="mobile_wallet_provider">
-                            <option value="">Select…</option>
-                            <option>Airtel Money</option>
-                            <option>TNM Mpamba</option>
-                            <option>Mo626</option>
-                            <option>Other</option>
-                        </select>
-                        <label>Transaction reference</label>
-                        <input type="text" name="mobile_wallet_reference" placeholder="MP25.0123.A4567">
-                    </div>
-
-                    <div id="ext-card_manual" style="display:none;">
-                        <label>Card last 4 digits</label>
-                        <input type="text" name="card_last4" maxlength="4" pattern="\d{4}" placeholder="1234">
-                        <label>Authorisation code (from slip)</label>
-                        <input type="text" name="card_auth_code" maxlength="50">
-                    </div>
                 </div>
                 <div class="modal-foot modal-footer">
                     <button type="button" class="btn-cancel" onclick="closePayModal()">Cancel</button>
@@ -5443,7 +5445,9 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
 
         function initPosCatsResizer() {
             const STORAGE_KEY = 'rh_pos_cats_width_v1';
-            const MOBILE_QUERY = '(max-width: 1024px)';
+            // Tablets (≤1366px) show categories as a chip rail above the menu, not a
+            // resizable side column, so the drag handle only exists on desktops.
+            const MOBILE_QUERY = '(max-width: 1366px)';
             const grid = document.querySelector('.till-grid');
             const catsWrap = document.getElementById('catsWrap');
             if (!grid || !catsWrap || catsWrap.dataset.resizeReady === '1') return;
@@ -6305,7 +6309,9 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
             const grid = document.querySelector('.till-grid');
             const backdrop = document.getElementById('cartBackdrop');
             if (!cart || !grid) return;
-            if (window.matchMedia('(max-width: 1024px)').matches) {
+            // Only phones slide the order in as a drawer. Tablets and up keep it on
+            // screen as a column beside the menu, so the cashier never loses sight of it.
+            if (window.matchMedia('(max-width: 640px)').matches) {
                 const opening = !cart.classList.contains('open');
                 cart.classList.toggle('open');
                 document.body.classList.toggle('pos-cart-open', opening);
@@ -6360,7 +6366,7 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
         }
 
         function isPosCompactViewport() {
-            return window.matchMedia('(max-width: 1024px)').matches;
+            return window.matchMedia('(max-width: 640px)').matches;
         }
 
         function posMobileQuickViewEmpty(iconClass, title, text) {
@@ -6899,7 +6905,7 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
             if (tabsOv) tabsOv.classList.remove('show');
             // Ensure the cart drawer is visible on mobile
             const mainCart = document.getElementById('mainCart');
-            if (mainCart && window.matchMedia('(max-width: 1024px)').matches && !mainCart.classList.contains('open')) {
+            if (mainCart && window.matchMedia('(max-width: 640px)').matches && !mainCart.classList.contains('open')) {
                 toggleCartDrawer();
             }
             posToastReady('Adding to ' + ref + ' — tap items then Fire to append.', false);
