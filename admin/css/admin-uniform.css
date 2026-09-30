@@ -1,0 +1,273 @@
+/* ============================================================================
+   Admin uniform layer — one size for every summary card and data table.
+
+   Loaded last on every admin page (from includes/admin-header.php), so it
+   settles the dozen card families that grew up page by page (dashboard,
+   finance, stock, end of day, housekeeping, maintenance, …) onto one compact
+   spec without touching each page's markup or logic. Colours, accents and
+   icons stay with each page; only size, spacing and type scale are unified.
+   ========================================================================== */
+
+:root {
+    --uni-card-pad: 12px 14px;
+    --uni-card-radius: 10px;
+    --uni-card-gap: 12px;
+    --uni-card-min: 200px;
+    --uni-value-size: 20px;
+    --uni-label-size: 12px;
+    --uni-sub-size: 11.5px;
+    --uni-muted: var(--color-text-secondary, #5E554D);
+    --uni-panel-pad: 14px 16px;
+}
+
+/* ---------------------------------------------------------------------------
+   1. Summary-card grids: the same column rhythm everywhere.
+   ------------------------------------------------------------------------ */
+body .stats-grid,
+body .ops-grid,
+body .acct-kpis,
+body .sdash-kpi-row,
+body .eod-kpis,
+body .hk-dashboard,
+body .rm-dashboard,
+body .summary-cards,
+body .booking-kpi-strip,
+body .stats-row,
+body .qt-stats,
+body .cache-overview {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(var(--uni-card-min), 1fr));
+    gap: var(--uni-card-gap);
+    margin-bottom: 18px;
+}
+
+/* ---------------------------------------------------------------------------
+   2. Summary cards: compact tile — padding, radius, no forced height.
+   ------------------------------------------------------------------------ */
+body .stat-card,
+body .stats-grid a.stat-card,
+body .ops-card,
+body .acct-kpi,
+body .sdash-kpi-card,
+body .eod-kpi,
+body .hk-stat-card,
+body .rm-stat-card,
+body .summary-card,
+body .booking-kpi-card,
+body .stat-box,
+body .qt-stat,
+body .cache-stat-card {
+    padding: var(--uni-card-pad);
+    border-radius: var(--uni-card-radius);
+    min-height: 0;
+    min-width: 0;
+    box-shadow: none;
+    background: var(--color-white, #fff);
+}
+
+/* Numbers */
+body .stat-card .stat-value,
+body .stat-card .number,
+body .ops-card .ops-value,
+body .acct-kpi .acct-kpi__value,
+body .sdash-kpi-card__value,
+body .eod-kpi__value,
+body .hk-stat-card__value,
+body .rm-stat-card__value,
+body .booking-kpi-card__value,
+body .qt-stat__value,
+body .summary-card .value,
+body .stat-box .big-stat,
+body .cache-stat-info h3,
+body .stat-money__amount {
+    font-size: var(--uni-value-size) !important;
+    line-height: 1.2;
+    font-weight: 700;
+    letter-spacing: -0.01em;
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+    margin: 2px 0 0;
+}
+
+/* Labels */
+body .stat-card .stat-label,
+body .ops-card .ops-label,
+body .acct-kpi .acct-kpi__label,
+body .sdash-kpi-card__label,
+body .eod-kpi__label,
+body .hk-stat-card__label,
+body .rm-stat-card__label,
+body .booking-kpi-card__label,
+body .qt-stat__label,
+body .summary-card .label,
+body .stat-box .stat-label,
+body .cache-stat-info p {
+    font-size: var(--uni-label-size) !important;
+    line-height: 1.3;
+    font-weight: 600;
+    color: var(--uni-muted);
+    white-space: normal;
+    overflow: visible;
+    text-overflow: clip;
+}
+
+/* Secondary lines */
+body .stat-card .stat-sub,
+body .ops-card .ops-sub,
+body .acct-kpi .acct-kpi__meta,
+body .acct-kpi .acct-kpi__sub,
+body .sdash-kpi-card__sub,
+body .eod-kpi__meta {
+    font-size: var(--uni-sub-size) !important;
+    line-height: 1.35;
+    margin-top: 2px;
+    color: var(--uni-muted);
+}
+
+/* "Open detail" / "Click for details" hints: the whole tile is already the
+   click target, so the extra line only adds height. */
+body .acct-kpi__hint,
+body .hk-stat-card__hint,
+body .rm-stat-card__hint,
+body .summary-card__hint,
+body .bookings-stats-insight-card__hint {
+    display: none !important;
+}
+
+/* Dashboard tile: icon beside the figures instead of stacked above them. */
+body .stats-grid .stat-card {
+    display: grid;
+    grid-template-columns: auto 1fr;
+    column-gap: 12px;
+    align-items: center;
+    align-content: center;
+}
+body .stats-grid .stat-card > :not(.stat-icon):not(.stat-cta) {
+    grid-column: 2;
+}
+body .stats-grid .stat-card .stat-icon {
+    grid-column: 1;
+    grid-row: 1 / span 3;
+    width: 32px;
+    height: 32px;
+    margin: 0;
+}
+body .stats-grid .stat-card .stat-icon i {
+    font-size: 14px !important;
+}
+
+/* Icon blocks on the other tile families */
+body .ops-card .ops-icon,
+body .sdash-kpi-card__icon {
+    width: 32px;
+    height: 32px;
+    min-width: 32px;
+    font-size: 14px;
+    border-radius: 8px;
+}
+
+/* ---------------------------------------------------------------------------
+   3. Panels that hold lists or tables: one padding and radius.
+   ------------------------------------------------------------------------ */
+body .widget-card,
+body .today-checkins-section,
+body .eod-panel,
+body .eod-insight-card,
+body .hk-section {
+    padding: var(--uni-panel-pad);
+    border-radius: var(--uni-card-radius);
+}
+
+body .room-status-widget,
+body .acct-panel,
+body .sdash-section,
+body .table-container,
+body .table-card {
+    border-radius: var(--uni-card-radius);
+}
+
+/* Oversized headline figures inside panels */
+body .occupancy-percentage .value {
+    font-size: 28px;
+}
+body .eod-stats__value {
+    font-size: 16px;
+}
+
+/* ---------------------------------------------------------------------------
+   4. Data tables: the same header and row rhythm on every page.
+   ------------------------------------------------------------------------ */
+body .content table.table,
+body .content table.acct-table,
+body .content table.booking-table,
+body .content table.menu-table,
+body .content table.staff-workload-table,
+body .content .invoices-table table,
+body .content .sdash-section table {
+    font-size: 13px;
+}
+
+body .content table.table thead th,
+body .content table.acct-table thead th,
+body .content table.booking-table thead th,
+body .content table.menu-table thead th,
+body .content table.staff-workload-table thead th,
+body .content .invoices-table table thead th,
+body .content .sdash-section table thead th {
+    padding: 10px 12px !important;
+    font-size: 11.5px !important;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    white-space: nowrap;
+}
+
+body .content table.table tbody td,
+body .content table.acct-table tbody td,
+body .content table.booking-table tbody td,
+body .content table.menu-table tbody td,
+body .content table.staff-workload-table tbody td,
+body .content .invoices-table table tbody td,
+body .content .sdash-section table tbody td {
+    padding: 10px 12px !important;
+    font-size: 13px !important;
+    line-height: 1.4;
+    vertical-align: middle;
+}
+
+/* ---------------------------------------------------------------------------
+   5. Phones: two tiles per row, then one on the narrowest screens.
+   ------------------------------------------------------------------------ */
+@media (max-width: 640px) {
+    body .stats-grid,
+    body .ops-grid,
+    body .acct-kpis,
+    body .sdash-kpi-row,
+    body .eod-kpis,
+    body .hk-dashboard,
+    body .rm-dashboard,
+    body .summary-cards,
+    body .booking-kpi-strip,
+    body .stats-row,
+    body .qt-stats,
+    body .cache-overview {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+}
+
+@media (max-width: 380px) {
+    body .stats-grid,
+    body .ops-grid,
+    body .acct-kpis,
+    body .sdash-kpi-row,
+    body .eod-kpis,
+    body .hk-dashboard,
+    body .rm-dashboard,
+    body .summary-cards,
+    body .booking-kpi-strip,
+    body .stats-row,
+    body .qt-stats,
+    body .cache-overview {
+        grid-template-columns: 1fr;
+    }
+}

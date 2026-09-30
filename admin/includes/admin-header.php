@@ -412,6 +412,8 @@ if ($_admin_back_target !== null) {
          before anything visible so the page never paints at the wrong size. */ ?>
 <?php require_once __DIR__ . '/page-zoom.php'; rh_page_zoom_bootstrap(); ?>
 <link rel="stylesheet" href="css/page-zoom.css?v=<?php echo @filemtime(__DIR__ . '/../css/page-zoom.css'); ?>">
+<?php /* One size for every summary card and data table — loaded after page CSS so it wins. */ ?>
+<link rel="stylesheet" href="css/admin-uniform.css?v=<?php echo @filemtime(__DIR__ . '/../css/admin-uniform.css'); ?>">
 <div id="adminPageLoader" class="admin-page-loader is-visible" data-boot-loader="1" role="status" aria-live="polite" aria-hidden="false">
     <div class="admin-page-loader-card">
         <div class="admin-page-loader-brand"><i class="fas fa-hotel" aria-hidden="true"></i><span id="adminPageLoaderBrand"><?php echo htmlspecialchars($site_name); ?></span></div>

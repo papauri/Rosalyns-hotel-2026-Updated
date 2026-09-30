@@ -1104,6 +1104,13 @@ $checkoutCleanupRooms = getCheckoutCleanupRooms($pdo);
 
 // Get staff workload
 $staffWorkload = getStaffWorkload($pdo);
+// Only staff with housekeeping work today — listing every account (bar, kitchen,
+// coffee…) at zero buried the few rows that matter.
+$staffWorkload = array_values(array_filter($staffWorkload, static function ($row) {
+    return (int)($row['active_tasks'] ?? 0) > 0
+        || (int)($row['high_priority_pending'] ?? 0) > 0
+        || (int)($row['completed_today'] ?? 0) > 0;
+}));
 
 // Get all assignments with enhanced sorting
 // Backward compatible: works with or without migration 004 columns

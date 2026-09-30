@@ -98,10 +98,13 @@ define('RH_HELP_TOOLTIPS_RENDERED', true);
          * them can still hit the Help toggle, and the choice persists per device. */
         const isFrontOfHouseScreen = document.body.classList.contains('pos-screen')
             || document.body.classList.contains('station-screen');
+        /* Default OFF on every screen: a yellow "?" on every card and button made the back
+         * office look unfinished. The floating Help button turns them on, and the choice
+         * persists per device, so anyone who has already opted in keeps them. */
         const storedHelpPref = localStorage.getItem(KEY);
         let enabled = storedHelpPref !== null
             ? storedHelpPref === '1'
-            : !isFrontOfHouseScreen;
+            : false;
         /* "No visible toggle, so force help on" exists so back-office pages can't end up with
          * badges permanently unavailable. It must NOT apply to the till: below 1280px the
          * toolbar (and the inline toggle inside it) is display:none, pickPrimaryToggle() only

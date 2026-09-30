@@ -3204,8 +3204,6 @@ $today_str = $today->format('Y-m-d');
     </script>
 
     <div class="content">
-        </div>
-
         <?php if ($message): ?>
             <?php showAlert($message, 'success'); ?>
         <?php endif; ?>

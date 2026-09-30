@@ -444,12 +444,7 @@ $csrf_token = generateCsrfToken();
             </div>
             <?php endif; ?>
         </div>
-        <?php else: ?>
-        <div class="sdash-all-clear">
-            <i class="fas fa-check-circle"></i>
-            <span>No active alerts — inventory is in great shape!</span>
-        </div>
-        <?php endif; ?>
+        <?php endif; /* nothing to show when clear — the banner above already says so */ ?>
 
         <?php /* Inventory Health counts were removed: the banner and Needs Attention above already
                  show out-of-stock, low, expiring and expired items, each with an action. */ ?>

@@ -742,7 +742,7 @@ $quickActive = function ($s, $e) use ($startDate, $endDate) {
 
                 <div class="filter-group">
                     <label>Booking ID</label>
-                    <input type="number" name="booking_id" value="<?php echo $bookingId; ?>" placeholder="Enter ID">
+                    <input type="number" name="booking_id" value="<?php echo $bookingId ? (int)$bookingId : ''; ?>" placeholder="Enter ID">
                 </div>
 
                 <div class="filter-group">
