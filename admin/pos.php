@@ -2512,67 +2512,72 @@ if (in_array($user['role'] ?? '', ['admin', 'manager'], true)) {
             <!-- Cart -->
             <div class="cart" id="mainCart">
                 <div class="cart-head">
-                    <h3><i class="fas fa-shopping-cart"></i> Order</h3>
-                    <div style="display:flex; gap:10px;">
-                        <button class="clear" onclick="clearCart()"><i class="fas fa-trash"></i> Clear</button>
+                    <div class="cart-title">
+                        <h3>Current order</h3>
+                        <span class="cart-count" id="cartCount">No items</span>
+                    </div>
+                    <div class="cart-head-actions">
+                        <button class="clear" onclick="clearCart()"><i class="fas fa-trash-can"></i> Clear</button>
                         <button class="cart-close-btn" onclick="toggleCartDrawer()" data-help="Close order panel|Hide the current order panel so the menu has more room. Tap the floating cart button to bring it back."><i class="fas fa-times"></i></button>
                     </div>
                 </div>
-                <div class="cart-lines" id="cart-lines">
-                    <p style="color:#6c757d; text-align:center; padding:30px 0; font-size:13px;">Tap items to add to the order.</p>
-                </div>
-                <div class="cart-foot">
-                    <!-- Service context: order type + location + customer name. These inputs live OUTSIDE the
-                     pay form (form="payForm" attribute) so they submit with both Fire-Order and Pay flows. -->
-                    <div class="service-ctx">
-                        <div class="ctx-chips" role="group" aria-label="Service type">
-                            <button type="button" class="ctx-chip is-active" data-type="walk_in" onclick="setServiceType('walk_in')"><i class="fas fa-walking"></i><span>Walk-in</span></button>
-                            <?php if (isRestaurantEnabled()): ?>
-                            <button type="button" class="ctx-chip" data-type="dine_in" onclick="setServiceType('dine_in')"><i class="fas fa-utensils"></i><span>Dine-in</span></button>
-                            <button type="button" class="ctx-chip" data-type="takeaway" onclick="setServiceType('takeaway')"><i class="fas fa-shopping-bag"></i><span>Takeaway</span></button>
-                            <?php endif; ?>
-                            <?php if (moduleEnabled('bookings') && moduleEnabled('station_room_service')): ?>
-                            <button type="button" class="ctx-chip" data-type="room_service" onclick="setServiceType('room_service')"><i class="fas fa-bed"></i><span>Room</span></button>
-                            <?php endif; ?>
-                        </div>
-                        <input type="hidden" id="ctxOrderType" name="order_type" form="payForm" value="walk_in">
-                        <div class="ctx-fields">
-                            <input type="hidden" id="ctxLocation" name="table_number" form="payForm" value="">
-                            <select id="ctxTableSelect" onchange="syncServiceLocation()" style="display:none;">
-                                <option value="">Select table...</option>
-                                <?php foreach ($restaurantTables as $table): ?>
-                                    <?php
-                                    $tableNumber = (string)$table['table_number'];
-                                    $tableLock = $activeLocationLocks['tables'][$tableNumber] ?? null;
-                                    $tableMeta = $table['capacity'] !== null ? ' · seats ' . (int)$table['capacity'] : '';
-                                    ?>
-                                    <option value="<?php echo htmlspecialchars($tableNumber); ?>" data-capacity="<?php echo $table['capacity'] !== null ? (int)$table['capacity'] : ''; ?>" <?php echo $tableLock ? 'disabled' : ''; ?>>
-                                        Table <?php echo htmlspecialchars($tableNumber . $tableMeta); ?><?php echo $tableLock ? ' · busy ' . htmlspecialchars((string)$tableLock['reference']) : ''; ?>
-                                    </option>
-                                <?php endforeach; ?>
-                            </select>
-                            <select id="ctxRoomSelect" onchange="syncServiceLocation()" style="display:none;">
-                                <option value="">Select checked-in room...</option>
-                                <?php foreach ($checkedInRooms as $room): ?>
-                                    <?php
-                                    $roomNumber = (string)$room['room_number'];
-                                    $roomLock = $activeLocationLocks['rooms'][$roomNumber] ?? null;
-                                    $guest = trim((string)($room['guest_name'] ?? ''));
-                                    ?>
-                                    <option value="<?php echo htmlspecialchars($roomNumber); ?>" data-booking="<?php echo (int)$room['booking_id']; ?>" <?php echo $roomLock ? 'disabled' : ''; ?>>
-                                        Room <?php echo htmlspecialchars($roomNumber); ?><?php echo $guest !== '' ? ' · ' . htmlspecialchars($guest) : ''; ?><?php echo $roomLock ? ' · busy ' . htmlspecialchars((string)$roomLock['reference']) : ''; ?>
-                                    </option>
-                                <?php endforeach; ?>
-                            </select>
-                            <div class="ctx-location-hint" id="ctxLocationHint"></div>
-                            <input type="text" id="ctxCustomer" name="customer_name" form="payForm" placeholder="Guest name (optional)" autocomplete="off">
-                            <div class="ctx-covers-row" style="display:flex; align-items:center; gap:8px; margin-top:8px;">
-                                <label for="ctxCovers" style="font-size:12px; color:#6c757d; white-space:nowrap;"><i class="fas fa-users" style="margin-right:4px;"></i>Covers</label>
-                                <input type="number" id="ctxCovers" name="covers" form="payForm" min="0" max="99" step="1" placeholder="0" autocomplete="off" style="width:70px; padding:6px 8px; border:1px solid #d6d8db; border-radius:6px; font-size:13px;">
-                                <span style="font-size:11px; color:#9ca3af;">guests on this tab (optional)</span>
-                            </div>
+                <?php /* Who the order is for comes first, like the top of a paper ticket:
+                          service type, then table/room and guest. */ ?>
+                <!-- Service context: order type + location + customer name. These inputs live OUTSIDE the
+                 pay form (form="payForm" attribute) so they submit with both Fire-Order and Pay flows. -->
+                <div class="service-ctx">
+                    <div class="ctx-chips" role="group" aria-label="Service type">
+                        <button type="button" class="ctx-chip is-active" data-type="walk_in" onclick="setServiceType('walk_in')"><i class="fas fa-walking"></i><span>Walk-in</span></button>
+                        <?php if (isRestaurantEnabled()): ?>
+                        <button type="button" class="ctx-chip" data-type="dine_in" onclick="setServiceType('dine_in')"><i class="fas fa-utensils"></i><span>Dine-in</span></button>
+                        <button type="button" class="ctx-chip" data-type="takeaway" onclick="setServiceType('takeaway')"><i class="fas fa-shopping-bag"></i><span>Takeaway</span></button>
+                        <?php endif; ?>
+                        <?php if (moduleEnabled('bookings') && moduleEnabled('station_room_service')): ?>
+                        <button type="button" class="ctx-chip" data-type="room_service" onclick="setServiceType('room_service')"><i class="fas fa-bed"></i><span>Room</span></button>
+                        <?php endif; ?>
+                    </div>
+                    <input type="hidden" id="ctxOrderType" name="order_type" form="payForm" value="walk_in">
+                    <div class="ctx-fields">
+                        <input type="hidden" id="ctxLocation" name="table_number" form="payForm" value="">
+                        <select id="ctxTableSelect" onchange="syncServiceLocation()" style="display:none;">
+                            <option value="">Select table...</option>
+                            <?php foreach ($restaurantTables as $table): ?>
+                                <?php
+                                $tableNumber = (string)$table['table_number'];
+                                $tableLock = $activeLocationLocks['tables'][$tableNumber] ?? null;
+                                $tableMeta = $table['capacity'] !== null ? ' · seats ' . (int)$table['capacity'] : '';
+                                ?>
+                                <option value="<?php echo htmlspecialchars($tableNumber); ?>" data-capacity="<?php echo $table['capacity'] !== null ? (int)$table['capacity'] : ''; ?>" <?php echo $tableLock ? 'disabled' : ''; ?>>
+                                    Table <?php echo htmlspecialchars($tableNumber . $tableMeta); ?><?php echo $tableLock ? ' · busy ' . htmlspecialchars((string)$tableLock['reference']) : ''; ?>
+                                </option>
+                            <?php endforeach; ?>
+                        </select>
+                        <select id="ctxRoomSelect" onchange="syncServiceLocation()" style="display:none;">
+                            <option value="">Select checked-in room...</option>
+                            <?php foreach ($checkedInRooms as $room): ?>
+                                <?php
+                                $roomNumber = (string)$room['room_number'];
+                                $roomLock = $activeLocationLocks['rooms'][$roomNumber] ?? null;
+                                $guest = trim((string)($room['guest_name'] ?? ''));
+                                ?>
+                                <option value="<?php echo htmlspecialchars($roomNumber); ?>" data-booking="<?php echo (int)$room['booking_id']; ?>" <?php echo $roomLock ? 'disabled' : ''; ?>>
+                                    Room <?php echo htmlspecialchars($roomNumber); ?><?php echo $guest !== '' ? ' · ' . htmlspecialchars($guest) : ''; ?><?php echo $roomLock ? ' · busy ' . htmlspecialchars((string)$roomLock['reference']) : ''; ?>
+                                </option>
+                            <?php endforeach; ?>
+                        </select>
+                        <div class="ctx-location-hint" id="ctxLocationHint"></div>
+                        <input type="text" id="ctxCustomer" name="customer_name" form="payForm" placeholder="Guest name" aria-label="Guest name (optional)" autocomplete="off">
+                        <div class="ctx-covers-row" style="display:flex; align-items:center; gap:8px; margin-top:8px;">
+                            <label for="ctxCovers" style="font-size:12px; color:#6c757d; white-space:nowrap;"><i class="fas fa-users" style="margin-right:4px;"></i>Covers</label>
+                            <input type="number" id="ctxCovers" name="covers" form="payForm" min="0" max="99" step="1" placeholder="0" autocomplete="off" style="width:70px; padding:6px 8px; border:1px solid #d6d8db; border-radius:6px; font-size:13px;">
+                            <span style="font-size:11px; color:#9ca3af;">guests on this tab (optional)</span>
                         </div>
                     </div>
+                </div>
+                <div class="cart-lines" id="cart-lines">
+                    <div class="cart-empty"><i class="fas fa-receipt"></i><strong>No items yet</strong><span>Tap a dish on the menu to start this order.</span></div>
+                </div>
+                <div class="cart-foot">
                     <!-- Active-tab banner: shown when adding a round to an existing open tab -->
                     <div id="activeTabBanner" style="display:none; align-items:center; gap:10px; background:#fff7ed; border:1px solid #fdba74; border-radius:8px; padding:9px 12px; margin-bottom:10px;">
                         <i class="fas fa-layer-group" style="color:#ea580c;"></i>
@@ -6558,23 +6563,29 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
                 }
             }
 
+            const countEl = document.getElementById('cartCount');
+            if (countEl) countEl.textContent = totQty > 0 ? (totQty === 1 ? '1 item' : totQty + ' items') : 'No items';
+
             if (!cart.length) {
-                c.innerHTML = '<p style="color:#6c757d; text-align:center; padding:30px 0; font-size:13px;">Tap items to add to the order.</p>';
+                c.innerHTML = '<div class="cart-empty"><i class="fas fa-receipt"></i><strong>No items yet</strong><span>Tap a dish on the menu to start this order.</span></div>';
             } else {
                 c.innerHTML = cart.map((l, i) => `
             <div class="cline">
-                <div>
+                <div class="cline-top">
                     <div class="nm">${escHtml(l.name)}</div>
-                    <div class="ln-meta">${currencySymbol} ${fmtMoney(l.price)} · ${escHtml(l.type)}</div>
-                    ${l.note ? `<div class="ln-note" style="font-size:11px; color:#8B7355; margin-top:3px; font-style:italic;"><i class="fas fa-comment-dots"></i> ${escHtml(l.note)}</div>` : ''}
-                    <button type="button" onclick="openNote(${i})" style="background:none; border:none; color:${l.note ? '#8B7355' : '#a0a0a0'}; font-size:11px; padding:2px 0; cursor:pointer; margin-top:2px;"><i class="fas fa-comment-dots"></i> ${l.note ? 'Edit note' : 'Add note'}</button>
+                    <div class="cline-total">${currencySymbol} ${fmtMoney(l.price * l.qty)}</div>
                 </div>
-                <div class="qty">
-                    <button type="button" onclick="bump(${i},-1)">−</button>
-                    <input type="number" min="0" max="1000" step="0.5" value="${l.qty}" onchange="setQty(${i}, this.value)">
-                    <button type="button" onclick="bump(${i},1)">+</button>
+                <div class="cline-bottom">
+                    <div class="ln-meta" title="${currencySymbol} ${fmtMoney(l.price)} each">@ ${fmtMoney(l.price)}</div>
+                    <button type="button" class="cline-act${l.note ? ' has-note' : ''}" onclick="openNote(${i})" aria-label="${l.note ? 'Edit note' : 'Add note'}"><i class="fas fa-comment-dots"></i></button>
+                    <button type="button" class="rm" onclick="rm(${i})" aria-label="Remove ${escHtml(l.name)}"><i class="fas fa-trash-can"></i></button>
+                    <div class="qty">
+                        <button type="button" onclick="bump(${i},-1)" aria-label="One less">−</button>
+                        <input type="number" min="0" max="1000" step="0.5" value="${l.qty}" onchange="setQty(${i}, this.value)" aria-label="Quantity">
+                        <button type="button" onclick="bump(${i},1)" aria-label="One more">+</button>
+                    </div>
                 </div>
-                <button type="button" class="rm" onclick="rm(${i})"><i class="fas fa-times"></i></button>
+                ${l.note ? `<button type="button" class="cline-note" onclick="openNote(${i})"><i class="fas fa-comment-dots"></i> ${escHtml(l.note)}</button>` : ''}
             </div>`).join('');
             }
             applyDeals();

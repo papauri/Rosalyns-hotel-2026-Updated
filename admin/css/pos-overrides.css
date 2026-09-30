@@ -5946,165 +5946,6 @@ button.svc-card:focus-visible { outline: 3px solid #8A775F; outline-offset: 2px;
     .till-grid.order-menu-closed .mobile-cart-toggle {
         display: none !important;
     }
-
-    .cart-head {
-        min-height: 60px;
-        padding: 8px 12px 8px 16px;
-    }
-
-    .cart-head h3 {
-        font-size: 18px;
-    }
-
-    .cart-head .clear {
-        min-height: 44px;
-        padding: 0 14px;
-        border-radius: 10px;
-        font-size: 14px;
-        font-weight: 600;
-    }
-
-    .cart-head .clear:active {
-        background: #fdecee;
-    }
-
-    .cart-lines {
-        padding: 4px 12px;
-    }
-
-    .cline {
-        gap: 8px;
-        padding: 10px 0;
-    }
-
-    .cline .nm {
-        font-size: 15px;
-    }
-
-    .cline .ln-meta {
-        font-size: 12px;
-    }
-
-    .cline .qty {
-        gap: 4px;
-    }
-
-    .cline .qty button {
-        width: 40px;
-        height: 40px;
-        border-radius: 12px;
-        font-size: 18px;
-    }
-
-    .cline .qty input {
-        width: 38px;
-        height: 40px;
-        padding: 4px;
-        border-radius: 10px;
-        font-size: 16px;
-    }
-
-    .cline .rm {
-        width: 34px;
-        height: 40px;
-        border-radius: 10px;
-        font-size: 17px;
-    }
-
-    .cline .rm:active {
-        background: #fdecee;
-    }
-
-    .cart-foot {
-        padding: 12px 14px calc(12px + env(safe-area-inset-bottom));
-        background: #fffdfb;
-        box-shadow: 0 -8px 20px rgba(15, 15, 20, .05);
-    }
-
-    .service-ctx {
-        padding-bottom: 10px;
-        margin-bottom: 10px;
-    }
-
-    .ctx-chip {
-        min-height: 52px;
-        border-radius: 12px;
-        font-size: 12px;
-    }
-
-    .ctx-chip i {
-        font-size: 16px;
-    }
-
-    .ctx-fields input,
-    .ctx-fields select {
-        min-height: 46px;
-        border-radius: 10px;
-        font-size: 16px;
-    }
-
-    /* Guest name and covers share one row: every line the footer gives back is
-       another order line visible above it. */
-    .ctx-fields {
-        display: grid;
-        grid-template-columns: minmax(0, 1fr) auto;
-        column-gap: 8px;
-        align-items: center;
-    }
-
-    .ctx-fields > select,
-    .ctx-fields > .ctx-location-hint {
-        grid-column: 1 / -1;
-    }
-
-    .ctx-fields > #ctxCustomer {
-        grid-column: 1;
-        min-width: 0;
-    }
-
-    .ctx-fields > .ctx-covers-row {
-        grid-column: 2;
-        margin-top: 0 !important;
-        gap: 6px !important;
-    }
-
-    .ctx-fields > .ctx-covers-row > span {
-        display: none;
-    }
-
-    .ctx-fields > .ctx-covers-row > #ctxCovers {
-        width: 64px !important;
-        min-height: 46px;
-        border-radius: 10px !important;
-        font-size: 16px !important;
-    }
-
-    .total-row {
-        align-items: baseline;
-        font-size: 24px;
-        margin-bottom: 10px;
-    }
-
-    .park-btn,
-    .pay-btn {
-        min-height: 60px;
-        padding: 0 10px;
-        border-radius: 14px;
-        font-size: 16px;
-        display: inline-flex;
-        align-items: center;
-        justify-content: center;
-        gap: 8px;
-    }
-
-    .park-btn:not(:disabled):active,
-    .pay-btn:not(:disabled):active {
-        transform: scale(.98);
-    }
-
-    #parkHint {
-        margin-top: 6px !important;
-    }
 }
 
 @media (min-width: 641px) and (max-width: 899px) {
@@ -6127,19 +5968,6 @@ button.svc-card:focus-visible { outline: 3px solid #8A775F; outline-offset: 2px;
     }
 
 
-    .ctx-chip span {
-        font-size: 11px;
-    }
-
-    /* Keep the people icon, drop the word, so the guest name field keeps its width. */
-    .ctx-fields > .ctx-covers-row > label {
-        font-size: 0 !important;
-    }
-
-    .ctx-fields > .ctx-covers-row > label i {
-        margin-right: 0 !important;
-        font-size: 15px;
-    }
 }
 
 @media (min-width: 1181px) and (max-width: 1366px) {
@@ -6149,56 +5977,582 @@ button.svc-card:focus-visible { outline: 3px solid #8A775F; outline-offset: 2px;
     }
 }
 
-/* Short screens (landscape tablets with browser chrome, laptops): the order
-   footer would otherwise eat the order lines. Service chips go to one slim row
-   and the hint line goes, so at least three order lines stay visible. */
-@media (min-width: 641px) and (max-width: 1366px) and (max-height: 720px) {
-    .till-grid > .cart .cart-lines {
-        min-height: 150px;
-    }
+/* ══════════════════════════════════════════════════════════════════════════
+   Order panel
+   Laid out like a paper ticket, top to bottom:
+   1. Header      "Current order", a live item count, Clear.
+   2. Who it's for  service type as one segmented control, then table/room,
+                  guest name and covers on one row.
+   3. Lines       name and line total on top; unit price, remove and a pill
+                  stepper underneath; a note chip.
+   4. Footer      the total, then Fire and Pay as two equal, large buttons.
+   Shared by the tablet column and the phone drawer, so it is not width-gated.
+   ══════════════════════════════════════════════════════════════════════════ */
+.cart {
+    background: #fff;
+}
 
+.cart-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    min-height: 0;
+    padding: 12px 12px 10px 16px;
+    border-bottom: none;
+    flex-shrink: 0;
+}
+
+.cart-title {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-width: 0;
+}
+
+.cart-title h3,
+.cart-head .cart-title h3 {
+    margin: 0;
+    font-size: 18px;
+    font-weight: 700;
+    color: #2a2723;
+    white-space: nowrap;
+}
+
+.cart-count {
+    padding: 3px 9px;
+    border-radius: 999px;
+    background: #f4efe9;
+    color: #7a6a52;
+    font-size: 12.5px;
+    font-weight: 600;
+    white-space: nowrap;
+}
+
+.cart-head-actions {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    flex-shrink: 0;
+}
+
+.cart-head .clear {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    min-height: 40px;
+    padding: 0 12px;
+    border-radius: 10px;
+    background: transparent;
+    color: #b42318;
+    font-size: 13.5px;
+    font-weight: 600;
+}
+
+.cart-head .clear:hover,
+.cart-head .clear:active {
+    background: #fdecee;
+}
+
+/* Who it's for */
+.service-ctx {
+    flex-shrink: 0;
+    margin: 0;
+    padding: 0 14px 12px;
+    border-bottom: 1px solid #eee7de;
+}
+
+.ctx-chips {
+    display: flex;
+    gap: 2px;
+    margin: 0 0 10px;
+    padding: 4px;
+    border-radius: 14px;
+    background: #f4efe9;
+}
+
+.ctx-chip {
+    flex: 1 1 0;
+    flex-direction: row;
+    gap: 6px;
+    min-height: 44px;
+    padding: 0 6px;
+    border: none;
+    border-radius: 10px;
+    background: transparent;
+    color: #6b6158;
+    font-size: 13px;
+    font-weight: 600;
+    transition: background .15s, color .15s, box-shadow .15s;
+}
+
+.ctx-chip i {
+    font-size: 14px;
+    color: inherit;
+}
+
+.ctx-chip:hover {
+    border-color: transparent;
+    color: #2a2723;
+}
+
+.ctx-chip.is-active {
+    background: #fff;
+    color: #2a2723;
+    box-shadow: 0 1px 3px rgba(35, 31, 28, .16), 0 4px 10px rgba(35, 31, 28, .06);
+}
+
+.ctx-chip.is-active i {
+    color: var(--color-primary, #8A775F);
+}
+
+.ctx-fields {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 8px;
+    align-items: center;
+}
+
+.ctx-fields > select,
+.ctx-fields > .ctx-location-hint {
+    grid-column: 1 / -1;
+}
+
+.ctx-fields > #ctxCustomer {
+    grid-column: 1;
+    min-width: 0;
+}
+
+.ctx-fields input,
+.ctx-fields select {
+    min-height: 44px;
+    margin: 0;
+    padding: 8px 12px;
+    border: 1px solid #e3dbd1;
+    border-radius: 10px;
+    background: #fcfaf7;
+    font-size: 15px;
+}
+
+.ctx-fields input.is-required,
+.ctx-fields select.is-required {
+    border-color: #d4a843;
+    background: #fdfaf0;
+}
+
+.ctx-fields > .ctx-covers-row {
+    grid-column: 2;
+    margin-top: 0 !important;
+    gap: 6px !important;
+}
+
+/* Covers keeps its icon and loses the words, so the guest name keeps its width. */
+.ctx-fields > .ctx-covers-row > label {
+    font-size: 0 !important;
+}
+
+.ctx-fields > .ctx-covers-row > label i {
+    margin-right: 0 !important;
+    font-size: 15px;
+    color: #8c8279;
+}
+
+.ctx-fields > .ctx-covers-row > span {
+    display: none;
+}
+
+.ctx-fields > .ctx-covers-row > #ctxCovers {
+    width: 58px !important;
+    min-height: 44px;
+    padding: 8px !important;
+    border: 1px solid #e3dbd1 !important;
+    border-radius: 10px !important;
+    font-size: 15px !important;
+    text-align: center;
+}
+
+/* Lines */
+.cart-lines {
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow-y: auto;
+    padding: 0;
+    overscroll-behavior: contain;
+}
+
+.cline {
+    display: block;
+    padding: 12px 14px 12px 16px;
+    border-bottom: 1px solid #f0eae2;
+}
+
+.cline-top {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 10px;
+}
+
+.cline .nm {
+    min-width: 0;
+    font-size: 15px;
+    font-weight: 600;
+    line-height: 1.3;
+    color: #2a2723;
+    overflow-wrap: anywhere;
+}
+
+.cline-total {
+    flex-shrink: 0;
+    font-size: 15px;
+    font-weight: 700;
+    line-height: 1.3;
+    color: #2a2723;
+    white-space: nowrap;
+}
+
+.cline-bottom {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-top: 6px;
+}
+
+.cline .ln-meta {
+    flex: 1 1 auto;
+    min-width: 0;
+    font-size: 12.5px;
+    color: #8c8279;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.cline .cline-act,
+.cline .rm {
+    flex-shrink: 0;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 38px;
+    height: 38px;
+    padding: 0;
+    border: none;
+    border-radius: 10px;
+    background: transparent;
+    color: #b8aea4;
+    font-size: 15px;
+    cursor: pointer;
+}
+
+.cline .cline-act:hover,
+.cline .cline-act:active {
+    background: #f4efe9;
+    color: #7a6a52;
+}
+
+.cline .cline-act.has-note {
+    color: #c4891e;
+}
+
+.cline .rm:hover,
+.cline .rm:active {
+    background: #fdecee;
+    color: #b42318;
+}
+
+.cline .qty {
+    flex-shrink: 0;
+    display: inline-flex;
+    align-items: center;
+    gap: 0;
+    padding: 3px;
+    border-radius: 999px;
+    background: #f4efe9;
+}
+
+.cline .qty button {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 36px;
+    height: 36px;
+    padding: 0;
+    border: none;
+    border-radius: 50%;
+    background: #fff;
+    box-shadow: 0 1px 2px rgba(35, 31, 28, .16);
+    color: #2a2723;
+    font-size: 19px;
+    font-weight: 600;
+    line-height: 1;
+    cursor: pointer;
+    transition: transform .08s;
+}
+
+.cline .qty button:active {
+    transform: scale(.9);
+}
+
+.cline .qty input {
+    width: 36px;
+    height: 36px;
+    padding: 0;
+    border: none;
+    border-radius: 0;
+    background: transparent;
+    color: #2a2723;
+    font-size: 15px;
+    font-weight: 700;
+    text-align: center;
+    -moz-appearance: textfield;
+    appearance: textfield;
+}
+
+.cline .qty input::-webkit-outer-spin-button,
+.cline .qty input::-webkit-inner-spin-button {
+    -webkit-appearance: none;
+    margin: 0;
+}
+
+.cline-note {
+    display: inline-flex;
+    align-items: flex-start;
+    gap: 6px;
+    max-width: 100%;
+    margin-top: 6px;
+    padding: 5px 10px;
+    border: 1px solid #ecd9b8;
+    border-radius: 10px;
+    background: #fdf6ea;
+    color: #7a5a26;
+    font-family: inherit;
+    font-size: 12.5px;
+    font-style: italic;
+    line-height: 1.3;
+    text-align: left;
+    cursor: pointer;
+}
+
+.cline-note i {
+    margin-top: 2px;
+    color: #c4891e;
+}
+
+.cart-empty {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 4px;
+    min-height: 100%;
+    padding: 32px 24px;
+    text-align: center;
+    color: #8c8279;
+    font-size: 13px;
+}
+
+.cart-empty i {
+    margin-bottom: 8px;
+    font-size: 30px;
+    color: #d8cdbf;
+}
+
+.cart-empty strong {
+    font-size: 15px;
+    color: #5e554d;
+}
+
+/* Footer */
+.cart-foot {
+    flex-shrink: 0;
+    padding: 12px 14px calc(14px + env(safe-area-inset-bottom));
+    border-top: 1px solid #eee7de;
+    background: #faf7f3;
+    box-shadow: 0 -10px 24px rgba(35, 31, 28, .05);
+}
+
+.cart-foot .total-row {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    margin: 0 2px 12px;
+    font-size: 15px;
+    font-weight: 600;
+    color: #6b6158;
+}
+
+.cart-foot .total-row #total {
+    font-size: 26px;
+    font-weight: 800;
+    letter-spacing: -.01em;
+    color: #2a2723;
+}
+
+.cart-foot .park-btn,
+.cart-foot .pay-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    min-height: 56px;
+    padding: 0 10px;
+    border: none;
+    border-radius: 14px;
+    font-size: 16px;
+    font-weight: 700;
+    line-height: 1.15;
+    transition: transform .08s, box-shadow .15s, background .15s;
+}
+
+.cart-foot .park-btn {
+    background: #e7ae3c;
+    color: #2b1d05;
+    box-shadow: 0 6px 16px rgba(196, 139, 30, .28);
+}
+
+.cart-foot .pay-btn {
+    background: #1f9d55;
+    color: #fff;
+    box-shadow: 0 6px 16px rgba(31, 157, 85, .28);
+}
+
+.cart-foot .park-btn:not(:disabled):active,
+.cart-foot .pay-btn:not(:disabled):active {
+    transform: scale(.98);
+}
+
+/* Empty order: both buttons read as "not yet" rather than as faded colours. */
+.cart-foot .park-btn:disabled,
+.cart-foot .pay-btn:disabled {
+    background: #ece6de;
+    color: #aaa095;
+    box-shadow: none;
+}
+
+.cart-foot #parkHint {
+    margin-top: 8px !important;
+    color: #9a9087 !important;
+    font-size: 11.5px !important;
+}
+
+/* Narrow tablet column (portrait, ~280px): stack the service icons over their
+   labels and let Clear be an icon, so nothing truncates. */
+@media (min-width: 641px) and (max-width: 899px) {
     .cart-head {
-        min-height: 50px;
-        padding-top: 4px;
-        padding-bottom: 4px;
+        padding-left: 14px;
     }
 
-    .ctx-chip {
-        flex-direction: row;
-        gap: 6px;
-        min-height: 44px;
+    .cart-title h3,
+    .cart-head .cart-title h3 {
+        font-size: 16px;
     }
 
-    .ctx-chip i {
-        font-size: 14px;
+    .cart-head .clear {
+        width: 40px;
+        padding: 0;
+        justify-content: center;
+        font-size: 0;
+    }
+
+    .cart-head .clear i {
+        font-size: 16px;
+    }
+
+    .cline {
+        padding-left: 14px;
+        padding-right: 10px;
+    }
+
+    .cline .cline-act,
+    .cline .rm {
+        width: 32px;
+    }
+
+    /* Too narrow for "@ unit price" beside the controls; the line total and the
+       menu card both show the price. The element stays as the flex spacer. */
+    .cline .ln-meta {
+        font-size: 0;
     }
 
     .ctx-chips {
-        margin-bottom: 6px;
+        padding: 3px;
+    }
+
+    .ctx-chip {
+        padding: 0 1px;
+        font-size: 11px !important;
+        letter-spacing: -.01em;
+    }
+
+    .cart-foot .park-btn,
+    .cart-foot .pay-btn {
+        font-size: 15px;
+    }
+}
+
+/* Up to 1180px the column is too narrow for icon and label side by side
+   ("Takeaway" truncated), so the icon sits above the label. */
+@media (min-width: 641px) and (max-width: 1180px) {
+    .ctx-chip {
+        flex-direction: column;
+        gap: 3px;
+        min-height: 50px;
+        font-size: 11.5px;
+    }
+
+    .ctx-chip i {
+        font-size: 15px;
+    }
+}
+
+/* Short screens (landscape tablets with browser chrome, laptops): trim the
+   header and footer so at least three order lines stay visible. */
+@media (min-width: 641px) and (max-height: 720px) {
+    .till-grid > .cart .cart-lines {
+        min-height: 140px;
+    }
+
+    .cart-head {
+        padding-top: 8px;
+        padding-bottom: 6px;
+    }
+
+    .ctx-chips {
+        margin-bottom: 8px;
+    }
+
+    .ctx-chip {
+        min-height: 40px;
     }
 
     .service-ctx {
-        padding-bottom: 8px;
+        padding-bottom: 10px;
+    }
+
+    .cline {
+        padding-top: 9px;
+        padding-bottom: 9px;
+    }
+
+    .cart-foot {
+        padding-top: 10px;
+    }
+
+    .cart-foot .total-row {
         margin-bottom: 8px;
     }
 
-    .ctx-fields input,
-    .ctx-fields select,
-    .ctx-fields > .ctx-covers-row > #ctxCovers {
-        min-height: 44px;
+    .cart-foot .total-row #total {
+        font-size: 22px;
     }
 
-    .total-row {
-        font-size: 20px;
-        margin-bottom: 8px;
+    .cart-foot .park-btn,
+    .cart-foot .pay-btn {
+        min-height: 50px;
     }
 
-    .park-btn,
-    .pay-btn {
-        min-height: 52px;
-    }
-
-    #parkHint {
+    .cart-foot #parkHint {
         display: none;
     }
 }
