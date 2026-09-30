@@ -202,7 +202,32 @@ $bootstrap['fingerprint'] = md5(
 
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=1920, initial-scale=1, user-scalable=no">
+    <meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no, viewport-fit=cover">
+    <script>
+    /* Display size — the same model as the POS. The board used to force a 1920px
+       layout through the viewport tag to look zoomed out on tablets, but a tablet
+       browser in desktop mode ignores that tag, so the board showed at full size.
+       It now scales itself: 60% by default on touch tablets, 100% elsewhere, and
+       each screen can change it under the station menu > Display size. Runs before
+       the stylesheet so there is no resize flash. */
+    (function () {
+        var z = 1, tablet = false;
+        try { tablet = Math.min(screen.width, screen.height) >= 600 && window.matchMedia('(pointer: coarse)').matches; } catch (e) {}
+        if (tablet) z = 0.6;
+        try {
+            var saved = parseFloat(localStorage.getItem('rh_kds_zoom') || '');
+            if (saved >= 0.5 && saved <= 1) z = saved;
+        } catch (e) {}
+        window.__rhPageZoom = z;
+        if (z < 1) {
+            document.documentElement.style.setProperty('--page-zoom', String(z));
+            document.documentElement.classList.add('page-zoomed');
+        }
+    })();
+    /* Screen coordinates (getBoundingClientRect, pointer events) are in real pixels;
+       CSS lengths inside the scaled page are not. Divide by this before using one. */
+    window.pageZoom = function () { return window.__rhPageZoom || 1; };
+    </script>
     <title><?php echo htmlspecialchars($STATION_TITLE); ?></title>
     <meta name="mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-capable" content="yes">
@@ -317,6 +342,14 @@ $bootstrap['fingerprint'] = md5(
                 <button class="drawer-settings-btn" onclick="RHSounds.openSettings(); closeKdsDrawer();">
                     <i class="fas fa-sliders"></i> Sound Settings
                 </button>
+                <div class="drawer-zoom">
+                    <span><i class="fas fa-magnifying-glass"></i> Display size</span>
+                    <span class="drawer-zoom__ctl">
+                        <button type="button" onclick="stepKdsZoom(-1)" aria-label="Make the board smaller">&minus;</button>
+                        <output id="kdsZoomVal">100%</output>
+                        <button type="button" onclick="stepKdsZoom(1)" aria-label="Make the board larger">+</button>
+                    </span>
+                </div>
                 <button data-loader-manual onclick="openServedToday('current', this); closeKdsDrawer();">
                     <i class="fas fa-clipboard-check"></i> Served Menu
                 </button>
@@ -684,8 +717,8 @@ $bootstrap['fingerprint'] = md5(
         function syncStationViewportMetrics() {
             const top = document.getElementById('kdsTopWrap');
             const bottom = document.querySelector('.station-bottom');
-            const topHeight = Math.ceil(top?.getBoundingClientRect().height || 56);
-            const bottomHeight = Math.ceil(bottom?.getBoundingClientRect().height || 108);
+            const topHeight = Math.ceil((top?.getBoundingClientRect().height || 56) / pageZoom());
+            const bottomHeight = Math.ceil((bottom?.getBoundingClientRect().height || 108) / pageZoom());
             document.documentElement.style.setProperty('--station-topbar-height', topHeight + 'px');
             document.documentElement.style.setProperty('--station-bottom-height', bottomHeight + 'px');
             /* Park the notification stack clear of the topbar and the FOH Notes /
@@ -2982,6 +3015,39 @@ $bootstrap['fingerprint'] = md5(
 
         syncStationViewportMetrics();
         window.addEventListener('resize', syncStationViewportMetrics);
+
+        const KDS_ZOOM_STEPS = [0.5, 0.6, 0.7, 0.8, 0.9, 1];
+
+        function applyKdsZoom(z) {
+            window.__rhPageZoom = z;
+            const root = document.documentElement;
+            if (z < 1) {
+                root.style.setProperty('--page-zoom', String(z));
+                root.classList.add('page-zoomed');
+            } else {
+                root.style.removeProperty('--page-zoom');
+                root.classList.remove('page-zoomed');
+            }
+            const out = document.getElementById('kdsZoomVal');
+            if (out) out.textContent = Math.round(z * 100) + '%';
+        }
+
+        function stepKdsZoom(dir) {
+            const cur = pageZoom();
+            let i = KDS_ZOOM_STEPS.findIndex(v => Math.abs(v - cur) < 0.001);
+            if (i < 0) i = KDS_ZOOM_STEPS.length - 1;
+            const next = KDS_ZOOM_STEPS[Math.max(0, Math.min(KDS_ZOOM_STEPS.length - 1, i + dir))];
+            try { localStorage.setItem('rh_kds_zoom', String(next)); } catch (_) {}
+            applyKdsZoom(next);
+            // Everything sized from the window (docked sidebar vs drawer, bar heights)
+            // listens for resize, so one event re-measures the lot.
+            window.dispatchEvent(new Event('resize'));
+        }
+        if (document.readyState === 'loading') {
+            document.addEventListener('DOMContentLoaded', () => applyKdsZoom(pageZoom()));
+        } else {
+            applyKdsZoom(pageZoom());
+        }
         if ('ResizeObserver' in window) {
             const stationLayoutObserver = new ResizeObserver(syncStationViewportMetrics);
             const topWrap = document.getElementById('kdsTopWrap');
@@ -3021,10 +3087,12 @@ $bootstrap['fingerprint'] = md5(
             const SIDEBAR_WIDTH_KEY = 'rh_kds_sidebar_width_v1';
             const SIDEBAR_COLLAPSED_KEY = 'rh_kds_sidebar_collapsed_v1';
             const SIDEBAR_HIDDEN_KEY = 'rh_kds_sidebar_hidden_v1';
-            const DESKTOP_QUERY = '(min-width: 901px)';
+            const DESKTOP_MIN_WIDTH = 901;
 
             function isDesktopMode() {
-                return window.matchMedia(DESKTOP_QUERY).matches;
+                // Measured in the scaled page's own width (see pageZoom in <head>), so a
+                // tablet at 60% gets the docked desktop sidebar its layout now has room for.
+                return (window.innerWidth / pageZoom()) >= DESKTOP_MIN_WIDTH;
             }
 
             function setMobileDrawerState(open) {
@@ -3183,12 +3251,12 @@ $bootstrap['fingerprint'] = md5(
 
                 function onMove(e) {
                     if (!dragging || !isDesktopMode()) return;
-                    applySidebarWidth(e.clientX, true);
+                    applySidebarWidth(e.clientX / pageZoom(), true);
                 }
 
                 function onMouseMove(e) {
                     if (!dragging || !isDesktopMode()) return;
-                    applySidebarWidth(e.clientX, true);
+                    applySidebarWidth(e.clientX / pageZoom(), true);
                 }
 
                 function stopDrag() {

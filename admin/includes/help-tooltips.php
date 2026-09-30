@@ -249,9 +249,9 @@ define('RH_HELP_TOOLTIPS_RENDERED', true);
             bubble.classList.add('show');
             bubble.setAttribute('aria-hidden', 'false');
             // Position after measure
-            // The POS can scale itself (window.__rhPosZoom); screen coordinates are
-            // in real pixels, so convert them to the page's own before placing.
-            const z = window.__rhPosZoom || 1;
+            // The POS and the station boards can scale themselves (window.__rhPageZoom);
+            // screen coordinates are in real pixels, so convert them to the page's own.
+            const z = window.__rhPageZoom || 1;
             const rr = target.getBoundingClientRect();
             const r = { left: rr.left / z, top: rr.top / z, bottom: rr.bottom / z, width: rr.width / z };
             const vw = window.innerWidth / z,

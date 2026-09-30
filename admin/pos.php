@@ -2041,7 +2041,7 @@ if (in_array($user['role'] ?? '', ['admin', 'manager'], true)) {
             var saved = parseFloat(localStorage.getItem('rh_pos_zoom') || '');
             if (saved >= 0.5 && saved <= 1) z = saved;
         } catch (e) {}
-        window.__rhPosZoom = z;
+        window.__rhPageZoom = z;
         if (z < 1) {
             document.documentElement.style.setProperty('--pos-zoom', String(z));
             document.documentElement.classList.add('pos-zoomed');
@@ -2049,7 +2049,7 @@ if (in_array($user['role'] ?? '', ['admin', 'manager'], true)) {
     })();
     /* Screen coordinates (getBoundingClientRect, pointer events) are in real pixels;
        CSS lengths inside the scaled page are not. Divide by this before using one. */
-    window.posZoom = function () { return window.__rhPosZoom || 1; };
+    window.posZoom = function () { return window.__rhPageZoom || 1; };
     </script>
     <meta name="theme-color" content="#8B7355">
     <meta name="mobile-web-app-capable" content="yes">
@@ -7247,7 +7247,7 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
         const POS_ZOOM_STEPS = [0.5, 0.6, 0.7, 0.8, 0.9, 1];
 
         function applyPosZoom(z) {
-            window.__rhPosZoom = z;
+            window.__rhPageZoom = z;
             const root = document.documentElement;
             if (z < 1) {
                 root.style.setProperty('--pos-zoom', String(z));

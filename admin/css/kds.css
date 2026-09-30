@@ -117,6 +117,12 @@
 
 html {
     -webkit-text-size-adjust: 100%;
+    /* The width breakpoints below are container queries on the root rather than
+       media queries: media queries measure the physical screen, but when the board
+       is scaled down (html.page-zoomed) it has more room than the screen width
+       suggests. The root's inline size is the scaled page's width, so a tablet at
+       60% keeps the full multi-column board. At 100% the two are identical. */
+    container-type: inline-size;
 }
 
 /* Page shell is a flex column rather than height arithmetic: the topbar and
@@ -2918,7 +2924,7 @@ body.kds-sidebar-resizing .station-bottom {
       420  topbar clock       → the drawer carries a much larger one
    Open, Ready and the open/closed pill survive to the very bottom: they are
    the only numbers the section actually runs on. */
-@media (max-width: 1950px) {
+@container (max-width: 1950px) {
 
     .right button span,
     .right .logout-link span {
@@ -2932,7 +2938,7 @@ body.kds-sidebar-resizing .station-bottom {
     }
 }
 
-@media (max-width: 1550px) {
+@container (max-width: 1550px) {
 
     .brand__hotel,
     .kds-stat-pill.stat-hours,
@@ -2941,13 +2947,13 @@ body.kds-sidebar-resizing .station-bottom {
     }
 }
 
-@media (max-width: 1200px) {
+@container (max-width: 1200px) {
     .kds-stat-pill.stat-served {
         display: none;
     }
 }
 
-@media (max-width: 1060px) {
+@container (max-width: 1060px) {
     .topbar .filter {
         display: none;
     }
@@ -2958,14 +2964,14 @@ body.kds-sidebar-resizing .station-bottom {
     }
 }
 
-@media (max-width: 420px) {
+@container (max-width: 420px) {
     .topbar .clock {
         display: none;
     }
 }
 
 /* ── Handheld / small tablet ─────────────────────────────────────────────── */
-@media (max-width: 900px) {
+@container (max-width: 900px) {
     body.station-screen {
         padding-left: 0;
     }
@@ -3050,7 +3056,7 @@ body.kds-sidebar-resizing .station-bottom {
     }
 }
 
-@media (max-width: 560px) {
+@container (max-width: 560px) {
     .t-head {
         padding: 12px 12px 9px 15px;
     }
@@ -3083,9 +3089,11 @@ body.kds-sidebar-resizing .station-bottom {
 }
 
 /* Short screens — a 1366×768 counter tablet has no height to spare. */
-@media (max-height: 760px) and (min-width: 901px) {
-    .station-bottom {
-        height: 138px;
+@media (max-height: 760px) {
+    @container (min-width: 901px) {
+        .station-bottom {
+            height: 138px;
+        }
     }
 }
 
@@ -3765,4 +3773,94 @@ body.kds-chat-open .kds-chathead-wrap { display: none; }
     .kds-chathead.is-bouncing,
     .kds-chatpeek { animation: none; }
     .kds-chat, .kds-chat.is-open { transition: none; }
+}
+
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   DISPLAY SIZE (html.page-zoomed, set in the <head> of kds.php)
+   The whole board is scaled with CSS zoom. Viewport units scale with it, so
+   anything sized to the screen is divided by the zoom to fill it again.
+   ═══════════════════════════════════════════════════════════════════════════ */
+html.page-zoomed {
+    zoom: var(--page-zoom, 1);
+}
+
+html.page-zoomed body.station-screen {
+    height: calc(100dvh / var(--page-zoom));
+}
+
+html.page-zoomed .rh-modal-card {
+    max-height: calc((100dvh - 48px) / var(--page-zoom));
+}
+
+html.page-zoomed .rh-modal-frame {
+    height: min(calc(72vh / var(--page-zoom)), 1200px);
+}
+
+html.page-zoomed .toast {
+    max-width: min(640px, calc((100vw - 32px) / var(--page-zoom)));
+}
+
+/* Station menu > Display size: − 60% + */
+.drawer-zoom {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 6px 10px;
+    min-height: 44px;
+    padding: 6px 6px 6px 12px;
+    color: var(--txt-2);
+    font-size: 13.5px;
+    font-weight: 600;
+}
+
+.drawer-zoom > span:first-child {
+    display: inline-flex;
+    align-items: center;
+    gap: 12px;
+    white-space: nowrap;
+}
+
+.drawer-zoom > span:first-child i {
+    width: 18px;
+    text-align: center;
+    font-size: 15px;
+    color: var(--txt-3);
+}
+
+.drawer-zoom__ctl {
+    margin-left: auto;
+    display: inline-flex;
+    align-items: center;
+    gap: 2px;
+    padding: 2px;
+    border-radius: 999px;
+    background: rgba(42, 39, 35, .08);
+}
+
+.drawer-links .drawer-zoom__ctl button {
+    justify-content: center;
+    width: 34px;
+    min-height: 34px;
+    height: 34px;
+    padding: 0;
+    border-radius: 50%;
+    background: #fff;
+    color: var(--txt);
+    font-size: 17px;
+    font-weight: 700;
+    box-shadow: 0 1px 2px rgba(0, 0, 0, .16);
+}
+
+.drawer-zoom__ctl output {
+    min-width: 42px;
+    text-align: center;
+    font-weight: 700;
+    color: var(--txt);
+}
+
+/* Collapsed rail: no room for the control. */
+body.kds-sidebar-collapsed .drawer-zoom {
+    display: none;
 }
