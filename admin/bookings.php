@@ -3204,32 +3204,6 @@ $today_str = $today->format('Y-m-d');
     </script>
 
     <div class="content">
-        <div class="stats-grid">
-            <div class="stat-card bookings-stats-insight-card js-bookings-stat-insight" data-stats-card="total_bookings" role="button" tabindex="0" aria-label="Open total bookings insight">
-                <h3>Total Bookings</h3>
-                <div class="number"><?php echo $total_bookings; ?></div>
-                <span class="bookings-stats-insight-card__hint"><i class="fas fa-chart-line"></i> View insight</span>
-            </div>
-            <div class="stat-card pending bookings-stats-insight-card js-bookings-stat-insight" data-stats-card="pending" role="button" tabindex="0" aria-label="Open pending bookings insight">
-                <h3>Pending</h3>
-                <div class="number"><?php echo $pending; ?></div>
-                <span class="bookings-stats-insight-card__hint"><i class="fas fa-list-check"></i> View insight</span>
-            </div>
-            <div class="stat-card tentative bookings-stats-insight-card js-bookings-stat-insight" data-stats-card="tentative" role="button" tabindex="0" aria-label="Open tentative bookings insight">
-                <h3>Tentative</h3>
-                <div class="number"><?php echo $tentative; ?></div>
-                <span class="bookings-stats-insight-card__hint"><i class="fas fa-hourglass-half"></i> View insight</span>
-            </div>
-            <div class="stat-card confirmed bookings-stats-insight-card js-bookings-stat-insight" data-stats-card="confirmed" role="button" tabindex="0" aria-label="Open confirmed bookings insight">
-                <h3>Confirmed</h3>
-                <div class="number"><?php echo $confirmed; ?></div>
-                <span class="bookings-stats-insight-card__hint"><i class="fas fa-circle-check"></i> View insight</span>
-            </div>
-            <div class="stat-card checked-in bookings-stats-insight-card js-bookings-stat-insight" data-stats-card="checked_in" role="button" tabindex="0" aria-label="Open checked in bookings insight">
-                <h3>Checked In</h3>
-                <div class="number"><?php echo $checked_in; ?></div>
-                <span class="bookings-stats-insight-card__hint"><i class="fas fa-bed"></i> View insight</span>
-            </div>
         </div>
 
         <?php if ($message): ?>
@@ -3341,30 +3315,12 @@ $today_str = $today->format('Y-m-d');
             <!-- Tab Navigation -->
             <div class="tabs-container">
                 <div class="tabs-header">
+                    <?php /* Everyday tabs only. Confirmed, Checked Out, Cancelled and No-Show are in the
+                             status filter; Paid and booked-today/week/month still work via ?filter=. */ ?>
                     <button class="tab-button <?php echo $active_tab_override === '' ? 'active' : ''; ?>" data-tab="all" data-count="<?php echo $total_bookings; ?>">
                         <i class="fas fa-list"></i>
                         All
                         <span class="tab-count"><?php echo $total_bookings; ?></span>
-                    </button>
-                    <button class="tab-button" data-tab="pending" data-count="<?php echo $pending; ?>">
-                        <i class="fas fa-clock"></i>
-                        Pending
-                        <span class="tab-count"><?php echo $pending; ?></span>
-                    </button>
-                    <button class="tab-button" data-tab="tentative" data-count="<?php echo $tentative; ?>">
-                        <i class="fas fa-hourglass-half"></i>
-                        Tentative
-                        <span class="tab-count"><?php echo $tentative; ?></span>
-                    </button>
-                    <button class="tab-button" data-tab="expiring-soon" data-count="<?php echo $expiring_soon; ?>">
-                        <i class="fas fa-exclamation-triangle"></i>
-                        Expiring Soon
-                        <span class="tab-count"><?php echo $expiring_soon; ?></span>
-                    </button>
-                    <button class="tab-button" data-tab="confirmed" data-count="<?php echo $confirmed; ?>">
-                        <i class="fas fa-check-circle"></i>
-                        Confirmed
-                        <span class="tab-count"><?php echo $confirmed; ?></span>
                     </button>
                     <button class="tab-button" data-tab="today-checkins" data-count="<?php echo $today_checkins; ?>">
                         <i class="fas fa-calendar-day"></i>
@@ -3378,48 +3334,30 @@ $today_str = $today->format('Y-m-d');
                     </button>
                     <button class="tab-button" data-tab="checked-in" data-count="<?php echo $checked_in; ?>">
                         <i class="fas fa-sign-in-alt"></i>
-                        Checked In
+                        In-House
                         <span class="tab-count"><?php echo $checked_in; ?></span>
                     </button>
-                    <button class="tab-button" data-tab="checked-out" data-count="<?php echo $checked_out; ?>">
-                        <i class="fas fa-sign-out-alt"></i>
-                        Checked Out
-                        <span class="tab-count"><?php echo $checked_out; ?></span>
+                    <button class="tab-button" data-tab="pending" data-count="<?php echo $pending; ?>">
+                        <i class="fas fa-clock"></i>
+                        Pending
+                        <span class="tab-count"><?php echo $pending; ?></span>
                     </button>
-                    <button class="tab-button" data-tab="cancelled" data-count="<?php echo $cancelled; ?>">
-                        <i class="fas fa-times-circle"></i>
-                        Cancelled
-                        <span class="tab-count"><?php echo $cancelled; ?></span>
+                    <button class="tab-button" data-tab="tentative" data-count="<?php echo $tentative; ?>">
+                        <i class="fas fa-hourglass-half"></i>
+                        Tentative
+                        <span class="tab-count"><?php echo $tentative; ?></span>
                     </button>
-                    <button class="tab-button" data-tab="no-show" data-count="<?php echo $no_show; ?>">
-                        <i class="fas fa-user-slash"></i>
-                        No-Show
-                        <span class="tab-count"><?php echo $no_show; ?></span>
+                    <?php if ($expiring_soon > 0): /* only while tentative holds are about to lapse */ ?>
+                    <button class="tab-button" data-tab="expiring-soon" data-count="<?php echo $expiring_soon; ?>">
+                        <i class="fas fa-exclamation-triangle"></i>
+                        Expiring Soon
+                        <span class="tab-count"><?php echo $expiring_soon; ?></span>
                     </button>
-                    <button class="tab-button" data-tab="paid" data-count="<?php echo $paid; ?>">
-                        <i class="fas fa-dollar-sign"></i>
-                        Paid
-                        <span class="tab-count"><?php echo $paid; ?></span>
-                    </button>
+                    <?php endif; ?>
                     <button class="tab-button" data-tab="unpaid" data-count="<?php echo $unpaid; ?>">
                         <i class="fas fa-exclamation-circle"></i>
                         Unpaid
                         <span class="tab-count"><?php echo $unpaid; ?></span>
-                    </button>
-                    <button class="tab-button" data-tab="today-bookings" data-count="<?php echo $today_bookings; ?>">
-                        <i class="fas fa-calendar-day"></i>
-                        Today's Bookings
-                        <span class="tab-count"><?php echo $today_bookings; ?></span>
-                    </button>
-                    <button class="tab-button" data-tab="week-bookings" data-count="<?php echo $week_bookings; ?>">
-                        <i class="fas fa-calendar-week"></i>
-                        This Week
-                        <span class="tab-count"><?php echo $week_bookings; ?></span>
-                    </button>
-                    <button class="tab-button" data-tab="month-bookings" data-count="<?php echo $month_bookings; ?>">
-                        <i class="fas fa-calendar-alt"></i>
-                        This Month
-                        <span class="tab-count"><?php echo $month_bookings; ?></span>
                     </button>
                 </div>
             </div>

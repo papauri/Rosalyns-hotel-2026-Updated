@@ -1160,84 +1160,6 @@ if (isset($_GET['export']) && $_GET['export'] === 'csv') {
 
             <!-- Owner intelligence -->
             <section class="eod-intel" aria-label="Owner closeout intelligence">
-                <article class="eod-insight-card eod-insight-card--score" data-help="Daily Closeout Health Score|A 0–100 score measuring how cleanly today is closing. Points are deducted for: unchecked arrivals/departures, pending payments, outstanding folio, POS voids above 5%, incomplete housekeeping, and out-of-order rooms. 90+ is excellent. Below 70 means action is needed before end of shift.">
-                    <div class="eod-insight-card__head">
-                        <span class="eod-insight-card__label">Daily Closeout Health</span>
-                        <i class="fas fa-gauge-high"></i>
-                    </div>
-                    <div class="eod-score" style="--score: <?php echo (int)$daily_health_score; ?>%;">
-                        <strong><?php echo (int)$daily_health_score; ?></strong>
-                        <span>/ 100</span>
-                    </div>
-                    <h2 class="eod-insight-card__title"><?php echo htmlspecialchars($daily_health_label); ?></h2>
-                    <p class="eod-insight-card__text">Weighted from arrivals, departures, unpaid balances, POS exceptions, housekeeping, and room availability.</p>
-                </article>
-
-                <article class="eod-insight-card" data-help="What Moved Today|Each row compares today to yesterday for the same metric. Green = improved, red = declined. Net change shows the actual currency movement; percentage shows the relative shift. Use this to spot momentum patterns at a glance.">
-                    <div class="eod-insight-card__head">
-                        <span class="eod-insight-card__label">What Moved Today</span>
-                        <i class="fas fa-chart-line"></i>
-                    </div>
-                    <ul class="eod-trends">
-                        <li>
-                            <span>Net revenue vs yesterday</span>
-                            <strong class="eod-trend eod-trend--<?php echo $trendTone($net_change); ?>"><?php echo $trendLabel($net_change, true); ?> <small><?php echo $trendLabel($net_change_pct, false, '%'); ?></small></strong>
-                        </li>
-                        <?php if ($mod_bookings): ?>
-                        <li>
-                            <span>Rooms revenue vs yesterday</span>
-                            <strong class="eod-trend eod-trend--<?php echo $trendTone($room_rev_change); ?>"><?php echo $trendLabel($room_rev_change, true); ?></strong>
-                        </li>
-                        <?php endif; ?>
-                        <?php if ($mod_conference && ((float)$rev['conf_gross'] > 0 || (float)$prev_sources['conf_gross'] > 0)): ?>
-                        <li>
-                            <span>Conference revenue vs yesterday</span>
-                            <strong class="eod-trend eod-trend--<?php echo $trendTone($conf_rev_change); ?>"><?php echo $trendLabel($conf_rev_change, true); ?></strong>
-                        </li>
-                        <?php endif; ?>
-                        <?php if ($mod_pos): ?>
-                        <li>
-                            <span><?php echo htmlspecialchars(rh_pos_short_label()); ?> vs yesterday</span>
-                            <strong class="eod-trend eod-trend--<?php echo $trendTone($fnb_rev_change); ?>"><?php echo $trendLabel($fnb_rev_change, true); ?></strong>
-                        </li>
-                        <?php endif; ?>
-                        <?php if ($mod_gym && ((float)$rev['gym_gross'] > 0 || (float)$prev_sources['gym_gross'] > 0)): ?>
-                        <li>
-                            <span>Gym revenue vs yesterday</span>
-                            <strong class="eod-trend eod-trend--<?php echo $trendTone($gym_rev_change); ?>"><?php echo $trendLabel($gym_rev_change, true); ?></strong>
-                        </li>
-                        <?php endif; ?>
-                        <?php if ($mod_events && ((float)$rev['events_gross'] > 0 || (float)$prev_sources['events_gross'] > 0)): ?>
-                        <li>
-                            <span>Event revenue vs yesterday</span>
-                            <strong class="eod-trend eod-trend--<?php echo $trendTone($events_rev_change); ?>"><?php echo $trendLabel($events_rev_change, true); ?></strong>
-                        </li>
-                        <?php endif; ?>
-                        <?php if ($mod_bookings): ?>
-                        <li>
-                            <span>Occupancy movement</span>
-                            <strong class="eod-trend eod-trend--<?php echo $trendTone($occupancy_change); ?>"><?php echo $trendLabel($occupancy_change, false, ' pts'); ?></strong>
-                        </li>
-                        <?php endif; ?>
-                        <?php if ($mod_pos): ?>
-                        <li>
-                            <span>POS sales vs yesterday</span>
-                            <strong class="eod-trend eod-trend--<?php echo $trendTone($pos_change); ?>"><?php echo $trendLabel($pos_change, true); ?> <small><?php echo $trendLabel($pos_change_pct, false, '%'); ?></small></strong>
-                        </li>
-                        <li>
-                            <span>Average POS order</span>
-                            <strong class="eod-trend eod-trend--<?php echo $trendTone($order_value_change); ?>"><?php echo $money($average_order_value); ?></strong>
-                        </li>
-                        <?php endif; ?>
-                        <?php if ($mod_bookings): ?>
-                        <li>
-                            <span>New bookings today</span>
-                            <strong class="eod-trend eod-trend--<?php echo $trendTone((float)((int)$ops['new_bookings'] - $previous['new_bookings'])); ?>"><?php echo (int)$ops['new_bookings']; ?> <small><?php echo $trendLabel((float)((int)$ops['new_bookings'] - $previous['new_bookings'])); ?> vs yesterday</small></strong>
-                        </li>
-                        <?php endif; ?>
-                    </ul>
-                </article>
-
                 <article class="eod-insight-card eod-insight-card--wide" data-help="Closeout Exceptions|Automated checks run each time the page loads. Red (warn) = financial or operational risk requiring immediate action. Amber (watch) = advisory, action recommended before end of shift. Green (good) = clean closeout, no issues detected.">
                     <div class="eod-insight-card__head">
                         <span class="eod-insight-card__label">Closeout Exceptions</span>
@@ -1267,36 +1189,6 @@ if (isset($_GET['export']) && $_GET['export'] === 'csv') {
                         <li><span>Pending today</span><strong class="eod-ledger__warn"><?php echo $money($rev['pending']); ?></strong></li>
                         <li><span>Collection rate</span><strong><?php echo number_format($payment_capture_rate, 1); ?>%</strong></li>
                     </ul>
-                </article>
-
-                <?php if ($mod_bookings): ?>
-                <article class="eod-insight-card" data-help="Yield & Opportunity|Empty-room opportunity: estimated revenue lost from unsold rooms (unsold rooms × ADR). <?php echo htmlspecialchars(rh_pos_short_label()); ?> per occupied room: <?php echo isRestaurantEnabled() ? 'food and beverage' : 'POS/till'; ?> revenue per occupied room — measures in-house guest spend. Top revenue source shows which booking type generated the most gross income today.">
-                    <div class="eod-insight-card__head">
-                        <span class="eod-insight-card__label">Yield & Opportunity</span>
-                        <i class="fas fa-bullseye"></i>
-                    </div>
-                    <ul class="eod-ledger">
-                        <li><span>Unsold rooms</span><strong><?php echo (int)$rooms_unsold; ?></strong></li>
-                        <li><span>Empty-room opportunity</span><strong><?php echo $money($empty_room_opportunity); ?></strong></li>
-                        <?php if ($mod_pos): ?><li><span><?php echo htmlspecialchars(rh_pos_short_label()); ?> per occupied room</span><strong><?php echo $money($fnb_per_occupied_room); ?></strong></li><?php endif; ?>
-                        <li><span>Top revenue source</span><strong><?php echo htmlspecialchars($top_revenue_source['label']); ?> <small><?php echo number_format($top_revenue_source_share, 1); ?>%</small></strong></li>
-                    </ul>
-                </article>
-                <?php endif; ?>
-
-                <article class="eod-insight-card" data-help="Best Seller & Risk Exposure|Top POS item: the single menu item generating the most revenue today. Unpaid exposure: combined total of all pending payments and outstanding folio — the maximum amount currently at risk of non-collection.">
-                    <div class="eod-insight-card__head">
-                        <span class="eod-insight-card__label">Best Seller Signal</span>
-                        <i class="fas fa-ranking-star"></i>
-                    </div>
-                    <div class="eod-hero-metric">
-                        <strong><?php echo htmlspecialchars($top_item_name); ?></strong>
-                        <span><?php echo $top_item_revenue > 0 ? $money($top_item_revenue) . ' revenue from the top POS item.' : 'No paid POS item has led today yet.'; ?></span>
-                    </div>
-                    <div class="eod-hero-metric eod-hero-metric--subtle">
-                        <strong><?php echo $money($unpaid_risk); ?></strong>
-                        <span>Total unpaid exposure: pending payments plus active folio balance.</span>
-                    </div>
                 </article>
             </section>
 
@@ -1479,6 +1371,180 @@ if (isset($_GET['export']) && $_GET['export'] === 'csv') {
                 </article>
                 <?php endif; ?>
 
+                <!-- Open Maintenance -->
+                <?php if ($mod_bookings && $maintenance['total_open'] > 0): ?>
+                <article class="eod-panel" data-help="Open Maintenance|Rooms maintenance tasks still open at end of shift. Urgent and high priority tasks should be resolved before tomorrow's arrivals to ensure rooms are ready.">
+                    <header class="eod-panel__head">
+                        <h2 class="eod-panel__title"><i class="fas fa-screwdriver-wrench"></i> Open Maintenance</h2>
+                    </header>
+                    <ul class="eod-stats">
+                        <?php if ($maintenance['urgent'] > 0): ?>
+                        <li>
+                            <span class="eod-stats__label">Urgent</span>
+                            <span class="eod-stats__value eod-stats__value--warn"><?php echo $maintenance['urgent']; ?></span>
+                        </li>
+                        <?php endif; ?>
+                        <?php if ($maintenance['high'] > 0): ?>
+                        <li>
+                            <span class="eod-stats__label">High priority</span>
+                            <span class="eod-stats__value eod-stats__value--warn"><?php echo $maintenance['high']; ?></span>
+                        </li>
+                        <?php endif; ?>
+                        <?php if ($maintenance['medium'] > 0): ?>
+                        <li>
+                            <span class="eod-stats__label">Medium</span>
+                            <span class="eod-stats__value"><?php echo $maintenance['medium']; ?></span>
+                        </li>
+                        <?php endif; ?>
+                        <li>
+                            <span class="eod-stats__label">Total open tasks</span>
+                            <span class="eod-stats__value eod-stats__value--warn"><?php echo $maintenance['total_open']; ?></span>
+                            <span class="eod-stats__sub">Rooms need attention</span>
+                        </li>
+                    </ul>
+                    <a href="room-maintenance.php" class="eod-link" style="margin-top:0.5rem;display:inline-block;">View all &rarr;</a>
+                </article>
+                <?php endif; ?>
+
+                <?php if ($mod_bookings): ?>
+                <!-- Tomorrow preview -->
+                <article class="eod-panel eod-panel--accent" data-help="Tomorrow Preview|Expected arrivals: confirmed bookings checking in tomorrow. Expected departures: guests due to check out. Revenue forecast: the sum of booking charges due from tomorrow's arrivals based on their confirmed booking values.">
+                    <header class="eod-panel__head">
+                        <h2 class="eod-panel__title"><i class="fas fa-arrow-right"></i> Tomorrow Preview</h2>
+                        <span class="eod-panel__date"><?php echo htmlspecialchars(date('D, M j', strtotime($tomorrow))); ?></span>
+                    </header>
+                    <ul class="eod-stats">
+                        <li>
+                            <span class="eod-stats__label">Arrivals expected</span>
+                            <span class="eod-stats__value"><?php echo (int)$tomorrow_preview['arrivals']; ?></span>
+                        </li>
+                        <li>
+                            <span class="eod-stats__label">Departures expected</span>
+                            <span class="eod-stats__value"><?php echo (int)$tomorrow_preview['departures']; ?></span>
+                        </li>
+                        <li>
+                            <span class="eod-stats__label">Forecast revenue</span>
+                            <span class="eod-stats__value"><?php echo $money($tomorrow_preview['rev_forecast']); ?></span>
+                        </li>
+                    </ul>
+                </article>
+                <?php endif; ?>
+            </section>
+
+            <?php /* The close-out essentials stay in view above; trends, yield and the analysis
+                     panels are one click away. Printing opens this so the paper copy is complete. */ ?>
+            <details class="eod-more" id="eodMoreDetail">
+                <summary class="eod-more__summary"><i class="fas fa-chart-pie"></i> More detail <span>trends, yield, top sellers, guests, housekeeping and more</span></summary>
+                <section class="eod-intel" aria-label="Closeout trends">
+                <article class="eod-insight-card eod-insight-card--score" data-help="Daily Closeout Health Score|A 0–100 score measuring how cleanly today is closing. Points are deducted for: unchecked arrivals/departures, pending payments, outstanding folio, POS voids above 5%, incomplete housekeeping, and out-of-order rooms. 90+ is excellent. Below 70 means action is needed before end of shift.">
+                    <div class="eod-insight-card__head">
+                        <span class="eod-insight-card__label">Daily Closeout Health</span>
+                        <i class="fas fa-gauge-high"></i>
+                    </div>
+                    <div class="eod-score" style="--score: <?php echo (int)$daily_health_score; ?>%;">
+                        <strong><?php echo (int)$daily_health_score; ?></strong>
+                        <span>/ 100</span>
+                    </div>
+                    <h2 class="eod-insight-card__title"><?php echo htmlspecialchars($daily_health_label); ?></h2>
+                    <p class="eod-insight-card__text">Weighted from arrivals, departures, unpaid balances, POS exceptions, housekeeping, and room availability.</p>
+                </article>
+
+                <article class="eod-insight-card" data-help="What Moved Today|Each row compares today to yesterday for the same metric. Green = improved, red = declined. Net change shows the actual currency movement; percentage shows the relative shift. Use this to spot momentum patterns at a glance.">
+                    <div class="eod-insight-card__head">
+                        <span class="eod-insight-card__label">What Moved Today</span>
+                        <i class="fas fa-chart-line"></i>
+                    </div>
+                    <ul class="eod-trends">
+                        <li>
+                            <span>Net revenue vs yesterday</span>
+                            <strong class="eod-trend eod-trend--<?php echo $trendTone($net_change); ?>"><?php echo $trendLabel($net_change, true); ?> <small><?php echo $trendLabel($net_change_pct, false, '%'); ?></small></strong>
+                        </li>
+                        <?php if ($mod_bookings): ?>
+                        <li>
+                            <span>Rooms revenue vs yesterday</span>
+                            <strong class="eod-trend eod-trend--<?php echo $trendTone($room_rev_change); ?>"><?php echo $trendLabel($room_rev_change, true); ?></strong>
+                        </li>
+                        <?php endif; ?>
+                        <?php if ($mod_conference && ((float)$rev['conf_gross'] > 0 || (float)$prev_sources['conf_gross'] > 0)): ?>
+                        <li>
+                            <span>Conference revenue vs yesterday</span>
+                            <strong class="eod-trend eod-trend--<?php echo $trendTone($conf_rev_change); ?>"><?php echo $trendLabel($conf_rev_change, true); ?></strong>
+                        </li>
+                        <?php endif; ?>
+                        <?php if ($mod_pos): ?>
+                        <li>
+                            <span><?php echo htmlspecialchars(rh_pos_short_label()); ?> vs yesterday</span>
+                            <strong class="eod-trend eod-trend--<?php echo $trendTone($fnb_rev_change); ?>"><?php echo $trendLabel($fnb_rev_change, true); ?></strong>
+                        </li>
+                        <?php endif; ?>
+                        <?php if ($mod_gym && ((float)$rev['gym_gross'] > 0 || (float)$prev_sources['gym_gross'] > 0)): ?>
+                        <li>
+                            <span>Gym revenue vs yesterday</span>
+                            <strong class="eod-trend eod-trend--<?php echo $trendTone($gym_rev_change); ?>"><?php echo $trendLabel($gym_rev_change, true); ?></strong>
+                        </li>
+                        <?php endif; ?>
+                        <?php if ($mod_events && ((float)$rev['events_gross'] > 0 || (float)$prev_sources['events_gross'] > 0)): ?>
+                        <li>
+                            <span>Event revenue vs yesterday</span>
+                            <strong class="eod-trend eod-trend--<?php echo $trendTone($events_rev_change); ?>"><?php echo $trendLabel($events_rev_change, true); ?></strong>
+                        </li>
+                        <?php endif; ?>
+                        <?php if ($mod_bookings): ?>
+                        <li>
+                            <span>Occupancy movement</span>
+                            <strong class="eod-trend eod-trend--<?php echo $trendTone($occupancy_change); ?>"><?php echo $trendLabel($occupancy_change, false, ' pts'); ?></strong>
+                        </li>
+                        <?php endif; ?>
+                        <?php if ($mod_pos): ?>
+                        <li>
+                            <span>POS sales vs yesterday</span>
+                            <strong class="eod-trend eod-trend--<?php echo $trendTone($pos_change); ?>"><?php echo $trendLabel($pos_change, true); ?> <small><?php echo $trendLabel($pos_change_pct, false, '%'); ?></small></strong>
+                        </li>
+                        <li>
+                            <span>Average POS order</span>
+                            <strong class="eod-trend eod-trend--<?php echo $trendTone($order_value_change); ?>"><?php echo $money($average_order_value); ?></strong>
+                        </li>
+                        <?php endif; ?>
+                        <?php if ($mod_bookings): ?>
+                        <li>
+                            <span>New bookings today</span>
+                            <strong class="eod-trend eod-trend--<?php echo $trendTone((float)((int)$ops['new_bookings'] - $previous['new_bookings'])); ?>"><?php echo (int)$ops['new_bookings']; ?> <small><?php echo $trendLabel((float)((int)$ops['new_bookings'] - $previous['new_bookings'])); ?> vs yesterday</small></strong>
+                        </li>
+                        <?php endif; ?>
+                    </ul>
+                </article>
+
+                <?php if ($mod_bookings): ?>
+                <article class="eod-insight-card" data-help="Yield & Opportunity|Empty-room opportunity: estimated revenue lost from unsold rooms (unsold rooms × ADR). <?php echo htmlspecialchars(rh_pos_short_label()); ?> per occupied room: <?php echo isRestaurantEnabled() ? 'food and beverage' : 'POS/till'; ?> revenue per occupied room — measures in-house guest spend. Top revenue source shows which booking type generated the most gross income today.">
+                    <div class="eod-insight-card__head">
+                        <span class="eod-insight-card__label">Yield & Opportunity</span>
+                        <i class="fas fa-bullseye"></i>
+                    </div>
+                    <ul class="eod-ledger">
+                        <li><span>Unsold rooms</span><strong><?php echo (int)$rooms_unsold; ?></strong></li>
+                        <li><span>Empty-room opportunity</span><strong><?php echo $money($empty_room_opportunity); ?></strong></li>
+                        <?php if ($mod_pos): ?><li><span><?php echo htmlspecialchars(rh_pos_short_label()); ?> per occupied room</span><strong><?php echo $money($fnb_per_occupied_room); ?></strong></li><?php endif; ?>
+                        <li><span>Top revenue source</span><strong><?php echo htmlspecialchars($top_revenue_source['label']); ?> <small><?php echo number_format($top_revenue_source_share, 1); ?>%</small></strong></li>
+                    </ul>
+                </article>
+                <?php endif; ?>
+
+                <article class="eod-insight-card" data-help="Best Seller & Risk Exposure|Top POS item: the single menu item generating the most revenue today. Unpaid exposure: combined total of all pending payments and outstanding folio — the maximum amount currently at risk of non-collection.">
+                    <div class="eod-insight-card__head">
+                        <span class="eod-insight-card__label">Best Seller Signal</span>
+                        <i class="fas fa-ranking-star"></i>
+                    </div>
+                    <div class="eod-hero-metric">
+                        <strong><?php echo htmlspecialchars($top_item_name); ?></strong>
+                        <span><?php echo $top_item_revenue > 0 ? $money($top_item_revenue) . ' revenue from the top POS item.' : 'No paid POS item has led today yet.'; ?></span>
+                    </div>
+                    <div class="eod-hero-metric eod-hero-metric--subtle">
+                        <strong><?php echo $money($unpaid_risk); ?></strong>
+                        <span>Total unpaid exposure: pending payments plus active folio balance.</span>
+                    </div>
+                </article>
+                </section>
+                <section class="eod-grid">
                 <?php if ($mod_pos): ?>
                 <!-- Top selling items -->
                 <article class="eod-panel eod-panel--wide" data-help="Top Selling Items|Best-performing individual menu items today ranked by total revenue. Qty is total units sold. Use this to guide menu decisions, manage stock for tomorrow, and identify high-margin items worth promoting.">
@@ -1730,41 +1796,6 @@ if (isset($_GET['export']) && $_GET['export'] === 'csv') {
                 </article>
                 <?php endif; ?>
 
-                <!-- Open Maintenance -->
-                <?php if ($mod_bookings && $maintenance['total_open'] > 0): ?>
-                <article class="eod-panel" data-help="Open Maintenance|Rooms maintenance tasks still open at end of shift. Urgent and high priority tasks should be resolved before tomorrow's arrivals to ensure rooms are ready.">
-                    <header class="eod-panel__head">
-                        <h2 class="eod-panel__title"><i class="fas fa-screwdriver-wrench"></i> Open Maintenance</h2>
-                    </header>
-                    <ul class="eod-stats">
-                        <?php if ($maintenance['urgent'] > 0): ?>
-                        <li>
-                            <span class="eod-stats__label">Urgent</span>
-                            <span class="eod-stats__value eod-stats__value--warn"><?php echo $maintenance['urgent']; ?></span>
-                        </li>
-                        <?php endif; ?>
-                        <?php if ($maintenance['high'] > 0): ?>
-                        <li>
-                            <span class="eod-stats__label">High priority</span>
-                            <span class="eod-stats__value eod-stats__value--warn"><?php echo $maintenance['high']; ?></span>
-                        </li>
-                        <?php endif; ?>
-                        <?php if ($maintenance['medium'] > 0): ?>
-                        <li>
-                            <span class="eod-stats__label">Medium</span>
-                            <span class="eod-stats__value"><?php echo $maintenance['medium']; ?></span>
-                        </li>
-                        <?php endif; ?>
-                        <li>
-                            <span class="eod-stats__label">Total open tasks</span>
-                            <span class="eod-stats__value eod-stats__value--warn"><?php echo $maintenance['total_open']; ?></span>
-                            <span class="eod-stats__sub">Rooms need attention</span>
-                        </li>
-                    </ul>
-                    <a href="room-maintenance.php" class="eod-link" style="margin-top:0.5rem;display:inline-block;">View all &rarr;</a>
-                </article>
-                <?php endif; ?>
-
                 <!-- Quotation Pipeline (billing businesses only — matches the nav/page gate) -->
                 <?php $eod_billing = function_exists('rh_module_key_enabled') && rh_module_key_enabled('billing'); ?>
                 <?php if ($eod_billing && ($quotation_stats['sent_today'] > 0 || $quotation_stats['total_active'] > 0)): ?>
@@ -1790,31 +1821,8 @@ if (isset($_GET['export']) && $_GET['export'] === 'csv') {
                     <a href="quotations.php" class="eod-link" style="margin-top:0.5rem;display:inline-block;">View all &rarr;</a>
                 </article>
                 <?php endif; ?>
-
-                <?php if ($mod_bookings): ?>
-                <!-- Tomorrow preview -->
-                <article class="eod-panel eod-panel--accent" data-help="Tomorrow Preview|Expected arrivals: confirmed bookings checking in tomorrow. Expected departures: guests due to check out. Revenue forecast: the sum of booking charges due from tomorrow's arrivals based on their confirmed booking values.">
-                    <header class="eod-panel__head">
-                        <h2 class="eod-panel__title"><i class="fas fa-arrow-right"></i> Tomorrow Preview</h2>
-                        <span class="eod-panel__date"><?php echo htmlspecialchars(date('D, M j', strtotime($tomorrow))); ?></span>
-                    </header>
-                    <ul class="eod-stats">
-                        <li>
-                            <span class="eod-stats__label">Arrivals expected</span>
-                            <span class="eod-stats__value"><?php echo (int)$tomorrow_preview['arrivals']; ?></span>
-                        </li>
-                        <li>
-                            <span class="eod-stats__label">Departures expected</span>
-                            <span class="eod-stats__value"><?php echo (int)$tomorrow_preview['departures']; ?></span>
-                        </li>
-                        <li>
-                            <span class="eod-stats__label">Forecast revenue</span>
-                            <span class="eod-stats__value"><?php echo $money($tomorrow_preview['rev_forecast']); ?></span>
-                        </li>
-                    </ul>
-                </article>
-                <?php endif; ?>
-            </section>
+                </section>
+            </details>
 
             <!-- Footer note -->
             <footer class="eod-footer">
@@ -1899,6 +1907,7 @@ if (isset($_GET['export']) && $_GET['export'] === 'csv') {
     </script>
 
     <?php require_once 'includes/admin-footer.php'; ?>
+<script>window.addEventListener('beforeprint',function(){var d=document.getElementById('eodMoreDetail');if(d)d.open=true;});</script>
 </body>
 
 </html>

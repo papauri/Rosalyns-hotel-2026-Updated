@@ -782,148 +782,6 @@ if (!isset($folio_fnb)) {
             </a>
         </div>
 
-        <section class="acct-panel acct-panel--vat" id="vat-settings">
-            <header class="acct-panel__head acct-panel__head--vat">
-                <div class="acct-panel__head-title-row">
-                    <h2 class="acct-panel__title"><i class="fas fa-percent"></i> VAT Settings</h2>
-                    <span class="vat-status-badge <?php echo $vatEnabled ? 'vat-status-badge--on' : 'vat-status-badge--off'; ?>">
-                        <i class="fas fa-circle"></i>
-                        <?php echo $vatEnabled ? 'VAT Enabled' : 'VAT Disabled'; ?>
-                    </span>
-                </div>
-                <p class="acct-panel__sub">Tax configuration affects all future invoices, payments, and MRA reporting. Changes cannot be undone automatically.</p>
-            </header>
-
-            <?php if ($vatSettingsMessage): ?>
-                <div class="vat-result-banner vat-result-banner--success">
-                    <i class="fas fa-check-circle"></i>
-                    <div><strong>Saved.</strong> <?php echo htmlspecialchars($vatSettingsMessage); ?></div>
-                </div>
-            <?php endif; ?>
-
-            <?php if ($vatSettingsError): ?>
-                <div class="vat-result-banner vat-result-banner--error">
-                    <i class="fas fa-exclamation-circle"></i>
-                    <div><?php echo htmlspecialchars($vatSettingsError); ?></div>
-                </div>
-            <?php endif; ?>
-
-            <!-- Read-only summary (default locked state) -->
-            <div class="vat-locked-view" id="vatLockedView">
-                <div class="vat-current-grid">
-                    <div class="vat-current-item">
-                        <span class="vat-current-item__label">Status</span>
-                        <span class="vat-current-item__value <?php echo $vatEnabled ? 'vat-current-item__value--on' : 'vat-current-item__value--off'; ?>">
-                            <?php echo $vatEnabled ? '<i class="fas fa-toggle-on"></i> Enabled' : '<i class="fas fa-toggle-off"></i> Disabled'; ?>
-                        </span>
-                    </div>
-                    <div class="vat-current-item">
-                        <span class="vat-current-item__label">Rate</span>
-                        <span class="vat-current-item__value"><?php echo htmlspecialchars((string)$vatRate); ?>%</span>
-                    </div>
-                    <div class="vat-current-item">
-                        <span class="vat-current-item__label">VAT Registration No.</span>
-                        <span class="vat-current-item__value">
-                            <?php echo $vatNumber ? htmlspecialchars((string)$vatNumber) : '<em style="color:var(--finance-muted)">Not set</em>'; ?>
-                        </span>
-                    </div>
-                </div>
-                <div class="vat-unlock-row">
-                    <button type="button" class="acct-btn acct-btn--unlock" id="vatUnlockBtn">
-                        <i class="fas fa-lock-open"></i> Unlock to Edit
-                    </button>
-                    <p class="vat-unlock-hint"><i class="fas fa-triangle-exclamation"></i> Editing VAT settings affects all future invoices, tax calculations, and MRA reports. Proceed with caution.</p>
-                </div>
-            </div>
-
-            <!-- Edit form (hidden until unlocked) -->
-            <div class="vat-edit-view" id="vatEditView" hidden>
-                <div class="vat-warning-banner">
-                    <i class="fas fa-triangle-exclamation vat-warning-banner__icon"></i>
-                    <div class="vat-warning-banner__body">
-                        <strong>Caution — tax-critical change</strong>
-                        <ul>
-                            <li>Changing the VAT rate affects all new payments going forward — existing invoices are not recalculated.</li>
-                            <li>Disabling VAT will stop tax being applied to all new transactions immediately.</li>
-                            <li>Your VAT registration number must match your MRA certificate exactly.</li>
-                            <li>Consult your accountant before making changes mid-period.</li>
-                        </ul>
-                    </div>
-                </div>
-
-                <form method="POST" class="vat-edit-form" action="accounting-dashboard.php<?php echo $showAll ? '?show_all=1' : ''; ?>">
-                    <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf_token, ENT_QUOTES, 'UTF-8'); ?>">
-                    <input type="hidden" name="save_vat_settings" value="1">
-
-                    <div class="vat-edit-fields">
-                        <div class="vat-field-group">
-                            <label class="vat-field-group__label" for="vat_enabled">VAT Status</label>
-                            <select class="vat-field-group__control" id="vat_enabled" name="vat_enabled">
-                                <option value="1" <?php echo $vatEnabled ? 'selected' : ''; ?>>Enabled</option>
-                                <option value="0" <?php echo !$vatEnabled ? 'selected' : ''; ?>>Disabled</option>
-                            </select>
-                        </div>
-                        <div class="vat-field-group">
-                            <label class="vat-field-group__label" for="vat_pricing_mode">Pricing Mode</label>
-                            <select class="vat-field-group__control" id="vat_pricing_mode" name="vat_pricing_mode">
-                                <option value="exclusive" <?php echo $vatPricingMode !== 'inclusive' ? 'selected' : ''; ?>>VAT added on top of prices</option>
-                                <option value="inclusive" <?php echo $vatPricingMode === 'inclusive' ? 'selected' : ''; ?>>Prices already include VAT</option>
-                            </select>
-                            <small style="color:#7a6f63;font-size:.74rem;display:block;margin-top:4px;">
-                                Inclusive: totals equal your listed prices and documents show only the VAT rate, never an amount.
-                            </small>
-                        </div>
-                        <div class="vat-field-group">
-                            <label class="vat-field-group__label" for="vat_rate">VAT Rate (%)</label>
-                            <input class="vat-field-group__control" type="number" id="vat_rate" name="vat_rate"
-                                min="0" max="100" step="0.01"
-                                value="<?php echo htmlspecialchars((string)$vatRate); ?>" required>
-                        </div>
-                        <div class="vat-field-group vat-field-group--wide">
-                            <label class="vat-field-group__label" for="vat_number">VAT Registration Number</label>
-                            <input class="vat-field-group__control" type="text" id="vat_number" name="vat_number"
-                                maxlength="120"
-                                value="<?php echo htmlspecialchars((string)$vatNumber); ?>"
-                                placeholder="Enter your MRA VAT registration number">
-                        </div>
-                    </div>
-
-                    <div class="vat-edit-actions">
-                        <button type="button" class="acct-btn acct-btn--ghost" id="vatCancelBtn">
-                            <i class="fas fa-xmark"></i> Cancel
-                        </button>
-                        <button type="submit" class="acct-btn acct-btn--save-vat" id="vatSaveBtn">
-                            <i class="fas fa-save"></i> Save VAT Settings
-                        </button>
-                    </div>
-                </form>
-            </div>
-        </section>
-
-        <!-- VAT unlock confirmation modal -->
-        <div class="modal-overlay" id="vatConfirmModal-overlay" data-modal-overlay aria-hidden="true"></div>
-        <div class="modal-overlay vat-confirm-modal" id="vatConfirmModal" role="dialog" aria-modal="true" aria-labelledby="vatConfirmTitle" data-modal data-close-on-escape="true" data-close-on-overlay="false">
-            <div class="modal-container vat-confirm-modal__container">
-                <div class="vat-confirm-modal__icon"><i class="fas fa-shield-halved"></i></div>
-                <h3 class="vat-confirm-modal__title" id="vatConfirmTitle">Unlock VAT Settings?</h3>
-                <p class="vat-confirm-modal__body">
-                    VAT settings control how tax is calculated across all bookings, POS transactions, and invoices.
-                    Incorrect values can cause compliance issues with the MRA.
-                </p>
-                <p class="vat-confirm-modal__body">
-                    <strong>Are you sure you want to unlock and edit these settings?</strong>
-                </p>
-                <div class="vat-confirm-modal__actions">
-                    <button type="button" class="acct-btn acct-btn--ghost" id="vatConfirmCancel">
-                        <i class="fas fa-xmark"></i> No, keep locked
-                    </button>
-                    <button type="button" class="acct-btn acct-btn--unlock-confirm" id="vatConfirmYes">
-                        <i class="fas fa-lock-open"></i> Yes, unlock to edit
-                    </button>
-                </div>
-            </div>
-        </div>
-
         <?php if (!empty($error)): ?>
             <div class="acct-error">
                 <i class="fas fa-triangle-exclamation"></i> <?php echo htmlspecialchars($error); ?>
@@ -971,7 +829,7 @@ if (!isset($folio_fnb)) {
             </div>
         </div>
 
-        <?php if ($acct_billing): // quotations register belongs to billing businesses (rooms/conference/gym/events) — hidden for till-only presets, matching the nav/page gate ?>
+        <?php if ($acct_billing && (int)$quotationStats['total'] > 0): // shown only when quotations were issued in the period; quotations register belongs to billing businesses (rooms/conference/gym/events) — hidden for till-only presets, matching the nav/page gate ?>
         <!-- Quotation Pipeline panel -->
         <section class="acct-panel" id="quotation-pipeline">
             <header class="acct-panel__head">
@@ -1014,7 +872,7 @@ if (!isset($folio_fnb)) {
         </section>
         <?php endif; // quotation pipeline (billing businesses) ?>
 
-        <?php if ($acct_ar): // credit notes are an accounts-receivable tool (rooms/conference) — till businesses refund at the POS instead ?>
+        <?php if ($acct_ar && ((int)$cnStats['count_issued'] > 0 || (float)$cnStats['total_outstanding'] > 0)): // shown only with credit-note activity or liability; credit notes are an accounts-receivable tool (rooms/conference) — till businesses refund at the POS instead ?>
         <!-- Credit Note Summary panel -->
         <section class="acct-panel" id="credit-note-summary">
             <header class="acct-panel__head">
@@ -1117,8 +975,19 @@ if (!isset($folio_fnb)) {
                                 'action_label' => $mraColumnsAvailable ? 'Open MRA-focused reports' : 'Open settings & install fields',
                             ],
                         ]);
+                        // Only checks that need attention are listed; a clean period shows one line.
+                        $complianceRows = array_values(array_filter($complianceRows, static function ($row) {
+                            return $row['warn'] && (int)$row['count'] > 0;
+                        }));
+                        if (empty($complianceRows)):
+                        ?>
+                            <tr>
+                                <td colspan="4"><span class="acct-pill acct-pill--paid">Clear</span> All compliance checks pass for this period.</td>
+                            </tr>
+                        <?php
+                        endif;
                         foreach ($complianceRows as $row):
-                            $hasGap = $row['warn'] && (int)$row['count'] > 0;
+                            $hasGap = true;
                         ?>
                             <tr>
                                 <td>
@@ -2173,8 +2042,167 @@ if (!isset($folio_fnb)) {
             <?php endif; ?>
         </section>
 
+        <?php /* VAT is set up once and rarely changed, so it sits folded at the foot of the page.
+                 It opens after a save (to show the result) or when a link targets #vat-settings. */ ?>
+        <details class="acct-vat-details" id="vat-settings"<?php echo ($vatSettingsMessage || $vatSettingsError) ? ' open' : ''; ?>>
+            <summary class="acct-vat-details__summary">
+                <i class="fas fa-percent"></i> VAT settings
+                <span class="vat-status-badge <?php echo $vatEnabled ? 'vat-status-badge--on' : 'vat-status-badge--off'; ?>">
+                    <?php echo $vatEnabled ? 'Enabled @ ' . htmlspecialchars((string)$vatRate) . '%' : 'Disabled'; ?>
+                </span>
+            </summary>
+        <section class="acct-panel acct-panel--vat">
+            <header class="acct-panel__head acct-panel__head--vat">
+                <div class="acct-panel__head-title-row">
+                    <h2 class="acct-panel__title"><i class="fas fa-percent"></i> VAT Settings</h2>
+                    <span class="vat-status-badge <?php echo $vatEnabled ? 'vat-status-badge--on' : 'vat-status-badge--off'; ?>">
+                        <i class="fas fa-circle"></i>
+                        <?php echo $vatEnabled ? 'VAT Enabled' : 'VAT Disabled'; ?>
+                    </span>
+                </div>
+                <p class="acct-panel__sub">Tax configuration affects all future invoices, payments, and MRA reporting. Changes cannot be undone automatically.</p>
+            </header>
+
+            <?php if ($vatSettingsMessage): ?>
+                <div class="vat-result-banner vat-result-banner--success">
+                    <i class="fas fa-check-circle"></i>
+                    <div><strong>Saved.</strong> <?php echo htmlspecialchars($vatSettingsMessage); ?></div>
+                </div>
+            <?php endif; ?>
+
+            <?php if ($vatSettingsError): ?>
+                <div class="vat-result-banner vat-result-banner--error">
+                    <i class="fas fa-exclamation-circle"></i>
+                    <div><?php echo htmlspecialchars($vatSettingsError); ?></div>
+                </div>
+            <?php endif; ?>
+
+            <!-- Read-only summary (default locked state) -->
+            <div class="vat-locked-view" id="vatLockedView">
+                <div class="vat-current-grid">
+                    <div class="vat-current-item">
+                        <span class="vat-current-item__label">Status</span>
+                        <span class="vat-current-item__value <?php echo $vatEnabled ? 'vat-current-item__value--on' : 'vat-current-item__value--off'; ?>">
+                            <?php echo $vatEnabled ? '<i class="fas fa-toggle-on"></i> Enabled' : '<i class="fas fa-toggle-off"></i> Disabled'; ?>
+                        </span>
+                    </div>
+                    <div class="vat-current-item">
+                        <span class="vat-current-item__label">Rate</span>
+                        <span class="vat-current-item__value"><?php echo htmlspecialchars((string)$vatRate); ?>%</span>
+                    </div>
+                    <div class="vat-current-item">
+                        <span class="vat-current-item__label">VAT Registration No.</span>
+                        <span class="vat-current-item__value">
+                            <?php echo $vatNumber ? htmlspecialchars((string)$vatNumber) : '<em style="color:var(--finance-muted)">Not set</em>'; ?>
+                        </span>
+                    </div>
+                </div>
+                <div class="vat-unlock-row">
+                    <button type="button" class="acct-btn acct-btn--unlock" id="vatUnlockBtn">
+                        <i class="fas fa-lock-open"></i> Unlock to Edit
+                    </button>
+                    <p class="vat-unlock-hint"><i class="fas fa-triangle-exclamation"></i> Editing VAT settings affects all future invoices, tax calculations, and MRA reports. Proceed with caution.</p>
+                </div>
+            </div>
+
+            <!-- Edit form (hidden until unlocked) -->
+            <div class="vat-edit-view" id="vatEditView" hidden>
+                <div class="vat-warning-banner">
+                    <i class="fas fa-triangle-exclamation vat-warning-banner__icon"></i>
+                    <div class="vat-warning-banner__body">
+                        <strong>Caution — tax-critical change</strong>
+                        <ul>
+                            <li>Changing the VAT rate affects all new payments going forward — existing invoices are not recalculated.</li>
+                            <li>Disabling VAT will stop tax being applied to all new transactions immediately.</li>
+                            <li>Your VAT registration number must match your MRA certificate exactly.</li>
+                            <li>Consult your accountant before making changes mid-period.</li>
+                        </ul>
+                    </div>
+                </div>
+
+                <form method="POST" class="vat-edit-form" action="accounting-dashboard.php<?php echo $showAll ? '?show_all=1' : ''; ?>">
+                    <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf_token, ENT_QUOTES, 'UTF-8'); ?>">
+                    <input type="hidden" name="save_vat_settings" value="1">
+
+                    <div class="vat-edit-fields">
+                        <div class="vat-field-group">
+                            <label class="vat-field-group__label" for="vat_enabled">VAT Status</label>
+                            <select class="vat-field-group__control" id="vat_enabled" name="vat_enabled">
+                                <option value="1" <?php echo $vatEnabled ? 'selected' : ''; ?>>Enabled</option>
+                                <option value="0" <?php echo !$vatEnabled ? 'selected' : ''; ?>>Disabled</option>
+                            </select>
+                        </div>
+                        <div class="vat-field-group">
+                            <label class="vat-field-group__label" for="vat_pricing_mode">Pricing Mode</label>
+                            <select class="vat-field-group__control" id="vat_pricing_mode" name="vat_pricing_mode">
+                                <option value="exclusive" <?php echo $vatPricingMode !== 'inclusive' ? 'selected' : ''; ?>>VAT added on top of prices</option>
+                                <option value="inclusive" <?php echo $vatPricingMode === 'inclusive' ? 'selected' : ''; ?>>Prices already include VAT</option>
+                            </select>
+                            <small style="color:#7a6f63;font-size:.74rem;display:block;margin-top:4px;">
+                                Inclusive: totals equal your listed prices and documents show only the VAT rate, never an amount.
+                            </small>
+                        </div>
+                        <div class="vat-field-group">
+                            <label class="vat-field-group__label" for="vat_rate">VAT Rate (%)</label>
+                            <input class="vat-field-group__control" type="number" id="vat_rate" name="vat_rate"
+                                min="0" max="100" step="0.01"
+                                value="<?php echo htmlspecialchars((string)$vatRate); ?>" required>
+                        </div>
+                        <div class="vat-field-group vat-field-group--wide">
+                            <label class="vat-field-group__label" for="vat_number">VAT Registration Number</label>
+                            <input class="vat-field-group__control" type="text" id="vat_number" name="vat_number"
+                                maxlength="120"
+                                value="<?php echo htmlspecialchars((string)$vatNumber); ?>"
+                                placeholder="Enter your MRA VAT registration number">
+                        </div>
+                    </div>
+
+                    <div class="vat-edit-actions">
+                        <button type="button" class="acct-btn acct-btn--ghost" id="vatCancelBtn">
+                            <i class="fas fa-xmark"></i> Cancel
+                        </button>
+                        <button type="submit" class="acct-btn acct-btn--save-vat" id="vatSaveBtn">
+                            <i class="fas fa-save"></i> Save VAT Settings
+                        </button>
+                    </div>
+                </form>
+            </div>
+        </section>
+
+        <!-- VAT unlock confirmation modal -->
+        <div class="modal-overlay" id="vatConfirmModal-overlay" data-modal-overlay aria-hidden="true"></div>
+        <div class="modal-overlay vat-confirm-modal" id="vatConfirmModal" role="dialog" aria-modal="true" aria-labelledby="vatConfirmTitle" data-modal data-close-on-escape="true" data-close-on-overlay="false">
+            <div class="modal-container vat-confirm-modal__container">
+                <div class="vat-confirm-modal__icon"><i class="fas fa-shield-halved"></i></div>
+                <h3 class="vat-confirm-modal__title" id="vatConfirmTitle">Unlock VAT Settings?</h3>
+                <p class="vat-confirm-modal__body">
+                    VAT settings control how tax is calculated across all bookings, POS transactions, and invoices.
+                    Incorrect values can cause compliance issues with the MRA.
+                </p>
+                <p class="vat-confirm-modal__body">
+                    <strong>Are you sure you want to unlock and edit these settings?</strong>
+                </p>
+                <div class="vat-confirm-modal__actions">
+                    <button type="button" class="acct-btn acct-btn--ghost" id="vatConfirmCancel">
+                        <i class="fas fa-xmark"></i> No, keep locked
+                    </button>
+                    <button type="button" class="acct-btn acct-btn--unlock-confirm" id="vatConfirmYes">
+                        <i class="fas fa-lock-open"></i> Yes, unlock to edit
+                    </button>
+                </div>
+            </div>
+        </div>
+        </details>
+
+
         <script>
             (function() {
+                var vatDetails = document.getElementById('vat-settings');
+                function openVatDetails() { if (vatDetails && !vatDetails.open) vatDetails.open = true; }
+                if (location.hash === '#vat-settings') openVatDetails();
+                document.querySelectorAll('a[href="#vat-settings"]').forEach(function (link) {
+                    link.addEventListener('click', openVatDetails);
+                });
                 var unlockBtn = document.getElementById('vatUnlockBtn');
                 var cancelBtn = document.getElementById('vatCancelBtn');
                 var confirmYes = document.getElementById('vatConfirmYes');

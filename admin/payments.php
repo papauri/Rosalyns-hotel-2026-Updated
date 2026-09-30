@@ -611,6 +611,10 @@ $quickActive = function ($s, $e) use ($startDate, $endDate) {
             <a href="<?php echo htmlspecialchars(payments_url_with_dates(date('Y-01-01'), $today)); ?>" class="acct-quick-action">YTD</a>
         </div>
 
+        <?php /* Source / method / status splits repeat the Accounting page, so they sit folded
+                 above the ledger; the filters and the ledger itself come first. */ ?>
+        <details class="acct-breakdown-details">
+            <summary class="acct-vat-details__summary"><i class="fas fa-chart-pie"></i> Breakdown by source, method and status</summary>
         <!-- Breakdown panels: source × method × status -->
         <div class="acct-grid acct-grid--2" style="margin-bottom: 18px;">
             <div class="acct-panel">
@@ -719,6 +723,7 @@ $quickActive = function ($s, $e) use ($startDate, $endDate) {
                 </div>
             </div>
         <?php endif; ?>
+        </details>
 
         <!-- Detailed Filters -->
         <form method="GET" class="filter-section" data-live-search-form="payments">

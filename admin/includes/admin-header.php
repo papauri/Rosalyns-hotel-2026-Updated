@@ -92,116 +92,123 @@ if (!function_exists('_renderNavLink')) {
 // ---------------------------------------------------------------------------
 // Element format: [href, icon, label, perm, iconStyle, moduleKey]
 // moduleKey = null means always visible (not gated by a module)
+// Everyday work sits in the named groups; rarer and technical pages live in
+// 'Advanced', which starts folded (see $_nav_default_collapsed). Nothing is
+// removed — every page stays reachable, gated by the same permission/module.
 $_nav_groups = [
-    'Operations' => [
-        ['dashboard.php',     'fas fa-tachometer-alt', 'Dashboard',      'dashboard',     '', null],
-        ['bookings.php',      'fas fa-calendar-check', 'Bookings',       'bookings',      '', 'bookings'],
-        ['calendar.php',      'fas fa-calendar',       'Calendar',       'calendar',      '', 'bookings'],
-        ['blocked-dates.php', 'fas fa-ban',            'Blocked Dates',  'blocked_dates', '', 'bookings'],
+    'Front Desk' => [
+        ['dashboard.php',             'fas fa-tachometer-alt', 'Dashboard',        'dashboard',        '', null],
+        ['bookings.php',              'fas fa-calendar-check', 'Bookings',         'bookings',         '', 'bookings'],
+        ['calendar.php',              'fas fa-calendar',       'Calendar',         'calendar',         '', 'bookings'],
+        ['housekeeping.php',          'fas fa-broom',          'Housekeeping',     'housekeeping',     '', 'housekeeping'],
+        ['room-maintenance.php',      'fas fa-tools',          'Room Maintenance', 'room_maintenance', '', 'bookings'],
+        ['conference-management.php', 'fas fa-briefcase',      'Conference',       'conference',       '', 'conference'],
+        ['events-inquiries.php',      'fas fa-calendar-check', 'Event Bookings',   'events_bookings',  '', ['website_cms', 'events']],
     ],
-    'Rooms & Service' => [
-        ['room-management.php',   'fas fa-bed',       'Rooms',            'rooms',            '', 'bookings'],
-        ['individual-rooms.php',  'fas fa-door-open', 'Individual Rooms', 'rooms',            '', 'bookings'],
-        ['room-maintenance.php',  'fas fa-tools',     'Room Maintenance', 'room_maintenance', '', 'bookings'],
-        ['housekeeping.php',      'fas fa-broom',     'Housekeeping',     'housekeeping',     '', 'housekeeping'],
-    ],
-    'Stations' => [
+    'Restaurant & Bar' => [
         ['pos.php',                    'fas fa-cash-register',  'POS Till',          'pos_till',          'color:#8B7355;', 'pos'],
-        ['kds.php',                    'fas fa-utensils',       'Kitchen (KDS)',      'kds_view',          'color:#c82333;', ['pos', 'station_kds']],
+        ['kds.php',                    'fas fa-utensils',       'Kitchen (KDS)',     'kds_view',          'color:#c82333;', ['pos', 'station_kds']],
         ['bds.php',                    'fas fa-cocktail',       'Bar Display (BDS)', 'bds_view',          'color:#5e35b1;', ['pos', 'station_bds']],
         ['cds.php',                    'fas fa-mug-hot',        'Coffee Bar (CDS)',  'cds_view',          'color:#6f4e37;', ['pos', 'station_cds']],
         ['room-service-dashboard.php', 'fas fa-bell-concierge', 'Room Service',      'room_service_view', 'color:#0c8d6c;', ['pos', 'station_room_service']],
-        ['kds-report.php',             'fas fa-file-invoice',   'Station Reports',   'kds_reports',       '', ['pos', 'restaurant_page']],
-        ['station-settings.php',       'fas fa-clock',          'Station Hours',     'stock_management',  '', ['pos', 'restaurant_page']],
-        ['deals.php',                  'fas fa-tags',           'Deals & Promos',    'stock_management',  '', 'pos'],
-        ['offline-log.php',            'fas fa-cloud-arrow-up', 'Offline Log',       'offline_log_view',  '', 'pos'],
-    ],
-    'Guides' => [
-        ['../docs/guides/index.html',                         'fas fa-book-open',          'All Guides',          null, '', null],
-        ['../docs/guides/99-admin-dashboard-full-guide.html', 'fas fa-scroll',             'Admin Bible',         null, '', null],
-        ['../docs/guides/01-pos-till.html',                   'fas fa-cash-register',      'POS Guide',           null, '', 'pos'],
-        ['../docs/guides/02-kds-kitchen.html',                'fas fa-utensils',           'KDS Guide',           null, '', ['pos', 'station_kds']],
-        ['../docs/guides/03-bds-bar.html',                    'fas fa-cocktail',           'BDS Guide',           null, '', ['pos', 'station_bds']],
-        ['../docs/guides/04-cds-coffee.html',                 'fas fa-mug-hot',            'CDS Guide',           null, '', ['pos', 'station_cds']],
-        ['../docs/guides/05-room-service.html',               'fas fa-bell-concierge',     'Room Service Guide',  null, '', ['pos', 'station_room_service']],
-        ['../docs/guides/06-housekeeping.html',               'fas fa-broom',              'Housekeeping Guide',  null, '', 'housekeeping'],
-        ['../docs/guides/07-reception-bookings.html',         'fas fa-calendar-check',     'Reception Guide',     null, '', 'bookings'],
-        ['../docs/guides/08-stock-orders.html',               'fas fa-boxes',              'Stock Guide',         null, '', 'stock'],
-        ['../docs/guides/12-email-templates.php',             'fas fa-envelope-open-text', 'Email Template Tags', null, '', null],
-    ],
-    'Content' => [
-        ['gallery-management.php',    'fas fa-images',       'Gallery',           'gallery',           '', 'website_cms'],
-        ['media-management.php',      'fas fa-photo-video',  'Media Portal',      'media_management',  '', 'website_cms'],
-        ['conference-management.php', 'fas fa-briefcase',    'Conference Rooms',  'conference',        '', 'conference'],
-        ['gym-management.php',        'fas fa-dumbbell',     'Gym Packages',      'gym_packages',      '', 'gym'],
-        ['gym-inquiries.php',         'fas fa-inbox',        'Gym Inquiries',     'gym',               '', 'gym'],
-        ['gym-members.php',           'fas fa-id-card',      'Gym Members',       'gym',               '', 'gym'],
-        ['gym-checkin.php',           'fas fa-barcode',      'Gym Check-In',      'gym_checkin',       '', 'gym'],
-        ['gym-schedule.php',          'fas fa-calendar-day', 'Gym Schedule',      'gym',               '', 'gym'],
-        ['gym-classes.php',           'fas fa-people-group', 'Gym Classes',       'gym',               '', 'gym'],
-        ['gym-reports.php',           'fas fa-chart-line',   'Gym Reports',       'gym_reports',       '', 'gym'],
-        ['menu-management.php',       (function_exists('isRestaurantEnabled') && isRestaurantEnabled()) ? 'fas fa-utensils' : 'fas fa-box-open', (function_exists('isRestaurantEnabled') && isRestaurantEnabled()) ? 'Menu' : 'Products', 'menu', '', 'pos'],
-        ['events-management.php',     'fas fa-calendar-alt', 'Events',            'events',            '', ['website_cms', 'events']],
-        ['events-inquiries.php',      'fas fa-calendar-check', 'Event Bookings',  'events_bookings',   '', ['website_cms', 'events']],
-        ['reviews.php',               'fas fa-star',         'Reviews',           'reviews',           '', 'website_cms'],
-        ['contact-inquiries.php',     'fas fa-envelope',     'Contact Inquiries', 'contact',           '', 'website_cms'],
-        ['footer-management.php',     'fas fa-layer-group',  'Footer Management', 'footer_management', '', 'website_cms'],
+        ['menu-management.php',        (function_exists('isRestaurantEnabled') && isRestaurantEnabled()) ? 'fas fa-utensils' : 'fas fa-box-open', (function_exists('isRestaurantEnabled') && isRestaurantEnabled()) ? 'Menu' : 'Products', 'menu', '', 'pos'],
+        ['stock-orders.php',           'fas fa-receipt',        (function_exists('isRestaurantEnabled') && isRestaurantEnabled()) ? 'Orders & Tabs' : 'Orders', 'stock_orders', '', 'stock'],
+        ['restaurant-tables.php',      'fas fa-chair',          'Tables',            'stock_management',  '', ['stock', 'restaurant_page']],
     ],
     'Stock' => [
-        ['stock-dashboard.php',       'fas fa-boxes',          'Stock Dashboard',   'stock_dashboard',  '', 'stock'],
+        ['stock-dashboard.php',       'fas fa-boxes',           'Stock Overview', 'stock_dashboard',  '', 'stock'],
         ['stock-ingredients.php',     (function_exists('isRestaurantEnabled') && isRestaurantEnabled()) ? 'fas fa-carrot' : 'fas fa-boxes-stacked', (function_exists('isRestaurantEnabled') && isRestaurantEnabled()) ? 'Ingredients' : 'Stock Items', 'stock_management', '', 'stock'],
-        ['stock-recipes.php',         'fas fa-book-open',      'Recipes',           'stock_management', '', ['stock', 'restaurant_page']],
-        ['stock-batches.php',         'fas fa-layer-group',    'Batch Tracker',     'stock_batches',    '', 'stock'],
-        ['stock-suppliers.php',       'fas fa-truck-field',    'Suppliers',         'stock_management', '', 'stock'],
-        ['stock-reorder.php',         'fas fa-cart-flatbed',   'Reorder / Buying',  'stock_management', '', 'stock'],
-        ['purchase-orders.php',       'fas fa-file-invoice',   'Purchase Orders',   'stock_management', '', 'stock'],
-        ['stock-orders.php',          'fas fa-receipt',        (function_exists('isRestaurantEnabled') && isRestaurantEnabled()) ? 'Restaurant Orders' : 'Orders', 'stock_orders', '', 'stock'],
-        ['restaurant-tables.php',     'fas fa-chair',          'Restaurant Tables', 'stock_management', '', ['stock', 'restaurant_page']],
-        ['stock-barcode-receive.php', 'fas fa-barcode',        'Receive Stock',     'stock_management', '', 'stock'],
-        ['stock-count.php',           'fas fa-clipboard-check','Stock Count',       'stock_count',      '', 'stock'],
-        ['stock-wastage.php',         'fas fa-trash-alt',      'Wastage Log',       'stock_wastage',    '', 'stock'],
-        ['stock-reports.php',         'fas fa-chart-area',     'Stock Reports',     'stock_reports',    '', 'stock'],
+        ['stock-recipes.php',         'fas fa-book-open',       'Recipes',        'stock_management', '', ['stock', 'restaurant_page']],
+        ['stock-barcode-receive.php', 'fas fa-barcode',         'Receive Stock',  'stock_management', '', 'stock'],
+        ['stock-reorder.php',         'fas fa-cart-flatbed',    'Buying',         'stock_management', '', 'stock'],
+        ['stock-count.php',           'fas fa-clipboard-check', 'Stock Count',    'stock_count',      '', 'stock'],
+        ['stock-wastage.php',         'fas fa-trash-alt',       'Wastage',        'stock_wastage',    '', 'stock'],
     ],
-    'Finance' => [
-        ['accounting-dashboard.php', 'fas fa-calculator',          'Accounting',     'accounting',       '',              'finance'],
-        ['pos-accounting.php',       'fas fa-cash-register',       'POS Accounting', 'pos_accounting',   'color:#8B7355;',['finance', 'pos']],
-        ['payments.php',             'fas fa-money-bill-wave',     'Payments',       'payments',         '',              'finance'],
-        ['receipts.php',             'fas fa-receipt',             'Receipts',       'receipts',         '',              'finance'],
-        ['invoices.php',             'fas fa-file-invoice-dollar', 'Invoices',       'invoices',         '',              ['finance', 'billing']],
-        ['credit-notes.php',         'fas fa-file-invoice',        'Credit Notes',   'invoices',         '',              ['finance', 'advance_booking']],
-        ['quotations.php',           'fas fa-file-contract',       'Quotations',     'invoices',         '',              ['finance', 'billing']],
-        ['payment-add.php',          'fas fa-plus-circle',         'Add Payment',    'payment_add',      '',              'finance'],
-        ['reports.php',              'fas fa-chart-bar',           'Reports',        'reports',          '',              'finance'],
-        ['end-of-day-report.php',    'fas fa-sun',                 'End of Day',     'reports',          'color:#B18247;','finance'],
-        ['rate-plans.php',           'fas fa-tags',                'Rate Plans',     'booking_settings', '',              'bookings'],
-        ['packages.php',             'fas fa-gift',                'Packages',       'booking_settings', '',              'bookings'],
+    'Money' => [
+        ['accounting-dashboard.php', 'fas fa-calculator',          'Accounting', 'accounting', '',               'finance'],
+        ['payments.php',             'fas fa-money-bill-wave',     'Payments',   'payments',   '',               'finance'],
+        ['invoices.php',             'fas fa-file-invoice-dollar', 'Invoices',   'invoices',   '',               ['finance', 'billing']],
+        ['end-of-day-report.php',    'fas fa-sun',                 'End of Day', 'reports',    'color:#B18247;', 'finance'],
+        ['reports.php',              'fas fa-chart-bar',           'Reports',    'reports',    '',               'finance'],
     ],
-    'Configuration' => [
-        ['module-settings.php',            'fas fa-puzzle-piece',       'Module Settings',   'module_settings', '', null],
-        ['booking-settings.php',           'fas fa-cog',                'Booking Settings',  'booking_settings', '', null],
+    'Gym' => [
+        ['gym-members.php',   'fas fa-id-card',      'Members',   'gym',         '', 'gym'],
+        ['gym-checkin.php',   'fas fa-barcode',      'Check-In',  'gym_checkin', '', 'gym'],
+        ['gym-inquiries.php', 'fas fa-inbox',        'Inquiries', 'gym',         '', 'gym'],
+        ['gym-schedule.php',  'fas fa-calendar-day', 'Schedule',  'gym',         '', 'gym'],
+    ],
+    'Website' => [
+        ['reviews.php',            'fas fa-star',     'Reviews',           'reviews', '', 'website_cms'],
+        ['contact-inquiries.php',  'fas fa-envelope', 'Contact Inquiries', 'contact', '', 'website_cms'],
+        ['gallery-management.php', 'fas fa-images',   'Gallery',           'gallery', '', 'website_cms'],
+        ['page-management.php',    'fas fa-file-alt', 'Pages',             'pages',   '', 'website_cms'],
+    ],
+    'Settings' => [
+        ['booking-settings.php',  'fas fa-cog',          'Hotel Settings', 'booking_settings',  '', null],
+        ['room-management.php',   'fas fa-bed',          'Rooms',          'rooms',             '', 'bookings'],
+        ['rate-plans.php',        'fas fa-tags',         'Rate Plans',     'booking_settings',  '', 'bookings'],
+        ['user-management.php',   'fas fa-users-cog',    'Staff & Access', 'user_management',   '', null],
+        ['backup-management.php', 'fas fa-database',     'Backups',        'backup_management', '', null],
+        ['module-settings.php',   'fas fa-puzzle-piece', 'Modules',        'module_settings',   '', null],
+    ],
+    'Advanced' => [
+        // Front desk & rooms
+        ['individual-rooms.php',           'fas fa-door-open',      'Individual Rooms',  'rooms',             '', 'bookings'],
+        ['blocked-dates.php',              'fas fa-ban',            'Blocked Dates',     'blocked_dates',     '', 'bookings'],
+        ['packages.php',                   'fas fa-gift',           'Packages',          'booking_settings',  '', 'bookings'],
+        // Restaurant & stations
+        ['kds-report.php',                 'fas fa-file-invoice',   'Station Reports',   'kds_reports',       '', ['pos', 'restaurant_page']],
+        ['station-settings.php',           'fas fa-clock',          'Station Hours',     'stock_management',  '', ['pos', 'restaurant_page']],
+        ['deals.php',                      'fas fa-tags',           'Deals & Promos',    'stock_management',  '', 'pos'],
+        ['offline-log.php',                'fas fa-cloud-arrow-up', 'Offline Log',       'offline_log_view',  '', 'pos'],
+        // Stock
+        ['stock-batches.php',              'fas fa-layer-group',    'Batch Tracker',     'stock_batches',     '', 'stock'],
+        ['stock-suppliers.php',            'fas fa-truck-field',    'Suppliers',         'stock_management',  '', 'stock'],
+        ['purchase-orders.php',            'fas fa-file-invoice',   'Purchase Orders',   'stock_management',  '', 'stock'],
+        ['stock-reports.php',              'fas fa-chart-area',     'Stock Reports',     'stock_reports',     '', 'stock'],
+        // Money
+        ['pos-accounting.php',             'fas fa-cash-register',  'POS Accounting',    'pos_accounting',    'color:#8B7355;', ['finance', 'pos']],
+        ['receipts.php',                   'fas fa-receipt',        'Receipts',          'receipts',          '', 'finance'],
+        ['credit-notes.php',               'fas fa-file-invoice',   'Credit Notes',      'invoices',          '', ['finance', 'advance_booking']],
+        ['quotations.php',                 'fas fa-file-contract',  'Quotations',        'invoices',          '', ['finance', 'billing']],
+        ['payment-add.php',                'fas fa-plus-circle',    'Add Payment',       'payment_add',       '', 'finance'],
+        // Gym
+        ['gym-management.php',             'fas fa-dumbbell',       'Gym Packages',      'gym_packages',      '', 'gym'],
+        ['gym-classes.php',                'fas fa-people-group',   'Gym Classes',       'gym',               '', 'gym'],
+        ['gym-reports.php',                'fas fa-chart-line',     'Gym Reports',       'gym_reports',       '', 'gym'],
+        // Website
+        ['events-management.php',          'fas fa-calendar-alt',   'Events',            'events',            '', ['website_cms', 'events']],
+        ['media-management.php',           'fas fa-photo-video',    'Media Portal',      'media_management',  '', 'website_cms'],
+        ['footer-management.php',          'fas fa-layer-group',    'Footer',            'footer_management', '', 'website_cms'],
+        ['section-headers-management.php', 'fas fa-heading',        'Section Headers',   'section_headers',   '', 'website_cms'],
+        ['visitor-analytics.php',          'fas fa-chart-line',     'Visitor Analytics', 'visitor_analytics', '', null],
+        // Messaging & integrations
         ['booking-settings.php?section=email-templates#email-templates', 'fas fa-envelope-open-text', 'Email Previewer', 'booking_settings', '', null],
-        ['whatsapp-settings.php',          'fab fa-whatsapp',           'WhatsApp Settings', 'whatsapp_settings',  'color:#25D366;', null],
-        ['facebook-settings.php',          'fab fa-facebook-f',         'Facebook Settings', 'facebook_settings',  'color:#1877F2;', null],
-        ['page-management.php',            'fas fa-file-alt',           'Page Management',   'pages',              '', 'website_cms'],
-        ['cache-management.php',           'fas fa-bolt',               'Cache Management',  'cache',              '', null],
-        ['backup-management.php',          'fas fa-database',           'Backup Management', 'backup_management',  '', null],
-        ['system-logs.php',                'fas fa-clipboard-list',     'System Logs',       'system_logs',        '', null],
-        ['api-keys.php',                   'fas fa-key',                'API Keys',          'api_keys',           '', null],
-        ['user-management.php',            'fas fa-users-cog',          'User Management',   'user_management',    '', null],
-        ['visitor-analytics.php',          'fas fa-chart-line',         'Visitor Analytics', 'visitor_analytics',  '', null],
-        ['section-headers-management.php', 'fas fa-heading',            'Section Headers',   'section_headers',    '', 'website_cms'],
+        ['whatsapp-settings.php',          'fab fa-whatsapp',       'WhatsApp Settings', 'whatsapp_settings', 'color:#25D366;', null],
+        ['facebook-settings.php',          'fab fa-facebook-f',     'Facebook Settings', 'facebook_settings', 'color:#1877F2;', null],
+        ['api-keys.php',                   'fas fa-key',            'API Keys',          'api_keys',          '', null],
+        // System
+        ['system-logs.php',                'fas fa-clipboard-list', 'System Logs',       'system_logs',       '', null],
+        ['cache-management.php',           'fas fa-bolt',           'Cache',             'cache',             '', null],
+        // Guides
+        ['../docs/guides/index.html',                         'fas fa-book-open',          'Staff Guides',        null, '', null],
+        ['../docs/guides/99-admin-dashboard-full-guide.html', 'fas fa-scroll',             'Admin Bible',         null, '', null],
+        ['../docs/guides/12-email-templates.php',             'fas fa-envelope-open-text', 'Email Template Tags', null, '', null],
     ],
 ];
 
+// Groups that start folded until the user opens them.
+$_nav_default_collapsed = ['Advanced'];
+
 $_nav_group_icons = [
-    'Operations' => 'fas fa-compass',
-    'Rooms & Service' => 'fas fa-bed',
-    'Stations' => 'fas fa-display',
-    'Guides' => 'fas fa-book',
-    'Content' => 'fas fa-layer-group',
+    'Front Desk' => 'fas fa-concierge-bell',
+    'Restaurant & Bar' => 'fas fa-utensils',
     'Stock' => 'fas fa-boxes',
-    'Finance' => 'fas fa-calculator',
-    'Configuration' => 'fas fa-sliders-h',
+    'Money' => 'fas fa-coins',
+    'Gym' => 'fas fa-dumbbell',
+    'Website' => 'fas fa-globe',
+    'Settings' => 'fas fa-sliders-h',
+    'Advanced' => 'fas fa-toolbox',
     'External' => 'fas fa-external-link-alt',
 ];
 
@@ -497,8 +504,9 @@ if ($_admin_back_target !== null) {
             $group_id = trim((string)preg_replace('/[^a-z0-9]+/', '-', strtolower($group_label)), '-');
             $group_icon = $_nav_group_icons[$group_label] ?? 'fas fa-folder';
         ?>
-            <section class="nav-group <?php echo $isActiveGroup ? 'is-active-group' : ''; ?>" data-nav-group="<?php echo htmlspecialchars($group_id); ?>">
-                <button type="button" class="nav-group-toggle" aria-expanded="true" aria-controls="nav-group-<?php echo htmlspecialchars($group_id); ?>">
+            <?php $_group_default_collapsed = in_array($group_label, $_nav_default_collapsed, true); $_group_start_folded = $_group_default_collapsed && !$isActiveGroup; ?>
+            <section class="nav-group <?php echo $isActiveGroup ? 'is-active-group' : ''; ?><?php echo $_group_start_folded ? ' collapsed' : ''; ?>" data-nav-group="<?php echo htmlspecialchars($group_id); ?>"<?php echo $_group_default_collapsed ? ' data-nav-default-collapsed="1"' : ''; ?>>
+                <button type="button" class="nav-group-toggle" aria-expanded="<?php echo $_group_start_folded ? 'false' : 'true'; ?>" aria-controls="nav-group-<?php echo htmlspecialchars($group_id); ?>">
                     <span class="nav-group-label"><i class="<?php echo htmlspecialchars($group_icon); ?>"></i><span class="nav-group-title"><?php echo htmlspecialchars($group_label); ?></span></span>
                     <span class="nav-group-count"><?php echo (int)$visibleCount; ?></span>
                     <i class="fas fa-chevron-down nav-group-chevron"></i>

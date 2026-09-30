@@ -497,8 +497,12 @@ $totalAging = (float)$aging['bucket_0_30'] + (float)$aging['bucket_31_60'] + (fl
             </div>
         </div>
 
+        <?php /* Aging and source splits are analysis (also on Reports > Aging), so they sit
+                 folded; the filters and the invoice list come straight after the totals. */ ?>
+        <details class="acct-breakdown-details" style="margin-top: 18px;">
+            <summary class="acct-vat-details__summary"><i class="fas fa-hourglass-half"></i> Receivables aging and outstanding by source</summary>
         <!-- Aging buckets + outstanding by source -->
-        <div class="acct-grid acct-grid--2" style="margin-top: 18px;">
+        <div class="acct-grid acct-grid--2">
             <div class="acct-panel">
                 <div class="acct-panel__head">
                     <h3 class="acct-panel__title">Receivables Aging</h3>
@@ -595,6 +599,7 @@ $totalAging = (float)$aging['bucket_0_30'] + (float)$aging['bucket_31_60'] + (fl
                 </div>
             </div>
         </div>
+        </details>
 
         <!-- Filters -->
         <div class="filters-card" style="margin-top: 18px;">

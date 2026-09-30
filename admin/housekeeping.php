@@ -1220,41 +1220,33 @@ foreach ($assignments as $a) {
 
         <!-- Dashboard Statistics -->
         <div class="hk-dashboard" id="hkStatsDashboard">
+            <?php /* Cards open their detail on click; Verified Today lives in the task list. */ ?>
             <button type="button" class="hk-stat-card hk-stat-card--interactive today_total" data-stat-key="today_total" data-stat-title="Today's Housekeeping Tasks" data-stat-description="All housekeeping assignments scheduled for today.">
                 <span class="hk-stat-card__value"><?php echo (int)$stats['today_total']; ?></span>
                 <span class="hk-stat-card__label"><i class="fas fa-calendar-day"></i> Today's Tasks</span>
-                <span class="hk-stat-card__hint"><i class="fas fa-circle-info"></i> Hover for insight • Click for details</span>
             </button>
             <button type="button" class="hk-stat-card hk-stat-card--interactive pending" data-stat-key="pending" data-stat-title="Pending Tasks" data-stat-description="Tasks waiting to be started.">
                 <span class="hk-stat-card__value"><?php echo (int)$stats['pending']; ?></span>
                 <span class="hk-stat-card__label"><i class="fas fa-clock"></i> Pending Tasks</span>
-                <span class="hk-stat-card__hint"><i class="fas fa-circle-info"></i> Hover for insight • Click for details</span>
             </button>
             <button type="button" class="hk-stat-card hk-stat-card--interactive in_progress" data-stat-key="in_progress" data-stat-title="In Progress" data-stat-description="Tasks currently being cleaned.">
                 <span class="hk-stat-card__value"><?php echo (int)$stats['in_progress']; ?></span>
                 <span class="hk-stat-card__label"><i class="fas fa-spinner"></i> In Progress</span>
-                <span class="hk-stat-card__hint"><i class="fas fa-circle-info"></i> Hover for insight • Click for details</span>
             </button>
             <button type="button" class="hk-stat-card hk-stat-card--interactive completed" data-stat-key="completed_today" data-stat-title="Completed Today" data-stat-description="Housekeeping assignments completed today.">
                 <span class="hk-stat-card__value"><?php echo (int)$stats['completed_today']; ?></span>
                 <span class="hk-stat-card__label"><i class="fas fa-check"></i> Completed Today</span>
-                <span class="hk-stat-card__hint"><i class="fas fa-circle-info"></i> Hover for insight • Click for details</span>
-            </button>
-            <button type="button" class="hk-stat-card hk-stat-card--interactive verified" data-stat-key="verified_today" data-stat-title="Verified Today" data-stat-description="Assignments verified by supervisors today.">
-                <span class="hk-stat-card__value"><?php echo (int)$stats['verified_today']; ?></span>
-                <span class="hk-stat-card__label"><i class="fas fa-check-double"></i> Verified Today</span>
-                <span class="hk-stat-card__hint"><i class="fas fa-circle-info"></i> Hover for insight • Click for details</span>
             </button>
             <button type="button" class="hk-stat-card hk-stat-card--interactive high_priority" data-stat-key="high_priority" data-stat-title="High Priority" data-stat-description="Urgent assignments needing immediate attention.">
                 <span class="hk-stat-card__value"><?php echo (int)$stats['high_priority']; ?></span>
                 <span class="hk-stat-card__label"><i class="fas fa-exclamation-triangle"></i> High Priority</span>
-                <span class="hk-stat-card__hint"><i class="fas fa-circle-info"></i> Hover for insight • Click for details</span>
             </button>
+            <?php if ((int)$stats['blocked'] > 0): /* shown only when something is blocked */ ?>
             <button type="button" class="hk-stat-card hk-stat-card--interactive blocked" data-stat-key="blocked" data-stat-title="Blocked" data-stat-description="Assignments currently blocked and needing unblock action.">
                 <span class="hk-stat-card__value"><?php echo (int)$stats['blocked']; ?></span>
                 <span class="hk-stat-card__label"><i class="fas fa-ban"></i> Blocked</span>
-                <span class="hk-stat-card__hint"><i class="fas fa-circle-info"></i> Hover for insight • Click for details</span>
             </button>
+            <?php endif; ?>
         </div>
         <script type="application/json" id="hkAssignmentData">
             <?php echo json_encode(array_map(static function (array $row): array {

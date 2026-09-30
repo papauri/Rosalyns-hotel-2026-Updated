@@ -366,12 +366,30 @@
             scheduleSidebarStateSave({ collapsed_groups: Array.from(collapsedGroups) });
         }
 
+        // Groups marked data-nav-default-collapsed (e.g. Advanced) start folded;
+        // for those the stored set records '<key>-open' once the user opens them.
+        function isGroupCollapsed(group) {
+            const key = group.dataset.navGroup || '';
+            if (group.dataset.navDefaultCollapsed === '1') return !collapsedGroups.has(key + '-open');
+            return collapsedGroups.has(key);
+        }
+
+        function rememberGroupCollapsed(group, collapsed) {
+            const key = group.dataset.navGroup || '';
+            if (group.dataset.navDefaultCollapsed === '1') {
+                if (collapsed) collapsedGroups.delete(key + '-open');
+                else collapsedGroups.add(key + '-open');
+                return;
+            }
+            if (collapsed) collapsedGroups.add(key);
+            else collapsedGroups.delete(key);
+        }
+
         function applyCollapsedGroups() {
             nav.querySelectorAll('.nav-group').forEach(function (group) {
-                const key = group.dataset.navGroup || '';
                 const hasActive = !!group.querySelector('.admin-nav-link.active');
-                if (hasActive) collapsedGroups.delete(key);
-                setGroupCollapsed(group, collapsedGroups.has(key));
+                // The page you are on always shows its group, without changing the saved preference.
+                setGroupCollapsed(group, hasActive ? false : isGroupCollapsed(group));
             });
             saveCollapsedGroups();
         }
@@ -380,11 +398,9 @@
             toggle.addEventListener('click', function () {
                 const group = this.closest('.nav-group');
                 if (!group) return;
-                const key = group.dataset.navGroup || '';
                 const nextCollapsed = !group.classList.contains('collapsed');
                 setGroupCollapsed(group, nextCollapsed);
-                if (nextCollapsed) collapsedGroups.add(key);
-                else collapsedGroups.delete(key);
+                rememberGroupCollapsed(group, nextCollapsed);
                 saveCollapsedGroups();
             });
         });

@@ -540,6 +540,44 @@ body.dashboard-insight-open {
     }
 }
 
+/* System health alert — only rendered visible when a check fails */
+.dashboard-health-alert {
+    display: flex;
+    align-items: flex-start;
+    gap: 12px;
+    flex-wrap: wrap;
+    background: #fff3e0;
+    border: 1px solid #ffe0b2;
+    border-radius: 10px;
+    padding: 14px 18px;
+    margin-bottom: 20px;
+    color: #e65100;
+    font-size: 14px;
+}
+
+.dashboard-health-alert[hidden] {
+    display: none;
+}
+
+.dashboard-health-alert > i {
+    margin-top: 3px;
+}
+
+.dashboard-health-alert__body {
+    flex: 1 1 240px;
+}
+
+.dashboard-health-alert__body ul {
+    margin: 4px 0 0;
+    padding-left: 18px;
+}
+
+.dashboard-health-alert__actions {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+}
+
 /* Widget strip */
 .widget-strip {
     display: grid;

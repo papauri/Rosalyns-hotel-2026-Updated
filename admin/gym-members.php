@@ -651,7 +651,10 @@ $gm_currency = (string)getSetting('currency_symbol', 'K');
         <?php else: ?>
 
         <!-- Renewal reminder engine — configurable days-before-expiry email -->
-        <div style="background:#fff;border:1px solid #d5cfc4;border-radius:4px;padding:14px 18px;margin-bottom:18px;display:flex;align-items:center;gap:14px;flex-wrap:wrap;">
+        <?php /* Set-once reminder settings sit folded so the register comes first. */ ?>
+        <details style="background:#fff;border:1px solid #d5cfc4;border-radius:4px;margin-bottom:18px;">
+            <summary style="min-height:44px;display:flex;align-items:center;gap:8px;padding:10px 18px;cursor:pointer;font-weight:700;color:#8B7355;font-size:.82rem;letter-spacing:.05em;text-transform:uppercase;"><i class="fas fa-bell"></i> Renewal reminders</summary>
+        <div style="background:#fff;border:0;border-top:1px solid #d5cfc4;padding:14px 18px;display:flex;align-items:center;gap:14px;flex-wrap:wrap;">
             <span style="font-weight:700;color:#8B7355;font-size:.82rem;letter-spacing:.05em;text-transform:uppercase;">
                 <i class="fas fa-bell"></i> Renewal Reminders
             </span>
@@ -677,6 +680,7 @@ $gm_currency = (string)getSetting('currency_symbol', 'K');
                 <?php endif; ?>
             </span>
         </div>
+        </details>
 
         <div class="menu-type-tabs" style="margin-bottom:18px;">
             <?php foreach (['all' => 'All', 'active' => 'Active', 'expiring' => 'Expiring ≤30d', 'expired' => 'Expired'] as $fk => $fl): ?>

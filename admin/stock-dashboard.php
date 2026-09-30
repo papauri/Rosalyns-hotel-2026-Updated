@@ -451,42 +451,8 @@ $csrf_token = generateCsrfToken();
         </div>
         <?php endif; ?>
 
-        <!-- ═══ INVENTORY HEALTH ═══ -->
-        <div class="sdash-section">
-            <div class="sdash-section__header">
-                <h3 class="sdash-section__title"><i class="fas fa-heartbeat"></i> Inventory Health</h3>
-            </div>
-            <div class="sdash-health-grid">
-                <div class="sdash-health-stat">
-                    <div class="sdash-health-stat__value"><?php echo number_format((int)$metrics['ingredient_count']); ?></div>
-                    <div class="sdash-health-stat__label">Ingredients tracked</div>
-                </div>
-                <div class="sdash-health-stat <?php echo ($metrics['critical_stock'] ?? 0) > 0 ? 'sdash-health-stat--danger' : ''; ?>">
-                    <div class="sdash-health-stat__value"><?php echo number_format((int)$metrics['critical_stock']); ?></div>
-                    <div class="sdash-health-stat__label">Out of stock</div>
-                </div>
-                <a href="stock-reorder.php" class="sdash-health-stat <?php echo ($metrics['low_stock'] ?? 0) > 0 ? 'sdash-health-stat--warn' : ''; ?>" style="text-decoration:none;color:inherit;" title="Open the Reorder / Buying report">
-                    <div class="sdash-health-stat__value"><?php echo number_format((int)$metrics['low_stock']); ?></div>
-                    <div class="sdash-health-stat__label">Running low &rsaquo;</div>
-                </a>
-                <div class="sdash-health-stat">
-                    <div class="sdash-health-stat__value"><?php echo number_format((int)$metrics['active_batches']); ?></div>
-                    <div class="sdash-health-stat__label">Active batches</div>
-                </div>
-                <div class="sdash-health-stat <?php echo ($metrics['expiring_3d'] ?? 0) > 0 ? 'sdash-health-stat--danger' : ''; ?>">
-                    <div class="sdash-health-stat__value"><?php echo number_format((int)$metrics['expiring_3d']); ?></div>
-                    <div class="sdash-health-stat__label">Expiring ≤3 days</div>
-                </div>
-                <div class="sdash-health-stat <?php echo ($metrics['expiring_7d'] ?? 0) > 0 ? 'sdash-health-stat--warn' : ''; ?>">
-                    <div class="sdash-health-stat__value"><?php echo number_format((int)$metrics['expiring_7d']); ?></div>
-                    <div class="sdash-health-stat__label">Expiring 4–7 days</div>
-                </div>
-                <div class="sdash-health-stat <?php echo ($metrics['expired_batches'] ?? 0) > 0 ? 'sdash-health-stat--danger' : ''; ?>">
-                    <div class="sdash-health-stat__value"><?php echo number_format((int)($metrics['expired_batches'] ?? 0)); ?></div>
-                    <div class="sdash-health-stat__label"><a href="stock-batches.php?filter=expired" style="color:inherit;text-decoration:none;">Expired (still active)</a></div>
-                </div>
-            </div>
-        </div>
+        <?php /* Inventory Health counts were removed: the banner and Needs Attention above already
+                 show out-of-stock, low, expiring and expired items, each with an action. */ ?>
 
         <?php if (function_exists('isRestaurantEnabled') && isRestaurantEnabled()): ?>
         <!-- ═══ RECIPE COVERAGE ═══ (food-service only — recipes/food-cost don't apply to retail presets) -->

@@ -28,8 +28,6 @@ $roomServiceNow = new DateTimeImmutable('now', new DateTimeZone($roomServiceRemi
 $roomServiceReminderDueNow = $roomServiceNow->format('H:i') >= $roomServiceReminderTime;
 
 // Default values so the template never sees undefined variables if DB queries fail
-$recent_bookings   = [];
-$recent_conferences = [];
 $upcoming_checkins = [];
 $today_conference_events = [];
 $upcoming_conferences = [];
@@ -39,7 +37,6 @@ $pending_bookings = 0;
 $current_guests = 0;
 $pending_conference = 0;
 $today_conferences = 0;
-$expired_bookings = 0;
 $ops = [
     'open_tabs' => 0,
     'open_tabs_value' => 0.0,
@@ -80,11 +77,6 @@ $gymDash = [
     'expiring_members' => 0,
 ];
 $roomServiceQueue = [];
-$activity_log = [];
-$activity_log_total = 0;
-$activity_log_page = 1;
-$activity_log_per_page = 10;
-$activity_log_total_pages = 1;
 $is_card_insight_ajax = isset($_GET['ajax']) && $_GET['ajax'] === 'card_insight';
 $station_union_window = null;
 $station_union_start_sql = '';
@@ -140,20 +132,6 @@ if (!$is_card_insight_ajax) {
             $current_stmt = $pdo->query("SELECT COUNT(*) as count FROM bookings WHERE status = 'checked-in'");
             $current_guests = $current_stmt->fetch(PDO::FETCH_ASSOC)['count'];
 
-            $expired_stmt = $pdo->query("SELECT COUNT(*) as count FROM bookings WHERE status = 'expired' AND expired_at >= DATE_SUB(NOW(), INTERVAL 24 HOUR)");
-            $expired_bookings = $expired_stmt->fetch(PDO::FETCH_ASSOC)['count'];
-
-            $recent_stmt = $pdo->query("
-                SELECT b.*, r.name as room_name,
-                       ir.room_number as individual_room_number, ir.room_name as individual_room_name,
-                       b.total_amount, b.amount_paid, b.amount_due, b.payment_status
-                FROM bookings b
-                JOIN rooms r ON b.room_id = r.id
-                LEFT JOIN individual_rooms ir ON b.individual_room_id = ir.id
-                ORDER BY b.created_at DESC LIMIT 10
-            ");
-            $recent_bookings = $recent_stmt->fetchAll(PDO::FETCH_ASSOC);
-
             $upcoming_stmt = $pdo->prepare("
                 SELECT b.*, r.name as room_name,
                        ir.room_number as individual_room_number, ir.room_name as individual_room_name,
@@ -176,14 +154,6 @@ if (!$is_card_insight_ajax) {
             $today_conf_stmt = $pdo->prepare("SELECT COUNT(*) as count FROM conference_inquiries WHERE event_date = ? AND status IN ('confirmed', 'pending')");
             $today_conf_stmt->execute([$today]);
             $today_conferences = $today_conf_stmt->fetch(PDO::FETCH_ASSOC)['count'];
-
-            $recent_conf_stmt = $pdo->query("
-                SELECT ci.*, cr.name as room_name
-                FROM conference_inquiries ci
-                LEFT JOIN conference_rooms cr ON ci.conference_room_id = cr.id
-                ORDER BY ci.created_at DESC LIMIT 10
-            ");
-            $recent_conferences = $recent_conf_stmt->fetchAll(PDO::FETCH_ASSOC);
 
             $today_conf_events_stmt = $pdo->prepare("
                 SELECT ci.*, cr.name as room_name
@@ -249,20 +219,6 @@ if (!$is_card_insight_ajax) {
                         )")->fetchColumn();
                 $ops['room_service_reminders_due'] = $roomServiceReminderDueNow ? (int)$ops['room_service_reminder_pending'] : 0;
             }
-            if ($station_union_start_sql !== '' && $station_union_end_sql !== '') {
-                $stationCountStmt = $pdo->prepare("SELECT oi.station, COUNT(DISTINCT o.id) AS c
-                    FROM stock_orders o
-                    INNER JOIN stock_order_items oi ON oi.order_id = o.id
-                    WHERE o.kitchen_status IN ('new','in_progress','ready','recalled')
-                      AND o.fired_at IS NOT NULL AND o.fired_at >= ? AND o.fired_at < ?
-                      AND oi.kds_status NOT IN ('served','void')
-                    GROUP BY oi.station");
-                $stationCountStmt->execute([$station_union_start_sql, $station_union_end_sql]);
-                $st = $stationCountStmt->fetchAll(PDO::FETCH_KEY_PAIR);
-                $ops['kds_kitchen_pending'] = (int)($st['kitchen'] ?? 0);
-                $ops['kds_bar_pending']     = (int)($st['bar'] ?? 0);
-                $ops['kds_coffee_pending']  = (int)($st['coffee_bar'] ?? 0);
-            }
             $r = $pdo->query("SELECT COUNT(*) c, COALESCE(SUM(total_amount),0) v FROM stock_orders WHERE status IN ('paid','completed') AND DATE(COALESCE(paid_at, created_at))=CURDATE()")->fetch(PDO::FETCH_ASSOC);
             $ops['orders_today'] = (int)$r['c'];
             $ops['restaurant_rev_today'] = (float)$r['v'];
@@ -276,7 +232,6 @@ if (!$is_card_insight_ajax) {
             $stock['expired_batches']  = (int)$pdo->query("SELECT COUNT(*) FROM stock_batches WHERE status='active' AND quantity_remaining > 0 AND expiry_date IS NOT NULL AND expiry_date < CURDATE()")->fetchColumn();
             $stock['wastage_today']    = (float)$pdo->query("SELECT COALESCE(SUM(quantity * COALESCE(cost_per_unit,0)),0) FROM stock_wastage WHERE DATE(created_at)=CURDATE()")->fetchColumn();
             $stock['low_items']        = $pdo->query("SELECT id, name, unit, current_quantity, min_quantity FROM stock_ingredients WHERE is_archived=0 AND min_quantity > 0 AND current_quantity <= min_quantity ORDER BY (current_quantity / NULLIF(min_quantity,0)) ASC LIMIT 8")->fetchAll(PDO::FETCH_ASSOC);
-            $stock['expiring_items']   = $pdo->query("SELECT b.id, i.name, b.batch_number, b.quantity_remaining, i.unit, b.expiry_date FROM stock_batches b JOIN stock_ingredients i ON i.id=b.ingredient_id WHERE b.status='active' AND b.quantity_remaining > 0 AND b.expiry_date IS NOT NULL AND b.expiry_date <= DATE_ADD(CURDATE(), INTERVAL 7 DAY) ORDER BY b.expiry_date ASC LIMIT 8")->fetchAll(PDO::FETCH_ASSOC);
         } catch (Throwable $e) { /* fine */ }
     }
 
@@ -343,45 +298,6 @@ if (!$is_card_insight_ajax) {
             ")->fetchAll(PDO::FETCH_ASSOC);
         } catch (Throwable $e) {
             $roomServiceQueue = [];
-        }
-    }
-
-    // Fetch recent login activity (admin only)
-    $activity_log = [];
-    if ($user['role'] === 'admin') {
-        try {
-            $activity_log_page = max(1, (int)($_GET['activity_page'] ?? 1));
-
-            $activity_log_total_stmt = $pdo->query("
-                SELECT COUNT(*)
-                FROM admin_activity_log
-                WHERE action IN ('login_success', 'login_failed', 'logout', 'password_reset', 'login_blocked')
-            ");
-            $activity_log_total = (int)$activity_log_total_stmt->fetchColumn();
-            $activity_log_total_pages = max(1, (int)ceil($activity_log_total / $activity_log_per_page));
-            if ($activity_log_page > $activity_log_total_pages) {
-                $activity_log_page = $activity_log_total_pages;
-            }
-
-            $activity_log_offset = max(0, ($activity_log_page - 1) * $activity_log_per_page);
-            $log_stmt = $pdo->prepare("
-                SELECT al.*, au.full_name
-                FROM admin_activity_log al
-                LEFT JOIN admin_users au ON al.user_id = au.id
-                WHERE al.action IN ('login_success', 'login_failed', 'logout', 'password_reset', 'login_blocked')
-                ORDER BY al.created_at DESC
-                LIMIT :limit OFFSET :offset
-            ");
-            $log_stmt->bindValue(':limit', $activity_log_per_page, PDO::PARAM_INT);
-            $log_stmt->bindValue(':offset', $activity_log_offset, PDO::PARAM_INT);
-            $log_stmt->execute();
-            $activity_log = $log_stmt->fetchAll(PDO::FETCH_ASSOC);
-        } catch (PDOException $e) {
-            // Table may not exist yet - that's fine
-            $activity_log = [];
-            $activity_log_total = 0;
-            $activity_log_page = 1;
-            $activity_log_total_pages = 1;
         }
     }
 }
@@ -1928,14 +1844,6 @@ $currency_symbol = getSetting('currency_symbol');
                 <div class="stat-label">In-House Guests</div>
                 <div class="stat-sub">Currently checked in</div>
             </a>
-
-            <a class="stat-card <?php echo $expired_bookings > 0 ? 'stat-warn' : ''; ?> js-dashboard-insight" data-insight-card="expired_bookings" href="bookings.php?status=expired" title="Bookings that expired in the last 24h">
-                <span class="stat-cta">Review →</span>
-                <div class="stat-icon"><i class="fas fa-hourglass-end"></i></div>
-                <div class="stat-value"><?php echo $expired_bookings; ?></div>
-                <div class="stat-label">Expired (24h)</div>
-                <div class="stat-sub">Unpaid holds released</div>
-            </a>
             <?php endif; ?>
 
             <?php if ($mod_conference): ?>
@@ -1994,11 +1902,11 @@ $currency_symbol = getSetting('currency_symbol');
         </div>
         <?php endif; ?>
 
-        <?php if ($mod_pos || $mod_finance): ?>
-        <!-- Operations Pulse: real-time restaurant / room-service / KDS pipeline -->
-        <h3 class="section-title" style="margin-top:6px;"><i class="fas fa-bolt"></i> Operations Pulse</h3>
+        <?php if ($mod_finance || ($mod_pos && $mod_bookings)): ?>
+        <!-- Money today: takings, open tabs and refunds waiting -->
+        <h3 class="section-title" style="margin-top:6px;"><i class="fas fa-coins"></i> Money Today</h3>
         <div class="ops-grid">
-            <?php if ($mod_stock): ?>
+            <?php if ($mod_stock && $mod_bookings): /* POS-only presets show this in the stats row */ ?>
             <a class="ops-card js-dashboard-insight" data-insight-card="open_tabs" href="stock-orders.php?status=placed" title="<?php echo isRestaurantEnabled() ? 'Open restaurant tabs awaiting payment' : 'Placed orders awaiting payment'; ?>">
                 <div class="ops-icon" style="background:#e67e22;"><i class="fas fa-receipt"></i></div>
                 <div class="ops-body">
@@ -2009,62 +1917,7 @@ $currency_symbol = getSetting('currency_symbol');
             </a>
             <?php endif; // mod_stock — open tabs ?>
 
-            <?php if ($mod_pos && $mod_bookings): ?>
-            <a class="ops-card js-dashboard-insight" data-insight-card="room_service_pending" href="stock-orders.php?type=room_service" title="Room-service orders in flight">
-                <div class="ops-icon" style="background:#8e44ad;"><i class="fas fa-concierge-bell"></i></div>
-                <div class="ops-body">
-                    <div class="ops-value"><?php echo $ops['room_service_pending']; ?></div>
-                    <div class="ops-label">Room Service Pending</div>
-                    <div class="ops-sub">Active room-folio orders</div>
-                </div>
-            </a>
-            <a class="ops-card js-dashboard-insight" data-insight-card="room_service_reminders_due" href="housekeeping.php" title="Daily room-service reminders for occupied rooms">
-                <div class="ops-icon" style="background:<?php echo $ops['room_service_reminders_due'] > 0 ? '#c62828' : '#455a64'; ?>;"><i class="fas fa-bell"></i></div>
-                <div class="ops-body">
-                    <div class="ops-value"><?php echo $ops['room_service_reminders_due']; ?></div>
-                    <div class="ops-label">Room-Service Reminders Due</div>
-                    <div class="ops-sub">
-                        <?php if ($roomServiceReminderDueNow): ?>
-                            <?php echo $ops['room_service_reminders_due'] > 0 ? 'Follow-up needed now' : 'All occupied rooms served today'; ?>
-                        <?php else: ?>
-                            Opens at <?php echo htmlspecialchars($roomServiceReminderTime, ENT_QUOTES, 'UTF-8'); ?> (<?php echo htmlspecialchars($roomServiceReminderTimezone, ENT_QUOTES, 'UTF-8'); ?>)
-                        <?php endif; ?>
-                    </div>
-                </div>
-            </a>
-            <?php endif; ?>
-
-            <?php if ($mod_pos && $mod_station_kds): ?>
-            <a class="ops-card js-dashboard-insight" data-insight-card="kitchen_tickets" href="kds.php" target="_blank" rel="noopener" title="Open Kitchen Display System">
-                <div class="ops-icon" style="background:#dc3545;"><i class="fas fa-utensils"></i></div>
-                <div class="ops-body">
-                    <div class="ops-value"><?php echo $ops['kds_kitchen_pending']; ?></div>
-                    <div class="ops-label">Kitchen Tickets</div>
-                    <div class="ops-sub">Active service-window tickets</div>
-                </div>
-            </a>
-            <?php endif; ?>
-            <?php if ($mod_pos && $mod_station_bds): ?>
-            <a class="ops-card js-dashboard-insight" data-insight-card="bar_tickets" href="bds.php" target="_blank" rel="noopener" title="Open Bar Display System">
-                <div class="ops-icon" style="background:#6f42c1;"><i class="fas fa-cocktail"></i></div>
-                <div class="ops-body">
-                    <div class="ops-value"><?php echo $ops['kds_bar_pending']; ?></div>
-                    <div class="ops-label">Bar Tickets</div>
-                    <div class="ops-sub">Active service-window tickets</div>
-                </div>
-            </a>
-            <?php endif; ?>
-            <?php if ($mod_pos && $mod_station_cds): ?>
-            <a class="ops-card js-dashboard-insight" data-insight-card="coffee_tickets" href="cds.php" target="_blank" rel="noopener" title="Open Coffee Display System">
-                <div class="ops-icon" style="background:#8B5A2B;"><i class="fas fa-mug-hot"></i></div>
-                <div class="ops-body">
-                    <div class="ops-value"><?php echo $ops['kds_coffee_pending']; ?></div>
-                    <div class="ops-label">Coffee Tickets</div>
-                    <div class="ops-sub">Active service-window tickets</div>
-                </div>
-            </a>
-            <?php endif; ?>
-            <?php if ($mod_pos): ?>
+            <?php if ($mod_pos && $mod_bookings): /* POS-only presets show this in the stats row */ ?>
             <a class="ops-card js-dashboard-insight" data-insight-card="restaurant_revenue_today" href="reports.php?type=accounting&range=today" title="<?php echo isRestaurantEnabled() ? "Today's restaurant revenue" : "Today's POS revenue"; ?>">
                 <div class="ops-icon" style="background:#16a085;"><i class="fas fa-cash-register"></i></div>
                 <div class="ops-body">
@@ -2096,7 +1949,7 @@ $currency_symbol = getSetting('currency_symbol');
         </div>
         <?php endif; ?>
 
-        <?php if ($mod_stock || $mod_website_cms || $mod_gym || $mod_bookings || $mod_housekeeping || $mod_pos || $mod_finance): ?>
+        <?php if ($mod_stock || $mod_website_cms || $mod_gym || $mod_events || $mod_housekeeping || ($mod_pos && $mod_bookings)): ?>
         <!-- Three-up widget strip: Stock Health · Guest Services · Operations & Facilities -->
         <div class="widget-strip">
             <?php if ($mod_stock): ?>
@@ -2146,7 +1999,7 @@ $currency_symbol = getSetting('currency_symbol');
             </div>
             <?php endif; // mod_stock ?>
 
-            <?php if ($mod_website_cms || $mod_gym || $mod_bookings): ?>
+            <?php if ($mod_website_cms || $mod_gym || $mod_events): ?>
             <!-- Guest Services -->
             <div class="widget-card">
                 <h4>
@@ -2188,25 +2041,11 @@ $currency_symbol = getSetting('currency_symbol');
                         </a>
                     </li>
                     <?php endif; ?>
-                    <?php if ($mod_bookings): ?>
-                    <li>
-                        <span class="pri"><i class="fas fa-calendar-day"></i> Today's check-ins</span>
-                        <a href="bookings.php?filter=checkin_today" style="text-decoration:none;">
-                            <span class="pulse-pill green"><?php echo $today_checkins; ?></span>
-                        </a>
-                    </li>
-                    <li>
-                        <span class="pri"><i class="fas fa-bed"></i> In-house guests</span>
-                        <a href="bookings.php?status=checked-in" style="text-decoration:none;">
-                            <span class="pulse-pill green"><?php echo $current_guests; ?></span>
-                        </a>
-                    </li>
-                    <?php endif; ?>
                 </ul>
             </div>
             <?php endif; ?>
 
-            <?php if ($mod_housekeeping || $mod_pos || $mod_finance): ?>
+            <?php if ($mod_housekeeping || ($mod_pos && $mod_bookings)): ?>
             <!-- Operations & Facilities -->
             <div class="widget-card">
                 <h4>
@@ -2249,98 +2088,27 @@ $currency_symbol = getSetting('currency_symbol');
                         </button>
                     </li>
                     <?php endif; ?>
-                    <?php if ($mod_stock): ?>
-                    <li>
-                        <span class="pri"><i class="fas fa-receipt" style="color:#e67e22;"></i> <?php echo isRestaurantEnabled() ? 'Open restaurant tabs' : 'Pending orders'; ?></span>
-                        <a href="stock-orders.php?status=placed" style="text-decoration:none;">
-                            <span class="pulse-pill <?php echo $ops['open_tabs'] > 0 ? 'amber' : 'green'; ?>"><?php echo $ops['open_tabs']; ?></span>
-                        </a>
-                    </li>
-                    <?php endif; ?>
-                    <?php if ($mod_finance && $mod_receivables): ?>
-                    <li>
-                        <span class="pri"><i class="fas fa-money-check-alt" style="color:#dc3545;"></i> <?php echo $mod_bookings ? 'Bookings' : 'Accounts'; ?> with balance due</span>
-                        <a href="payments.php?balance=outstanding" style="text-decoration:none;">
-                            <span class="pulse-pill <?php echo $finance['outstanding_count'] > 0 ? 'red' : 'green'; ?>"><?php echo $finance['outstanding_count']; ?></span>
-                        </a>
-                    </li>
-                    <?php endif; ?>
                 </ul>
             </div>
             <?php endif; ?>
         </div>
         <?php endif; ?>
 
-        <!-- ===================================================================
-             System Health Monitor — polls /admin/api/system-health.php
-             ================================================================ -->
-        <h3 class="section-title" style="margin-top:6px;"><i class="fas fa-heartbeat" style="color:#dc3545;"></i> System Health</h3>
-        <div class="ops-grid" id="sysHealthGrid" style="margin-bottom:6px;">
-            <!-- Database -->
-            <div class="ops-card" style="cursor:default;">
-                <div class="ops-icon" id="shcDbIcon" style="background:#aaa;"><i class="fas fa-database"></i></div>
-                <div class="ops-body">
-                    <div class="ops-value" id="shcDbValue"><i class="fas fa-spinner fa-spin"></i></div>
-                    <div class="ops-label">Database</div>
-                    <div class="ops-sub" id="shcDbMeta">Checking…</div>
-                </div>
+        <?php if (hasPermission((int)$user['id'], 'system_logs')): ?>
+        <!-- System health: silent while all is well; appears only when something needs the owner's attention.
+             Polls admin/api/system-health.php every 5 minutes. -->
+        <div class="dashboard-health-alert" id="sysHealthAlert" role="status" hidden>
+            <i class="fas fa-triangle-exclamation" aria-hidden="true"></i>
+            <div class="dashboard-health-alert__body">
+                <strong>System needs attention</strong>
+                <ul id="sysHealthIssues"></ul>
             </div>
-            <!-- Last Backup -->
-            <div class="ops-card" style="cursor:default;">
-                <div class="ops-icon" id="shcBackupIcon" style="background:#aaa;"><i class="fas fa-cloud-download-alt"></i></div>
-                <div class="ops-body">
-                    <div class="ops-value" id="shcBackupValue" style="font-size:18px;"><i class="fas fa-spinner fa-spin"></i></div>
-                    <div class="ops-label">Last Backup</div>
-                    <div class="ops-sub" id="shcBackupMeta">Checking…</div>
-                </div>
-            </div>
-            <!-- Disk Space -->
-            <div class="ops-card" style="cursor:default;">
-                <div class="ops-icon" id="shcDiskIcon" style="background:#aaa;"><i class="fas fa-hdd"></i></div>
-                <div class="ops-body">
-                    <div class="ops-value" id="shcDiskValue" style="font-size:18px;"><i class="fas fa-spinner fa-spin"></i></div>
-                    <div class="ops-label">Disk Space Free</div>
-                    <div class="ops-sub" id="shcDiskMeta">Checking…</div>
-                </div>
-            </div>
-            <!-- Error Log -->
-            <div class="ops-card" style="cursor:default;">
-                <div class="ops-icon" id="shcLogIcon" style="background:#aaa;"><i class="fas fa-file-medical-alt"></i></div>
-                <div class="ops-body">
-                    <div class="ops-value" id="shcLogValue" style="font-size:18px;"><i class="fas fa-spinner fa-spin"></i></div>
-                    <div class="ops-label">Error Log Size</div>
-                    <div class="ops-sub" id="shcLogMeta">Checking…</div>
-                </div>
-            </div>
-            <!-- PHP Version -->
-            <div class="ops-card" style="cursor:default;">
-                <div class="ops-icon" style="background:#8892bf;"><i class="fab fa-php"></i></div>
-                <div class="ops-body">
-                    <div class="ops-value" id="shcPhpValue" style="font-size:16px;"><i class="fas fa-spinner fa-spin"></i></div>
-                    <div class="ops-label">PHP Version</div>
-                    <div class="ops-sub" id="shcPhpMeta">Checking…</div>
-                </div>
-            </div>
-            <?php if ($mod_bookings): ?>
-            <!-- Tentative Booking Sweep — booking-expiry housekeeping, only meaningful with the bookings module -->
-            <div class="ops-card" style="cursor:default;">
-                <div class="ops-icon" id="shcSweepIcon" style="background:#aaa;"><i class="fas fa-broom"></i></div>
-                <div class="ops-body">
-                    <div class="ops-value" id="shcSweepValue" style="font-size:18px;"><i class="fas fa-spinner fa-spin"></i></div>
-                    <div class="ops-label">Tentative Sweep</div>
-                    <div class="ops-sub" id="shcSweepMeta">Checking…</div>
-                </div>
-            </div>
-            <?php endif; ?>
-        </div>
-        <div style="display:flex; justify-content:space-between; align-items:center; font-size:11px; color:#888; margin-bottom:20px; padding:0 2px 0 4px;">
-            <span>Auto-refreshes every 60 s &nbsp;&middot;&nbsp; Last checked: <strong id="shcLastChecked">—</strong></span>
-            <div style="display:flex; gap:6px;">
-                <a href="backup-management.php" class="btn btn-outline" style="font-size:11px; padding:4px 12px;"><i class="fas fa-archive"></i> Manage Backups</a>
-                <a href="system-logs.php" class="btn btn-outline" style="font-size:11px; padding:4px 12px;"><i class="fas fa-list-alt"></i> System Logs</a>
-                <button type="button" id="shcRefreshBtn" class="btn btn-outline" style="font-size:11px; padding:4px 12px;"><i class="fas fa-sync-alt"></i> Refresh</button>
+            <div class="dashboard-health-alert__actions">
+                <a href="backup-management.php" class="btn btn-sm btn-outline">Backups</a>
+                <a href="system-logs.php" class="btn btn-sm btn-outline">System Logs</a>
             </div>
         </div>
+        <?php endif; ?>
 
         <?php if ($mod_pos && $mod_bookings && !empty($roomServiceQueue)): ?>
             <!-- Room-service queue: live oldest-first list of in-flight room orders -->
@@ -2388,44 +2156,6 @@ $currency_symbol = getSetting('currency_symbol');
             </div>
         <?php endif; ?>
 
-        <?php if ($mod_stock && !empty($stock['expiring_items'])): ?>
-            <!-- Stock alerts: batches expiring within 7 days -->
-            <div class="today-checkins-section">
-                <h3>
-                    <i class="fas fa-exclamation-triangle" style="color:#b45309;"></i> Batches Expiring Within 7 Days (<?php echo count($stock['expiring_items']); ?>)
-                    <a href="stock-orders.php?view=batches" class="btn btn-sm btn-outline" style="float:right;">All batches →</a>
-                </h3>
-                <div class="table-container">
-                    <table class="table">
-                        <thead>
-                            <tr>
-                                <th>Ingredient</th>
-                                <th>Batch</th>
-                                <th>Remaining</th>
-                                <th>Expiry</th>
-                                <th>Days Left</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            <?php foreach ($stock['expiring_items'] as $b):
-                                $daysLeft = (int)((strtotime($b['expiry_date']) - strtotime(date('Y-m-d'))) / 86400);
-                                $color = $daysLeft < 0 ? '#c62828' : ($daysLeft <= 2 ? '#e65100' : '#b45309');
-                            ?>
-                                <tr>
-                                    <td data-label="Ingredient"><?php echo htmlspecialchars($b['name']); ?></td>
-                                    <td data-label="Batch"><?php echo htmlspecialchars($b['batch_number'] ?? '—'); ?></td>
-                                    <td data-label="Remaining"><?php echo number_format((float)$b['quantity_remaining'], 1) . ' ' . htmlspecialchars($b['unit']); ?></td>
-                                    <td data-label="Expiry"><?php echo date('M j, Y', strtotime($b['expiry_date'])); ?></td>
-                                    <td data-label="Days Left" style="color:<?php echo $color; ?>; font-weight:600;">
-                                        <?php echo $daysLeft < 0 ? abs($daysLeft) . ' days OVERDUE' : $daysLeft . ' days'; ?>
-                                    </td>
-                                </tr>
-                            <?php endforeach; ?>
-                        </tbody>
-                    </table>
-                </div>
-            </div>
-        <?php endif; ?>
 
 
         <?php if ($mod_bookings || $mod_housekeeping): ?>
@@ -2482,24 +2212,6 @@ $currency_symbol = getSetting('currency_symbol');
                             <span class="label"><?php echo $info['label']; ?></span>
                         </button>
                     <?php endforeach; ?>
-                </div>
-                <div class="quick-actions-row">
-                    <button type="button" class="action-item js-dashboard-insight" data-insight-card="room_status_cleaning" title="View rooms queued for cleaning" data-no-spa="1" data-no-admin-loader="1">
-                        <span class="action-value"><?php echo $roomSummary['cleaning_queue'] ?? 0; ?></span>
-                        <span class="action-label"><i class="fas fa-broom"></i> To Clean</span>
-                    </button>
-                    <button type="button" class="action-item js-dashboard-insight" data-insight-card="checkins_today" title="View today's check-ins" data-no-spa="1" data-no-admin-loader="1">
-                        <span class="action-value"><?php echo $roomSummary['checkins_today'] ?? 0; ?></span>
-                        <span class="action-label"><i class="fas fa-sign-in-alt"></i> Check-ins</span>
-                    </button>
-                    <button type="button" class="action-item js-dashboard-insight" data-insight-card="checkouts_today" title="View today's check-outs" data-no-spa="1" data-no-admin-loader="1">
-                        <span class="action-value"><?php echo $roomSummary['checkouts_today'] ?? 0; ?></span>
-                        <span class="action-label"><i class="fas fa-sign-out-alt"></i> Check-outs</span>
-                    </button>
-                    <button type="button" class="action-item js-dashboard-insight" data-insight-card="room_status_occupied" title="View occupied rooms" data-no-spa="1" data-no-admin-loader="1">
-                        <span class="action-value"><?php echo (int)($roomSummary['status_counts']['occupied'] ?? 0); ?></span>
-                        <span class="action-label"><i class="fas fa-users"></i> Occupied</span>
-                    </button>
                 </div>
             </div>
         </div>
@@ -2748,70 +2460,6 @@ $currency_symbol = getSetting('currency_symbol');
             </table>
         </div>
 
-        <h3 class="section-title mt-4">Recent Bookings</h3>
-        <div class="table-container">
-            <table class="table">
-                <thead>
-                    <tr>
-                        <th>Booking Ref</th>
-                        <th>Guest Name</th>
-                        <th>Room</th>
-                        <th>Dates</th>
-                        <th>Total</th>
-                        <th>Status</th>
-                        <th>Payment</th>
-                        <th>Actions</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    <?php foreach ($recent_bookings as $booking): ?>
-                        <tr>
-                            <td data-label="Booking Ref"><strong><?php echo htmlspecialchars($booking['booking_reference']); ?></strong></td>
-                            <td data-label="Guest Name"><?php echo htmlspecialchars($booking['guest_name']); ?></td>
-                            <td data-label="Room">
-                                <?php echo htmlspecialchars($booking['room_name']); ?>
-                                <?php if (!empty($booking['individual_room_id'])): ?>
-                                    <br><span class="dashboard-room-chip">
-                                        <i class="fas fa-door-open"></i>
-                                        <?php echo htmlspecialchars($booking['individual_room_name'] ?: $booking['individual_room_number']); ?>
-                                    </span>
-                                    <?php if ($booking['individual_room_name'] && $booking['individual_room_number']): ?>
-                                        <br><small style="color:#888;font-size:10px;">#<?php echo htmlspecialchars($booking['individual_room_number']); ?></small>
-                                    <?php endif; ?>
-                                <?php else: ?>
-                                    <br><small style="color:#bbb;font-style:italic;font-size:10px;">Unassigned</small>
-                                <?php endif; ?>
-                            </td>
-                            <td data-label="Dates">
-                                <?php echo date('M j', strtotime($booking['check_in_date'])); ?> -
-                                <?php echo date('M j, Y', strtotime($booking['check_out_date'])); ?>
-                            </td>
-                            <td data-label="Total"><?php echo $currency_symbol; ?><?php echo number_format($booking['total_amount'], 2); ?></td>
-                            <td data-label="Status">
-                                <span class="badge badge-<?php echo $booking['status']; ?>">
-                                    <?php echo ucfirst($booking['status']); ?>
-                                </span>
-                            </td>
-                            <td data-label="Payment">
-                                <span class="badge badge-<?php echo $booking['payment_status']; ?>">
-                                    <?php echo ucfirst($booking['payment_status']); ?>
-                                </span>
-                                <br><small style="color: #666; font-size: 11px; margin-top: 4px; display: block;">
-                                    <?php echo '<span class="kpi-currency">' . $currency_symbol . '</span>' . number_format($booking['amount_paid'], 2); ?> / <?php echo '<span class="kpi-currency">' . $currency_symbol . '</span>' . number_format($booking['total_amount'], 2); ?>
-                                    <?php if ($booking['amount_due'] > 0): ?>
-                                        <span style="color: #dc3545; font-weight: 600;">(Due: <?php echo '<span class="kpi-currency">' . $currency_symbol . '</span>' . number_format($booking['amount_due'], 2); ?>)</span>
-                                    <?php endif; ?>
-                                </small>
-                            </td>
-                            <td data-label="Actions">
-                                <a href="booking-details.php?id=<?php echo $booking['id']; ?>" class="btn btn-primary btn-sm">View</a>
-                            </td>
-                        </tr>
-                    <?php endforeach; ?>
-                </tbody>
-            </table>
-        </div>
-
         <?php endif; // mod_bookings ?>
 
         <?php if ($mod_conference): ?>
@@ -2865,155 +2513,8 @@ $currency_symbol = getSetting('currency_symbol');
             </table>
         </div>
 
-        <h3 class="section-title mt-4">Recent Conference Enquiries</h3>
-        <div class="table-container">
-            <table class="table">
-                <thead>
-                    <tr>
-                        <th>Reference</th>
-                        <th>Company</th>
-                        <th>Contact</th>
-                        <th>Event Date</th>
-                        <th>Attendees</th>
-                        <th>Status</th>
-                        <th>Actions</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    <?php foreach ($recent_conferences as $conf): ?>
-                        <tr>
-                            <td data-label="Reference"><strong><?php echo htmlspecialchars($conf['inquiry_reference']); ?></strong></td>
-                            <td data-label="Company"><?php echo htmlspecialchars($conf['company_name']); ?></td>
-                            <td data-label="Contact"><?php echo htmlspecialchars($conf['contact_person']); ?></td>
-                            <td data-label="Event Date"><?php echo date('M j, Y', strtotime($conf['event_date'])); ?></td>
-                            <td data-label="Attendees"><?php echo (int) $conf['number_of_attendees']; ?></td>
-                            <td data-label="Status">
-                                <span class="badge badge-<?php echo $conf['status']; ?>">
-                                    <?php echo ucfirst($conf['status']); ?>
-                                </span>
-                            </td>
-                            <td data-label="Actions">
-                                <a href="conference-management.php" class="btn btn-primary btn-sm">View</a>
-                            </td>
-                        </tr>
-                    <?php endforeach; ?>
-                </tbody>
-            </table>
-        </div>
         <?php endif; // mod_conference ?>
 
-        <?php if ($user['role'] === 'admin'): ?>
-            <!-- Login Activity Log -->
-            <div class="today-checkins-section" id="dashboard-login-activity">
-                <h3>
-                    <i class="fas fa-shield-alt"></i> Recent Login Activity
-                    <?php if ($activity_log_total > 0): ?>
-                        <span style="font-size:12px; color:#6b7280; font-weight:500; margin-left:8px;">(<?php echo (int)$activity_log_total; ?> total)</span>
-                    <?php endif; ?>
-                </h3>
-                <?php if (empty($activity_log)): ?>
-                    <div class="empty-state">
-                        <i class="fas fa-shield-alt"></i>
-                        <p>No recent login activity found</p>
-                    </div>
-                <?php else: ?>
-                    <div style="overflow-x: auto;">
-                        <table class="table" style="width:100%; border-collapse:collapse; font-size:13px;">
-                            <thead>
-                                <tr style="background:linear-gradient(135deg, var(--deep-navy, #111111) 0%, var(--navy, #1A1A1A) 100%); color:white;">
-                                    <th style="padding:10px 14px; text-align:left; font-weight:600; font-size:12px; text-transform:uppercase;">Time</th>
-                                    <th style="padding:10px 14px; text-align:left; font-weight:600; font-size:12px; text-transform:uppercase;">User</th>
-                                    <th style="padding:10px 14px; text-align:left; font-weight:600; font-size:12px; text-transform:uppercase;">Action</th>
-                                    <th style="padding:10px 14px; text-align:left; font-weight:600; font-size:12px; text-transform:uppercase;">Details</th>
-                                    <th style="padding:10px 14px; text-align:left; font-weight:600; font-size:12px; text-transform:uppercase;">IP Address</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                <?php foreach ($activity_log as $log):
-                                    $action_colors = [
-                                        'login_success' => ['bg' => '#e8f5e9', 'color' => '#2e7d32', 'icon' => 'fa-sign-in-alt', 'label' => 'Login'],
-                                        'login_failed' => ['bg' => '#fbe9e7', 'color' => '#c62828', 'icon' => 'fa-times-circle', 'label' => 'Failed Login'],
-                                        'login_blocked' => ['bg' => '#fff3e0', 'color' => '#e65100', 'icon' => 'fa-lock', 'label' => 'Blocked'],
-                                        'logout' => ['bg' => '#e3f2fd', 'color' => '#1565c0', 'icon' => 'fa-sign-out-alt', 'label' => 'Logout'],
-                                        'password_reset' => ['bg' => '#f3e5f5', 'color' => '#7b1fa2', 'icon' => 'fa-key', 'label' => 'Password Reset'],
-                                    ];
-                                    $ac = $action_colors[$log['action']] ?? ['bg' => '#f5f5f5', 'color' => '#666', 'icon' => 'fa-info-circle', 'label' => $log['action']];
-                                ?>
-                                    <tr style="border-bottom:1px solid #f0f0f0;">
-                                        <td data-label="Time" style="padding:10px 14px; white-space:nowrap; color:#888; font-size:12px;">
-                                            <?php echo date('M j, g:ia', strtotime($log['created_at'])); ?>
-                                        </td>
-                                        <td data-label="User" style="padding:10px 14px;">
-                                            <strong><?php echo htmlspecialchars($log['full_name'] ?? $log['username'] ?? '—'); ?></strong>
-                                            <?php if ($log['username']): ?>
-                                                <span style="color:#999; font-size:11px;">(<?php echo htmlspecialchars($log['username']); ?>)</span>
-                                            <?php endif; ?>
-                                        </td>
-                                        <td data-label="Action" style="padding:10px 14px;">
-                                            <span style="display:inline-flex; align-items:center; gap:5px; padding:3px 10px; border-radius:12px; font-size:11px; font-weight:600; background:<?php echo $ac['bg']; ?>; color:<?php echo $ac['color']; ?>;">
-                                                <i class="fas <?php echo $ac['icon']; ?>"></i> <?php echo $ac['label']; ?>
-                                            </span>
-                                        </td>
-                                        <td data-label="Details" style="padding:10px 14px; color:#555; font-size:12px;">
-                                            <?php echo htmlspecialchars($log['details'] ?? ''); ?>
-                                        </td>
-                                        <td data-label="IP Address" style="padding:10px 14px; font-family:monospace; font-size:12px; color:#888;">
-                                            <?php echo htmlspecialchars($log['ip_address'] ?? ''); ?>
-                                        </td>
-                                    </tr>
-                                <?php endforeach; ?>
-                            </tbody>
-                        </table>
-                    </div>
-
-                    <?php if ($activity_log_total_pages > 1): ?>
-                        <?php
-                        $activity_page_params = $_GET;
-                        unset($activity_page_params['activity_page']);
-                        $activity_page_base = 'dashboard.php';
-                        $activity_page_base .= empty($activity_page_params) ? '?' : ('?' . http_build_query($activity_page_params) . '&');
-                        $activity_page_start = (($activity_log_page - 1) * $activity_log_per_page) + 1;
-                        $activity_page_end = min($activity_log_page * $activity_log_per_page, $activity_log_total);
-                        $activity_page_window_start = max(1, $activity_log_page - 2);
-                        $activity_page_window_end = min($activity_log_total_pages, $activity_log_page + 2);
-                        ?>
-                        <nav class="bookings-pagination" style="display:flex;align-items:center;justify-content:center;gap:8px;padding:14px 0 4px;flex-wrap:wrap;">
-                            <?php if ($activity_log_page > 1): ?>
-                                <a href="<?php echo htmlspecialchars($activity_page_base . 'activity_page=' . ($activity_log_page - 1), ENT_QUOTES); ?>#dashboard-login-activity" class="btn btn-sm btn-outline" data-no-admin-loader="1">&lsaquo; Prev</a>
-                            <?php endif; ?>
-
-                            <?php if ($activity_page_window_start > 1): ?>
-                                <a href="<?php echo htmlspecialchars($activity_page_base . 'activity_page=1', ENT_QUOTES); ?>#dashboard-login-activity" class="btn btn-sm btn-outline" data-no-admin-loader="1">1</a>
-                                <?php if ($activity_page_window_start > 2): ?>
-                                    <span style="font-size:12px; color:#6b7280; padding:2px 2px;">&hellip;</span>
-                                <?php endif; ?>
-                            <?php endif; ?>
-
-                            <?php for ($activity_page_num = $activity_page_window_start; $activity_page_num <= $activity_page_window_end; $activity_page_num++): ?>
-                                <?php if ($activity_page_num === $activity_log_page): ?>
-                                    <span class="btn btn-sm btn-primary" aria-current="page"><?php echo $activity_page_num; ?></span>
-                                <?php else: ?>
-                                    <a href="<?php echo htmlspecialchars($activity_page_base . 'activity_page=' . $activity_page_num, ENT_QUOTES); ?>#dashboard-login-activity" class="btn btn-sm btn-outline" data-no-admin-loader="1"><?php echo $activity_page_num; ?></a>
-                                <?php endif; ?>
-                            <?php endfor; ?>
-
-                            <?php if ($activity_page_window_end < $activity_log_total_pages): ?>
-                                <?php if ($activity_page_window_end < ($activity_log_total_pages - 1)): ?>
-                                    <span style="font-size:12px; color:#6b7280; padding:2px 2px;">&hellip;</span>
-                                <?php endif; ?>
-                                <a href="<?php echo htmlspecialchars($activity_page_base . 'activity_page=' . $activity_log_total_pages, ENT_QUOTES); ?>#dashboard-login-activity" class="btn btn-sm btn-outline" data-no-admin-loader="1"><?php echo $activity_log_total_pages; ?></a>
-                            <?php endif; ?>
-
-                            <?php if ($activity_log_page < $activity_log_total_pages): ?>
-                                <a href="<?php echo htmlspecialchars($activity_page_base . 'activity_page=' . ($activity_log_page + 1), ENT_QUOTES); ?>#dashboard-login-activity" class="btn btn-sm btn-outline" data-no-admin-loader="1">Next &rsaquo;</a>
-                            <?php endif; ?>
-
-                            <span style="font-size:12px; color:#6b7280; padding:4px 6px;">Showing <?php echo (int)$activity_page_start; ?>–<?php echo (int)$activity_page_end; ?> of <?php echo (int)$activity_log_total; ?></span>
-                        </nav>
-                    <?php endif; ?>
-                <?php endif; ?>
-            </div>
-        <?php endif; ?>
     </div>
 
     <div class="dashboard-insight-modal modal-overlay" data-modal id="dashboardInsightModal" aria-hidden="true" inert>
@@ -3379,137 +2880,57 @@ $currency_symbol = getSetting('currency_symbol');
                 });
         }
         // -------------------------------------------------------------------
-        // System Health Monitor
+        // System health: stays hidden unless something needs attention
         // -------------------------------------------------------------------
         (function () {
             'use strict';
-            const SHC_URL  = 'api/system-health.php';
-            const POLL_MS  = 60000;
-            let   _shcTimer = null;
+            const box  = document.getElementById('sysHealthAlert');
+            const list = document.getElementById('sysHealthIssues');
+            if (!box || !list) return;
+            const CHECK_SWEEP = <?php echo $mod_bookings ? 'true' : 'false'; ?>;
+            const POLL_MS = 300000;
 
-            function fmtBytes(b) {
-                if (b === null || b === undefined) return '—';
-                b = Number(b);
-                if (b >= 1073741824) return (b / 1073741824).toFixed(1) + ' GB';
-                if (b >= 1048576)    return (b / 1048576).toFixed(1) + ' MB';
-                return Math.round(b / 1024) + ' KB';
+            function hoursSince(iso) {
+                return Math.round((Date.now() - new Date(iso).getTime()) / 3600000);
             }
 
-            function setCard(iconId, valueId, metaId, cfg) {
-                const ic = document.getElementById(iconId);
-                const vl = document.getElementById(valueId);
-                const mt = document.getElementById(metaId);
-                if (ic) ic.style.background = cfg.bg;
-                if (vl) vl.innerHTML        = cfg.value;
-                if (mt) mt.textContent      = cfg.meta;
-            }
-
-            async function shcFetch() {
-                const btn = document.getElementById('shcRefreshBtn');
-                if (btn) { btn.disabled = true; btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i>'; }
+            async function check() {
+                let d;
                 try {
-                    const res = await fetch(SHC_URL, {
+                    const res = await fetch('api/system-health.php', {
                         credentials: 'same-origin',
                         headers: { 'X-Requested-With': 'XMLHttpRequest' }
                     });
-                    if (!res.ok) throw new Error('HTTP ' + res.status);
-                    const d = await res.json();
-
-                    // Database
-                    const dbOk = d.db === 'ok';
-                    setCard('shcDbIcon', 'shcDbValue', 'shcDbMeta', {
-                        bg:    dbOk ? '#2e7d32' : '#c62828',
-                        value: dbOk
-                            ? '<i class="fas fa-check-circle" style="color:#fff;"></i>'
-                            : '<i class="fas fa-times-circle" style="color:#fff;"></i>',
-                        meta:  dbOk ? 'Connected' : 'Connection failed'
-                    });
-
-                    // Backup
-                    const bkAge = d.last_backup_age_hours;
-                    const bkBg  = !d.last_backup_at
-                        ? '#c62828'
-                        : (bkAge < 12 ? '#2e7d32' : (bkAge < 36 ? '#b45309' : '#c62828'));
-                    const bkVal  = d.last_backup_at
-                        ? (bkAge !== null ? bkAge + 'h ago' : '—')
-                        : 'Never';
-                    const bkMeta = d.last_backup_at
-                        ? (new Date(d.last_backup_at).toLocaleString()
-                            + (d.last_backup_size_bytes ? ' · ' + fmtBytes(d.last_backup_size_bytes) : ''))
-                        : 'No backup on record';
-                    setCard('shcBackupIcon', 'shcBackupValue', 'shcBackupMeta',
-                        { bg: bkBg, value: bkVal, meta: bkMeta });
-
-                    // Disk
-                    const dkPct = d.disk_free_pct;
-                    const dkBg  = dkPct === null ? '#607d8b'
-                        : (dkPct > 20 ? '#2e7d32' : (dkPct > 10 ? '#b45309' : '#c62828'));
-                    const dkVal  = dkPct !== null ? dkPct + '%' : '—';
-                    const dkMeta = d.disk_free_bytes !== null
-                        ? fmtBytes(d.disk_free_bytes) + ' free of ' + fmtBytes(d.disk_total_bytes)
-                        : 'Unavailable on this host';
-                    setCard('shcDiskIcon', 'shcDiskValue', 'shcDiskMeta',
-                        { bg: dkBg, value: dkVal, meta: dkMeta });
-
-                    // Error log
-                    const lgSz  = d.log_error_size_bytes;
-                    const lgBg  = lgSz === null ? '#607d8b'
-                        : (lgSz < 102400 ? '#2e7d32' : (lgSz < 1048576 ? '#b45309' : '#c62828'));
-                    const lgVal  = lgSz !== null ? fmtBytes(lgSz) : '—';
-                    const lgMeta = lgSz !== null
-                        ? (lgSz === 0 ? 'No errors logged' : 'php-errors.log on server')
-                        : 'File not found';
-                    setCard('shcLogIcon', 'shcLogValue', 'shcLogMeta',
-                        { bg: lgBg, value: lgVal, meta: lgMeta });
-
-                    // PHP version
-                    const phpVal = document.getElementById('shcPhpValue');
-                    const phpMt  = document.getElementById('shcPhpMeta');
-                    if (phpVal) phpVal.textContent = d.php_version || '—';
-                    if (phpMt)  phpMt.textContent  = d.server_time
-                        ? 'Server: ' + new Date(d.server_time).toLocaleTimeString()
-                        : '—';
-
-                    // Tentative sweep
-                    let swBg = '#607d8b', swVal = 'Never', swMeta = 'Cron not yet run';
-                    if (d.last_tentative_sweep_at) {
-                        const swAge = Math.round(
-                            (Date.now() - new Date(d.last_tentative_sweep_at).getTime()) / 3600000
-                        );
-                        swBg   = swAge < 2  ? '#2e7d32' : (swAge < 25 ? '#b45309' : '#c62828');
-                        swVal  = swAge + 'h ago';
-                        swMeta = new Date(d.last_tentative_sweep_at).toLocaleString();
-                    }
-                    setCard('shcSweepIcon', 'shcSweepValue', 'shcSweepMeta',
-                        { bg: swBg, value: swVal, meta: swMeta });
-
-                    const el = document.getElementById('shcLastChecked');
-                    if (el) el.textContent = new Date().toLocaleTimeString();
+                    if (!res.ok) return;
+                    d = await res.json();
                 } catch (err) {
                     console.error('[SysHealth]', err);
-                    const el = document.getElementById('shcLastChecked');
-                    if (el) el.textContent = 'Error: ' + (err.message || 'check failed');
-                } finally {
-                    if (btn) {
-                        btn.disabled  = false;
-                        btn.innerHTML = '<i class="fas fa-sync-alt"></i> Refresh';
-                    }
+                    return;
                 }
-            }
-
-            const btn = document.getElementById('shcRefreshBtn');
-            if (btn) {
-                btn.addEventListener('click', () => {
-                    clearTimeout(_shcTimer);
-                    shcFetch().finally(() => {
-                        _shcTimer = setTimeout(shcFetch, POLL_MS);
-                    });
+                const issues = [];
+                if (d.db !== 'ok') issues.push('The database is not responding.');
+                if (!d.last_backup_at) {
+                    issues.push('No backup has been taken yet.');
+                } else if (d.last_backup_age_hours !== null && d.last_backup_age_hours >= 36) {
+                    issues.push('The last backup was ' + d.last_backup_age_hours + ' hours ago.');
+                }
+                if (d.disk_free_pct !== null && d.disk_free_pct <= 10) {
+                    issues.push('Server disk space is low (' + d.disk_free_pct + '% free).');
+                }
+                if (CHECK_SWEEP && d.last_tentative_sweep_at && hoursSince(d.last_tentative_sweep_at) >= 25) {
+                    issues.push('Unpaid booking holds have not been released for ' + hoursSince(d.last_tentative_sweep_at) + ' hours.');
+                }
+                list.innerHTML = '';
+                issues.forEach(function (text) {
+                    const li = document.createElement('li');
+                    li.textContent = text;
+                    list.appendChild(li);
                 });
+                box.hidden = issues.length === 0;
             }
 
-            // Run immediately on page load, then every 60 s
-            shcFetch();
-            _shcTimer = setInterval(shcFetch, POLL_MS);
+            check();
+            setInterval(check, POLL_MS);
         })();
     </script>
 

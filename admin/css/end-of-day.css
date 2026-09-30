@@ -1291,3 +1291,39 @@
     }
 }
 
+
+/* "More detail" — trends and analysis panels, folded below the close-out essentials */
+.eod-more {
+    margin-top: 20px;
+}
+
+.eod-more__summary {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+    min-height: 44px;
+    padding: 12px 18px;
+    border: 1px solid var(--eod-border);
+    border-radius: 14px;
+    background: var(--color-white);
+    box-shadow: var(--eod-shadow-soft);
+    cursor: pointer;
+    font-weight: 600;
+}
+
+.eod-more__summary span {
+    font-weight: 400;
+    font-size: 0.85rem;
+    color: var(--color-text-secondary, #5E554D);
+}
+
+.eod-more[open] > .eod-more__summary {
+    margin-bottom: 16px;
+}
+
+@media print {
+    .eod-more__summary {
+        display: none;
+    }
+}

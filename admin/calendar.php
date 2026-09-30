@@ -240,7 +240,7 @@ foreach ($blockedDatesByDate as $dayBlocks) {
     $blockedEntryCount += count($dayBlocks);
 }
 
-$calendarMonthLabel = $monthNames[$currentMonth] . ' ' . $currentYear;
+$calendarMonthLabel = $monthNames[(int)$currentMonth] . ' ' . $currentYear;
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -264,11 +264,6 @@ $calendarMonthLabel = $monthNames[$currentMonth] . ' ' . $currentYear;
 
     <div class="content">
         <h2 class="section-title">📅 Room Calendar</h2>
-
-        <div class="calendar-actions mb-3">
-            <a href="bookings.php">← Back to Bookings</a>
-            <a href="dashboard.php">Dashboard</a>
-        </div>
 
         <?php if (isset($error)): ?>
             <div class="alert alert-error">
@@ -331,9 +326,6 @@ $calendarMonthLabel = $monthNames[$currentMonth] . ' ' . $currentYear;
                     <span>Blocked date (room-type or individual)</span>
                 </div>
             </div>
-            <p class="calendar-legend-note">
-                Logic: booked dates are <strong>Reserved</strong> before check-in and become <strong>Occupied</strong> from check-in through the active stay; blocked dates override booking indicators.
-            </p>
 
             <!-- ══ FILTER BAR ══ -->
             <div class="cal-filter-bar" id="calFilterBar">
