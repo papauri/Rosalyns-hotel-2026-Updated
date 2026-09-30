@@ -3982,6 +3982,116 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
             });
         }
 
+        /* ── Live order changes and quiet "ready" notices ─────────────────
+           The notification poll (every second) also carries a change feed: the
+           KDS moves and order edits since the last poll, for the orders this till
+           follows. Anything that shows an order — My orders, Tabs, an open tab,
+           its timeline — refreshes from that within a second, with no reload. */
+        const _posChangeCursor = { kds: 0, audit: 0 };
+        let _tdiOrderId = 0;         // order in the tab-detail window, while it is open
+        let _pageModalReturnTab = 0; // tab to reopen when Timeline / Print KOT closes
+
+        function posApplyOrderChanges(c) {
+            const firstPoll = !_posChangeCursor.kds && !_posChangeCursor.audit;
+            _posChangeCursor.kds = Math.max(_posChangeCursor.kds, parseInt(c.kds_cursor, 10) || 0);
+            _posChangeCursor.audit = Math.max(_posChangeCursor.audit, parseInt(c.audit_cursor, 10) || 0);
+            if (firstPoll) return;
+
+            const ids = (c.orders || []).map(v => parseInt(v, 10)).filter(v => v > 0);
+            if (!ids.length) return;
+            pollMyOrders(true);
+            refreshOpenTabs(false);
+            if (_tdiOrderId && ids.includes(_tdiOrderId)) refreshTabDetail();
+
+            /* A dish ready before the rest of its order: tell the cashier who placed
+               it which order and which dish. The whole-order notice comes from the
+               ready notifications, so the last dish is left to that. */
+            const groups = new Map();
+            (c.items || []).forEach(it => {
+                if (!it.mine) return;
+                const key = it.order_id + ':' + it.station;
+                const g = groups.get(key) || Object.assign({}, it, { names: [] });
+                const qty = parseFloat(it.quantity) || 1;
+                g.names.push((qty !== 1 ? (Number.isInteger(qty) ? qty : qty.toFixed(1)) + 'x ' : '') + it.item_name);
+                g.station_ready = Math.max(parseInt(g.station_ready, 10) || 0, parseInt(it.station_ready, 10) || 0);
+                g.station_total = parseInt(it.station_total, 10) || 0;
+                groups.set(key, g);
+            });
+            let announced = false;
+            groups.forEach(g => {
+                if (g.station_total > 0 && g.station_ready >= g.station_total) return;
+                announced = true;
+                posReadyNotice({
+                    key: g.order_id + ':' + g.station,
+                    orderId: parseInt(g.order_id, 10) || 0,
+                    done: false,
+                    title: g.reference + (g.table_number ? ' · ' + posReadyLocationLabel({ table_label: g.table_number }) : ''),
+                    detail: g.names.join(', ') + ' ready · ' + g.station_ready + ' of ' + g.station_total,
+                });
+            });
+            if (announced) RHSounds.play('success');
+        }
+
+        function posReadyNoticeFromOrder(n) {
+            const stations = { kitchen: 'Kitchen', bar: 'Bar', coffee_bar: 'Coffee Bar' };
+            const where = posReadyLocationLabel(n);
+            const count = parseInt(n.item_count || 0, 10) || 0;
+            const summary = posCompactItemsSummary(n.items_summary || '', 3);
+            posReadyNotice({
+                key: n.order_id + ':' + n.station,
+                orderId: parseInt(n.order_id, 10) || 0,
+                done: true,
+                title: (n.reference || 'Order') + (where ? ' · ' + where : ''),
+                detail: (stations[n.station] || 'Station') + ': ' + (count > 1 ? 'all ' + count + ' items ready' : 'ready') + (summary ? ' — ' + summary : ''),
+            });
+        }
+
+        /* Quiet, non-blocking notices stacked under the bar. One per order and
+           station: a later update (the next dish, then "all ready") replaces the
+           text rather than adding a card. Tap to open the order. */
+        const _posReadyTimers = new Map();
+        function posReadyNotice(opts) {
+            let stack = document.getElementById('posReadyNotices');
+            if (!stack) {
+                stack = document.createElement('div');
+                stack.id = 'posReadyNotices';
+                stack.className = 'pos-ready-notices';
+                stack.setAttribute('aria-live', 'polite');
+                document.body.appendChild(stack);
+            }
+            let el = stack.querySelector('[data-key="' + CSS.escape(opts.key) + '"]');
+            if (!el) {
+                el = document.createElement('div');
+                el.className = 'prn';
+                el.dataset.key = opts.key;
+                el.innerHTML = '<button type="button" class="prn__main"><i class="fas fa-bell-concierge" aria-hidden="true"></i><span class="prn__text"><strong></strong><span></span></span></button>'
+                    + '<button type="button" class="prn__x" aria-label="Dismiss"><i class="fas fa-xmark" aria-hidden="true"></i></button>';
+                el.querySelector('.prn__x').addEventListener('click', () => posReadyNoticeDismiss(opts.key));
+                el.querySelector('.prn__main').addEventListener('click', () => {
+                    const id = parseInt(el.dataset.orderId, 10) || 0;
+                    posReadyNoticeDismiss(opts.key);
+                    if (id) openTabDetail(id);
+                });
+            }
+            el.dataset.orderId = String(opts.orderId || 0);
+            el.classList.toggle('prn--done', !!opts.done);
+            el.querySelector('.prn__text strong').textContent = opts.title;
+            el.querySelector('.prn__text span').textContent = opts.detail;
+            stack.prepend(el);
+            while (stack.children.length > 4) posReadyNoticeDismiss(stack.lastElementChild.dataset.key);
+            clearTimeout(_posReadyTimers.get(opts.key));
+            _posReadyTimers.set(opts.key, setTimeout(() => posReadyNoticeDismiss(opts.key), opts.done ? 60000 : 30000));
+        }
+
+        function posReadyNoticeDismiss(key) {
+            clearTimeout(_posReadyTimers.get(key));
+            _posReadyTimers.delete(key);
+            const el = document.querySelector('#posReadyNotices [data-key="' + CSS.escape(key) + '"]');
+            if (!el) return;
+            el.classList.add('is-leaving');
+            setTimeout(() => el.remove(), 180);
+        }
+
         let _notifInFlight = false;
         async function pollReadyNotifications() {
             if (_notifInFlight) return;
@@ -3989,6 +4099,8 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
             try {
                 const payload = new URLSearchParams();
                 payload.set('csrf_token', posCsrfToken);
+                payload.set('since_kds', String(_posChangeCursor.kds));
+                payload.set('since_audit', String(_posChangeCursor.audit));
                 const r = await fetch(posApiUrl('pos-notifications.php?action=poll'), {
                     method: 'POST',
                     headers: {
@@ -4001,6 +4113,7 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
                 });
                 if (!r.ok) return;
                 const j = await r.json().catch(() => null);
+                if (j && j.ok && j.changes) posApplyOrderChanges(j.changes);
                 if (j && j.ok && j.notifications && j.notifications.length) {
                     const fresh = j.notifications.filter(n => {
                         const readyKey = [n.order_id, n.station, n.reference || n.id].join(':');
@@ -4015,11 +4128,12 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
                        the business day. */
                     posAckReadyNotifications(j.notifications.map(n => n.id));
                     if (fresh.length) {
-                        fresh.forEach(n => posAlertPush(posAlertFromReady(n)));
-                        /* One alert tone for the batch, pitched to whether any of these
-                           are this cashier's own orders. Playing per notification made a
-                           three-ticket pass sound like an alarm fault. */
-                        RHSounds.play(fresh.some(n => n.vibrate) ? 'urgent' : 'normal');
+                        /* A whole order (for one station) is ready: a quiet notice that
+                           names the order, not the full-screen card — that is kept for
+                           messages a station is waiting on an answer to. */
+                        fresh.forEach(n => posReadyNoticeFromOrder(n));
+                        RHSounds.play('normal');
+                        if (fresh.some(n => n.vibrate) && navigator.vibrate) navigator.vibrate(120);
                         /* ...and one refresh, not one per notification: the old loop fired
                            two extra round-trips per ready order on a 1s poll. */
                         pollMyOrders(true);
@@ -4349,7 +4463,7 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
                     </div>`;
             } else {
                 actions = `<div class="svc-card__actions"><span class="svc-done"><i class="fas fa-circle-check"></i> Done</span>
-                    <button type="button" class="svc-btn svc-btn--ghost" onclick="dismissPosInboxThread(${JSON.stringify(thread.map(m => parseInt(m.id, 10) || 0))})">Clear</button></div>`;
+                    <button type="button" class="svc-btn svc-btn--ghost" onclick="dismissPosInboxThread(${escHtml(JSON.stringify(thread.map(m => parseInt(m.id, 10) || 0)))})">Clear</button></div>`;
             }
 
             return `<article class="svc-card svc-card--msg${urgent ? ' is-urgent' : ''}${latestPending ? ' is-pending' : ''}">
@@ -4594,28 +4708,6 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
         function posAlertDismissAll() {
             _posAlerts.length = 0;
             posAlertRender();
-        }
-
-        function posAlertFromReady(n) {
-            const stations = { kitchen: 'Kitchen', bar: 'Bar', coffee_bar: 'Coffee Bar' };
-            const station = stations[n.station] || 'Station';
-            const itemCount = parseInt(n.item_count || 0, 10) || 0;
-            return {
-                key: 'ready:' + [n.order_id, n.station, n.reference || n.id].join(':'),
-                kind: 'ready',
-                tone: 'ready',
-                urgent: !!n.vibrate,
-                icon: 'fa-bell-concierge',
-                kicker: station,
-                title: (n.reference ? n.reference + ' is ready' : 'Order ready') + (n.vibrate ? ' — your order' : ''),
-                where: posReadyLocationLabel(n),
-                items: (itemCount ? itemCount + ' item' + (itemCount === 1 ? '' : 's') + ': ' : '') + posCompactItemsSummary(n.items_summary || '', 6),
-                message: String(n.message || '').trim(),
-                orderId: parseInt(n.order_id, 10) || 0,
-                primaryLabel: 'Got it',
-                secondaryLabel: n.order_id ? 'Open order' : '',
-                secondaryAction: 'order'
-            };
         }
 
         function posAlertFromDirect(m) {
@@ -8118,6 +8210,7 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
                 _selectedOpenTabIds.delete(parseInt(orderId, 10) || 0);
                 await refreshOpenTabs(true);
                 refreshShiftStats(true);
+                if (_tdiOrderId === (parseInt(orderId, 10) || 0)) refreshTabDetail();
             } catch (e) {
                 posToast('Network error: ' + e.message, 'err');
             }
@@ -8155,6 +8248,8 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
                 _selectedOpenTabIds.delete(parseInt(orderId, 10) || 0);
                 await refreshOpenTabs(true);
                 refreshShiftStats(true);
+                // Voided from the tab window: show the voided state straight away.
+                if (_tdiOrderId === (parseInt(orderId, 10) || 0)) refreshTabDetail();
             } catch (e) {
                 posToast('Network error: ' + e.message, 'err');
             }
@@ -8282,7 +8377,28 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
             // Raise above floating widgets (z 99990) so its backdrop and content receive pointer events
             overlay.style.zIndex = '100001';
             overlay.classList.add('show');
+            _tdiOrderId = parseInt(orderId, 10) || 0;
             body.innerHTML = '<div style="text-align:center;padding:40px 0;color:#9ca3af;"><i class="fas fa-spinner fa-spin fa-2x"></i></div>';
+            await loadTabDetailInto(orderId, false);
+        }
+
+        /* Re-render the open tab in place when the KDS or another till changes it
+           (see posApplyOrderChanges): no spinner, and the scroll position is kept. */
+        let _tdiRefreshing = false;
+        async function refreshTabDetail() {
+            const overlay = document.getElementById('tabDetailOverlay');
+            if (!_tdiOrderId || _tdiRefreshing || !overlay || !overlay.classList.contains('show')) return;
+            _tdiRefreshing = true;
+            try {
+                await loadTabDetailInto(_tdiOrderId, true);
+            } finally {
+                _tdiRefreshing = false;
+            }
+        }
+
+        async function loadTabDetailInto(orderId, silent) {
+            const body = document.getElementById('tdiBody');
+            const title = document.getElementById('tdiTitle');
             try {
                 const resp = await fetch(posApiUrl('pos-tab-detail.php?order_id=' + encodeURIComponent(String(orderId))), {
                     credentials: 'include',
@@ -8310,19 +8426,24 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
                     }
                 }
 
+                /* A background refresh that fails leaves what is on screen alone. */
                 if (!data) {
-                    body.innerHTML = '<p style="color:#c82333;padding:20px;">Order details are temporarily unavailable. Please refresh POS and try again.</p>';
+                    if (!silent) body.innerHTML = '<p style="color:#c82333;padding:20px;">Order details are temporarily unavailable. Please refresh POS and try again.</p>';
                     return;
                 }
 
                 if (!resp.ok || !data.success) {
-                    body.innerHTML = '<p style="color:#c82333;padding:20px;">' + escH(data.error || ('Failed to load (HTTP ' + resp.status + ')')) + '</p>';
+                    if (!silent) body.innerHTML = '<p style="color:#c82333;padding:20px;">' + escH(data.error || ('Failed to load (HTTP ' + resp.status + ')')) + '</p>';
                     return;
                 }
+                // The window may have been closed or switched to another tab meanwhile.
+                if ((parseInt(orderId, 10) || 0) !== _tdiOrderId) return;
+                const scrollTop = body.scrollTop;
                 title.innerHTML = '<i class="fas fa-receipt"></i> ' + escH(data.order.reference);
                 body.innerHTML = renderTabDetail(data);
+                if (silent) body.scrollTop = scrollTop;
             } catch (e) {
-                body.innerHTML = '<p style="color:#c82333;padding:20px;">Network error: ' + escH(e.message) + '</p>';
+                if (!silent) body.innerHTML = '<p style="color:#c82333;padding:20px;">Network error: ' + escH(e.message) + '</p>';
             }
         }
 
@@ -8433,15 +8554,15 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
 
             const detailActions = [];
             if (canSettle) {
-                detailActions.push(`<button type="button" class="tc-btn tc-btn-settle tdi-action" onclick="settleTabFromDetail(${parseInt(o.id, 10) || 0}, ${grossTotal}, ${JSON.stringify(String(o.reference || 'TAB'))})"><i class="fas fa-credit-card"></i> Settle tab</button>`);
+                detailActions.push(`<button type="button" class="tc-btn tc-btn-settle tdi-action" onclick="settleTabFromDetail(${parseInt(o.id, 10) || 0}, ${grossTotal}, ${escHtml(JSON.stringify(String(o.reference || 'TAB')))})"><i class="fas fa-credit-card"></i> Settle tab</button>`);
             }
             detailActions.push(`<button type="button" class="tc-btn tc-btn-kot tdi-action" onclick="openPosPageModal('stock-receipt.php?id=${parseInt(o.id, 10) || 0}&print=1&kot=1','Print KOT','fas fa-print')"><i class="fas fa-print"></i> Print KOT</button>`);
             detailActions.push(`<button type="button" class="tc-btn tc-btn-log tdi-action" onclick="openPosPageModal('order-lifecycle.php?embed=1&id=${parseInt(o.id, 10) || 0}','Timeline','fas fa-stream')"><i class="fas fa-stream"></i> Timeline</button>`);
             if (canCancelBeforePrep) {
-                detailActions.push(`<button type="button" class="tc-btn tc-btn-cancel tdi-action" onclick="cancelOpenOrder(${parseInt(o.id, 10) || 0}, ${JSON.stringify(String(o.reference || 'TAB'))})"><i class="fas fa-circle-xmark"></i> Cancel</button>`);
+                detailActions.push(`<button type="button" class="tc-btn tc-btn-cancel tdi-action" onclick="cancelOpenOrder(${parseInt(o.id, 10) || 0}, ${escHtml(JSON.stringify(String(o.reference || 'TAB')))})"><i class="fas fa-circle-xmark"></i> Cancel</button>`);
             }
             if (posCanVoid) {
-                detailActions.push(`<button type="button" class="tc-btn tc-btn-void tdi-action" onclick="adminVoidTab(${parseInt(o.id, 10) || 0}, ${JSON.stringify(String(o.reference || 'TAB'))})"><i class="fas fa-ban"></i> Void</button>`);
+                detailActions.push(`<button type="button" class="tc-btn tc-btn-void tdi-action" onclick="adminVoidTab(${parseInt(o.id, 10) || 0}, ${escHtml(JSON.stringify(String(o.reference || 'TAB')))})"><i class="fas fa-ban"></i> Void</button>`);
             }
 
             html += `<div class="tdi-actions">${detailActions.join('')}</div>`;
@@ -8786,6 +8907,7 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
             if (!ov) return;
             ov.classList.remove('show');
             ov.style.zIndex = ''; // reset elevated z-index
+            _tdiOrderId = 0;
         }
 
         // ----- Global modal-close behaviour -----
@@ -9338,7 +9460,10 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
             titleEl.textContent = title || 'Loading…';
             iconEl.className = iconClass || 'fas fa-file-alt';
             frame.src = url;
-            // Close any lower-level overlays so this one is clearly on top
+            /* Opened from a tab (Timeline, Print KOT): close the tab so this sits
+               clearly on top, but remember it so closing this returns to the tab. */
+            const tabOpen = document.getElementById('tabDetailOverlay')?.classList.contains('show');
+            _pageModalReturnTab = tabOpen ? _tdiOrderId : 0;
             closeTabDetailOverlay();
             modal.classList.add('show');
         }
@@ -9349,6 +9474,9 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
             if (!modal) return;
             modal.classList.remove('show');
             if (frame) frame.src = 'about:blank';
+            const returnTo = _pageModalReturnTab;
+            _pageModalReturnTab = 0;
+            if (returnTo) openTabDetail(returnTo);
         }
 
         function settleTabFromDetail(orderId, total, ref) {

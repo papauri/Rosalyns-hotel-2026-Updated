@@ -6773,3 +6773,130 @@ html.pos-zoomed .pos-ready-card {
     text-align: center;
     font-weight: 700;
 }
+
+/* ── Quiet "ready" notices ──────────────────────────────────────────────────
+   Non-blocking cards under the bar, one per order and station, naming the
+   order and what is ready. They never cover the till; tap to open the order. */
+.pos-ready-notices {
+    position: fixed;
+    top: var(--rh-notif-top, 120px);
+    right: 14px;
+    /* Above the tab and page windows (100001-100003) so a ready order is seen
+       while one is open; below the full-screen message card (100050). */
+    z-index: 100020;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    width: min(360px, calc(100vw - 28px));
+    pointer-events: none;
+}
+
+.prn {
+    display: flex;
+    align-items: stretch;
+    border: 1px solid #e3dbd1;
+    border-left: 4px solid #d4a843;
+    border-radius: 12px;
+    background: #fffdfb;
+    box-shadow: 0 8px 24px rgba(35, 31, 28, .14);
+    pointer-events: auto;
+    animation: prn-in .2s ease-out;
+    overflow: hidden;
+}
+
+.prn--done {
+    border-left-color: #1f9d55;
+}
+
+.prn.is-leaving {
+    opacity: 0;
+    transform: translateX(12px);
+    transition: opacity .18s, transform .18s;
+}
+
+.prn__main {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    min-width: 0;
+    min-height: 52px;
+    padding: 8px 4px 8px 12px;
+    border: none;
+    background: none;
+    font-family: inherit;
+    text-align: left;
+    cursor: pointer;
+}
+
+.prn__main > i {
+    flex-shrink: 0;
+    font-size: 16px;
+    color: #c4891e;
+}
+
+.prn--done .prn__main > i {
+    color: #1f9d55;
+}
+
+.prn__text {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    min-width: 0;
+}
+
+.prn__text strong {
+    font-size: 13.5px;
+    color: #2a2723;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.prn__text span {
+    font-size: 12.5px;
+    line-height: 1.3;
+    color: #6b6158;
+}
+
+.prn__x {
+    flex-shrink: 0;
+    width: 40px;
+    border: none;
+    background: none;
+    color: #b8aea4;
+    font-size: 14px;
+    cursor: pointer;
+}
+
+.prn__x:hover {
+    color: #2a2723;
+}
+
+@keyframes prn-in {
+    from {
+        opacity: 0;
+        transform: translateY(-6px);
+    }
+
+    to {
+        opacity: 1;
+        transform: none;
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .prn {
+        animation: none;
+    }
+}
+
+/* Prompts a tab window opens (void/cancel reason, manager sign-off, item note)
+   must sit above it: the tab window is raised to 100001, and these used to
+   open underneath it, invisible, so Void and Cancel looked dead. */
+#posReasonOverlay,
+#mgrAuthOverlay,
+#noteOverlay {
+    z-index: 100010 !important;
+}

@@ -19,6 +19,7 @@ header('Content-Type: application/json; charset=utf-8');
 require_once __DIR__ . '/../config/database.php';
 require_once __DIR__ . '/../config/security.php';
 require_once __DIR__ . '/../includes/station-hours.php';
+require_once __DIR__ . '/../admin/includes/permissions.php';
 if (session_status() !== PHP_SESSION_ACTIVE) session_start();
 
 function pn_err(string $m, int $code = 400): void
@@ -65,6 +66,74 @@ $action = trim((string)($_POST['action'] ?? ($_GET['action'] ?? 'poll')));
 if ($action === '') $action = 'poll';
 
 if ($action === 'poll') {
+    /* Whose orders this till follows: its own, or everyone's with pos_all_tabs. */
+    $seesAllTabs = hasPermission($userId, 'pos_all_tabs');
+
+    /* ── Change feed ────────────────────────────────────────────────────
+     * Every KDS move (start, ready, collect, serve, void, recall) is a row in
+     * stock_kds_events, and every order-level change (payment, void, edit) a row
+     * in stock_order_audit. The till sends the last ids it saw; we return what
+     * happened since, for the orders it follows, so My orders, Tabs, an open
+     * tab and its timeline refresh within one poll instead of on reload. The
+     * first poll (cursor 0) only learns where the cursors are. */
+    $changes = ['kds_cursor' => 0, 'audit_cursor' => 0, 'orders' => [], 'items' => []];
+    try {
+        $sinceKds = max(0, (int)($_POST['since_kds'] ?? 0));
+        $sinceAudit = max(0, (int)($_POST['since_audit'] ?? 0));
+        $changes['kds_cursor'] = (int)$pdo->query("SELECT COALESCE(MAX(id), 0) FROM stock_kds_events")->fetchColumn();
+        $changes['audit_cursor'] = (int)$pdo->query("SELECT COALESCE(MAX(id), 0) FROM stock_order_audit")->fetchColumn();
+        $changedOrders = [];
+
+        if ($sinceKds > 0 && $changes['kds_cursor'] > $sinceKds) {
+            $ev = $pdo->prepare("SELECT e.id, e.order_id, e.order_item_id, e.event, e.to_status,
+                                        o.reference, o.table_number, o.order_type, o.created_by,
+                                        i.item_name, i.quantity, i.station,
+                                        (SELECT COUNT(*) FROM stock_order_items x
+                                          WHERE x.order_id = e.order_id AND x.station = i.station AND x.kds_status <> 'void') AS station_total,
+                                        (SELECT COUNT(*) FROM stock_order_items x
+                                          WHERE x.order_id = e.order_id AND x.station = i.station
+                                            AND x.kds_status IN ('ready','collection','served')) AS station_ready
+                                   FROM stock_kds_events e
+                                   JOIN stock_orders o ON o.id = e.order_id
+                              LEFT JOIN stock_order_items i ON i.id = e.order_item_id
+                                  WHERE e.id > ? AND (o.created_by = ? OR ? = 1)
+                               ORDER BY e.id ASC
+                                  LIMIT 200");
+            $ev->execute([$sinceKds, $userId, $seesAllTabs ? 1 : 0]);
+            foreach ($ev->fetchAll(PDO::FETCH_ASSOC) as $row) {
+                $changedOrders[(int)$row['order_id']] = true;
+                if ($row['order_item_id'] === null || ($row['to_status'] ?? '') !== 'ready') continue;
+                $changes['items'][] = [
+                    'order_id'      => (int)$row['order_id'],
+                    'reference'     => (string)$row['reference'],
+                    'table_number'  => (string)($row['table_number'] ?? ''),
+                    'order_type'    => (string)($row['order_type'] ?? ''),
+                    'mine'          => (int)$row['created_by'] === $userId,
+                    'item_name'     => (string)($row['item_name'] ?? ''),
+                    'quantity'      => (float)($row['quantity'] ?? 1),
+                    'station'       => (string)($row['station'] ?? 'kitchen'),
+                    'station_total' => (int)$row['station_total'],
+                    'station_ready' => (int)$row['station_ready'],
+                ];
+            }
+        }
+
+        if ($sinceAudit > 0 && $changes['audit_cursor'] > $sinceAudit) {
+            $au = $pdo->prepare("SELECT DISTINCT a.order_id
+                                   FROM stock_order_audit a
+                                   JOIN stock_orders o ON o.id = a.order_id
+                                  WHERE a.id > ? AND (o.created_by = ? OR ? = 1)
+                                  LIMIT 200");
+            $au->execute([$sinceAudit, $userId, $seesAllTabs ? 1 : 0]);
+            foreach ($au->fetchAll(PDO::FETCH_COLUMN) as $oid) {
+                $changedOrders[(int)$oid] = true;
+            }
+        }
+        $changes['orders'] = array_keys($changedOrders);
+    } catch (Throwable $e) {
+        error_log('pos-notifications changes: ' . $e->getMessage());
+    }
+
     /* Return current business-day notifications that are still valid and unseen for this user. */
     try {
         $notificationWindow = rh_station_union_business_window();
@@ -99,6 +168,10 @@ if ($action === 'poll') {
         foreach ($rows as $row) {
             $seenBy = json_decode($row['seen_by'] ?? '[]', true) ?: [];
             if (in_array($userId, $seenBy, true)) continue; // already seen by this user
+            /* "Ready" goes to the till of the person who placed the order, and to
+               supervisors who follow every tab — not to every cashier on shift. */
+            $placedBy = (int)($row['placed_by'] ?? 0);
+            if ($placedBy > 0 && $placedBy !== $userId && !$seesAllTabs) continue;
             $unseen[] = [
                 'id'          => (int)$row['id'],
                 'order_id'    => (int)$row['order_id'],
@@ -127,7 +200,7 @@ if ($action === 'poll') {
          * repeat arriving before the ack lands is suppressed there rather than
          * re-alerting the cashier. Rows stay bounded by the business-day window in
          * the query above, so nothing accumulates past the shift. */
-        pn_ok(['notifications' => $unseen]);
+        pn_ok(['notifications' => $unseen, 'changes' => $changes]);
     } catch (Throwable $e) {
         error_log('pos-notifications poll: ' . $e->getMessage());
         pn_err('Could not load notifications.', 500);

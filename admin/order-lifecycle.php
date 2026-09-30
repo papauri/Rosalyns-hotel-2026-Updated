@@ -65,6 +65,24 @@ if (!$order) { http_response_code(404); exit('Order not found.'); }
 if (!hasPermission((int)$user['id'], 'pos_all_tabs') && (int)$order['created_by'] !== (int)$user['id']) {
     http_response_code(403); exit('You can only view your own tabs.');
 }
+
+/* ?version=1 — a fingerprint of everything this page shows that other screens
+   change: KDS moves, order audit events, statuses and item states. The page
+   polls it and swaps in fresh content when it moves, so the timeline is live
+   without a reload. */
+if (isset($_GET['version'])) {
+    $vs = $pdo->prepare("SELECT CONCAT_WS('|',
+            (SELECT COALESCE(MAX(id), 0) FROM stock_kds_events WHERE order_id = o.id),
+            (SELECT COALESCE(MAX(id), 0) FROM stock_order_audit WHERE order_id = o.id),
+            o.status, o.kitchen_status, COALESCE(o.paid_at, ''), COALESCE(o.total_amount, ''),
+            (SELECT GROUP_CONCAT(CONCAT(id, ':', kds_status) ORDER BY id) FROM stock_order_items WHERE order_id = o.id))
+        FROM stock_orders o WHERE o.id = ?");
+    $vs->execute([$orderId]);
+    header('Content-Type: application/json; charset=utf-8');
+    header('Cache-Control: no-store');
+    echo json_encode(['v' => md5((string)$vs->fetchColumn())]);
+    exit;
+}
 $isRoomService = ($order['order_type'] ?? '') === 'room_service';
 $locationLabel = lifecycleOrderLocationLabel($order);
 $isVoided     = in_array($order['status'] ?? '', ['voided', 'cancelled'], true);
@@ -368,10 +386,14 @@ function fmt_dur(?int $from, ?int $to) { if (!$from || !$to) return '—'; $s = 
     <?php endif; ?>
 
     <div class="actions">
+        <?php /* Inside a host panel, Back and All orders would navigate the panel's own
+                 frame (the host has its own close); they only belong on the full page. */ ?>
+        <?php if (!$embed): ?>
         <a class="a-back" href="javascript:history.back()"><i class="fas fa-arrow-left"></i> Back</a>
+        <?php endif; ?>
         <a class="a-print" href="stock-receipt.php?id=<?php echo $orderId; ?>&print=1" target="_blank"><i class="fas fa-print"></i> Receipt</a>
         <a class="a-print" href="stock-receipt.php?id=<?php echo $orderId; ?>&print=1&kot=1" target="_blank"><i class="fas fa-print"></i> KOT</a>
-        <?php if (rhCanLinkTo((int)$user['id'], 'stock-orders.php')): ?>
+        <?php if (!$embed && rhCanLinkTo((int)$user['id'], 'stock-orders.php')): ?>
             <a class="a-receipt" href="stock-orders.php"><i class="fas fa-list"></i> All orders</a>
         <?php endif; ?>
         <?php if ($canCancel): ?>
@@ -428,6 +450,41 @@ function fmt_dur(?int $from, ?int $to) { if (!$from || !$to) return '—'; $s = 
         })
         .catch(() => { alert('Network error — please try again.'); setLoading(btn, false); });
     };
+
+    /* Live timeline. Every 1.5s, ask for the order's fingerprint; when the KDS
+       or a till has changed the order, fetch this page again and swap the
+       content in place (scroll kept, no reload flash). It keeps running in a
+       background tab, like the till's own polls; the request is tiny. */
+    const versionUrl = 'order-lifecycle.php?id=' + ORDER_ID + '&version=1';
+    let lastVersion = null;
+    let busy = false;
+    async function checkForChanges() {
+        if (busy) return;
+        busy = true;
+        try {
+            const r = await fetch(versionUrl, { credentials: 'same-origin', cache: 'no-store' });
+            if (!r.ok) return;
+            const v = (await r.json()).v;
+            if (lastVersion === null) { lastVersion = v; return; }
+            if (v === lastVersion) return;
+            lastVersion = v;
+            const html = await (await fetch(location.href, { credentials: 'same-origin', cache: 'no-store' })).text();
+            const fresh = new DOMParser().parseFromString(html, 'text/html').querySelector('.wrap');
+            const current = document.querySelector('.wrap');
+            if (fresh && current) {
+                const y = window.scrollY;
+                current.innerHTML = fresh.innerHTML;
+                window.scrollTo(0, y);
+            }
+        } catch (e) {
+            /* network blip — next tick retries */
+        } finally {
+            busy = false;
+        }
+    }
+    checkForChanges();
+    setInterval(checkForChanges, 1500);
+    document.addEventListener('visibilitychange', checkForChanges);
 })();
 </script>
 </body>
