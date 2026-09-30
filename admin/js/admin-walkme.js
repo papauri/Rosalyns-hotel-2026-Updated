@@ -19,6 +19,18 @@
 (function (global) {
     'use strict';
 
+    /* The admin portal can be scaled (display size, includes/page-zoom.php). Screen
+       measurements are in real pixels; the fixed-position card, tooltip and
+       cutout are laid out in the page's own, so convert once, here. */
+    function _wmZoom() { return window.__rhPageZoom || 1; }
+    function _wmRect(el) {
+        const r = el.getBoundingClientRect();
+        const z = _wmZoom();
+        return { top: r.top / z, bottom: r.bottom / z, left: r.left / z, right: r.right / z, width: r.width / z, height: r.height / z, x: r.x / z, y: r.y / z };
+    }
+    function _wmVw() { return window.innerWidth / _wmZoom(); }
+    function _wmVh() { return window.innerHeight / _wmZoom(); }
+
     /* ─── Storage helpers ─────────────────────────────── */
     const STORAGE_PREFIX = 'rh_walkme_';
 
@@ -53,8 +65,8 @@
 
     function _positionTooltip(anchor, placement) {
         const tip = _getTooltip();
-        const rect = anchor.getBoundingClientRect();
-        const tipRect = tip.getBoundingClientRect();
+        const rect = _wmRect(anchor);
+        const tipRect = _wmRect(tip);
         const gap = 8;
 
         let top, left;
@@ -69,8 +81,8 @@
         }
 
         // Clamp to viewport
-        const vw = window.innerWidth;
-        const vh = window.innerHeight;
+        const vw = _wmVw();
+        const vh = _wmVh();
         left = Math.max(8, Math.min(left, vw - tipRect.width - 8));
         top  = Math.max(8, Math.min(top, vh - tipRect.height - 8));
 
@@ -179,8 +191,8 @@
         const svg = _tourOverlay.querySelector('svg');
         if (!svg) return;
 
-        const vw = window.innerWidth;
-        const vh = window.innerHeight;
+        const vw = _wmVw();
+        const vh = _wmVh();
         const pad = 6;
         const r = 8;
 
@@ -254,8 +266,8 @@
     }
 
     function _positionCard(card, targetRect, placement) {
-        const vw = window.innerWidth;
-        const vh = window.innerHeight;
+        const vw = _wmVw();
+        const vh = _wmVh();
         const gap = 16;
 
         // After DOM insertion
@@ -310,8 +322,8 @@
 
     function _scrollToTarget(el) {
         if (!el) return;
-        const rect = el.getBoundingClientRect();
-        const vh = window.innerHeight;
+        const rect = _wmRect(el);
+        const vh = _wmVh();
         if (rect.top < 80 || rect.bottom > vh - 80) {
             el.scrollIntoView({ behavior: 'smooth', block: 'center' });
         }
@@ -333,7 +345,7 @@
             targetEl = document.querySelector(step.target);
             if (targetEl) {
                 _scrollToTarget(targetEl);
-                targetRect = targetEl.getBoundingClientRect();
+                targetRect = _wmRect(targetEl);
                 targetEl.classList.add('wm-highlight');
                 _tourHighlight = targetEl;
             }

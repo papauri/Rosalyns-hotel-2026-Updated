@@ -3777,7 +3777,7 @@ body.kds-chat-open .kds-chathead-wrap { display: none; }
 
 
 /* ═══════════════════════════════════════════════════════════════════════════
-   DISPLAY SIZE (html.page-zoomed, set in the <head> of kds.php)
+   DISPLAY SIZE (html.page-zoomed, set by includes/page-zoom.php)
    The whole board is scaled with CSS zoom. Viewport units scale with it, so
    anything sized to the screen is divided by the zoom to fill it again.
    ═══════════════════════════════════════════════════════════════════════════ */

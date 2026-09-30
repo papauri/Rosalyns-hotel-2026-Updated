@@ -1,0 +1,97 @@
+/* Display size for the admin portal (html.page-zoomed, set by
+   includes/page-zoom.php — the same standard as the POS and station boards).
+   The page is scaled with CSS zoom. It scrolls as a normal document, so content
+   needs nothing; only things sized to the screen are divided by the zoom so they
+   still fill it: the fixed sidebar and the pop-up windows. */
+
+html.page-zoomed {
+    zoom: var(--page-zoom, 1);
+}
+
+html.page-zoomed body {
+    min-height: calc(100vh / var(--page-zoom));
+}
+
+/* The sidebar is fixed and 100vh tall; anchor it to the bottom of the screen
+   instead, which fills the height at any zoom. */
+html.page-zoomed .admin-nav {
+    height: auto !important;
+    bottom: 0 !important;
+}
+
+html.page-zoomed .modal-content,
+html.page-zoomed .admin-modal,
+html.page-zoomed .modal__wrapper,
+html.page-zoomed .modal__container,
+html.page-zoomed .modal-container {
+    max-height: calc(90vh / var(--page-zoom)) !important;
+}
+
+html.page-zoomed .modal-content {
+    max-width: calc(96vw / var(--page-zoom));
+}
+
+html.page-zoomed .booking-details-page {
+    min-height: calc((100vh - 60px) / var(--page-zoom));
+}
+
+/* Header control: − 60% + */
+.rh-zoom {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    margin-right: 8px;
+    font-size: .8rem;
+    font-weight: 600;
+    color: inherit;
+    white-space: nowrap;
+}
+
+.rh-zoom > span:first-child i {
+    margin-right: 4px;
+    opacity: .75;
+}
+
+.rh-zoom__ctl {
+    display: inline-flex;
+    align-items: center;
+    gap: 2px;
+    padding: 2px;
+    border-radius: 999px;
+    background: rgba(127, 127, 127, .16);
+}
+
+.rh-zoom__ctl button {
+    width: 30px;
+    height: 30px;
+    padding: 0;
+    border: none;
+    border-radius: 50%;
+    background: #fff;
+    color: #2a2723;
+    font-size: 16px;
+    font-weight: 700;
+    line-height: 1;
+    cursor: pointer;
+    box-shadow: 0 1px 2px rgba(0, 0, 0, .18);
+}
+
+.rh-zoom__ctl output {
+    min-width: 40px;
+    text-align: center;
+    font-weight: 700;
+}
+
+@media (pointer: coarse) {
+    .rh-zoom__ctl button {
+        width: 38px;
+        height: 38px;
+    }
+}
+
+/* Small screens: the header has no room for the words. */
+@media (max-width: 760px) {
+    .rh-zoom > span:first-child {
+        display: none;
+    }
+}

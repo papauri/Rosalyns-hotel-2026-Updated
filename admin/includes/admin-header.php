@@ -401,6 +401,10 @@ if ($_admin_back_target !== null) {
         });
     }
 </script>
+<?php /* Display size — the same standard as the POS and station boards. Output
+         before anything visible so the page never paints at the wrong size. */ ?>
+<?php require_once __DIR__ . '/page-zoom.php'; rh_page_zoom_bootstrap(); ?>
+<link rel="stylesheet" href="css/page-zoom.css?v=<?php echo @filemtime(__DIR__ . '/../css/page-zoom.css'); ?>">
 <div id="adminPageLoader" class="admin-page-loader is-visible" data-boot-loader="1" role="status" aria-live="polite" aria-hidden="false">
     <div class="admin-page-loader-card">
         <div class="admin-page-loader-brand"><i class="fas fa-hotel" aria-hidden="true"></i><span id="adminPageLoaderBrand"><?php echo htmlspecialchars($site_name); ?></span></div>
@@ -427,6 +431,7 @@ if ($_admin_back_target !== null) {
             <i class="fas fa-circle" id="rhConnDot" style="font-size:.55rem"></i>
             <span id="rhConnLabel">Online</span>
         </div>
+        <?php rh_page_zoom_control(); ?>
         <div class="user-meta">
             <div class="user-name"><?php echo htmlspecialchars($user['full_name']); ?></div>
             <div class="user-role"><i class="fas fa-user-shield"></i> <?php echo htmlspecialchars(ucfirst($user['role'])); ?></div>

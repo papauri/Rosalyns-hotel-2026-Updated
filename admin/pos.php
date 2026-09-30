@@ -2035,29 +2035,7 @@ if ($posCanStations) {
     <meta charset="UTF-8">
     <title>POS Till — <?php echo htmlspecialchars($siteName); ?></title>
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <script>
-    /* Display size. Staff found the till at 100% too large on tablets and preferred
-       how it looked at 60% browser zoom, so the till scales itself: 60% by default on
-       touch tablets, 100% elsewhere, and each device can change it under
-       More > Display size. Runs before the stylesheets so there is no resize flash. */
-    (function () {
-        var z = 1, tablet = false;
-        try { tablet = Math.min(screen.width, screen.height) >= 600 && window.matchMedia('(pointer: coarse)').matches; } catch (e) {}
-        if (tablet) z = 0.6;
-        try {
-            var saved = parseFloat(localStorage.getItem('rh_pos_zoom') || '');
-            if (saved >= 0.5 && saved <= 1) z = saved;
-        } catch (e) {}
-        window.__rhPageZoom = z;
-        if (z < 1) {
-            document.documentElement.style.setProperty('--pos-zoom', String(z));
-            document.documentElement.classList.add('pos-zoomed');
-        }
-    })();
-    /* Screen coordinates (getBoundingClientRect, pointer events) are in real pixels;
-       CSS lengths inside the scaled page are not. Divide by this before using one. */
-    window.posZoom = function () { return window.__rhPageZoom || 1; };
-    </script>
+    <?php require_once __DIR__ . '/includes/page-zoom.php'; rh_page_zoom_bootstrap(); ?>
     <meta name="theme-color" content="#8B7355">
     <meta name="mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-capable" content="yes">
@@ -2463,14 +2441,7 @@ if ($posCanStations) {
 
                             <div class="tb-more__group">Settings</div>
                             <button type="button" class="rh-help-toggle" data-inline="1" id="rhHelpToggle" aria-label="Toggle help tooltips" data-help="Help mode|Turn tooltip hints on or off for POS actions."><span class="dot"></span><i class="fas fa-question-circle"></i> <span id="rhHelpLabel">Help mode</span></button>
-                            <div class="tb-more__zoom">
-                                <span><i class="fas fa-magnifying-glass"></i> Display size</span>
-                                <span class="tb-more__zoom-ctl">
-                                    <button type="button" onclick="stepPosZoom(-1)" aria-label="Make the till smaller">&minus;</button>
-                                    <output id="posZoomVal">100%</output>
-                                    <button type="button" onclick="stepPosZoom(1)" aria-label="Make the till larger">+</button>
-                                </span>
-                            </div>
+                            <?php rh_page_zoom_control('tb-more__zoom', 'tb-more__zoom-ctl'); ?>
                             <button type="button" onclick="closePosMoreMenu(); RHSounds.openSettings();"><i class="fas fa-sliders"></i> Sound settings</button>
                             <a href="../docs/guides/01-pos-till.html" target="_blank" rel="noopener"><i class="fas fa-book-open"></i> POS guide</a>
                             <?php if ($posHasAdminPortal): ?><a href="dashboard.php"><i class="fas fa-arrow-left"></i> Admin dashboard</a><?php endif; ?>
@@ -7309,8 +7280,6 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
             const opening = menu.hasAttribute('hidden');
             if (opening) {
                 menu.removeAttribute('hidden');
-                const zoomOut = document.getElementById('posZoomVal');
-                if (zoomOut) zoomOut.textContent = Math.round(posZoom() * 100) + '%';
                 positionPosMoreMenu();
                 btn.setAttribute('aria-expanded', 'true');
                 btn.classList.add('is-open');
@@ -7344,38 +7313,13 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
             menu.style.top = Math.round(top) + 'px';
         }
 
-        const POS_ZOOM_STEPS = [0.5, 0.6, 0.7, 0.8, 0.9, 1];
-
-        function applyPosZoom(z) {
-            window.__rhPageZoom = z;
-            const root = document.documentElement;
-            if (z < 1) {
-                root.style.setProperty('--pos-zoom', String(z));
-                root.classList.add('pos-zoomed');
-            } else {
-                root.style.removeProperty('--pos-zoom');
-                root.classList.remove('pos-zoomed');
-            }
-            const out = document.getElementById('posZoomVal');
-            if (out) out.textContent = Math.round(z * 100) + '%';
+        /* Display size (shared, see includes/page-zoom.php): re-measure what this
+           till positions from the window when it changes. */
+        window.addEventListener('rh:pagezoom', () => {
             if (typeof syncPosAlertBounds === 'function') syncPosAlertBounds();
             if (typeof window.syncPosCatsResize === 'function') window.syncPosCatsResize();
             positionPosMoreMenu();
-        }
-
-        function stepPosZoom(dir) {
-            const cur = posZoom();
-            let i = POS_ZOOM_STEPS.findIndex(v => Math.abs(v - cur) < 0.001);
-            if (i < 0) i = POS_ZOOM_STEPS.length - 1;
-            const next = POS_ZOOM_STEPS[Math.max(0, Math.min(POS_ZOOM_STEPS.length - 1, i + dir))];
-            try { localStorage.setItem('rh_pos_zoom', String(next)); } catch (_) {}
-            applyPosZoom(next);
-        }
-        if (document.readyState === 'loading') {
-            document.addEventListener('DOMContentLoaded', () => applyPosZoom(posZoom()));
-        } else {
-            applyPosZoom(posZoom());
-        }
+        });
 
         window.addEventListener('resize', positionPosMoreMenu);
         window.addEventListener('scroll', positionPosMoreMenu, true);

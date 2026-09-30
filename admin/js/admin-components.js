@@ -511,10 +511,13 @@
                 tooltip.style.pointerEvents = 'none';
             }
 
-            const triggerRect = trigger.getBoundingClientRect();
-            const tooltipRect = tooltip.getBoundingClientRect();
-            const vpW = window.innerWidth;
-            const vpH = window.innerHeight;
+            // In the scaled page's own pixels (display size, see includes/page-zoom.php).
+            const z = window.__rhPageZoom || 1;
+            const toPage = r => ({ top: r.top / z, bottom: r.bottom / z, left: r.left / z, right: r.right / z, width: r.width / z, height: r.height / z });
+            const triggerRect = toPage(trigger.getBoundingClientRect());
+            const tooltipRect = toPage(tooltip.getBoundingClientRect());
+            const vpW = window.innerWidth / z;
+            const vpH = window.innerHeight / z;
 
             const spaceBelow = vpH - triggerRect.bottom;
             const spaceAbove = triggerRect.top;

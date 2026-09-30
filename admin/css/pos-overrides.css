@@ -6673,57 +6673,57 @@ button.svc-card:focus-visible { outline: 3px solid #8A775F; outline-offset: 2px;
 }
 
 /* ══════════════════════════════════════════════════════════════════════════
-   Display size (html.pos-zoomed, set in the <head> of pos.php)
+   Display size (html.page-zoomed, set by includes/page-zoom.php)
    The whole till is scaled with CSS zoom. Viewport units scale with it, so
    anything sized to the screen is divided by the zoom to fill it again.
    Media queries still see the real screen width, so a tablet keeps the tablet
    layout, just smaller, with more of the menu and the order on screen.
    ══════════════════════════════════════════════════════════════════════════ */
-html.pos-zoomed {
-    zoom: var(--pos-zoom, 1);
+html.page-zoomed {
+    zoom: var(--page-zoom, 1);
 }
 
-html.pos-zoomed,
-html.pos-zoomed body {
+html.page-zoomed,
+html.page-zoomed body {
     max-width: none;
 }
 
-html.pos-zoomed .till-wrap {
-    width: calc(100dvw / var(--pos-zoom));
+html.page-zoomed .till-wrap {
+    width: calc(100dvw / var(--page-zoom));
     max-width: none;
-    height: calc(100dvh / var(--pos-zoom));
+    height: calc(100dvh / var(--page-zoom));
     min-height: 0;
 }
 
 /* The side columns are fixed widths, so they shrink with the zoom while the menu
    (1fr) takes the space. Give them back some width so the order stays readable. */
 @media (min-width: 641px) and (max-width: 1366px) {
-    html.pos-zoomed {
+    html.page-zoomed {
         --pos-tab-cats-w: 210px;
         --pos-tab-cart-w: 440px;
     }
 }
 
-html.pos-zoomed .modal,
-html.pos-zoomed .modal-content {
-    max-height: calc((100dvh - 32px) / var(--pos-zoom)) !important;
-    max-width: calc(96vw / var(--pos-zoom)) !important;
+html.page-zoomed .modal,
+html.page-zoomed .modal-content {
+    max-height: calc((100dvh - 32px) / var(--page-zoom)) !important;
+    max-width: calc(96vw / var(--page-zoom)) !important;
 }
 
-html.pos-zoomed .modal-body[style*="vh"] {
-    max-height: calc(74dvh / var(--pos-zoom)) !important;
+html.page-zoomed .modal-body[style*="vh"] {
+    max-height: calc(74dvh / var(--page-zoom)) !important;
 }
 
-html.pos-zoomed #posPageModal > .modal-content {
-    height: calc(90dvh / var(--pos-zoom)) !important;
+html.page-zoomed #posPageModal > .modal-content {
+    height: calc(90dvh / var(--page-zoom)) !important;
 }
 
-html.pos-zoomed .svc-modal {
-    height: min(calc(86vh / var(--pos-zoom)), 900px);
+html.page-zoomed .svc-modal {
+    height: min(calc(86vh / var(--page-zoom)), 900px);
 }
 
-html.pos-zoomed .pos-ready-card {
-    width: calc((100vw - 40px) / var(--pos-zoom));
+html.page-zoomed .pos-ready-card {
+    width: calc((100vw - 40px) / var(--page-zoom));
 }
 
 /* More > Display size: − 60% + */
