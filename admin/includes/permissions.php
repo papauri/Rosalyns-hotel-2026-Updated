@@ -72,6 +72,7 @@ function getAllRoles()
                 'receipts',
                 'invoices',
                 'payment_add',
+                'refund_payment',
                 'reports',
                 'booking_settings',
                 'visitor_analytics',
@@ -168,6 +169,7 @@ function getAllRoles()
                 'receipts',
                 'invoices',
                 'payment_add',
+                'refund_payment',
                 'reports',
                 'bookings'
             ]
@@ -393,6 +395,14 @@ function getAllPermissions()
         'checkout_guest' => [
             'label' => 'Check-out Guests',
             'description' => 'Process guest check-outs',
+            'icon' => 'fa-sign-out-alt',
+            'category' => 'Guest Services',
+            'page' => 'bookings.php',
+            'group' => 'guest_services'
+        ],
+        'checkout_with_balance' => [
+            'label' => 'Check-out With Balance',
+            'description' => 'Check a guest out even though an outstanding balance remains on the booking (recorded in the booking timeline)',
             'icon' => 'fa-sign-out-alt',
             'category' => 'Guest Services',
             'page' => 'bookings.php',
@@ -836,6 +846,22 @@ function getAllPermissions()
             'icon' => 'fa-plus-circle',
             'category' => 'Finance',
             'page' => 'payment-add.php',
+            'group' => 'payments_write'
+        ],
+        'refund_payment' => [
+            'label' => 'Issue & settle refunds',
+            'description' => 'Issue refunds and move them through pending, processing, completed or failed',
+            'icon' => 'fa-undo',
+            'category' => 'Finance',
+            'page' => 'payment-refund.php',
+            'group' => 'payments_write'
+        ],
+        'finance_settings' => [
+            'label' => 'Change VAT & refund settings',
+            'description' => 'Change the VAT mode, VAT rate and the refund and cancellation rules',
+            'icon' => 'fa-percent',
+            'category' => 'Finance',
+            'page' => 'accounting-dashboard.php',
             'group' => 'payments_write'
         ],
         'invoices' => [
@@ -1406,7 +1432,7 @@ function getPermissionForPage(string $page)
         'invoices.php' => 'invoices',
         'credit-notes.php' => 'invoices',
         'payment-add.php' => 'payment_add',
-        'payment-refund.php' => 'payment_add',
+        'payment-refund.php' => 'refund_payment',
         'edit-booking.php' => 'edit_booking',
         'reports.php' => 'reports',
         'end-of-day-report.php' => 'reports',

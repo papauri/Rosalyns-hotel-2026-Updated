@@ -63,7 +63,7 @@ if (isset($tab_module_map[$active_tab]) && !$tab_module_map[$active_tab]) {
 
 // Get currency symbol and VAT settings
 $currency_symbol = getSetting('currency_symbol');
-$vatEnabled = in_array(getSetting('vat_enabled'), ['1', 'true', 'on']);
+$vatEnabled = rh_vat_enabled();
 $vatRate = (float)getSetting('vat_rate', 0);
 $conferenceFields = finance_conference_fields($pdo);
 

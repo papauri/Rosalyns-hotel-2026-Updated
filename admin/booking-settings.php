@@ -160,6 +160,47 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['toggle_tentative_book
         : 'Tentative bookings disabled — only standard bookings will appear on the website and admin forms.';
 }
 
+// Cancellation handling mode (what happens to the bill and the money when a booking is cancelled)
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['save_cancellation_refund_mode'])) {
+    $cancelModes = ['void_refund_all', 'void_keep_credit', 'keep_first_night'];
+    $newCancelMode = (string)($_POST['cancellation_refund_mode'] ?? '');
+    $newRules = [];
+    $ruleOptions = rh_refund_rule_options();
+    $rulesValid = true;
+    foreach ($ruleOptions as $ruleKey => $ruleChoices) {
+        $posted = (string)($_POST[$ruleKey] ?? '');
+        if (!in_array($posted, $ruleChoices, true)) {
+            $rulesValid = false;
+            break;
+        }
+        $newRules[$ruleKey] = $posted;
+    }
+    if (!hasPermission((int)($user['id'] ?? 0), 'finance_settings')) {
+        $error = 'You do not have permission to change refund and cancellation settings.';
+    } elseif (!in_array($newCancelMode, $cancelModes, true) || !$rulesValid) {
+        $error = 'Invalid refund or cancellation option.';
+    } else {
+        $oldCancelMode = getCancellationRefundMode();
+        $oldRules = [];
+        foreach ($ruleOptions as $ruleKey => $ruleChoices) {
+            $oldRules[$ruleKey] = rh_refund_rule($ruleKey);
+        }
+        updateSetting('cancellation_refund_mode', $newCancelMode);
+        foreach ($newRules as $ruleKey => $ruleVal) {
+            updateSetting($ruleKey, $ruleVal);
+        }
+        if (function_exists('rh_log_event')) {
+            rh_log_event('admin/' . basename(__FILE__, '.php'), 'warning', 'Refund and cancellation settings changed', [
+                'user' => $user['username'] ?? '',
+                'user_id' => $user['id'] ?? null,
+                'from' => ['cancellation_refund_mode' => $oldCancelMode] + $oldRules,
+                'to' => ['cancellation_refund_mode' => $newCancelMode] + $newRules,
+            ]);
+        }
+        $message = 'Refund and cancellation settings saved.';
+    }
+}
+
 // Handle one-click full frontend maintenance mode toggle
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['toggle_site_maintenance'])) {
     $wasEnabled = in_array(strtolower(trim((string)getSetting('site_maintenance_enabled', '0'))), ['1', 'true', 'on', 'yes'], true);
@@ -1340,6 +1381,81 @@ foreach ($canonicalTemplateDefaults as $templateKey => $templateDefaults) {
                         </ul>
                     </div>
                 </details>
+            </div>
+
+            <div class="settings-card" id="cancellation">
+                <h2><i class="fas fa-ban" style="color: #a03030;"></i> Refunds &amp; cancellations</h2>
+                <?php
+                $cancelModeNow = getCancellationRefundMode();
+                $canEditRefundRules = hasPermission((int)($user['id'] ?? 0), 'finance_settings');
+                ?>
+                <div class="current-value">
+                    <i class="fas fa-coins" style="color: #8B7355;"></i>
+                    <div class="current-value-info">
+                        <h3>Current handling</h3>
+                        <div class="value"><?php echo htmlspecialchars(getCancellationRefundModeLabel($cancelModeNow)); ?></div>
+                    </div>
+                </div>
+                <form method="POST" action="booking-settings.php#cancellation">
+                    <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf_token, ENT_QUOTES); ?>">
+                    <input type="hidden" name="save_cancellation_refund_mode" value="1">
+                    <div class="form-group">
+                        <?php if (!$canEditRefundRules): ?>
+                            <p class="help-text"><i class="fas fa-lock"></i> You can view these rules. Only users with the "Change VAT &amp; refund settings" permission can change them.</p>
+                        <?php endif; ?>
+                        <h3 style="margin:0 0 8px;">When a room booking is cancelled</h3>
+                        <fieldset <?php echo $canEditRefundRules ? '' : 'disabled'; ?> style="border:0;padding:0;margin:0;min-width:0;">
+                        <?php
+                        $cancelModeOptions = [
+                            'void_refund_all'  => ['Void the bill and refund everything paid', 'The booking owes nothing and the full net amount paid is refunded automatically.'],
+                            'void_keep_credit' => ['Void the bill, keep payments as guest credit', 'The booking owes nothing but no refund is made automatically. Money paid shows as owed back to the guest, for staff to refund or issue a credit note.'],
+                            'keep_first_night' => ['Charge the first night, refund the rest', 'The guest is charged the first night (nightly rate including its VAT/levy share); the bill is reduced to that amount and the rest of the net paid is refunded.'],
+                        ];
+                        foreach ($cancelModeOptions as $modeKey => [$modeTitle, $modeHelp]): ?>
+                            <label style="display:flex;align-items:flex-start;gap:10px;cursor:pointer;margin-bottom:12px;">
+                                <input type="radio" name="cancellation_refund_mode" value="<?php echo htmlspecialchars($modeKey, ENT_QUOTES); ?>" <?php echo $cancelModeNow === $modeKey ? 'checked' : ''; ?> style="margin-top:4px;">
+                                <span>
+                                    <span style="font-weight:600;color:#1A1A1A;"><?php echo htmlspecialchars($modeTitle); ?></span><br>
+                                    <span class="help-text"><?php echo htmlspecialchars($modeHelp); ?></span>
+                                </span>
+                            </label>
+                        <?php endforeach; ?>
+                        <p class="help-text"><i class="fas fa-info-circle"></i> Applies to every cancellation made after you save. Bookings already cancelled are not changed. Folio charges already posted to a booking stay billable.</p>
+
+                        <?php
+                        $ruleGroups = [
+                            'guest_self_cancel_refund' => ['When a guest cancels online', [
+                                'pending' => ['Staff approve the refund', 'The refund is queued as pending until staff settle it.'],
+                                'auto'    => ['Refund immediately', 'The refund is marked completed the moment the guest cancels.'],
+                            ]],
+                            'nonroom_cancel_mode' => ['When a conference, event or gym account is cancelled', [
+                                'keep_credit' => ['Keep payments as credit', 'The bill is voided and money paid stays as credit owed back; staff refund it manually.'],
+                                'refund_all'  => ['Refund everything paid', 'The net amount paid is refunded automatically when the account is cancelled.'],
+                            ]],
+                            'refund_method_default' => ['How refunds are paid out', [
+                                'original' => ['Always to the original payment method', 'Refunds go back the way the money came in and staff cannot change the method.'],
+                                'ask'      => ['Staff choose on the refund screen', 'The refund screen starts on the original method but staff may pick another.'],
+                            ]],
+                        ];
+                        foreach ($ruleGroups as $ruleKey => [$ruleTitle, $ruleChoices]):
+                            $ruleNow = rh_refund_rule($ruleKey); ?>
+                            <h3 style="margin:18px 0 8px;"><?php echo htmlspecialchars($ruleTitle); ?></h3>
+                            <?php foreach ($ruleChoices as $choiceKey => [$choiceTitle, $choiceHelp]): ?>
+                                <label style="display:flex;align-items:flex-start;gap:10px;cursor:pointer;margin-bottom:12px;">
+                                    <input type="radio" name="<?php echo htmlspecialchars($ruleKey, ENT_QUOTES); ?>" value="<?php echo htmlspecialchars($choiceKey, ENT_QUOTES); ?>" <?php echo $ruleNow === $choiceKey ? 'checked' : ''; ?> style="margin-top:4px;">
+                                    <span>
+                                        <span style="font-weight:600;color:#1A1A1A;"><?php echo htmlspecialchars($choiceTitle); ?></span><br>
+                                        <span class="help-text"><?php echo htmlspecialchars($choiceHelp); ?></span>
+                                    </span>
+                                </label>
+                            <?php endforeach; ?>
+                        <?php endforeach; ?>
+                        </fieldset>
+                        <?php if ($canEditRefundRules): ?>
+                        <button type="submit" class="btn-submit" style="margin-top: 14px;"><i class="fas fa-save"></i> Save Refund Settings</button>
+                        <?php endif; ?>
+                    </div>
+                </form>
             </div>
 
             <div class="settings-card" id="tentative">

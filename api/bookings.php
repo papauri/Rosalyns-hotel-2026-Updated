@@ -46,6 +46,7 @@ if (!$auth->checkPermission($client, 'bookings.create')) {
 }
 
 require_once __DIR__ . '/../includes/booking-functions.php';
+require_once __DIR__ . '/../includes/pricing.php';
 require_once __DIR__ . '/../includes/whatsapp-functions.php';
 require_once __DIR__ . '/../includes/idempotency.php';
 require_once __DIR__ . '/../includes/booking-timeline.php';
@@ -251,17 +252,16 @@ try {
         ? ($roomRate * ($childPriceMultiplier / 100) * $bookingData['child_guests'] * $nights)
         : 0;
     
-    // Calculate tourism levy if enabled
-    $tourismLevyEnabled = (bool)getSetting('tourism_levy_enabled', false);
-    $tourismLevyPercent = (float)getSetting('tourism_levy_percent', 0);
-    $tourismLevyAmount = 0.00;
-    
-    if ($tourismLevyEnabled && $tourismLevyPercent > 0) {
-        // Calculate levy on (base amount + child supplement)
-        $tourismLevyAmount = ($baseAmount + $childSupplementTotal) * ($tourismLevyPercent / 100);
-    }
-    
-    $totalAmount = $baseAmount + $childSupplementTotal + $tourismLevyAmount;
+    // Stay totals via the shared helper (same as booking.php): levy is OUTSIDE the VAT
+    // base, levy = net * levy%. total_amount = net + levy (ex-VAT), vat_amount = VAT,
+    // total_with_vat = net + levy + VAT = what the guest owes.
+    $stayTotals = rh_stay_totals((float)($baseAmount + $childSupplementTotal), 'price');
+    $tourismLevyAmount  = round($stayTotals['levy'], 2);
+    $tourismLevyPercent = $stayTotals['levy_rate'];
+    $vatRateBooking     = $stayTotals['vat_rate'];
+    $vatAmountBooking   = round($stayTotals['vat'], 2);
+    $totalWithVat       = round($stayTotals['total_with_vat'], 2);
+    $totalAmount        = round($stayTotals['net'] + $tourismLevyAmount, 2);
     
     // Generate unique booking reference
     $refPrefix = getSetting('booking_reference_prefix', 'LSH');
@@ -304,10 +304,10 @@ try {
                 booking_reference, room_id, guest_name, guest_email, guest_phone,
                 guest_country, guest_address, number_of_guests, adult_guests, child_guests,
                 child_price_multiplier, check_in_date, check_out_date, number_of_nights,
-                total_amount, amount_due, total_with_vat,
+                total_amount, amount_due, vat_rate, vat_amount, total_with_vat,
                 child_supplement_total, tourism_levy_amount, tourism_levy_percent,
                 special_requests, status, is_tentative, tentative_expires_at, occupancy_type, client_uuid
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ");
 
         $__bookingClientUuid = idem_normalize_uuid($__incomingClientUuid ?? null);
@@ -327,8 +327,10 @@ try {
             $bookingData['check_out_date'],
             $nights,
             $totalAmount,
-            $totalAmount, // amount_due = full total for new bookings (no payments yet)
-            $totalAmount, // total_with_vat matches total_amount (levy already included)
+            $totalWithVat, // amount_due = everything the guest owes (no payments yet)
+            $vatRateBooking,
+            $vatAmountBooking,
+            $totalWithVat,
             $childSupplementTotal,
             $tourismLevyAmount,
             $tourismLevyPercent,
@@ -400,6 +402,9 @@ try {
             'tourism_levy_percent' => $tourismLevyPercent,
             'occupancy_type' => $bookingData['occupancy_type'],
             'total_amount' => $totalAmount,
+            'vat_rate' => $vatRateBooking,
+            'vat_amount' => $vatAmountBooking,
+            'total_with_vat' => $totalWithVat,
             'special_requests' => $bookingData['special_requests'],
             'status' => $bookingStatus,
             'is_tentative' => $isTentative,

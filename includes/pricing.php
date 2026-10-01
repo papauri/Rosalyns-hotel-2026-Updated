@@ -86,10 +86,8 @@ if (!function_exists('applyDynamicPricing')) {
             $daysUntilArrival = 0;
         }
 
-        $currentPrice   = $base_price;
-        $appliedPlan    = null;
-        $totalDiscount  = 0.0;
-
+        // Collect every plan matching this room + stay (already priority-ordered).
+        $matching = [];
         foreach ($plans as $plan) {
             if (!_planAppliesToRoom($plan, $room_id)) {
                 continue;
@@ -97,34 +95,115 @@ if (!function_exists('applyDynamicPricing')) {
             if (!_planMatchesStay($plan, $checkInDate, $checkOutDate, $nights, $daysUntilArrival)) {
                 continue;
             }
+            $matching[] = $plan;
+        }
 
-            // Plan matches
-            $adjustedPrice = applyRatePlanToPrice($plan, $currentPrice);
-            $diff          = $currentPrice - $adjustedPrice; // positive = discount, negative = surcharge
+        if (empty($matching)) {
+            return $empty;
+        }
 
-            $totalDiscount += $diff;
-            $currentPrice   = $adjustedPrice;
-
-            if ($appliedPlan === null) {
-                $appliedPlan = $plan; // Track first match for label / ID
-            }
-
+        $hasNonStacking = false;
+        foreach ($matching as $plan) {
             if (empty($plan['is_stacking'])) {
-                break; // Non-stacking: stop after first match
+                $hasNonStacking = true;
+                break;
             }
         }
 
-        if ($appliedPlan === null) {
-            return $empty;
+        $applied = [];
+        if ($hasNonStacking) {
+            // Any non-stacking plan in play: only the single best (lowest resulting
+            // price) plan among ALL matching plans applies.
+            $bestPlan  = null;
+            $bestPrice = null;
+            foreach ($matching as $plan) {
+                $candidate = applyRatePlanToPrice($plan, $base_price);
+                if ($bestPrice === null || $candidate < $bestPrice - 0.00001) {
+                    $bestPrice = $candidate;
+                    $bestPlan  = $plan;
+                }
+            }
+            $applied = [$bestPlan];
+        } else {
+            $applied = $matching; // all stacking: combine cumulatively
+        }
+
+        $currentPrice = $base_price;
+        foreach ($applied as $plan) {
+            $currentPrice = applyRatePlanToPrice($plan, $currentPrice);
+        }
+        $totalDiscount = $base_price - $currentPrice; // positive = discount, negative = surcharge
+
+        $appliedPlan = $applied[0];
+        $labels = [];
+        $ids    = [];
+        foreach ($applied as $plan) {
+            $labels[] = (string)$plan['name'];
+            $ids[]    = (int)$plan['id'];
         }
 
         return [
             'final_price'     => round($currentPrice, 2),
             'original_price'  => $base_price,
             'discount_amount' => round($totalDiscount, 2),
-            'rate_plan_id'    => (int)$appliedPlan['id'],
-            'rate_plan_label' => $appliedPlan['name'],
+            'rate_plan_id'    => (int)$appliedPlan['id'],       // primary plan
+            'rate_plan_label' => implode(', ', $labels),        // every applied plan
+            'rate_plan_ids'   => $ids,
             'rate_plan_row'   => $appliedPlan,
+        ];
+    }
+
+    /**
+     * Single source of truth for splitting a stay amount into net / VAT / levy / total.
+     * The tourism levy sits OUTSIDE the VAT base: levy = net * levyRate, VAT = net * vatRate,
+     * total = net + vat + levy (exactly, at 2dp; rounding residue lands on net).
+     *
+     * $basis 'price': a catalog amount read per vat_pricing_mode
+     *            inclusive -> amount contains VAT; exclusive -> amount is net; off -> no VAT.
+     * $basis 'final': an all-in amount the guest pays; net = amount / (1 + vat + levy).
+     * $applyLevy false skips the levy for this amount (e.g. packages).
+     *
+     * @return array{net:float,vat:float,levy:float,total_with_vat:float,vat_rate:float,levy_rate:float}
+     *         vat_rate / levy_rate are percentages (16.5 = 16.5%).
+     */
+    function rh_stay_totals(float $amount, string $basis = 'price', bool $applyLevy = true): array
+    {
+        $mode = function_exists('vat_mode') ? vat_mode() : 'off';
+        $vatPct = $mode === 'off' ? 0.0 : (float)getSetting('vat_rate', 0);
+        $levyOn = in_array(getSetting('tourism_levy_enabled', '0'), ['1', 1, true, 'true', 'on'], true);
+        $levyPct = ($applyLevy && $levyOn) ? max(0.0, (float)getSetting('tourism_levy_percent', 0)) : 0.0;
+        $v = $vatPct / 100;
+        $l = $levyPct / 100;
+        $amount = max(0.0, $amount);
+
+        if ($basis === 'final') {
+            $total    = round($amount, 2);
+            $netExact = $amount / (1 + $v + $l);
+            $vat      = round($netExact * $v, 2);
+            $levy     = round($netExact * $l, 2);
+            $net      = round($total - $vat - $levy, 2);
+        } else {
+            if ($mode === 'inclusive' && $v > 0) {
+                $netExact = $amount / (1 + $v);
+                $vat      = round($amount - $netExact, 2);
+                $levy     = round($netExact * $l, 2);
+                $total    = round(round($amount, 2) + $levy, 2);
+                $net      = round($total - $vat - $levy, 2);
+            } else {
+                $net  = round($amount, 2);
+                $vat  = round($amount * $v, 2);
+                $levy = round($amount * $l, 2);
+                $total = round($net + $vat + $levy, 2);
+            }
+        }
+
+        return [
+            'net'            => $net,
+            'vat'            => $vat,
+            'levy'           => $levy,
+            'total_with_vat' => $total,
+            'vat_rate'       => $vatPct,
+            'levy_rate'      => $levyPct,
         ];
     }
 

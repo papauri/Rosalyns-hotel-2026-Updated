@@ -484,14 +484,39 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['booking_action'])) {
                     if (!$validation['allowed']) {
                         $_SESSION['error_message'] = getBookingActionErrorMessage('check_out', $validation['reason']);
                     } else {
-                        $stmt = $pdo->prepare("UPDATE bookings SET status = 'checked-out', checkout_completed_at = NOW(), updated_at = NOW() WHERE id = ?");
-                        $stmt->execute([$booking_id]);
+                        // Balance gate (server-side): lock the booking, recalculate, then
+                        // block unless settled or a 'checkout_with_balance' user confirmed.
+                        $pdo->beginTransaction();
+                        $balGate = null;
+                        try {
+                            $pdo->prepare("SELECT id FROM bookings WHERE id = ? FOR UPDATE")->execute([$booking_id]);
+                            $balGate = evaluateCheckoutBalance($pdo, (int)$booking_id, (int)($user['id'] ?? 0), !empty($_POST['confirm_checkout_with_balance']));
+                            if ($balGate['allowed']) {
+                                $stmt = $pdo->prepare("UPDATE bookings SET status = 'checked-out', checkout_completed_at = NOW(), updated_at = NOW() WHERE id = ?");
+                                $stmt->execute([$booking_id]);
+
+                                // Restore room availability
+                                $pdo->prepare("UPDATE rooms SET rooms_available = rooms_available + 1 WHERE id = ? AND rooms_available < total_rooms")
+                                    ->execute([$checkout_row['room_id']]);
+                                $pdo->commit();
+                            } else {
+                                $pdo->rollBack();
+                            }
+                        } catch (\Throwable $coErr) {
+                            if ($pdo->inTransaction()) {
+                                $pdo->rollBack();
+                            }
+                            throw new RuntimeException('Checkout failed - nothing was changed. ' . $coErr->getMessage());
+                        }
+                    }
+                    if (isset($balGate) && !$balGate['allowed']) {
+                        $_SESSION['error_message'] = $balGate['message'];
+                    } elseif (isset($balGate)) {
+                        if ($balGate['override']) {
+                            logCheckoutBalanceOverride((int)$booking_id, (string)$checkout_row['booking_reference'], (float)$balGate['balance'], (int)($user['id'] ?? 0), $user['full_name'] ?? null);
+                        }
 
                         logBookingCheckOut($booking_id, $checkout_row['booking_reference'], 'admin', $user['id'], $user['full_name']);
-
-                        // Restore room availability
-                        $pdo->prepare("UPDATE rooms SET rooms_available = rooms_available + 1 WHERE id = ? AND rooms_available < total_rooms")
-                            ->execute([$checkout_row['room_id']]);
 
                         $updatedRoomCount = updateBookingRoomsStatus($booking_id, 'cleaning', 'Guest checked out', $user['id'] ?? null);
 
@@ -587,6 +612,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['booking_action'])) {
                                 $msg .= ' Pending refund ' . $refund_result['refund_ref']
                                     . ' (' . getSetting('currency_symbol', 'MWK') . ' ' . number_format((float) $refund_result['refund_amount'], 2) . ') queued - review in Payments.';
                             }
+                            if (!empty($refund_result['error'])) {
+                                $msg .= ' WARNING: the automatic refund could not be created (' . $refund_result['error'] . ') - raise it manually in Payments.';
+                            }
                             $msg .= $email_result['success'] ? ' No-show email sent to guest.' : ' (No-show email could not be sent.)';
                             $_SESSION['success_message'] = $msg;
                         }
@@ -615,74 +643,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['booking_action'])) {
                         $previous_status = $booking_to_cancel['status'];
                         $cancellation_reason = $_POST['cancellation_reason'] ?? 'Cancelled by admin';
 
-                        $stmt = $pdo->prepare("UPDATE bookings SET status = 'cancelled', updated_at = NOW() WHERE id = ?");
-                        $stmt->execute([$booking_id]);
+                        // One transaction: status + room/stock release + bill treatment +
+                        // refund, booking row locked. Any failure rolls everything back.
+                        $cancelRes = cancelRoomBookingSettled($pdo, (int)$booking_id, (int)($user['id'] ?? 0), (string)$cancellation_reason);
+                        if (!$cancelRes['success']) {
+                            throw new RuntimeException('Cancellation failed - nothing was changed. ' . $cancelRes['error']);
+                        }
 
                         logBookingStatusChange($booking_id, $booking_to_cancel['booking_reference'], $previous_status, 'cancelled', 'admin', $user['id'], $user['full_name'], $cancellation_reason);
-
-                        if ($previous_status === 'confirmed') {
-                            $pdo->prepare("UPDATE rooms SET rooms_available = rooms_available + 1 WHERE id = ? AND rooms_available < total_rooms")
-                                ->execute([$booking_to_cancel['room_id']]);
-                        }
-
-                        updateBookingRoomsStatus($booking_id, 'available', 'Booking cancelled: ' . $cancellation_reason, $user['id'] ?? null);
-
-                        // Refund accounting: if any completed payment exists, create a refund record.
-                        $canPay_stmt = $pdo->prepare("
-                            SELECT SUM(total_amount) as total_paid
-                            FROM payments
-                            WHERE booking_type = 'room' AND booking_id = ?
-                              AND payment_status IN ('completed','paid') AND COALESCE(payment_type, '') != 'refund'
-                              AND deleted_at IS NULL
-                        ");
-                        $canPay_stmt->execute([$booking_id]);
-                        $cancel_paid_total = (float)(($canPay_stmt->fetch(PDO::FETCH_ASSOC))['total_paid'] ?? 0);
-
-                        $cancel_refund_msg = '';
-                        if ($cancel_paid_total > 0) {
-                            do {
-                                $cancel_refund_ref = 'RFD-CAN-' . strtoupper(substr(uniqid(), -8));
-                                $canRefChk = $pdo->prepare("SELECT COUNT(*) FROM payments WHERE payment_reference = ?");
-                                $canRefChk->execute([$cancel_refund_ref]);
-                            } while ((int)$canRefChk->fetchColumn() > 0);
-
-                            $vatEnabled_can = getSetting('vat_enabled') === '1';
-                            $vatRate_can    = $vatEnabled_can ? (float)getSetting('vat_rate') : 0;
-                            $vatAmt_can     = $vatRate_can > 0
-                                ? round($cancel_paid_total * ($vatRate_can / (100 + $vatRate_can)), 2)
-                                : 0;
-                            $netAmt_can     = round($cancel_paid_total - $vatAmt_can, 2);
-
-                            $pdo->prepare("
-                                INSERT INTO payments (
-                                    payment_reference, booking_type, booking_id, booking_reference,
-                                    payment_date, payment_amount, vat_rate, vat_amount, total_amount,
-                                    payment_method, payment_type, payment_status,
-                                    refund_reason, refund_status, refund_amount,
-                                    recorded_by, created_at
-                                ) VALUES (?, 'room', ?, ?, CURDATE(), ?, ?, ?, ?, 'cash', 'refund', 'completed',
-                                          'cancellation', 'completed', ?, ?, NOW())
-                            ")->execute([
-                                $cancel_refund_ref,
-                                $booking_id,
-                                $booking_to_cancel['booking_reference'],
-                                $netAmt_can,
-                                $vatRate_can,
-                                $vatAmt_can,
-                                $cancel_paid_total,
-                                $cancel_paid_total,
-                                (int)($user['id'] ?? 0),
-                            ]);
-
-                            $cancel_refund_msg = ' Refund of ' . ($currency_symbol ?? 'MWK') . ' '
-                                . number_format($cancel_paid_total, 2) . ' recorded (Ref: ' . $cancel_refund_ref . ').';
-                        }
-
-                        recalculateBookingFinancials($booking_id);
-                        if ($cancel_paid_total > 0) {
-                            $pdo->prepare("UPDATE bookings SET payment_status = 'refunded', updated_at = NOW() WHERE id = ?")
-                                ->execute([$booking_id]);
-                        }
+                        $cancel_refund_msg = ' ' . $cancelRes['summary'];
 
                         require_once '../config/email.php';
                         $email_result = sendBookingCancelledEmail($booking_to_cancel, $cancellation_reason);
@@ -694,7 +663,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['booking_action'])) {
                 break;
         }
     } catch (\Throwable $e) {
-        $_SESSION['error_message'] = 'Action failed. Please try again.';
+        // RuntimeException carries a deliberate, staff-safe message (e.g. a failed
+        // cancellation that was rolled back); anything else stays generic.
+        $_SESSION['error_message'] = ($e instanceof RuntimeException && $e->getMessage() !== '')
+            ? $e->getMessage()
+            : 'Action failed. Please try again.';
         error_log("Booking action error: " . $e->getMessage());
     }
 
@@ -918,26 +891,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['adjust_dates'])) {
 
             $message = "Stay dates adjusted successfully. {$delta_text}";
 
-            // If extra amount is due, add a pending payment row so it appears in Payments
+            // Any extra amount is carried by the recalculated booking balance (amount_due);
+            // no placeholder payment row is created.
             if ($delta > 0.01) {
-                $pay_ref = 'ADJ-' . date('Y') . '-' . str_pad($booking_id, 6, '0', STR_PAD_LEFT) . '-' . time();
-                $adj_pay_stmt = $pdo->prepare("
-                    INSERT INTO payments (
-                        payment_reference, booking_type, booking_id, booking_reference,
-                        payment_date, payment_amount, payment_method, payment_type,
-                        payment_status, status, notes, recorded_by
-                    ) VALUES (?, 'room', ?, ?, CURDATE(), ?, 'pending', 'date_adjustment',
-                              'pending', 'pending', ?, ?)
-                ");
-                $adj_pay_stmt->execute([
-                    $pay_ref,
-                    $booking_id,
-                    $pre_adj_row['booking_reference'] ?? '',
-                    $delta,
-                    'Additional charge due to date adjustment. New check-out: ' . $new_check_out,
-                    $user['id']
-                ]);
-                $message .= ' Payment record ' . $pay_ref . ' added - collect before check-out.';
+                $message .= ' The additional amount now shows as balance due - collect before check-out.';
             }
 
             // Add credit balance notification if applicable
@@ -978,27 +935,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['adjust_dates'])) {
 
 // Handle payment status update
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['update_payment'])) {
-    $payment_status = $_POST['payment_status'];
+    // payment_status is DERIVED from real payments, never taken from the form.
+    // The form value is only a request: 'paid' means "settle the outstanding
+    // balance now"; anything else just re-derives the status from the ledger.
+    $requested_status = (string)($_POST['payment_status'] ?? '');
+    if (!in_array($requested_status, ['unpaid', 'partial', 'paid'], true)) {
+        $requested_status = '';
+    }
     $previous_status = $booking['payment_status'];
 
     try {
         $vatEnabled = in_array(getSetting('vat_enabled'), ['1', 1, true, 'true', 'on'], true);
         $configuredVatRate = $vatEnabled ? (float) getSetting('vat_rate') : 0;
-
-        $summaryForPayment = getBookingFolioSummary($booking_id);
-        $extrasSubtotal = (float)($summaryForPayment['extras_subtotal'] ?? 0);
-        $extrasVat = (float)($summaryForPayment['extras_vat'] ?? 0);
-
-        $baseSubtotal = (float)($booking['total_amount'] ?? 0);
-        $baseVat = (float)($booking['vat_amount'] ?? 0);
-        if ($baseVat <= 0.0 && $configuredVatRate > 0.0) {
-            $baseVat = round($baseSubtotal * ($configuredVatRate / 100), 2);
-        }
-
-        $paymentSubtotal = $baseSubtotal + $extrasSubtotal;
-        $paymentVatAmount = $baseVat + $extrasVat;
-        $paymentTotalWithVat = $paymentSubtotal + $paymentVatAmount;
-        $paymentVatRate = $paymentSubtotal > 0 ? round(($paymentVatAmount / $paymentSubtotal) * 100, 2) : $configuredVatRate;
 
         $levyAmount = (float)($booking['tourism_levy_amount'] ?? 0);
         $levyPercent = (float)($booking['tourism_levy_percent'] ?? 0);
@@ -1007,28 +955,41 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['update_payment'])) {
             $paymentNotes .= ' Tourism levy included' . ($levyPercent > 0 ? ' (' . number_format($levyPercent, 2) . '%).' : '.');
         }
 
-        $update_stmt = $pdo->prepare("UPDATE bookings SET payment_status = ?, updated_at = NOW() WHERE id = ?");
-        $update_stmt->execute([$payment_status, $booking_id]);
+        $new_payment_id = 0;
+        $paymentAlreadyRecorded = false;
+        $settleRequested = ($requested_status === 'paid');
 
-        if ($payment_status === 'paid' && $previous_status !== 'paid') {
-            // Guard: skip the insert if a completed payment already exists for this
-            // booking. `$previous_status !== 'paid'` only stops the same transition
-            // running twice — it does NOT notice a payment already recorded through
-            // payment-add.php or the API, so settling here booked the full amount a
-            // second time under a different reference format. admin/bookings.php has
-            // carried this guard for a while; this path was missed.
-            $dupChk = $pdo->prepare("
-                SELECT COUNT(*) FROM payments
-                WHERE booking_type = 'room' AND booking_id = ?
-                  AND payment_status IN ('completed','paid') AND COALESCE(payment_type, '') != 'refund'
-                  AND deleted_at IS NULL
-            ");
-            $dupChk->execute([$booking_id]);
-            $paymentAlreadyRecorded = (int)$dupChk->fetchColumn() > 0;
+        $pdo->beginTransaction();
+        // Lock the booking row, then size the settlement from the live folio balance.
+        $lockStmt = $pdo->prepare("SELECT id FROM bookings WHERE id = ? FOR UPDATE");
+        $lockStmt->execute([$booking_id]);
+        if (!recalculateBookingFinancials($booking_id)) {
+            throw new RuntimeException('Could not recalculate the booking balance.');
+        }
 
-            $new_payment_id = 0;
-            if (!$paymentAlreadyRecorded) {
-                $payment_reference = 'PAY-' . date('Y') . '-' . str_pad($booking_id, 6, '0', STR_PAD_LEFT);
+        if ($settleRequested) {
+            $summaryForPayment = getBookingFolioSummary($booking_id);
+            $settleAmount = round((float)($summaryForPayment['balance_due'] ?? 0), 2);
+
+            if ($settleAmount > BALANCE_TOLERANCE) {
+                // Same split as admin/payment-add.php: the amount received is GROSS,
+                // payment_amount is the NET portion, vat_amount the extracted VAT.
+                $paymentVatRate = $configuredVatRate;
+                $paymentVatAmount = $paymentVatRate > 0 ? round($settleAmount * ($paymentVatRate / (100 + $paymentVatRate)), 2) : 0.0;
+                $paymentTotalWithVat = $settleAmount;
+                $paymentSubtotal = round($settleAmount - $paymentVatAmount, 2);
+                // Prefer the account's own VAT ratio (levy / zero-rated lines carry no VAT).
+                if (!function_exists('rh_account_vat_split') && is_file(__DIR__ . '/includes/finance-account-sync.php')) {
+                    require_once __DIR__ . '/includes/finance-account-sync.php';
+                }
+                if (function_exists('rh_account_vat_split')) {
+                    $acctSplit = rh_account_vat_split($pdo, 'room', (int)$booking_id, $settleAmount, $paymentVatRate);
+                    $paymentVatRate = $acctSplit['rate'];
+                    $paymentVatAmount = $acctSplit['vat'];
+                    $paymentSubtotal = $acctSplit['net'];
+                }
+
+                $payment_reference = 'PAY-' . date('Y') . '-' . str_pad($booking_id, 6, '0', STR_PAD_LEFT) . '-' . strtoupper(substr(uniqid(), -4));
                 $receipt_number = finance_next_receipt_number($pdo, date('Y-m-d'));
 
                 $insert_payment = $pdo->prepare("
@@ -1054,19 +1015,20 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['update_payment'])) {
                 $new_payment_id = (int)$pdo->lastInsertId();
 
                 logBookingPayment($booking_id, $booking['booking_reference'], $paymentTotalWithVat, 'full_payment', 'cash', 'completed', $user['id'], $payment_reference);
+                // Status, amount_paid and amount_due are re-derived from the ledger;
+                // total_with_vat (the bill) is never written from here.
+                if (!recalculateBookingFinancials($booking_id)) {
+                    throw new RuntimeException('Could not recalculate the booking balance after the payment.');
+                }
+            } else {
+                // Nothing outstanding — no second payment is created.
+                $paymentAlreadyRecorded = true;
             }
+        }
 
-            $update_amounts = $pdo->prepare("
-                UPDATE bookings
-                SET vat_rate = ?, vat_amount = ?, total_with_vat = ?, last_payment_date = CURDATE(), updated_at = NOW()
-                WHERE id = ?
-            ");
-            $update_amounts->execute([$paymentVatRate, $paymentVatAmount, $paymentTotalWithVat, $booking_id]);
+        $pdo->commit();
 
-            if (function_exists('recalculateBookingFinancials')) {
-                recalculateBookingFinancials($booking_id);
-            }
-
+        if ($settleRequested) {
             $auto_assign_msg = '';
             if (($booking['status'] ?? '') === 'confirmed' && empty($booking['individual_room_id'])) {
                 $autoAssignResult = autoAssignConfirmedPaidBooking($booking_id);
@@ -1099,8 +1061,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['update_payment'])) {
 
         header('Location: booking-details.php?id=' . $booking_id);
         exit;
-    } catch (PDOException $e) {
-        $error_message = 'Failed to update payment status: ' . $e->getMessage();
+    } catch (Throwable $e) {
+        if ($pdo->inTransaction()) {
+            $pdo->rollBack();
+        }
+        $error_message = 'Failed to update payment status - nothing was saved: ' . $e->getMessage();
     }
 }
 
@@ -1130,18 +1095,15 @@ if ($booking_base_vat <= 0.0 && $configured_vat_rate > 0.0) {
     $booking_base_vat = vat_components($booking_base_subtotal)['vat'];
 }
 
-// Inclusive mode: priced amounts already contain VAT — the folio total is the
-// sum of priced amounts, never price + VAT again.
 $vat_is_inclusive = function_exists('vat_mode') && vat_mode() === 'inclusive';
-$folio_subtotal_before_vat = $vat_is_inclusive
-    ? max(0.0, ($booking_base_subtotal - $booking_base_vat) + ($folio_extras_subtotal - $folio_extras_vat))
-    : $booking_base_subtotal + $folio_extras_subtotal;
-$folio_total_vat = $booking_base_vat + $folio_extras_vat;
-$folio_total_amount = $vat_is_inclusive
-    ? $booking_base_subtotal + $folio_extras_subtotal
-    : $folio_subtotal_before_vat + $folio_total_vat;
+// One source of truth: getBookingFolioSummary() — grand total, VAT and balance
+// due are shown exactly as the finance layer computes them (no page-local third
+// balance). Subtotal before VAT is derived from those same figures.
+$folio_total_amount = (float)($folio_summary['grand_total'] ?? 0);
+$folio_total_vat = (float)($folio_summary['total_vat'] ?? 0);
+$folio_subtotal_before_vat = max(0.0, $folio_total_amount - $folio_total_vat);
 $folio_amount_paid = (float)($folio_summary['amount_paid'] ?? $booking['amount_paid'] ?? 0);
-$folio_balance_due = max(0.0, $folio_total_amount - $folio_amount_paid);
+$folio_balance_due = (float)($folio_summary['balance_due'] ?? max(0.0, $folio_total_amount - $folio_amount_paid));
 // Money owed BACK to the guest (overpayment, or a stay shortened after payment).
 // Balance Due is clamped at zero, so without this the credit is invisible here.
 $folio_credit_balance = max(0.0, $folio_amount_paid - $folio_total_amount);
@@ -1744,7 +1706,7 @@ unset($_SESSION['success_message'], $_SESSION['error_message']);
                             <?php if (!empty($booking['rate_plan_label']) && (float)($booking['rate_plan_discount'] ?? 0) > 0): ?>
                                 <div class="folio-summary-item">
                                     <div class="folio-summary-label"><?php echo htmlspecialchars($booking['rate_plan_label']); ?></div>
-                                    <div class="folio-summary-value" style="color:#1f7a42;">-<?php echo $currency_symbol; ?><?php echo number_format((float) $booking['rate_plan_discount'], 2); ?></div>
+                                    <div class="folio-summary-value" style="color:#1f7a42;">-<?php echo $currency_symbol; ?><?php echo number_format((float) $booking['rate_plan_discount'] * max(1, (int) $booking['number_of_nights']), 2); ?></div>
                                 </div>
                             <?php endif; ?>
                             <?php foreach ($booking_packages as $bp): ?>
@@ -2073,13 +2035,26 @@ unset($_SESSION['success_message'], $_SESSION['error_message']);
                                     <?php endif; ?>
                                 <?php endif; ?>
 
-                                <?php if ($booking['status'] == 'checked-in'): ?>
-                                    <form method="POST" class="booking-action-form" data-admin-confirm="Check out this guest and generate the final invoice where applicable?" data-admin-confirm-title="Check out guest" data-admin-confirm-ok="Check out" data-admin-confirm-icon="fa-right-from-bracket" data-admin-submit-text="Checking out...">
+                                <?php if ($booking['status'] == 'checked-in'):
+                                    $co_balance = round(max(0.0, (float)($folio_summary['balance_due'] ?? ($booking['amount_due'] ?? 0))), 2);
+                                    $co_has_balance = $co_balance > BALANCE_TOLERANCE;
+                                    $co_can_override = $co_has_balance && hasPermission((int)($user['id'] ?? 0), 'checkout_with_balance');
+                                    $co_confirm_text = $co_can_override
+                                        ? 'This guest still owes ' . $currency_symbol . ' ' . number_format($co_balance, 2) . '. Check out anyway with the outstanding balance? This will be recorded in the booking timeline.'
+                                        : 'Check out this guest and generate the final invoice where applicable?';
+                                ?>
+                                    <form method="POST" class="booking-action-form" data-admin-confirm="<?php echo htmlspecialchars($co_confirm_text, ENT_QUOTES); ?>" data-admin-confirm-title="Check out guest" data-admin-confirm-ok="<?php echo $co_can_override ? 'Check out with balance' : 'Check out'; ?>" data-admin-confirm-icon="fa-right-from-bracket" data-admin-submit-text="Checking out...">
                                         <input type="hidden" name="booking_action" value="checkout">
-                                        <button type="submit" class="action-btn checkout" data-help="Check Out|Check the guest out, release the room, and generate the final invoice where applicable.">
+                                        <?php if ($co_can_override): ?><input type="hidden" name="confirm_checkout_with_balance" value="1"><?php endif; ?>
+                                        <button type="submit" class="action-btn checkout" data-help="Check Out|Check the guest out, release the room, and generate the final invoice where applicable."<?php echo ($co_has_balance && !$co_can_override) ? ' disabled title="Outstanding balance ' . htmlspecialchars($currency_symbol . ' ' . number_format($co_balance, 2), ENT_QUOTES) . ' - record payment before checkout"' : ''; ?>>
                                             <i class="fas fa-right-from-bracket"></i> Check Out
                                         </button>
                                     </form>
+                                    <?php if ($co_has_balance): ?>
+                                        <p class="booking-action-inline-hint booking-action-inline-hint--error">
+                                            <i class="fas fa-info-circle"></i> Outstanding balance: <?php echo htmlspecialchars($currency_symbol . ' ' . number_format($co_balance, 2)); ?><?php echo $co_can_override ? ' - you may check out with the balance after confirming.' : ' - payment must be recorded before checkout.'; ?>
+                                        </p>
+                                    <?php endif; ?>
                                 <?php endif; ?>
 
                                 <?php if (in_array($booking['status'], ['confirmed', 'pending'], true) && strtotime($booking['check_in_date']) < strtotime('today')): ?>
@@ -2090,7 +2065,7 @@ unset($_SESSION['success_message'], $_SESSION['error_message']);
                                 <?php endif; ?>
 
                                 <?php if ($can_cancel): ?>
-                                    <form method="POST" class="booking-action-form" data-admin-confirm="Cancel this booking, release the room, and send the guest cancellation email?" data-admin-confirm-title="Cancel booking" data-admin-confirm-ok="Cancel booking" data-admin-confirm-tone="danger" data-admin-confirm-icon="fa-ban" data-admin-submit-text="Cancelling...">
+                                    <form method="POST" class="booking-action-form" data-admin-confirm="<?php echo htmlspecialchars('Cancel this booking, release the room, and send the guest cancellation email? Cancellation handling: ' . getCancellationRefundModeLabel() . '.', ENT_QUOTES); ?>" data-admin-confirm-title="Cancel booking" data-admin-confirm-ok="Cancel booking" data-admin-confirm-tone="danger" data-admin-confirm-icon="fa-ban" data-admin-submit-text="Cancelling...">
                                         <input type="hidden" name="booking_action" value="cancel">
                                         <input type="hidden" name="cancellation_reason" value="Cancelled by admin">
                                         <button type="submit" class="action-btn cancel" aria-label="Cancel booking"><i class="fas fa-ban"></i> Cancel Booking</button>
@@ -2596,7 +2571,10 @@ unset($_SESSION['success_message'], $_SESSION['error_message']);
         const currentCheckIn = '<?php echo htmlspecialchars($booking['check_in_date']); ?>';
         const currentCheckOut = '<?php echo htmlspecialchars($booking['check_out_date']); ?>';
         const currentNights = <?php echo (int) $booking['number_of_nights']; ?>;
-        const currentTotal = <?php echo (float) $booking_room_total_with_tax; ?>;
+        const _bookedSplit = <?php echo json_encode(rh_booked_stay_split($booking)); ?>;
+        const bookedRoomGrossPerNight = Number(_bookedSplit.per_night) || 0;
+        const bookedPackageGross = Number(_bookedSplit.package_gross) || 0;
+        const currentTotal = Number(_bookedSplit.total_with_vat) || 0;
         const currentChildSupplement = <?php echo (float)($booking['child_supplement_total'] ?? 0); ?>;
         const pricePerNight = <?php echo (float)($booking['price_per_night'] ?? 0); ?>;
         const vatRate = <?php echo $vat_enabled ? (float) getSetting('vat_rate') : 0; ?>;
@@ -2685,22 +2663,9 @@ unset($_SESSION['success_message'], $_SESSION['error_message']);
                 return;
             }
 
-            // Calculate new total with child supplement
-            const newBaseAmount = pricePerNight * newNights;
-
-            // Calculate child supplement adjustment (proportional to nights change)
-            let newChildSupplement = 0;
-            if (currentNights > 0 && currentChildSupplement > 0) {
-                const nightRatio = newNights / currentNights;
-                newChildSupplement = currentChildSupplement * nightRatio;
-            }
-
-            const newLevyAmount = levyRate > 0 ? ((newBaseAmount + newChildSupplement) * (levyRate / 100)) : 0;
-            const newSubtotal = newBaseAmount + newChildSupplement + newLevyAmount;
-            // Mode-aware VAT (mirrors calculateDateAdjustmentAmount server-side).
-            const newVatAmount = vatMode === 'inclusive' ? newSubtotal * (vatRate / (100 + vatRate))
-                : (vatMode === 'exclusive' ? newSubtotal * (vatRate / 100) : 0);
-            const newTotal = vatMode === 'exclusive' ? newSubtotal + newVatAmount : newSubtotal;
+            // Repriced at the guest's BOOKED nightly rate (server-computed gross per night:
+            // VAT, levy and child supplement already inside; packages kept as-is).
+            const newTotal = bookedRoomGrossPerNight * newNights + bookedPackageGross;
             const amountDelta = newTotal - currentTotal;
             const nightsDelta = newNights - currentNights;
 

@@ -931,7 +931,7 @@ if (!function_exists('vat_mode')) {
      */
     function vat_mode(): string
     {
-        $enabled = in_array(getSetting('vat_enabled'), ['1', 1, true, 'true', 'on'], true);
+        $enabled = rh_vat_enabled();
         if (!$enabled || (float)getSetting('vat_rate', 0) <= 0) {
             return 'off';
         }
@@ -4579,40 +4579,27 @@ function cancelTentativeBooking(int $booking_id, ?int $admin_user_id = null, ?st
     global $pdo;
 
     try {
-        // Start transaction
-        $pdo->beginTransaction();
-
-        // Get current booking details
-        $stmt = $pdo->prepare("SELECT * FROM bookings WHERE id = ? AND status = 'tentative'");
+        $stmt = $pdo->prepare("SELECT status FROM bookings WHERE id = ?");
         $stmt->execute([$booking_id]);
-        $booking = $stmt->fetch(PDO::FETCH_ASSOC);
-
-        if (!$booking) {
-            $pdo->rollBack();
+        if ((string)$stmt->fetchColumn() !== 'tentative') {
             return false;
         }
 
-        // Update booking status to cancelled
-        $update_stmt = $pdo->prepare("
-            UPDATE bookings
-            SET status = 'cancelled',
-                updated_at = CURRENT_TIMESTAMP
-            WHERE id = ?
-        ");
-        $update_stmt->execute([$booking_id]);
+        // Settle through the shared cancellation path (status, room release, bill
+        // treatment and any refund in one transaction, per the active cancellation mode).
+        $res = cancelRoomBookingSettled($pdo, $booking_id, (int)($admin_user_id ?? 0), (string)($reason ?? ''));
+        if (empty($res['success'])) {
+            return false;
+        }
 
-        // Log the action
         logTentativeBookingAction($booking_id, 'cancelled', [
             'cancelled_by' => $admin_user_id,
             'previous_status' => 'tentative',
             'new_status' => 'cancelled',
             'reason' => $reason
         ]);
-
-        $pdo->commit();
         return true;
-    } catch (PDOException $e) {
-        $pdo->rollBack();
+    } catch (Throwable $e) {
         error_log("Error cancelling tentative booking: " . $e->getMessage());
         return false;
     }
@@ -6182,6 +6169,10 @@ function ensureBookingChargesTable(PDO $pdo): void
         // overpayment was invisible to every finance page (it lived only inside the
         // metadata JSON of booking_date_adjustments).
         $ensureColumn('bookings', 'credit_balance', "ALTER TABLE bookings ADD COLUMN credit_balance DECIMAL(10,2) NOT NULL DEFAULT 0.00 COMMENT 'Amount owed back to the guest (overpayment / shortened stay). Settled via refund or credit note.'");
+        // Cancelled bookings: the room charge retained after cancellation (first night
+        // under 'keep_first_night', otherwise 0/NULL). Original total fields stay intact
+        // as history; recalculateBookingFinancials bills this instead for cancelled rows.
+        $ensureColumn('bookings', 'cancellation_retained_amount', "ALTER TABLE bookings ADD COLUMN cancellation_retained_amount DECIMAL(12,2) NULL DEFAULT NULL COMMENT 'Room charge retained on cancellation (NULL/0 = bill voided). Used as the room bill when status = cancelled.'");
     } catch (Throwable $e) {
         error_log('ensureBookingChargesTable warning: ' . $e->getMessage());
     }
@@ -6190,6 +6181,22 @@ function ensureBookingChargesTable(PDO $pdo): void
 // Initialize booking charges table on connection (gated — see rh_auto_migrate_enabled)
 if (rh_auto_migrate_enabled()) {
     ensureBookingChargesTable($pdo);
+}
+
+/**
+ * Single source of truth for "is VAT switched on?". The setting is stored as
+ * '1', 'true', 'on' or 'yes' depending on which screen saved it; every money
+ * path must read it through here so they cannot disagree.
+ */
+if (!function_exists('rh_vat_enabled')) {
+    function rh_vat_enabled(): bool
+    {
+        $v = getSetting('vat_enabled');
+        if (is_bool($v)) {
+            return $v;
+        }
+        return in_array(strtolower(trim((string)$v)), ['1', 'true', 'on', 'yes'], true);
+    }
 }
 
 /**
@@ -6204,9 +6211,16 @@ if (rh_auto_migrate_enabled()) {
  * @param int|null $addedBy Admin user ID who added the charge
  * @return array Result with success status and charge ID
  */
-function addBookingCharge(int $bookingId, string $chargeType, string $description, float $quantity, float $unitPrice, ?int $sourceItemId = null, ?int $addedBy = null): array
+function addBookingCharge(int $bookingId, string $chargeType, string $description, float $quantity, float $unitPrice, ?int $sourceItemId = null, ?int $addedBy = null, ?float $explicitVat = null): array
 {
     global $pdo;
+
+    if ($quantity <= 0) {
+        return ['success' => false, 'message' => 'Quantity must be greater than zero'];
+    }
+    if ($unitPrice < 0) {
+        return ['success' => false, 'message' => 'Unit price cannot be negative'];
+    }
 
     $ownTransaction = !$pdo->inTransaction();
 
@@ -6216,7 +6230,7 @@ function addBookingCharge(int $bookingId, string $chargeType, string $descriptio
         }
 
         // Get VAT settings
-        $vatEnabled = getSetting('vat_enabled') === '1';
+        $vatEnabled = rh_vat_enabled();
         $vatRate = $vatEnabled ? (float)getSetting('vat_rate') : 0;
 
         // unitPrice is the VAT-inclusive (gross) price — F&B/menu convention shared
@@ -6225,7 +6239,11 @@ function addBookingCharge(int $bookingId, string $chargeType, string $descriptio
         // vat_pricing_mode. (Room/conference/gym accounts instead use vat_components(),
         // which honours the exclusive/inclusive mode.)
         $lineTotal    = round($quantity * $unitPrice, 2);
-        if ($vatRate > 0) {
+        if ($explicitVat !== null) {
+            // Caller already split the gross (e.g. a room-rate line carrying levy outside the VAT base).
+            $vatAmount    = max(0.0, min($lineTotal, round($explicitVat, 2)));
+            $lineSubtotal = round($lineTotal - $vatAmount, 2);
+        } elseif ($vatRate > 0) {
             $lineSubtotal = round($lineTotal / (1 + ($vatRate / 100)), 2);
             $vatAmount    = round($lineTotal - $lineSubtotal, 2);
         } else {
@@ -6258,8 +6276,10 @@ function addBookingCharge(int $bookingId, string $chargeType, string $descriptio
 
         $chargeId = $pdo->lastInsertId();
 
-        // Recalculate booking financials
-        recalculateBookingFinancials($bookingId);
+        // Recalculate booking financials (a failure must undo the charge)
+        if (!recalculateBookingFinancials($bookingId)) {
+            throw new RuntimeException('Could not recalculate the booking balance after posting the charge.');
+        }
 
         if ($ownTransaction) {
             $pdo->commit();
@@ -6270,7 +6290,7 @@ function addBookingCharge(int $bookingId, string $chargeType, string $descriptio
             'charge_id' => $chargeId,
             'line_total' => $lineTotal
         ];
-    } catch (PDOException $e) {
+    } catch (Throwable $e) {
         if ($ownTransaction && $pdo->inTransaction()) {
             $pdo->rollBack();
         }
@@ -6484,7 +6504,7 @@ function getBookingFolioSummary(int $bookingId): array
 
     try {
         // Get booking base amount
-        $bookingStmt = $pdo->prepare("SELECT total_amount, total_with_vat, vat_amount, amount_paid, amount_due FROM bookings WHERE id = ?");
+        $bookingStmt = $pdo->prepare("SELECT * FROM bookings WHERE id = ?");
         $bookingStmt->execute([$bookingId]);
         $booking = $bookingStmt->fetch(PDO::FETCH_ASSOC);
 
@@ -6525,8 +6545,8 @@ function getBookingFolioSummary(int $bookingId): array
         $paymentsStmt = $pdo->prepare("
             SELECT
                 SUM(CASE
-                    WHEN payment_status IN ('completed', 'paid') AND COALESCE(payment_type, '') != 'refund' THEN total_amount
-                    WHEN payment_type = 'refund' AND payment_status IN ('completed', 'paid') THEN -total_amount
+                    WHEN payment_status IN ('completed', 'paid', 'refunded', 'partially_refunded') AND COALESCE(payment_type, '') != 'refund' THEN total_amount
+                    WHEN payment_type = 'refund' AND refund_status IN ('completed', 'processing') THEN -total_amount
                     ELSE 0
                 END) as total_paid
             FROM payments
@@ -6542,6 +6562,14 @@ function getBookingFolioSummary(int $bookingId): array
         }
         $baseNet = (float)($booking['total_amount'] ?? 0);
         $baseVat = (float)($booking['vat_amount'] ?? 0);
+        // Cancelled: bill only what was retained on cancellation (mirrors
+        // recalculateBookingFinancials); original totals stay as history.
+        if (($booking['status'] ?? '') === 'cancelled') {
+            $retained = max(0.0, (float)($booking['cancellation_retained_amount'] ?? 0));
+            $baseGross = $retained;
+            $baseNet = $baseGross;
+            $baseVat = 0.0;
+        }
         $extrasSubtotal = (float)($folioTotals['folio_subtotal'] ?? 0);
         $extrasVat = (float)($folioTotals['folio_vat'] ?? 0);
         $extrasTotal = (float)($folioTotals['folio_total'] ?? 0);
@@ -6584,8 +6612,9 @@ function recalculateBookingFinancials(int $bookingId): bool
     global $pdo;
 
     try {
-        // Get current booking
-        $stmt = $pdo->prepare("SELECT total_amount, total_with_vat, vat_rate, vat_amount FROM bookings WHERE id = ?");
+        // Get current booking (lock the row when inside a caller's transaction so
+        // concurrent payment/charge writers serialise on the recalculation)
+        $stmt = $pdo->prepare("SELECT * FROM bookings WHERE id = ?" . ($pdo->inTransaction() ? " FOR UPDATE" : ""));
         $stmt->execute([$bookingId]);
         $booking = $stmt->fetch(PDO::FETCH_ASSOC);
 
@@ -6614,11 +6643,12 @@ function recalculateBookingFinancials(int $bookingId): bool
         $paymentsStmt = $pdo->prepare("
             SELECT
                 SUM(CASE
-                    WHEN payment_status IN ('completed', 'paid') AND COALESCE(payment_type, '') != 'refund' THEN total_amount
+                    WHEN payment_status IN ('completed', 'paid', 'refunded', 'partially_refunded') AND COALESCE(payment_type, '') != 'refund' THEN total_amount
                     WHEN payment_type = 'refund' AND refund_status IN ('completed', 'processing') THEN -total_amount
                     ELSE 0
                 END) as total_paid,
-                MAX(CASE WHEN payment_status IN ('completed', 'paid') AND COALESCE(payment_type, '') != 'refund' THEN payment_date ELSE NULL END) as last_payment_date
+                SUM(CASE WHEN payment_type = 'refund' AND refund_status IN ('completed', 'processing') THEN total_amount ELSE 0 END) as total_refunded,
+                MAX(CASE WHEN payment_status IN ('completed', 'paid', 'refunded', 'partially_refunded') AND COALESCE(payment_type, '') != 'refund' THEN payment_date ELSE NULL END) as last_payment_date
             FROM payments
             WHERE booking_type = 'room' AND booking_id = ? AND deleted_at IS NULL
         ");
@@ -6639,6 +6669,13 @@ function recalculateBookingFinancials(int $bookingId): bool
         // folio_charges_total, and adjustBookingDates() relies on that split. Do not be
         // tempted to fold $chargesSubtotal / $chargesVat back into those columns; the
         // balance below is what reflects the full bill.
+        // Cancelled bookings: the room bill is whatever was retained on cancellation
+        // (cancellation_retained_amount; NULL = bill voided = 0). The original
+        // total_amount / total_with_vat stay untouched as history. Folio charges already
+        // posted and not voided remain billable.
+        if (($booking['status'] ?? '') === 'cancelled') {
+            $baseTotalWithVat = max(0.0, (float)($booking['cancellation_retained_amount'] ?? 0));
+        }
         $totalWithVat = $baseTotalWithVat + $chargesTotal; // charges_total already includes VAT
         $balance   = $totalWithVat - $amountPaid;
         $amountDue = max(0, $balance);
@@ -6647,6 +6684,20 @@ function recalculateBookingFinancials(int $bookingId): bool
         // adjustBookingDates() would go stale the moment a folio charge is added.
         $creditBalance = $balance < -BALANCE_TOLERANCE ? round(-$balance, 2) : 0.00;
         $paymentStatus = $amountDue <= BALANCE_TOLERANCE ? 'paid' : ($amountPaid > BALANCE_TOLERANCE ? 'partial' : 'unpaid');
+        // A cancelled booking with nothing billed and nothing ever paid is simply unpaid.
+        if (($booking['status'] ?? '') === 'cancelled'
+            && $totalWithVat <= BALANCE_TOLERANCE
+            && $amountPaid <= BALANCE_TOLERANCE
+            && (float)($payments['total_refunded'] ?? 0) <= BALANCE_TOLERANCE) {
+            $paymentStatus = 'unpaid';
+        }
+        // A cancelled booking whose money has all gone back out reads 'refunded'.
+        if (($booking['status'] ?? '') === 'cancelled'
+            && $amountPaid <= BALANCE_TOLERANCE
+            && (float)($payments['total_refunded'] ?? 0) > BALANCE_TOLERANCE
+            && $amountDue <= BALANCE_TOLERANCE) {
+            $paymentStatus = 'refunded';
+        }
 
         // Update booking
         $updateStmt = $pdo->prepare("
@@ -6675,6 +6726,400 @@ function recalculateBookingFinancials(int $bookingId): bool
     } catch (PDOException $e) {
         error_log("recalculateBookingFinancials error: " . $e->getMessage());
         return false;
+    }
+}
+
+/**
+ * Split a room-booking refund across the original payments that still have a
+ * refundable balance (newest payment first). Remaining refundable per payment =
+ * its gross total_amount minus refund rows against it that are pending,
+ * processing or completed (same reservation rule as admin/payment-refund.php).
+ * The total is capped at what can actually be refunded, so it never exceeds net
+ * paid. Pass $lock=true inside a transaction to lock the payment rows.
+ *
+ * @return array<int, array{payment: array, amount: float}> one entry per original payment
+ */
+function allocateBookingRefunds(PDO $pdo, int $bookingId, float $amount, bool $lock = false): array
+{
+    if ($amount <= BALANCE_TOLERANCE) {
+        return [];
+    }
+    $stmt = $pdo->prepare("
+        SELECT p.id, p.payment_method, p.booking_type, p.booking_reference, p.vat_rate, p.total_amount,
+               COALESCE((
+                   SELECT SUM(COALESCE(r.refund_amount, r.total_amount))
+                   FROM payments r
+                   WHERE r.original_payment_id = p.id AND r.payment_type = 'refund'
+                     AND r.refund_status IN ('completed','processing','pending') AND r.deleted_at IS NULL
+               ), 0) AS already_refunded
+        FROM payments p
+        WHERE p.booking_type = 'room' AND p.booking_id = ?
+          AND COALESCE(p.payment_type, '') <> 'refund'
+          AND p.payment_status IN ('completed','paid','refunded','partially_refunded')
+          AND p.deleted_at IS NULL
+        ORDER BY p.payment_date DESC, p.id DESC
+        " . ($lock ? "FOR UPDATE" : ""));
+    $stmt->execute([$bookingId]);
+
+    $out = [];
+    $left = round($amount, 2);
+    foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $p) {
+        if ($left <= BALANCE_TOLERANCE) {
+            break;
+        }
+        $remaining = round((float)$p['total_amount'] - (float)$p['already_refunded'], 2);
+        if ($remaining <= BALANCE_TOLERANCE) {
+            continue;
+        }
+        $take = round(min($left, $remaining), 2);
+        $out[] = ['payment' => $p, 'amount' => $take];
+        $left = round($left - $take, 2);
+    }
+    return $out;
+}
+
+/**
+ * Active cancellation handling mode (booking setting, admin/booking-settings.php).
+ *   void_refund_all  — bill voided, full net paid refunded (default)
+ *   void_keep_credit — bill voided, no auto refund; paid money stays as the booking's
+ *                      credit_balance (owed back — refund or credit note by staff)
+ *   keep_first_night — first night retained, bill reduced to it, rest refunded
+ */
+function getCancellationRefundMode(): string
+{
+    $mode = (string)getSetting('cancellation_refund_mode', 'void_refund_all');
+    return in_array($mode, ['void_refund_all', 'void_keep_credit', 'keep_first_night'], true) ? $mode : 'void_refund_all';
+}
+
+function getCancellationRefundModeLabel(?string $mode = null): string
+{
+    $mode = $mode ?? getCancellationRefundMode();
+    $labels = [
+        'void_refund_all'  => 'Void the bill and refund everything paid',
+        'void_keep_credit' => 'Void the bill and keep payments as guest credit (no automatic refund)',
+        'keep_first_night' => 'Charge the first night and refund the rest',
+    ];
+    return $labels[$mode] ?? $labels['void_refund_all'];
+}
+
+/**
+ * Refund & cancellation rules (admin/booking-settings.php, "Refunds & cancellations").
+ * One option active per rule; the first listed option is the default.
+ *   guest_self_cancel_refund — pending (staff approve) | auto (refund completed at once)
+ *   nonroom_cancel_mode      — keep_credit (paid money stays as credit) | refund_all (auto-refund net paid)
+ *   refund_method_default    — original (locked to original method) | ask (staff may choose)
+ */
+function rh_refund_rule_options(): array
+{
+    return [
+        'guest_self_cancel_refund' => ['pending', 'auto'],
+        'nonroom_cancel_mode'      => ['keep_credit', 'refund_all'],
+        'refund_method_default'    => ['original', 'ask'],
+    ];
+}
+
+function rh_refund_rule(string $key): string
+{
+    $opts = rh_refund_rule_options();
+    if (!isset($opts[$key])) {
+        return '';
+    }
+    $val = (string)getSetting($key, $opts[$key][0]);
+    return in_array($val, $opts[$key], true) ? $val : $opts[$key][0];
+}
+
+/**
+ * Cancel a room booking and settle its money in ONE transaction: the booking row is
+ * locked FOR UPDATE, status + room release + bill treatment + refund rows all commit
+ * together or not at all. Uses the active cancellation mode (see
+ * getCancellationRefundMode()). The original total fields are never altered — the
+ * retained bill lives in bookings.cancellation_retained_amount.
+ *
+ * If the caller already has a transaction open, this joins it and does NOT commit or
+ * roll back (on failure it returns success=false and the caller must roll back).
+ *
+ * @return array{success:bool,error:string,mode:string,previous_status:string,booking_reference:string,retained:float,refund_total:float,refund_refs:array,credit_balance:float,summary:string}
+ */
+function cancelRoomBookingSettled(PDO $pdo, int $bookingId, int $adminUserId, string $reason = '', string $refundStatus = 'completed'): array
+{
+    // 'pending' = refund rows are queued for staff to settle through the refund lifecycle
+    // (used for guest self-cancel); 'completed' = paid out now by staff.
+    $refundStatus = $refundStatus === 'pending' ? 'pending' : 'completed';
+    $result = [
+        'success' => false, 'error' => '', 'mode' => getCancellationRefundMode(), 'previous_status' => '',
+        'booking_reference' => '', 'retained' => 0.0, 'refund_total' => 0.0, 'refund_refs' => [],
+        'credit_balance' => 0.0, 'summary' => '',
+    ];
+    $ownTx = !$pdo->inTransaction();
+
+    try {
+        require_once __DIR__ . '/../includes/finance-sequences.php';
+        if (!function_exists('logBookingEvent')) {
+            require_once __DIR__ . '/../includes/booking-timeline.php';
+        }
+        $currency = (string)getSetting('currency_symbol', 'MWK');
+        $mode = $result['mode'];
+
+        if ($ownTx) {
+            $pdo->beginTransaction();
+        }
+
+        $lock = $pdo->prepare("SELECT * FROM bookings WHERE id = ? FOR UPDATE");
+        $lock->execute([$bookingId]);
+        $b = $lock->fetch(PDO::FETCH_ASSOC);
+        if (!$b) {
+            throw new RuntimeException('Booking not found.');
+        }
+        $prev = (string)($b['status'] ?? '');
+        $valid = validateBookingCancellation($b);
+        if (!$valid['allowed']) {
+            throw new RuntimeException($valid['reason']);
+        }
+        $ref = (string)($b['booking_reference'] ?? '');
+        $result['previous_status'] = $prev;
+        $result['booking_reference'] = $ref;
+
+        // Status change (clears tentative hold fields)
+        $pdo->prepare("UPDATE bookings SET status = 'cancelled', is_tentative = 0, tentative_expires_at = NULL, updated_at = NOW() WHERE id = ?")
+            ->execute([$bookingId]);
+
+        // Release the room-type stock counter (only confirmed bookings held one) and
+        // every individual room the booking holds.
+        if ($prev === 'confirmed') {
+            $pdo->prepare("UPDATE rooms SET rooms_available = rooms_available + 1 WHERE id = ? AND rooms_available < total_rooms")
+                ->execute([$b['room_id']]);
+        }
+        updateBookingRoomsStatus($bookingId, 'available', 'Booking cancelled: ' . ($ref !== '' ? $ref : ('Booking #' . $bookingId)), $adminUserId ?: null);
+
+        // Bill treatment. keep_first_night: booked nightly rate incl. its VAT/levy share
+        // (total_with_vat / nights), capped at what is billed. Never-confirmed tentative
+        // holds are not charged.
+        $retained = 0.0;
+        if ($mode === 'keep_first_night' && $prev !== 'tentative') {
+            $gross = (float)($b['total_with_vat'] ?? 0);
+            if ($gross <= 0) {
+                $gross = (float)($b['total_amount'] ?? 0) + (float)($b['vat_amount'] ?? 0);
+            }
+            $nights = max(1, (int)($b['number_of_nights'] ?? 1));
+            $retained = max(0.0, round(min($gross, $gross / $nights), 2));
+        }
+        $pdo->prepare("UPDATE bookings SET cancellation_retained_amount = ? WHERE id = ?")->execute([$retained, $bookingId]);
+
+        if (!recalculateBookingFinancials($bookingId)) {
+            throw new RuntimeException('Could not recalculate the booking balance.');
+        }
+        $fin = $pdo->prepare("SELECT amount_paid, folio_charges_total FROM bookings WHERE id = ?");
+        $fin->execute([$bookingId]);
+        $f = $fin->fetch(PDO::FETCH_ASSOC);
+        $netPaid = round((float)($f['amount_paid'] ?? 0), 2);
+        $folio = round((float)($f['folio_charges_total'] ?? 0), 2);
+
+        // Refund = net paid less whatever is still billable (retained night + any
+        // folio charges that remain posted).
+        $refundTarget = 0.0;
+        if ($mode !== 'void_keep_credit') {
+            $refundTarget = max(0.0, round($netPaid - $retained - $folio, 2));
+        }
+
+        $refunded = 0.0;
+        $refs = [];
+        if ($refundTarget > BALANCE_TOLERANCE) {
+            $allocs = allocateBookingRefunds($pdo, $bookingId, $refundTarget, true);
+            $ins = $pdo->prepare("
+                INSERT INTO payments (
+                    payment_reference, booking_type, booking_id, booking_reference,
+                    payment_date, payment_amount, vat_rate, vat_amount, total_amount,
+                    payment_method, payment_type, payment_status, original_payment_id,
+                    refund_reason, refund_status, refund_amount, refund_notes,
+                    recorded_by, created_at
+                ) VALUES (?, 'room', ?, ?, CURDATE(), ?, ?, ?, ?, ?, 'refund', ?, ?,
+                          'cancellation', ?, ?, ?, ?, NOW())
+            ");
+            foreach ($allocs as $alloc) {
+                $orig = $alloc['payment'];
+                $leg = (float)$alloc['amount'];
+                $vr = (float)($orig['vat_rate'] ?? 0);
+                $va = $vr > 0 ? round($leg * ($vr / (100 + $vr)), 2) : 0.0;
+                $legRef = finance_next_refund_reference($pdo, date('Y-m-d'));
+                $ins->execute([
+                    $legRef, $bookingId, $ref,
+                    round($leg - $va, 2), $vr, $va, $leg,
+                    $orig['payment_method'] ?: 'other',
+                    $refundStatus,
+                    (int)$orig['id'],
+                    $refundStatus,
+                    $leg, 'Cancellation (' . $mode . ')', $adminUserId ?: null,
+                ]);
+                if ($refundStatus === 'completed' && !function_exists('rh_refresh_original_payment_status')
+                    && is_file(__DIR__ . '/../admin/includes/finance-account-sync.php')) {
+                    require_once __DIR__ . '/../admin/includes/finance-account-sync.php';
+                }
+                if ($refundStatus === 'completed' && function_exists('rh_refresh_original_payment_status')) {
+                    rh_refresh_original_payment_status($pdo, (int)$orig['id']);
+                }
+                $refunded = round($refunded + $leg, 2);
+                $refs[] = $legRef;
+            }
+            if (!recalculateBookingFinancials($bookingId)) {
+                throw new RuntimeException('Could not recalculate the booking balance after the refund.');
+            }
+        }
+
+        $after = $pdo->prepare("SELECT credit_balance FROM bookings WHERE id = ?");
+        $after->execute([$bookingId]);
+        $credit = round((float)$after->fetchColumn(), 2);
+
+        $summary = 'Cancellation mode: ' . getCancellationRefundModeLabel($mode) . '.';
+        if ($retained > 0) {
+            $summary .= ' Retained ' . $currency . ' ' . number_format($retained, 2) . ' (first night).';
+        }
+        if ($refunded > 0) {
+            $summary .= ($refundStatus === 'pending' ? ' Refund queued for staff to settle ' : ' Refunded ')
+                . $currency . ' ' . number_format($refunded, 2) . ' (Ref: ' . implode(', ', $refs) . ').';
+        }
+        if ($credit > BALANCE_TOLERANCE) {
+            $summary .= ' ' . $currency . ' ' . number_format($credit, 2) . ' is owed back to the guest - refund it or issue a credit note.';
+        }
+
+        if (function_exists('logBookingEvent')) {
+            logBookingEvent(
+                $bookingId, $ref, 'Cancellation settled', 'financial', $summary,
+                $prev, 'cancelled', 'admin', $adminUserId ?: null, null,
+                ['mode' => $mode, 'retained' => $retained, 'refunded' => $refunded, 'credit_balance' => $credit, 'reason' => $reason]
+            );
+        }
+
+        if ($ownTx) {
+            $pdo->commit();
+        }
+
+        $result['success'] = true;
+        $result['retained'] = $retained;
+        $result['refund_total'] = $refunded;
+        $result['refund_refs'] = $refs;
+        $result['credit_balance'] = $credit;
+        $result['summary'] = $summary;
+        return $result;
+    } catch (Throwable $e) {
+        if ($ownTx && $pdo->inTransaction()) {
+            $pdo->rollBack();
+        }
+        error_log('cancelRoomBookingSettled failed for booking ' . $bookingId . ': ' . $e->getMessage());
+        $result['success'] = false;
+        $result['error'] = $e->getMessage();
+        return $result;
+    }
+}
+
+/**
+ * Checkout balance gate. Recalculates the booking, then decides whether checkout may
+ * proceed: balance within BALANCE_TOLERANCE -> yes; otherwise only a user holding the
+ * 'checkout_with_balance' permission who explicitly confirmed ($override) may proceed.
+ * Call it inside the transaction that locks the booking row where possible.
+ *
+ * @return array{allowed:bool,balance:float,override:bool,needs_confirm:bool,can_override:bool,message:string}
+ * @throws RuntimeException when the balance cannot be recalculated
+ */
+function evaluateCheckoutBalance(PDO $pdo, int $bookingId, ?int $userId, bool $override = false): array
+{
+    if (!recalculateBookingFinancials($bookingId)) {
+        throw new RuntimeException('Could not verify the booking balance, so checkout was not processed.');
+    }
+    $st = $pdo->prepare("SELECT amount_due FROM bookings WHERE id = ?");
+    $st->execute([$bookingId]);
+    $balance = round(max(0.0, (float)$st->fetchColumn()), 2);
+
+    $res = ['allowed' => true, 'balance' => $balance, 'override' => false, 'needs_confirm' => false, 'can_override' => false, 'message' => ''];
+    if ($balance <= BALANCE_TOLERANCE) {
+        return $res;
+    }
+
+    $can = $userId !== null && $userId > 0 && function_exists('hasPermission') && hasPermission($userId, 'checkout_with_balance');
+    $cs = (string)getSetting('currency_symbol', 'MWK');
+    $res['can_override'] = $can;
+    if (!$can) {
+        $res['allowed'] = false;
+        $res['message'] = 'Checkout blocked: the guest still owes ' . $cs . ' ' . number_format($balance, 2)
+            . '. Record the payment first, or ask someone with the "Check out with balance" permission.';
+    } elseif (!$override) {
+        $res['allowed'] = false;
+        $res['needs_confirm'] = true;
+        $res['message'] = 'The guest still owes ' . $cs . ' ' . number_format($balance, 2)
+            . '. Confirm to check out with the outstanding balance.';
+    } else {
+        $res['override'] = true;
+    }
+    return $res;
+}
+
+/** Timeline entry for a checkout that went ahead with an outstanding balance. */
+function logCheckoutBalanceOverride(int $bookingId, string $bookingReference, float $balance, ?int $userId, ?string $userName = null): void
+{
+    if (!function_exists('logBookingEvent')) {
+        require_once __DIR__ . '/../includes/booking-timeline.php';
+    }
+    $cs = (string)getSetting('currency_symbol', 'MWK');
+    logBookingEvent(
+        $bookingId, $bookingReference, 'Checked out with outstanding balance', 'financial',
+        'Checked out with ' . $cs . ' ' . number_format($balance, 2) . ' outstanding' . ($userName ? ' (authorised by ' . $userName . ')' : ''),
+        null, number_format($balance, 2, '.', ''), 'admin', $userId, $userName,
+        ['outstanding_amount' => $balance, 'authorised_by_user_id' => $userId]
+    );
+}
+
+/**
+ * Check a checked-in booking out through the balance gate, in one transaction:
+ * booking row locked, balance re-derived, status flipped, room-type stock restored.
+ * Used by every status-change path (update_status, quick modify) so none bypasses the
+ * "checkout blocked while a balance is owed" rule. Room housekeeping status and the
+ * override timeline entry are written after the commit.
+ *
+ * @return array{success:bool,message:string,override:bool,balance:float}
+ */
+function rh_checkout_with_gate(PDO $pdo, int $bookingId, ?int $userId, bool $override = false, ?string $userName = null): array
+{
+    $out = ['success' => false, 'message' => '', 'override' => false, 'balance' => 0.0];
+    $ownTx = !$pdo->inTransaction();
+    try {
+        if ($ownTx) {
+            $pdo->beginTransaction();
+        }
+        $st = $pdo->prepare("SELECT id, status, room_id, booking_reference FROM bookings WHERE id = ? FOR UPDATE");
+        $st->execute([$bookingId]);
+        $bk = $st->fetch(PDO::FETCH_ASSOC);
+        if (!$bk) {
+            throw new RuntimeException('Booking not found.');
+        }
+        if ($bk['status'] !== 'checked-in') {
+            throw new RuntimeException("Cannot check out a booking that is '" . $bk['status'] . "'.");
+        }
+        $gate = evaluateCheckoutBalance($pdo, $bookingId, $userId, $override);
+        $out['balance'] = $gate['balance'];
+        if (!$gate['allowed']) {
+            if ($ownTx) {
+                $pdo->rollBack();
+            }
+            $out['message'] = $gate['message'];
+            return $out;
+        }
+        $pdo->prepare("UPDATE bookings SET status = 'checked-out', checkout_completed_at = NOW(), updated_at = NOW() WHERE id = ?")->execute([$bookingId]);
+        $pdo->prepare("UPDATE rooms SET rooms_available = rooms_available + 1 WHERE id = ? AND rooms_available < total_rooms")->execute([$bk['room_id']]);
+        if ($ownTx) {
+            $pdo->commit();
+        }
+        updateBookingRoomsStatus($bookingId, 'cleaning', 'Checkout completed: ' . ($bk['booking_reference'] ?: ('Booking #' . $bookingId)), $userId);
+        if ($gate['override']) {
+            logCheckoutBalanceOverride($bookingId, (string)$bk['booking_reference'], (float)$gate['balance'], $userId, $userName);
+            $out['override'] = true;
+        }
+        $out['success'] = true;
+        return $out;
+    } catch (Throwable $e) {
+        if ($ownTx && $pdo->inTransaction()) {
+            $pdo->rollBack();
+        }
+        $out['message'] = $e->getMessage();
+        return $out;
     }
 }
 
@@ -6878,7 +7323,111 @@ function validateDateAdjustment(array $booking, ?string $newCheckIn = null, ?str
 }
 
 /**
- * Calculate new booking amount based on date changes
+ * Booked nightly rate of a booking, as a FINAL gross (VAT + levy included) per night.
+ * Derived from the booking itself (never today's catalogue rate): room portion of the
+ * stay (child supplement included, packages excluded) divided by the original nights.
+ * Folio charges live in booking_charges and are not part of bookings.total_with_vat.
+ *
+ * @return array{gross:float,package_gross:float,room_gross:float,nights:int,per_night:float,total_with_vat:float}
+ */
+function rh_booked_stay_split(array $b): array
+{
+    $total = (float)($b['total_with_vat'] ?? 0);
+    if ($total <= 0) {
+        $total = (float)($b['total_amount'] ?? 0) + (float)($b['vat_amount'] ?? 0);
+    }
+    $base = (float)($b['total_amount'] ?? 0);
+    $pkg = max(0.0, (float)($b['package_total'] ?? 0));
+    // package_total is stored on the price basis (per vat_pricing_mode); gross it up the
+    // same way a price is (no levy on packages).
+    $pkgGross = 0.0;
+    if ($pkg > 0) {
+        if (!function_exists('rh_stay_totals')) {
+            require_once __DIR__ . '/../includes/pricing.php';
+        }
+        $pkgGross = min($total, rh_stay_totals($pkg, 'price', false)['total_with_vat']);
+    }
+    $nights = max(1, (int)($b['number_of_nights'] ?? 1));
+    $roomGross = max(0.0, round($total - $pkgGross, 2));
+    return [
+        'gross' => $total,
+        'package_gross' => $pkgGross,
+        'room_gross' => $roomGross,
+        'nights' => $nights,
+        'per_night' => $roomGross / $nights,
+        'total_with_vat' => $total,
+    ];
+}
+
+/**
+ * Whether levy applies to a stored booking (it had levy when booked).
+ */
+function rh_booking_has_levy(array $b): bool
+{
+    return (float)($b['tourism_levy_amount'] ?? 0) > 0 || (float)($b['tourism_levy_percent'] ?? 0) > 0;
+}
+
+/**
+ * Write a repriced stay's figures to the booking row consistently:
+ * total_amount = net + levy (ex-VAT), vat_amount, tourism_levy_amount, total_with_vat,
+ * and optionally nights / dates / child supplement. Does NOT touch payment columns:
+ * call recalculateBookingFinancials() afterwards (inside the caller's transaction).
+ *
+ * @param array $tt result of rh_stay_totals() for the new FULL stay value (packages included)
+ */
+function rh_write_booking_stay_totals(PDO $pdo, int $bookingId, array $tt, ?int $nights = null, ?string $checkIn = null, ?string $checkOut = null, ?float $childSupplement = null): void
+{
+    $sets = ['total_amount = ?', 'vat_amount = ?', 'tourism_levy_amount = ?', 'total_with_vat = ?'];
+    $vals = [round($tt['net'] + $tt['levy'], 2), $tt['vat'], $tt['levy'], $tt['total_with_vat']];
+    if ($nights !== null) {
+        $sets[] = 'number_of_nights = ?';
+        $vals[] = $nights;
+    }
+    if ($checkIn !== null && $checkOut !== null) {
+        $sets[] = 'check_in_date = ?';
+        $sets[] = 'check_out_date = ?';
+        $vals[] = $checkIn;
+        $vals[] = $checkOut;
+    }
+    if ($childSupplement !== null) {
+        $sets[] = 'child_supplement_total = ?';
+        $vals[] = round($childSupplement, 2);
+    }
+    $sets[] = 'updated_at = NOW()';
+    $vals[] = $bookingId;
+    $pdo->prepare('UPDATE bookings SET ' . implode(', ', $sets) . ' WHERE id = ?')->execute($vals);
+}
+
+/**
+ * Price a booking for a different number of nights at its BOOKED nightly rate
+ * (see rh_booked_stay_split) and return the new split; pure calculation, no writes.
+ *
+ * @return array{old_gross:float,new_gross:float,delta:float,totals:array,per_night:float,new_child_supplement:float}
+ */
+function rh_reprice_at_booked_rate(array $b, int $newNights): array
+{
+    if (!function_exists('rh_stay_totals')) {
+        require_once __DIR__ . '/../includes/pricing.php';
+    }
+    $split = rh_booked_stay_split($b);
+    $newNights = max(1, $newNights);
+    $newGross = round($split['per_night'] * $newNights + $split['package_gross'], 2);
+    $tt = rh_stay_totals($newGross, 'final', rh_booking_has_levy($b));
+    $oldChild = (float)($b['child_supplement_total'] ?? 0);
+    $newChild = $oldChild > 0 ? round($oldChild * ($newNights / $split['nights']), 2) : 0.0;
+    return [
+        'old_gross' => $split['total_with_vat'],
+        'new_gross' => $tt['total_with_vat'],
+        'delta' => round($tt['total_with_vat'] - $split['total_with_vat'], 2),
+        'totals' => $tt,
+        'per_night' => $split['per_night'],
+        'new_child_supplement' => $newChild,
+    ];
+}
+
+/**
+ * Calculate new booking amount based on date changes, at the guest's BOOKED nightly
+ * rate (not today's catalogue rate). Amounts here are total_with_vat figures.
  *
  * @param array $booking Current booking data
  * @param string $newCheckIn New check-in date (Y-m-d)
@@ -6887,81 +7436,43 @@ function validateDateAdjustment(array $booking, ?string $newCheckIn = null, ?str
  */
 function calculateDateAdjustmentAmount(array $booking, string $newCheckIn, string $newCheckOut): array
 {
-    global $pdo;
-
     try {
-        // Validate dates
         $checkIn = DateTime::createFromFormat('Y-m-d', $newCheckIn);
         $checkOut = DateTime::createFromFormat('Y-m-d', $newCheckOut);
 
         if (!$checkIn || !$checkOut) {
             return ['error' => 'Invalid date format. Use Y-m-d format.'];
         }
-
         if ($checkIn >= $checkOut) {
             return ['error' => 'Check-out date must be after check-in date.'];
         }
-
-        // Calculate new number of nights
         $newNights = $checkIn->diff($checkOut)->days;
-
         if ($newNights <= 0) {
             return ['error' => 'Booking must be for at least one night.'];
         }
 
-        // Get room rate
-        $stmt = $pdo->prepare("SELECT price_per_night FROM rooms WHERE id = ?");
-        $stmt->execute([$booking['room_id']]);
-        $room = $stmt->fetch(PDO::FETCH_ASSOC);
-
-        if (!$room) {
-            return ['error' => 'Room not found.'];
-        }
-
-        $pricePerNight = (float)$room['price_per_night'];
-
-        // Get old values
         $oldNights = (int)($booking['number_of_nights'] ?? 0);
-        $oldTotalAmount = (float)($booking['total_amount'] ?? 0);
         $oldChildSupplement = (float)($booking['child_supplement_total'] ?? 0);
-
-        // Calculate new base room amount
-        $newBaseAmount = $pricePerNight * $newNights;
-
-        // Calculate child supplement adjustment (proportional to nights change)
-        // Preserve the child supplement by adjusting it proportionally based on night ratio
-        $newChildSupplement = 0.0;
-        if ($oldNights > 0 && $oldChildSupplement > 0) {
-            $nightRatio = $newNights / $oldNights;
-            $newChildSupplement = $oldChildSupplement * $nightRatio;
-        }
-
-        // VAT on the base room amount per installation mode: exclusive adds on
-        // top, inclusive is already in the price (no add), off is zero.
-        $vatParts = vat_components($newBaseAmount);
-        $vatRate = $vatParts['rate'];
-        $vatAmount = $vatParts['vat'];
-        $newTotalAmount = $vatParts['total'] + $newChildSupplement;
-
-        // Calculate delta (includes child supplement changes)
-        $amountDelta = $newTotalAmount - $oldTotalAmount;
+        $rp = rh_reprice_at_booked_rate($booking, $newNights);
+        $tt = $rp['totals'];
 
         return [
             'success' => true,
             'old_nights' => $oldNights,
             'new_nights' => $newNights,
             'nights_delta' => $newNights - $oldNights,
-            'old_total_amount' => $oldTotalAmount,
-            'new_total_amount' => $newTotalAmount,
+            'old_total_amount' => $rp['old_gross'],
+            'new_total_amount' => $rp['new_gross'],
             'old_child_supplement' => $oldChildSupplement,
-            'new_child_supplement' => $newChildSupplement,
-            'child_supplement_delta' => $newChildSupplement - $oldChildSupplement,
-            'amount_delta' => $amountDelta,
-            'price_per_night' => $pricePerNight,
-            'vat_rate' => $vatRate,
-            'vat_amount' => $vatAmount
+            'new_child_supplement' => $rp['new_child_supplement'],
+            'child_supplement_delta' => $rp['new_child_supplement'] - $oldChildSupplement,
+            'amount_delta' => $rp['delta'],
+            'price_per_night' => round($rp['per_night'], 2),
+            'vat_rate' => $tt['vat_rate'],
+            'vat_amount' => $tt['vat'],
+            'totals' => $tt,
         ];
-    } catch (Exception $e) {
+    } catch (Throwable $e) {
         error_log("calculateDateAdjustmentAmount error: " . $e->getMessage());
         return ['error' => 'Failed to calculate adjustment amount.'];
     }
@@ -7020,9 +7531,8 @@ function processBookingDateAdjustment(int $bookingId, string $newCheckIn, string
         $oldCheckIn = $booking['check_in_date'];
         $oldCheckOut = $booking['check_out_date'];
         $oldNights = (int)$booking['number_of_nights'];
-        $oldTotalAmount = (float)$booking['total_amount'];
+        $oldTotalAmount = (float)($booking['total_with_vat'] ?? 0) > 0 ? (float)$booking['total_with_vat'] : (float)$booking['total_amount'] + (float)($booking['vat_amount'] ?? 0);
         $oldChildSupplement = (float)($booking['child_supplement_total'] ?? 0);
-        $oldAmountPaid = (float)($booking['amount_paid'] ?? 0);
 
         // Check room availability for new dates (excluding current booking)
         $availabilityCheck = isRoomAvailable($booking['room_id'], $newCheckIn, $newCheckOut, $bookingId);
@@ -7040,66 +7550,23 @@ function processBookingDateAdjustment(int $bookingId, string $newCheckIn, string
             }
         }
 
-        // Get folio charges total (additional charges beyond room rate)
-        $folioStmt = $pdo->prepare("
-            SELECT COALESCE(SUM(line_total), 0) as folio_total
-            FROM booking_charges
-            WHERE booking_id = ? AND voided = 0
-        ");
-        $folioStmt->execute([$bookingId]);
-        $folioData = $folioStmt->fetch(PDO::FETCH_ASSOC);
-        $folioTotal = (float)($folioData['folio_total'] ?? 0);
-
-        // Calculate new amount due including folio charges
-        // New total = new room total (with VAT) + child supplement + folio charges
+        // Reprice at the booked nightly rate: write net/levy/VAT/total_with_vat/nights/dates
+        // consistently, then let recalculateBookingFinancials() derive amount_due,
+        // credit_balance and payment_status (no direct amount_due writes).
         $newRoomTotal = $calculation['new_total_amount'];
-        $newTotalWithFolio = $newRoomTotal + $folioTotal;
-        $newAmountDue = $newTotalWithFolio - $oldAmountPaid;
-
-        // Determine payment status and credit balance
-        $newPaymentStatus = $booking['payment_status'];
-        $creditBalance = 0.0;
-
-        if ($newAmountDue <= BALANCE_TOLERANCE) {
-            // Fully paid or overpaid (credit)
-            $newPaymentStatus = 'paid';
-            $creditBalance = abs($newAmountDue); // Track credit balance separately
-        } elseif ($oldAmountPaid > 0) {
-            // Partial payment
-            $newPaymentStatus = 'partial';
-        } else {
-            // No payment yet
-            $newPaymentStatus = 'unpaid';
+        rh_write_booking_stay_totals(
+            $pdo, $bookingId, $calculation['totals'], (int)$calculation['new_nights'],
+            $newCheckIn, $newCheckOut, (float)$calculation['new_child_supplement']
+        );
+        if (!recalculateBookingFinancials($bookingId)) {
+            $pdo->rollBack();
+            return ['success' => false, 'message' => 'Could not recalculate the booking balance.'];
         }
-
-        // Update booking with all values
-        $updateStmt = $pdo->prepare("
-            UPDATE bookings
-            SET check_in_date = ?,
-                check_out_date = ?,
-                number_of_nights = ?,
-                total_amount = ?,
-                vat_amount = ?,
-                child_supplement_total = ?,
-                amount_due = ?,
-                credit_balance = ?,
-                payment_status = ?,
-                updated_at = NOW()
-            WHERE id = ?
-        ");
-
-        $updateStmt->execute([
-            $newCheckIn,
-            $newCheckOut,
-            $calculation['new_nights'],
-            $newRoomTotal, // Store room total only (folio charges tracked separately)
-            $calculation['vat_amount'],
-            $calculation['new_child_supplement'],
-            max(0, $newAmountDue), // amount_due never goes negative — the overpayment
-            round($creditBalance, 2), // is carried in credit_balance instead, so money
-            $newPaymentStatus,        // owed back to the guest is visible to finance.
-            $bookingId
-        ]);
+        $finStmt = $pdo->prepare("SELECT credit_balance, folio_charges_total FROM bookings WHERE id = ?");
+        $finStmt->execute([$bookingId]);
+        $finRow = $finStmt->fetch(PDO::FETCH_ASSOC) ?: [];
+        $creditBalance = (float)($finRow['credit_balance'] ?? 0);
+        $folioTotal = (float)($finRow['folio_charges_total'] ?? 0);
 
         // Record adjustment in audit table
         $adjustmentStmt = $pdo->prepare("
@@ -7201,7 +7668,7 @@ function processBookingDateAdjustment(int $bookingId, string $newCheckIn, string
             'credit_balance' => $creditBalance > 0 ? $creditBalance : null,
             'message' => 'Booking dates adjusted successfully.' . ($creditBalance > 0 ? " Guest has a credit balance of $" . number_format($creditBalance, 2) . "." : '')
         ];
-    } catch (PDOException $e) {
+    } catch (Throwable $e) {
         if ($pdo->inTransaction()) {
             $pdo->rollBack();
         }
@@ -7685,6 +8152,30 @@ function chargeTypeToMenuType(string $chargeType): ?string
 }
 
 /**
+ * True when stock_adjustments carries restore_of_type (migration 020). Restores record
+ * which kind of deduction they reverse, so a pos_order line id and a room_service
+ * charge id that happen to share a number can never mask one another. Cached.
+ */
+if (!function_exists('rh_stock_adjustments_has_restore_col')) {
+    function rh_stock_adjustments_has_restore_col(): bool
+    {
+        static $has = null;
+        if ($has !== null) {
+            return $has;
+        }
+        global $pdo;
+        try {
+            $st = $pdo->prepare("SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'stock_adjustments' AND COLUMN_NAME = 'restore_of_type'");
+            $st->execute();
+            $has = ((int)$st->fetchColumn() > 0);
+        } catch (Throwable $e) {
+            $has = false;
+        }
+        return $has;
+    }
+}
+
+/**
  * Deduct stock for a menu item using its recipe.
  *
  * Walks the recipe ingredients and deducts each from stock using FIFO batch
@@ -7727,31 +8218,31 @@ function deductStockForMenuItem(int $menuItemId, string $menuType, float $portio
             return true;
         }
 
-        $roomServiceDupCheck = null;
-        if ($sourceType === 'room_service' && $sourceId !== null) {
-            $roomServiceDupCheck = $pdo->prepare("
-                SELECT id
+        /* Idempotency guard: a retried request must not deduct the same line twice.
+         * Deductions are compared with restores for the SAME (source type, id,
+         * ingredient): if an earlier deduction has since been restored (KDS recall, 86
+         * before prep) the line is owed a fresh deduction, so a re-bump deducts again. */
+        $dupDeductions = null;
+        $dupRestores = null;
+        if (($sourceType === 'room_service' || $sourceType === 'pos_order') && $sourceId !== null) {
+            $dupDeductions = $pdo->prepare("
+                SELECT COUNT(*)
                 FROM stock_adjustments
-                WHERE source_type = 'room_service'
+                WHERE source_type = ?
                   AND source_id = ?
                   AND ingredient_id = ?
                   AND quantity_change < 0
-                LIMIT 1
             ");
-        }
-
-        // Idempotency guard for POS orders: prevents double-deduction on retried requests
-        $posOrderDupCheck = null;
-        if ($sourceType === 'pos_order' && $sourceId !== null) {
-            $posOrderDupCheck = $pdo->prepare("
-                SELECT id
-                FROM stock_adjustments
-                WHERE source_type = 'pos_order'
-                  AND source_id = ?
-                  AND ingredient_id = ?
-                  AND quantity_change < 0
-                LIMIT 1
-            ");
+            if (rh_stock_adjustments_has_restore_col()) {
+                $dupRestores = $pdo->prepare("
+                    SELECT COUNT(*)
+                    FROM stock_adjustments
+                    WHERE source_type = 'void_restore'
+                      AND restore_of_type = ?
+                      AND source_id = ?
+                      AND ingredient_id = ?
+                ");
+            }
         }
 
         foreach ($rows as $row) {
@@ -7759,15 +8250,15 @@ function deductStockForMenuItem(int $menuItemId, string $menuType, float $portio
             if ($yield <= 0) $yield = 100.0; // safety
             $rawNeeded = ((float)$row['quantity_per_portion'] * $portions) / ($yield / 100.0);
             if ($rawNeeded <= 0) continue;
-            if ($roomServiceDupCheck) {
-                $roomServiceDupCheck->execute([$sourceId, (int)$row['ingredient_id']]);
-                if ($roomServiceDupCheck->fetchColumn()) {
-                    continue;
+            if ($dupDeductions) {
+                $dupDeductions->execute([$sourceType, $sourceId, (int)$row['ingredient_id']]);
+                $priorDeductions = (int)$dupDeductions->fetchColumn();
+                $priorRestores = 0;
+                if ($dupRestores) {
+                    $dupRestores->execute([$sourceType, $sourceId, (int)$row['ingredient_id']]);
+                    $priorRestores = (int)$dupRestores->fetchColumn();
                 }
-            }
-            if ($posOrderDupCheck) {
-                $posOrderDupCheck->execute([$sourceId, (int)$row['ingredient_id']]);
-                if ($posOrderDupCheck->fetchColumn()) {
+                if ($priorDeductions > $priorRestores) {
                     continue;
                 }
             }
@@ -8016,40 +8507,82 @@ function restoreStockForMenuItem(int $menuItemId, string $menuType, float $porti
             ? $originalSourceType
             : 'room_service';
 
-        // Idempotency guard — mirrors the dup-check on the deduction side. A void
-        // restore for a given charge/line is written as a 'void_restore' adjustment
-        // keyed on that charge id. If one already exists, this charge was already
-        // put back; a retried or double-clicked void must NOT add the stock again.
+        /* Idempotency guard. A restore is written as a 'void_restore' adjustment keyed on
+         * the original line id AND (restore_of_type) the kind of deduction it reverses, so a
+         * pos_order line #7 and a room_service charge #7 can never mask each other. Restores
+         * are paired against deductions oldest-first: a line that was restored (KDS recall,
+         * 86 before prep) and then deducted again is owed one more restore, while a retried
+         * or double-clicked void still cannot put the same deduction back twice.
+         * Without migration 020 (no restore_of_type column) the legacy id-only check applies. */
+        $hasRestoreCol = rh_stock_adjustments_has_restore_col();
+        $restoredByIngredient = [];
         if ($originalChargeId !== null) {
-            $restoreDupCheck = $pdo->prepare("
-                SELECT id FROM stock_adjustments
-                WHERE source_type = 'void_restore' AND source_id = ?
-                LIMIT 1
-            ");
-            $restoreDupCheck->execute([$originalChargeId]);
-            if ($restoreDupCheck->fetchColumn()) {
-                if ($ownTx && $pdo->inTransaction()) $pdo->commit();
-                return true;
+            if ($hasRestoreCol) {
+                $restCnt = $pdo->prepare("
+                    SELECT ingredient_id, COUNT(*) AS n FROM stock_adjustments
+                    WHERE source_type = 'void_restore' AND restore_of_type = ? AND source_id = ?
+                    GROUP BY ingredient_id
+                ");
+                $restCnt->execute([$sourceType, $originalChargeId]);
+                foreach ($restCnt->fetchAll(PDO::FETCH_ASSOC) as $rc) {
+                    $restoredByIngredient[(int)$rc['ingredient_id']] = (int)$rc['n'];
+                }
+            } else {
+                $restoreDupCheck = $pdo->prepare("
+                    SELECT id FROM stock_adjustments
+                    WHERE source_type = 'void_restore' AND source_id = ?
+                    LIMIT 1
+                ");
+                $restoreDupCheck->execute([$originalChargeId]);
+                if ($restoreDupCheck->fetchColumn()) {
+                    if ($ownTx && $pdo->inTransaction()) $pdo->commit();
+                    return true;
+                }
             }
         }
 
         $byBatch = []; // batch_id => qty to add back
         $byIngredient = []; // ingredient_id => qty to add back (fallback / aggregate)
+        $hadDeductionTrail = false;
 
         if ($originalChargeId !== null) {
             $sel = $pdo->prepare("
                 SELECT sa.id AS adjustment_id, sa.ingredient_id, sa.quantity_change, sbd.batch_id, sbd.quantity_deducted
                 FROM stock_adjustments sa
                 LEFT JOIN stock_batch_deductions sbd ON sbd.adjustment_id = sa.id
-                WHERE sa.source_type = ? AND sa.source_id = ?
+                WHERE sa.source_type = ? AND sa.source_id = ? AND sa.quantity_change < 0
+                ORDER BY sa.id ASC
             ");
             $sel->execute([$sourceType, $originalChargeId]);
             $hits = $sel->fetchAll(PDO::FETCH_ASSOC);
+
+            // Adjustments per ingredient, oldest first; the oldest N are already restored.
+            $adjOrder = [];
+            foreach ($hits as $h) {
+                $adjOrder[(int)$h['ingredient_id']][(int)$h['adjustment_id']] = true;
+            }
+            $alreadyRestoredAdj = [];
+            if ($hasRestoreCol) {
+                foreach ($adjOrder as $ingId => $ids) {
+                    $skip = $restoredByIngredient[$ingId] ?? 0;
+                    foreach (array_keys($ids) as $aid) {
+                        if ($skip <= 0) break;
+                        $alreadyRestoredAdj[$aid] = true;
+                        $skip--;
+                    }
+                }
+            }
+            if ($hits) {
+                $hadDeductionTrail = true;
+            }
 
             $seenAdj = [];
             foreach ($hits as $h) {
                 $adjId = (int)$h['adjustment_id'];
                 $ingId = (int)$h['ingredient_id'];
+                if (isset($alreadyRestoredAdj[$adjId])) {
+                    continue;
+                }
                 // The LEFT JOIN can multiply rows when one adjustment spans several batches.
                 // Add quantity_change once per adjustment to avoid over-restoring the ingredient total.
                 if (!isset($seenAdj[$adjId])) {
@@ -8061,6 +8594,13 @@ function restoreStockForMenuItem(int $menuItemId, string $menuType, float $porti
                     $byBatch[$bid] = ($byBatch[$bid] ?? 0) + (float)$h['quantity_deducted'];
                 }
             }
+        }
+
+        // Every recorded deduction has already been restored: nothing left to put back.
+        // (Must NOT fall through to the recipe fallback below, which would credit it again.)
+        if ($hasRestoreCol && $hadDeductionTrail && empty($byIngredient)) {
+            if ($ownTx && $pdo->inTransaction()) $pdo->commit();
+            return true;
         }
 
         // Fallback: nothing found, recompute from recipe
@@ -8130,17 +8670,22 @@ function restoreStockForMenuItem(int $menuItemId, string $menuType, float $porti
         }
 
         // For each ingredient: insert restore adjustment + bump aggregate qty
-        $adjStmt = $pdo->prepare("
-            INSERT INTO stock_adjustments (ingredient_id, quantity_change, reason, source_type, source_id, cost_at_time, adjusted_by, created_at)
-            VALUES (?, ?, ?, 'void_restore', ?, ?, ?, NOW())
-        ");
+        $adjStmt = $pdo->prepare($hasRestoreCol
+            ? "INSERT INTO stock_adjustments (ingredient_id, quantity_change, reason, source_type, source_id, cost_at_time, adjusted_by, created_at, restore_of_type)
+               VALUES (?, ?, ?, 'void_restore', ?, ?, ?, NOW(), ?)"
+            : "INSERT INTO stock_adjustments (ingredient_id, quantity_change, reason, source_type, source_id, cost_at_time, adjusted_by, created_at)
+               VALUES (?, ?, ?, 'void_restore', ?, ?, ?, NOW())");
         $costSel = $pdo->prepare("SELECT cost_per_unit FROM stock_ingredients WHERE id = ?");
         $ingUpd = $pdo->prepare("UPDATE stock_ingredients SET current_quantity = current_quantity + ?, updated_at = NOW() WHERE id = ?");
 
         foreach ($byIngredient as $ingId => $q) {
             $costSel->execute([$ingId]);
             $costAtTime = (float)($costSel->fetchColumn() ?: 0);
-            $adjStmt->execute([$ingId, $q, mb_substr($reason, 0, 250), $originalChargeId, $costAtTime, $doneBy]);
+            $adjArgs = [$ingId, $q, mb_substr($reason, 0, 250), $originalChargeId, $costAtTime, $doneBy];
+            if ($hasRestoreCol) {
+                $adjArgs[] = $sourceType;
+            }
+            $adjStmt->execute($adjArgs);
             $ingUpd->execute([$q, $ingId]);
         }
 

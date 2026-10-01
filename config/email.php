@@ -1903,12 +1903,13 @@ function buildBookingEmailVariables(array $booking, ?array $room = null, array $
         'tentative_status' => ucfirst((string)($booking['status'] ?? '')),
         'child_price_multiplier' => (string)($booking['child_price_multiplier'] ?? getSetting('booking_child_price_multiplier', getSetting('child_guest_price_multiplier', 50))),
         'child_supplement_total_formatted' => isset($booking['child_supplement_total']) ? number_format((float)$booking['child_supplement_total'], 0) : number_format(0, 0),
-        'total_amount_formatted' => isset($booking['total_amount']) ? number_format((float)$booking['total_amount'], 0) : '',
+        // Guest-facing total = what is actually owed (VAT + levy included)
+        'total_amount_formatted' => isset($booking['total_amount']) ? number_format((float)rh_booking_owed($booking)['owed'], 0) : '',
         'special_requests' => $booking['special_requests'] ?? '',
         'cancellation_reason' => $extra['cancellation_reason'] ?? '',
         'rate_plan_label' => $booking['rate_plan_label'] ?? '',
         'rate_plan_discount_formatted' => isset($booking['rate_plan_discount']) && (float)$booking['rate_plan_discount'] > 0
-            ? number_format((float)$booking['rate_plan_discount'], 0) : '',
+            ? number_format((float)$booking['rate_plan_discount'] * max(1, (int)($booking['number_of_nights'] ?? 1)), 0) : '',
         'package_total_formatted' => isset($booking['package_total']) && (float)$booking['package_total'] > 0
             ? number_format((float)$booking['package_total'], 0) : '',
     ];
@@ -1952,10 +1953,12 @@ function buildBookingEmailVariables(array $booking, ?array $room = null, array $
     $vatAmtVal    = (float)($booking['vat_amount'] ?? (isset($booking['total_amount']) ? vat_components((float)$booking['total_amount'])['vat'] : 0.0));
     // Use booking levy percent, fall back to site setting when levy is enabled
     $levyPctVal   = (float)($booking['tourism_levy_percent'] ?? ($levyEnabled ? (float)getSetting('tourism_levy_percent', 0) : 0.0));
-    // Compute levy amount from subtotal when the booking has a rate but amount was 0
+    // Fallback when the booking has a rate but the stored amount was 0: total_amount
+    // already INCLUDES the levy (net + levy), so extract it rather than add on top.
     $levyAmtVal   = (float)($booking['tourism_levy_amount'] ?? 0.0);
     if ($levyAmtVal === 0.0 && $levyPctVal > 0.0) {
-        $levyAmtVal = (float)($booking['total_amount'] ?? 0) * $levyPctVal / 100.0;
+        $taForLevy = (float)($booking['total_amount'] ?? 0);
+        $levyAmtVal = round($taForLevy - $taForLevy / (1 + $levyPctVal / 100.0), 2);
     }
     $totalTaxVal  = (float)($booking['total_with_vat'] ?? (vat_mode() === 'inclusive'
         ? (float)($booking['total_amount'] ?? 0) + $levyAmtVal
@@ -2081,6 +2084,47 @@ function logCancellationToFile(string $booking_reference, string $booking_type, 
     return $result !== false;
 }
 
+if (!function_exists('rh_booking_owed')) {
+    /**
+     * Amount the guest actually owes for a booking row/group: total_with_vat
+     * (VAT + tourism levy included), falling back to total_amount + vat_amount.
+     * @return array{owed:float,vat:float,levy:float}
+     */
+    function rh_booking_owed(array $booking): array
+    {
+        $vat  = (float)($booking['vat_amount'] ?? 0);
+        $levy = (float)($booking['tourism_levy_amount'] ?? 0);
+        $owed = (float)($booking['total_with_vat'] ?? 0);
+        if ($owed <= 0) {
+            $owed = (float)($booking['amount_due'] ?? 0);
+        }
+        if ($owed <= 0) {
+            $owed = (float)($booking['total_amount'] ?? 0) + $vat;
+        }
+        return ['owed' => round($owed, 2), 'vat' => $vat, 'levy' => $levy];
+    }
+}
+
+if (!function_exists('rh_booking_tax_rows_html')) {
+    /** Tourism levy + VAT rows for guest booking emails (VAT row only when the mode itemises it). */
+    function rh_booking_tax_rows_html(array $booking): string
+    {
+        $t   = rh_booking_owed($booking);
+        $cur = htmlspecialchars((string)getSetting('currency_symbol'), ENT_QUOTES, 'UTF-8');
+        $row = function (string $label, float $amt) use ($cur): string {
+            return '<table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="margin:0;"><tr><td style="padding:10px 10px 10px 0;font-weight:bold;color:#1A1A1A;width:44%;vertical-align:top;font-family:\'Segoe UI\',Tahoma,Verdana,sans-serif;border-bottom:1px solid #e8e0d4;">' . $label . ':</td><td style="padding:10px 0 10px 6px;color:#333;text-align:left;vertical-align:top;font-family:\'Segoe UI\',Tahoma,Verdana,sans-serif;border-bottom:1px solid #e8e0d4;">' . $cur . ' ' . number_format($amt, 0) . '</td></tr></table>';
+        };
+        $html = '';
+        if ($t['levy'] > 0) {
+            $html .= $row('Tourism Levy', $t['levy']);
+        }
+        if (function_exists('vat_shows_amount') && vat_shows_amount() && $t['vat'] > 0) {
+            $html .= $row('VAT', $t['vat']);
+        }
+        return $html;
+    }
+}
+
 /**
  * Send booking received email (sent immediately when user submits booking)
  */
@@ -2131,7 +2175,7 @@ function sendBookingReceivedEmail(array $booking)
 
             <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="margin:0;"><tr><td style="padding:10px 10px 10px 0;font-weight:bold;color:#1A1A1A;width:44%;vertical-align:top;font-family:\'Segoe UI\',Tahoma,Verdana,sans-serif;border-bottom:1px solid #e8e0d4;">Number of Guests:</td><td style="padding:10px 0 10px 6px;color: #333;;text-align:left;vertical-align:top;font-family:\'Segoe UI\',Tahoma,Verdana,sans-serif;border-bottom:1px solid #e8e0d4;">' . $booking['number_of_guests'] . ' guest' . ($booking['number_of_guests'] != 1 ? 's' : '') . '</td></tr></table>
 
-            <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="margin:0;"><tr><td style="padding:10px 10px 10px 0;font-weight:bold;color:#1A1A1A;width:44%;vertical-align:top;font-family:\'Segoe UI\',Tahoma,Verdana,sans-serif;">Total Amount:</td><td style="padding:10px 0 10px 6px;color: #8B7355; font-weight: bold; font-size: 18px;;text-align:left;vertical-align:top;font-family:\'Segoe UI\',Tahoma,Verdana,sans-serif;">' . getSetting('currency_symbol') . ' ' . number_format($booking['total_amount'], 0) . '</td></tr></table>
+            ' . rh_booking_tax_rows_html($booking) . '<table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="margin:0;"><tr><td style="padding:10px 10px 10px 0;font-weight:bold;color:#1A1A1A;width:44%;vertical-align:top;font-family:\'Segoe UI\',Tahoma,Verdana,sans-serif;">Total Amount:</td><td style="padding:10px 0 10px 6px;color: #8B7355; font-weight: bold; font-size: 18px;;text-align:left;vertical-align:top;font-family:\'Segoe UI\',Tahoma,Verdana,sans-serif;">' . getSetting('currency_symbol') . ' ' . number_format(rh_booking_owed($booking)['owed'], 0) . '</td></tr></table>
         </div>
 
         <div style="background: #FDF6EC; padding: 15px; border-left: 4px solid #8B7355; border-radius: 5px; margin: 20px 0;">
@@ -2145,7 +2189,7 @@ function sendBookingReceivedEmail(array $booking)
         <div style="background: #fff3cd; padding: 15px; border-left: 4px solid #ffc107; border-radius: 5px; margin: 20px 0;">
             <h3 style="color: #856404; margin-top: 0;;text-align:left;">Payment Information</h3>
             <p style="color: #856404; margin: 0;">
-                ' . getSetting('payment_policy', 'Payment will be made at the hotel upon arrival.<br>We accept cash payments only. Please bring the total amount of <strong>' . getSetting('currency_symbol') . ' ' . number_format($booking['total_amount'], 0) . '</strong> with you.') . '
+                ' . getSetting('payment_policy', 'Payment will be made at the hotel upon arrival.<br>We accept cash payments only. Please bring the total amount of <strong>' . getSetting('currency_symbol') . ' ' . number_format(rh_booking_owed($booking)['owed'], 0) . '</strong> with you.') . '
             </p>
         </div>';
 
@@ -2231,7 +2275,7 @@ function sendBookingConfirmedEmail(array $booking)
 
             <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="margin:0;"><tr><td style="padding:10px 10px 10px 0;font-weight:bold;color:#1A1A1A;width:44%;vertical-align:top;font-family:\'Segoe UI\',Tahoma,Verdana,sans-serif;border-bottom:1px solid #e8e0d4;">Number of Guests:</td><td style="padding:10px 0 10px 6px;color: #333;;text-align:left;vertical-align:top;font-family:\'Segoe UI\',Tahoma,Verdana,sans-serif;border-bottom:1px solid #e8e0d4;">' . $booking['number_of_guests'] . ' guest' . ($booking['number_of_guests'] != 1 ? 's' : '') . '</td></tr></table>
 
-            <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="margin:0;"><tr><td style="padding:10px 10px 10px 0;font-weight:bold;color:#1A1A1A;width:44%;vertical-align:top;font-family:\'Segoe UI\',Tahoma,Verdana,sans-serif;">Total Amount:</td><td style="padding:10px 0 10px 6px;color: #8B7355; font-weight: bold; font-size: 18px;;text-align:left;vertical-align:top;font-family:\'Segoe UI\',Tahoma,Verdana,sans-serif;">' . getSetting('currency_symbol') . ' ' . number_format($booking['total_amount'], 0) . '</td></tr></table>
+            ' . rh_booking_tax_rows_html($booking) . '<table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="margin:0;"><tr><td style="padding:10px 10px 10px 0;font-weight:bold;color:#1A1A1A;width:44%;vertical-align:top;font-family:\'Segoe UI\',Tahoma,Verdana,sans-serif;">Total Amount:</td><td style="padding:10px 0 10px 6px;color: #8B7355; font-weight: bold; font-size: 18px;;text-align:left;vertical-align:top;font-family:\'Segoe UI\',Tahoma,Verdana,sans-serif;">' . getSetting('currency_symbol') . ' ' . number_format(rh_booking_owed($booking)['owed'], 0) . '</td></tr></table>
         </div>
 
         <div style="background: #d4edda; padding: 15px; border-left: 4px solid #28a745; border-radius: 5px; margin: 20px 0;">
@@ -2245,7 +2289,7 @@ function sendBookingConfirmedEmail(array $booking)
         <div style="background: #fff3cd; padding: 15px; border-left: 4px solid #ffc107; border-radius: 5px; margin: 20px 0;">
             <h3 style="color: #856404; margin-top: 0;;text-align:left;">Payment Information</h3>
             <p style="color: #856404; margin: 0;">
-                ' . getSetting('payment_policy', 'Payment will be made at the hotel upon arrival.<br>We accept cash payments only. Please bring the total amount of <strong>' . getSetting('currency_symbol') . ' ' . number_format($booking['total_amount'], 0) . '</strong> with you.') . '
+                ' . getSetting('payment_policy', 'Payment will be made at the hotel upon arrival.<br>We accept cash payments only. Please bring the total amount of <strong>' . getSetting('currency_symbol') . ' ' . number_format(rh_booking_owed($booking)['owed'], 0) . '</strong> with you.') . '
             </p>
         </div>
 
@@ -2368,7 +2412,7 @@ function sendBookingModifiedEmail(array $booking, array $changes = [])
             <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="margin:0;"><tr><td style="padding:10px 10px 10px 0;font-weight:bold;color:#1A1A1A;width:44%;vertical-align:top;font-family:\'Segoe UI\',Tahoma,Verdana,sans-serif;border-bottom:1px solid #e8e0d4;">Check-out Date:</td><td style="padding:10px 0 10px 6px;color: #333;;text-align:left;vertical-align:top;font-family:\'Segoe UI\',Tahoma,Verdana,sans-serif;border-bottom:1px solid #e8e0d4;">' . date('F j, Y', strtotime($booking['check_out_date'])) . '</td></tr></table>
             <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="margin:0;"><tr><td style="padding:10px 10px 10px 0;font-weight:bold;color:#1A1A1A;width:44%;vertical-align:top;font-family:\'Segoe UI\',Tahoma,Verdana,sans-serif;border-bottom:1px solid #e8e0d4;">Number of Nights:</td><td style="padding:10px 0 10px 6px;color: #333;;text-align:left;vertical-align:top;font-family:\'Segoe UI\',Tahoma,Verdana,sans-serif;border-bottom:1px solid #e8e0d4;">' . $booking['number_of_nights'] . ' night' . ($booking['number_of_nights'] != 1 ? 's' : '') . '</td></tr></table>
             <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="margin:0;"><tr><td style="padding:10px 10px 10px 0;font-weight:bold;color:#1A1A1A;width:44%;vertical-align:top;font-family:\'Segoe UI\',Tahoma,Verdana,sans-serif;border-bottom:1px solid #e8e0d4;">Number of Guests:</td><td style="padding:10px 0 10px 6px;color: #333;;text-align:left;vertical-align:top;font-family:\'Segoe UI\',Tahoma,Verdana,sans-serif;border-bottom:1px solid #e8e0d4;">' . $booking['number_of_guests'] . ' guest' . ($booking['number_of_guests'] != 1 ? 's' : '') . '</td></tr></table>
-            <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="margin:0;"><tr><td style="padding:10px 10px 10px 0;font-weight:bold;color:#1A1A1A;width:44%;vertical-align:top;font-family:\'Segoe UI\',Tahoma,Verdana,sans-serif;">Total Amount:</td><td style="padding:10px 0 10px 6px;color: #8B7355; font-weight: bold; font-size: 18px;;text-align:left;vertical-align:top;font-family:\'Segoe UI\',Tahoma,Verdana,sans-serif;">' . getSetting('currency_symbol') . ' ' . number_format($booking['total_amount'], 0) . '</td></tr></table>
+            ' . rh_booking_tax_rows_html($booking) . '<table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="margin:0;"><tr><td style="padding:10px 10px 10px 0;font-weight:bold;color:#1A1A1A;width:44%;vertical-align:top;font-family:\'Segoe UI\',Tahoma,Verdana,sans-serif;">Total Amount:</td><td style="padding:10px 0 10px 6px;color: #8B7355; font-weight: bold; font-size: 18px;;text-align:left;vertical-align:top;font-family:\'Segoe UI\',Tahoma,Verdana,sans-serif;">' . getSetting('currency_symbol') . ' ' . number_format(rh_booking_owed($booking)['owed'], 0) . '</td></tr></table>
         </div>
         <div style="background: #d4edda; padding: 15px; border-left: 4px solid #28a745; border-radius: 5px; margin: 20px 0;">
             <h3 style="color: #155724; margin-top: 0;;text-align:left;">Next Steps</h3>
@@ -3601,7 +3645,7 @@ function sendBookingCancelledEmail(array $booking, string $cancellation_reason =
 
             <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="margin:0;"><tr><td style="padding:10px 10px 10px 0;font-weight:bold;color:#1A1A1A;width:44%;vertical-align:top;font-family:\'Segoe UI\',Tahoma,Verdana,sans-serif;border-bottom:1px solid #e8e0d4;">Number of Guests:</td><td style="padding:10px 0 10px 6px;color: #333;;text-align:left;vertical-align:top;font-family:\'Segoe UI\',Tahoma,Verdana,sans-serif;border-bottom:1px solid #e8e0d4;">' . $booking['number_of_guests'] . ' guest' . ($booking['number_of_guests'] != 1 ? 's' : '') . '</td></tr></table>
 
-            <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="margin:0;"><tr><td style="padding:10px 10px 10px 0;font-weight:bold;color:#1A1A1A;width:44%;vertical-align:top;font-family:\'Segoe UI\',Tahoma,Verdana,sans-serif;">Total Amount:</td><td style="padding:10px 0 10px 6px;color: #8B7355; font-weight: bold; font-size: 18px;;text-align:left;vertical-align:top;font-family:\'Segoe UI\',Tahoma,Verdana,sans-serif;">' . getSetting('currency_symbol') . ' ' . number_format($booking['total_amount'], 0) . '</td></tr></table>
+            ' . rh_booking_tax_rows_html($booking) . '<table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="margin:0;"><tr><td style="padding:10px 10px 10px 0;font-weight:bold;color:#1A1A1A;width:44%;vertical-align:top;font-family:\'Segoe UI\',Tahoma,Verdana,sans-serif;">Total Amount:</td><td style="padding:10px 0 10px 6px;color: #8B7355; font-weight: bold; font-size: 18px;;text-align:left;vertical-align:top;font-family:\'Segoe UI\',Tahoma,Verdana,sans-serif;">' . getSetting('currency_symbol') . ' ' . number_format(rh_booking_owed($booking)['owed'], 0) . '</td></tr></table>
         </div>';
 
         if ($cancellation_reason) {
@@ -4087,7 +4131,7 @@ function sendTentativeBookingConfirmedEmail(array $booking)
 
             <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="margin:0;"><tr><td style="padding:10px 10px 10px 0;font-weight:bold;color:#1A1A1A;width:44%;vertical-align:top;font-family:\'Segoe UI\',Tahoma,Verdana,sans-serif;border-bottom:1px solid #e8e0d4;">Number of Guests:</td><td style="padding:10px 0 10px 6px;color: #333;;text-align:left;vertical-align:top;font-family:\'Segoe UI\',Tahoma,Verdana,sans-serif;border-bottom:1px solid #e8e0d4;">' . $booking['number_of_guests'] . ' guest' . ($booking['number_of_guests'] != 1 ? 's' : '') . '</td></tr></table>
 
-            <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="margin:0;"><tr><td style="padding:10px 10px 10px 0;font-weight:bold;color:#1A1A1A;width:44%;vertical-align:top;font-family:\'Segoe UI\',Tahoma,Verdana,sans-serif;">Total Amount:</td><td style="padding:10px 0 10px 6px;color: #8B7355; font-weight: bold; font-size: 18px;;text-align:left;vertical-align:top;font-family:\'Segoe UI\',Tahoma,Verdana,sans-serif;">' . getSetting('currency_symbol') . ' ' . number_format($booking['total_amount'], 0) . '</td></tr></table>
+            ' . rh_booking_tax_rows_html($booking) . '<table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="margin:0;"><tr><td style="padding:10px 10px 10px 0;font-weight:bold;color:#1A1A1A;width:44%;vertical-align:top;font-family:\'Segoe UI\',Tahoma,Verdana,sans-serif;">Total Amount:</td><td style="padding:10px 0 10px 6px;color: #8B7355; font-weight: bold; font-size: 18px;;text-align:left;vertical-align:top;font-family:\'Segoe UI\',Tahoma,Verdana,sans-serif;">' . getSetting('currency_symbol') . ' ' . number_format(rh_booking_owed($booking)['owed'], 0) . '</td></tr></table>
         </div>
 
         <div style="background: #d4edda; padding: 15px; border-left: 4px solid #28a745; border-radius: 5px; margin: 20px 0;">
@@ -4194,7 +4238,7 @@ function sendTentativeBookingReminderEmail(array $booking)
 
             <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="margin:0;"><tr><td style="padding:10px 10px 10px 0;font-weight:bold;color:#1A1A1A;width:44%;vertical-align:top;font-family:\'Segoe UI\',Tahoma,Verdana,sans-serif;border-bottom:1px solid #e8e0d4;">Check-out:</td><td style="padding:10px 0 10px 6px;color: #333;;text-align:left;vertical-align:top;font-family:\'Segoe UI\',Tahoma,Verdana,sans-serif;border-bottom:1px solid #e8e0d4;">' . date('F j, Y', strtotime($booking['check_out_date'])) . '</td></tr></table>
 
-            <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="margin:0;"><tr><td style="padding:10px 10px 10px 0;font-weight:bold;color:#1A1A1A;width:44%;vertical-align:top;font-family:\'Segoe UI\',Tahoma,Verdana,sans-serif;">Total Amount:</td><td style="padding:10px 0 10px 6px;color: #8B7355; font-weight: bold; font-size: 18px;;text-align:left;vertical-align:top;font-family:\'Segoe UI\',Tahoma,Verdana,sans-serif;">' . getSetting('currency_symbol') . ' ' . number_format($booking['total_amount'], 0) . '</td></tr></table>
+            ' . rh_booking_tax_rows_html($booking) . '<table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="margin:0;"><tr><td style="padding:10px 10px 10px 0;font-weight:bold;color:#1A1A1A;width:44%;vertical-align:top;font-family:\'Segoe UI\',Tahoma,Verdana,sans-serif;">Total Amount:</td><td style="padding:10px 0 10px 6px;color: #8B7355; font-weight: bold; font-size: 18px;;text-align:left;vertical-align:top;font-family:\'Segoe UI\',Tahoma,Verdana,sans-serif;">' . getSetting('currency_symbol') . ' ' . number_format(rh_booking_owed($booking)['owed'], 0) . '</td></tr></table>
         </div>
 
         <div style="text-align: center; margin-top: 30px;">
@@ -4378,7 +4422,7 @@ function sendTentativeBookingConvertedEmail(array $booking)
 
             <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="margin:0;"><tr><td style="padding:10px 10px 10px 0;font-weight:bold;color:#1A1A1A;width:44%;vertical-align:top;font-family:\'Segoe UI\',Tahoma,Verdana,sans-serif;border-bottom:1px solid #e8e0d4;">Number of Guests:</td><td style="padding:10px 0 10px 6px;color: #333;;text-align:left;vertical-align:top;font-family:\'Segoe UI\',Tahoma,Verdana,sans-serif;border-bottom:1px solid #e8e0d4;">' . $booking['number_of_guests'] . ' guest' . ($booking['number_of_guests'] != 1 ? 's' : '') . '</td></tr></table>
 
-            <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="margin:0;"><tr><td style="padding:10px 10px 10px 0;font-weight:bold;color:#1A1A1A;width:44%;vertical-align:top;font-family:\'Segoe UI\',Tahoma,Verdana,sans-serif;">Total Amount:</td><td style="padding:10px 0 10px 6px;color: #8B7355; font-weight: bold; font-size: 18px;;text-align:left;vertical-align:top;font-family:\'Segoe UI\',Tahoma,Verdana,sans-serif;">' . getSetting('currency_symbol') . ' ' . number_format($booking['total_amount'], 0) . '</td></tr></table>
+            ' . rh_booking_tax_rows_html($booking) . '<table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="margin:0;"><tr><td style="padding:10px 10px 10px 0;font-weight:bold;color:#1A1A1A;width:44%;vertical-align:top;font-family:\'Segoe UI\',Tahoma,Verdana,sans-serif;">Total Amount:</td><td style="padding:10px 0 10px 6px;color: #8B7355; font-weight: bold; font-size: 18px;;text-align:left;vertical-align:top;font-family:\'Segoe UI\',Tahoma,Verdana,sans-serif;">' . getSetting('currency_symbol') . ' ' . number_format(rh_booking_owed($booking)['owed'], 0) . '</td></tr></table>
         </div>
 
         <div style="background: #d4edda; padding: 15px; border-left: 4px solid #28a745; border-radius: 5px; margin: 20px 0;">
@@ -4392,7 +4436,7 @@ function sendTentativeBookingConvertedEmail(array $booking)
         <div style="background: #fff3cd; padding: 15px; border-left: 4px solid #ffc107; border-radius: 5px; margin: 20px 0;">
             <h3 style="color: #856404; margin-top: 0;;text-align:left;">Payment Information</h3>
             <p style="color: #856404; margin: 0;">
-                ' . getSetting('payment_policy', 'Payment will be made at the hotel upon arrival.<br>We accept cash payments only. Please bring the total amount of <strong>' . getSetting('currency_symbol') . ' ' . number_format($booking['total_amount'], 0) . '</strong> with you.') . '
+                ' . getSetting('payment_policy', 'Payment will be made at the hotel upon arrival.<br>We accept cash payments only. Please bring the total amount of <strong>' . getSetting('currency_symbol') . ' ' . number_format(rh_booking_owed($booking)['owed'], 0) . '</strong> with you.') . '
             </p>
         </div>
 

@@ -96,8 +96,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 throw new Exception('Booking not found.');
             }
 
-            $pdo->prepare("UPDATE bookings SET status = 'cancelled', is_tentative = 0 WHERE id = ?")
-                ->execute([$booking_id]);
+            // Shared settled cancellation (status, room release, bill treatment, refunds).
+            $settled = cancelRoomBookingSettled($pdo, (int)$booking_id, (int)$user['id'], 'Tentative hold cancelled by ' . $user['full_name']);
+            if (empty($settled['success'])) {
+                throw new Exception($settled['error'] !== '' ? $settled['error'] : 'Could not cancel the booking.');
+            }
 
             $pdo->prepare("INSERT INTO tentative_booking_log (booking_id, action, performed_by, action_reason) VALUES (?, 'cancelled', ?, ?)")
                 ->execute([$booking_id, (int)$user['id'], 'Cancelled by ' . $user['full_name']]);

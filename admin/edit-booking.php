@@ -153,7 +153,7 @@ try {
 
 // Get settings
 $currency_symbol = getSetting('currency_symbol');
-$vatEnabled = in_array(getSetting('vat_enabled'), ['1', 'true', 'on']);
+$vatEnabled = rh_vat_enabled();
 $vatRate = (float)getSetting('vat_rate', 0);
 $levyEnabled = getSetting('tourism_levy_enabled', '0') === '1';
 $levyPercent = $levyEnabled ? (float)getSetting('tourism_levy_percent', 0) : 0.0;
@@ -177,12 +177,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $booking) {
         $adult_guests = max(1, $number_of_guests - $child_guests);
         $occupancy_type = $_POST['occupancy_type'] ?? 'single';
         $special_requests = trim($_POST['special_requests'] ?? '');
-        $posted_total_amount = isset($_POST['total_amount']) ? (float)$_POST['total_amount'] : (float)($booking['total_amount'] ?? 0);
-        $total_amount = $can_edit_booking_financials ? $posted_total_amount : (float)($booking['total_amount'] ?? 0);
+        // The Total field is the FINAL price (VAT + levy included): compare/prefill against total_with_vat.
+        $storedGross = rh_booked_stay_split($booking)['total_with_vat'];
+        $posted_total_amount = isset($_POST['total_amount']) ? (float)$_POST['total_amount'] : $storedGross;
+        $total_amount = $can_edit_booking_financials ? $posted_total_amount : $storedGross;
         $admin_notes = trim($_POST['booking_notes'] ?? '');
 
         // Validate
-        if (!$can_edit_booking_financials && isset($_POST['total_amount']) && abs($posted_total_amount - (float)($booking['total_amount'] ?? 0)) > 0.01) {
+        if (!$can_edit_booking_financials && isset($_POST['total_amount']) && abs($posted_total_amount - $storedGross) > BALANCE_TOLERANCE) {
             $error = 'You do not have permission to change booking amounts.';
         } elseif (empty($guest_name) || empty($guest_email) || empty($check_in) || empty($check_out)) {
             $error = 'Guest name, email, check-in and check-out dates are required.';
@@ -234,8 +236,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $booking) {
         if (empty($error)) {
             try {
                 $pdo->beginTransaction();
+                $pdo->prepare("SELECT id FROM bookings WHERE id = ? FOR UPDATE")->execute([$booking_id]);
 
-                $number_of_nights = (strtotime($check_out) - strtotime($check_in)) / 86400;
+                $number_of_nights =(strtotime($check_out) - strtotime($check_in)) / 86400;
                 $multiplierStmt = $pdo->prepare("
                     SELECT
                         r.child_price_multiplier AS room_type_child_price_multiplier,
@@ -289,8 +292,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $booking) {
                 if ($occupancy_type !== ($booking['occupancy_type'] ?? 'single')) {
                     $changes['occupancy_type'] = ['old' => ucfirst($booking['occupancy_type'] ?? 'single'), 'new' => ucfirst($occupancy_type)];
                 }
-                if (abs($total_amount - (float)$booking['total_amount']) > 0.01) {
-                    $changes['total_amount'] = ['old' => $currency_sym . ' ' . number_format($booking['total_amount'], 2), 'new' => $currency_sym . ' ' . number_format($total_amount, 2)];
+                if (abs($total_amount - $storedGross) > BALANCE_TOLERANCE) {
+                    $changes['total_amount'] = ['old' => $currency_sym . ' ' . number_format($storedGross, 2), 'new' => $currency_sym . ' ' . number_format($total_amount, 2)];
                 }
                 if ($guest_name !== $booking['guest_name']) {
                     $changes['guest_name'] = ['old' => $booking['guest_name'], 'new' => $guest_name];
@@ -324,37 +327,25 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $booking) {
 
                 if (empty($error)) {
                     $currentIndividualRoomId = !empty($booking['individual_room_id']) ? (int)$booking['individual_room_id'] : null;
-                    $pricingFieldsChanged = $room_id !== (int)$booking['room_id']
-                        || $individual_room_id !== $currentIndividualRoomId
-                        || $check_in !== ($booking['check_in_date'] ?? '')
-                        || $check_out !== ($booking['check_out_date'] ?? '')
-                        || $number_of_guests !== (int)($booking['number_of_guests'] ?? 1)
-                        || $adult_guests !== (int)($booking['adult_guests'] ?? ($booking['number_of_guests'] ?? 1))
-                        || $child_guests !== (int)($booking['child_guests'] ?? 0)
-                        || $occupancy_type !== ($booking['occupancy_type'] ?? 'single')
-                        || abs($total_amount - (float)($booking['total_amount'] ?? 0)) > 0.01;
 
-                    // Rate-affecting fields only (excludes total_amount — that may be an explicit admin override)
-                    $rateFieldsChanged = $room_id !== (int)$booking['room_id']
-                        || $individual_room_id !== $currentIndividualRoomId
-                        || $check_in !== ($booking['check_in_date'] ?? '')
-                        || $check_out !== ($booking['check_out_date'] ?? '')
-                        || $number_of_guests !== (int)($booking['number_of_guests'] ?? 1)
-                        || $adult_guests !== (int)($booking['adult_guests'] ?? ($booking['number_of_guests'] ?? 1))
-                        || $child_guests !== (int)($booking['child_guests'] ?? 0)
-                        || $occupancy_type !== ($booking['occupancy_type'] ?? 'single');
+                    // What kind of price change is this?
+                    //  - manual final price (differs from the stored gross)  -> VAT + levy extracted from it
+                    //  - room / occupancy / children changed                  -> new catalogue rate (explicit rate change)
+                    //  - dates only                                           -> the guest's BOOKED nightly rate
+                    $totalOverridden = $can_edit_booking_financials && abs($posted_total_amount - $storedGross) > BALANCE_TOLERANCE;
+                    $catalogReprice = $room_id !== (int)$booking['room_id']
+                        || $occupancy_type !== ($booking['occupancy_type'] ?? 'single')
+                        || $child_guests !== (int)($booking['child_guests'] ?? 0);
+                    $stayDatesChanged = $check_in !== ($booking['check_in_date'] ?? '')
+                        || $check_out !== ($booking['check_out_date'] ?? '');
+                    $pricingFieldsChanged = $totalOverridden || $catalogReprice || $stayDatesChanged;
 
                     $vat_amount = (float)($booking['vat_amount'] ?? 0);
                     $child_supplement_total = (float)($booking['child_supplement_total'] ?? 0);
-                    // FIX: Carry existing levy values as defaults; they are recalculated below
-                    // when rateFieldsChanged is true.
                     $tourism_levy_amount  = (float)($booking['tourism_levy_amount'] ?? 0);
                     $tourism_levy_percent = (float)($booking['tourism_levy_percent'] ?? 0);
-
-                    if ($pricingFieldsChanged) {
-                        // Mode-aware: exclusive adds on top, inclusive extracts, off zeroes.
-                        $vat_amount = vat_components($total_amount)['vat'];
-                    }
+                    $total_amount = (float)($booking['total_amount'] ?? 0);
+                    $total_with_vat = $storedGross;
 
                     $update = $pdo->prepare("
                         UPDATE bookings SET
@@ -384,60 +375,65 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $booking) {
                     ");
 
                     if ($pricingFieldsChanged) {
-                        $roomRateStmt = $pdo->prepare("
-                            SELECT
-                                r.price_per_night,
-                                COALESCE(r.price_single_occupancy, r.price_per_night) AS single_price,
-                                COALESCE(r.price_double_occupancy, r.price_per_night) AS double_price,
-                                COALESCE(r.price_triple_occupancy, r.price_per_night) AS triple_price,
-                                COALESCE(ir.child_price_multiplier, r.child_price_multiplier) AS effective_child_price_multiplier
-                            FROM rooms r
-                            LEFT JOIN individual_rooms ir ON ir.id = ?
-                            WHERE r.id = ?
-                            LIMIT 1
-                        ");
-                        $roomRateStmt->execute([$individual_room_id, $room_id]);
-                        $rateRow = $roomRateStmt->fetch(PDO::FETCH_ASSOC);
-                        $ratePerNight = (float)($rateRow['price_per_night'] ?? 0);
-                        if ($occupancy_type === 'single') {
-                            $ratePerNight = (float)($rateRow['single_price'] ?? $ratePerNight);
-                        } elseif ($occupancy_type === 'double') {
-                            $ratePerNight = (float)($rateRow['double_price'] ?? $ratePerNight);
-                        } elseif ($occupancy_type === 'triple') {
-                            $ratePerNight = (float)($rateRow['triple_price'] ?? $ratePerNight);
-                        }
+                        $oldSplit = rh_booked_stay_split($booking);
+                        $hasLevy = rh_booking_has_levy($booking);
+                        $repriceTt = null;
 
-                        if (isset($rateRow['effective_child_price_multiplier']) && $rateRow['effective_child_price_multiplier'] !== null) {
-                            $child_price_multiplier = max(0, (float)$rateRow['effective_child_price_multiplier']);
-                        }
-                        $child_supplement_total = $child_guests > 0
-                            ? ($ratePerNight * ($child_price_multiplier / 100) * $child_guests * $number_of_nights)
-                            : 0;
-
-                        // When rate-affecting fields changed, recalculate total server-side via dynamic pricing
-                        if ($rateFieldsChanged) {
+                        if ($totalOverridden) {
+                            // Manual price = FINAL gross: VAT and levy are extracted, never added on top.
+                            $repriceTt = rh_stay_totals($posted_total_amount, 'final', $hasLevy);
+                        } elseif ($catalogReprice) {
+                            $roomRateStmt = $pdo->prepare("
+                                SELECT
+                                    r.price_per_night,
+                                    COALESCE(r.price_single_occupancy, r.price_per_night) AS single_price,
+                                    COALESCE(r.price_double_occupancy, r.price_per_night) AS double_price,
+                                    COALESCE(r.price_triple_occupancy, r.price_per_night) AS triple_price,
+                                    COALESCE(ir.child_price_multiplier, r.child_price_multiplier) AS effective_child_price_multiplier
+                                FROM rooms r
+                                LEFT JOIN individual_rooms ir ON ir.id = ?
+                                WHERE r.id = ?
+                                LIMIT 1
+                            ");
+                            $roomRateStmt->execute([$individual_room_id, $room_id]);
+                            $rateRow = $roomRateStmt->fetch(PDO::FETCH_ASSOC);
+                            $ratePerNight = (float)($rateRow['price_per_night'] ?? 0);
+                            if ($occupancy_type === 'single') {
+                                $ratePerNight = (float)($rateRow['single_price'] ?? $ratePerNight);
+                            } elseif ($occupancy_type === 'double') {
+                                $ratePerNight = (float)($rateRow['double_price'] ?? $ratePerNight);
+                            } elseif ($occupancy_type === 'triple') {
+                                $ratePerNight = (float)($rateRow['triple_price'] ?? $ratePerNight);
+                            }
+                            if (isset($rateRow['effective_child_price_multiplier']) && $rateRow['effective_child_price_multiplier'] !== null) {
+                                $child_price_multiplier = max(0, (float)$rateRow['effective_child_price_multiplier']);
+                            }
+                            // Seasonal / rate-plan pricing applies to the new catalogue rate, as before.
                             $dynResult = applyDynamicPricing($pdo, $room_id, $check_in, $check_out, (int)$number_of_nights, $ratePerNight);
-                            $ratePerNight = $dynResult['final_price'];
+                            $ratePerNight = (float)$dynResult['final_price'];
                             $child_supplement_total = $child_guests > 0
                                 ? ($ratePerNight * ($child_price_multiplier / 100) * $child_guests * (int)$number_of_nights)
                                 : 0;
-                            $total_amount = round(($ratePerNight * (int)$number_of_nights) + $child_supplement_total, 2);
-
-                            // FIX: Recalculate tourism levy when rate-affecting fields change.
-                            // Previously the levy was never updated on edit, causing the stored
-                            // tourism_levy_amount to be stale after any date/room/occupancy change.
-                            if ($levyEnabled && $levyPercent > 0) {
-                                $tourism_levy_amount  = round(($total_amount) * ($levyPercent / 100), 2);
-                                $tourism_levy_percent = $levyPercent;
-                                $total_amount         = round($total_amount + $tourism_levy_amount, 2);
-                            } else {
-                                $tourism_levy_amount  = 0.0;
-                                $tourism_levy_percent = 0.0;
+                            // Price basis honours vat_pricing_mode; levy sits outside the VAT base.
+                            $repriceTt = rh_stay_totals(($ratePerNight * (int)$number_of_nights) + $child_supplement_total, 'price', $hasLevy);
+                            if ($oldSplit['package_gross'] > 0) {
+                                // Packages are not repriced by a room change: keep their gross in the bill.
+                                $repriceTt = rh_stay_totals(round($repriceTt['total_with_vat'] + $oldSplit['package_gross'], 2), 'final', $hasLevy);
                             }
-
-                            // Mode-aware: exclusive adds on top, inclusive extracts, off zeroes.
-                            $vat_amount = vat_components($total_amount)['vat'];
+                        } else {
+                            // Dates only: the BOOKED nightly rate for every night.
+                            $rpEdit = rh_reprice_at_booked_rate($booking, (int)$number_of_nights);
+                            $repriceTt = $rpEdit['totals'];
+                            $child_supplement_total = $rpEdit['new_child_supplement'];
                         }
+
+                        $total_amount = round($repriceTt['net'] + $repriceTt['levy'], 2); // net + levy, ex-VAT
+                        $vat_amount = $repriceTt['vat'];
+                        $tourism_levy_amount = $repriceTt['levy'];
+                        if ($repriceTt['levy_rate'] > 0) {
+                            $tourism_levy_percent = $repriceTt['levy_rate'];
+                        }
+                        $total_with_vat = $repriceTt['total_with_vat'];
                     } else {
                         $number_of_nights = (int)($booking['number_of_nights'] ?? $number_of_nights);
                         $child_price_multiplier = (float)($booking['child_price_multiplier'] ?? $child_price_multiplier);
@@ -515,11 +511,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $booking) {
                         }
                     }
 
-                    // Inclusive mode: the priced total already contains VAT — never add on top.
-                    $total_with_vat = vat_mode() === 'inclusive'
-                        ? round($total_amount, 2)
-                        : round($total_amount + $vat_amount, 2);
-
                     $update->execute([
                         $room_id,
                         $individual_room_id,
@@ -548,6 +539,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $booking) {
                     if ($adminNoteChanged) {
                         $noteInsert = $pdo->prepare("INSERT INTO booking_notes (booking_id, note_text, created_by) VALUES (?, ?, ?)");
                         $noteInsert->execute([$booking_id, $admin_notes, $user['id'] ?? null]);
+                    }
+
+                    // New totals change the bill — re-derive amount_due / credit_balance /
+                    // payment_status inside the same transaction (rolls back if it fails).
+                    if (!recalculateBookingFinancials((int)$booking_id)) {
+                        throw new Exception('Could not recalculate booking financials.');
                     }
 
                     $pdo->commit();
@@ -785,9 +782,9 @@ if (!$booking) {
                         <small style="color:#888;">At least 1 adult is required per booking.</small>
                     </div>
                     <div class="form-group">
-                        <label for="total_amount">Total Amount (<?php echo $currency_symbol; ?>)</label>
+                        <label for="total_amount">Final price incl. VAT &amp; levy (<?php echo $currency_symbol; ?>)</label>
                         <input type="number" id="total_amount" name="total_amount" step="0.01" min="0"
-                            value="<?php echo $booking['total_amount']; ?>" <?php echo $can_edit_booking_financials ? '' : 'readonly disabled aria-disabled="true"'; ?>>
+                            value="<?php echo htmlspecialchars(number_format(rh_booked_stay_split($booking)['total_with_vat'], 2, '.', '')); ?>" <?php echo $can_edit_booking_financials ? '' : 'readonly disabled aria-disabled="true"'; ?>>
                         <?php if (!$can_edit_booking_financials): ?>
                             <small style="color: #888;">Only admin users or users with the Edit Booking Financials permission can change this amount.</small>
                         <?php endif; ?>
@@ -934,7 +931,8 @@ if (!$booking) {
             document.getElementById('calcNights').textContent = nights;
             document.getElementById('calcRate').textContent = currencySymbol + ' ' + rate.toLocaleString();
             document.getElementById('calcTotal').textContent = currencySymbol + ' ' + total.toLocaleString();
-            document.getElementById('total_amount').value = total.toFixed(2);
+            // Preview only: the Final price field is never overwritten. Leave it unchanged and the
+            // server reprices (booked rate for date changes, catalogue rate for room / occupancy / children changes).
             document.getElementById('calcGuestSplit').textContent = `${adults} adult${adults === 1 ? '' : 's'}${safeChildren > 0 ? ` + ${safeChildren} child${safeChildren === 1 ? '' : 'ren'}` : ''}`;
             document.getElementById('calcChildInfo').textContent = safeChildren > 0 ?
                 `Child supplement (${activeChildMultiplier}%): ${currencySymbol} ${childSupplement.toLocaleString()}` :

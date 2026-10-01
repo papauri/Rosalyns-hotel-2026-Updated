@@ -127,13 +127,23 @@ try {
                 : 'Thank you for choosing ' . htmlspecialchars($site_name) . '. Your reservation has been received and is being reviewed.';
             $split_count  = count($split_bookings);
             $group_total_amount           = 0.0;
-            $group_guest_count            = 0;
+            $group_owed_total             = 0.0;   // total_with_vat: what the guest actually owes
+            $group_vat_total              = 0.0;
+            $group_levy_total             = 0.0;
+            $group_guest_count           = 0;
             $group_adult_count            = 0;
             $group_child_count            = 0;
             $group_child_supplement_total = 0.0;
             $group_references             = [];
             foreach ($split_bookings as $split_booking) {
                 $group_total_amount           += (float)($split_booking['total_amount'] ?? 0);
+                $row_owed = (float)($split_booking['total_with_vat'] ?? 0);
+                if ($row_owed <= 0) {
+                    $row_owed = (float)($split_booking['total_amount'] ?? 0) + (float)($split_booking['vat_amount'] ?? 0);
+                }
+                $group_owed_total             += $row_owed;
+                $group_vat_total              += (float)($split_booking['vat_amount'] ?? 0);
+                $group_levy_total             += (float)($split_booking['tourism_levy_amount'] ?? 0);
                 $group_guest_count            += (int)($split_booking['number_of_guests'] ?? 0);
                 $group_adult_count            += (int)($split_booking['adult_guests'] ?? 0);
                 $group_child_count            += (int)($split_booking['child_guests'] ?? 0);
@@ -212,7 +222,7 @@ try {
                                 </div>
                                 <div class="conf-total-block">
                                     <div class="conf-total-label">Total</div>
-                                    <div class="conf-total-amount"><?php echo $currency_symbol; ?><?php echo number_format($group_total_amount, 0); ?></div>
+                                    <div class="conf-total-amount"><?php echo $currency_symbol; ?><?php echo number_format($group_owed_total, 0); ?></div>
                                 </div>
                             </div>
 
@@ -265,13 +275,13 @@ try {
                                     <li><strong>Room is on hold</strong> until <?php echo date('M j, Y \a\t g:i A', strtotime($booking['tentative_expires_at'])); ?>.</li>
                                     <li>You'll receive a <strong>reminder email</strong> <?php echo (int)getSetting('tentative_reminder_hours', 24); ?> hours before expiration.</li>
                                     <li><strong>Contact us</strong> before expiration to convert this to a confirmed reservation.</li>
-                                    <li>Once confirmed, payment of <strong><?php echo $currency_symbol . number_format($group_total_amount, 0); ?></strong> is collected at check-in.</li>
+                                    <li>Once confirmed, payment of <strong><?php echo $currency_symbol . number_format($group_owed_total, 0); ?></strong> is collected at check-in.</li>
                                 <?php else: ?>
                                     <li><strong>Confirmation email sent</strong> to <?php echo htmlspecialchars($booking['guest_email']); ?> — please check your inbox.</li>
                                     <li>Our team will review your booking and may contact you to confirm details.</li>
                                     <li>Save your reference number: <strong><?php echo htmlspecialchars($booking['booking_reference']); ?></strong>.</li>
                                     <li>Arrive on your check-in date and present your reference at reception.</li>
-                                    <li>Payment of <strong><?php echo $currency_symbol . number_format($group_total_amount, 0); ?></strong> is collected at check-in.</li>
+                                    <li>Payment of <strong><?php echo $currency_symbol . number_format($group_owed_total, 0); ?></strong> is collected at check-in.</li>
                                 <?php endif; ?>
                             </ol>
                             <?php if (!$is_tentative && $payment_policy): ?>
@@ -317,9 +327,21 @@ try {
                                     <span><?php echo $currency_symbol . number_format($group_child_supplement_total, 0); ?></span>
                                 </div>
                                 <?php endif; ?>
+                                <?php if ($group_levy_total > 0): ?>
+                                <div class="conf-detail-row">
+                                    <span>Tourism Levy<?php echo ((float)($booking['tourism_levy_percent'] ?? 0)) > 0 ? ' (' . rtrim(rtrim(number_format((float)$booking['tourism_levy_percent'], 2), '0'), '.') . '%)' : ''; ?></span>
+                                    <span><?php echo $currency_symbol . number_format($group_levy_total, 0); ?></span>
+                                </div>
+                                <?php endif; ?>
+                                <?php if (vat_shows_amount() && $group_vat_total > 0): ?>
+                                <div class="conf-detail-row">
+                                    <span>VAT</span>
+                                    <span><?php echo $currency_symbol . number_format($group_vat_total, 0); ?></span>
+                                </div>
+                                <?php endif; ?>
                                 <div class="conf-detail-row conf-detail-row--total">
                                     <span>Total Amount</span>
-                                    <span><?php echo $currency_symbol . number_format($group_total_amount, 0); ?></span>
+                                    <span><?php echo $currency_symbol . number_format($group_owed_total, 0); ?></span>
                                 </div>
                             </div>
                         </div>

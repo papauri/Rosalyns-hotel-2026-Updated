@@ -418,12 +418,24 @@ function processGuestCheckout(int $bookingId, ?int $performedBy = null, array $o
 
         // Recalculate financials first so the returned balance and the final
         // invoice reflect any folio charges added right up to checkout.
-        if (function_exists('recalculateBookingFinancials')) {
-            recalculateBookingFinancials($bookingId);
+        // Checkout is gated on the outstanding balance: blocked unless settled, or the
+        // user holds 'checkout_with_balance' and confirmed
+        // ($options['confirm_checkout_with_balance']). Booking row locked first.
+        $pdo->prepare("SELECT id FROM bookings WHERE id = ? FOR UPDATE")->execute([$bookingId]);
+        $balGate = evaluateCheckoutBalance($pdo, $bookingId, $performedBy, !empty($options['confirm_checkout_with_balance']));
+        if (!$balGate['allowed']) {
+            $pdo->rollBack();
+            return [
+                'success' => false,
+                'message' => $balGate['message'],
+                'needs_confirm' => $balGate['needs_confirm'],
+                'outstanding_balance' => $balGate['balance'],
+            ];
         }
-        $balStmt = $pdo->prepare("SELECT amount_due FROM bookings WHERE id = ?");
-        $balStmt->execute([$bookingId]);
-        $outstandingBalance = round((float)($balStmt->fetchColumn() ?: 0), 2);
+        $outstandingBalance = $balGate['balance'];
+        if ($balGate['override']) {
+            logCheckoutBalanceOverride($bookingId, (string)$booking['booking_reference'], $outstandingBalance, $performedBy);
+        }
 
         // Update booking status
         $pdo->prepare("UPDATE bookings SET status = 'checked-out', checkout_completed_at = NOW(), updated_at = NOW() WHERE id = ?")->execute([$bookingId]);
@@ -521,8 +533,16 @@ function processGuestCheckout(int $bookingId, ?int $performedBy = null, array $o
                 'workflow' => $workflowResults
             ]
         ];
+    } catch (RuntimeException $e) {
+        if ($pdo->inTransaction()) {
+            $pdo->rollBack();
+        }
+        error_log("Checkout process error: " . $e->getMessage());
+        return ['success' => false, 'message' => $e->getMessage()];
     } catch (PDOException $e) {
-        $pdo->rollBack();
+        if ($pdo->inTransaction()) {
+            $pdo->rollBack();
+        }
         error_log("Checkout process error: " . $e->getMessage());
         return ['success' => false, 'message' => 'Database error: ' . $e->getMessage()];
     }

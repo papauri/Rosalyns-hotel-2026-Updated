@@ -673,6 +673,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $createdBookingTotals = [];
             $createdGuestCounts = [];
             $bookingGroupTotal = 0.0;
+            $bookingGroupVat = 0.0;
+            $bookingGroupTotalWithVat = 0.0;
             $bookingGroupChildSupplementTotal = 0.0;
             $bookingGroupTourismLevyTotal = 0.0;
 
@@ -705,22 +707,21 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
                 $baseThisBooking = $rateThisBooking * $number_of_nights;
                 $childSupplementThisBooking = $childrenThisBooking > 0 ? (($rateThisBooking * ($child_price_multiplier / 100)) * $childrenThisBooking * $number_of_nights) : 0;
-                $tourismLevyThisBooking = 0.0;
-                if ($tourism_levy_enabled && $tourism_levy_percent > 0) {
-                    $tourismLevyThisBooking = ($baseThisBooking + $childSupplementThisBooking) * ($tourism_levy_percent / 100);
-                }
-                $totalThisBooking = $baseThisBooking + $childSupplementThisBooking + $tourismLevyThisBooking + $pkgTotalThisBooking;
-
-                // Record the VAT split, exactly as admin/create-booking.php does. Guest
-                // prices are VAT-INCLUSIVE, so vat_components() extracts the tax from the
-                // priced amount and leaves the total untouched — the guest pays what they
-                // were quoted, and the books get a real VAT figure instead of a zero.
-                // (Under 'exclusive' mode this same call would add VAT on top; the mode
-                // setting is the single control, and it is not this file's decision.)
-                $vatThisBooking      = vat_components($totalThisBooking);
-                $vatRateThisBooking  = $vatThisBooking['rate'];
-                $vatAmtThisBooking   = $vatThisBooking['vat'];
-                $totalWithVatBooking = $vatThisBooking['total'];
+                // Stay totals via the shared helper: the tourism levy is OUTSIDE the VAT
+                // base (levy = net * levy%, VAT = net * VAT%). Levy applies to room +
+                // child supplement only; packages carry VAT but no levy.
+                $stayTotals = rh_stay_totals($baseThisBooking + $childSupplementThisBooking, 'price');
+                $pkgTotals  = $pkgTotalThisBooking > 0
+                    ? rh_stay_totals($pkgTotalThisBooking, 'price', false)
+                    : ['net' => 0.0, 'vat' => 0.0, 'levy' => 0.0, 'total_with_vat' => 0.0];
+                $tourismLevyThisBooking = round($stayTotals['levy'], 2);
+                $vatRateThisBooking     = $stayTotals['vat_rate'];
+                $vatAmtThisBooking      = round($stayTotals['vat'] + $pkgTotals['vat'], 2);
+                $totalWithVatBooking    = round($stayTotals['total_with_vat'] + $pkgTotals['total_with_vat'], 2);
+                // total_amount convention: net of VAT, levy included (net + levy);
+                // total_with_vat = net + levy + VAT = everything the guest owes.
+                $totalThisBooking       = round($stayTotals['net'] + $pkgTotals['net'] + $tourismLevyThisBooking, 2);
+                $tourismLevyPctBooking  = $stayTotals['levy_rate'];
 
                 $refForBooking = ($i === 0) ? $booking_reference : ($booking_reference . '-' . ($i + 1));
                 if ($i > 0) {
@@ -762,7 +763,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     $totalWithVatBooking,   // total_with_vat
                     $childSupplementThisBooking,
                     $tourismLevyThisBooking,
-                    $tourism_levy_percent,
+                    $tourismLevyPctBooking,
                     $requestsForBooking,
                     $booking_status,
                     $is_tentative,
@@ -792,6 +793,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $createdBookingTotals[] = $totalThisBooking;
                 $createdGuestCounts[] = $guestsThisBooking;
                 $bookingGroupTotal += $totalThisBooking;
+                $bookingGroupVat += $vatAmtThisBooking;
+                $bookingGroupTotalWithVat += $totalWithVatBooking;
                 $bookingGroupChildSupplementTotal += $childSupplementThisBooking;
                 $bookingGroupTourismLevyTotal += $tourismLevyThisBooking;
             }
@@ -855,6 +858,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 'tourism_levy_amount' => $bookingGroupTourismLevyTotal,
                 'tourism_levy_percent' => $tourism_levy_percent,
                 'total_amount' => $bookingGroupTotal,
+                'vat_amount' => round($bookingGroupVat, 2),
+                'total_with_vat' => round($bookingGroupTotalWithVat, 2),
+                'amount_due' => round($bookingGroupTotalWithVat, 2),
                 'special_requests' => $special_requests,
                 'status' => $booking_status,
                 'is_tentative' => $is_tentative,
@@ -917,7 +923,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 'check_in' => $check_in_date,
                 'check_out' => $check_out_date,
                 'nights' => $number_of_nights,
-                'total' => $bookingGroupTotal,
+                'total' => round($bookingGroupTotalWithVat, 2),   // what the guest owes
+                'vat_amount' => round($bookingGroupVat, 2),
+                'levy_amount' => round($bookingGroupTourismLevyTotal, 2),
                 'email_sent' => $email_result['success'],
                 'is_tentative' => $is_tentative,
                 'tentative_expires_at' => $tentative_expires_at,
@@ -1667,6 +1675,9 @@ try {
         // Tourism levy settings
         const tourismLevyEnabled = <?php echo json_encode((bool)getSetting('tourism_levy_enabled', false)); ?>;
         const tourismLevyPercent = <?php echo json_encode((float)getSetting('tourism_levy_percent', 0)); ?>;
+        // VAT settings (levy sits outside the VAT base; see rh_stay_totals in includes/pricing.php)
+        const siteVatMode = <?php echo json_encode(vat_mode()); ?>;
+        const siteVatRate = <?php echo json_encode(vat_mode() === 'off' ? 0.0 : (float)getSetting('vat_rate', 0)); ?>;
 
         // Blocked dates from server (global + per room)
         const globalBlockedDates = <?php echo json_encode(array_values($global_blocked_dates)); ?>;

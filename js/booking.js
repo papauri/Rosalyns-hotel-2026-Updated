@@ -1144,13 +1144,54 @@
                     // Calculate package total from selected packages
                     const pkgTotal = getPackageTotal(nights, adults);
 
-                    // Calculate tourism levy if enabled
-                    let tourismLevyAmount = serverPricing ? Number(serverPricing.tourism_levy_amount || 0) : 0;
-                    if (!serverPricing && tourismLevyEnabled && tourismLevyPercent > 0) {
-                        tourismLevyAmount = (baseTotal + childSupplement) * (tourismLevyPercent / 100);
-                    }
+                    // Levy / VAT / total come from the server (rh_stay_totals); the levy sits
+                    // outside the VAT base. Packages carry VAT but no levy (added below).
+                    const vatModeNow = serverPricing && serverPricing.vat_mode ?
+                        serverPricing.vat_mode :
+                        (typeof siteVatMode !== 'undefined' ? siteVatMode : 'off');
+                    const vatRateNow = serverPricing && serverPricing.vat_rate !== undefined ?
+                        Number(serverPricing.vat_rate) :
+                        (typeof siteVatRate !== 'undefined' ? Number(siteVatRate) : 0);
+                    const showVatAmount = serverPricing && serverPricing.vat_shows_amount !== undefined ?
+                        !!serverPricing.vat_shows_amount :
+                        vatModeNow === 'exclusive';
 
-                    const total = baseTotal + childSupplement + tourismLevyAmount + pkgTotal;
+                    let tourismLevyAmount = 0;
+                    let stayVat = 0;
+                    let stayTotalWithVat = 0;
+                    if (serverPricing) {
+                        tourismLevyAmount = Number(serverPricing.levy ?? serverPricing.tourism_levy_amount ?? 0);
+                        stayVat = Number(serverPricing.vat || 0);
+                        stayTotalWithVat = Number(serverPricing.total_with_vat ?? serverPricing.total_before_packages ?? 0);
+                    } else {
+                        // Provisional figures until the server answers; same composition as the server.
+                        const rawStay = baseTotal + childSupplement;
+                        const vr = vatModeNow === 'off' ? 0 : vatRateNow / 100;
+                        const lr = (tourismLevyEnabled && tourismLevyPercent > 0) ? tourismLevyPercent / 100 : 0;
+                        if (vatModeNow === 'inclusive' && vr > 0) {
+                            const netExact = rawStay / (1 + vr);
+                            stayVat = rawStay - netExact;
+                            tourismLevyAmount = netExact * lr;
+                            stayTotalWithVat = rawStay + tourismLevyAmount;
+                        } else {
+                            stayVat = rawStay * vr;
+                            tourismLevyAmount = rawStay * lr;
+                            stayTotalWithVat = rawStay + stayVat + tourismLevyAmount;
+                        }
+                    }
+                    // Package VAT: exclusive adds on top; inclusive is already inside the price.
+                    let pkgVat = 0;
+                    let pkgWithVat = pkgTotal;
+                    if (pkgTotal > 0 && vatRateNow > 0) {
+                        if (vatModeNow === 'inclusive') {
+                            pkgVat = pkgTotal - pkgTotal / (1 + vatRateNow / 100);
+                        } else if (vatModeNow === 'exclusive') {
+                            pkgVat = pkgTotal * vatRateNow / 100;
+                            pkgWithVat = pkgTotal + pkgVat;
+                        }
+                    }
+                    const vatTotalNow = stayVat + pkgVat;
+                    const total = Math.round((stayTotalWithVat + pkgWithVat) * 100) / 100;
 
                     // Update booking type badge
                     const selectedBookingType = document.querySelector('input[name="booking_type"]:checked');
@@ -1259,14 +1300,35 @@
                     // Update total
                     document.getElementById('summaryTotal').textContent = currencySymbol + total.toLocaleString();
 
-                    // Update tourism levy hint
+                    // Levy + VAT breakdown lines (VAT amount only when VAT display is on)
                     const tourismLevyNote = document.getElementById('summaryTourismLevyNote');
                     const tourismLevyText = document.getElementById('tourismLevyText');
-                    if (tourismLevyEnabled && tourismLevyPercent > 0 && tourismLevyAmount > 0) {
+                    const fmtMoney = v => currencySymbol + Number(v).toLocaleString(undefined, {
+                        minimumFractionDigits: 2,
+                        maximumFractionDigits: 2
+                    });
+                    const levyPctShown = serverPricing ? Number(serverPricing.tourism_levy_percent || 0) : tourismLevyPercent;
+                    if (tourismLevyAmount > 0) {
                         tourismLevyNote.style.display = '';
-                        tourismLevyText.textContent = `Includes ${tourismLevyPercent}% Tourism Levy`;
+                        tourismLevyText.textContent = `Includes ${levyPctShown}% Tourism Levy (${fmtMoney(tourismLevyAmount)})`;
                     } else {
                         tourismLevyNote.style.display = 'none';
+                    }
+                    let vatNote = document.getElementById('summaryVatNote');
+                    if (!vatNote && tourismLevyNote && tourismLevyNote.parentNode) {
+                        vatNote = document.createElement('div');
+                        vatNote.id = 'summaryVatNote';
+                        vatNote.className = 'bsum-total-note';
+                        vatNote.style.display = 'none';
+                        tourismLevyNote.parentNode.insertBefore(vatNote, tourismLevyNote.nextSibling);
+                    }
+                    if (vatNote) {
+                        if (showVatAmount && vatTotalNow > 0) {
+                            vatNote.textContent = `Includes VAT ${vatRateNow}% (${fmtMoney(vatTotalNow)})`;
+                            vatNote.style.display = '';
+                        } else {
+                            vatNote.style.display = 'none';
+                        }
                     }
 
                     bookingSummary.style.display = 'block';

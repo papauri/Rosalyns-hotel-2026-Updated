@@ -251,11 +251,26 @@ function availabilityBuildSplitPricing(PDO $pdo, array $room, string $checkIn, s
         ];
     }
 
-    $tourismLevyEnabled = (bool)getSetting('tourism_levy_enabled', false);
-    $tourismLevyPercent = (float)getSetting('tourism_levy_percent', 0);
+    // Totals via the shared helper, per allocated room exactly as booking.php does
+    // (levy outside the VAT base; packages are added on the client with VAT, no levy).
+    $netTotal = 0.0;
+    $vatTotal = 0.0;
     $tourismLevyAmount = 0.0;
-    if ($tourismLevyEnabled && $tourismLevyPercent > 0) {
-        $tourismLevyAmount = ($baseTotal + $childSupplementTotal) * ($tourismLevyPercent / 100);
+    $totalWithVat = 0.0;
+    $vatRate = 0.0;
+    $tourismLevyPercent = 0.0;
+    foreach ($allocation as $i => $part) {
+        $t = rh_stay_totals((float)($part['base_total'] + $part['child_supplement_total']), 'price');
+        $netTotal += $t['net'];
+        $vatTotal += $t['vat'];
+        $tourismLevyAmount += $t['levy'];
+        $totalWithVat += $t['total_with_vat'];
+        $vatRate = $t['vat_rate'];
+        $tourismLevyPercent = $t['levy_rate'];
+        $allocation[$i]['net'] = $t['net'];
+        $allocation[$i]['levy'] = $t['levy'];
+        $allocation[$i]['vat'] = $t['vat'];
+        $allocation[$i]['total_with_vat'] = $t['total_with_vat'];
     }
 
     if ($ratePlan !== null) {
@@ -271,7 +286,14 @@ function availabilityBuildSplitPricing(PDO $pdo, array $room, string $checkIn, s
         'child_supplement_total' => round($childSupplementTotal, 2),
         'tourism_levy_amount' => round($tourismLevyAmount, 2),
         'tourism_levy_percent' => $tourismLevyPercent,
-        'total_before_packages' => round($baseTotal + $childSupplementTotal + $tourismLevyAmount, 2),
+        'net' => round($netTotal, 2),
+        'levy' => round($tourismLevyAmount, 2),
+        'vat' => round($vatTotal, 2),
+        'total_with_vat' => round($totalWithVat, 2),
+        'vat_rate' => $vatRate,
+        'vat_mode' => function_exists('vat_mode') ? vat_mode() : 'off',
+        'vat_shows_amount' => function_exists('vat_shows_amount') ? vat_shows_amount() : false,
+        'total_before_packages' => round($totalWithVat, 2),
         'rate_plan' => $ratePlan,
     ];
 }

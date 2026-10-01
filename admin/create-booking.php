@@ -28,7 +28,7 @@ $error   = '';
 // VAT & levy settings (also passed to JS for live preview)
 $vat_enabled     = in_array(getSetting('vat_enabled'), ['1', 1, true, 'true', 'on'], true);
 $vat_rate_cfg    = $vat_enabled ? (float)getSetting('vat_rate', 0) : 0.0;
-$levy_enabled    = getSetting('tourism_levy_enabled', '0') === '1';
+$levy_enabled    = in_array(getSetting('tourism_levy_enabled', '0'), ['1', 1, true, 'true', 'on'], true);
 $levy_pct_cfg    = $levy_enabled ? (float)getSetting('tourism_levy_percent', 0) : 0.0;
 $currency_symbol = getSetting('currency_symbol', 'MWK');
 finance_ensure_sequence_tables($pdo);
@@ -133,15 +133,32 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'check
         exit;
     }
     try {
-        $avail_stmt = $pdo->query("SELECT id FROM rooms WHERE is_active = 1 ORDER BY display_order ASC");
+        $avail_stmt = $pdo->query("SELECT id, price_per_night FROM rooms WHERE is_active = 1 ORDER BY display_order ASC");
         $availability = [];
         foreach ($avail_stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
             $check = checkRoomAvailability((int)$row['id'], $ci, $co);
+            // Joined-room types are priced per combination. Mirror the save path's queue
+            // (combinations sharing no physical room, in availability order) so the live
+            // preview charges each row the same rate the server will.
+            $comboRates = [];
+            if (roomTypeHasActiveCombinations((int)$row['id'])) {
+                $claimedRooms = [];
+                foreach (getAvailableRoomCombinations((int)$row['id'], $ci, $co) as $cand) {
+                    if (count($comboRates) >= 20) break;
+                    $candRooms = [(int)$cand['room_a_id'], (int)$cand['room_b_id']];
+                    if (array_intersect($candRooms, $claimedRooms)) continue;
+                    $claimedRooms = array_merge($claimedRooms, $candRooms);
+                    $comboRates[] = ($cand['price_override'] !== null && $cand['price_override'] !== '')
+                        ? (float)$cand['price_override']
+                        : (float)$row['price_per_night'];
+                }
+            }
             $availability[] = [
                 'room_id' => (int)$row['id'],
                 'available' => !empty($check['available']),
                 'rooms_left' => max(0, (int)($check['remaining_rooms'] ?? 0)),
                 'max_guests' => (int)($check['max_guests'] ?? 0),
+                'combo_rates' => $comboRates,
             ];
         }
         echo json_encode(['success' => true, 'data' => $availability]);
@@ -302,6 +319,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['create_booking'])) {
 
         // ── Build & validate room lines ─────────────────────────────────────
         $room_lines = [];
+        $claimed_combo_rooms = [];
         for ($li = 0; $li < count($rl_room_ids); $li++) {
             $rid = (int)($rl_room_ids[$li] ?? 0);
             $qty = max(1, min(20, (int)($rl_qtys[$li] ?? 1)));
@@ -327,12 +345,27 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['create_booking'])) {
             if (!$r_data) throw new Exception('Room type ID ' . $rid . ' not found.');
 
             $combination_candidates = [];
+            $combination_queue      = [];
+            $base_price_per_night   = (float)$r_data['price_per_night'];
             if (roomTypeHasActiveCombinations($rid)) {
                 $combination_candidates = getAvailableRoomCombinations($rid, $check_in_date, $check_out_date);
-                if (count($combination_candidates) < $qty) {
-                    throw new Exception('Only ' . count($combination_candidates) . ' joined room combination(s) are available for "' . $r_data['name'] . '" on those dates.');
+                // One combination is reserved per row, sharing no physical room with any
+                // combination already claimed by another row/line of the same room type.
+                foreach ($combination_candidates as $candidateCombination) {
+                    if (count($combination_queue) >= $qty) {
+                        break;
+                    }
+                    $candidateRoomIds = [(int)$candidateCombination['room_a_id'], (int)$candidateCombination['room_b_id']];
+                    if (array_intersect($candidateRoomIds, $claimed_combo_rooms[$rid] ?? [])) {
+                        continue;
+                    }
+                    $claimed_combo_rooms[$rid] = array_merge($claimed_combo_rooms[$rid] ?? [], $candidateRoomIds);
+                    $combination_queue[] = $candidateCombination;
                 }
-                $pricingCombination = $combination_candidates[0];
+                if (count($combination_queue) < $qty) {
+                    throw new Exception('Only ' . count($combination_queue) . ' joined room combination(s) are available for "' . $r_data['name'] . '" on those dates.');
+                }
+                $pricingCombination = $combination_queue[0];
                 $combinedRate = $pricingCombination['price_override'] !== null && $pricingCombination['price_override'] !== ''
                     ? (float)$pricingCombination['price_override']
                     : (float)$r_data['price_per_night'];
@@ -361,6 +394,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['create_booking'])) {
                 'room_data' => $r_data,
                 'policy' => $policy,
                 'combination_candidates' => $combination_candidates,
+                'combination_queue' => $combination_queue,
+                'base_price_per_night' => $base_price_per_night,
             ];
         }
         if (empty($room_lines)) throw new Exception('Please select at least one room type.');
@@ -382,6 +417,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['create_booking'])) {
         }
 
         $total_rooms_booked = array_sum(array_column($room_lines, 'qty'));
+        // Every room row needs at least one adult (adults are spread across rows; children ride on the first).
+        if ($adult_guests < $total_rooms_booked) {
+            throw new Exception('Each room needs at least one adult: ' . $adult_guests . ' adult(s) cannot cover ' . $total_rooms_booked . ' rooms. Add adults or remove rooms.');
+        }
         // Individual room selection only valid for single-room bookings
         if ($total_rooms_booked > 1) {
             $individual_room_id = null;
@@ -389,8 +428,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['create_booking'])) {
         }
 
         // ── VAT / levy settings ──────────────────────────────────────────────
-        $levy_pct_db = getSetting('tourism_levy_enabled', '0') === '1' ? (float)getSetting('tourism_levy_percent', 0) : 0.0;
-        $vat_rate_db = $vat_enabled ? $vat_rate_cfg : 0.0;
+        $levy_pct_db = in_array(getSetting('tourism_levy_enabled', '0'), ['1', 1, true, 'true', 'on'], true) ? (float)getSetting('tourism_levy_percent', 0) : 0.0;
+        $vat_rate_db = vat_mode() === 'off' ? 0.0 : $vat_rate_cfg;
 
         // ── Ref prefix & tentative ───────────────────────────────────────────
         $ref_prefix = getSetting('booking_reference_prefix', 'LSH');
@@ -407,85 +446,118 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['create_booking'])) {
         $grand_child_supplement  = 0.0;
         $grand_levy_amount       = 0.0;
         $grand_vat_amount        = 0.0;
+        $global_row_idx = 0;   // child supplement is group-level: charged once, on the very first row
         foreach ($room_lines as &$line) {
             $r   = $line['room_data'];
             $occ = $line['occupancy_type'];
             $ovr = $line['price_override'];
             $qty = $line['qty'];
 
-            $r_price = match ($occ) {
-                'single' => !empty($r['price_single_occupancy']) ? (float)$r['price_single_occupancy'] : (float)$r['price_per_night'],
-                'double' => !empty($r['price_double_occupancy']) ? (float)$r['price_double_occupancy'] : (float)$r['price_per_night'],
-                'triple' => !empty($r['price_triple_occupancy']) ? (float)$r['price_triple_occupancy'] : (float)$r['price_per_night'],
-                default  => (float)$r['price_per_night'],
-            };
             $cpm = max(0.0, (float)($r['child_price_multiplier'] ?? getSetting('booking_child_price_multiplier', 50)));
-
-            $applied_rate_plan_id    = null;
-            $applied_rate_plan_label = '';
-            $applied_rate_discount   = 0.0;
-            if ($ovr === null) {
-                $dyn                  = applyDynamicPricing($pdo, $line['room_id'], $check_in_date, $check_out_date, $number_of_nights, $r_price);
-                $r_price              = $dyn['final_price'];
-                $applied_rate_plan_id    = $dyn['rate_plan_id'];
-                $applied_rate_plan_label = $dyn['rate_plan_label'];
-                $applied_rate_discount   = $dyn['discount_amount'];
+            // A specific individual room may carry its own child multiplier; mirror the live preview.
+            if ($individual_room_id && !$auto_assign) {
+                $cpm_stmt = $pdo->prepare("
+                    SELECT COALESCE(ir.child_price_multiplier, r.child_price_multiplier)
+                    FROM individual_rooms ir
+                    JOIN rooms r ON r.id = ir.room_type_id
+                    WHERE ir.id = ? AND ir.room_type_id = ? AND ir.is_active = 1
+                ");
+                $cpm_stmt->execute([$individual_room_id, $line['room_id']]);
+                $cpm_ind = $cpm_stmt->fetchColumn();
+                if ($cpm_ind !== false && $cpm_ind !== null) {
+                    $cpm = max(0.0, (float)$cpm_ind);
+                }
             }
 
-            // Per-room base, then child supplement is group-level (one charge regardless of qty)
-            $base_amt_per  = $r_price * $number_of_nights;
-            $base_amt_all  = $base_amt_per * $qty;
-            $child_sup     = ($child_guests > 0) ? ($r_price * ($cpm / 100) * $child_guests * $number_of_nights) : 0.0;
-            $levy_amt      = ($ovr === null && $levy_pct_db > 0) ? round(($base_amt_all + $child_sup) * ($levy_pct_db / 100), 2) : 0.0;
-            $tot_amt       = $ovr !== null ? $ovr : ($base_amt_all + $child_sup + $levy_amt);
-            // VAT per installation mode: exclusive on top, inclusive extracted
-            // from the priced amount (total never inflates), off zero.
-            $vp            = vat_components($tot_amt);
-            $vat_amt       = $vp['vat'];
-            $twv           = $vp['total'];  // covers ALL qty rooms
+            $line['rows']  = [];
+            // Manager override = FINAL gross the guest pays for this whole line (VAT + levy
+            // inside). Distributed equally across the line's rows, residue on the first row.
+            $ovr_row_finals = [];
+            if ($ovr !== null) {
+                $each = round($ovr / $qty, 2);
+                for ($ri = 0; $ri < $qty; $ri++) {
+                    $ovr_row_finals[$ri] = $each;
+                }
+                $ovr_row_finals[0] = round($ovr - $each * ($qty - 1), 2);
+            }
+            for ($ri = 0; $ri < $qty; $ri++) {
+                // Price each row off the joined-room combination it will actually be assigned
+                $r_row = $r;
+                if (!empty($line['combination_queue'][$ri])) {
+                    $combo = $line['combination_queue'][$ri];
+                    $combo_rate = ($combo['price_override'] !== null && $combo['price_override'] !== '')
+                        ? (float)$combo['price_override']
+                        : (float)$line['base_price_per_night'];
+                    $r_row['price_per_night']        = $combo_rate;
+                    $r_row['price_single_occupancy'] = $combo_rate;
+                    $r_row['price_double_occupancy'] = $combo_rate;
+                    $r_row['price_triple_occupancy'] = $combo_rate;
+                }
+                $r_price = match ($occ) {
+                    'single' => !empty($r_row['price_single_occupancy']) ? (float)$r_row['price_single_occupancy'] : (float)$r_row['price_per_night'],
+                    'double' => !empty($r_row['price_double_occupancy']) ? (float)$r_row['price_double_occupancy'] : (float)$r_row['price_per_night'],
+                    'triple' => !empty($r_row['price_triple_occupancy']) ? (float)$r_row['price_triple_occupancy'] : (float)$r_row['price_per_night'],
+                    default  => (float)$r_row['price_per_night'],
+                };
 
-            // Per-row INSERT amounts: spread base across rows; child supplement on first row only
-            $row_levy_per   = ($ovr === null && $levy_pct_db > 0) ? round($base_amt_per * ($levy_pct_db / 100), 2) : 0.0;
-            $row_tot_per    = $base_amt_per + $row_levy_per;
-            $row_vp         = vat_components($row_tot_per);
-            $row_vat_per    = $row_vp['vat'];
-            $row_twv_per    = $row_vp['total'];
-            $first_levy_add = ($ovr === null && $levy_pct_db > 0) ? round($child_sup * ($levy_pct_db / 100), 2) : 0.0;
-            $first_tot_add  = $child_sup + $first_levy_add;
-            $first_vp       = vat_components($first_tot_add);
-            $first_vat_add  = $first_vp['vat'];
-            $first_twv_add  = $first_vp['total'];
+                $applied_rate_plan_id    = null;
+                $applied_rate_plan_label = '';
+                $applied_rate_discount   = 0.0;
+
+                if ($ovr !== null) {
+                    // Override: the line's final gross is authoritative; extract VAT + levy from it.
+                    $tt        = rh_stay_totals($ovr_row_finals[$ri], 'final');
+                    $child_sup = 0.0;   // any child supplement is folded into the override
+                    $r_price   = $number_of_nights > 0 ? round($tt['net'] / $number_of_nights, 2) : $tt['net'];
+                } else {
+                    $dyn                     = applyDynamicPricing($pdo, $line['room_id'], $check_in_date, $check_out_date, $number_of_nights, $r_price);
+                    $r_price                 = $dyn['final_price'];
+                    $applied_rate_plan_id    = $dyn['rate_plan_id'];
+                    $applied_rate_plan_label = $dyn['rate_plan_label'];
+                    $applied_rate_discount   = $dyn['discount_amount'];
+
+                    $base_row  = $r_price * $number_of_nights;
+                    $child_sup = ($global_row_idx === 0 && $child_guests > 0)
+                        ? $r_price * ($cpm / 100) * $child_guests * $number_of_nights
+                        : 0.0;
+                    // Levy sits outside the VAT base (shared helper)
+                    $tt = rh_stay_totals($base_row + $child_sup, 'price');
+                }
+
+                // Figures exactly as saved (2dp) — payment status/split use their sum.
+                // total_amount = net of VAT, levy included (net + levy); total_with_vat = all the guest owes.
+                $saved = [
+                    'room_price'         => $r_price,
+                    'total_amount'       => round($tt['net'] + $tt['levy'], 2),
+                    'child_supplement'   => round($child_sup, 2),
+                    'levy_amount'        => $tt['levy'],
+                    'vat_amount'         => $tt['vat'],
+                    'total_with_vat'     => $tt['total_with_vat'],
+                    'vat_rate'           => $tt['vat_rate'],
+                    'levy_rate'          => $tt['levy_rate'],
+                    'rate_plan_id'       => $applied_rate_plan_id,
+                    'rate_plan_label'    => $applied_rate_plan_label,
+                    'rate_plan_discount' => $applied_rate_discount,
+                ];
+                $line['rows'][] = $saved;
+
+                $grand_total_with_vat   += $saved['total_with_vat'];
+                $grand_child_supplement += $saved['child_supplement'];
+                $grand_levy_amount      += $saved['levy_amount'];
+                $grand_vat_amount       += $saved['vat_amount'];
+                $global_row_idx++;
+            }
+            $grand_total_with_vat   = round($grand_total_with_vat, 2);
+            $grand_child_supplement = round($grand_child_supplement, 2);
+            $grand_levy_amount      = round($grand_levy_amount, 2);
+            $grand_vat_amount       = round($grand_vat_amount, 2);
 
             $line['calc'] = [
-                'room_price'         => $r_price,
-                'cpm'                => $cpm,
-                'base_amount'        => $base_amt_all,
-                'base_amount_per'    => $base_amt_per,
-                'child_supplement'   => $child_sup,
-                'levy_pct'           => $ovr !== null ? 0.0 : $levy_pct_db,
-                'levy_amount'        => $levy_amt,
-                'total_amount'       => $tot_amt,
-                'vat_rate'           => $vat_rate_db,
-                'vat_amount'         => $vat_amt,
-                'total_with_vat'     => $twv,
-                // per-row amounts
-                'row_tot_per'        => $row_tot_per,
-                'row_levy_per'       => $row_levy_per,
-                'row_vat_per'        => $row_vat_per,
-                'row_twv_per'        => $row_twv_per,
-                'first_tot_add'      => $first_tot_add,
-                'first_levy_add'     => $first_levy_add,
-                'first_vat_add'      => $first_vat_add,
-                'first_twv_add'      => $first_twv_add,
-                'rate_plan_id'       => $applied_rate_plan_id,
-                'rate_plan_label'    => $applied_rate_plan_label,
-                'rate_plan_discount' => $applied_rate_discount,
+                'room_price' => $line['rows'][0]['room_price'],
+                'cpm'        => $cpm,
+                'levy_pct'   => $line['rows'][0]['levy_rate'],
+                'vat_rate'   => $line['rows'][0]['vat_rate'],
             ];
-            // $twv already covers all qty rooms — do NOT multiply by $qty
-            $grand_total_with_vat   += $twv;
-            $grand_child_supplement += $child_sup;
-            $grand_levy_amount      += $levy_amt;
-            $grand_vat_amount       += $vat_amt;
         }
         unset($line);
 
@@ -547,19 +619,22 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['create_booking'])) {
                     $ref_exists = (int)$ref_check->fetchColumn() > 0;
                 } while ($ref_exists);
 
-                $is_first_in_line = ($room_idx === 0);
+                $is_first_row = ($booking_number === 0);   // first row of the whole booking
+                $row_fin      = $line['rows'][$room_idx];
 
-                // Per-row financials: child supplement on first row only
-                $row_tot  = $c['row_tot_per']  + ($is_first_in_line ? $c['first_tot_add']  : 0.0);
-                $row_levy = $c['row_levy_per'] + ($is_first_in_line ? $c['first_levy_add'] : 0.0);
-                $row_vat  = $c['row_vat_per']  + ($is_first_in_line ? $c['first_vat_add']  : 0.0);
-                $row_twv  = $c['row_twv_per']  + ($is_first_in_line ? $c['first_twv_add']  : 0.0);
-                $row_child_sup = $is_first_in_line ? $c['child_supplement'] : 0.0;
+                // Per-row financials exactly as priced above (child supplement on the first row only)
+                $row_tot       = $row_fin['total_amount'];
+                $row_levy      = $row_fin['levy_amount'];
+                $row_vat       = $row_fin['vat_amount'];
+                $row_twv       = $row_fin['total_with_vat'];
+                $row_child_sup = $row_fin['child_supplement'];
 
-                // Distribute guests: adults spread evenly, children on first row only
-                $adults_floor  = (int)floor($adult_guests / $qty);
-                $row_adults    = ($room_idx < $qty - 1) ? $adults_floor : ($adult_guests - $adults_floor * ($qty - 1));
-                $row_children  = $is_first_in_line ? $child_guests : 0;
+                // Distribute guests across ALL rows of the booking: adults spread evenly
+                // (remainder to the earliest rows), children on the first row only
+                $adults_base   = intdiv($adult_guests, $total_rooms_booked);
+                $adults_extra  = $adult_guests - $adults_base * $total_rooms_booked;
+                $row_adults    = $adults_base + ($booking_number < $adults_extra ? 1 : 0);
+                $row_children  = $is_first_row ? $child_guests : 0;
                 $row_guests    = $row_adults + $row_children;
 
                 $is_primary = ($booking_number === 0);
@@ -629,25 +704,27 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['create_booking'])) {
                     $tentative_expires_at,
                     $occ,
                     $__bookingClientUuid,
-                    $c['rate_plan_id'],
-                    $c['rate_plan_label'] ?: null,
-                    $c['rate_plan_discount'] ?: null,
+                    $row_fin['rate_plan_id'],
+                    $row_fin['rate_plan_label'] ?: null,
+                    $row_fin['rate_plan_discount'] ?: null,
                     $this_primary_booking_id,
                 ]);
 
                 $new_booking_id = (int)$pdo->lastInsertId();
                 if ($is_primary) $primary_booking_db_id = $new_booking_id;
                 $assigned_combination_id = null;
-                if (roomTypeHasActiveCombinations((int)$line['room_id'])) {
-                    $availableCombinations = getAvailableRoomCombinations((int)$line['room_id'], $check_in_date, $check_out_date, $new_booking_id);
-                    if (empty($availableCombinations)) {
+                if (!empty($line['combination_queue'])) {
+                    // Assign the exact combination this row was priced from. The assign
+                    // call re-validates availability under the lock.
+                    if (empty($line['combination_queue'][$room_idx])) {
                         throw new Exception('Joined rooms are no longer available for ' . $r['name'] . '.');
                     }
-                    $assignment = assignRoomCombinationToBooking($new_booking_id, (int)$availableCombinations[0]['id'], (int)$user['id']);
+                    $row_combo_id = (int)$line['combination_queue'][$room_idx]['id'];
+                    $assignment = assignRoomCombinationToBooking($new_booking_id, $row_combo_id, (int)$user['id']);
                     if (empty($assignment['success'])) {
                         throw new Exception($assignment['message'] ?: 'Failed to reserve joined rooms for ' . $r['name'] . '.');
                     }
-                    $assigned_combination_id = (int)$availableCombinations[0]['id'];
+                    $assigned_combination_id = $row_combo_id;
                     $this_individual_room_id = (int)($assignment['room_ids'][0] ?? 0) ?: $this_individual_room_id;
                 }
                 $created_bookings[] = [
@@ -708,7 +785,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['create_booking'])) {
 
                 $pay_ref  = $payment_reference_base . ($bi > 0 ? '-' . ($bi + 1) : '');
                 $pay_uuid = ($__incomingClientUuid ?? '') ? ($__incomingClientUuid . ':pay' . ($bi > 0 ? $bi : '')) : null;
-                $pay_vat  = ($vat_rate_db > 0) ? round($this_amount * ($vat_rate_db / (100 + $vat_rate_db)), 2) : 0.0;
+                // Gross = net x (1 + vat% + levy%): the levy sits outside the VAT base, so the VAT share is vat% / (100 + vat% + levy%).
+                $pay_vat  = ($vat_rate_db > 0) ? round($this_amount * ($vat_rate_db / (100 + $vat_rate_db + $levy_pct_db)), 2) : 0.0;
                 // Invariant across every payments write: payment_amount (NET) +
                 // vat_amount = total_amount (GROSS). accounting-dashboard.php sums
                 // payment_amount as total_collected_excl_vat, so storing the gross
@@ -2318,6 +2396,35 @@ try {
         let _lineCount = 0; // ever-increasing line index counter
         let _availMap = {}; // roomId → {available, rooms_left}
 
+        // Mirrors rh_stay_totals() in includes/pricing.php: levy sits OUTSIDE the VAT base.
+        // basis 'price': catalog amount per vatMode; 'final': all-in amount the guest pays.
+        function stayTotals(amount, basis) {
+            const r2 = x => Math.round((x + Number.EPSILON) * 100) / 100;
+            const v = (vatMode === 'off' ? 0 : vatRate) / 100;
+            const l = (levyEnabled ? levyPct : 0) / 100;
+            amount = Math.max(0, amount || 0);
+            let net, vat, levy, total;
+            if (basis === 'final') {
+                total = r2(amount);
+                const n = amount / (1 + v + l);
+                vat = r2(n * v);
+                levy = r2(n * l);
+                net = r2(total - vat - levy);
+            } else if (vatMode === 'inclusive' && v > 0) {
+                const n = amount / (1 + v);
+                vat = r2(amount - n);
+                levy = r2(n * l);
+                total = r2(r2(amount) + levy);
+                net = r2(total - vat - levy);
+            } else {
+                net = r2(amount);
+                vat = r2(amount * v);
+                levy = r2(amount * l);
+                total = r2(net + vat + levy);
+            }
+            return {net, vat, levy, total};
+        }
+
         function fmt(n) {
             return currency + (n || 0).toLocaleString(undefined, {
                 minimumFractionDigits: 2,
@@ -2559,20 +2666,25 @@ try {
             const checkOutDate = parseDateOnly(checkOut);
             const today = parseDateOnly(new Date().toISOString().split('T')[0]);
             const daysUntilArrival = checkInDate && today && checkInDate >= today ? daysBetween(today, checkInDate) : 0;
-            let currentRate = baseRate;
-            let appliedLabel = '';
-            let totalDiscount = 0;
-
-            for (const plan of ratePlans) {
-                if (!planAppliesToRoom(plan, roomId)) continue;
-                if (!planMatchesStay(plan, checkInDate, checkOutDate, nights, daysUntilArrival)) continue;
-
-                const adjustedRate = applyRatePlanToPrice(plan, currentRate);
-                totalDiscount += currentRate - adjustedRate;
-                currentRate = adjustedRate;
-                if (!appliedLabel) appliedLabel = plan.name || 'Rate plan';
-                if (!Number(plan.is_stacking || 0)) break;
+            const matching = ratePlans.filter(plan => planAppliesToRoom(plan, roomId) &&
+                planMatchesStay(plan, checkInDate, checkOutDate, nights, daysUntilArrival));
+            if (!matching.length) return empty;
+            let applied;
+            if (matching.some(plan => !Number(plan.is_stacking || 0))) {
+                // Any non-stacking plan in play: only the single best (lowest price) plan applies
+                let best = null, bestPrice = null;
+                matching.forEach(plan => {
+                    const cand = applyRatePlanToPrice(plan, baseRate);
+                    if (bestPrice === null || cand < bestPrice - 0.00001) { bestPrice = cand; best = plan; }
+                });
+                applied = [best];
+            } else {
+                applied = matching;
             }
+            let currentRate = baseRate;
+            applied.forEach(plan => { currentRate = applyRatePlanToPrice(plan, currentRate); });
+            const totalDiscount = baseRate - currentRate;
+            const appliedLabel = applied.map(plan => plan.name || 'Rate plan').join(', ');
 
             if (!appliedLabel) return empty;
             return {
@@ -3030,7 +3142,13 @@ try {
                 ratePlanAdjustmentTotal = 0,
                 ratePlanLabel = '';
 
-            lines.forEach(ln => {
+            // Mirror the server: joined-room rows consume the combination queue in order.
+            const comboUsed = {};
+            // The individual-room picker only exists for a single line; its child multiplier
+            // (and only its) applies to that line, exactly as the server does.
+            const indRadio = lines.length === 1 ? document.querySelector('input[name=individual_room_id]:checked') : null;
+
+            lines.forEach((ln, lnOrder) => {
                 const lineIdx = parseInt(ln.id.replace('room-line-', ''), 10);
                 const roomId = parseInt(ln.querySelector('.line-room-select')?.value || '0', 10);
                 const occ = ln.querySelector('.line-occ-select')?.value || 'double';
@@ -3049,7 +3167,13 @@ try {
                 if (occ === 'single' && room.price_single) rate = room.price_single;
                 if (occ === 'double' && room.price_double) rate = room.price_double;
                 if (occ === 'triple' && room.price_triple) rate = room.price_triple;
-                const originalRate = rate;
+                // Joined-room type: each row is priced off the combination it will be assigned
+                const comboRates = (_availMap[roomId] && _availMap[roomId].combo_rates) || [];
+                if (comboRates.length) {
+                    const ci0 = comboUsed[roomId] || 0;
+                    if (ci0 < comboRates.length) rate = comboRates[ci0];
+                    comboUsed[roomId] = ci0 + 1;
+                }
                 const dynamicRate = override === null ? getDynamicRate(roomId, ci, co, nights, rate) : null;
                 if (dynamicRate && dynamicRate.label) {
                     rate = dynamicRate.finalRate;
@@ -3059,34 +3183,27 @@ try {
                 if (firstRate === null) firstRate = rate;
                 else if (firstRate !== rate) multiRates = true;
 
-                const cMult = document.querySelector('input[name=individual_room_id]:checked') ?
-                    parseFloat(document.querySelector('input[name=individual_room_id]:checked').getAttribute('data-child-multiplier') || '50') :
+                const cMult = indRadio ?
+                    parseFloat(indRadio.getAttribute('data-child-multiplier') || room.child_price_multiplier) :
                     room.child_price_multiplier;
 
+                let lineBase = 0, lineChild = 0, tt;
                 if (override !== null) {
-                    const lt = override * qty;
-                    if (subEl) subEl.textContent = fmt(lt);
-                    grandSub += lt;
-                    grandTotal += lt;
-                    return;
+                    // Override = FINAL gross for the line; VAT + levy are extracted from it
+                    tt = stayTotals(override * qty, 'final');
+                } else {
+                    lineBase = rate * nights * qty;
+                    // Child supplement is group-level: charged once, on the first room line only (matches the server)
+                    lineChild = (children > 0 && lnOrder === 0) ? (rate * (cMult / 100) * children * nights) : 0;
+                    tt = stayTotals(lineBase + lineChild, 'price');
                 }
-
-                const lineBase = rate * nights * qty;
-                const lineChild = children > 0 ? (rate * (cMult / 100) * children * nights * qty) : 0;
-                const lineLevy = levyEnabled ? (lineBase + lineChild) * (levyPct / 100) : 0;
-                const lineSub = lineBase + lineChild + lineLevy;
-                // Mode-aware VAT: inclusive extracts from the priced total
-                // (grand total never inflates); exclusive adds on top.
-                const lineVat = vatMode === 'inclusive' ? lineSub * (vatRate / (100 + vatRate))
-                    : (vatMode === 'exclusive' ? lineSub * (vatRate / 100) : 0);
-                const lineGrand = vatMode === 'exclusive' ? lineSub + lineVat : lineSub;
-                if (subEl) subEl.textContent = fmt(lineGrand);
+                if (subEl) subEl.textContent = fmt(tt.total);
                 grandBase += lineBase;
                 grandChild += lineChild;
-                grandLevy += lineLevy;
-                grandSub += lineSub;
-                grandVat += lineVat;
-                grandTotal += lineGrand;
+                grandLevy += tt.levy;
+                grandSub += tt.net + tt.levy;
+                grandVat += tt.vat;
+                grandTotal += tt.total;
             });
 
             const rateLabel = multiRates ? 'Multiple room types' : (firstRate !== null ? fmt(firstRate) + '/night' : '—');

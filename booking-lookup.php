@@ -107,14 +107,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['cancel_booking'])) {
                     }
                 }
                 if (empty($error) && $cancel_booking) {
-                    // Cancel the booking
-                    $update = $pdo->prepare("UPDATE bookings SET status = 'cancelled', updated_at = NOW() WHERE id = ?");
-                    $update->execute([$cancel_booking['id']]);
-
-                    // Restore room availability if confirmed
-                    if ($cancel_booking['status'] === 'confirmed') {
-                        $pdo->prepare("UPDATE rooms SET rooms_available = rooms_available + 1 WHERE id = ? AND rooms_available < total_rooms")
-                            ->execute([$cancel_booking['room_id']]);
+                    // Cancel the booking through the shared settled path (status, room
+                    // release, bill treatment and refund per the active cancellation mode,
+                    // all in one transaction). Ownership was verified above.
+                    $settled = cancelRoomBookingSettled($pdo, (int)$cancel_booking['id'], 0, 'Guest cancelled: ' . $cancel_reason, rh_refund_rule('guest_self_cancel_refund') === 'auto' ? 'completed' : 'pending');
+                    if (empty($settled['success'])) {
+                        error_log('Guest self-cancel failed for booking ' . (int)$cancel_booking['id'] . ': ' . ($settled['error'] ?? ''));
+                        throw new RuntimeException('cancel_failed');
                     }
 
                     // Send cancellation email
@@ -136,7 +135,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['cancel_booking'])) {
                     $success = 'Your booking has been cancelled successfully. A confirmation email has been sent to your email address.';
                     $booking = null; // Clear the booking display
                 }
-            } catch (PDOException $e) {
+            } catch (Throwable $e) {
                 error_log("Booking cancellation error: " . $e->getMessage());
                 $error = 'Unable to cancel booking. Please contact us directly.';
             }

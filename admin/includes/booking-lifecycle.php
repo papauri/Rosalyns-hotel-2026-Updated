@@ -139,7 +139,8 @@ function getBookingPermissions(array $booking): array
 }
 
 /**
- * Detects whether a new payment amount creates an overpayment on a booking.
+ * Detects whether a just-recorded payment left the booking overpaid (reads
+ * bookings.credit_balance; call after recalculateBookingFinancials()).
  *
  * Returns ['overpaid' => bool, 'excess' => float, 'booking' => array|null].
  * The caller is responsible for creating the credit note (using issueCreditNote()
@@ -148,7 +149,7 @@ function getBookingPermissions(array $booking): array
 function detectOverpayment(PDO $pdo, int $bookingId, float $newPaymentAmount): array
 {
     try {
-        $stmt = $pdo->prepare("SELECT total_amount, folio_charges_total, amount_paid, booking_reference, guest_name, guest_email FROM bookings WHERE id = ?");
+        $stmt = $pdo->prepare("SELECT credit_balance, booking_reference, guest_name, guest_email FROM bookings WHERE id = ?");
         $stmt->execute([$bookingId]);
         $b = $stmt->fetch(PDO::FETCH_ASSOC);
     } catch (PDOException $e) {
@@ -160,19 +161,19 @@ function detectOverpayment(PDO $pdo, int $bookingId, float $newPaymentAmount): a
         return ['overpaid' => false, 'excess' => 0.0, 'booking' => null];
     }
 
-    $folioTotal   = (float)($b['folio_charges_total'] ?? 0);
-    $roomTotal    = (float)($b['total_amount'] ?? 0);
-    $grandTotal   = $roomTotal + $folioTotal;
-    $alreadyPaid  = (float)($b['amount_paid'] ?? 0);
-    $afterPayment = $alreadyPaid + $newPaymentAmount;
-
-    if ($afterPayment <= $grandTotal + BALANCE_TOLERANCE) {
+    // Must be called AFTER recalculateBookingFinancials() has run for the new
+    // payment: credit_balance is then (net paid - gross bill incl. VAT and folio
+    // charges), so the payment is already counted and must not be added again.
+    // The excess attributable to THIS payment can never exceed the payment itself.
+    $credit = (float)($b['credit_balance'] ?? 0);
+    if ($credit <= BALANCE_TOLERANCE) {
         return ['overpaid' => false, 'excess' => 0.0, 'booking' => $b];
     }
 
+    $excess = $newPaymentAmount > 0 ? min($credit, $newPaymentAmount) : $credit;
     return [
         'overpaid' => true,
-        'excess'   => round($afterPayment - $grandTotal, 2),
+        'excess'   => round($excess, 2),
         'booking'  => $b,
     ];
 }

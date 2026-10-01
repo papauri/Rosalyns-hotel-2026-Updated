@@ -162,7 +162,8 @@ try {
         // Use comprehensive room management checkout
         $options = [
             'room_status' => $_POST['room_status'] ?? ROOM_STATUS_CLEANING,
-            'urgent_cleaning' => !empty($_POST['urgent_cleaning'])
+            'urgent_cleaning' => !empty($_POST['urgent_cleaning']),
+            'confirm_checkout_with_balance' => !empty($_POST['confirm_checkout_with_balance'])
         ];
 
         $result = processGuestCheckout($booking_id, $admin_user_id ?: null, $options);
@@ -337,35 +338,16 @@ try {
             exit;
         }
 
-        $stmt = $pdo->prepare("UPDATE bookings SET status = 'cancelled' WHERE id = ?");
-        $stmt->execute([$booking_id]);
-
-        if ($stmt->rowCount() > 0) {
-            // Restore room availability if booking was confirmed
-            if ($booking['status'] === 'confirmed') {
-                $pdo->prepare("UPDATE rooms SET rooms_available = rooms_available + 1 WHERE id = ?")
-                    ->execute([$booking['room_id']]);
-            }
-
-            // Update individual room status if assigned
-            if (!empty($booking['individual_room_id'])) {
-                $roomUpdate = $pdo->prepare("UPDATE individual_rooms SET status = 'available' WHERE id = ?");
-                $roomUpdate->execute([$booking['individual_room_id']]);
-
-                // Log the status change
-                $logStmt = $pdo->prepare("
-                    INSERT INTO room_maintenance_log (individual_room_id, status_from, status_to, reason, performed_by)
-                    VALUES (?, 'occupied', 'available', ?, ?)
-                ");
-                $logStmt->execute([$booking['individual_room_id'], 'Booking cancelled: ' . $booking['booking_reference'], $admin_user_id ?: null]);
-            }
-
-            echo json_encode(['success' => true, 'message' => 'Booking cancelled successfully']);
+        // One transaction: status + room/stock release + bill treatment + refund
+        // (booking row locked). Any failure rolls everything back.
+        $cancelRes = cancelRoomBookingSettled($pdo, (int)$booking_id, (int)$admin_user_id, 'Cancelled via check-in workflow');
+        if ($cancelRes['success']) {
+            echo json_encode(['success' => true, 'message' => 'Booking cancelled successfully. ' . $cancelRes['summary']]);
             exit;
         }
 
         http_response_code(400);
-        echo json_encode(['success' => false, 'message' => 'Failed to cancel booking']);
+        echo json_encode(['success' => false, 'message' => 'Cancellation failed - nothing was changed. ' . $cancelRes['error']]);
         exit;
     }
 
