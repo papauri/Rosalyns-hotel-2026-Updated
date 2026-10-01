@@ -10,6 +10,8 @@
  */
 
 require_once 'admin-init.php';
+require_once '../includes/station-hours.php';
+require_once __DIR__ . '/includes/pos-shift-totals.php';
 
 /** @var array $user */
 /** @var string $csrf_token */
@@ -32,6 +34,7 @@ $closes = [];       // all records for date
 // Safe defaults — assigned in the relevant branch; pre-declare to satisfy static analysis
 $paidOrders    = [];
 $voidedOrders  = [];
+$payouts       = [];
 $topItems      = [];
 $reportDate    = date('Y-m-d');
 $agg           = [
@@ -74,27 +77,30 @@ if (isset($_GET['id']) && ctype_digit($_GET['id'])) {
         exit;
     }
 
-    // Orders paid during this cashier's shift window — derive window from stock_shift_closes shift_date
-    // We look up the restaurant window setting to reconstruct start/end times, or we just use the full day
-    // (business date 00:00 to 23:59 with paid_at filter is the safest fallback without the POS settings).
-    $dayStart = $close['shift_date'] . ' 00:00:00';
-    $dayEnd   = $close['shift_date'] . ' 23:59:59';
-
-    // Try to get the restaurant open/close hours from site_settings
-    $openTime  = getSetting('restaurant_open_time')  ?: '06:00';
-    $closeTime = getSetting('restaurant_close_time') ?: '23:59';
-
-    // If close time looks like it crosses midnight (e.g. "02:00"), handle that
-    $windowStart = $close['shift_date'] . ' ' . $openTime . ':00';
-    $closeHour   = (int)substr($closeTime, 0, 2);
-    if ($closeHour < 6) {
-        $nextDay     = date('Y-m-d', strtotime($close['shift_date'] . ' +1 day'));
-        $windowEnd   = $nextDay . ' ' . $closeTime . ':59';
-    } else {
-        $windowEnd   = $close['shift_date'] . ' ' . $closeTime . ':59';
+    // Reconstruct this close window exactly as the till does: the business window for the
+    // close business date (same helper as admin/pos.php), starting at this user's previous
+    // close on that date and ending when this close was recorded. Nothing is restated; this
+    // only lists the orders behind the stored figures.
+    $bizWindow   = rh_station_union_window_for_date((string)$close['shift_date']);
+    $windowStart = $bizWindow['start_sql'];
+    $windowEnd   = $bizWindow['end_sql'];
+    $closedAtTs  = strtotime((string)($close['closed_at'] ?? ''));
+    if ($closedAtTs) {
+        $closedEnd = date('Y-m-d H:i:s', $closedAtTs + 1);
+        if ($closedEnd < $windowEnd) {
+            $windowEnd = $closedEnd;
+        }
+        $prevStmt = $pdo->prepare("SELECT MAX(closed_at) FROM stock_shift_closes WHERE user_id = ? AND id < ? AND closed_at >= ? AND closed_at < ?");
+        $prevStmt->execute([(int)$close['user_id'], (int)$close['id'], $windowStart, $windowEnd]);
+        $prevClose = $prevStmt->fetchColumn();
+        if ($prevClose && $prevClose > $windowStart) {
+            $windowStart = (string)$prevClose;
+        }
     }
 
-    // Fetch all paid orders during this window for the FOH user who closed this shift.
+    // Sales taken by this user in the window: by paid_at, whatever the order status is now
+    // (a later refund/void is a separate payout below, not a removal of the sale).
+    $payerSql  = rh_pos_payer_sql($pdo, 'o');
     $ordersSql = "
         SELECT
             o.id,
@@ -106,33 +112,46 @@ if (isset($_GET['id']) && ctype_digit($_GET['id'])) {
             o.status,
             (SELECT COUNT(*) FROM stock_order_items WHERE order_id = o.id) AS item_count
         FROM stock_orders o
-        WHERE o.status = 'paid'
-          AND o.paid_at BETWEEN ? AND ?
-        ";
-    $ordersParams = [$windowStart, $windowEnd];
-    $ordersSql    .= " AND o.created_by = ?";
-    $ordersParams[] = (int)$close['user_id'];
-    $ordersSql .= " ORDER BY o.paid_at ASC";
+        WHERE " . rh_pos_sale_window_sql('o') . "
+          AND $payerSql = ?
+        ORDER BY o.paid_at ASC";
     $ordersStmt = $pdo->prepare($ordersSql);
-    $ordersStmt->execute($ordersParams);
+    $ordersStmt->execute([$windowStart, $windowEnd, $windowStart, $windowEnd, (int)$close['user_id']]);
     $paidOrders = $ordersStmt->fetchAll(PDO::FETCH_ASSOC);
 
-    // Voided orders
+    // Voided orders (by the voiding user, at the time of the void)
+    $voidActorSql = rh_pos_col_exists($pdo, 'stock_orders', 'voided_by') ? 'COALESCE(o.voided_by, o.created_by)' : 'o.created_by';
     $voidsSql = "
         SELECT o.id, o.reference AS order_ref, o.total_amount, o.payment_method, o.voided_at, o.void_reason, o.created_by
         FROM stock_orders o
         WHERE o.status = 'voided'
-          AND o.voided_at BETWEEN ? AND ?
-        ";
-    $voidsParams = [$windowStart, $windowEnd];
-    $voidsSql    .= " AND o.created_by = ?";
-    $voidsParams[] = (int)$close['user_id'];
-    $voidsSql .= " ORDER BY o.voided_at ASC";
+          AND o.voided_at >= ? AND o.voided_at < ?
+          AND $voidActorSql = ?
+        ORDER BY o.voided_at ASC";
     $voidsStmt = $pdo->prepare($voidsSql);
-    $voidsStmt->execute($voidsParams);
+    $voidsStmt->execute([$windowStart, $windowEnd, (int)$close['user_id']]);
     $voidedOrders = $voidsStmt->fetchAll(PDO::FETCH_ASSOC);
 
-    // Top-selling items during shift
+    // Refund / void payouts of paid orders made by this user in the window.
+    $payouts = [];
+    foreach (rh_pos_shift_reversals($pdo, $windowStart, $windowEnd) as $rv) {
+        if ($rv['actor_id'] === (int)$close['user_id']) {
+            $payouts[] = $rv;
+        }
+    }
+    if ($payouts) {
+        $refIds = array_map(fn($r) => (int)$r['id'], $payouts);
+        $refPh  = implode(',', array_fill(0, count($refIds), '?'));
+        $refStmt = $pdo->prepare("SELECT id, reference FROM stock_orders WHERE id IN ($refPh)");
+        $refStmt->execute($refIds);
+        $refRefs = $refStmt->fetchAll(PDO::FETCH_KEY_PAIR);
+        foreach ($payouts as &$pr) {
+            $pr['reference'] = (string)($refRefs[$pr['id']] ?? ('#' . $pr['id']));
+        }
+        unset($pr);
+    }
+
+    // Top-selling items: sold lines only (voided / 86d lines are excluded).
     $topItemsSql = "
         SELECT
             oi.item_name AS name,
@@ -141,16 +160,15 @@ if (isset($_GET['id']) && ctype_digit($_GET['id'])) {
             SUM(oi.line_total) AS revenue
         FROM stock_order_items oi
         JOIN stock_orders o ON o.id = oi.order_id
-        WHERE o.status = 'paid'
-          AND o.paid_at BETWEEN ? AND ?
-          AND o.created_by = ?
+        WHERE " . rh_pos_sale_window_sql('o') . "
+          AND $payerSql = ?
+          AND COALESCE(oi.kds_status, '') NOT IN ('void', 'voided', 'cancelled', '86', '86d', '86ed')
         GROUP BY oi.item_name, oi.menu_type
         ORDER BY revenue DESC
         LIMIT 10
     ";
-    $topParams = [$windowStart, $windowEnd, (int)$close['user_id']];
     $topItemsStmt = $pdo->prepare($topItemsSql);
-    $topItemsStmt->execute($topParams);
+    $topItemsStmt->execute([$windowStart, $windowEnd, $windowStart, $windowEnd, (int)$close['user_id']]);
     $topItems = $topItemsStmt->fetchAll(PDO::FETCH_ASSOC);
 } elseif (isset($_GET['date'])) {
     // ----- Date summary (all closes for a business date) — admin/manager only -----
@@ -1003,8 +1021,43 @@ $printTitle = match ($mode) {
                                     <tr>
                                         <td style="font-family:monospace; font-size:12px;"><?php echo htmlspecialchars($o['order_ref']); ?></td>
                                         <td style="color:var(--muted); font-size:12px;"><?php echo htmlspecialchars(substr($o['paid_at'] ?? '', 11, 5)); ?></td>
-                                        <td><?php echo htmlspecialchars(ucfirst($o['payment_method'] ?? '')); ?></td>
+                                        <td><?php echo htmlspecialchars(ucfirst(str_replace('_', ' ', (string)($o['payment_method'] ?? '')))); ?><?php if (($o['status'] ?? '') !== 'paid'): ?> <span class="badge badge--overage"><?php echo htmlspecialchars(strtoupper((string)$o['status'])); ?> LATER</span><?php endif; ?></td>
                                         <td class="text-right" style="font-weight:600;"><?php echo $fmt((float)$o['total_amount']); ?></td>
+                                    </tr>
+                                <?php endforeach; ?>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            <?php endif; ?>
+
+            <!-- Refund / void payouts of paid orders made in this shift -->
+            <?php if (!empty($payouts)): ?>
+                <div class="report-card">
+                    <div class="section-label" style="border-top:none; background:#fff1f2; padding-top:16px; color:#c82333;">
+                        <i class="fas fa-rotate-left"></i> Refund / Void Payouts &mdash; <?php echo count($payouts); ?> (reduce expected cash)
+                    </div>
+                    <div class="tbl-outer">
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th>Ref</th>
+                                    <th>Time</th>
+                                    <th>Type</th>
+                                    <th class="text-right">Cash</th>
+                                    <th class="text-right">Mobile</th>
+                                    <th class="text-right">Card</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <?php foreach ($payouts as $pr): ?>
+                                    <tr>
+                                        <td style="font-family:monospace; font-size:12px;"><?php echo htmlspecialchars($pr['reference']); ?></td>
+                                        <td style="color:var(--muted); font-size:12px;"><?php echo htmlspecialchars(substr($pr['at'] ?? '', 11, 5)); ?></td>
+                                        <td><?php echo htmlspecialchars(ucfirst($pr['kind'])); ?></td>
+                                        <td class="text-right" style="color:#c82333;"><?php echo $pr['cash'] > 0 ? '-' . $fmt((float)$pr['cash']) : '&mdash;'; ?></td>
+                                        <td class="text-right" style="color:#c82333;"><?php echo $pr['mobile'] > 0 ? '-' . $fmt((float)$pr['mobile']) : '&mdash;'; ?></td>
+                                        <td class="text-right" style="color:#c82333;"><?php echo $pr['card'] > 0 ? '-' . $fmt((float)$pr['card']) : '&mdash;'; ?></td>
                                     </tr>
                                 <?php endforeach; ?>
                             </tbody>

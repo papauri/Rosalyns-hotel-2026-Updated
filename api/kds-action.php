@@ -55,6 +55,7 @@ if (!validateCsrfToken($csrfToken)) jerr('Invalid CSRF token', 403);
 require_once __DIR__ . '/../admin/includes/permissions.php';
 require_once __DIR__ . '/../admin/includes/offline-log.php';
 require_once __DIR__ . '/../includes/station-hours.php';
+require_once __DIR__ . '/../admin/includes/restaurant-payment-sync.php';
 
 /* Resolve which station this user is acting on. */
 $STATION_ALLOWED = ['kitchen', 'bar', 'coffee_bar'];
@@ -981,7 +982,23 @@ try {
         if ($itemId <= 0) jerr('Missing item_id');
 
         $pdo->beginTransaction();
-        $row = $pdo->prepare("SELECT id, order_id, kds_status, menu_item_id, menu_type, quantity, item_name, station, stock_deducted FROM stock_order_items WHERE id=? FOR UPDATE");
+        /* Lock order: ORDER row first, then the item row - the same order void / cancel / pay use -
+         * so two actions on the same order can never deadlock. */
+        $preRow = $pdo->prepare("SELECT order_id FROM stock_order_items WHERE id=?");
+        $preRow->execute([$itemId]);
+        $preOrderId = (int)$preRow->fetchColumn();
+        if ($preOrderId <= 0) {
+            $pdo->rollBack();
+            jerr('Item not found', 404);
+        }
+        $ordLock = $pdo->prepare("SELECT id, reference, status, order_type, booking_id, subtotal, total_amount, total_cost, tax_amount, discount_amount, service_charge FROM stock_orders WHERE id=? FOR UPDATE");
+        $ordLock->execute([$preOrderId]);
+        $ordRow = $ordLock->fetch(PDO::FETCH_ASSOC);
+        if (!$ordRow) {
+            $pdo->rollBack();
+            jerr('Order not found', 404);
+        }
+        $row = $pdo->prepare("SELECT id, order_id, kds_status, menu_item_id, menu_type, quantity, item_name, station, stock_deducted, unit_price, line_total FROM stock_order_items WHERE id=? FOR UPDATE");
         $row->execute([$itemId]);
         $it = $row->fetch(PDO::FETCH_ASSOC);
         if (!$it) {
@@ -1005,15 +1022,113 @@ try {
 
         $orderId = (int)$it['order_id'];
         $from = (string)$it['kds_status'];
+        $orderStatus = (string)$ordRow['status'];
 
-        // Restore stock if it was deducted at ready_item time
-        // Use item ID as source_id (matches how deduction was recorded — per item, not per order)
-        if ((int)$it['stock_deducted']) {
-            restoreStockForMenuItem((int)$it['menu_item_id'], (string)$it['menu_type'], (float)$it['quantity'], 'KDS 86 - item voided', (int)$user['id'], $itemId, 'pos_order');
+        /* 86 keeps the money side of the order in step with the kitchen, in this one transaction.
+         * Pay-first orders (paid, or part-paid on a split) reach the kitchen too, so an 86 there is
+         * allowed: the line comes off the order and a PENDING refund is raised for the cashier to
+         * settle through the refund flow. Orders that are already closed (refunded / voided /
+         * cancelled) cannot be 86'd. */
+        if (!in_array($orderStatus, ['placed', 'paid'], true)) {
+            $pdo->rollBack();
+            jerr('Order ' . $ordRow['reference'] . ' is already ' . str_replace('_', ' ', $orderStatus) . ' - it cannot be 86\'d.');
+        }
+
+        $lineGross = round((float)($it['line_total'] ?? 0), 2);
+        if ($lineGross <= 0) {
+            $lineGross = round((float)($it['unit_price'] ?? 0) * (float)$it['quantity'], 2);
+        }
+        $notStarted = in_array($from, ['pending', 'placed'], true);
+        $userId = (int)$user['id'];
+
+        // Room-service line: find its folio charge (posted at order time) so it can be voided with the line.
+        $rsCharge = null;
+        if ((string)$ordRow['order_type'] === 'room_service') {
+            try {
+                $chStmt = $pdo->prepare("SELECT id, booking_id, charge_type, source_item_id, quantity, stock_tracked FROM booking_charges WHERE stock_order_id = ? AND source_item_id = ? AND quantity = ? AND voided = 0 ORDER BY id ASC LIMIT 1 FOR UPDATE");
+                $chStmt->execute([$orderId, (int)$it['menu_item_id'], (float)$it['quantity']]);
+                $rsCharge = $chStmt->fetch(PDO::FETCH_ASSOC) ?: null;
+            } catch (Throwable $e) {
+                error_log('void_item charge lookup: ' . $e->getMessage());
+            }
+        }
+
+        // Stock: restore only when the item was never started; once preparing/ready it is wastage.
+        $stockOutcome = 'none';
+        if ($notStarted) {
+            if ($rsCharge && !empty($rsCharge['stock_tracked'])) {
+                if (!restoreStockForMenuItem((int)$it['menu_item_id'], (string)$it['menu_type'], (float)$it['quantity'], 'KDS 86 - item voided', $userId, (int)$rsCharge['id'], 'room_service')) {
+                    $pdo->rollBack();
+                    jerr('Could not restore stock for ' . $it['item_name'] . ' - nothing was changed. Please retry.', 500);
+                }
+                $stockOutcome = 'restored';
+            } elseif ((int)$it['stock_deducted']) {
+                // Use item ID as source_id (matches how deduction was recorded - per item, not per order)
+                if (!restoreStockForMenuItem((int)$it['menu_item_id'], (string)$it['menu_type'], (float)$it['quantity'], 'KDS 86 - item voided', $userId, $itemId, 'pos_order')) {
+                    $pdo->rollBack();
+                    jerr('Could not restore stock for ' . $it['item_name'] . ' - nothing was changed. Please retry.', 500);
+                }
+                $stockOutcome = 'restored';
+            }
+        } else {
+            $alreadyDeducted = (int)$it['stock_deducted'] === 1 || ($rsCharge && !empty($rsCharge['stock_tracked']));
+            $nWaste = rh_record_item_wastage($pdo, (int)$it['menu_item_id'], (string)$it['menu_type'], (float)$it['quantity'], !$alreadyDeducted, $userId, '86 wastage - ' . $it['item_name'] . ' (' . $ordRow['reference'] . ', ' . $from . ')');
+            $stockOutcome = $nWaste > 0 ? 'wastage' : 'none';
+        }
+
+        /* Order totals. Prices are gross; total = subtotal - discount + service (+ tax), so the
+         * line comes off the total scaled by that same ratio, and the order-level discount /
+         * service charge / tax scale down with the subtotal. */
+        $oldSubtotal = (float)($ordRow['subtotal'] ?: $ordRow['total_amount']);
+        $oldTotal = (float)$ordRow['total_amount'];
+        $ratio = $oldSubtotal > 0 ? ($oldTotal / $oldSubtotal) : 1.0;
+        $lineEffective = round($lineGross * $ratio, 2);
+        $newSubtotal = max(0.0, round($oldSubtotal - $lineGross, 2));
+        $newTotal = max(0.0, round($oldTotal - $lineEffective, 2));
+        $scale = $oldSubtotal > 0 ? ($newSubtotal / $oldSubtotal) : 0.0;
+        $newTax = round((float)$ordRow['tax_amount'] * $scale, 2);
+        $newDiscount = round((float)$ordRow['discount_amount'] * $scale, 2);
+        $newService = round((float)$ordRow['service_charge'] * $scale, 2);
+        $costDrop = 0.0;
+        if ($stockOutcome === 'restored') {
+            $costStmt = $pdo->prepare("SELECT COALESCE(SUM((sri.quantity_per_portion / (GREATEST(sri.yield_percent, 0.1) / 100)) * i.cost_per_unit), 0) FROM stock_recipes sr INNER JOIN stock_recipe_ingredients sri ON sri.recipe_id = sr.id INNER JOIN stock_ingredients i ON i.id = sri.ingredient_id WHERE sr.menu_item_id = ? AND sr.menu_type = ?");
+            $costStmt->execute([(int)$it['menu_item_id'], (string)$it['menu_type']]);
+            $costDrop = round(((float)$costStmt->fetchColumn()) * (float)$it['quantity'], 4);
+        }
+        $newCost = max(0.0, round((float)$ordRow['total_cost'] - $costDrop, 4));
+        $pdo->prepare("UPDATE stock_orders SET subtotal=?, total_amount=?, tax_amount=?, discount_amount=?, service_charge=?, total_cost=?, updated_at=NOW() WHERE id=?")
+            ->execute([$newSubtotal, $newTotal, $newTax, $newDiscount, $newService, $newCost, $orderId]);
+
+        // Paid / part-paid: raise the PENDING refund for what the guest overpaid (newest leg first, capped).
+        $refundInfo = ['allocated' => 0.0, 'rows' => 0, 'shortfall' => 0.0];
+        $paidOrPart = ($orderStatus === 'paid');
+        if (!$paidOrPart) {
+            $legChk = $pdo->prepare("SELECT COUNT(*) FROM payments WHERE booking_type = 'restaurant' AND booking_id = ? AND COALESCE(payment_type, '') != 'refund' AND deleted_at IS NULL AND COALESCE(payment_status, 'completed') = 'completed'");
+            $legChk->execute([$orderId]);
+            $paidOrPart = (int)$legChk->fetchColumn() > 0;
+        }
+        if ($paidOrPart) {
+            $refundInfo = rh_create_pending_refund_allocation($pdo, $orderId, (string)$ordRow['reference'], $lineEffective, 'service_issue', '86: ' . $it['item_name'], $userId);
+        }
+
+        // Room service: void the matching folio charge and re-derive the booking's balance.
+        if ($rsCharge) {
+            $pdo->prepare("UPDATE booking_charges SET voided = 1, voided_at = NOW(), void_reason = ?, voided_by = ?, updated_at = NOW() WHERE id = ?")
+                ->execute([mb_substr('KDS 86 - ' . $it['item_name'] . ' (' . $ordRow['reference'] . ')', 0, 255), $userId, (int)$rsCharge['id']]);
+            recalculateBookingFinancials((int)$rsCharge['booking_id']);
         }
 
         $pdo->prepare("UPDATE stock_order_items SET kds_status='void', served_at=NOW(), bumped_by=?, stock_deducted=0 WHERE id=?")
-            ->execute([(int)$user['id'], $itemId]);
+            ->execute([$userId, $itemId]);
+
+        // Every line 86'd on an OPEN order: nothing left to charge, so close the empty tab.
+        // A paid order stays 'paid' - its refund(s) are pending and the cashier completes them.
+        $liveLeft = $pdo->prepare("SELECT COUNT(*) FROM stock_order_items WHERE order_id=? AND kds_status <> 'void'");
+        $liveLeft->execute([$orderId]);
+        if ((int)$liveLeft->fetchColumn() === 0 && !$paidOrPart) {
+            $pdo->prepare("UPDATE stock_orders SET status='cancelled', voided_by=?, voided_at=NOW(), void_reason=?, updated_at=NOW() WHERE id=? AND status='placed'")
+                ->execute([$userId, '86: every item on the order was voided by the station', $orderId]);
+        }
 
         $newOrderStatus = kds_recompute_order_status($pdo, $orderId);
         $pdo->prepare("UPDATE stock_orders SET kitchen_status=? WHERE id=?")->execute([$newOrderStatus, $orderId]);
@@ -1023,7 +1138,7 @@ try {
         // Audit trail
         try {
             $pdo->prepare("INSERT INTO stock_order_audit (order_id, actor_id, actor_name, event, details, ip_address) VALUES (?, ?, ?, '86_item', ?, ?)")
-                ->execute([$orderId, (int)$user['id'], $user['full_name'] ?? $user['username'] ?? '', '86: ' . $it['item_name'], $ip]);
+                ->execute([$orderId, (int)$user['id'], $user['full_name'] ?? $user['username'] ?? '', '86: ' . $it['item_name'] . ' | line ' . number_format($lineGross, 2) . ' removed, new total ' . number_format($newTotal, 2) . ' | stock ' . $stockOutcome . ($refundInfo['rows'] > 0 ? ' | pending refund ' . number_format($refundInfo['allocated'], 2) : '') . ($rsCharge ? ' | folio charge #' . (int)$rsCharge['id'] . ' voided' : ''), $ip]);
         } catch (Throwable $ignored) {
         }
 
@@ -1037,7 +1152,7 @@ try {
             $ord = $ordRow->fetch(PDO::FETCH_ASSOC);
             if ($ord && (int)($ord['created_by'] ?? 0) > 0) {
                 $stnLbl = kds_station_label($STATION);
-                $notifMsg = '86 ' . $it['item_name'] . ' on order ' . ($ord['reference'] ?? '') . ' (' . ($ord['table_number'] ?: strtoupper($STATION)) . ') — inform guest and offer alternative.';
+                $notifMsg = '86 ' . $it['item_name'] . ' on order ' . ($ord['reference'] ?? '') . ' (' . ($ord['table_number'] ?: strtoupper($STATION)) . ') — inform guest and offer alternative.' . ($refundInfo['rows'] > 0 ? ' A refund of ' . number_format($refundInfo['allocated'], 2) . ' is pending - settle it through the refund flow.' : '');
                 $pdo->prepare("INSERT INTO station_messages (station, message, sent_by, sent_by_name, source, priority, order_id, order_ref, to_user_id, is_acknowledged, acknowledged_at) VALUES (?, ?, ?, ?, 'station', 'urgent', ?, ?, ?, 0, NULL)")
                     ->execute([$STATION, $notifMsg, (int)$user['id'], $user['full_name'] ?? $user['username'] ?? '', $orderId, $ord['reference'] ?? '', (int)$ord['created_by']]);
             }
@@ -1045,7 +1160,7 @@ try {
             error_log('void_item station msg: ' . $e->getMessage());
         }
 
-        jok(['item_id' => $itemId, 'order_id' => $orderId, 'item_status' => 'void', 'order_status' => $newOrderStatus]);
+        jok(['item_id' => $itemId, 'order_id' => $orderId, 'item_status' => 'void', 'order_status' => $newOrderStatus, 'order_total' => $newTotal, 'stock' => $stockOutcome, 'pending_refund' => $refundInfo['allocated']]);
     }
 
     /* ── toggle_priority: Rush / un-rush a ticket ───────────────────── *
@@ -1305,7 +1420,10 @@ try {
         $itemsToRestore = $recallStmt->fetchAll(PDO::FETCH_ASSOC);
         foreach ($itemsToRestore as $ri) {
             // Use item ID as source_id (matches deduction record — per item, not per order)
-            restoreStockForMenuItem((int)$ri['menu_item_id'], (string)$ri['menu_type'], (float)$ri['quantity'], 'KDS recall - stock restored', (int)$user['id'], (int)$ri['id'], 'pos_order');
+            if (!restoreStockForMenuItem((int)$ri['menu_item_id'], (string)$ri['menu_type'], (float)$ri['quantity'], 'KDS recall - stock restored', (int)$user['id'], (int)$ri['id'], 'pos_order')) {
+                $pdo->rollBack();
+                jerr('Could not restore stock for the recalled items - nothing was changed. Please retry.', 500);
+            }
         }
 
         // Recall served and collection items back to preparing; clear stock_deducted flag

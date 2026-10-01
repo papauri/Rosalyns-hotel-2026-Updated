@@ -31,7 +31,7 @@ if (!ensureStockTablesExist()) {
 
 function calculateRestaurantVatParts(float $grossAmount): array
 {
-    $vatEnabled = in_array(getSetting('vat_enabled'), ['1', 1, true, 'true', 'on'], true);
+    $vatEnabled = rh_vat_enabled();
     $vatRate = $vatEnabled ? (float)getSetting('vat_rate') : 0.0;
     if ($grossAmount <= 0 || $vatRate <= 0) {
         return ['net' => round($grossAmount, 2), 'vat_rate' => 0.0, 'vat' => 0.0, 'gross' => round($grossAmount, 2)];
@@ -137,7 +137,7 @@ function loadCheckedInRoomServiceBooking(PDO $pdo, int $bookingId): array
 
 function addRoomServiceFolioChargeForOrder(PDO $pdo, int $bookingId, int $orderId, string $menuType, int $menuItemId, string $itemName, float $quantity, float $unitPrice, ?int $addedBy): array
 {
-    $vatEnabled = in_array(getSetting('vat_enabled'), ['1', 1, true, 'true', 'on'], true);
+    $vatEnabled = rh_vat_enabled();
     $vatRate = $vatEnabled ? (float)getSetting('vat_rate') : 0.0;
     // unitPrice is the VAT-inclusive (gross) menu price — extract net and VAT.
     $lineTotal    = round($quantity * $unitPrice, 2);
@@ -306,7 +306,7 @@ function reconcileRestaurantOrder(PDO $pdo, int $orderId, array $user): array
             $changes[] = 'payment ledger synced';
         }
 
-        if (in_array($order['status'], ['voided', 'cancelled'], true)) {
+        if (in_array($order['status'], ['cancelled'], true)) {
             $pdo->prepare("\n                UPDATE payments\n                SET payment_status = 'cancelled', status = 'failed', updated_at = NOW()\n                WHERE booking_type = 'restaurant' AND booking_id = ? AND COALESCE(payment_type, '') != 'refund' AND deleted_at IS NULL\n            ")->execute([$orderId]);
             $changes[] = 'reversed payment rows cancelled';
         }
@@ -578,6 +578,7 @@ if (!$error && $_SERVER['REQUEST_METHOD'] === 'POST') {
                         $paymentExtras['card_auth_code'],
                         $orderId,
                     ]);
+                    rh_stamp_order_paid_by($pdo, $orderId, (int)$user['id']);
 
                     // Sync to accounting ledger
                     $orderRow = ['id' => $orderId, 'reference' => $reference, 'total_amount' => $totalAmount, 'customer_name' => $customerName, 'status' => 'paid'];
@@ -618,8 +619,13 @@ if (!$error && $_SERVER['REQUEST_METHOD'] === 'POST') {
                 $oh->execute([$orderId]);
                 $order = $oh->fetch(PDO::FETCH_ASSOC);
                 if (!$order) throw new RuntimeException('Order not found.');
-                if (in_array($order['status'], ['cancelled', 'voided'], true)) throw new RuntimeException('Order already reversed.');
-                if ($order['status'] === 'paid') throw new RuntimeException('Order is paid — use Void with a reason instead.');
+                /* Cancel = an open, completely unpaid order only. Paid / part-paid / refunded /
+                 * already-reversed orders are refused; a paid order goes through Void, which writes
+                 * the reversal record. */
+                if ($order['status'] !== 'placed') throw new RuntimeException('Order is ' . str_replace('_', ' ', (string)$order['status']) . ' — only an open, unpaid order can be cancelled. Use Void for a paid order.');
+                $cancelPaidChk = $pdo->prepare("SELECT COUNT(*) FROM payments WHERE booking_type = 'restaurant' AND booking_id = ? AND COALESCE(payment_type, '') != 'refund' AND deleted_at IS NULL AND COALESCE(payment_status, 'completed') = 'completed'");
+                $cancelPaidChk->execute([$orderId]);
+                if ((int)($order['split_paid_count'] ?? 0) > 0 || (int)$cancelPaidChk->fetchColumn() > 0) throw new RuntimeException('Order has payment recorded against it — use Void (it writes the reversal).');
 
                 // Enforce pre-prep cancellation policy: only cancel when all items are still pending
                 $prepCheck = $pdo->prepare("SELECT COUNT(*) FROM stock_order_items WHERE order_id=? AND kds_status IN ('preparing','in_progress','ready','collection','served')");
@@ -642,7 +648,6 @@ if (!$error && $_SERVER['REQUEST_METHOD'] === 'POST') {
                 $pdo->prepare("UPDATE stock_orders SET status = 'cancelled', updated_at = NOW(), kitchen_status='served', served_at=COALESCE(served_at, NOW()) WHERE id = ?")->execute([$orderId]);
                 $pdo->prepare("UPDATE stock_order_items SET kds_status='void', served_at=COALESCE(served_at, NOW()), bumped_by=? WHERE order_id=? AND kds_status NOT IN ('served','void')")
                     ->execute([$user['id'], $orderId]);
-                $pdo->prepare("\n                    UPDATE payments\n                    SET payment_status = 'cancelled', status = 'failed', updated_at = NOW()\n                    WHERE booking_type = 'restaurant' AND booking_id = ? AND COALESCE(payment_type, '') != 'refund' AND deleted_at IS NULL\n                ")->execute([$orderId]);
                 logOrderAudit($pdo, $orderId, $user['id'], $user['full_name'], 'cancelled', null);
                 $pdo->commit();
 
@@ -665,7 +670,8 @@ if (!$error && $_SERVER['REQUEST_METHOD'] === 'POST') {
                 $oh->execute([$orderId]);
                 $order = $oh->fetch(PDO::FETCH_ASSOC);
                 if (!$order) throw new RuntimeException('Order not found.');
-                if (in_array($order['status'], ['cancelled', 'voided'], true)) throw new RuntimeException('Order already reversed.');
+                /* Only a live sale can be voided: 'placed' (open, possibly part-paid) or 'paid'. */
+                if (!in_array($order['status'], ['placed', 'paid'], true)) throw new RuntimeException('Order is ' . str_replace('_', ' ', (string)$order['status']) . ' — only an open or paid order can be voided.');
 
                 $folioVoids = 0;
                 if (($order['order_type'] ?? '') === 'room_service') {
@@ -688,7 +694,8 @@ if (!$error && $_SERVER['REQUEST_METHOD'] === 'POST') {
                 } catch (Throwable $e) {
                     error_log('void kds_log: ' . $e->getMessage());
                 }
-                $pdo->prepare("\n                    UPDATE payments\n                    SET payment_status = 'cancelled', status = 'failed', notes = CONCAT(COALESCE(notes,''), '\\nVOID: ', ?), updated_at = NOW()\n                    WHERE booking_type = 'restaurant' AND booking_id = ? AND COALESCE(payment_type, '') != 'refund' AND deleted_at IS NULL\n                ")->execute([$voidReason, $orderId]);
+                // Same reversal method as api/void-order.php: contra rows per original payment row (per split leg, in its own tender), never an in-place edit of the original payment.
+                rh_reverse_restaurant_payments($pdo, $orderId, (string)$order['reference'], 'VOID-', 'cancellation', 'Void: ' . $voidReason, (int)$user['id']);
                 logOrderAudit($pdo, $orderId, $user['id'], $user['full_name'], 'voided', $voidReason);
                 $pdo->commit();
 
@@ -721,6 +728,7 @@ if (!$error && $_SERVER['REQUEST_METHOD'] === 'POST') {
                 $order = $oh->fetch(PDO::FETCH_ASSOC);
                 if (!$order) throw new RuntimeException('Order not found.');
                 if ($order['status'] !== 'placed') throw new RuntimeException('Order is not open — cannot settle a ' . $order['status'] . ' order.');
+                if ((int)($order['split_paid_count'] ?? 0) > 0) throw new RuntimeException('This order is mid split-payment (' . (int)$order['split_paid_count'] . ' of ' . (int)($order['split_count'] ?? 0) . ' paid) — finish the remaining legs from the POS till; it cannot be settled in full again.');
                 if (($order['order_type'] ?? '') === 'room_service') throw new RuntimeException('Room-service orders are charged to the booking folio — use the booking module to settle them.');
 
                 $totalAmount = (float)$order['total_amount'];
@@ -768,6 +776,7 @@ if (!$error && $_SERVER['REQUEST_METHOD'] === 'POST') {
                     $paymentExtras['card_last4'], $paymentExtras['card_auth_code'],
                     $orderId,
                 ]);
+                rh_stamp_order_paid_by($pdo, $orderId, (int)$user['id']);
 
                 syncRestaurantOrderPayment($pdo, array_merge($order, ['status' => 'paid', 'payment_method' => $paymentMethod]), (int)$user['id'], $paymentMethod);
                 logOrderAudit($pdo, $orderId, (int)$user['id'], (string)$user['full_name'], 'settled', json_encode([
@@ -799,98 +808,15 @@ if (!$error && $_SERVER['REQUEST_METHOD'] === 'POST') {
 }
 
 /**
- * Restore stock for a POS order — equivalent to restoreStockForMenuItem but
- * matching the 'pos_order' source_type the deduction wrote.
- * Inline here to avoid a second public helper for now.
+ * Restore stock for a cancelled / voided POS order. Delegates to the shared per-line restore
+ * (rh_restore_pos_order_stock) used by the API void and cancel: matched on each line's original
+ * deduction, skips lines an 86 or a KDS recall already handled, and records which kind of
+ * deduction each restore reverses (source type + id, never id alone).
  */
 function restoreFromPosOrder(PDO $pdo, int $orderId, ?int $doneBy): void
 {
-    if ($orderId <= 0) return;
-    $byBatch = [];
-    $byIngredient = [];
-    $seenAdj = [];
-
-    // ── New format (current): adjustments stored with source_id = stock_order_items.id ──
-    // KDS ready_item uses item ID as source_id to avoid false idempotency-skip when two
-    // items share an ingredient. Only look at items where stock was actually deducted.
-    $itemSel = $pdo->prepare("SELECT id FROM stock_order_items WHERE order_id = ? AND stock_deducted = 1");
-    $itemSel->execute([$orderId]);
-    $itemIds = $itemSel->fetchAll(PDO::FETCH_COLUMN);
-
-    if (!empty($itemIds)) {
-        $placeholders = implode(',', array_fill(0, count($itemIds), '?'));
-        $sel = $pdo->prepare("
-            SELECT sa.id AS adjustment_id, sa.ingredient_id, sa.quantity_change, sbd.batch_id, sbd.quantity_deducted
-            FROM stock_adjustments sa
-            LEFT JOIN stock_batch_deductions sbd ON sbd.adjustment_id = sa.id
-            WHERE sa.source_type = 'pos_order' AND sa.source_id IN ({$placeholders})
-        ");
-        $sel->execute($itemIds);
-        foreach ($sel->fetchAll(PDO::FETCH_ASSOC) as $h) {
-            $adjId = (int)$h['adjustment_id'];
-            $ingId = (int)$h['ingredient_id'];
-            if (!isset($seenAdj[$adjId])) {
-                $seenAdj[$adjId] = true;
-                $byIngredient[$ingId] = ($byIngredient[$ingId] ?? 0) + abs((float)$h['quantity_change']);
-            }
-            if (!empty($h['batch_id'])) {
-                $bid = (int)$h['batch_id'];
-                $byBatch[$bid] = ($byBatch[$bid] ?? 0) + (float)$h['quantity_deducted'];
-            }
-        }
-    }
-
-    // ── Legacy fallback: adjustments stored with source_id = order_id ──
-    // Used by early POS versions before item-level source_id was introduced.
-    if (empty($byIngredient)) {
-        $sel = $pdo->prepare("
-            SELECT sa.id AS adjustment_id, sa.ingredient_id, sa.quantity_change, sbd.batch_id, sbd.quantity_deducted
-            FROM stock_adjustments sa
-            LEFT JOIN stock_batch_deductions sbd ON sbd.adjustment_id = sa.id
-            WHERE sa.source_type = 'pos_order' AND sa.source_id = ?
-        ");
-        $sel->execute([$orderId]);
-        $seenAdj = [];
-        foreach ($sel->fetchAll(PDO::FETCH_ASSOC) as $h) {
-            $adjId = (int)$h['adjustment_id'];
-            $ingId = (int)$h['ingredient_id'];
-            if (!isset($seenAdj[$adjId])) {
-                $seenAdj[$adjId] = true;
-                $byIngredient[$ingId] = ($byIngredient[$ingId] ?? 0) + abs((float)$h['quantity_change']);
-            }
-            if (!empty($h['batch_id'])) {
-                $bid = (int)$h['batch_id'];
-                $byBatch[$bid] = ($byBatch[$bid] ?? 0) + (float)$h['quantity_deducted'];
-            }
-        }
-    }
-
-    if (!empty($byBatch)) {
-        $bUpd = $pdo->prepare("
-            UPDATE stock_batches
-            SET quantity_remaining = quantity_remaining + ?,
-                status = CASE WHEN status = 'depleted' THEN 'active' ELSE status END,
-                updated_at = NOW()
-            WHERE id = ?
-        ");
-        foreach ($byBatch as $bid => $q) $bUpd->execute([$q, $bid]);
-    }
-
-    $adjStmt = $pdo->prepare("
-        INSERT INTO stock_adjustments (ingredient_id, quantity_change, reason, source_type, source_id, cost_at_time, adjusted_by)
-        VALUES (?, ?, 'POS order cancelled', 'void_restore', ?, ?, ?)
-    ");
-    $costSel = $pdo->prepare("SELECT cost_per_unit FROM stock_ingredients WHERE id = ?");
-    $ingUpd = $pdo->prepare("UPDATE stock_ingredients SET current_quantity = current_quantity + ?, updated_at = NOW() WHERE id = ?");
-
-    foreach ($byIngredient as $ingId => $q) {
-        $costSel->execute([$ingId]);
-        $cost = (float)($costSel->fetchColumn() ?: 0);
-        $adjStmt->execute([$ingId, $q, $orderId, $cost, $doneBy]);
-        $ingUpd->execute([$q, $ingId]);
-    }
+    rh_restore_pos_order_stock($pdo, $orderId, $doneBy, 'POS order cancelled / voided');
 }
-
 if (!empty($_SESSION['stock_msg'])) {
     $message = $_SESSION['stock_msg'];
     unset($_SESSION['stock_msg']);

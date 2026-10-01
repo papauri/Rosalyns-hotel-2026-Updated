@@ -25,6 +25,7 @@ require_once __DIR__ . '/../config/database.php';
 require_once __DIR__ . '/../config/security.php';
 require_once __DIR__ . '/../admin/includes/permissions.php';
 require_once __DIR__ . '/../admin/includes/offline-log.php';
+require_once __DIR__ . '/../admin/includes/restaurant-payment-sync.php';
 if (session_status() !== PHP_SESSION_ACTIVE) {
     session_start();
 }
@@ -44,47 +45,9 @@ function cjok(array $extra = []): void
 
 function c_restore_from_pos_order(PDO $pdo, int $orderId, ?int $doneBy): void
 {
-    $byBatch = [];
-    $byIngredient = [];
-
-    /* source_id on a 'pos_order' adjustment is the stock_order_items.id, not the order id —
-     * see the matching note in api/void-order.php. Keyed by order id this matched nothing and
-     * silently restored NO stock on cancel. */
-    $sel = $pdo->prepare("SELECT sa.id AS adjustment_id, sa.ingredient_id, sa.quantity_change, sbd.batch_id, sbd.quantity_deducted FROM stock_adjustments sa LEFT JOIN stock_batch_deductions sbd ON sbd.adjustment_id = sa.id WHERE sa.source_type = 'pos_order' AND sa.source_id IN (SELECT id FROM stock_order_items WHERE order_id = ?)");
-    $sel->execute([$orderId]);
-
-    $seenAdjustments = [];
-    foreach ($sel->fetchAll(PDO::FETCH_ASSOC) as $row) {
-        $adjustmentId = (int)$row['adjustment_id'];
-        if (!isset($seenAdjustments[$adjustmentId])) {
-            $seenAdjustments[$adjustmentId] = true;
-            $ingredientId = (int)$row['ingredient_id'];
-            $byIngredient[$ingredientId] = ($byIngredient[$ingredientId] ?? 0) + abs((float)$row['quantity_change']);
-        }
-
-        if (!empty($row['batch_id'])) {
-            $batchId = (int)$row['batch_id'];
-            $byBatch[$batchId] = ($byBatch[$batchId] ?? 0) + (float)$row['quantity_deducted'];
-        }
-    }
-
-    if ($byBatch) {
-        $batchUpd = $pdo->prepare("UPDATE stock_batches SET quantity_remaining = quantity_remaining + ?, status = CASE WHEN status='depleted' THEN 'active' ELSE status END, updated_at = NOW() WHERE id = ?");
-        foreach ($byBatch as $batchId => $qty) {
-            $batchUpd->execute([$qty, $batchId]);
-        }
-    }
-
-    $costSel = $pdo->prepare("SELECT cost_per_unit FROM stock_ingredients WHERE id = ?");
-    $adjIns = $pdo->prepare("INSERT INTO stock_adjustments (ingredient_id, quantity_change, reason, source_type, source_id, cost_at_time, adjusted_by) VALUES (?, ?, 'POS order cancelled before prep', 'void_restore', ?, ?, ?)");
-    $ingUpd = $pdo->prepare("UPDATE stock_ingredients SET current_quantity = current_quantity + ?, updated_at = NOW() WHERE id = ?");
-
-    foreach ($byIngredient as $ingredientId => $qty) {
-        $costSel->execute([$ingredientId]);
-        $cpu = (float)($costSel->fetchColumn() ?: 0);
-        $adjIns->execute([$ingredientId, $qty, $orderId, $cpu, $doneBy]);
-        $ingUpd->execute([$qty, $ingredientId]);
-    }
+    // Shared per-line restore (see rh_restore_pos_order_stock): matched on the original deduction,
+    // skips lines an 86 or a KDS recall already handled.
+    rh_restore_pos_order_stock($pdo, $orderId, $doneBy, 'POS order cancelled before prep');
 }
 
 function c_column_exists(PDO $pdo, string $table, string $column): bool
@@ -223,7 +186,7 @@ $details = $reason . ($notes !== '' ? "\nNotes: " . $notes : '');
 try {
     $pdo->beginTransaction();
 
-    $ordStmt = $pdo->prepare("SELECT id, reference, status, order_type, created_by, kitchen_status FROM stock_orders WHERE id = ? FOR UPDATE");
+    $ordStmt = $pdo->prepare("SELECT id, reference, status, order_type, created_by, kitchen_status, COALESCE(split_paid_count, 0) AS split_paid_count FROM stock_orders WHERE id = ? FOR UPDATE");
     $ordStmt->execute([$orderId]);
     $order = $ordStmt->fetch(PDO::FETCH_ASSOC);
 
@@ -231,9 +194,18 @@ try {
         $pdo->rollBack();
         cjerr('Order not found', 404);
     }
-    if (in_array((string)$order['status'], ['cancelled', 'voided'], true)) {
+    /* Cancel is for an accidental fire caught before any money moved: the order must be 'placed'
+     * AND completely unpaid. A paid (or part-paid) order is money in the till and the ledger -
+     * it has to go through Void (pos_void permission), which writes the reversal record. */
+    if ((string)$order['status'] !== 'placed') {
         $pdo->rollBack();
-        cjerr('Order already reversed');
+        cjerr('Order ' . $order['reference'] . ' is ' . str_replace('_', ' ', (string)$order['status']) . ' - only an open, unpaid order can be cancelled. Use Void for a paid order.');
+    }
+    $paidChk = $pdo->prepare("SELECT COUNT(*) FROM payments WHERE booking_type = 'restaurant' AND booking_id = ? AND COALESCE(payment_type, '') != 'refund' AND deleted_at IS NULL AND COALESCE(payment_status, 'completed') = 'completed'");
+    $paidChk->execute([$orderId]);
+    if ((int)$order['split_paid_count'] > 0 || (int)$paidChk->fetchColumn() > 0) {
+        $pdo->rollBack();
+        cjerr('Order ' . $order['reference'] . ' has payment recorded against it - it cannot be cancelled. A manager must void it (this writes the reversal).');
     }
 
     // Non-privileged users can cancel only their own order or one tied to their station permissions.
@@ -294,9 +266,6 @@ try {
 
     $pdo->prepare("UPDATE stock_order_items SET kds_status='void', served_at=COALESCE(served_at, NOW()), bumped_by=? WHERE order_id=? AND kds_status NOT IN ('served','void')")
         ->execute([$userId, $orderId]);
-
-    $pdo->prepare("UPDATE payments SET payment_status='cancelled', status='failed', notes=CONCAT(COALESCE(notes,''), '\nCANCELLED-BEFORE-PREP: ', ?), updated_at=NOW() WHERE booking_type='restaurant' AND booking_id=? AND payment_type<>'refund' AND deleted_at IS NULL")
-        ->execute([$details, $orderId]);
 
     /* Retract any outstanding collection ping / unacknowledged station note — a cancelled
      * order must stop asking the floor to collect it (see the same cleanup in void-order.php). */

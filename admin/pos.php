@@ -23,6 +23,7 @@ require_once __DIR__ . '/../includes/station-hours.php';
 require_once __DIR__ . '/../includes/restaurant-location-locks.php';
 require_once __DIR__ . '/includes/restaurant-payment-sync.php';
 require_once __DIR__ . '/includes/restaurant-order-serve.php';
+require_once __DIR__ . '/../includes/idempotency.php';
 
 /* Granular till permissions. These used to be hard-wired to role names
    (admin/manager, or "restaurant_staff = own tabs only"), so a custom role or a
@@ -54,7 +55,7 @@ finance_ensure_sequence_tables($pdo);
 /* ---------------- Inline copies of helpers (kept lean) ---------------- */
 function pos_calculateRestaurantVatParts(float $grossAmount): array
 {
-    $vatEnabled = in_array(getSetting('vat_enabled'), ['1', 1, true, 'true', 'on'], true);
+    $vatEnabled = rh_vat_enabled();
     $vatRate = $vatEnabled ? (float)getSetting('vat_rate') : 0.0;
     if ($grossAmount <= 0 || $vatRate <= 0) {
         return ['net' => round($grossAmount, 2), 'vat_rate' => 0.0, 'vat' => 0.0, 'gross' => round($grossAmount, 2)];
@@ -174,7 +175,9 @@ function pos_buildOrderFromPost(PDO $pdo, array $user, string $orderType, ?strin
         $existing = $pdo->prepare("SELECT id, reference, total_amount FROM stock_orders WHERE client_uuid=? LIMIT 1 FOR UPDATE");
         $existing->execute([$clientUuid]);
         if ($prior = $existing->fetch(PDO::FETCH_ASSOC)) {
-            return [(int)$prior['id'], (string)$prior['reference'], (float)$prior['total_amount'], 0];
+            // Idempotent replay: 5th element flags it so the caller returns the stored result
+            // immediately — no discount re-application, no payment, no re-fire.
+            return [(int)$prior['id'], (string)$prior['reference'], (float)$prior['total_amount'], 0, true];
         }
     }
 
@@ -247,7 +250,7 @@ function pos_buildOrderFromPost(PDO $pdo, array $user, string $orderType, ?strin
         ]);
     }
 
-    return [$orderId, $reference, $totalAmount, $count];
+    return [$orderId, $reference, $totalAmount, $count, false];
 }
 
 /**
@@ -460,20 +463,44 @@ function pos_applyPaymentToOrder(PDO $pdo, array $user, int $orderId, string $re
         $pdo->prepare("UPDATE stock_orders SET split_paid_count = split_paid_count + 1, tip_amount = tip_amount + ? WHERE id = ?")
             ->execute([$tipAmount, $orderId]);
 
+        // One ledger row PER LEG, in that leg's own tender, for the leg's gross share (VAT
+        // extracted from it, net payment_amount — same maths as the single-row sale). Booked
+        // as each leg is taken so the ledger matches the cash that actually moved, and so a
+        // refund can reverse every leg in the tender it was paid with. Tips are cash movement,
+        // not revenue: only $splitAmount is booked; pos-accounting reconciles tips separately.
+        $legCnStmt = $pdo->prepare("SELECT customer_name FROM stock_orders WHERE id = ?");
+        $legCnStmt->execute([$orderId]);
+        rh_record_restaurant_split_leg_payment(
+            $pdo,
+            $orderId,
+            $reference,
+            (string)($legCnStmt->fetchColumn() ?: '') ?: null,
+            pos_calculateRestaurantVatParts((float)$splitAmount),
+            (int)$user['id'],
+            pos_mapMethod($paymentMethod),
+            $splitNumber,
+            $splitNumber >= $splitCount
+        );
+
         if ($splitNumber >= $splitCount) {
-            // Last split: close the order; use last leg's method for the ledger
+            // Last split: close the order (the order row carries the last leg's tender; the
+            // per-leg tenders live in stock_order_splits and the payments ledger rows).
             $pdo->prepare("UPDATE stock_orders SET status='paid', paid_at=NOW(), payment_method=? WHERE id=?")
                 ->execute([$paymentMethod, $orderId]);
-            // Tips are cash movement, not revenue: the ledger books totalAmount only.
-            // pos-accounting.php reconciles tips separately via stock_order_splits/tip_amount.
-            $cnStmt = $pdo->prepare("SELECT customer_name FROM stock_orders WHERE id = ?");
-            $cnStmt->execute([$orderId]);
-            pos_syncPayment($pdo, ['id' => $orderId, 'reference' => $reference, 'total_amount' => $totalAmount, 'customer_name' => (string)($cnStmt->fetchColumn() ?: ''), 'status' => 'paid'], $user['id'], $paymentMethod);
+            rh_stamp_order_paid_by($pdo, $orderId, (int)$user['id']);
         }
     } else {
+        // Defence in depth for every caller: a single full payment is never valid once any split
+        // leg has been recorded against this order.
+        $spChk = $pdo->prepare("SELECT COALESCE(split_paid_count, 0) FROM stock_orders WHERE id = ? FOR UPDATE");
+        $spChk->execute([$orderId]);
+        if ((int)$spChk->fetchColumn() > 0) {
+            throw new RuntimeException('This tab is mid split-payment - only the next split leg can be paid.');
+        }
         // Single payment — store tip on the order row along with payment details
         $pdo->prepare("UPDATE stock_orders SET status='paid', paid_at=NOW(), payment_method=?, tendered_amount=?, change_due=?, mobile_wallet_provider=?, mobile_wallet_reference=?, card_last4=?, card_auth_code=?, tip_amount=? WHERE id=?")
             ->execute([$paymentMethod, $extras['tendered'], $extras['change'], $extras['mp'], $extras['mr'], $extras['l4'], $extras['auth'], $tipAmount, $orderId]);
+        rh_stamp_order_paid_by($pdo, $orderId, (int)$user['id']);
         // Tips are cash movement, not revenue: the ledger books totalAmount only.
         $cnStmt = $pdo->prepare("SELECT customer_name FROM stock_orders WHERE id = ?");
         $cnStmt->execute([$orderId]);
@@ -515,7 +542,35 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             if ($action === 'park') {
                 /* === Fire order to stations, pay later (open tab) === */
                 $pdo->beginTransaction();
-                [$orderId, $reference, $totalAmount, $count] = pos_buildOrderFromPost($pdo, $user, $orderType, $tableNumber, $customerName, $customerEmail, $customerPhone, $orderNote, true);
+                [$orderId, $reference, $totalAmount, $count, $replayed] = pos_buildOrderFromPost($pdo, $user, $orderType, $tableNumber, $customerName, $customerEmail, $customerPhone, $orderNote, true);
+                if ($replayed) {
+                    /* Same client_uuid already produced this tab: hand back the stored result and
+                     * do nothing else (no second fire, no covers/total rewrite). */
+                    $pdo->commit();
+                    $replayMessage = "Order {$reference} was already sent — duplicate submission ignored.";
+                    if (!empty($_SERVER['HTTP_X_REQUESTED_WITH']) && strtolower((string)$_SERVER['HTTP_X_REQUESTED_WITH']) === 'xmlhttprequest') {
+                        $replayLines = $pdo->prepare("SELECT item_name, quantity FROM stock_order_items WHERE order_id = ? ORDER BY id");
+                        $replayLines->execute([$orderId]);
+                        header('Content-Type: application/json; charset=utf-8');
+                        echo json_encode([
+                            'ok' => true,
+                            'replayed' => true,
+                            'order_id' => $orderId,
+                            'reference' => $reference,
+                            'total' => $totalAmount,
+                            'station_label' => 'Station',
+                            'message' => $replayMessage,
+                            'lines' => $replayLines->fetchAll(PDO::FETCH_ASSOC),
+                        ]);
+                        exit;
+                    }
+                    pos_redirectWithFlash([
+                        'message' => $replayMessage,
+                        'last_order_id' => $orderId,
+                        'last_order_ref' => $reference,
+                        'just_parked' => true,
+                    ]);
+                }
                 $coversPark = max(0, min(99, (int)($_POST['covers'] ?? 0)));
                 if ($posHasCoversCol && $coversPark > 0) {
                     $pdo->prepare("UPDATE stock_orders SET covers=? WHERE id=?")->execute([$coversPark, $orderId]);
@@ -579,6 +634,30 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $stmt->execute([$tabOrderId]);
                 $tab = $stmt->fetch(PDO::FETCH_ASSOC);
                 if (!$tab) throw new RuntimeException('Tab not found.');
+
+                /* Idempotent replay: a retried / double-tapped round carrying the same client_uuid
+                 * returns the stored result and adds nothing (the tab row lock above serialises
+                 * concurrent duplicates, so the second one lands here after the first committed). */
+                $addIdem = idem_begin($pdo, 'pos.php:add_to_tab:' . $tabOrderId, $_POST['client_uuid'] ?? null);
+                if (!empty($addIdem['cached'])) {
+                    $pdo->commit();
+                    $cachedResp = json_decode((string)$addIdem['body'], true);
+                    if (!is_array($cachedResp)) {
+                        $cachedResp = ['ok' => true, 'order_id' => $tabOrderId, 'reference' => $tab['reference'], 'message' => 'Round already added - duplicate ignored.', 'lines' => []];
+                    }
+                    $cachedResp['replayed'] = true;
+                    if (!empty($_SERVER['HTTP_X_REQUESTED_WITH']) && strtolower((string)$_SERVER['HTTP_X_REQUESTED_WITH']) === 'xmlhttprequest') {
+                        header('Content-Type: application/json; charset=utf-8');
+                        echo json_encode($cachedResp);
+                        exit;
+                    }
+                    pos_redirectWithFlash([
+                        'message' => (string)($cachedResp['message'] ?? 'Round already added - duplicate ignored.'),
+                        'last_order_id' => $tabOrderId,
+                        'last_order_ref' => $tab['reference'],
+                        'just_parked' => true,
+                    ]);
+                }
                 if ($tab['status'] !== 'placed') {
                     throw new RuntimeException('That tab is no longer open (' . str_replace('_', ' ', (string)$tab['status']) . '). Refreshing tabs.');
                 }
@@ -628,9 +707,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     'till'         => 'pos.php',
                 ]));
                 logActivity($user['id'], 'pos_add_to_tab', 'Added ' . $addedCount . ' item(s) to tab ' . $tab['reference'] . ' (' . $currency_symbol . ' ' . number_format($addedAmount, 2) . '); new total ' . $currency_symbol . ' ' . number_format($newTotal, 2));
-                $pdo->commit();
-                if (function_exists('deleteCache')) deleteCache('stock_dashboard_metrics_v2');
-
                 // Build station label from the whole order so the user sees where it went
                 $stnStmt = $pdo->prepare("SELECT DISTINCT station FROM stock_order_items WHERE order_id=? ORDER BY station");
                 $stnStmt->execute([$tabOrderId]);
@@ -643,22 +719,28 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $stationLabel = implode(' & ', $stnNames) ?: 'Station';
                 $message = "Added {$addedCount} item(s) to {$tab['reference']} — new total {$currency_symbol} " . number_format($newTotal, 2) . '.';
 
+                $lineStmt = $pdo->prepare("SELECT item_name, quantity FROM stock_order_items WHERE order_id = ? ORDER BY id");
+                $lineStmt->execute([$tabOrderId]);
+                $addResp = [
+                    'ok'            => true,
+                    'order_id'      => $tabOrderId,
+                    'reference'     => $tab['reference'],
+                    'added_count'   => $addedCount,
+                    'new_total'     => $newTotal,
+                    'station_label' => $stationLabel,
+                    'message'       => $message,
+                    'lines'         => $lineStmt->fetchAll(PDO::FETCH_ASSOC),
+                ];
+                // Store the result in the same transaction as the round so the replay record and
+                // the added lines commit (or roll back) together.
+                idem_finish($pdo, $addIdem, 200, json_encode($addResp), ['entity_type' => 'stock_order', 'entity_id' => $tabOrderId, 'entity_reference' => (string)$tab['reference']]);
+                $pdo->commit();
+                if (function_exists('deleteCache')) deleteCache('stock_dashboard_metrics_v2');
+
                 $isXhr = !empty($_SERVER['HTTP_X_REQUESTED_WITH']) && strtolower((string)$_SERVER['HTTP_X_REQUESTED_WITH']) === 'xmlhttprequest';
                 if ($isXhr) {
-                    $lineStmt = $pdo->prepare("SELECT item_name, quantity FROM stock_order_items WHERE order_id = ? ORDER BY id");
-                    $lineStmt->execute([$tabOrderId]);
-                    $lines = $lineStmt->fetchAll(PDO::FETCH_ASSOC);
                     header('Content-Type: application/json; charset=utf-8');
-                    echo json_encode([
-                        'ok'            => true,
-                        'order_id'      => $tabOrderId,
-                        'reference'     => $tab['reference'],
-                        'added_count'   => $addedCount,
-                        'new_total'     => $newTotal,
-                        'station_label' => $stationLabel,
-                        'message'       => $message,
-                        'lines'         => $lines,
-                    ]);
+                    echo json_encode($addResp);
                     exit;
                 }
                 pos_redirectWithFlash([
@@ -787,18 +869,29 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     }
                 }
 
-                // Validate split sequence
-                if ($splitCount > 1) {
-                    $dbPaid = (int)$row['split_paid_count'];
-                    $dbCount = (int)$row['split_count'];
-                    if ($splitNumber === 1 && $dbPaid === 0) {
-                        // First split: record the agreed total on the order
-                        $pdo->prepare("UPDATE stock_orders SET split_count = ? WHERE id = ?")->execute([$splitCount, $orderId]);
-                    } elseif ($splitNumber !== $dbPaid + 1) {
-                        throw new RuntimeException('Split sequence error — expected leg ' . ($dbPaid + 1) . ', received ' . $splitNumber . '. Refresh the page.');
-                    } elseif ($dbCount !== $splitCount) {
-                        throw new RuntimeException('Split count changed mid-session (' . $dbCount . ' vs ' . $splitCount . '). Refresh and restart.');
+                // Validate split sequence. The STORED split (split_count / split_paid_count on the
+                // locked order row) is authoritative, never the posted values: once any leg has been
+                // paid, the only payment accepted is the NEXT leg under the stored split_count. A
+                // posted split_count of 1 (or any other number) can no longer route around this and
+                // settle the whole bill a second time.
+                $dbPaid = (int)$row['split_paid_count'];
+                $dbCount = (int)$row['split_count'];
+                if ($dbPaid > 0) {
+                    if ($dbCount <= 1 || $dbPaid >= $dbCount) {
+                        throw new RuntimeException('This tab has split payments recorded but its split is inconsistent — ask a manager to review it before taking more payment.');
                     }
+                    if ($splitCount !== $dbCount) {
+                        throw new RuntimeException('This bill is split ' . $dbCount . ' ways (' . $dbPaid . ' paid) — continue with leg ' . ($dbPaid + 1) . ' of ' . $dbCount . '. Refresh the page.');
+                    }
+                    if ($splitNumber !== $dbPaid + 1) {
+                        throw new RuntimeException('Split sequence error — expected leg ' . ($dbPaid + 1) . ', received ' . $splitNumber . '. Refresh the page.');
+                    }
+                } elseif ($splitCount > 1) {
+                    if ($splitNumber !== 1) {
+                        throw new RuntimeException('Split sequence error — expected leg 1, received ' . $splitNumber . '. Refresh the page.');
+                    }
+                    // First split: record the agreed total on the order
+                    $pdo->prepare("UPDATE stock_orders SET split_count = ? WHERE id = ?")->execute([$splitCount, $orderId]);
                 }
 
                 $extras = pos_applyPaymentToOrder($pdo, $user, $orderId, $row['reference'], (float)$row['total_amount'], $paymentMethod, $_POST, $splitCount, $splitNumber);
@@ -889,98 +982,29 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     $refsLabel = implode(', ', $openTabRefs);
                     throw new RuntimeException('Cannot close shift: ' . count($openTabRefs) . ' open tab(s) from this shift still need to be settled or cancelled — ' . $refsLabel . '. Open the Tabs tray, take payment, or cancel them first.');
                 }
+                foreach (['declared_cash' => 'cash', 'declared_mobile' => 'mobile money', 'declared_card' => 'card'] as $declKey => $declLabel) {
+                    if (!isset($_POST[$declKey]) || trim((string)$_POST[$declKey]) === '' || !is_numeric($_POST[$declKey])) {
+                        throw new RuntimeException('Enter the counted ' . $declLabel . ' amount (0 if none) before closing the shift.');
+                    }
+                }
                 $declCash   = round((float)($_POST['declared_cash']   ?? 0), 2);
                 $declMobile = round((float)($_POST['declared_mobile'] ?? 0), 2);
                 $declCard   = round((float)($_POST['declared_card']   ?? 0), 2);
                 $shiftNote  = trim($_POST['shift_note'] ?? '');
                 if ($declCash < 0 || $declMobile < 0 || $declCard < 0) throw new RuntimeException('Declared amounts cannot be negative.');
 
-                // Expected totals (this cashier, paid in the active restaurant window).
-                // Uses paid_at so tabs created earlier but settled now are included.
+                // Expected totals come from the shared till maths (admin/includes/pos-shift-totals.php):
+                //  - the window starts at THIS user's previous close, so a second close never
+                //    re-counts the first one's sales;
+                //  - cash is attributed to who took the money (paid_by, fallback created_by;
+                //    split legs by paid_by_user_id), each leg by its own tender;
+                //  - refund/void payouts of paid orders reduce expected cash in the window they
+                //    happen in; the original sale stays in its own shift and is never restated.
+                require_once __DIR__ . '/includes/pos-shift-totals.php';
                 $windowStart = $restaurantWindow['start_sql'];
                 $windowEnd = $restaurantWindow['end_sql'];
-                // Split-order legs book to the tender each leg actually took
-                // (stock_order_splits.payment_method); stock_orders.payment_method only ever
-                // holds the LAST leg's method, so reading it for a mixed-tender split reported
-                // the whole tab under one tender and made the drawer impossible to balance.
-                // Non-split orders still read straight off stock_orders.
-                $expNonSplitStmt = $pdo->prepare("
-                    SELECT COALESCE(SUM(CASE WHEN payment_method='cash' THEN total_amount + COALESCE(tip_amount,0) ELSE 0 END),0) AS cash,
-                           COALESCE(SUM(CASE WHEN payment_method='mobile_money' THEN total_amount + COALESCE(tip_amount,0) ELSE 0 END),0) AS mobile,
-                           COALESCE(SUM(CASE WHEN payment_method IN ('card_manual','card_pos') THEN total_amount + COALESCE(tip_amount,0) ELSE 0 END),0) AS card
-                    FROM stock_orders
-                    WHERE created_by = ?
-                      AND status = 'paid'
-                      AND COALESCE(split_count,1) <= 1
-                      AND (
-                              (paid_at IS NOT NULL AND paid_at >= ? AND paid_at < ?)
-                          OR  (paid_at IS NULL AND created_at >= ? AND created_at < ?)
-                      )
-                ");
-                $expNonSplitStmt->execute([$user['id'], $windowStart, $windowEnd, $windowStart, $windowEnd]);
-                $expNonSplit = $expNonSplitStmt->fetch(PDO::FETCH_ASSOC) ?: ['cash' => 0, 'mobile' => 0, 'card' => 0];
-
-                $expSplitStmt = $pdo->prepare("
-                    SELECT COALESCE(SUM(CASE WHEN s.payment_method='cash' THEN s.split_amount + COALESCE(s.tip_amount,0) ELSE 0 END),0) AS cash,
-                           COALESCE(SUM(CASE WHEN s.payment_method='mobile_money' THEN s.split_amount + COALESCE(s.tip_amount,0) ELSE 0 END),0) AS mobile,
-                           COALESCE(SUM(CASE WHEN s.payment_method IN ('card_manual','card_pos') THEN s.split_amount + COALESCE(s.tip_amount,0) ELSE 0 END),0) AS card
-                    FROM stock_order_splits s
-                    INNER JOIN stock_orders o ON o.id = s.order_id
-                    WHERE o.created_by = ?
-                      AND o.status = 'paid'
-                      AND COALESCE(o.split_count,1) > 1
-                      AND (
-                              (o.paid_at IS NOT NULL AND o.paid_at >= ? AND o.paid_at < ?)
-                          OR  (o.paid_at IS NULL AND o.created_at >= ? AND o.created_at < ?)
-                      )
-                ");
-                $expSplitStmt->execute([$user['id'], $windowStart, $windowEnd, $windowStart, $windowEnd]);
-                $expSplit = $expSplitStmt->fetch(PDO::FETCH_ASSOC) ?: ['cash' => 0, 'mobile' => 0, 'card' => 0];
-
-                // Order-level metrics (tips, counts, stale-tab tracking) don't depend on which
-                // tender a split leg used, so these still read straight off the order row.
-                $expOrdersStmt = $pdo->prepare("
-                    SELECT COALESCE(SUM(COALESCE(tip_amount,0)),0) AS tips_total,
-                           COUNT(*) AS orders_count,
-                           COALESCE(SUM(CASE WHEN created_at < ? THEN 1 ELSE 0 END),0) AS settled_from_tabs_count,
-                           COALESCE(SUM(CASE WHEN created_at < ? THEN total_amount + COALESCE(tip_amount,0) ELSE 0 END),0) AS settled_from_tabs_amount
-                    FROM stock_orders
-                    WHERE created_by = ?
-                      AND status = 'paid'
-                      AND (
-                              (paid_at IS NOT NULL AND paid_at >= ? AND paid_at < ?)
-                          OR  (paid_at IS NULL AND created_at >= ? AND created_at < ?)
-                      )
-                ");
-                $expOrdersStmt->execute([$windowStart, $windowStart, $user['id'], $windowStart, $windowEnd, $windowStart, $windowEnd]);
-                $expOrders = $expOrdersStmt->fetch(PDO::FETCH_ASSOC) ?: ['tips_total' => 0, 'orders_count' => 0, 'settled_from_tabs_count' => 0, 'settled_from_tabs_amount' => 0];
-
-                $E = [
-                    'cash'   => round((float)$expNonSplit['cash']   + (float)$expSplit['cash'], 2),
-                    'mobile' => round((float)$expNonSplit['mobile'] + (float)$expSplit['mobile'], 2),
-                    'card'   => round((float)$expNonSplit['card']   + (float)$expSplit['card'], 2),
-                    'tips_total' => (float)$expOrders['tips_total'],
-                    'orders_count' => (int)$expOrders['orders_count'],
-                    'settled_from_tabs_count' => (int)$expOrders['settled_from_tabs_count'],
-                    'settled_from_tabs_amount' => (float)$expOrders['settled_from_tabs_amount'],
-                ];
-
-                // Voids reporting follows voided_at (fallback to created_at for legacy rows).
-                $voidsStmt = $pdo->prepare("
-                    SELECT COUNT(*) AS voids_count,
-                           COALESCE(SUM(total_amount),0) AS voids_amount
-                    FROM stock_orders
-                    WHERE created_by = ?
-                      AND status = 'voided'
-                      AND (
-                            (voided_at IS NOT NULL AND voided_at >= ? AND voided_at < ?)
-                         OR (voided_at IS NULL AND created_at >= ? AND created_at < ?)
-                      )
-                ");
-                $voidsStmt->execute([$user['id'], $windowStart, $windowEnd, $windowStart, $windowEnd]);
-                $V = $voidsStmt->fetch(PDO::FETCH_ASSOC) ?: ['voids_count' => 0, 'voids_amount' => 0];
-                $E['voids_count'] = (int)($V['voids_count'] ?? 0);
-                $E['voids_amount'] = (float)($V['voids_amount'] ?? 0);
+                $shiftFrom = rh_pos_shift_window_start($pdo, (int)$user['id'], $windowStart, $windowEnd);
+                $E = rh_pos_shift_totals($pdo, (int)$user['id'], $shiftFrom, $windowEnd, $windowStart);
                 $vCash   = round($declCash   - (float)$E['cash'], 2);
                 $vMobile = round($declMobile - (float)$E['mobile'], 2);
                 $vCard   = round($declCard   - (float)$E['card'], 2);
@@ -1007,7 +1031,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $pdo->prepare("INSERT INTO stock_shift_closes (user_id, user_name, shift_date, closed_at, expected_cash, declared_cash, variance_cash, expected_mobile, declared_mobile, variance_mobile, expected_card, declared_card, variance_card, orders_count, voids_count, voids_amount, notes, ip_address) VALUES (?, ?, ?, NOW(), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
                     ->execute([$user['id'], $user['full_name'], $restaurantWindow['business_date'], (float)$E['cash'], $declCash, $vCash, (float)$E['mobile'], $declMobile, $vMobile, (float)$E['card'], $declCard, $vCard, (int)$E['orders_count'], (int)$E['voids_count'], (float)$E['voids_amount'], $shiftNote ?: null, $_SERVER['REMOTE_ADDR'] ?? null]);
                 $closeId = (int)$pdo->lastInsertId();
-                pos_logAudit($pdo, 0, $user['id'], $user['full_name'], 'shift_closed', json_encode(['close_id' => $closeId, 'window_start' => $windowStart, 'window_end' => $windowEnd, 'expected_cash' => $E['cash'], 'declared_cash' => $declCash, 'variance_cash' => $vCash, 'expected_mobile' => $E['mobile'], 'declared_mobile' => $declMobile, 'variance_mobile' => $vMobile, 'expected_card' => $E['card'], 'declared_card' => $declCard, 'variance_card' => $vCard, 'tips_total' => $E['tips_total'] ?? 0, 'orders' => $E['orders_count'], 'voids' => $E['voids_count'], 'settled_from_tabs_count' => $E['settled_from_tabs_count'], 'settled_from_tabs_amount' => $E['settled_from_tabs_amount'], 'override' => $overrideRequested && $maxVar > $threshold, 'override_reason' => $overrideRequested ? $overrideReason : null]));
+                pos_logAudit($pdo, 0, $user['id'], $user['full_name'], 'shift_closed', json_encode(['close_id' => $closeId, 'window_start' => $shiftFrom, 'window_end' => $windowEnd, 'refund_cash' => $E['refund_cash'], 'refund_mobile' => $E['refund_mobile'], 'refund_card' => $E['refund_card'], 'expected_cash' => $E['cash'], 'declared_cash' => $declCash, 'variance_cash' => $vCash, 'expected_mobile' => $E['mobile'], 'declared_mobile' => $declMobile, 'variance_mobile' => $vMobile, 'expected_card' => $E['card'], 'declared_card' => $declCard, 'variance_card' => $vCard, 'tips_total' => $E['tips_total'] ?? 0, 'orders' => $E['orders_count'], 'voids' => $E['voids_count'], 'settled_from_tabs_count' => $E['settled_from_tabs_count'], 'settled_from_tabs_amount' => $E['settled_from_tabs_amount'], 'override' => $overrideRequested && $maxVar > $threshold, 'override_reason' => $overrideRequested ? $overrideReason : null]));
 
                 $justClosedShift = [
                     'expected_cash' => (float)$E['cash'],
@@ -1079,61 +1103,35 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 if ($refRow['status'] !== 'paid') throw new RuntimeException('Only paid orders can be refunded. Current status: ' . $refRow['status'] . '.');
 
                 $refundTotal = (float)$refRow['total_amount'] + (float)($refRow['tip_amount'] ?? 0);
+
+                /* Reverse the sale with contra rows via the shared method (also used by the API void
+                 * and the stock-orders void). Each original payment row — one per split leg — is
+                 * reversed in ITS OWN tender for what is still refundable on it (original gross less
+                 * refunds already raised, pending/processing/completed, under the order row lock).
+                 * Raising it twice, or after payment-refund.php already returned the money, finds
+                 * nothing left and is refused instead of double-refunding.
+                 * Deliberately NOT swallowed: if this fails the whole refund rolls back (outer catch)
+                 * rather than leave the order 'refunded' with cash out of the drawer and no ledger row.
+                 * Tips are not in the ledger (cash movement, not revenue) so they are not reversed
+                 * here; $refundTotal keeps them because that is what is physically handed back.
+                 * payments.refund_reason is an ENUM, so the typed wording goes to notes. */
+                $refVat = pos_calculateRestaurantVatParts((float)$refRow['total_amount']);
+                $refundResult = rh_reverse_restaurant_payments(
+                    $pdo,
+                    $refundOrderId,
+                    (string)$refRow['reference'],
+                    'REF-',
+                    'other',
+                    'Refund: ' . $refundReason,
+                    (int)$user['id'],
+                    ['net' => $refVat['net'], 'vat_rate' => $refVat['vat_rate'], 'vat' => $refVat['vat'], 'gross' => $refVat['gross'], 'method' => pos_mapMethod((string)($refRow['payment_method'] ?? 'cash'))]
+                );
+                if (!empty($refundResult['nothing_to_refund'])) {
+                    throw new RuntimeException('Nothing left to refund on ' . $refRow['reference'] . ' - it has already been refunded in full.');
+                }
+                // Every original row is now reversed in full, so the order is fully refunded.
                 $pdo->prepare("UPDATE stock_orders SET status='refunded', refunded_at=NOW(), refund_reason=? WHERE id=?")
                     ->execute([$refundReason, $refundOrderId]);
-                // Create refund record for ledger reversal (canonical columns so refund reports pick it up).
-                // Deliberately NOT wrapped in a try/catch: if this insert fails, the whole
-                // refund must roll back (see outer catch) rather than leave the order marked
-                // 'refunded' with cash out of the drawer and no ledger entry to show for it.
-                {
-                    // POS menu prices are gross — extract VAT from within (same as the sale sync)
-                    $refVat = pos_calculateRestaurantVatParts((float)$refRow['total_amount']);
-
-                    // The ledger reverses exactly what the sale recorded, and the sale
-                    // (pos_syncPayment -> rh_sync_restaurant_payment) passes total_amount
-                    // ONLY — the tip never enters `payments`. This previously wrote
-                    // payment_amount = net + tip and total_amount = total + tip, so
-                    // refunding a tipped order reversed more than was ever booked and left
-                    // revenue negative by the tip. Tips are not revenue; they are cash
-                    // movement, and admin/pos-accounting.php already counts them separately
-                    // for till reconciliation via total_amount + tip_amount.
-                    // $refundTotal below still includes the tip: that is what is physically
-                    // handed back and what the audit trail and staff message should show.
-                    $origPayStmt = $pdo->prepare("SELECT id FROM payments WHERE booking_type='restaurant' AND COALESCE(payment_type,'') != 'refund' AND deleted_at IS NULL AND (payment_reference = ? OR booking_id = ?) ORDER BY id DESC LIMIT 1");
-                    $origPayStmt->execute(['POS-' . $refRow['reference'], $refundOrderId]);
-                    $origPaymentId = (int)$origPayStmt->fetchColumn() ?: null;
-                    $pdo->prepare("INSERT INTO payments (
-                            payment_reference, booking_type, booking_id, booking_reference,
-                            payment_date, payment_amount, vat_rate, vat_amount, total_amount,
-                            payment_method, payment_type, payment_status, status,
-                            original_payment_id, refund_reason, refund_status, refund_amount,
-                            notes, recorded_by, created_at
-                        ) VALUES (?, 'restaurant', ?, ?, ?, ?, ?, ?, ?, ?, 'refund', 'completed', 'completed', ?, ?, 'completed', ?, ?, ?, NOW())")
-                        ->execute([
-                            'REF-POS-' . $refRow['reference'],
-                            $refundOrderId,
-                            $refRow['reference'],
-                            rh_station_union_business_window()['business_date'] ?? date('Y-m-d'),
-                            $refVat['net'],
-                            $refVat['vat_rate'],
-                            $refVat['vat'],
-                            $refVat['gross'],
-                            pos_mapMethod($refRow['payment_method'] ?? 'cash'),
-                            $origPaymentId,
-                            /* payments.refund_reason is an ENUM
-                             * ('early_checkout','late_checkout_charge','cancellation',
-                             * 'service_issue','overpayment','other') — NOT free text. Binding the
-                             * cashier's typed reason here made MySQL reject the row with
-                             * "Data truncated for column 'refund_reason'", and because the insert
-                             * used to sit in a swallow-and-log try/catch, every POS refund since
-                             * this code was written silently failed to reach the ledger. The
-                             * operator's wording is preserved in `notes` (TEXT) just below. */
-                            'other',
-                            $refVat['gross'],
-                            'Refund: ' . $refundReason,
-                            $user['id'],
-                        ]);
-                }
                 $auditDetails = ['reason' => $refundReason, 'total' => $refundTotal, 'original_method' => $refRow['payment_method']];
                 if ($mgrActorId) {
                     $auditDetails['authorised_by_id']   = $mgrActorId;
@@ -1164,7 +1162,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 }
 
                 $pdo->beginTransaction();
-                [$orderId, $reference, $totalAmount, $count] = pos_buildOrderFromPost($pdo, $user, $orderType, $tableNumber, $customerName, $customerEmail, $customerPhone, $orderNote, false);
+                [$orderId, $reference, $totalAmount, $count, $replayed] = pos_buildOrderFromPost($pdo, $user, $orderType, $tableNumber, $customerName, $customerEmail, $customerPhone, $orderNote, false);
+                if ($replayed) {
+                    /* Same client_uuid already produced this order: return the stored result and
+                     * stop — never re-apply a discount or take a second payment. */
+                    $pdo->commit();
+                    pos_redirectWithFlash([
+                        'message' => "Order {$reference} was already recorded — duplicate submission ignored, nothing charged twice.",
+                        'last_order_id' => $orderId,
+                        'last_order_ref' => $reference,
+                        'just_parked' => false,
+                    ]);
+                }
                 $coversPay = max(0, min(99, (int)($_POST['covers'] ?? 0)));
                 if ($posHasCoversCol && $coversPay > 0) {
                     $pdo->prepare("UPDATE stock_orders SET covers=? WHERE id=?")->execute([$coversPay, $orderId]);
@@ -1560,52 +1569,21 @@ function pos_fetch_order_deal_lines(PDO $pdo, int $orderId): array
 /* My-shift summary (per-cashier, based on payment time in this restaurant window). */
 function pos_fetch_shift_summary(PDO $pdo, array $restaurantWindow, int $userId): array
 {
-    $myShift = $pdo->prepare("
-        SELECT COUNT(*) AS orders_today,
-            COALESCE(SUM(total_amount),0) AS revenue_today,
-            /* Split orders book per-leg from stock_order_splits — the order row's
-             * payment_method only holds the LAST leg's tender, which would show a
-             * mixed cash+card split entirely under card in the till's live header. */
-            COALESCE(SUM(CASE
-                WHEN COALESCE(split_count,1) <= 1 AND payment_method='cash' THEN total_amount
-                WHEN COALESCE(split_count,1) > 1 THEN COALESCE((SELECT SUM(CASE WHEN s.payment_method='cash' THEN s.split_amount ELSE 0 END) FROM stock_order_splits s WHERE s.order_id = stock_orders.id),0)
-                ELSE 0 END),0) AS cash_today,
-            COALESCE(SUM(CASE
-                WHEN COALESCE(split_count,1) <= 1 AND payment_method='mobile_money' THEN total_amount
-                WHEN COALESCE(split_count,1) > 1 THEN COALESCE((SELECT SUM(CASE WHEN s.payment_method='mobile_money' THEN s.split_amount ELSE 0 END) FROM stock_order_splits s WHERE s.order_id = stock_orders.id),0)
-                ELSE 0 END),0) AS mobile_today,
-            COALESCE(SUM(CASE
-                WHEN COALESCE(split_count,1) <= 1 AND payment_method IN ('card_manual','card_pos') THEN total_amount
-                WHEN COALESCE(split_count,1) > 1 THEN COALESCE((SELECT SUM(CASE WHEN s.payment_method IN ('card_manual','card_pos') THEN s.split_amount ELSE 0 END) FROM stock_order_splits s WHERE s.order_id = stock_orders.id),0)
-                ELSE 0 END),0) AS card_today,
-            COALESCE(SUM(CASE WHEN created_at < ? THEN 1 ELSE 0 END),0) AS settled_from_tabs_count,
-            COALESCE(SUM(CASE WHEN created_at < ? THEN total_amount ELSE 0 END),0) AS settled_from_tabs_amount
-        FROM stock_orders
-        WHERE created_by = ?
-          AND status = 'paid'
-          AND (
-                (paid_at IS NOT NULL AND paid_at >= ? AND paid_at < ?)
-             OR (paid_at IS NULL AND created_at >= ? AND created_at < ?)
-          )
-    ");
-    $myShift->execute([
-        $restaurantWindow['start_sql'],
-        $restaurantWindow['start_sql'],
-        $userId,
-        $restaurantWindow['start_sql'],
-        $restaurantWindow['end_sql'],
-        $restaurantWindow['start_sql'],
-        $restaurantWindow['end_sql']
-    ]);
-    $row = $myShift->fetch(PDO::FETCH_ASSOC) ?: [];
+    /* Same maths as the close itself (admin/includes/pos-shift-totals.php): window starts at this
+     * user's previous close, takings attributed to who took the money. The toolbar shows SALES
+     * taken per tender (gross, before refund payouts). The expected drawer figure is never sent
+     * to the browser: the close is a blind count and the server computes the variance. */
+    require_once __DIR__ . '/includes/pos-shift-totals.php';
+    $from = rh_pos_shift_window_start($pdo, $userId, $restaurantWindow['start_sql'], $restaurantWindow['end_sql']);
+    $t = rh_pos_shift_totals($pdo, $userId, $from, $restaurantWindow['end_sql'], $restaurantWindow['start_sql']);
     return [
-        'orders_today' => (int)($row['orders_today'] ?? 0),
-        'revenue_today' => (float)($row['revenue_today'] ?? 0),
-        'cash_today' => (float)($row['cash_today'] ?? 0),
-        'mobile_today' => (float)($row['mobile_today'] ?? 0),
-        'card_today' => (float)($row['card_today'] ?? 0),
-        'settled_from_tabs_count' => (int)($row['settled_from_tabs_count'] ?? 0),
-        'settled_from_tabs_amount' => (float)($row['settled_from_tabs_amount'] ?? 0),
+        'orders_today' => (int)$t['orders_count'],
+        'revenue_today' => (float)$t['sales_total'],
+        'cash_today' => (float)$t['gross_cash'],
+        'mobile_today' => (float)$t['gross_mobile'],
+        'card_today' => (float)$t['gross_card'],
+        'settled_from_tabs_count' => (int)$t['settled_from_tabs_count'],
+        'settled_from_tabs_amount' => (float)$t['settled_from_tabs_amount'],
     ];
 }
 
@@ -3141,20 +3119,17 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
                 <input type="hidden" name="csrf_token" value="<?php echo $csrf_token; ?>">
                 <input type="hidden" name="action" value="close_shift">
                 <div class="modal-body">
-                    <p style="font-size:13px; color:#6c757d; margin-top:0;">Count what's actually in the drawer / records. The shift must balance — variance &gt; <?php echo $currency_symbol; ?> 1.00 will be blocked unless overridden by an admin/manager.</p>
+                    <p style="font-size:13px; color:#6c757d; margin-top:0;">Count what is actually in the drawer / records and enter every amount (0 if none). Expected figures stay hidden until you submit; the shift must balance — variance &gt; <?php echo $currency_symbol; ?> 1.00 will be blocked unless overridden by an admin/manager.</p>
                     <div style="background:#f7f7f7; border-radius:8px; padding:12px; font-size:13px; margin-bottom:14px;">
-                        <div>Expected cash: <strong id="expCash" data-amount="<?php echo (float)($shift['cash_today'] ?? 0); ?>"><?php echo $currency_symbol . ' ' . number_format((float)($shift['cash_today'] ?? 0), 2); ?></strong></div>
-                        <div>Expected mobile: <strong id="expMobile" data-amount="<?php echo (float)($shift['mobile_today'] ?? 0); ?>"><?php echo $currency_symbol . ' ' . number_format((float)($shift['mobile_today'] ?? 0), 2); ?></strong></div>
-                        <div>Expected card: <strong id="expCard" data-amount="<?php echo (float)($shift['card_today'] ?? 0); ?>"><?php echo $currency_symbol . ' ' . number_format((float)($shift['card_today'] ?? 0), 2); ?></strong></div>
                         <div>Paid orders this shift: <strong id="closeShiftOrdersCount"><?php echo (int)($shift['orders_today'] ?? 0); ?></strong></div>
                         <div>Settled earlier tabs: <strong id="closeShiftSettledCount"><?php echo (int)($shift['settled_from_tabs_count'] ?? 0); ?></strong> · <span id="closeShiftSettledAmount"><?php echo $currency_symbol . ' ' . number_format((float)($shift['settled_from_tabs_amount'] ?? 0), 2); ?></span></div>
                     </div>
                     <label>Cash counted (<?php echo $currency_symbol; ?>)</label>
-                    <input type="number" step="0.01" min="0" name="declared_cash" id="declCash" required oninput="updShiftVariance()">
+                    <input type="number" step="0.01" min="0" name="declared_cash" id="declCash" placeholder="0.00" required oninput="updShiftVariance()">
                     <label>Mobile money totals (<?php echo $currency_symbol; ?>)</label>
-                    <input type="number" step="0.01" min="0" name="declared_mobile" id="declMobile" value="<?php echo number_format((float)($shift['mobile_today'] ?? 0), 2, '.', ''); ?>" oninput="updShiftVariance()">
+                    <input type="number" step="0.01" min="0" name="declared_mobile" id="declMobile" placeholder="0.00" required oninput="updShiftVariance()">
                     <label>Card totals (<?php echo $currency_symbol; ?>)</label>
-                    <input type="number" step="0.01" min="0" name="declared_card" id="declCard" value="<?php echo number_format((float)($shift['card_today'] ?? 0), 2, '.', ''); ?>" oninput="updShiftVariance()">
+                    <input type="number" step="0.01" min="0" name="declared_card" id="declCard" placeholder="0.00" required oninput="updShiftVariance()">
 
                     <div id="shiftVarianceBox" style="margin-top:10px; padding:10px 12px; border-radius:8px; font-size:13px; display:none;"></div>
 
@@ -3719,7 +3694,7 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
         const posCanForceServe = <?php echo $posCanForceServe ? 'true' : 'false'; ?>;
         const posCanFloat      = <?php echo $posCanFloat ? 'true' : 'false'; ?>;
         const posCanAssignBarcode = <?php echo $posCanToggle86 ? 'true' : 'false'; ?>;
-        const posVatEnabled = <?php echo in_array(getSetting('vat_enabled'), ['1', 1, true, 'true', 'on'], true) ? 'true' : 'false'; ?>;
+        const posVatEnabled = <?php echo rh_vat_enabled() ? 'true' : 'false'; ?>;
         const posVatRate = <?php echo json_encode((float)getSetting('vat_rate')); ?>;
         const posServerErrorMessage = <?php echo json_encode($error, JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT); ?>;
         const posRestaurantTables = <?php echo json_encode($restaurantTables, JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_AMP | JSON_HEX_QUOT); ?>;
@@ -5441,17 +5416,6 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
             setText('tbStatCash', currencySymbol + ' ' + fmtMoneyNoDecimals(cash));
             setText('tbStatMobile', currencySymbol + ' ' + fmtMoneyNoDecimals(mobile));
             setText('tbStatCard', currencySymbol + ' ' + fmtMoneyNoDecimals(card));
-
-            const setExpected = (id, amount) => {
-                const el = document.getElementById(id);
-                if (!el) return;
-                el.dataset.amount = amount.toFixed(2);
-                el.textContent = currencySymbol + ' ' + fmtMoney(amount);
-            };
-
-            setExpected('expCash', cash);
-            setExpected('expMobile', mobile);
-            setExpected('expCard', card);
 
             setText('closeShiftOrdersCount', String(orders));
             setText('closeShiftSettledCount', String(settledCount));
@@ -8712,16 +8676,15 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
 
         /* Live variance preview for shift close. Blocks/warns when out-of-tolerance. */
         function updShiftVariance() {
-            const expCash = parseFloat(document.getElementById('expCash')?.dataset.amount || '0');
-            const expMobile = parseFloat(document.getElementById('expMobile')?.dataset.amount || '0');
-            const expCard = parseFloat(document.getElementById('expCard')?.dataset.amount || '0');
-            const decCash = parseFloat(document.getElementById('declCash')?.value || '0') || 0;
-            const decMobile = parseFloat(document.getElementById('declMobile')?.value || '0') || 0;
-            const decCard = parseFloat(document.getElementById('declCard')?.value || '0') || 0;
-            const vC = +(decCash - expCash).toFixed(2);
-            const vM = +(decMobile - expMobile).toFixed(2);
-            const vK = +(decCard - expCard).toFixed(2);
-            const max = Math.max(Math.abs(vC), Math.abs(vM), Math.abs(vK));
+            /* Blind count: no expected figures in the browser, so no live preview. The server
+               computes the variance on submit; privileged users tick the override box if needed. */
+            const ovBox0 = document.getElementById('shiftOverrideBox');
+            if (ovBox0) ovBox0.style.display = 'block';
+            const btn0 = document.getElementById('closeShiftBtn');
+            if (btn0) btn0.disabled = false;
+            const box0 = document.getElementById('shiftVarianceBox');
+            if (box0) box0.style.display = 'none';
+            return;
             const box = document.getElementById('shiftVarianceBox');
             const ovBox = document.getElementById('shiftOverrideBox');
             const btn = document.getElementById('closeShiftBtn');

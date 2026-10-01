@@ -220,17 +220,22 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 if (!in_array($user['role'] ?? '', ['admin', 'manager'], true)) {
                     throw new RuntimeException('Only admin/manager can adjust totals.');
                 }
-                if ($orderRow['status'] !== 'paid') {
-                    throw new RuntimeException('Only paid orders can be re-consolidated.');
+                /* Paid orders are immutable: once any payment (or split leg) is recorded the total,
+                 * discount and service charge are fixed. A change is a refund / credit note plus a
+                 * new sale - never an edit of what the guest already paid. */
+                $paidLegs = $pdo->prepare("SELECT COUNT(*) FROM payments WHERE booking_type = 'restaurant' AND booking_id = ? AND COALESCE(payment_type, '') != 'refund' AND deleted_at IS NULL");
+                $paidLegs->execute([$orderId]);
+                if ($orderRow['status'] !== 'placed' || (int)($orderRow['split_paid_count'] ?? 0) > 0 || (int)$paidLegs->fetchColumn() > 0) {
+                    throw new RuntimeException('This order has been paid - its totals can no longer be changed. Use the refund flow and take a new sale instead.');
                 }
                 $discount = max(0, (float)($_POST['discount_amount'] ?? 0));
                 $reason   = trim($_POST['discount_reason'] ?? '');
                 $service  = max(0, (float)($_POST['service_charge'] ?? 0));
-                $tax      = max(0, (float)($_POST['tax_amount'] ?? 0));
+                $tax      = 0.0; // F&B prices are gross; VAT is extracted from them, never added on top
                 $extraNotes = trim($_POST['extra_notes'] ?? '');
 
                 // Recompute subtotal from line items so we can't be tricked by stale data
-                $sumStmt = $pdo->prepare("SELECT COALESCE(SUM(line_total), 0) FROM stock_order_items WHERE order_id = ?");
+                $sumStmt = $pdo->prepare("SELECT COALESCE(SUM(line_total), 0) FROM stock_order_items WHERE order_id = ? AND kds_status <> 'void'");
                 $sumStmt->execute([$orderId]);
                 $subtotal = (float)$sumStmt->fetchColumn();
                 foreach (['discount' => $discount, 'service charge' => $service, 'tax' => $tax] as $label => $amount) {
@@ -248,7 +253,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     ->execute([$subtotal, $discount, $reason ?: null, $service, $tax, $newTotal, $extraNotes ? '[Consolidation] ' . $extraNotes : '', $orderId]);
 
                 // Sync payments table — recalculate VAT split from the new gross total
-                $vatEnabled = in_array(getSetting('vat_enabled'), ['1', 1, true, 'true', 'on'], true);
+                $vatEnabled = rh_vat_enabled();
                 $vatRate = $vatEnabled ? (float)getSetting('vat_rate') : 0.0;
                 $newNet = ($newTotal > 0 && $vatRate > 0) ? round($newTotal / (1 + ($vatRate / 100)), 2) : round($newTotal, 2);
                 $newVat = round($newTotal - $newNet, 2);
@@ -629,10 +634,10 @@ $canConsolidate = in_array($user['role'] ?? '', ['admin', 'manager'], true);
                 </div>
 
                 <!-- Manual consolidation -->
-                <?php if ($canConsolidate && $order['status'] === 'paid'): ?>
+                <?php if ($canConsolidate && $order['status'] === 'placed' && (int)($order['split_paid_count'] ?? 0) === 0): ?>
                     <div class="panel">
                         <h3><i class="fas fa-balance-scale"></i> Manual consolidation</h3>
-                        <p style="font-size:11px;color:#6c757d;margin:0 0 8px;">Apply a manager-approved discount, service charge or tax. Every change is audited.</p>
+                        <p style="font-size:11px;color:#6c757d;margin:0 0 8px;">Apply a manager-approved discount or service charge before payment. Once paid, totals are final. Every change is audited.</p>
                         <form method="POST">
                             <input type="hidden" name="csrf_token" value="<?php echo $csrf_token; ?>">
                             <input type="hidden" name="action" value="consolidate">
@@ -643,8 +648,6 @@ $canConsolidate = in_array($user['role'] ?? '', ['admin', 'manager'], true);
                             <input type="text" name="discount_reason" maxlength="255" value="<?php echo htmlspecialchars($order['discount_reason'] ?? ''); ?>" placeholder="e.g. Loyal guest courtesy">
                             <label>Service charge (<?php echo $currency; ?>)</label>
                             <input type="number" step="0.01" min="0" name="service_charge" value="<?php echo number_format((float)$order['service_charge'], 2, '.', ''); ?>">
-                            <label>Tax amount (<?php echo $currency; ?>)</label>
-                            <input type="number" step="0.01" min="0" name="tax_amount" value="<?php echo number_format((float)$order['tax_amount'], 2, '.', ''); ?>">
                             <label>Notes (appended to order)</label>
                             <textarea name="extra_notes" rows="2" placeholder="Optional context for this adjustment"></textarea>
                             <button type="submit" class="btn-primary" style="margin-top:10px;width:100%;" onclick="return confirm('Re-consolidate totals? Payment record will sync to the new total.');"><i class="fas fa-save"></i> Apply &amp; recompute</button>

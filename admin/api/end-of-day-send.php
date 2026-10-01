@@ -12,6 +12,7 @@
 declare(strict_types=1);
 
 require_once __DIR__ . '/api-init.php';
+require_once __DIR__ . '/../includes/pos-shift-totals.php';
 require_once __DIR__ . '/../../includes/report-mailer.php';
 require_once __DIR__ . '/../../includes/whatsapp-functions.php';
 
@@ -103,12 +104,12 @@ try {
     // Revenue
     $payStmt = $pdo->prepare("
         SELECT
-            COALESCE(SUM(CASE WHEN booking_type='room'       AND payment_status IN ('completed','paid') AND COALESCE(payment_type, '') <> 'refund' THEN total_amount ELSE 0 END), 0) AS room_gross,
-            COALESCE(SUM(CASE WHEN booking_type='conference' AND payment_status IN ('completed','paid') AND COALESCE(payment_type, '') <> 'refund' THEN total_amount ELSE 0 END), 0) AS conf_gross,
-            COALESCE(SUM(CASE WHEN booking_type='restaurant' AND payment_status IN ('completed','paid') AND COALESCE(payment_type, '') <> 'refund' THEN total_amount ELSE 0 END), 0) AS fnb_gross,
-            COALESCE(SUM(CASE WHEN booking_type='gym'        AND payment_status IN ('completed','paid') AND COALESCE(payment_type, '') <> 'refund' THEN total_amount ELSE 0 END), 0) AS gym_gross,
-            COALESCE(SUM(CASE WHEN booking_type='event'      AND payment_status IN ('completed','paid') AND COALESCE(payment_type, '') <> 'refund' THEN total_amount ELSE 0 END), 0) AS events_gross,
-            COALESCE(SUM(CASE WHEN payment_status IN ('completed','paid') AND COALESCE(payment_type, '') <> 'refund' THEN vat_amount ELSE 0 END), 0) AS total_vat,
+            COALESCE(SUM(CASE WHEN booking_type='room'       AND payment_status IN ('completed','paid','refunded','partially_refunded') AND COALESCE(payment_type, '') <> 'refund' THEN total_amount ELSE 0 END), 0) AS room_gross,
+            COALESCE(SUM(CASE WHEN booking_type='conference' AND payment_status IN ('completed','paid','refunded','partially_refunded') AND COALESCE(payment_type, '') <> 'refund' THEN total_amount ELSE 0 END), 0) AS conf_gross,
+            COALESCE(SUM(CASE WHEN booking_type='restaurant' AND payment_status IN ('completed','paid','refunded','partially_refunded') AND COALESCE(payment_type, '') <> 'refund' THEN total_amount ELSE 0 END), 0) AS fnb_gross,
+            COALESCE(SUM(CASE WHEN booking_type='gym'        AND payment_status IN ('completed','paid','refunded','partially_refunded') AND COALESCE(payment_type, '') <> 'refund' THEN total_amount ELSE 0 END), 0) AS gym_gross,
+            COALESCE(SUM(CASE WHEN booking_type='event'      AND payment_status IN ('completed','paid','refunded','partially_refunded') AND COALESCE(payment_type, '') <> 'refund' THEN total_amount ELSE 0 END), 0) AS events_gross,
+            COALESCE(SUM(CASE WHEN payment_status IN ('completed','paid','refunded','partially_refunded') AND COALESCE(payment_type, '') <> 'refund' THEN vat_amount ELSE 0 END), 0) AS total_vat,
                 COALESCE(SUM(CASE WHEN payment_type='refund' AND refund_status IN ('completed','processing') THEN refund_amount ELSE 0 END), 0) AS refunds,
                 COALESCE(SUM(CASE WHEN payment_type='refund' AND refund_status IN ('completed','processing') THEN vat_amount ELSE 0 END), 0) AS refund_vat,
             COALESCE(SUM(CASE WHEN payment_status IN ('pending','partial') AND COALESCE(payment_type, '') <> 'refund' THEN total_amount ELSE 0 END), 0) AS pending,
@@ -120,7 +121,16 @@ try {
     $rev = $payStmt->fetch(PDO::FETCH_ASSOC) ?: [];
     $rev['total_vat'] = (float)($rev['total_vat'] ?? 0) - (float)($rev['refund_vat'] ?? 0);
 
-    $gross = (float)$rev['room_gross'] + (float)$rev['conf_gross'] + (float)$rev['fnb_gross'] + (float)$rev['gym_gross'] + (float)$rev['events_gross'];
+    // Department revenue from posted charges: food / drink / room-service charges posted to
+    // guest folios today are F&B, not room revenue (so ADR / RevPAR use room charges only).
+    $folioFnb = rh_eod_folio_fnb($pdo, $date);
+    $folioFnbMoved = max(0.0, min((float)$folioFnb['gross'], (float)$rev['room_gross']));
+    if ($folioFnbMoved > 0) {
+        $rev['room_gross'] = (float)$rev['room_gross'] - $folioFnbMoved;
+        $rev['fnb_gross']  = (float)$rev['fnb_gross'] + $folioFnbMoved;
+    }
+
+    $gross =(float)$rev['room_gross'] + (float)$rev['conf_gross'] + (float)$rev['fnb_gross'] + (float)$rev['gym_gross'] + (float)$rev['events_gross'];
     $net   = $gross - (float)$rev['refunds'];
     $adr   = $rooms_occupied > 0 ? ((float)$rev['room_gross'] / $rooms_occupied) : 0;
     $revpar = $rooms_total    > 0 ? ((float)$rev['room_gross'] / $rooms_total)    : 0;
@@ -132,7 +142,7 @@ try {
             SELECT COALESCE(NULLIF(payment_method,''),'unassigned') AS method,
                    COALESCE(SUM(total_amount),0) AS total
             FROM payments
-            WHERE DATE(payment_date) = :d AND payment_status IN ('completed','paid') AND COALESCE(payment_type, '') <> 'refund' AND deleted_at IS NULL
+            WHERE DATE(payment_date) = :d AND payment_status IN ('completed','paid','refunded','partially_refunded') AND COALESCE(payment_type, '') <> 'refund' AND deleted_at IS NULL
             GROUP BY method ORDER BY total DESC
         ");
         $mStmt->execute([':d' => $date]);
@@ -157,34 +167,19 @@ try {
     // POS totals
     $pos = ['orders' => 0, 'gross' => 0, 'cogs' => 0, 'voided_value' => 0, 'voided_count' => 0];
     try {
-        $tot = $pdo->prepare("
-            SELECT COUNT(*) AS orders,
-                   COALESCE(SUM(CASE WHEN status IN ('paid','completed') THEN total_amount ELSE 0 END),0) AS gross,
-                   COALESCE(SUM(CASE WHEN status IN ('paid','completed') THEN total_cost   ELSE 0 END),0) AS cogs,
-                   COALESCE(SUM(CASE WHEN status='voided' THEN total_amount ELSE 0 END),0) AS voided_value,
-                   COALESCE(SUM(CASE WHEN status='voided' THEN 1 ELSE 0 END),0) AS voided_count
-            FROM stock_orders WHERE created_at BETWEEN :a AND :b
-        ");
-        $tot->execute([':a' => $dayStart, ':b' => $dayEnd]);
-        $pos = array_merge($pos, $tot->fetch(PDO::FETCH_ASSOC) ?: []);
+        // Same shared block as the on-screen report (sales by paid_at in the business window,
+        // voids / refunds by their own timestamp).
+        $posSummary = rh_pos_eod_summary($pdo, $date);
+        $pos = array_merge($pos, $posSummary['totals']);
     } catch (Throwable $e) {
+        $posSummary = [];
         $pos = ['orders' => 0, 'gross' => 0, 'cogs' => 0, 'voided_value' => 0, 'voided_count' => 0];
     }
 
     // Top items
     $top = [];
     try {
-        $itStmt = $pdo->prepare("
-            SELECT soi.item_name, SUM(soi.quantity) AS qty, SUM(soi.line_total) AS revenue
-            FROM stock_order_items soi
-            INNER JOIN stock_orders o ON o.id = soi.order_id
-            WHERE o.status IN ('paid','completed') AND o.created_at BETWEEN :a AND :b
-            GROUP BY soi.item_name
-            ORDER BY revenue DESC
-            LIMIT 5
-        ");
-        $itStmt->execute([':a' => $dayStart, ':b' => $dayEnd]);
-        $top = $itStmt->fetchAll(PDO::FETCH_ASSOC);
+        $top = array_slice($posSummary['top_items'] ?? [], 0, 5);
     } catch (Throwable $e) {
         $top = [];
     }
@@ -239,7 +234,7 @@ try {
     $previous = ['net' => 0.0, 'pos_gross' => 0.0, 'rooms_occupied' => 0, 'occupancy_pct' => 0.0];
     $prevPay = $pdo->prepare("
         SELECT
-            COALESCE(SUM(CASE WHEN payment_status IN ('completed','paid') AND COALESCE(payment_type, '') <> 'refund' THEN total_amount ELSE 0 END), 0) AS gross,
+            COALESCE(SUM(CASE WHEN payment_status IN ('completed','paid','refunded','partially_refunded') AND COALESCE(payment_type, '') <> 'refund' THEN total_amount ELSE 0 END), 0) AS gross,
             COALESCE(SUM(CASE WHEN payment_type='refund' AND refund_status IN ('completed','processing') THEN refund_amount ELSE 0 END), 0) AS refunds
         FROM payments
         WHERE DATE(payment_date) = :d
@@ -250,9 +245,7 @@ try {
     $previous['net'] = (float)($prevPayRow['gross'] ?? 0) - (float)($prevPayRow['refunds'] ?? 0);
 
     try {
-        $prevPos = $pdo->prepare("SELECT COALESCE(SUM(CASE WHEN status IN ('paid','completed') THEN total_amount ELSE 0 END), 0) FROM stock_orders WHERE created_at BETWEEN :a AND :b");
-        $prevPos->execute([':a' => $previous_day_start, ':b' => $previous_day_end]);
-        $previous['pos_gross'] = (float)$prevPos->fetchColumn();
+        $previous['pos_gross'] = (float)(rh_pos_eod_summary($pdo, $previous_day)['totals']['gross'] ?? 0);
     } catch (Throwable $e) {
         $previous['pos_gross'] = 0.0;
     }
@@ -348,7 +341,7 @@ try {
         SELECT rt.name AS room_type, COUNT(DISTINCT b.id) AS bookings, COALESCE(SUM(p.total_amount), 0) AS revenue
         FROM payments p INNER JOIN bookings b ON b.id = p.booking_id
         INNER JOIN rooms rt ON rt.id = b.room_id
-        WHERE DATE(p.payment_date) = :d AND p.payment_status IN ('completed','paid')
+        WHERE DATE(p.payment_date) = :d AND p.payment_status IN ('completed','paid','refunded','partially_refunded')
           AND COALESCE(p.payment_type,'') <> 'refund' AND p.booking_type = 'room' AND p.deleted_at IS NULL
         GROUP BY rt.id, rt.name ORDER BY revenue DESC LIMIT 6
     ");

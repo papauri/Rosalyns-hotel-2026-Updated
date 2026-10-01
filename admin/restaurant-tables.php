@@ -27,7 +27,7 @@ $error = '';
 
 function rt_calculate_restaurant_vat_parts(float $grossAmount): array
 {
-    $vatEnabled = in_array(getSetting('vat_enabled'), ['1', 1, true, 'true', 'on'], true);
+    $vatEnabled = rh_vat_enabled();
     $vatRate = $vatEnabled ? (float)getSetting('vat_rate') : 0.0;
     if ($grossAmount <= 0 || $vatRate <= 0) {
         return [
@@ -127,6 +127,7 @@ function rt_apply_payment_to_order(PDO $pdo, array $user, array $order, string $
         $extras['auth'] = mb_substr($cardAuthCode, 0, 50);
     }
 
+    // paid_by = whoever took the money (shift cash is attributed to them, not to the tab opener)
     $pdo->prepare("UPDATE stock_orders SET status='paid', paid_at=NOW(), payment_method=?, tendered_amount=?, change_due=?, mobile_wallet_provider=?, mobile_wallet_reference=?, card_last4=?, card_auth_code=? WHERE id=?")
         ->execute([
             $paymentMethod,
@@ -138,6 +139,7 @@ function rt_apply_payment_to_order(PDO $pdo, array $user, array $order, string $
             $extras['auth'],
             $orderId,
         ]);
+    rh_stamp_order_paid_by($pdo, $orderId, (int)($user['id'] ?? 0));
 
     $extras['payment_id'] = rt_sync_payment($pdo, $order, (int)($user['id'] ?? 0), $paymentMethod);
 
@@ -891,11 +893,17 @@ if (!rh_restaurant_tables_exist($pdo)) {
                 }
 
                 $pdo->beginTransaction();
-                $stmt = $pdo->prepare("SELECT id, reference, total_amount, status, order_type, table_number, customer_name, customer_email, customer_phone FROM stock_orders WHERE id = ? FOR UPDATE");
+                $stmt = $pdo->prepare("SELECT id, reference, total_amount, status, order_type, table_number, customer_name, customer_email, customer_phone, COALESCE(split_paid_count, 0) AS split_paid_count, COALESCE(split_count, 1) AS split_count FROM stock_orders WHERE id = ? FOR UPDATE");
                 $stmt->execute([$orderId]);
                 $order = $stmt->fetch(PDO::FETCH_ASSOC);
                 if (!$order) {
                     throw new RuntimeException('Order not found.');
+                }
+                if ((int)$order['split_paid_count'] > 0) {
+                    /* Part of this bill is already paid leg by leg at the till. Settling the whole
+                     * total again here would collect it twice - the remaining legs can only be
+                     * finished from the POS till, under the stored split. */
+                    throw new RuntimeException('This tab is mid split-payment (' . (int)$order['split_paid_count'] . ' of ' . (int)$order['split_count'] . ' paid) - finish it from the POS till.');
                 }
                 if (($order['order_type'] ?? '') !== 'dine_in') {
                     throw new RuntimeException('Only dine-in table tabs can be settled here.');

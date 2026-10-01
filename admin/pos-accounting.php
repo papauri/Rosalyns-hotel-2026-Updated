@@ -4,6 +4,7 @@ require_once 'admin-init.php';
 /** @var string $csrf_token */
 /** @var PDO $pdo */
 require_once 'includes/finance-schema.php';
+require_once __DIR__ . '/includes/pos-shift-totals.php';
 require_once '../includes/station-hours.php';
 
 if (!hasPermission((int)($user['id'] ?? 0), 'pos_accounting')) {
@@ -184,42 +185,10 @@ function rh_pos_accounting_log(PDO $pdo, int $orderId, ?int $actorId, ?string $a
 
 function rh_pos_accounting_shift_totals(PDO $pdo, int $userId, string $dayStart, string $dayEnd): array
 {
-    $stmt = $pdo->prepare("
-        SELECT
-            COALESCE(SUM(CASE WHEN payment_method = 'cash' THEN total_amount + COALESCE(tip_amount,0) ELSE 0 END), 0) AS cash,
-            COALESCE(SUM(CASE WHEN payment_method = 'mobile_money' THEN total_amount + COALESCE(tip_amount,0) ELSE 0 END), 0) AS mobile,
-            COALESCE(SUM(CASE WHEN payment_method IN ('card_manual','card_pos') THEN total_amount + COALESCE(tip_amount,0) ELSE 0 END), 0) AS card,
-            COUNT(*) AS orders_count,
-            COALESCE(SUM(CASE WHEN created_at < ? THEN 1 ELSE 0 END), 0) AS settled_from_tabs_count,
-            COALESCE(SUM(CASE WHEN created_at < ? THEN total_amount + COALESCE(tip_amount,0) ELSE 0 END), 0) AS settled_from_tabs_amount
-        FROM stock_orders
-        WHERE created_by = ?
-          AND status = 'paid'
-          AND ((paid_at IS NOT NULL AND paid_at BETWEEN ? AND ?) OR (paid_at IS NULL AND created_at BETWEEN ? AND ?))
-    ");
-    $stmt->execute([$dayStart, $dayStart, $userId, $dayStart, $dayEnd, $dayStart, $dayEnd]);
-    $totals = $stmt->fetch(PDO::FETCH_ASSOC) ?: [];
-
-    $voidStmt = $pdo->prepare("
-        SELECT COUNT(*) AS voids_count, COALESCE(SUM(total_amount), 0) AS voids_amount
-        FROM stock_orders
-        WHERE created_by = ?
-          AND status = 'voided'
-          AND ((voided_at IS NOT NULL AND voided_at BETWEEN ? AND ?) OR (voided_at IS NULL AND created_at BETWEEN ? AND ?))
-    ");
-    $voidStmt->execute([$userId, $dayStart, $dayEnd, $dayStart, $dayEnd]);
-    $voids = $voidStmt->fetch(PDO::FETCH_ASSOC) ?: [];
-
-    return [
-        'cash' => (float)($totals['cash'] ?? 0),
-        'mobile' => (float)($totals['mobile'] ?? 0),
-        'card' => (float)($totals['card'] ?? 0),
-        'orders_count' => (int)($totals['orders_count'] ?? 0),
-        'settled_from_tabs_count' => (int)($totals['settled_from_tabs_count'] ?? 0),
-        'settled_from_tabs_amount' => (float)($totals['settled_from_tabs_amount'] ?? 0),
-        'voids_count' => (int)($voids['voids_count'] ?? 0),
-        'voids_amount' => (float)($voids['voids_amount'] ?? 0),
-    ];
+    // Same split-aware, payer-attributed, payout-netted maths as the till close
+    // (admin/includes/pos-shift-totals.php), starting after this user's last close.
+    $from = rh_pos_shift_window_start($pdo, $userId, $dayStart, $dayEnd);
+    return rh_pos_shift_totals($pdo, $userId, $from, $dayEnd, $dayStart);
 }
 
 function rh_pos_accounting_existing_closes(PDO $pdo, string $businessDate): array
@@ -257,6 +226,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $closedCount = 0;
             $skippedAlreadyClosed = 0;
             $skippedNoOrders = 0;
+            $closeResults = [];
             $pdo->beginTransaction();
 
             foreach ($selectedUserIds as $targetUserId) {
@@ -275,9 +245,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     continue;
                 }
 
-                $declaredCash = round((float)($_POST['declared_cash'][$targetUserId] ?? $totals['cash']), 2);
-                $declaredMobile = round((float)($_POST['declared_mobile'][$targetUserId] ?? $totals['mobile']), 2);
-                $declaredCard = round((float)($_POST['declared_card'][$targetUserId] ?? $totals['card']), 2);
+                // Blind count: every declared amount must be entered (0 is fine, blank is not);
+                // the server alone computes the variance against the expected figures.
+                foreach (['declared_cash' => 'cash', 'declared_mobile' => 'mobile money', 'declared_card' => 'card'] as $declKey => $declLabel) {
+                    $declRaw = $_POST[$declKey][$targetUserId] ?? null;
+                    if ($declRaw === null || trim((string)$declRaw) === '' || !is_numeric($declRaw)) {
+                        throw new RuntimeException('Enter the counted ' . $declLabel . ' for ' . $targetName . ' (enter 0 if none) before closing.');
+                    }
+                }
+                $declaredCash = round((float)$_POST['declared_cash'][$targetUserId], 2);
+                $declaredMobile = round((float)$_POST['declared_mobile'][$targetUserId], 2);
+                $declaredCard = round((float)$_POST['declared_card'][$targetUserId], 2);
                 if ($declaredCash < 0 || $declaredMobile < 0 || $declaredCard < 0) {
                     throw new RuntimeException('Declared amounts cannot be negative.');
                 }
@@ -327,6 +305,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     'declared_card' => $declaredCard,
                 ]));
                 $closedCount++;
+                $closeResults[] = $targetName . ': cash ' . number_format($varianceCash, 2)
+                    . ', mobile ' . number_format($varianceMobile, 2)
+                    . ', card ' . number_format($varianceCard, 2);
             }
 
             // Save per-order accountant notes — upsert (clear old entry, insert new) inside same transaction
@@ -359,6 +340,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 ]);
             }
             $message = $closedCount . ' POS shift' . ($closedCount === 1 ? '' : 's') . ' closed.';
+            if ($closeResults) {
+                $message .= ' Variance (counted - expected) - ' . implode(' | ', $closeResults) . '.';
+            }
             if ($skippedAlreadyClosed > 0 || $skippedNoOrders > 0) {
                 $message .= ' Skipped - already closed: ' . $skippedAlreadyClosed
                     . ', no paid orders: ' . $skippedNoOrders . '.';
@@ -377,60 +361,72 @@ $posUsers = [];
 $orders = [];
 $orderItemsByOrder = [];
 $logs = [];
-$summary = ['orders' => 0, 'paid_total' => 0.0, 'cash' => 0.0, 'mobile' => 0.0, 'card' => 0.0, 'voids' => 0, 'voided_total' => 0.0];
+$summary = ['orders' => 0, 'paid_total' => 0.0, 'cash' => 0.0, 'mobile' => 0.0, 'card' => 0.0, 'refunds' => 0, 'refund_total' => 0.0, 'voids' => 0, 'voided_total' => 0.0];
 
 try {
-    $usersStmt = $pdo->prepare("
-        SELECT
-            au.id,
-            COALESCE(NULLIF(au.full_name, ''), au.username) AS display_name,
-            au.username,
-            COUNT(so.id) AS order_count,
-            COALESCE(SUM(CASE WHEN so.status = 'paid' THEN so.total_amount ELSE 0 END), 0) AS paid_total,
-            /* so.payment_method only ever holds the LAST split leg's tender, so a mixed-tender
-             * split must be read from stock_order_splits (each leg's own method) instead —
-             * otherwise the whole tab is misreported under one tender. */
-            COALESCE(SUM(CASE
-                WHEN so.status = 'paid' AND COALESCE(so.split_count,1) <= 1 AND so.payment_method = 'cash' THEN so.total_amount + COALESCE(so.tip_amount,0)
-                WHEN so.status = 'paid' AND COALESCE(so.split_count,1) > 1 THEN COALESCE((SELECT SUM(CASE WHEN s.payment_method='cash' THEN s.split_amount + COALESCE(s.tip_amount,0) ELSE 0 END) FROM stock_order_splits s WHERE s.order_id = so.id), 0)
-                ELSE 0 END), 0) AS expected_cash,
-            COALESCE(SUM(CASE
-                WHEN so.status = 'paid' AND COALESCE(so.split_count,1) <= 1 AND so.payment_method = 'mobile_money' THEN so.total_amount + COALESCE(so.tip_amount,0)
-                WHEN so.status = 'paid' AND COALESCE(so.split_count,1) > 1 THEN COALESCE((SELECT SUM(CASE WHEN s.payment_method='mobile_money' THEN s.split_amount + COALESCE(s.tip_amount,0) ELSE 0 END) FROM stock_order_splits s WHERE s.order_id = so.id), 0)
-                ELSE 0 END), 0) AS expected_mobile,
-            COALESCE(SUM(CASE
-                WHEN so.status = 'paid' AND COALESCE(so.split_count,1) <= 1 AND so.payment_method IN ('card_manual','card_pos') THEN so.total_amount + COALESCE(so.tip_amount,0)
-                WHEN so.status = 'paid' AND COALESCE(so.split_count,1) > 1 THEN COALESCE((SELECT SUM(CASE WHEN s.payment_method IN ('card_manual','card_pos') THEN s.split_amount + COALESCE(s.tip_amount,0) ELSE 0 END) FROM stock_order_splits s WHERE s.order_id = so.id), 0)
-                ELSE 0 END), 0) AS expected_card,
-            COALESCE(SUM(CASE WHEN so.status = 'voided' THEN so.total_amount ELSE 0 END), 0) AS voided_total,
-            COALESCE(SUM(CASE WHEN so.status = 'voided' THEN 1 ELSE 0 END), 0) AS voided_count,
-            COALESCE(SUM(CASE WHEN so.status = 'placed' AND so.order_type != 'room_service' THEN 1 ELSE 0 END), 0) AS open_tabs
-        FROM admin_users au
-        INNER JOIN stock_orders so ON so.created_by = au.id
-        WHERE so.created_at BETWEEN ? AND ? OR so.paid_at BETWEEN ? AND ? OR so.voided_at BETWEEN ? AND ?
-        GROUP BY au.id, au.full_name, au.username
-        ORDER BY paid_total DESC, display_name ASC
-    ");
-    $usersStmt->execute([$dayStart, $dayEnd, $dayStart, $dayEnd, $dayStart, $dayEnd]);
-    $posUsers = $usersStmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
+    // Per-cashier figures: who TOOK the money (paid_by, fallback created_by; split legs by
+    // paid_by_user_id), sales counted by paid_at, refund/void payouts by their own timestamp.
+    // The expected_* numbers stay server-side (blind count): only the declared inputs are shown.
+    $posUserIds = rh_pos_shift_user_ids($pdo, $dayStart, $dayEnd);
+    if ($posUserIds) {
+        $uPh = implode(',', array_fill(0, count($posUserIds), '?'));
+        $nameStmt2 = $pdo->prepare("SELECT id, COALESCE(NULLIF(full_name, ''), username) AS display_name, username FROM admin_users WHERE id IN ($uPh)");
+        $nameStmt2->execute($posUserIds);
+        $userNames = [];
+        foreach ($nameStmt2->fetchAll(PDO::FETCH_ASSOC) as $nr) {
+            $userNames[(int)$nr['id']] = $nr;
+        }
+        $openStmt = $pdo->prepare("SELECT created_by, COUNT(*) FROM stock_orders WHERE status = 'placed' AND order_type != 'room_service' AND created_at >= ? AND created_at < ? GROUP BY created_by");
+        $openStmt->execute([$dayStart, $dayEnd]);
+        $openByUser = $openStmt->fetchAll(PDO::FETCH_KEY_PAIR);
+        foreach ($posUserIds as $puid) {
+            if (!isset($userNames[$puid])) {
+                continue;
+            }
+            $pt = rh_pos_shift_totals($pdo, $puid, $dayStart, $dayEnd, $dayStart);
+            $posUsers[] = [
+                'id' => $puid,
+                'display_name' => $userNames[$puid]['display_name'],
+                'username' => $userNames[$puid]['username'],
+                'order_count' => $pt['orders_count'],
+                'paid_total' => $pt['sales_total'],
+                'expected_cash' => $pt['cash'],
+                'expected_mobile' => $pt['mobile'],
+                'expected_card' => $pt['card'],
+                'voided_total' => $pt['voids_amount'],
+                'voided_count' => $pt['voids_count'],
+                'open_tabs' => (int)($openByUser[$puid] ?? 0),
+            ];
+        }
+        usort($posUsers, function ($a, $b) {
+            return ($b['paid_total'] <=> $a['paid_total']) ?: strcmp((string)$a['display_name'], (string)$b['display_name']);
+        });
+    }
 
+    // Orders behind the day: sales by paid_at (whatever their status is now), refund/void
+    // payouts by their own timestamp, and tabs opened in the window.
+    $payerSqlAcct = rh_pos_payer_sql($pdo, 'so');
     $ordersStmt = $pdo->prepare("
         SELECT so.id, so.reference, so.order_type, so.status, so.payment_method, so.total_amount,
                so.table_number, so.customer_name, so.paid_at, so.voided_at, so.created_at, so.created_by,
+               $payerSqlAcct AS actor_id,
                COALESCE(NULLIF(au.full_name, ''), au.username) AS user_name
         FROM stock_orders so
-        LEFT JOIN admin_users au ON au.id = so.created_by
-        WHERE so.created_at BETWEEN ? AND ? OR so.paid_at BETWEEN ? AND ? OR so.voided_at BETWEEN ? AND ?
+        LEFT JOIN admin_users au ON au.id = $payerSqlAcct
+        WHERE " . rh_pos_sale_window_sql('so') . "
+           OR (so.paid_at IS NULL AND so.created_at >= ? AND so.created_at < ?)
+           OR (so.status = 'refunded' AND so.refunded_at >= ? AND so.refunded_at < ?)
+           OR (so.status = 'voided' AND so.voided_at >= ? AND so.voided_at < ?)
         ORDER BY COALESCE(so.paid_at, so.created_at) ASC
         LIMIT 500
     ");
-    $ordersStmt->execute([$dayStart, $dayEnd, $dayStart, $dayEnd, $dayStart, $dayEnd]);
+    $ordersStmt->execute([$dayStart, $dayEnd, $dayStart, $dayEnd, $dayStart, $dayEnd, $dayStart, $dayEnd, $dayStart, $dayEnd]);
     $orders = $ordersStmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
 
-    // Index orders by cashier for the per-cashier sales drawer
+    // Index orders by the user who took the money for the per-cashier sales drawer
     $ordersByUser = [];
     foreach ($orders as $o) {
-        $ordersByUser[(int)$o['created_by']][] = $o;
+        $ordersByUser[(int)$o['actor_id']][] = $o;
     }
 
     // Pre-load any existing accountant notes for individual orders on this date
@@ -482,31 +478,20 @@ try {
         }
     }
 
-    $summaryStmt = $pdo->prepare("
-        SELECT
-            COUNT(*) AS orders,
-            COALESCE(SUM(CASE WHEN status = 'paid' THEN total_amount ELSE 0 END), 0) AS paid_total,
-            /* payment_method only ever holds the LAST split leg's tender — see expected_cash
-             * above for the same fix applied per-cashier. */
-            COALESCE(SUM(CASE
-                WHEN status = 'paid' AND COALESCE(split_count,1) <= 1 AND payment_method = 'cash' THEN total_amount + COALESCE(tip_amount,0)
-                WHEN status = 'paid' AND COALESCE(split_count,1) > 1 THEN COALESCE((SELECT SUM(CASE WHEN s.payment_method='cash' THEN s.split_amount + COALESCE(s.tip_amount,0) ELSE 0 END) FROM stock_order_splits s WHERE s.order_id = stock_orders.id), 0)
-                ELSE 0 END), 0) AS cash,
-            COALESCE(SUM(CASE
-                WHEN status = 'paid' AND COALESCE(split_count,1) <= 1 AND payment_method = 'mobile_money' THEN total_amount + COALESCE(tip_amount,0)
-                WHEN status = 'paid' AND COALESCE(split_count,1) > 1 THEN COALESCE((SELECT SUM(CASE WHEN s.payment_method='mobile_money' THEN s.split_amount + COALESCE(s.tip_amount,0) ELSE 0 END) FROM stock_order_splits s WHERE s.order_id = stock_orders.id), 0)
-                ELSE 0 END), 0) AS mobile,
-            COALESCE(SUM(CASE
-                WHEN status = 'paid' AND COALESCE(split_count,1) <= 1 AND payment_method IN ('card_manual','card_pos') THEN total_amount + COALESCE(tip_amount,0)
-                WHEN status = 'paid' AND COALESCE(split_count,1) > 1 THEN COALESCE((SELECT SUM(CASE WHEN s.payment_method IN ('card_manual','card_pos') THEN s.split_amount + COALESCE(s.tip_amount,0) ELSE 0 END) FROM stock_order_splits s WHERE s.order_id = stock_orders.id), 0)
-                ELSE 0 END), 0) AS card,
-            COALESCE(SUM(CASE WHEN status = 'voided' THEN 1 ELSE 0 END), 0) AS voids,
-            COALESCE(SUM(CASE WHEN status = 'voided' THEN total_amount ELSE 0 END), 0) AS voided_total
-        FROM stock_orders
-        WHERE created_at BETWEEN ? AND ? OR paid_at BETWEEN ? AND ? OR voided_at BETWEEN ? AND ?
-    ");
-    $summaryStmt->execute([$dayStart, $dayEnd, $dayStart, $dayEnd, $dayStart, $dayEnd]);
-    $summary = array_merge($summary, $summaryStmt->fetch(PDO::FETCH_ASSOC) ?: []);
+    // Business-day summary: same maths as the till close, all users, by payment date.
+    $dayTotals = rh_pos_shift_totals($pdo, null, $dayStart, $dayEnd, $dayStart);
+    $summary = array_merge($summary, [
+        'orders' => $dayTotals['orders_count'],
+        'paid_total' => $dayTotals['sales_total'],
+        // Collected per tender (gross); refunds/voids paid out are their own line.
+        'cash' => $dayTotals['gross_cash'],
+        'mobile' => $dayTotals['gross_mobile'],
+        'card' => $dayTotals['gross_card'],
+        'refunds' => $dayTotals['refund_count'],
+        'refund_total' => $dayTotals['refund_amount'],
+        'voids' => $dayTotals['voids_count'],
+        'voided_total' => $dayTotals['voids_amount'],
+    ]);
 
     $logsStmt = $pdo->prepare("
         SELECT soa.event, soa.details, soa.actor_name, soa.created_at, so.reference
@@ -566,9 +551,9 @@ try {
                 <div class="stat-sub"><?php echo (int)$summary['orders']; ?> total order rows</div>
             </div>
             <div class="stat-card success">
-                <div class="stat-label">Cash expected</div>
+                <div class="stat-label">Cash collected</div>
                 <div class="acct-kpi__value"><?php echo rh_pos_accounting_money((float)$summary['cash'], $currency_symbol); ?></div>
-                <div class="stat-sub">Count and match drawers</div>
+                <div class="stat-sub">Gross by payment date &middot; refunds paid out <?php echo rh_pos_accounting_money((float)$summary['refund_total'], $currency_symbol); ?> (<?php echo (int)$summary['refunds']; ?>)</div>
             </div>
             <div class="stat-card info">
                 <div class="stat-label">Mobile / card</div>
@@ -657,9 +642,7 @@ try {
 
                                 <!-- Detailed fields row (hidden by default, expanded on click) -->
                                 <tr class="pos-acct-details-row" id="<?php echo $rowId; ?>-details" data-pos-acct-row
-                                    data-expected-cash="<?php echo htmlspecialchars((string)$expectedCash); ?>"
-                                    data-expected-mobile="<?php echo htmlspecialchars((string)$expectedMobile); ?>"
-                                    data-expected-card="<?php echo htmlspecialchars((string)$expectedCard); ?>" aria-hidden="true">
+                                    aria-hidden="true">
                                     <td colspan="10">
                                         <div class="pos-acct-details-wrap">
                                             <div class="pos-acct-detail-grid">
@@ -669,25 +652,25 @@ try {
                                                     </div>
                                                 </div>
                                                 <div class="pos-acct-detail-cell">
-                                                    <label class="pos-acct-detail-label">Expected</label>
-                                                    <div class="pos-acct-detail-value"><?php echo rh_pos_accounting_money((float)$posUser['paid_total'], $currency_symbol); ?><div class="stat-sub">Cash <?php echo rh_pos_accounting_money($expectedCash, $currency_symbol); ?></div>
+                                                    <label class="pos-acct-detail-label">Sales taken</label>
+                                                    <div class="pos-acct-detail-value"><?php echo rh_pos_accounting_money((float)$posUser['paid_total'], $currency_symbol); ?><div class="stat-sub">Expected drawer figures are hidden until you count</div>
                                                     </div>
                                                 </div>
                                                 <div class="pos-acct-detail-cell">
                                                     <label class="pos-acct-detail-label">Declared cash</label>
-                                                    <input type="number" step="0.01" min="0" class="pos-acct-input" name="declared_cash[<?php echo $uid; ?>]" value="<?php echo htmlspecialchars(number_format($expectedCash, 2, '.', '')); ?>" data-declared="cash" title="Enter actual cash counted in the drawer">
+                                                    <input type="number" step="0.01" min="0" class="pos-acct-input" name="declared_cash[<?php echo $uid; ?>]" value="" placeholder="0.00" data-declared="cash" title="Enter actual cash counted in the drawer (0 if none)">
                                                 </div>
                                                 <div class="pos-acct-detail-cell">
                                                     <label class="pos-acct-detail-label">Declared mobile</label>
-                                                    <input type="number" step="0.01" min="0" class="pos-acct-input" name="declared_mobile[<?php echo $uid; ?>]" value="<?php echo htmlspecialchars(number_format($expectedMobile, 2, '.', '')); ?>" data-declared="mobile" title="Enter actual mobile money total">
+                                                    <input type="number" step="0.01" min="0" class="pos-acct-input" name="declared_mobile[<?php echo $uid; ?>]" value="" placeholder="0.00" data-declared="mobile" title="Enter actual mobile money total (0 if none)">
                                                 </div>
                                                 <div class="pos-acct-detail-cell">
                                                     <label class="pos-acct-detail-label">Declared card</label>
-                                                    <input type="number" step="0.01" min="0" class="pos-acct-input" name="declared_card[<?php echo $uid; ?>]" value="<?php echo htmlspecialchars(number_format($expectedCard, 2, '.', '')); ?>" data-declared="card" title="Enter actual card payment total">
+                                                    <input type="number" step="0.01" min="0" class="pos-acct-input" name="declared_card[<?php echo $uid; ?>]" value="" placeholder="0.00" data-declared="card" title="Enter actual card payment total (0 if none)">
                                                 </div>
                                                 <div class="pos-acct-detail-cell">
                                                     <label class="pos-acct-detail-label">Variance</label>
-                                                    <div class="pos-acct-detail-value"><span class="pos-acct-variance" title="Difference between expected and declared totals">0.00</span></div>
+                                                    <div class="pos-acct-detail-value"><span class="pos-acct-variance" title="Shown after the close is recorded">Shown after closing</span></div>
                                                 </div>
                                                 <div class="pos-acct-detail-cell">
                                                     <label class="pos-acct-detail-label">Notes</label>
@@ -877,6 +860,9 @@ try {
 
             // ── Variance live update ────────────────────────────────────────────
             function updateVariance(row) {
+                // Blind count: expected figures are never sent to the browser; the server
+                // computes and reports the variance when the close is recorded.
+                if (row.dataset.expectedCash === undefined) return;
                 var expectedCash = parseFloat(row.dataset.expectedCash || '0');
                 var expectedMobile = parseFloat(row.dataset.expectedMobile || '0');
                 var expectedCard = parseFloat(row.dataset.expectedCard || '0');
