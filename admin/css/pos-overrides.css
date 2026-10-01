@@ -6706,24 +6706,23 @@ html.page-zoomed .till-wrap {
 
 html.page-zoomed .modal,
 html.page-zoomed .modal-content {
-    max-height: calc((100dvh - 32px) / var(--page-zoom)) !important;
-    max-width: calc(96vw / var(--page-zoom)) !important;
+    max-height: calc(88dvh / var(--page-zoom)) !important;
 }
 
 html.page-zoomed .modal-body[style*="vh"] {
-    max-height: calc(74dvh / var(--page-zoom)) !important;
+    max-height: calc(66dvh / var(--page-zoom)) !important;
 }
 
 html.page-zoomed #posPageModal > .modal-content {
-    height: calc(90dvh / var(--page-zoom)) !important;
+    height: calc(88dvh / var(--page-zoom)) !important;
 }
 
 html.page-zoomed .svc-modal {
-    height: min(calc(86vh / var(--page-zoom)), 900px);
+    height: min(calc(80vh / var(--page-zoom)), 50rem);
 }
 
 html.page-zoomed .pos-ready-card {
-    width: calc((100vw - 40px) / var(--page-zoom));
+    width: min(30rem, calc(92vw / var(--page-zoom)));
 }
 
 /* More > Display size: − 60% + */
@@ -6899,4 +6898,236 @@ html.page-zoomed .pos-ready-card {
 #mgrAuthOverlay,
 #noteOverlay {
     z-index: 100010 !important;
+}
+
+
+/* ══════════════════════════════════════════════════════════════════════════
+   Modal size — pop-ups follow the display size like the rest of the till
+   rem-based so they scale with html.page-zoomed; screen-relative bounds are
+   divided by --page-zoom so a window never outgrows the screen. Targets stay
+   at 2.75rem (44px) or more. Phones keep their full-width sheets above.
+   Kept last on purpose.
+   ══════════════════════════════════════════════════════════════════════════ */
+@media (min-width: 641px) {
+    .modal,
+    .modal-content {
+        max-width: min(40rem, calc(92vw / var(--page-zoom, 1))) !important;
+        max-height: calc(88dvh / var(--page-zoom, 1)) !important;
+        border-radius: .875rem;
+    }
+
+    .modal-content[style*="880px"] {
+        max-width: min(52rem, calc(92vw / var(--page-zoom, 1))) !important;
+    }
+
+    .modal-overlay > .modal-content[style*="width:520px"],
+    .modal-overlay > .modal-content[style*="width:560px"] {
+        width: min(32rem, 100%) !important;
+    }
+
+    #payOverlay > .modal-content {
+        width: min(38rem, 100%);
+    }
+
+    .modal-head,
+    .modal-header {
+        min-height: 3.25rem;
+        padding: .6rem .75rem .6rem 1.1rem;
+        gap: .6rem;
+    }
+
+    .modal-head h3,
+    .modal-header h3 {
+        font-size: 1.05rem;
+    }
+
+    .modal-head .close,
+    .modal-header .close,
+    .modal-header .modal-close {
+        width: 2.75rem;
+        height: 2.75rem;
+        font-size: 1.5rem;
+    }
+
+    .modal-header input[type="search"],
+    .modal-header input[type="text"] {
+        min-height: 2.75rem;
+        font-size: .95rem;
+    }
+
+    .modal-body {
+        padding: .9rem 1.1rem;
+    }
+
+    .modal-body input,
+    .modal-body select,
+    .modal-body textarea {
+        min-height: 2.75rem;
+        font-size: 1rem;
+    }
+
+    .modal-body textarea {
+        min-height: 5rem;
+    }
+
+    .modal-foot,
+    .modal-footer {
+        padding: .75rem 1.1rem calc(.75rem + env(safe-area-inset-bottom));
+        gap: .6rem;
+    }
+
+    .modal-foot button,
+    .modal-foot a.btn-cancel,
+    .modal-foot a.btn-confirm,
+    .modal-footer button,
+    .modal-footer a.btn-cancel,
+    .modal-footer a.btn-confirm {
+        min-height: 3rem;
+        border-radius: .75rem;
+        font-size: 1rem;
+    }
+
+    #payOverlay .pay-method-grid {
+        gap: .6rem;
+    }
+
+    #payOverlay .pay-method-grid button {
+        min-height: 4.75rem;
+        padding: .6rem .35rem;
+        border-radius: .75rem;
+        font-size: .9rem;
+    }
+
+    #payOverlay .pay-method-grid button i {
+        font-size: 1.4rem;
+    }
+
+    #payOverlay .discount-preset-btn {
+        min-height: 2.75rem;
+        min-width: 3.25rem;
+        font-size: .9rem;
+    }
+
+    #payOverlay .change-banner {
+        font-size: 1.1rem;
+    }
+
+    .success-modal {
+        width: min(28rem, 100%);
+        padding: 1.5rem;
+        border-radius: 1rem;
+    }
+
+    .success-modal .icon {
+        font-size: 3rem;
+    }
+
+    .pos-ready-card {
+        padding: 1.5rem 1.75rem 1.25rem;
+        max-width: 30rem;
+        border-radius: 1rem;
+    }
+
+    /* Service window and incoming alert */
+    .svc-overlay,
+    .pos-alert-overlay {
+        padding: 1rem;
+    }
+
+    .svc-modal {
+        width: min(52rem, 100%);
+        height: min(calc(80vh / var(--page-zoom, 1)), 50rem);
+        border-radius: 1rem;
+    }
+
+    .svc-head {
+        padding: .65rem .85rem .65rem 1.1rem;
+        gap: .75rem;
+    }
+
+    .svc-tab {
+        min-height: 2.75rem;
+        padding: 0 1.1rem;
+        font-size: 1rem;
+    }
+
+    .svc-close {
+        width: 2.75rem;
+        height: 2.75rem;
+        font-size: 1.2rem;
+    }
+
+    .svc-filter {
+        padding: .75rem 1.1rem 0;
+    }
+
+    .svc-filter__btn {
+        padding: 0 1rem;
+        font-size: .9rem;
+    }
+
+    .svc-list {
+        padding: .75rem 1.1rem 1.1rem;
+        gap: .65rem;
+    }
+
+    .pos-alert {
+        width: min(32rem, 100%);
+        max-height: calc(88dvh / var(--page-zoom, 1));
+        overflow-y: auto;
+        border-radius: 1rem;
+    }
+
+    .pos-alert__band {
+        padding: .75rem 1.25rem;
+        font-size: 1rem;
+    }
+
+    .pos-alert__band i {
+        font-size: 1.4rem;
+    }
+
+    .pos-alert__queue {
+        padding: .2rem .65rem;
+        font-size: .85rem;
+    }
+
+    .pos-alert__main {
+        padding: 1.1rem 1.25rem .5rem;
+    }
+
+    .pos-alert__title {
+        font-size: 1.6rem;
+    }
+
+    .pos-alert__where {
+        font-size: 1.05rem;
+    }
+
+    .pos-alert__message {
+        padding: .7rem .9rem;
+        font-size: 1.1rem;
+    }
+
+    .pos-alert__items {
+        font-size: .95rem;
+    }
+
+    .pos-alert__replies-label {
+        font-size: .85rem;
+    }
+
+    .pos-alert__actions {
+        padding: .9rem 1.25rem 1.1rem;
+    }
+
+    .pos-alert__actions .svc-btn {
+        min-height: 3.25rem;
+        font-size: 1.1rem;
+    }
+
+    .pos-alert__all {
+        min-height: 2.75rem;
+        font-size: .9rem;
+    }
 }

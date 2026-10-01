@@ -3790,11 +3790,11 @@ html.page-zoomed body.station-screen {
 }
 
 html.page-zoomed .rh-modal-card {
-    max-height: calc((100dvh - 48px) / var(--page-zoom));
+    max-height: calc(88dvh / var(--page-zoom));
 }
 
 html.page-zoomed .rh-modal-frame {
-    height: min(calc(72vh / var(--page-zoom)), 1200px);
+    height: min(calc(60vh / var(--page-zoom)), 40rem);
 }
 
 html.page-zoomed .toast {
@@ -3864,3 +3864,107 @@ html.page-zoomed .toast {
 body.kds-sidebar-collapsed .drawer-zoom {
     display: none;
 }
+
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   MODAL SIZE — pop-ups follow the display size like the rest of the board
+   Everything here is in rem so it scales with html.page-zoomed, and every
+   screen-relative bound is divided by --page-zoom so a window never outgrows
+   the screen. Targets stay at 2.75rem (44px) or more. Kept last on purpose.
+   ═══════════════════════════════════════════════════════════════════════════ */
+.rh-modal { padding: .75rem; }
+
+.rh-modal-card {
+    max-width: min(56rem, calc(94vw / var(--page-zoom, 1)));
+    max-height: calc(88dvh / var(--page-zoom, 1));
+    border-radius: .75rem;
+}
+
+.rh-modal-head { padding: .75rem 1rem; gap: .75rem; }
+.rh-modal-head h3 { font-size: 1rem; gap: .5rem; }
+.rh-modal-close { width: 2.75rem; height: 2.75rem; }
+.rh-modal-body { padding: 1rem; }
+.rh-modal-frame { height: min(calc(60vh / var(--page-zoom, 1)), 40rem); }
+
+.kds-notes-overlay,
+.kds-alert-overlay { padding: 1rem; }
+
+.kds-bigbtn {
+    min-height: 3.25rem;
+    padding: 0 1.25rem;
+    gap: .5rem;
+    border-width: 1px;
+    border-radius: .75rem;
+    font-size: 1.05rem;
+}
+
+.kds-chip {
+    min-height: 2.75rem;
+    padding: 0 1rem;
+    border-width: 1px;
+    font-size: .95rem;
+}
+
+.kds-alert {
+    width: min(40rem, 100%);
+    max-height: calc(88dvh / var(--page-zoom, 1));
+    border-radius: 1rem;
+}
+
+.kds-alert__band { gap: .75rem; padding: .85rem 1.25rem; font-size: 1rem; }
+.kds-alert__band i { font-size: 1.4rem; }
+.kds-alert__queue { padding: .25rem .75rem; font-size: .9rem; }
+.kds-alert__main { padding: 1.25rem 1.25rem .5rem; }
+.kds-alert__title { font-size: 1.75rem; }
+.kds-alert__meta { margin-top: .5rem; font-size: 1.1rem; }
+.kds-alert__quote-label { margin-top: 1rem; font-size: .9rem; }
+.kds-alert__quote {
+    margin-top: .75rem;
+    padding: .85rem 1.1rem;
+    border-left-width: .3rem;
+    border-radius: 0 .75rem .75rem 0;
+    font-size: 1.3rem;
+}
+.kds-alert__quote--muted { margin-top: .5rem; font-size: 1rem; }
+.kds-alert__replies { gap: .5rem; margin-top: 1rem; }
+.kds-alert__replies-label { font-size: .9rem; }
+.kds-alert__actions { gap: .75rem; padding: 1rem 1.25rem 1.25rem; }
+.kds-alert__actions .kds-bigbtn { min-height: 3.5rem; font-size: 1.15rem; }
+.kds-alert__all { min-height: 2.75rem; font-size: .95rem; }
+
+/* FOH chat panel */
+.kds-chat { width: min(30rem, calc(100vw / var(--page-zoom, 1))); }
+.kds-chat__head { gap: .75rem; padding: .85rem 1rem; }
+.kds-chat__head h2 { font-size: 1.35rem; }
+.kds-chat__head span { font-size: .9rem; }
+.kds-chat__head-icon { width: 2.75rem; height: 2.75rem; font-size: 1.2rem; }
+.kds-chat__close { width: 2.75rem; height: 2.75rem; font-size: 1.2rem; }
+.kds-chat__list { padding: .85rem; gap: .85rem; }
+.kds-chat__empty { font-size: 1rem; }
+.kds-chat__empty i { font-size: 2.5rem; }
+.kds-chat__empty strong { font-size: 1.3rem; }
+.kds-chat__thread { border-radius: 1rem; }
+.kds-chat__thread-head { gap: .65rem; padding: .75rem .85rem; }
+.kds-chat__avatar { width: 2.75rem; height: 2.75rem; font-size: 1.1rem; }
+.kds-chat__thread-title strong { font-size: 1.1rem; }
+.kds-chat__thread-title span { font-size: .85rem; }
+.kds-chat__waiting { padding: .25rem .65rem; font-size: .85rem; }
+.kds-chat__jump { min-height: 2.75rem; padding: 0 1rem; font-size: .95rem; }
+.kds-chat__msgs { padding: .75rem .85rem; }
+.kds-chat__who { font-size: .8rem; }
+.kds-chat__bubble { padding: .6rem .9rem; border-radius: 1rem 1rem 1rem .3rem; font-size: 1.05rem; }
+.kds-chat__msg.is-mine .kds-chat__bubble { border-radius: 1rem 1rem .3rem 1rem; }
+.kds-chat__time { font-size: .75rem; }
+.kds-chat__status { font-size: .8rem; }
+.kds-chat__actions { gap: .5rem; padding: 0 .85rem .75rem; }
+.kds-chat__got { min-height: 2.75rem; padding: 0 1.25rem; font-size: 1rem; }
+.kds-chip--sm { min-height: 2.75rem; padding: 0 .9rem; font-size: .95rem; }
+.kds-chat__compose { gap: .5rem; padding: .65rem .85rem .85rem; }
+.kds-chat__compose input { min-height: 2.75rem; padding: 0 1.1rem; font-size: 1rem; }
+.kds-chat__send { width: 2.75rem; height: 2.75rem; font-size: 1.1rem; }
+
+/* Station dialog (shared modal body) */
+.station-dialog { gap: .75rem; padding: .85rem; }
+.station-dialog__icon { font-size: 1.2rem; }
+.station-dialog__body { font-size: .95rem; }
+.station-dialog__detail { font-size: .85rem; }
