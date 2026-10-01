@@ -99,7 +99,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             if (!$result['success']) {
                 throw new RuntimeException($result['error'] ?? 'Unknown error.');
             }
-            $message = 'Credit note applied. Remaining balance: ' . getSetting('currency_symbol') . ' ' . number_format($result['remaining_balance'], 2);
+            $appliedNow = (float)($result['applied_amount'] ?? $amount);
+            $message = 'Credit note applied: ' . getSetting('currency_symbol') . ' ' . number_format($appliedNow, 2)
+                . (abs($appliedNow - $amount) > BALANCE_TOLERANCE ? ' (limited to the amount actually due / available)' : '')
+                . '. Remaining balance: ' . getSetting('currency_symbol') . ' ' . number_format($result['remaining_balance'], 2);
         }
 
         // ── Void a CN ─────────────────────────────────────────────────────────

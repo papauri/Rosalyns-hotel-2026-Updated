@@ -11,6 +11,7 @@ require_once 'admin-init.php';
 require_once '../includes/alert.php';
 require_once '../includes/finance-sequences.php';
 require_once 'includes/finance-schema.php';
+require_once __DIR__ . '/includes/finance-account-sync.php';
 
 $message = '';
 $error = '';
@@ -25,14 +26,20 @@ if ($payment_id > 0) {
                    CASE WHEN p.booking_type = 'room' THEN b.guest_name
                         WHEN p.booking_type = 'conference' THEN ci.{$conferenceFields['company']}
                         WHEN p.booking_type = 'restaurant' THEN COALESCE(NULLIF(so.customer_name, ''), CONCAT('Restaurant order ', so.reference))
+                        WHEN p.booking_type = 'gym' THEN gi.name
+                        WHEN p.booking_type = 'event' THEN ei.name
                    END as customer_name,
                    CASE WHEN p.booking_type = 'room' THEN b.guest_email
                         WHEN p.booking_type = 'conference' THEN ci.{$conferenceFields['email']}
+                        WHEN p.booking_type = 'gym' THEN gi.email
+                        WHEN p.booking_type = 'event' THEN ei.email
                    END as customer_email
             FROM payments p
             LEFT JOIN bookings b ON p.booking_type = 'room' AND p.booking_id = b.id
             LEFT JOIN conference_inquiries ci ON p.booking_type = 'conference' AND p.booking_id = ci.id
               LEFT JOIN stock_orders so ON p.booking_type = 'restaurant' AND p.booking_id = so.id
+              LEFT JOIN gym_inquiries gi ON p.booking_type = 'gym' AND p.booking_id = gi.id
+              LEFT JOIN event_inquiries ei ON p.booking_type = 'event' AND p.booking_id = ei.id
             WHERE p.id = ? AND p.deleted_at IS NULL
         ");
         $stmt->execute([$payment_id]);
@@ -40,8 +47,8 @@ if ($payment_id > 0) {
 
         if (!$payment) {
             $error = 'Payment not found.';
-        } elseif (!in_array($payment['payment_status'], ['completed', 'paid'], true)) {
-            $error = 'Refunds can only be processed for completed or paid payments.';
+        } elseif (!in_array($payment['payment_status'], ['completed', 'paid', 'partially_refunded'], true)) {
+            $error = 'Refunds can only be processed for completed, paid or partially refunded payments.';
         } elseif ($payment['payment_type'] === 'refund') {
             $error = 'Cannot refund a refund transaction.';
         }
@@ -91,6 +98,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $payment
             $refund_notes = $_POST['refund_notes'] ?? '';
             $refund_status = $_POST['refund_status'] ?? 'pending';
             $refund_method = $_POST['refund_method'] ?? 'original';
+            // Refund setting "original": staff cannot pick another method.
+            if (rh_refund_rule('refund_method_default') === 'original') {
+                $refund_method = 'original';
+            }
 
             // Validate inputs
             if (!in_array($refund_method, ['original', 'store_credit'], true)) {
@@ -133,26 +144,32 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $payment
                 default => 'pending',
             };
 
-            $vat_rate = $payment['vat_rate'] ?? 0;
-
-            // Generate refund reference via the atomic sequence allocator, the same way
-            // receipts, invoices and credit notes are numbered. The previous
-            // random-then-recheck loop was a check-then-use race between concurrent
-            // refunds and produced non-sequential references in the ledger.
-            $refundRef = finance_next_refund_reference($pdo, date('Y-m-d'));
-
             // Start transaction — open BEFORE re-validating to prevent concurrent
             // over-refund (two simultaneous requests both passing the pre-transaction check).
             $pdo->beginTransaction();
 
+            // Restaurant: serialise on the order row so two cashiers cannot both refund it.
+            if ($payment['booking_type'] === 'restaurant') {
+                $orderLock = $pdo->prepare("SELECT id FROM stock_orders WHERE id = ? FOR UPDATE");
+                $orderLock->execute([$payment['booking_id']]);
+                if (!$orderLock->fetchColumn()) {
+                    throw new Exception('The restaurant order for this payment no longer exists.');
+                }
+            }
+
             // Re-fetch original payment with row lock and recompute refundable balance
             // inside the transaction to prevent concurrent double-refunds.
-            $lockedPayStmt = $pdo->prepare("SELECT id, total_amount FROM payments WHERE id = ? AND deleted_at IS NULL FOR UPDATE");
+            $lockedPayStmt = $pdo->prepare("SELECT id, total_amount, vat_amount, vat_rate, payment_status FROM payments WHERE id = ? AND deleted_at IS NULL FOR UPDATE");
             $lockedPayStmt->execute([$payment_id]);
             $lockedPayment = $lockedPayStmt->fetch(PDO::FETCH_ASSOC);
             if (!$lockedPayment) {
                 throw new Exception('Payment record could not be locked. Please try again.');
             }
+            if (!in_array((string)$lockedPayment['payment_status'], ['completed', 'paid', 'partially_refunded'], true)) {
+                throw new Exception('This payment can no longer be refunded (status: ' . $lockedPayment['payment_status'] . ').');
+            }
+            // Remaining refundable = original gross less every refund that is still alive
+            // (pending, processing or completed) — failed refunds free their amount again.
             $lockedRefundedStmt = $pdo->prepare("
                 SELECT COALESCE(SUM(CASE WHEN refund_status IN ('completed','processing','pending') THEN COALESCE(refund_amount, total_amount) ELSE 0 END), 0)
                 FROM payments WHERE original_payment_id = ? AND payment_type = 'refund' AND deleted_at IS NULL
@@ -165,11 +182,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $payment
             }
             $refund_amount = min($refund_amount, $lockedMaxRefundable);
 
-            // Split the refund into net + VAT only now that the amount is final — the
-            // locked re-check above can clamp it, and deriving these earlier would write
-            // a VAT figure that no longer matches the amount actually refunded.
-            $vat_amount     = round($refund_amount * ($vat_rate / (100 + $vat_rate)), 2);
-            $payment_amount = round($refund_amount - $vat_amount, 2);
+            // Split the refund into net + VAT only now that the amount is final, pro rata to
+            // the ORIGINAL payment's own VAT / gross ratio (the refund mirrors the sale).
+            $origTotalLocked = (float)$lockedPayment['total_amount'];
+            $origVatLocked   = (float)$lockedPayment['vat_amount'];
+            $vat_rate        = $lockedPayment['vat_rate'] ?? ($payment['vat_rate'] ?? 0);
+            $vat_amount      = $origTotalLocked > BALANCE_TOLERANCE
+                ? round($refund_amount * ($origVatLocked / $origTotalLocked), 2)
+                : 0.0;
+            $payment_amount  = round($refund_amount - $vat_amount, 2);
+
+            // Allocate the refund reference only now — validation has passed and we hold the
+            // locks — so a rejected refund never burns a number from the sequence.
+            $refundRef = finance_next_refund_reference($pdo, date('Y-m-d'));
 
             // Insert refund record
             $insertStmt = $pdo->prepare("
@@ -185,8 +210,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $payment
             ");
 
             // For store credit the payout vehicle is a credit note, so record the
-            // refund row's method as 'credit_note' (the credit note itself is issued
-            // after commit). Cash/card/mobile-money refunds keep the original method.
+            // refund row's method as 'credit_note'. Cash/card/mobile-money refunds keep
+            // the original method.
             $refund_payment_method = $isStoreCredit ? 'credit_note' : $payment['payment_method'];
             $effective_refund_notes = $isStoreCredit
                 ? trim('Refunded as store credit. ' . $refund_notes)
@@ -211,45 +236,56 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $payment
                 $effective_refund_notes,
                 $_SESSION['admin_user_id'] ?? null
             ]);
+            $newRefundRowId = (int)$pdo->lastInsertId();
 
-            // Update original payment status only when settled refunds fully cover the original payment.
-            // Pending refunds reserve refundable balance but should not finalize original payment status.
-            $settledRefundedStmt = $pdo->prepare("\n                    SELECT COALESCE(SUM(CASE WHEN refund_status IN ('completed','processing') THEN COALESCE(refund_amount, total_amount) ELSE 0 END), 0)\n                    FROM payments\n                    WHERE original_payment_id = ? AND payment_type = 'refund' AND deleted_at IS NULL\n                ");
-            $settledRefundedStmt->execute([$payment_id]);
-            $totalRefundedAfterThis = round((float)$settledRefundedStmt->fetchColumn(), 2);
-            $originalTotal = round((float)$lockedPayment['total_amount'], 2);
-            if ($totalRefundedAfterThis >= $originalTotal) {
-                $updateStmt = $pdo->prepare("
-                    UPDATE payments
-                    SET payment_status = 'refunded', updated_at = NOW()
-                    WHERE id = ?
-                ");
-                $updateStmt->execute([$payment_id]);
-            }
-
-            // Recalculate booking balances INSIDE the transaction so that amount_paid / amount_due
-            // remain consistent with the refund row. If recalc fails the whole transaction rolls back.
-            if ($payment['booking_type'] === 'room') {
-                recalculateBookingFinancials((int)$payment['booking_id']);
-            } elseif ($payment['booking_type'] === 'conference') {
-                require_once __DIR__ . '/includes/finance-account-sync.php';
-                $cfStmt = $pdo->prepare("SELECT total_amount, total_with_vat FROM conference_inquiries WHERE id = ? LIMIT 1");
-                $cfStmt->execute([$payment['booking_id']]);
-                if ($cfRow = $cfStmt->fetch(PDO::FETCH_ASSOC)) {
-                    // Paid nets out settled refunds; due is measured against the
-                    // invoiced GROSS (locked total_with_vat), never the net total.
-                    $cfAmtPaid = rh_sum_account_paid($pdo, 'conference', (int)$payment['booking_id']);
-                    $cfDue = max(0.0, round(rh_account_gross_total($cfRow) - $cfAmtPaid, 2));
-                    $pdo->prepare("UPDATE conference_inquiries SET amount_paid = ?, amount_due = ?, updated_at = NOW() WHERE id = ?")
-                        ->execute([$cfAmtPaid, $cfDue, $payment['booking_id']]);
+            // Store credit: issue the credit note INSIDE the transaction and link it to the
+            // refund row (credit_note_id), so voiding the note restores the money to the
+            // account. If the note cannot be issued the whole refund rolls back — never a
+            // refund that took the money out of the account but created no credit.
+            $storeCreditCn = null;
+            if ($isStoreCredit) {
+                require_once __DIR__ . '/../config/credit-notes.php';
+                $cnReasonMap = [
+                    'early_checkout'       => 'early_checkout',
+                    'cancellation'         => 'cancellation',
+                    'service_issue'        => 'service_issue',
+                    'overpayment'          => 'overpayment',
+                    'late_checkout_charge' => 'other',
+                    'other'                => 'other',
+                ];
+                $cnGuestName = trim((string)($payment['customer_name'] ?? ''));
+                if ($cnGuestName === '') {
+                    $cnGuestName = trim((string)($payment['booking_reference'] ?? '')) ?: 'Guest';
                 }
-            } elseif ($payment['booking_type'] === 'gym') {
-                require_once __DIR__ . '/includes/finance-account-sync.php';
-                syncGymInquiryPaymentSnapshot($pdo, (int)$payment['booking_id']);
-            } elseif ($payment['booking_type'] === 'event') {
-                require_once __DIR__ . '/includes/finance-account-sync.php';
-                syncEventInquiryPaymentSnapshot($pdo, (int)$payment['booking_id']);
+                $cnBookingType = in_array($payment['booking_type'], ['room', 'conference', 'restaurant'], true)
+                    ? $payment['booking_type'] : 'goodwill';
+                $storeCreditCn = issueCreditNote($pdo, [
+                    'amount'              => $refund_amount,
+                    'guest_name'          => $cnGuestName,
+                    'guest_email'         => $payment['customer_email'] ?? null,
+                    'booking_id'          => $payment['booking_id'],
+                    'booking_reference'   => $payment['booking_reference'],
+                    'booking_type'        => $cnBookingType,
+                    'reason'              => $cnReasonMap[$refund_reason] ?? 'other',
+                    'reason_notes'        => 'Store-credit refund ' . $refundRef . ($refund_notes !== '' ? ' — ' . $refund_notes : ''),
+                    'vat_rate'            => $vat_rate,
+                    'original_payment_id' => $payment_id,
+                    'issued_by'           => (int)($_SESSION['admin_user_id'] ?? 0),
+                    'generate_pdf'        => false,
+                    'send_email'          => false,
+                ]);
+                if (empty($storeCreditCn['success'])) {
+                    throw new Exception('The credit note could not be issued, so nothing was refunded. ' . ($storeCreditCn['error'] ?? ''));
+                }
+                $pdo->prepare("UPDATE payments SET credit_note_id = ?, refund_notes = CONCAT(COALESCE(refund_notes, ''), ?) WHERE id = ?")
+                    ->execute([(int)$storeCreditCn['credit_note_id'], ' [Credit note: ' . $storeCreditCn['credit_note_number'] . ']', $newRefundRowId]);
             }
+
+            // Original status (refunded / partially_refunded), account balance (room folio,
+            // conference/gym/event snapshot) and restaurant order state — all INSIDE the
+            // transaction so amount_paid / amount_due stay consistent with the refund row.
+            // Pending refunds reserve refundable balance but do not touch paid or the original.
+            rh_apply_refund_side_effects($pdo, (string)$payment['booking_type'], (int)$payment['booking_id'], (int)$payment_id, 'Refund ' . $refundRef . ' (' . $refund_reason . ')');
 
             $pdo->commit();
 
@@ -257,64 +293,22 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $payment
             $refundEmailNote = '';
 
             if ($isStoreCredit) {
-                // Issue the credit note as a post-commit side effect (mirrors the
-                // refund-email pattern). The core refund is already durable; if the
-                // credit note fails we surface a clear manual-fallback message rather
-                // than rolling back a settled refund.
-                $message = 'Refund issued as store credit (Ref ' . $refundRef . ').';
+                // The credit note was issued and linked inside the transaction; PDF and email
+                // are best-effort side effects after the commit.
+                $cnNumber = (string)($storeCreditCn['credit_note_number'] ?? '');
+                $cnHasEmail = !empty($payment['customer_email']) && filter_var($payment['customer_email'], FILTER_VALIDATE_EMAIL);
+                $message = 'Refund issued as store credit. Credit note ' . $cnNumber . ' created (Ref ' . $refundRef . ').';
                 try {
-                    require_once __DIR__ . '/../config/credit-notes.php';
-
-                    // Map refund reasons to the credit-note reason vocabulary.
-                    $cnReasonMap = [
-                        'early_checkout'       => 'early_checkout',
-                        'cancellation'         => 'cancellation',
-                        'service_issue'        => 'service_issue',
-                        'overpayment'          => 'overpayment',
-                        'late_checkout_charge' => 'other',
-                        'other'                => 'other',
-                    ];
-                    $cnGuestName = trim((string)($payment['customer_name'] ?? ''));
-                    if ($cnGuestName === '') {
-                        $cnGuestName = trim((string)($payment['booking_reference'] ?? '')) ?: 'Guest';
-                    }
-                    $cnBookingType = in_array($payment['booking_type'], ['room', 'conference', 'restaurant'], true)
-                        ? $payment['booking_type'] : 'goodwill';
-                    $cnHasEmail = !empty($payment['customer_email']) && filter_var($payment['customer_email'], FILTER_VALIDATE_EMAIL);
-
-                    $cnResult = issueCreditNote($pdo, [
-                        'amount'              => $refund_amount,
-                        'guest_name'          => $cnGuestName,
-                        'guest_email'         => $payment['customer_email'] ?? null,
-                        'booking_id'          => $payment['booking_id'],
-                        'booking_reference'   => $payment['booking_reference'],
-                        'booking_type'        => $cnBookingType,
-                        'reason'              => $cnReasonMap[$refund_reason] ?? 'other',
-                        'reason_notes'        => 'Store-credit refund ' . $refundRef . ($refund_notes !== '' ? ' — ' . $refund_notes : ''),
-                        'vat_rate'            => $vat_rate,
-                        'original_payment_id' => $payment_id,
-                        'issued_by'           => (int)($_SESSION['admin_user_id'] ?? 0),
-                        'generate_pdf'        => true,
-                        'send_email'          => $cnHasEmail,
-                    ]);
-
-                    if (!empty($cnResult['success'])) {
-                        $cnNumber = (string)($cnResult['credit_note_number'] ?? '');
-                        $message = 'Refund issued as store credit. Credit note ' . $cnNumber . ' created (Ref ' . $refundRef . ').';
-                        $refundEmailSent = $cnHasEmail; // credit-note email carries the redeemable number
-                        if (!$cnHasEmail) {
-                            $message .= ' No customer email on file — share the credit note number manually.';
-                        }
-                        // Stamp the credit note number onto the refund row for traceability.
-                        $pdo->prepare("UPDATE payments SET refund_notes = CONCAT(COALESCE(refund_notes, ''), ?) WHERE payment_reference = ?")
-                            ->execute([' [Credit note: ' . $cnNumber . ']', $refundRef]);
+                    generateCreditNotePDF($pdo, (int)$storeCreditCn['credit_note_id']);
+                    if ($cnHasEmail) {
+                        sendCreditNoteEmail($pdo, (int)$storeCreditCn['credit_note_id']);
+                        $refundEmailSent = true; // credit-note email carries the redeemable number
                     } else {
-                        $message .= ' WARNING: the credit note could not be issued automatically — issue it manually from Credit Notes. (' . ($cnResult['error'] ?? 'unknown error') . ')';
-                        error_log('Store-credit CN issue failed for ' . $refundRef . ': ' . ($cnResult['error'] ?? 'unknown'));
+                        $message .= ' No customer email on file — share the credit note number manually.';
                     }
                 } catch (Throwable $cnEx) {
-                    $message .= ' WARNING: the credit note could not be issued automatically — issue it manually from Credit Notes.';
-                    error_log('Store-credit CN exception for ' . $refundRef . ': ' . $cnEx->getMessage());
+                    $message .= ' (The credit note PDF/email could not be produced — regenerate it from Credit Notes.)';
+                    error_log('Store-credit CN post-commit failed for ' . $refundRef . ': ' . $cnEx->getMessage());
                 }
             } else {
                 // Standard refund back to the original payment method — notify by email.
@@ -676,6 +670,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $payment
                                             <span class="refund-dest__opt-desc">Return the money the way it was paid (<?php echo htmlspecialchars(ucfirst(str_replace('_', ' ', (string)$payment['payment_method']))); ?>).</span>
                                         </span>
                                     </label>
+                                    <?php if (rh_refund_rule('refund_method_default') === 'ask'): ?>
                                     <label class="refund-dest__opt" id="refund_dest_credit">
                                         <input type="radio" name="refund_method" value="store_credit">
                                         <span>
@@ -683,6 +678,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $payment
                                             <span class="refund-dest__opt-desc">Issue a credit note the customer can redeem on a future purchase. Settled immediately.</span>
                                         </span>
                                     </label>
+                                    <?php endif; ?>
                                 </div>
                             </div>
 

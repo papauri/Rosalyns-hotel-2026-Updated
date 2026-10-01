@@ -126,7 +126,7 @@ $gr_hours_out_max = max(1, max($gr_hours_out));
 $gr_rev = ['count' => 0, 'total' => 0.0];
 try {
     $s = $pdo->prepare("SELECT COUNT(*) c, COALESCE(SUM(total_amount),0) t FROM payments
-                        WHERE booking_type='gym' AND payment_status IN ('completed','paid')
+                        WHERE booking_type='gym' AND payment_status IN ('completed','paid','refunded','partially_refunded')
                           AND COALESCE(payment_type,'') <> 'refund' AND deleted_at IS NULL
                           AND payment_date BETWEEN ? AND ?");
     $s->execute([$gr_start, $gr_end]);

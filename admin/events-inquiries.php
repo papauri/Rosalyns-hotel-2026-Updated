@@ -96,61 +96,42 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['inquiry_action'])) {
                     ? 'Event booking confirmed successfully! Confirmation email sent.'
                     : 'Event booking confirmed successfully! (Email not sent: ' . htmlspecialchars($email_result['message']) . ')';
             } elseif ($action === 'cancel') {
-                $stmt = $pdo->prepare("UPDATE event_inquiries SET status = 'cancelled', updated_at = NOW() WHERE id = ?");
-                $stmt->execute([$inquiry_id]);
-
-                // Refund accounting: record a refund row if any completed payment exists.
-                $eventCanPay = $pdo->prepare("
-                    SELECT SUM(total_amount) as total_paid
-                    FROM payments
-                    WHERE booking_type = 'event' AND booking_id = ?
-                      AND payment_status IN ('completed','paid') AND COALESCE(payment_type, '') != 'refund'
-                      AND deleted_at IS NULL
-                ");
-                $eventCanPay->execute([$inquiry_id]);
-                $eventPaidTotal = (float)(($eventCanPay->fetch(PDO::FETCH_ASSOC))['total_paid'] ?? 0);
-
-                if ($eventPaidTotal > 0) {
-                    do {
-                        $eventRefRef = 'RFD-EVT-' . strtoupper(substr(uniqid(), -8));
-                        $eventRefChk = $pdo->prepare("SELECT COUNT(*) FROM payments WHERE payment_reference = ?");
-                        $eventRefChk->execute([$eventRefRef]);
-                    } while ((int)$eventRefChk->fetchColumn() > 0);
-
-                    $eventVatEnabled = getSetting('vat_enabled') === '1';
-                    $eventVatRate    = $eventVatEnabled ? (float)getSetting('vat_rate') : 0;
-                    $eventVatAmt     = $eventVatRate > 0 ? round($eventPaidTotal * ($eventVatRate / (100 + $eventVatRate)), 2) : 0;
-                    $eventNetAmt     = round($eventPaidTotal - $eventVatAmt, 2);
-
-                    $pdo->prepare("
-                        INSERT INTO payments (
-                            payment_reference, booking_type, booking_id, booking_reference,
-                            payment_date, payment_amount, vat_rate, vat_amount, total_amount,
-                            payment_method, payment_type, payment_status,
-                            refund_reason, refund_status, refund_amount,
-                            recorded_by, created_at
-                        ) VALUES (?, 'event', ?, ?, CURDATE(), ?, ?, ?, ?, 'cash', 'refund', 'completed',
-                                  'cancellation', 'completed', ?, ?, NOW())
-                    ")->execute([
-                        $eventRefRef,
-                        $inquiry_id,
-                        $inquiry['reference_number'] ?? '',
-                        $eventNetAmt,
-                        $eventVatRate,
-                        $eventVatAmt,
-                        $eventPaidTotal,
-                        $eventPaidTotal,
-                        (int)($user['id'] ?? 0),
-                    ]);
-
-                    $pdo->prepare("UPDATE event_inquiries SET payment_status = 'refunded', updated_at = NOW() WHERE id = ?")
-                        ->execute([$inquiry_id]);
+                if ((string)($inquiry['status'] ?? '') === 'cancelled') {
+                    throw new Exception('This booking is already cancelled.');
                 }
+                // Cancelling voids the bill (amount due 0). No automatic refund: whatever was paid stays
+                // on the account as credit owed back, and staff refund it deliberately from the payment's
+                // Refund screen (or issue a credit note). Status + resync commit together or not at all.
+                require_once __DIR__ . '/includes/finance-account-sync.php';
+                $pdo->beginTransaction();
+                try {
+                    $cancelLock = $pdo->prepare("SELECT status FROM event_inquiries WHERE id = ? FOR UPDATE");
+                    $cancelLock->execute([$inquiry_id]);
+                    if ((string)$cancelLock->fetchColumn() === 'cancelled') {
+                        throw new Exception('This booking is already cancelled.');
+                    }
+                    $pdo->prepare("UPDATE event_inquiries SET status = 'cancelled', updated_at = NOW() WHERE id = ?")->execute([$inquiry_id]);
+                    if (!rh_sync_account_payments($pdo, 'event', (int)$inquiry_id)) {
+                        throw new Exception('Could not recalculate the account balance.');
+                    }
+                    // Refund settings: 'refund_all' pays the net paid back inside this same transaction.
+                    rh_cancel_auto_refund_account($pdo, 'event', (int)$inquiry_id, (int)($user['id'] ?? 0));
+                    $pdo->commit();
+                } catch (Throwable $cancelEx) {
+                    if ($pdo->inTransaction()) {
+                        $pdo->rollBack();
+                    }
+                    throw $cancelEx;
+                }
+                $cancelCredit = rh_account_credit_owed($pdo, 'event', (int)$inquiry_id);
+                $cancelCreditNote = $cancelCredit > BALANCE_TOLERANCE
+                    ? ' ' . getSetting('currency_symbol') . number_format($cancelCredit, 2) . ' already paid stays as credit owed back - refund it from the payment Refund screen.'
+                    : '';
 
                 $email_result = sendEventCancelledEmail($inquiry);
                 $message = $email_result['success']
-                    ? 'Event booking cancelled successfully! Cancellation email sent.'
-                    : 'Event booking cancelled successfully! (Email not sent: ' . htmlspecialchars($email_result['message']) . ')';
+                    ? 'Event booking cancelled successfully! Cancellation email sent.' . $cancelCreditNote
+                    : 'Event booking cancelled successfully! (Email not sent: ' . htmlspecialchars($email_result['message']) . ')' . $cancelCreditNote;
             } elseif ($action === 'complete') {
                 if (($inquiry['status'] ?? '') !== 'confirmed') {
                     throw new Exception('Only confirmed bookings can be marked completed.');

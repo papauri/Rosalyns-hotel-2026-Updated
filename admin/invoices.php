@@ -198,22 +198,32 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
                 throw new Exception('Credit notes can only be generated for refund payments.');
             }
 
-            // Generate credit note number (unique, cryptographically random)
-            $year = date('Y');
-            do {
-                $creditNoteNumber = 'CN-' . $year . '-' . str_pad(random_int(1, 9999999), 7, '0', STR_PAD_LEFT);
-                $cnCheck = $pdo->prepare("SELECT COUNT(*) FROM payments WHERE invoice_number = ? LIMIT 1");
-                $cnCheck->execute([$creditNoteNumber]);
-                $cnExists = (int)$cnCheck->fetchColumn() > 0;
-            } while ($cnExists);
-
-            // Update payment record with credit note number
-            $update_stmt = $pdo->prepare("
-                UPDATE payments
-                SET invoice_number = ?, invoice_generated = 1
-                WHERE id = ?
-            ");
-            $update_stmt->execute([$creditNoteNumber, $payment_id]);
+            // Credit note number comes from the credit_notes sequence (never invented), and
+            // is only written when the payment has none yet — under a row lock, so a double
+            // click returns the same number instead of burning a second one.
+            require_once __DIR__ . '/../includes/finance-sequences.php';
+            $pdo->beginTransaction();
+            try {
+                $cnLock = $pdo->prepare("SELECT invoice_number FROM payments WHERE id = ? AND deleted_at IS NULL FOR UPDATE");
+                $cnLock->execute([$payment_id]);
+                $existingCnNumber = trim((string)($cnLock->fetchColumn() ?: ''));
+                if ($existingCnNumber !== '') {
+                    $creditNoteNumber = $existingCnNumber;
+                } else {
+                    $creditNoteNumber = finance_next_credit_note_number($pdo, (string)($payment['payment_date'] ?? date('Y-m-d')));
+                    $pdo->prepare("
+                        UPDATE payments
+                        SET invoice_number = ?, invoice_generated = 1
+                        WHERE id = ? AND (invoice_number IS NULL OR invoice_number = '')
+                    ")->execute([$creditNoteNumber, $payment_id]);
+                }
+                $pdo->commit();
+            } catch (Throwable $cnEx) {
+                if ($pdo->inTransaction()) {
+                    $pdo->rollBack();
+                }
+                throw $cnEx;
+            }
 
             $message = 'Credit note generated successfully! Number: ' . $creditNoteNumber;
         }
@@ -332,7 +342,7 @@ try {
             COUNT(*) as total_invoices,
             COUNT(CASE WHEN invoice_generated = 1 THEN 1 END) as invoices_generated,
             COALESCE(SUM(CASE
-                WHEN payment_status IN ('completed','paid') AND COALESCE(payment_type,'') <> 'refund' THEN total_amount
+                WHEN payment_status IN ('completed','paid','refunded','partially_refunded') AND COALESCE(payment_type,'') <> 'refund' THEN total_amount
                 WHEN payment_type = 'refund' AND refund_status IN ('completed','processing') THEN -total_amount
                 ELSE 0 END), 0) as total_revenue
         FROM payments
@@ -343,13 +353,13 @@ try {
     // Rich invoice analytics — outstanding, paid, refunded, MTD, aging buckets
     $invoiceKpiStmt = $pdo->query("
         SELECT
-            COALESCE(SUM(CASE WHEN payment_status IN ('completed','paid') AND COALESCE(payment_type, '') <> 'refund' THEN total_amount ELSE 0 END), 0) AS paid_total,
-            COALESCE(SUM(CASE WHEN payment_status IN ('completed','paid') AND COALESCE(payment_type, '') <> 'refund' THEN 1 ELSE 0 END), 0) AS paid_count,
+            COALESCE(SUM(CASE WHEN payment_status IN ('completed','paid','refunded','partially_refunded') AND COALESCE(payment_type, '') <> 'refund' THEN total_amount ELSE 0 END), 0) AS paid_total,
+            COALESCE(SUM(CASE WHEN payment_status IN ('completed','paid','refunded','partially_refunded') AND COALESCE(payment_type, '') <> 'refund' THEN 1 ELSE 0 END), 0) AS paid_count,
             COALESCE(SUM(CASE WHEN payment_status IN ('pending','partial') AND COALESCE(payment_type, '') <> 'refund' THEN total_amount ELSE 0 END), 0) AS outstanding_total,
             COALESCE(SUM(CASE WHEN payment_status IN ('pending','partial') AND COALESCE(payment_type, '') <> 'refund' THEN 1 ELSE 0 END), 0) AS outstanding_count,
             COALESCE(SUM(CASE WHEN payment_type = 'refund' AND refund_status IN ('completed','processing') THEN total_amount ELSE 0 END), 0) AS refunded_total,
             COALESCE(SUM(CASE WHEN payment_type = 'refund' AND refund_status IN ('completed','processing') THEN 1 ELSE 0 END), 0) AS refunded_count,
-            COALESCE(SUM(CASE WHEN YEAR(payment_date)=YEAR(CURDATE()) AND MONTH(payment_date)=MONTH(CURDATE()) AND payment_status IN ('completed','paid') AND COALESCE(payment_type, '') <> 'refund' THEN total_amount ELSE 0 END), 0) AS mtd_collected
+            COALESCE(SUM(CASE WHEN YEAR(payment_date)=YEAR(CURDATE()) AND MONTH(payment_date)=MONTH(CURDATE()) AND payment_status IN ('completed','paid','refunded','partially_refunded') AND COALESCE(payment_type, '') <> 'refund' THEN total_amount ELSE 0 END), 0) AS mtd_collected
         FROM payments
         WHERE deleted_at IS NULL
     ");

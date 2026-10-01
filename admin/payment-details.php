@@ -2,6 +2,7 @@
 // Include admin initialization (PHP-only, no HTML output)
 require_once 'admin-init.php';
 require_once 'includes/finance-schema.php';
+require_once __DIR__ . '/includes/finance-account-sync.php';
 
 $user = [
     'id' => $_SESSION['admin_user_id'],
@@ -68,6 +69,84 @@ $payment = $stmt->fetch(PDO::FETCH_ASSOC);
 if (!$payment) {
     $_SESSION['alert'] = ['type' => 'info', 'message' => 'Payment not found. It may have been deleted or does not exist.'];
     header('Location: payments.php');
+    exit;
+}
+
+// ── Settle refund: pending -> processing -> completed / failed ───────────────────
+// The only way a refund row changes state. Locks the refund row, validates the
+// transition, then resyncs the original payment's status and the account balance
+// (room folio, conference/gym/event snapshot, restaurant order) in the SAME transaction.
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'settle_refund') {
+    $settleBack = 'payment-details.php?id=' . $paymentId;
+    $settlePermKey = isset(getAllPermissions()['refund_payment']) ? 'refund_payment' : 'payment_add';
+    if (!validateCsrfToken($_POST['csrf_token'] ?? '')) {
+        $_SESSION['alert'] = ['type' => 'error', 'message' => 'Security token invalid. Refresh and try again.'];
+    } elseif (!hasPermission((int)$user['id'], $settlePermKey)) {
+        $_SESSION['alert'] = ['type' => 'error', 'message' => 'You do not have permission to settle refunds.'];
+    } else {
+        $targetStatus = (string)($_POST['new_refund_status'] ?? '');
+        $settleNote   = trim((string)($_POST['settle_notes'] ?? ''));
+        try {
+            if (!in_array($targetStatus, ['processing', 'completed', 'failed'], true)) {
+                throw new Exception('Choose a valid refund status.');
+            }
+            $pdo->beginTransaction();
+            // Lock order matches payment-refund.php: order row -> original payment -> refund row.
+            if ((string)$payment['booking_type'] === 'restaurant') {
+                $pdo->prepare("SELECT id FROM stock_orders WHERE id = ? FOR UPDATE")->execute([(int)$payment['booking_id']]);
+            }
+            if (!empty($payment['original_payment_id'])) {
+                $pdo->prepare("SELECT id FROM payments WHERE id = ? FOR UPDATE")->execute([(int)$payment['original_payment_id']]);
+            }
+            $lockStmt = $pdo->prepare("SELECT id, booking_type, booking_id, original_payment_id, payment_reference, payment_method, refund_status, refund_reason, COALESCE(refund_amount, total_amount) AS amt FROM payments WHERE id = ? AND payment_type = 'refund' AND deleted_at IS NULL FOR UPDATE");
+            $lockStmt->execute([$paymentId]);
+            $refundRow = $lockStmt->fetch(PDO::FETCH_ASSOC);
+            if (!$refundRow) {
+                throw new Exception('Refund record not found.');
+            }
+            if ((string)$refundRow['payment_method'] === 'credit_note') {
+                throw new Exception('Store-credit refunds are settled when the credit note is issued. Void the credit note to reverse one.');
+            }
+            $from = (string)$refundRow['refund_status'];
+            $allowed = [
+                'pending'    => ['processing', 'completed', 'failed'],
+                'processing' => ['completed', 'failed'],
+            ];
+            if (!isset($allowed[$from]) || !in_array($targetStatus, $allowed[$from], true)) {
+                throw new Exception('A ' . $from . ' refund cannot be moved to ' . $targetStatus . '.');
+            }
+            $newPaymentStatus = $targetStatus === 'completed' ? 'completed' : ($targetStatus === 'failed' ? 'cancelled' : 'pending');
+            $settleLine = ' [' . date('Y-m-d H:i') . ' ' . ($user['username'] ?? 'staff') . ': ' . $from . ' -> ' . $targetStatus . ($settleNote !== '' ? ' - ' . mb_substr($settleNote, 0, 250) : '') . ']';
+            $pdo->prepare("
+                UPDATE payments
+                SET refund_status = ?, payment_status = ?, status = ?,
+                    refund_date_processed = CASE WHEN ? IN ('completed','failed') THEN NOW() ELSE refund_date_processed END,
+                    refund_notes = CONCAT(COALESCE(refund_notes, ''), ?), updated_at = NOW()
+                WHERE id = ?
+            ")->execute([$targetStatus, $newPaymentStatus, $targetStatus === 'completed' ? 'completed' : ($targetStatus === 'failed' ? 'failed' : 'pending'), $targetStatus, $settleLine, $paymentId]);
+
+            rh_apply_refund_side_effects(
+                $pdo,
+                (string)$refundRow['booking_type'],
+                (int)$refundRow['booking_id'],
+                !empty($refundRow['original_payment_id']) ? (int)$refundRow['original_payment_id'] : null,
+                'Refund ' . $refundRow['payment_reference'] . ' ' . $targetStatus
+            );
+            $pdo->commit();
+
+            rh_log_event('payment-details', 'info', 'Refund settled', [
+                'refund_id' => $paymentId, 'from' => $from, 'to' => $targetStatus,
+                'amount' => (float)$refundRow['amt'], 'by' => $user['username'] ?? null,
+            ]);
+            $_SESSION['alert'] = ['type' => 'success', 'message' => 'Refund ' . $refundRow['payment_reference'] . ' is now ' . $targetStatus . '.'];
+        } catch (Throwable $settleEx) {
+            if ($pdo->inTransaction()) {
+                $pdo->rollBack();
+            }
+            $_SESSION['alert'] = ['type' => 'error', 'message' => 'Could not settle the refund: ' . $settleEx->getMessage()];
+        }
+    }
+    header('Location: ' . $settleBack);
     exit;
 }
 
@@ -247,29 +326,42 @@ $otherPaymentsStmt = $pdo->prepare("
 $otherPaymentsStmt->execute([$payment['booking_type'], $payment['booking_id'], $paymentId]);
 $otherPayments = $otherPaymentsStmt->fetchAll(PDO::FETCH_ASSOC);
 
-// Calculate payment summary for this booking
+// Payment summary for this account — canonical net-paid rule (originals incl. refunded /
+// partially refunded, minus completed + processing refunds) and the account's GROSS bill.
 $paymentSummaryStmt = $pdo->prepare("
     SELECT
-        COALESCE(SUM(CASE WHEN payment_status IN ('completed', 'paid') AND COALESCE(payment_type, '') != 'refund' THEN total_amount ELSE 0 END), 0) as total_paid,
-        COALESCE(SUM(CASE WHEN payment_status = 'pending' THEN total_amount ELSE 0 END), 0) as pending_amount,
-        COUNT(CASE WHEN payment_status IN ('completed', 'paid') AND COALESCE(payment_type, '') != 'refund' THEN 1 END) as completed_payments,
-        COUNT(CASE WHEN payment_status = 'pending' THEN 1 END) as pending_payments
+        COALESCE(SUM(CASE WHEN payment_status = 'pending' AND COALESCE(payment_type, '') != 'refund' THEN total_amount ELSE 0 END), 0) as pending_amount,
+        COUNT(CASE WHEN payment_status IN ('completed', 'paid', 'refunded', 'partially_refunded') AND COALESCE(payment_type, '') != 'refund' THEN 1 END) as completed_payments,
+        COUNT(CASE WHEN payment_status = 'pending' AND COALESCE(payment_type, '') != 'refund' THEN 1 END) as pending_payments
     FROM payments
     WHERE booking_type = ? AND booking_id = ? AND deleted_at IS NULL
 ");
 $paymentSummaryStmt->execute([$payment['booking_type'], $payment['booking_id']]);
 $paymentSummary = $paymentSummaryStmt->fetch(PDO::FETCH_ASSOC);
+$paymentSummary['total_paid'] = rh_sum_account_paid($pdo, (string)$payment['booking_type'], (int)$payment['booking_id']);
 
-// Get booking total amount from booking details
-$bookingTotalAmount = 0;
-if ($bookingDetails && isset($bookingDetails['amounts']['total_with_vat'])) {
-    $bookingTotalAmount = $bookingDetails['amounts']['total_with_vat'];
+// Account bill (gross): room = folio grand total; conference/gym/event = locked gross
+// (a cancelled account's bill is void); restaurant = order total.
+$bookingTotalAmount = 0.0;
+if ($payment['booking_type'] === 'room') {
+    $folioForTotal = getBookingFolioSummary((int)$payment['booking_id']);
+    $bookingTotalAmount = (float)($folioForTotal['grand_total'] ?? 0);
+} elseif (in_array($payment['booking_type'], ['conference', 'gym', 'event'], true)) {
+    $acctTables = ['conference' => 'conference_inquiries', 'gym' => 'gym_inquiries', 'event' => 'event_inquiries'];
+    $acctStmt = $pdo->prepare("SELECT status, total_amount, total_with_vat FROM {$acctTables[$payment['booking_type']]} WHERE id = ?");
+    $acctStmt->execute([$payment['booking_id']]);
+    if ($acctRow = $acctStmt->fetch(PDO::FETCH_ASSOC)) {
+        $bookingTotalAmount = ((string)$acctRow['status'] === 'cancelled') ? 0.0 : rh_account_gross_total($acctRow);
+    }
 } elseif ($bookingDetails && isset($bookingDetails['amounts']['total_amount'])) {
-    $bookingTotalAmount = $bookingDetails['amounts']['total_amount'];
+    $bookingTotalAmount = (float)$bookingDetails['amounts']['total_amount'];
 }
 
-// Calculate due amount
+// Calculate due amount (within BALANCE_TOLERANCE counts as settled)
 $dueAmount = $bookingTotalAmount - $paymentSummary['total_paid'];
+if ($dueAmount <= BALANCE_TOLERANCE) {
+    $dueAmount = 0.0;
+}
 
 // Refunds issued AGAINST this specific payment (when this is the original)
 $refundsAgainstStmt = $pdo->prepare("
@@ -332,12 +424,12 @@ if (($payment['payment_type'] ?? '') === 'refund' && !empty($payment['original_p
                 </p>
             </div>
             <div style="display:flex; gap:8px; flex-wrap:wrap;">
-                <?php if ($payment['payment_status'] !== 'completed'): ?>
+                <?php if ($payment['payment_status'] !== 'completed' && ($payment['payment_type'] ?? '') !== 'refund'): ?>
                     <a href="payment-add.php?edit=<?php echo $paymentId; ?>" class="acct-quick-action acct-quick-action--accent">
                         <i class="fas fa-edit"></i> Edit
                     </a>
                 <?php endif; ?>
-                <?php if (in_array($payment['payment_status'], ['completed', 'paid'], true) && ($payment['payment_type'] ?? '') !== 'refund'): ?>
+                <?php if (in_array($payment['payment_status'], ['completed', 'paid', 'partially_refunded'], true) && ($payment['payment_type'] ?? '') !== 'refund'): ?>
                     <a href="payment-refund.php?id=<?php echo $paymentId; ?>" class="acct-quick-action">
                         <i class="fas fa-undo"></i> Refund
                     </a>
@@ -407,6 +499,35 @@ if (($payment['payment_type'] ?? '') === 'refund' && !empty($payment['original_p
                 <a class="acct-link" href="payment-details.php?id=<?php echo (int)$originalPayment['id']; ?>"><strong><?php echo htmlspecialchars($originalPayment['payment_reference']); ?></strong></a>
                 · <?php echo $currency_symbol . number_format((float)$originalPayment['total_amount'], 0); ?>
                 · <?php echo date('M j, Y', strtotime($originalPayment['payment_date'])); ?>
+            </div>
+        <?php endif; ?>
+
+        <?php if (($payment['payment_type'] ?? '') === 'refund' && in_array((string)($payment['refund_status'] ?? ''), ['pending', 'processing'], true) && (string)$payment['payment_method'] !== 'credit_note'): ?>
+            <div class="acct-panel" style="margin-top: 18px;">
+                <div class="acct-panel__head">
+                    <h3 class="acct-panel__title"><i class="fas fa-check-double"></i> &nbsp;Settle This Refund</h3>
+                    <span class="acct-panel__sub">Currently <?php echo htmlspecialchars((string)$payment['refund_status']); ?></span>
+                </div>
+                <form method="POST" action="payment-details.php?id=<?php echo (int)$paymentId; ?>" style="padding: 14px 18px; display:flex; gap:12px; flex-wrap:wrap; align-items:flex-end;"
+                    data-admin-confirm="Update this refund's status?" data-admin-confirm-title="Settle refund">
+                    <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf_token ?? generateCsrfToken(), ENT_QUOTES, 'UTF-8'); ?>">
+                    <input type="hidden" name="action" value="settle_refund">
+                    <div>
+                        <label for="new_refund_status" style="display:block; font-size:12px; font-weight:600; margin-bottom:4px;">Move to</label>
+                        <select id="new_refund_status" name="new_refund_status" style="padding:9px 11px; min-height:44px;" required>
+                            <?php if ((string)$payment['refund_status'] === 'pending'): ?>
+                                <option value="processing">Processing (sent to provider)</option>
+                            <?php endif; ?>
+                            <option value="completed">Completed (money paid out)</option>
+                            <option value="failed">Failed (money not paid out)</option>
+                        </select>
+                    </div>
+                    <div style="flex:1; min-width:220px;">
+                        <label for="settle_notes" style="display:block; font-size:12px; font-weight:600; margin-bottom:4px;">Note (optional)</label>
+                        <input type="text" id="settle_notes" name="settle_notes" maxlength="250" style="width:100%; padding:9px 11px; min-height:44px;" placeholder="Provider reference, reason for failure…">
+                    </div>
+                    <button type="submit" class="acct-quick-action acct-quick-action--accent" style="min-height:44px;"><i class="fas fa-check"></i> Update refund</button>
+                </form>
             </div>
         <?php endif; ?>
 

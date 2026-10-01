@@ -168,61 +168,42 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['inquiry_action'])) {
                     ? 'Gym membership confirmed successfully! Confirmation email sent.'
                     : 'Gym membership confirmed successfully! (Email not sent: ' . htmlspecialchars($email_result['message']) . ')';
             } elseif ($action === 'cancel') {
-                $stmt = $pdo->prepare("UPDATE gym_inquiries SET status = 'cancelled', updated_at = NOW() WHERE id = ?");
-                $stmt->execute([$inquiry_id]);
-
-                // Refund accounting: record a refund row if any completed payment exists.
-                $gymCanPay = $pdo->prepare("
-                    SELECT SUM(total_amount) as total_paid
-                    FROM payments
-                    WHERE booking_type = 'gym' AND booking_id = ?
-                      AND payment_status IN ('completed','paid') AND COALESCE(payment_type, '') != 'refund'
-                      AND deleted_at IS NULL
-                ");
-                $gymCanPay->execute([$inquiry_id]);
-                $gymPaidTotal = (float)(($gymCanPay->fetch(PDO::FETCH_ASSOC))['total_paid'] ?? 0);
-
-                if ($gymPaidTotal > 0) {
-                    do {
-                        $gymRefRef = 'RFD-GYM-' . strtoupper(substr(uniqid(), -8));
-                        $gymRefChk = $pdo->prepare("SELECT COUNT(*) FROM payments WHERE payment_reference = ?");
-                        $gymRefChk->execute([$gymRefRef]);
-                    } while ((int)$gymRefChk->fetchColumn() > 0);
-
-                    $gymVatEnabled = getSetting('vat_enabled') === '1';
-                    $gymVatRate    = $gymVatEnabled ? (float)getSetting('vat_rate') : 0;
-                    $gymVatAmt     = $gymVatRate > 0 ? round($gymPaidTotal * ($gymVatRate / (100 + $gymVatRate)), 2) : 0;
-                    $gymNetAmt     = round($gymPaidTotal - $gymVatAmt, 2);
-
-                    $pdo->prepare("
-                        INSERT INTO payments (
-                            payment_reference, booking_type, booking_id, booking_reference,
-                            payment_date, payment_amount, vat_rate, vat_amount, total_amount,
-                            payment_method, payment_type, payment_status,
-                            refund_reason, refund_status, refund_amount,
-                            recorded_by, created_at
-                        ) VALUES (?, 'gym', ?, ?, CURDATE(), ?, ?, ?, ?, 'cash', 'refund', 'completed',
-                                  'cancellation', 'completed', ?, ?, NOW())
-                    ")->execute([
-                        $gymRefRef,
-                        $inquiry_id,
-                        $inquiry['reference_number'] ?? '',
-                        $gymNetAmt,
-                        $gymVatRate,
-                        $gymVatAmt,
-                        $gymPaidTotal,
-                        $gymPaidTotal,
-                        (int)($user['id'] ?? 0),
-                    ]);
-
-                    $pdo->prepare("UPDATE gym_inquiries SET payment_status = 'refunded', updated_at = NOW() WHERE id = ?")
-                        ->execute([$inquiry_id]);
+                if ((string)($inquiry['status'] ?? '') === 'cancelled') {
+                    throw new Exception('This booking is already cancelled.');
                 }
+                // Cancelling voids the bill (amount due 0). No automatic refund: whatever was paid stays
+                // on the account as credit owed back, and staff refund it deliberately from the payment's
+                // Refund screen (or issue a credit note). Status + resync commit together or not at all.
+                require_once __DIR__ . '/includes/finance-account-sync.php';
+                $pdo->beginTransaction();
+                try {
+                    $cancelLock = $pdo->prepare("SELECT status FROM gym_inquiries WHERE id = ? FOR UPDATE");
+                    $cancelLock->execute([$inquiry_id]);
+                    if ((string)$cancelLock->fetchColumn() === 'cancelled') {
+                        throw new Exception('This booking is already cancelled.');
+                    }
+                    $pdo->prepare("UPDATE gym_inquiries SET status = 'cancelled', updated_at = NOW() WHERE id = ?")->execute([$inquiry_id]);
+                    if (!rh_sync_account_payments($pdo, 'gym', (int)$inquiry_id)) {
+                        throw new Exception('Could not recalculate the account balance.');
+                    }
+                    // Refund settings: 'refund_all' pays the net paid back inside this same transaction.
+                    rh_cancel_auto_refund_account($pdo, 'gym', (int)$inquiry_id, (int)($user['id'] ?? 0));
+                    $pdo->commit();
+                } catch (Throwable $cancelEx) {
+                    if ($pdo->inTransaction()) {
+                        $pdo->rollBack();
+                    }
+                    throw $cancelEx;
+                }
+                $cancelCredit = rh_account_credit_owed($pdo, 'gym', (int)$inquiry_id);
+                $cancelCreditNote = $cancelCredit > BALANCE_TOLERANCE
+                    ? ' ' . getSetting('currency_symbol') . number_format($cancelCredit, 2) . ' already paid stays as credit owed back - refund it from the payment Refund screen.'
+                    : '';
 
                 $email_result = sendGymCancelledEmail($inquiry);
                 $message = $email_result['success']
-                    ? 'Gym membership cancelled successfully! Cancellation email sent.'
-                    : 'Gym membership cancelled successfully! (Email not sent: ' . htmlspecialchars($email_result['message']) . ')';
+                    ? 'Gym membership cancelled successfully! Cancellation email sent.' . $cancelCreditNote
+                    : 'Gym membership cancelled successfully! (Email not sent: ' . htmlspecialchars($email_result['message']) . ')' . $cancelCreditNote;
             } elseif ($action === 'complete') {
                 if (($inquiry['status'] ?? '') !== 'confirmed') {
                     throw new Exception('Only confirmed memberships can be marked completed.');

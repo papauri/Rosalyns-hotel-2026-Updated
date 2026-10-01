@@ -386,14 +386,43 @@ if (!function_exists('receipt_generate_pdf')) {
         if (!$payment) {
             throw new RuntimeException('Payment not found.');
         }
-        if (!in_array((string)$payment['payment_status'], ['completed', 'paid', 'refunded'], true)) {
+        if (!in_array((string)$payment['payment_status'], ['completed', 'paid', 'refunded', 'partially_refunded'], true)) {
             throw new RuntimeException('Only completed, paid, or refunded payments can have receipts.');
         }
 
         $receiptNumber = trim((string)($payment['receipt_number'] ?? ''));
         if ($receiptNumber === '' && (string)($payment['payment_type'] ?? '') !== 'refund') {
-            $receiptNumber = finance_next_receipt_number($pdo, (string)($payment['payment_date'] ?? date('Y-m-d')));
-            $pdo->prepare('UPDATE payments SET receipt_number = ? WHERE id = ?')->execute([$receiptNumber, $paymentId]);
+            // Allocate under a row lock and write only if still empty: two concurrent
+            // "send receipt" clicks must end with ONE number on the payment, not two.
+            $ownReceiptTx = !$pdo->inTransaction();
+            try {
+                if ($ownReceiptTx) {
+                    $pdo->beginTransaction();
+                }
+                $rcLock = $pdo->prepare('SELECT receipt_number FROM payments WHERE id = ? FOR UPDATE');
+                $rcLock->execute([$paymentId]);
+                $lockedNumber = trim((string)($rcLock->fetchColumn() ?: ''));
+                if ($lockedNumber === '') {
+                    $candidate = finance_next_receipt_number($pdo, (string)($payment['payment_date'] ?? date('Y-m-d')));
+                    $rcUpd = $pdo->prepare("UPDATE payments SET receipt_number = ? WHERE id = ? AND (receipt_number IS NULL OR receipt_number = '')");
+                    $rcUpd->execute([$candidate, $paymentId]);
+                    if ($rcUpd->rowCount() > 0) {
+                        $lockedNumber = $candidate;
+                    } else {
+                        $rcLock->execute([$paymentId]);
+                        $lockedNumber = trim((string)($rcLock->fetchColumn() ?: ''));
+                    }
+                }
+                if ($ownReceiptTx) {
+                    $pdo->commit();
+                }
+            } catch (Throwable $rcEx) {
+                if ($ownReceiptTx && $pdo->inTransaction()) {
+                    $pdo->rollBack();
+                }
+                throw $rcEx;
+            }
+            $receiptNumber = $lockedNumber;
             $payment['receipt_number'] = $receiptNumber;
         } elseif ($receiptNumber === '') {
             $receiptNumber = 'RFD-' . (string)($payment['payment_reference'] ?? $paymentId);

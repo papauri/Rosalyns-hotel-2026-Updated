@@ -372,55 +372,37 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['enquiry_action'])) {
                 error_log('Admin CC for conference confirmation failed: ' . $confCcEx->getMessage());
             }
         } elseif ($action === 'cancel') {
-            $stmt = $pdo->prepare("UPDATE conference_inquiries SET status = 'cancelled', updated_at = NOW() WHERE id = ?");
-            $stmt->execute([$enquiry_id]);
-
-            // Refund accounting: record a refund row if any completed payment exists.
-            $confCanPay = $pdo->prepare("
-                SELECT SUM(total_amount) as total_paid
-                FROM payments
-                WHERE booking_type = 'conference' AND booking_id = ?
-                  AND payment_status IN ('completed','paid') AND COALESCE(payment_type, '') != 'refund'
-                  AND deleted_at IS NULL
-            ");
-            $confCanPay->execute([$enquiry_id]);
-            $confPaidTotal = (float)(($confCanPay->fetch(PDO::FETCH_ASSOC))['total_paid'] ?? 0);
-            if ($confPaidTotal > 0) {
-                do {
-                    $confRefRef = 'RFD-CONF-' . strtoupper(substr(uniqid(), -8));
-                    $confRefChk = $pdo->prepare("SELECT COUNT(*) FROM payments WHERE payment_reference = ?");
-                    $confRefChk->execute([$confRefRef]);
-                } while ((int)$confRefChk->fetchColumn() > 0);
-                $confVatEnabled = getSetting('vat_enabled') === '1';
-                $confVatRate    = $confVatEnabled ? (float)getSetting('vat_rate') : 0;
-                $confVatAmt     = $confVatRate > 0 ? round($confPaidTotal * ($confVatRate / (100 + $confVatRate)), 2) : 0;
-                $confNetAmt     = round($confPaidTotal - $confVatAmt, 2);
-                $pdo->prepare("
-                    INSERT INTO payments (
-                        payment_reference, booking_type, booking_id, booking_reference,
-                        payment_date, payment_amount, vat_rate, vat_amount, total_amount,
-                        payment_method, payment_type, payment_status,
-                        refund_reason, refund_status, refund_amount,
-                        recorded_by, created_at
-                    ) VALUES (?, 'conference', ?, ?, CURDATE(), ?, ?, ?, ?, 'cash', 'refund', 'completed',
-                              'cancellation', 'completed', ?, ?, NOW())
-                ")->execute([
-                    $confRefRef,
-                    $enquiry_id,
-                    $enquiry['inquiry_reference'] ?? '',
-                    $confNetAmt,
-                    $confVatRate,
-                    $confVatAmt,
-                    $confPaidTotal,
-                    $confPaidTotal,
-                    (int)($user['id'] ?? 0),
-                ]);
-                if (function_exists('updateConferenceEnquiryPayments')) {
-                    updateConferenceEnquiryPayments($pdo, $enquiry_id);
-                }
-                $pdo->prepare("UPDATE conference_inquiries SET payment_status = 'refunded', updated_at = NOW() WHERE id = ?")
-                    ->execute([$enquiry_id]);
+            if ((string)($enquiry['status'] ?? '') === 'cancelled') {
+                throw new Exception('This booking is already cancelled.');
             }
+            // Cancelling voids the bill (amount due 0). No automatic refund: whatever was paid stays
+            // on the account as credit owed back, and staff refund it deliberately from the payment's
+            // Refund screen (or issue a credit note). Status + resync commit together or not at all.
+            require_once __DIR__ . '/includes/finance-account-sync.php';
+            $pdo->beginTransaction();
+            try {
+                $cancelLock = $pdo->prepare("SELECT status FROM conference_inquiries WHERE id = ? FOR UPDATE");
+                $cancelLock->execute([$enquiry_id]);
+                if ((string)$cancelLock->fetchColumn() === 'cancelled') {
+                    throw new Exception('This booking is already cancelled.');
+                }
+                $pdo->prepare("UPDATE conference_inquiries SET status = 'cancelled', updated_at = NOW() WHERE id = ?")->execute([$enquiry_id]);
+                if (!rh_sync_account_payments($pdo, 'conference', (int)$enquiry_id)) {
+                    throw new Exception('Could not recalculate the account balance.');
+                }
+                // Refund settings: 'refund_all' pays the net paid back inside this same transaction.
+                rh_cancel_auto_refund_account($pdo, 'conference', (int)$enquiry_id, (int)($user['id'] ?? 0));
+                $pdo->commit();
+            } catch (Throwable $cancelEx) {
+                if ($pdo->inTransaction()) {
+                    $pdo->rollBack();
+                }
+                throw $cancelEx;
+            }
+            $cancelCredit = rh_account_credit_owed($pdo, 'conference', (int)$enquiry_id);
+            $cancelCreditNote = $cancelCredit > BALANCE_TOLERANCE
+                ? ' ' . getSetting('currency_symbol') . number_format($cancelCredit, 2) . ' already paid stays as credit owed back - refund it from the payment Refund screen.'
+                : '';
 
             $email_result = sendConferenceCancelledEmail($enquiry);
 
@@ -448,9 +430,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['enquiry_action'])) {
             );
 
             if ($email_sent) {
-                $message = 'Conference enquiry cancelled successfully! Cancellation email sent.';
+                $message = 'Conference enquiry cancelled successfully! Cancellation email sent.' . $cancelCreditNote;
             } else {
-                $message = 'Conference enquiry cancelled successfully! (Email not sent: ' . $email_status . ')';
+                $message = 'Conference enquiry cancelled successfully! (Email not sent: ' . $email_status . ')' . $cancelCreditNote;
             }
         } elseif ($action === 'complete') {
             if (($enquiry['status'] ?? '') !== 'confirmed') {

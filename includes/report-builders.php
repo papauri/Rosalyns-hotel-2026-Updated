@@ -224,13 +224,13 @@ function buildAccountingSummary(string $startDate, string $endDate): array
     /* Revenue by booking_type from payments */
     $sumStmt = $pdo->prepare(
         "SELECT booking_type,
-                COUNT(*) AS tx_count,
-                SUM(total_amount) AS gross,
-                SUM(vat_amount) AS vat
+                COUNT(CASE WHEN COALESCE(payment_type, '') <> 'refund' THEN 1 END) AS tx_count,
+                SUM(CASE WHEN payment_type = 'refund' THEN -total_amount ELSE total_amount END) AS gross,
+                SUM(CASE WHEN payment_type = 'refund' THEN -vat_amount ELSE vat_amount END) AS vat
          FROM payments
          WHERE deleted_at IS NULL
-           AND payment_status IN ('completed','paid')
-           AND COALESCE(payment_type, '') <> 'refund'
+           AND ((payment_status IN ('completed','paid','refunded','partially_refunded') AND COALESCE(payment_type, '') <> 'refund')
+                OR (payment_type = 'refund' AND refund_status IN ('completed','processing')))
            AND payment_date BETWEEN :s AND :e
          GROUP BY booking_type"
     );
@@ -251,11 +251,11 @@ function buildAccountingSummary(string $startDate, string $endDate): array
 
     /* Payment method breakdown */
     $methodStmt = $pdo->prepare(
-        "SELECT payment_method, COUNT(*) AS tx_count, SUM(total_amount) AS gross
+        "SELECT payment_method, COUNT(CASE WHEN COALESCE(payment_type, '') <> 'refund' THEN 1 END) AS tx_count, SUM(CASE WHEN payment_type = 'refund' THEN -total_amount ELSE total_amount END) AS gross
          FROM payments
          WHERE deleted_at IS NULL
-           AND payment_status IN ('completed','paid')
-           AND COALESCE(payment_type, '') <> 'refund'
+           AND ((payment_status IN ('completed','paid','refunded','partially_refunded') AND COALESCE(payment_type, '') <> 'refund')
+                OR (payment_type = 'refund' AND refund_status IN ('completed','processing')))
            AND payment_date BETWEEN :s AND :e
          GROUP BY payment_method
          ORDER BY gross DESC"
@@ -275,12 +275,12 @@ function buildAccountingSummary(string $startDate, string $endDate): array
 
     $hasMraStatus = rh_column_exists($pdo, 'payments', 'mra_status');
     $mraPendingSql = $hasMraStatus
-        ? "SUM(CASE WHEN payment_status IN ('completed','paid') AND COALESCE(payment_type, '') <> 'refund' AND mra_status NOT IN ('accepted','not_required') THEN 1 ELSE 0 END)"
+        ? "SUM(CASE WHEN payment_status IN ('completed','paid','refunded','partially_refunded') AND COALESCE(payment_type, '') <> 'refund' AND mra_status NOT IN ('accepted','not_required') THEN 1 ELSE 0 END)"
         : "0";
     $complianceStmt = $pdo->prepare(
         "SELECT
             COUNT(*) AS completed_sales,
-            SUM(CASE WHEN payment_status IN ('completed','paid') AND COALESCE(payment_type, '') <> 'refund' AND (receipt_number IS NULL OR receipt_number = '') THEN 1 ELSE 0 END) AS missing_receipts,
+            SUM(CASE WHEN payment_status IN ('completed','paid','refunded','partially_refunded') AND COALESCE(payment_type, '') <> 'refund' AND (receipt_number IS NULL OR receipt_number = '') THEN 1 ELSE 0 END) AS missing_receipts,
             SUM(CASE WHEN invoice_generated = 1 AND (invoice_number IS NULL OR invoice_number = '') THEN 1 ELSE 0 END) AS generated_invoices_missing_numbers,
             {$mraPendingSql} AS mra_pending_or_unsubmitted
          FROM payments

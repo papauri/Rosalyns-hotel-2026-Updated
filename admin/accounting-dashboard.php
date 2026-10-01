@@ -70,6 +70,9 @@ $vatEnabled = in_array(getSetting('vat_enabled'), ['1', 1, true, 'true', 'on'], 
 $vatRate = getSetting('vat_rate');
 $vatNumber = getSetting('vat_number');
 $vatPricingMode = getSetting('vat_pricing_mode', 'exclusive') === 'inclusive' ? 'inclusive' : 'exclusive';
+// One three-way VAT mode: off / inclusive / exclusive (same value the whole system reads).
+$vatModeNow = !$vatEnabled ? 'off' : $vatPricingMode;
+$canChangeFinanceSettings = hasPermission((int)($user['id'] ?? 0), 'finance_settings');
 $vatSettingsMessage = '';
 $vatSettingsError = '';
 
@@ -96,10 +99,20 @@ $acct_ar      = function_exists('rh_module_key_enabled') && rh_module_key_enable
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['save_vat_settings'])) {
     if (!validateCsrfToken($_POST['csrf_token'] ?? '')) {
         $vatSettingsError = 'Security token invalid. Please refresh and try again.';
+    } elseif (!$canChangeFinanceSettings) {
+        $vatSettingsError = 'You do not have permission to change VAT settings.';
     } else {
         try {
-            $vatEnabledValue = (string)(($_POST['vat_enabled'] ?? '0') === '1' ? '1' : '0');
-            $vatRateInput = trim((string)($_POST['vat_rate'] ?? '0'));
+            $postedVatMode = (string)($_POST['vat_mode'] ?? '');
+            if (!in_array($postedVatMode, ['off', 'inclusive', 'exclusive'], true)) {
+                throw new Exception('Choose a VAT mode.');
+            }
+            $vatEnabledValue = $postedVatMode === 'off' ? '0' : '1';
+            // No VAT: the rate field is ignored and the stored rate is left as it was.
+            $vatRateInput = $postedVatMode === 'off' ? trim((string)getSetting('vat_rate', '0')) : trim((string)($_POST['vat_rate'] ?? '0'));
+            if ($postedVatMode === 'off' && !is_numeric($vatRateInput)) {
+                $vatRateInput = '0';
+            }
             $vatNumberValue = trim((string)($_POST['vat_number'] ?? ''));
 
             if ($vatRateInput === '' || !is_numeric($vatRateInput)) {
@@ -115,8 +128,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['save_vat_settings']))
                 throw new Exception('VAT number is too long.');
             }
 
-            $vatPricingModeValue = ($_POST['vat_pricing_mode'] ?? 'exclusive') === 'inclusive' ? 'inclusive' : 'exclusive';
+            // off keeps the stored pricing mode untouched; the other two set it.
+            $vatPricingModeValue = $postedVatMode === 'off'
+                ? (getSetting('vat_pricing_mode', 'exclusive') === 'inclusive' ? 'inclusive' : 'exclusive')
+                : $postedVatMode;
 
+            $oldVatMode = $vatModeNow;
             $savedEnabled = updateSetting('vat_enabled', $vatEnabledValue);
             $savedRate = updateSetting('vat_rate', (string)$vatRateValue);
             $savedNumber = updateSetting('vat_number', $vatNumberValue);
@@ -131,6 +148,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['save_vat_settings']))
                     'user' => $user['username'] ?? '',
                     'user_id' => $user['id'] ?? null,
                     'vat_enabled' => $vatEnabledValue,
+                    'vat_mode_from' => $oldVatMode,
+                    'vat_mode_to' => $postedVatMode,
                     'vat_rate' => $vatRateValue,
                     'vat_number_set' => $vatNumberValue !== '',
                 ]);
@@ -140,6 +159,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['save_vat_settings']))
             $vatRate = getSetting('vat_rate');
             $vatNumber = getSetting('vat_number');
             $vatPricingMode = getSetting('vat_pricing_mode', 'exclusive') === 'inclusive' ? 'inclusive' : 'exclusive';
+            $vatModeNow = !$vatEnabled ? 'off' : $vatPricingMode;
             $vatSettingsMessage = 'VAT settings updated successfully.';
         } catch (Throwable $e) {
             $vatSettingsError = $e->getMessage();
@@ -153,9 +173,9 @@ try {
     $financialStmt = $pdo->prepare("
         SELECT
             COUNT(*) as total_payments,
-            COALESCE(SUM(CASE WHEN payment_status IN ('completed', 'paid') AND COALESCE(payment_type, '') != 'refund' THEN total_amount ELSE 0 END), 0) as total_collected,
-            COALESCE(SUM(CASE WHEN payment_status IN ('completed', 'paid') AND COALESCE(payment_type, '') != 'refund' THEN payment_amount ELSE 0 END), 0) as total_collected_excl_vat,
-            COALESCE(SUM(CASE WHEN payment_status IN ('completed', 'paid') AND COALESCE(payment_type, '') != 'refund' THEN vat_amount ELSE 0 END), 0)
+            COALESCE(SUM(CASE WHEN payment_status IN ('completed', 'paid', 'refunded', 'partially_refunded') AND COALESCE(payment_type, '') != 'refund' THEN total_amount ELSE 0 END), 0) as total_collected,
+            COALESCE(SUM(CASE WHEN payment_status IN ('completed', 'paid', 'refunded', 'partially_refunded') AND COALESCE(payment_type, '') != 'refund' THEN payment_amount ELSE 0 END), 0) as total_collected_excl_vat,
+            COALESCE(SUM(CASE WHEN payment_status IN ('completed', 'paid', 'refunded', 'partially_refunded') AND COALESCE(payment_type, '') != 'refund' THEN vat_amount ELSE 0 END), 0)
                 - COALESCE(SUM(CASE WHEN payment_type = 'refund' AND refund_status IN ('completed','processing') THEN vat_amount ELSE 0 END), 0)
                 as total_vat_collected,
             COALESCE(SUM(CASE WHEN payment_status IN ('pending', 'partial') AND COALESCE(payment_type, '') != 'refund' THEN total_amount ELSE 0 END), 0) as total_pending,
@@ -176,8 +196,8 @@ try {
         $roomStmt = $pdo->prepare("
             SELECT
                 COUNT(DISTINCT p.booking_id) as total_bookings_with_payments,
-                COALESCE(SUM(CASE WHEN p.payment_status IN ('completed', 'paid') AND COALESCE(p.payment_type, '') != 'refund' THEN p.total_amount ELSE 0 END), 0) as room_collected,
-                COALESCE(SUM(CASE WHEN p.payment_status IN ('completed', 'paid') AND COALESCE(p.payment_type, '') != 'refund' THEN p.vat_amount ELSE 0 END), 0)
+                COALESCE(SUM(CASE WHEN p.payment_status IN ('completed', 'paid', 'refunded', 'partially_refunded') AND COALESCE(p.payment_type, '') != 'refund' THEN p.total_amount ELSE 0 END), 0) as room_collected,
+                COALESCE(SUM(CASE WHEN p.payment_status IN ('completed', 'paid', 'refunded', 'partially_refunded') AND COALESCE(p.payment_type, '') != 'refund' THEN p.vat_amount ELSE 0 END), 0)
                     - COALESCE(SUM(CASE WHEN p.payment_type = 'refund' AND p.refund_status IN ('completed','processing') THEN p.vat_amount ELSE 0 END), 0)
                     as room_vat_collected,
                 (
@@ -205,8 +225,8 @@ try {
         $confStmt = $pdo->prepare("
             SELECT
                 COUNT(DISTINCT p.booking_id) as total_conferences_with_payments,
-                COALESCE(SUM(CASE WHEN p.payment_status IN ('completed', 'paid') AND COALESCE(p.payment_type, '') != 'refund' THEN p.total_amount ELSE 0 END), 0) as conf_collected,
-                COALESCE(SUM(CASE WHEN p.payment_status IN ('completed', 'paid') AND COALESCE(p.payment_type, '') != 'refund' THEN p.vat_amount ELSE 0 END), 0)
+                COALESCE(SUM(CASE WHEN p.payment_status IN ('completed', 'paid', 'refunded', 'partially_refunded') AND COALESCE(p.payment_type, '') != 'refund' THEN p.total_amount ELSE 0 END), 0) as conf_collected,
+                COALESCE(SUM(CASE WHEN p.payment_status IN ('completed', 'paid', 'refunded', 'partially_refunded') AND COALESCE(p.payment_type, '') != 'refund' THEN p.vat_amount ELSE 0 END), 0)
                     - COALESCE(SUM(CASE WHEN p.payment_type = 'refund' AND p.refund_status IN ('completed','processing') THEN p.vat_amount ELSE 0 END), 0)
                     as conf_vat_collected,
                 (
@@ -234,8 +254,8 @@ try {
         $gymStmt = $pdo->prepare("
             SELECT
                 COUNT(DISTINCT p.booking_id) as total_gym_with_payments,
-                COALESCE(SUM(CASE WHEN p.payment_status IN ('completed', 'paid') AND COALESCE(p.payment_type, '') != 'refund' THEN p.total_amount ELSE 0 END), 0) as gym_collected,
-                COALESCE(SUM(CASE WHEN p.payment_status IN ('completed', 'paid') AND COALESCE(p.payment_type, '') != 'refund' THEN p.vat_amount ELSE 0 END), 0)
+                COALESCE(SUM(CASE WHEN p.payment_status IN ('completed', 'paid', 'refunded', 'partially_refunded') AND COALESCE(p.payment_type, '') != 'refund' THEN p.total_amount ELSE 0 END), 0) as gym_collected,
+                COALESCE(SUM(CASE WHEN p.payment_status IN ('completed', 'paid', 'refunded', 'partially_refunded') AND COALESCE(p.payment_type, '') != 'refund' THEN p.vat_amount ELSE 0 END), 0)
                     - COALESCE(SUM(CASE WHEN p.payment_type = 'refund' AND p.refund_status IN ('completed','processing') THEN p.vat_amount ELSE 0 END), 0)
                     as gym_vat_collected,
                 (
@@ -263,8 +283,8 @@ try {
         $eventsStmt = $pdo->prepare("
             SELECT
                 COUNT(DISTINCT p.booking_id) as total_events_with_payments,
-                COALESCE(SUM(CASE WHEN p.payment_status IN ('completed', 'paid') AND COALESCE(p.payment_type, '') != 'refund' THEN p.total_amount ELSE 0 END), 0) as events_collected,
-                COALESCE(SUM(CASE WHEN p.payment_status IN ('completed', 'paid') AND COALESCE(p.payment_type, '') != 'refund' THEN p.vat_amount ELSE 0 END), 0)
+                COALESCE(SUM(CASE WHEN p.payment_status IN ('completed', 'paid', 'refunded', 'partially_refunded') AND COALESCE(p.payment_type, '') != 'refund' THEN p.total_amount ELSE 0 END), 0) as events_collected,
+                COALESCE(SUM(CASE WHEN p.payment_status IN ('completed', 'paid', 'refunded', 'partially_refunded') AND COALESCE(p.payment_type, '') != 'refund' THEN p.vat_amount ELSE 0 END), 0)
                     - COALESCE(SUM(CASE WHEN p.payment_type = 'refund' AND p.refund_status IN ('completed','processing') THEN p.vat_amount ELSE 0 END), 0)
                     as events_vat_collected,
                 (
@@ -292,8 +312,8 @@ try {
         $restaurantStmt = $pdo->prepare("
             SELECT
                 COUNT(DISTINCT CASE WHEN COALESCE(p.payment_type, '') != 'refund' THEN p.booking_id ELSE NULL END) as total_restaurant_orders_with_payments,
-                COALESCE(SUM(CASE WHEN p.payment_status IN ('completed', 'paid') AND COALESCE(p.payment_type, '') != 'refund' THEN p.total_amount ELSE 0 END), 0) as restaurant_collected,
-                COALESCE(SUM(CASE WHEN p.payment_status IN ('completed', 'paid') AND COALESCE(p.payment_type, '') != 'refund' THEN p.vat_amount ELSE 0 END), 0)
+                COALESCE(SUM(CASE WHEN p.payment_status IN ('completed', 'paid', 'refunded', 'partially_refunded') AND COALESCE(p.payment_type, '') != 'refund' THEN p.total_amount ELSE 0 END), 0) as restaurant_collected,
+                COALESCE(SUM(CASE WHEN p.payment_status IN ('completed', 'paid', 'refunded', 'partially_refunded') AND COALESCE(p.payment_type, '') != 'refund' THEN p.vat_amount ELSE 0 END), 0)
                     - COALESCE(SUM(CASE WHEN p.payment_type = 'refund' AND p.refund_status IN ('completed','processing') THEN p.vat_amount ELSE 0 END), 0)
                     as restaurant_vat_collected
             FROM payments p
@@ -310,7 +330,7 @@ try {
         SELECT
             payment_method,
             COUNT(*) as count,
-            COALESCE(SUM(CASE WHEN payment_status IN ('completed', 'paid') AND COALESCE(payment_type, '') != 'refund' THEN total_amount ELSE 0 END), 0) as total
+            COALESCE(SUM(CASE WHEN payment_status IN ('completed', 'paid', 'refunded', 'partially_refunded') AND COALESCE(payment_type, '') != 'refund' THEN total_amount ELSE 0 END), 0) as total
         FROM payments
         WHERE payment_date BETWEEN ? AND ?
           AND deleted_at IS NULL
@@ -471,11 +491,11 @@ try {
     $trendStmt = $pdo->prepare("
         SELECT
             DATE(payment_date) AS day,
-            COALESCE(SUM(CASE WHEN booking_type = 'room' AND payment_status IN ('completed','paid') AND COALESCE(payment_type, '') != 'refund' THEN total_amount ELSE 0 END), 0) AS room_rev,
-            COALESCE(SUM(CASE WHEN booking_type = 'conference' AND payment_status IN ('completed','paid') AND COALESCE(payment_type, '') != 'refund' THEN total_amount ELSE 0 END), 0) AS conf_rev,
-            COALESCE(SUM(CASE WHEN booking_type = 'restaurant' AND payment_status IN ('completed','paid') AND COALESCE(payment_type, '') != 'refund' THEN total_amount ELSE 0 END), 0) AS fnb_rev,
-            COALESCE(SUM(CASE WHEN booking_type = 'gym' AND payment_status IN ('completed','paid') AND COALESCE(payment_type, '') != 'refund' THEN total_amount ELSE 0 END), 0) AS gym_rev,
-            COALESCE(SUM(CASE WHEN booking_type = 'event' AND payment_status IN ('completed','paid') AND COALESCE(payment_type, '') != 'refund' THEN total_amount ELSE 0 END), 0) AS events_rev,
+            COALESCE(SUM(CASE WHEN booking_type = 'room' AND payment_status IN ('completed','paid','refunded','partially_refunded') AND COALESCE(payment_type, '') != 'refund' THEN total_amount ELSE 0 END), 0) AS room_rev,
+            COALESCE(SUM(CASE WHEN booking_type = 'conference' AND payment_status IN ('completed','paid','refunded','partially_refunded') AND COALESCE(payment_type, '') != 'refund' THEN total_amount ELSE 0 END), 0) AS conf_rev,
+            COALESCE(SUM(CASE WHEN booking_type = 'restaurant' AND payment_status IN ('completed','paid','refunded','partially_refunded') AND COALESCE(payment_type, '') != 'refund' THEN total_amount ELSE 0 END), 0) AS fnb_rev,
+            COALESCE(SUM(CASE WHEN booking_type = 'gym' AND payment_status IN ('completed','paid','refunded','partially_refunded') AND COALESCE(payment_type, '') != 'refund' THEN total_amount ELSE 0 END), 0) AS gym_rev,
+            COALESCE(SUM(CASE WHEN booking_type = 'event' AND payment_status IN ('completed','paid','refunded','partially_refunded') AND COALESCE(payment_type, '') != 'refund' THEN total_amount ELSE 0 END), 0) AS events_rev,
             COALESCE(SUM(CASE WHEN payment_type = 'refund' THEN refund_amount ELSE 0 END), 0) AS refunds,
             COUNT(*) AS txn_count
         FROM payments
@@ -490,12 +510,12 @@ try {
     $paymentColumns = finance_table_columns($pdo, 'payments');
     $mraColumnsAvailable = isset($paymentColumns['mra_status']);
     $mraPendingSql = $mraColumnsAvailable
-        ? "SUM(CASE WHEN payment_status IN ('completed','paid') AND COALESCE(payment_type, '') != 'refund' AND mra_status NOT IN ('accepted','not_required') THEN 1 ELSE 0 END)"
+        ? "SUM(CASE WHEN payment_status IN ('completed','paid','refunded','partially_refunded') AND COALESCE(payment_type, '') != 'refund' AND mra_status NOT IN ('accepted','not_required') THEN 1 ELSE 0 END)"
         : "0";
     $complianceStmt = $pdo->prepare("
         SELECT
             COUNT(*) AS completed_sales,
-            SUM(CASE WHEN payment_status IN ('completed','paid') AND COALESCE(payment_type, '') != 'refund' AND (receipt_number IS NULL OR receipt_number = '') THEN 1 ELSE 0 END) AS missing_receipts,
+            SUM(CASE WHEN payment_status IN ('completed','paid','refunded','partially_refunded') AND COALESCE(payment_type, '') != 'refund' AND (receipt_number IS NULL OR receipt_number = '') THEN 1 ELSE 0 END) AS missing_receipts,
             SUM(CASE WHEN invoice_generated = 1 AND (invoice_number IS NULL OR invoice_number = '') THEN 1 ELSE 0 END) AS generated_invoices_missing_numbers,
             {$mraPendingSql} AS mra_pending_or_unsubmitted
         FROM payments
@@ -651,7 +671,7 @@ if (!isset($folio_fnb)) {
         try {
             // Refund rows also sit at payment_status='completed' — they must reduce, not inflate, the drawer.
             $cashStmt = $pdo->prepare("SELECT COALESCE(SUM(CASE
-                    WHEN COALESCE(payment_type,'') <> 'refund' AND payment_status IN ('completed','paid') THEN total_amount
+                    WHEN COALESCE(payment_type,'') <> 'refund' AND payment_status IN ('completed','paid','refunded','partially_refunded') THEN total_amount
                     WHEN payment_type = 'refund' AND refund_status IN ('completed','processing') THEN -total_amount
                     ELSE 0 END),0)
                 FROM payments
@@ -2055,9 +2075,9 @@ if (!isset($folio_fnb)) {
             <header class="acct-panel__head acct-panel__head--vat">
                 <div class="acct-panel__head-title-row">
                     <h2 class="acct-panel__title"><i class="fas fa-percent"></i> VAT Settings</h2>
-                    <span class="vat-status-badge <?php echo $vatEnabled ? 'vat-status-badge--on' : 'vat-status-badge--off'; ?>">
+                    <span class="vat-status-badge <?php echo $vatModeNow !== 'off' ? 'vat-status-badge--on' : 'vat-status-badge--off'; ?>">
                         <i class="fas fa-circle"></i>
-                        <?php echo $vatEnabled ? 'VAT Enabled' : 'VAT Disabled'; ?>
+                        <?php echo $vatModeNow !== 'off' ? 'VAT Enabled' : 'VAT Disabled'; ?>
                     </span>
                 </div>
                 <p class="acct-panel__sub">Tax configuration affects all future invoices, payments, and MRA reporting. Changes cannot be undone automatically.</p>
@@ -2081,9 +2101,12 @@ if (!isset($folio_fnb)) {
             <div class="vat-locked-view" id="vatLockedView">
                 <div class="vat-current-grid">
                     <div class="vat-current-item">
-                        <span class="vat-current-item__label">Status</span>
-                        <span class="vat-current-item__value <?php echo $vatEnabled ? 'vat-current-item__value--on' : 'vat-current-item__value--off'; ?>">
-                            <?php echo $vatEnabled ? '<i class="fas fa-toggle-on"></i> Enabled' : '<i class="fas fa-toggle-off"></i> Disabled'; ?>
+                        <span class="vat-current-item__label">VAT mode</span>
+                        <span class="vat-current-item__value <?php echo $vatModeNow !== 'off' ? 'vat-current-item__value--on' : 'vat-current-item__value--off'; ?>">
+                            <?php
+                            $vatModeLabels = ['off' => 'No VAT', 'inclusive' => 'Prices include VAT', 'exclusive' => 'VAT added on top of prices'];
+                            echo ($vatModeNow !== 'off' ? '<i class="fas fa-toggle-on"></i> ' : '<i class="fas fa-toggle-off"></i> ') . htmlspecialchars($vatModeLabels[$vatModeNow]);
+                            ?>
                         </span>
                     </div>
                     <div class="vat-current-item">
@@ -2097,14 +2120,19 @@ if (!isset($folio_fnb)) {
                         </span>
                     </div>
                 </div>
+                <?php if ($canChangeFinanceSettings): ?>
                 <div class="vat-unlock-row">
                     <button type="button" class="acct-btn acct-btn--unlock" id="vatUnlockBtn">
                         <i class="fas fa-lock-open"></i> Unlock to Edit
                     </button>
                     <p class="vat-unlock-hint"><i class="fas fa-triangle-exclamation"></i> Editing VAT settings affects all future invoices, tax calculations, and MRA reports. Proceed with caution.</p>
                 </div>
+                <?php else: ?>
+                <p class="vat-unlock-hint"><i class="fas fa-lock"></i> Only users with the "Change VAT &amp; refund settings" permission can change VAT.</p>
+                <?php endif; ?>
             </div>
 
+            <?php if ($canChangeFinanceSettings): ?>
             <!-- Edit form (hidden until unlocked) -->
             <div class="vat-edit-view" id="vatEditView" hidden>
                 <div class="vat-warning-banner">
@@ -2125,28 +2153,29 @@ if (!isset($folio_fnb)) {
                     <input type="hidden" name="save_vat_settings" value="1">
 
                     <div class="vat-edit-fields">
-                        <div class="vat-field-group">
-                            <label class="vat-field-group__label" for="vat_enabled">VAT Status</label>
-                            <select class="vat-field-group__control" id="vat_enabled" name="vat_enabled">
-                                <option value="1" <?php echo $vatEnabled ? 'selected' : ''; ?>>Enabled</option>
-                                <option value="0" <?php echo !$vatEnabled ? 'selected' : ''; ?>>Disabled</option>
-                            </select>
-                        </div>
-                        <div class="vat-field-group">
-                            <label class="vat-field-group__label" for="vat_pricing_mode">Pricing Mode</label>
-                            <select class="vat-field-group__control" id="vat_pricing_mode" name="vat_pricing_mode">
-                                <option value="exclusive" <?php echo $vatPricingMode !== 'inclusive' ? 'selected' : ''; ?>>VAT added on top of prices</option>
-                                <option value="inclusive" <?php echo $vatPricingMode === 'inclusive' ? 'selected' : ''; ?>>Prices already include VAT</option>
-                            </select>
-                            <small style="color:#7a6f63;font-size:.74rem;display:block;margin-top:4px;">
-                                Inclusive: totals equal your listed prices and documents show only the VAT rate, never an amount.
-                            </small>
+                        <div class="vat-field-group vat-field-group--wide">
+                            <span class="vat-field-group__label" id="vatModeLegend">VAT mode</span>
+                            <div role="radiogroup" aria-labelledby="vatModeLegend" style="display:flex;flex-direction:column;gap:8px;margin-top:6px;">
+                                <?php
+                                $vatModeChoices = [
+                                    'off'       => ['No VAT', 'No VAT is applied anywhere. Totals equal listed prices.'],
+                                    'inclusive' => ['Prices include VAT', 'Totals equal your listed prices. Documents show only the VAT rate, never an amount.'],
+                                    'exclusive' => ['VAT added on top of prices', 'VAT is calculated on top of listed prices and itemised on documents.'],
+                                ];
+                                foreach ($vatModeChoices as $vmKey => $vmInfo): ?>
+                                    <label style="display:flex;gap:10px;align-items:flex-start;min-height:44px;cursor:pointer;">
+                                        <input type="radio" name="vat_mode" value="<?php echo $vmKey; ?>" <?php echo $vatModeNow === $vmKey ? 'checked' : ''; ?> style="margin-top:4px;">
+                                        <span><strong><?php echo htmlspecialchars($vmInfo[0]); ?></strong><br>
+                                        <small style="color:#7a6f63;font-size:.74rem;"><?php echo htmlspecialchars($vmInfo[1]); ?></small></span>
+                                    </label>
+                                <?php endforeach; ?>
+                            </div>
                         </div>
                         <div class="vat-field-group">
                             <label class="vat-field-group__label" for="vat_rate">VAT Rate (%)</label>
                             <input class="vat-field-group__control" type="number" id="vat_rate" name="vat_rate"
                                 min="0" max="100" step="0.01"
-                                value="<?php echo htmlspecialchars((string)$vatRate); ?>" required>
+                                value="<?php echo htmlspecialchars((string)$vatRate); ?>" <?php echo $vatModeNow === 'off' ? 'disabled' : 'required'; ?>>
                         </div>
                         <div class="vat-field-group vat-field-group--wide">
                             <label class="vat-field-group__label" for="vat_number">VAT Registration Number</label>
@@ -2166,9 +2195,24 @@ if (!isset($folio_fnb)) {
                         </button>
                     </div>
                 </form>
+                <script>
+                    (function () {
+                        var rate = document.getElementById('vat_rate');
+                        document.querySelectorAll('input[name="vat_mode"]').forEach(function (r) {
+                            r.addEventListener('change', function () {
+                                if (!rate) return;
+                                var off = document.querySelector('input[name="vat_mode"]:checked').value === 'off';
+                                rate.disabled = off;
+                                rate.required = !off;
+                            });
+                        });
+                    })();
+                </script>
             </div>
+            <?php endif; ?>
         </section>
 
+        <?php if ($canChangeFinanceSettings): ?>
         <!-- VAT unlock confirmation modal -->
         <div class="modal-overlay" id="vatConfirmModal-overlay" data-modal-overlay aria-hidden="true"></div>
         <div class="modal-overlay vat-confirm-modal" id="vatConfirmModal" role="dialog" aria-modal="true" aria-labelledby="vatConfirmTitle" data-modal data-close-on-escape="true" data-close-on-overlay="false">
@@ -2192,6 +2236,7 @@ if (!isset($folio_fnb)) {
                 </div>
             </div>
         </div>
+        <?php endif; ?>
         </details>
 
 

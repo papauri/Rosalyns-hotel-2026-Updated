@@ -48,6 +48,8 @@ if (count($pathParts) >= 3 && is_numeric($pathParts[2])) {
 }
 
 require_once __DIR__ . '/../includes/finance-sequences.php';
+require_once __DIR__ . '/../admin/includes/finance-account-sync.php';
+require_once __DIR__ . '/../config/credit-notes.php';
 finance_ensure_sequence_tables($pdo);
 
 try {
@@ -208,11 +210,11 @@ function listPayments(PDO $pdo)
     $summarySql = "
         SELECT
             COUNT(*) as total_payments,
-            SUM(CASE WHEN payment_status IN ('completed', 'paid') AND COALESCE(payment_type, '') != 'refund' THEN total_amount ELSE 0 END) as total_collected,
-            SUM(CASE WHEN payment_status IN ('pending', 'partial', 'partially_refunded') AND COALESCE(payment_type, '') != 'refund' THEN total_amount ELSE 0 END) as total_pending,
-            SUM(CASE WHEN COALESCE(payment_type, '') = 'refund' THEN COALESCE(refund_amount, total_amount) ELSE 0 END) as total_refunded,
+            SUM(CASE WHEN payment_status IN ('completed', 'paid', 'refunded', 'partially_refunded') AND COALESCE(payment_type, '') != 'refund' THEN total_amount ELSE 0 END) as total_collected,
+            SUM(CASE WHEN payment_status IN ('pending', 'partial') AND COALESCE(payment_type, '') != 'refund' THEN total_amount ELSE 0 END) as total_pending,
+            SUM(CASE WHEN COALESCE(payment_type, '') = 'refund' AND refund_status IN ('completed','processing') THEN COALESCE(refund_amount, total_amount) ELSE 0 END) as total_refunded,
             (
-                SUM(CASE WHEN payment_status IN ('completed', 'paid') AND COALESCE(payment_type, '') != 'refund' THEN vat_amount ELSE 0 END)
+                SUM(CASE WHEN payment_status IN ('completed', 'paid', 'refunded', 'partially_refunded') AND COALESCE(payment_type, '') != 'refund' THEN vat_amount ELSE 0 END)
                 - SUM(CASE WHEN COALESCE(payment_type, '') = 'refund' AND refund_status IN ('completed','processing') THEN vat_amount ELSE 0 END)
             ) as total_vat_collected
         FROM payments
@@ -502,13 +504,20 @@ function createPayment(PDO $pdo)
 
     // Validate payment status
     // 'paid' and 'partial' can be set by the POS sync internally; allow them in API too for consistency.
-    $validStatuses = ['pending', 'partial', 'completed', 'paid', 'failed', 'refunded', 'partially_refunded'];
-    if (!in_array($input['payment_status'], $validStatuses)) {
+    // Refunded statuses are produced only by the refund process (refund rows), never set directly.
+    $validStatuses = ['pending', 'partial', 'completed', 'paid'];
+    if (rh_payment_status_supported($pdo, 'failed')) {
+        $validStatuses[] = 'failed';
+    }
+    if (in_array($input['payment_status'], ['refunded', 'partially_refunded'], true)) {
+        ApiResponse::validationError(['payment_status' => 'Refunded statuses are set by the refund process only']);
+    }
+    if (!in_array($input['payment_status'], $validStatuses, true)) {
         ApiResponse::validationError(['payment_status' => 'Invalid payment status']);
     }
 
     // Get VAT settings
-    $vatEnabled = getSetting('vat_enabled') === '1';
+    $vatEnabled = rh_vat_enabled();
     $vatRate = $vatEnabled ? (float)getSetting('vat_rate') : 0;
 
     // Validate payment amount
@@ -517,10 +526,11 @@ function createPayment(PDO $pdo)
         ApiResponse::validationError(['payment_amount' => 'Payment amount must be greater than zero']);
     }
 
-    // payment_amount is the gross (VAT-inclusive) amount — extract VAT portion.
-    $vatRate = isset($input['vat_rate']) ? (float)$input['vat_rate'] : $vatRate;
-    $vatAmount = $vatRate > 0 ? round($paymentAmount * ($vatRate / (100 + $vatRate)), 2) : 0.0;
-    $totalAmount = $paymentAmount;
+    // VAT is never taken from the client: it is split pro rata from the account's own VAT.
+    if (isset($input['vat_rate'])) {
+        ApiResponse::validationError(['vat_rate' => 'vat_rate cannot be supplied; VAT is derived from the booking']);
+    }
+    $totalAmount = $paymentAmount; // gross received
 
     // Validate booking exists
     if ($input['booking_type'] === 'room') {
@@ -536,6 +546,12 @@ function createPayment(PDO $pdo)
             ApiResponse::error('Conference enquiry not found', 404);
         }
     }
+
+    // payment_amount stored NET; vat_amount pro rata to the account's VAT / gross ratio.
+    $vatSplit  = rh_account_vat_split($pdo, (string)$input['booking_type'], (int)$input['booking_id'], $paymentAmount, $vatRate);
+    $vatRate   = $vatSplit['rate'];
+    $vatAmount = $vatSplit['vat'];
+    $netAmount = $vatSplit['net'];
 
     // Generate unique payment reference
     do {
@@ -570,7 +586,7 @@ function createPayment(PDO $pdo)
             $input['booking_type'],
             (int)$input['booking_id'],
             $paymentDate,
-            $paymentAmount,
+            $netAmount,
             $vatRate,
             $vatAmount,
             $totalAmount,
@@ -585,14 +601,25 @@ function createPayment(PDO $pdo)
 
         $paymentId = $pdo->lastInsertId();
 
-        // Update booking payment totals
-        if ($input['booking_type'] === 'room') {
-            updateRoomBookingPayments($pdo, (int)$input['booking_id']);
-        } else {
-            updateConferenceEnquiryPayments($pdo, (int)$input['booking_id']);
+        // Update account totals
+        if (!rh_sync_account_payments($pdo, (string)$input['booking_type'], (int)$input['booking_id'])) {
+            throw new Exception('Could not recalculate the account balance');
+        }
+
+        // Overpayment -> credit note, inside the same transaction
+        $overpayCn = null;
+        if (in_array($input['payment_status'], ['completed', 'paid'], true)) {
+            $overpayCn = rh_auto_credit_overpayment($pdo, (string)$input['booking_type'], (int)$input['booking_id'], $totalAmount, $paymentRef, 0);
         }
 
         $pdo->commit();
+        if ($overpayCn && $overpayCn['email'] !== '') {
+            try {
+                sendCreditNoteEmail($pdo, $overpayCn['credit_note_id']);
+            } catch (Throwable $cnMailEx) {
+                error_log('Overpayment credit note email failed: ' . $cnMailEx->getMessage());
+            }
+        }
 
         // Send receipt email automatically for completed/paid payments
         if (in_array($input['payment_status'], ['completed', 'paid'], true)) {
@@ -657,6 +684,25 @@ function updatePayment(PDO $pdo, int $paymentId)
         ApiResponse::error('Invalid JSON request body', 400);
     }
 
+    // Refund rows are owned by the refund process; originals with refunds keep amount/status.
+    if ((string)($existingPayment['payment_type'] ?? '') === 'refund') {
+        ApiResponse::error('Refund records cannot be edited here. Settle them from the admin refund screen.', 409);
+    }
+    if (isset($input['vat_rate'])) {
+        ApiResponse::validationError(['vat_rate' => 'vat_rate cannot be supplied; VAT is derived from the stored payment']);
+    }
+    if (isset($input['payment_status'])) {
+        if (in_array($input['payment_status'], ['refunded', 'partially_refunded', 'cancelled'], true)) {
+            ApiResponse::validationError(['payment_status' => 'Refunded/cancelled statuses cannot be set directly; use the refund process']);
+        }
+        $apiStatuses = ['pending', 'partial', 'completed', 'paid'];
+        if (rh_payment_status_supported($pdo, 'failed')) {
+            $apiStatuses[] = 'failed';
+        }
+        if (!in_array($input['payment_status'], $apiStatuses, true)) {
+            ApiResponse::validationError(['payment_status' => 'Invalid payment status']);
+        }
+    }
     // Build update data
     $updateFields = [];
     $params = [];
@@ -672,30 +718,44 @@ function updatePayment(PDO $pdo, int $paymentId)
     ];
 
     foreach ($allowedFields as $field) {
+        if ($field === 'payment_amount') {
+            continue; // stored NET below, together with the VAT split
+        }
         if (isset($input[$field])) {
             $updateFields[] = "$field = ?";
             $params[] = $input[$field];
         }
     }
 
-    if (empty($updateFields)) {
+    if (empty($updateFields) && !isset($input['payment_amount'])) {
         ApiResponse::error('No valid fields to update', 400);
     }
 
-    // Recalculate VAT if amount changed
+    // Amount changed: the row keeps its OWN stored VAT ratio (set pro rata when recorded);
+    // payment_amount is stored NET, total_amount GROSS.
     if (isset($input['payment_amount'])) {
-        $newAmount = (float)$input['payment_amount'];
-        $vatRate = isset($input['vat_rate']) ? (float)$input['vat_rate'] : (float)$existingPayment['vat_rate'];
-        $vatAmount = $vatRate > 0 ? round($newAmount * ($vatRate / (100 + $vatRate)), 2) : 0.0;
-        $totalAmount = $newAmount; // gross = what was entered
-
-        $updateFields[] = "vat_rate = ?";
-        $params[] = $vatRate;
+        $newAmount = round((float)$input['payment_amount'], 2);
+        if ($newAmount <= 0) {
+            ApiResponse::validationError(['payment_amount' => 'Payment amount must be greater than zero']);
+        }
+        $storedTotal = (float)$existingPayment['total_amount'];
+        $storedVat   = (float)$existingPayment['vat_amount'];
+        if (abs($newAmount - $storedTotal) <= BALANCE_TOLERANCE) {
+            $newAmount = $storedTotal;
+            $vatAmount = $storedVat;
+        } elseif ($storedTotal > BALANCE_TOLERANCE && $storedVat > 0.001) {
+            $vatAmount = round($newAmount * ($storedVat / $storedTotal), 2);
+        } else {
+            $vatAmount = 0.0;
+        }
+        $updateFields[] = "payment_amount = ?";
+        $params[] = round($newAmount - $vatAmount, 2);
         $updateFields[] = "vat_amount = ?";
         $params[] = $vatAmount;
         $updateFields[] = "total_amount = ?";
-        $params[] = $totalAmount;
+        $params[] = $newAmount;
     }
+
 
     $needsReceiptNumber = isset($input['payment_status'])
         && in_array($input['payment_status'], ['completed', 'paid'], true)
@@ -706,6 +766,33 @@ function updatePayment(PDO $pdo, int $paymentId)
     $pdo->beginTransaction();
 
     try {
+        // Lock the payment row, then re-check refund state under the lock: a refund recorded
+        // between the read above and this write must not be overwritten.
+        $lockPay = $pdo->prepare("SELECT payment_status, total_amount FROM payments WHERE id = ? AND deleted_at IS NULL FOR UPDATE");
+        $lockPay->execute([$paymentId]);
+        $lockedPay = $lockPay->fetch(PDO::FETCH_ASSOC);
+        if (!$lockedPay) {
+            $pdo->rollBack();
+            ApiResponse::error('Payment not found. It may have been deleted or does not exist.', 404);
+        }
+        $apiRefundedStmt = $pdo->prepare("SELECT COALESCE(SUM(COALESCE(refund_amount, total_amount)), 0) FROM payments WHERE original_payment_id = ? AND payment_type = 'refund' AND deleted_at IS NULL AND refund_status IN ('pending','processing','completed')");
+        $apiRefundedStmt->execute([$paymentId]);
+        $apiRefunded = round((float)$apiRefundedStmt->fetchColumn(), 2);
+        if ($apiRefunded > 0) {
+            $guardMsg = null;
+            if (in_array((string)$lockedPay['payment_status'], ['refunded', 'partially_refunded'], true) && (isset($input['payment_status']) || isset($input['payment_amount']))) {
+                $guardMsg = 'This payment has refunds; its amount and status are managed by the refund records';
+            } elseif (isset($input['payment_status']) && (string)$input['payment_status'] !== (string)$lockedPay['payment_status']) {
+                $guardMsg = 'This payment has refunds; its status cannot be changed';
+            } elseif (isset($input['payment_amount']) && (float)$input['payment_amount'] + BALANCE_TOLERANCE < $apiRefunded) {
+                $guardMsg = 'Amount cannot be lowered below the already refunded ' . number_format($apiRefunded, 2);
+            }
+            if ($guardMsg !== null) {
+                $pdo->rollBack();
+                ApiResponse::error($guardMsg, 409);
+            }
+        }
+
         if ($needsReceiptNumber) {
             $updateFields[] = "receipt_number = ?";
             $params[] = finance_next_receipt_number($pdo, isset($input['payment_date']) ? (string)$input['payment_date'] : date('Y-m-d'));
@@ -717,14 +804,29 @@ function updatePayment(PDO $pdo, int $paymentId)
         $stmt = $pdo->prepare($sql);
         $stmt->execute($params);
 
-        // Update booking payment totals
-        if ($existingPayment['booking_type'] === 'room') {
-            updateRoomBookingPayments($pdo, $existingPayment['booking_id']);
-        } elseif ($existingPayment['booking_type'] === 'conference') {
-            updateConferenceEnquiryPayments($pdo, $existingPayment['booking_id']);
+        // Update account totals (every account type)
+        if (!rh_sync_account_payments($pdo, (string)$existingPayment['booking_type'], (int)$existingPayment['booking_id'])) {
+            throw new Exception('Could not recalculate the account balance');
+        }
+
+        // A raised amount on a collected payment may overpay the account: convert the excess
+        // into a credit note inside this same transaction.
+        $overpayCn = null;
+        $resultingStatus = (string)($input['payment_status'] ?? $existingPayment['payment_status']);
+        if (isset($input['payment_amount']) && in_array($resultingStatus, ['completed', 'paid'], true)
+            && in_array((string)$existingPayment['booking_type'], ['room', 'conference', 'gym', 'event'], true)) {
+            $raisedBy = round((float)$input['payment_amount'] - (float)$existingPayment['total_amount'], 2);
+            $overpayCn = rh_auto_credit_overpayment($pdo, (string)$existingPayment['booking_type'], (int)$existingPayment['booking_id'], $raisedBy, (string)$existingPayment['payment_reference'], 0);
         }
 
         $pdo->commit();
+        if ($overpayCn && $overpayCn['email'] !== '') {
+            try {
+                sendCreditNoteEmail($pdo, $overpayCn['credit_note_id']);
+            } catch (Throwable $cnMailEx) {
+                error_log('Overpayment credit note email failed: ' . $cnMailEx->getMessage());
+            }
+        }
 
         // Fetch updated payment
         $fetchStmt = $pdo->prepare("SELECT * FROM payments WHERE id = ?");
@@ -769,6 +871,18 @@ function deletePayment(PDO $pdo, int $paymentId)
         ApiResponse::error('Payment not found. It may have been deleted or does not exist.', 404);
     }
 
+    if ((string)($payment['payment_method'] ?? '') === 'credit_note' || (int)($payment['credit_note_id'] ?? 0) > 0) {
+        ApiResponse::error('Credit-note payments cannot be deleted; void the credit note instead', 409);
+    }
+    if ((string)($payment['payment_type'] ?? '') === 'refund') {
+        ApiResponse::error('Refund records cannot be deleted', 409);
+    }
+    $delRefStmt = $pdo->prepare("SELECT COUNT(*) FROM payments WHERE original_payment_id = ? AND payment_type = 'refund' AND deleted_at IS NULL");
+    $delRefStmt->execute([$paymentId]);
+    if ((int)$delRefStmt->fetchColumn() > 0) {
+        ApiResponse::error('This payment has refunds recorded against it and cannot be deleted', 409);
+    }
+
     // Start transaction
     $pdo->beginTransaction();
 
@@ -777,11 +891,9 @@ function deletePayment(PDO $pdo, int $paymentId)
         $stmt = $pdo->prepare("UPDATE payments SET deleted_at = NOW() WHERE id = ?");
         $stmt->execute([$paymentId]);
 
-        // Update booking payment totals
-        if ($payment['booking_type'] === 'room') {
-            updateRoomBookingPayments($pdo, $payment['booking_id']);
-        } elseif ($payment['booking_type'] === 'conference') {
-            updateConferenceEnquiryPayments($pdo, $payment['booking_id']);
+        // Update account totals (every account type)
+        if (!rh_sync_account_payments($pdo, (string)$payment['booking_type'], (int)$payment['booking_id'])) {
+            throw new Exception('Could not recalculate the account balance');
         }
 
         $pdo->commit();

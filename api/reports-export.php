@@ -130,14 +130,14 @@ function exportOverviewReport($output, string $start_date, string $end_date, str
 
     $summaryQuery = "
         SELECT
-            COUNT(*) as total_transactions,
-            SUM(CASE WHEN COALESCE(payment_type, '') != 'refund' THEN total_amount ELSE 0 END) as total_revenue,
+            COUNT(CASE WHEN COALESCE(payment_type, '') != 'refund' THEN 1 END) as total_transactions,
+            SUM(CASE WHEN COALESCE(payment_type, '') = 'refund' THEN -total_amount ELSE total_amount END) as total_revenue,
             SUM(CASE WHEN COALESCE(payment_type, '') != 'refund' THEN vat_amount ELSE 0 END)
                 - COALESCE(SUM(CASE WHEN payment_type = 'refund' AND refund_status IN ('completed','processing') THEN vat_amount ELSE 0 END), 0)
                 as total_vat
         FROM payments
-        WHERE payment_status IN ('completed', 'paid')
-        AND COALESCE(payment_type, '') != 'refund'
+        WHERE (payment_status IN ('completed', 'paid', 'refunded', 'partially_refunded') AND COALESCE(payment_type, '') != 'refund'
+               OR (payment_type = 'refund' AND refund_status IN ('completed','processing')))
         AND deleted_at IS NULL
         $date_filter
     ";
@@ -182,12 +182,12 @@ function exportOverviewReport($output, string $start_date, string $end_date, str
     $revenueQuery = "
         SELECT
             booking_type,
-            COUNT(*) as count,
-            SUM(total_amount) as total_revenue,
-            SUM(vat_amount) as total_vat
+            COUNT(CASE WHEN COALESCE(payment_type, '') != 'refund' THEN 1 END) as count,
+            SUM(CASE WHEN COALESCE(payment_type, '') = 'refund' THEN -total_amount ELSE total_amount END) as total_revenue,
+            SUM(CASE WHEN COALESCE(payment_type, '') = 'refund' THEN -vat_amount ELSE vat_amount END) as total_vat
         FROM payments
-        WHERE payment_status IN ('completed', 'paid')
-        AND COALESCE(payment_type, '') != 'refund'
+        WHERE (payment_status IN ('completed', 'paid', 'refunded', 'partially_refunded') AND COALESCE(payment_type, '') != 'refund'
+               OR (payment_type = 'refund' AND refund_status IN ('completed','processing')))
         AND deleted_at IS NULL
         $date_filter
         GROUP BY booking_type
@@ -212,11 +212,11 @@ function exportOverviewReport($output, string $start_date, string $end_date, str
     $methodsQuery = "
         SELECT
             payment_method,
-            COUNT(*) as count,
-            SUM(total_amount) as total_amount
+            COUNT(CASE WHEN COALESCE(payment_type, '') != 'refund' THEN 1 END) as count,
+            SUM(CASE WHEN COALESCE(payment_type, '') = 'refund' THEN -total_amount ELSE total_amount END) as total_amount
         FROM payments
-        WHERE payment_status IN ('completed', 'paid')
-        AND COALESCE(payment_type, '') != 'refund'
+        WHERE (payment_status IN ('completed', 'paid', 'refunded', 'partially_refunded') AND COALESCE(payment_type, '') != 'refund'
+               OR (payment_type = 'refund' AND refund_status IN ('completed','processing')))
         AND deleted_at IS NULL
         $date_filter
         GROUP BY payment_method
@@ -255,14 +255,14 @@ function exportRevenueReport($output, string $start_date, string $end_date, stri
     $dailyQuery = "
         SELECT
             DATE(payment_date) as date,
-            COUNT(*) as transaction_count,
-            SUM(total_amount) as daily_revenue,
-            SUM(vat_amount)
+            COUNT(CASE WHEN COALESCE(payment_type, '') != 'refund' THEN 1 END) as transaction_count,
+            SUM(CASE WHEN COALESCE(payment_type, '') = 'refund' THEN -total_amount ELSE total_amount END) as daily_revenue,
+            SUM(CASE WHEN COALESCE(payment_type, '') != 'refund' THEN vat_amount ELSE 0 END)
                 - COALESCE(SUM(CASE WHEN payment_type = 'refund' AND refund_status IN ('completed','processing') THEN vat_amount ELSE 0 END), 0)
                 as daily_vat
         FROM payments
-        WHERE payment_status IN ('completed', 'paid')
-        AND COALESCE(payment_type, '') != 'refund'
+        WHERE (payment_status IN ('completed', 'paid', 'refunded', 'partially_refunded') AND COALESCE(payment_type, '') != 'refund'
+               OR (payment_type = 'refund' AND refund_status IN ('completed','processing')))
         AND deleted_at IS NULL
         $date_filter
         GROUP BY DATE(payment_date)
@@ -292,13 +292,13 @@ function exportRevenueReport($output, string $start_date, string $end_date, stri
                 WHEN p.booking_type = 'conference' THEN ci.{$conferenceFields['company']}
             END as client_name,
             p.booking_type,
-            COUNT(*) as transaction_count,
-            SUM(p.total_amount) as total_spent
+            COUNT(CASE WHEN COALESCE(p.payment_type, '') != 'refund' THEN 1 END) as transaction_count,
+            SUM(CASE WHEN COALESCE(p.payment_type, '') = 'refund' THEN -p.total_amount ELSE p.total_amount END) as total_spent
         FROM payments p
         LEFT JOIN bookings b ON p.booking_type = 'room' AND p.booking_id = b.id
         LEFT JOIN conference_inquiries ci ON p.booking_type = 'conference' AND p.booking_id = ci.id
-        WHERE p.payment_status IN ('completed', 'paid')
-        AND COALESCE(p.payment_type, '') != 'refund'
+        WHERE (p.payment_status IN ('completed', 'paid', 'refunded', 'partially_refunded') AND COALESCE(p.payment_type, '') != 'refund'
+               OR (p.payment_type = 'refund' AND p.refund_status IN ('completed','processing')))
         AND p.deleted_at IS NULL
         $date_filter
         GROUP BY client_name, p.booking_type
@@ -423,13 +423,14 @@ function exportVATReport($output, string $start_date, string $end_date, string $
     $dailyQuery = "
         SELECT
             DATE(payment_date) as date,
-            COUNT(*) as transaction_count,
+            COUNT(CASE WHEN COALESCE(payment_type, '') != 'refund' THEN 1 END) as transaction_count,
             SUM(CASE WHEN COALESCE(payment_type, '') != 'refund' THEN vat_amount ELSE 0 END)
                 - COALESCE(SUM(CASE WHEN payment_type = 'refund' AND refund_status IN ('completed','processing') THEN vat_amount ELSE 0 END), 0)
                 as vat_collected,
-            SUM(CASE WHEN COALESCE(payment_type, '') != 'refund' THEN total_amount ELSE 0 END) as total_revenue
+            SUM(CASE WHEN COALESCE(payment_type, '') = 'refund' THEN -total_amount ELSE total_amount END) as total_revenue
         FROM payments
-        WHERE payment_status IN ('completed', 'paid')
+        WHERE (payment_status IN ('completed', 'paid', 'refunded', 'partially_refunded') AND COALESCE(payment_type, '') != 'refund'
+               OR (payment_type = 'refund' AND refund_status IN ('completed','processing')))
         AND deleted_at IS NULL
         $date_filter
         GROUP BY DATE(payment_date)
@@ -466,13 +467,14 @@ function exportVATReport($output, string $start_date, string $end_date, string $
     $typeQuery = "
         SELECT
             booking_type,
-            COUNT(*) as count,
+            COUNT(CASE WHEN COALESCE(payment_type, '') != 'refund' THEN 1 END) as count,
             SUM(CASE WHEN COALESCE(payment_type, '') != 'refund' THEN vat_amount ELSE 0 END)
                 - COALESCE(SUM(CASE WHEN payment_type = 'refund' AND refund_status IN ('completed','processing') THEN vat_amount ELSE 0 END), 0)
                 as vat_collected,
-            SUM(CASE WHEN COALESCE(payment_type, '') != 'refund' THEN total_amount ELSE 0 END) as total_revenue
+            SUM(CASE WHEN COALESCE(payment_type, '') = 'refund' THEN -total_amount ELSE total_amount END) as total_revenue
         FROM payments
-        WHERE payment_status IN ('completed', 'paid')
+        WHERE (payment_status IN ('completed', 'paid', 'refunded', 'partially_refunded') AND COALESCE(payment_type, '') != 'refund'
+               OR (payment_type = 'refund' AND refund_status IN ('completed','processing')))
         AND deleted_at IS NULL
         $date_filter
         GROUP BY booking_type

@@ -9,6 +9,24 @@ require_once __DIR__ . '/database.php';
 require_once __DIR__ . '/email.php';
 require_once __DIR__ . '/../includes/finance-sequences.php';
 
+if (!function_exists('rh_invoice_signed_payments')) {
+    /**
+     * Invoice payment history rows: collected payments as positives and settled refunds
+     * (completed / processing) as negatives, so the list sums to the Amount Paid line.
+     */
+    function rh_invoice_signed_payments(array $rows): array
+    {
+        foreach ($rows as &$r) {
+            if ((string)($r['payment_type'] ?? '') === 'refund') {
+                $r['total_amount'] = -abs((float)$r['total_amount']);
+                $r['payment_method'] = 'refund_' . (string)($r['payment_method'] ?? '');
+            }
+        }
+        unset($r);
+        return $rows;
+    }
+}
+
 // Import PHPMailer classes
 use PHPMailer\PHPMailer\PHPMailer;
 use PHPMailer\PHPMailer\Exception;
@@ -348,7 +366,19 @@ function buildInvoiceHTML(array $booking, string $invoice_number, string $site_n
     $childGuests        = (int)($booking['child_guests'] ?? 0);
     $adultGuests        = (int)($booking['adult_guests'] ?? max(1, ((int)($booking['number_of_guests'] ?? 1)) - $childGuests));
     $pkgTotal           = (float)($booking['package_total']          ?? 0);
-    $ratePlanDiscount   = (float)($booking['rate_plan_discount']     ?? 0);
+    // rate_plan_discount is stored per room per night; the invoice line is a booking total.
+    $ratePlanNightsOf = static function (array $b): int {
+        $n = (int)($b['number_of_nights'] ?? 0);
+        if (!empty($b['check_in_date']) && !empty($b['check_out_date'])) {
+            $ci = strtotime((string)$b['check_in_date']);
+            $co = strtotime((string)$b['check_out_date']);
+            if ($ci !== false && $co !== false) {
+                $n = (int)round(($co - $ci) / 86400);
+            }
+        }
+        return max(1, $n);
+    };
+    $ratePlanDiscount   = (float)($booking['rate_plan_discount']     ?? 0) * $ratePlanNightsOf($booking);
     $ratePlanLabel      = (string)($booking['rate_plan_label']       ?? '');
 
     // When group_bookings is provided, use combined figures from all rooms.
@@ -402,13 +432,13 @@ function buildInvoiceHTML(array $booking, string $invoice_number, string $site_n
     if (!empty($group_bookings)) {
         $grp_ids    = array_map(fn($g) => (int)$g['id'], $group_bookings);
         $placeholders = implode(',', array_fill(0, count($grp_ids), '?'));
-        $ps = $pdo->prepare("SELECT * FROM payments WHERE booking_type='room' AND booking_id IN ($placeholders) AND payment_status='completed' AND deleted_at IS NULL ORDER BY payment_date ASC");
+        $ps = $pdo->prepare("SELECT * FROM payments WHERE booking_type='room' AND booking_id IN ($placeholders) AND ((payment_status IN ('completed','paid','refunded','partially_refunded') AND COALESCE(payment_type,'') <> 'refund') OR (payment_type='refund' AND refund_status IN ('completed','processing'))) AND deleted_at IS NULL ORDER BY payment_date ASC, id ASC");
         $ps->execute($grp_ids);
-        $payments = $ps->fetchAll(PDO::FETCH_ASSOC);
+        $payments = rh_invoice_signed_payments($ps->fetchAll(PDO::FETCH_ASSOC));
     } else {
-        $ps = $pdo->prepare("SELECT * FROM payments WHERE booking_type='room' AND booking_id=? AND payment_status='completed' AND deleted_at IS NULL ORDER BY payment_date ASC");
+        $ps = $pdo->prepare("SELECT * FROM payments WHERE booking_type='room' AND booking_id=? AND ((payment_status IN ('completed','paid','refunded','partially_refunded') AND COALESCE(payment_type,'') <> 'refund') OR (payment_type='refund' AND refund_status IN ('completed','processing'))) AND deleted_at IS NULL ORDER BY payment_date ASC, id ASC");
         $ps->execute([$booking['id']]);
-        $payments = $ps->fetchAll(PDO::FETCH_ASSOC);
+        $payments = rh_invoice_signed_payments($ps->fetchAll(PDO::FETCH_ASSOC));
     }
 
     // Totals — VAT per installation mode: exclusive adds on top of the room
@@ -422,8 +452,28 @@ function buildInvoiceHTML(array $booking, string $invoice_number, string $site_n
     $amountPaid    = array_sum(array_column($payments, 'total_amount'));
     $balanceDue    = max(0.0, $totalWithVat - $amountPaid);
 
+    // Paid / total / balance come from the folio summary (canonical net-paid rule, folio
+    // charges and levy included) so the invoice always agrees with the booking page.
+    $summaryIds = !empty($group_bookings) ? array_map(fn($g) => (int)$g['id'], $group_bookings) : [(int)$booking['id']];
+    $sumGrand = 0.0; $sumPaid = 0.0; $sumDue = 0.0; $summaryOk = true;
+    foreach ($summaryIds as $sid) {
+        $fs = getBookingFolioSummary($sid);
+        if (isset($fs['error']) || !isset($fs['grand_total'], $fs['amount_paid'], $fs['balance_due'])) {
+            $summaryOk = false;
+            break;
+        }
+        $sumGrand += (float)$fs['grand_total'];
+        $sumPaid  += (float)$fs['amount_paid'];
+        $sumDue   += (float)$fs['balance_due'];
+    }
+    if ($summaryOk) {
+        $totalWithVat = $sumGrand;
+        $amountPaid   = $sumPaid;
+        $balanceDue   = ($sumDue <= BALANCE_TOLERANCE) ? 0.0 : $sumDue;
+    }
+
     // Status badge
-    $isPaid        = $balanceDue <= 0;
+    $isPaid        = $balanceDue <= BALANCE_TOLERANCE;
     $statusText    = $isPaid ? 'PAID IN FULL' : 'BALANCE DUE';
     $statusBg      = $isPaid ? '#E7F4EA' : '#FCE8E6';
     $statusFg      = $isPaid ? '#1E6C43' : '#A63A3A';
@@ -1681,7 +1731,7 @@ function buildConferenceInvoiceHTML(array $enquiry, string $invoice_number, stri
         SELECT * FROM payments
         WHERE booking_type = 'conference' AND booking_id = ?
         AND deleted_at IS NULL
-        AND ((payment_status IN ('completed','paid') AND COALESCE(payment_type,'') <> 'refund')
+        AND ((payment_status IN ('completed','paid','refunded','partially_refunded') AND COALESCE(payment_type,'') <> 'refund')
              OR (payment_type = 'refund' AND refund_status IN ('completed','processing')))
         ORDER BY payment_date ASC
     ");
@@ -2192,7 +2242,7 @@ function buildGymInvoiceHTML(array $inquiry, string $invoice_number, string $sit
         SELECT * FROM payments
         WHERE booking_type = 'gym' AND booking_id = ?
         AND deleted_at IS NULL
-        AND ((payment_status IN ('completed','paid') AND COALESCE(payment_type,'') <> 'refund')
+        AND ((payment_status IN ('completed','paid','refunded','partially_refunded') AND COALESCE(payment_type,'') <> 'refund')
              OR (payment_type = 'refund' AND refund_status IN ('completed','processing')))
         ORDER BY payment_date ASC
     ");
@@ -2593,7 +2643,7 @@ function buildEventInvoiceHTML(array $inquiry, string $invoice_number, string $s
         SELECT * FROM payments
         WHERE booking_type = 'event' AND booking_id = ?
         AND deleted_at IS NULL
-        AND ((payment_status IN ('completed','paid') AND COALESCE(payment_type,'') <> 'refund')
+        AND ((payment_status IN ('completed','paid','refunded','partially_refunded') AND COALESCE(payment_type,'') <> 'refund')
              OR (payment_type = 'refund' AND refund_status IN ('completed','processing')))
         ORDER BY payment_date ASC
     ");

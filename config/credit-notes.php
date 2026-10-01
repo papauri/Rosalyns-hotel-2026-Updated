@@ -248,8 +248,59 @@ if (!function_exists('applyCreditNote')) {
             }
 
             $availableBalance = round((float)$cn['balance'], 2);
-            if ($amountToApply > $availableBalance) {
-                throw new RuntimeException('Amount to apply (' . number_format($amountToApply, 2) . ') exceeds available balance (' . number_format($availableBalance, 2) . ').');
+            if ($availableBalance <= BALANCE_TOLERANCE) {
+                throw new RuntimeException('This credit note has no balance left to apply.');
+            }
+
+            // Lock the receiving account and read what is actually owed on it. Applying more
+            // than is due would turn the excess into an instant overpayment, so the amount is
+            // capped at min(requested, note balance, account amount due).
+            $syncInclude = __DIR__ . '/../admin/includes/finance-account-sync.php';
+            if (is_file($syncInclude)) {
+                require_once $syncInclude;
+            }
+            $accountDue = 0.0;
+            if ($bookingType === 'room') {
+                $acct = $pdo->prepare("SELECT status, amount_due FROM bookings WHERE id = ? FOR UPDATE");
+                $acct->execute([$bookingId]);
+                $acctRow = $acct->fetch(PDO::FETCH_ASSOC);
+                if (!$acctRow) {
+                    throw new RuntimeException('Booking not found.');
+                }
+                if (in_array((string)$acctRow['status'], ['cancelled', 'no-show', 'expired'], true)) {
+                    throw new RuntimeException('A credit note cannot be applied to a ' . $acctRow['status'] . ' booking.');
+                }
+                $accountDue = (float)$acctRow['amount_due'];
+            } elseif ($bookingType === 'conference') {
+                $acct = $pdo->prepare("SELECT status, amount_due FROM conference_inquiries WHERE id = ? FOR UPDATE");
+                $acct->execute([$bookingId]);
+                $acctRow = $acct->fetch(PDO::FETCH_ASSOC);
+                if (!$acctRow) {
+                    throw new RuntimeException('Conference enquiry not found.');
+                }
+                if ((string)$acctRow['status'] === 'cancelled') {
+                    throw new RuntimeException('A credit note cannot be applied to a cancelled conference.');
+                }
+                $accountDue = (float)$acctRow['amount_due'];
+            } else {
+                $acct = $pdo->prepare("SELECT status, total_amount FROM stock_orders WHERE id = ? FOR UPDATE");
+                $acct->execute([$bookingId]);
+                $acctRow = $acct->fetch(PDO::FETCH_ASSOC);
+                if (!$acctRow) {
+                    throw new RuntimeException('Restaurant order not found.');
+                }
+                if (in_array((string)$acctRow['status'], ['paid', 'completed', 'refunded', 'cancelled', 'voided'], true)) {
+                    throw new RuntimeException('This restaurant order is ' . $acctRow['status'] . ' - a credit note can only be applied to an unpaid order.');
+                }
+                $paidSoFar = function_exists('rh_sum_account_paid') ? rh_sum_account_paid($pdo, 'restaurant', $bookingId) : 0.0;
+                $accountDue = max(0.0, round((float)$acctRow['total_amount'] - $paidSoFar, 2));
+            }
+            if ($accountDue <= BALANCE_TOLERANCE) {
+                throw new RuntimeException('Nothing is due on this account, so there is nothing to apply the credit note to.');
+            }
+            $amountToApply = round(min($amountToApply, $availableBalance, $accountDue), 2);
+            if ($amountToApply <= 0) {
+                throw new RuntimeException('Amount to apply must be greater than zero.');
             }
 
             // Resolve booking reference
@@ -283,20 +334,17 @@ if (!function_exists('applyCreditNote')) {
             $vatRate    = (float)($cn['vat_rate'] ?? 0) > 0
                 ? (float)$cn['vat_rate']
                 : ($vatEnabled ? (float)getSetting('vat_rate') : 0.0);
-            $vatAmount  = $vatRate > 0 ? round($amountToApply * ($vatRate / (100 + $vatRate)), 2) : 0.0;
-            $netAmount  = $amountToApply - $vatAmount;
+            // Pro rata to the account's own VAT / gross ratio (levy and zero-rated lines carry
+            // no VAT); the note's locked rate is only the fallback when the account has none.
+            $vatSplit   = function_exists('rh_account_vat_split')
+                ? rh_account_vat_split($pdo, $bookingType, $bookingId, $amountToApply, $vatRate)
+                : ['rate' => $vatRate, 'vat' => ($vatRate > 0 ? round($amountToApply * ($vatRate / (100 + $vatRate)), 2) : 0.0), 'net' => 0.0];
+            $vatRate    = (float)$vatSplit['rate'];
+            $vatAmount  = (float)$vatSplit['vat'];
+            $netAmount  = round($amountToApply - $vatAmount, 2);
 
-            // Payment type logic
-            $outstandingAmount = 0.0;
-            if ($bookingType === 'room') {
-                $bkRow = $pdo->prepare("SELECT amount_due FROM bookings WHERE id = ?");
-                $bkRow->execute([$bookingId]);
-                $outstandingAmount = (float)($bkRow->fetchColumn() ?: 0);
-            } elseif ($bookingType === 'conference') {
-                $ciRow = $pdo->prepare("SELECT amount_due FROM conference_inquiries WHERE id = ?");
-                $ciRow->execute([$bookingId]);
-                $outstandingAmount = (float)($ciRow->fetchColumn() ?: 0);
-            }
+            // Payment type logic (amount due was read under the account lock above)
+            $outstandingAmount = $accountDue;
             $paymentType = ($amountToApply >= $outstandingAmount - 0.01 && $outstandingAmount > 0)
                 ? 'full_payment'
                 : 'partial_payment';
@@ -420,6 +468,7 @@ if (!function_exists('applyCreditNote')) {
                 'success'           => true,
                 'payment_id'        => $paymentId,
                 'remaining_balance' => max(0.0, $newBalance),
+                'applied_amount'    => $amountToApply,
                 'error'             => null,
             ];
         } catch (Throwable $e) {
@@ -433,6 +482,148 @@ if (!function_exists('applyCreditNote')) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// recordCreditNoteRefundLegs
+// ─────────────────────────────────────────────────────────────────────────────
+if (!function_exists('recordCreditNoteRefundLegs')) {
+    /**
+     * Move money out of a room booking into a credit note: inserts completed refund
+     * rows (payment_method 'credit_note', credit_note_id = the note) against the
+     * original payments, so net paid on the booking drops by the note's value and the
+     * credit lives ONLY in the credit note. Call inside the caller's transaction, then
+     * recalculateBookingFinancials(). Voiding the note soft-deletes these rows.
+     *
+     * @return array{total:float,refs:array}
+     */
+    function recordCreditNoteRefundLegs(PDO $pdo, int $bookingId, string $bookingReference, float $amount, int $creditNoteId, string $creditNoteNumber, int $adminUserId, string $reason = 'overpayment', string $bookingType = 'room'): array
+    {
+        require_once __DIR__ . '/../includes/finance-sequences.php';
+        $out = ['total' => 0.0, 'refs' => []];
+        if (!in_array($bookingType, ['room', 'conference', 'gym', 'event'], true)) {
+            $bookingType = 'room';
+        }
+        $syncInclude = __DIR__ . '/../admin/includes/finance-account-sync.php';
+        if (is_file($syncInclude)) {
+            require_once $syncInclude;
+        }
+        if ($bookingType === 'room') {
+            $allocs = allocateBookingRefunds($pdo, $bookingId, $amount, true);
+        } else {
+            $allocs = rh_allocate_account_refunds($pdo, $bookingType, $bookingId, $amount, true);
+        }
+        if (!$allocs) {
+            return $out;
+        }
+        $ins = $pdo->prepare("
+            INSERT INTO payments (
+                payment_reference, booking_type, booking_id, booking_reference,
+                payment_date, payment_amount, vat_rate, vat_amount, total_amount,
+                payment_method, payment_type, payment_status, original_payment_id,
+                refund_reason, refund_status, refund_amount, refund_notes,
+                credit_note_id, recorded_by, created_at
+            ) VALUES (?, ?, ?, ?, CURDATE(), ?, ?, ?, ?, 'credit_note', 'refund', 'completed', ?,
+                      ?, 'completed', ?, ?, ?, ?, NOW())
+        ");
+        foreach ($allocs as $alloc) {
+            $orig = $alloc['payment'];
+            $leg  = (float)$alloc['amount'];
+            $vr   = (float)($orig['vat_rate'] ?? 0);
+            $va   = $vr > 0 ? round($leg * ($vr / (100 + $vr)), 2) : 0.0;
+            $ref  = finance_next_refund_reference($pdo, date('Y-m-d'));
+            $ins->execute([
+                $ref, $bookingType, $bookingId, $bookingReference,
+                round($leg - $va, 2), $vr, $va, $leg,
+                (int)$orig['id'],
+                $reason, $leg, 'Moved to credit note ' . $creditNoteNumber,
+                $creditNoteId, $adminUserId ?: null,
+            ]);
+            $out['total'] = round($out['total'] + $leg, 2);
+            $out['refs'][] = $ref;
+            if (function_exists('rh_refresh_original_payment_status')) {
+                rh_refresh_original_payment_status($pdo, (int)$orig['id']);
+            }
+        }
+        return $out;
+    }
+}
+
+
+// ─────────────────────────────────────────────────────────────────────────────
+// rh_auto_credit_overpayment
+// ─────────────────────────────────────────────────────────────────────────────
+if (!function_exists('rh_auto_credit_overpayment')) {
+    /**
+     * After a payment is recorded and the account resynced, convert any overpayment into a
+     * credit note — INSIDE the caller's open transaction (locks the account, re-reads the
+     * credit under the lock, issues the note, moves the excess out via refund legs, resyncs).
+     * Cancelled accounts are skipped (their paid money stays as credit owed back).
+     * gym/event notes are stored as 'goodwill' (enum) with the real type+id in the notes.
+     *
+     * @return array|null ['credit_note_id','credit_note_number','excess','email'] or null when nothing to do
+     * @throws RuntimeException when the note or legs cannot be created (caller rolls back)
+     */
+    function rh_auto_credit_overpayment(PDO $pdo, string $bookingType, int $bookingId, float $maxExcess, string $paymentRef, int $userId): ?array
+    {
+        $tables = ['room' => 'bookings', 'conference' => 'conference_inquiries', 'gym' => 'gym_inquiries', 'event' => 'event_inquiries'];
+        if (!isset($tables[$bookingType]) || $maxExcess <= BALANCE_TOLERANCE) {
+            return null;
+        }
+        $syncInclude = __DIR__ . '/../admin/includes/finance-account-sync.php';
+        if (is_file($syncInclude)) {
+            require_once $syncInclude;
+        }
+        if ($userId <= 0) {
+            // API-originated payments have no admin session: attribute the note to the first admin account.
+            $userId = (int)$pdo->query("SELECT MIN(id) FROM admin_users")->fetchColumn();
+        }
+        $sel = $pdo->prepare("SELECT * FROM {$tables[$bookingType]} WHERE id = ? FOR UPDATE");
+        $sel->execute([$bookingId]);
+        $row = $sel->fetch(PDO::FETCH_ASSOC);
+        if (!$row || (string)($row['status'] ?? '') === 'cancelled') {
+            return null;
+        }
+        $excess = round(min(rh_account_credit_owed($pdo, $bookingType, $bookingId), $maxExcess), 2);
+        if ($excess <= BALANCE_TOLERANCE) {
+            return null;
+        }
+        $pick = static function (array $r, array $keys): string {
+            foreach ($keys as $k) {
+                if (isset($r[$k]) && trim((string)$r[$k]) !== '') {
+                    return (string)$r[$k];
+                }
+            }
+            return '';
+        };
+        $ref   = $pick($row, ['booking_reference', 'reference_number', 'enquiry_reference', 'inquiry_reference']);
+        $name  = $pick($row, ['guest_name', 'name', 'organization_name', 'company_name', 'contact_name', 'contact_person']);
+        $email = $pick($row, ['guest_email', 'email', 'contact_email']);
+        $cn = issueCreditNote($pdo, [
+            'booking_type'      => $bookingType,
+            'booking_id'        => $bookingId,
+            'booking_reference' => $ref,
+            'guest_name'        => $name !== '' ? $name : 'Customer',
+            'guest_email'       => $email,
+            'amount'            => $excess,
+            'reason'            => 'overpayment',
+            'reason_notes'      => 'Overpaid by ' . number_format($excess, 2) . ' on payment ' . $paymentRef . ' [account: ' . $bookingType . ' #' . $bookingId . ']',
+            'issued_by'         => $userId,
+            'send_email'        => false,
+            'generate_pdf'      => false,
+        ]);
+        if (empty($cn['success'])) {
+            throw new RuntimeException('Overpayment credit note could not be created: ' . ($cn['error'] ?? 'unknown error'));
+        }
+        $legs = recordCreditNoteRefundLegs($pdo, $bookingId, $ref, $excess, (int)$cn['credit_note_id'], (string)$cn['credit_note_number'], $userId, 'overpayment', $bookingType);
+        if ($legs['total'] + BALANCE_TOLERANCE < $excess) {
+            throw new RuntimeException('Could not move the full overpayment into the credit note.');
+        }
+        if (!rh_sync_account_payments($pdo, $bookingType, $bookingId)) {
+            throw new RuntimeException('Could not recalculate the account balance.');
+        }
+        return ['credit_note_id' => (int)$cn['credit_note_id'], 'credit_note_number' => (string)$cn['credit_note_number'], 'excess' => $excess, 'email' => $email];
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // voidCreditNote
 // ─────────────────────────────────────────────────────────────────────────────
 if (!function_exists('voidCreditNote')) {
@@ -441,11 +632,16 @@ if (!function_exists('voidCreditNote')) {
      */
     function voidCreditNote(PDO $pdo, int $creditNoteId, string $reason, int $adminUserId): array
     {
+        $ownTx = false;
         try {
             if (trim($reason) === '') {
                 throw new RuntimeException('A void reason is required.');
             }
-            $cn = $pdo->prepare("SELECT * FROM credit_notes WHERE id = ?");
+            if (!$pdo->inTransaction()) {
+                $pdo->beginTransaction();
+                $ownTx = true;
+            }
+            $cn = $pdo->prepare("SELECT * FROM credit_notes WHERE id = ? FOR UPDATE");
             $cn->execute([$creditNoteId]);
             $cn = $cn->fetch(PDO::FETCH_ASSOC);
             if (!$cn) {
@@ -459,6 +655,47 @@ if (!function_exists('voidCreditNote')) {
                 SET status='voided', voided_at=NOW(), voided_by=?, void_reason=?, updated_at=NOW()
                 WHERE id=?
             ")->execute([$adminUserId, mb_substr($reason, 0, 1000), $creditNoteId]);
+
+            // Restore the account's credit: soft-delete the refund rows that moved its
+            // money into this note (any account type — room, conference, gym, event).
+            // Whatever was already applied elsewhere (amount_used) stays out of the
+            // account, so that part is re-recorded.
+            $legStmt = $pdo->prepare("SELECT id, booking_type, booking_id, booking_reference, original_payment_id FROM payments WHERE credit_note_id = ? AND payment_type = 'refund' AND deleted_at IS NULL FOR UPDATE");
+            $legStmt->execute([$creditNoteId]);
+            $legRows = $legStmt->fetchAll(PDO::FETCH_ASSOC);
+            if ($legRows) {
+                $syncInclude = __DIR__ . '/../admin/includes/finance-account-sync.php';
+                if (is_file($syncInclude)) {
+                    require_once $syncInclude;
+                }
+                $softDel = $pdo->prepare("UPDATE payments SET deleted_at = NOW(), notes = CONCAT(COALESCE(notes,''), ' [Credit note voided]'), updated_at = NOW() WHERE id = ?");
+                $legType      = (string)$legRows[0]['booking_type'];
+                $legBookingId = (int)$legRows[0]['booking_id'];
+                $legRef       = (string)($legRows[0]['booking_reference'] ?? '');
+                $origIds      = [];
+                foreach ($legRows as $legRow) {
+                    $softDel->execute([(int)$legRow['id']]);
+                    if (!empty($legRow['original_payment_id'])) {
+                        $origIds[(int)$legRow['original_payment_id']] = true;
+                    }
+                }
+                $used = round((float)($cn['amount_used'] ?? 0), 2);
+                if ($used > BALANCE_TOLERANCE && in_array($legType, ['room', 'conference', 'gym', 'event'], true)) {
+                    recordCreditNoteRefundLegs($pdo, $legBookingId, $legRef, $used, $creditNoteId, (string)$cn['credit_note_number'], $adminUserId, 'overpayment', $legType);
+                }
+                if (function_exists('rh_refresh_original_payment_status')) {
+                    foreach (array_keys($origIds) as $origId) {
+                        rh_refresh_original_payment_status($pdo, (int)$origId);
+                    }
+                }
+                if ($legType === 'restaurant') {
+                    if (function_exists('rh_sync_restaurant_order_refund_state')) {
+                        rh_sync_restaurant_order_refund_state($pdo, $legBookingId, 'Credit note voided');
+                    }
+                } elseif ($legBookingId > 0 && !rh_sync_account_payments($pdo, $legType, $legBookingId)) {
+                    throw new RuntimeException('Could not recalculate the account balance after voiding.');
+                }
+            }
 
             rh_log_event('credit-notes', 'info', "Credit note {$cn['credit_note_number']} voided", [
                 'credit_note_id' => $creditNoteId,
@@ -488,8 +725,14 @@ if (!function_exists('voidCreditNote')) {
                 );
             }
 
+            if ($ownTx) {
+                $pdo->commit();
+            }
             return ['success' => true, 'error' => null];
         } catch (Throwable $e) {
+            if ($ownTx && $pdo->inTransaction()) {
+                $pdo->rollBack();
+            }
             error_log('[credit-notes] voidCreditNote: ' . $e->getMessage());
             return ['success' => false, 'error' => $e->getMessage()];
         }

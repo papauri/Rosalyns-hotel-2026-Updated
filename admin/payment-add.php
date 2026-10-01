@@ -10,6 +10,7 @@ require_once 'includes/booking-lifecycle.php';
 require_once 'includes/finance-account-sync.php';
 require_once '../includes/idempotency.php';
 require_once '../includes/finance-sequences.php';
+require_once '../config/credit-notes.php';
 
 $user = [
     'id' => $_SESSION['admin_user_id'],
@@ -25,7 +26,7 @@ $paymentTransactionColumn = finance_payment_transaction_column($pdo);
 finance_ensure_sequence_tables($pdo);
 
 // Get VAT settings
-$vatEnabled = getSetting('vat_enabled') === '1';
+$vatEnabled = rh_vat_enabled();
 $vatRate = $vatEnabled ? (float)getSetting('vat_rate') : 0;
 
 // Check if editing existing payment
@@ -42,6 +43,29 @@ if ($editId) {
         header('Location: payments.php');
         exit;
     }
+}
+
+// Refund rows are never edited through this form: their lifecycle (pending ->
+// processing -> completed/failed) is the "Settle refund" action on the details page.
+if ($payment && (string)($payment['payment_type'] ?? '') === 'refund') {
+    $_SESSION['alert'] = ['type' => 'info', 'message' => 'Refund records cannot be edited here. Use "Settle refund" on the payment details page to move a refund through pending, processing, completed or failed.'];
+    header('Location: payment-details.php?id=' . (int)$editId);
+    exit;
+}
+
+// An original that already has refunds against it keeps its amount and status: both are
+// owned by the refund records. The amount can never be edited below what was refunded.
+$editLocked = false;
+$editRefundedTotal = 0.0;
+if ($payment) {
+    $rfSumStmt = $pdo->prepare("
+        SELECT COALESCE(SUM(COALESCE(refund_amount, total_amount)), 0) FROM payments
+        WHERE original_payment_id = ? AND payment_type = 'refund' AND deleted_at IS NULL
+          AND refund_status IN ('pending','processing','completed')
+    ");
+    $rfSumStmt->execute([$editId]);
+    $editRefundedTotal = round((float)$rfSumStmt->fetchColumn(), 2);
+    $editLocked = in_array((string)$payment['payment_status'], ['refunded', 'partially_refunded'], true);
 }
 
 $paymentTransactionValue = $payment[$paymentTransactionColumn] ?? '';
@@ -184,6 +208,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $ccEmails = str_replace(["\r", "\n"], '', $_POST['cc_emails'] ?? '');
     $processedBy = $user['full_name'] ?? ($user['username'] ?? 'System');
 
+    if ($editId && $payment) {
+        // The account a payment belongs to never changes through an edit.
+        $bookingType = (string)$payment['booking_type'];
+        $bookingId   = (int)$payment['booking_id'];
+        if ($editLocked) {
+            // Amount and status belong to the refund records once refunds exist.
+            $paymentAmount = (float)$payment['total_amount'];
+            $paymentStatus = (string)$payment['payment_status'];
+        }
+    }
+
     $allowedPaymentTypes = ['room', 'conference', 'restaurant', 'gym', 'event'];
     $typeEnabled = [
         'room'       => $pa_mod_bookings,
@@ -205,6 +240,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $_SESSION['alert'] = ['type' => 'error', 'message' => 'Payment amount must be greater than zero'];
     } elseif ($paymentAmount > 99999999) {
         $_SESSION['alert'] = ['type' => 'error', 'message' => 'Payment amount exceeds the maximum allowed value'];
+    } elseif (in_array($paymentStatus, ['refunded', 'partially_refunded'], true) && !($editId && $editLocked)) {
+        $_SESSION['alert'] = ['type' => 'error', 'message' => 'Refunded statuses are set by the refund process only. Use "Process Refund" on the payment details page.'];
+    } elseif ($editId && $payment && $editRefundedTotal > 0 && $paymentAmount + BALANCE_TOLERANCE < $editRefundedTotal) {
+        $_SESSION['alert'] = ['type' => 'error', 'message' => 'This payment already has ' . $currency_symbol . number_format($editRefundedTotal, 2) . ' refunded against it, so the amount cannot be lowered below that.'];
     } elseif (
         $editId && $payment
         && in_array((string)$payment['payment_status'], ['completed', 'paid'], true)
@@ -218,13 +257,22 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     } else {
         try {
             if ($editId) {
-                // Update existing payment
-                // The entered amount is the GROSS received. Extract VAT so the row
-                // stays consistent: payment_amount (NET) + vat_amount = total_amount.
-                $paymentVatRate = $vatRate;
-                $paymentVatAmount = $paymentVatRate > 0 ? round($paymentAmount * ($paymentVatRate / (100 + $paymentVatRate)), 2) : 0.0;
+                // Update existing payment. The entered amount is the GROSS received. The row
+                // keeps its OWN stored VAT ratio (set pro rata when it was recorded) so editing
+                // never re-prices it at today's rate: payment_amount (NET) + vat_amount = total_amount.
+                $storedTotal = (float)$payment['total_amount'];
+                $storedVat   = (float)$payment['vat_amount'];
+                $paymentVatRate = (float)$payment['vat_rate'];
                 $totalAmount = $paymentAmount;                       // gross = what was received
-                $paymentNet  = round($paymentAmount - $paymentVatAmount, 2);
+                if (abs($paymentAmount - $storedTotal) <= BALANCE_TOLERANCE) {
+                    $totalAmount      = $storedTotal;
+                    $paymentVatAmount = $storedVat;
+                } elseif ($storedTotal > BALANCE_TOLERANCE && $storedVat > 0.001) {
+                    $paymentVatAmount = round($paymentAmount * ($storedVat / $storedTotal), 2);
+                } else {
+                    $paymentVatAmount = 0.0;
+                }
+                $paymentNet  = round($totalAmount - $paymentVatAmount, 2);
 
                 $updateFields = [
                     'payment_date = ?',
@@ -255,11 +303,33 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $params[] = $paymentVatAmount;
                 $params[] = $totalAmount;
 
-                $needsReceiptNumber = in_array($paymentStatus, ['completed', 'paid'], true)
-                    && !in_array((string)$payment['payment_status'], ['completed', 'paid'], true)
-                    && !$payment['receipt_number'];
-
                 $pdo->beginTransaction();
+
+                // Re-read the row under lock: refund state may have changed since the form loaded.
+                $lockEdit = $pdo->prepare("SELECT payment_status, payment_type, receipt_number FROM payments WHERE id = ? AND deleted_at IS NULL FOR UPDATE");
+                $lockEdit->execute([$editId]);
+                $lockedRow = $lockEdit->fetch(PDO::FETCH_ASSOC);
+                if (!$lockedRow || (string)$lockedRow['payment_type'] === 'refund') {
+                    throw new Exception('This payment can no longer be edited.');
+                }
+                $lockRefunds = $pdo->prepare("
+                    SELECT COALESCE(SUM(COALESCE(refund_amount, total_amount)), 0) FROM payments
+                    WHERE original_payment_id = ? AND payment_type = 'refund' AND deleted_at IS NULL
+                      AND refund_status IN ('pending','processing','completed')
+                ");
+                $lockRefunds->execute([$editId]);
+                $lockedRefunded = round((float)$lockRefunds->fetchColumn(), 2);
+                if ($lockedRefunded > 0 && (
+                    in_array((string)$lockedRow['payment_status'], ['refunded', 'partially_refunded'], true)
+                    || $paymentStatus !== (string)$lockedRow['payment_status']
+                    || $totalAmount + BALANCE_TOLERANCE < $lockedRefunded
+                )) {
+                    throw new Exception('Refunds were recorded against this payment while you were editing. Reload the page; its amount and status are now managed by the refund records.');
+                }
+
+                $needsReceiptNumber = in_array($paymentStatus, ['completed', 'paid'], true)
+                    && !in_array((string)$lockedRow['payment_status'], ['completed', 'paid'], true)
+                    && !$lockedRow['receipt_number'];
 
                 if ($needsReceiptNumber) {
                     $updateFields[] = 'receipt_number = ?';
@@ -272,17 +342,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $stmt = $pdo->prepare($sql);
                 $stmt->execute($params);
 
-                // Update booking totals
-                if ($bookingType === 'room') {
-                    updateRoomBookingPayments($pdo, $bookingId);
-                } elseif ($bookingType === 'conference') {
-                    updateConferenceEnquiryPayments($pdo, $bookingId);
-                } elseif ($bookingType === 'gym') {
-                    syncGymInquiryPaymentSnapshot($pdo, $bookingId);
-                } elseif ($bookingType === 'event') {
-                    syncEventInquiryPaymentSnapshot($pdo, $bookingId);
+                // Update account totals (every receivable type; restaurant has no balance row)
+                if (!rh_sync_account_payments($pdo, $bookingType, $bookingId)) {
+                    throw new Exception('Could not recalculate the account balance.');
                 }
-                // restaurant payments are tracked via stock_orders — no separate balance update needed
 
                 $pdo->commit();
 
@@ -318,10 +381,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 // The entered amount is the GROSS received (VAT-inclusive). Extract
                 // the VAT portion so the payment row is internally consistent:
                 // payment_amount (NET) + vat_amount = total_amount (GROSS).
-                $paymentVatRate = $vatRate;
-                $paymentVatAmount = $paymentVatRate > 0 ? round($paymentAmount * ($paymentVatRate / (100 + $paymentVatRate)), 2) : 0.0;
+                // VAT is split pro rata to the account's own VAT / gross ratio (levy and zero-rated
+                // lines carry none); the global rate is only the fallback for accounts with no VAT data.
+                $vatSplit = rh_account_vat_split($pdo, $bookingType, $bookingId, $paymentAmount, $vatRate);
+                $paymentVatRate   = $vatSplit['rate'];
+                $paymentVatAmount = $vatSplit['vat'];
                 $totalAmount = $paymentAmount;                       // gross = what was received
-                $paymentNet  = round($paymentAmount - $paymentVatAmount, 2); // ex-VAT portion
+                $paymentNet  = $vatSplit['net'];                     // ex-VAT portion
 
                 // Generate payment reference
                 do {
@@ -392,52 +458,73 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
                 $newPaymentId = $pdo->lastInsertId();
 
-                // Update booking totals
-                if ($bookingType === 'room') {
-                    updateRoomBookingPayments($pdo, $bookingId);
-                } elseif ($bookingType === 'conference') {
-                    updateConferenceEnquiryPayments($pdo, $bookingId);
-                } elseif ($bookingType === 'gym') {
-                    syncGymInquiryPaymentSnapshot($pdo, $bookingId);
-                } elseif ($bookingType === 'event') {
-                    syncEventInquiryPaymentSnapshot($pdo, $bookingId);
+                // Update account totals (room folio, conference/gym/event snapshots; restaurant has no balance row)
+                if (!rh_sync_account_payments($pdo, $bookingType, $bookingId)) {
+                    throw new Exception('Could not recalculate the account balance.');
                 }
-                // restaurant payments are tracked via stock_orders — no separate balance update needed
+
+                // Overpayment — auto-issue a credit note when the customer has overpaid, INSIDE the
+                // payment transaction (payment, note, refund legs and resync commit together).
+                // Same rule for every account: the excess lives only in the credit note and the
+                // account reads settled. A cancelled account keeps its paid money as credit owed
+                // back (staff refund it deliberately) and is never auto-converted.
+                $overpayMsg = '';
+                $overpayCnId = 0;
+                $overpayEmail = '';
+                if (in_array($bookingType, ['room', 'conference', 'gym', 'event'], true) && in_array($paymentStatus, ['completed', 'paid'], true)) {
+                    $ovTables = ['room' => 'bookings', 'conference' => 'conference_inquiries', 'gym' => 'gym_inquiries', 'event' => 'event_inquiries'];
+                    $ovSel = $pdo->prepare([
+                        'room'       => "SELECT status, booking_reference AS ref, guest_name AS contact_name, guest_email AS contact_email FROM bookings WHERE id = ? FOR UPDATE",
+                        'conference' => "SELECT status, {$conferenceFields['reference']} AS ref, {$conferenceFields['contact_name']} AS contact_name, {$conferenceFields['email']} AS contact_email FROM conference_inquiries WHERE id = ? FOR UPDATE",
+                        'gym'        => "SELECT status, reference_number AS ref, name AS contact_name, email AS contact_email FROM gym_inquiries WHERE id = ? FOR UPDATE",
+                        'event'      => "SELECT status, reference_number AS ref, name AS contact_name, email AS contact_email FROM event_inquiries WHERE id = ? FOR UPDATE",
+                    ][$bookingType]);
+                    $ovSel->execute([$bookingId]);
+                    $ovRow = $ovSel->fetch(PDO::FETCH_ASSOC);
+                    if ($ovRow && (string)$ovRow['status'] !== 'cancelled') {
+                        $ovCredit = rh_account_credit_owed($pdo, $bookingType, $bookingId);
+                        $excess = round(min($ovCredit, $paymentAmount), 2);
+                        if ($excess > BALANCE_TOLERANCE) {
+                            $ovRef = (string)($ovRow['ref'] ?? '');
+                            $cnResult = issueCreditNote($pdo, [
+                                'booking_type'      => $bookingType, // gym/event are stored as 'goodwill' (enum); real type+id kept in the notes
+                                'booking_id'        => $bookingId,
+                                'booking_reference' => $ovRef,
+                                'guest_name'        => trim((string)($ovRow['contact_name'] ?? '')) !== '' ? (string)$ovRow['contact_name'] : 'Customer',
+                                'guest_email'       => (string)($ovRow['contact_email'] ?? ''),
+                                'amount'            => $excess,
+                                'reason'            => 'overpayment',
+                                'reason_notes'      => 'Overpaid by ' . number_format($excess, 2) . ' on payment ' . $paymentRef . ' [account: ' . $bookingType . ' #' . $bookingId . ']',
+                                'issued_by'         => (int)$user['id'],
+                                'send_email'        => false,
+                                'generate_pdf'      => false,
+                            ]);
+                            if (empty($cnResult['success'])) {
+                                throw new Exception('Overpayment credit note could not be created: ' . ($cnResult['error'] ?? 'unknown error') . '. Payment not recorded.');
+                            }
+                            $cnLegs = recordCreditNoteRefundLegs($pdo, (int)$bookingId, $ovRef, $excess, (int)$cnResult['credit_note_id'], (string)$cnResult['credit_note_number'], (int)$user['id'], 'overpayment', $bookingType);
+                            if ($cnLegs['total'] + BALANCE_TOLERANCE < $excess) {
+                                throw new Exception('Could not move the full overpayment into the credit note. Payment not recorded.');
+                            }
+                            if (!rh_sync_account_payments($pdo, $bookingType, (int)$bookingId)) {
+                                throw new Exception('Could not recalculate the account balance.');
+                            }
+                            $overpayCnId = (int)$cnResult['credit_note_id'];
+                            $overpayEmail = (string)($ovRow['contact_email'] ?? '');
+                            $overpayMsg = ' Overpayment detected — credit note ' . $cnResult['credit_note_number'] . ' for ' . number_format($excess, 2) . ' issued and queued under Credit Notes.';
+                        }
+                    }
+                }
 
                 $pdo->commit();
                 // Burn the per-render idempotency token so a fresh one is issued next render.
                 unset($_SESSION['admin_payment_add_uuid']);
 
-                // Overpayment check — auto-issue a credit note if the guest has overpaid
-                $overpayMsg = '';
-                if ($bookingType === 'room' && in_array($paymentStatus, ['completed', 'paid'], true)) {
-                    $overpayResult = detectOverpayment($pdo, $bookingId, $paymentAmount);
-                    if ($overpayResult['overpaid'] && $overpayResult['excess'] > 0) {
-                        $b = $overpayResult['booking'];
-                        try {
-                            require_once __DIR__ . '/../config/credit-notes.php';
-                            $cnResult = issueCreditNote($pdo, [
-                                'booking_type'      => 'room',
-                                'booking_id'        => $bookingId,
-                                'booking_reference' => $b['booking_reference'] ?? '',
-                                'guest_name'        => $b['guest_name'] ?? 'Guest',
-                                'guest_email'       => $b['guest_email'] ?? '',
-                                'amount'            => $overpayResult['excess'],
-                                'reason'            => 'overpayment',
-                                'reason_notes'      => 'Guest overpaid by ' . number_format($overpayResult['excess'], 2) . ' on payment ' . $paymentRef,
-                                'issued_by'         => (int)$user['id'],
-                                'send_email'        => !empty($b['guest_email']),
-                                'generate_pdf'      => false,
-                            ]);
-                            if ($cnResult['success']) {
-                                $overpayMsg = ' Overpayment detected — credit note ' . $cnResult['credit_note_number'] . ' for ' . number_format($overpayResult['excess'], 2) . ' issued and queued under Credit Notes.';
-                            } else {
-                                $overpayMsg = ' Overpayment of ' . number_format($overpayResult['excess'], 2) . ' detected. Credit note could not be auto-created — please issue one manually.';
-                            }
-                        } catch (Throwable $e) {
-                            error_log("Overpayment credit note failed: " . $e->getMessage());
-                            $overpayMsg = ' Overpayment of ' . number_format($overpayResult['excess'], 2) . ' detected — please issue a credit note manually.';
-                        }
+                if ($overpayCnId > 0 && $overpayEmail !== '') {
+                    try {
+                        sendCreditNoteEmail($pdo, $overpayCnId);
+                    } catch (Throwable $cnMailEx) {
+                        error_log('Overpayment credit note email failed: ' . $cnMailEx->getMessage());
                     }
                 }
 
@@ -574,49 +661,8 @@ function updateRoomBookingPayments(PDO $pdo, int $bookingId)
 
 function updateConferenceEnquiryPayments(PDO $pdo, int $enquiryId)
 {
-    $enquiryStmt = $pdo->prepare("SELECT total_amount, total_with_vat, deposit_required FROM conference_inquiries WHERE id = ?");
-    $enquiryStmt->execute([$enquiryId]);
-    $enquiry = $enquiryStmt->fetch(PDO::FETCH_ASSOC);
-
-    if (!$enquiry) return;
-
-    $depositRequired = (float)$enquiry['deposit_required'];
-
-    // amount_paid is the sum of GROSS completed non-refund payments (auditable).
-    $amountPaid = rh_sum_account_paid($pdo, 'conference', $enquiryId);
-
-    // amount_due is measured against the invoiced GROSS grand total. Prefer the
-    // locked total_with_vat so a conference invoiced at a historical VAT rate is
-    // never re-based to the current rate; only compute from net when it was
-    // never populated. Invariant: total_with_vat = amount_paid + amount_due.
-    $grossTotal = rh_account_gross_total($enquiry);
-    $amountDue = max(0.0, round($grossTotal - $amountPaid, 2));
-    $depositPaid = min($amountPaid, $depositRequired);
-    $lastPaymentDate = rh_last_account_payment_date($pdo, 'conference', $enquiryId);
-
-    // Only (re)populate the VAT breakdown when it was never locked, to keep the
-    // stored figure faithful to the original invoice's rate.
-    $storedGross = (float)($enquiry['total_with_vat'] ?? 0);
-    if ($storedGross > 0.001) {
-        $updateStmt = $pdo->prepare("
-            UPDATE conference_inquiries
-            SET amount_paid = ?, amount_due = ?, deposit_paid = ?, last_payment_date = ?
-            WHERE id = ?
-        ");
-        $updateStmt->execute([$amountPaid, $amountDue, $depositPaid, $lastPaymentDate, $enquiryId]);
-    } else {
-        $vatParts = vat_components((float)$enquiry['total_amount']);
-        $updateStmt = $pdo->prepare("
-            UPDATE conference_inquiries
-            SET amount_paid = ?, amount_due = ?, vat_rate = ?, vat_amount = ?,
-                total_with_vat = ?, deposit_paid = ?, last_payment_date = ?
-            WHERE id = ?
-        ");
-        $updateStmt->execute([
-            $amountPaid, $amountDue, $vatParts['rate'], $vatParts['vat'],
-            $vatParts['total'], $depositPaid, $lastPaymentDate, $enquiryId
-        ]);
-    }
+    // Single source of truth for conference balances (gross/locked model, refunds netted).
+    syncConferenceInquiryPaymentSnapshot($pdo, $enquiryId);
 }
 ?>
 <!DOCTYPE html>
@@ -902,7 +948,9 @@ function updateConferenceEnquiryPayments(PDO $pdo, int $enquiryId)
                                     <span class="pa-currency"><?php echo htmlspecialchars($currency_symbol); ?></span>
                                     <input type="number" id="pa-amount" name="payment_amount"
                                         step="0.01" min="0"
-                                        value="<?php echo htmlspecialchars($payment['payment_amount'] ?? ''); ?>"
+                                        value="<?php echo htmlspecialchars((string)($payment['total_amount'] ?? '')); ?>"
+                                        <?php echo $editLocked ? 'readonly title="Locked: this payment has refunds against it"' : ''; ?>
+                                        <?php echo ($editId && $editRefundedTotal > 0 && !$editLocked) ? 'min="' . htmlspecialchars((string)$editRefundedTotal) . '"' : ''; ?>
                                         class="pa-input pa-input--amount"
                                         placeholder="0.00"
                                         required>
@@ -925,7 +973,10 @@ function updateConferenceEnquiryPayments(PDO $pdo, int $enquiryId)
                                     Payment Status <span class="pa-required">*</span>
                                     <button type="button" class="wm-help" data-tooltip="'Completed' or 'Paid' triggers a receipt email to the guest and updates the booking balance immediately." aria-label="Help">?</button>
                                 </label>
-                                <select id="pa-status" name="payment_status" class="pa-input" required>
+                                <?php if ($editLocked): ?>
+                                    <input type="hidden" name="payment_status" value="<?php echo htmlspecialchars((string)$payment['payment_status']); ?>">
+                                <?php endif; ?>
+                                <select id="pa-status" name="payment_status" class="pa-input" required <?php echo $editLocked ? 'disabled' : ''; ?>>
                                     <?php
                                     $statuses = [
                                         'pending'   => 'Pending',
@@ -933,8 +984,14 @@ function updateConferenceEnquiryPayments(PDO $pdo, int $enquiryId)
                                         'paid'      => 'Paid',
                                         'completed' => 'Completed',
                                         'refunded'  => 'Refunded',
+                                        'partially_refunded' => 'Partially refunded',
                                         'cancelled' => 'Cancelled',
                                     ];
+                                    if (!$editLocked) {
+                                        unset($statuses['refunded'], $statuses['partially_refunded']);
+                                    } else {
+                                        $statuses = array_intersect_key($statuses, [(string)$payment['payment_status'] => true]);
+                                    }
                                     $currentStatus = $payment['payment_status'] ?? 'completed';
                                     foreach ($statuses as $val => $lbl):
                                     ?>

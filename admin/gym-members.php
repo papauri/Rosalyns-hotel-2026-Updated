@@ -388,19 +388,22 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['gm_action'])) {
             $costPerVisit = null; $paidTotal = null;
             if (!empty($mem['membership_type'])) {
                 try {
+                    // Net paid (canonical rule): collected originals incl. refunded /
+                    // partially refunded, minus completed + processing refunds.
                     $paidStmt = $pdo->prepare("
-                        SELECT COALESCE(SUM(p.total_amount),0)
+                        SELECT COALESCE(SUM(CASE
+                                   WHEN p.payment_status IN ('completed','paid','refunded','partially_refunded') AND COALESCE(p.payment_type,'') <> 'refund' THEN p.total_amount
+                                   WHEN p.payment_type = 'refund' AND p.refund_status IN ('completed','processing') THEN -p.total_amount
+                                   ELSE 0 END),0)
                         FROM payments p
                         JOIN gym_inquiries gi ON gi.id = p.booking_id
                         JOIN gym_members gm ON gm.gym_inquiry_id = gi.id
-                        WHERE gm.id = ? AND p.booking_type='gym'
-                          AND p.payment_status IN ('completed','paid')
-                          AND COALESCE(p.payment_type,'') <> 'refund' AND p.deleted_at IS NULL
+                        WHERE gm.id = ? AND p.booking_type='gym' AND p.deleted_at IS NULL
                     ");
                     $paidStmt->execute([$memberId]);
-                    $paidTotal = (float)$paidStmt->fetchColumn();
+                    $paidTotal = max(0.0, (float)$paidStmt->fetchColumn());
                     $tv = (int)($stats['total_visits'] ?? 0);
-                    if ($paidTotal > 0 && $tv > 0) { $costPerVisit = round($paidTotal / $tv, 2); }
+                    if ($paidTotal > BALANCE_TOLERANCE && $tv > 0) { $costPerVisit = round($paidTotal / $tv, 2); }
                 } catch (Throwable $e) { /* optional */ }
             }
 

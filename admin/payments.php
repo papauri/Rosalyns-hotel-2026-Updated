@@ -362,12 +362,12 @@ $analyticsWhereSql = "WHERE " . implode(' AND ', $analyticsWhere);
 $kpiStmt = $pdo->prepare("
     SELECT
         COUNT(*) AS txn_count,
-        COALESCE(SUM(CASE WHEN payment_status IN ('completed','paid') AND COALESCE(payment_type, '') <> 'refund' THEN total_amount ELSE 0 END), 0) AS gross_collected,
-        COALESCE(SUM(CASE WHEN payment_status IN ('completed','paid') AND COALESCE(payment_type, '') <> 'refund' THEN vat_amount   ELSE 0 END), 0) AS vat_collected,
+        COALESCE(SUM(CASE WHEN payment_status IN ('completed','paid','refunded','partially_refunded') AND COALESCE(payment_type, '') <> 'refund' THEN total_amount ELSE 0 END), 0) AS gross_collected,
+        COALESCE(SUM(CASE WHEN payment_status IN ('completed','paid','refunded','partially_refunded') AND COALESCE(payment_type, '') <> 'refund' THEN vat_amount   ELSE 0 END), 0) AS vat_collected,
         COALESCE(SUM(CASE WHEN payment_status IN ('pending','partial') THEN total_amount ELSE 0 END), 0) AS pending_total,
         COALESCE(SUM(CASE WHEN payment_status IN ('pending','partial') THEN 1 ELSE 0 END), 0) AS pending_count,
-        COALESCE(SUM(CASE WHEN payment_type = 'refund' THEN total_amount ELSE 0 END), 0) AS refunds_total,
-        COALESCE(SUM(CASE WHEN payment_type = 'refund' THEN 1 ELSE 0 END), 0) AS refunds_count
+        COALESCE(SUM(CASE WHEN payment_type = 'refund' AND refund_status IN ('completed','processing') THEN total_amount ELSE 0 END), 0) AS refunds_total,
+        COALESCE(SUM(CASE WHEN payment_type = 'refund' AND refund_status IN ('completed','processing') THEN 1 ELSE 0 END), 0) AS refunds_count
     FROM payments
     $analyticsWhereSql
 ");
@@ -377,10 +377,10 @@ $kpi = $kpiStmt->fetch(PDO::FETCH_ASSOC) ?: [];
 // Today / This month (always — independent of filters, useful sidebar info)
 $periodStmt = $pdo->prepare("
     SELECT
-        COALESCE(SUM(CASE WHEN DATE(payment_date) = CURDATE() AND payment_status IN ('completed','paid') AND COALESCE(payment_type, '') <> 'refund' THEN total_amount ELSE 0 END), 0) AS today_collected,
-        COALESCE(SUM(CASE WHEN DATE(payment_date) = CURDATE() AND payment_status IN ('completed','paid') AND COALESCE(payment_type, '') <> 'refund' THEN 1 ELSE 0 END), 0) AS today_count,
-        COALESCE(SUM(CASE WHEN YEAR(payment_date)=YEAR(CURDATE()) AND MONTH(payment_date)=MONTH(CURDATE()) AND payment_status IN ('completed','paid') AND COALESCE(payment_type, '') <> 'refund' THEN total_amount ELSE 0 END), 0) AS month_collected,
-        COALESCE(SUM(CASE WHEN payment_date >= DATE_SUB(CURDATE(), INTERVAL 6 DAY) AND payment_status IN ('completed','paid') AND COALESCE(payment_type, '') <> 'refund' THEN total_amount ELSE 0 END), 0) AS week_collected
+        COALESCE(SUM(CASE WHEN DATE(payment_date) = CURDATE() AND payment_status IN ('completed','paid','refunded','partially_refunded') AND COALESCE(payment_type, '') <> 'refund' THEN total_amount ELSE 0 END), 0) AS today_collected,
+        COALESCE(SUM(CASE WHEN DATE(payment_date) = CURDATE() AND payment_status IN ('completed','paid','refunded','partially_refunded') AND COALESCE(payment_type, '') <> 'refund' THEN 1 ELSE 0 END), 0) AS today_count,
+        COALESCE(SUM(CASE WHEN YEAR(payment_date)=YEAR(CURDATE()) AND MONTH(payment_date)=MONTH(CURDATE()) AND payment_status IN ('completed','paid','refunded','partially_refunded') AND COALESCE(payment_type, '') <> 'refund' THEN total_amount ELSE 0 END), 0) AS month_collected,
+        COALESCE(SUM(CASE WHEN payment_date >= DATE_SUB(CURDATE(), INTERVAL 6 DAY) AND payment_status IN ('completed','paid','refunded','partially_refunded') AND COALESCE(payment_type, '') <> 'refund' THEN total_amount ELSE 0 END), 0) AS week_collected
     FROM payments
     WHERE deleted_at IS NULL
 ");
@@ -391,7 +391,7 @@ $period = $periodStmt->fetch(PDO::FETCH_ASSOC) ?: [];
 $bySourceStmt = $pdo->prepare("
     SELECT booking_type,
            COUNT(*) AS txns,
-           COALESCE(SUM(CASE WHEN payment_status IN ('completed','paid') AND COALESCE(payment_type, '') <> 'refund' THEN total_amount ELSE 0 END), 0) AS collected
+           COALESCE(SUM(CASE WHEN payment_status IN ('completed','paid','refunded','partially_refunded') AND COALESCE(payment_type, '') <> 'refund' THEN total_amount ELSE 0 END), 0) AS collected
     FROM payments
     $analyticsWhereSql
     GROUP BY booking_type
@@ -404,7 +404,7 @@ $bySource = $bySourceStmt->fetchAll(PDO::FETCH_ASSOC);
 $byMethodStmt = $pdo->prepare("
     SELECT payment_method,
            COUNT(*) AS txns,
-           COALESCE(SUM(CASE WHEN payment_status IN ('completed','paid') AND COALESCE(payment_type, '') <> 'refund' THEN total_amount ELSE 0 END), 0) AS collected
+           COALESCE(SUM(CASE WHEN payment_status IN ('completed','paid','refunded','partially_refunded') AND COALESCE(payment_type, '') <> 'refund' THEN total_amount ELSE 0 END), 0) AS collected
     FROM payments
     $analyticsWhereSql
     GROUP BY payment_method
