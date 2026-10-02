@@ -18,6 +18,7 @@
  *   php scripts/patch_amount_due_drift.php --apply   # write changes
  */
 declare(strict_types=1);
+if (PHP_SAPI !== 'cli') { http_response_code(403); exit("CLI only.\n"); } // never runnable over the web
 require __DIR__ . '/../config/database.php';
 global $pdo;
 

@@ -112,6 +112,52 @@ Options -Indexes
 php_flag display_errors Off
 
 # Force HTTPS
+# ====================
+# FILE ACCESS DENIAL
+# ====================
+# This file previously had no Files / FilesMatch / Require rule of any kind, so
+# nothing stopped a config or dotfile being fetched over HTTP. A .env at the web
+# root would have been served as PLAINTEXT, credentials included.
+#
+# Apache 2.4 uses "Require all denied"; the mod_authz_core fallback keeps this
+# working on 2.2. Both are present so the rule cannot silently do nothing.
+
+# Dotfiles (.env, .env.local, .git*, .user.ini, .htpasswd …)
+<FilesMatch "^\.">
+    <IfModule mod_authz_core.c>
+        Require all denied
+    </IfModule>
+    <IfModule !mod_authz_core.c>
+        Order allow,deny
+        Deny from all
+    </IfModule>
+</FilesMatch>
+
+# Credentials, dependency manifests, dumps, logs and backups.
+# NOTE: config/*.php is intentionally NOT denied here — the app serves pages that
+# include those files; PHP executes them and they emit nothing. Denying by
+# extension would break nothing but adds no protection either.
+<FilesMatch "(?i)\.(env|ini|log|sql|sql\.gz|sqlite|db|bak|backup|old|orig|save|swp|swo|dist|lock|yml|yaml|json)$">
+    <IfModule mod_authz_core.c>
+        Require all denied
+    </IfModule>
+    <IfModule !mod_authz_core.c>
+        Order allow,deny
+        Deny from all
+    </IfModule>
+</FilesMatch>
+
+# Re-allow the few JSON files the site legitimately serves.
+<FilesMatch "(?i)^(manifest|site|browserconfig)\.json$">
+    <IfModule mod_authz_core.c>
+        Require all granted
+    </IfModule>
+    <IfModule !mod_authz_core.c>
+        Order allow,deny
+        Allow from all
+    </IfModule>
+</FilesMatch>
+
 <IfModule mod_rewrite.c>
     RewriteEngine On
     RewriteCond %{HTTPS} off

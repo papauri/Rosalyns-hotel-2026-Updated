@@ -1,4 +1,5 @@
 <?php
+if (PHP_SAPI !== 'cli') { http_response_code(403); exit("CLI only.\n"); } // never runnable over the web
 /**
  * ProManaged IT — PMS Service Agreement Generator
  * Run: php scripts/generate-contract.php
