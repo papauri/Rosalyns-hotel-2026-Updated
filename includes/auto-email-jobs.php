@@ -9,6 +9,7 @@
  *  - quotation_expiry_reminder  sent quotations that expire within automated_email_quotation_days.
  *  - tentative_hold_reminder    one reminder per hold, tentative_reminder_hours before it lapses.
  *  - tentative_expired_notice   guest + hotel notice once a hold has lapsed (last 24 h).
+ *  - nightly_backup             runs scripts/backup_database.php once a day after 01:00.
  *  - prearrival_reminders / poststay_review_requests / gym_membership_renewal
  *                               the former cron senders; they call the SAME library functions the
  *                               scripts/ wrappers call and keep their original settings and dedupe
@@ -587,6 +588,85 @@ if (!function_exists('rh_job_overdue_payment_reminders')) {
         }
         rh_auto_log_run_summary($pdo, 'gym_membership_renewal', $r);
         return $r;
+    }
+
+    /* ── job: nightly database backup (replaces the backup crontab line) ─ */
+
+    /** CLI php binary: under PHP-FPM / LiteSpeed, PHP_BINARY is the server binary, not the CLI. */
+    function rh_auto_php_cli(): string
+    {
+        $bin = (string)PHP_BINARY;
+        $base = strtolower(basename($bin));
+        if (PHP_SAPI !== 'cli' && ($bin === '' || strpos($base, 'fpm') !== false || strpos($base, 'lsphp') !== false || strpos($base, 'cgi') !== false)) {
+            foreach ([PHP_BINDIR . '/php', '/usr/local/bin/php', '/usr/bin/php'] as $cand) {
+                if (@is_file($cand) && @is_executable($cand)) {
+                    return $cand;
+                }
+            }
+        }
+        return $bin !== '' ? $bin : 'php';
+    }
+
+    /** Run a project PHP script in a child process. @return array{ok:bool,exit:int,output:string} */
+    function rh_auto_run_php_script(string $script, array $args = []): array
+    {
+        $cmd = escapeshellarg(rh_auto_php_cli()) . ' ' . escapeshellarg($script);
+        foreach ($args as $a) {
+            $cmd .= ' ' . escapeshellarg((string)$a);
+        }
+        $disabled = array_map('trim', explode(',', (string)ini_get('disable_functions')));
+        $can = static function (string $f) use ($disabled): bool {
+            return function_exists($f) && !in_array($f, $disabled, true);
+        };
+        if ($can('proc_open')) {
+            $proc = @proc_open($cmd, [1 => ['pipe', 'w'], 2 => ['pipe', 'w']], $pipes, dirname($script, 2));
+            if (is_resource($proc)) {
+                $out = (string)stream_get_contents($pipes[1]) . (string)stream_get_contents($pipes[2]);
+                fclose($pipes[1]);
+                fclose($pipes[2]);
+                $exit = (int)proc_close($proc);
+                return ['ok' => $exit === 0, 'exit' => $exit, 'output' => trim($out)];
+            }
+        }
+        if ($can('exec')) {
+            $lines = [];
+            $exit = 1;
+            @exec($cmd . ' 2>&1', $lines, $exit);
+            return ['ok' => $exit === 0, 'exit' => (int)$exit, 'output' => trim(implode("\n", $lines))];
+        }
+        return ['ok' => false, 'exit' => 127, 'output' => 'proc_open and exec are disabled on this server'];
+    }
+
+    /**
+     * One backup a day: at the first scheduler run after 01:00 once the last backup
+     * (last_backup_at, written by scripts/backup_database.php) is over 20 hours old.
+     * The script keeps its own lock, rotation (14 daily / 8 weekly / 12 monthly) and log.
+     */
+    function rh_job_nightly_backup(PDO $pdo, array $o = []): array
+    {
+        $res = ['checked' => 1, 'sent' => 0, 'skipped' => 0, 'errors' => []];
+        // Only on the server: a local copy (Windows, or a localhost request) would dump the live
+        // database onto a laptop and stamp last_backup_at, so the server would skip its own backup.
+        $host = strtolower((string)($_SERVER['HTTP_HOST'] ?? ''));
+        if (PHP_OS_FAMILY === 'Windows' || preg_match('/localhost|127\.0\.0\.1|\.local$/', $host)) {
+            $res['skipped'] = 1;
+            return $res;
+        }
+        $last = strtotime(rh_auto_setting_fresh($pdo, 'last_backup_at')) ?: 0;
+        if ((time() - $last) < 20 * 3600 || (int)date('G') < 1) {
+            $res['skipped'] = 1;
+            return $res;
+        }
+        @set_time_limit(900);
+        $r = rh_auto_run_php_script(dirname(__DIR__) . '/scripts/backup_database.php', ['--quiet']);
+        if ($r['ok']) {
+            $res['sent'] = 1; // shown as "1 of 1" on Admin -> Automated Emails
+        } else {
+            $res['errors'][] = 'backup failed (exit ' . $r['exit'] . '): ' . mb_substr($r['output'], 0, 300);
+            error_log('auto-scheduler nightly backup: ' . $r['output']);
+        }
+        rh_auto_log_run_summary($pdo, 'nightly_backup', $res);
+        return $res;
     }
 
     /* ── sample sends ("Send test to me" and scripts/auto-emails-dry-run.php) ─ */

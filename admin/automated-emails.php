@@ -191,7 +191,7 @@ $editableTemplates = ['payment_reminder_1', 'payment_reminder_2', 'payment_remin
 
             <div class="form-group">
                 <label class="ae-check"><input type="checkbox" name="automated_email_master" value="1" <?php echo $cfg['automated_email_master'] === '1' ? 'checked' : ''; ?>>
-                    <span><strong>Master switch</strong> &mdash; turn ALL automated emails on/off</span></label>
+                    <span><strong>Master switch</strong> &mdash; turn ALL automated jobs (emails and the nightly backup) on/off</span></label>
             </div>
 
             <h3>Jobs</h3>

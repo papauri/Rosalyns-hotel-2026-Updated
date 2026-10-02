@@ -13,7 +13,7 @@
  * the same code.
  *
  * Settings (site_settings; defaults in rh_auto_defaults()):
- *   automated_email_master            '1'   master switch for everything here
+ *   automated_email_master            '1'   master switch for everything here (emails and the nightly backup)
  *   automated_email_interval_minutes  '15'  minimum minutes between scheduler runs
  *   automated_email_test_recipient    ''    when set, EVERY automated email goes there ([TEST])
  *   scheduler_last_run                unix time of the last run start (cached read)
@@ -42,6 +42,7 @@ if (!function_exists('rh_auto_defaults')) {
             'automated_email_quotation_days'    => '2',
             'automated_email_job_tentative'     => '1',
             'automated_email_job_tentative_expired' => '1',
+            'automated_backup_enabled'          => '1',
             'scheduler_last_run'                => '0',
             'scheduler_last_result'             => '',
         ];
@@ -103,6 +104,11 @@ if (!function_exists('rh_auto_defaults')) {
             'gym_membership_renewal' => [
                 'label' => 'Gym membership renewal reminders', 'fn' => 'rh_job_gym_membership_renewal',
                 'toggle' => 'gym_reminder_enabled', 'toggle_default' => '1', 'interval' => 360, 'legacy' => true, 'bcc' => 'global',
+            ],
+            // Last on purpose: a backup can take a while, so every email job runs first.
+            'nightly_backup' => [
+                'label' => 'Nightly database backup', 'fn' => 'rh_job_nightly_backup',
+                'toggle' => 'automated_backup_enabled', 'toggle_default' => '1', 'interval' => 60, 'legacy' => false, 'bcc' => 'global',
             ],
         ];
     }
