@@ -61,19 +61,17 @@ $fnb = [
         $st->execute([$rp_from, $rp_to]);
         return $st->fetchAll(PDO::FETCH_ASSOC);
     }),
-    // `stock_payments` does not exist on this installation and never has. Because
-    // rp_safe() swallows the error, this panel reported "no payments" rather than
-    // reporting that it was broken. Restaurant payments are written to `payments`
-    // with booking_type='restaurant' by rh_sync_restaurant_payment(), so the panel
-    // now reads its numbers from there. total_amount is the gross figure the sale
-    // booked; refunds are excluded so the split reflects money taken.
+    // POS money by method, from `payments` (booking_type='restaurant', written by
+    // rh_sync_restaurant_payment()). `stock_payments` never existed, and rp_safe() hid the
+    // error as "no payments". Canonical net-paid rule: a sale counts while its payment_status
+    // is completed/paid/refunded/partially_refunded (refunds are their own rows, listed below).
     'payment_split' => rp_safe(function() use ($pdo, $rp_from, $rp_to) {
         $st = $pdo->prepare("SELECT payment_method, COUNT(*) AS n, SUM(total_amount) AS total
             FROM payments
             WHERE booking_type='restaurant'
               AND deleted_at IS NULL
               AND COALESCE(payment_type,'') <> 'refund'
-              AND status='completed'
+              AND payment_status IN ('completed','paid','refunded','partially_refunded')
               AND created_at BETWEEN ? AND ?
             GROUP BY payment_method ORDER BY total DESC");
         $st->execute([$rp_from, $rp_to]);
@@ -211,17 +209,17 @@ $voids = [
         $st->execute([$rp_from, $rp_to]);
         return $st->fetch(PDO::FETCH_ASSOC) ?: [];
     }, []),
-    // Same repoint as payment_split above. `payments` has no refunded_at/refunded_by
-    // columns — a refund is its own row (payment_type='refund'), so created_at and
-    // recorded_by are the equivalent fields and are aliased to the names this
-    // panel's view already renders.
+    // Refunds are their own `payments` rows (payment_type='refund'); created_at / recorded_by
+    // stand in for the refunded_at / refunded_by names the view renders. Only refunds that
+    // went (or are going) out: refund_status completed or processing.
     'refunds' => rp_safe(function() use ($pdo, $rp_from, $rp_to) {
-        $st = $pdo->prepare("SELECT id, payment_reference, total_amount AS amount, refund_reason,
+        $st = $pdo->prepare("SELECT id, payment_reference, ABS(total_amount) AS amount, refund_reason,
                    created_at AS refunded_at, recorded_by AS refunded_by
             FROM payments
             WHERE booking_type='restaurant'
               AND payment_type='refund'
               AND deleted_at IS NULL
+              AND COALESCE(refund_status,'completed') IN ('completed','processing')
               AND created_at BETWEEN ? AND ?
             ORDER BY created_at DESC LIMIT 100");
         $st->execute([$rp_from, $rp_to]);
