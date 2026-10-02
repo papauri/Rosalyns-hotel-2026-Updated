@@ -11,6 +11,50 @@
 > approval," never silently queued. /build-loop stops (not pauses) once every item below
 > is `[x]`.
 
+## Go-live round — 2026-10-02 (owner-requested; done jointly in Rosalyn's and Liwonde)
+
+Every item below was built in both repos with the same targeted edits, `php -l` clean,
+booking/finance/POS-KDS smoke tests green, and pushed to `origin/main`. **Deploying to the
+live server is the owner's job** (owner, 2026-10-02) — `main` being ahead of live is expected.
+
+**Done**
+- [x] Branded PDF/email document templates + automated emails without cron — web-triggered
+      scheduler (`includes/auto-scheduler.php`, jobs in `includes/auto-email-jobs.php`, Admin →
+      Automated Emails, migration 040). Overdue reminders 1/3/7 days (stop at 30), quotation
+      expiry, tentative-hold reminder + expired notice (the expiry email had never been sent:
+      the page-load sweep expired holds before the cron script looked), pre-arrival, post-stay,
+      gym renewal. Idempotent via `automated_email_log`. (173834a)
+- [x] Hotel timezone: PHP + MySQL session on Africa/Blantyre (`RH_TIMEZONE`, `HOTEL_TIMEZONE`
+      override); station hours, KDS recall/ticket clocks and POS/KDS timestamps use it.
+      Rows stored before this are UTC (2 h early); dates unaffected. (8e9b5a7)
+- [x] Admin/POS/KDS sign-out after 8 idle hours (`includes/admin-session.php`); polling does
+      not count as activity; session GC raised in `.user.ini`. (8e9b5a7)
+- [x] Check-in blocked while a room is not marked clean; `checkin_room_not_ready` permission
+      (managers by default, grantable per user) confirms and is logged to the timeline. Also
+      fixed: checkout-with-balance overrides never reached the timeline (invalid action_type).
+      (1438f10 + ac184f0)
+- [x] Events: capacity enforced, extra RSVPs `waitlisted`, staff "Promote from waitlist";
+      status dropdown can no longer bypass Cancel. No schema change. (ea70f00)
+- [x] Nightly database backup as a scheduler job (server only, after 01:00, >20 h since the
+      last one). (e22d217)
+- [x] Admin date pickers no longer go through UTC (`rhYmd()`/`rhYmdHm()`): Reports period
+      shortcuts, gym expiry, create-booking min check-out, maintenance times. (5fb9146)
+- [x] Cleanup: superseded cron scripts removed; `error_log` files ignored and four committed copies untracked;
+      leftover Copilot config removed. (f2c2afd)
+
+**Still open — owner / hotel staff**
+- [ ] **Email sender:** `email_from_email` is `johnpaulchirwa@gmail.com` but mail goes through `mail.promanaged-it.com` as `info@promanaged-it.com` — Gmail's DMARC means guest mail is likely spam-foldered or rejected. Use an address the SMTP account owns.
+- [ ] Grant **Check-in to Room Not Clean** / **Check-out With Balance** to any non-manager who needs them (User Management → Guest Services).
+- [ ] Replace the 3 Facebook-post "reviews"; confirm the 20 restaurant tables are the real floor plan.
+- [ ] `sql_mode` without `STRICT_TRANS_TABLES` (X-02 / B1) — test on a staging copy first.
+- [ ] `stock_payments` (POS payment split panel always empty) and `room_features`
+      (`api/spatial-loading.php`, called from `restaurant.php`) — recommended: repoint the panel
+      at `payments`; check whether the restaurant page really uses the endpoint before removing.
+- [ ] Staging database; then one real booking end to end in a browser (never done — both live
+      databases have 0 bookings), check-in, POS on a tablet.
+
+---
+
 ## Cross-port audit — 2026-09-03 (owner-requested: apply the Liwonde Sun fixes here)
 
 Liwonde Sun is a fork of this platform, so defects found there were candidates here. **Every
