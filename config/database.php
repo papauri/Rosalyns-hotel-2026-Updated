@@ -4038,6 +4038,19 @@ function getRoomTypeNightlyAvailability(int $room_id, string $start_date, string
     }
 
     $roomIds = array_map('intval', array_column($rooms, 'id'));
+    // Joined-room types sell pairs whose rooms can belong to another type: watch those rooms too.
+    $pairs = [];
+    if (roomTypeHasActiveCombinations($room_id)) {
+        $cst = $pdo->prepare("SELECT room_a_id, room_b_id FROM room_combinations WHERE combined_room_type_id = ? AND is_active = 1");
+        $cst->execute([$room_id]);
+        $pairs = $cst->fetchAll(PDO::FETCH_ASSOC);
+        foreach ($pairs as $pr) {
+            $roomIds[] = (int)$pr['room_a_id'];
+            $roomIds[] = (int)$pr['room_b_id'];
+        }
+        $roomIds = array_values(array_unique($roomIds));
+    }
+    $ownRoomIds = array_map('intval', array_column($rooms, 'id'));
     $idPh = implode(',', array_fill(0, count($roomIds), '?'));
 
     // Build the night list.
@@ -4140,7 +4153,8 @@ function getRoomTypeNightlyAvailability(int $room_id, string $start_date, string
 
     // Bookings of this type that hold no physical room yet each consume one unit per night.
     $unassignedPerNight = array_fill_keys($nights, 0);
-    $st = $pdo->prepare("SELECT b.check_in_date AS ci, b.check_out_date AS co FROM bookings b WHERE b.room_id = ? AND b.individual_room_id IS NULL AND $live");
+    $noLink = bookingAvailabilityTableExists('booking_rooms') ? " AND NOT EXISTS (SELECT 1 FROM booking_rooms br2 WHERE br2.booking_id = b.id AND br2.released_at IS NULL)" : '';
+    $st = $pdo->prepare("SELECT b.check_in_date AS ci, b.check_out_date AS co FROM bookings b WHERE b.room_id = ? AND b.individual_room_id IS NULL AND $live" . $noLink);
     $st->execute(array_merge([$room_id], $statuses, [$end, $start]));
     foreach ($st->fetchAll(PDO::FETCH_ASSOC) as $row) {
         $from = max(substr($row['ci'], 0, 10), $start);
@@ -4150,12 +4164,40 @@ function getRoomTypeNightlyAvailability(int $room_id, string $start_date, string
         }
     }
 
-    // Joined-room types sell pairs; everything else sells single rooms.
-    $pairs = [];
-    if (roomTypeHasActiveCombinations($room_id)) {
-        $cst = $pdo->prepare("SELECT room_a_id, room_b_id FROM room_combinations WHERE combined_room_type_id = ? AND is_active = 1");
-        $cst->execute([$room_id]);
-        $pairs = $cst->fetchAll(PDO::FETCH_ASSOC);
+    // Unassigned joined-room bookings of OTHER types each need a free pair that uses rooms of
+    // this type: hold the first free pairs per night (same rule as rh_rooms_held_for_combinations).
+    if (empty($pairs)) {
+        $fst = $pdo->prepare("SELECT rc.combined_room_type_id AS ft, rc.room_a_id, rc.room_b_id FROM room_combinations rc
+            JOIN individual_rooms a ON a.id = rc.room_a_id JOIN individual_rooms bb ON bb.id = rc.room_b_id
+            WHERE rc.is_active = 1 AND rc.combined_room_type_id <> ? AND (a.room_type_id = ? OR bb.room_type_id = ?) ORDER BY rc.id");
+        $fst->execute([$room_id, $room_id, $room_id]);
+        $familyPairs = [];
+        foreach ($fst->fetchAll(PDO::FETCH_ASSOC) as $fp) {
+            $familyPairs[(int)$fp['ft']][] = $fp;
+        }
+        foreach ($familyPairs as $ft => $fps) {
+            $need = array_fill_keys($nights, 0);
+            $ust = $pdo->prepare("SELECT b.check_in_date AS ci, b.check_out_date AS co FROM bookings b WHERE b.room_id = ? AND b.individual_room_id IS NULL AND $live" . $noLink);
+            $ust->execute(array_merge([$ft], $statuses, [$end, $start]));
+            foreach ($ust->fetchAll(PDO::FETCH_ASSOC) as $row) {
+                $from = max(substr($row['ci'], 0, 10), $start);
+                $to = min(substr($row['co'], 0, 10), $end);
+                for ($d = new DateTime($from), $e = new DateTime($to); $d < $e; $d->modify('+1 day')) {
+                    $need[$d->format('Y-m-d')]++;
+                }
+            }
+            foreach ($nights as $night) {
+                for ($i = 0, $n = $need[$night]; $n > 0 && $i < count($fps); $i++) {
+                    $a = (int)$fps[$i]['room_a_id'];
+                    $b2 = (int)$fps[$i]['room_b_id'];
+                    if (empty($taken[$a][$night]) && empty($taken[$b2][$night])) {
+                        $taken[$a][$night] = true;
+                        $taken[$b2][$night] = true;
+                        $n--;
+                    }
+                }
+            }
+        }
     }
 
     $out = [];
@@ -4169,7 +4211,7 @@ function getRoomTypeNightlyAvailability(int $room_id, string $start_date, string
             }
         } else {
             $free = 0;
-            foreach ($roomIds as $rid) {
+            foreach ($ownRoomIds as $rid) {
                 if (empty($taken[$rid][$night])) {
                     $free++;
                 }
