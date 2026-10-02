@@ -95,6 +95,9 @@ try {
     $stmt = $pdo->prepare("SELECT * FROM rooms WHERE slug = ? AND is_active = 1");
     $stmt->execute([$room_slug]);
     $room = $stmt->fetch(PDO::FETCH_ASSOC);
+    if ($room) {
+        $room['rooms_available'] = rh_room_type_sellable_count((int)$room['id'], (int)$room['rooms_available']);
+    }
 
     if (!empty($room) && function_exists('applyManagedMediaOverrides')) {
         $room = applyManagedMediaOverrides($room, 'rooms', $room['id'] ?? '', ['image_url', 'video_path']);

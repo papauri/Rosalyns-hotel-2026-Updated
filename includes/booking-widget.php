@@ -29,6 +29,10 @@ if (!isBookingEnabled()) {
 // Fetch available room types from database
 $widget_rooms_stmt = $pdo->query("SELECT id, name, max_guests, total_rooms, price_per_night, rooms_available, children_allowed, child_price_multiplier FROM rooms WHERE is_active = 1 ORDER BY display_order ASC");
 $widget_rooms = $widget_rooms_stmt->fetchAll(PDO::FETCH_ASSOC);
+foreach ($widget_rooms as &$__wr) { // real sellable rooms, not the drifting stored figure
+    $__wr['rooms_available'] = rh_room_type_sellable_count((int)$__wr['id'], (int)$__wr['rooms_available']);
+}
+unset($__wr);
 
 // Get child price multiplier setting
 $widget_child_multiplier = (float)getSetting('booking_child_price_multiplier', getSetting('child_guest_price_multiplier', 50));

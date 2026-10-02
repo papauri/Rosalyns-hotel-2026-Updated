@@ -3184,6 +3184,40 @@ function rh_ensure_checkout_cleaning_task(int $individualRoomId, int $bookingId,
     }
 }
 
+/**
+ * How many units of a room type can be sold at all (no dates): active joined-room
+ * combinations for a joined type, else active individual rooms that are not in maintenance
+ * or out of order, else the legacy rooms.rooms_available figure for types with no physical
+ * rooms set up. The undated "(N rooms available)" labels use this; the per-date figure comes
+ * from checkRoomAvailability(). rooms.rooms_available / total_rooms drifted (17 vs 14 real).
+ */
+function rh_room_type_sellable_count(int $roomTypeId, int $fallback = 0): int
+{
+    global $pdo;
+    static $memo = [];
+    if (isset($memo[$roomTypeId])) {
+        return $memo[$roomTypeId];
+    }
+    try {
+        if (roomTypeHasActiveCombinations($roomTypeId)) {
+            $st = $pdo->prepare('SELECT COUNT(*) FROM room_combinations WHERE combined_room_type_id = ? AND is_active = 1');
+            $st->execute([$roomTypeId]);
+            return $memo[$roomTypeId] = (int)$st->fetchColumn();
+        }
+        $st = $pdo->prepare("SELECT COUNT(*) AS total,
+                SUM(CASE WHEN status NOT IN ('maintenance', 'out_of_order') THEN 1 ELSE 0 END) AS sellable
+            FROM individual_rooms WHERE room_type_id = ? AND is_active = 1");
+        $st->execute([$roomTypeId]);
+        $row = $st->fetch(PDO::FETCH_ASSOC) ?: ['total' => 0, 'sellable' => 0];
+        if ((int)$row['total'] > 0) {
+            return $memo[$roomTypeId] = (int)$row['sellable'];
+        }
+    } catch (Throwable $e) {
+        error_log('rh_room_type_sellable_count: ' . $e->getMessage());
+    }
+    return $memo[$roomTypeId] = max(0, $fallback);
+}
+
 function roomTypeHasActiveCombinations(int $roomTypeId): bool
 {
     global $pdo;

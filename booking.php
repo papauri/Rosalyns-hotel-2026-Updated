@@ -854,6 +854,10 @@ $rooms_stmt = $pdo->query("
     ORDER BY r.display_order ASC
 ");
 $available_rooms = $rooms_stmt->fetchAll(PDO::FETCH_ASSOC);
+foreach ($available_rooms as &$__r) { // real sellable rooms, not the drifting stored figure
+    $__r['rooms_available'] = rh_room_type_sellable_count((int)$__r['id'], (int)$__r['rooms_available']);
+}
+unset($__r);
 
 // Extract unique badges for room category filters
 $room_badges = ['All'];
