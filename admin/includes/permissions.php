@@ -83,6 +83,7 @@ function getAllRoles()
                 'cancel_booking',
                 'checkin_guest',
                 'checkout_guest',
+                'checkin_room_not_ready', // override the clean-room check-in rule (logged)
                 'room_dashboard',
                 'individual_rooms',
                 'block_rooms',
