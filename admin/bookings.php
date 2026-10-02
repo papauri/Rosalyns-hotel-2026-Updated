@@ -958,22 +958,20 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
             // Availability is checked UNDER the same room-row lock the create paths take, so a
             // concurrent booking cannot slip into the new dates between check and write.
+            if (is_array($updates) && isset($updates['individual_room_id']) && (int)$updates['individual_room_id'] <= 0) {
+                unset($updates['individual_room_id'], $newValues['individual_room_id']);
+            }
             $mbIndChanged = is_array($updates) && isset($updates['individual_room_id'])
                 && (int)$updates['individual_room_id'] > 0
                 && (int)$updates['individual_room_id'] !== (int)($current['individual_room_id'] ?? 0);
             if ($mbDatesChanged || $mbIndChanged) {
                 $mbIn  = $updates['check_in_date']  ?? $current['check_in_date'];
                 $mbOut = $updates['check_out_date'] ?? $current['check_out_date'];
-                $pdo->prepare("SELECT id FROM rooms WHERE id = ? FOR UPDATE")->execute([$current['room_id']]);
-                if ($mbDatesChanged && !isRoomAvailable($current['room_id'], $mbIn, $mbOut, $booking_id)) {
-                    throw new Exception('Room is not available for the new dates.');
-                }
-                $mbIndId = $mbIndChanged ? (int)$updates['individual_room_id'] : (int)($current['individual_room_id'] ?? 0);
-                if ($mbIndId > 0) {
-                    $pdo->prepare("SELECT id FROM individual_rooms WHERE id = ? FOR UPDATE")->execute([$mbIndId]);
-                    if (!isIndividualRoomAvailable($mbIndId, $mbIn, $mbOut, $booking_id)) {
-                        throw new Exception('The assigned individual room is not available for those dates.');
-                    }
+                // Shared stay-change gate: booking / room-type / room locks, then only the NEW
+                // nights are re-checked at type level and for every assigned (or newly chosen) room.
+                $mbGate = rh_validate_booking_stay_change($booking_id, $mbIn, $mbOut, null, $mbIndChanged ? (int)$updates['individual_room_id'] : null);
+                if (!$mbGate['ok']) {
+                    throw new Exception($mbGate['error']);
                 }
             }
             if ($updates === null) {
@@ -989,6 +987,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $vals[] = $booking_id;
             $stmt = $pdo->prepare("UPDATE bookings SET " . implode(', ', $sets) . " WHERE id = ?");
             $stmt->execute($vals);
+
+            // A newly chosen room replaces the old hold (and any joined-room pairing).
+            if ($mbIndChanged) {
+                syncBookingRooms($booking_id, [(int)$updates['individual_room_id']], null);
+                $pdo->prepare("UPDATE bookings SET room_combination_id = NULL WHERE id = ?")->execute([$booking_id]);
+            }
 
             // Date change without a manual price: reprice at the BOOKED nightly rate.
             if ($mbDatesChanged && !isset($updates['total_amount']) && isset($updates['number_of_nights'])) {
@@ -2282,37 +2286,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             // one transaction so a concurrent booking or extend can't slip into the newly
             // extended nights between the check and the write (overbooking).
             $pdo->beginTransaction();
-            $pdo->prepare("SELECT id FROM rooms WHERE id = ? FOR UPDATE")->execute([$bk['room_id']]);
 
-            // Check for conflicts — fetch actual booking details so the error is actionable
-            $blockingStatuses = getBookingStatusesThatBlockAvailability(false);
-            $placeholders = implode(',', array_fill(0, count($blockingStatuses), '?'));
-            $conflict_stmt = $pdo->prepare(
-                "SELECT booking_reference, guest_name, check_in_date, check_out_date, status
-                 FROM bookings
-                 WHERE room_id = ? AND id != ? AND status IN ({$placeholders})
-                 AND NOT (check_out_date <= ? OR check_in_date >= ?)
-                 ORDER BY check_in_date ASC
-                 LIMIT 3"
-            );
-            $conflict_stmt->execute(array_merge(
-                [$bk['room_id'], $booking_id],
-                $blockingStatuses,
-                [$oldCheckout, $new_checkout]
-            ));
-            $conflictRows = $conflict_stmt->fetchAll(PDO::FETCH_ASSOC);
-
-            if (!empty($conflictRows)) {
+            // Shared stay-change gate (booking, room-type and room locks; only the extra nights are
+            // checked): the old test treated ANY other booking of the room type as a conflict even
+            // when plenty of rooms were free, and ignored blocks and maintenance on the guest's room.
+            $extGate = rh_validate_booking_stay_change($booking_id, (string)$bk['check_in_date'], $new_checkout);
+            if (!$extGate['ok']) {
                 $pdo->rollBack();
-                $details = array_map(function ($c) {
-                    $in  = date('d M Y', strtotime($c['check_in_date']));
-                    $out = date('d M Y', strtotime($c['check_out_date']));
-                    return sprintf('%s — %s (%s to %s, %s)',
-                        $c['booking_reference'], $c['guest_name'], $in, $out, ucfirst($c['status']));
-                }, $conflictRows);
-                $msg = 'Cannot extend: the following booking' . (count($conflictRows) > 1 ? 's conflict' : ' conflicts') . ' with the new dates: ' . implode('; ', $details);
                 header('Content-Type: application/json');
-                echo json_encode(['success' => false, 'message' => $msg, 'conflicts' => $conflictRows]);
+                echo json_encode(['success' => false, 'message' => 'Cannot extend: ' . $extGate['error'], 'conflicts' => $extGate['conflicts']]);
                 exit;
             }
 
@@ -2411,6 +2393,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $acd_locked = $lockAcd->fetch(PDO::FETCH_ASSOC);
                 if (!$acd_locked || $acd_locked['status'] !== 'checked-in') {
                     throw new Exception('Booking not found or not checked-in');
+                }
+                $acdGate = rh_validate_booking_stay_change($booking_id, (string)$acd_locked['check_in_date'], $new_checkout);
+                if (!$acdGate['ok']) {
+                    throw new Exception($acdGate['error']);
                 }
                 $rpAcd = rh_reprice_at_booked_rate($acd_locked, $newNights_acd);
                 rh_write_booking_stay_totals($pdo, $booking_id, $rpAcd['totals'], $newNights_acd, (string)$acd_locked['check_in_date'], $new_checkout, $rpAcd['new_child_supplement']);
@@ -2515,6 +2501,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 if (!$lockedUp || !in_array($lockedUp['status'], ['pending', 'confirmed'], true)) {
                     throw new Exception('Only pending or confirmed bookings can be upgraded');
                 }
+                // The new room type must be free for the whole stay (type-level check under the
+                // booking + room-type locks) - upgrading used to move the booking with no check.
+                $upGate = rh_validate_booking_stay_change($booking_id, (string)$lockedUp['check_in_date'], (string)$lockedUp['check_out_date'], $new_room_id);
+                if (!$upGate['ok']) {
+                    throw new Exception($upGate['error']);
+                }
                 $oldSplit = rh_booked_stay_split($lockedUp);
                 $nights = max(1, (int)$lockedUp['number_of_nights']);
 
@@ -2570,7 +2562,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     $current_ir = $ir_stmt->fetch(PDO::FETCH_ASSOC);
 
                     if ($current_ir && (int)$current_ir['room_type_id'] !== $new_room_id) {
-                        // Current individual room doesn't match new room type, try to auto-assign
+                        // Current individual room doesn't match new room type: release it (autoAssign
+                        // returns early while a room is still set), then pick a room of the new type.
+                        rh_release_booking_room_assignment((int)$booking_id);
                         $autoAssignResult = autoAssignIndividualRoom($booking_id);
                         if ($autoAssignResult['success']) {
                             $room_reassigned = true;

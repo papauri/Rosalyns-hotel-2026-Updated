@@ -121,7 +121,7 @@ function maintenanceApiHasActiveBlockNow(PDO $pdo, int $roomId): bool {
         FROM room_maintenance_schedules
         WHERE individual_room_id = ?
           AND block_room = 1
-          AND status IN ('pending', 'in_progress')
+          AND status IN ('planned', 'pending', '', 'in_progress')
           AND start_date <= NOW()
           AND end_date > NOW()
     ");
@@ -156,7 +156,7 @@ function maintenanceApiOverlaps(PDO $pdo, int $roomId, string $startDate, string
         FROM room_maintenance_schedules
         WHERE individual_room_id = ?
           AND block_room = 1
-          AND status IN ('pending', 'in_progress')
+          AND status IN ('planned', 'pending', '', 'in_progress')
           AND NOT (end_date <= ? OR start_date >= ?)
     ";
     $params = [$roomId, $startDate, $endDate];
@@ -201,8 +201,17 @@ function listSchedules() {
     if ($status) {
         $validStatuses = ['pending','in_progress','completed','verified','cancelled'];
         if (in_array($status, $validStatuses, true)) {
-            $sql .= " AND status = ?";
-            $params[] = $status;
+            // The workflow statuses 'pending' / 'verified' are stored as planned / completed+verified_at.
+            if ($status === 'pending') {
+                $sql .= " AND COALESCE(status, '') IN ('planned', 'pending', '')";
+            } elseif ($status === 'verified') {
+                $sql .= " AND status = 'completed' AND verified_at IS NOT NULL";
+            } elseif ($status === 'completed') {
+                $sql .= " AND status = 'completed' AND verified_at IS NULL";
+            } else {
+                $sql .= " AND status = ?";
+                $params[] = $status;
+            }
         }
     }
 
@@ -210,6 +219,8 @@ function listSchedules() {
     $sql .= " ORDER BY 
         CASE status 
             WHEN 'pending' THEN 1 
+            WHEN 'planned' THEN 1 
+            WHEN '' THEN 1 
             WHEN 'in_progress' THEN 2 
             WHEN 'completed' THEN 3 
             WHEN 'verified' THEN 4 
@@ -231,6 +242,7 @@ function listSchedules() {
     $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
     foreach ($rows as &$row) {
+        $row['status'] = rh_maint_status_from_db($row['status'] ?? '', $row['verified_at'] ?? null);
         if (!empty($row['assigned_to'])) {
             $u = $pdo->prepare("SELECT username FROM admin_users WHERE id = ?");
             $u->execute([$row['assigned_to']]);
@@ -331,7 +343,7 @@ function createSchedule() {
             (int)$input['individual_room_id'],
             $input['title'],
             $input['description'] ?? null,
-            $status,
+            rh_maint_status_to_db($status),
             $startDate,
             $endDate,
             $input['assigned_to'] ?? null,
@@ -432,6 +444,7 @@ function updateSchedule($id) {
     if (!$existing) {
         ApiResponse::error('Schedule not found', 404);
     }
+    $existing['status'] = rh_maint_status_from_db($existing['status'] ?? '', $existing['verified_at'] ?? null);
 
     // Check which columns exist
     $hasDueDate = maintenanceApiColumnExists($pdo, 'due_date');
@@ -463,7 +476,7 @@ function updateSchedule($id) {
     foreach ($allowed as $f) {
         if (array_key_exists($f, $input)) {
             $fields[] = "$f = ?";
-            $params[] = $input[$f];
+            $params[] = ($f === 'status') ? rh_maint_status_to_db((string)$input[$f]) : $input[$f];
         }
     }
     if (!$fields) ApiResponse::error('No fields to update', 400);
@@ -596,20 +609,20 @@ function verifySchedule($id) {
         ApiResponse::error('Verification feature requires database migration 005', 400);
     }
     
-    $rowStmt = $pdo->prepare("SELECT individual_room_id, created_by, status FROM room_maintenance_schedules WHERE id = ?");
+    $rowStmt = $pdo->prepare("SELECT individual_room_id, created_by, status, verified_at FROM room_maintenance_schedules WHERE id = ?");
     $rowStmt->execute([$id]);
     $row = $rowStmt->fetch(PDO::FETCH_ASSOC);
     if (!$row) {
         ApiResponse::error('Schedule not found', 404);
     }
     
-    if (($row['status'] ?? '') !== 'completed') {
-        ApiResponse::error('Schedule must be completed before verification', 400);
+    if (rh_maint_status_from_db($row['status'] ?? '', $row['verified_at'] ?? null) !== 'completed') {
+        ApiResponse::error('Schedule must be completed (and not already verified) before verification', 400);
     }
 
     $pdo->beginTransaction();
     try {
-        $stmt = $pdo->prepare("UPDATE room_maintenance_schedules SET status = 'verified', verified_by = ?, verified_at = NOW() WHERE id = ?");
+        $stmt = $pdo->prepare("UPDATE room_maintenance_schedules SET verified_by = ?, verified_at = NOW() WHERE id = ? AND status = 'completed'");
         $stmt->execute([isset($row['created_by']) ? (int)$row['created_by'] : null, $id]);
         
         maintenanceApiSyncRoomStatus($pdo, (int)$row['individual_room_id'], isset($row['created_by']) ? (int)$row['created_by'] : null, 'Maintenance schedule verified via API');

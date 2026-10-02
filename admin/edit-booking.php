@@ -101,27 +101,20 @@ if ($booking && $booking['room_id']) {
             $isAvailable = true;
             $reason = '';
 
-            // Check status
-            if (!in_array($room['status'], ['available', 'cleaning'])) {
+            // One rule for the whole system: status, maintenance, blocks, same-day cleaning and
+            // overlapping bookings (incl. joined rooms and live tentative holds). The booking's
+            // own stay is excluded; an in-house guest's own room is not held to the cleaning rule.
+            $roomCheck = checkIndividualRoomAvailability((int)$room['id'], $checkIn, $checkOut, (int)$booking_id, ($booking['status'] ?? '') === 'checked-in');
+            if (empty($roomCheck['available'])) {
                 $isAvailable = false;
-                $reason = ucfirst(str_replace('_', ' ', $room['status']));
-            } else {
-                // Check for booking conflicts
-                $conflictStmt = $pdo->prepare("
-                    SELECT COUNT(*) as count, booking_reference
-                    FROM bookings
-                    WHERE individual_room_id = ?
-                    AND status IN ('pending', 'confirmed', 'checked-in')
-                    AND NOT (check_out_date <= ? OR check_in_date >= ?)
-                    AND id != ?
-                    LIMIT 1
-                ");
-                $conflictStmt->execute([$room['id'], $checkIn, $checkOut, $booking_id]);
-                $conflict = $conflictStmt->fetch(PDO::FETCH_ASSOC);
-
-                if ($conflict['count'] > 0) {
-                    $isAvailable = false;
-                    $reason = 'Booked (' . $conflict['booking_reference'] . ')';
+                if (!empty($roomCheck['conflicts'])) {
+                    $reason = 'Booked (' . $roomCheck['conflicts'][0]['booking_reference'] . ')';
+                } elseif (!empty($roomCheck['blocked_dates'])) {
+                    $reason = 'Blocked';
+                } elseif (!empty($roomCheck['maintenance'])) {
+                    $reason = 'Maintenance';
+                } else {
+                    $reason = (string)($roomCheck['error'] ?? ucfirst(str_replace('_', ' ', (string)$room['status'])));
                 }
             }
 
@@ -312,16 +305,25 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $booking) {
                 $datesChanged = $check_in !== ($booking['check_in_date'] ?? '')
                     || $check_out !== ($booking['check_out_date'] ?? '');
 
-                if ($room_changed || $datesChanged) {
-                    // Serialise against concurrent creates/edits on this room type using
-                    // the SAME per-room row lock the booking-creation flows take, BEFORE
-                    // re-checking availability. Without it the check-then-update window
-                    // lets an edit and a new booking both grab the last room → overbooking.
-                    $pdo->prepare("SELECT id FROM rooms WHERE id = ? FOR UPDATE")->execute([$room_id]);
-                    $availCheck = checkRoomAvailability($room_id, $check_in, $check_out, $booking_id);
-                    if (empty($availCheck['available'])) {
+                // A room of another type cannot stay assigned: changing the type releases the room.
+                if ($individual_room_id) {
+                    $irTypeStmt = $pdo->prepare("SELECT room_type_id FROM individual_rooms WHERE id = ?");
+                    $irTypeStmt->execute([$individual_room_id]);
+                    $irType = $irTypeStmt->fetchColumn();
+                    if ($irType !== false && (int)$irType !== (int)$room_id) {
+                        $individual_room_id = null;
+                    }
+                }
+                $roomPointerChanged = (int)($individual_room_id ?? 0) !== (int)($booking['individual_room_id'] ?? 0);
+
+                if ($room_changed || $datesChanged || $roomPointerChanged) {
+                    // One shared gate for every stay change: takes the booking, room-type and
+                    // room row locks, then re-checks the NEW nights at type level and for the
+                    // assigned (or newly chosen) room(s) incl. blocks, maintenance and joined rooms.
+                    $stayGate = rh_validate_booking_stay_change((int)$booking_id, $check_in, $check_out, (int)$room_id, $individual_room_id ? (int)$individual_room_id : null);
+                    if (!$stayGate['ok']) {
                         $pdo->rollBack();
-                        $error = 'Selected room is not available for those dates: ' . ($availCheck['error'] ?? 'no rooms remaining.');
+                        $error = 'Cannot save: ' . $stayGate['error'];
                     }
                 }
 
@@ -535,6 +537,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $booking) {
                         $special_requests,
                         $booking_id
                     ]);
+
+                    // Keep the room hold table and the joined-room pointer in step with the
+                    // (possibly changed) room: a stale booking_rooms row would keep blocking a room.
+                    if ($roomPointerChanged || $room_changed) {
+                        if ($individual_room_id) {
+                            syncBookingRooms((int)$booking_id, [(int)$individual_room_id], null);
+                            $pdo->prepare("UPDATE bookings SET room_combination_id = NULL WHERE id = ?")->execute([$booking_id]);
+                        } else {
+                            rh_release_booking_room_assignment((int)$booking_id);
+                        }
+                    }
 
                     if ($adminNoteChanged) {
                         $noteInsert = $pdo->prepare("INSERT INTO booking_notes (booking_id, note_text, created_by) VALUES (?, ?, ?)");

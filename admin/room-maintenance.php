@@ -174,7 +174,7 @@ function getMaintenanceNeededRooms(PDO $pdo): array
     // Build the NOT EXISTS clause conditionally based on available columns
     $notExistsConditions = [
         "rms.individual_room_id = ir.id",
-        "rms.status IN ('pending', 'in_progress')"
+        "rms.status IN ('planned', 'pending', '', 'in_progress')"
     ];
 
     $notExistsClause = implode(' AND ', $notExistsConditions);
@@ -215,19 +215,19 @@ function getMaintenanceStaffWorkload(PDO $pdo): array
 
     // Build the high_priority_pending conditionally
     $highPriorityCase = $hasPriority
-        ? "COUNT(CASE WHEN rms.status = 'pending' AND rms.priority IN ('urgent', 'high') THEN 1 END) as high_priority_pending"
+        ? "COUNT(CASE WHEN rms.status IN ('planned', 'pending', '') AND rms.priority IN ('urgent', 'high') THEN 1 END) as high_priority_pending"
         : "0 as high_priority_pending";
 
     $sql = "
         SELECT
             u.id,
             u.username,
-            COUNT(CASE WHEN rms.status IN ('pending', 'in_progress') THEN 1 END) as active_tasks,
+            COUNT(CASE WHEN rms.status IN ('planned', 'pending', '', 'in_progress') THEN 1 END) as active_tasks,
             {$highPriorityCase},
             COUNT(CASE WHEN rms.status = 'completed' AND DATE(rms.completed_at) = CURDATE() THEN 1 END) as completed_today
         FROM admin_users u
         LEFT JOIN room_maintenance_schedules rms ON rms.assigned_to = u.id
-            AND (rms.status IN ('pending', 'in_progress') OR (rms.status = 'completed' AND DATE(rms.completed_at) = CURDATE()))
+            AND (rms.status IN ('planned', 'pending', '', 'in_progress') OR (rms.status = 'completed' AND DATE(rms.completed_at) = CURDATE()))
         WHERE u.is_active = 1
         GROUP BY u.id, u.username
         ORDER BY active_tasks DESC, u.username ASC
@@ -255,7 +255,7 @@ function autoCreateMaintenanceTasks(PDO $pdo, int $performedBy): int
         // Check if assignment already exists
         $checkStmt = $pdo->prepare("
             SELECT id FROM room_maintenance_schedules
-            WHERE individual_room_id = ? AND status IN ('pending', 'in_progress')
+            WHERE individual_room_id = ? AND status IN ('planned', 'pending', '', 'in_progress')
         ");
         $checkStmt->execute([$room['id']]);
         if ($checkStmt->fetch()) {
@@ -279,7 +279,7 @@ function autoCreateMaintenanceTasks(PDO $pdo, int $performedBy): int
         $insertParams = [
             $room['id'],
             'Auto-generated maintenance task',
-            'pending',
+            'planned',
             date('Y-m-d H:i:s'),
             date('Y-m-d H:i:s', strtotime('+1 day')),
             null,
@@ -479,7 +479,7 @@ function createRecurringMaintenance(PDO $pdo, int $performedBy): int
                 $assignment['individual_room_id'],
                 $assignment['title'],
                 $assignment['description'],
-                'pending',
+                'planned',
                 $startDate,
                 $endDate,
                 $assignment['assigned_to'],
@@ -635,7 +635,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 // Build INSERT columns and values based on available columns
                 $insertColumns = ['individual_room_id', 'title', 'description', 'status', 'start_date', 'end_date', 'assigned_to', 'created_by'];
                 $insertValues = ['?', '?', '?', '?', '?', '?', '?', '?'];
-                $insertParams = [$room_id, $title, $description, $status, $start_date, $end_date, $assigned_to, $user['id'] ?? null];
+                $insertParams = [$room_id, $title, $description, rh_maint_status_to_db($status), $start_date, $end_date, $assigned_to, $user['id'] ?? null];
 
                 if ($hasDueDate) {
                     $insertColumns[] = 'due_date';
@@ -819,6 +819,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 if (!$existing) {
                     throw new RuntimeException('Maintenance schedule does not exist.');
                 }
+                $existing['status'] = rh_maint_status_from_db($existing['status'] ?? '', $existing['verified_by'] ?? null);
                 if (($existing['status'] ?? '') === 'verified') {
                     throw new DomainException('Verified maintenance schedules are locked and cannot be edited.');
                 }
@@ -843,7 +844,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
                 // Build UPDATE SET clause based on available columns
                 $setColumns = ['individual_room_id=?', 'title=?', 'description=?', 'status=?', 'start_date=?', 'end_date=?', 'assigned_to=?'];
-                $updateParams = [$room_id, $title, $description, $status, $start_date, $end_date, $assigned_to];
+                $updateParams = [$room_id, $title, $description, rh_maint_status_to_db($status), $start_date, $end_date, $assigned_to];
 
                 if ($hasDueDate) {
                     $setColumns[] = 'due_date=?';
@@ -1008,7 +1009,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     // Check if pending assignment already exists
                     $checkStmt = $pdo->prepare("
                         SELECT id FROM room_maintenance_schedules
-                        WHERE individual_room_id = ? AND status IN ('pending', 'in_progress')
+                        WHERE individual_room_id = ? AND status IN ('planned', 'pending', '', 'in_progress')
                     ");
                     $checkStmt->execute([$room_id]);
                     if ($checkStmt->fetch()) {
@@ -1021,7 +1022,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     $insertParams = [
                         $room_id,
                         'Bulk assigned maintenance task',
-                        'pending',
+                        'planned',
                         date('Y-m-d H:i:s'),
                         date('Y-m-d H:i:s', strtotime('+1 day')),
                         $assigned_to,
@@ -1098,8 +1099,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
                     $stmt = $pdo->prepare("
                         UPDATE room_maintenance_schedules
-                        SET status = 'verified', verified_by = ?, verified_at = NOW()
-                        WHERE id = ? AND status = 'completed'
+                        SET verified_by = ?, verified_at = NOW()
+                        WHERE id = ? AND status = 'completed' AND verified_at IS NULL
                     ");
                     $stmt->execute([$user['id'] ?? null, $id]);
 
@@ -1135,10 +1136,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 if (!$beforeData) throw new RuntimeException('Schedule not found.');
                 $hasStartedAtCol = maintenanceColumnExists($pdo, 'started_at');
                 if ($hasStartedAtCol) {
-                    $pdo->prepare("UPDATE room_maintenance_schedules SET started_at = COALESCE(started_at, NOW()), status = CASE WHEN status = 'pending' THEN 'in_progress' ELSE status END WHERE id = ?")
+                    $pdo->prepare("UPDATE room_maintenance_schedules SET started_at = COALESCE(started_at, NOW()), status = CASE WHEN status IN ('planned', 'pending', '') THEN 'in_progress' ELSE status END WHERE id = ?")
                         ->execute([$id]);
                 } else {
-                    $pdo->prepare("UPDATE room_maintenance_schedules SET status = 'in_progress' WHERE id = ? AND status = 'pending'")
+                    $pdo->prepare("UPDATE room_maintenance_schedules SET status = 'in_progress' WHERE id = ? AND status IN ('planned', 'pending', '')")
                         ->execute([$id]);
                 }
                 $dataStmt->execute([$id]);
@@ -1242,7 +1243,7 @@ $hasDueDate = maintenanceColumnExists($pdo, 'due_date');
 
 // Build ORDER BY clause based on available columns
 $orderByClauses = [
-    "CASE rms.status WHEN 'pending' THEN 1 WHEN 'in_progress' THEN 2 WHEN 'completed' THEN 3 WHEN 'verified' THEN 4 WHEN 'cancelled' THEN 5 ELSE 99 END"
+    "CASE rms.status WHEN 'pending' THEN 1 WHEN 'planned' THEN 1 WHEN '' THEN 1 WHEN 'in_progress' THEN 2 WHEN 'completed' THEN 3 WHEN 'verified' THEN 4 WHEN 'cancelled' THEN 5 ELSE 99 END"
 ];
 
 if ($hasPriority) {
@@ -1270,6 +1271,11 @@ $scheduleStmt = $pdo->query(
     ORDER BY " . implode(', ', $orderByClauses)
 );
 $schedules = $scheduleStmt->fetchAll(PDO::FETCH_ASSOC);
+foreach ($schedules as &$schedRow) {
+    // storage enum -> workflow status (planned / '' => pending, completed + verified_at => verified)
+    $schedRow['status'] = rh_maint_status_from_db($schedRow['status'] ?? '', $schedRow['verified_at'] ?? null);
+}
+unset($schedRow);
 
 // Statistics
 // Backward compatible: works with or without migration 005 columns
