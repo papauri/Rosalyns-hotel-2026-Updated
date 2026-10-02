@@ -432,7 +432,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['create_booking'])) {
         $vat_rate_db = vat_mode() === 'off' ? 0.0 : $vat_rate_cfg;
 
         // ── Ref prefix & tentative ───────────────────────────────────────────
-        $ref_prefix = getSetting('booking_reference_prefix', 'LSH');
+        $ref_prefix = rh_booking_reference_prefix();
         $ref_check  = $pdo->prepare("SELECT COUNT(*) FROM bookings WHERE booking_reference = ?");
         $is_tentative         = ($booking_status === 'tentative') ? 1 : 0;
         $tentative_expires_at = null;

@@ -321,7 +321,7 @@ function getBookingSettings(): array {
         'tentative_duration_hours' => (int)getSetting('tentative_duration_hours', 48),
         'vat_enabled' => rh_vat_enabled(),
         'vat_rate' => (float)getSetting('vat_rate', 0),
-        'booking_reference_prefix' => getSetting('booking_reference_prefix', 'BK'),
+        'booking_reference_prefix' => rh_booking_reference_prefix(),
     ];
 }
 

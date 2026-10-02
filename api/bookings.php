@@ -264,7 +264,7 @@ try {
     $totalAmount        = round($stayTotals['net'] + $tourismLevyAmount, 2);
     
     // Generate unique booking reference
-    $refPrefix = getSetting('booking_reference_prefix', 'LSH');
+    $refPrefix = rh_booking_reference_prefix();
     do {
         $bookingReference = $refPrefix . date('Y') . str_pad(random_int(1, 999999), 6, '0', STR_PAD_LEFT);
         $refCheck = $pdo->prepare("SELECT COUNT(*) as count FROM bookings WHERE booking_reference = ?");

@@ -596,7 +596,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
 
         // Generate unique booking reference (guaranteed unique)
-        $ref_prefix = getSetting('booking_reference_prefix', 'LSH');
+        $ref_prefix = rh_booking_reference_prefix();
         do {
             $booking_reference = $ref_prefix . date('Y') . str_pad(random_int(1, 999999), 6, '0', STR_PAD_LEFT);
             $ref_check = $pdo->prepare("SELECT COUNT(*) as count FROM bookings WHERE booking_reference = ?");

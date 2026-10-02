@@ -899,31 +899,35 @@ function getSetting(string $key, mixed $default = '')
 {
     global $pdo, $_SITE_SETTINGS;
 
+    // A missing setting is cached as this marker, never as the caller's default: callers pass
+    // different defaults, and caching the first one made it stick for every later caller.
+    $unset = " __rh_setting_unset__";
+
     // Check in-memory cache first (fastest)
     if (isset($_SITE_SETTINGS[$key])) {
-        return $_SITE_SETTINGS[$key];
+        return $_SITE_SETTINGS[$key] === $unset ? $default : $_SITE_SETTINGS[$key];
     }
 
     // Check file cache (much faster than database query)
     $cachedValue = getCache("setting_{$key}", null);
     if ($cachedValue !== null) {
         $_SITE_SETTINGS[$key] = $cachedValue;
-        return $cachedValue;
+        return $cachedValue === $unset ? $default : $cachedValue;
     }
 
     try {
         $stmt = $pdo->prepare("SELECT setting_value FROM site_settings WHERE setting_key = ?");
         $stmt->execute([$key]);
         $result = $stmt->fetch();
-        $value = $result ? $result['setting_value'] : $default;
+        $stored = $result ? $result['setting_value'] : $unset;
 
         // Cache in memory
-        $_SITE_SETTINGS[$key] = $value;
+        $_SITE_SETTINGS[$key] = $stored;
 
         // Cache in file for next request (1 hour TTL)
-        setCache("setting_{$key}", $value, 3600);
+        setCache("setting_{$key}", $stored, 3600);
 
-        return $value;
+        return $stored === $unset ? $default : $stored;
     } catch (PDOException $e) {
         error_log("Error fetching setting: " . $e->getMessage());
         return $default;
@@ -2518,6 +2522,17 @@ function validateBookingStatusTransition(string $currentStatus, string $newStatu
     }
 
     return ['allowed' => true, 'reason' => ''];
+}
+
+/**
+ * Booking reference prefix (Admin -> Booking Settings -> Booking references). 2-6 letters/digits,
+ * upper-case; falls back to this hotel's own default when the setting is empty or invalid.
+ * References are <prefix><year><6 digits>, e.g. RBH2026012345.
+ */
+function rh_booking_reference_prefix(): string
+{
+    $p = strtoupper(preg_replace('/[^A-Za-z0-9]/', '', (string)getSetting('booking_reference_prefix', '')));
+    return strlen($p) >= 2 ? substr($p, 0, 6) : 'RBH';
 }
 
 /**

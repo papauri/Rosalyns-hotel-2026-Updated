@@ -102,7 +102,7 @@ echo "  Result for dates {$checkIn}→{$checkOut}: " . ($avail['available'] ? 'A
 
 // ── 5. Standard booking INSERT (smoke) ───────────────────────────────────────
 echo "\n=== 5. Standard booking creation ===\n";
-$refPrefix = getSetting('booking_reference_prefix', 'LSH');
+$refPrefix = rh_booking_reference_prefix();
 // bookings.booking_reference is varchar(20) and the server's sql_mode has no
 // STRICT_TRANS_TABLES, so an over-length reference is silently TRUNCATED on
 // insert rather than rejected. The old value ('SMOKETEST-' + time() + '-' +

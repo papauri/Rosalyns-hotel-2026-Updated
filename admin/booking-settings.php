@@ -211,6 +211,23 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['save_cancellation_ref
     }
 }
 
+// Booking reference prefix (new references only; existing ones never change)
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['save_booking_reference_prefix'])) {
+    $newPrefix = strtoupper(trim((string)($_POST['booking_reference_prefix'] ?? '')));
+    if (!preg_match('/^[A-Z0-9]{2,6}$/', $newPrefix)) {
+        $error = 'The booking reference prefix must be 2 to 6 letters or digits (for example RBH).';
+    } else {
+        $oldPrefix = rh_booking_reference_prefix();
+        updateSetting('booking_reference_prefix', $newPrefix);
+        if (function_exists('rh_log_event')) {
+            rh_log_event('admin/' . basename(__FILE__, '.php'), 'info', 'Booking reference prefix changed', [
+                'user' => $user['username'] ?? '', 'user_id' => $user['id'] ?? null, 'from' => $oldPrefix, 'to' => $newPrefix,
+            ]);
+        }
+        $message = 'Booking reference prefix saved. New bookings will look like ' . $newPrefix . date('Y') . '012345.';
+    }
+}
+
 // Document branding (colours, footer line, terms, logo size on every emailed PDF)
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['save_document_branding'])) {
     $docBrandKeys = ['brand_primary_color', 'brand_accent_color', 'document_footer_text', 'document_terms_text', 'document_logo_height_mm'];
@@ -1531,6 +1548,22 @@ foreach ($canonicalTemplateDefaults as $templateKey => $templateDefaults) {
                         <button type="submit" class="btn-submit" style="margin-top: 14px;"><i class="fas fa-save"></i> Save Refund Settings</button>
                         <?php endif; ?>
                     </div>
+                </form>
+            </div>
+
+            <div class="settings-card" id="booking-references">
+                <h2><i class="fas fa-hashtag" style="color: #8B7355;"></i> Booking references</h2>
+                <?php $refPrefixNow = rh_booking_reference_prefix(); ?>
+                <form method="POST" action="booking-settings.php#booking-references">
+                    <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf_token, ENT_QUOTES); ?>">
+                    <input type="hidden" name="save_booking_reference_prefix" value="1">
+                    <div class="form-group">
+                        <label for="booking_reference_prefix">Reference prefix (2-6 letters or digits)</label>
+                        <input type="text" id="booking_reference_prefix" name="booking_reference_prefix" maxlength="6" pattern="[A-Za-z0-9]{2,6}" required
+                               value="<?php echo htmlspecialchars($refPrefixNow, ENT_QUOTES); ?>" style="text-transform:uppercase;max-width:160px;">
+                        <p class="help-text">New bookings get references like <strong><?php echo htmlspecialchars($refPrefixNow . date('Y'), ENT_QUOTES); ?>012345</strong>. Used by the website, Create Booking and the API. Existing bookings keep their reference.</p>
+                    </div>
+                    <button type="submit" class="btn-submit"><i class="fas fa-save"></i> Save Prefix</button>
                 </form>
             </div>
 
