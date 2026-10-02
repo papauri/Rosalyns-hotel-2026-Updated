@@ -964,7 +964,7 @@ $gm_currency = (string)getSetting('currency_symbol', 'K');
             document.getElementById('gmEmail').value = m ? (m.email || '') : '';
             document.getElementById('gmPhone').value = m ? (m.phone || '') : '';
             document.getElementById('gmType').value = m ? (m.membership_type || '') : '';
-            document.getElementById('gmStart').value = m ? (m.start_date || '') : new Date().toISOString().slice(0, 10);
+            document.getElementById('gmStart').value = m ? (m.start_date || '') : rhYmd(new Date());
             document.getElementById('gmExpiry').value = m ? (m.expiry_date || '') : '';
             document.getElementById('gmFee').value = m && m.monthly_fee != null ? m.monthly_fee : '';
             document.getElementById('gmStatus').value = m ? (m.status || 'active') : 'active';
@@ -1037,7 +1037,7 @@ $gm_currency = (string)getSetting('currency_symbol', 'K');
             if (!p || p.days == null || !start) { if (hint) hint.textContent = '(open-ended)'; return; }
             var d = new Date(start + 'T00:00:00');
             d.setDate(d.getDate() + (p.days - 1));
-            document.getElementById('gmExpiry').value = d.toISOString().slice(0, 10);
+            document.getElementById('gmExpiry').value = rhYmd(d);
             if (hint) hint.textContent = '(auto: ' + p.days + ' days)';
         }
 

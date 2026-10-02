@@ -88,6 +88,18 @@ if (!function_exists('rh_admin_session_start')) {
     window.rhNowSql = function () {
         return new Date(Date.now() + OFFSET_MIN * 60000).toISOString().slice(0, 19).replace('T', ' ');
     };
+    // Calendar date / datetime-local value of a Date in the device's own clock. Use these, not
+    // toISOString(), which converts to UTC and lands on the previous day before 02:00 (UTC+2)
+    // and for any local-midnight date (first of the month, expiry dates, ...).
+    function pad2(n) { return String(n).padStart(2, '0'); }
+    window.rhYmd = function (d) {
+        d = d || new Date();
+        return d.getFullYear() + '-' + pad2(d.getMonth() + 1) + '-' + pad2(d.getDate());
+    };
+    window.rhYmdHm = function (d) {
+        d = d || new Date();
+        return window.rhYmd(d) + 'T' + pad2(d.getHours()) + ':' + pad2(d.getMinutes());
+    };
     if (window.fetch && !window.__rhSessionGuard) {
         window.__rhSessionGuard = true;
         var orig = window.fetch;

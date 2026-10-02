@@ -2061,7 +2061,7 @@ try {
 
         // Set minimum date to today
         document.addEventListener('DOMContentLoaded', function() {
-            const today = new Date().toISOString().split('T')[0];
+            const today = rhYmd(new Date());
             const dueDateInput = document.getElementById('due_date');
             if (dueDateInput) {
                 dueDateInput.min = today;
@@ -2108,10 +2108,10 @@ try {
             const startDateInput = document.getElementById('start_date');
             const endDateInput = document.getElementById('end_date');
             if (startDateInput) {
-                startDateInput.value = now.toISOString().slice(0, 16);
+                startDateInput.value = rhYmdHm(now);
             }
             if (endDateInput) {
-                endDateInput.value = tomorrow.toISOString().slice(0, 16);
+                endDateInput.value = rhYmdHm(tomorrow);
             }
         });
 
@@ -2120,15 +2120,15 @@ try {
             document.getElementById('formAction').value = 'add_schedule';
             document.getElementById('scheduleForm').reset();
             document.getElementById('scheduleId').value = '';
-            document.getElementById('due_date').min = new Date().toISOString().split('T')[0];
+            document.getElementById('due_date').min = rhYmd(new Date());
             document.getElementById('recurringOptions').style.display = 'none';
 
             // Set default dates
             const now = new Date();
             const tomorrow = new Date(now);
             tomorrow.setDate(tomorrow.getDate() + 1);
-            document.getElementById('start_date').value = now.toISOString().slice(0, 16);
-            document.getElementById('end_date').value = tomorrow.toISOString().slice(0, 16);
+            document.getElementById('start_date').value = rhYmdHm(now);
+            document.getElementById('end_date').value = rhYmdHm(tomorrow);
 
             openAdminModal('scheduleModal');
         }

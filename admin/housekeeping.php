@@ -1803,7 +1803,7 @@ foreach ($assignments as $a) {
 
         // Set minimum date to today
         document.addEventListener('DOMContentLoaded', function() {
-            const today = new Date().toISOString().split('T')[0];
+            const today = rhYmd(new Date());
             const dueDateInput = document.getElementById('due_date');
             if (dueDateInput) {
                 dueDateInput.min = today;
@@ -1849,7 +1849,7 @@ foreach ($assignments as $a) {
             document.getElementById('formAction').value = 'add_assignment';
             document.getElementById('assignmentForm').reset();
             document.getElementById('assignmentId').value = '';
-            document.getElementById('due_date').min = new Date().toISOString().split('T')[0];
+            document.getElementById('due_date').min = rhYmd(new Date());
             document.getElementById('recurringOptions').style.display = 'none';
             openAdminModal('assignmentModal');
         }
@@ -1925,8 +1925,8 @@ foreach ($assignments as $a) {
             document.getElementById('formAction').value = 'add_assignment';
             document.getElementById('assignmentForm').reset();
             document.getElementById('assignmentId').value = '';
-            document.getElementById('due_date').value = new Date().toISOString().split('T')[0];
-            document.getElementById('due_date').min = new Date().toISOString().split('T')[0];
+            document.getElementById('due_date').value = rhYmd(new Date());
+            document.getElementById('due_date').min = rhYmd(new Date());
             document.getElementById('roomSelect').value = roomId;
             document.getElementById('recurringOptions').style.display = 'none';
             openAdminModal('assignmentModal');

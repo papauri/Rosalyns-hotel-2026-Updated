@@ -3083,31 +3083,31 @@ try {
 
         switch (range) {
             case 'today':
-                startDate = endDate = today.toISOString().split('T')[0];
+                startDate = endDate = rhYmd(today);
                 break;
             case 'week':
                 const weekStart = new Date(today);
                 weekStart.setDate(today.getDate() - today.getDay());
-                startDate = weekStart.toISOString().split('T')[0];
-                endDate = today.toISOString().split('T')[0];
+                startDate = rhYmd(weekStart);
+                endDate = rhYmd(today);
                 break;
             case 'month':
-                startDate = new Date(today.getFullYear(), today.getMonth(), 1).toISOString().split('T')[0];
-                endDate = new Date(today.getFullYear(), today.getMonth() + 1, 0).toISOString().split('T')[0];
+                startDate = rhYmd(new Date(today.getFullYear(), today.getMonth(), 1));
+                endDate = rhYmd(new Date(today.getFullYear(), today.getMonth() + 1, 0));
                 break;
             case 'quarter':
                 const qStart = new Date(today.getFullYear(), Math.floor(today.getMonth() / 3) * 3, 1);
                 const qEnd = new Date(today.getFullYear(), Math.floor(today.getMonth() / 3) * 3 + 3, 0);
-                startDate = qStart.toISOString().split('T')[0];
-                endDate = qEnd.toISOString().split('T')[0];
+                startDate = rhYmd(qStart);
+                endDate = rhYmd(qEnd);
                 break;
             case 'year':
-                startDate = new Date(today.getFullYear(), 0, 1).toISOString().split('T')[0];
-                endDate = new Date(today.getFullYear(), 11, 31).toISOString().split('T')[0];
+                startDate = rhYmd(new Date(today.getFullYear(), 0, 1));
+                endDate = rhYmd(new Date(today.getFullYear(), 11, 31));
                 break;
             case 'all':
-                startDate = new Date(today.getFullYear() - 5, 0, 1).toISOString().split('T')[0];
-                endDate = new Date(today.getFullYear(), 11, 31).toISOString().split('T')[0];
+                startDate = rhYmd(new Date(today.getFullYear() - 5, 0, 1));
+                endDate = rhYmd(new Date(today.getFullYear(), 11, 31));
                 break;
         }
 

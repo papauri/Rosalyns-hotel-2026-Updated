@@ -2664,7 +2664,7 @@ try {
 
             const checkInDate = parseDateOnly(checkIn);
             const checkOutDate = parseDateOnly(checkOut);
-            const today = parseDateOnly(new Date().toISOString().split('T')[0]);
+            const today = parseDateOnly(rhYmd(new Date()));
             const daysUntilArrival = checkInDate && today && checkInDate >= today ? daysBetween(today, checkInDate) : 0;
             const matching = ratePlans.filter(plan => planAppliesToRoom(plan, roomId) &&
                 planMatchesStay(plan, checkInDate, checkOutDate, nights, daysUntilArrival));
@@ -2839,7 +2839,7 @@ try {
 
         // ── Date controls ─────────────────────────────────────────────────────────
         function datesChanged() {
-            const today = new Date().toISOString().split('T')[0];
+            const today = rhYmd(new Date());
             const ciEl = el('checkInDate');
             const coEl = el('checkOutDate');
             let ci = ciEl.value,
@@ -2851,7 +2851,7 @@ try {
             if (ci) {
                 const next = new Date(ci + 'T00:00:00');
                 next.setDate(next.getDate() + 1);
-                const minCo = next.toISOString().split('T')[0];
+                const minCo = rhYmd(next);
                 coEl.min = minCo;
                 if (co && co <= ci) {
                     coEl.value = minCo;
