@@ -38,6 +38,8 @@ Desktop.ini
 
 # Logs
 *.log
+# PHP/cPanel per-directory error logs (no extension; may hold DB host/user)
+error_log
 logs/
 error.log
 
