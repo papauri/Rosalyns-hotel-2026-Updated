@@ -114,6 +114,17 @@ try {
     // Set timezone after connection
     $pdo->exec("SET time_zone = '" . (new DateTime('now'))->format('P') . "'"); // e.g. +02:00 (no DST in Malawi)
 
+    // Strict SQL (owner decision 2026-10-03): a value that does not fit its column raises an
+    // error instead of being silently truncated or replaced. The server default lacks
+    // STRICT_TRANS_TABLES and cannot be changed on shared hosting, so it is set per connection.
+    // Emergency switch: HOTEL_SQL_STRICT=0 in .env.
+    if ((string)(getenv('HOTEL_SQL_STRICT') ?: '1') !== '0') {
+        $sqlMode = (string)$pdo->query('SELECT @@SESSION.sql_mode')->fetchColumn();
+        if (stripos($sqlMode, 'STRICT_TRANS_TABLES') === false) {
+            $pdo->exec("SET SESSION sql_mode = " . $pdo->quote(trim($sqlMode . ',STRICT_TRANS_TABLES', ',')));
+        }
+    }
+
     // Schema self-migration — OFF by default.
     //
     // These nine functions probe information_schema and issue CREATE/ALTER on every

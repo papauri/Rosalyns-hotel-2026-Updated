@@ -144,10 +144,10 @@ function logBookingCancellation(
         $stmt = $pdo->prepare("
             INSERT INTO cancellation_log (
                 booking_id, booking_reference, booking_type, guest_email, guest_name,
-                cancelled_by_type, cancelled_by_id, cancelled_by_name, cancellation_reason,
+                cancelled_by, cancelled_by_type, cancelled_by_id, cancelled_by_name, cancellation_reason,
                 total_amount, amount_paid, refund_amount, refund_status,
                 ip_address, metadata
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ");
 
         $stmt->execute([
@@ -156,6 +156,7 @@ function logBookingCancellation(
             'room',
             $booking['guest_email'],
             $booking['guest_name'],
+            (int)($cancelled_by_id ?? 0),
             $cancelled_by_type,
             $cancelled_by_id,
             $cancelled_by_name,

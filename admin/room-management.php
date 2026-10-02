@@ -383,9 +383,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     child_price_multiplier,
                     single_occupancy_enabled, double_occupancy_enabled, triple_occupancy_enabled, children_allowed,
                     size_sqm, max_guests, rooms_available, total_rooms,
-                    bed_type, amenities, image_url, is_featured, is_active, display_order, video_path, video_type)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    bed_type, amenities, image_url, is_featured, is_active, display_order, video_path, video_type, slug)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ");
+            // slug is required (NOT NULL): derive it from the name and keep it unique.
+            $slugBase = trim(preg_replace('/[^a-z0-9]+/', '-', strtolower((string)($_POST['name'] ?? 'room'))), '-') ?: 'room';
+            $newSlug = $slugBase;
+            $slugCheck = $pdo->prepare('SELECT COUNT(*) FROM rooms WHERE slug = ?');
+            for ($si = 2; $slugCheck->execute([$newSlug]) && (int)$slugCheck->fetchColumn() > 0; $si++) {
+                $newSlug = $slugBase . '-' . $si;
+            }
             $maxGuests = max(1, (int)($_POST['max_guests'] ?? 2));
             $singleEnabled = $maxGuests >= 1 ? 1 : 0;
             $doubleEnabled = $maxGuests >= 2 ? 1 : 0;
@@ -415,7 +422,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 1,
                 $_POST['display_order'] ?? 0,
                 $videoPath,
-                $videoType
+                $videoType,
+                $newSlug
             ]);
 
             $newRoomId = (int)$pdo->lastInsertId();

@@ -573,18 +573,33 @@ function createPayment(PDO $pdo)
         // Insert payment
         $insertStmt = $pdo->prepare("
             INSERT INTO payments (
-                payment_reference, booking_type, booking_id, payment_date,
+                payment_reference, booking_type, booking_id, booking_reference, payment_date,
                 payment_amount, vat_rate, vat_amount, total_amount,
                 payment_method, payment_status, transaction_reference,
                 receipt_number, processed_by, notes, client_uuid
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ");
+        // booking_reference is required (NOT NULL): the account's own reference.
+        $refLookup = [
+            'room' => 'SELECT booking_reference FROM bookings WHERE id = ?',
+            'conference' => 'SELECT inquiry_reference FROM conference_inquiries WHERE id = ?',
+            'gym' => 'SELECT reference_number FROM gym_inquiries WHERE id = ?',
+            'event' => 'SELECT reference_number FROM event_inquiries WHERE id = ?',
+            'restaurant' => 'SELECT reference FROM stock_orders WHERE id = ?',
+        ];
+        $accountReference = '';
+        if (isset($refLookup[$input['booking_type']])) {
+            $refStmt = $pdo->prepare($refLookup[$input['booking_type']]);
+            $refStmt->execute([(int)$input['booking_id']]);
+            $accountReference = (string)($refStmt->fetchColumn() ?: '');
+        }
 
         $__paymentClientUuid = idem_normalize_uuid($__incomingClientUuid ?? null);
         $insertStmt->execute([
             $paymentRef,
             $input['booking_type'],
             (int)$input['booking_id'],
+            $accountReference,
             $paymentDate,
             $netAmount,
             $vatRate,

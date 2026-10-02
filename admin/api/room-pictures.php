@@ -300,8 +300,8 @@ try {
             // Insert into gallery table
             $image_url = "images/rooms/gallery/" . $filename;
             $stmt = $pdo->prepare("
-                INSERT INTO gallery (room_id, image_url, title, description, display_order, is_active)
-                VALUES (?, ?, ?, ?, ?, 1)
+                INSERT INTO gallery (room_id, category, image_url, title, description, display_order, is_active)
+                VALUES (?, 'rooms', ?, ?, ?, ?, 1)
             ");
             $stmt->execute([
                 $room_id,
