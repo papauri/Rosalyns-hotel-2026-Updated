@@ -42,6 +42,13 @@ live server is the owner's job** (owner, 2026-10-02) — `main` being ahead of l
 - [x] Cleanup: superseded cron scripts removed; `error_log` files ignored and four committed copies untracked;
       leftover Copilot config removed. (f2c2afd)
 
+**Readiness check 2026-10-03 (code: READY; go-live gated by owner actions below)**
+- Done since: booking-reference prefix setting; getSetting default-cache fix; one guests->rooms rule (site/widget/admin/API);
+  guests-first booking page; individual-room/blocking/assignment overhaul; date-change re-checks; assignment never reprices;
+  joined rooms hold member rooms (search + calendar); scripts/ locked to CLI (was web-executable on live); full staff E2E (13/13, rolled back) then test booking 138 cancelled; lint 0 errors, smoke all green.
+- Owner actions: email_from_email is a gmail.com address sent via mail.promanaged-it.com (DMARC) - use an address the SMTP account owns; remove/rename test admin users rosalyns_uat + jptest; decide on 2 POS test orders/payments (MWK 162,950) and cancelled booking 138; map the joined room to real rooms (QA-JOIN-101A/B); deploy (backups resume via scheduler; live sends no security headers until the repo .htaccess is live).
+- Open decision both hotels: MySQL sql_mode lacks STRICT_TRANS_TABLES (silent truncation) - test on staging first.
+
 **Still open — owner / hotel staff**
 - [ ] **Email sender:** `email_from_email` is `johnpaulchirwa@gmail.com` but mail goes through `mail.promanaged-it.com` as `info@promanaged-it.com` — Gmail's DMARC means guest mail is likely spam-foldered or rejected. Use an address the SMTP account owns.
 - [ ] Grant **Check-in to Room Not Clean** / **Check-out With Balance** to any non-manager who needs them (User Management → Guest Services).
