@@ -624,7 +624,8 @@ $fb_events_posting_on = getSetting('facebook_posting_enabled', '0') === '1'
                                     <?php if ($event['capacity']): ?>
                                         <div class="event-card-info-item">
                                             <i class="fas fa-users"></i>
-                                            <span><?php echo $event['capacity']; ?> seats</span>
+                                            <?php require_once __DIR__ . '/../includes/event-capacity.php'; $capInfo = rh_event_capacity_info($pdo, (int)$event['id']); ?>
+                                            <span><?php echo (int)$capInfo['taken']; ?> / <?php echo (int)$event['capacity']; ?> seats<?php echo $capInfo['waitlisted'] > 0 ? ' &middot; ' . (int)$capInfo['waitlisted'] . ' waitlisted' : ''; ?></span>
                                         </div>
                                     <?php endif; ?>
                                 </div>

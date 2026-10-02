@@ -88,10 +88,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['event_booking_form'])
             $bookingReference = 'EVT-' . strtoupper(substr(uniqid(), -8));
 
             try {
+                // Capacity: the event row is locked while seats are counted; a party that does
+                // not fit is saved as 'waitlisted' (includes/event-capacity.php).
+                require_once __DIR__ . '/includes/event-capacity.php';
+                $pdo->beginTransaction();
+                $rsvpStatus = rh_event_rsvp_status($pdo, $event_id, (int)($sanitized_data['guests'] ?? 1));
+                if ($rsvpStatus === null) {
+                    throw new RuntimeException('event_unavailable');
+                }
                 $stmt = $pdo->prepare("
                     INSERT INTO event_inquiries (
                         reference_number, event_id, name, email, phone, guests, message, consent, status
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending')
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ");
                 $stmt->execute([
                     $bookingReference,
@@ -102,7 +110,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['event_booking_form'])
                     $sanitized_data['guests'] ?? 1,
                     $sanitized_data['message'] ?? '',
                     $consent ? 1 : 0,
+                    $rsvpStatus,
                 ]);
+                $pdo->commit();
 
                 $eventTitleStmt = $pdo->prepare("SELECT title, event_date FROM events WHERE id = ? LIMIT 1");
                 $eventTitleStmt->execute([$event_id]);
@@ -118,13 +128,23 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['event_booking_form'])
                     'event_date' => $eventRow['event_date'] ?? null,
                 ];
 
-                $email_result = sendEventBookingConfirmedEmail($email_data);
+                $email_result = $rsvpStatus === 'waitlisted'
+                    ? sendEventWaitlistedEmail($email_data)
+                    : sendEventBookingConfirmedEmail($email_data);
                 if (!$email_result['success']) {
                     error_log('Failed to send event booking confirmation email: ' . $email_result['message']);
                 }
             } catch (PDOException $e) {
+                if ($pdo->inTransaction()) {
+                    $pdo->rollBack();
+                }
                 error_log('Failed to save event inquiry to database: ' . $e->getMessage());
                 $bookingError = 'We could not save your booking request. Please try again or contact us directly.';
+            } catch (RuntimeException $e) {
+                if ($pdo->inTransaction()) {
+                    $pdo->rollBack();
+                }
+                $bookingError = 'This event is no longer taking bookings.';
             }
 
             if ($bookingError === '') {

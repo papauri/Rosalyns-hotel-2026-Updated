@@ -95,11 +95,19 @@ try {
                 <div class="conf-icon-ring tentative">
                     <i class="fas fa-calendar-check"></i>
                 </div>
+                <?php if (($inquiry['status'] ?? '') === 'waitlisted'): ?>
+                <h1 class="conf-heading">You're on the Waitlist</h1>
+                <p class="conf-subtitle">This event is fully booked right now. We have added you to the waitlist and will email you as soon as a place opens up.</p>
+                <span class="conf-type-pill tentative">
+                    <i class="fas fa-hourglass-half"></i> Waitlisted
+                </span>
+                <?php else: ?>
                 <h1 class="conf-heading">Event Booking Received</h1>
                 <p class="conf-subtitle">Thank you for choosing <?php echo htmlspecialchars($site_name); ?>. Our team will review your request and confirm your booking shortly.</p>
                 <span class="conf-type-pill tentative">
                     <i class="fas fa-clock"></i> Pending Confirmation
                 </span>
+                <?php endif; ?>
             </div>
 
             <!-- 2-col body grid -->

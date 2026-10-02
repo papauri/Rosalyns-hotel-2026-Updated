@@ -25,6 +25,7 @@ $currency_symbol = (string)getSetting('currency_symbol', 'K');
 // shared include so payment-add.php and this page compute identical balances.
 // amount_due is derived from the LOCKED invoiced gross (total_with_vat) — rate-safe.
 require_once __DIR__ . '/includes/finance-account-sync.php';
+require_once __DIR__ . '/../includes/event-capacity.php';
 
 // Handle status updates, deletions and financial actions
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['inquiry_action'])) {
@@ -37,7 +38,21 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['inquiry_action'])) {
         $action = $_POST['inquiry_action'];
 
         if ($action === 'update_status') {
-            $new_status = $_POST['new_status'] ?? 'pending';
+            // Quick status switch for open bookings only. Cancel (money handling) and Promote
+            // (seat check) have their own actions so they cannot be bypassed here.
+            $new_status = (string)($_POST['new_status'] ?? '');
+            $curSt = $pdo->prepare('SELECT status FROM event_inquiries WHERE id = ?');
+            $curSt->execute([(int)$inquiry_id]);
+            $curStatus = (string)$curSt->fetchColumn();
+            if (!in_array($new_status, ['pending', 'confirmed', 'completed'], true)) {
+                throw new Exception('Use the Cancel button in the booking details to cancel (it handles any payment).');
+            }
+            if ($curStatus === 'waitlisted') {
+                throw new Exception('Use "Promote from waitlist" in the booking details so the seat count is checked.');
+            }
+            if ($curStatus === 'cancelled') {
+                throw new Exception('Cancelled bookings cannot be reopened. Ask the guest to book again.');
+            }
             $stmt = $pdo->prepare("UPDATE event_inquiries SET status = ?, updated_at = NOW() WHERE id = ?");
             $stmt->execute([$new_status, $inquiry_id]);
             $message = 'Event booking status updated successfully!';
@@ -45,7 +60,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['inquiry_action'])) {
             $stmt = $pdo->prepare("DELETE FROM event_inquiries WHERE id = ?");
             $stmt->execute([$inquiry_id]);
             $message = 'Event booking deleted successfully!';
-        } elseif (in_array($action, ['confirm', 'cancel', 'complete', 'send_invoice', 'send_quotation', 'update_amount', 'update_notes'], true)) {
+        } elseif (in_array($action, ['confirm', 'promote', 'cancel', 'complete', 'send_invoice', 'send_quotation', 'update_amount', 'update_notes'], true)) {
             $inquiry_id = (int)$inquiry_id;
             if ($inquiry_id <= 0) {
                 throw new Exception('Invalid booking selected.');
@@ -95,6 +110,31 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['inquiry_action'])) {
                 $message = $email_result['success']
                     ? 'Event booking confirmed successfully! Confirmation email sent.'
                     : 'Event booking confirmed successfully! (Email not sent: ' . htmlspecialchars($email_result['message']) . ')';
+            } elseif ($action === 'promote') {
+                if (($inquiry['status'] ?? '') !== 'waitlisted') {
+                    throw new Exception('Only waitlisted bookings can be promoted.');
+                }
+                $pdo->beginTransaction();
+                try {
+                    $capLock = $pdo->prepare('SELECT capacity FROM events WHERE id = ? FOR UPDATE');
+                    $capLock->execute([(int)$inquiry['event_id']]);
+                    $capacity = max(0, (int)$capLock->fetchColumn());
+                    $need = max(1, (int)($inquiry['guests'] ?? 1));
+                    $taken = rh_event_seats_taken($pdo, (int)$inquiry['event_id'], $inquiry_id);
+                    if ($capacity > 0 && $taken + $need > $capacity) {
+                        throw new Exception('Not enough seats: ' . max(0, $capacity - $taken) . ' left, this booking needs ' . $need . '. Raise the event capacity or cancel another booking first.');
+                    }
+                    $pdo->prepare("UPDATE event_inquiries SET status = 'pending', updated_at = NOW() WHERE id = ? AND status = 'waitlisted'")->execute([$inquiry_id]);
+                    $pdo->commit();
+                } catch (Throwable $promoteEx) {
+                    if ($pdo->inTransaction()) {
+                        $pdo->rollBack();
+                    }
+                    throw $promoteEx;
+                }
+                $email_result = sendEventWaitlistPromotedEmail($inquiry);
+                $message = 'Booking moved off the waitlist (now pending).'
+                    . ($email_result['success'] ? ' The guest has been emailed.' : ' (Email not sent: ' . htmlspecialchars($email_result['message']) . ')');
             } elseif ($action === 'cancel') {
                 if ((string)($inquiry['status'] ?? '') === 'cancelled') {
                     throw new Exception('This booking is already cancelled.');
@@ -127,6 +167,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['inquiry_action'])) {
                 $cancelCreditNote = $cancelCredit > BALANCE_TOLERANCE
                     ? ' ' . getSetting('currency_symbol') . number_format($cancelCredit, 2) . ' already paid stays as credit owed back - refund it from the payment Refund screen.'
                     : '';
+                $waitInfo = rh_event_capacity_info($pdo, (int)$inquiry['event_id']);
+                if ($waitInfo['waitlisted'] > 0) {
+                    $cancelCreditNote .= ' ' . $waitInfo['waitlisted'] . ' booking(s) are on the waitlist for this event - promote one from the Waitlisted tab.';
+                }
 
                 $email_result = sendEventCancelledEmail($inquiry);
                 $message = $email_result['success']
@@ -347,6 +391,9 @@ try {
             <a href="events-inquiries.php?status=completed" class="filter-tab <?php echo $status_filter === 'completed' ? 'active' : ''; ?>">
                 Completed <?php if (isset($status_counts['completed'])) { ?><span class="count"><?php echo $status_counts['completed']; ?></span><?php } ?>
             </a>
+            <a href="events-inquiries.php?status=waitlisted" class="filter-tab <?php echo $status_filter === 'waitlisted' ? 'active' : ''; ?>">
+                Waitlisted <?php if (isset($status_counts['waitlisted'])) { ?><span class="count"><?php echo $status_counts['waitlisted']; ?></span><?php } ?>
+            </a>
             <a href="events-inquiries.php?status=cancelled" class="filter-tab <?php echo $status_filter === 'cancelled' ? 'active' : ''; ?>">
                 Cancelled <?php if (isset($status_counts['cancelled'])) { ?><span class="count"><?php echo $status_counts['cancelled']; ?></span><?php } ?>
             </a>
@@ -410,12 +457,15 @@ try {
                                 <input type="hidden" name="inquiry_action" value="update_status">
                                 <input type="hidden" name="inquiry_id" value="<?php echo $inquiry['id']; ?>">
                                 <input type="hidden" name="csrf_token" value="<?= htmlspecialchars($csrf_token, ENT_QUOTES) ?>">
+                                <?php if (in_array($inquiry['status'], ['pending', 'confirmed', 'completed'], true)): ?>
                                 <select name="new_status" class="status-select" onchange="this.form.submit();">
                                     <option value="pending" <?php echo $inquiry['status'] === 'pending' ? 'selected' : ''; ?>>Pending</option>
                                     <option value="confirmed" <?php echo $inquiry['status'] === 'confirmed' ? 'selected' : ''; ?>>Confirmed</option>
                                     <option value="completed" <?php echo $inquiry['status'] === 'completed' ? 'selected' : ''; ?>>Completed</option>
-                                    <option value="cancelled" <?php echo $inquiry['status'] === 'cancelled' ? 'selected' : ''; ?>>Cancelled</option>
                                 </select>
+                                <?php else: ?>
+                                <span class="status-select" style="display:inline-block;"><?php echo htmlspecialchars(ucfirst((string)$inquiry['status'])); ?></span>
+                                <?php endif; ?>
                             </form>
                         </td>
                         <td>
@@ -471,7 +521,8 @@ try {
                 'pending': '#17a2b8',
                 'confirmed': '#8B7355',
                 'completed': '#6c757d',
-                'cancelled': '#dc3545'
+                'cancelled': '#dc3545',
+                'waitlisted': '#C8A45A'
             };
 
             function money(n) {
@@ -544,6 +595,13 @@ try {
                         <input type="hidden" name="inquiry_id" value="${inquiry.id}">
                         <input type="hidden" name="csrf_token" value="${eventCsrfToken}">
                         <button type="submit" class="btn btn-primary btn-sm"><i class="fas fa-check"></i> Confirm</button>
+                    </form>` : ''}
+                    ${inquiry.status === 'waitlisted' ? `
+                    <form method="POST" onsubmit="return confirm('Move this booking off the waitlist? The guest will be emailed that a place is available.');">
+                        <input type="hidden" name="inquiry_action" value="promote">
+                        <input type="hidden" name="inquiry_id" value="${inquiry.id}">
+                        <input type="hidden" name="csrf_token" value="${eventCsrfToken}">
+                        <button type="submit" class="btn btn-primary btn-sm"><i class="fas fa-arrow-up"></i> Promote from waitlist</button>
                     </form>` : ''}
                     ${inquiry.status === 'confirmed' ? `
                     <form method="POST" onsubmit="return confirm('Mark this booking as completed?');">
