@@ -1090,6 +1090,42 @@ try {
                     </div>
                 </div>
 
+                <!-- Who is staying? Guests come BEFORE rooms so every room card can say up front
+                     whether it fits the party, how many rooms it takes, and what that costs. -->
+                <div class="form-section form-section--step" id="partySection">
+                    <h3 class="form-section-title"><i class="fas fa-users"></i> Who Is Staying?</h3>
+                    <div class="form-grid">
+                        <div class="form-group">
+                            <label for="number_of_guests" class="required">Number of Guests</label>
+                            <select id="number_of_guests" name="number_of_guests" class="form-control" required aria-describedby="guestCapacityHint">
+                                <?php
+                                $party_selected_guests = (int)($hero_guests ?: 2);
+                                if ($party_selected_guests < 1 || $party_selected_guests > 20) {
+                                    $party_selected_guests = 2;
+                                }
+                                for ($g = 1; $g <= 20; $g++): ?>
+                                    <option value="<?php echo $g; ?>"<?php echo $g === $party_selected_guests ? ' selected' : ''; ?>><?php echo $g; ?> Guest<?php echo $g === 1 ? '' : 's'; ?></option>
+                                <?php endfor; ?>
+                            </select>
+                            <small id="guestCapacityHint" class="form-hint">Adults and children together. A party larger than one room holds is placed in several rooms of the same type automatically, with at least 1 adult in every room.</small>
+                        </div>
+                        <div class="form-group">
+                            <label for="child_guests">Of whom children (under 12)</label>
+                            <input
+                                type="number"
+                                id="child_guests"
+                                name="child_guests"
+                                class="form-control"
+                                min="0"
+                                max="19"
+                                inputmode="numeric"
+                                aria-describedby="childGuestHint"
+                                value="<?php echo isset($_POST['child_guests']) ? (int)$_POST['child_guests'] : (int)($hero_children ?: 0); ?>">
+                            <small id="childGuestHint" class="form-hint">Children must be accompanied by at least 1 adult. Some room types are adults only.</small>
+                        </div>
+                    </div>
+                </div>
+
                 <!-- Room Selection — revealed after both dates are selected -->
                 <?php if (!$preselected_room): ?>
                     <div class="form-section form-section--room form-section--step" id="roomSectionWrapper" style="<?php echo (!empty($_POST['check_in_date']) && !empty($_POST['check_out_date'])) ? '' : 'display:none'; ?>">
@@ -1223,29 +1259,7 @@ try {
                 <div class="form-sections-row">
 
                 <div class="form-section form-section--step" id="guestDetailsSection">
-                    <h3 class="form-section-title"><i class="fas fa-users"></i> Guest Details</h3>
-                    <div class="form-group">
-                        <label for="number_of_guests" class="required">Number of Guests</label>
-                        <select id="number_of_guests" name="number_of_guests" class="form-control" required>
-                            <option value="">Select room first...</option>
-                        </select>
-                        <small id="guestCapacityHint" class="form-hint" style="display: none;"></small>
-                    </div>
-
-                    <div class="form-group">
-                        <label for="child_guests">Children (under 12)</label>
-                        <input
-                            type="number"
-                            id="child_guests"
-                            name="child_guests"
-                            class="form-control"
-                            min="0"
-                            max="19"
-                            inputmode="numeric"
-                            value="<?php echo isset($_POST['child_guests']) ? (int)$_POST['child_guests'] : 0; ?>">
-                        <small id="childGuestHint" class="form-hint">Children must be accompanied by at least 1 adult. Children under 12.</small>
-                    </div>
-
+                    <h3 class="form-section-title"><i class="fas fa-users"></i> Your Rooms &amp; Requests</h3>
                     <!-- Occupancy Type Guide (Informational Only) -->
                     <div class="form-group">
                         <label>Price per Night (by Guest Count)</label>

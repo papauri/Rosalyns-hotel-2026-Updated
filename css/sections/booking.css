@@ -4479,6 +4479,7 @@
 .booking-page .unavailable-badge {
     position: static !important;
     width: 100%;
+    box-sizing: border-box; /* padding inside the 100% width: no overflow on phones */
     border-radius: 0 !important;
     text-align: center;
     justify-content: center;

@@ -332,7 +332,8 @@
             if (datesGood) {
                 if (wrapper) {
                     wrapper.style.display = '';
-                    scrollToSection(wrapper, 350);
+                    refreshRoomCardPlansLocal();
+                    scrollToSection(document.getElementById('partySection') || wrapper, 350);
                 } else if (preselectedRoomId) {
                     // Pre-selected room with dates set — advance to step 3 (Guest Information)
                     advanceToStep(3);
@@ -470,7 +471,7 @@
                 if (guestSelect) {
                     // Set guests value after room is selected
                     setTimeout(() => {
-                        const maxSelectableGuests = selectedRoomMaxGuests ? Math.min(20, Math.max(selectedRoomMaxGuests * 4, selectedRoomMaxGuests)) : 20;
+                        const maxSelectableGuests = 20;
                         guestSelect.value = Math.min(heroGuests, maxSelectableGuests);
 
                         // Handle children from hero widget
@@ -706,26 +707,19 @@
             const allowed = Number(room.children_allowed || 0) === 1;
             if (!childInput) return;
 
-            childInput.disabled = !allowed;
-
-            // Visual indication for disabled state
+            // The party is chosen before the room, so the children field is never locked:
+            // adults-only room types simply disable themselves while children are entered.
+            childInput.disabled = false;
             if (childGroup) {
-                childGroup.style.opacity = allowed ? '1' : '0.5';
+                childGroup.style.opacity = '1';
             }
-
-            if (!allowed) {
-                const droppedChildren = parseInt(childInput.value || '0', 10) || 0;
-                childInput.value = '0';
-                if (childHint) {
+            if (childHint) {
+                if (!allowed) {
                     childHint.innerHTML = '<i class="fas fa-ban" style="color: #dc3545;"></i> ' +
-                        escapeHtml(room.name) + ' is adults only, so children cannot stay in this room type.' +
-                        (droppedChildren > 0 ? ' The ' + plural(droppedChildren, 'child').replace('childs', 'children') + ' you entered were removed - all guests are now counted as adults. Choose a family-friendly room to bring them.' : '');
+                        escapeHtml(room.name) + ' is adults only. Children cannot stay in this room type.';
                     childHint.style.color = '#dc3545';
-                }
-            } else {
-                // Update hint with pricing info
-                const childMultiplier = Number(room.child_price_multiplier || childPriceMultiplier || 50);
-                if (childHint) {
+                } else {
+                    const childMultiplier = Number(room.child_price_multiplier || childPriceMultiplier || 50);
                     childHint.innerHTML = `<i class="fas fa-child"></i> Children under 12 stay at ${childMultiplier}% of adult rate. At least 1 adult required.`;
                     childHint.style.color = '#666';
                 }
@@ -792,7 +786,6 @@
             document.querySelectorAll('.room-option').forEach(opt => opt.classList.remove('selected'));
             label.classList.add('selected');
 
-            const previousGuests = parseInt(document.getElementById('number_of_guests')?.value || heroGuests || '0', 10);
             const roomRadio = label.querySelector('input[name="room_id"]');
             const roomId = parseInt(roomRadio.value);
             const roomName = label.getAttribute('data-room-name');
@@ -806,26 +799,6 @@
 
             // Update guest options based on room capacity
             updateGuestOptions(selectedRoomMaxGuests);
-
-            const guestSelect = document.getElementById('number_of_guests');
-            const selectedRoom = roomsData.find(room => room.id === roomId);
-            const maxSelectableGuests = Math.min(20, Math.max(selectedRoomMaxGuests * 4, selectedRoomMaxGuests));
-            const fallbackGuests = selectedRoomMaxGuests > 1 ? 2 : 1;
-            const desiredGuests = previousGuests > 0 ? previousGuests : fallbackGuests;
-            const normalizedGuests = Math.min(maxSelectableGuests, Math.max(1, desiredGuests));
-            // Keep the party the guest already chose whenever this room type can take it
-            // (children only count where the type allows them; applyChildrenPolicy then
-            // tells the guest if they were removed). Otherwise fall back to the largest
-            // supported head-count at or below it.
-            const childrenForRoom = selectedRoom && Number(selectedRoom.children_allowed || 0) === 1 ? getCurrentChildGuestCount() : 0;
-            let keptGuests = 1;
-            for (let candidate = normalizedGuests; candidate >= 1; candidate--) {
-                if (hasValidAllocation(candidate, selectedRoom, childrenForRoom)) {
-                    keptGuests = candidate;
-                    break;
-                }
-            }
-            guestSelect.value = String(keptGuests);
 
             // Update occupancy prices for this room
             updateOccupancyPrices(roomId);
@@ -863,44 +836,67 @@
             const guestSelect = document.getElementById('number_of_guests');
             const capacityHint = document.getElementById('guestCapacityHint');
             const room = getSelectedRoomData();
-            const currentValue = parseInt(guestSelect.value || '0', 10);
-            const maxSelectableGuests = Math.min(20, Math.max(maxGuests * 4, maxGuests));
+            if (!guestSelect) return;
 
-            // Clear existing options
-            guestSelect.innerHTML = '<option value="">Select number of guests...</option>';
-
-            const freeRooms = room && roomsFreeByType[room.id] !== undefined ? Number(roomsFreeByType[room.id]) : null;
-            for (let i = 1; i <= maxSelectableGuests; i++) {
-                const option = document.createElement('option');
-                option.value = i;
-                // Best case for this head-count (no children) - children are checked live below.
-                const plan = room ? getPartyPlan(i, 0, room) : null;
-                const roomsNeeded = plan ? plan.roomsNeeded : Math.ceil(i / Math.max(1, maxGuests));
-                let label = plural(i, 'Guest');
-                if (plan && plan.valid && roomsNeeded > 1) {
-                    label += ` → ${roomsNeeded} rooms (${plan.allocation.map(part => part.guests).join(' + ')})`;
-                }
-                if (plan && !plan.valid) {
-                    option.disabled = true;
-                    label += ' - not available for this room type';
-                } else if (freeRooms !== null && roomsNeeded > freeRooms) {
-                    option.disabled = true;
-                    label += freeRooms <= 0 ?
-                        ' - no rooms free on your dates' :
-                        ` - needs ${roomsNeeded} rooms, only ${freeRooms} free on your dates`;
+            // Guests are chosen BEFORE rooms, so the list is fixed (1-20). Once a room type
+            // is picked, each head-count says how many of that type it takes.
+            Array.from(guestSelect.options).forEach(option => {
+                const n = parseInt(option.value, 10);
+                if (!n) return;
+                let label = plural(n, 'Guest');
+                if (room) {
+                    const plan = getPartyPlan(n, 0, room);
+                    if (plan.valid && plan.roomsNeeded > 1) {
+                        label += ` → ${plan.roomsNeeded} rooms`;
+                    }
                 }
                 option.textContent = label;
-                guestSelect.appendChild(option);
+            });
+
+            if (capacityHint && room) {
+                capacityHint.textContent = `Each ${room.name} holds up to ${plural(maxGuests, 'guest')}. Larger parties are booked into several ${room.name} rooms automatically (every room needs at least 1 adult).`;
             }
+        }
 
-            // Update capacity hint
-            capacityHint.textContent = `Each ${selectedRoomName || 'room'} holds up to ${plural(maxGuests, 'guest')}. Larger parties are booked into several rooms of this type automatically (every room needs at least 1 adult).`;
-            capacityHint.style.display = 'block';
-
-            if (currentValue && currentValue <= maxSelectableGuests) {
-                guestSelect.value = String(currentValue);
+        function setRoomCardLine(roomOption, text, isProblem) {
+            const info = roomOption.querySelector('.room-info');
+            if (!info) return;
+            let line = info.querySelector('.room-party-plan');
+            if (!line) {
+                line = document.createElement('p');
+                line.className = 'room-party-plan';
+                line.style.cssText = 'margin:6px 0 0;font-size:0.85rem;line-height:1.4;font-weight:500;';
+                line.setAttribute('role', 'status');
+                info.appendChild(line);
             }
+            line.textContent = text;
+            line.style.color = isProblem ? '#b02a37' : '';
+        }
 
+        // Instant per-card verdict from the local mirror while check-availability answers
+        // (the server verdict replaces it, same rules). Needs a plan, not dates.
+        function refreshRoomCardPlansLocal() {
+            const total = parseInt(document.getElementById('number_of_guests')?.value || '0', 10);
+            if (!total) return;
+            const children = getCurrentChildGuestCount();
+            document.querySelectorAll('.room-option[data-room-id]').forEach(card => {
+                const room = roomsData.find(r => r.id === Number(card.getAttribute('data-room-id')));
+                if (!room) return;
+                const plan = getPartyPlan(total, children, room);
+                if (!plan.valid) {
+                    disableRoomOption(card, plan.message, plan.reason);
+                    card.dataset.localDisabled = '1';
+                    setRoomCardLine(card, plan.message, true);
+                } else {
+                    if (card.dataset.localDisabled === '1') {
+                        enableRoomOption(card);
+                        delete card.dataset.localDisabled;
+                    }
+                    const counts = plan.allocation.map(part => part.guests).join(' + ');
+                    setRoomCardLine(card, plan.roomsNeeded === 1 ? `Fits: 1 room for ${plural(total, 'guest')}` : `Fits: ${plan.roomsNeeded} rooms (${counts} guests)`, false);
+                }
+            });
+            if (selectedRoomId) renderPartyPlan();
         }
 
         // "Your rooms" panel: says plainly how many rooms of the chosen type the party
@@ -1636,9 +1632,7 @@
                     updatePriceBasedOnGuestCount();
                     updateSummary();
                     validateFormForSubmit();
-                    // Scroll to booking type section (right column of form-sections-row)
-                    const bookingTypeSection = document.querySelector('.booking-type-selection')?.closest('.form-section');
-                    scrollToSection(bookingTypeSection, 350);
+                    refreshRoomCardPlansLocal();
                 });
             }
 
@@ -1647,10 +1641,12 @@
                 childGuestsInput.addEventListener('input', function() {
                     enforceChildGuestRules();
                     checkGuestCapacity();
+                    refreshRoomCardPlansLocal();
                     updateSummary();
                     validateFormForSubmit();
                 });
             }
+            refreshRoomCardPlansLocal();
         });
 
         // Availability state tracking
@@ -1936,30 +1932,18 @@
         // One plain-language line on each room card: what this party would get in this
         // room type (rooms, split, total) or exactly why it is not offered.
         function renderRoomCardPlan(roomOption, result, partyChosen) {
-            const info = roomOption.querySelector('.room-info');
-            if (!info) return;
-            let line = info.querySelector('.room-party-plan');
-            if (!line) {
-                line = document.createElement('p');
-                line.className = 'room-party-plan';
-                line.style.cssText = 'margin:6px 0 0;font-size:0.85rem;line-height:1.4;';
-                info.appendChild(line);
-            }
             if (!partyChosen) {
-                line.textContent = 'Choose your number of guests to see how many rooms you need.';
-                line.style.color = '';
+                setRoomCardLine(roomOption, 'Choose your number of guests to see how many rooms you need.', false);
                 return;
             }
             const pricing = result && result.split_pricing && result.split_pricing.valid ? result.split_pricing : null;
             if (result && result.available && pricing) {
                 const counts = pricing.allocation.map(part => part.guests).join(' + ');
                 const rooms = Number(result.rooms_needed || pricing.allocation.length);
-                line.textContent = (rooms === 1 ? '1 room' : `${rooms} rooms (${counts} guests)`) +
-                    ` · ${currencySymbol}${Number(pricing.total_with_vat).toLocaleString()} total for ${plural(Number(result.nights || 0), 'night')}`;
-                line.style.color = '';
+                setRoomCardLine(roomOption, (rooms === 1 ? 'Fits: 1 room' : `Fits: ${rooms} rooms (${counts} guests)`) +
+                    ` · ${currencySymbol}${Number(pricing.total_with_vat).toLocaleString()} total for ${plural(Number(result.nights || 0), 'night')}`, false);
             } else {
-                line.textContent = (result && (result.message || result.error)) || 'Not available for your party and dates.';
-                line.style.color = '#b02a37';
+                setRoomCardLine(roomOption, (result && (result.message || result.error)) || 'Not available for your party and dates.', true);
             }
         }
 
