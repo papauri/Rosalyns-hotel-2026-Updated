@@ -2767,8 +2767,8 @@ $currency_symbol = getSetting('currency_symbol');
             return Promise.resolve(confirm(options.message || options.title || 'Confirm action'));
         }
 
-        async function processCheckIn(bookingId, guestName) {
-            const confirmed = await dashboardConfirm({
+        async function processCheckIn(bookingId, guestName, roomOverride) {
+            const confirmed = roomOverride || await dashboardConfirm({
                 title: 'Confirm guest check-in',
                 message: `Check in ${guestName}?`,
                 details: ['The booking status will be changed to checked-in.', 'This action will be recorded in the audit trail.'],
@@ -2788,6 +2788,7 @@ $currency_symbol = getSetting('currency_symbol');
             formData.append('action', 'checkin');
             formData.append('booking_id', bookingId);
             formData.append('csrf_token', _dashCsrf);
+            if (roomOverride) formData.append('confirm_checkin_room_not_ready', '1');
 
             fetch('process-checkin.php', {
                     method: 'POST',
@@ -2813,6 +2814,11 @@ $currency_symbol = getSetting('currency_symbol');
                     } else {
                         if (window.AdminPageLoader) AdminPageLoader.hide();
                         if (window.ButtonLoader && actionButton) ButtonLoader.hide(actionButton);
+                        if (data.needs_confirm_room && !roomOverride) {
+                            dashboardConfirm({ title: 'Room not marked clean', message: data.message, confirmText: 'Check in anyway', icon: 'fa-broom' })
+                                .then(ok => { if (ok) processCheckIn(bookingId, guestName, true); });
+                            return;
+                        }
                         Alert.show('Error: ' + (data.message || 'Failed to check in guest'), 'error');
                     }
                 })

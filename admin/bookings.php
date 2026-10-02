@@ -534,6 +534,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     throw new Exception(getBookingActionErrorMessage('check_in', $validation['reason']));
                 }
 
+                $roomGate = evaluateCheckInRoomReady($booking_id, (int)($user['id'] ?? 0), !empty($_POST['confirm_checkin_room_not_ready']));
+                if (!$roomGate['allowed']) {
+                    header('Content-Type: application/json');
+                    echo json_encode(['success' => false, 'message' => $roomGate['message'], 'needs_confirm_room' => $roomGate['needs_confirm']]);
+                    exit;
+                }
+
                 $pdo->beginTransaction();
                 $stmt = $pdo->prepare("UPDATE bookings SET status = 'checked-in' WHERE id = ?");
                 $stmt->execute([$booking_id]);
@@ -548,6 +555,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
                 // Timeline event (outside transaction — non-fatal if it fails)
                 logBookingCheckIn($booking_id, $booking['booking_reference'] ?? '', 'admin', $user['id'] ?? null, $user['full_name'] ?? null);
+                if ($roomGate['override']) {
+                    logCheckInRoomNotReadyOverride($booking_id, (string)($booking['booking_reference'] ?? ''), $roomGate['rooms'], $user['id'] ?? null, $user['full_name'] ?? null);
+                }
 
                 $scheduledCheckIn = new DateTime((string)($booking['check_in_date'] ?? 'today'));
                 $scheduledCheckIn->setTime(0, 0, 0);
@@ -4184,7 +4194,9 @@ $today_str = $today->format('Y-m-d');
                 if (contentType.includes('application/json')) {
                     const data = await response.json();
                     if (!response.ok || data.success === false) {
-                        throw new Error(data.message || data.error || errorMessage || 'Action failed.');
+                        const err = new Error(data.message || data.error || errorMessage || 'Action failed.');
+                        err.data = data;
+                        throw err;
                     }
                     return data;
                 }
@@ -6931,9 +6943,33 @@ $today_str = $today->format('Y-m-d');
                     setModalActionLoading(form, false);
                     reloadWithBookingActionMessage(data, mode === 'noshow' ? 'Booking marked as no-show successfully.' : 'Guest checked in successfully.');
                 })
-                .catch(error => {
+                .catch(async error => {
                     setModalActionLoading(form, false);
                     if (submitBtn) setButtonLoading(submitBtn, false);
+                    if (error.data && error.data.needs_confirm_room && !formData.has('confirm_checkin_room_not_ready')) {
+                        const anyway = await confirmAdminAction({
+                            title: 'Room not marked clean',
+                            message: error.data.message,
+                            confirmText: 'Check in anyway',
+                            icon: 'fa-broom'
+                        });
+                        if (anyway) {
+                            formData.append('confirm_checkin_room_not_ready', '1');
+                            if (submitBtn) setButtonLoading(submitBtn, true);
+                            setModalActionLoading(form, true, 'Checking in guest...');
+                            postBookingAction(formData, 'Error checking in guest')
+                                .then(data => {
+                                    setModalActionLoading(form, false);
+                                    reloadWithBookingActionMessage(data, 'Guest checked in successfully.');
+                                })
+                                .catch(err2 => {
+                                    setModalActionLoading(form, false);
+                                    if (submitBtn) setButtonLoading(submitBtn, false);
+                                    Alert.show(err2.message || 'Error checking in guest', 'error');
+                                });
+                        }
+                        return;
+                    }
                     Alert.show(error.message || (mode === 'noshow' ? 'Error marking booking as no-show' : 'Error checking in guest'), 'error');
                 });
         });

@@ -34,6 +34,11 @@ if (in_array($action, $bookingScopedActions, true) && $booking_id <= 0) {
 
 try {
     if ($action === 'checkin') {
+        $roomGate = evaluateCheckInRoomReady($booking_id, $admin_user_id ?: null, !empty($_POST['confirm_checkin_room_not_ready']));
+        if (!$roomGate['allowed']) {
+            echo json_encode(['success' => false, 'message' => $roomGate['message'], 'needs_confirm_room' => $roomGate['needs_confirm']]);
+            exit;
+        }
         // Only allow check-in when booking is confirmed AND fully paid
         $stmt = $pdo->prepare("UPDATE bookings SET status = 'checked-in' WHERE id = ? AND status = 'confirmed' AND payment_status = 'paid'");
         $stmt->execute([$booking_id]);
@@ -60,6 +65,9 @@ try {
                     VALUES (?, 'available', 'occupied', ?, ?)
                 ");
                 $logStmt->execute([$booking['individual_room_id'], 'Check-in: ' . $booking['booking_reference'], $admin_user_id ?: null]);
+            }
+            if ($booking && $roomGate['override']) {
+                logCheckInRoomNotReadyOverride($booking_id, (string)$booking['booking_reference'], $roomGate['rooms'], $admin_user_id ?: null, $user['full_name'] ?? null);
             }
 
             // Send status update email

@@ -2560,6 +2560,79 @@ function validateCheckIn(array $booking): array
 }
 
 /**
+ * Rooms on a booking that housekeeping has not released: room status other than
+ * 'available', or cleaning still pending / in progress.
+ *
+ * @return array<int,array{id:int,room_number:string,status:string,housekeeping_status:?string}>
+ */
+function getBookingRoomsNotReady(int $bookingId): array
+{
+    global $pdo;
+    $ids = getBookingRoomIds($bookingId);
+    if (empty($ids)) {
+        return [];
+    }
+    $ph = implode(',', array_fill(0, count($ids), '?'));
+    $st = $pdo->prepare("SELECT id, room_number, status, housekeeping_status FROM individual_rooms
+        WHERE id IN ($ph) AND (status <> 'available' OR housekeeping_status IN ('pending', 'in_progress'))");
+    $st->execute(array_values($ids));
+    return $st->fetchAll(PDO::FETCH_ASSOC);
+}
+
+/**
+ * Clean-room gate for check-in (owner decision 2026-10-02): blocked while any assigned room
+ * is not marked clean, unless a user holding 'checkin_room_not_ready' explicitly confirmed
+ * ($override). Same shape as evaluateCheckoutBalance().
+ *
+ * @return array{allowed:bool,override:bool,needs_confirm:bool,can_override:bool,message:string,rooms:array}
+ */
+function evaluateCheckInRoomReady(int $bookingId, ?int $userId, bool $override = false): array
+{
+    $res = ['allowed' => true, 'override' => false, 'needs_confirm' => false, 'can_override' => false, 'message' => '', 'rooms' => []];
+    $rooms = getBookingRoomsNotReady($bookingId);
+    if (!$rooms) {
+        return $res;
+    }
+    $labels = [];
+    foreach ($rooms as $r) {
+        $why = (string)$r['status'] !== 'available'
+            ? str_replace('_', ' ', (string)$r['status'])
+            : 'cleaning ' . str_replace('_', ' ', (string)$r['housekeeping_status']);
+        $labels[] = 'Room ' . $r['room_number'] . ' (' . $why . ')';
+    }
+    $list = implode(', ', $labels);
+    $can = $userId !== null && $userId > 0 && function_exists('hasPermission') && hasPermission($userId, 'checkin_room_not_ready');
+    $res['rooms'] = $rooms;
+    $res['can_override'] = $can;
+    if (!$can) {
+        $res['allowed'] = false;
+        $res['message'] = 'Check-in blocked: ' . $list . ' is not marked clean yet. Ask housekeeping to finish the room, or ask someone with the "Check-in to Room Not Clean" permission.';
+    } elseif (!$override) {
+        $res['allowed'] = false;
+        $res['needs_confirm'] = true;
+        $res['message'] = $list . ' is not marked clean yet. Confirm to check the guest in anyway (recorded in the booking timeline).';
+    } else {
+        $res['override'] = true;
+    }
+    return $res;
+}
+
+/** Timeline entry for a check-in that went ahead into a room not marked clean. */
+function logCheckInRoomNotReadyOverride(int $bookingId, string $bookingReference, array $rooms, ?int $userId, ?string $userName = null): void
+{
+    if (!function_exists('logBookingEvent')) {
+        require_once __DIR__ . '/../includes/booking-timeline.php';
+    }
+    $numbers = array_map(static function ($r) { return (string)$r['room_number']; }, $rooms);
+    logBookingEvent(
+        $bookingId, $bookingReference, 'Checked in to a room not marked clean', 'check_in',
+        'Room ' . implode(', ', $numbers) . ' was not marked clean' . ($userName ? ' (authorised by ' . $userName . ')' : ''),
+        null, null, 'admin', $userId, $userName,
+        ['rooms' => $rooms, 'authorised_by_user_id' => $userId]
+    );
+}
+
+/**
  * Validate if a booking can be checked out
  *
  * @param array $booking Booking record (must include status, check_out_date)
@@ -7069,7 +7142,7 @@ function logCheckoutBalanceOverride(int $bookingId, string $bookingReference, fl
     }
     $cs = (string)getSetting('currency_symbol', 'MWK');
     logBookingEvent(
-        $bookingId, $bookingReference, 'Checked out with outstanding balance', 'financial',
+        $bookingId, $bookingReference, 'Checked out with outstanding balance', 'payment',
         'Checked out with ' . $cs . ' ' . number_format($balance, 2) . ' outstanding' . ($userName ? ' (authorised by ' . $userName . ')' : ''),
         null, number_format($balance, 2, '.', ''), 'admin', $userId, $userName,
         ['outstanding_amount' => $balance, 'authorised_by_user_id' => $userId]

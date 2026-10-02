@@ -400,6 +400,14 @@ function getAllPermissions()
             'page' => 'bookings.php',
             'group' => 'guest_services'
         ],
+        'checkin_room_not_ready' => [
+            'label' => 'Check-in to Room Not Clean',
+            'description' => 'Check a guest in even though housekeeping has not marked the room clean (recorded in the booking timeline)',
+            'icon' => 'fa-broom',
+            'category' => 'Guest Services',
+            'page' => 'bookings.php',
+            'group' => 'guest_services'
+        ],
         'checkout_with_balance' => [
             'label' => 'Check-out With Balance',
             'description' => 'Check a guest out even though an outstanding balance remains on the booking (recorded in the booking timeline)',

@@ -433,8 +433,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['booking_action'])) {
                     $_SESSION['error_message'] = 'Booking not found.';
                 } else {
                     $validation = validateCheckIn($check_row);
+                    $roomGate = $validation['allowed']
+                        ? evaluateCheckInRoomReady((int)$booking_id, (int)($user['id'] ?? 0), !empty($_POST['confirm_checkin_room_not_ready']))
+                        : null;
                     if (!$validation['allowed']) {
                         $_SESSION['error_message'] = getBookingActionErrorMessage('check_in', $validation['reason']);
+                    } elseif (!$roomGate['allowed']) {
+                        $_SESSION['error_message'] = $roomGate['message'];
                     } else {
                         $pdo->beginTransaction();
                         $pdo->prepare("UPDATE bookings SET status = 'checked-in', updated_at = NOW() WHERE id = ?")->execute([$booking_id]);
@@ -443,6 +448,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['booking_action'])) {
 
                         // Timeline event (outside transaction — non-fatal if it fails)
                         logBookingCheckIn($booking_id, $check_row['booking_reference'], 'admin', $user['id'], $user['full_name']);
+                        if ($roomGate['override']) {
+                            logCheckInRoomNotReadyOverride((int)$booking_id, (string)$check_row['booking_reference'], $roomGate['rooms'], $user['id'] ?? null, $user['full_name'] ?? null);
+                        }
 
                         // Late check-in detection for audit trail
                         $ciScheduled = (new DateTime((string)$check_row['check_in_date']))->setTime(0, 0, 0);
@@ -2010,6 +2018,11 @@ unset($_SESSION['success_message'], $_SESSION['error_message']);
                                     } elseif (!$checkin_date_reached) {
                                         $checkin_disabled_reason = 'Check-in date has not been reached yet (' . htmlspecialchars($booking['check_in_date']) . ')';
                                     }
+                                    $ci_room_gate = ($checkin_disabled_reason === '') ? evaluateCheckInRoomReady((int)$booking['id'], (int)($user['id'] ?? 0), false) : null;
+                                    $ci_room_override = $ci_room_gate && $ci_room_gate['needs_confirm'];
+                                    if ($ci_room_gate && !$ci_room_gate['allowed'] && !$ci_room_override) {
+                                        $checkin_disabled_reason = $ci_room_gate['message'];
+                                    }
                                     ?>
 
                                     <?php if (!$room_assigned): ?>
@@ -2022,8 +2035,9 @@ unset($_SESSION['success_message'], $_SESSION['error_message']);
                                         </a>
                                     <?php endif; ?>
 
-                                    <form method="POST" class="booking-action-form" data-admin-confirm="Check in this guest and mark the assigned room occupied?" data-admin-confirm-title="Check in guest" data-admin-confirm-ok="Check in" data-admin-confirm-icon="fa-right-to-bracket" data-admin-submit-text="Checking in...">
+                                    <form method="POST" class="booking-action-form" data-admin-confirm="<?php echo $ci_room_override ? htmlspecialchars($ci_room_gate['message'], ENT_QUOTES) : 'Check in this guest and mark the assigned room occupied?'; ?>" data-admin-confirm-title="<?php echo $ci_room_override ? 'Room not marked clean' : 'Check in guest'; ?>" data-admin-confirm-ok="<?php echo $ci_room_override ? 'Check in anyway' : 'Check in'; ?>" data-admin-confirm-icon="fa-right-to-bracket" data-admin-submit-text="Checking in...">
                                         <input type="hidden" name="booking_action" value="checkin">
+                                        <?php if ($ci_room_override): ?><input type="hidden" name="confirm_checkin_room_not_ready" value="1"><?php endif; ?>
                                         <button type="submit" class="action-btn checkin" data-help="Check In|Check the guest into their assigned room and mark the room occupied. Requires payment recorded, a room assigned, and the check-in date to have arrived." <?php echo ($can_checkin && $room_assigned && $checkin_date_reached) ? '' : 'disabled title="' . htmlspecialchars($checkin_disabled_reason) . '"'; ?>>
                                             <i class="fas fa-right-to-bracket"></i> Check In
                                         </button>
