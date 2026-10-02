@@ -3300,6 +3300,82 @@ function getAvailableRoomCombinations(int $roomTypeId, string $checkIn, string $
     }
 }
 
+/**
+ * Joined-room bookings that have no rooms assigned yet (website bookings arrive this way)
+ * still need a combination. They hold the first free combinations for their dates, so the
+ * joined type cannot be oversold and those member rooms are not sold on their own meanwhile.
+ *
+ * @return array{count:int, held_combinations:array<int,array>} count = peak concurrent unassigned bookings
+ */
+function rh_combination_unassigned_holds(int $combinedTypeId, string $checkIn, string $checkOut, ?int $excludeBookingId = null): array
+{
+    global $pdo;
+    $statuses = getBookingStatusesThatBlockAvailability(false);
+    $ph = implode(',', array_fill(0, count($statuses), '?'));
+    $sql = "SELECT b.id, b.check_in_date, b.check_out_date FROM bookings b
+        WHERE b.room_id = ? AND b.individual_room_id IS NULL
+          AND b.status IN ({$ph})
+          AND NOT (b.status = 'tentative' AND b.tentative_expires_at IS NOT NULL AND b.tentative_expires_at < NOW())
+          AND NOT (b.check_out_date <= ? OR b.check_in_date >= ?)
+          AND NOT EXISTS (SELECT 1 FROM booking_rooms br WHERE br.booking_id = b.id AND br.released_at IS NULL)";
+    $params = array_merge([$combinedTypeId], $statuses, [$checkIn, $checkOut]);
+    if ($excludeBookingId) {
+        $sql .= ' AND b.id <> ?';
+        $params[] = $excludeBookingId;
+    }
+    try {
+        $st = $pdo->prepare($sql);
+        $st->execute($params);
+        $count = peakConcurrentOccupancy($st->fetchAll(PDO::FETCH_ASSOC), $checkIn, $checkOut);
+    } catch (Throwable $e) {
+        error_log('rh_combination_unassigned_holds: ' . $e->getMessage());
+        return ['count' => 0, 'held_combinations' => []];
+    }
+    $held = $count > 0 ? array_slice(getAvailableRoomCombinations($combinedTypeId, $checkIn, $checkOut, $excludeBookingId), 0, $count) : [];
+    return ['count' => $count, 'held_combinations' => $held];
+}
+
+/**
+ * Rooms of type $roomTypeId held back for unassigned joined-room bookings of OTHER types
+ * (e.g. two Superior Suites combined into a Family Room).
+ *
+ * @return int[] individual room ids
+ */
+function rh_rooms_held_for_combinations(int $roomTypeId, string $checkIn, string $checkOut, ?int $excludeBookingId = null): array
+{
+    global $pdo;
+    try {
+        $st = $pdo->prepare("SELECT DISTINCT rc.combined_room_type_id FROM room_combinations rc
+            JOIN individual_rooms a ON a.id = rc.room_a_id
+            JOIN individual_rooms b ON b.id = rc.room_b_id
+            WHERE rc.is_active = 1 AND rc.combined_room_type_id <> ? AND (a.room_type_id = ? OR b.room_type_id = ?)");
+        $st->execute([$roomTypeId, $roomTypeId, $roomTypeId]);
+        $familyTypes = array_map('intval', $st->fetchAll(PDO::FETCH_COLUMN));
+        if (!$familyTypes) {
+            return [];
+        }
+        $typeOf = $pdo->prepare('SELECT room_type_id FROM individual_rooms WHERE id = ?');
+        $held = [];
+        foreach ($familyTypes as $familyType) {
+            foreach (rh_combination_unassigned_holds($familyType, $checkIn, $checkOut, $excludeBookingId)['held_combinations'] as $combo) {
+                foreach (['room_a_id', 'room_b_id'] as $k) {
+                    $rid = (int)($combo[$k] ?? 0);
+                    if ($rid > 0) {
+                        $typeOf->execute([$rid]);
+                        if ((int)$typeOf->fetchColumn() === $roomTypeId) {
+                            $held[$rid] = $rid;
+                        }
+                    }
+                }
+            }
+        }
+        return array_values($held);
+    } catch (Throwable $e) {
+        error_log('rh_rooms_held_for_combinations: ' . $e->getMessage());
+        return [];
+    }
+}
+
 function getRoomCombinationAvailabilitySummary(int $roomTypeId, string $checkIn, string $checkOut, ?int $excludeBookingId = null): ?array
 {
     if (!roomTypeHasActiveCombinations($roomTypeId)) {
@@ -3312,9 +3388,12 @@ function getRoomCombinationAvailabilitySummary(int $roomTypeId, string $checkIn,
         $maxGuests = max($maxGuests, (int)($combination['max_guests_combined'] ?? $combination['combined_type_max_guests'] ?? 0));
     }
 
+    $holds = rh_combination_unassigned_holds($roomTypeId, $checkIn, $checkOut, $excludeBookingId);
+
     return [
         'inventory_count' => count($available),
-        'remaining_rooms' => count($available),
+        'remaining_rooms' => max(0, count($available) - $holds['count']),
+        'unassigned_booking_count' => $holds['count'],
         'available_combinations' => $available,
         'max_guests' => $maxGuests,
     ];
@@ -3553,7 +3632,12 @@ function getRoomTypeIndividualAvailabilitySummary(int $room_id, string $check_in
     $unassignedAdultBookings = peakConcurrentOccupancy($unassignedAdultRows, $check_in_date, $check_out_date);
     $adultOverflowIntoChildRooms = max(0, $unassignedAdultBookings - $nonChildEligibleAvailableCount);
     $availableCount = count($availableRooms);
-    $childEligibleRemainingRooms = max(0, $childEligibleAvailableCount - $unassignedChildBookings - $adultOverflowIntoChildRooms);
+    // Free rooms of this type that unassigned joined-room bookings will need.
+    $availableIds = array_map(static fn($r) => (int)$r['id'], $availableRooms);
+    $comboHeldIds = array_values(array_intersect(rh_rooms_held_for_combinations($room_id, $check_in_date, $check_out_date, $exclude_booking_id), $availableIds));
+    $comboHeld = count($comboHeldIds);
+    $comboHeldChild = count(array_filter($availableRooms, static fn($r) => !empty($r['children_allowed']) && in_array((int)$r['id'], $comboHeldIds, true)));
+    $childEligibleRemainingRooms = max(0, $childEligibleAvailableCount - $unassignedChildBookings - $adultOverflowIntoChildRooms - $comboHeldChild);
 
     return [
         'inventory_count' => count($individualRooms),
@@ -3565,7 +3649,8 @@ function getRoomTypeIndividualAvailabilitySummary(int $room_id, string $check_in
         'unassigned_booking_count' => $unassignedBookings,
         'unassigned_child_booking_count' => $unassignedChildBookings,
         'unassigned_adult_booking_count' => $unassignedAdultBookings,
-        'remaining_rooms' => max(0, $availableCount - $unassignedBookings),
+        'combination_held_count' => $comboHeld,
+        'remaining_rooms' => max(0, $availableCount - $unassignedBookings - $comboHeld),
         'available_rooms' => $availableRooms,
         'unavailable_rooms' => $unavailableRooms
     ];
