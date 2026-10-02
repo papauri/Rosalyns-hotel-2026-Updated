@@ -21,6 +21,38 @@ $message = '';
 $messageType = '';
 $isAjax = !empty($_SERVER['HTTP_X_REQUESTED_WITH']) && strtolower($_SERVER['HTTP_X_REQUESTED_WITH']) === 'xmlhttprequest';
 
+/**
+ * Keep only valid, not-in-the-past blocked nights. A block is one NIGHT: blocking the 5th
+ * stops a stay that sleeps on the night of the 5th; a guest checking out on the 5th is fine.
+ */
+function rh_clean_block_dates($dates): array
+{
+    $today = date('Y-m-d');
+    $out = [];
+    foreach ((array)$dates as $d) {
+        $n = rh_normalize_block_date((string)$d);
+        if ($n !== null && $n >= $today) {
+            $out[$n] = $n;
+        }
+    }
+    ksort($out);
+    return array_values(array_slice($out, 0, 366));
+}
+
+/** Heads-up appended to a success message when existing bookings sleep on the blocked nights. */
+function rh_block_overlap_note(?int $roomTypeId, ?int $individualRoomId, array $dates): string
+{
+    $rows = getBookingsOverlappingBlockDates($roomTypeId, $individualRoomId, $dates);
+    if (empty($rows)) {
+        return '';
+    }
+    $refs = array_map(function ($b) {
+        return $b['booking_reference'];
+    }, array_slice($rows, 0, 5));
+    return ' Note: ' . count($rows) . ' existing booking(s) already sleep on these nights (' . implode(', ', $refs)
+        . (count($rows) > 5 ? ', ...' : '') . '). Blocks do not cancel or move bookings; reassign or contact those guests.';
+}
+
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if (!validateCsrfToken($_POST['csrf_token'] ?? '')) {
         if ($isAjax) {
@@ -44,14 +76,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $reason = $_POST['reason'] ?? null;
             $created_by = $user['id'] ?? null;
 
+            $clean_dates = rh_clean_block_dates([$block_date]);
             if (empty($individual_room_id) || empty($block_date)) {
                 $message = 'Please select a room and date to block';
                 $messageType = 'error';
+            } elseif (empty($clean_dates)) {
+                $message = 'Please choose a valid date that is today or later';
+                $messageType = 'error';
             } else {
-                $result = blockIndividualRoomDate($individual_room_id, $block_date, $block_type, $reason, $created_by);
+                $result = blockIndividualRoomDate($individual_room_id, $clean_dates[0], $block_type, $reason, $created_by);
 
                 if ($result) {
-                    $message = 'Individual room date blocked successfully';
+                    $message = 'Individual room date blocked successfully.' . rh_block_overlap_note(null, $individual_room_id, $clean_dates);
                     $messageType = 'success';
                 } else {
                     $message = 'Failed to block date';
@@ -71,14 +107,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $reason = $_POST['reason'] ?? null;
             $created_by = $user['id'] ?? null;
 
+            $clean_dates = rh_clean_block_dates([$block_date]);
             if (empty($block_date)) {
                 $message = 'Please select a date to block';
                 $messageType = 'error';
+            } elseif (empty($clean_dates)) {
+                $message = 'Please choose a valid date that is today or later';
+                $messageType = 'error';
             } else {
-                $result = blockRoomDate($room_id, $block_date, $block_type, $reason, $created_by);
+                $result = blockRoomDate($room_id, $clean_dates[0], $block_type, $reason, $created_by);
 
                 if ($result) {
-                    $message = 'Room type date blocked successfully';
+                    $message = 'Room type date blocked successfully.' . rh_block_overlap_note($room_id, null, $clean_dates);
                     $messageType = 'success';
                 } else {
                     $message = 'Failed to block date';
@@ -100,8 +140,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $blocked_dates = getBlockedDates(null, null, null);
             $target_date = null;
 
+            // Type blocks and individual-room blocks have separate id sequences, so the id
+            // alone can match one row of each - match the scope too, or the wrong block is removed.
             foreach ($blocked_dates as $bd) {
-                if ($bd['id'] == $id) {
+                if ((int)$bd['id'] === $id && ($bd['block_scope'] ?? 'type') === ($block_scope === 'individual' ? 'individual' : 'type')) {
                     $target_date = $bd;
                     break;
                 }
@@ -140,14 +182,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             // Decode JSON dates array
             $dates = !empty($dates_json) ? json_decode($dates_json, true) : [];
 
-            if (empty($individual_room_id) || empty($dates) || !is_array($dates)) {
-                $message = 'Please select a room and at least one date to block';
+            $dates = rh_clean_block_dates($dates);
+            if (empty($individual_room_id) || empty($dates)) {
+                $message = 'Please select a room and at least one valid date (today or later) to block';
                 $messageType = 'error';
             } else {
                 $blocked_count = blockIndividualRoomDates($individual_room_id, $dates, $block_type, $reason, $created_by);
 
                 if ($blocked_count > 0) {
-                    $message = "Successfully blocked {$blocked_count} date(s) for individual room";
+                    $message = "Successfully blocked {$blocked_count} date(s) for individual room." . rh_block_overlap_note(null, $individual_room_id, $dates);
                     $messageType = 'success';
                 } else {
                     $message = 'Failed to block dates';
@@ -170,14 +213,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             // Decode JSON dates array
             $dates = !empty($dates_json) ? json_decode($dates_json, true) : [];
 
-            if (empty($dates) || !is_array($dates)) {
-                $message = 'Please select at least one date to block';
+            $dates = rh_clean_block_dates($dates);
+            if (empty($dates)) {
+                $message = 'Please select at least one valid date (today or later) to block';
                 $messageType = 'error';
             } else {
                 $blocked_count = blockRoomDates($room_id, $dates, $block_type, $reason, $created_by);
 
                 if ($blocked_count > 0) {
-                    $message = "Successfully blocked {$blocked_count} date(s)";
+                    $message = "Successfully blocked {$blocked_count} date(s)." . rh_block_overlap_note($room_id, null, $dates);
                     $messageType = 'success';
                 } else {
                     $message = 'Failed to block dates';
@@ -191,6 +235,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             }
         }
     }
+}
+
+// Validation failures in the AJAX block forms fall through to here; answer in JSON so the
+// modal shows the message instead of choking on the HTML page.
+if ($isAjax && $_SERVER['REQUEST_METHOD'] === 'POST' && in_array($_POST['action'] ?? '', ['block_date', 'block_multiple'], true)) {
+    header('Content-Type: application/json; charset=utf-8');
+    echo json_encode(['success' => $messageType === 'success', 'message' => $message !== '' ? $message : 'Nothing was blocked']);
+    exit;
 }
 
 // Get filter parameters
@@ -577,7 +629,7 @@ $site_name = getSetting('site_name');
                     <div class="mb-3">
                         <label class="form-label">Date Range</label>
                         <input type="text" id="dateRangeInput" class="form-control" placeholder="Select start and end dates">
-                        <small class="text-muted">All dates in the range will be blocked</small>
+                        <small class="text-muted">Every date in the range is a blocked night (first to last, inclusive). A guest may still check out on the day after the last date.</small>
                     </div>
 
                     <div class="mb-3">
@@ -629,8 +681,7 @@ $site_name = getSetting('site_name');
             // Initialize single date picker
             flatpickr('#singleDateInput', {
                 minDate: 'today',
-                dateFormat: 'Y-m-d',
-                disable: blockedDates
+                dateFormat: 'Y-m-d'
             });
 
             // Initialize date range picker
@@ -638,7 +689,6 @@ $site_name = getSetting('site_name');
                 mode: 'range',
                 minDate: 'today',
                 dateFormat: 'Y-m-d',
-                disable: blockedDates,
                 onChange: function(selectedDates, dateStr, instance) {
                     const display = document.getElementById('selectedDatesDisplay');
                     const input = document.getElementById('selectedDatesArray');

@@ -289,10 +289,13 @@ function createHousekeepingAssignment(int $roomId, ?int $performedBy, array $opt
             return ['success' => true, 'message' => 'Housekeeping assignment already exists'];
         }
 
-        // Determine priority
-        $priority = $options['priority'] ?? 'normal';
-        if (!empty($options['urgent'])) {
-            $priority = 'urgent';
+        // Determine priority. housekeeping_assignments.priority is enum(high, medium, low);
+        // 'normal' / 'urgent' are not members and were stored as '' (non-strict SQL mode).
+        $priority = $options['priority'] ?? 'medium';
+        if (!empty($options['urgent']) || $priority === 'urgent') {
+            $priority = 'high';
+        } elseif (!in_array($priority, ['high', 'medium', 'low'], true)) {
+            $priority = 'medium';
         }
 
         // Get room's housekeeping notes
@@ -548,6 +551,22 @@ function processGuestCheckout(int $bookingId, ?int $performedBy = null, array $o
     }
 }
 
+/** True when individual_rooms.status can hold 'inspection' (enum member present). */
+function rh_room_status_supports_inspection(): bool
+{
+    static $supported = null;
+    if ($supported === null) {
+        global $pdo;
+        try {
+            $st = $pdo->query("SELECT COLUMN_TYPE FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'individual_rooms' AND COLUMN_NAME = 'status'");
+            $supported = strpos((string)$st->fetchColumn(), "'inspection'") !== false;
+        } catch (Throwable $e) {
+            $supported = false;
+        }
+    }
+    return $supported;
+}
+
 /**
  * Mark room as clean and ready
  *
@@ -575,6 +594,12 @@ function markRoomClean(int $roomId, ?int $performedBy = null, array $options = [
 
         // Determine if inspection is required
         $requireInspection = !empty($options['require_inspection']) || getSetting('room_inspection_required', '0') === '1';
+        // individual_rooms.status has no 'inspection' member on this schema: writing it would be
+        // stored as '' (non-strict SQL mode) and strand the room outside every availability and
+        // check-in rule. Without schema support, the inspection step is skipped.
+        if ($requireInspection && !rh_room_status_supports_inspection()) {
+            $requireInspection = false;
+        }
 
         $newStatus = $requireInspection ? ROOM_STATUS_INSPECTION : ROOM_STATUS_AVAILABLE;
 

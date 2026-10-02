@@ -137,6 +137,46 @@ function validateBlockedDateData($data, $isUpdate = false) {
     ];
 }
 
+/**
+ * Look a block up by id. Room-type blocks (blocked_dates) and individual-room blocks
+ * (individual_room_blocked_dates) are different tables with their own id sequences, so a
+ * bare id can match one row of each. The caller must pass the scope; without it an id that
+ * matches both is rejected instead of silently acting on the wrong block.
+ */
+function findBlockedDateById(int $id, ?string $scope) {
+    $matches = [];
+    foreach (getBlockedDates(null, null, null) as $bd) {
+        if ((int)$bd['id'] !== $id) {
+            continue;
+        }
+        $bdScope = $bd['block_scope'] ?? 'type';
+        if ($scope !== null && $scope !== '' && $scope !== $bdScope) {
+            continue;
+        }
+        $matches[] = $bd;
+    }
+    if (count($matches) > 1) {
+        sendError('Ambiguous id: both a room-type block and an individual-room block have this id. Pass scope=type or scope=individual.', 409);
+    }
+    return $matches[0] ?? null;
+}
+
+/** Existing bookings that sleep on the blocked nights (blocks never cancel bookings). */
+function blockOverlapWarning(?int $roomTypeId, ?int $individualRoomId, array $dates): array {
+    $rows = getBookingsOverlappingBlockDates($roomTypeId, $individualRoomId, $dates);
+    return [
+        'overlapping_bookings' => array_map(function ($b) {
+            return [
+                'id' => (int)$b['id'],
+                'booking_reference' => $b['booking_reference'],
+                'check_in_date' => $b['check_in_date'],
+                'check_out_date' => $b['check_out_date'],
+                'status' => $b['status']
+            ];
+        }, $rows)
+    ];
+}
+
 // Get request method
 $method = $_SERVER['REQUEST_METHOD'];
 
@@ -156,18 +196,10 @@ switch ($method) {
         $start_date = isset($_GET['start_date']) ? $_GET['start_date'] : null;
         $end_date = isset($_GET['end_date']) ? $_GET['end_date'] : null;
         
-        // Get specific blocked date by ID
+        // Get specific blocked date by ID (scope=type|individual disambiguates)
         if (isset($_GET['id'])) {
             $id = (int)$_GET['id'];
-            $blocked_dates = getBlockedDates(null, null, null);
-            $blocked_date = null;
-            
-            foreach ($blocked_dates as $bd) {
-                if ($bd['id'] == $id) {
-                    $blocked_date = $bd;
-                    break;
-                }
-            }
+            $blocked_date = findBlockedDateById($id, $_GET['scope'] ?? null);
             
             if ($blocked_date) {
                 sendResponse([
@@ -193,7 +225,17 @@ switch ($method) {
         // Create new blocked date(s)
         
         $block_scope = $input['block_scope'] ?? 'type'; // 'type' or 'individual'
-        
+
+        // Date range: start_date .. end_date are the first and last blocked NIGHT (inclusive);
+        // a guest may still check out on the day after end_date. Expanded into a dates list.
+        if (!isset($input['block_date']) && !isset($input['dates']) && isset($input['start_date'], $input['end_date'])) {
+            $range_dates = rh_block_dates_in_range((string)$input['start_date'], (string)$input['end_date']);
+            if (empty($range_dates)) {
+                sendError('Invalid date range: start_date must be on or before end_date (Y-m-d)', 422);
+            }
+            $input['dates'] = $range_dates;
+        }
+
         // Handle single date creation
         if (isset($input['block_date'])) {
             // Validate data
@@ -224,7 +266,8 @@ switch ($method) {
                     sendResponse([
                         'success' => true,
                         'message' => 'Individual room date blocked successfully',
-                        'data' => $created_date
+                        'data' => $created_date,
+                        'warnings' => blockOverlapWarning(null, $individual_room_id, [$block_date])
                     ], 201);
                 } else {
                     sendError('Failed to block date', 500);
@@ -241,7 +284,8 @@ switch ($method) {
                     sendResponse([
                         'success' => true,
                         'message' => 'Room type date blocked successfully',
-                        'data' => $created_date
+                        'data' => $created_date,
+                        'warnings' => blockOverlapWarning($room_id, null, [$block_date])
                     ], 201);
                 } else {
                     sendError('Failed to block date', 500);
@@ -297,7 +341,8 @@ switch ($method) {
                             'blocked_count' => $blocked_count,
                             'total_requested' => count($input['dates']),
                             'errors' => $errors
-                        ]
+                        ],
+                        'warnings' => blockOverlapWarning(null, $individual_room_id, $valid_dates)
                     ], 201);
                 } else {
                     sendError('Failed to block dates', 500);
@@ -315,7 +360,8 @@ switch ($method) {
                             'blocked_count' => $blocked_count,
                             'total_requested' => count($input['dates']),
                             'errors' => $errors
-                        ]
+                        ],
+                        'warnings' => blockOverlapWarning($room_id, null, $valid_dates)
                     ], 201);
                 } else {
                     sendError('Failed to block dates', 500);
@@ -342,16 +388,8 @@ switch ($method) {
             sendError('Validation failed', 422, $validation['errors']);
         }
         
-        // Get current blocked date
-        $current_dates = getBlockedDates(null, null, null);
-        $current_date = null;
-        
-        foreach ($current_dates as $bd) {
-            if ($bd['id'] == $id) {
-                $current_date = $bd;
-                break;
-            }
-        }
+        // Get current blocked date (scope=type|individual disambiguates colliding ids)
+        $current_date = findBlockedDateById($id, $_GET['scope'] ?? ($input['block_scope'] ?? null));
         
         if (!$current_date) {
             sendError('Blocked date not found', 404);
@@ -412,16 +450,8 @@ switch ($method) {
         if (isset($_GET['id'])) {
             $id = (int)$_GET['id'];
             
-            // Get the blocked date
-            $current_dates = getBlockedDates(null, null, null);
-            $target_date = null;
-            
-            foreach ($current_dates as $bd) {
-                if ($bd['id'] == $id) {
-                    $target_date = $bd;
-                    break;
-                }
-            }
+            // Get the blocked date (scope=type|individual disambiguates colliding ids)
+            $target_date = findBlockedDateById($id, $_GET['scope'] ?? null);
             
             if (!$target_date) {
                 sendError('Blocked date not found', 404);

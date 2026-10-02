@@ -154,7 +154,8 @@ try {
                 b.status
             FROM bookings b
             WHERE b.room_id = ?
-            AND b.status IN ('pending', 'confirmed', 'checked-in')
+            AND b.status IN ('pending', 'tentative', 'confirmed', 'checked-in')
+            AND NOT (b.status = 'tentative' AND b.tentative_expires_at IS NOT NULL AND b.tentative_expires_at < NOW())
             AND (
                 (b.check_in_date < ? AND b.check_out_date > ?) OR
                 (b.check_in_date >= ? AND b.check_in_date < ?)
@@ -204,7 +205,8 @@ try {
                 b.status
             FROM bookings b
             WHERE b.room_id = ?
-            AND b.status IN ('pending', 'confirmed', 'checked-in')
+            AND b.status IN ('pending', 'tentative', 'confirmed', 'checked-in')
+            AND NOT (b.status = 'tentative' AND b.tentative_expires_at IS NOT NULL AND b.tentative_expires_at < NOW())
             AND (
                 (b.check_in_date < ? AND b.check_out_date > ?) OR
                 (b.check_in_date >= ? AND b.check_in_date < ?)
@@ -294,7 +296,7 @@ function getIndividualRoomsAvailability(int $roomTypeId, ?string $checkIn, ?stri
             ir.room_number,
             ir.floor,
             ir.status,
-            ir.amenities,
+            ir.specific_amenities AS amenities,
             ir.notes
         FROM individual_rooms ir
         WHERE ir.room_type_id = ? AND ir.is_active = 1
@@ -306,161 +308,61 @@ function getIndividualRoomsAvailability(int $roomTypeId, ?string $checkIn, ?stri
     $availableRooms = [];
     $unavailableRooms = [];
 
+    // One rule set for the whole system: every room is judged by
+    // checkIndividualRoomAvailability() (status, maintenance windows, housekeeping for a
+    // same-day arrival, per-night room blocks, overlapping bookings incl. joined rooms and
+    // live tentative holds) - the same function checkRoomAvailability() counts with, so
+    // this list can never disagree with the public availability count.
     foreach ($individualRooms as $room) {
-        // Check if room is available based on status
-        if (!in_array($room['status'], ['available', 'cleaning'])) {
-            // Room is not available due to status
-            $unavailableRooms[] = [
+        $check = checkIndividualRoomAvailability((int)$room['id'], $checkIn, $checkOut, $excludeBookingId);
+
+        if (!empty($check['available'])) {
+            $availableRooms[] = [
                 'id' => $room['id'],
                 'room_number' => $room['room_number'],
                 'floor' => $room['floor'],
                 'status' => $room['status'],
-                'reason' => getRoomStatusReason($room['status'])
+                'amenities' => $room['amenities'],
+                'notes' => $room['notes']
             ];
             continue;
         }
 
-        // Check canonical maintenance sources during the requested date range
-        // - room_maintenance_schedules: active blocking schedules
-        // - room_maintenance_blocks: explicit maintenance blocks (legacy/optional)
-        $subQueries = [];
-        $maintenanceParams = [];
-
-        $subQueries[] = "
-            SELECT
-                DATE(start_date) AS start_date,
-                DATE(end_date) AS end_date,
-                COALESCE(NULLIF(title, ''), 'Scheduled maintenance') AS reason,
-                created_at
-            FROM room_maintenance_schedules
-            WHERE individual_room_id = ?
-              AND block_room = 1
-              AND status IN ('pending', 'in_progress')
-              AND NOT (DATE(end_date) < ? OR DATE(start_date) > ?)
-        ";
-        $maintenanceParams[] = $room['id'];
-        $maintenanceParams[] = $checkIn;
-        $maintenanceParams[] = $checkOut;
-
-        if (availabilityTableExists($pdo, 'room_maintenance_blocks')) {
-            $subQueries[] = "
-                SELECT
-                    block_start_date AS start_date,
-                    block_end_date AS end_date,
-                    COALESCE(NULLIF(reason, ''), 'Scheduled maintenance') AS reason,
-                    created_at
-                FROM room_maintenance_blocks
-                WHERE individual_room_id = ?
-                  AND NOT (block_end_date < ? OR block_start_date > ?)
-            ";
-            $maintenanceParams[] = $room['id'];
-            $maintenanceParams[] = $checkIn;
-            $maintenanceParams[] = $checkOut;
-        }
-
-        $maintenanceStmt = $pdo->prepare("
-            SELECT m.start_date, m.end_date, m.reason
-            FROM (" . implode(" UNION ALL ", $subQueries) . ") m
-            ORDER BY m.start_date ASC, m.created_at ASC
-            LIMIT 1
-        ");
-        $maintenanceStmt->execute($maintenanceParams);
-        $maintenance = $maintenanceStmt->fetch(PDO::FETCH_ASSOC);
-
-        if ($maintenance) {
-            // Room has maintenance scheduled
-            $unavailableRooms[] = [
-                'id' => $room['id'],
-                'room_number' => $room['room_number'],
-                'floor' => $room['floor'],
-                'status' => 'maintenance',
-                'reason' => $maintenance['reason'] ?: 'Scheduled maintenance',
-                'maintenance_period' => [
-                    'start_date' => $maintenance['start_date'],
-                    'end_date' => $maintenance['end_date']
-                ]
+        $entry = [
+            'id' => $room['id'],
+            'room_number' => $room['room_number'],
+            'floor' => $room['floor'],
+            'status' => $room['status'],
+            'reason' => $check['error'] ?? 'Not available'
+        ];
+        if (!empty($check['blocked_dates'])) {
+            $entry['status'] = 'blocked';
+            $entry['reason'] = 'Blocked dates: ' . count($check['blocked_dates']) . ' date(s)';
+            $entry['blocked_dates'] = $check['blocked_dates'];
+        } elseif (!empty($check['maintenance'])) {
+            $entry['status'] = 'maintenance';
+            $first = $check['maintenance'][0];
+            $entry['reason'] = !empty($first['title']) ? $first['title'] : (!empty($first['reason']) ? $first['reason'] : 'Scheduled maintenance');
+            $entry['maintenance_period'] = [
+                'start_date' => substr((string)($first['start_date'] ?? ''), 0, 10),
+                'end_date' => substr((string)($first['end_date'] ?? ''), 0, 10)
             ];
-            continue;
+        } elseif (!empty($check['conflicts'])) {
+            $conflict = $check['conflicts'][0];
+            $entry['status'] = 'booked';
+            $entry['reason'] = 'Booked by ' . $conflict['guest_name'];
+            $entry['booking_reference'] = $conflict['booking_reference'];
+            $entry['conflicting_booking'] = $conflict;
+        } elseif (!empty($check['housekeeping'])) {
+            $entry['status'] = 'cleaning';
+            $entry['reason'] = 'Awaiting housekeeping';
+        } elseif (in_array((string)$room['status'], ['occupied', 'maintenance', 'cleaning', 'out_of_order'], true)) {
+            $entry['reason'] = getRoomStatusReason((string)$room['status']);
         }
-
-        // Check for individual room blocked dates
-        $blockedStmt = $pdo->prepare("
-            SELECT block_date, block_type, reason
-            FROM individual_room_blocked_dates
-            WHERE individual_room_id = ?
-            AND block_date >= ? AND block_date < ?
-            ORDER BY block_date ASC
-        ");
-        $blockedStmt->execute([$room['id'], $checkIn, $checkOut]);
-        $blockedDates = $blockedStmt->fetchAll(PDO::FETCH_ASSOC);
-
-        if (!empty($blockedDates)) {
-            // Room has blocked dates
-            $unavailableRooms[] = [
-                'id' => $room['id'],
-                'room_number' => $room['room_number'],
-                'floor' => $room['floor'],
-                'status' => 'blocked',
-                'reason' => 'Blocked dates: ' . count($blockedDates) . ' date(s)',
-                'blocked_dates' => $blockedDates
-            ];
-        } else {
-            // Check for conflicting bookings
-            $conflictStmt = $pdo->prepare("
-                SELECT
-                    b.id,
-                    b.booking_reference,
-                    b.guest_name,
-                    b.check_in_date,
-                    b.check_out_date,
-                    b.status
-                FROM bookings b
-                WHERE (b.individual_room_id = ? OR EXISTS (
-                    SELECT 1 FROM booking_rooms br
-                    WHERE br.booking_id = b.id
-                      AND br.individual_room_id = ?
-                      AND br.released_at IS NULL
-                ))
-                AND b.status IN ('pending', 'confirmed', 'checked-in')
-                AND NOT (b.check_out_date <= ? OR b.check_in_date >= ?)
-                " . ($excludeBookingId ? "AND b.id != ?" : "") . "
-                LIMIT 1
-            ");
-
-            $params = [$room['id'], $room['id'], $checkIn, $checkOut];
-            if ($excludeBookingId) {
-                $params[] = $excludeBookingId;
-            }
-
-            $conflictStmt->execute($params);
-            $conflict = $conflictStmt->fetch(PDO::FETCH_ASSOC);
-
-            if ($conflict) {
-                // Room has a booking conflict
-                $unavailableRooms[] = [
-                    'id' => $room['id'],
-                    'room_number' => $room['room_number'],
-                    'floor' => $room['floor'],
-                    'status' => 'booked',
-                    'reason' => 'Booked by ' . $conflict['guest_name'],
-                    'booking_reference' => $conflict['booking_reference'],
-                    'conflicting_booking' => $conflict
-                ];
-            } else {
-                // Room is available
-                $availableRooms[] = [
-                    'id' => $room['id'],
-                    'room_number' => $room['room_number'],
-                    'floor' => $room['floor'],
-                    'status' => $room['status'],
-                    'amenities' => $room['amenities'],
-                    'notes' => $room['notes']
-                ];
-            }
-        }
+        $unavailableRooms[] = $entry;
     }
 
-    // Check for blocked dates
+    // Room-type / global blocks (per night; the check-out day is free)
     $blockedStmt = $pdo->prepare("
         SELECT block_date, reason
         FROM blocked_dates
@@ -472,7 +374,8 @@ function getIndividualRoomsAvailability(int $roomTypeId, ?string $checkIn, ?stri
     $blockedDates = $blockedStmt->fetchAll(PDO::FETCH_ASSOC);
 
     $response = [
-        'available' => count($availableRooms) > 0,
+        // A room-type block makes the type unsellable even when physical rooms are free.
+        'available' => count($availableRooms) > 0 && empty($blockedDates),
         'room_type' => [
             'id' => $roomType['id'],
             'name' => $roomType['name'],

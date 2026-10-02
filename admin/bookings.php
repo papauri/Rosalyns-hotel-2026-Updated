@@ -413,6 +413,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     'room_type_name' => $room['room_type_name'] ?? null,
                     'floor' => $room['floor'] ?? null,
                     'children_allowed' => $childrenAllowed,
+                    'ready' => (int)($room['ready'] ?? 1),
+                    'status' => $room['status'] ?? 'available',
                     'requires_child_override' => $bookingChildGuests > 0 && $childrenAllowed === 0,
                     'available' => true
                 ];
@@ -441,7 +443,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 exit;
             }
 
-            $bkStmt = $pdo->prepare("SELECT id, status, room_id, individual_room_id, child_guests, booking_reference FROM bookings WHERE id = ?");
+            $bkStmt = $pdo->prepare("SELECT id, status, room_id, individual_room_id, child_guests, booking_reference, check_in_date FROM bookings WHERE id = ?");
             $bkStmt->execute([$booking_id]);
             $bookingToAssign = $bkStmt->fetch(PDO::FETCH_ASSOC);
 
@@ -477,7 +479,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             // Housekeeping / room-status gate with a clear, actionable reason so
             // staff know WHY the room is blocked and HOW to free it (rooms with a
             // pending checkout cleanup must not be assignable until it is done).
-            $hkBlock = getRoomHousekeepingAssignmentBlock($individual_room_id);
+            $hkBlock = getRoomHousekeepingAssignmentBlock($individual_room_id, (string)($bookingToAssign['check_in_date'] ?? ''));
             if ($hkBlock && !empty($hkBlock['blocked'])) {
                 header('Content-Type: application/json');
                 echo json_encode(['success' => false, 'message' => $hkBlock['message']]);
@@ -488,12 +490,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
             if (!$assigned) {
                 header('Content-Type: application/json');
-                echo json_encode(['success' => false, 'message' => 'Selected room could not be assigned — it is unavailable for the booking dates (it may overlap another reservation, a maintenance block, or a housekeeping task). Check the room timeline and try again.']);
+                $assignWhy = rh_room_assign_last_error();
+                echo json_encode(['success' => false, 'message' => 'Selected room could not be assigned' . ($assignWhy !== '' ? ': ' . $assignWhy : ' - it is unavailable for the booking dates (it may overlap another reservation, a block, a maintenance window or a housekeeping task).') . ' Check the room timeline and try again.']);
                 exit;
             }
 
-            // Note: assignIndividualRoomToBooking() already handles room status updates internally
-            // for confirmed/checked-in bookings, so we don't need to duplicate it here
+            // Note: assignIndividualRoomToBooking() locks the booking + room, re-validates, and keeps the
+            // room's status as is (it becomes 'occupied' at check-in).
             logBookingAudit(
                 $booking_id,
                 'room_assigned',

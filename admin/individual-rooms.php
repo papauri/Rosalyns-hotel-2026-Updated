@@ -371,13 +371,25 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 FROM bookings b
                 JOIN rooms r ON b.room_id = r.id
                 WHERE b.room_id = ?
-                AND b.status IN ('pending', 'confirmed', 'checked-in')
+                AND b.status = 'confirmed'
                 AND (b.individual_room_id IS NULL OR b.individual_room_id = ?)
-                AND b.check_out_date >= CURDATE()
+                AND b.check_out_date > CURDATE()
                 ORDER BY b.check_in_date ASC
             ");
             $stmt->execute([$room_type_id, $individual_room_id]);
             $bookings = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+            // Only offer bookings this exact room can take for their dates (no overlap, not
+            // blocked, not in maintenance) - otherwise staff pick one and the assignment is refused.
+            if ($individual_room_id > 0) {
+                $bookings = array_values(array_filter($bookings, function ($b) use ($individual_room_id) {
+                    if ((int)$b['individual_room_id'] === $individual_room_id) {
+                        return true;
+                    }
+                    $chk = checkIndividualRoomAvailability($individual_room_id, (string)$b['check_in_date'], (string)$b['check_out_date'], (int)$b['id']);
+                    return !empty($chk['available']);
+                }));
+            }
 
             // Normalize for JSON
             $normalized = array_map(function ($booking) {
@@ -463,13 +475,24 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                                             AND br.individual_room_id = ?
                                             AND br.released_at IS NULL
                                 ))
-                  AND b.status IN ('confirmed','checked-in','pending')
+                  AND b.status IN ('confirmed','checked-in','pending','tentative')
                   AND b.check_in_date > CURDATE()
                 ORDER BY b.check_in_date ASC
                 LIMIT 10
             ");
             $uStmt->execute([$room_id, $room_id]);
             $upcoming = $uStmt->fetchAll(PDO::FETCH_ASSOC);
+
+            // Upcoming individual-room blocks (per blocked night)
+            $blStmt = $pdo->prepare("
+                SELECT block_date, block_type, reason
+                FROM individual_room_blocked_dates
+                WHERE individual_room_id = ? AND block_date >= CURDATE()
+                ORDER BY block_date ASC
+                LIMIT 60
+            ");
+            $blStmt->execute([$room_id]);
+            $roomBlocks = $blStmt->fetchAll(PDO::FETCH_ASSOC);
 
             // Status / maintenance log — last 8 entries
             $lStmt = $pdo->prepare("
@@ -556,6 +579,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 ],
                 'active'    => $activeNorm,
                 'upcoming'  => $upcomingNorm,
+                'blocks'    => $roomBlocks,
                 'log'       => $logNorm,
             ]);
             exit;
@@ -1418,6 +1442,14 @@ $currency = htmlspecialchars(getSetting('currency_symbol'));
                             <i class="fas fa-calendar-alt"></i> Upcoming Bookings
                         </div>
                         <div id="rdUpcomingBody"></div>
+                    </div>
+
+                    <!-- Blocked nights -->
+                    <div class="rd-section" id="rdBlocksSection" style="display:none;">
+                        <div class="rd-section-title">
+                            <i class="fas fa-ban"></i> Blocked Nights
+                        </div>
+                        <div id="rdBlocksBody"></div>
                     </div>
 
                     <!-- Room Info -->
@@ -2520,6 +2552,22 @@ $currency = htmlspecialchars(getSetting('currency_symbol'));
                 }).join('');
             } else {
                 upSection.style.display = 'none';
+            }
+
+            // ── Blocked nights (Blocked Dates page) ───────────────────
+            const blkSection = document.getElementById('rdBlocksSection');
+            const blkBody = document.getElementById('rdBlocksBody');
+            const blocks = data.blocks || [];
+            if (blkSection && blkBody && blocks.length) {
+                blkSection.style.display = '';
+                blkBody.innerHTML = blocks.map(bl => `
+                    <div class="rd-upcoming-row">
+                        <div class="rd-up-dates">${_fmtDate(bl.block_date)}</div>
+                        <div class="rd-up-badges">${_badge(_esc(bl.block_type || 'manual'), '#b45309')}
+                            <span style="font-size:11px;color:#5E554D;">${_esc(bl.reason || '')}</span></div>
+                    </div>`).join('');
+            } else if (blkSection) {
+                blkSection.style.display = 'none';
             }
 
             // ── Room Info ─────────────────────────────────────────────
