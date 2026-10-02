@@ -10,9 +10,8 @@
  */
 
 // Start session FIRST before any includes
-if (session_status() === PHP_SESSION_NONE) {
-    session_start();
-}
+require_once __DIR__ . '/../../includes/admin-session.php';
+rh_admin_session_start(); // 8h idle sign-out
 
 // Enable error reporting for debugging (disable in production)
 error_reporting(E_ALL);

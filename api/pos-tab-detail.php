@@ -15,7 +15,8 @@ header('Content-Type: application/json; charset=utf-8');
 require_once __DIR__ . '/../config/database.php';
 require_once __DIR__ . '/../config/security.php';
 require_once __DIR__ . '/../admin/includes/permissions.php';
-if (session_status() !== PHP_SESSION_ACTIVE) session_start();
+require_once __DIR__ . '/../includes/admin-session.php';
+rh_admin_session_start(); // 8h idle sign-out
 
 function ptderr(string $msg, int $code = 400): never {
     http_response_code($code);

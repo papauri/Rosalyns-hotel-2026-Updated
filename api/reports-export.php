@@ -7,9 +7,8 @@
 
 // Admin session guard — this endpoint is called directly from admin/reports.php
 // and is NOT routed through api/index.php, so it needs its own auth check.
-if (session_status() === PHP_SESSION_NONE) {
-    session_start();
-}
+require_once __DIR__ . '/../includes/admin-session.php';
+rh_admin_session_start(); // 8h idle sign-out
 if (empty($_SESSION['admin_user_id'])) {
     http_response_code(403);
     header('Content-Type: text/plain');

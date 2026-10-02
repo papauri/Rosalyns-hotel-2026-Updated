@@ -78,6 +78,15 @@ if (!function_exists('rh_auto_migrate_enabled')) {
     }
 }
 
+// Hotel timezone (owner decision 2026-10-02): PHP and the MySQL session both run on
+// Malawi time so NOW(), date() and every stored DATETIME agree. HOTEL_TIMEZONE overrides.
+if (!defined('RH_TIMEZONE')) {
+    $rhTz = trim((string)(getenv('HOTEL_TIMEZONE') ?: 'Africa/Blantyre'));
+    define('RH_TIMEZONE', in_array($rhTz, timezone_identifiers_list(), true) ? $rhTz : 'Africa/Blantyre');
+    unset($rhTz);
+}
+date_default_timezone_set(RH_TIMEZONE);
+
 // Create PDO connection with performance optimizations
 try {
     // Diagnostic logging (opt-in only)
@@ -103,7 +112,7 @@ try {
     $pdo = new PDO($dsn, DB_USER, DB_PASS, $options);
 
     // Set timezone after connection
-    $pdo->exec("SET time_zone = '+00:00'");
+    $pdo->exec("SET time_zone = '" . (new DateTime('now'))->format('P') . "'"); // e.g. +02:00 (no DST in Malawi)
 
     // Schema self-migration — OFF by default.
     //

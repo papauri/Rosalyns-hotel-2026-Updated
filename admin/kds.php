@@ -708,10 +708,10 @@ $bootstrap['fingerprint'] = md5(
 
         function elapsedSeconds(iso) {
             if (!iso) return 0;
-            // Server returns "YYYY-MM-DD HH:MM:SS" stored in UTC — append Z so the browser
-            // parses it as UTC rather than local time (Malawi is UTC+2, losing 2h otherwise).
+            // Server returns "YYYY-MM-DD HH:MM:SS" in hotel time — append the hotel offset so
+            // the browser parses it correctly whatever the device clock zone.
             const norm = iso.includes('T') ? iso : iso.replace(' ', 'T');
-            const t = new Date(norm.endsWith('Z') || norm.includes('+') ? norm : norm + 'Z');
+            const t = new Date(norm.endsWith('Z') || norm.includes('+') ? norm : norm + (window.RH_TZ_OFFSET || '+02:00'));
             return Math.max(0, Math.floor((Date.now() - t.getTime()) / 1000));
         }
 
@@ -738,7 +738,7 @@ $bootstrap['fingerprint'] = md5(
         function fmtPlacedTime(iso) {
             if (!iso) return '';
             const norm = iso.includes('T') ? iso : iso.replace(' ', 'T');
-            const t = new Date(norm.endsWith('Z') || norm.includes('+') ? norm : norm + 'Z');
+            const t = new Date(norm.endsWith('Z') || norm.includes('+') ? norm : norm + (window.RH_TZ_OFFSET || '+02:00'));
             if (isNaN(t.getTime())) return '';
             const today = new Date();
             const sameDay = t.toDateString() === today.toDateString();
@@ -1067,7 +1067,7 @@ $bootstrap['fingerprint'] = md5(
                 priority: 'normal',
                 source: 'station',
                 sent_by_name: 'You',
-                created_at: new Date().toISOString().slice(0, 19).replace('T', ' '),
+                created_at: (window.rhNowSql ? window.rhNowSql() : new Date().toISOString().slice(0, 19).replace('T', ' ')),
                 is_outbound: true,
                 optimistic: true
             };
@@ -2261,7 +2261,7 @@ $bootstrap['fingerprint'] = md5(
                     }
                     state.messages = (state.messages || []).concat([{
                         id: j.message_id, station: STATION, source: 'station', is_outbound: true, message: text,
-                        order_id: t.orderId, order_ref: t.ref, created_at: new Date().toISOString().slice(0, 19).replace('T', ' '),
+                        order_id: t.orderId, order_ref: t.ref, created_at: (window.rhNowSql ? window.rhNowSql() : new Date().toISOString().slice(0, 19).replace('T', ' ')),
                         priority: 'normal', is_acknowledged: 1, pos_acknowledged: 0
                     }]);
                     toast('Sent to FOH');

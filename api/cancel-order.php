@@ -26,9 +26,8 @@ require_once __DIR__ . '/../config/security.php';
 require_once __DIR__ . '/../admin/includes/permissions.php';
 require_once __DIR__ . '/../admin/includes/offline-log.php';
 require_once __DIR__ . '/../admin/includes/restaurant-payment-sync.php';
-if (session_status() !== PHP_SESSION_ACTIVE) {
-    session_start();
-}
+require_once __DIR__ . '/../includes/admin-session.php';
+rh_admin_session_start(); // 8h idle sign-out
 
 function cjerr(string $m, int $code = 400): void
 {

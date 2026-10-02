@@ -105,9 +105,9 @@ if (!function_exists('rh_station_is_valid_time')) {
 if (!function_exists('rh_site_timezone')) {
     function rh_site_timezone(): DateTimeZone
     {
-        $tz = function_exists('getSetting') ? (string)getSetting('site_timezone', 'UTC') : 'UTC';
+        $tz = function_exists('getSetting') ? (string)getSetting('site_timezone', date_default_timezone_get()) : date_default_timezone_get();
         if ($tz === '' || !in_array($tz, DateTimeZone::listIdentifiers(), true)) {
-            $tz = 'UTC';
+            $tz = date_default_timezone_get();
         }
         return new DateTimeZone($tz);
     }
@@ -172,7 +172,7 @@ if (!function_exists('rh_station_window_for_date')) {
 
         $hours = rh_station_hours($station);
         $tz  = rh_site_timezone();
-        $utc = new DateTimeZone('UTC');
+        $utc = new DateTimeZone(date_default_timezone_get()); // DB session timezone
         $start = new DateTimeImmutable($businessDate . ' ' . $hours['opens_at'] . ':00', $tz);
         $endDate = $hours['crosses_midnight']
             ? (new DateTimeImmutable($businessDate))->modify('+1 day')->format('Y-m-d')
@@ -242,7 +242,7 @@ if (!function_exists('rh_station_union_window_for_date')) {
         usort($windows, fn(array $a, array $b): int => $a['start'] <=> $b['start']);
         $start = $windows[0]['start'];
         $end = array_reduce($windows, fn(DateTimeImmutable $carry, array $window): DateTimeImmutable => $window['end'] > $carry ? $window['end'] : $carry, $windows[0]['end']);
-        $utc = new DateTimeZone('UTC');
+        $utc = new DateTimeZone(date_default_timezone_get()); // DB session timezone
 
         return [
             'station' => 'all',

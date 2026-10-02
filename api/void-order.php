@@ -21,7 +21,8 @@ require_once __DIR__ . '/../admin/includes/permissions.php';
 require_once __DIR__ . '/../admin/includes/offline-log.php';
 require_once __DIR__ . '/../includes/station-hours.php';
 require_once __DIR__ . '/../admin/includes/restaurant-payment-sync.php';
-if (session_status() !== PHP_SESSION_ACTIVE) session_start();
+require_once __DIR__ . '/../includes/admin-session.php';
+rh_admin_session_start(); // 8h idle sign-out
 
 function vjerr(string $m, int $code = 400): void { http_response_code($code); echo json_encode(['ok'=>false,'error'=>$m]); exit; }
 function vjok(array $extra = []): void { echo json_encode(array_merge(['ok'=>true], $extra)); exit; }

@@ -25,6 +25,8 @@ if (!function_exists('rh_page_zoom_bootstrap')) {
             return;
         }
         $done = true;
+        require_once __DIR__ . '/../../includes/admin-session.php';
+        rh_admin_client_script(); // hotel time offset + session-expiry redirect
         ?>
 <script>
 (function () {

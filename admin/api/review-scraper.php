@@ -7,9 +7,8 @@
  * POST action=import  -> import one candidate into reviews table as pending/approved
  */
 
-if (session_status() === PHP_SESSION_NONE) {
-    session_start();
-}
+require_once __DIR__ . '/../../includes/admin-session.php';
+rh_admin_session_start(); // 8h idle sign-out
 
 header('Content-Type: application/json');
 

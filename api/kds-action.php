@@ -20,7 +20,8 @@ header('Content-Type: application/json; charset=utf-8');
 
 require_once __DIR__ . '/../config/database.php';
 require_once __DIR__ . '/../config/security.php';
-if (session_status() !== PHP_SESSION_ACTIVE) session_start();
+require_once __DIR__ . '/../includes/admin-session.php';
+rh_admin_session_start(); // 8h idle sign-out
 
 function jerr(string $m, int $code = 400): void
 {
@@ -1396,8 +1397,8 @@ try {
         $servedTimestamp = 0;
         $nowTimestamp = 0;
         try {
-            $servedAt = new DateTimeImmutable((string)$srv, new DateTimeZone('UTC'));
-            $nowUtc = new DateTimeImmutable('now', new DateTimeZone('UTC'));
+            $servedAt = new DateTimeImmutable((string)$srv); // DB and PHP share the hotel timezone
+            $nowUtc = new DateTimeImmutable('now');
             $servedTimestamp = $servedAt->getTimestamp();
             $nowTimestamp = $nowUtc->getTimestamp();
         } catch (Throwable $e) {

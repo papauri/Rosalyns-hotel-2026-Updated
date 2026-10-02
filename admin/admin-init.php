@@ -24,9 +24,8 @@ if (file_exists($override_file)) {
 require_once __DIR__ . '/../config/base-url.php';
 
 // Start session if not already started
-if (session_status() === PHP_SESSION_NONE) {
-    session_start();
-}
+require_once __DIR__ . '/../includes/admin-session.php';
+rh_admin_session_start(); // 8h idle sign-out
 
 // Define admin access constant (for security checks in included files)
 define('ADMIN_ACCESS', true);

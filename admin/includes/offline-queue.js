@@ -189,7 +189,7 @@
         // Stamp the moment the user submitted (offline) so the audit log can show queue lag
         if (!f.querySelector('[name="client_queued_at"]')) {
             const ts = document.createElement('input'); ts.type = 'hidden'; ts.name = 'client_queued_at';
-            ts.value = new Date().toISOString().slice(0, 19).replace('T', ' ');
+            ts.value = (window.rhNowSql ? window.rhNowSql() : new Date().toISOString().slice(0, 19).replace('T', ' '));
             f.appendChild(ts);
         }
         const fd = new FormData(f);

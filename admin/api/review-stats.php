@@ -21,9 +21,8 @@ require_once __DIR__ . '/../../config/database.php';
 require_once __DIR__ . '/../includes/permissions.php';
 
 // Start session for admin authentication
-if (session_status() === PHP_SESSION_NONE) {
-    session_start();
-}
+require_once __DIR__ . '/../../includes/admin-session.php';
+rh_admin_session_start(); // 8h idle sign-out
 
 // Helper function to send JSON response
 function sendResponse($data, $statusCode = 200)

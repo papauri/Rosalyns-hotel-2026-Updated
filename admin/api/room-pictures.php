@@ -24,9 +24,8 @@ require_once __DIR__ . '/../../config/database.php';
 require_once __DIR__ . '/../includes/permissions.php';
 
 // Start session and enforce admin auth/permission
-if (session_status() === PHP_SESSION_NONE) {
-    session_start();
-}
+require_once __DIR__ . '/../../includes/admin-session.php';
+rh_admin_session_start(); // 8h idle sign-out
 
 if (!isset($_SESSION['admin_user_id'])) {
     sendError('Authentication required', 401);

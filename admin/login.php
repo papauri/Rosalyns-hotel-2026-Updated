@@ -15,7 +15,8 @@ if (file_exists($override_file)) {
 require_once __DIR__ . '/../config/base-url.php';
 
 // Start session
-session_start();
+require_once __DIR__ . '/../includes/admin-session.php';
+rh_admin_session_start(); // 8h idle sign-out
 
 function admin_sanitize_redirect(?string $rawRedirect): string
 {
@@ -218,6 +219,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     if ($user && password_verify($password, $user['password_hash'])) {
                         // Successful login
                         $_SESSION['admin_user_id'] = $user['id'];
+                        $_SESSION['admin_last_activity'] = time();
+                        unset($_SESSION['admin_logout_reason']);
                         $_SESSION['admin_username'] = $user['username'];
                         $_SESSION['admin_role'] = $user['role'];
                         $_SESSION['admin_full_name'] = $user['full_name'];
@@ -321,6 +324,12 @@ $site_name = getSetting('site_name');
             <?php if ($error_message): ?>
                 <div class="alert-danger">
                     <?php echo htmlspecialchars($error_message); ?>
+                </div>
+            <?php endif; ?>
+
+            <?php if (!empty($_SESSION['admin_logout_reason']) || ($_GET['reason'] ?? '') === 'idle'): unset($_SESSION['admin_logout_reason']); ?>
+                <div class="alert-success">
+                    You were signed out after 8 hours without activity. Please sign in again.
                 </div>
             <?php endif; ?>
 

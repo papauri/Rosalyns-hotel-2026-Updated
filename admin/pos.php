@@ -4157,7 +4157,7 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
             const msgId = parseInt(messageId, 10) || 0;
             const reply = String(replyText || '').trim();
             if (msgId <= 0 || !reply || !Array.isArray(_inboxLastMsgs)) return;
-            const ts = new Date().toISOString().slice(0, 19).replace('T', ' ');
+            const ts = (window.rhNowSql ? window.rhNowSql() : new Date().toISOString().slice(0, 19).replace('T', ' '));
             _inboxLastMsgs = _inboxLastMsgs.map(m => {
                 if ((parseInt(m.id, 10) || 0) !== msgId) return m;
                 return {
@@ -4811,7 +4811,7 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
 
             // Optimistic: mark acknowledged locally right away
             const prevMsgs = (_inboxLastMsgs || []).slice();
-            const ts = new Date().toISOString().slice(0, 19).replace('T', ' ');
+            const ts = (window.rhNowSql ? window.rhNowSql() : new Date().toISOString().slice(0, 19).replace('T', ' '));
             _inboxLastMsgs = prevMsgs.map(m => {
                 if ((parseInt(m.id, 10) || 0) !== msgId) return m;
                 return { ...m, pos_acknowledged: 1, pos_acknowledged_at: ts, pos_acknowledged_by: posUserId };

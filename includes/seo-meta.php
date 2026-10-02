@@ -233,7 +233,7 @@ if (!empty($seo['breadcrumbs'])):
     </script>
 <?php endif; ?>
 <script>
-    window._siteTimezone = <?php echo json_encode((string)getSetting('site_timezone', 'UTC')); ?>;
+    window._siteTimezone = <?php echo json_encode((string)getSetting('site_timezone', date_default_timezone_get())); ?>;
     window._siteName = <?php echo json_encode((string)($site_name ?: '')); ?>;
 </script>
 <!-- PWA manifest — enables browser install prompt on desktop + mobile -->
