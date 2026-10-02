@@ -11,6 +11,9 @@ require_once __DIR__ . '/base-url.php';
 // Require database connection for settings
 require_once __DIR__ . '/database.php';
 
+// Shared document theme + PDF kit (brand tokens, rh_pdf_* helpers)
+require_once __DIR__ . '/document-theme.php';
+
 // WhatsApp notification functions
 if (file_exists(__DIR__ . '/../includes/whatsapp-functions.php')) {
     require_once __DIR__ . '/../includes/whatsapp-functions.php';
@@ -63,6 +66,33 @@ $is_localhost = isset($_SERVER['HTTP_HOST']) && (
 $development_mode = $is_localhost && $email_development_mode;
 
 /**
+ * Automated-send policy hook (includes/auto-scheduler.php).
+ *
+ * Only acts while the scheduler / a test run has set $GLOBALS['rh_automated_ctx']
+ * (['redirect' => string, 'bcc' => bool]); manual admin and guest-triggered emails
+ * are never touched. A non-empty 'redirect' sends EVERYTHING to that address instead
+ * (subject prefixed [TEST], no BCC) so the full pipeline can be proven without
+ * contacting a real guest. Otherwise 'bcc' decides whether the hotel is BCC'd.
+ */
+function rh_automated_email_adjust(string &$to, string &$subject, bool &$bccAdmin): void
+{
+    $ctx = $GLOBALS['rh_automated_ctx'] ?? null;
+    if (!is_array($ctx)) {
+        return;
+    }
+    $redirect = trim((string)($ctx['redirect'] ?? ''));
+    if ($redirect !== '' && filter_var($redirect, FILTER_VALIDATE_EMAIL)) {
+        $to = $redirect;
+        if (strpos($subject, '[TEST]') !== 0) {
+            $subject = '[TEST] ' . $subject;
+        }
+        $bccAdmin = false;
+        return;
+    }
+    $bccAdmin = !empty($ctx['bcc']);
+}
+
+/**
  * Send email using PHPMailer
  *
  * @param string $to Recipient email
@@ -77,6 +107,10 @@ function sendEmail(string $to, ?string $toName, string $subject, string $htmlBod
     global $email_from_name, $email_from_email, $email_admin_email, $email_site_name;
     global $smtp_host, $smtp_port, $smtp_username, $smtp_password, $smtp_secure, $smtp_timeout, $smtp_debug;
     global $email_bcc_admin, $development_mode, $email_log_enabled, $email_preview_enabled;
+
+    // Automated (scheduler) sends: optional test-recipient redirect + BCC policy.
+    $bccAdmin = (bool)$email_bcc_admin;
+    rh_automated_email_adjust($to, $subject, $bccAdmin);
 
     // If in development mode and no password or preview enabled, show preview
     if ($development_mode && (empty($smtp_password) || $email_preview_enabled)) {
@@ -123,7 +157,7 @@ function sendEmail(string $to, ?string $toName, string $subject, string $htmlBod
             }
 
             // Add BCC for admin if enabled
-            if ($email_bcc_admin && !empty($email_admin_email)) {
+            if ($bccAdmin && !empty($email_admin_email)) {
                 $mail->addBCC($email_admin_email);
             }
 
@@ -184,11 +218,15 @@ function sendEmail(string $to, ?string $toName, string $subject, string $htmlBod
  * - ['path' => '/abs/file.pdf', 'name' => 'file.pdf', 'mime' => 'application/pdf']
  * - ['content' => '<binary>', 'name' => 'file.pdf', 'mime' => 'application/pdf']
  */
-function sendEmailWithAttachments(string $to, ?string $toName, string $subject, string $htmlBody, array $attachments = [], string $textBody = ''): array
+function sendEmailWithAttachments(string $to, ?string $toName, string $subject, string $htmlBody, array $attachments = [], string $textBody = '', array $options = []): array
 {
     global $email_from_name, $email_from_email, $email_admin_email, $email_site_name;
     global $smtp_host, $smtp_port, $smtp_username, $smtp_password, $smtp_secure, $smtp_timeout, $smtp_debug;
     global $email_bcc_admin, $development_mode, $email_log_enabled, $email_preview_enabled;
+
+    // Automated (scheduler) sends: optional test-recipient redirect + BCC policy.
+    $bccAdmin = (bool)$email_bcc_admin;
+    rh_automated_email_adjust($to, $subject, $bccAdmin);
 
     if ($development_mode && (empty($smtp_password) || $email_preview_enabled)) {
         $preview = createEmailPreview($to, $toName, $subject, $htmlBody, $textBody);
@@ -234,8 +272,14 @@ function sendEmailWithAttachments(string $to, ?string $toName, string $subject, 
             if (!empty($email_from_email) && filter_var($email_from_email, FILTER_VALIDATE_EMAIL)) {
                 $mail->addReplyTo($email_from_email, $email_from_name ?: $email_site_name);
             }
-            if ($email_bcc_admin && !empty($email_admin_email)) {
+            if ($bccAdmin && !empty($email_admin_email)) {
                 $mail->addBCC($email_admin_email);
+            }
+            foreach ((array)($options['cc'] ?? []) as $ccAddress) {
+                $ccAddress = trim((string)$ccAddress);
+                if (filter_var($ccAddress, FILTER_VALIDATE_EMAIL) && strcasecmp($ccAddress, $to) !== 0) {
+                    $mail->addCC($ccAddress);
+                }
             }
 
             foreach ($attachments as $attachment) {
@@ -663,16 +707,21 @@ if (!function_exists('hotel_embed_logo_cid')) {
 }
 
 if (!function_exists('hotel_japandi_key_value_rows')) {
+    /**
+     * Label/value rows for the legacy placeholder-based document templates. TCPDF-safe: pt sizes, no
+     * text-transform / em spacing; labels are upper-cased here. Values are inserted as given (HTML or {{placeholders}}).
+     */
     function hotel_japandi_key_value_rows(array $rows, string $labelWidth = '30%', string $valueColor = '#6d6455', string $valueWeight = '500'): string
     {
-        $html = '<table style="width:100%;border-collapse:collapse;font-size:12px;line-height:1.8;" cellpadding="0" cellspacing="0">';
-        foreach ($rows as $index => $row) {
-            $label = (string)($row['label'] ?? '');
+        $t = hotel_brand_tokens()['colors'];
+        $weight = ((int)$valueWeight >= 600) ? 'bold' : 'normal';
+        $html = '<table width="100%" cellpadding="2" cellspacing="0" border="0">';
+        foreach ($rows as $row) {
+            $label = strtoupper((string)($row['label'] ?? ''));
             $value = (string)($row['value'] ?? '');
-            $topPadding = $index === 0 ? '0' : '6px';
             $html .= '<tr>'
-                . '<td style="width:' . $labelWidth . ';color:#9b8f7e;font-weight:600;text-transform:uppercase;letter-spacing:0.1em;font-size:9px;padding-top:' . $topPadding . ';">' . htmlspecialchars($label, ENT_QUOTES, 'UTF-8') . '</td>'
-                . '<td style="color:' . $valueColor . ';font-weight:' . $valueWeight . ';padding-top:' . $topPadding . ';">' . $value . '</td>'
+                . '<td width="' . htmlspecialchars($labelWidth, ENT_QUOTES, 'UTF-8') . '" style="color:' . $t['muted'] . ';font-weight:bold;letter-spacing:0.6pt;font-size:6.5pt;">' . htmlspecialchars($label, ENT_QUOTES, 'UTF-8') . '</td>'
+                . '<td style="color:' . htmlspecialchars($valueColor, ENT_QUOTES, 'UTF-8') . ';font-weight:' . $weight . ';font-size:9pt;">' . $value . '</td>'
                 . '</tr>';
         }
         $html .= '</table>';
@@ -682,55 +731,60 @@ if (!function_exists('hotel_japandi_key_value_rows')) {
 }
 
 if (!function_exists('hotel_japandi_summary_table')) {
+    /**
+     * Two-column summary (heading row + label/value rows) in the kit look.
+     * Row tones: none, accent (bold), alert (danger, bold) or total (primary-coloured bar).
+     */
     function hotel_japandi_summary_table(array $rows, string $labelHeading = 'Description', string $valueHeading = 'Amount'): string
     {
-        $html = '<table width="100%" border="1" bordercolor="#d3cbc0" style="width:100%;border-collapse:collapse;" cellpadding="0" cellspacing="0">'
-            . '<tr>'
-            . '<td width="60%" style="padding:14px 10px 14px 8px;border-bottom:2px solid #c4bbb0;border-right:1px solid #d3cbc0;color:#9b8f7e;font-size:11px;letter-spacing:0.12em;text-transform:uppercase;font-weight:600;">' . htmlspecialchars($labelHeading, ENT_QUOTES, 'UTF-8') . '</td>'
-            . '<td width="40%" style="padding:14px 8px 14px 10px;border-bottom:2px solid #c4bbb0;color:#9b8f7e;font-size:11px;letter-spacing:0.12em;text-transform:uppercase;font-weight:600;text-align:right;">' . htmlspecialchars($valueHeading, ENT_QUOTES, 'UTF-8') . '</td>'
-            . '</tr>';
+        $t = hotel_brand_tokens()['colors'];
+        $headStyle = 'color:' . $t['accent_text'] . ';font-size:7.5pt;font-weight:bold;letter-spacing:0.8pt;border:0.4px solid ' . $t['accent'] . ';';
+        $html = '<table width="100%" cellpadding="6" cellspacing="0" border="0"><thead><tr>'
+            . '<td width="60%" bgcolor="' . $t['accent'] . '" style="' . $headStyle . '">' . htmlspecialchars(strtoupper($labelHeading), ENT_QUOTES, 'UTF-8') . '</td>'
+            . '<td width="40%" align="right" bgcolor="' . $t['accent'] . '" style="' . $headStyle . '">' . htmlspecialchars(strtoupper($valueHeading), ENT_QUOTES, 'UTF-8') . '</td>'
+            . '</tr></thead><tbody>';
 
         foreach ($rows as $row) {
             $label = htmlspecialchars((string)($row['label'] ?? ''), ENT_QUOTES, 'UTF-8');
             $value = (string)($row['value'] ?? '');
             $tone = (string)($row['tone'] ?? '');
 
-            $rowStyle = '';
-            $labelStyle = 'width:60%;padding:10px 10px 10px 8px;border-bottom:1px solid #d3cbc0;border-right:1px solid #d3cbc0;font-size:12px;color:#6d6455;';
-            $valueStyle = 'width:40%;padding:10px 8px 10px 10px;border-bottom:1px solid #d3cbc0;font-size:12px;color:#3e3930;text-align:right;font-weight:500;white-space:nowrap;';
-
-            if ($tone === 'accent') {
-                $labelStyle = 'width:60%;padding:10px 10px 10px 8px;border-bottom:1px solid #d3cbc0;border-right:1px solid #d3cbc0;font-size:12px;color:#3e3930;font-weight:700;';
-                $valueStyle = 'width:40%;padding:10px 8px 10px 10px;border-bottom:1px solid #d3cbc0;font-size:12px;color:#3e3930;text-align:right;font-weight:700;white-space:nowrap;';
-            } elseif ($tone === 'alert') {
-                $labelStyle = 'width:60%;padding:10px 10px 10px 8px;border-bottom:1px solid #d3cbc0;border-right:1px solid #d3cbc0;font-size:12px;color:#8a5646;font-weight:700;';
-                $valueStyle = 'width:40%;padding:10px 8px 10px 10px;border-bottom:1px solid #d3cbc0;font-size:12px;color:#8a5646;text-align:right;font-weight:700;white-space:nowrap;';
-            } elseif ($tone === 'total') {
-                $rowStyle = '';
-                $labelStyle = 'width:60%;padding:10px 10px 10px 8px;border-top:2px solid #2a2420;font-size:12px;color:#f5f2eb;font-weight:700;background-color:#3e3930;';
-                $valueStyle = 'width:40%;padding:10px 8px 10px 10px;border-top:2px solid #2a2420;font-size:12px;color:#f5f2eb;text-align:right;font-weight:700;background-color:#3e3930;white-space:nowrap;';
-            }
-
             if ($tone === 'total') {
-                $html .= '<tr>'
-                    . '<td width="60%" bgcolor="#3e3930" style="' . $labelStyle . '">' . $label . '</td>'
-                    . '<td width="40%" bgcolor="#3e3930" style="' . $valueStyle . '">' . $value . '</td>'
+                $cell = 'color:' . $t['accent_text'] . ';font-size:9.5pt;font-weight:bold;';
+                $html .= '<tr nobr="true">'
+                    . '<td width="60%" bgcolor="' . $t['accent'] . '" style="' . $cell . '">' . $label . '</td>'
+                    . '<td width="40%" align="right" bgcolor="' . $t['accent'] . '" style="' . $cell . '">' . $value . '</td>'
                     . '</tr>';
-            } else {
-                $html .= '<tr' . ($rowStyle !== '' ? ' style="' . $rowStyle . '"' : '') . '>'
-                    . '<td width="60%" style="' . $labelStyle . '">' . $label . '</td>'
-                    . '<td width="40%" style="' . $valueStyle . '">' . $value . '</td>'
-                    . '</tr>';
+                continue;
             }
+            $labelColor = $t['muted_dark'];
+            $valueColor = $t['text'];
+            $weight = 'normal';
+            if ($tone === 'accent') {
+                $labelColor = $t['text'];
+                $weight = 'bold';
+            } elseif ($tone === 'alert') {
+                $labelColor = $valueColor = $t['danger'];
+                $weight = 'bold';
+            }
+            $border = 'border-bottom:0.5px solid ' . $t['rule'] . ';';
+            $html .= '<tr nobr="true">'
+                . '<td width="60%" style="color:' . $labelColor . ';font-size:9pt;font-weight:' . $weight . ';' . $border . '">' . $label . '</td>'
+                . '<td width="40%" align="right" style="color:' . $valueColor . ';font-size:9pt;font-weight:' . $weight . ';' . $border . '">' . $value . '</td>'
+                . '</tr>';
         }
 
-        $html .= '</table>';
-
-        return $html;
+        return $html . '</tbody></table>';
     }
 }
 
 if (!function_exists('hotel_japandi_document_shell')) {
+    /**
+     * Code-default layout for the placeholder-based *_document templates, built on the PDF kit
+     * (config/document-theme.php) so it renders cleanly in TCPDF: no max-width, box-shadow, rgba or
+     * border-radius. {{placeholders}} stay in the output; callers substitute them with escaped values.
+     * The rh-pdf-kit marker makes bookingRenderPdfFromHtml() draw the cream card and footer.
+     */
     function hotel_japandi_document_shell(
         string $documentLabel,
         string $documentNumber,
@@ -747,72 +801,59 @@ if (!function_exists('hotel_japandi_document_shell')) {
         string $footerNote = 'Thank you for choosing us',
         string $headerExtraHtml = ''
     ): string {
+        $t = hotel_brand_tokens()['colors'];
+        $e = static function (string $s): string {
+            return htmlspecialchars($s, ENT_QUOTES, 'UTF-8');
+        };
         $dateLine = trim($dateLabel . ' ' . $dateValue);
-        $headerExtra = trim($headerExtraHtml) !== ''
-            ? '<div style="font-size:10px;color:#9b8f7e;letter-spacing:0.04em;margin-top:4px;">' . $headerExtraHtml . '</div>'
-            : '';
+        $line = 'color:' . $t['muted_dark'] . ';font-size:8pt;';
 
-        $extraHtml = '';
+        $out = '<!--rh-pdf-kit-->'
+            . '<table width="100%" cellpadding="2" cellspacing="0" border="0">'
+            . '<tr><td align="center">{{logo_html}}</td></tr>'
+            . '<tr><td align="center" style="font-family:times;font-size:19pt;color:' . $t['text'] . ';letter-spacing:1pt;">{{site_name}}</td></tr>'
+            . '<tr><td align="center" style="' . $line . '">{{address}}</td></tr>'
+            . '<tr><td align="center" style="' . $line . '">{{contact_phone}}  |  {{contact_email}}</td></tr>';
+        if (trim($headerExtraHtml) !== '') {
+            $out .= '<tr><td align="center" style="' . $line . '">' . $headerExtraHtml . '</td></tr>';
+        }
+        $out .= '</table>'
+            . rh_pdf_spacer(3)
+            . '<table width="100%" cellpadding="6" cellspacing="0" border="0"><tr><td align="center" bgcolor="' . $t['accent'] . '" style="color:' . $t['accent_text'] . ';font-size:9.5pt;font-weight:bold;letter-spacing:2.5pt;">'
+            . $e(strtoupper($documentLabel)) . '</td></tr></table>'
+            . rh_pdf_spacer(3)
+            . '<table width="100%" cellpadding="3" cellspacing="0" border="0"><tr>'
+            . '<td width="50%" style="font-family:times;font-size:15pt;color:' . $t['text'] . ';">' . $documentNumber . '</td>'
+            . '<td width="50%" align="right" style="color:' . $t['muted_dark'] . ';font-size:9pt;">' . $e($dateLine) . ($statusHtml !== '' ? '<br />' . $statusHtml : '') . '</td>'
+            . '</tr></table>'
+            . rh_pdf_spacer(3)
+            . '<table width="100%" cellpadding="8" cellspacing="0" border="0" bgcolor="' . $t['panel'] . '"><tr>'
+            . '<td width="50%" style="color:' . $t['muted'] . ';font-size:7pt;font-weight:bold;letter-spacing:1.2pt;">' . $e(strtoupper($leftHeading)) . '<br />' . $leftContentHtml . '</td>'
+            . '<td width="50%" style="color:' . $t['muted'] . ';font-size:7pt;font-weight:bold;letter-spacing:1.2pt;">' . $e(strtoupper($rightHeading)) . '<br />' . $rightContentHtml . '</td>'
+            . '</tr></table>'
+            . rh_pdf_spacer(4)
+            . rh_pdf_section_title($contentHeading)
+            . rh_pdf_spacer(2)
+            . $contentHtml;
+
         foreach ($extraSections as $sectionHtml) {
             $section = trim((string)$sectionHtml);
             if ($section === '') {
                 continue;
             }
-
-            $extraHtml .= '<tr><td bgcolor="#f5f2eb" style="background-color:#f5f2eb;padding:0 48px;"><div style="height:1px;background:#d3cbc0;"></div></td></tr>'
-                . '<tr><td bgcolor="#f5f2eb" style="background-color:#f5f2eb;padding:0 48px;">' . $section . '</td></tr>';
+            $out .= rh_pdf_spacer(4) . $section;
         }
 
-        return '<table style="width:100%;background-color:#d5cfc4;border-collapse:collapse;" cellpadding="0" cellspacing="0" bgcolor="#d5cfc4"><tr><td bgcolor="#d5cfc4" style="padding:40px 20px;background-color:#d5cfc4;font-family:Helvetica,Arial,sans-serif;color:#3e3930;">'
-            . '<table border="1" bordercolor="#d3cbc0" cellpadding="0" cellspacing="0" style="width:100%;max-width:720px;margin:0 auto;border-collapse:collapse;border:1px solid #d3cbc0;background-color:#f5f2eb;border-radius:1px;box-shadow:0 16px 40px rgba(70,60,50,0.15),0 4px 12px rgba(70,60,50,0.08);">'
-            . '<tr><td bgcolor="#f5f2eb" style="background-color:#f5f2eb;padding:0;">'
-            . '<table style="width:100%;border-collapse:collapse;" cellpadding="0" cellspacing="0">'
-            . '<tr><td bgcolor="#f5f2eb" style="background-color:#f5f2eb;padding:0;"><table style="width:100%;border-collapse:collapse;" cellpadding="0" cellspacing="0"><tr>'
-            . '<td bgcolor="#f5f2eb" style="background-color:#f5f2eb;padding:48px 48px 36px;vertical-align:top;">'
-            . '<div style="max-width:110px;margin-bottom:16px;color:#9b8f7e;">{{logo_html}}</div>'
-            . '<div style="font-family:Georgia,\'Times New Roman\',serif;font-size:24px;color:#3e3930;letter-spacing:0.04em;line-height:1;font-weight:400;margin-bottom:16px;">{{site_name}}</div>'
-            . '<div style="font-size:10px;color:#6d6455;letter-spacing:0.08em;line-height:1.7;">{{address}}</div>'
-            . '<div style="font-size:10px;color:#6d6455;letter-spacing:0.04em;margin-top:4px;">{{contact_phone}} &nbsp;&middot;&nbsp; {{contact_email}}</div>'
-            . $headerExtra
-            . '</td>'
-            . '<td bgcolor="#f5f2eb" style="background-color:#f5f2eb;padding:48px 48px 36px;vertical-align:top;text-align:right;">'
-            . '<div style="font-size:9px;letter-spacing:0.25em;text-transform:uppercase;color:#9b8f7e;font-weight:600;margin-bottom:12px;">' . htmlspecialchars($documentLabel, ENT_QUOTES, 'UTF-8') . '</div>'
-            . '<div style="font-family:Georgia,\'Times New Roman\',serif;font-size:24px;color:#3e3930;letter-spacing:0.04em;line-height:1.1;font-weight:400;">' . $documentNumber . '</div>'
-            . '<div style="font-size:11px;color:#6d6455;margin-top:12px;letter-spacing:0.06em;">' . htmlspecialchars($dateLine, ENT_QUOTES, 'UTF-8') . '</div>'
-            . $statusHtml
-            . '</td>'
-            . '</tr></table></td></tr>'
-            . '<tr><td bgcolor="#f5f2eb" style="background-color:#f5f2eb;padding:0 48px;"><table width="100%" cellpadding="0" cellspacing="0"><tr><td bgcolor="#d3cbc0" style="background-color:#d3cbc0;height:1px;font-size:1px;line-height:1px;"> </td></tr></table></td></tr>'
-            . '<tr><td bgcolor="#f5f2eb" style="background-color:#f5f2eb;padding:0;"><table style="width:100%;border-collapse:collapse;" cellpadding="0" cellspacing="0"><tr>'
-            . '<td bgcolor="#f5f2eb" style="background-color:#f5f2eb;width:50%;padding:32px 48px;vertical-align:top;border-right:1px solid #d3cbc0;">'
-            . '<div style="font-size:9px;letter-spacing:0.2em;text-transform:uppercase;color:#9b8f7e;font-weight:600;margin-bottom:20px;">' . htmlspecialchars($leftHeading, ENT_QUOTES, 'UTF-8') . '</div>'
-            . $leftContentHtml
-            . '</td>'
-            . '<td bgcolor="#f5f2eb" style="background-color:#f5f2eb;width:50%;padding:32px 48px;vertical-align:top;">'
-            . '<div style="font-size:9px;letter-spacing:0.2em;text-transform:uppercase;color:#9b8f7e;font-weight:600;margin-bottom:20px;">' . htmlspecialchars($rightHeading, ENT_QUOTES, 'UTF-8') . '</div>'
-            . $rightContentHtml
-            . '</td>'
-            . '</tr></table></td></tr>'
-            . '<tr><td bgcolor="#f5f2eb" style="background-color:#f5f2eb;padding:0 48px;"><table width="100%" cellpadding="0" cellspacing="0"><tr><td bgcolor="#d3cbc0" style="background-color:#d3cbc0;height:1px;font-size:1px;line-height:1px;"> </td></tr></table></td></tr>'
-            . '<tr><td bgcolor="#f5f2eb" style="background-color:#f5f2eb;padding:36px 48px 36px;">'
-            . '<div style="font-size:9px;letter-spacing:0.2em;text-transform:uppercase;color:#9b8f7e;font-weight:600;margin-bottom:20px;">' . htmlspecialchars($contentHeading, ENT_QUOTES, 'UTF-8') . '</div>'
-            . $contentHtml
-            . '</td></tr>'
-            . $extraHtml
-            . '<tr><td bgcolor="#ece8e0" style="background-color:#ece8e0;padding:0;"><table style="width:100%;border-collapse:collapse;background-color:#ece8e0;" cellpadding="0" cellspacing="0" bgcolor="#ece8e0"><tr>'
-            . '<td style="padding:28px 48px;vertical-align:middle;"><span style="font-family:Georgia,\'Times New Roman\',serif;font-size:15px;color:#3e3930;font-weight:400;letter-spacing:0.06em;">{{site_name}}</span></td>'
-            . '<td style="padding:28px 48px;text-align:right;vertical-align:middle;"><span style="font-size:9px;color:#9b8f7e;letter-spacing:0.18em;text-transform:uppercase;">' . htmlspecialchars($footerNote, ENT_QUOTES, 'UTF-8') . '</span></td>'
-            . '</tr></table></td></tr>'
-            . '</table>'
-            . '</td></tr></table>'
-            . '</td></tr></table>';
+        return $out . rh_pdf_spacer(6)
+            . '<table width="100%" cellpadding="3" cellspacing="0" border="0"><tr><td align="center" style="font-family:times;font-size:11pt;color:' . $t['muted_dark'] . ';">{{site_name}}</td></tr>'
+            . '<tr><td align="center" style="color:' . $t['muted'] . ';font-size:7pt;letter-spacing:1.5pt;">' . $e(strtoupper($footerNote)) . '</td></tr></table>';
     }
 }
 
 if (!function_exists('hotel_default_payment_invoice_document_html')) {
     function hotel_default_payment_invoice_document_html(): string
     {
-        $statusHtml = '<div style="margin-top:16px;"><span style="display:inline-block;padding:6px 16px;background:{{status_bg}};color:{{status_fg}};font-size:9px;letter-spacing:0.15em;text-transform:uppercase;font-weight:700;border-radius:2px;border:1px solid rgba(0,0,0,0.05);box-shadow:0 1px 2px rgba(0,0,0,0.02);">{{status_text}}</span></div>';
+        $statusHtml = '<span style="background-color:{{status_bg}};color:{{status_fg}};font-size:8pt;font-weight:bold;letter-spacing:1pt;">&nbsp;{{status_text}}&nbsp;</span>';
         $leftContentHtml = hotel_japandi_key_value_rows([
             ['label' => 'Name', 'value' => '{{guest_name}}'],
             ['label' => 'Email', 'value' => '{{guest_email}}'],
@@ -826,17 +867,19 @@ if (!function_exists('hotel_default_payment_invoice_document_html')) {
             ['label' => 'Guests', 'value' => '{{guests}}'],
             ['label' => 'Duration', 'value' => '{{nights}} night(s)'],
         ], '35%', '#6d6455', '500');
-        $contentHtml = '<table width="100%" border="1" bordercolor="#C8BEB0" style="width:100%;border-collapse:collapse;" cellpadding="0" cellspacing="0">'
-            . '<tr style="background-color:#8A775F;">'
-            . '<td width="50%" bgcolor="#8A775F" style="padding:10px 12px;border-bottom:2px solid #9A8E82;border-right:1px solid #9A8E82;color:#FFFFFF;font-size:10px;letter-spacing:1.5px;text-transform:uppercase;font-weight:700;background-color:#8A775F;">Description</td>'
-            . '<td width="10%" bgcolor="#8A775F" style="padding:10px 8px;border-bottom:2px solid #9A8E82;border-right:1px solid #9A8E82;color:#FFFFFF;font-size:10px;letter-spacing:1.5px;text-transform:uppercase;font-weight:700;text-align:center;background-color:#8A775F;">Qty</td>'
-            . '<td width="15%" bgcolor="#8A775F" style="padding:10px 8px;border-bottom:2px solid #9A8E82;border-right:1px solid #9A8E82;color:#FFFFFF;font-size:10px;letter-spacing:1.5px;text-transform:uppercase;font-weight:700;text-align:right;background-color:#8A775F;">Unit Rate</td>'
-            . '<td width="25%" bgcolor="#8A775F" style="padding:10px 12px;border-bottom:2px solid #9A8E82;color:#FFFFFF;font-size:10px;letter-spacing:1.5px;text-transform:uppercase;font-weight:700;text-align:right;background-color:#8A775F;">Line Total</td>'
-            . '</tr>'
+        $inv = hotel_brand_tokens()['colors'];
+        $invHead = static function (string $width, string $align, string $label) use ($inv): string {
+            return '<td width="' . $width . '" align="' . $align . '" bgcolor="' . $inv['accent'] . '" style="color:' . $inv['accent_text'] . ';font-size:7.5pt;font-weight:bold;letter-spacing:0.8pt;border:0.4px solid ' . $inv['accent'] . ';">' . $label . '</td>';
+        };
+        $contentHtml = '<table width="100%" cellpadding="6" cellspacing="0" border="0"><thead><tr>'
+            . $invHead('50%', 'left', 'DESCRIPTION')
+            . $invHead('10%', 'center', 'QTY')
+            . $invHead('15%', 'right', 'UNIT RATE')
+            . $invHead('25%', 'right', 'LINE TOTAL')
+            . '</tr></thead><tbody>'
             . '{{charges_table_rows}}'
             . '{{totals_rows}}'
-            . '</table>';
-
+            . '</tbody></table>';
         return hotel_japandi_document_shell(
             'Invoice',
             '{{invoice_number}}',
@@ -859,7 +902,7 @@ if (!function_exists('hotel_default_payment_invoice_document_html')) {
 if (!function_exists('hotel_default_conference_invoice_document_html')) {
     function hotel_default_conference_invoice_document_html(): string
     {
-        $statusHtml = '<div style="margin-top:16px;"><span style="display:inline-block;padding:6px 16px;background:#ece5db;color:#5b5246;font-size:9px;letter-spacing:0.15em;text-transform:uppercase;font-weight:700;border-radius:2px;border:1px solid rgba(0,0,0,0.05);">{{status_text}}</span></div>';
+        $statusHtml = '<span style="background-color:#ece5db;color:#5b5246;font-size:8pt;font-weight:bold;letter-spacing:1pt;">&nbsp;{{status_text}}&nbsp;</span>';
         $leftContentHtml = hotel_japandi_key_value_rows([
             ['label' => 'Company', 'value' => '{{company_name}}'],
             ['label' => 'Contact', 'value' => '{{contact_person}}'],
@@ -922,8 +965,8 @@ if (!function_exists('hotel_default_room_quotation_document_html')) {
             ['label' => 'Total Quotation', 'value' => '{{total_amount}}', 'tone' => 'total'],
             ['label' => 'Balance Due', 'value' => '{{balance_due}}', 'tone' => 'alert'],
         ], 'Line Item', 'Amount')
-            . '<div style="margin-top:18px;font-size:12px;line-height:1.8;color:#6d6455;">{{payment_policy}}</div>'
-            . '<div style="margin-top:12px;font-size:12px;line-height:1.8;color:#6d6455;">{{quotation_notes}}</div>';
+            . rh_pdf_spacer(4) . '<div style="font-size:9pt;color:#6d6455;">{{payment_policy}}</div>'
+            . rh_pdf_spacer(3) . '<div style="font-size:9pt;color:#6d6455;">{{quotation_notes}}</div>';
 
         return hotel_japandi_document_shell(
             'Quotation',
@@ -963,8 +1006,8 @@ if (!function_exists('hotel_default_conference_quotation_document_html')) {
             ['label' => 'VAT', 'value' => '{{vat_amount}}'],
             ['label' => 'Deposit Required', 'value' => '{{deposit_amount}}', 'tone' => 'accent'],
         ], 'Line Item', 'Amount')
-            . '<div style="margin-top:18px;font-size:12px;line-height:1.8;color:#6d6455;">{{payment_policy}}</div>'
-            . '<div style="margin-top:12px;font-size:12px;line-height:1.8;color:#6d6455;">{{quotation_notes}}</div>';
+            . rh_pdf_spacer(4) . '<div style="font-size:9pt;color:#6d6455;">{{payment_policy}}</div>'
+            . rh_pdf_spacer(3) . '<div style="font-size:9pt;color:#6d6455;">{{quotation_notes}}</div>';
 
         return hotel_japandi_document_shell(
             'Quotation',
@@ -1004,7 +1047,7 @@ if (!function_exists('hotel_default_event_quotation_document_html')) {
             ['label' => 'Attendee Count', 'value' => '{{attendee_count}} attendees'],
             ['label' => 'Total Quotation', 'value' => '{{total_amount}}', 'tone' => 'total'],
         ], 'Line Item', 'Amount')
-            . '<div style="margin-top:18px;font-size:12px;line-height:1.8;color:#6d6455;">{{quotation_notes}}</div>';
+            . rh_pdf_spacer(4) . '<div style="font-size:9pt;color:#6d6455;">{{quotation_notes}}</div>';
 
         return hotel_japandi_document_shell(
             'Quotation',
@@ -1042,7 +1085,7 @@ if (!function_exists('hotel_default_credit_note_document_html')) {
             ['label' => 'Amount Used', 'value' => '{{amount_used}}'],
             ['label' => 'Available Balance', 'value' => '{{balance}}', 'tone' => 'total'],
         ], 'Line Item', 'Amount')
-            . '<div style="margin-top:18px;font-size:10px;line-height:1.8;color:#6d6455;">{{reason_notes}}</div>';
+            . rh_pdf_spacer(4) . '<div style="font-size:8pt;color:#6d6455;">{{reason_notes}}</div>';
 
         return hotel_japandi_document_shell(
             'Credit Note',
@@ -1065,7 +1108,7 @@ if (!function_exists('hotel_default_credit_note_document_html')) {
 if (!function_exists('hotel_default_receipt_document_html')) {
     function hotel_default_receipt_document_html(): string
     {
-        $statusHtml = '<div style="margin-top:16px;"><span style="display:inline-block;padding:6px 16px;background:#ece5db;color:#5b5246;font-size:9px;letter-spacing:0.15em;text-transform:uppercase;font-weight:700;border-radius:2px;border:1px solid rgba(0,0,0,0.05);">{{payment_status}}</span></div>';
+        $statusHtml = '<span style="background-color:#ece5db;color:#5b5246;font-size:8pt;font-weight:bold;letter-spacing:1pt;">&nbsp;{{payment_status}}&nbsp;</span>';
         $leftContentHtml = hotel_japandi_key_value_rows([
             ['label' => 'Guest', 'value' => '{{guest_name}}'],
             ['label' => 'Email', 'value' => '{{guest_email}}'],
@@ -1077,7 +1120,7 @@ if (!function_exists('hotel_default_receipt_document_html')) {
             ['label' => 'Payment Ref', 'value' => '{{payment_reference}}'],
             ['label' => 'Method', 'value' => '{{payment_method}}'],
         ], '34%', '#6d6455', '500');
-        $contentHtml = '<div style="margin:0 0 18px;font-size:10px;line-height:1.8;color:#6d6455;">{{description}}</div>'
+        $contentHtml = '<div style="font-size:8pt;color:#6d6455;">{{description}}</div>' . rh_pdf_spacer(3)
             . hotel_japandi_summary_table([
                 ['label' => 'Payment Amount', 'value' => '{{payment_amount}}'],
                 ['label' => 'VAT Component', 'value' => '{{vat_amount}}'],
@@ -1123,7 +1166,10 @@ if (!function_exists('renderBookingDocumentTemplate')) {
         $templateHtml = $fallbackHtml;
         if (function_exists('getBookingEmailTemplateConfig')) {
             $template = getBookingEmailTemplateConfig($templateKey, []);
-            if (!empty($template['html_body']) && (int)($template['is_active'] ?? 1) === 1) {
+            // A saved copy that only repeats the code default's wording (older styling) is ignored so the
+            // current TCPDF-safe default renders; a template with edited wording is honoured as saved.
+            if (!empty($template['html_body']) && (int)($template['is_active'] ?? 1) === 1
+                && !rh_pdf_template_is_stock((string)$template['html_body'], $fallbackHtml)) {
                 $templateHtml = (string)$template['html_body'];
             }
         }
@@ -1164,31 +1210,181 @@ if (!function_exists('hotel_load_tcpdf')) {
 }
 
 if (!function_exists('bookingRenderPdfFromHtml')) {
-    function bookingRenderPdfFromHtml(string $html, string $title = 'Document'): string
+    /**
+     * Render HTML to PDF bytes (A4) with the shared document chrome.
+     *
+     * Two modes, chosen automatically:
+     *  - KIT mode (html contains the rh-pdf-kit marker, i.e. built with rh_pdf_document_shell()):
+     *    sand page (token "page") with an inset cream card (token "card"), content inside the card.
+     *  - LEGACY mode (older japandi shells that paint their own sand table): full-page token
+     *    "page" colour, 12mm margins, as before.
+     * Both get a footer: footer text, hotel name | address | phone, and "Page X of Y".
+     *
+     * @param array $opts 'watermark' => text drawn diagonally behind content (e.g. SAMPLE)
+     */
+    function bookingRenderPdfFromHtml(string $html, string $title = 'Document', array $opts = []): string
     {
         if (!hotel_load_tcpdf()) {
             throw new RuntimeException('The PDF engine (TCPDF) is not installed on this server. Upload the vendor/ folder (composer install) or a TCPDF/ folder to enable PDF documents.');
         }
 
-        // Anonymous subclass fills #D5CFC4 sand on every page — matches the document shell
-        // outer table so no white gap appears in margins or on overflow pages.
+        $tok = hotel_brand_tokens();
+        $kit = strpos($html, '<!--rh-pdf-kit-->') !== false;
+        if ($kit) {
+            $html = rh_pdf_clean($html);
+        }
+
         $pdf = new class('P', 'mm', 'A4', true, 'UTF-8', false) extends TCPDF {
+            /** @var array<string,mixed> */
+            public $rh = [];
+
+            /** Drop the 1pt "Powered by TCPDF" mark TCPDF stamps in the page corner. */
+            public function rhHideEngineLink(): void
+            {
+                if (property_exists($this, 'tcpdflink')) {
+                    $this->tcpdflink = false;
+                }
+            }
+
             public function AddPage($orientation = '', $format = '', $keepmargins = false, $tocpage = false): void
             {
                 parent::AddPage($orientation, $format, $keepmargins, $tocpage);
-                $this->SetFillColor(213, 207, 196); // #D5CFC4 — Japandi sand, matches outer table
-                $this->Rect(0, 0, $this->getPageWidth(), $this->getPageHeight(), 'F');
+                $c = $this->rh['colors'];
+                $w = $this->getPageWidth();
+                $h = $this->getPageHeight();
+                $page = rh_theme_rgb($c['page']);
+                $this->SetFillColor($page[0], $page[1], $page[2]);
+                $this->Rect(0, 0, $w, $h, 'F');
+                if (!empty($this->rh['kit'])) {
+                    $card = rh_theme_rgb($c['card']);
+                    $rule = rh_theme_rgb($c['rule']);
+                    $this->SetFillColor($card[0], $card[1], $card[2]);
+                    $this->SetDrawColor($rule[0], $rule[1], $rule[2]);
+                    $this->SetLineWidth(0.2);
+                    $this->Rect(8, 8, $w - 16, $h - 16, 'DF');
+                }
+                // Table cell backgrounds are inserted at the page mark: move it above the page paint,
+                // otherwise the full-page rect covers every bgcolor cell.
+                $this->setPageMark();
+            }
+
+            public function Footer(): void
+            {
+                $c = $this->rh['colors'];
+                $hotel = $this->rh['hotel'];
+                $mut = rh_theme_rgb($c['muted_dark']);
+                $rule = rh_theme_rgb($c['rule']);
+                $kit = !empty($this->rh['kit']);
+                $left = $kit ? 18 : 12;
+                $width = $this->getPageWidth() - 2 * $left;
+                $y = $this->getPageHeight() - ($kit ? 22 : 14);
+                $this->SetDrawColor($rule[0], $rule[1], $rule[2]);
+                $this->SetLineWidth(0.2);
+                $this->Line($left, $y, $left + $width, $y);
+                $this->SetTextColor($mut[0], $mut[1], $mut[2]);
+                $this->SetFont('helvetica', '', 7);
+                $y += 1.5;
+                if ($this->rh['footer_text'] !== '') {
+                    $this->SetXY($left, $y);
+                    $this->Cell($width, 3.5, $this->rh['footer_text'], 0, 0, 'C');
+                    $y += 3.5;
+                }
+                $parts = array_filter([$hotel['name'], $hotel['address'], $hotel['phone'] !== '' ? 'Tel ' . $hotel['phone'] : ''], 'strlen');
+                $this->SetXY($left, $y);
+                $this->Cell($width * 0.78, 3.5, implode('  |  ', $parts), 0, 0, 'L');
+                $this->Cell($width * 0.22, 3.5, 'Page ' . $this->getAliasNumPage() . ' of ' . $this->getAliasNbPages(), 0, 0, 'R');
             }
         };
+        $pdf->rh = [
+            'colors'      => $tok['colors'],
+            'hotel'       => array_map('rh_pdf_clean', $tok['hotel']),
+            'footer_text' => rh_pdf_clean($tok['footer_text']),
+            'kit'         => $kit,
+            'watermark'   => (string)($opts['watermark'] ?? ''),
+        ];
+        $pdf->rhHideEngineLink();
+        $pdf->SetCreator($tok['hotel']['name']);
+        $pdf->SetAuthor($tok['hotel']['name']);
         $pdf->setPrintHeader(false);
-        $pdf->setPrintFooter(false);
-        $pdf->SetMargins(12, 12, 12);
-        $pdf->SetAutoPageBreak(true, 14);
+        $pdf->setPrintFooter(true);
+        if ($kit) {
+            $pdf->SetMargins(18, 16, 18);
+            $pdf->SetAutoPageBreak(true, 26);
+        } else {
+            $pdf->SetMargins(12, 12, 12);
+            $pdf->SetAutoPageBreak(true, 18);
+        }
+        $pdf->SetFooterMargin(0);
         $pdf->SetTitle($title);
+        $pdf->SetFont($tok['fonts']['body'], '', 9);
         $pdf->AddPage();
-        $pdf->writeHTML($html, true, false, true, false, '');
 
-        return $pdf->Output('', 'S');
+        // Markers emitted by the kit:
+        //   <!--rh-keep=N-->      start a new page when fewer than N mm remain (heading + first rows stay together)
+        //   <!--rh-th=base64-->   a table header to re-print at the top of any page the table runs onto
+        //   <!--rh-th-end-->      forget that header
+        $parts = preg_split('/(<!--rh-(?:keep=\d+|th=[A-Za-z0-9+\/=]+|th-end)-->)/', $html, -1, PREG_SPLIT_DELIM_CAPTURE);
+        $header = '';
+        $headerNext = false;
+        $pendingKeep = 0.0;
+        foreach ($parts as $part) {
+            if (preg_match('/^<!--rh-keep=(\d+)-->$/', $part, $m)) {
+                $pendingKeep = max($pendingKeep, (float)$m[1]);
+                continue;
+            }
+            if (preg_match('/^<!--rh-th=([A-Za-z0-9+\/=]+)-->$/', $part, $m)) {
+                $header = (string)base64_decode($m[1]);
+                $headerNext = true;
+                continue;
+            }
+            if ($part === '<!--rh-th-end-->') {
+                $header = '';
+                continue;
+            }
+            if (trim($part) === '') {
+                continue;
+            }
+            if ($pendingKeep > 0 && $pdf->GetY() + $pendingKeep > $pdf->getPageHeight() - $pdf->getBreakMargin()) {
+                $pdf->AddPage();
+                if ($header !== '' && strpos($part, $header) === false) {
+                    $x0 = $pdf->GetX();
+                    $pdf->writeHTML($header, false, false, true, false, '');
+                    $pdf->SetX($x0);
+                }
+            }
+            $isRow = $header !== '' && ($pendingKeep > 0 || $headerNext);
+            $headerNext = false;
+            $pendingKeep = 0.0;
+            $startX = $pdf->GetX();
+            $pdf->writeHTML($part, !$isRow, false, true, false, '');
+            if ($isRow) {
+                $pdf->SetX($startX); // table rows stack with no blank line between them
+            }
+        }
+        // TCPDF can pre-create a following page when the last block ends at the bottom margin; the
+        // cursor stays on the page that was written, so drop any pages after it (they are empty).
+        while ($pdf->getNumPages() > $pdf->getPage()) {
+            $pdf->deletePage($pdf->getNumPages());
+        }
+
+// Watermark is stamped on every page AFTER the content is laid out, so it can never affect pagination.
+        if ((string)($opts['watermark'] ?? '') !== '') {
+            $mut = rh_theme_rgb($tok['colors']['muted']);
+            $pdf->SetAutoPageBreak(false);
+            for ($n = 1, $total = $pdf->getNumPages(); $n <= $total; $n++) {
+                $pdf->setPage($n);
+                $pdf->StartTransform();
+                $pdf->SetAlpha(0.13);
+                $pdf->SetTextColor($mut[0], $mut[1], $mut[2]);
+                $pdf->SetFont('helvetica', 'B', 80);
+                $pdf->Rotate(45, $pdf->getPageWidth() / 2, $pdf->getPageHeight() / 2);
+                $pdf->Text($pdf->getPageWidth() / 2 - 60, $pdf->getPageHeight() / 2 - 8, (string)$opts['watermark']);
+                $pdf->SetAlpha(1);
+                $pdf->StopTransform();
+            }
+        }
+
+                return $pdf->Output('', 'S');
     }
 }
 
@@ -1758,6 +1954,69 @@ function ensureBookingEmailTemplateDefaults()
             'subject' => 'Conference Invoice Document',
             'html'    => hotel_default_conference_invoice_document_html(),
         ],
+    ];
+
+    /* ── Automated overdue-payment reminders (includes/auto-scheduler.php) ──
+       Polite -> firm -> final. Same premium shell as every other template. */
+    $reminderTone = [
+        1 => [
+            'name'    => 'Payment Reminder 1 - Friendly',
+            'subject' => 'A gentle reminder: balance due on {{account_reference}} — {{site_name}}',
+            'pre'     => 'A friendly reminder about your outstanding balance of {{currency_symbol}} {{amount_due}}',
+            'intro'   => '<p style="margin:0 0 16px;">Thank you for choosing <strong>{{site_name}}</strong>. We hope everything went well. Our records show an outstanding balance of <strong>{{currency_symbol}} {{amount_due}}</strong> on <strong>{{account_reference}}</strong>, which was due on <strong>{{due_date}}</strong>.</p>'
+                . '<p style="margin:0 0 16px;">If you have already paid, thank you &mdash; please reply with your proof of payment so we can update our records. Otherwise, we would be grateful if you could settle the balance at your earliest convenience. Your invoice is attached for reference.</p>',
+        ],
+        2 => [
+            'name'    => 'Payment Reminder 2 - Firm',
+            'subject' => 'Second reminder: overdue balance on {{account_reference}} — {{site_name}}',
+            'pre'     => 'Second reminder: {{currency_symbol}} {{amount_due}} is now {{days_overdue}} days overdue',
+            'intro'   => '<p style="margin:0 0 16px;">We wrote to you recently about the outstanding balance on <strong>{{account_reference}}</strong>. We have not yet received payment, and <strong>{{currency_symbol}} {{amount_due}}</strong> is now <strong>{{days_overdue}} days</strong> past its due date of <strong>{{due_date}}</strong>.</p>'
+                . '<p style="margin:0 0 16px;">Please arrange payment within the next 48 hours, or contact us right away if there is a problem we can help with. Your invoice is attached again for reference.</p>',
+        ],
+        3 => [
+            'name'    => 'Payment Reminder 3 - Final',
+            'subject' => 'Final reminder: overdue balance on {{account_reference}} — {{site_name}}',
+            'pre'     => 'Final reminder: {{currency_symbol}} {{amount_due}} is {{days_overdue}} days overdue',
+            'intro'   => '<p style="margin:0 0 16px;"><span style="color:#b0552b;font-weight:600;">This is our final reminder.</span> The balance of <strong>{{currency_symbol}} {{amount_due}}</strong> on <strong>{{account_reference}}</strong> is <strong>{{days_overdue}} days</strong> overdue (due {{due_date}}).</p>'
+                . '<p style="margin:0 0 16px;">Unless we receive payment, or hear from you to agree a payment plan, within 7 days, we will have to refer this account to our management for further action. We would much prefer to resolve this with you directly &mdash; please get in touch today. Your invoice is attached.</p>',
+        ],
+    ];
+    foreach ($reminderTone as $n => $tone) {
+        $defaults['payment_reminder_' . $n] = [
+            'name'    => $tone['name'],
+            'subject' => $tone['subject'],
+            'html'    => hotel_premium_email_html(
+                $tone['pre'],
+                hotel_premium_email_body('{{guest_name}}', $tone['intro'])
+                    . hotel_premium_email_summary_rows('Account Summary', [
+                        ['Account',      '{{account_reference}}'],
+                        ['Invoice',      '{{invoice_number}}'],
+                        ['Due date',     '{{due_date}}'],
+                        ['Days overdue', '{{days_overdue}}'],
+                        ['Amount due',   '{{currency_symbol}} {{amount_due}}', true],
+                    ])
+                    . '<tr><td style="padding:0 48px 32px;font-size:13px;line-height:1.8;color:#5c5549;">{{pay_instructions}}</td></tr>'
+                    . '<tr><td style="padding:0 48px 48px;font-size:12px;line-height:1.8;color:#9b8f7e;text-align:center;font-style:italic;">Questions? Contact us at <a href="mailto:{{contact_email}}" style="color:#524b3f;">{{contact_email}}</a> &middot; {{phone_main}}.</td></tr>'
+            ),
+        ];
+    }
+    $defaults['quotation_expiry_reminder'] = [
+        'name'    => 'Quotation Expiry Reminder',
+        'subject' => 'Your quotation {{quote_reference}} expires {{valid_until}} — {{site_name}}',
+        'html'    => hotel_premium_email_html(
+            'Your quotation {{quote_reference}} is about to expire',
+            hotel_premium_email_body(
+                '{{guest_name}}',
+                '<p style="margin:0 0 16px;">Just a quick note that your quotation <strong>{{quote_reference}}</strong> from <strong>{{site_name}}</strong> is valid until <strong>{{valid_until}}</strong> ({{days_left}}).</p>'
+                    . '<p style="margin:0;">To secure your booking at the quoted price, simply reply to this email or contact us at <a href="mailto:{{contact_email}}" style="color:#524b3f;">{{contact_email}}</a> &middot; {{phone_main}}.</p>'
+            )
+                . hotel_premium_email_summary_rows('Quotation', [
+                    ['Reference',   '{{quote_reference}}'],
+                    ['Valid until', '{{valid_until}}'],
+                    ['Total',       '{{currency_symbol}} {{quote_total}}', true],
+                ])
+                . '<tr><td style="padding:0 0 24px;"></td></tr>'
+        ),
     ];
 
     // Keep an in-memory copy so admin reset/revert actions can use the exact same defaults.

@@ -10,6 +10,10 @@ declare(strict_types=1);
  * Returns the PDF as a raw binary string ready to echo or attach to email.
  */
 
+if (!function_exists('hotel_brand_tokens')) {
+    require_once __DIR__ . '/../config/email.php';
+}
+
 if (!class_exists('TCPDF')) {
     // Prefer the shared resilient loader (composer autoload, vendor TCPDF, or a
     // standalone TCPDF/ folder). Fall back to the direct vendor path if the
@@ -24,14 +28,27 @@ if (!class_exists('TCPDF')) {
 }
 
 if (!class_exists('RhEodPdf')) {
+    /**
+     * End-of-day report page: same look as every other emailed PDF (sand page, cream card, token
+     * colours, core fonts, footer line + page numbers) - see config/document-theme.php.
+     */
     class RhEodPdf extends TCPDF
     {
-        public array  $bg_cream   = [243, 236, 228];
-        public array  $ac_gold    = [177, 130, 71];
-        public array  $ac_divider = [229, 217, 201];
+        /** @var array<string,mixed> */
+        public array  $rh = [];
         public string $footer_site     = '';
         public string $footer_date     = '';
         public string $footer_currency = '';
+        public string $watermark       = '';
+
+        /** Core PDF fonts cannot draw every glyph: map/drop the ones they cannot. */
+        public function Cell($w, $h = 0, $txt = '', $border = 0, $ln = 0, $align = '', $fill = false, $link = '', $stretch = 0, $ignore_min_height = false, $calign = 'T', $valign = 'M')
+        {
+            if (is_string($txt) && $txt !== '' && function_exists('rh_pdf_clean')) {
+                $txt = rh_pdf_clean($txt);
+            }
+            return parent::Cell($w, $h, $txt, $border, $ln, $align, $fill, $link, $stretch, $ignore_min_height, $calign, $valign);
+        }
 
         public function AddPage(
             $orientation = '',
@@ -40,51 +57,84 @@ if (!class_exists('RhEodPdf')) {
             $tocpage     = false
         ): void {
             parent::AddPage($orientation, $format, $keepmargins, $tocpage);
-            // Cream background
-            $this->SetFillColorArray($this->bg_cream);
-            $this->Rect(0, 0, $this->getPageWidth(), $this->getPageHeight(), 'F');
-            // Gold top strip
-            $this->SetFillColorArray($this->ac_gold);
-            $this->Rect(0, 0, $this->getPageWidth(), 2.5, 'F');
+            $c = $this->rh['colors'];
+            $w = $this->getPageWidth();
+            $h = $this->getPageHeight();
+            $page = rh_theme_rgb($c['page']);
+            $card = rh_theme_rgb($c['card']);
+            $rule = rh_theme_rgb($c['rule']);
+            $this->SetFillColor($page[0], $page[1], $page[2]);
+            $this->Rect(0, 0, $w, $h, 'F');
+            $this->SetFillColor($card[0], $card[1], $card[2]);
+            $this->SetDrawColor($rule[0], $rule[1], $rule[2]);
+            $this->SetLineWidth(0.2);
+            $this->Rect(8, 8, $w - 16, $h - 16, 'DF');
+            if ($this->watermark !== '') {
+                $mut = rh_theme_rgb($c['muted']);
+                $this->StartTransform();
+                $this->SetAlpha(0.13);
+                $this->SetTextColor($mut[0], $mut[1], $mut[2]);
+                $this->SetFont('helvetica', 'B', 80);
+                $this->Rotate(45, $w / 2, $h / 2);
+                $this->Text($w / 2 - 60, $h / 2 - 8, $this->watermark);
+                $this->SetAlpha(1);
+                $this->StopTransform();
+                $this->SetTextColor(0, 0, 0);
+            }
         }
 
         public function Footer(): void
         {
-            $this->SetY(-10);
-            $this->SetDrawColorArray($this->ac_divider);
-            $this->Line(12, $this->GetY(), 198, $this->GetY());
-            $this->SetY($this->GetY() + 1.5);
-            $this->SetFont('helvetica', '', 6.5);
-            $this->SetTextColor(168, 150, 131);
-            $txt = $this->footer_site
-                . '  |  EOD Report  |  ' . $this->footer_date
-                . '  |  All amounts in ' . $this->footer_currency
-                . '  |  Page ' . $this->getAliasNumPage() . ' of ' . $this->getAliasNbPages();
-            $this->Cell(0, 4, $txt, 0, 0, 'C');
+            $c = $this->rh['colors'];
+            $mut = rh_theme_rgb($c['muted_dark']);
+            $rule = rh_theme_rgb($c['rule']);
+            $left = 18;
+            $width = $this->getPageWidth() - 2 * $left;
+            $y = $this->getPageHeight() - 22;
+            $this->SetDrawColor($rule[0], $rule[1], $rule[2]);
+            $this->SetLineWidth(0.2);
+            $this->Line($left, $y, $left + $width, $y);
+            $this->SetTextColor($mut[0], $mut[1], $mut[2]);
+            $this->SetFont('helvetica', '', 7);
+            $y += 1.5;
+            if (($this->rh['footer_text'] ?? '') !== '') {
+                $this->SetXY($left, $y);
+                $this->Cell($width, 3.5, (string)$this->rh['footer_text'], 0, 0, 'C');
+                $y += 3.5;
+            }
+            $this->SetXY($left, $y);
+            $this->Cell($width * 0.78, 3.5, $this->footer_site . '  |  End of Day Report  |  ' . $this->footer_date . '  |  All amounts in ' . $this->footer_currency, 0, 0, 'L');
+            $this->Cell($width * 0.22, 3.5, 'Page ' . $this->getAliasNumPage() . ' of ' . $this->getAliasNbPages(), 0, 0, 'R');
         }
     }
 }
 
+/**
+ * @param array $opts 'watermark' => text drawn diagonally behind content (e.g. SAMPLE, for test builds)
+ */
 function buildEodPdf(
     array  $d,
     string $site_name,
     string $currency_symbol,
-    string $user_name
+    string $user_name,
+    array  $opts = []
 ): string {
-    // ── Colours ────────────────────────────────────────────────────────────────
-    $CHARCOAL = [35,  31,  28];
-    $GOLD     = [177, 130, 71];
-    $CREAM    = [243, 236, 228];
-    $LIGHT_BG = [247, 243, 238];
-    $BROWN    = [138, 119, 95];
-    $TEXT2    = [94,  85,  77];
-    $DIVIDER  = [229, 217, 201];
+    // ── Colours: the shared brand tokens (Admin > Booking settings > Document branding) ─────
+    $tok      = hotel_brand_tokens();
+    $tc       = $tok['colors'];
+    $CHARCOAL = rh_theme_rgb($tc['accent']);        // section bars / total rows
+    $GOLD     = rh_theme_rgb($tc['highlight']);     // accent strips
+    $CREAM    = rh_theme_rgb($tc['panel']);         // alternate rows, KPI boxes
+    $LIGHT_BG = rh_theme_rgb($tc['card']);          // base rows
+    $BROWN    = rh_theme_rgb($tc['muted_dark']);    // sub-section bars, labels
+    $TEXT2    = rh_theme_rgb($tc['muted_dark']);
+    $DIVIDER  = rh_theme_rgb($tc['rule']);
     $WHITE    = [255, 255, 255];
-    $GREEN    = [22,  101, 52];
-    $MIDGREEN = [21,  128, 61];
+    $GREEN    = rh_theme_rgb($tc['success']);
+    $MIDGREEN = rh_theme_rgb($tc['success']);
     $AMBER    = [146, 64,  14];
-    $RED      = [185, 28,  28];
-    $MUTED    = [168, 150, 131];
+    $RED      = rh_theme_rgb($tc['danger']);
+    $MUTED    = rh_theme_rgb($tc['rule']);          // light text on dark bars
 
     // ── Unpack $d with safe defaults ────────────────────────────────────────────
     $date    = (string)($d['date'] ?? date('Y-m-d'));
@@ -164,9 +214,8 @@ function buildEodPdf(
     $pdf->footer_site     = $site_name;
     $pdf->footer_date     = $date;
     $pdf->footer_currency = $curr_trim;
-    $pdf->bg_cream        = $CREAM;
-    $pdf->ac_gold         = $GOLD;
-    $pdf->ac_divider      = $DIVIDER;
+    $pdf->rh             = ['colors' => $tc, 'footer_text' => rh_pdf_clean($tok['footer_text'])];
+    $pdf->watermark      = (string)($opts['watermark'] ?? '');
     $pdf->SetCreator($site_name);
     $pdf->SetAuthor($site_name);
     $pdf->SetTitle('End of Day Report — ' . $dateLabel);
@@ -177,58 +226,64 @@ function buildEodPdf(
     $pdf->SetMargins($LM, 14, $LM);
     $pdf->AddPage();
 
-    $y = 5.0;  // current cursor (below the 2.5mm gold strip)
+    $y = 12.0;  // current cursor (inside the cream card)
 
     // ══════════════════════════════════════════════════════════════════════════
-    // HEADER BAND (32mm tall, charcoal)
+    // HEADER: logo + hotel name/date on the card, score badge right, title strip below
     // ══════════════════════════════════════════════════════════════════════════
-    $HH = 32.0;
-    $pdf->SetFillColorArray($CHARCOAL);
-    $pdf->Rect($LM, $y, $CW, $HH, 'F');
+    $logoH = min(22.0, (float)$tok['logo_height_mm']);
+    $logoW = 0.0;
+    $textX = $LM + 2;
+    if ($tok['logo'] !== '' && preg_match('#^data:image/(png|jpe?g|gif);base64,(.+)$#s', $tok['logo'], $lm)) {
+        $bytes = base64_decode($lm[2], true);
+        $dim = $bytes !== false ? @getimagesizefromstring($bytes) : false;
+        if ($dim && $dim[1] > 0) {
+            $logoW = $logoH * $dim[0] / $dim[1];
+            $pdf->Image('@' . $bytes, $LM + 2, $y, $logoW, $logoH, '', '', '', false, 300);
+            $textX = $LM + 2 + $logoW + 4;
+        }
+    }
+    $HZ = max($logoH, 20.0);
+    $hotel = $tok['hotel'];
 
-    // Gold left accent bar
-    $pdf->SetFillColorArray($GOLD);
-    $pdf->Rect($LM, $y, 3.5, $HH, 'F');
+    $pdf->SetTextColor(...rh_theme_rgb($tc['text']));
+    $pdf->SetFont($tok['fonts']['heading'], '', 17);
+    $pdf->SetXY($textX, $y + 1);
+    $pdf->Cell(110, 8, $site_name, 0, 0, 'L');
 
-    // Eyebrow: END OF DAY REPORT
-    $pdf->SetTextColorArray($GOLD);
-    $pdf->SetFont('helvetica', 'B', 7);
-    $pdf->SetXY($LM + 6, $y + 5);
-    $pdf->Cell(120, 5, 'END OF DAY REPORT', 0, 0, 'L');
-
-    // Hotel name
-    $pdf->SetTextColorArray($CREAM);
-    $pdf->SetFont('helvetica', 'B', 16);
-    $pdf->SetXY($LM + 6, $y + 10);
-    $pdf->Cell(120, 9, $site_name, 0, 0, 'L');
-
-    // Date + generated by
-    $pdf->SetTextColorArray($MUTED);
+    $pdf->SetTextColorArray($TEXT2);
     $pdf->SetFont('helvetica', '', 7);
-    $pdf->SetXY($LM + 6, $y + 20);
-    $pdf->Cell(120, 5, $dateLabel . '   ·   Generated ' . date('H:i') . '   ·   ' . $user_name, 0, 0, 'L');
+    $pdf->SetXY($textX, $y + 9.5);
+    $pdf->Cell(110, 4, implode('  |  ', array_filter([$hotel['address'], $hotel['phone'] !== '' ? 'Tel ' . $hotel['phone'] : ''], 'strlen')), 0, 0, 'L');
+    $pdf->SetXY($textX, $y + 14);
+    $pdf->Cell(110, 4, $dateLabel . '  |  Generated ' . date('H:i') . '  |  ' . $user_name, 0, 0, 'L');
 
-    // Health score badge (right side of header band, 19×24mm)
+    // Health score badge
     $badgeX = $LM + $CW - 23;
-    $badgeY = $y + 4;
+    $badgeY = $y;
     $pdf->SetFillColorArray($score_color);
-    $pdf->RoundedRect($badgeX, $badgeY, 19, 24, 2, '1111', 'F');
-
+    $pdf->Rect($badgeX, $badgeY, 19, 20, 'F');
     $pdf->SetTextColorArray($WHITE);
     $pdf->SetFont('helvetica', 'B', 14);
-    $pdf->SetXY($badgeX, $badgeY + 3);
-    $pdf->Cell(19, 9, (string)$score, 0, 0, 'C');
-
+    $pdf->SetXY($badgeX, $badgeY + 2);
+    $pdf->Cell(19, 8, (string)$score, 0, 0, 'C');
     $pdf->SetFont('helvetica', '', 6);
-    $pdf->SetXY($badgeX, $badgeY + 11);
-    $pdf->Cell(19, 5, '/ 100', 0, 0, 'C');
-
+    $pdf->SetXY($badgeX, $badgeY + 9.5);
+    $pdf->Cell(19, 4, '/ 100', 0, 0, 'C');
     $pdf->SetFont('helvetica', 'B', 5.5);
-    $pdf->SetXY($badgeX, $badgeY + 16.5);
-    $pdf->Cell(19, 5, strtoupper($score_label), 0, 0, 'C');
+    $pdf->SetXY($badgeX, $badgeY + 14);
+    $pdf->Cell(19, 4, strtoupper($score_label), 0, 0, 'C');
 
-    $y += $HH + 2;
-
+    $y += $HZ + 2;
+    $pdf->SetFillColorArray($CHARCOAL);
+    $pdf->Rect($LM, $y, $CW, 7, 'F');
+    $pdf->SetTextColorArray($WHITE);
+    $pdf->SetFont('helvetica', 'B', 9);
+    $pdf->setFontSpacing(2);
+    $pdf->SetXY($LM, $y + 1);
+    $pdf->Cell($CW, 5, 'END OF DAY REPORT', 0, 0, 'C');
+    $pdf->setFontSpacing(0);
+    $y += 7 + 3;
     // ══════════════════════════════════════════════════════════════════════════
     // KPI STRIP (4 boxes, 20mm tall)
     // ══════════════════════════════════════════════════════════════════════════
@@ -541,7 +596,7 @@ function buildEodPdf(
         $pdf->Cell(44, $ROW, $cnt_str, 'B', 0, 'L', true);
 
         // Progress bar (37mm wide track, gold fill proportional to share)
-        $barTrackW = 20.0;
+        $barTrackW = 17.0;
         $barFillW  = min($barTrackW, ($mShare / 100) * $barTrackW);
         $barX = $CRX + 44;
         $barY = $yR + ($ROW / 2) - 1.5;
@@ -555,7 +610,7 @@ function buildEodPdf(
         $pdf->SetDrawColorArray($DIVIDER);
         $pdf->SetXY($barX + $barTrackW, $yR);
         $pdf->SetTextColorArray($TEXT2);
-        $pdf->Cell(7, $ROW, number_format($mShare, 0) . '%', 'B', 0, 'C', true);
+        $pdf->Cell(10, $ROW, number_format($mShare, 0) . '%', 'B', 0, 'C', true);
         $pdf->SetTextColorArray($CHARCOAL);
         $pdf->SetFont('helvetica', '', 7);
         $pdf->Cell(20, $ROW, $m($mTotal), 'B', 0, 'R', true);
@@ -610,10 +665,10 @@ function buildEodPdf(
         $pdf->Cell(56, $ROW, $val, 'B', 0, 'R', true);
         $y += $ROW;
     };
-    $pb = function () use ($pdf, &$y): void {
-        if ($y > 235) {
+    $pb = function (float $need = 30.0) use ($pdf, &$y): void {
+        if ($y + $need > 270) {
             $pdf->AddPage();
-            $y = 5.0;
+            $y = 14.0;
         }
     };
 
@@ -622,7 +677,7 @@ function buildEodPdf(
     // ══════════════════════════════════════════════════════════════════════════
     $activeAlerts = array_filter($closeout_alerts, fn($a) => in_array($a['level'] ?? '', ['warn', 'watch'], true));
     if (!empty($activeAlerts)) {
-        $pb();
+        $pb(8 + 7.5 * count($activeAlerts));
         $fwSec('Closeout Alerts', $CHARCOAL);
         foreach ($activeAlerts as $al) {
             $lvl  = (string)($al['level'] ?? 'watch');
@@ -651,7 +706,7 @@ function buildEodPdf(
     // TOP SELLING ITEMS
     // ══════════════════════════════════════════════════════════════════════════
     if (!empty($top_items)) {
-        $pb();
+        $pb(14 + $ROW * count($top_items));
         $fwSec('Top Selling Items', $CHARCOAL);
         // Table header
         $pdf->SetFillColorArray($CREAM);
@@ -687,7 +742,7 @@ function buildEodPdf(
     // POS VOID REASONS
     // ══════════════════════════════════════════════════════════════════════════
     if (!empty($void_reasons)) {
-        $pb();
+        $pb(10 + $ROW * count($void_reasons));
         $fwSec('POS Void Reasons', $RED);
         foreach ($void_reasons as $vi => $vr) {
             $bg = $vi % 2 === 0 ? $LIGHT_BG : $CREAM;
@@ -709,7 +764,7 @@ function buildEodPdf(
     // ROOM TYPE REVENUE
     // ══════════════════════════════════════════════════════════════════════════
     if (!empty($room_type_perf)) {
-        $pb();
+        $pb(10 + $ROW * count($room_type_perf));
         $fwSec('Room Type Revenue', $BROWN);
         $maxRev = max(array_column($room_type_perf, 'revenue') ?: [1]);
         foreach ($room_type_perf as $ri => $rt) {
@@ -750,7 +805,7 @@ function buildEodPdf(
     // ══════════════════════════════════════════════════════════════════════════
     $gi_total = (int)($guest_intel['new_guests'] ?? 0) + (int)($guest_intel['returning_guests'] ?? 0);
     if ($gi_total > 0) {
-        $pb();
+        $pb(34);
         $fwSec('Guest Intelligence', $BROWN);
         $i = 0;
         $fwRow('New Guests Today',      (string)(int)($guest_intel['new_guests'] ?? 0),      false, $i++);
@@ -840,7 +895,7 @@ function buildEodPdf(
     // TOMORROW PREVIEW BAND (arrivals/departures — hotel businesses only)
     // ══════════════════════════════════════════════════════════════════════════
     if ($eodModBookings) {
-    $pb();
+    $pb(26);
     $TBH = 22.0;
     // Gold top strip
     $pdf->SetFillColorArray($GOLD);
@@ -854,7 +909,7 @@ function buildEodPdf(
 
     // Header label
     $tomLabel = 'TOMORROW — ' . strtoupper(date('l, F j', strtotime($tomorrow)));
-    $pdf->SetTextColorArray($GOLD);
+    $pdf->SetTextColorArray($MUTED);
     $pdf->SetFont('helvetica', 'B', 8);
     $pdf->SetXY($LM, $y + 2.5);
     $pdf->Cell($CW, 5, $tomLabel, 0, 0, 'C');
@@ -882,7 +937,7 @@ function buildEodPdf(
         $pdf->Cell($colTW, 5, $tc['label'], 0, 0, 'C');
 
         $pdf->SetFont('helvetica', 'B', 14);
-        $pdf->SetTextColorArray($tc['gold'] ? $GOLD : $WHITE);
+        $pdf->SetTextColorArray($WHITE);
         $pdf->SetXY($tx, $tvY + 5);
         $pdf->Cell($colTW, 9, $tc['val'], 0, 0, 'C');
     }

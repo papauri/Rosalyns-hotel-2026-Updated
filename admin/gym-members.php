@@ -679,7 +679,7 @@ $gm_currency = (string)getSetting('currency_symbol', 'K');
                 <?php elseif ($gm_reminder_run['last_sent_at']): ?>
                     Last reminder sent <?php echo htmlspecialchars(date('M j, H:i', strtotime((string)$gm_reminder_run['last_sent_at']))); ?> · <?php echo (int)$gm_reminder_run['sent_today']; ?> today · <?php echo (int)$gm_reminder_run['total']; ?> all-time
                 <?php else: ?>
-                    No reminders sent yet — cron: scripts/gym_membership_reminders.php (daily)
+                    No reminders sent yet — they go out automatically (Admin → Automated Emails)
                 <?php endif; ?>
             </span>
         </div>

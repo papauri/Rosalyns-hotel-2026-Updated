@@ -343,10 +343,288 @@ function getInvoiceLogoUrl()
     return rtrim($base_url, '/') . '/' . ltrim($selected, '/');
 }
 
+/* ═══════════════════════════════════════════════════════════════════
+ *  Document kit helpers for invoices and quotations
+ *  (layout lives in config/document-theme.php; these only assemble it)
+ * ═══════════════════════════════════════════════════════════════════ */
+
+if (!function_exists('rh_inv_custom_template')) {
+    /**
+     * Return the admin-customised HTML for a DB document template, or '' when the
+     * stored copy is just the seeded stock layout (then the kit layout is used).
+     *
+     * invoice_document_template_mode setting: 'kit' = never use DB templates,
+     * 'custom' = always use the stored template, anything else = auto-detect
+     * (a stored copy with the same wording as the built-in default counts as stock).
+     */
+    function rh_inv_custom_template(string $templateKey, string $stockHtml = ''): string
+    {
+        static $cache = [];
+        if (isset($cache[$templateKey])) {
+            return $cache[$templateKey];
+        }
+        $cache[$templateKey] = '';
+        $mode = strtolower(trim((string)getSetting('invoice_document_template_mode', '')));
+        if ($mode === 'kit' || !function_exists('getBookingEmailTemplateConfig')) {
+            return '';
+        }
+        $tpl = getBookingEmailTemplateConfig($templateKey, []);
+        $html = (string)($tpl['html_body'] ?? '');
+        if ($html === '' || (int)($tpl['is_active'] ?? 1) !== 1) {
+            return '';
+        }
+        if ($mode !== 'custom' && $stockHtml !== '') {
+            // Same wording as the code default (only old styling differs) = stock copy, not a customisation.
+            if (rh_pdf_template_is_stock($html, $stockHtml)) {
+                return '';
+            }
+        }
+        return $cache[$templateKey] = $html;
+    }
+}
+
+if (!function_exists('rh_inv_keep_together')) {
+    /** Ask TCPDF not to split a table (e.g. totals) across two pages. */
+    function rh_inv_keep_together(string $tableHtml): string
+    {
+        return preg_replace('/^<table /', '<table nobr="true" ', $tableHtml, 1) ?? $tableHtml;
+    }
+}
+
+if (!function_exists('rh_inv_sub')) {
+    /** Small muted second line under an item description (HTML, escaped). */
+    function rh_inv_sub(string $text): string
+    {
+        if (trim($text) === '') {
+            return '';
+        }
+        return '<br/><span style="color:' . hotel_brand_tokens()['colors']['muted_dark'] . ';font-size:7.5pt;">' . rh_pdf_e($text) . '</span>';
+    }
+}
+
+if (!function_exists('rh_inv_payments_html')) {
+    /**
+     * Payment history block. $payments must already be signed (refunds negative, method prefixed
+     * "refund_") - see rh_invoice_signed_payments().
+     */
+    function rh_inv_payments_html(array $payments, string $cur): string
+    {
+        if (!$payments) {
+            return '';
+        }
+        $rows = [];
+        foreach ($payments as $p) {
+            $ts = strtotime((string)($p['payment_date'] ?? ''));
+            $method = ucwords(str_replace('_', ' ', (string)($p['payment_method'] ?? '')));
+            $ref = trim((string)($p['payment_reference'] ?? ''));
+            $rows[] = [
+                rh_pdf_e($ts ? date('d M Y', $ts) : ''),
+                rh_pdf_e($method) . rh_inv_sub($ref),
+                rh_pdf_e(rh_pdf_money((float)($p['total_amount'] ?? 0), $cur)),
+            ];
+        }
+        return rh_pdf_spacer(5) . rh_pdf_section_title('Payment history') . rh_pdf_spacer(1)
+            . rh_pdf_items_table([
+                ['label' => 'Date', 'width' => 24, 'align' => 'left'],
+                ['label' => 'Method', 'width' => 52, 'align' => 'left'],
+                ['label' => 'Amount', 'width' => 24, 'align' => 'right'],
+            ], $rows);
+    }
+}
+
+if (!function_exists('rh_inv_bank_terms_html')) {
+    /** Bank details + payment terms (from settings) and the shared document terms. */
+    function rh_inv_bank_terms_html(string $siteName, string $email, string $phone, bool $owing): string
+    {
+        $out = '';
+        if ($owing) {
+            $bank = rh_pdf_meta_table([
+                ['Bank', trim((string)getSetting('bank_name', ''))],
+                ['Account name', trim((string)getSetting('bank_account_name', ''))],
+                ['Account no.', trim((string)getSetting('bank_account_number', ''))],
+                ['Branch', trim((string)getSetting('bank_branch', ''))],
+            ]);
+            if ($bank !== '') {
+                $out .= rh_pdf_spacer(5) . rh_pdf_section_title('Bank details') . rh_pdf_spacer(1) . $bank;
+            }
+            $terms = trim((string)getSetting('invoice_terms', getSetting('payment_terms', '')));
+            if ($terms !== '') {
+                $terms = strtr($terms, ['{{contact_email}}' => $email, '{{contact_phone}}' => $phone, '{{site_name}}' => $siteName]);
+                $out .= rh_pdf_spacer(5) . rh_pdf_section_title('Payment terms') . rh_pdf_spacer(1) . rh_pdf_note($terms);
+            }
+        }
+        $shared = hotel_brand_tokens()['terms_text'];
+        if ($shared !== '') {
+            $out .= rh_pdf_spacer(4) . rh_pdf_note($shared);
+        }
+        return $out;
+    }
+}
+
+if (!function_exists('rh_inv_closing_html')) {
+    /** Centered serif closing line (invoice_footer setting overrides the per-document default). */
+    function rh_inv_closing_html(string $default): string
+    {
+        $t = hotel_brand_tokens()['colors'];
+        $text = trim((string)getSetting('invoice_footer', ''));
+        if ($text === '') {
+            $text = $default;
+        }
+        return rh_pdf_spacer(6) . '<table width="100%" cellpadding="4" cellspacing="0" border="0"><tr><td align="center" style="font-family:times;font-size:11pt;color:' . $t['muted_dark'] . ';">'
+            . rh_pdf_e($text) . '</td></tr></table>';
+    }
+}
+
+if (!function_exists('rh_inv_flat_invoice')) {
+    /**
+     * Single-line invoice used by conference / gym / event invoices.
+     *
+     * @param array $a title, invoice_number, issued, meta (rows), line_desc_html, qty, subtotal, vat_enabled,
+     *                 vat_amount, vat_rate, total, amount_paid, amount_due, deposit (['required'=>bool,'amount'=>,'paid'=>]),
+     *                 payments (signed), closing, site_name, email, phone, currency
+     */
+    function rh_inv_flat_invoice(array $a): string
+    {
+        $cur = (string)($a['currency'] ?? '');
+        if ($cur === '') {
+            $cur = hotel_brand_tokens()['hotel']['currency'];
+        }
+        $money = static function ($v) use ($cur): string {
+            return rh_pdf_money((float)$v, $cur);
+        };
+        $subtotal = (float)$a['subtotal'];
+        $total = (float)$a['total'];
+        $paid = (float)$a['amount_paid'];
+        $due = (float)$a['amount_due'];
+        $owing = $due > BALANCE_TOLERANCE;
+        $vatEnabled = !empty($a['vat_enabled']);
+        $vatAmount = (float)$a['vat_amount'];
+        $vatRate = (float)$a['vat_rate'];
+        $mode = function_exists('vat_mode') ? vat_mode() : 'exclusive';
+
+        $items = rh_pdf_items_table([
+            ['label' => 'Description', 'width' => 46, 'align' => 'left'],
+            ['label' => 'Qty', 'width' => 10, 'align' => 'right'],
+            ['label' => 'Unit', 'width' => 21, 'align' => 'right'],
+            ['label' => 'Amount', 'width' => 23, 'align' => 'right'],
+        ], [[(string)$a['line_desc_html'], rh_pdf_e((string)($a['qty'] ?? 1)), rh_pdf_e($money($subtotal)), rh_pdf_e($money($subtotal))]]);
+
+        $totals = [];
+        $dep = $a['deposit'] ?? [];
+        if (!empty($dep['required'])) {
+            $totals[] = ['label' => 'Deposit required', 'value' => $money($dep['amount'] ?? 0), 'type' => 'muted'];
+            $totals[] = [
+                'label' => 'Deposit paid',
+                'value' => $money($dep['paid'] ?? 0),
+                'type' => ((float)($dep['paid'] ?? 0) >= (float)($dep['amount'] ?? 0)) ? 'success' : 'danger',
+            ];
+        }
+        if ($mode === 'inclusive') {
+            foreach (rh_pdf_vat_rows($vatAmount, $vatRate, $cur) as $row) {
+                $totals[] = $row;
+            }
+        } elseif ($vatEnabled && $vatAmount > 0) {
+            $rateLabel = rtrim(rtrim(number_format($vatRate, 2), '0'), '.');
+            $totals[] = ['label' => 'Subtotal (excl. VAT)', 'value' => $money($subtotal)];
+            $totals[] = ['label' => 'VAT (' . $rateLabel . '%)', 'value' => $money($vatAmount), 'type' => 'vat'];
+        }
+        $totalLabel = $vatEnabled ? 'Total (incl. VAT)' : 'Total';
+        if ($owing) {
+            $totals[] = ['label' => $totalLabel, 'value' => $money($total), 'type' => 'strong'];
+            $totals[] = ['label' => 'Amount paid', 'value' => $money($paid), 'type' => 'paid'];
+            $totals[] = ['label' => 'Balance due', 'value' => $money($due), 'type' => 'total'];
+        } else {
+            $totals[] = ['label' => $totalLabel, 'value' => $money($total), 'type' => 'total'];
+            $totals[] = ['label' => 'Amount paid', 'value' => $money($paid), 'type' => 'paid'];
+        }
+
+        $body = $items . rh_pdf_spacer(3) . rh_inv_keep_together(rh_pdf_totals_table($totals))
+            . rh_inv_payments_html((array)($a['payments'] ?? []), $cur)
+            . rh_inv_bank_terms_html((string)($a['site_name'] ?? ''), (string)($a['email'] ?? ''), (string)($a['phone'] ?? ''), $owing)
+            . rh_inv_closing_html((string)($a['closing'] ?? 'Thank you for your payment.'));
+
+        $meta = array_merge([
+            ['Invoice No.', (string)$a['invoice_number']],
+            ['Issued', (string)($a['issued'] ?? date('d M Y'))],
+        ], (array)$a['meta']);
+
+        return rh_pdf_document_shell((string)$a['title'], $meta, $body, [
+            'banner' => ['text' => $owing ? 'Balance due' : 'Paid in full', 'tone' => $owing ? 'danger' : 'neutral'],
+        ]);
+    }
+}
+
+if (!function_exists('rh_inv_quotation_html')) {
+    /**
+     * Quotation document on the kit.
+     *
+     * @param array $a title, quote_ref, valid_until (DateTime), meta (rows), line_desc_html, qty, base, vat_amount,
+     *                 vat_rate, total, deposit_amount, payment_policy, notes
+     */
+    function rh_inv_quotation_html(array $a): string
+    {
+        $cur = hotel_brand_tokens()['hotel']['currency'];
+        $money = static function ($v) use ($cur): string {
+            return rh_pdf_money((float)$v, $cur);
+        };
+        $base = (float)$a['base'];
+        $vatAmount = (float)$a['vat_amount'];
+        $mode = function_exists('vat_mode') ? vat_mode() : 'exclusive';
+        $validText = $a['valid_until']->format('d M Y');
+
+        $items = rh_pdf_items_table([
+            ['label' => 'Description', 'width' => 46, 'align' => 'left'],
+            ['label' => 'Qty', 'width' => 10, 'align' => 'right'],
+            ['label' => 'Unit', 'width' => 21, 'align' => 'right'],
+            ['label' => 'Amount', 'width' => 23, 'align' => 'right'],
+        ], [[(string)$a['line_desc_html'], rh_pdf_e((string)($a['qty'] ?? 1)), rh_pdf_e($money($base)), rh_pdf_e($money($base))]]);
+
+        $totals = [];
+        if ($mode === 'exclusive' && $vatAmount > 0) {
+            $totals[] = ['label' => 'Subtotal (excl. VAT)', 'value' => $money($base)];
+        }
+        foreach (rh_pdf_vat_rows($vatAmount, (float)$a['vat_rate'], $cur) as $row) {
+            $totals[] = $row;
+        }
+        if ((float)$a['deposit_amount'] > 0) {
+            $totals[] = ['label' => 'Deposit required', 'value' => $money($a['deposit_amount']), 'type' => 'muted'];
+        }
+        $totals[] = ['label' => 'Total quotation', 'value' => $money($a['total']), 'type' => 'total'];
+
+        $body = $items . rh_pdf_spacer(3) . rh_inv_keep_together(rh_pdf_totals_table($totals));
+        $policy = trim((string)$a['payment_policy']);
+        if ($policy !== '') {
+            $body .= rh_pdf_spacer(5) . rh_pdf_section_title('Payment terms') . rh_pdf_spacer(1) . rh_pdf_note($policy);
+        }
+        $notes = trim((string)$a['notes']);
+        if ($notes !== '') {
+            $body .= rh_pdf_spacer(4) . rh_pdf_section_title('Notes') . rh_pdf_spacer(1) . rh_pdf_note($notes);
+        }
+        $shared = hotel_brand_tokens()['terms_text'];
+        if ($shared !== '') {
+            $body .= rh_pdf_spacer(4) . rh_pdf_note($shared);
+        }
+        $validity = trim((string)getSetting('quotation_footer_text', ''));
+        if ($validity === '') {
+            $validity = 'This quotation is valid until {{valid_until}}. Availability and rates are subject to confirmation at acceptance.';
+        }
+        $validity = str_replace('{{valid_until}}', $validText, $validity);
+        $body .= rh_pdf_spacer(6) . '<table width="100%" cellpadding="4" cellspacing="0" border="0"><tr><td align="center" style="font-family:times;font-size:10.5pt;color:'
+            . hotel_brand_tokens()['colors']['muted_dark'] . ';">' . rh_pdf_e($validity) . '</td></tr></table>';
+
+        $meta = array_merge([
+            ['Quotation ref', (string)$a['quote_ref']],
+            ['Valid until', $validText],
+        ], (array)$a['meta']);
+
+        return rh_pdf_document_shell((string)$a['title'], $meta, $body);
+    }
+}
+
 /**
  * Build HTML content for invoice - Stunning State-of-the-Art PDF Design
  */
-function buildInvoiceHTML(array $booking, string $invoice_number, string $site_name, string $email_address, string $phone_number, string $address, string $currency_symbol, array $group_bookings = [])
+function buildInvoiceHTML(array $booking, string $invoice_number, string $site_name, string $email_address, string $phone_number, string $address, string $currency_symbol, array $group_bookings = [], ?array $preload = null)
 {
     global $pdo;
 
@@ -441,6 +719,19 @@ function buildInvoiceHTML(array $booking, string $invoice_number, string $site_n
         $payments = rh_invoice_signed_payments($ps->fetchAll(PDO::FETCH_ASSOC));
     }
 
+    // Sample rendering only (scripts/send-test-documents.php): supply rows instead of reading the DB.
+    if ($preload !== null) {
+        $pkgRows      = (array)($preload['packages'] ?? $pkgRows);
+        $folioCharges = (array)($preload['folio_charges'] ?? $folioCharges);
+        $payments     = rh_invoice_signed_payments((array)($preload['payments'] ?? $payments));
+        $folioTotal   = 0.0;
+        $folioVat     = 0.0;
+        foreach ($folioCharges as $c) {
+            $folioTotal += (float)$c['line_total'];
+            $folioVat   += (float)$c['vat_amount'];
+        }
+    }
+
     // Totals — VAT per installation mode: exclusive adds on top of the room
     // base, inclusive extracts from it (total never inflates), off is zero.
     // Folio lines carry their own stored VAT split either way.
@@ -455,9 +746,12 @@ function buildInvoiceHTML(array $booking, string $invoice_number, string $site_n
     // Paid / total / balance come from the folio summary (canonical net-paid rule, folio
     // charges and levy included) so the invoice always agrees with the booking page.
     $summaryIds = !empty($group_bookings) ? array_map(fn($g) => (int)$g['id'], $group_bookings) : [(int)$booking['id']];
+    if ($preload !== null && isset($preload['summary'])) {
+        $summaryIds = [(int)$booking['id']]; // sample rendering: one supplied summary for the whole document
+    }
     $sumGrand = 0.0; $sumPaid = 0.0; $sumDue = 0.0; $summaryOk = true;
     foreach ($summaryIds as $sid) {
-        $fs = getBookingFolioSummary($sid);
+        $fs = ($preload !== null && isset($preload['summary'])) ? (array)$preload['summary'] : getBookingFolioSummary($sid);
         if (isset($fs['error']) || !isset($fs['grand_total'], $fs['amount_paid'], $fs['balance_due'])) {
             $summaryOk = false;
             break;
@@ -480,6 +774,146 @@ function buildInvoiceHTML(array $booking, string $invoice_number, string $site_n
     $totalDueDisplay = $currency_symbol . ' ' . number_format($totalWithVat, 2);
     $amountPaidDisplay = $currency_symbol . ' ' . number_format($amountPaid, 2);
     $balanceDueDisplay = $currency_symbol . ' ' . number_format($balanceDue, 2);
+
+    // An admin-customised DB template (payment_invoice_document) keeps being honoured;
+    // the stock seeded copy is ignored in favour of the kit layout below.
+    $customTemplate = function_exists('hotel_default_payment_invoice_document_html')
+        ? rh_inv_custom_template('payment_invoice_document', hotel_default_payment_invoice_document_html())
+        : rh_inv_custom_template('payment_invoice_document');
+    if ($customTemplate !== '') {
+        return rh_inv_legacy_room_template(get_defined_vars(), $customTemplate);
+    }
+
+    // ═══════════════════════════════════════════════════════
+    //  KIT LAYOUT (config/document-theme.php)
+    // ═══════════════════════════════════════════════════════
+    $cur   = trim((string)$currency_symbol) !== '' ? trim((string)$currency_symbol) : hotel_brand_tokens()['hotel']['currency'];
+    $money = static function ($v) use ($cur): string {
+        return rh_pdf_money((float)$v, $cur);
+    };
+    $tc = hotel_brand_tokens()['colors'];
+
+    $guestCountStr = $adultGuests . ' Adult' . ($adultGuests > 1 ? 's' : '') . ($childGuests > 0 ? ', ' . $childGuests . ' Child' . ($childGuests > 1 ? 'ren' : '') : '');
+
+    // Item rows: [description, qty, unit, amount]
+    $itemRows = [];
+    if (!empty($group_bookings)) {
+        foreach ($group_bookings as $grm) {
+            $grmSubtotal = (float)$grm['total_amount'];
+            $nightRate   = $grmSubtotal / max(1, (int)$grm['number_of_nights']);
+            $itemRows[] = [
+                rh_pdf_e($grm['room_name']) . rh_inv_sub('Accommodation'),
+                rh_pdf_e((string)(int)$grm['number_of_nights']),
+                rh_pdf_e($money($nightRate)),
+                rh_pdf_e($money($grmSubtotal)),
+            ];
+        }
+    } else {
+        $nightRate = $roomSubtotal / max(1, (int)$booking['number_of_nights']);
+        $itemRows[] = [
+            rh_pdf_e($booking['room_name']) . rh_inv_sub('Accommodation'),
+            rh_pdf_e((string)(int)$booking['number_of_nights']),
+            rh_pdf_e($money($nightRate)),
+            rh_pdf_e($money($roomSubtotal)),
+        ];
+    }
+    if ($childGuests > 0 && $childSuppTotal > 0) {
+        $itemRows[] = [
+            rh_pdf_e('Child supplement x ' . $childGuests),
+            rh_pdf_e((string)$childGuests),
+            rh_pdf_e($money($childSuppTotal / $childGuests)),
+            rh_pdf_e($money($childSuppTotal)),
+        ];
+    }
+    if ($ratePlanDiscount > 0 && $ratePlanLabel !== '') {
+        $itemRows[] = [
+            rh_pdf_e($ratePlanLabel) . rh_inv_sub('Rate discount'),
+            rh_pdf_e((string)(int)$booking['number_of_nights']),
+            '',
+            '<span style="color:' . $tc['success'] . ';">' . rh_pdf_e($money(-$ratePlanDiscount)) . '</span>',
+        ];
+    }
+    foreach ($pkgRows as $pkg) {
+        $itemRows[] = [
+            rh_pdf_e($pkg['package_name']) . rh_inv_sub('Package add-on'),
+            rh_pdf_e((string)(int)$pkg['quantity']),
+            rh_pdf_e($money((float)$pkg['price_amount'])),
+            rh_pdf_e($money((float)$pkg['total_cost'])),
+        ];
+    }
+    foreach ($folioCharges as $fc) {
+        $typeLabel = match (strtolower((string)($fc['charge_type'] ?? ''))) {
+            'food'  => 'Food',
+            'drink' => 'Beverage',
+            'spa'   => 'Spa',
+            default => ucfirst((string)(($fc['charge_type'] ?? '') !== '' ? $fc['charge_type'] : 'Extra')),
+        };
+        $itemRows[] = [
+            rh_pdf_e($fc['description']) . rh_inv_sub($typeLabel),
+            rh_pdf_e((string)(int)$fc['quantity']),
+            rh_pdf_e($money((float)$fc['unit_price'])),
+            rh_pdf_e($money((float)$fc['line_total'])),
+        ];
+    }
+    $itemsHtml = rh_pdf_items_table([
+        ['label' => 'Description', 'width' => 46, 'align' => 'left'],
+        ['label' => 'Qty', 'width' => 10, 'align' => 'right'],
+        ['label' => 'Unit', 'width' => 21, 'align' => 'right'],
+        ['label' => 'Amount', 'width' => 23, 'align' => 'right'],
+    ], $itemRows);
+
+    // Totals - same figures as before; only the presentation follows vat_mode().
+    $vMode = vat_mode();
+    $totals = [];
+    if ($vMode === 'inclusive') {
+        $totals[] = ['label' => 'Subtotal (incl. VAT)', 'value' => $money($baseVatParts['total'] + $folioTotal)];
+    } elseif ($vMode === 'exclusive') {
+        $totals[] = ['label' => 'Subtotal (excl. VAT)', 'value' => $money($baseVatParts['net'] + $folioTotal - $folioVat)];
+    } else {
+        // VAT off: no VAT row prints, so the subtotal must carry any VAT recorded
+        // earlier for the rows to foot to the invoice total.
+        $totals[] = ['label' => 'Subtotal', 'value' => $money((float)$totalWithVat - (float)$tourismLevyAmt)];
+    }
+    foreach (rh_pdf_vat_rows((float)$vatAmount, (float)$vatRate, $cur) as $vrow) {
+        $totals[] = $vrow;
+    }
+    if ($tourismLevyAmt > 0) {
+        $totals[] = ['label' => 'Tourism levy' . ($tourismLevyPct > 0 ? ' (' . number_format($tourismLevyPct, 1) . '%)' : ''), 'value' => $money($tourismLevyAmt)];
+    }
+    $totals[] = ['label' => 'Invoice total', 'value' => $money($totalWithVat), 'type' => 'strong'];
+    $totals[] = ['label' => 'Amount paid', 'value' => $money($amountPaid), 'type' => 'paid'];
+    $totals[] = ['label' => 'Balance due', 'value' => $money(max(0, $balanceDue)), 'type' => 'total'];
+
+    $body = $itemsHtml . rh_pdf_spacer(3) . rh_inv_keep_together(rh_pdf_totals_table($totals))
+        . rh_inv_payments_html($payments, $cur)
+        . rh_inv_bank_terms_html($site_name, $email_address, $phone_number, !$isPaid)
+        . rh_inv_closing_html('Thank you for choosing us.');
+
+    $meta = [
+        ['Invoice No.', $invoice_number],
+        ['Issued', date('d M Y')],
+        ['Billed to', (string)$booking['guest_name']],
+        ['Booking ref', (string)$booking['booking_reference']],
+        ['Email', (string)($booking['guest_email'] ?? '')],
+        ['Check-in', date('d M Y', strtotime((string)$booking['check_in_date']))],
+        ['Phone', (string)($booking['guest_phone'] ?? '')],
+        ['Check-out', date('d M Y', strtotime((string)$booking['check_out_date']))],
+        ['Room', (string)$booking['room_name']],
+        ['Nights', (string)(int)$booking['number_of_nights']],
+        ['Guests', $guestCountStr],
+    ];
+
+    return rh_pdf_document_shell('Invoice', $meta, $body, [
+        'banner' => ['text' => $isPaid ? 'Paid in full' : 'Balance due', 'tone' => $isPaid ? 'neutral' : 'danger'],
+    ]);
+}
+/**
+ * Renders an admin-customised payment_invoice_document DB template (legacy placeholders).
+ * Receives the variable scope of buildInvoiceHTML().
+ */
+function rh_inv_legacy_room_template(array $c, string $templateHtml): string
+{
+    extract($c, EXTR_SKIP);
 
     // ── HELPER: section label ─────────────────────────────────
     $sectionLabel  = static fn(string $t) =>
@@ -592,10 +1026,10 @@ function buildInvoiceHTML(array $booking, string $invoice_number, string $site_n
     $balanceDueColor = $balanceDue > 0 ? '#9b2c2c' : '#4a7c5e';
     $totalsRows .= '<tr><td colspan="3" style="padding:3px 8px 6px; text-align:right; font-size:12px; color:' . $balanceDueColor . '; font-weight:700; font-family:Helvetica,Arial,sans-serif; border-bottom:2px solid #C8BEB0; border-left:1px solid #C8BEB0;">Balance Due</td><td width="25%" style="padding:3px 8px 6px; text-align:right; font-size:12px; color:' . $balanceDueColor . '; font-weight:700; font-family:Helvetica,Arial,sans-serif; border-bottom:2px solid #C8BEB0; border-right:1px solid #C8BEB0; white-space:nowrap;">' . $currency_symbol . ' ' . number_format($balanceDueDisplayValue, 2) . '</td></tr>';
 
-    // ── DB TEMPLATE OVERRIDE (payment_invoice_document) ────────
-    if (function_exists('getBookingEmailTemplateConfig')) {
-        $docTemplate = getBookingEmailTemplateConfig('payment_invoice_document', []);
-        if (!empty($docTemplate['html_body'])) {
+    // ── DB TEMPLATE (admin-customised) ────────
+    {
+        $docTemplate = ['html_body' => $templateHtml];
+        {
             $vatNumberHtml = $vatNumber
                 ? '<p style="margin:2px 0 0; font-size:10px; color:#8A775F; font-family:Helvetica,Arial,sans-serif; letter-spacing:0.04em;">VAT Reg: ' . htmlspecialchars($vatNumber) . '</p>'
                 : '';
@@ -686,117 +1120,9 @@ function buildInvoiceHTML(array $booking, string $invoice_number, string $site_n
             return strtr($docTemplate['html_body'], $replacements);
         }
     }
-
-    // ═══════════════════════════════════════════════════════
-    //  FINAL HTML
-    // ═══════════════════════════════════════════════════════
-    return '
-<div style="font-family:Georgia,\'Times New Roman\',serif; color:#231F1C; background:#F7F3EE; max-width:680px; margin:0 auto;">
-
-    <!-- ▌ HEADER ▐ -->
-    <table style="width:100%; background:#231F1C; margin-bottom:0;" cellpadding="0" cellspacing="0">
-        <tr>
-            <td style="padding:28px 30px 22px; vertical-align:middle; width:50%;">' . $logo_html . '
-                <p style="margin:8px 0 0; font-size:11px; letter-spacing:3px; text-transform:uppercase; color:#B18247; font-family:Helvetica,Arial,sans-serif;">' . htmlspecialchars($site_name) . '</p>
-            </td>
-            <td style="padding:28px 30px 22px; vertical-align:middle; text-align:right; width:50%;">
-                <p style="margin:0; font-size:30px; font-weight:400; letter-spacing:5px; color:#F3ECE4; font-family:Georgia,serif;">INVOICE</p>
-                <p style="margin:6px 0 0; font-size:12px; letter-spacing:1px; color:#B18247; font-family:Helvetica,Arial,sans-serif;">' . htmlspecialchars($invoice_number) . '</p>
-                <p style="margin:4px 0 0; font-size:10px; color:#8A775F; font-family:Helvetica,Arial,sans-serif;">Issued ' . $issued . '</p>
-            </td>
-        </tr>
-    </table>
-
-    <!-- ▌ STATUS STRIPE ▐ -->
-    <table style="width:100%; background:' . $statusBg . ';" cellpadding="0" cellspacing="0">
-        <tr>
-            <td style="padding:9px 30px; font-family:Helvetica,Arial,sans-serif; font-size:10px; letter-spacing:3px; font-weight:700; color:' . $statusFg . '; text-transform:uppercase; text-align:right;">' . $statusText . '</td>
-        </tr>
-    </table>
-
-    <!-- ▌ BILL-TO / FROM ▐ -->
-    <table style="width:100%; background:#F7F3EE;" cellpadding="0" cellspacing="0">
-        <tr>
-            <td style="padding:20px 24px; width:50%; vertical-align:top;">
-                ' . $sectionLabel('Billed To') . '
-                <p style="margin:0 0 3px; font-size:15px; font-weight:700; color:#231F1C; font-family:Georgia,serif;">' . htmlspecialchars($booking['guest_name']) . '</p>
-                <p style="margin:0 0 2px; font-size:11px; color:#5E554D; font-family:Helvetica,Arial,sans-serif;">' . htmlspecialchars($booking['guest_email']) . '</p>
-                <p style="margin:0; font-size:11px; color:#5E554D; font-family:Helvetica,Arial,sans-serif;">' . htmlspecialchars($booking['guest_phone']) . '</p>
-            </td>
-            <td style="padding:20px 24px; width:50%; vertical-align:top;">
-                ' . $sectionLabel('Property') . '
-                <p style="margin:0 0 3px; font-size:15px; font-weight:700; color:#231F1C; font-family:Georgia,serif;">' . htmlspecialchars($site_name) . '</p>
-                <p style="margin:0 0 2px; font-size:11px; color:#5E554D; font-family:Helvetica,Arial,sans-serif;">' . htmlspecialchars($address) . '</p>
-                <p style="margin:0 0 2px; font-size:11px; color:#5E554D; font-family:Helvetica,Arial,sans-serif;">' . htmlspecialchars($email_address) . '</p>
-                <p style="margin:0; font-size:11px; color:#5E554D; font-family:Helvetica,Arial,sans-serif;">' . htmlspecialchars($phone_number) . '</p>' .
-        ($vatNumber ? '<p style="margin:6px 0 0; font-size:10px; color:#8A775F; font-family:Helvetica,Arial,sans-serif; letter-spacing:0.5px;">VAT Reg: ' . htmlspecialchars($vatNumber) . '</p>' : '') . '
-            </td>
-        </tr>
-    </table>
-
-    <!-- ▌ STAY SUMMARY BAR ▐ -->
-    <table style="width:100%; background:#231F1C;" cellpadding="0" cellspacing="0">
-        <tr>
-            <td style="padding:14px 30px; font-family:Helvetica,Arial,sans-serif;">
-                <table style="width:100%;" cellpadding="0" cellspacing="0">
-                    <tr>
-                        <td style="font-size:9px; color:#C4A882; letter-spacing:2px; text-transform:uppercase; padding-bottom:3px;">Reference</td>
-                        <td style="font-size:9px; color:#C4A882; letter-spacing:2px; text-transform:uppercase; padding-bottom:3px;">Room</td>
-                        <td style="font-size:9px; color:#C4A882; letter-spacing:2px; text-transform:uppercase; padding-bottom:3px;">Check-in</td>
-                        <td style="font-size:9px; color:#C4A882; letter-spacing:2px; text-transform:uppercase; padding-bottom:3px;">Check-out</td>
-                        <td style="font-size:9px; color:#C4A882; letter-spacing:2px; text-transform:uppercase; padding-bottom:3px;">Nights</td>
-                        <td style="font-size:9px; color:#C4A882; letter-spacing:2px; text-transform:uppercase; padding-bottom:3px;">Guests</td>
-                    </tr>
-                    <tr>
-                        <td style="font-size:12px; color:#B18247; font-weight:700;">' . htmlspecialchars($booking['booking_reference']) . '</td>
-                        <td style="font-size:12px; color:#FFFFFF; font-weight:500;">' . htmlspecialchars($booking['room_name']) . '</td>
-                        <td style="font-size:12px; color:#FFFFFF; font-weight:500;">' . $check_in . '</td>
-                        <td style="font-size:12px; color:#FFFFFF; font-weight:500;">' . $check_out . '</td>
-                        <td style="font-size:12px; color:#FFFFFF; font-weight:500;">' . (int)$booking['number_of_nights'] . '</td>
-                        <td style="font-size:12px; color:#FFFFFF; font-weight:500;">' . $guestCountStr . '</td>
-                    </tr>
-                </table>
-            </td>
-        </tr>
-    </table>
-
-    <!-- ▌ CHARGES TABLE ▐ -->
-    <p style="margin:16px 24px 6px; font-size:9px; font-weight:700; letter-spacing:2px; text-transform:uppercase; color:#B18247; font-family:Helvetica,Arial,sans-serif;">Itemised Charges</p>
-    <table width="100%" border="1" bordercolor="#C8BEB0" style="width:100%; border-collapse:collapse;" cellpadding="0" cellspacing="0">
-        <tr>
-            <td width="50%" bgcolor="#8A775F" style="padding:12px 24px; text-align:left; font-size:10px; letter-spacing:1.5px; text-transform:uppercase; color:#FFFFFF; font-family:Helvetica,Arial,sans-serif; font-weight:700; background-color:#8A775F; border-right:1px solid #9A8E82; border-bottom:2px solid #9A8E82;">Description</td>
-            <td width="10%" bgcolor="#8A775F" style="padding:12px 10px; text-align:center; font-size:10px; letter-spacing:1.5px; text-transform:uppercase; color:#FFFFFF; font-family:Helvetica,Arial,sans-serif; font-weight:700; background-color:#8A775F; border-right:1px solid #9A8E82; border-bottom:2px solid #9A8E82;">Qty</td>
-            <td width="15%" bgcolor="#8A775F" style="padding:12px 10px; text-align:right; font-size:10px; letter-spacing:1.5px; text-transform:uppercase; color:#FFFFFF; font-family:Helvetica,Arial,sans-serif; font-weight:700; background-color:#8A775F; border-right:1px solid #9A8E82; border-bottom:2px solid #9A8E82;">Unit Price</td>
-            <td width="25%" bgcolor="#8A775F" style="padding:12px 24px; text-align:right; font-size:10px; letter-spacing:1.5px; text-transform:uppercase; color:#FFFFFF; font-family:Helvetica,Arial,sans-serif; font-weight:700; background-color:#8A775F; border-bottom:2px solid #9A8E82;">Amount</td>
-        </tr>
-        ' . $chargeRows . $totalsRows . '
-    </table>
-
-    <!-- ▌ PAYMENT HISTORY ▐ -->' .
-        (!empty($payments) ? '
-    <div style="padding:20px 30px 0;">
-        ' . $sectionLabel('Payment History') . '
-        <table style="width:100%; border-collapse:collapse;" cellpadding="0" cellspacing="0">
-            <tr style="background:#F7F3EE;">
-                <th style="padding:8px 10px; text-align:left; font-size:10px; letter-spacing:1px; text-transform:uppercase; color:#8A775F; font-family:Helvetica,Arial,sans-serif; font-weight:600;">Date</th>
-                <th style="padding:8px 10px; text-align:left; font-size:10px; letter-spacing:1px; text-transform:uppercase; color:#8A775F; font-family:Helvetica,Arial,sans-serif; font-weight:600;">Method</th>
-                <th style="padding:8px 10px; text-align:right; font-size:10px; letter-spacing:1px; text-transform:uppercase; color:#8A775F; font-family:Helvetica,Arial,sans-serif; font-weight:600;">Amount</th>
-            </tr>' . $paymentRows . '
-        </table>
-    </div>' : '') . '
-
-    <!-- ▌ FOOTER ▐ -->
-    <table style="width:100%; margin-top:28px; background:#F7F3EE;" cellpadding="0" cellspacing="0">
-        <tr>
-            <td style="padding:20px 30px; border-top:2px solid #B18247; text-align:center; font-family:Helvetica,Arial,sans-serif;">
-                <p style="margin:0 0 4px; font-size:13px; font-weight:700; color:#231F1C; letter-spacing:1px;">' . htmlspecialchars($site_name) . '</p>
-                <p style="margin:0; font-size:9px; color:#B18247; letter-spacing:2px; text-transform:uppercase;">Thank you for choosing us</p>
-            </td>
-        </tr>
-    </table>
-
-</div>';
+    return $templateHtml;
 }
+
 
 /**
  * Send payment invoice email to guest and copy recipients
@@ -1710,21 +2036,13 @@ function buildConferenceInvoiceHTML(array $enquiry, string $invoice_number, stri
 {
     global $pdo;
 
-    $event_date = date('F j, Y', strtotime($enquiry['event_date']));
+    $event_date = date('j F Y', strtotime($enquiry['event_date']));
 
-    // Get logo URL
-    $logo_url = getInvoiceLogoUrl();
-    $logo_html = '';
-    if (!empty($logo_url)) {
-        $logo_html = '<img src="' . htmlspecialchars($logo_url) . '" alt="' . htmlspecialchars($site_name) . '" style="max-width: 110px; height: auto; margin-bottom: 20px; display: block; margin-left: auto; margin-right: auto;">';
-    }
-
-    // Get VAT settings - more flexible check
+    // VAT settings
     $vatEnabled = in_array(getSetting('vat_enabled'), ['1', 1, true, 'true', 'on'], true);
     $vatRate = $vatEnabled ? (float)getSetting('vat_rate') : 0;
-    $vatNumber = getSetting('vat_number');
 
-    // Get payment details for this conference enquiry — genuine receipts plus
+    // Get payment details for this conference enquiry - genuine receipts plus
     // settled refunds (refund rows also sit at payment_status='completed' and
     // must show as negative, not as extra payments).
     $paymentsStmt = $pdo->prepare("
@@ -1736,9 +2054,9 @@ function buildConferenceInvoiceHTML(array $enquiry, string $invoice_number, stri
         ORDER BY payment_date ASC
     ");
     $paymentsStmt->execute([$enquiry['id']]);
-    $payments = $paymentsStmt->fetchAll(PDO::FETCH_ASSOC);
+    $payments = rh_invoice_signed_payments($paymentsStmt->fetchAll(PDO::FETCH_ASSOC));
 
-    // Totals — prefer the VAT breakdown LOCKED on the record at invoice time so a
+    // Totals - prefer the VAT breakdown LOCKED on the record at invoice time so a
     // re-sent invoice never re-bases to the current rate; only compute fresh when
     // the record was never populated.
     $subtotal = (float)$enquiry['total_amount'];
@@ -1752,193 +2070,88 @@ function buildConferenceInvoiceHTML(array $enquiry, string $invoice_number, stri
         $vatAmount = $vatParts['vat'];
         $totalWithVat = $vatParts['total'];
     }
+    $amountPaid = (float)($enquiry['amount_paid'] ?? $totalWithVat);
+    $balanceDue = (float)($enquiry['amount_due'] ?? max(0, $totalWithVat - $amountPaid));
 
-    // Build payment details HTML
-    $paymentDetailsHTML = '';
-    if (!empty($payments)) {
-        $paymentDetailsHTML = '<div style="margin-top: 20px; padding: 15px; background: #f8f9fa; border-radius: 5px;">
-                    <h4 style="color: #1A1A1A; margin-top: 0;">Payment History</h4>';
+    $startTs = strtotime((string)($enquiry['start_time'] ?? ''));
+    $endTs   = strtotime((string)($enquiry['end_time'] ?? ''));
+    $eventTime = ($startTs && $endTs) ? date('H:i', $startTs) . ' - ' . date('H:i', $endTs) : '';
 
-        foreach ($payments as $payment) {
-            $isRefundRow = (($payment['payment_type'] ?? '') === 'refund');
-            $paymentDetailsHTML .= '<div style="display: flex; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid #ddd;">
-                        <span>' . date('M j, Y', strtotime($payment['payment_date'])) . ' (' . ($isRefundRow ? 'Refund — ' : '') . ucfirst(str_replace('_', ' ', $payment['payment_method'])) . ')</span>
-                        <span>' . ($isRefundRow ? '-' : '') . $currency_symbol . ' ' . number_format($payment['total_amount'], 2) . '</span>
-                    </div>';
-        }
+    // An admin-customised DB template keeps being honoured; the stock seeded copy is replaced by the kit layout.
+    $customTemplate = function_exists('hotel_default_conference_invoice_document_html')
+        ? rh_inv_custom_template('conference_invoice_document', hotel_default_conference_invoice_document_html())
+        : '';
+    if ($customTemplate !== '' && function_exists('renderBookingDocumentTemplate')) {
+        $logoSrc = function_exists('hotel_invoice_logo_src') ? hotel_invoice_logo_src() : getInvoiceLogoUrl();
+        $logoHtml = $logoSrc !== ''
+            ? '<img src="' . htmlspecialchars($logoSrc, ENT_QUOTES, 'UTF-8') . '" alt="' . htmlspecialchars($site_name, ENT_QUOTES, 'UTF-8') . '" height="64" style="height:64px;width:auto;display:block;margin:0 auto;">'
+            : '';
 
-        $paymentDetailsHTML .= '</div>';
+        return renderBookingDocumentTemplate('conference_invoice_document', [
+            'logo_html' => $logoHtml,
+            'site_name' => htmlspecialchars($site_name, ENT_QUOTES, 'UTF-8'),
+            'address' => htmlspecialchars($address, ENT_QUOTES, 'UTF-8'),
+            'contact_email' => htmlspecialchars($email_address, ENT_QUOTES, 'UTF-8'),
+            'contact_phone' => htmlspecialchars($phone_number, ENT_QUOTES, 'UTF-8'),
+            'invoice_number' => htmlspecialchars($invoice_number, ENT_QUOTES, 'UTF-8'),
+            'issued_date' => htmlspecialchars(date('j F Y'), ENT_QUOTES, 'UTF-8'),
+            'status_text' => htmlspecialchars($balanceDue > 0 ? 'BALANCE DUE' : 'PAID IN FULL', ENT_QUOTES, 'UTF-8'),
+            'inquiry_reference' => htmlspecialchars((string)($enquiry['inquiry_reference'] ?? ''), ENT_QUOTES, 'UTF-8'),
+            'company_name' => htmlspecialchars((string)($enquiry['company_name'] ?? ''), ENT_QUOTES, 'UTF-8'),
+            'contact_person' => htmlspecialchars((string)($enquiry['contact_person'] ?? ''), ENT_QUOTES, 'UTF-8'),
+            'client_email' => htmlspecialchars((string)($enquiry['email'] ?? ''), ENT_QUOTES, 'UTF-8'),
+            'client_phone' => htmlspecialchars((string)($enquiry['phone'] ?? ''), ENT_QUOTES, 'UTF-8'),
+            'conference_room' => htmlspecialchars((string)($enquiry['room_name'] ?? ''), ENT_QUOTES, 'UTF-8'),
+            'event_date' => htmlspecialchars($event_date, ENT_QUOTES, 'UTF-8'),
+            'event_time' => htmlspecialchars($eventTime, ENT_QUOTES, 'UTF-8'),
+            'attendees' => (string)((int)($enquiry['number_of_attendees'] ?? 0)),
+            'event_type' => htmlspecialchars((string)($enquiry['event_type'] ?? 'Conference'), ENT_QUOTES, 'UTF-8'),
+            'total_amount' => htmlspecialchars($currency_symbol . ' ' . number_format($totalWithVat, 2), ENT_QUOTES, 'UTF-8'),
+            'amount_paid' => htmlspecialchars($currency_symbol . ' ' . number_format($amountPaid, 2), ENT_QUOTES, 'UTF-8'),
+            'balance_due' => htmlspecialchars($currency_symbol . ' ' . number_format($balanceDue, 2), ENT_QUOTES, 'UTF-8'),
+        ], $customTemplate);
     }
 
-    // Build deposit section HTML
-    $depositSectionHTML = '';
-    if (!empty($enquiry['deposit_required']) && $enquiry['deposit_required'] > 0) {
-        $depositSectionHTML = '<div class="invoice-row">
-                    <span class="invoice-label">Deposit Required:</span>
-                    <span class="invoice-value">' . $currency_symbol . ' ' . number_format($enquiry['deposit_amount'], 2) . '</span>
-                </div>
-                <div class="invoice-row">
-                    <span class="invoice-label">Deposit Paid:</span>
-                    <span class="invoice-value" style="color: ' . ($enquiry['deposit_paid'] >= $enquiry['deposit_amount'] ? '#28a745' : '#dc3545') . '; font-weight: bold;">' . $currency_symbol . ' ' . number_format($enquiry['deposit_paid'] ?? 0, 2) . '</span>
-                </div>';
-    }
+    $desc = rh_pdf_e('Conference facilities' . (!empty($enquiry['room_name']) ? ' - ' . $enquiry['room_name'] : ''))
+        . rh_inv_sub(trim((string)($enquiry['event_type'] ?? '')) . ($event_date !== '' ? ' | ' . $event_date : '') . ($eventTime !== '' ? ', ' . $eventTime : ''));
 
-    // Build VAT section HTML
-    $vatSectionHTML = '';
-    if ($vatEnabled && $vatAmount > 0) {
-        $vatSectionHTML = '<div class="invoice-row">
-                    <span class="invoice-label">Subtotal (excl. VAT):</span>
-                    <span class="invoice-value">' . $currency_symbol . ' ' . number_format($subtotal, 2) . '</span>
-                </div>
-                <div class="invoice-row">
-                    <span class="invoice-label">VAT (' . number_format($vatRate, 2) . '%):</span>
-                    <span class="invoice-value">' . htmlspecialchars(vat_document_value($currency_symbol . ' ' . number_format($vatAmount, 2)), ENT_QUOTES, 'UTF-8') . '</span>
-                </div>';
-        if ($vatNumber) {
-            $vatSectionHTML .= '<div class="invoice-row">
-                    <span class="invoice-label">VAT Number:</span>
-                    <span class="invoice-value">' . htmlspecialchars($vatNumber) . '</span>
-                </div>';
-        }
-
-        if (function_exists('hotel_default_conference_invoice_document_html') && function_exists('renderBookingDocumentTemplate')) {
-            $logoSrc = function_exists('hotel_invoice_logo_src') ? hotel_invoice_logo_src() : getInvoiceLogoUrl();
-            $logoHtml = $logoSrc !== ''
-                ? '<img src="' . htmlspecialchars($logoSrc, ENT_QUOTES, 'UTF-8') . '" alt="' . htmlspecialchars($site_name, ENT_QUOTES, 'UTF-8') . '" height="64" style="height:64px;width:auto;display:block;margin:0 auto;">'
-                : '';
-            $amountPaid = (float)($enquiry['amount_paid'] ?? $totalWithVat);
-            $balanceDue = (float)($enquiry['amount_due'] ?? max(0, $totalWithVat - $amountPaid));
-
-            return renderBookingDocumentTemplate('conference_invoice_document', [
-                'logo_html' => $logoHtml,
-                'site_name' => htmlspecialchars($site_name, ENT_QUOTES, 'UTF-8'),
-                'address' => htmlspecialchars($address, ENT_QUOTES, 'UTF-8'),
-                'contact_email' => htmlspecialchars($email_address, ENT_QUOTES, 'UTF-8'),
-                'contact_phone' => htmlspecialchars($phone_number, ENT_QUOTES, 'UTF-8'),
-                'invoice_number' => htmlspecialchars($invoice_number, ENT_QUOTES, 'UTF-8'),
-                'issued_date' => htmlspecialchars(date('j F Y'), ENT_QUOTES, 'UTF-8'),
-                'status_text' => htmlspecialchars($balanceDue > 0 ? 'BALANCE DUE' : 'PAID IN FULL', ENT_QUOTES, 'UTF-8'),
-                'inquiry_reference' => htmlspecialchars((string)($enquiry['inquiry_reference'] ?? ''), ENT_QUOTES, 'UTF-8'),
-                'company_name' => htmlspecialchars((string)($enquiry['company_name'] ?? ''), ENT_QUOTES, 'UTF-8'),
-                'contact_person' => htmlspecialchars((string)($enquiry['contact_person'] ?? ''), ENT_QUOTES, 'UTF-8'),
-                'client_email' => htmlspecialchars((string)($enquiry['email'] ?? ''), ENT_QUOTES, 'UTF-8'),
-                'client_phone' => htmlspecialchars((string)($enquiry['phone'] ?? ''), ENT_QUOTES, 'UTF-8'),
-                'conference_room' => htmlspecialchars((string)($enquiry['room_name'] ?? ''), ENT_QUOTES, 'UTF-8'),
-                'event_date' => htmlspecialchars($event_date, ENT_QUOTES, 'UTF-8'),
-                'event_time' => htmlspecialchars(date('H:i', strtotime((string)$enquiry['start_time'])) . ' - ' . date('H:i', strtotime((string)$enquiry['end_time'])), ENT_QUOTES, 'UTF-8'),
-                'attendees' => (string)((int)($enquiry['number_of_attendees'] ?? 0)),
-                'event_type' => htmlspecialchars((string)($enquiry['event_type'] ?? 'Conference'), ENT_QUOTES, 'UTF-8'),
-                'total_amount' => htmlspecialchars($currency_symbol . ' ' . number_format($totalWithVat, 2), ENT_QUOTES, 'UTF-8'),
-                'amount_paid' => htmlspecialchars($currency_symbol . ' ' . number_format($amountPaid, 2), ENT_QUOTES, 'UTF-8'),
-                'balance_due' => htmlspecialchars($currency_symbol . ' ' . number_format($balanceDue, 2), ENT_QUOTES, 'UTF-8'),
-            ], hotel_default_conference_invoice_document_html());
-        }
-    }
-
-    return '
-    <div class="invoice-container">
-        <div class="invoice-header" style="text-align: center;">
-            ' . $logo_html . '
-            <h1 style="color: #8B7355; margin: 0 0 10px 0; font-size: 32px;">CONFERENCE INVOICE</h1>
-            <p style="margin: 5px 0; font-size: 18px;">' . htmlspecialchars($site_name) . '</p>
-            <p style="margin: 5px 0;">Invoice Number: <strong>' . htmlspecialchars($invoice_number) . '</strong></p>
-            <p style="margin: 5px 0;">Date: ' . date('F j, Y') . '</p>
-        </div>
-
-        <div class="invoice-body">
-            <div class="invoice-details">
-                <h3 style="color: #1A1A1A; border-bottom: 2px solid #8B7355; padding-bottom: 10px; margin-bottom: 20px;">Client Information</h3>
-
-                <div class="invoice-row">
-                    <span class="invoice-label">Company:</span>
-                    <span class="invoice-value">' . htmlspecialchars($enquiry['company_name']) . '</span>
-                </div>
-                <div class="invoice-row">
-                    <span class="invoice-label">Contact Person:</span>
-                    <span class="invoice-value">' . htmlspecialchars($enquiry['contact_person']) . '</span>
-                </div>
-                <div class="invoice-row">
-                    <span class="invoice-label">Email:</span>
-                    <span class="invoice-value">' . htmlspecialchars($enquiry['email']) . '</span>
-                </div>
-                <div class="invoice-row">
-                    <span class="invoice-label">Phone:</span>
-                    <span class="invoice-value">' . htmlspecialchars($enquiry['phone']) . '</span>
-                </div>
-            </div>
-
-            <div class="invoice-details">
-                <h3 style="color: #1A1A1A; border-bottom: 2px solid #8B7355; padding-bottom: 10px; margin-bottom: 20px;">Event Details</h3>
-
-                <div class="invoice-row">
-                    <span class="invoice-label">Reference:</span>
-                    <span class="invoice-value" style="color: #8B7355; font-weight: bold; font-size: 16px;">' . htmlspecialchars($enquiry['inquiry_reference']) . '</span>
-                </div>
-                <div class="invoice-row">
-                    <span class="invoice-label">Conference Room:</span>
-                    <span class="invoice-value">' . htmlspecialchars($enquiry['room_name']) . '</span>
-                </div>
-                <div class="invoice-row">
-                    <span class="invoice-label">Event Date:</span>
-                    <span class="invoice-value">' . $event_date . '</span>
-                </div>
-                <div class="invoice-row">
-                    <span class="invoice-label">Event Time:</span>
-                    <span class="invoice-value">' . date('H:i', strtotime($enquiry['start_time'])) . ' - ' . date('H:i', strtotime($enquiry['end_time'])) . '</span>
-                </div>
-                <div class="invoice-row">
-                    <span class="invoice-label">Number of Attendees:</span>
-                    <span class="invoice-value">' . (int) $enquiry['number_of_attendees'] . '</span>
-                </div>
-                <div class="invoice-row">
-                    <span class="invoice-label">Event Type:</span>
-                    <span class="invoice-value">' . htmlspecialchars($enquiry['event_type'] ?? 'N/A') . '</span>
-                </div>
-            </div>
-
-            <div class="invoice-details">
-                <h3 style="color: #1A1A1A; border-bottom: 2px solid #8B7355; padding-bottom: 10px; margin-bottom: 20px;">Services</h3>
-
-                <div class="invoice-row">
-                    <span class="invoice-label">Catering:</span>
-                    <span class="invoice-value">' . ($enquiry['catering_required'] ? 'Yes' : 'No') . '</span>
-                </div>
-                <div class="invoice-row">
-                    <span class="invoice-label">AV Equipment:</span>
-                    <span class="invoice-value">' . htmlspecialchars($enquiry['av_equipment'] ?? 'None') . '</span>
-                </div>
-            </div>
-
-            <div class="total-section">
-                ' . $depositSectionHTML . '
-                ' . $vatSectionHTML . '
-                <div class="total-row">
-                    <span>Total Amount' . ($vatEnabled ? ' (incl. VAT)' : '') . ':</span>
-                    <span>' . $currency_symbol . ' ' . number_format($totalWithVat, 2) . '</span>
-                </div>
-                <p style="margin: 15px 0 0 0; color: #666; font-size: 14px;">
-                    <strong>Payment Status:</strong> <span style="color: #28a745; font-weight: bold;">PAID</span>
-                </p>
-                <p style="margin: 5px 0; color: #666; font-size: 14px;">
-                    <strong>Amount Paid:</strong> ' . $currency_symbol . ' ' . number_format($enquiry['amount_paid'] ?? $totalWithVat, 2) . '
-                </p>
-                ' . ($enquiry['amount_due'] > 0 ? '<p style="margin: 5px 0; color: #dc3545; font-size: 14px;">
-                    <strong>Balance Due:</strong> ' . $currency_symbol . ' ' . number_format($enquiry['amount_due'], 2) . '
-                </p>' : '') . '
-            </div>
-
-            ' . $paymentDetailsHTML . '
-        </div>
-
-        <div class="footer">
-            <p style="margin: 10px 0;"><strong>' . htmlspecialchars($site_name) . '</strong></p>
-            <p style="margin: 5px 0;">' . htmlspecialchars($address) . '</p>
-            <p style="margin: 5px 0;">Email: ' . htmlspecialchars($email_address) . ' | Phone: ' . htmlspecialchars($phone_number) . '</p>
-            <p style="margin: 15px 0 0 0; color: #999; font-size: 12px;">
-                Thank you for your payment! We look forward to hosting your event.
-            </p>
-        </div>
-    </div>';
+    return rh_inv_flat_invoice([
+        'title' => 'Conference Invoice',
+        'invoice_number' => $invoice_number,
+        'meta' => [
+            ['Company', (string)($enquiry['company_name'] ?? '')],
+            ['Reference', (string)($enquiry['inquiry_reference'] ?? '')],
+            ['Contact', (string)($enquiry['contact_person'] ?? '')],
+            ['Room', (string)($enquiry['room_name'] ?? '')],
+            ['Email', (string)($enquiry['email'] ?? '')],
+            ['Event date', $event_date],
+            ['Phone', (string)($enquiry['phone'] ?? '')],
+            ['Time', $eventTime],
+            ['Event type', (string)($enquiry['event_type'] ?? '')],
+            ['Attendees', (string)(int)($enquiry['number_of_attendees'] ?? 0)],
+            ['Catering', !empty($enquiry['catering_required']) ? 'Yes' : 'No'],
+            ['AV equipment', (string)($enquiry['av_equipment'] ?? '') !== '' ? (string)$enquiry['av_equipment'] : 'None'],
+        ],
+        'line_desc_html' => $desc,
+        'subtotal' => $subtotal,
+        'vat_enabled' => $vatEnabled,
+        'vat_amount' => $vatAmount,
+        'vat_rate' => $vatRate,
+        'total' => $totalWithVat,
+        'amount_paid' => $amountPaid,
+        'amount_due' => $balanceDue,
+        'deposit' => [
+            'required' => !empty($enquiry['deposit_required']) && $enquiry['deposit_required'] > 0,
+            'amount' => (float)($enquiry['deposit_amount'] ?? 0),
+            'paid' => (float)($enquiry['deposit_paid'] ?? 0),
+        ],
+        'payments' => $payments,
+        'closing' => 'Thank you for your payment! We look forward to hosting your event.',
+        'site_name' => $site_name,
+        'email' => $email_address,
+        'phone' => $phone_number,
+        'currency' => $currency_symbol,
+    ]);
 }
 
 /**
@@ -2227,15 +2440,8 @@ function buildGymInvoiceHTML(array $inquiry, string $invoice_number, string $sit
 {
     global $pdo;
 
-    $logo_url = getInvoiceLogoUrl();
-    $logo_html = '';
-    if (!empty($logo_url)) {
-        $logo_html = '<img src="' . htmlspecialchars($logo_url) . '" alt="' . htmlspecialchars($site_name) . '" style="max-width: 110px; height: auto; margin-bottom: 20px; display: block; margin-left: auto; margin-right: auto;">';
-    }
-
     $vatEnabled = in_array(getSetting('vat_enabled'), ['1', 1, true, 'true', 'on'], true);
     $vatRate = $vatEnabled ? (float)getSetting('vat_rate') : 0;
-    $vatNumber = getSetting('vat_number');
 
     // Genuine receipts plus settled refunds (shown negative).
     $paymentsStmt = $pdo->prepare("
@@ -2247,7 +2453,7 @@ function buildGymInvoiceHTML(array $inquiry, string $invoice_number, string $sit
         ORDER BY payment_date ASC
     ");
     $paymentsStmt->execute([$inquiry['id']]);
-    $payments = $paymentsStmt->fetchAll(PDO::FETCH_ASSOC);
+    $payments = rh_invoice_signed_payments($paymentsStmt->fetchAll(PDO::FETCH_ASSOC));
 
     $subtotal = (float)$inquiry['total_amount'];
     // Prefer the VAT breakdown locked on the record at invoice time; only
@@ -2262,126 +2468,43 @@ function buildGymInvoiceHTML(array $inquiry, string $invoice_number, string $sit
         $vatAmount = $vatParts['vat'];
         $totalWithVat = $vatParts['total'];
     }
+    $amountPaid = (float)($inquiry['amount_paid'] ?? $totalWithVat);
+    $balanceDue = (float)($inquiry['amount_due'] ?? 0);
 
-    $paymentDetailsHTML = '';
-    if (!empty($payments)) {
-        $paymentDetailsHTML = '<div style="margin-top: 20px; padding: 15px; background: #f8f9fa; border-radius: 5px;">
-                    <h4 style="color: #1A1A1A; margin-top: 0;">Payment History</h4>';
-        foreach ($payments as $payment) {
-            $isRefundRow = (($payment['payment_type'] ?? '') === 'refund');
-            $paymentDetailsHTML .= '<div style="display: flex; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid #ddd;">
-                        <span>' . date('M j, Y', strtotime($payment['payment_date'])) . ' (' . ($isRefundRow ? 'Refund — ' : '') . ucfirst(str_replace('_', ' ', $payment['payment_method'])) . ')</span>
-                        <span>' . ($isRefundRow ? '-' : '') . $currency_symbol . ' ' . number_format($payment['total_amount'], 2) . '</span>
-                    </div>';
-        }
-        $paymentDetailsHTML .= '</div>';
-    }
+    $package = trim((string)($inquiry['membership_type'] ?? ''));
+    $desc = rh_pdf_e('Gym membership') . rh_inv_sub($package !== '' ? $package : '');
 
-    $depositSectionHTML = '';
-    if (!empty($inquiry['deposit_required']) && $inquiry['deposit_required'] > 0) {
-        $depositSectionHTML = '<div class="invoice-row">
-                    <span class="invoice-label">Deposit Required:</span>
-                    <span class="invoice-value">' . $currency_symbol . ' ' . number_format($inquiry['deposit_amount'], 2) . '</span>
-                </div>
-                <div class="invoice-row">
-                    <span class="invoice-label">Deposit Paid:</span>
-                    <span class="invoice-value" style="color: ' . ($inquiry['deposit_paid'] >= $inquiry['deposit_amount'] ? '#28a745' : '#dc3545') . '; font-weight: bold;">' . $currency_symbol . ' ' . number_format($inquiry['deposit_paid'] ?? 0, 2) . '</span>
-                </div>';
-    }
-
-    $vatSectionHTML = '';
-    if ($vatEnabled && $vatAmount > 0) {
-        $vatSectionHTML = '<div class="invoice-row">
-                    <span class="invoice-label">Subtotal (excl. VAT):</span>
-                    <span class="invoice-value">' . $currency_symbol . ' ' . number_format($subtotal, 2) . '</span>
-                </div>
-                <div class="invoice-row">
-                    <span class="invoice-label">VAT (' . number_format($vatRate, 2) . '%):</span>
-                    <span class="invoice-value">' . htmlspecialchars(vat_document_value($currency_symbol . ' ' . number_format($vatAmount, 2)), ENT_QUOTES, 'UTF-8') . '</span>
-                </div>';
-        if ($vatNumber) {
-            $vatSectionHTML .= '<div class="invoice-row">
-                    <span class="invoice-label">VAT Number:</span>
-                    <span class="invoice-value">' . htmlspecialchars($vatNumber) . '</span>
-                </div>';
-        }
-    }
-
-    return '
-    <div class="invoice-container">
-        <div class="invoice-header" style="text-align: center;">
-            ' . $logo_html . '
-            <h1 style="color: #8B7355; margin: 0 0 10px 0; font-size: 32px;">GYM MEMBERSHIP INVOICE</h1>
-            <p style="margin: 5px 0; font-size: 18px;">' . htmlspecialchars($site_name) . '</p>
-            <p style="margin: 5px 0;">Invoice Number: <strong>' . htmlspecialchars($invoice_number) . '</strong></p>
-            <p style="margin: 5px 0;">Date: ' . date('F j, Y') . '</p>
-        </div>
-
-        <div class="invoice-body">
-            <div class="invoice-details">
-                <h3 style="color: #1A1A1A; border-bottom: 2px solid #8B7355; padding-bottom: 10px; margin-bottom: 20px;">Member Information</h3>
-
-                <div class="invoice-row">
-                    <span class="invoice-label">Name:</span>
-                    <span class="invoice-value">' . htmlspecialchars($inquiry['name']) . '</span>
-                </div>
-                <div class="invoice-row">
-                    <span class="invoice-label">Email:</span>
-                    <span class="invoice-value">' . htmlspecialchars($inquiry['email']) . '</span>
-                </div>
-                <div class="invoice-row">
-                    <span class="invoice-label">Phone:</span>
-                    <span class="invoice-value">' . htmlspecialchars($inquiry['phone']) . '</span>
-                </div>
-            </div>
-
-            <div class="invoice-details">
-                <h3 style="color: #1A1A1A; border-bottom: 2px solid #8B7355; padding-bottom: 10px; margin-bottom: 20px;">Membership Details</h3>
-
-                <div class="invoice-row">
-                    <span class="invoice-label">Reference:</span>
-                    <span class="invoice-value" style="color: #8B7355; font-weight: bold; font-size: 16px;">' . htmlspecialchars($inquiry['reference_number']) . '</span>
-                </div>
-                <div class="invoice-row">
-                    <span class="invoice-label">Membership / Package:</span>
-                    <span class="invoice-value">' . htmlspecialchars($inquiry['membership_type'] ?? 'N/A') . '</span>
-                </div>
-                ' . (!empty($inquiry['preferred_date']) ? '<div class="invoice-row">
-                    <span class="invoice-label">Preferred Start Date:</span>
-                    <span class="invoice-value">' . date('F j, Y', strtotime($inquiry['preferred_date'])) . '</span>
-                </div>' : '') . '
-            </div>
-
-            <div class="total-section">
-                ' . $depositSectionHTML . '
-                ' . $vatSectionHTML . '
-                <div class="total-row">
-                    <span>Total Amount' . ($vatEnabled ? ' (incl. VAT)' : '') . ':</span>
-                    <span>' . $currency_symbol . ' ' . number_format($totalWithVat, 2) . '</span>
-                </div>
-                <p style="margin: 15px 0 0 0; color: #666; font-size: 14px;">
-                    <strong>Payment Status:</strong> <span style="color: #28a745; font-weight: bold;">PAID</span>
-                </p>
-                <p style="margin: 5px 0; color: #666; font-size: 14px;">
-                    <strong>Amount Paid:</strong> ' . $currency_symbol . ' ' . number_format($inquiry['amount_paid'] ?? $totalWithVat, 2) . '
-                </p>
-                ' . ($inquiry['amount_due'] > 0 ? '<p style="margin: 5px 0; color: #dc3545; font-size: 14px;">
-                    <strong>Balance Due:</strong> ' . $currency_symbol . ' ' . number_format($inquiry['amount_due'], 2) . '
-                </p>' : '') . '
-            </div>
-
-            ' . $paymentDetailsHTML . '
-        </div>
-
-        <div class="footer">
-            <p style="margin: 10px 0;"><strong>' . htmlspecialchars($site_name) . '</strong></p>
-            <p style="margin: 5px 0;">' . htmlspecialchars($address) . '</p>
-            <p style="margin: 5px 0;">Email: ' . htmlspecialchars($email_address) . ' | Phone: ' . htmlspecialchars($phone_number) . '</p>
-            <p style="margin: 15px 0 0 0; color: #999; font-size: 12px;">
-                Thank you for your payment! We look forward to seeing you at the gym.
-            </p>
-        </div>
-    </div>';
+    return rh_inv_flat_invoice([
+        'title' => 'Gym Membership Invoice',
+        'invoice_number' => $invoice_number,
+        'meta' => [
+            ['Member', (string)($inquiry['name'] ?? '')],
+            ['Reference', (string)($inquiry['reference_number'] ?? '')],
+            ['Email', (string)($inquiry['email'] ?? '')],
+            ['Package', $package !== '' ? $package : 'N/A'],
+            ['Phone', (string)($inquiry['phone'] ?? '')],
+            ['Start date', !empty($inquiry['preferred_date']) ? date('d M Y', strtotime((string)$inquiry['preferred_date'])) : ''],
+        ],
+        'line_desc_html' => $desc,
+        'subtotal' => $subtotal,
+        'vat_enabled' => $vatEnabled,
+        'vat_amount' => $vatAmount,
+        'vat_rate' => $vatRate,
+        'total' => $totalWithVat,
+        'amount_paid' => $amountPaid,
+        'amount_due' => $balanceDue,
+        'deposit' => [
+            'required' => !empty($inquiry['deposit_required']) && $inquiry['deposit_required'] > 0,
+            'amount' => (float)($inquiry['deposit_amount'] ?? 0),
+            'paid' => (float)($inquiry['deposit_paid'] ?? 0),
+        ],
+        'payments' => $payments,
+        'closing' => 'Thank you for your payment! We look forward to seeing you at the gym.',
+        'site_name' => $site_name,
+        'email' => $email_address,
+        'phone' => $phone_number,
+        'currency' => $currency_symbol,
+    ]);
 }
 
 /**
@@ -2628,15 +2751,8 @@ function buildEventInvoiceHTML(array $inquiry, string $invoice_number, string $s
 {
     global $pdo;
 
-    $logo_url = getInvoiceLogoUrl();
-    $logo_html = '';
-    if (!empty($logo_url)) {
-        $logo_html = '<img src="' . htmlspecialchars($logo_url) . '" alt="' . htmlspecialchars($site_name) . '" style="max-width: 110px; height: auto; margin-bottom: 20px; display: block; margin-left: auto; margin-right: auto;">';
-    }
-
     $vatEnabled = in_array(getSetting('vat_enabled'), ['1', 1, true, 'true', 'on'], true);
     $vatRate = $vatEnabled ? (float)getSetting('vat_rate') : 0;
-    $vatNumber = getSetting('vat_number');
 
     // Genuine receipts plus settled refunds (shown negative).
     $paymentsStmt = $pdo->prepare("
@@ -2648,7 +2764,7 @@ function buildEventInvoiceHTML(array $inquiry, string $invoice_number, string $s
         ORDER BY payment_date ASC
     ");
     $paymentsStmt->execute([$inquiry['id']]);
-    $payments = $paymentsStmt->fetchAll(PDO::FETCH_ASSOC);
+    $payments = rh_invoice_signed_payments($paymentsStmt->fetchAll(PDO::FETCH_ASSOC));
 
     $subtotal = (float)$inquiry['total_amount'];
     // Prefer the VAT breakdown locked on the record at invoice time; only
@@ -2663,130 +2779,46 @@ function buildEventInvoiceHTML(array $inquiry, string $invoice_number, string $s
         $vatAmount = $vatParts['vat'];
         $totalWithVat = $vatParts['total'];
     }
+    $amountPaid = (float)($inquiry['amount_paid'] ?? $totalWithVat);
+    $balanceDue = (float)($inquiry['amount_due'] ?? 0);
 
-    $paymentDetailsHTML = '';
-    if (!empty($payments)) {
-        $paymentDetailsHTML = '<div style="margin-top: 20px; padding: 15px; background: #f8f9fa; border-radius: 5px;">
-                    <h4 style="color: #1A1A1A; margin-top: 0;">Payment History</h4>';
-        foreach ($payments as $payment) {
-            $isRefundRow = (($payment['payment_type'] ?? '') === 'refund');
-            $paymentDetailsHTML .= '<div style="display: flex; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid #ddd;">
-                        <span>' . date('M j, Y', strtotime($payment['payment_date'])) . ' (' . ($isRefundRow ? 'Refund — ' : '') . ucfirst(str_replace('_', ' ', $payment['payment_method'])) . ')</span>
-                        <span>' . ($isRefundRow ? '-' : '') . $currency_symbol . ' ' . number_format($payment['total_amount'], 2) . '</span>
-                    </div>';
-        }
-        $paymentDetailsHTML .= '</div>';
-    }
+    $guests = (int)($inquiry['guests'] ?? 1);
+    $eventTitle = trim((string)($inquiry['event_title'] ?? ''));
+    $desc = rh_pdf_e('Event booking' . ($eventTitle !== '' ? ' - ' . $eventTitle : ''))
+        . rh_inv_sub($guests . ' attendee' . ($guests === 1 ? '' : 's'));
 
-    $depositSectionHTML = '';
-    if (!empty($inquiry['deposit_required']) && $inquiry['deposit_required'] > 0) {
-        $depositSectionHTML = '<div class="invoice-row">
-                    <span class="invoice-label">Deposit Required:</span>
-                    <span class="invoice-value">' . $currency_symbol . ' ' . number_format($inquiry['deposit_amount'], 2) . '</span>
-                </div>
-                <div class="invoice-row">
-                    <span class="invoice-label">Deposit Paid:</span>
-                    <span class="invoice-value" style="color: ' . ($inquiry['deposit_paid'] >= $inquiry['deposit_amount'] ? '#28a745' : '#dc3545') . '; font-weight: bold;">' . $currency_symbol . ' ' . number_format($inquiry['deposit_paid'] ?? 0, 2) . '</span>
-                </div>';
-    }
-
-    $vatSectionHTML = '';
-    if ($vatEnabled && $vatAmount > 0) {
-        $vatSectionHTML = '<div class="invoice-row">
-                    <span class="invoice-label">Subtotal (excl. VAT):</span>
-                    <span class="invoice-value">' . $currency_symbol . ' ' . number_format($subtotal, 2) . '</span>
-                </div>
-                <div class="invoice-row">
-                    <span class="invoice-label">VAT (' . number_format($vatRate, 2) . '%):</span>
-                    <span class="invoice-value">' . htmlspecialchars(vat_document_value($currency_symbol . ' ' . number_format($vatAmount, 2)), ENT_QUOTES, 'UTF-8') . '</span>
-                </div>';
-        if ($vatNumber) {
-            $vatSectionHTML .= '<div class="invoice-row">
-                    <span class="invoice-label">VAT Number:</span>
-                    <span class="invoice-value">' . htmlspecialchars($vatNumber) . '</span>
-                </div>';
-        }
-    }
-
-    return '
-    <div class="invoice-container">
-        <div class="invoice-header" style="text-align: center;">
-            ' . $logo_html . '
-            <h1 style="color: #8B7355; margin: 0 0 10px 0; font-size: 32px;">EVENT BOOKING INVOICE</h1>
-            <p style="margin: 5px 0; font-size: 18px;">' . htmlspecialchars($site_name) . '</p>
-            <p style="margin: 5px 0;">Invoice Number: <strong>' . htmlspecialchars($invoice_number) . '</strong></p>
-            <p style="margin: 5px 0;">Date: ' . date('F j, Y') . '</p>
-        </div>
-
-        <div class="invoice-body">
-            <div class="invoice-details">
-                <h3 style="color: #1A1A1A; border-bottom: 2px solid #8B7355; padding-bottom: 10px; margin-bottom: 20px;">Attendee Information</h3>
-
-                <div class="invoice-row">
-                    <span class="invoice-label">Name:</span>
-                    <span class="invoice-value">' . htmlspecialchars($inquiry['name']) . '</span>
-                </div>
-                <div class="invoice-row">
-                    <span class="invoice-label">Email:</span>
-                    <span class="invoice-value">' . htmlspecialchars($inquiry['email']) . '</span>
-                </div>
-                <div class="invoice-row">
-                    <span class="invoice-label">Phone:</span>
-                    <span class="invoice-value">' . htmlspecialchars($inquiry['phone']) . '</span>
-                </div>
-            </div>
-
-            <div class="invoice-details">
-                <h3 style="color: #1A1A1A; border-bottom: 2px solid #8B7355; padding-bottom: 10px; margin-bottom: 20px;">Event Booking Details</h3>
-
-                <div class="invoice-row">
-                    <span class="invoice-label">Reference:</span>
-                    <span class="invoice-value" style="color: #8B7355; font-weight: bold; font-size: 16px;">' . htmlspecialchars($inquiry['reference_number']) . '</span>
-                </div>
-                <div class="invoice-row">
-                    <span class="invoice-label">Event:</span>
-                    <span class="invoice-value">' . htmlspecialchars($inquiry['event_title'] ?? 'N/A') . '</span>
-                </div>
-                ' . (!empty($inquiry['event_date']) ? '<div class="invoice-row">
-                    <span class="invoice-label">Event Date:</span>
-                    <span class="invoice-value">' . date('F j, Y', strtotime($inquiry['event_date'])) . '</span>
-                </div>' : '') . '
-                <div class="invoice-row">
-                    <span class="invoice-label">Attendees:</span>
-                    <span class="invoice-value">' . (int)($inquiry['guests'] ?? 1) . '</span>
-                </div>
-            </div>
-
-            <div class="total-section">
-                ' . $depositSectionHTML . '
-                ' . $vatSectionHTML . '
-                <div class="total-row">
-                    <span>Total Amount' . ($vatEnabled ? ' (incl. VAT)' : '') . ':</span>
-                    <span>' . $currency_symbol . ' ' . number_format($totalWithVat, 2) . '</span>
-                </div>
-                <p style="margin: 15px 0 0 0; color: #666; font-size: 14px;">
-                    <strong>Payment Status:</strong> <span style="color: #28a745; font-weight: bold;">PAID</span>
-                </p>
-                <p style="margin: 5px 0; color: #666; font-size: 14px;">
-                    <strong>Amount Paid:</strong> ' . $currency_symbol . ' ' . number_format($inquiry['amount_paid'] ?? $totalWithVat, 2) . '
-                </p>
-                ' . ($inquiry['amount_due'] > 0 ? '<p style="margin: 5px 0; color: #dc3545; font-size: 14px;">
-                    <strong>Balance Due:</strong> ' . $currency_symbol . ' ' . number_format($inquiry['amount_due'], 2) . '
-                </p>' : '') . '
-            </div>
-
-            ' . $paymentDetailsHTML . '
-        </div>
-
-        <div class="footer">
-            <p style="margin: 10px 0;"><strong>' . htmlspecialchars($site_name) . '</strong></p>
-            <p style="margin: 5px 0;">' . htmlspecialchars($address) . '</p>
-            <p style="margin: 5px 0;">Email: ' . htmlspecialchars($email_address) . ' | Phone: ' . htmlspecialchars($phone_number) . '</p>
-            <p style="margin: 15px 0 0 0; color: #999; font-size: 12px;">
-                Thank you for your payment! We look forward to seeing you at the event.
-            </p>
-        </div>
-    </div>';
+    return rh_inv_flat_invoice([
+        'title' => 'Event Booking Invoice',
+        'invoice_number' => $invoice_number,
+        'meta' => [
+            ['Attendee', (string)($inquiry['name'] ?? '')],
+            ['Reference', (string)($inquiry['reference_number'] ?? '')],
+            ['Email', (string)($inquiry['email'] ?? '')],
+            ['Event', $eventTitle !== '' ? $eventTitle : 'N/A'],
+            ['Phone', (string)($inquiry['phone'] ?? '')],
+            ['Event date', !empty($inquiry['event_date']) ? date('d M Y', strtotime((string)$inquiry['event_date'])) : ''],
+            ['Attendees', (string)$guests],
+        ],
+        'line_desc_html' => $desc,
+        'subtotal' => $subtotal,
+        'vat_enabled' => $vatEnabled,
+        'vat_amount' => $vatAmount,
+        'vat_rate' => $vatRate,
+        'total' => $totalWithVat,
+        'amount_paid' => $amountPaid,
+        'amount_due' => $balanceDue,
+        'deposit' => [
+            'required' => !empty($inquiry['deposit_required']) && $inquiry['deposit_required'] > 0,
+            'amount' => (float)($inquiry['deposit_amount'] ?? 0),
+            'paid' => (float)($inquiry['deposit_paid'] ?? 0),
+        ],
+        'payments' => $payments,
+        'closing' => 'Thank you for your payment! We look forward to seeing you at the event.',
+        'site_name' => $site_name,
+        'email' => $email_address,
+        'phone' => $phone_number,
+        'currency' => $currency_symbol,
+    ]);
 }
 
 /**
@@ -3075,118 +3107,28 @@ function generateGymQuotationPDF(array $inquiry, array $options = []): string
     $depositAmount = (float)($inquiry['deposit_amount'] ?? 0);
     $membershipType = (string)($inquiry['membership_type'] ?? 'Gym Membership');
 
-    $fmt = static function (float $value) use ($currency): string {
-        return $currency . number_format($value, 0);
-    };
-    $esc = static function (mixed $value): string {
-        return htmlspecialchars((string)$value, ENT_QUOTES, 'UTF-8');
-    };
+    $html = rh_inv_quotation_html([
+        'title' => 'Gym Membership Quotation',
+        'quote_ref' => $quoteRef,
+        'valid_until' => $validUntil,
+        'meta' => [
+            ['Prepared for', (string)($inquiry['name'] ?? 'Member')],
+            ['Inquiry ref', (string)($inquiry['reference_number'] ?? '')],
+            ['Phone', (string)($inquiry['phone'] ?? '')],
+            ['Email', (string)($inquiry['email'] ?? '')],
+            ['Package', $membershipType],
+        ],
+        'line_desc_html' => rh_pdf_e('Membership package') . rh_inv_sub($membershipType),
+        'base' => $baseAmount,
+        'vat_amount' => $vatAmount,
+        'vat_rate' => $vatRate,
+        'total' => $totalAmount,
+        'deposit_amount' => (!empty($inquiry['deposit_required']) && $depositAmount > 0) ? $depositAmount : 0.0,
+        'payment_policy' => $paymentPolicy,
+        'notes' => $notes,
+    ]);
 
-    $vatRow = '';
-    if ($vatAmount > 0) {
-        $vatLabel = $vatRate > 0 ? 'VAT (' . number_format($vatRate, 0) . '%)' : 'VAT';
-        $vatRow = '<tr><td>' . $esc($vatLabel) . '</td><td class="right">' . $esc(vat_document_value($fmt($vatAmount))) . '</td></tr>';
-    }
-
-    $depositRow = '';
-    if (!empty($inquiry['deposit_required']) && $depositAmount > 0) {
-        $depositRow = '<tr><td>Deposit Required</td><td class="right">' . $esc($fmt($depositAmount)) . '</td></tr>';
-    }
-
-    $notesBlock = '';
-    if ($notes !== '') {
-        $notesBlock = '<div class="note-block"><h3>Notes</h3><p>' . nl2br($esc($notes)) . '</p></div>';
-    }
-
-    $html = '
-<style>
-body { font-family: helvetica; color: #2A2723; font-size: 10.5px; background: #F7F3EE; }
-.header { background: #8A775F; color: #ffffff; padding: 16px; }
-.header h1 { margin: 0 0 4px; font-size: 20px; letter-spacing: 0.8px; }
-.header p { margin: 0; font-size: 10px; color: #E6DBCF; }
-.meta { margin-top: 10px; border: 1px solid #E3D8CA; }
-.meta td { padding: 8px; font-size: 10px; }
-.meta .label { color: #7A6A58; text-transform: uppercase; letter-spacing: 0.6px; width: 35%; }
-.section-title { margin: 14px 0 6px; color: #8A775F; font-size: 12px; letter-spacing: 0.4px; }
-.detail-table, .price-table { border: 1px solid #E3D8CA; border-collapse: collapse; }
-.detail-table td, .price-table td { border: 1px solid #EDE4D8; padding: 7px; font-size: 10px; }
-.detail-table td:first-child, .price-table td:first-child { background: #F7F3EE; width: 38%; color: #5F5343; }
-.right { text-align: right; }
-.total-row td { background: #EDE2D4; font-weight: bold; color: #231F1C; }
-.policy { margin-top: 10px; background: #FFF8EC; border-left: 3px solid #B18247; padding: 10px; }
-.note-block { margin-top: 10px; background: #F2F7FC; border-left: 3px solid #4A6FA5; padding: 10px; }
-.note-block h3 { margin: 0 0 6px; font-size: 11px; color: #2D4F7A; }
-.footer { margin-top: 16px; font-size: 9px; color: #766A5E; text-align: center; }
-</style>
-
-<div class="header">
-    <h1>' . $esc($siteName) . '</h1>
-    <p>' . $esc($siteAddress) . ' | ' . $esc($sitePhone) . ' | ' . $esc($siteEmail) . '</p>
-</div>
-
-<table class="meta" width="100%" cellspacing="0" cellpadding="0">
-    <tr>
-        <td class="label">Quotation Ref</td>
-        <td>' . $esc($quoteRef) . '</td>
-        <td class="label">Valid Until</td>
-        <td>' . $esc($validUntil->format('F j, Y')) . '</td>
-    </tr>
-    <tr>
-        <td class="label">Prepared For</td>
-        <td>' . $esc((string)($inquiry['name'] ?? 'Member')) . '</td>
-        <td class="label">Phone</td>
-        <td>' . $esc((string)($inquiry['phone'] ?? '')) . '</td>
-    </tr>
-</table>
-
-<h2 class="section-title">Membership Details</h2>
-<table class="detail-table" width="100%" cellspacing="0" cellpadding="0">
-    <tr><td>Inquiry Reference</td><td>' . $esc((string)($inquiry['reference_number'] ?? '')) . '</td></tr>
-    <tr><td>Package</td><td>' . $esc($membershipType) . '</td></tr>
-</table>
-
-<h2 class="section-title">Price Breakdown</h2>
-<table class="price-table" width="100%" cellspacing="0" cellpadding="0">
-    <tr><td>Membership Package</td><td class="right">' . $esc($fmt($baseAmount)) . '</td></tr>'
-        . $vatRow
-        . $depositRow
-        . '<tr class="total-row"><td>Total Quotation</td><td class="right">' . $esc($fmt($totalAmount)) . '</td></tr>
-</table>
-
-<div class="policy">
-    <strong>Payment Terms</strong><br>' . $esc($paymentPolicy) . '
-</div>'
-        . $notesBlock . '
-
-<div class="footer">
-    This quotation is valid until ' . $esc($validUntil->format('F j, Y')) . '. Availability and rates are subject to confirmation at acceptance.
-</div>';
-
-    if (function_exists('bookingRenderPdfFromHtml')) {
-        return bookingRenderPdfFromHtml($html, 'Gym Quotation ' . $quoteRef);
-    }
-
-    if (!class_exists('JapandiTCPDF')) {
-        class JapandiTCPDF extends TCPDF {
-            public function AddPage($orientation = '', $format = '', $keepmargins = false, $tocpage = false): void
-            {
-                parent::AddPage($orientation, $format, $keepmargins, $tocpage);
-                $this->SetFillColor(247, 243, 238);
-                $this->Rect(0, 0, $this->getPageWidth(), $this->getPageHeight(), 'F');
-            }
-        }
-    }
-    $pdf = new JapandiTCPDF('P', 'mm', 'A4', true, 'UTF-8', false);
-    $pdf->setPrintHeader(false);
-    $pdf->setPrintFooter(false);
-    $pdf->SetMargins(16, 16, 16);
-    $pdf->SetAutoPageBreak(true, 18);
-    $pdf->SetTitle('Gym Quotation ' . $quoteRef);
-    $pdf->SetAuthor($siteName);
-    $pdf->AddPage();
-    $pdf->writeHTML($html, true, false, true, false, '');
-
-    return $pdf->Output('', 'S');
+    return bookingRenderPdfFromHtml($html, 'Gym Quotation ' . $quoteRef, array_intersect_key($options, ['watermark' => true]));
 }
 
 /**
@@ -3232,117 +3174,27 @@ function generateEventInquiryQuotationPDF(array $inquiry, array $options = []): 
     $eventTitle = (string)($inquiry['event_title'] ?? 'Event Booking');
     $guests = max(1, (int)($inquiry['guests'] ?? 1));
 
-    $fmt = static function (float $value) use ($currency): string {
-        return $currency . number_format($value, 0);
-    };
-    $esc = static function (mixed $value): string {
-        return htmlspecialchars((string)$value, ENT_QUOTES, 'UTF-8');
-    };
+    $html = rh_inv_quotation_html([
+        'title' => 'Event Booking Quotation',
+        'quote_ref' => $quoteRef,
+        'valid_until' => $validUntil,
+        'meta' => [
+            ['Prepared for', (string)($inquiry['name'] ?? 'Attendee')],
+            ['Inquiry ref', (string)($inquiry['reference_number'] ?? '')],
+            ['Phone', (string)($inquiry['phone'] ?? '')],
+            ['Email', (string)($inquiry['email'] ?? '')],
+            ['Event', $eventTitle],
+            ['Attendees', (string)$guests],
+        ],
+        'line_desc_html' => rh_pdf_e('Event booking') . rh_inv_sub($eventTitle . ' | ' . $guests . ' attendee' . ($guests === 1 ? '' : 's')),
+        'base' => $baseAmount,
+        'vat_amount' => $vatAmount,
+        'vat_rate' => $vatRate,
+        'total' => $totalAmount,
+        'deposit_amount' => (!empty($inquiry['deposit_required']) && $depositAmount > 0) ? $depositAmount : 0.0,
+        'payment_policy' => $paymentPolicy,
+        'notes' => $notes,
+    ]);
 
-    $vatRow = '';
-    if ($vatAmount > 0) {
-        $vatLabel = $vatRate > 0 ? 'VAT (' . number_format($vatRate, 0) . '%)' : 'VAT';
-        $vatRow = '<tr><td>' . $esc($vatLabel) . '</td><td class="right">' . $esc(vat_document_value($fmt($vatAmount))) . '</td></tr>';
-    }
-
-    $depositRow = '';
-    if (!empty($inquiry['deposit_required']) && $depositAmount > 0) {
-        $depositRow = '<tr><td>Deposit Required</td><td class="right">' . $esc($fmt($depositAmount)) . '</td></tr>';
-    }
-
-    $notesBlock = '';
-    if ($notes !== '') {
-        $notesBlock = '<div class="note-block"><h3>Notes</h3><p>' . nl2br($esc($notes)) . '</p></div>';
-    }
-
-    $html = '
-<style>
-body { font-family: helvetica; color: #2A2723; font-size: 10.5px; background: #F7F3EE; }
-.header { background: #8A775F; color: #ffffff; padding: 16px; }
-.header h1 { margin: 0 0 4px; font-size: 20px; letter-spacing: 0.8px; }
-.header p { margin: 0; font-size: 10px; color: #E6DBCF; }
-.meta { margin-top: 10px; border: 1px solid #E3D8CA; }
-.meta td { padding: 8px; font-size: 10px; }
-.meta .label { color: #7A6A58; text-transform: uppercase; letter-spacing: 0.6px; width: 35%; }
-.section-title { margin: 14px 0 6px; color: #8A775F; font-size: 12px; letter-spacing: 0.4px; }
-.detail-table, .price-table { border: 1px solid #E3D8CA; border-collapse: collapse; }
-.detail-table td, .price-table td { border: 1px solid #EDE4D8; padding: 7px; font-size: 10px; }
-.detail-table td:first-child, .price-table td:first-child { background: #F7F3EE; width: 38%; color: #5F5343; }
-.right { text-align: right; }
-.total-row td { background: #EDE2D4; font-weight: bold; color: #231F1C; }
-.policy { margin-top: 10px; background: #FFF8EC; border-left: 3px solid #B18247; padding: 10px; }
-.note-block { margin-top: 10px; background: #F2F7FC; border-left: 3px solid #4A6FA5; padding: 10px; }
-.note-block h3 { margin: 0 0 6px; font-size: 11px; color: #2D4F7A; }
-.footer { margin-top: 16px; font-size: 9px; color: #766A5E; text-align: center; }
-</style>
-
-<div class="header">
-    <h1>' . $esc($siteName) . '</h1>
-    <p>' . $esc($siteAddress) . ' | ' . $esc($sitePhone) . ' | ' . $esc($siteEmail) . '</p>
-</div>
-
-<table class="meta" width="100%" cellspacing="0" cellpadding="0">
-    <tr>
-        <td class="label">Quotation Ref</td>
-        <td>' . $esc($quoteRef) . '</td>
-        <td class="label">Valid Until</td>
-        <td>' . $esc($validUntil->format('F j, Y')) . '</td>
-    </tr>
-    <tr>
-        <td class="label">Prepared For</td>
-        <td>' . $esc((string)($inquiry['name'] ?? 'Attendee')) . '</td>
-        <td class="label">Phone</td>
-        <td>' . $esc((string)($inquiry['phone'] ?? '')) . '</td>
-    </tr>
-</table>
-
-<h2 class="section-title">Event Booking Details</h2>
-<table class="detail-table" width="100%" cellspacing="0" cellpadding="0">
-    <tr><td>Inquiry Reference</td><td>' . $esc((string)($inquiry['reference_number'] ?? '')) . '</td></tr>
-    <tr><td>Event</td><td>' . $esc($eventTitle) . '</td></tr>
-    <tr><td>Attendees</td><td>' . $esc((string)$guests) . '</td></tr>
-</table>
-
-<h2 class="section-title">Price Breakdown</h2>
-<table class="price-table" width="100%" cellspacing="0" cellpadding="0">
-    <tr><td>Event Booking</td><td class="right">' . $esc($fmt($baseAmount)) . '</td></tr>'
-        . $vatRow
-        . $depositRow
-        . '<tr class="total-row"><td>Total Quotation</td><td class="right">' . $esc($fmt($totalAmount)) . '</td></tr>
-</table>
-
-<div class="policy">
-    <strong>Payment Terms</strong><br>' . $esc($paymentPolicy) . '
-</div>'
-        . $notesBlock . '
-
-<div class="footer">
-    This quotation is valid until ' . $esc($validUntil->format('F j, Y')) . '. Availability and rates are subject to confirmation at acceptance.
-</div>';
-
-    if (function_exists('bookingRenderPdfFromHtml')) {
-        return bookingRenderPdfFromHtml($html, 'Event Quotation ' . $quoteRef);
-    }
-
-    if (!class_exists('JapandiTCPDF')) {
-        class JapandiTCPDF extends TCPDF {
-            public function AddPage($orientation = '', $format = '', $keepmargins = false, $tocpage = false): void
-            {
-                parent::AddPage($orientation, $format, $keepmargins, $tocpage);
-                $this->SetFillColor(247, 243, 238);
-                $this->Rect(0, 0, $this->getPageWidth(), $this->getPageHeight(), 'F');
-            }
-        }
-    }
-    $pdf = new JapandiTCPDF('P', 'mm', 'A4', true, 'UTF-8', false);
-    $pdf->setPrintHeader(false);
-    $pdf->setPrintFooter(false);
-    $pdf->SetMargins(16, 16, 16);
-    $pdf->SetAutoPageBreak(true, 18);
-    $pdf->SetTitle('Event Quotation ' . $quoteRef);
-    $pdf->SetAuthor($siteName);
-    $pdf->AddPage();
-    $pdf->writeHTML($html, true, false, true, false, '');
-
-    return $pdf->Output('', 'S');
+    return bookingRenderPdfFromHtml($html, 'Event Quotation ' . $quoteRef, array_intersect_key($options, ['watermark' => true]));
 }

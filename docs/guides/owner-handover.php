@@ -737,7 +737,7 @@ footer.handover .links a:hover { color: var(--gold); }
     <h3>Booking lifecycle</h3>
     <ol class="steps">
       <li><strong>Pending</strong> — the website request lands. A confirmation email fires immediately.</li>
-      <li><strong>Tentative</strong> — hold a room for <?= $tentHours ?> hours while the guest decides. The cron script <code>scripts/expire_tentative_bookings.php</code> runs every 15 minutes and flags any hold past its window, but it does <strong>not</strong> auto-cancel or release the room — a staff member must review and manually cancel expired tentatives.</li>
+      <li><strong>Tentative</strong> — hold a room for <?= $tentHours ?> hours while the guest decides. A hold past its window is marked expired automatically and the room is released; the guest gets a reminder before the hold lapses and a notice when it expires (Admin → Automated Emails).</li>
       <li><strong>Confirmed</strong> — room is reserved. Guest gets a full confirmation with room details and policy.</li>
       <li><strong>Checked-in</strong> — front desk opens the folio; live room availability decrements.</li>
       <li><strong>Checked-out</strong> — final invoice emailed automatically with VAT (<em><?= $vatStatus ?></em>) and tourism levy (<em><?= $levyStatus ?></em>).</li>
@@ -1312,12 +1312,11 @@ footer.handover .links a:hover { color: var(--gold); }
     <h3>Database migrations</h3>
     <p>All schema changes are versioned in <code>admin/migrations/</code>. Run them in order via CLI: <code>php admin/migrations/NNN_name.php</code>. Each migration is idempotent — safe to run again if a deployment failed midway. This project ships with <strong><?= $stats['migrations'] ?> migration scripts</strong>.</p>
 
-    <h3>Scheduled cron jobs</h3>
-    <p>Add the following to the server's crontab:</p>
+    <h3>Scheduled jobs</h3>
+    <p>Automated emails (payment and quotation reminders, tentative holds, pre-arrival, post-stay, gym renewals) need <strong>no cron</strong>: they run by themselves as people use the site, controlled from Admin → Automated Emails. <code>php scripts/auto-scheduler-run.php</code> runs the same jobs if you prefer cron. The remaining optional crontab entries:</p>
     <table>
       <thead><tr><th>Schedule</th><th>Command</th><th>Purpose</th></tr></thead>
       <tbody>
-        <tr><td><code>*/15 * * * *</code></td><td><code>php scripts/expire_tentative_bookings.php</code></td><td>Flags overdue tentative holds for staff review (does not auto-cancel)</td></tr>
         <tr><td><code>0 7 * * *</code></td><td><code>php scripts/daily_reports.php</code></td><td>Morning email digest to manager</td></tr>
         <tr><td><code>0 2 * * *</code></td><td><code>php scripts/backup_database.php --quiet</code></td><td>Nightly gzipped database backup with rotation</td></tr>
       </tbody>
@@ -1547,7 +1546,7 @@ footer.handover .links a:hover { color: var(--gold); }
         <tr><td><code>scripts/smoke_test_booking.php</code></td><td>Verifies database connectivity and booking availability logic</td></tr>
         <tr><td><code>scripts/smoke_test_finance.php</code></td><td>Verifies finance sequence numbering and money-tolerance paths</td></tr>
         <tr><td><code>scripts/daily_reports.php</code></td><td>Sends the morning digest email (run manually to test)</td></tr>
-        <tr><td><code>scripts/expire_tentative_bookings.php</code></td><td>Sweeps and flags overdue tentative holds for staff review — does not cancel them automatically</td></tr>
+        <tr><td><code>scripts/auto-scheduler-run.php</code></td><td>Runs the automated-email jobs now (same as Run now in Admin → Automated Emails)</td></tr>
         <tr><td><code>scripts/patch_amount_due_drift.php</code></td><td>Recalculates booking financial totals in bulk</td></tr>
       </tbody>
     </table>

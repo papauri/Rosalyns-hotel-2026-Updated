@@ -3,7 +3,7 @@
 /**
  * Gym membership expiry-reminder engine.
  *
- * Shared by scripts/gym_membership_reminders.php (cron) and the "Send due
+ * Shared by the web-triggered scheduler (includes/auto-email-jobs.php) and the "Send due
  * reminders now" button on admin/gym-members.php — one code path, testable
  * without HTTP. Settings (site_settings):
  *   gym_reminder_enabled  '1'|'0'   (default '1')

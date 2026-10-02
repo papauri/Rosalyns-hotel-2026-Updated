@@ -52,154 +52,12 @@ function ensureInvoiceNumber(PDO $pdo, array $order, string $prefix): string
     return $invNum;
 }
 
-/* ---------- Build the HTML body of the receipt (used for view + email) ---------- */
+/* ---------- Receipt HTML: built in config/receipts.php so CLI/test scripts share it ---------- */
+require_once __DIR__ . '/../config/receipts.php';
+
 function buildReceiptHtml(array $order, array $items, array $ctx): string
 {
-    $cur = $ctx['currency'];
-    $site = htmlspecialchars($ctx['site']);
-    $addr = htmlspecialchars($ctx['address']);
-    $phone = htmlspecialchars($ctx['phone']);
-    $email = htmlspecialchars($ctx['email']);
-    $footer = htmlspecialchars($ctx['footer']);
-    $invNum = htmlspecialchars($order['invoice_number'] ?? '');
-    $ref    = htmlspecialchars($order['reference']);
-    $date   = $order['paid_at'] ? date('Y-m-d H:i', strtotime($order['paid_at'])) : date('Y-m-d H:i', strtotime($order['created_at']));
-    $cust   = htmlspecialchars($order['customer_name'] ?: 'Walk-in customer');
-    $custEm = htmlspecialchars($order['customer_email'] ?: '');
-    $custPh = htmlspecialchars($order['customer_phone'] ?: '');
-    $isRoomService = ($order['order_type'] ?? '') === 'room_service';
-    $orderType = htmlspecialchars(ucfirst(str_replace('_', ' ', $order['order_type'])));
-    $rawTableNo = (string)($order['table_number'] ?: '');
-    $roomNumber = trim((string)($order['room_number'] ?? ''));
-    if ($isRoomService && $roomNumber === '' && $rawTableNo !== '') {
-        $roomNumber = trim(preg_replace('/^Room\s+/i', '', $rawTableNo));
-    }
-    $tableNo = htmlspecialchars($rawTableNo);
-    $roomNo = htmlspecialchars($roomNumber);
-    $cashier    = htmlspecialchars($ctx['cashier'] ?: '');
-    $splitLegs  = $ctx['split_legs'] ?? [];
-    $notes  = htmlspecialchars($order['notes'] ?: '');
-    $method = htmlspecialchars(ucwords(str_replace('_', ' ', $order['payment_method'] ?: '—')));
-    $statusLabel = htmlspecialchars(ucfirst($order['status']));
-    $isVoid = in_array($order['status'], ['voided', 'cancelled'], true);
-
-    $rows = '';
-    foreach ($items as $it) {
-        $noteRow = !empty($it['notes']) ? '<div style="font-size:11px;color:#8B7355;font-style:italic;">→ ' . htmlspecialchars($it['notes']) . '</div>' : '';
-        $rows .= '<tr>'
-            . '<td style="padding:6px 8px;border:1px solid #e0d8ce;">' . htmlspecialchars($it['item_name']) . $noteRow . '</td>'
-            . '<td style="padding:6px 8px;border:1px solid #e0d8ce;text-align:right;white-space:nowrap;">' . number_format((float)$it['quantity'], 2) . '</td>'
-            . '<td style="padding:6px 8px;border:1px solid #e0d8ce;text-align:right;white-space:nowrap;">' . $cur . ' ' . number_format((float)$it['unit_price'], 2) . '</td>'
-            . '<td style="padding:6px 8px;border:1px solid #e0d8ce;text-align:right;white-space:nowrap;">' . $cur . ' ' . number_format((float)$it['line_total'], 2) . '</td>'
-            . '</tr>';
-    }
-
-    $subtotal   = (float)$order['subtotal'] ?: array_sum(array_map(fn($i) => (float)$i['line_total'], $items));
-    $discount   = (float)$order['discount_amount'];
-    $service    = (float)$order['service_charge'];
-    $tax        = (float)$order['tax_amount'];
-    $total      = (float)$order['total_amount'];
-    $tip        = (float)($order['tip_amount'] ?? 0);
-    $splitCount = max(1, (int)($order['split_count'] ?? 1));
-    $grandTotal = $total + $tip;
-    $tendered   = $order['tendered_amount'] !== null ? (float)$order['tendered_amount'] : null;
-    $change     = $order['change_due'] !== null ? (float)$order['change_due'] : null;
-
-    $extras = '';
-    if ($order['payment_method'] === 'mobile_money' && $order['mobile_wallet_reference']) {
-        $extras .= '<div>Mobile: ' . htmlspecialchars($order['mobile_wallet_provider']) . ' · Ref ' . htmlspecialchars($order['mobile_wallet_reference']) . '</div>';
-    } elseif ($order['payment_method'] === 'card_manual' && $order['card_last4']) {
-        $extras .= '<div>Card: ···· ' . htmlspecialchars($order['card_last4']) . ' · Auth ' . htmlspecialchars($order['card_auth_code'] ?: '') . '</div>';
-    }
-
-    $voidBanner = '';
-    if ($isVoid) {
-        $voidBanner = '<div style="background:#fde7e9;border:2px solid #c82333;color:#721c24;padding:10px;text-align:center;font-weight:700;letter-spacing:2px;margin:0 0 12px;">VOID / NOT VALID</div>';
-    }
-
-    // Logo via public HTTPS URL so hotel_embed_logo_cid() can reference it (prevents orphaned PNG attachment)
-    $logoUrl  = function_exists('hotel_email_logo_url') ? hotel_email_logo_url() : '';
-    $logoHtml = $logoUrl !== ''
-        ? '<img src="' . htmlspecialchars($logoUrl, ENT_QUOTES, 'UTF-8') . '" alt="' . $site . '" style="max-height:60px;width:auto;display:block;margin:0 auto 10px;">'
-        : '';
-
-    return '<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Receipt ' . $ref . '</title></head>'
-        . '<body style="margin:0;padding:0;background:#f7f3ee;font-family:Arial,Helvetica,sans-serif;color:#1f1c18;">'
-        . '<table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-collapse:collapse;background:#f7f3ee;padding:22px 10px;">'
-        . '<tr><td align="center">'
-        . '<table role="presentation" width="640" cellspacing="0" cellpadding="0" style="width:100%;max-width:640px;background:#ffffff;border:1px solid #ece3d9;border-radius:12px;overflow:hidden;">'
-        . '<tr><td style="padding:18px 24px 16px;border-bottom:1px solid #ede7df;text-align:center;">'
-        . $voidBanner
-        . $logoHtml
-        . '<h1 style="margin:0;color:#8B7355;font-size:24px;font-weight:600;">' . $site . '</h1>'
-        . ($addr ? '<div style="margin-top:6px;font-size:12px;color:#5a534c;">' . $addr . '</div>' : '')
-        . ($phone ? '<div style="margin-top:2px;font-size:12px;color:#5a534c;">Tel: ' . $phone . ($email ? ' · Email: ' . $email : '') . '</div>' : '')
-        . '<div style="margin-top:10px;font-size:12px;letter-spacing:0.12em;font-weight:700;color:#8B7355;">RESTAURANT RECEIPT</div>'
-        . '</td></tr>'
-        . '<tr><td style="padding:16px 24px 10px;">'
-        . '<table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="font-size:12px;color:#3f3933;">'
-        . '<tr><td style="padding:4px 0;"><strong>Receipt #</strong></td><td align="right" style="padding:4px 0;">' . $ref . '</td></tr>'
-        . ($invNum ? '<tr><td style="padding:4px 0;"><strong>Invoice #</strong></td><td align="right" style="padding:4px 0;">' . $invNum . '</td></tr>' : '')
-        . '<tr><td style="padding:4px 0;"><strong>Date</strong></td><td align="right" style="padding:4px 0;">' . htmlspecialchars($date) . '</td></tr>'
-        . '<tr><td style="padding:4px 0;"><strong>Order type</strong></td><td align="right" style="padding:4px 0;">' . $orderType . (!$isRoomService && $tableNo ? ' · Table ' . $tableNo : '') . '</td></tr>'
-        . ($isRoomService ? '<tr><td style="padding:4px 0;"><strong>Room</strong></td><td align="right" style="padding:4px 0;">' . ($roomNo ?: 'Not linked') . '</td></tr>' : '')
-        . ($isRoomService && !empty($order['booking_reference']) ? '<tr><td style="padding:4px 0;"><strong>Booking</strong></td><td align="right" style="padding:4px 0;">' . htmlspecialchars((string)$order['booking_reference']) . '</td></tr>' : '')
-        . '<tr><td style="padding:4px 0;"><strong>Customer</strong></td><td align="right" style="padding:4px 0;">' . $cust . '</td></tr>'
-        . ($custEm ? '<tr><td style="padding:4px 0;"><strong>Email</strong></td><td align="right" style="padding:4px 0;">' . $custEm . '</td></tr>' : '')
-        . ($custPh ? '<tr><td style="padding:4px 0;"><strong>Phone</strong></td><td align="right" style="padding:4px 0;">' . $custPh . '</td></tr>' : '')
-        . ($cashier ? '<tr><td style="padding:4px 0;"><strong>Cashier</strong></td><td align="right" style="padding:4px 0;">' . $cashier . '</td></tr>' : '')
-        . '<tr><td style="padding:4px 0;"><strong>Status</strong></td><td align="right" style="padding:4px 0;">' . $statusLabel . '</td></tr>'
-        . '</table>'
-        . '</td></tr>'
-        . '<tr><td style="padding:8px 24px 0;">'
-        . '<table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-collapse:collapse;font-size:13px;border:1px solid #d9cec1;">'
-        . '<thead><tr style="background:#8B7355;"><th style="padding:8px 8px 8px 8px;text-align:left;color:#ffffff;border-right:1px solid #9A8775;border-bottom:2px solid #6d5a44;">Item</th><th style="padding:8px;text-align:right;color:#ffffff;border-right:1px solid #9A8775;border-bottom:2px solid #6d5a44;white-space:nowrap;">Qty</th><th style="padding:8px;text-align:right;color:#ffffff;border-right:1px solid #9A8775;border-bottom:2px solid #6d5a44;white-space:nowrap;">Unit Price</th><th style="padding:8px;text-align:right;color:#ffffff;border-bottom:2px solid #6d5a44;white-space:nowrap;">Line Total</th></tr></thead>'
-        . '<tbody>' . $rows . '</tbody>'
-        . '</table>'
-        . '</td></tr>'
-        . '<tr><td style="padding:14px 24px 0;">'
-        . '<table role="presentation" align="right" cellspacing="0" cellpadding="0" style="font-size:13px;color:#3f3933;min-width:300px;border-collapse:collapse;border:1px solid #d9cec1;">'
-        . '<tr><td style="padding:6px 10px;border-bottom:1px solid #e8e0d5;border-right:1px solid #d9cec1;">Subtotal</td><td align="right" style="padding:6px 10px;border-bottom:1px solid #e8e0d5;white-space:nowrap;">' . $cur . ' ' . number_format($subtotal, 2) . '</td></tr>'
-        . ($discount > 0 ? '<tr><td style="padding:6px 10px;border-bottom:1px solid #e8e0d5;border-right:1px solid #d9cec1;">Discount' . ($order['discount_reason'] ? ' (' . htmlspecialchars($order['discount_reason']) . ')' : '') . '</td><td align="right" style="padding:6px 10px;border-bottom:1px solid #e8e0d5;color:#b3261e;white-space:nowrap;">−' . $cur . ' ' . number_format($discount, 2) . '</td></tr>' : '')
-        . ($service > 0 ? '<tr><td style="padding:6px 10px;border-bottom:1px solid #e8e0d5;border-right:1px solid #d9cec1;">Service charge</td><td align="right" style="padding:6px 10px;border-bottom:1px solid #e8e0d5;white-space:nowrap;">' . $cur . ' ' . number_format($service, 2) . '</td></tr>' : '')
-        . ($tax > 0 ? '<tr><td style="padding:6px 10px;border-bottom:1px solid #e8e0d5;border-right:1px solid #d9cec1;">Tax</td><td align="right" style="padding:6px 10px;border-bottom:1px solid #e8e0d5;white-space:nowrap;">' . $cur . ' ' . number_format($tax, 2) . '</td></tr>' : '')
-        . ($tip > 0 ? '<tr><td style="padding:6px 10px;border-bottom:1px solid #e8e0d5;border-right:1px solid #d9cec1;color:#059669;font-weight:600;">Tip</td><td align="right" style="padding:6px 10px;border-bottom:1px solid #e8e0d5;color:#059669;font-weight:600;white-space:nowrap;">+ ' . $cur . ' ' . number_format($tip, 2) . '</td></tr>' : '')
-        . '<tr style="background:#3f3933;"><td style="padding:8px 10px;font-weight:700;color:#ffffff;border-right:1px solid #5a534c;">' . ($tip > 0 ? 'GRAND TOTAL' : 'TOTAL') . '</td><td align="right" style="padding:8px 10px;font-weight:700;font-size:15px;color:#D5B37C;white-space:nowrap;">' . $cur . ' ' . number_format($grandTotal, 2) . '</td></tr>'
-        . (function_exists('vat_document_note') && vat_document_note() !== '' ? '<tr><td colspan="2" style="padding:6px 10px;font-size:11px;color:#7a6f63;text-align:center;">' . htmlspecialchars(vat_document_note(), ENT_QUOTES, 'UTF-8') . '</td></tr>' : '')
-        . ($splitCount > 1 ? '<tr><td colspan="2" style="padding:5px 10px;font-size:12px;color:#5a534c;background:#faf7f3;border-top:1px solid #e8e0d5;"><i class="fas fa-users"></i> Split ' . $splitCount . ' ways — ' . $cur . ' ' . number_format($total / $splitCount, 2) . ' each</td></tr>' : '')
-        . '<tr><td colspan="2" style="padding:6px 10px;font-size:12px;color:#5a534c;border-top:1px solid #d9cec1;">Paid via: ' . $method . '</td></tr>'
-        . ($tendered !== null ? '<tr><td style="padding:4px 10px;border-right:1px solid #d9cec1;">Tendered</td><td align="right" style="padding:4px 10px;white-space:nowrap;">' . $cur . ' ' . number_format($tendered, 2) . '</td></tr>' : '')
-        . ($change !== null && $change > 0 ? '<tr><td style="padding:4px 10px;border-top:1px solid #e8e0d5;border-right:1px solid #d9cec1;">Change</td><td align="right" style="padding:4px 10px;border-top:1px solid #e8e0d5;white-space:nowrap;">' . $cur . ' ' . number_format($change, 2) . '</td></tr>' : '')
-        . ($extras ? '<tr><td colspan="2" style="padding:4px 10px;font-size:11px;color:#5a534c;">' . $extras . '</td></tr>' : '')
-        . '</table>'
-        . '</td></tr>'
-        . (!empty($splitLegs) ? (function() use ($splitLegs, $cur): string {
-            $rows = '';
-            $methodNames = ['cash' => 'Cash', 'mobile_money' => 'Mobile Money', 'card_manual' => 'Card (manual)', 'card_pos' => 'Card POS', 'other' => 'Other'];
-            foreach ($splitLegs as $leg) {
-                $legMethod = htmlspecialchars($methodNames[$leg['payment_method']] ?? ucwords(str_replace('_', ' ', $leg['payment_method'])));
-                $legAmt = (float)$leg['split_amount'] + (float)$leg['tip_amount'];
-                $tipNote = (float)$leg['tip_amount'] > 0 ? ' <span style="color:#059669;">(+tip ' . $cur . ' ' . number_format((float)$leg['tip_amount'], 2) . ')</span>' : '';
-                $changeNote = ($leg['change_due'] !== null && (float)$leg['change_due'] > 0) ? ' · Chg ' . $cur . ' ' . number_format((float)$leg['change_due'], 2) : '';
-                $rows .= '<tr><td style="padding:5px 8px;border-bottom:1px solid #ede7df;">#' . (int)$leg['split_number'] . '</td>'
-                    . '<td style="padding:5px 8px;border-bottom:1px solid #ede7df;">' . $legMethod . '</td>'
-                    . '<td align="right" style="padding:5px 8px;border-bottom:1px solid #ede7df;white-space:nowrap;">' . $cur . ' ' . number_format($legAmt, 2) . $tipNote . $changeNote . '</td></tr>';
-            }
-            return '<tr><td style="padding:10px 24px 0;">'
-                . '<div style="font-size:12px;color:#374151;font-weight:700;margin-bottom:4px;">Split payment breakdown</div>'
-                . '<table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="font-size:12px;color:#3f3933;border-collapse:collapse;border:1px solid #d9cec1;">'
-                . '<thead><tr style="background:#f5f0ea;"><th style="padding:5px 8px;text-align:left;border-bottom:1px solid #d9cec1;">Leg</th><th style="padding:5px 8px;text-align:left;border-bottom:1px solid #d9cec1;">Method</th><th style="padding:5px 8px;text-align:right;border-bottom:1px solid #d9cec1;">Amount</th></tr></thead>'
-                . '<tbody>' . $rows . '</tbody></table>'
-                . '</td></tr>';
-        })() : '')
-        . ($notes ? '<tr><td style="padding:14px 24px 0;"><div style="font-size:12px;color:#5a534c;background:#faf7f3;border:1px solid #ece3d9;border-radius:8px;padding:9px 10px;"><strong>Notes:</strong> ' . $notes . '</div></td></tr>' : '')
-        . '<tr><td style="padding:18px 24px 22px;">'
-        . '<div style="border-top:1px dashed #d9cec1;padding-top:10px;text-align:center;font-size:12px;color:#6a645d;line-height:1.5;">' . $footer . '</div>'
-        . '</td></tr>'
-        . '</table>'
-        . '</td></tr>'
-        . '</table>'
-        . '</body></html>';
+    return receipt_build_restaurant_email_html($order, $items, $ctx);
 }
 
 /* ---------- POST: email or whatsapp ---------- */
@@ -317,7 +175,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $pdfAttachments = [];
                 if (function_exists('bookingRenderPdfFromHtml')) {
                     try {
-                        $pdfBytes = bookingRenderPdfFromHtml($html, $subject);
+                        // PDF is built on the themed document kit (A4, real columns), not the email HTML
+                        $pdfBytes = receipt_restaurant_pdf_bytes($orderRow, $items, [
+                            'currency'   => $currency,
+                            'footer'     => $footerLine,
+                            'cashier'    => $cashier ?: '',
+                            'split_legs' => $emailSplitLegs,
+                        ]);
                         if ($pdfBytes !== '') {
                             $pdfName = preg_replace('/[^A-Za-z0-9_-]+/', '-', $orderRow['invoice_number'] ?: $orderRow['reference']) . '.pdf';
                             $pdfAttachments = [['content' => $pdfBytes, 'name' => $pdfName, 'mime' => 'application/pdf']];
@@ -445,6 +309,23 @@ $ctx = [
     'split_legs' => $splitLegs,
 ];
 $receiptHtml = buildReceiptHtml($order, $items, $ctx);
+
+/* ---------- PDF view: same bytes that are emailed ---------- */
+if (!empty($_GET['pdf'])) {
+    try {
+        $pdfBytes = receipt_restaurant_pdf_bytes($order, $items, $ctx);
+    } catch (Throwable $pdfEx) {
+        error_log('stock-receipt: PDF view failed: ' . $pdfEx->getMessage());
+        http_response_code(500);
+        exit('PDF unavailable.');
+    }
+    $pdfName = preg_replace('/[^A-Za-z0-9_-]+/', '-', (string)($order['invoice_number'] ?: $order['reference'])) . '.pdf';
+    header('Content-Type: application/pdf');
+    header('Content-Disposition: inline; filename="' . $pdfName . '"');
+    header('Content-Length: ' . strlen($pdfBytes));
+    echo $pdfBytes;
+    exit;
+}
 
 /* ---------- Print-only mode ---------- */
 if (!empty($_GET['print'])) {
@@ -581,6 +462,7 @@ $canConsolidate = in_array($user['role'] ?? '', ['admin', 'manager'], true);
         <div class="page-header" style="display:flex;align-items:center;gap:14px;">
             <a href="stock-orders.php" class="btn-secondary"><i class="fas fa-arrow-left"></i> Back to orders</a>
             <h2 class="page-title" style="flex:1;"><i class="fas fa-receipt" style="color:#8B7355;"></i> Receipt — <?php echo htmlspecialchars($order['reference']); ?></h2>
+            <a href="stock-receipt.php?id=<?php echo (int)$orderId; ?>&pdf=1" target="_blank" class="btn-secondary"><i class="fas fa-file-pdf"></i> PDF</a>
             <a href="stock-receipt.php?id=<?php echo (int)$orderId; ?>&print=1" target="_blank" class="btn-primary"><i class="fas fa-print"></i> Print</a>
         </div>
 

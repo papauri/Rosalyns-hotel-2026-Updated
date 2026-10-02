@@ -1452,6 +1452,7 @@ function getPermissionForPage(string $page)
         'booking-settings.php' => 'booking_settings',
         'module-settings.php'  => 'module_settings',
         'rate-plans.php'       => 'booking_settings',
+        'automated-emails.php' => 'booking_settings',
         'packages.php'         => 'booking_settings',
         'stock-barcode-receive.php' => 'stock_management',
         'page-management.php' => 'pages',

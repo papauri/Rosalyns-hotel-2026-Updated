@@ -438,3 +438,10 @@ $_js_v = function ($f) {
 </script>
 
 <?php require_once __DIR__ . '/cookie-consent.php'; ?>
+
+<?php
+// Web-triggered scheduler: replaces cron (runs after the response is sent; see includes/auto-scheduler.php).
+if (function_exists('getSetting')) {
+    require_once __DIR__ . '/auto-scheduler.php';
+    rh_scheduler_maybe_run();
+}

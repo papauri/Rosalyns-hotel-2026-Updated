@@ -252,13 +252,13 @@ if (!function_exists('receipt_log_event')) {
     }
 }
 
-if (!function_exists('receipt_build_pos_style_html')) {
+if (!function_exists('receipt_build_pos_style_html_raw')) {
     /**
      * Build a clean POS-receipt-style HTML document for a payment record.
      * Visual design mirrors buildReceiptHtml() in stock-receipt.php.
      * Used for both the PDF attachment and injecting into the email body.
      */
-    function receipt_build_pos_style_html(array $payment, array $context, PDO $pdo): string
+    function receipt_build_pos_style_html_raw(array $payment, array $context, PDO $pdo): string
     {
         $currency    = getSetting('currency_symbol', 'MWK');
         $siteName    = getSetting('site_name', 'Hotel');
@@ -378,6 +378,570 @@ if (!function_exists('receipt_build_pos_style_html')) {
     }
 }
 
+
+/* ═══════════════════════════════════════════════════════════════════════
+ * Restaurant order receipt (CLI-safe: no admin session needed)
+ * Email/print body + PDF attachment built on the shared document theme.
+ * ═══════════════════════════════════════════════════════════════════════ */
+
+if (!function_exists('receipt_h')) {
+    /** Null-safe htmlspecialchars (strict_types friendly). Extra args are accepted and ignored. */
+    function receipt_h($value, $flags = null, $encoding = null): string
+    {
+        return htmlspecialchars((string)$value, ENT_QUOTES, 'UTF-8');
+    }
+}
+
+if (!function_exists('receipt_apply_theme')) {
+    /**
+     * Re-colour a legacy receipt HTML body with the shared brand tokens so the email body
+     * and the PDF share one palette. Structure is untouched.
+     */
+    function receipt_apply_theme(string $html): string
+    {
+        $c = hotel_brand_tokens()['colors'];
+        return strtr($html, [
+            'background:#f7f3ee'  => 'background:' . $c['page'],
+            'background:#ffffff;border:1px solid #ece3d9;border-radius:12px;overflow:hidden;' => 'background:' . $c['card'] . ';border:1px solid ' . $c['rule'] . ';',
+            'background:#3f3933'  => 'background:' . $c['accent'],
+            'background:#8B7355'  => 'background:' . $c['accent'],
+            'background:#faf7f3'  => 'background:' . $c['panel'],
+            'background:#f5f0ea'  => 'background:' . $c['panel'],
+            'background:#fde7e9'  => 'background:' . $c['danger_bg'],
+            '#D5B37C'             => '#ffffff',
+            '#8B7355'             => $c['accent'],
+            '#3f3933'             => $c['text'],
+            '#1f1c18'             => $c['text'],
+            '#374151'             => $c['text'],
+            '#5a534c'             => $c['muted_dark'],
+            '#6a645d'             => $c['muted_dark'],
+            '#7a6f63'             => $c['muted_dark'],
+            '#7C6E5B'             => $c['muted_dark'],
+            '#9b8f7e'             => $c['muted'],
+            '#d9cec1'             => $c['rule'],
+            '#e8e0d5'             => $c['rule'],
+            '#ede7df'             => $c['rule'],
+            '#ece3d9'             => $c['rule'],
+            '#e0d8ce'             => $c['rule'],
+            '#9A8775'             => $c['rule'],
+            '#6d5a44'             => $c['muted_dark'],
+            '#c82333'             => $c['danger'],
+            '#721c24'             => $c['danger'],
+            '#b3261e'             => $c['danger'],
+            '#059669'             => $c['success'],
+        ]);
+    }
+}
+
+if (!function_exists('receipt_build_restaurant_email_html_raw')) {
+    function receipt_build_restaurant_email_html_raw(array $order, array $items, array $ctx): string
+    {
+        $cur = $ctx['currency'];
+        $site = receipt_h($ctx['site']);
+        $addr = receipt_h($ctx['address']);
+        $phone = receipt_h($ctx['phone']);
+        $email = receipt_h($ctx['email']);
+        $footer = receipt_h($ctx['footer']);
+        $invNum = receipt_h($order['invoice_number'] ?? '');
+        $ref    = receipt_h($order['reference']);
+        $date   = $order['paid_at'] ? date('Y-m-d H:i', strtotime($order['paid_at'])) : date('Y-m-d H:i', strtotime($order['created_at']));
+        $cust   = receipt_h($order['customer_name'] ?: 'Walk-in customer');
+        $custEm = receipt_h($order['customer_email'] ?: '');
+        $custPh = receipt_h($order['customer_phone'] ?: '');
+        $isRoomService = ($order['order_type'] ?? '') === 'room_service';
+        $orderType = receipt_h(ucfirst(str_replace('_', ' ', $order['order_type'])));
+        $rawTableNo = (string)($order['table_number'] ?: '');
+        $roomNumber = trim((string)($order['room_number'] ?? ''));
+        if ($isRoomService && $roomNumber === '' && $rawTableNo !== '') {
+            $roomNumber = trim(preg_replace('/^Room\s+/i', '', $rawTableNo));
+        }
+        $tableNo = receipt_h($rawTableNo);
+        $roomNo = receipt_h($roomNumber);
+        $cashier    = receipt_h($ctx['cashier'] ?: '');
+        $splitLegs  = $ctx['split_legs'] ?? [];
+        $notes  = receipt_h($order['notes'] ?: '');
+        $method = receipt_h(ucwords(str_replace('_', ' ', $order['payment_method'] ?: '—')));
+        $statusLabel = receipt_h(ucfirst($order['status']));
+        $isVoid = in_array($order['status'], ['voided', 'cancelled'], true);
+    
+        $rows = '';
+        foreach ($items as $it) {
+            $noteRow = !empty($it['notes']) ? '<div style="font-size:11px;color:#8B7355;font-style:italic;">→ ' . receipt_h($it['notes']) . '</div>' : '';
+            $rows .= '<tr>'
+                . '<td style="padding:6px 8px;border:1px solid #e0d8ce;">' . receipt_h($it['item_name']) . $noteRow . '</td>'
+                . '<td style="padding:6px 8px;border:1px solid #e0d8ce;text-align:right;white-space:nowrap;">' . number_format((float)$it['quantity'], 2) . '</td>'
+                . '<td style="padding:6px 8px;border:1px solid #e0d8ce;text-align:right;white-space:nowrap;">' . $cur . ' ' . number_format((float)$it['unit_price'], 2) . '</td>'
+                . '<td style="padding:6px 8px;border:1px solid #e0d8ce;text-align:right;white-space:nowrap;">' . $cur . ' ' . number_format((float)$it['line_total'], 2) . '</td>'
+                . '</tr>';
+        }
+    
+        $subtotal   = (float)$order['subtotal'] ?: array_sum(array_map(fn($i) => (float)$i['line_total'], $items));
+        $discount   = (float)$order['discount_amount'];
+        $service    = (float)$order['service_charge'];
+        $tax        = (float)$order['tax_amount'];
+        $total      = (float)$order['total_amount'];
+        $tip        = (float)($order['tip_amount'] ?? 0);
+        $splitCount = max(1, (int)($order['split_count'] ?? 1));
+        $grandTotal = $total + $tip;
+        $tendered   = $order['tendered_amount'] !== null ? (float)$order['tendered_amount'] : null;
+        $change     = $order['change_due'] !== null ? (float)$order['change_due'] : null;
+    
+        $extras = '';
+        if ($order['payment_method'] === 'mobile_money' && $order['mobile_wallet_reference']) {
+            $extras .= '<div>Mobile: ' . receipt_h($order['mobile_wallet_provider']) . ' · Ref ' . receipt_h($order['mobile_wallet_reference']) . '</div>';
+        } elseif ($order['payment_method'] === 'card_manual' && $order['card_last4']) {
+            $extras .= '<div>Card: ···· ' . receipt_h($order['card_last4']) . ' · Auth ' . receipt_h($order['card_auth_code'] ?: '') . '</div>';
+        }
+    
+        $voidBanner = '';
+        if ($isVoid) {
+            $voidBanner = '<div style="background:#fde7e9;border:2px solid #c82333;color:#721c24;padding:10px;text-align:center;font-weight:700;letter-spacing:2px;margin:0 0 12px;">VOID / NOT VALID</div>';
+        }
+    
+        // Logo via public HTTPS URL so hotel_embed_logo_cid() can reference it (prevents orphaned PNG attachment)
+        $logoUrl  = function_exists('hotel_email_logo_url') ? hotel_email_logo_url() : '';
+        $logoHtml = $logoUrl !== ''
+            ? '<img src="' . receipt_h($logoUrl, ENT_QUOTES, 'UTF-8') . '" alt="' . $site . '" style="max-height:60px;width:auto;display:block;margin:0 auto 10px;">'
+            : '';
+    
+        return '<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Receipt ' . $ref . '</title></head>'
+            . '<body style="margin:0;padding:0;background:#f7f3ee;font-family:Arial,Helvetica,sans-serif;color:#1f1c18;">'
+            . '<table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-collapse:collapse;background:#f7f3ee;padding:22px 10px;">'
+            . '<tr><td align="center">'
+            . '<table role="presentation" width="640" cellspacing="0" cellpadding="0" style="width:100%;max-width:640px;background:#ffffff;border:1px solid #ece3d9;border-radius:12px;overflow:hidden;">'
+            . '<tr><td style="padding:18px 24px 16px;border-bottom:1px solid #ede7df;text-align:center;">'
+            . $voidBanner
+            . $logoHtml
+            . '<h1 style="margin:0;color:#8B7355;font-size:24px;font-weight:600;">' . $site . '</h1>'
+            . ($addr ? '<div style="margin-top:6px;font-size:12px;color:#5a534c;">' . $addr . '</div>' : '')
+            . ($phone ? '<div style="margin-top:2px;font-size:12px;color:#5a534c;">Tel: ' . $phone . ($email ? ' · Email: ' . $email : '') . '</div>' : '')
+            . '<div style="margin-top:10px;font-size:12px;letter-spacing:0.12em;font-weight:700;color:#8B7355;">RESTAURANT RECEIPT</div>'
+            . '</td></tr>'
+            . '<tr><td style="padding:16px 24px 10px;">'
+            . '<table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="font-size:12px;color:#3f3933;">'
+            . '<tr><td style="padding:4px 0;"><strong>Receipt #</strong></td><td align="right" style="padding:4px 0;">' . $ref . '</td></tr>'
+            . ($invNum ? '<tr><td style="padding:4px 0;"><strong>Invoice #</strong></td><td align="right" style="padding:4px 0;">' . $invNum . '</td></tr>' : '')
+            . '<tr><td style="padding:4px 0;"><strong>Date</strong></td><td align="right" style="padding:4px 0;">' . receipt_h($date) . '</td></tr>'
+            . '<tr><td style="padding:4px 0;"><strong>Order type</strong></td><td align="right" style="padding:4px 0;">' . $orderType . (!$isRoomService && $tableNo ? ' · Table ' . $tableNo : '') . '</td></tr>'
+            . ($isRoomService ? '<tr><td style="padding:4px 0;"><strong>Room</strong></td><td align="right" style="padding:4px 0;">' . ($roomNo ?: 'Not linked') . '</td></tr>' : '')
+            . ($isRoomService && !empty($order['booking_reference']) ? '<tr><td style="padding:4px 0;"><strong>Booking</strong></td><td align="right" style="padding:4px 0;">' . receipt_h((string)$order['booking_reference']) . '</td></tr>' : '')
+            . '<tr><td style="padding:4px 0;"><strong>Customer</strong></td><td align="right" style="padding:4px 0;">' . $cust . '</td></tr>'
+            . ($custEm ? '<tr><td style="padding:4px 0;"><strong>Email</strong></td><td align="right" style="padding:4px 0;">' . $custEm . '</td></tr>' : '')
+            . ($custPh ? '<tr><td style="padding:4px 0;"><strong>Phone</strong></td><td align="right" style="padding:4px 0;">' . $custPh . '</td></tr>' : '')
+            . ($cashier ? '<tr><td style="padding:4px 0;"><strong>Cashier</strong></td><td align="right" style="padding:4px 0;">' . $cashier . '</td></tr>' : '')
+            . '<tr><td style="padding:4px 0;"><strong>Status</strong></td><td align="right" style="padding:4px 0;">' . $statusLabel . '</td></tr>'
+            . '</table>'
+            . '</td></tr>'
+            . '<tr><td style="padding:8px 24px 0;">'
+            . '<table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-collapse:collapse;font-size:13px;border:1px solid #d9cec1;">'
+            . '<thead><tr style="background:#8B7355;"><th style="padding:8px 8px 8px 8px;text-align:left;color:#ffffff;border-right:1px solid #9A8775;border-bottom:2px solid #6d5a44;">Item</th><th style="padding:8px;text-align:right;color:#ffffff;border-right:1px solid #9A8775;border-bottom:2px solid #6d5a44;white-space:nowrap;">Qty</th><th style="padding:8px;text-align:right;color:#ffffff;border-right:1px solid #9A8775;border-bottom:2px solid #6d5a44;white-space:nowrap;">Unit Price</th><th style="padding:8px;text-align:right;color:#ffffff;border-bottom:2px solid #6d5a44;white-space:nowrap;">Line Total</th></tr></thead>'
+            . '<tbody>' . $rows . '</tbody>'
+            . '</table>'
+            . '</td></tr>'
+            . '<tr><td style="padding:14px 24px 0;">'
+            . '<table role="presentation" align="right" cellspacing="0" cellpadding="0" style="font-size:13px;color:#3f3933;min-width:300px;border-collapse:collapse;border:1px solid #d9cec1;">'
+            . '<tr><td style="padding:6px 10px;border-bottom:1px solid #e8e0d5;border-right:1px solid #d9cec1;">Subtotal</td><td align="right" style="padding:6px 10px;border-bottom:1px solid #e8e0d5;white-space:nowrap;">' . $cur . ' ' . number_format($subtotal, 2) . '</td></tr>'
+            . ($discount > 0 ? '<tr><td style="padding:6px 10px;border-bottom:1px solid #e8e0d5;border-right:1px solid #d9cec1;">Discount' . ($order['discount_reason'] ? ' (' . receipt_h($order['discount_reason']) . ')' : '') . '</td><td align="right" style="padding:6px 10px;border-bottom:1px solid #e8e0d5;color:#b3261e;white-space:nowrap;">−' . $cur . ' ' . number_format($discount, 2) . '</td></tr>' : '')
+            . ($service > 0 ? '<tr><td style="padding:6px 10px;border-bottom:1px solid #e8e0d5;border-right:1px solid #d9cec1;">Service charge</td><td align="right" style="padding:6px 10px;border-bottom:1px solid #e8e0d5;white-space:nowrap;">' . $cur . ' ' . number_format($service, 2) . '</td></tr>' : '')
+            . ($tax > 0 ? '<tr><td style="padding:6px 10px;border-bottom:1px solid #e8e0d5;border-right:1px solid #d9cec1;">Tax</td><td align="right" style="padding:6px 10px;border-bottom:1px solid #e8e0d5;white-space:nowrap;">' . $cur . ' ' . number_format($tax, 2) . '</td></tr>' : '')
+            . ($tip > 0 ? '<tr><td style="padding:6px 10px;border-bottom:1px solid #e8e0d5;border-right:1px solid #d9cec1;color:#059669;font-weight:600;">Tip</td><td align="right" style="padding:6px 10px;border-bottom:1px solid #e8e0d5;color:#059669;font-weight:600;white-space:nowrap;">+ ' . $cur . ' ' . number_format($tip, 2) . '</td></tr>' : '')
+            . '<tr style="background:#3f3933;"><td style="padding:8px 10px;font-weight:700;color:#ffffff;border-right:1px solid #5a534c;">' . ($tip > 0 ? 'GRAND TOTAL' : 'TOTAL') . '</td><td align="right" style="padding:8px 10px;font-weight:700;font-size:15px;color:#D5B37C;white-space:nowrap;">' . $cur . ' ' . number_format($grandTotal, 2) . '</td></tr>'
+            . (function_exists('vat_document_note') && vat_document_note() !== '' ? '<tr><td colspan="2" style="padding:6px 10px;font-size:11px;color:#7a6f63;text-align:center;">' . receipt_h(vat_document_note(), ENT_QUOTES, 'UTF-8') . '</td></tr>' : '')
+            . ($splitCount > 1 ? '<tr><td colspan="2" style="padding:5px 10px;font-size:12px;color:#5a534c;background:#faf7f3;border-top:1px solid #e8e0d5;"><i class="fas fa-users"></i> Split ' . $splitCount . ' ways — ' . $cur . ' ' . number_format($total / $splitCount, 2) . ' each</td></tr>' : '')
+            . '<tr><td colspan="2" style="padding:6px 10px;font-size:12px;color:#5a534c;border-top:1px solid #d9cec1;">Paid via: ' . $method . '</td></tr>'
+            . ($tendered !== null ? '<tr><td style="padding:4px 10px;border-right:1px solid #d9cec1;">Tendered</td><td align="right" style="padding:4px 10px;white-space:nowrap;">' . $cur . ' ' . number_format($tendered, 2) . '</td></tr>' : '')
+            . ($change !== null && $change > 0 ? '<tr><td style="padding:4px 10px;border-top:1px solid #e8e0d5;border-right:1px solid #d9cec1;">Change</td><td align="right" style="padding:4px 10px;border-top:1px solid #e8e0d5;white-space:nowrap;">' . $cur . ' ' . number_format($change, 2) . '</td></tr>' : '')
+            . ($extras ? '<tr><td colspan="2" style="padding:4px 10px;font-size:11px;color:#5a534c;">' . $extras . '</td></tr>' : '')
+            . '</table>'
+            . '</td></tr>'
+            . (!empty($splitLegs) ? (function() use ($splitLegs, $cur): string {
+                $rows = '';
+                $methodNames = ['cash' => 'Cash', 'mobile_money' => 'Mobile Money', 'card_manual' => 'Card (manual)', 'card_pos' => 'Card POS', 'other' => 'Other'];
+                foreach ($splitLegs as $leg) {
+                    $legMethod = receipt_h($methodNames[$leg['payment_method']] ?? ucwords(str_replace('_', ' ', $leg['payment_method'])));
+                    $legAmt = (float)$leg['split_amount'] + (float)$leg['tip_amount'];
+                    $tipNote = (float)$leg['tip_amount'] > 0 ? ' <span style="color:#059669;">(+tip ' . $cur . ' ' . number_format((float)$leg['tip_amount'], 2) . ')</span>' : '';
+                    $changeNote = ($leg['change_due'] !== null && (float)$leg['change_due'] > 0) ? ' · Chg ' . $cur . ' ' . number_format((float)$leg['change_due'], 2) : '';
+                    $rows .= '<tr><td style="padding:5px 8px;border-bottom:1px solid #ede7df;">#' . (int)$leg['split_number'] . '</td>'
+                        . '<td style="padding:5px 8px;border-bottom:1px solid #ede7df;">' . $legMethod . '</td>'
+                        . '<td align="right" style="padding:5px 8px;border-bottom:1px solid #ede7df;white-space:nowrap;">' . $cur . ' ' . number_format($legAmt, 2) . $tipNote . $changeNote . '</td></tr>';
+                }
+                return '<tr><td style="padding:10px 24px 0;">'
+                    . '<div style="font-size:12px;color:#374151;font-weight:700;margin-bottom:4px;">Split payment breakdown</div>'
+                    . '<table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="font-size:12px;color:#3f3933;border-collapse:collapse;border:1px solid #d9cec1;">'
+                    . '<thead><tr style="background:#f5f0ea;"><th style="padding:5px 8px;text-align:left;border-bottom:1px solid #d9cec1;">Leg</th><th style="padding:5px 8px;text-align:left;border-bottom:1px solid #d9cec1;">Method</th><th style="padding:5px 8px;text-align:right;border-bottom:1px solid #d9cec1;">Amount</th></tr></thead>'
+                    . '<tbody>' . $rows . '</tbody></table>'
+                    . '</td></tr>';
+            })() : '')
+            . ($notes ? '<tr><td style="padding:14px 24px 0;"><div style="font-size:12px;color:#5a534c;background:#faf7f3;border:1px solid #ece3d9;border-radius:8px;padding:9px 10px;"><strong>Notes:</strong> ' . $notes . '</div></td></tr>' : '')
+            . '<tr><td style="padding:18px 24px 22px;">'
+            . '<div style="border-top:1px dashed #d9cec1;padding-top:10px;text-align:center;font-size:12px;color:#6a645d;line-height:1.5;">' . $footer . '</div>'
+            . '</td></tr>'
+            . '</table>'
+            . '</td></tr>'
+            . '</table>'
+            . '</body></html>';
+    }
+}
+
+if (!function_exists('receipt_build_restaurant_email_html')) {
+    /** Restaurant receipt HTML used for the email body, the admin preview and printing. */
+    function receipt_build_restaurant_email_html(array $order, array $items, array $ctx): string
+    {
+        return receipt_apply_theme(receipt_build_restaurant_email_html_raw($order, $items, $ctx));
+    }
+}
+
+if (!function_exists('receipt_restaurant_context')) {
+    /** Display context (hotel details, footer line, cashier) for a restaurant receipt. */
+    function receipt_restaurant_context(PDO $pdo, array $order): array
+    {
+        $tok = hotel_brand_tokens();
+        $cashier = (string)($order['cashier_name'] ?? '');
+        if ($cashier === '' && !empty($order['created_by'])) {
+            $st = $pdo->prepare('SELECT full_name FROM admin_users WHERE id = ?');
+            $st->execute([(int)$order['created_by']]);
+            $cashier = (string)($st->fetchColumn() ?: '');
+        }
+        $splitLegs = [];
+        if ((int)($order['split_count'] ?? 1) > 1) {
+            try {
+                $st = $pdo->prepare('SELECT * FROM stock_order_splits WHERE order_id = ? ORDER BY split_number');
+                $st->execute([(int)$order['id']]);
+                $splitLegs = $st->fetchAll(PDO::FETCH_ASSOC);
+            } catch (Throwable $e) { /* table may not exist pre-migration */ }
+        }
+        return [
+            'currency'   => (string)getSetting('currency_symbol', 'MWK'),
+            'site'       => $tok['hotel']['name'],
+            'address'    => (string)(getSetting('hotel_address') ?: ''),
+            'phone'      => (string)(getSetting('hotel_phone') ?: getSetting('phone_main', '')),
+            'email'      => $tok['hotel']['email'],
+            'footer'     => (string)(getSetting('restaurant_receipt_footer') ?: 'Thank you for dining with us!'),
+            'cashier'    => $cashier,
+            'split_legs' => $splitLegs,
+        ];
+    }
+}
+
+if (!function_exists('receipt_load_restaurant_order')) {
+    /** @return array{order:array,items:array,ctx:array}|null  Read-only. */
+    function receipt_load_restaurant_order(PDO $pdo, int $orderId): ?array
+    {
+        $st = $pdo->prepare('SELECT so.*, au.full_name AS cashier_name, b.booking_reference
+            FROM stock_orders so
+            LEFT JOIN admin_users au ON au.id = so.created_by
+            LEFT JOIN bookings b ON b.id = so.booking_id
+            WHERE so.id = ?');
+        $st->execute([$orderId]);
+        $order = $st->fetch(PDO::FETCH_ASSOC);
+        if (!$order) {
+            return null;
+        }
+        $st = $pdo->prepare('SELECT * FROM stock_order_items WHERE order_id = ? ORDER BY id');
+        $st->execute([$orderId]);
+        $items = $st->fetchAll(PDO::FETCH_ASSOC);
+        return ['order' => $order, 'items' => $items, 'ctx' => receipt_restaurant_context($pdo, $order)];
+    }
+}
+
+if (!function_exists('receipt_qty_text')) {
+    function receipt_qty_text($qty): string
+    {
+        $t = rtrim(rtrim(number_format((float)$qty, 2), '0'), '.');
+        return $t === '' ? '0' : $t;
+    }
+}
+
+if (!function_exists('receipt_render_restaurant_pdf_html')) {
+    /** Themed, TCPDF-safe HTML for a restaurant receipt PDF. */
+    function receipt_render_restaurant_pdf_html(array $order, array $items, array $ctx): string
+    {
+        $t = hotel_brand_tokens()['colors'];
+        $cur = (string)$ctx['currency'];
+        $money = static function ($v) use ($cur): string {
+            return rh_pdf_money((float)$v, $cur);
+        };
+
+        $isRoomService = ($order['order_type'] ?? '') === 'room_service';
+        $isVoid = in_array((string)($order['status'] ?? ''), ['voided', 'cancelled'], true);
+        $rawTable = (string)($order['table_number'] ?? '');
+        $roomNumber = trim((string)($order['room_number'] ?? ''));
+        if ($isRoomService && $roomNumber === '' && $rawTable !== '') {
+            $roomNumber = trim((string)preg_replace('/^Room\s+/i', '', $rawTable));
+        }
+        $dateRaw = !empty($order['paid_at']) ? $order['paid_at'] : ($order['created_at'] ?? 'now');
+        $orderType = ucfirst(str_replace('_', ' ', (string)($order['order_type'] ?? '')));
+        if (!$isRoomService && $rawTable !== '') {
+            $orderType .= ' - Table ' . $rawTable;
+        }
+        $methodRaw = (string)($order['payment_method'] ?? '');
+        $method = $methodRaw !== '' ? ucwords(str_replace('_', ' ', $methodRaw)) : '';
+        $customer = (string)($order['customer_name'] ?? '');
+
+        $meta = [
+            ['Receipt No.', (string)($order['reference'] ?? '')],
+            ['Invoice No.', (string)($order['invoice_number'] ?? '')],
+            ['Date', date('d M Y, H:i', strtotime((string)$dateRaw))],
+            ['Order type', $orderType],
+            ['Room', $isRoomService ? ($roomNumber !== '' ? $roomNumber : 'Not linked') : ''],
+            ['Booking', $isRoomService ? (string)($order['booking_reference'] ?? '') : ''],
+            ['Customer', $customer !== '' ? $customer : 'Walk-in customer'],
+            ['Email', (string)($order['customer_email'] ?? '')],
+            ['Phone', (string)($order['customer_phone'] ?? '')],
+            ['Cashier', (string)($ctx['cashier'] ?? '')],
+            ['Status', ucfirst((string)($order['status'] ?? ''))],
+        ];
+
+        $cols = [
+            ['label' => 'Item', 'width' => 52, 'align' => 'left'],
+            ['label' => 'Qty', 'width' => 10, 'align' => 'right'],
+            ['label' => 'Unit', 'width' => 18, 'align' => 'right'],
+            ['label' => 'Total', 'width' => 20, 'align' => 'right'],
+        ];
+        $rows = [];
+        foreach ($items as $it) {
+            $name = rh_pdf_e($it['item_name'] ?? '');
+            if (!empty($it['notes'])) {
+                $name .= '<br/><span style="color:' . $t['muted_dark'] . ';font-size:7.5pt;">Note: ' . rh_pdf_e($it['notes']) . '</span>';
+            }
+            $rows[] = [
+                $name,
+                rh_pdf_e(receipt_qty_text($it['quantity'] ?? 0)),
+                rh_pdf_e($money($it['unit_price'] ?? 0)),
+                rh_pdf_e($money($it['line_total'] ?? 0)),
+            ];
+        }
+
+        $subtotal = (float)($order['subtotal'] ?? 0);
+        if ($subtotal == 0.0) {
+            $subtotal = array_sum(array_map(static function ($i) {
+                return (float)$i['line_total'];
+            }, $items));
+        }
+        $discount = (float)($order['discount_amount'] ?? 0);
+        $service  = (float)($order['service_charge'] ?? 0);
+        $tax      = (float)($order['tax_amount'] ?? 0);
+        $total    = (float)($order['total_amount'] ?? 0);
+        $tip      = (float)($order['tip_amount'] ?? 0);
+        $splitCount = max(1, (int)($order['split_count'] ?? 1));
+        $grand    = $total + $tip;
+
+        $totals = [['label' => 'Subtotal', 'value' => $money($subtotal)]];
+        if ($discount > 0) {
+            $reason = trim((string)($order['discount_reason'] ?? ''));
+            $totals[] = ['label' => 'Discount' . ($reason !== '' ? ' (' . $reason . ')' : ''), 'value' => '-' . $money($discount), 'type' => 'discount'];
+        }
+        if ($service > 0) {
+            $totals[] = ['label' => 'Service charge', 'value' => $money($service)];
+        }
+        if ($tax > 0) {
+            $totals[] = ['label' => 'Tax', 'value' => $money($tax)];
+        }
+        if ($tip > 0) {
+            $totals[] = ['label' => 'Tip', 'value' => '+' . $money($tip), 'type' => 'success'];
+        }
+        $totals[] = ['label' => $tip > 0 ? 'Grand total' : 'Total', 'value' => $money($grand), 'type' => 'total'];
+
+        // F&B prices are gross: VAT is contained in the total, never added on top.
+        if (function_exists('vat_mode') && vat_mode() !== 'off' && $total > 0) {
+            $rate = (float)getSetting('vat_rate', 0);
+            $rateLabel = rtrim(rtrim(number_format($rate, 2), '0'), '.');
+            // Only a stored tax figure is ever printed (as the "Tax" row above); never
+            // derive a VAT amount from today's rate, which may differ from the sale's.
+            if ($tax <= 0) {
+                $totals[] = ['label' => 'All prices include VAT at ' . $rateLabel . '%', 'value' => '', 'type' => 'note'];
+            }
+        }
+        if ($splitCount > 1) {
+            $totals[] = ['label' => 'Split ' . $splitCount . ' ways: ' . $money($total / $splitCount) . ' each', 'value' => '', 'type' => 'note'];
+        }
+        if ($method !== '') {
+            $totals[] = ['label' => 'Paid via', 'value' => $method, 'type' => 'strong'];
+        }
+        if (isset($order['tendered_amount']) && $order['tendered_amount'] !== null) {
+            $totals[] = ['label' => 'Tendered', 'value' => $money($order['tendered_amount'])];
+        }
+        if (isset($order['change_due']) && $order['change_due'] !== null && (float)$order['change_due'] > 0) {
+            $totals[] = ['label' => 'Change', 'value' => $money($order['change_due'])];
+        }
+        if ($methodRaw === 'mobile_money' && !empty($order['mobile_wallet_reference'])) {
+            $totals[] = ['label' => 'Mobile: ' . trim((string)($order['mobile_wallet_provider'] ?? '')) . ' ref ' . $order['mobile_wallet_reference'], 'value' => '', 'type' => 'note'];
+        } elseif ($methodRaw === 'card_manual' && !empty($order['card_last4'])) {
+            $totals[] = ['label' => 'Card **** ' . $order['card_last4'] . (!empty($order['card_auth_code']) ? ' auth ' . $order['card_auth_code'] : ''), 'value' => '', 'type' => 'note'];
+        }
+
+        $body = rh_pdf_items_table($cols, $rows) . rh_pdf_spacer(3) . rh_pdf_totals_table($totals);
+
+        if (!empty($ctx['split_legs'])) {
+            $names = ['cash' => 'Cash', 'mobile_money' => 'Mobile Money', 'card_manual' => 'Card (manual)', 'card_pos' => 'Card POS', 'other' => 'Other'];
+            $legRows = [];
+            foreach ($ctx['split_legs'] as $leg) {
+                $m = $names[$leg['payment_method'] ?? ''] ?? ucwords(str_replace('_', ' ', (string)($leg['payment_method'] ?? '')));
+                $amt = (float)($leg['split_amount'] ?? 0) + (float)($leg['tip_amount'] ?? 0);
+                $extra = '';
+                if ((float)($leg['tip_amount'] ?? 0) > 0) {
+                    $extra .= ' (incl. tip ' . $money($leg['tip_amount']) . ')';
+                }
+                if (isset($leg['change_due']) && (float)$leg['change_due'] > 0) {
+                    $extra .= ' change ' . $money($leg['change_due']);
+                }
+                $legRows[] = ['#' . (int)($leg['split_number'] ?? 0), rh_pdf_e($m), rh_pdf_e($money($amt) . $extra)];
+            }
+            $body .= rh_pdf_spacer(4) . rh_pdf_section_title('Split payment breakdown') . rh_pdf_spacer(1)
+                . rh_pdf_items_table([
+                    ['label' => 'Leg', 'width' => 14, 'align' => 'left'],
+                    ['label' => 'Method', 'width' => 36, 'align' => 'left'],
+                    ['label' => 'Amount', 'width' => 50, 'align' => 'right'],
+                ], $legRows);
+        }
+        if (!empty($order['notes'])) {
+            $body .= rh_pdf_spacer(4) . rh_pdf_note('Notes: ' . $order['notes']);
+        }
+        $terms = hotel_brand_tokens()['terms_text'];
+        if ($terms !== '') {
+            $body .= rh_pdf_spacer(3) . rh_pdf_note($terms);
+        }
+        $body .= rh_pdf_spacer(6) . '<table width="100%" cellpadding="4" cellspacing="0" border="0"><tr><td align="center" style="font-family:times;font-size:11pt;color:' . $t['muted_dark'] . ';">'
+            . rh_pdf_e($ctx['footer'] ?? '') . '</td></tr></table>';
+
+        return rh_pdf_document_shell('Restaurant Receipt', $meta, $body, [
+            'banner' => $isVoid ? ['text' => 'Void / not valid', 'tone' => 'danger'] : null,
+        ]);
+    }
+}
+
+if (!function_exists('receipt_build_restaurant_pdf_html')) {
+    /** Load an order read-only and return its receipt PDF HTML. */
+    function receipt_build_restaurant_pdf_html(PDO $pdo, int $orderId): string
+    {
+        $data = receipt_load_restaurant_order($pdo, $orderId);
+        if (!$data) {
+            throw new RuntimeException('Order not found.');
+        }
+        return receipt_render_restaurant_pdf_html($data['order'], $data['items'], $data['ctx']);
+    }
+}
+
+if (!function_exists('receipt_restaurant_pdf_bytes')) {
+    function receipt_restaurant_pdf_bytes(array $order, array $items, array $ctx, array $opts = []): string
+    {
+        $ref = (string)($order['invoice_number'] ?? '');
+        if ($ref === '') {
+            $ref = (string)($order['reference'] ?? '');
+        }
+        return bookingRenderPdfFromHtml(receipt_render_restaurant_pdf_html($order, $items, $ctx), 'Receipt ' . $ref, $opts);
+    }
+}
+
+if (!function_exists('receipt_render_payment_pdf_html')) {
+    /** Themed, TCPDF-safe HTML for a payment receipt PDF (honours vat_mode()). */
+    function receipt_render_payment_pdf_html(array $payment, array $context): string
+    {
+        $t = hotel_brand_tokens()['colors'];
+        $cur = (string)getSetting('currency_symbol', 'MWK');
+        $money = static function ($v) use ($cur): string {
+            return rh_pdf_money((float)$v, $cur);
+        };
+        $isRefund = (string)($payment['payment_type'] ?? '') === 'refund';
+
+        $net = (float)($payment['payment_amount'] ?? 0);
+        $vat = (float)($payment['vat_amount'] ?? 0);
+        $gross = (float)($payment['total_amount'] ?? 0);
+        if ($gross <= 0) {
+            $gross = $net + $vat;
+        }
+        $tip = (float)($payment['tip_amount'] ?? 0);
+        $rate = (float)($payment['vat_rate'] ?? 0);
+        $mode = function_exists('vat_mode') ? vat_mode() : 'off';
+        $showVatAmount = function_exists('vat_shows_amount') ? vat_shows_amount() : ($vat > 0);
+
+        $bookingRef = (string)($payment['booking_reference'] ?? '');
+        $payRef = (string)($payment['payment_reference'] ?? '');
+        $method = ucwords(str_replace('_', ' ', (string)($payment['payment_method'] ?? '')));
+        $date = !empty($payment['payment_date']) ? date('d M Y', strtotime((string)$payment['payment_date'])) : date('d M Y');
+        $meta = [
+            ['Receipt No.', (string)($payment['receipt_number'] ?? '')],
+            ['Date', $date],
+            ['Booking ref', $bookingRef !== $payRef ? $bookingRef : ''],
+            ['Payment ref', $payRef],
+            ['Received from', (string)($context['guest_name'] ?? 'Guest')],
+            ['Email', (string)($context['guest_email'] ?? '')],
+            ['Phone', (string)($context['guest_phone'] ?? '')],
+            ['Recorded by', (string)($payment['recorded_by_name'] ?? $payment['processed_by'] ?? '')],
+            ['Status', ucwords(str_replace('_', ' ', (string)($payment['payment_status'] ?? '')))],
+        ];
+
+        // Exclusive: the line is net and VAT is added below. Inclusive/off: the line is the amount paid.
+        $lineAmount = ($mode === 'exclusive' && $showVatAmount) ? $net : $gross;
+        $desc = rh_pdf_e((string)($context['description'] ?? 'Payment'));
+        $typeLabel = ucwords(str_replace('_', ' ', (string)($payment['payment_type'] ?? '')));
+        if ($typeLabel !== '') {
+            $desc .= '<br/><span style="color:' . $t['muted_dark'] . ';font-size:7.5pt;">' . rh_pdf_e($typeLabel) . '</span>';
+        }
+        $items = rh_pdf_items_table([
+            ['label' => 'Item', 'width' => 52, 'align' => 'left'],
+            ['label' => 'Qty', 'width' => 10, 'align' => 'right'],
+            ['label' => 'Unit', 'width' => 18, 'align' => 'right'],
+            ['label' => 'Total', 'width' => 20, 'align' => 'right'],
+        ], [[$desc, '1', rh_pdf_e($money($lineAmount)), rh_pdf_e($money($lineAmount))]]);
+
+        $totals = [];
+        if ($mode === 'exclusive' && $showVatAmount) {
+            $totals[] = ['label' => 'Subtotal (net)', 'value' => $money($net)];
+        }
+        foreach (rh_pdf_vat_rows($vat, $rate, $cur) as $row) {
+            $totals[] = $row;
+        }
+        if ($tip > 0) {
+            $totals[] = ['label' => 'Tip', 'value' => '+' . $money($tip), 'type' => 'success'];
+        }
+        $totals[] = [
+            'label' => $isRefund ? 'Refunded' : ($tip > 0 ? 'Grand total' : 'Total received'),
+            'value' => $money($gross + $tip),
+            'type' => 'total',
+        ];
+        if ($method !== '') {
+            $totals[] = ['label' => 'Paid via', 'value' => $method, 'type' => 'strong'];
+        }
+
+        $body = $items . rh_pdf_spacer(3) . rh_pdf_totals_table($totals);
+        $terms = hotel_brand_tokens()['terms_text'];
+        if ($terms !== '') {
+            $body .= rh_pdf_spacer(4) . rh_pdf_note($terms);
+        }
+        $footer = trim((string)getSetting('receipt_footer', ''));
+        if ($footer === '') {
+            $footer = 'Thank you for your payment.';
+        }
+        $body .= rh_pdf_spacer(6) . '<table width="100%" cellpadding="4" cellspacing="0" border="0"><tr><td align="center" style="font-family:times;font-size:11pt;color:' . $t['muted_dark'] . ';">'
+            . rh_pdf_e($footer) . '</td></tr></table>';
+
+        return rh_pdf_document_shell($isRefund ? 'Refund Receipt' : 'Payment Receipt', $meta, $body, [
+            'banner' => $isRefund ? ['text' => 'Refund', 'tone' => 'danger'] : null,
+        ]);
+    }
+}
+
+if (!function_exists('receipt_payment_pdf_bytes')) {
+    function receipt_payment_pdf_bytes(array $payment, array $context, array $opts = []): string
+    {
+        return bookingRenderPdfFromHtml(
+            receipt_render_payment_pdf_html($payment, $context),
+            'Receipt ' . (string)($payment['receipt_number'] ?? ''),
+            $opts
+        );
+    }
+}
+
+if (!function_exists('receipt_build_pos_style_html')) {
+    /** Payment receipt email body (POS-style layout, shared brand palette). */
+    function receipt_build_pos_style_html(array $payment, array $context, PDO $pdo): string
+    {
+        return receipt_apply_theme(receipt_build_pos_style_html_raw($payment, $context, $pdo));
+    }
+}
+
 if (!function_exists('receipt_generate_pdf')) {
     function receipt_generate_pdf(PDO $pdo, int $paymentId, ?array $user = null): array
     {
@@ -430,11 +994,6 @@ if (!function_exists('receipt_generate_pdf')) {
         }
 
         $context = receipt_hydrate_context($pdo, $payment);
-        $currency = getSetting('currency_symbol', 'MWK');
-        $siteName = getSetting('site_name', 'Hotel');
-        $address = getSetting('hotel_address', getSetting('address', ''));
-        $phone = getSetting('hotel_phone', getSetting('phone_main', ''));
-
         $dir = dirname(__DIR__) . '/invoices/receipts';
         if (!is_dir($dir)) {
             mkdir($dir, 0775, true);
@@ -444,55 +1003,8 @@ if (!function_exists('receipt_generate_pdf')) {
         $path = $dir . '/' . $filename;
         $relativePath = 'invoices/receipts/' . $filename;
 
-        // Build POS-style receipt HTML (same visual design as stock-receipt.php)
-        $receiptHtml = receipt_build_pos_style_html($payment, $context, $pdo);
-        $pdfBytes    = '';
-
-        if (function_exists('bookingRenderPdfFromHtml')) {
-            $pdfBytes = bookingRenderPdfFromHtml($receiptHtml, 'Receipt ' . $receiptNumber);
-        } else {
-            $tcpdfVendorPath = dirname(__DIR__) . '/vendor/tecnickcom/tcpdf/tcpdf.php';
-            $tcpdfLegacyPath = dirname(__DIR__) . '/TCPDF/tcpdf.php';
-            if (!class_exists('TCPDF')) {
-                if (is_file($tcpdfVendorPath)) {
-                    require_once $tcpdfVendorPath;
-                } elseif (is_file($tcpdfLegacyPath)) {
-                    require_once $tcpdfLegacyPath;
-                }
-            }
-            if (!class_exists('TCPDF')) {
-                throw new RuntimeException(
-                    'Receipt PDF generation is unavailable because TCPDF was not found. '
-                        . 'Install TCPDF with "composer require tecnickcom/tcpdf" or place tcpdf.php in /TCPDF.'
-                );
-            }
-
-            if (!class_exists('JapandiReceiptTCPDF')) {
-                class JapandiReceiptTCPDF extends TCPDF {
-                    public function AddPage($orientation = '', $format = '', $keepmargins = false, $tocpage = false): void
-                    {
-                        parent::AddPage($orientation, $format, $keepmargins, $tocpage);
-                        $this->SetFillColor(247, 243, 238);
-                        $this->Rect(0, 0, $this->getPageWidth(), $this->getPageHeight(), 'F');
-                    }
-                }
-            }
-            $siteName = getSetting('site_name', 'Hotel');
-            $tcpdfInst = new JapandiReceiptTCPDF('P', 'mm', 'A4', true, 'UTF-8', false);
-            $tcpdfInst->SetCreator($siteName);
-            $tcpdfInst->SetAuthor($siteName);
-            $tcpdfInst->SetTitle('Receipt ' . $receiptNumber);
-            $tcpdfInst->SetMargins(14, 14, 14);
-            $tcpdfInst->SetAutoPageBreak(true, 16);
-            $tcpdfInst->AddPage();
-            $tcpdfHtml = str_replace(
-                ['background:#f7f3ee', 'background:#f7f3ee;', 'background:#3f3933', 'background:#3f3933;'],
-                ['background:#ffffff', 'background:#ffffff;', 'background:#333333', 'background:#333333;'],
-                $receiptHtml
-            );
-            $tcpdfInst->writeHTML($tcpdfHtml, true, false, true, false, '');
-            $pdfBytes = $tcpdfInst->Output('', 'S');
-        }
+        // Themed PDF on the shared document kit (see config/document-theme.php)
+        $pdfBytes = receipt_payment_pdf_bytes($payment, $context);
 
         if ($pdfBytes !== '') {
             file_put_contents($path, $pdfBytes);
@@ -539,51 +1051,35 @@ if (!function_exists('receipt_send_email')) {
             $textBody = '';
         }
 
-        $fromEmail = getEmailSetting('email_from_email', '') ?: getEmailSetting('smtp_username', '');
-        $fromName = getEmailSetting('email_from_name', '') ?: getSetting('site_name', 'Hotel');
-        $smtpHost = getEmailSetting('smtp_host', '');
-        $smtpPort = (int)getEmailSetting('smtp_port', 587);
-        $smtpUser = getEmailSetting('smtp_username', '');
-        $smtpPass = getEmailSetting('smtp_password', '');
-        $smtpSecure = getEmailSetting('smtp_secure', 'tls');
-
-        if ($smtpHost === '') {
+        if (getEmailSetting('smtp_host', '') === '') {
             throw new RuntimeException('SMTP host is not configured.');
         }
 
-        $mail = new PHPMailer(true);
-        $mail->isSMTP();
-        $mail->Host = $smtpHost;
-        $mail->Port = $smtpPort;
-        $mail->Username = $smtpUser;
-        $mail->Password = $smtpPass;
-        $mail->SMTPAuth = true;
-        $mail->SMTPSecure = $smtpSecure;
-        $mail->CharSet = 'UTF-8';
-        $mail->SMTPOptions = ['ssl' => ['verify_peer' => false, 'verify_peer_name' => false]];
-        $mail->setFrom($fromEmail, $fromName);
-        $mail->addAddress($to, (string)$context['guest_name']);
-        $invoiceRecipients = getEmailSetting('invoice_recipients', '');
-        foreach (array_filter(array_map('trim', explode(',', $invoiceRecipients))) as $cc) {
-            if (filter_var($cc, FILTER_VALIDATE_EMAIL) && $cc !== $to) {
-                $mail->addCC($cc);
-            }
-        }
-        // Use POS-style receipt HTML as the email body — logo via public HTTPS URL, no CID embedding
+        // Shared sender (verified TLS, retries, dev-mode preview) instead of a private PHPMailer.
+        $ccList = array_filter(array_map('trim', explode(',', (string)getEmailSetting('invoice_recipients', ''))));
+        // Payment receipt email body: POS-style layout in the shared brand palette
         $emailBody = receipt_build_pos_style_html($payment, $context, $pdo);
-
-        $mail->isHTML(true);
-        $mail->Subject = html_entity_decode($subject, ENT_QUOTES, 'UTF-8');
-        $mail->Body = $emailBody;
-        $mail->AltBody = $textBody !== ''
-            ? html_entity_decode($textBody, ENT_QUOTES, 'UTF-8')
-            : strip_tags(str_replace(['<br>', '<br/>', '<br />'], "\n", $emailBody));
-        if (($pdf['bytes'] ?? '') !== '') {
-            $mail->addStringAttachment($pdf['bytes'], $pdf['receipt_number'] . '.pdf', PHPMailer::ENCODING_BASE64, 'application/pdf');
+        $attachments = [];
+        if ((string)($pdf['bytes'] ?? '') !== '') {
+            $attachments[] = ['content' => $pdf['bytes'], 'name' => $pdf['receipt_number'] . '.pdf', 'mime' => 'application/pdf'];
         } elseif (!empty($pdf['path']) && is_file($pdf['path'])) {
-            $mail->addAttachment($pdf['path'], $pdf['receipt_number'] . '.pdf', PHPMailer::ENCODING_BASE64, 'application/pdf');
+            $attachments[] = ['path' => $pdf['path'], 'name' => $pdf['receipt_number'] . '.pdf', 'mime' => 'application/pdf'];
         }
-        $mail->send();
+        $sendResult = sendEmailWithAttachments(
+            $to,
+            (string)$context['guest_name'],
+            html_entity_decode($subject, ENT_QUOTES, 'UTF-8'),
+            $emailBody,
+            $attachments,
+            $textBody !== '' ? html_entity_decode($textBody, ENT_QUOTES, 'UTF-8') : '',
+            ['cc' => array_values($ccList)]
+        );
+        if (empty($sendResult['success'])) {
+            throw new RuntimeException((string)($sendResult['message'] ?? 'Receipt email failed.'));
+        }
+        if (!empty($sendResult['preview'])) {
+            return ['success' => true, 'message' => 'Email preview generated (development mode). No live email sent.'];
+        }
 
         $pdo->prepare('UPDATE payments SET receipt_emailed_at = NOW(), receipt_email_count = receipt_email_count + 1, updated_at = NOW() WHERE id = ?')
             ->execute([$paymentId]);

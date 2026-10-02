@@ -144,3 +144,7 @@ if (!function_exists('rh_format_age')) {
     }
 }
 
+
+// Web-triggered scheduler: replaces cron (runs after the response is sent; see includes/auto-scheduler.php).
+require_once __DIR__ . '/../includes/auto-scheduler.php';
+rh_scheduler_maybe_run();

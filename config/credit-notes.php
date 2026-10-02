@@ -791,6 +791,119 @@ if (!function_exists('checkExpiredCreditNotes')) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Credit note PDF layout (shared PDF kit) - presentation only, figures come from the row
+// ─────────────────────────────────────────────────────────────────────────────
+if (!function_exists('rh_credit_note_pdf_html')) {
+    /**
+     * Kit HTML for a credit note.
+     *
+     * @param array $cn           credit_notes row
+     * @param array $applications credit_note_applications rows (+ applied_by_name), oldest first
+     */
+    function rh_credit_note_pdf_html(array $cn, array $applications = []): string
+    {
+        $tok = hotel_brand_tokens();
+        $cur = $tok['hotel']['currency'];
+        $money = static function ($v) use ($cur): string {
+            return rh_pdf_money((float)$v, $cur);
+        };
+        $day = static function ($d): string {
+            return date('d M Y', strtotime((string)$d));
+        };
+        $reasonLabels = [
+            'cancellation'   => 'Booking cancellation',
+            'service_issue'  => 'Service issue / complaint',
+            'early_checkout' => 'Early checkout',
+            'overpayment'    => 'Overpayment',
+            'goodwill'       => 'Goodwill gesture',
+            'pricing_error'  => 'Pricing / billing error',
+            'other'          => 'Other',
+        ];
+        $reasonKey = (string)($cn['reason'] ?? 'other');
+        $reasonLabel = $reasonLabels[$reasonKey] ?? ucfirst(str_replace('_', ' ', $reasonKey));
+        $status = (string)($cn['status'] ?? 'active');
+
+        $meta = [
+            ['Credit note no.', (string)($cn['credit_note_number'] ?? '')],
+            ['Issued', !empty($cn['issued_at']) ? $day($cn['issued_at']) : ''],
+            ['Valid until', !empty($cn['expires_at']) ? $day($cn['expires_at']) : 'No expiry'],
+            ['Issued to', (string)($cn['guest_name'] ?? '')],
+            ['Email', (string)($cn['guest_email'] ?? '')],
+            ['Booking ref', (string)($cn['booking_reference'] ?? '')],
+            ['Reason', $reasonLabel],
+            ['Status', ucwords(str_replace('_', ' ', $status))],
+        ];
+
+        $body = rh_pdf_section_title('Credit summary') . rh_pdf_spacer(2)
+            . rh_pdf_items_table(
+                [['label' => 'Description', 'width' => 70], ['label' => 'Value', 'width' => 30, 'align' => 'right']],
+                [[rh_pdf_e('Credit note ' . (string)($cn['credit_note_number'] ?? '') . ' - ' . $reasonLabel), rh_pdf_e($money($cn['original_amount'] ?? 0))]]
+            )
+            . rh_pdf_spacer(2)
+            . rh_pdf_totals_table([
+                ['label' => 'Amount used', 'value' => $money($cn['amount_used'] ?? 0), 'type' => 'muted'],
+                ['label' => 'Available balance', 'value' => $money(max(0, (float)($cn['balance'] ?? 0))), 'type' => 'total'],
+            ]);
+
+        $reasonNotes = trim((string)($cn['reason_notes'] ?? ''));
+        if ($reasonNotes !== '') {
+            $body .= rh_pdf_spacer(4) . rh_pdf_note($reasonNotes);
+        }
+
+        if ($applications) {
+            $rows = [];
+            foreach ($applications as $app) {
+                $rows[] = [
+                    rh_pdf_e($day($app['applied_at'] ?? '')),
+                    rh_pdf_e((string)(($app['applied_to_booking_reference'] ?? '') ?: 'N/A')),
+                    rh_pdf_e((string)(($app['applied_by_name'] ?? '') ?: 'Admin')),
+                    rh_pdf_e($money($app['amount_applied'] ?? 0)),
+                ];
+            }
+            $body .= rh_pdf_spacer(5) . rh_pdf_section_title('Redemption history') . rh_pdf_spacer(2)
+                . rh_pdf_items_table(
+                    [
+                        ['label' => 'Date', 'width' => 20],
+                        ['label' => 'Booking', 'width' => 32],
+                        ['label' => 'Processed by', 'width' => 28],
+                        ['label' => 'Amount applied', 'width' => 20, 'align' => 'right'],
+                    ],
+                    $rows
+                );
+        }
+
+        $terms = 'This credit note may be applied to any future booking at ' . $tok['hotel']['name'] . '. ';
+        if (!empty($cn['expires_at'])) {
+            $terms .= 'Valid until ' . $day($cn['expires_at']) . '. ';
+        }
+        $terms .= 'Credit notes are non-transferable and cannot be exchanged for cash. Please quote ' . (string)($cn['credit_note_number'] ?? '') . ' when you book.';
+        if ($tok['terms_text'] !== '') {
+            $terms .= "\n" . $tok['terms_text'];
+        }
+        $body .= rh_pdf_spacer(5) . rh_pdf_note($terms);
+
+        $opts = [];
+        if ($status === 'voided') {
+            $opts['banner'] = ['text' => 'Void / not valid', 'tone' => 'danger'];
+        } elseif ($status === 'expired') {
+            $opts['banner'] = ['text' => 'Expired', 'tone' => 'neutral'];
+        } elseif ($status === 'fully_applied') {
+            $opts['banner'] = ['text' => 'Fully applied', 'tone' => 'neutral'];
+        }
+
+        return rh_pdf_document_shell('Credit Note', $meta, $body, $opts);
+    }
+}
+
+if (!function_exists('rh_credit_note_pdf_bytes')) {
+    /** Render a credit note to PDF bytes without touching the database or disk. $opts: 'watermark'. */
+    function rh_credit_note_pdf_bytes(array $cn, array $applications = [], array $opts = []): string
+    {
+        return bookingRenderPdfFromHtml(rh_credit_note_pdf_html($cn, $applications), 'Credit Note ' . (string)($cn['credit_note_number'] ?? ''), $opts);
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // generateCreditNotePDF
 // ─────────────────────────────────────────────────────────────────────────────
 if (!function_exists('generateCreditNotePDF')) {
@@ -851,37 +964,6 @@ if (!function_exists('generateCreditNotePDF')) {
             $appStmt->execute([$creditNoteId]);
             $applications = $appStmt->fetchAll(PDO::FETCH_ASSOC);
 
-            if ($tcpdfAvailable && function_exists('hotel_default_credit_note_document_html') && function_exists('renderBookingDocumentTemplate') && function_exists('bookingRenderPdfFromHtml')) {
-                $logoSrc = function_exists('hotel_invoice_logo_src') ? hotel_invoice_logo_src() : '';
-                $logoHtml = $logoSrc !== ''
-                    ? '<img src="' . htmlspecialchars($logoSrc, ENT_QUOTES, 'UTF-8') . '" alt="' . htmlspecialchars($siteName, ENT_QUOTES, 'UTF-8') . '" height="64" style="height:64px;width:auto;display:block;margin:0 auto;">'
-                    : '';
-
-                $html = renderBookingDocumentTemplate('credit_note_document', [
-                    'logo_html' => $logoHtml,
-                    'site_name' => htmlspecialchars($siteName, ENT_QUOTES, 'UTF-8'),
-                    'address' => htmlspecialchars($siteAddress, ENT_QUOTES, 'UTF-8'),
-                    'contact_email' => htmlspecialchars($siteEmail, ENT_QUOTES, 'UTF-8'),
-                    'contact_phone' => htmlspecialchars($sitePhone, ENT_QUOTES, 'UTF-8'),
-                    'credit_note_number' => htmlspecialchars((string)$cn['credit_note_number'], ENT_QUOTES, 'UTF-8'),
-                    'issued_date' => htmlspecialchars(date('d M Y', strtotime((string)$cn['issued_at'])), ENT_QUOTES, 'UTF-8'),
-                    'guest_name' => htmlspecialchars((string)($cn['guest_name'] ?? ''), ENT_QUOTES, 'UTF-8'),
-                    'guest_email' => htmlspecialchars((string)($cn['guest_email'] ?? ''), ENT_QUOTES, 'UTF-8'),
-                    'booking_reference' => htmlspecialchars((string)($cn['booking_reference'] ?? ''), ENT_QUOTES, 'UTF-8'),
-                    'reason' => htmlspecialchars(ucfirst(str_replace('_', ' ', (string)($cn['reason'] ?? ''))), ENT_QUOTES, 'UTF-8'),
-                    'reason_notes' => nl2br(htmlspecialchars((string)($cn['reason_notes'] ?? ''), ENT_QUOTES, 'UTF-8')),
-                    'expires_at' => htmlspecialchars($cn['expires_at'] ? date('d M Y', strtotime((string)$cn['expires_at'])) : 'No expiry', ENT_QUOTES, 'UTF-8'),
-                    'amount' => htmlspecialchars($currencySymbol . ' ' . number_format((float)$cn['original_amount'], 2), ENT_QUOTES, 'UTF-8'),
-                    'amount_used' => htmlspecialchars($currencySymbol . ' ' . number_format((float)$cn['amount_used'], 2), ENT_QUOTES, 'UTF-8'),
-                    'balance' => htmlspecialchars($currencySymbol . ' ' . number_format((float)$cn['balance'], 2), ENT_QUOTES, 'UTF-8'),
-                ], hotel_default_credit_note_document_html());
-
-                file_put_contents($fullPath, bookingRenderPdfFromHtml($html, 'Credit Note ' . (string)$cn['credit_note_number']));
-                $pdo->prepare("UPDATE credit_notes SET pdf_path=?, pdf_generated=1, updated_at=NOW() WHERE id=?")
-                    ->execute([$relativePath, $creditNoteId]);
-
-                return ['pdf_path' => $fullPath, 'relative_path' => $relativePath];
-            }
 
             if (!$tcpdfAvailable) {
                 // Fallback: plain HTML→text file if TCPDF unavailable
@@ -899,203 +981,38 @@ if (!function_exists('generateCreditNotePDF')) {
                 return ['pdf_path' => $fullPath . '.html', 'relative_path' => $relativePath . '.html'];
             }
 
-            // ── TCPDF document ─────────────────────────────────────────────
-            if (!class_exists('JapandiTCPDF')) {
-                class JapandiTCPDF extends TCPDF {
-                    public function AddPage($orientation = '', $format = '', $keepmargins = false, $tocpage = false): void
-                    {
-                        parent::AddPage($orientation, $format, $keepmargins, $tocpage);
-                        $this->SetFillColor(247, 243, 238);
-                        $this->Rect(0, 0, $this->getPageWidth(), $this->getPageHeight(), 'F');
-                    }
-                }
+            // Code default = the shared PDF kit (config/document-theme.php). An admin-customised
+            // 'credit_note_document' template (wording edited in Booking settings) is still honoured.
+            $html = null;
+            if (function_exists('rh_pdf_custom_template_html') && function_exists('hotel_default_credit_note_document_html')) {
+                $logoSrc = function_exists('hotel_invoice_logo_src') ? hotel_invoice_logo_src() : '';
+                $logoHtml = $logoSrc !== ''
+                    ? '<img src="' . htmlspecialchars($logoSrc, ENT_QUOTES, 'UTF-8') . '" alt="' . htmlspecialchars($siteName, ENT_QUOTES, 'UTF-8') . '" height="22mm">'
+                    : '';
+                $html = rh_pdf_custom_template_html('credit_note_document', [
+                    'logo_html' => $logoHtml,
+                    'site_name' => htmlspecialchars($siteName, ENT_QUOTES, 'UTF-8'),
+                    'address' => htmlspecialchars($siteAddress, ENT_QUOTES, 'UTF-8'),
+                    'contact_email' => htmlspecialchars($siteEmail, ENT_QUOTES, 'UTF-8'),
+                    'contact_phone' => htmlspecialchars($sitePhone, ENT_QUOTES, 'UTF-8'),
+                    'credit_note_number' => htmlspecialchars((string)$cn['credit_note_number'], ENT_QUOTES, 'UTF-8'),
+                    'issued_date' => htmlspecialchars(date('d M Y', strtotime((string)$cn['issued_at'])), ENT_QUOTES, 'UTF-8'),
+                    'guest_name' => htmlspecialchars((string)($cn['guest_name'] ?? ''), ENT_QUOTES, 'UTF-8'),
+                    'guest_email' => htmlspecialchars((string)($cn['guest_email'] ?? ''), ENT_QUOTES, 'UTF-8'),
+                    'booking_reference' => htmlspecialchars((string)($cn['booking_reference'] ?? ''), ENT_QUOTES, 'UTF-8'),
+                    'reason' => htmlspecialchars(ucfirst(str_replace('_', ' ', (string)($cn['reason'] ?? ''))), ENT_QUOTES, 'UTF-8'),
+                    'reason_notes' => nl2br(htmlspecialchars((string)($cn['reason_notes'] ?? ''), ENT_QUOTES, 'UTF-8')),
+                    'expires_at' => htmlspecialchars($cn['expires_at'] ? date('d M Y', strtotime((string)$cn['expires_at'])) : 'No expiry', ENT_QUOTES, 'UTF-8'),
+                    'amount' => htmlspecialchars($currencySymbol . ' ' . number_format((float)$cn['original_amount'], 2), ENT_QUOTES, 'UTF-8'),
+                    'amount_used' => htmlspecialchars($currencySymbol . ' ' . number_format((float)$cn['amount_used'], 2), ENT_QUOTES, 'UTF-8'),
+                    'balance' => htmlspecialchars($currencySymbol . ' ' . number_format((float)$cn['balance'], 2), ENT_QUOTES, 'UTF-8'),
+                ], hotel_default_credit_note_document_html());
             }
-            $pdf = new JapandiTCPDF(PDF_PAGE_ORIENTATION, PDF_UNIT, PDF_PAGE_FORMAT, true, 'UTF-8', false);
-            $pdf->SetCreator($siteName);
-            $pdf->SetAuthor($siteName);
-            $pdf->SetTitle('Credit Note ' . $cn['credit_note_number']);
-            $pdf->SetSubject('Credit Note');
-            $pdf->setPrintHeader(false);
-            $pdf->setPrintFooter(false);
-            $pdf->SetMargins(15, 15, 15);
-            $pdf->SetAutoPageBreak(true, 20);
-            $pdf->AddPage();
-            $pdf->SetFont('helvetica', '', 9);
-
-            $headerBg  = '#231F1C';
-            $gold      = '#B18247';
-            $lightBg   = '#F7F3EE';
-            $textColor = '#2A2723';
-            $muted     = '#5E554D';
-            $dangerBg  = '#3c1a1a';
-            $successBg = '#1a3c2a';
-
-            // ── Header bar ────────────────────────────────────────────────
-            $pdf->SetFillColor(35, 31, 28);
-            $pdf->Rect(0, 0, 210, 38, 'F');
-
-            $pdf->SetFont('helvetica', 'B', 18);
-            $pdf->SetTextColor(177, 130, 71);
-            $pdf->SetXY(15, 8);
-            $pdf->Cell(100, 10, strtoupper($siteName), 0, 0, 'L');
-
-            $pdf->SetFont('helvetica', '', 8);
-            $pdf->SetTextColor(200, 190, 180);
-            $pdf->SetXY(15, 20);
-            $pdf->MultiCell(95, 4, implode(' · ', array_filter([$siteAddress, $sitePhone, $siteEmail, $siteWebsite])), 0, 'L');
-
-            // CN badge (top-right)
-            $pdf->SetFont('helvetica', 'B', 20);
-            $pdf->SetTextColor(177, 130, 71);
-            $pdf->SetXY(110, 8);
-            $pdf->Cell(85, 10, 'CREDIT NOTE', 0, 0, 'R');
-
-            $pdf->SetFont('helvetica', '', 9);
-            $pdf->SetTextColor(200, 190, 180);
-            $pdf->SetXY(110, 20);
-            $pdf->Cell(85, 5, $cn['credit_note_number'], 0, 0, 'R');
-            $pdf->SetXY(110, 26);
-            $pdf->Cell(85, 5, 'Issued: ' . date('d M Y', strtotime((string)$cn['issued_at'])), 0, 0, 'R');
-
-            $pdf->SetY(44);
-
-            // ── CN details box ────────────────────────────────────────────
-            $pdf->SetFillColor(247, 243, 238);
-            $pdf->SetTextColor(42, 39, 35);
-            $pdf->SetFont('helvetica', 'B', 8);
-            $pdf->SetX(15);
-            $pdf->Cell(85, 5, 'ISSUED TO', 0, 1, 'L', true);
-            $pdf->SetFont('helvetica', '', 9);
-            $pdf->SetX(15);
-            $pdf->Cell(85, 6, $cn['guest_name'], 0, 1, 'L');
-            if (!empty($cn['guest_email'])) {
-                $pdf->SetX(15);
-                $pdf->Cell(85, 5, $cn['guest_email'], 0, 1, 'L');
-            }
-            if (!empty($cn['booking_reference'])) {
-                $pdf->SetX(15);
-                $pdf->Cell(85, 5, 'Booking: ' . $cn['booking_reference'], 0, 1, 'L');
+            if ($html === null) {
+                $html = rh_credit_note_pdf_html($cn, $applications);
             }
 
-            // Right side: amounts
-            $pdf->SetXY(110, 44);
-            $pdf->SetFillColor(247, 243, 238);
-            $pdf->SetFont('helvetica', 'B', 8);
-            $pdf->Cell(85, 5, 'CREDIT NOTE DETAILS', 0, 1, 'L', true);
-            $pdf->SetFont('helvetica', '', 9);
-
-            $detailsY = $pdf->GetY();
-            $rightRows = [
-                ['Original Value:', $currencySymbol . ' ' . number_format((float)$cn['original_amount'], 2)],
-                ['Used:', $currencySymbol . ' ' . number_format((float)$cn['amount_used'], 2)],
-                ['Available Balance:', $currencySymbol . ' ' . number_format((float)$cn['balance'], 2)],
-                ['Status:', ucfirst((string)$cn['status'])],
-            ];
-            if ($cn['expires_at']) {
-                $rightRows[] = ['Valid Until:', date('d M Y', strtotime((string)$cn['expires_at']))];
-            }
-            if ($vatNumber) {
-                $rightRows[] = ['VAT Reg:', $vatNumber];
-            }
-            foreach ($rightRows as [$label, $val]) {
-                $pdf->SetXY(110, $detailsY);
-                $pdf->SetTextColor(94, 85, 77);
-                $pdf->Cell(50, 5, $label, 0, 0, 'L');
-                $pdf->SetTextColor(42, 39, 35);
-                $pdf->SetFont('helvetica', 'B', 9);
-                $pdf->Cell(35, 5, $val, 0, 0, 'R');
-                $pdf->SetFont('helvetica', '', 9);
-                $detailsY += 5;
-            }
-
-            $pdf->SetY(max($pdf->GetY(), $detailsY) + 8);
-
-            // ── Reason section ────────────────────────────────────────────
-            $pdf->SetFillColor(177, 130, 71);
-            $pdf->SetTextColor(255, 255, 255);
-            $pdf->SetFont('helvetica', 'B', 8);
-            $pdf->SetX(15);
-            $pdf->Cell(180, 6, '  REASON FOR CREDIT NOTE', 0, 1, 'L', true);
-
-            $reasonLabels = [
-                'cancellation'  => 'Booking Cancellation',
-                'service_issue' => 'Service Issue / Complaint',
-                'early_checkout' => 'Early Checkout',
-                'overpayment'   => 'Overpayment',
-                'goodwill'      => 'Goodwill Gesture',
-                'pricing_error' => 'Pricing / Billing Error',
-                'other'         => 'Other',
-            ];
-            $reasonLabel = $reasonLabels[$cn['reason']] ?? ucfirst((string)$cn['reason']);
-
-            $pdf->SetFillColor(247, 243, 238);
-            $pdf->SetTextColor(42, 39, 35);
-            $pdf->SetFont('helvetica', '', 9);
-            $pdf->SetX(15);
-            $pdf->Cell(180, 6, $reasonLabel, 0, 1, 'L', true);
-
-            if (!empty($cn['reason_notes'])) {
-                $pdf->SetX(15);
-                $pdf->SetFont('helvetica', 'I', 8);
-                $pdf->SetTextColor(94, 85, 77);
-                $pdf->MultiCell(180, 5, $cn['reason_notes'], 0, 'L');
-            }
-
-            $pdf->Ln(4);
-
-            // ── Redemption history (if any) ───────────────────────────────
-            if (!empty($applications)) {
-                $pdf->SetFillColor(177, 130, 71);
-                $pdf->SetTextColor(255, 255, 255);
-                $pdf->SetFont('helvetica', 'B', 8);
-                $pdf->SetX(15);
-                $pdf->Cell(180, 6, '  REDEMPTION HISTORY', 0, 1, 'L', true);
-
-                $pdf->SetFillColor(247, 243, 238);
-                $pdf->SetTextColor(94, 85, 77);
-                $pdf->SetFont('helvetica', 'B', 8);
-                $pdf->SetX(15);
-                $pdf->Cell(40, 5, 'Date', 1, 0, 'L', true);
-                $pdf->Cell(55, 5, 'Booking', 1, 0, 'L', true);
-                $pdf->Cell(35, 5, 'Amount Applied', 1, 0, 'R', true);
-                $pdf->Cell(50, 5, 'Processed By', 1, 1, 'L', true);
-
-                $pdf->SetFont('helvetica', '', 8);
-                $pdf->SetTextColor(42, 39, 35);
-                foreach ($applications as $app) {
-                    $pdf->SetX(15);
-                    $pdf->Cell(40, 5, date('d M Y', strtotime((string)$app['applied_at'])), 1, 0, 'L');
-                    $pdf->Cell(55, 5, htmlspecialchars((string)($app['applied_to_booking_reference'] ?: 'N/A')), 1, 0, 'L');
-                    $pdf->Cell(35, 5, $currencySymbol . ' ' . number_format((float)$app['amount_applied'], 2), 1, 0, 'R');
-                    $pdf->Cell(50, 5, htmlspecialchars((string)($app['applied_by_name'] ?? 'Admin')), 1, 1, 'L');
-                }
-                $pdf->Ln(4);
-            }
-
-            // ── Balance summary box ───────────────────────────────────────
-            $pdf->SetFillColor(35, 31, 28);
-            $pdf->SetTextColor(177, 130, 71);
-            $pdf->SetFont('helvetica', 'B', 11);
-            $pdf->SetX(100);
-            $pdf->Cell(95, 8, 'AVAILABLE BALANCE: ' . $currencySymbol . ' ' . number_format(max(0, (float)$cn['balance']), 2), 0, 1, 'R', true);
-
-            $pdf->Ln(6);
-
-            // ── Footer ────────────────────────────────────────────────────
-            $pdf->SetFillColor(35, 31, 28);
-            $pdf->SetTextColor(200, 190, 180);
-            $pdf->SetFont('helvetica', '', 7);
-            $pdf->SetX(15);
-            $terms  = 'This credit note may be applied to any future booking at ' . $siteName . '. ';
-            if ($cn['expires_at']) {
-                $terms .= 'Valid until ' . date('d M Y', strtotime((string)$cn['expires_at'])) . '. ';
-            }
-            $terms .= 'Credit notes are non-transferable and cannot be exchanged for cash. ';
-            $terms .= 'Reference: ' . $cn['credit_note_number'] . '.';
-            $pdf->MultiCell(180, 4, $terms, 0, 'C');
-
-            $pdf->Output($fullPath, 'F');
-
+            file_put_contents($fullPath, bookingRenderPdfFromHtml($html, 'Credit Note ' . (string)$cn['credit_note_number']));
             $pdo->prepare("UPDATE credit_notes SET pdf_path=?, pdf_generated=1, updated_at=NOW() WHERE id=?")
                 ->execute([$relativePath, $creditNoteId]);
 

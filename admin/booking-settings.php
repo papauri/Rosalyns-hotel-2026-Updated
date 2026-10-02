@@ -49,6 +49,10 @@ $booking_template_defs_master = [
     'refund_notification' => 'Refund Notification Email',
     'payment_receipt' => 'Payment Receipt Email',
     'payment_receipt_document' => 'Payment Receipt PDF',
+    'payment_reminder_1' => 'Payment Reminder 1 (Friendly) Email',
+    'payment_reminder_2' => 'Payment Reminder 2 (Firm) Email',
+    'payment_reminder_3' => 'Payment Reminder 3 (Final) Email',
+    'quotation_expiry_reminder' => 'Quotation Expiry Reminder Email',
 ];
 
 // Filter the template editor to templates the active preset can actually send.
@@ -65,6 +69,8 @@ $booking_template_module_map = [
     'conference_quotation' => 'conference', 'conference_quotation_document' => 'conference',
     'event_quotation' => 'events', 'event_quotation_document' => 'events',
     'credit_note' => 'ar', 'credit_note_document' => 'ar',
+    'payment_reminder_1' => 'ar', 'payment_reminder_2' => 'ar', 'payment_reminder_3' => 'ar',
+    'quotation_expiry_reminder' => 'bookings',
     // refund_notification / payment_receipt(+document): every preset.
 ];
 $booking_template_defs_master = array_filter(
@@ -114,6 +120,10 @@ $booking_template_short_names = [
     'refund_notification' => 'Refund Email',
     'payment_receipt' => 'Receipt Email',
     'payment_receipt_document' => 'Receipt PDF',
+    'payment_reminder_1' => 'Reminder 1 (Friendly)',
+    'payment_reminder_2' => 'Reminder 2 (Firm)',
+    'payment_reminder_3' => 'Reminder 3 (Final)',
+    'quotation_expiry_reminder' => 'Quote Expiry',
 ];
 
 // Handle enable/disable via GET parameter
@@ -198,6 +208,58 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['save_cancellation_ref
             ]);
         }
         $message = 'Refund and cancellation settings saved.';
+    }
+}
+
+// Document branding (colours, footer line, terms, logo size on every emailed PDF)
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['save_document_branding'])) {
+    $docBrandKeys = ['brand_primary_color', 'brand_accent_color', 'document_footer_text', 'document_terms_text', 'document_logo_height_mm'];
+    if (!hasPermission((int)($user['id'] ?? 0), 'finance_settings')) {
+        $error = 'You do not have permission to change document branding.';
+    } else {
+        $newBrand = [];
+        $brandErrors = [];
+        foreach (['brand_primary_color' => 'Primary colour', 'brand_accent_color' => 'Accent colour'] as $ck => $cl) {
+            $raw = trim((string)($_POST[$ck] ?? ''));
+            if ($raw === '') {
+                $newBrand[$ck] = '';
+            } elseif (preg_match('/^#[0-9a-fA-F]{6}$/', $raw)) {
+                $newBrand[$ck] = strtolower($raw);
+            } else {
+                $brandErrors[] = $cl . ' must be a hex colour such as #524b3f.';
+            }
+        }
+        $newBrand['document_footer_text'] = mb_substr(trim(preg_replace('/\s+/', ' ', (string)($_POST['document_footer_text'] ?? ''))), 0, 160);
+        $newBrand['document_terms_text'] = mb_substr(trim((string)($_POST['document_terms_text'] ?? '')), 0, 600);
+        $logoMm = trim((string)($_POST['document_logo_height_mm'] ?? ''));
+        if ($logoMm === '') {
+            $newBrand['document_logo_height_mm'] = '';
+        } elseif (is_numeric($logoMm) && (float)$logoMm >= 10 && (float)$logoMm <= 40) {
+            $newBrand['document_logo_height_mm'] = (string)round((float)$logoMm, 1);
+        } else {
+            $brandErrors[] = 'Logo height must be between 10 and 40 mm.';
+        }
+        if ($brandErrors) {
+            $error = implode(' ', $brandErrors);
+        } else {
+            $oldBrand = [];
+            foreach ($docBrandKeys as $bk) {
+                $oldBrand[$bk] = (string)getSetting($bk, '');
+                updateSetting($bk, $newBrand[$bk]); // also clears the settings cache copy
+            }
+            if (function_exists('hotel_brand_tokens')) {
+                hotel_brand_tokens(true);
+            }
+            if (function_exists('rh_log_event')) {
+                rh_log_event('admin/' . basename(__FILE__, '.php'), 'info', 'Document branding changed', [
+                    'user' => $user['username'] ?? '',
+                    'user_id' => $user['id'] ?? null,
+                    'from' => $oldBrand,
+                    'to' => $newBrand,
+                ]);
+            }
+            $message = 'Document branding saved. New PDFs use it straight away.';
+        }
     }
 }
 
@@ -382,6 +444,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['booking_email_templat
             '{{total_due}}'                => (string)getSetting('currency_symbol', 'ZAR') . number_format(5175, 2),
             '{{amount_paid}}'              => (string)getSetting('currency_symbol', 'ZAR') . number_format(1000, 2),
             '{{balance_due}}'              => (string)getSetting('currency_symbol', 'ZAR') . number_format(4175, 2),
+            '{{amount_due}}'               => number_format(4175, 2),
+            '{{due_date}}'                 => date('F j, Y', strtotime('-3 days')),
+            '{{days_overdue}}'             => '3',
+            '{{account_reference}}'        => 'BK-PREVIEW-001',
+            '{{days_left}}'                => '2 days from now',
+            '{{quote_total}}'              => number_format(4500, 2),
+            '{{pay_instructions}}'         => '<p style="margin:0 0 8px;"><strong>How to pay:</strong> bank transfer or at reception. Please quote your account reference.</p>',
             '{{invoice_number}}'           => 'INV-2026-000001',
             '{{issued_date}}'              => date('j F Y'),
             '{{status_text}}'              => 'BALANCE DUE',
@@ -861,6 +930,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 '{{child_supplement}}'         => $currencySymbol . '0',
                 '{{deposit_amount}}'           => $currencySymbol . number_format(1000, 2),
                 '{{balance_due}}'              => $currencySymbol . number_format(3500, 2),
+                '{{amount_due}}'               => number_format(4175, 2),
+                '{{due_date}}'                 => date('F j, Y', strtotime('-3 days')),
+                '{{days_overdue}}'             => '3',
+                '{{account_reference}}'        => 'BK-PREVIEW-001',
+                '{{days_left}}'                => '2 days from now',
+                '{{quote_total}}'              => number_format(4500, 2),
+                '{{pay_instructions}}'         => '<p style="margin:0 0 8px;"><strong>How to pay:</strong> bank transfer or at reception. Please quote your account reference.</p>',
                 '{{invoice_number}}'           => 'INV-2026-000001',
                 '{{issued_date}}'              => date('j F Y'),
                 '{{status_text}}'              => 'BALANCE DUE',
@@ -1455,6 +1531,48 @@ foreach ($canonicalTemplateDefaults as $templateKey => $templateDefaults) {
                         <button type="submit" class="btn-submit" style="margin-top: 14px;"><i class="fas fa-save"></i> Save Refund Settings</button>
                         <?php endif; ?>
                     </div>
+                </form>
+            </div>
+
+            <div class="settings-card" id="document-branding">
+                <h2><i class="fas fa-palette" style="color: #8B7355;"></i> Document branding</h2>
+                <?php
+                $canEditBranding = hasPermission((int)($user['id'] ?? 0), 'finance_settings');
+                $brandPrimaryNow = rh_theme_hex(getSetting('brand_primary_color', ''), '#524b3f');
+                $brandAccentNow = rh_theme_hex(getSetting('brand_accent_color', ''), '#9b8f7e');
+                ?>
+                <form method="POST" action="booking-settings.php#document-branding">
+                    <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf_token, ENT_QUOTES); ?>">
+                    <input type="hidden" name="save_document_branding" value="1">
+                    <?php if (!$canEditBranding): ?>
+                        <p class="help-text"><i class="fas fa-lock"></i> You can view these. Only users with the "Change VAT &amp; refund settings" permission can change them.</p>
+                    <?php endif; ?>
+                    <fieldset <?php echo $canEditBranding ? '' : 'disabled'; ?> style="border:0;padding:0;margin:0;min-width:0;">
+                        <div class="form-group">
+                            <label for="brand_primary_color">Primary colour (table headers, total bar, title band)</label>
+                            <input type="color" id="brand_primary_color" name="brand_primary_color" value="<?php echo htmlspecialchars($brandPrimaryNow, ENT_QUOTES); ?>" pattern="#[0-9a-fA-F]{6}" style="width:70px;height:40px;padding:2px;">
+                        </div>
+                        <div class="form-group">
+                            <label for="brand_accent_color">Accent colour (small labels and rules)</label>
+                            <input type="color" id="brand_accent_color" name="brand_accent_color" value="<?php echo htmlspecialchars($brandAccentNow, ENT_QUOTES); ?>" pattern="#[0-9a-fA-F]{6}" style="width:70px;height:40px;padding:2px;">
+                        </div>
+                        <div class="form-group">
+                            <label for="document_footer_text">Footer line (printed at the bottom of every PDF)</label>
+                            <input type="text" id="document_footer_text" name="document_footer_text" maxlength="160" value="<?php echo htmlspecialchars((string)getSetting('document_footer_text', ''), ENT_QUOTES); ?>" placeholder="Thank you for staying with us">
+                        </div>
+                        <div class="form-group">
+                            <label for="document_terms_text">Terms / note under the totals</label>
+                            <textarea id="document_terms_text" name="document_terms_text" rows="3" maxlength="600"><?php echo htmlspecialchars((string)getSetting('document_terms_text', ''), ENT_QUOTES); ?></textarea>
+                        </div>
+                        <div class="form-group">
+                            <label for="document_logo_height_mm">Logo height on documents (10-40 mm)</label>
+                            <input type="number" id="document_logo_height_mm" name="document_logo_height_mm" min="10" max="40" step="0.5" value="<?php echo htmlspecialchars((string)getSetting('document_logo_height_mm', ''), ENT_QUOTES); ?>" placeholder="24">
+                            <p class="help-text">Leave blank for the default (24 mm).</p>
+                        </div>
+                    </fieldset>
+                    <?php if ($canEditBranding): ?>
+                    <button type="submit" class="btn-submit" style="margin-top: 8px;"><i class="fas fa-save"></i> Save Document Branding</button>
+                    <?php endif; ?>
                 </form>
             </div>
 

@@ -2,8 +2,8 @@
 
 /**
  * Guest communication lifecycle engine — pre-arrival reminder + post-stay
- * review request. Shared by scripts/guest_lifecycle_emails.php (cron) so the
- * logic is testable without HTTP, mirroring admin/includes/gym-reminders-lib.php.
+ * review request. Run by the web-triggered scheduler (includes/auto-email-jobs.php,
+ * no cron needed), mirroring admin/includes/gym-reminders-lib.php.
  *
  * Settings (site_settings):
  *   booking_prearrival_reminder_enabled  '1'|'0'  (default '0' — opt-in)
