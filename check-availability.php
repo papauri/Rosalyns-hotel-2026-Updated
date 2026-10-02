@@ -8,6 +8,7 @@
 
 require_once 'config/database.php';
 require_once 'includes/pricing.php';
+require_once 'includes/guest-allocation.php';
 
 header('Content-Type: application/json');
 
@@ -28,177 +29,19 @@ if (count($_SESSION[$rate_key]) >= 30) {
 }
 $_SESSION[$rate_key][] = time();
 
-function availabilityResolveOccupancyPolicy(array $room): array
-{
-    $policy = resolveOccupancyPolicy($room, null);
-
-    if (array_key_exists('price_double_occupancy', $room) && ($room['price_double_occupancy'] === '0' || $room['price_double_occupancy'] === 0)) {
-        $policy['double_enabled'] = 0;
-    }
-
-    if (array_key_exists('price_triple_occupancy', $room) && ($room['price_triple_occupancy'] === '0' || $room['price_triple_occupancy'] === 0)) {
-        $policy['triple_enabled'] = 0;
-    }
-
-    return $policy;
-}
-
-function availabilityPickOccupancyByGuestCount(int $guestCount, array $policy): ?string
-{
-    if ($guestCount === 1 && !empty($policy['single_enabled'])) {
-        return 'single';
-    }
-
-    if ($guestCount === 2 && !empty($policy['double_enabled'])) {
-        return 'double';
-    }
-
-    if ($guestCount === 3 && !empty($policy['triple_enabled'])) {
-        return 'triple';
-    }
-
-    if ($guestCount > 3) {
-        if (!empty($policy['triple_enabled'])) {
-            return 'triple';
-        }
-        if (!empty($policy['double_enabled'])) {
-            return 'double';
-        }
-        if (!empty($policy['single_enabled'])) {
-            return 'single';
-        }
-    }
-
-    return null;
-}
-
-function availabilityPriceForOccupancy(array $room, string $occupancyType): float
-{
-    if ($occupancyType === 'single') {
-        return !empty($room['price_single_occupancy']) ? (float)$room['price_single_occupancy'] : (float)$room['price_per_night'];
-    }
-
-    if ($occupancyType === 'double') {
-        return ($room['price_double_occupancy'] !== null && (float)$room['price_double_occupancy'] > 0)
-            ? (float)$room['price_double_occupancy']
-            : (float)$room['price_per_night'];
-    }
-
-    if ($occupancyType === 'triple') {
-        return ($room['price_triple_occupancy'] !== null && (float)$room['price_triple_occupancy'] > 0)
-            ? (float)$room['price_triple_occupancy']
-            : (float)$room['price_per_night'];
-    }
-
-    return (float)$room['price_per_night'];
-}
-
-function availabilityBuildGuestAllocation(int $totalGuests, int $childGuests, array $room, array $policy): array
-{
-    $maxGuestsPerRoom = max(1, (int)($room['max_guests'] ?? 1));
-    $roomsNeeded = max(1, (int)ceil($totalGuests / $maxGuestsPerRoom));
-    $adultGuests = $totalGuests - $childGuests;
-
-    if ($adultGuests < $roomsNeeded) {
-        return [
-            'valid' => false,
-            'rooms_needed' => $roomsNeeded,
-            'allocation' => [],
-            'message' => "At least one adult is required in each room. This group needs {$roomsNeeded} rooms, so please add more adult guests or reduce the number of children."
-        ];
-    }
-
-    $allocation = [];
-    $remainingGuests = $totalGuests;
-    $remainingAdults = $adultGuests;
-    $remainingChildren = $childGuests;
-
-    for ($index = 0; $index < $roomsNeeded; $index++) {
-        $roomsLeft = $roomsNeeded - $index;
-        $minGuestsForLaterRooms = max(0, $roomsLeft - 1);
-        $guestsThisRoom = min($maxGuestsPerRoom, max(1, $remainingGuests - $minGuestsForLaterRooms));
-        $adultReserveForLaterRooms = max(0, $roomsLeft - 1);
-        $adultsAvailableThisRoom = $remainingAdults - $adultReserveForLaterRooms;
-
-        if ($adultsAvailableThisRoom < 1) {
-            return [
-                'valid' => false,
-                'rooms_needed' => $roomsNeeded,
-                'allocation' => [],
-                'message' => 'At least one adult is required in each room.'
-            ];
-        }
-
-        $childrenThisRoom = min($remainingChildren, max(0, $guestsThisRoom - 1));
-        $adultsThisRoom = $guestsThisRoom - $childrenThisRoom;
-
-        if ($adultsThisRoom > $adultsAvailableThisRoom) {
-            $adultsThisRoom = $adultsAvailableThisRoom;
-            $childrenThisRoom = $guestsThisRoom - $adultsThisRoom;
-        }
-
-        if ($childrenThisRoom > $remainingChildren) {
-            $childrenThisRoom = $remainingChildren;
-            $adultsThisRoom = $guestsThisRoom - $childrenThisRoom;
-        }
-
-        if ($adultsThisRoom < 1 || $childrenThisRoom < 0) {
-            return [
-                'valid' => false,
-                'rooms_needed' => $roomsNeeded,
-                'allocation' => [],
-                'message' => 'Unable to allocate guests while keeping at least one adult in each room.'
-            ];
-        }
-
-        $occupancyType = availabilityPickOccupancyByGuestCount($guestsThisRoom, $policy);
-        if ($occupancyType === null) {
-            return [
-                'valid' => false,
-                'rooms_needed' => $roomsNeeded,
-                'allocation' => [],
-                'message' => "No enabled occupancy pricing can fit {$guestsThisRoom} guests in one {$room['name']} room."
-            ];
-        }
-
-        $allocation[] = [
-            'room_number' => $index + 1,
-            'guests' => $guestsThisRoom,
-            'adults' => $adultsThisRoom,
-            'children' => $childrenThisRoom,
-            'occupancy_type' => $occupancyType,
-        ];
-
-        $remainingGuests -= $guestsThisRoom;
-        $remainingAdults -= $adultsThisRoom;
-        $remainingChildren -= $childrenThisRoom;
-    }
-
-    if ($remainingGuests !== 0 || $remainingAdults !== 0 || $remainingChildren !== 0) {
-        return [
-            'valid' => false,
-            'rooms_needed' => $roomsNeeded,
-            'allocation' => [],
-            'message' => 'Unable to allocate the full guest list across the required rooms.'
-        ];
-    }
-
-    return [
-        'valid' => true,
-        'rooms_needed' => $roomsNeeded,
-        'allocation' => $allocation,
-    ];
-}
+// Allocation rules (rooms needed, per-room split, occupancy tier, children policy,
+// 1+ adult per room) live in includes/guest-allocation.php and are shared with
+// booking.php, api/bookings.php and admin/create-booking.php.
 
 function availabilityBuildSplitPricing(PDO $pdo, array $room, string $checkIn, string $checkOut, int $nights, int $totalGuests, int $childGuests): array
 {
-    $policy = availabilityResolveOccupancyPolicy($room);
-    $allocationResult = availabilityBuildGuestAllocation($totalGuests, $childGuests, $room, $policy);
+    $allocationResult = ga_plan($room, $totalGuests, $childGuests);
     $roomsNeeded = (int)($allocationResult['rooms_needed'] ?? 1);
 
     if (empty($allocationResult['valid'])) {
         return [
             'valid' => false,
+            'reason' => $allocationResult['reason'] ?? 'invalid_party',
             'rooms_needed' => $roomsNeeded,
             'message' => $allocationResult['message'] ?? 'This guest mix cannot be allocated across the selected room type.'
         ];
@@ -221,7 +64,7 @@ function availabilityBuildSplitPricing(PDO $pdo, array $room, string $checkIn, s
         $childrenThisRoom = (int)$allocationRoom['children'];
         $adultsThisRoom = (int)$allocationRoom['adults'];
         $occupancyType = $allocationRoom['occupancy_type'];
-        $baseRate = availabilityPriceForOccupancy($room, $occupancyType);
+        $baseRate = ga_price_for_occupancy($room, $occupancyType);
         $dynamicResult = applyDynamicPricing($pdo, (int)$room['id'], $checkIn, $checkOut, $nights, $baseRate);
         $rateThisRoom = (float)$dynamicResult['final_price'];
         $childSupplementThisRoom = $childrenThisRoom > 0
@@ -279,7 +122,9 @@ function availabilityBuildSplitPricing(PDO $pdo, array $room, string $checkIn, s
 
     return [
         'valid' => true,
+        'reason' => '',
         'rooms_needed' => $roomsNeeded,
+        'summary' => $allocationResult['summary'] ?? '',
         'allocation' => $allocation,
         'room_rate_total_per_night' => round($roomRateTotalPerNight, 2),
         'base_total' => round($baseTotal, 2),
@@ -308,7 +153,9 @@ function availabilityBuildResponse(PDO $pdo, array $room, string $checkIn, strin
             return [
                 'available' => false,
                 'message' => 'All joined rooms for this room type are unavailable for the selected dates.',
+                'reason' => 'not_enough_rooms',
                 'remaining_rooms' => 0,
+                'rooms_free' => 0,
                 'rooms_needed' => 1,
             ];
         }
@@ -329,29 +176,39 @@ function availabilityBuildResponse(PDO $pdo, array $room, string $checkIn, strin
     $childRoomsNeeded = 0;
 
     if (empty($splitPricing['valid'])) {
+        // The party itself is impossible for this room type. Still report how many
+        // rooms of the type are free so the page can explain the whole picture.
+        $inventoryOnly = checkRoomAvailability((int)$room['id'], $checkIn, $checkOut, null, 0, 0);
+        $freeRooms = !empty($inventoryOnly['available']) ? (int)($inventoryOnly['remaining_rooms'] ?? 0) : 0;
         return [
             'available' => false,
             'message' => $splitPricing['message'] ?? 'This guest count is not supported by the selected room type.',
-            'remaining_rooms' => 0,
+            'reason' => $splitPricing['reason'] ?? 'invalid_party',
+            'remaining_rooms' => $freeRooms,
+            'rooms_free' => $freeRooms,
             'rooms_needed' => $roomsNeeded,
             'split_pricing' => $splitPricing,
         ];
     }
 
-    foreach ($splitPricing['allocation'] as $allocatedRoom) {
-        if ((int)($allocatedRoom['children'] ?? 0) > 0) {
-            $childRoomsNeeded++;
-        }
-    }
+    $childRoomsNeeded = ga_child_rooms($splitPricing['allocation']);
 
     $availability = checkRoomAvailability((int)$room['id'], $checkIn, $checkOut, null, $childGuests, $childRoomsNeeded);
     $remainingRooms = (int)($availability['remaining_rooms'] ?? 0);
     $childEligibleRemainingRooms = (int)($availability['child_eligible_remaining_rooms'] ?? 0);
 
     if (empty($availability['available'])) {
+        $unavailableReason = 'unavailable';
+        if ($childRoomsNeeded > 0 && $remainingRooms > 0 && $childEligibleRemainingRooms < $childRoomsNeeded) {
+            $unavailableReason = 'child_rooms';
+        } elseif ($remainingRooms <= 0 && empty($availability['blocked_dates'])) {
+            $unavailableReason = 'not_enough_rooms';
+        }
         return [
             'available' => false,
             'message' => $availability['error'] ?? 'This room is not available for the selected dates.',
+            'reason' => $unavailableReason,
+            'rooms_free' => $remainingRooms,
             'remaining_rooms' => $remainingRooms,
             'child_eligible_remaining_rooms' => $childEligibleRemainingRooms,
             'child_eligible_available_count' => (int)($availability['child_eligible_available_count'] ?? 0),
@@ -367,7 +224,9 @@ function availabilityBuildResponse(PDO $pdo, array $room, string $checkIn, strin
     if ($remainingRooms < $roomsNeeded) {
         return [
             'available' => false,
-            'message' => "Only {$remainingRooms} {$room['name']} room" . ($remainingRooms === 1 ? '' : 's') . " available, but your group requires {$roomsNeeded}.",
+            'message' => ga_inventory_error($availability, $roomsNeeded, (string)$room['name'], $checkIn, $checkOut),
+            'reason' => 'not_enough_rooms',
+            'rooms_free' => $remainingRooms,
             'remaining_rooms' => $remainingRooms,
             'child_eligible_remaining_rooms' => $childEligibleRemainingRooms,
             'child_eligible_available_count' => (int)($availability['child_eligible_available_count'] ?? 0),
@@ -382,7 +241,7 @@ function availabilityBuildResponse(PDO $pdo, array $room, string $checkIn, strin
 
     $primaryAllocation = $splitPricing['allocation'][0] ?? null;
     $pricingBasePerNight = $primaryAllocation
-        ? availabilityPriceForOccupancy($room, $primaryAllocation['occupancy_type'])
+        ? ga_price_for_occupancy($room, $primaryAllocation['occupancy_type'])
         : (float)$room['price_per_night'];
     $preview = getDynamicPricingPreview($pdo, (int)$room['id'], $checkIn, $checkOut, $nights, $pricingBasePerNight);
 
@@ -401,6 +260,9 @@ function availabilityBuildResponse(PDO $pdo, array $room, string $checkIn, strin
         ],
         'nights' => $nights,
         'total' => (float)$splitPricing['total_before_packages'],
+        'reason' => '',
+        'plan_summary' => $splitPricing['summary'] ?? '',
+        'rooms_free' => $remainingRooms,
         'remaining_rooms' => $remainingRooms,
         'child_eligible_remaining_rooms' => (int)($availability['child_eligible_remaining_rooms'] ?? $remainingRooms),
         'child_eligible_available_count' => (int)($availability['child_eligible_available_count'] ?? 0),

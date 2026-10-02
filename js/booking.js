@@ -44,6 +44,11 @@
             return selectedRoomId ? roomsData.find(room => room.id === selectedRoomId) : null;
         }
 
+        // ── Guest allocation: exact mirror of includes/guest-allocation.php ─────────
+        // Rooms needed = ceil(guests / capacity); greedy fill; 1+ adult per room;
+        // children refused where the type is adults-only; the occupancy tier is
+        // picked from the guests in EACH room. check-availability.php and the booking
+        // POST run the PHP twin of this and always win; this gives instant feedback.
         function pickOccupancyForGuestCount(guestCount, room) {
             if (!room || guestCount < 1) return null;
             if (guestCount === 1 && Number(room.single_enabled || 0) === 1) return 'single';
@@ -77,61 +82,89 @@
             return Math.max(0, parseInt(childInput?.value || '0', 10) || 0);
         }
 
-        function getGuestAllocation(totalGuests, room, childGuests = null) {
-            const normalizedGuests = Math.max(0, Number(totalGuests || 0));
-            if (!room || normalizedGuests < 1) return [];
-            const maxGuestsPerRoom = Math.max(1, Number(room.max_guests || 1));
-            const roomsNeeded = Math.ceil(normalizedGuests / maxGuestsPerRoom);
-            const childCount = Math.min(
-                Math.max(0, Number(childGuests === null ? getCurrentChildGuestCount() : childGuests) || 0),
-                normalizedGuests
-            );
-            const adultGuests = normalizedGuests - childCount;
+        function plural(n, word) {
+            return n + ' ' + word + (n === 1 ? '' : 's');
+        }
 
-            if (adultGuests < roomsNeeded) return [];
+        function planFailure(reason, roomsNeeded, message) {
+            return { valid: false, reason: reason, roomsNeeded: roomsNeeded, allocation: [], message: message, summary: '' };
+        }
+
+        function getPartyPlan(totalGuests, childGuests, room) {
+            const total = Math.max(0, Number(totalGuests || 0));
+            if (!room || total < 1) {
+                return planFailure('invalid_party', 0, 'Select a room and guest count first.');
+            }
+            const maxPerRoom = Math.max(1, Number(room.max_guests || 1));
+            const roomsNeeded = Math.max(1, Math.ceil(total / maxPerRoom));
+            const children = Math.max(0, Number(childGuests === null || childGuests === undefined ? getCurrentChildGuestCount() : childGuests) || 0);
+            const adults = total - children;
+            const name = room.name || 'this room type';
+
+            if (adults < 1) return planFailure('invalid_party', roomsNeeded, 'At least 1 adult is required for every booking.');
+            if (children > 0 && Number(room.children_allowed || 0) !== 1) {
+                return planFailure('children_not_allowed', roomsNeeded, `${name} is adults only. Children cannot stay in this room type.`);
+            }
+            if (adults < roomsNeeded) {
+                return planFailure('adults_per_room', roomsNeeded, `${total} guests need ${roomsNeeded} ${name} rooms (up to ${maxPerRoom} guests each) and every room needs at least 1 adult. Add adults or reduce the number of children.`);
+            }
 
             const allocation = [];
-            let remainingGuests = normalizedGuests;
-            let remainingAdults = adultGuests;
-            let remainingChildren = childCount;
+            let remainingGuests = total;
+            let remainingAdults = adults;
+            let remainingChildren = children;
 
             for (let index = 0; index < roomsNeeded; index++) {
-                const roomsLeft = roomsNeeded - index;
-                const minForOthers = Math.max(0, roomsLeft - 1);
-                const guestsThisRoom = Math.min(maxGuestsPerRoom, Math.max(1, remainingGuests - minForOthers));
-                const adultReserveForLaterRooms = Math.max(0, roomsLeft - 1);
-                const adultsAvailableThisRoom = remainingAdults - adultReserveForLaterRooms;
-
-                if (adultsAvailableThisRoom < 1) return [];
+                const laterRooms = Math.max(0, roomsNeeded - index - 1);
+                const guestsThisRoom = Math.min(maxPerRoom, Math.max(1, remainingGuests - laterRooms));
+                const adultsAvailableThisRoom = remainingAdults - laterRooms;
+                if (adultsAvailableThisRoom < 1) return planFailure('adults_per_room', roomsNeeded, 'At least one adult is required in each room.');
 
                 let childrenThisRoom = Math.min(remainingChildren, Math.max(0, guestsThisRoom - 1));
                 let adultsThisRoom = guestsThisRoom - childrenThisRoom;
-
                 if (adultsThisRoom > adultsAvailableThisRoom) {
                     adultsThisRoom = adultsAvailableThisRoom;
                     childrenThisRoom = guestsThisRoom - adultsThisRoom;
                 }
-
                 if (childrenThisRoom > remainingChildren) {
                     childrenThisRoom = remainingChildren;
                     adultsThisRoom = guestsThisRoom - childrenThisRoom;
                 }
-
-                if (adultsThisRoom < 1 || childrenThisRoom < 0) return [];
+                if (adultsThisRoom < 1 || childrenThisRoom < 0) {
+                    return planFailure('adults_per_room', roomsNeeded, 'Unable to allocate guests while keeping at least one adult in each room.');
+                }
 
                 const occupancyType = pickOccupancyForGuestCount(guestsThisRoom, room);
+                if (occupancyType === null) {
+                    const tier = guestsThisRoom === 1 ? 'single' : (guestsThisRoom === 2 ? 'double' : 'triple');
+                    return planFailure('no_pricing', roomsNeeded, `${name} has no ${tier} rate enabled, so a room with ${plural(guestsThisRoom, 'guest')} cannot be booked.`);
+                }
+
                 allocation.push({
                     guests: guestsThisRoom,
                     adults: adultsThisRoom,
                     children: childrenThisRoom,
-                    occupancyType
+                    occupancyType: occupancyType
                 });
                 remainingGuests -= guestsThisRoom;
                 remainingAdults -= adultsThisRoom;
                 remainingChildren -= childrenThisRoom;
             }
 
-            return remainingGuests === 0 && remainingAdults === 0 && remainingChildren === 0 ? allocation : [];
+            if (remainingGuests !== 0 || remainingAdults !== 0 || remainingChildren !== 0) {
+                return planFailure('capacity', roomsNeeded, 'Unable to allocate the full guest list across the required rooms.');
+            }
+
+            const counts = allocation.map(part => part.guests);
+            const summary = roomsNeeded === 1
+                ? `${plural(total, 'guest')}: 1 × ${name} (${plural(counts[0], 'guest')})`
+                : `${plural(total, 'guest')}: ${roomsNeeded} × ${name} (${counts.join(' + ')} guests)`;
+            return { valid: true, reason: '', roomsNeeded: roomsNeeded, allocation: allocation, message: '', summary: summary };
+        }
+
+        function getGuestAllocation(totalGuests, room, childGuests = null) {
+            const plan = getPartyPlan(totalGuests, childGuests, room);
+            return plan.valid ? plan.allocation : [];
         }
 
         function getRoomsNeededForGuests(totalGuests, room) {
@@ -140,35 +173,17 @@
         }
 
         function getAllocationValidationMessage(totalGuests, room, childGuests = null) {
-            const normalizedGuests = Math.max(0, Number(totalGuests || 0));
-            if (!room || normalizedGuests < 1) return 'Select a room and guest count first.';
-            const childCount = Math.min(
-                Math.max(0, Number(childGuests === null ? getCurrentChildGuestCount() : childGuests) || 0),
-                normalizedGuests
-            );
-            const adultGuests = normalizedGuests - childCount;
-            const roomsNeeded = getRoomsNeededForGuests(normalizedGuests, room);
-
-            if (adultGuests < 1) {
-                return 'At least 1 adult is required for every booking.';
-            }
-
-            if (adultGuests < roomsNeeded) {
-                return `This group needs ${roomsNeeded} room${roomsNeeded === 1 ? '' : 's'}, so it needs at least ${roomsNeeded} adult${roomsNeeded === 1 ? '' : 's'}.`;
-            }
-
-            const allocation = getGuestAllocation(normalizedGuests, room, childCount);
-            if (!allocation.length || allocation.some(part => part.occupancyType === null)) {
-                return 'The selected room type does not have pricing enabled for this guest combination.';
-            }
-
-            return '';
+            const plan = getPartyPlan(totalGuests, childGuests, room);
+            return plan.valid ? '' : plan.message;
         }
 
         function hasValidAllocation(totalGuests, room, childGuests = null) {
-            const allocation = getGuestAllocation(totalGuests, room, childGuests);
-            return allocation.length > 0 && allocation.every(part => part.occupancyType !== null);
+            return getPartyPlan(totalGuests, childGuests, room).valid;
         }
+
+        // Rooms of each type free for every night of the chosen stay, learned from
+        // check-availability.php (missing key = not yet known).
+        const roomsFreeByType = {};
 
         function buildAvailabilityStatusKey(roomId, checkIn, checkOut, childGuests, totalGuests) {
             const room = roomsData.find(item => item.id === Number(roomId));
@@ -488,6 +503,25 @@
                 }
             }
 
+            // Rejected submission: dates and guests were restored from the POST by the
+            // server (hero* values); put the room, add-ons and booking type back too.
+            if (typeof postedBooking !== 'undefined' && postedBooking) {
+                (postedBooking.package_ids || []).forEach(id => selectedPackageIds.add(Number(id)));
+                if (postedBooking.room_id && !preselectedRoomId) {
+                    const postedOption = document.querySelector(`.room-option[data-room-id="${Number(postedBooking.room_id)}"]`);
+                    if (postedOption) {
+                        selectRoom(postedOption, true);
+                    }
+                }
+                if (postedBooking.booking_type === 'tentative') {
+                    const tentativeRadio = document.querySelector('input[name="booking_type"][value="tentative"]');
+                    if (tentativeRadio) {
+                        tentativeRadio.checked = true;
+                        selectBookingType('tentative');
+                    }
+                }
+            }
+
             // If room is pre-selected, initialize with that room
             if (preselectedRoomId) {
                 // Find the pre-selected room data from roomsData
@@ -680,9 +714,12 @@
             }
 
             if (!allowed) {
+                const droppedChildren = parseInt(childInput.value || '0', 10) || 0;
                 childInput.value = '0';
                 if (childHint) {
-                    childHint.innerHTML = '<i class="fas fa-ban" style="color: #dc3545;"></i> Children are not allowed for this room type.';
+                    childHint.innerHTML = '<i class="fas fa-ban" style="color: #dc3545;"></i> ' +
+                        escapeHtml(room.name) + ' is adults only, so children cannot stay in this room type.' +
+                        (droppedChildren > 0 ? ' The ' + plural(droppedChildren, 'child').replace('childs', 'children') + ' you entered were removed - all guests are now counted as adults. Choose a family-friendly room to bring them.' : '');
                     childHint.style.color = '#dc3545';
                 }
             } else {
@@ -776,7 +813,19 @@
             const fallbackGuests = selectedRoomMaxGuests > 1 ? 2 : 1;
             const desiredGuests = previousGuests > 0 ? previousGuests : fallbackGuests;
             const normalizedGuests = Math.min(maxSelectableGuests, Math.max(1, desiredGuests));
-            guestSelect.value = hasValidAllocation(normalizedGuests, selectedRoom) ? String(normalizedGuests) : '1';
+            // Keep the party the guest already chose whenever this room type can take it
+            // (children only count where the type allows them; applyChildrenPolicy then
+            // tells the guest if they were removed). Otherwise fall back to the largest
+            // supported head-count at or below it.
+            const childrenForRoom = selectedRoom && Number(selectedRoom.children_allowed || 0) === 1 ? getCurrentChildGuestCount() : 0;
+            let keptGuests = 1;
+            for (let candidate = normalizedGuests; candidate >= 1; candidate--) {
+                if (hasValidAllocation(candidate, selectedRoom, childrenForRoom)) {
+                    keptGuests = candidate;
+                    break;
+                }
+            }
+            guestSelect.value = String(keptGuests);
 
             // Update occupancy prices for this room
             updateOccupancyPrices(roomId);
@@ -820,83 +869,141 @@
             // Clear existing options
             guestSelect.innerHTML = '<option value="">Select number of guests...</option>';
 
+            const freeRooms = room && roomsFreeByType[room.id] !== undefined ? Number(roomsFreeByType[room.id]) : null;
             for (let i = 1; i <= maxSelectableGuests; i++) {
                 const option = document.createElement('option');
                 option.value = i;
-                const roomsNeeded = Math.ceil(i / Math.max(1, maxGuests));
-                option.textContent = i + (i === 1 ? ' Guest' : ' Guests') + (roomsNeeded > 1 ? ` (${roomsNeeded} rooms)` : '');
-                if (room && !hasValidAllocation(i, room)) {
-                    option.disabled = true;
-                    option.textContent += ' - pricing unavailable';
+                // Best case for this head-count (no children) - children are checked live below.
+                const plan = room ? getPartyPlan(i, 0, room) : null;
+                const roomsNeeded = plan ? plan.roomsNeeded : Math.ceil(i / Math.max(1, maxGuests));
+                let label = plural(i, 'Guest');
+                if (plan && plan.valid && roomsNeeded > 1) {
+                    label += ` → ${roomsNeeded} rooms (${plan.allocation.map(part => part.guests).join(' + ')})`;
                 }
+                if (plan && !plan.valid) {
+                    option.disabled = true;
+                    label += ' - not available for this room type';
+                } else if (freeRooms !== null && roomsNeeded > freeRooms) {
+                    option.disabled = true;
+                    label += freeRooms <= 0 ?
+                        ' - no rooms free on your dates' :
+                        ` - needs ${roomsNeeded} rooms, only ${freeRooms} free on your dates`;
+                }
+                option.textContent = label;
                 guestSelect.appendChild(option);
             }
 
             // Update capacity hint
-            capacityHint.textContent = `This room accommodates up to ${maxGuests} guest${maxGuests > 1 ? 's' : ''} per room. Larger groups are split across multiple rooms automatically.`;
+            capacityHint.textContent = `Each ${selectedRoomName || 'room'} holds up to ${plural(maxGuests, 'guest')}. Larger parties are booked into several rooms of this type automatically (every room needs at least 1 adult).`;
             capacityHint.style.display = 'block';
 
             if (currentValue && currentValue <= maxSelectableGuests) {
                 guestSelect.value = String(currentValue);
             }
 
-            // Hide second room suggestion
-            document.getElementById('secondRoomSuggestion').style.display = 'none';
         }
 
-        // Check if guests exceed capacity and show second room suggestion
-        function checkGuestCapacity() {
-            const guestSelect = document.getElementById('number_of_guests');
-            const numGuests = parseInt(guestSelect.value);
+        // "Your rooms" panel: says plainly how many rooms of the chosen type the party
+        // gets, who sleeps where, the rate per room, and why it is NOT possible when it
+        // is not. Uses the server's allocation/pricing once check-availability answered
+        // (same rules, authoritative) and the local mirror until then.
+        function escapeHtml(value) {
+            return String(value === null || value === undefined ? '' : value)
+                .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+        }
+
+        function describeRoomGuests(part) {
+            const adultsText = plural(Number(part.adults || 0), 'adult');
+            const childrenText = Number(part.children || 0) > 0 ? ` + ${plural(Number(part.children), 'child').replace('childs', 'children')}` : '';
+            return adultsText + childrenText;
+        }
+
+        function getServerResultForCurrentParty() {
+            const checkIn = document.getElementById('check_in_date')?.value;
+            const checkOut = document.getElementById('check_out_date')?.value;
+            const totalGuests = parseInt(document.getElementById('number_of_guests')?.value || '0', 10);
+            if (!selectedRoomId || !checkIn || !checkOut || totalGuests < 1) return null;
+            const key = buildAvailabilityStatusKey(selectedRoomId, checkIn, checkOut, getCurrentChildGuestCount(), totalGuests);
+            return currentAvailabilityResult && currentAvailabilityResult.status_key === key ? currentAvailabilityResult : null;
+        }
+
+        function renderPartyPlan() {
             const suggestionBox = document.getElementById('secondRoomSuggestion');
             const optionsContainer = document.getElementById('secondRoomOptions');
+            const titleEl = document.getElementById('partyPlanTitle');
+            const introEl = document.getElementById('partyPlanIntro');
+            const iconEl = document.getElementById('partyPlanIcon');
+            if (!suggestionBox || !optionsContainer) return;
+
+            const numGuests = parseInt(document.getElementById('number_of_guests')?.value || '0', 10);
             const room = getSelectedRoomData();
             const childGuests = getCurrentChildGuestCount();
 
-            if (!numGuests || !selectedRoomMaxGuests || !room) {
+            if (!numGuests || !room) {
                 suggestionBox.style.display = 'none';
-                return;
-            }
-
-            const allocationMessage = getAllocationValidationMessage(numGuests, room, childGuests);
-            if (allocationMessage) {
-                suggestionBox.style.display = 'block';
-                optionsContainer.innerHTML = `
-                    <div class="booking-split-notice booking-split-notice--warning">
-                        <strong>Guest allocation needs attention</strong>
-                        <p>${allocationMessage}</p>
-                    </div>
-                `;
                 validateFormForSubmit();
                 return;
             }
 
-            // Check if guests exceed room capacity
-            if (numGuests > selectedRoomMaxGuests) {
-                suggestionBox.style.display = 'block';
+            const plan = getPartyPlan(numGuests, childGuests, room);
+            const result = getServerResultForCurrentParty();
+            const serverPricing = result && result.split_pricing && result.split_pricing.valid ? result.split_pricing : null;
+            const roomName = escapeHtml(room.name);
+            suggestionBox.style.display = 'block';
 
-                // Calculate how many rooms needed
-                const roomsNeeded = Math.ceil(numGuests / selectedRoomMaxGuests);
-                const allocation = getGuestAllocation(numGuests, room, childGuests);
-                const allocationText = allocation.map((part, index) => `Room ${index + 1}: ${part.adults} adult${part.adults === 1 ? '' : 's'}${part.children > 0 ? ` + ${part.children} child${part.children === 1 ? '' : 'ren'}` : ''} (${getOccupancyLabel(part.occupancyType)})`).join(' • ');
-
-                // Build suggestion message
-                let html = `
-                    <div class="booking-split-notice">
-                        <strong>${roomsNeeded} ${selectedRoomName} room${roomsNeeded > 1 ? 's' : ''} will be reserved</strong>
-                        <p>Each room accommodates up to ${selectedRoomMaxGuests} guest${selectedRoomMaxGuests > 1 ? 's' : ''}. Your booking will be split automatically under one group request.</p>
-                        <p>${allocationText}</p>
-                    </div>
-                `;
-
-                optionsContainer.innerHTML = html;
-                validateFormForSubmit();
-            } else {
-                suggestionBox.style.display = 'none';
-
-                // Enable submit button if all validations pass
-                validateFormForSubmit();
+            // Not possible: say exactly why (local rules first, then the server's reason).
+            let problem = '';
+            if (!plan.valid) {
+                problem = plan.message;
+            } else if (result && result.available === false) {
+                problem = result.message || result.error || 'This room type is not available for your dates.';
+            } else if (plan.valid && roomsFreeByType[room.id] !== undefined && plan.roomsNeeded > Number(roomsFreeByType[room.id])) {
+                const free = Number(roomsFreeByType[room.id]);
+                problem = free <= 0 ?
+                    `${room.name} is fully booked for every night of your stay.` :
+                    `Your party needs ${plan.roomsNeeded} ${room.name} rooms but only ${free} ${free === 1 ? 'is' : 'are'} free for every night of your stay.`;
             }
+
+            if (problem) {
+                if (titleEl) titleEl.textContent = 'This room type cannot take your party';
+                if (introEl) introEl.textContent = '';
+                if (iconEl) iconEl.style.color = '#dc3545';
+                optionsContainer.innerHTML = `<div class="booking-split-notice booking-split-notice--warning"><p>${escapeHtml(problem)}</p><p>Try a different room type, change the number of guests or children, or pick other dates.</p></div>`;
+                validateFormForSubmit();
+                return;
+            }
+
+            if (iconEl) iconEl.style.color = '';
+            const nights = Number(serverPricing && result.nights ? result.nights : 0);
+            if (titleEl) {
+                titleEl.textContent = plan.roomsNeeded === 1 ?
+                    `Your booking: 1 × ${room.name}` :
+                    `Your booking: ${plan.roomsNeeded} × ${room.name} (${plan.allocation.map(part => part.guests).join(' + ')} guests)`;
+            }
+            if (introEl) {
+                introEl.textContent = plan.roomsNeeded === 1 ?
+                    `All ${plural(numGuests, 'guest')} share one room.` :
+                    `Each ${room.name} holds up to ${plural(Number(room.max_guests), 'guest')}, so your ${plural(numGuests, 'guest')} are placed in ${plan.roomsNeeded} rooms, one adult at least in each. They are booked together as one group.`;
+            }
+
+            const rows = (serverPricing ? serverPricing.allocation : plan.allocation).map((part, index) => {
+                const occ = part.occupancy_type || part.occupancyType;
+                const rate = part.rate_per_night !== undefined ? Number(part.rate_per_night) : getPriceForOccupancy(room, occ);
+                const lineTotal = part.total_with_vat !== undefined ? Number(part.total_with_vat) : null;
+                return `<li><strong>Room ${index + 1}:</strong> ${escapeHtml(describeRoomGuests(part))} &middot; ${getOccupancyLabel(occ)} rate ${currencySymbol}${rate.toLocaleString()}/night` +
+                    (lineTotal !== null && nights > 0 ? ` &middot; ${currencySymbol}${lineTotal.toLocaleString()} for ${plural(nights, 'night')}` : '') + '</li>';
+            }).join('');
+            let totalLine = '';
+            if (serverPricing && nights > 0) {
+                totalLine = `<p><strong>Total for ${plural(plan.roomsNeeded, 'room')}, ${plural(nights, 'night')}: ${currencySymbol}${Number(serverPricing.total_with_vat).toLocaleString()}</strong> (VAT included; tourism levy added where applicable)</p>`;
+            }
+            optionsContainer.innerHTML = `<div class="booking-split-notice"><ul style="margin:0;padding-left:18px;">${rows}</ul>${totalLine}</div>`;
+            validateFormForSubmit();
+        }
+
+        // Kept under its old name: every caller means "re-evaluate the party".
+        function checkGuestCapacity() {
+            renderPartyPlan();
         }
 
         // Validate form for submit
@@ -911,7 +1018,11 @@
             const adultsInt = totalGuestsInt - childGuests;
             const childValid = childGuests >= 0 && childGuests < totalGuestsInt;
             const selectedRoom = getSelectedRoomData();
-            const allocationValid = selectedRoom ? hasValidAllocation(totalGuestsInt, selectedRoom, childGuests) : false;
+            let allocationValid = selectedRoom ? hasValidAllocation(totalGuestsInt, selectedRoom, childGuests) : false;
+            if (allocationValid && selectedRoom && roomsFreeByType[selectedRoom.id] !== undefined &&
+                getRoomsNeededForGuests(totalGuestsInt, selectedRoom) > Number(roomsFreeByType[selectedRoom.id])) {
+                allocationValid = false;
+            }
 
             if (selectedRoomId && checkIn && checkOut && numGuests && childValid && adultsInt >= 1 && allocationValid) {
                 submitBtn.disabled = false;
@@ -921,7 +1032,7 @@
                 submitBtn.disabled = true;
                 submitBtn.innerHTML = allocationValid || !selectedRoomId ?
                     '<i class="fas fa-calendar-check"></i> Complete All Fields (1+ adult required)' :
-                    '<i class="fas fa-exclamation-triangle"></i> Choose a Supported Guest Count';
+                    '<i class="fas fa-exclamation-triangle"></i> This Room Cannot Take Your Party';
                 submitBtn.style.opacity = '0.6';
             }
         }
@@ -1617,7 +1728,7 @@
                                 e.preventDefault();
 
                                 // Clean up any raw HTML that might be in the error message
-                                let reasonText = roomStatus.error || "This room is fully booked for your selected dates.";
+                                let reasonText = roomStatus.message || roomStatus.error || "This room cannot take your party on your selected dates.";
                                 // Strip HTML tags
                                 reasonText = reasonText.replace(/<\/?[^>]+(>|$)/g, "");
 
@@ -1694,7 +1805,11 @@
                         result.status_key = statusKey;
                         roomAvailabilityStatus[statusKey] = result;
 
+                        if (result.rooms_free !== undefined && result.rooms_free !== null) {
+                            roomsFreeByType[roomId] = Number(result.rooms_free);
+                        }
                         updateRoomAvailabilityCount(roomOption, result, childGuests);
+                        renderRoomCardPlan(roomOption, result, numGuests > 0);
 
                         if (result.available) {
                             availableCount++;
@@ -1708,7 +1823,7 @@
                                 updateSummary();
                             }
                         } else {
-                            disableRoomOption(roomOption, result.message || result.error || 'Unavailable');
+                            disableRoomOption(roomOption, result.message || result.error || 'Unavailable', result.reason || '');
 
                             const shouldCacheAsBooked = Number(result.remaining_rooms || 0) <= 0 &&
                                 result.children_required !== true &&
@@ -1741,6 +1856,12 @@
                     });
 
                     availabilityCheckPending = false;
+
+                    // Free-room counts changed: re-grey impossible head-counts and re-explain the plan.
+                    if (selectedRoomId && selectedRoomMaxGuests) {
+                        updateGuestOptions(selectedRoomMaxGuests);
+                    }
+                    renderPartyPlan();
 
                     if (availableCount === 0) {
                         showAvailabilityMessage(
@@ -1812,7 +1933,37 @@
         }
 
         // Disable a room option with visual feedback (composes with filter tabs)
-        function disableRoomOption(roomOption, reason) {
+        // One plain-language line on each room card: what this party would get in this
+        // room type (rooms, split, total) or exactly why it is not offered.
+        function renderRoomCardPlan(roomOption, result, partyChosen) {
+            const info = roomOption.querySelector('.room-info');
+            if (!info) return;
+            let line = info.querySelector('.room-party-plan');
+            if (!line) {
+                line = document.createElement('p');
+                line.className = 'room-party-plan';
+                line.style.cssText = 'margin:6px 0 0;font-size:0.85rem;line-height:1.4;';
+                info.appendChild(line);
+            }
+            if (!partyChosen) {
+                line.textContent = 'Choose your number of guests to see how many rooms you need.';
+                line.style.color = '';
+                return;
+            }
+            const pricing = result && result.split_pricing && result.split_pricing.valid ? result.split_pricing : null;
+            if (result && result.available && pricing) {
+                const counts = pricing.allocation.map(part => part.guests).join(' + ');
+                const rooms = Number(result.rooms_needed || pricing.allocation.length);
+                line.textContent = (rooms === 1 ? '1 room' : `${rooms} rooms (${counts} guests)`) +
+                    ` · ${currencySymbol}${Number(pricing.total_with_vat).toLocaleString()} total for ${plural(Number(result.nights || 0), 'night')}`;
+                line.style.color = '';
+            } else {
+                line.textContent = (result && (result.message || result.error)) || 'Not available for your party and dates.';
+                line.style.color = '#b02a37';
+            }
+        }
+
+        function disableRoomOption(roomOption, reason, code) {
             roomOption.classList.add('room-option-disabled');
             const radio = roomOption.querySelector('input[type="radio"]');
             if (radio) {
@@ -1826,7 +1977,15 @@
                 badge.className = 'unavailable-badge';
                 roomOption.appendChild(badge);
             }
-            badge.innerHTML = '<i class="fas fa-ban"></i> Unavailable';
+            const badgeText = {
+                children_not_allowed: 'Adults only',
+                adults_per_room: 'Needs more adults',
+                no_pricing: 'Not offered for this party',
+                not_enough_rooms: 'Not enough rooms free',
+                child_rooms: 'Not enough child-friendly rooms',
+                invalid_party: 'Check guest numbers'
+            }[code] || 'Unavailable';
+            badge.innerHTML = '<i class="fas fa-ban"></i> ' + badgeText;
             badge.title = reason;
         }
 

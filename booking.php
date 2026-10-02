@@ -22,165 +22,8 @@ require_once 'includes/booking-timeline.php';
 require_once 'includes/idempotency.php';
 require_once 'includes/pricing.php';
 require_once 'includes/public-csrf.php';
+require_once 'includes/guest-allocation.php';
 
-function bookingResolveOccupancyPolicy(array $room): array
-{
-    $policy = resolveOccupancyPolicy($room, null);
-
-    // Only disable occupancy if price is explicitly set to 0 (not NULL)
-    // NULL pricing means use base price as fallback
-    if (array_key_exists('price_double_occupancy', $room)) {
-        if ($room['price_double_occupancy'] === '0' || $room['price_double_occupancy'] === 0) {
-            $policy['double_enabled'] = 0;
-        }
-        // NULL or positive value means enabled
-    }
-    if (array_key_exists('price_triple_occupancy', $room)) {
-        if ($room['price_triple_occupancy'] === '0' || $room['price_triple_occupancy'] === 0) {
-            $policy['triple_enabled'] = 0;
-        }
-        // NULL or positive value means enabled
-    }
-
-    return $policy;
-}
-
-function bookingPickOccupancyByGuestCount(int $guestCount, array $policy): ?string
-{
-    // For exact guest count matches, return the corresponding occupancy type
-    if ($guestCount === 1 && !empty($policy['single_enabled'])) return 'single';
-    if ($guestCount === 2 && !empty($policy['double_enabled'])) return 'double';
-    if ($guestCount === 3 && !empty($policy['triple_enabled'])) return 'triple';
-
-    // For guest counts > 3, return the highest enabled occupancy type
-    // This allows rooms like Front Villa (max_guests=5) to be booked with 4+ guests
-    // The split booking logic will handle distributing guests across multiple bookings
-    if ($guestCount > 3) {
-        if (!empty($policy['triple_enabled'])) return 'triple';
-        if (!empty($policy['double_enabled'])) return 'double';
-        if (!empty($policy['single_enabled'])) return 'single';
-    }
-
-    return null;
-}
-
-function bookingPriceForOccupancy(array $room, string $occupancyType): float
-{
-    if ($occupancyType === 'single') {
-        return !empty($room['price_single_occupancy']) ? (float)$room['price_single_occupancy'] : (float)$room['price_per_night'];
-    }
-
-    if ($occupancyType === 'double') {
-        return ($room['price_double_occupancy'] !== null && (float)$room['price_double_occupancy'] > 0)
-            ? (float)$room['price_double_occupancy']
-            : (float)$room['price_per_night'];
-    }
-
-    if ($occupancyType === 'triple') {
-        return ($room['price_triple_occupancy'] !== null && (float)$room['price_triple_occupancy'] > 0)
-            ? (float)$room['price_triple_occupancy']
-            : (float)$room['price_per_night'];
-    }
-
-    return (float)$room['price_per_night'];
-}
-
-function bookingBuildGuestAllocation(int $totalGuests, int $childGuests, array $room, array $policy): array
-{
-    $maxGuestsPerRoom = max(1, (int)($room['max_guests'] ?? 1));
-    $roomsNeeded = max(1, (int)ceil($totalGuests / $maxGuestsPerRoom));
-    $adultGuests = $totalGuests - $childGuests;
-
-    if ($adultGuests < $roomsNeeded) {
-        return [
-            'valid' => false,
-            'rooms_needed' => $roomsNeeded,
-            'allocation' => [],
-            'message' => "At least one adult is required in each room. This group needs {$roomsNeeded} rooms, so please add more adult guests or reduce the number of children."
-        ];
-    }
-
-    $allocation = [];
-    $remainingGuests = $totalGuests;
-    $remainingAdults = $adultGuests;
-    $remainingChildren = $childGuests;
-
-    for ($index = 0; $index < $roomsNeeded; $index++) {
-        $roomsLeft = $roomsNeeded - $index;
-        $minGuestsForLaterRooms = max(0, $roomsLeft - 1);
-        $guestsThisRoom = min($maxGuestsPerRoom, max(1, $remainingGuests - $minGuestsForLaterRooms));
-        $adultReserveForLaterRooms = max(0, $roomsLeft - 1);
-        $adultsAvailableThisRoom = $remainingAdults - $adultReserveForLaterRooms;
-
-        if ($adultsAvailableThisRoom < 1) {
-            return [
-                'valid' => false,
-                'rooms_needed' => $roomsNeeded,
-                'allocation' => [],
-                'message' => 'At least one adult is required in each room.'
-            ];
-        }
-
-        $childrenThisRoom = min($remainingChildren, max(0, $guestsThisRoom - 1));
-        $adultsThisRoom = $guestsThisRoom - $childrenThisRoom;
-
-        if ($adultsThisRoom > $adultsAvailableThisRoom) {
-            $adultsThisRoom = $adultsAvailableThisRoom;
-            $childrenThisRoom = $guestsThisRoom - $adultsThisRoom;
-        }
-
-        if ($childrenThisRoom > $remainingChildren) {
-            $childrenThisRoom = $remainingChildren;
-            $adultsThisRoom = $guestsThisRoom - $childrenThisRoom;
-        }
-
-        if ($adultsThisRoom < 1 || $childrenThisRoom < 0) {
-            return [
-                'valid' => false,
-                'rooms_needed' => $roomsNeeded,
-                'allocation' => [],
-                'message' => 'Unable to allocate guests while keeping at least one adult in each room.'
-            ];
-        }
-
-        $occupancyType = bookingPickOccupancyByGuestCount($guestsThisRoom, $policy);
-        if ($occupancyType === null) {
-            return [
-                'valid' => false,
-                'rooms_needed' => $roomsNeeded,
-                'allocation' => [],
-                'message' => "No enabled occupancy pricing can fit {$guestsThisRoom} guests in one {$room['name']} room."
-            ];
-        }
-
-        $allocation[] = [
-            'room_number' => $index + 1,
-            'guests' => $guestsThisRoom,
-            'adults' => $adultsThisRoom,
-            'children' => $childrenThisRoom,
-            'occupancy_type' => $occupancyType,
-        ];
-
-        $remainingGuests -= $guestsThisRoom;
-        $remainingAdults -= $adultsThisRoom;
-        $remainingChildren -= $childrenThisRoom;
-    }
-
-    if ($remainingGuests !== 0 || $remainingAdults !== 0 || $remainingChildren !== 0) {
-        return [
-            'valid' => false,
-            'rooms_needed' => $roomsNeeded,
-            'allocation' => [],
-            'message' => 'Unable to allocate the full guest list across the required rooms.'
-        ];
-    }
-
-    return [
-        'valid' => true,
-        'rooms_needed' => $roomsNeeded,
-        'allocation' => $allocation,
-    ];
-}
 
 // Check if booking system is enabled
 requireBookingEnabled();
@@ -367,52 +210,26 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             throw new Exception('Selected room not found or inactive.');
         }
 
-        $roomPolicy = bookingResolveOccupancyPolicy($selected_room);
-        $maxOccupancyPerBooking = !empty($roomPolicy['triple_enabled']) ? 3 : (!empty($roomPolicy['double_enabled']) ? 2 : (!empty($roomPolicy['single_enabled']) ? 1 : 0));
-        if ($maxOccupancyPerBooking < 1) {
+        // One shared rule set (includes/guest-allocation.php): rooms needed, per-room
+        // split, occupancy tier, children policy, 1+ adult per room. The guest page and
+        // check-availability.php run the very same function.
+        $plan = ga_plan($selected_room, (int)$sanitized_data['number_of_guests'], (int)($sanitized_data['child_guests'] ?? 0));
+        $roomPolicy = $plan['policy'];
+        if (empty($roomPolicy['single_enabled']) && empty($roomPolicy['double_enabled']) && empty($roomPolicy['triple_enabled'])) {
             throw new Exception('Selected room type has no enabled occupancy pricing. Please contact support.');
         }
-
-        if (empty($roomPolicy['children_allowed']) && ((int)($sanitized_data['child_guests'] ?? 0) > 0)) {
-            throw new Exception('Children are not allowed for the selected room type.');
+        if (empty($plan['valid'])) {
+            throw new Exception($plan['message'] ?: 'Unable to allocate guests across rooms.');
         }
+        $bookingAllocation = $plan['allocation'];
+        $roomsNeeded = (int)$plan['rooms_needed'];
 
-        // Use enhanced validation with availability check
-        // First, validate against the room's actual max_guests capacity
-        $maxGuestsPerRoom = (int)($selected_room['max_guests'] ?? 1);
-        if ($maxGuestsPerRoom < 1) $maxGuestsPerRoom = 1;
-
-        $allocation_result = bookingBuildGuestAllocation(
-            (int)$sanitized_data['number_of_guests'],
-            (int)($sanitized_data['child_guests'] ?? 0),
-            $selected_room,
-            $roomPolicy
-        );
-        if (empty($allocation_result['valid'])) {
-            throw new Exception($allocation_result['message'] ?? 'Unable to allocate guests across rooms.');
-        }
-        $bookingAllocation = $allocation_result['allocation'];
-        $roomsNeeded = (int)$allocation_result['rooms_needed'];
-
-        // For availability check, cap at occupancy pricing tier (this is for pricing, not capacity)
+        // Availability + capacity are validated per ROOM: the capacity check sees the
+        // largest party sharing one room, and the child check sees how many rooms carry
+        // children, so a party split across several rooms is judged room by room.
         $validation_payload = $sanitized_data;
-
-        // Tell the availability check how many CHILD-FRIENDLY rooms this allocation
-        // actually needs. Without it the check assumes one, and a party split across
-        // several rooms with children in more than one of them passes validation even
-        // when the room type has too few child-eligible rooms free.
-        $validation_payload['child_rooms_needed'] = 0;
-        foreach ($bookingAllocation as $allocatedRoom) {
-            if ((int)($allocatedRoom['children'] ?? 0) > 0) {
-                $validation_payload['child_rooms_needed']++;
-            }
-        }
-
-        if ((int)$validation_payload['number_of_guests'] > $maxOccupancyPerBooking) {
-            $validation_payload['number_of_guests'] = $maxOccupancyPerBooking;
-            $validation_payload['child_guests'] = min((int)$validation_payload['child_guests'], max(0, $maxOccupancyPerBooking - 1));
-            $validation_payload['adult_guests'] = max(1, (int)$validation_payload['number_of_guests'] - (int)$validation_payload['child_guests']);
-        }
+        $validation_payload['child_rooms_needed'] = (int)$plan['child_rooms_needed'];
+        $validation_payload['number_of_guests'] = ga_max_guests_in_one_room($bookingAllocation);
         $validation_result = validateBookingWithAvailability($validation_payload);
 
         if (!$validation_result['valid']) {
@@ -506,7 +323,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
 
         // Determine primary occupancy type from the actual split allocation.
-        $occupancyPolicy = bookingResolveOccupancyPolicy($room);
+        $occupancyPolicy = ga_resolve_policy($room);
         $occupancy_type = $bookingAllocation[0]['occupancy_type'] ?? null;
 
         if ($occupancy_type === null) {
@@ -522,7 +339,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             throw new Exception('Children are not allowed for the selected room type.');
         }
 
-        $room_price = bookingPriceForOccupancy($room, $occupancy_type);
+        $room_price = ga_price_for_occupancy($room, $occupancy_type);
 
         // ── Dynamic pricing: apply any matching rate plan ──────────────
         $dynamicResult    = applyDynamicPricing($pdo, $room_id, $check_in_date, $check_out_date, $number_of_nights, (float)$room_price);
@@ -631,25 +448,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $lockStmt = $pdo->prepare("SELECT id FROM rooms WHERE id = ? FOR UPDATE");
             $lockStmt->execute([$room_id]);
 
-            $childRoomsNeeded = 0;
-            foreach ($bookingAllocation as $allocatedRoom) {
-                if ((int)($allocatedRoom['children'] ?? 0) > 0) {
-                    $childRoomsNeeded++;
-                }
-            }
+            $childRoomsNeeded = ga_child_rooms($bookingAllocation);
 
+            // Re-check under the lock: enough rooms of this type must be free for EVERY
+            // night (inventory minus overlapping bookings), for ALL rooms the party needs.
             $lockedAvailability = checkRoomAvailability($room_id, $check_in_date, $check_out_date, null, $child_guests, $childRoomsNeeded);
-            $remaining = (int)($lockedAvailability['remaining_rooms'] ?? 0);
-            if (empty($lockedAvailability['available'])) {
-                throw new Exception($lockedAvailability['error'] ?? "Sorry, {$room['name']} is not available for {$check_in_date} to {$check_out_date}. Please choose different dates or another room type.");
-            }
-
-            if ($roomsNeeded > $remaining) {
-                if ($remaining === 0) {
-                    throw new Exception("Sorry, {$room['name']} is fully booked for {$check_in_date} to {$check_out_date}. Please choose different dates or another room type.");
-                } else {
-                    throw new Exception("Only {$remaining} room" . ($remaining === 1 ? '' : 's') . " available for {$room['name']} on those dates, but your group requires {$roomsNeeded}. Please adjust your guest count or dates.");
-                }
+            $inventoryError = ga_inventory_error($lockedAvailability, $roomsNeeded, (string)$room['name'], $check_in_date, $check_out_date);
+            if ($inventoryError !== '') {
+                throw new Exception($inventoryError . ' Please adjust your dates, guest count or room type.');
             }
 
             $insert_stmt = $pdo->prepare("
@@ -699,7 +505,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     $roomForThisBooking['price_triple_occupancy'] = $comboRate;
                 }
 
-                $baseRateThisBooking = bookingPriceForOccupancy($roomForThisBooking, $occThisBooking);
+                $baseRateThisBooking = ga_price_for_occupancy($roomForThisBooking, $occThisBooking);
                 $dynamicThisBooking = applyDynamicPricing($pdo, $room_id, $check_in_date, $check_out_date, $number_of_nights, $baseRateThisBooking);
                 $rateThisBooking = (float)$dynamicThisBooking['final_price'];
                 // Packages added to first booking only; subsequent splits get 0
@@ -1004,6 +810,33 @@ if (isset($_GET['room_type']) && !empty($_GET['room_type'])) {
     }
 }
 
+// A rejected submission re-renders this page: restore everything the guest chose
+// (dates, room, guests, children, booking type, add-ons) so they never start over.
+// Values are strictly validated here and only ever emitted through json_encode / casts.
+$posted_room_id = 0;
+$posted_booking_type = '';
+$posted_package_ids = [];
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($error_message)) {
+    foreach (['check_in_date' => 'hero_check_in', 'check_out_date' => 'hero_check_out'] as $postKey => $varName) {
+        $postedDate = trim((string)($_POST[$postKey] ?? ''));
+        $parsedDate = DateTime::createFromFormat('Y-m-d', $postedDate);
+        if ($parsedDate !== false && $parsedDate->format('Y-m-d') === $postedDate) {
+            $$varName = $postedDate;
+        }
+    }
+    $postedGuests = (int)($_POST['number_of_guests'] ?? 0);
+    if ($postedGuests >= 1 && $postedGuests <= 20) {
+        $hero_guests = $postedGuests;
+        $postedChildren = (int)($_POST['child_guests'] ?? 0);
+        $hero_children = ($postedChildren >= 1 && $postedChildren <= 19) ? $postedChildren : '';
+    }
+    $posted_room_id = (int)($_POST['room_id'] ?? 0);
+    $posted_booking_type = (($_POST['booking_type'] ?? '') === 'tentative') ? 'tentative' : 'standard';
+    if (!empty($_POST['package_ids']) && is_array($_POST['package_ids'])) {
+        $posted_package_ids = array_values(array_unique(array_filter(array_map('intval', $_POST['package_ids']))));
+    }
+}
+
 // Fetch available rooms for booking form with all details needed for validation
 $rooms_stmt = $pdo->query("
     SELECT r.id, r.name, r.price_per_night, r.price_single_occupancy, r.price_double_occupancy,
@@ -1211,7 +1044,7 @@ try {
                 }
                 ?>
                 <input type="hidden" name="client_uuid" value="<?php echo htmlspecialchars($_SESSION['booking_form_uuid']); ?>">
-                <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($booking_csrf_token, ENT_QUOTES, 'UTF-8'); ?>">
+                <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars(pub_csrf_generate('booking'), ENT_QUOTES, 'UTF-8'); ?>">
 
                 <!-- Booking Details — date-first UX: pick dates before browsing rooms -->
                 <div class="form-section form-section--step" id="bookingDetailsSection">
@@ -1439,12 +1272,14 @@ try {
                     </div>
 
                     <!-- Second Room Suggestion (hidden by default) -->
-                    <div id="secondRoomSuggestion">
+                    <!-- Your rooms: how many rooms of this type the party gets, who sleeps where,
+                         rate per room - or exactly why it is not possible (filled by js/booking.js) -->
+                    <div id="secondRoomSuggestion" role="status" aria-live="polite">
                         <div style="display: flex; align-items: start; gap: 12px;">
-                            <i class="fas fa-info-circle" style="color: var(--gold); font-size: 20px; margin-top: 2px;"></i>
-                            <div>
-                                <h4 style="margin: 0 0 8px 0; color: var(--navy); font-size: 16px;">Group Too Large for One Room</h4>
-                                <p style="margin: 0 0 10px 0; color: #666; font-size: 14px;">Your group exceeds the maximum capacity for this room type. Please book this room for some guests, then make a separate booking for the remaining guests — or <a href="contact-us.php" style="color: var(--gold);">contact us</a> for group booking assistance.</p>
+                            <i id="partyPlanIcon" class="fas fa-bed" style="color: var(--gold); font-size: 20px; margin-top: 2px;"></i>
+                            <div style="flex:1;">
+                                <h4 id="partyPlanTitle" style="margin: 0 0 8px 0; color: var(--navy); font-size: 16px;">Your rooms</h4>
+                                <p id="partyPlanIntro" style="margin: 0 0 10px 0; color: #666; font-size: 14px;"></p>
                                 <div id="secondRoomOptions" style="margin-top: 10px;"></div>
                             </div>
                         </div>
@@ -1693,6 +1528,13 @@ try {
         const heroGuests = <?php echo $hero_guests ? $hero_guests : 'null'; ?>;
         const heroChildren = <?php echo $hero_children ? $hero_children : 'null'; ?>;
         const heroRoomType = <?php echo $hero_room_type ? '"' . $hero_room_type . '"' : 'null'; ?>;
+
+        // Restored after a rejected submission (null/empty on a fresh page load)
+        const postedBooking = <?php echo json_encode([
+            'room_id' => $posted_room_id ?: null,
+            'booking_type' => $posted_booking_type ?: null,
+            'package_ids' => $posted_package_ids,
+        ], JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT); ?>;
 
         // Rooms data for dynamic validation
         const roomsData = <?php echo json_encode($rooms_data); ?>;

@@ -21,6 +21,7 @@ require_once '../includes/booking-functions.php';
 require_once '../includes/idempotency.php';
 require_once '../includes/finance-sequences.php';
 require_once '../includes/pricing.php';
+require_once '../includes/guest-allocation.php';
 
 $message = '';
 $error   = '';
@@ -383,9 +384,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['create_booking'])) {
             ) {
                 throw new Exception('Occupancy "' . $occ . '" not enabled for room "' . $r_data['name'] . '".');
             }
-            if (empty($policy['children_allowed']) && $child_guests > 0) {
-                throw new Exception('Children not allowed for room "' . $r_data['name'] . '".');
-            }
             $room_lines[] = [
                 'room_id' => $rid,
                 'qty' => $qty,
@@ -400,26 +398,37 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['create_booking'])) {
         }
         if (empty($room_lines)) throw new Exception('Please select at least one room type.');
 
-        // ── Capacity guard (authoritative) ───────────────────────────────────
-        // The whole party must physically fit in the allocated rooms. max_guests
-        // here is already the GREATEST of the room-type cap, any individual-room
-        // override, and any joined-room combination — so a large party must be
-        // split across enough rooms before the booking is accepted.
-        $total_capacity = 0;
-        foreach ($room_lines as $line) {
-            $total_capacity += (int)$line['qty'] * max(1, (int)($line['room_data']['max_guests'] ?? 1));
-        }
-        if ($number_of_guests > $total_capacity) {
-            throw new Exception(
-                'The selected rooms hold up to ' . $total_capacity . ' guest(s), but ' . $number_of_guests .
-                ' were entered. Add more rooms (or a larger room type) so everyone is accommodated.'
-            );
-        }
-
+        // ── Seat the party room by room (authoritative; shared rule set) ─────────
+        // includes/guest-allocation.php: every room needs 1+ adult, nobody beyond a
+        // room's own capacity (max_guests is already the GREATEST of the room-type cap,
+        // any individual-room override and any joined-room combination), and children
+        // only sleep in rooms whose policy allows them. One entry per physical room row.
         $total_rooms_booked = array_sum(array_column($room_lines, 'qty'));
-        // Every room row needs at least one adult (adults are spread across rows; children ride on the first).
-        if ($adult_guests < $total_rooms_booked) {
-            throw new Exception('Each room needs at least one adult: ' . $adult_guests . ' adult(s) cannot cover ' . $total_rooms_booked . ' rooms. Add adults or remove rooms.');
+        $party_rows = [];
+        foreach ($room_lines as $li_idx => $pl) {
+            for ($q = 0; $q < (int)$pl['qty']; $q++) {
+                $party_rows[] = [
+                    'capacity' => max(1, (int)($pl['room_data']['max_guests'] ?? 1)),
+                    'children_allowed' => !empty($pl['policy']['children_allowed']),
+                    'name' => (string)$pl['room_data']['name'],
+                    'room_id' => (int)$pl['room_id'],
+                ];
+            }
+        }
+        $party_split = ga_distribute_party($party_rows, $adult_guests, $child_guests);
+        if (empty($party_split['valid'])) {
+            throw new Exception($party_split['message']);
+        }
+        // Per room type: how many rooms will carry children and how many children sleep there
+        $child_rooms_by_room  = [];
+        $child_guests_by_room = [];
+        foreach ($party_rows as $pi => $prow) {
+            $prid = (int)$prow['room_id'];
+            $pc = (int)$party_split['rows'][$pi]['children'];
+            $child_guests_by_room[$prid] = ($child_guests_by_room[$prid] ?? 0) + $pc;
+            if ($pc > 0) {
+                $child_rooms_by_room[$prid] = ($child_rooms_by_room[$prid] ?? 0) + 1;
+            }
         }
         // Individual room selection only valid for single-room bookings
         if ($total_rooms_booked > 1) {
@@ -591,7 +600,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['create_booking'])) {
             $requested_qty_by_room[$rid] = ($requested_qty_by_room[$rid] ?? 0) + (int)$line['qty'];
         }
         foreach ($requested_qty_by_room as $rid => $needed) {
-            $avail = checkRoomAvailability($rid, $check_in_date, $check_out_date, null, $child_guests, $needed);
+            $avail = checkRoomAvailability($rid, $check_in_date, $check_out_date, null, (int)($child_guests_by_room[$rid] ?? 0), (int)($child_rooms_by_room[$rid] ?? 0));
             if (empty($avail['available'])) {
                 throw new Exception($avail['error'] ?? 'Selected room is no longer available for those dates.');
             }
@@ -629,12 +638,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['create_booking'])) {
                 $row_twv       = $row_fin['total_with_vat'];
                 $row_child_sup = $row_fin['child_supplement'];
 
-                // Distribute guests across ALL rows of the booking: adults spread evenly
-                // (remainder to the earliest rows), children on the first row only
-                $adults_base   = intdiv($adult_guests, $total_rooms_booked);
-                $adults_extra  = $adult_guests - $adults_base * $total_rooms_booked;
-                $row_adults    = $adults_base + ($booking_number < $adults_extra ? 1 : 0);
-                $row_children  = $is_first_row ? $child_guests : 0;
+                // Guests per row come from the validated room-by-room seating above
+                // (1+ adult per room, capacity and children policy respected)
+                $row_adults    = (int)$party_split['rows'][$booking_number]['adults'];
+                $row_children  = (int)$party_split['rows'][$booking_number]['children'];
                 $row_guests    = $row_adults + $row_children;
 
                 $is_primary = ($booking_number === 0);
@@ -1985,7 +1992,7 @@ try {
                             <label>Children (under 12)</label>
                             <input type="number" name="child_guests" id="childGuests" min="0" max="19"
                                 value="<?php echo htmlspecialchars($_POST['child_guests'] ?? '0'); ?>"
-                                onchange="calculateTotal()">
+                                onchange="childrenChanged()">
                             <small>At least 1 adult required per booking.</small>
                         </div>
                     </div>
@@ -2718,12 +2725,73 @@ try {
             }
         }
 
+        // ── Seat the party room by room: exact mirror of ga_distribute_party() in
+        // includes/guest-allocation.php (the server re-runs it on submit and wins) ──────
+        // 1+ adult in every room, nobody beyond a room's capacity, children only in rooms
+        // that allow them (seated first-room-first), remaining adults fill up.
+        function adminSeatParty() {
+            const guests = Math.max(1, parseInt(el('numGuests')?.value || '1', 10));
+            const children = Math.max(0, parseInt(el('childGuests')?.value || '0', 10) || 0);
+            const adults = guests - children;
+            const rows = getVisibleLines().map(ln => {
+                const rid = parseInt(ln.querySelector('.line-room-select')?.value || '0', 10);
+                const rm = roomsData.find(r => r.id === rid);
+                return {
+                    name: rm ? rm.name : 'room',
+                    capacity: rm ? roomPhysicalCap(rm) : 1,
+                    childrenAllowed: rm ? !!rm.children_allowed : true,
+                    picked: !!rm
+                };
+            });
+            const fail = message => ({ valid: false, message, rows: [] });
+            if (!rows.length) return fail('Add at least one room.');
+            if (adults < 1) return fail('At least 1 adult is required.');
+            if (adults < rows.length) {
+                return fail(`Each room needs at least one adult: ${adults} adult(s) cannot cover ${rows.length} room(s). Add adults or remove rooms.`);
+            }
+            const seated = rows.map(r => ({ adults: 1, children: 0, left: r.capacity - 1 }));
+            let childrenLeft = children;
+            rows.forEach((r, i) => {
+                if (childrenLeft <= 0 || !r.childrenAllowed) return;
+                const take = Math.min(childrenLeft, seated[i].left);
+                seated[i].children += take;
+                seated[i].left -= take;
+                childrenLeft -= take;
+            });
+            if (childrenLeft > 0) {
+                if (!rows.some(r => r.childrenAllowed)) {
+                    return fail(`Children are not allowed in ${Array.from(new Set(rows.map(r => r.name))).join(', ')}. Remove the children or choose a family-friendly room type.`);
+                }
+                return fail(`${childrenLeft} child(ren) cannot be seated: the child-friendly rooms selected are full. Add a child-friendly room or reduce the party.`);
+            }
+            let adultsLeft = adults - rows.length;
+            rows.forEach((r, i) => {
+                if (adultsLeft <= 0) return;
+                const take = Math.min(adultsLeft, seated[i].left);
+                seated[i].adults += take;
+                seated[i].left -= take;
+                adultsLeft -= take;
+            });
+            if (adultsLeft > 0) {
+                const seats = rows.reduce((sum, r) => sum + r.capacity, 0);
+                return fail(`The selected rooms hold up to ${seats} guest(s) in total (a room never takes more than its own capacity), but ${guests} were entered. Add more rooms (or a larger room type) so everyone is accommodated.`);
+            }
+            return {
+                valid: true,
+                message: '',
+                rows: seated.map(x => ({ adults: x.adults, children: x.children, guests: x.adults + x.children }))
+            };
+        }
+
         // ── Occupancy auto-derive per line ────────────────────────────────────────
+        // Each room's tier follows the guests seated in THAT room (same as the website:
+        // 3 guests in two 2-guest rooms = Double + Single, not Double + Double).
         function autoOccupancy() {
+            const seating = adminSeatParty();
             const guests = parseInt(el('numGuests')?.value || '1', 10);
             const totalRooms = getTotalRooms() || 1;
-            const per = Math.ceil(guests / totalRooms);
-            getVisibleLines().forEach(ln => {
+            getVisibleLines().forEach((ln, i) => {
+                const per = seating.valid ? seating.rows[i].guests : Math.ceil(guests / totalRooms);
                 const occSel = ln.querySelector('.line-occ-select');
                 const opts = Array.from(occSel.options).filter(o => !o.disabled);
                 const has = v => opts.some(o => o.value === v);
@@ -2732,6 +2800,12 @@ try {
                     has('triple') ? 'triple' :
                     (opts[0]?.value ?? occSel.value);
             });
+        }
+
+        function childrenChanged() {
+            autoOccupancy();
+            calculateTotal();
+            updateGroupSummary();
         }
 
         // ── Auto-split a large party across rooms ─────────────────────────────────
@@ -2807,24 +2881,24 @@ try {
             const guests = parseInt(el('numGuests')?.value || '1', 10);
             const total = getTotalRooms();
 
-            // Capacity hint next to the rooms counter — tells the manager at a glance
-            // whether the current allocation seats the whole party.
+            // Seating hint next to the rooms counter: who sleeps where, or exactly why the
+            // current rooms cannot take the party (same rules the server enforces).
             const hint = el('roomsCounterHint');
             if (hint) {
-                let seats = 0;
-                getVisibleLines().forEach(ln => {
-                    const rid = parseInt(ln.querySelector('.line-room-select')?.value || '0', 10);
-                    const rm = roomsData.find(r => r.id === rid);
-                    if (rm) seats += roomPhysicalCap(rm);
-                });
-                if (seats === 0) {
+                const anyPicked = getVisibleLines().some(ln => parseInt(ln.querySelector('.line-room-select')?.value || '0', 10) > 0);
+                if (!anyPicked) {
                     hint.textContent = '';
-                } else if (guests > seats) {
-                    hint.textContent = `Seats only ${seats} of ${guests} guests — add another room or pick a larger type.`;
-                    hint.style.color = '#c0392b';
                 } else {
-                    hint.textContent = `Seats ${seats} guest${seats !== 1 ? 's' : ''} · party of ${guests} fits.`;
-                    hint.style.color = '#2a7d4f';
+                    const seating = adminSeatParty();
+                    if (!seating.valid) {
+                        hint.textContent = seating.message;
+                        hint.style.color = '#c0392b';
+                    } else {
+                        hint.textContent = 'Seating: ' + seating.rows.map((r, i) =>
+                            `Room ${i + 1} - ${r.adults} adult${r.adults === 1 ? '' : 's'}${r.children > 0 ? ' + ' + r.children + (r.children === 1 ? ' child' : ' children') : ''}`
+                        ).join('; ') + ' - the party fits.';
+                        hint.style.color = '#2a7d4f';
+                    }
                 }
             }
 

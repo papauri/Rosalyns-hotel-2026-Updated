@@ -47,6 +47,7 @@ if (!$auth->checkPermission($client, 'bookings.create')) {
 
 require_once __DIR__ . '/../includes/booking-functions.php';
 require_once __DIR__ . '/../includes/pricing.php';
+require_once __DIR__ . '/../includes/guest-allocation.php';
 require_once __DIR__ . '/../includes/whatsapp-functions.php';
 require_once __DIR__ . '/../includes/idempotency.php';
 require_once __DIR__ . '/../includes/booking-timeline.php';
@@ -113,13 +114,15 @@ try {
         'guest_address' => isset($input['guest_address']) ? trim($input['guest_address']) : '',
         'number_of_guests' => (int)$input['number_of_guests'],
         'child_guests' => isset($input['child_guests']) ? (int)$input['child_guests'] : 0,
-        'occupancy_type' => isset($input['occupancy_type']) ? trim((string)$input['occupancy_type']) : 'double',
+        // Optional: the tier is derived from the guests in the room (same rule as the
+        // website). If a client sends one it must match that derived tier.
+        'occupancy_type' => isset($input['occupancy_type']) ? trim((string)$input['occupancy_type']) : '',
         'check_in_date' => $input['check_in_date'],
         'check_out_date' => $input['check_out_date'],
         'special_requests' => isset($input['special_requests']) ? trim($input['special_requests']) : ''
     ];
 
-    if (!in_array($bookingData['occupancy_type'], ['single', 'double', 'triple'], true)) {
+    if ($bookingData['occupancy_type'] !== '' && !in_array($bookingData['occupancy_type'], ['single', 'double', 'triple'], true)) {
         ApiResponse::validationError(['occupancy_type' => 'Invalid occupancy type. Must be single, double, or triple']);
     }
 
@@ -189,24 +192,26 @@ try {
         ApiResponse::error('Room not found or not available', 404);
     }
     
-    // Check capacity
-    if ($bookingData['number_of_guests'] > $room['max_guests']) {
-        ApiResponse::error("This room can accommodate maximum {$room['max_guests']} guests", 400);
+    // One shared rule set (includes/guest-allocation.php), identical to booking.php and
+    // check-availability.php: capacity, children policy, 1+ adult per room, occupancy tier.
+    // This endpoint creates ONE room booking, so the party must fit a single room of the
+    // type; a larger party must be submitted as one request per room (each with its own
+    // guests), exactly the split the website makes automatically.
+    $plan = ga_plan($room, $bookingData['number_of_guests'], $bookingData['child_guests']);
+    $occupancyPolicy = $plan['policy'];
+    if (empty($plan['valid'])) {
+        ApiResponse::validationError(['number_of_guests' => $plan['message'] ?: 'This guest mix cannot be booked in the selected room type']);
+    }
+    if ((int)$plan['rooms_needed'] > 1) {
+        ApiResponse::validationError(['number_of_guests' => "This room type holds {$room['max_guests']} guests per room, so {$bookingData['number_of_guests']} guests need {$plan['rooms_needed']} rooms (" . $plan['summary'] . "). Submit one booking per room with each room's own guests."]);
+    }
+    $derivedOccupancy = $plan['allocation'][0]['occupancy_type'];
+    if ($bookingData['occupancy_type'] === '') {
+        $bookingData['occupancy_type'] = $derivedOccupancy;
+    } elseif ($bookingData['occupancy_type'] !== $derivedOccupancy) {
+        ApiResponse::validationError(['occupancy_type' => "{$bookingData['number_of_guests']} guest(s) in one room are priced as '{$derivedOccupancy}', not '{$bookingData['occupancy_type']}'. Omit occupancy_type or send '{$derivedOccupancy}'."]);
     }
 
-    $occupancyPolicy = resolveOccupancyPolicy($room, null);
-    if (
-        ($bookingData['occupancy_type'] === 'single' && empty($occupancyPolicy['single_enabled'])) ||
-        ($bookingData['occupancy_type'] === 'double' && empty($occupancyPolicy['double_enabled'])) ||
-        ($bookingData['occupancy_type'] === 'triple' && empty($occupancyPolicy['triple_enabled']))
-    ) {
-        ApiResponse::validationError(['occupancy_type' => 'Selected occupancy type is disabled for this room']);
-    }
-
-    if (empty($occupancyPolicy['children_allowed']) && $bookingData['child_guests'] > 0) {
-        ApiResponse::validationError(['child_guests' => 'Children are not allowed for this room']);
-    }
-    
     // Check availability — preliminary (best-effort) check before pricing.
     // The authoritative check happens INSIDE the transaction below under a row lock
     // so concurrent submissions cannot both pass and overbook the same room.
@@ -296,6 +301,11 @@ try {
         if (empty($lockedAvailability['available'])) {
             $pdo->rollBack();
             ApiResponse::error($lockedAvailability['error'] ?? 'This room is no longer available for the selected dates. Please choose different dates.', 409);
+        }
+        $lockedInventoryError = ga_inventory_error($lockedAvailability, 1, (string)$room['name'], $bookingData['check_in_date'], $bookingData['check_out_date']);
+        if ($lockedInventoryError !== '') {
+            $pdo->rollBack();
+            ApiResponse::error($lockedInventoryError, 409);
         }
 
         // Insert booking

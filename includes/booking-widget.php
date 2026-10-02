@@ -27,17 +27,20 @@ if (!isBookingEnabled()) {
 }
 
 // Fetch available room types from database
-$widget_rooms_stmt = $pdo->query("SELECT id, name, max_guests, price_per_night, rooms_available, children_allowed, child_price_multiplier FROM rooms WHERE is_active = 1 ORDER BY display_order ASC");
+$widget_rooms_stmt = $pdo->query("SELECT id, name, max_guests, total_rooms, price_per_night, rooms_available, children_allowed, child_price_multiplier FROM rooms WHERE is_active = 1 ORDER BY display_order ASC");
 $widget_rooms = $widget_rooms_stmt->fetchAll(PDO::FETCH_ASSOC);
 
 // Get child price multiplier setting
 $widget_child_multiplier = (float)getSetting('booking_child_price_multiplier', getSetting('child_guest_price_multiplier', 50));
 
-// Calculate max guests across all rooms
+// Largest party any single room type can seat: capacity per room x rooms of that type.
+// Larger parties are split across several rooms of the same type automatically
+// (rules in includes/guest-allocation.php; booking.php enforces them on submit).
 $widget_max_guests = 1;
 foreach ($widget_rooms as $room) {
-    if ((int)$room['max_guests'] > $widget_max_guests) {
-        $widget_max_guests = (int)$room['max_guests'];
+    $type_seats = max(1, (int)$room['max_guests']) * max(1, (int)($room['total_rooms'] ?? 1));
+    if ($type_seats > $widget_max_guests) {
+        $widget_max_guests = min(20, $type_seats);
     }
 }
 ?>
@@ -77,7 +80,7 @@ foreach ($widget_rooms as $room) {
                 <label class="editorial-booking-label" for="children">Children (under 12)</label>
                 <select class="editorial-booking-input" id="children" name="children">
                     <option value="0" selected>0 Children</option>
-                    <?php for ($i = 1; $i <= min($widget_max_guests - 1, 4); $i++): ?>
+                    <?php for ($i = 1; $i <= min($widget_max_guests - 1, 6); $i++): ?>
                         <option value="<?php echo $i; ?>"><?php echo $i; ?> Child<?php echo $i > 1 ? 'ren' : ''; ?></option>
                     <?php endfor; ?>
                 </select>
@@ -121,6 +124,7 @@ foreach ($widget_rooms as $room) {
             'id' => (int)$r['id'],
             'name' => $r['name'],
             'max_guests' => (int)$r['max_guests'],
+            'total_rooms' => max(1, (int)($r['total_rooms'] ?? 1)),
             'price_per_night' => (float)$r['price_per_night'],
             'children_allowed' => (int)$r['children_allowed'],
             'child_multiplier' => (float)($r['child_price_multiplier'] ?? $widget_child_multiplier),
@@ -178,7 +182,7 @@ foreach ($widget_rooms as $room) {
         fetch(url)
             .then(response => response.json())
             .then(data => {
-                const statusKey = `${roomId}_${checkIn}_${checkOut}_${children}`;
+                const statusKey = `${roomId}_${checkIn}_${checkOut}_${children}_${Math.max(1, parseInt(guestsSelect?.value || '1', 10))}`;
                 availabilityStatus[statusKey] = data;
                 
                 // Update the room option in the dropdown
@@ -244,7 +248,8 @@ foreach ($widget_rooms as $room) {
                 ? Math.max(0, Number(availabilityData.child_eligible_remaining_rooms ?? availabilityData.remaining_rooms ?? 0))
                 : Math.max(0, Number(availabilityData.remaining_rooms || 0));
             const label = children > 0 ? 'child-ready room' : 'room';
-            showHint(`<i class="fas fa-check-circle" style="color: #28a745;"></i> <strong>${roomName}</strong> is available for ${availabilityData.nights || 'your selected'} nights. ${remaining} ${label}${remaining === 1 ? '' : 's'} left.`, 'success');
+            const planText = availabilityData.plan_summary ? ` ${availabilityData.plan_summary}.` : '';
+            showHint(`<i class="fas fa-check-circle" style="color: #28a745;"></i> <strong>${roomName}</strong> is available for ${availabilityData.nights || 'your selected'} nights.${planText} ${remaining} ${label}${remaining === 1 ? '' : 's'} left.`, 'success');
             
             // Update submit button
             if (submitBtn) {
@@ -289,14 +294,37 @@ foreach ($widget_rooms as $room) {
         availabilityHint.className = `widget-availability-hint widget-availability-hint--${type || 'info'}`;
     }
     
+    /**
+     * Rooms-needed rule, identical to includes/guest-allocation.php: rooms = ceil(guests /
+     * capacity), greedy fill, 1+ adult per room, children only where allowed. The server
+     * (check-availability.php, then booking.php) re-runs the full rule set and wins.
+     */
+    function widgetPlan(room, guests, children) {
+        const maxPer = Math.max(1, Number(room.max_guests || 1));
+        const rooms = Math.max(1, Math.ceil(guests / maxPer));
+        const adults = guests - children;
+        if (adults < 1) return { ok: false, rooms, message: 'At least 1 adult is required for every booking.' };
+        if (children > 0 && room.children_allowed !== 1) return { ok: false, rooms, message: `${room.name} is adults only, so children cannot stay in this room type.` };
+        if (adults < rooms) return { ok: false, rooms, message: `${guests} guests need ${rooms} ${room.name} rooms (up to ${maxPer} guests each) and every room needs at least 1 adult.` };
+        if (rooms > Number(room.total_rooms || 1)) return { ok: false, rooms, message: `${guests} guests need ${rooms} ${room.name} rooms, but the hotel only has ${room.total_rooms}.` };
+        const counts = [];
+        let remaining = guests;
+        for (let i = 0; i < rooms; i++) {
+            const g = Math.min(maxPer, Math.max(1, remaining - (rooms - i - 1)));
+            counts.push(g);
+            remaining -= g;
+        }
+        const summary = rooms === 1 ? `1 × ${room.name}` : `${rooms} × ${room.name} (${counts.join(' + ')} guests)`;
+        return { ok: true, rooms, counts, summary };
+    }
+
     function findCompatibleRooms(guests, children) {
         const checkIn = checkInInput?.value;
         const checkOut = checkOutInput?.value;
         return roomData.filter(room => {
-            if (room.max_guests < guests) return false;
-            if (children > 0 && room.children_allowed !== 1) return false;
+            if (!widgetPlan(room, guests, children).ok) return false;
             if (checkIn && checkOut) {
-                const statusKey = `${room.id}_${checkIn}_${checkOut}_${children}`;
+                const statusKey = `${room.id}_${checkIn}_${checkOut}_${children}_${guests}`;
                 const status = availabilityStatus[statusKey];
                 if (status && !status.available) return false;
             }
@@ -316,29 +344,21 @@ foreach ($widget_rooms as $room) {
         const selectedRoomOption = roomTypeSelect.options[roomTypeSelect.selectedIndex];
         const selectedRoomName = selectedRoomOption ? selectedRoomOption.value : '';
         
-        // If no specific room selected, just check if any room can accommodate
+        // If no specific room selected, say which room types can hold the party
         if (!selectedRoomName) {
             const compatibleRooms = findCompatibleRooms(totalGuests, children);
-            if (compatibleRooms.length === 0 && (children > 0 || totalGuests > 3)) {
-                const maxCapacity = Math.max(...roomData.map(r => r.max_guests));
-                const roomsWithChildren = roomData.filter(r => r.children_allowed === 1);
-                
-                if (children > 0 && roomsWithChildren.length === 0) {
-                    showHint('<i class="fas fa-exclamation-circle"></i> No rooms currently allow children. Please contact us for family arrangements.', 'warning');
-                } else if (children > 0 && roomsWithChildren.length > 0) {
-                    const roomNames = roomsWithChildren.map(r => r.name).join(', ');
-                    showHint(`<i class="fas fa-info-circle"></i> For bookings with children, consider: <strong>${roomNames}</strong>`, 'info');
-                } else if (totalGuests > maxCapacity) {
-                    showHint(`<i class="fas fa-info-circle"></i> Maximum room capacity is ${maxCapacity} guests. For larger groups, please book multiple rooms.`, 'info');
-                } else {
-                    hideHint();
-                }
+            if (compatibleRooms.length === 0) {
+                const reasons = roomData.map(r => `<strong>${r.name}</strong>: ${widgetPlan(r, totalGuests, children).message || 'not available for your dates'}`);
+                showHint(`<i class="fas fa-exclamation-circle"></i> No room type can take this party.<br><small>${reasons.join('<br>')}</small>`, 'warning');
+            } else if (totalGuests > 1 || children > 0) {
+                const lines = compatibleRooms.map(r => widgetPlan(r, totalGuests, children).summary);
+                showHint(`<i class="fas fa-info-circle"></i> For ${totalGuests} guest${totalGuests === 1 ? '' : 's'} you would get: ${lines.join(' &middot; ')}`, 'info');
             } else {
                 hideHint();
             }
             return;
         }
-        
+
         // Find the selected room's data
         const selectedRoom = roomData.find(r => r.name === selectedRoomName);
         if (!selectedRoom) {
@@ -346,43 +366,24 @@ foreach ($widget_rooms as $room) {
             return;
         }
         
-        const issues = [];
-        
-        // Check capacity
-        if (totalGuests > selectedRoom.max_guests) {
-            issues.push(`only accommodates ${selectedRoom.max_guests} guest${selectedRoom.max_guests > 1 ? 's' : ''}`);
-        }
-        
-        // Check children policy
-        if (children > 0 && selectedRoom.children_allowed === 0) {
-            issues.push('does not allow children');
-        }
-        
-        if (issues.length > 0) {
-            // Find compatible rooms
+        const plan = widgetPlan(selectedRoom, totalGuests, children);
+
+        if (!plan.ok) {
             const compatibleRooms = findCompatibleRooms(totalGuests, children);
-            
-            let hintHtml = `<i class="fas fa-exclamation-circle"></i> <strong>${selectedRoom.name}</strong> ${issues.join(' and ')}.`;
-            
+            let hintHtml = `<i class="fas fa-exclamation-circle"></i> ${plan.message}`;
             if (compatibleRooms.length > 0) {
-                const roomSuggestions = compatibleRooms.map(r => {
-                    const features = [];
-                    if (r.max_guests >= totalGuests) features.push(`up to ${r.max_guests} guests`);
-                    if (children > 0 && r.children_allowed === 1) features.push('children welcome');
-                    return `<strong>${r.name}</strong> (${features.join(', ')})`;
-                }).join(', ');
-                
-                hintHtml += `<br><i class="fas fa-lightbulb" style="margin-top: 6px; display: inline-block;"></i> Consider: ${roomSuggestions}`;
+                hintHtml += `<br><i class="fas fa-lightbulb" style="margin-top: 6px; display: inline-block;"></i> Consider: ${compatibleRooms.map(r => `<strong>${widgetPlan(r, totalGuests, children).summary}</strong>`).join(', ')}`;
             } else {
-                hintHtml += '<br><small>No single room matches your requirements. Consider booking multiple rooms or contact us for assistance.</small>';
+                hintHtml += '<br><small>No room type matches this party. Try fewer guests or contact us for assistance.</small>';
             }
-            
             showHint(hintHtml, 'warning');
+        } else if (plan.rooms > 1) {
+            showHint(`<i class="fas fa-info-circle"></i> ${totalGuests} guests need ${plan.summary} - booked together as one group.`, 'info');
         } else {
             hideHint();
         }
     }
-    
+
     function updateChildrenOptions() {
         const totalGuests = parseInt(guestsSelect.value) || 1;
         const selectedRoomOption = roomTypeSelect.options[roomTypeSelect.selectedIndex];
@@ -404,7 +405,7 @@ foreach ($widget_rooms as $room) {
         } else {
             childrenSelect.disabled = false;
             
-            for (let i = 1; i <= Math.min(maxChildren, 4); i++) {
+            for (let i = 1; i <= Math.min(maxChildren, 6); i++) {
                 const option = document.createElement('option');
                 option.value = i;
                 option.textContent = i + (i === 1 ? ' Child' : ' Children');
@@ -427,22 +428,31 @@ foreach ($widget_rooms as $room) {
         const selectedRoomOption = roomTypeSelect.options[roomTypeSelect.selectedIndex];
         
         if (selectedRoomOption && selectedRoomOption.value !== '') {
-            const maxGuests = parseInt(selectedRoomOption.dataset.maxGuests) || 3;
+            const selectedRoom = roomData.find(r => r.name === selectedRoomOption.value);
             const currentGuests = parseInt(guestsSelect.value) || 1;
-            
-            // Rebuild guests options based on room capacity
+
+            // Keep every head-count the hotel can seat; label how many rooms of this type it takes
             guestsSelect.innerHTML = '';
-            for (let i = 1; i <= maxGuests; i++) {
+            const maxOptions = <?php echo (int)$widget_max_guests; ?>;
+            for (let i = 1; i <= maxOptions; i++) {
                 const option = document.createElement('option');
                 option.value = i;
-                option.textContent = i + (i === 1 ? ' Guest' : ' Guests');
-                if (i === currentGuests || (currentGuests > maxGuests && i === maxGuests)) {
+                const plan = selectedRoom ? widgetPlan(selectedRoom, i, 0) : null;
+                let label = i + (i === 1 ? ' Guest' : ' Guests');
+                if (plan && plan.ok && plan.rooms > 1) {
+                    label += ` → ${plan.rooms} rooms`;
+                } else if (plan && !plan.ok) {
+                    option.disabled = true;
+                    label += ' - not enough rooms of this type';
+                }
+                option.textContent = label;
+                if (i === currentGuests) {
                     option.selected = true;
                 }
                 guestsSelect.appendChild(option);
             }
         }
-        
+
         updateChildrenOptions();
     }
     
@@ -471,7 +481,11 @@ foreach ($widget_rooms as $room) {
     }
     
     if (guestsSelect) {
-        guestsSelect.addEventListener('change', updateChildrenOptions);
+        guestsSelect.addEventListener('change', function() {
+            updateChildrenOptions();
+            // Party size decides how many rooms are needed, so re-check availability
+            checkAllRoomsAvailability();
+        });
     }
     
     if (childrenSelect) {
@@ -558,21 +572,15 @@ foreach ($widget_rooms as $room) {
             if (selectedRoomName) {
                 const selectedRoom = roomData.find(r => r.name === selectedRoomName);
                 if (selectedRoom) {
-                    // Check capacity
-                    if (guests > selectedRoom.max_guests) {
+                    // Rooms needed / children / adults-per-room (same rules as booking.php)
+                    const plan = widgetPlan(selectedRoom, guests, children);
+                    if (!plan.ok) {
                         e.preventDefault();
-                        showHint(`<i class="fas fa-exclamation-circle"></i> <strong>${selectedRoom.name}</strong> only accommodates ${selectedRoom.max_guests} guests. Please select a different room or reduce guest count.`, 'warning');
-                        return false;
-                    }
-                    
-                    // Check children policy
-                    if (children > 0 && selectedRoom.children_allowed === 0) {
-                        e.preventDefault();
-                        showHint(`<i class="fas fa-exclamation-circle"></i> <strong>${selectedRoom.name}</strong> does not allow children. Please select a different room or remove children from your booking.`, 'warning');
+                        showHint(`<i class="fas fa-exclamation-circle"></i> ${plan.message} Please select a different room or change your party.`, 'warning');
                         return false;
                     }
 
-                    const statusKey = `${selectedRoom.id}_${checkIn}_${checkOut}_${children}`;
+                    const statusKey = `${selectedRoom.id}_${checkIn}_${checkOut}_${children}_${guests}`;
                     const roomStatus = availabilityStatus[statusKey];
                     if (roomStatus && !roomStatus.available) {
                         e.preventDefault();
