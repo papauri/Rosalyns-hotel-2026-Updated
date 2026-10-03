@@ -162,6 +162,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $validation_errors['number_of_attendees'] = $attendees_validation['error'];
         } else {
             $sanitized_data['number_of_attendees'] = $attendees_validation['value'];
+            // The chosen room has a fixed capacity: refuse a party that cannot fit (staff can still override in admin).
+            if (isset($room_validation['room']['capacity']) && (int)$room_validation['room']['capacity'] > 0
+                && (int)$attendees_validation['value'] > (int)$room_validation['room']['capacity']) {
+                $validation_errors['number_of_attendees'] = 'This room holds up to ' . (int)$room_validation['room']['capacity'] . ' people. Please choose a larger room or reduce the number of attendees.';
+            }
         }
 
         // Validate event_type (optional)

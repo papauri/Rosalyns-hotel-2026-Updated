@@ -403,6 +403,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['enquiry_action'])) {
             } else {
                 $message = 'Conference enquiry confirmed successfully! (Email not sent: ' . $email_result['message'] . ')';
             }
+            // Capacity warning only - staff may deliberately over-seat a room.
+            $capChk = $pdo->prepare('SELECT capacity FROM conference_rooms WHERE id = ?');
+            $capChk->execute([(int)($enquiry['conference_room_id'] ?? 0)]);
+            $roomCap = (int)$capChk->fetchColumn();
+            if ($roomCap > 0 && (int)($enquiry['number_of_attendees'] ?? 0) > $roomCap) {
+                $message .= ' WARNING: ' . (int)$enquiry['number_of_attendees'] . ' attendees exceed this room\'s capacity of ' . $roomCap . ' - confirm the layout with the client.';
+            }
 
             // Admin CC notification for conference confirmation
             try {

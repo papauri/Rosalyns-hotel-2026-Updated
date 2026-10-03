@@ -119,6 +119,27 @@ if (!function_exists('rh_event_seat_statuses')) {
         }
     }
 
+    /** "Booking received - awaiting confirmation" email for a pending RSVP (staff confirm later). */
+    function sendEventReceivedEmail(array $inquiry): array
+    {
+        global $email_site_name;
+        try {
+            $html = rh_event_waitlist_email_html(
+                $inquiry,
+                'Booking Received',
+                'Thank you for booking with <strong>' . htmlspecialchars((string)$email_site_name) . '</strong>. We have received your event booking request.',
+                'Booking Status: Awaiting Confirmation',
+                'Your place is being held. Our team will confirm your booking shortly and email you again once it is confirmed.',
+                'wait'
+            );
+            return sendEmail((string)$inquiry['email'], (string)$inquiry['name'],
+                'Event Booking Received - ' . $email_site_name . ' [' . $inquiry['reference_number'] . ']', $html);
+        } catch (Throwable $e) {
+            error_log('sendEventReceivedEmail: ' . $e->getMessage());
+            return ['success' => false, 'message' => $e->getMessage()];
+        }
+    }
+
     /** "A place is available" email when staff promote a waitlisted RSVP. */
     function sendEventWaitlistPromotedEmail(array $inquiry): array
     {

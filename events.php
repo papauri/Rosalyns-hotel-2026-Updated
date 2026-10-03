@@ -128,9 +128,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['event_booking_form'])
                     'event_date' => $eventRow['event_date'] ?? null,
                 ];
 
+                // Staff confirm later, so a pending RSVP gets 'received - awaiting confirmation', not 'confirmed'.
                 $email_result = $rsvpStatus === 'waitlisted'
                     ? sendEventWaitlistedEmail($email_data)
-                    : sendEventBookingConfirmedEmail($email_data);
+                    : sendEventReceivedEmail($email_data);
                 if (!$email_result['success']) {
                     error_log('Failed to send event booking confirmation email: ' . $email_result['message']);
                 }

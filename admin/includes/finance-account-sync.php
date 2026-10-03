@@ -94,7 +94,7 @@ if (!function_exists('syncGymInquiryPaymentSnapshot')) {
      */
     function syncGymInquiryPaymentSnapshot(PDO $pdo, int $inquiryId): ?array
     {
-        $stmt = $pdo->prepare("SELECT id, status, total_amount, total_with_vat, deposit_required FROM gym_inquiries WHERE id = ? LIMIT 1");
+        $stmt = $pdo->prepare("SELECT id, status, total_amount, total_with_vat, deposit_required, deposit_amount FROM gym_inquiries WHERE id = ? LIMIT 1");
         $stmt->execute([$inquiryId]);
         $inquiry = $stmt->fetch(PDO::FETCH_ASSOC);
         if (!$inquiry) {
@@ -104,8 +104,11 @@ if (!function_exists('syncGymInquiryPaymentSnapshot')) {
         $grossTotal = rh_account_gross_total($inquiry);
         $amountPaid = rh_sum_account_paid($pdo, 'gym', $inquiryId);
         $amountDue  = rh_account_amount_due($inquiry, $grossTotal, $amountPaid);
-        $depositRequired = (float)($inquiry['deposit_required'] ?? 0);
+        // deposit_required / deposit_paid columns are 0/1 FLAGS; the money rule compares the net paid
+        // (refunds netted) against deposit_amount. Snapshot values are money; the stored flag is derived.
+        $depositRequired = (!empty($inquiry['deposit_required']) && (float)($inquiry['deposit_amount'] ?? 0) > 0) ? round((float)$inquiry['deposit_amount'], 2) : 0.0;
         $depositPaid = min($amountPaid, $depositRequired);
+        $depositFlag = ($depositRequired > 0 && $depositPaid + (defined('BALANCE_TOLERANCE') ? BALANCE_TOLERANCE : 0.01) >= $depositRequired) ? 1 : 0;
         $lastPaymentDate = rh_last_account_payment_date($pdo, 'gym', $inquiryId);
 
         $upd = $pdo->prepare(
@@ -113,7 +116,7 @@ if (!function_exists('syncGymInquiryPaymentSnapshot')) {
                 SET amount_paid = ?, amount_due = ?, deposit_paid = ?, last_payment_date = ?, updated_at = NOW()
               WHERE id = ?"
         );
-        $upd->execute([$amountPaid, $amountDue, $depositPaid, $lastPaymentDate, $inquiryId]);
+        $upd->execute([$amountPaid, $amountDue, $depositFlag, $lastPaymentDate, $inquiryId]);
 
         return [
             'total_amount'     => (float)($inquiry['total_amount'] ?? 0),
@@ -133,7 +136,7 @@ if (!function_exists('syncEventInquiryPaymentSnapshot')) {
      */
     function syncEventInquiryPaymentSnapshot(PDO $pdo, int $inquiryId): ?array
     {
-        $stmt = $pdo->prepare("SELECT id, status, total_amount, total_with_vat, deposit_required FROM event_inquiries WHERE id = ? LIMIT 1");
+        $stmt = $pdo->prepare("SELECT id, status, total_amount, total_with_vat, deposit_required, deposit_amount FROM event_inquiries WHERE id = ? LIMIT 1");
         $stmt->execute([$inquiryId]);
         $inquiry = $stmt->fetch(PDO::FETCH_ASSOC);
         if (!$inquiry) {
@@ -143,8 +146,11 @@ if (!function_exists('syncEventInquiryPaymentSnapshot')) {
         $grossTotal = rh_account_gross_total($inquiry);
         $amountPaid = rh_sum_account_paid($pdo, 'event', $inquiryId);
         $amountDue  = rh_account_amount_due($inquiry, $grossTotal, $amountPaid);
-        $depositRequired = (float)($inquiry['deposit_required'] ?? 0);
+        // deposit_required / deposit_paid columns are 0/1 FLAGS; the money rule compares the net paid
+        // (refunds netted) against deposit_amount. Snapshot values are money; the stored flag is derived.
+        $depositRequired = (!empty($inquiry['deposit_required']) && (float)($inquiry['deposit_amount'] ?? 0) > 0) ? round((float)$inquiry['deposit_amount'], 2) : 0.0;
         $depositPaid = min($amountPaid, $depositRequired);
+        $depositFlag = ($depositRequired > 0 && $depositPaid + (defined('BALANCE_TOLERANCE') ? BALANCE_TOLERANCE : 0.01) >= $depositRequired) ? 1 : 0;
         $lastPaymentDate = rh_last_account_payment_date($pdo, 'event', $inquiryId);
 
         $upd = $pdo->prepare(
@@ -152,7 +158,7 @@ if (!function_exists('syncEventInquiryPaymentSnapshot')) {
                 SET amount_paid = ?, amount_due = ?, deposit_paid = ?, last_payment_date = ?, updated_at = NOW()
               WHERE id = ?"
         );
-        $upd->execute([$amountPaid, $amountDue, $depositPaid, $lastPaymentDate, $inquiryId]);
+        $upd->execute([$amountPaid, $amountDue, $depositFlag, $lastPaymentDate, $inquiryId]);
 
         return [
             'total_amount'     => (float)($inquiry['total_amount'] ?? 0),
@@ -179,7 +185,7 @@ if (!function_exists('syncConferenceInquiryPaymentSnapshot')) {
      */
     function syncConferenceInquiryPaymentSnapshot(PDO $pdo, int $inquiryId): ?array
     {
-        $stmt = $pdo->prepare("SELECT id, status, payment_status, total_amount, total_with_vat, deposit_required FROM conference_inquiries WHERE id = ? LIMIT 1");
+        $stmt = $pdo->prepare("SELECT id, status, payment_status, total_amount, total_with_vat, deposit_required, deposit_amount FROM conference_inquiries WHERE id = ? LIMIT 1");
         $stmt->execute([$inquiryId]);
         $inquiry = $stmt->fetch(PDO::FETCH_ASSOC);
         if (!$inquiry) {
@@ -189,8 +195,11 @@ if (!function_exists('syncConferenceInquiryPaymentSnapshot')) {
         $grossTotal = rh_account_gross_total($inquiry);
         $amountPaid = rh_sum_account_paid($pdo, 'conference', $inquiryId);
         $amountDue  = rh_account_amount_due($inquiry, $grossTotal, $amountPaid);
-        $depositRequired = (float)($inquiry['deposit_required'] ?? 0);
+        // deposit_required / deposit_paid columns are 0/1 FLAGS; the money rule compares the net paid
+        // (refunds netted) against deposit_amount. Snapshot values are money; the stored flag is derived.
+        $depositRequired = (!empty($inquiry['deposit_required']) && (float)($inquiry['deposit_amount'] ?? 0) > 0) ? round((float)$inquiry['deposit_amount'], 2) : 0.0;
         $depositPaid = min($amountPaid, $depositRequired);
+        $depositFlag = ($depositRequired > 0 && $depositPaid + (defined('BALANCE_TOLERANCE') ? BALANCE_TOLERANCE : 0.01) >= $depositRequired) ? 1 : 0;
         $lastPaymentDate = rh_last_account_payment_date($pdo, 'conference', $inquiryId);
 
         // Derive the conference payment_status enum from the ledger.
@@ -216,7 +225,7 @@ if (!function_exists('syncConferenceInquiryPaymentSnapshot')) {
                         payment_status = ?, updated_at = NOW()
                   WHERE id = ?"
             );
-            $upd->execute([$amountPaid, $amountDue, $depositPaid, $lastPaymentDate, $paymentStatus, $inquiryId]);
+            $upd->execute([$amountPaid, $amountDue, $depositFlag, $lastPaymentDate, $paymentStatus, $inquiryId]);
         } else {
             $vatParts = function_exists('vat_components')
                 ? vat_components((float)($inquiry['total_amount'] ?? 0))
@@ -229,7 +238,7 @@ if (!function_exists('syncConferenceInquiryPaymentSnapshot')) {
             );
             $upd->execute([
                 $amountPaid, $amountDue, $vatParts['rate'], $vatParts['vat'], $vatParts['total'],
-                $depositPaid, $lastPaymentDate, $paymentStatus, $inquiryId
+                $depositFlag, $lastPaymentDate, $paymentStatus, $inquiryId
             ]);
         }
 
