@@ -271,3 +271,37 @@ body .content .sdash-section table tbody td {
         grid-template-columns: 1fr;
     }
 }
+
+/* ── Header: the right-hand group must never run off-screen ───────────────
+   .user-info was capped at max-width:400px, but it now holds the network pill,
+   Display size, name/role, menu toggle, password and Logout (well over 400px),
+   so its contents spilled past the right edge. The group keeps its natural
+   width; the hotel name on the left shrinks (ellipsis) instead, and the lower-
+   priority labels drop out as the screen narrows. */
+.admin-header .user-info {
+    max-width: none;
+    flex: 0 0 auto;
+    flex-wrap: nowrap;
+    min-width: 0;
+}
+.admin-header .admin-header-brand {
+    flex: 1 1 auto;
+    min-width: 0;
+    overflow: hidden;
+}
+.admin-header .admin-header-brand h1 {
+    min-width: 0;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+.admin-header .user-meta {
+    white-space: nowrap;
+}
+@media (max-width: 1280px) {
+    .admin-header .rh-zoom > span:first-child { display: none; }   /* keep the -/+ buttons */
+}
+@media (max-width: 1100px) {
+    .admin-header .user-meta { display: none; }                     /* name/role is in the nav */
+    .admin-header .btn-logout span { display: none; }               /* icon-only Logout */
+}
