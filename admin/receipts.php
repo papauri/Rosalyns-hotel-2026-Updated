@@ -35,7 +35,7 @@ function receipts_csv_cell(mixed $value): string
 function receipts_build_where(array $input, array &$params): string
 {
     $where = ["p.deleted_at IS NULL"];
-    $where[] = "p.payment_status IN ('completed','paid','refunded')";
+    $where[] = "p.payment_status IN ('completed','paid','refunded','partially_refunded')";
     if (($input['type'] ?? 'all') !== 'all') {
         $where[] = 'p.booking_type = ?';
         $params[] = $input['type'];
@@ -45,7 +45,7 @@ function receipts_build_where(array $input, array &$params): string
         foreach ($input['_scope_types'] as $t) { $params[] = $t; }
     }
     if (($input['status'] ?? 'all') === 'missing') {
-        $where[] = "(p.receipt_number IS NULL OR p.receipt_number = '')";
+        $where[] = "(p.receipt_number IS NULL OR p.receipt_number = '') AND COALESCE(p.payment_type, '') <> 'refund'";
     } elseif (($input['status'] ?? 'all') === 'generated') {
         $where[] = 'p.receipt_generated = 1';
     } elseif (($input['status'] ?? 'all') === 'emailed') {
@@ -110,7 +110,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $result = receipt_send_email($pdo, $paymentId, $recipient !== '' ? $recipient : null, $user);
                 $message = $result['message'];
             } elseif ($action === 'backfill_receipts') {
-                $stmt = $pdo->query("SELECT id FROM payments WHERE deleted_at IS NULL AND payment_status IN ('completed','paid') AND COALESCE(payment_type, '') != 'refund' AND (receipt_number IS NULL OR receipt_number = '') ORDER BY payment_date ASC, id ASC LIMIT 500");
+                $stmt = $pdo->query("SELECT id FROM payments WHERE deleted_at IS NULL AND payment_status IN ('completed','paid','refunded','partially_refunded') AND COALESCE(payment_type, '') != 'refund' AND (receipt_number IS NULL OR receipt_number = '') ORDER BY payment_date ASC, id ASC LIMIT 500");
                 $ids = $stmt ? $stmt->fetchAll(PDO::FETCH_COLUMN) : [];
                 $count = 0;
                 foreach ($ids as $id) {
@@ -184,7 +184,7 @@ if (isset($_GET['export']) && $_GET['export'] === 'csv') {
 }
 
 $summaryStmt = $pdo->prepare("SELECT COUNT(*) AS total_receipts,
-        COALESCE(SUM(CASE WHEN p.receipt_number IS NULL OR p.receipt_number = '' THEN 1 ELSE 0 END), 0) AS missing_receipts,
+        COALESCE(SUM(CASE WHEN (p.receipt_number IS NULL OR p.receipt_number = '') AND COALESCE(p.payment_type, '') <> 'refund' THEN 1 ELSE 0 END), 0) AS missing_receipts,
         COALESCE(SUM(CASE WHEN p.receipt_generated = 1 THEN 1 ELSE 0 END), 0) AS generated_receipts,
         COALESCE(SUM(CASE WHEN p.receipt_emailed_at IS NOT NULL THEN 1 ELSE 0 END), 0) AS emailed_receipts,
         COALESCE(SUM(CASE WHEN COALESCE(p.payment_type,'') = 'refund' THEN -p.total_amount ELSE p.total_amount END), 0) AS receipt_value
@@ -196,7 +196,7 @@ $summary = $summaryStmt->fetch(PDO::FETCH_ASSOC) ?: [];
 $hiddenScopedCount = 0;
 if ($scopeActive && $hiddenBookingTypes !== []) {
     $hPh = implode(',', array_fill(0, count($hiddenBookingTypes), '?'));
-    $hStmt = $pdo->prepare("SELECT COUNT(*) FROM payments p WHERE p.deleted_at IS NULL AND p.payment_status IN ('completed','paid','refunded') AND p.booking_type IN ($hPh)");
+    $hStmt = $pdo->prepare("SELECT COUNT(*) FROM payments p WHERE p.deleted_at IS NULL AND p.payment_status IN ('completed','paid','refunded','partially_refunded') AND p.booking_type IN ($hPh)");
     $hStmt->execute($hiddenBookingTypes);
     $hiddenScopedCount = (int)$hStmt->fetchColumn();
 }

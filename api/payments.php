@@ -262,7 +262,7 @@ function listPayments(PDO $pdo)
                 ],
                 'payment_method' => $payment['payment_method'],
                 'status' => $payment['payment_status'],
-                'transaction_reference' => $payment['transaction_reference'],
+                'transaction_reference' => $payment['transaction_id'] ?? $payment['payment_reference_number'] ?? null,
                 'receipt_number' => $payment['receipt_number'],
                 'invoice_number' => $payment['invoice_number'],
                 'notes' => $payment['notes'],
@@ -434,7 +434,7 @@ function getPayment(PDO $pdo, int $paymentId)
             ],
             'payment_method' => $payment['payment_method'],
             'status' => $payment['payment_status'],
-            'transaction_reference' => $payment['transaction_reference'],
+            'transaction_reference' => $payment['transaction_id'] ?? $payment['payment_reference_number'] ?? null,
             'receipt_number' => $payment['receipt_number'],
             'processed_by' => $payment['processed_by'],
             'notes' => $payment['notes'],
@@ -570,14 +570,15 @@ function createPayment(PDO $pdo)
             ? finance_next_receipt_number($pdo, $paymentDate)
             : null;
 
-        // Insert payment
+        // Insert payment (the reference column name varies by install: finance_payment_transaction_column)
+        $apiTxnColumn = finance_payment_transaction_column($pdo);
         $insertStmt = $pdo->prepare("
             INSERT INTO payments (
                 payment_reference, booking_type, booking_id, booking_reference, payment_date,
                 payment_amount, vat_rate, vat_amount, total_amount,
-                payment_method, payment_status, transaction_reference,
+                payment_method, payment_status, status, {$apiTxnColumn},
                 receipt_number, processed_by, notes, client_uuid
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ");
         // booking_reference is required (NOT NULL): the account's own reference.
         $refLookup = [
@@ -607,6 +608,7 @@ function createPayment(PDO $pdo)
             $totalAmount,
             $input['payment_method'],
             $input['payment_status'],
+            rh_legacy_payment_status((string)$input['payment_status']),
             isset($input['transaction_reference']) ? trim($input['transaction_reference']) : null,
             $receiptNumber,
             isset($input['processed_by']) ? trim($input['processed_by']) : null,
@@ -737,8 +739,14 @@ function updatePayment(PDO $pdo, int $paymentId)
             continue; // stored NET below, together with the VAT split
         }
         if (isset($input[$field])) {
-            $updateFields[] = "$field = ?";
+            // API field name -> real column (transaction_reference is install-specific)
+            $column = $field === 'transaction_reference' ? finance_payment_transaction_column($pdo) : $field;
+            $updateFields[] = "$column = ?";
             $params[] = $input[$field];
+            if ($field === 'payment_status') {
+                $updateFields[] = "status = ?";
+                $params[] = rh_legacy_payment_status((string)$input[$field]);
+            }
         }
     }
 

@@ -140,30 +140,43 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
             // Regenerate invoice based on booking type
             require_once '../config/invoice.php';
 
+            // Regenerating keeps the invoice number already issued on this payment (never
+            // burns a new number from the sequence). Refund rows hold a credit-note number there.
+            $reuseInvoiceNumber = ($payment['payment_type'] ?? '') !== 'refund' && trim((string)($payment['invoice_number'] ?? '')) !== ''
+                ? trim((string)$payment['invoice_number']) : null;
             if ($payment['booking_type'] === 'room') {
-                $result = generateInvoicePDF($payment['booking_id']);
+                $result = generateInvoicePDF($payment['booking_id'], $reuseInvoiceNumber);
             } elseif ($payment['booking_type'] === 'conference') {
-                $result = generateConferenceInvoicePDF($payment['booking_id']);
+                $result = generateConferenceInvoicePDF($payment['booking_id'], $reuseInvoiceNumber);
             } elseif ($payment['booking_type'] === 'gym') {
-                $result = generateGymInvoicePDF($payment['booking_id']);
+                $result = generateGymInvoicePDF($payment['booking_id'], $reuseInvoiceNumber);
             } elseif ($payment['booking_type'] === 'event') {
-                $result = generateEventInvoicePDF($payment['booking_id']);
+                $result = generateEventInvoicePDF($payment['booking_id'], $reuseInvoiceNumber);
             } else {
                 throw new Exception('Invoice regeneration is not supported for ' . htmlspecialchars($payment['booking_type'], ENT_QUOTES, 'UTF-8') . ' payments.');
             }
 
             if ($result) {
                 // Update payment record with new invoice path
-                $update_stmt = $pdo->prepare("
-                    UPDATE payments
-                    SET invoice_path = ?, invoice_number = ?, invoice_generated = 1
-                    WHERE id = ?
-                ");
-                $update_stmt->execute([
-                    $result['relative_path'],
-                    $result['invoice_number'],
-                    $payment_id
-                ]);
+                // invoice_number is UNIQUE: when the account's number already sits on another
+                // payment row (one invoice per account), only refresh this row's file path.
+                $numTaken = $pdo->prepare("SELECT COUNT(*) FROM payments WHERE invoice_number = ? AND id <> ?");
+                $numTaken->execute([$result['invoice_number'], $payment_id]);
+                if ((int)$numTaken->fetchColumn() > 0) {
+                    $update_stmt = $pdo->prepare("UPDATE payments SET invoice_path = ?, invoice_generated = 1 WHERE id = ?");
+                    $update_stmt->execute([$result['relative_path'], $payment_id]);
+                } else {
+                    $update_stmt = $pdo->prepare("
+                        UPDATE payments
+                        SET invoice_path = ?, invoice_number = ?, invoice_generated = 1
+                        WHERE id = ?
+                    ");
+                    $update_stmt->execute([
+                        $result['relative_path'],
+                        $result['invoice_number'],
+                        $payment_id
+                    ]);
+                }
 
                 $message = 'Invoice regenerated successfully!';
             } else {

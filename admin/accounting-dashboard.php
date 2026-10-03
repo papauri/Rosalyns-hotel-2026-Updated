@@ -348,6 +348,7 @@ try {
             COALESCE(SUM(refund_amount), 0) as total_amount
         FROM payments
         WHERE payment_type = 'refund'
+          AND refund_status IN ('completed','processing')
           AND payment_date BETWEEN ? AND ?
           AND deleted_at IS NULL
         GROUP BY refund_reason
@@ -496,7 +497,7 @@ try {
             COALESCE(SUM(CASE WHEN booking_type = 'restaurant' AND payment_status IN ('completed','paid','refunded','partially_refunded') AND COALESCE(payment_type, '') != 'refund' THEN total_amount ELSE 0 END), 0) AS fnb_rev,
             COALESCE(SUM(CASE WHEN booking_type = 'gym' AND payment_status IN ('completed','paid','refunded','partially_refunded') AND COALESCE(payment_type, '') != 'refund' THEN total_amount ELSE 0 END), 0) AS gym_rev,
             COALESCE(SUM(CASE WHEN booking_type = 'event' AND payment_status IN ('completed','paid','refunded','partially_refunded') AND COALESCE(payment_type, '') != 'refund' THEN total_amount ELSE 0 END), 0) AS events_rev,
-            COALESCE(SUM(CASE WHEN payment_type = 'refund' THEN refund_amount ELSE 0 END), 0) AS refunds,
+            COALESCE(SUM(CASE WHEN payment_type = 'refund' AND refund_status IN ('completed','processing') THEN refund_amount ELSE 0 END), 0) AS refunds,
             COUNT(*) AS txn_count
         FROM payments
         WHERE deleted_at IS NULL
@@ -514,7 +515,7 @@ try {
         : "0";
     $complianceStmt = $pdo->prepare("
         SELECT
-            COUNT(*) AS completed_sales,
+            SUM(CASE WHEN payment_status IN ('completed','paid','refunded','partially_refunded') AND COALESCE(payment_type, '') != 'refund' THEN 1 ELSE 0 END) AS completed_sales,
             SUM(CASE WHEN payment_status IN ('completed','paid','refunded','partially_refunded') AND COALESCE(payment_type, '') != 'refund' AND (receipt_number IS NULL OR receipt_number = '') THEN 1 ELSE 0 END) AS missing_receipts,
             SUM(CASE WHEN invoice_generated = 1 AND (invoice_number IS NULL OR invoice_number = '') THEN 1 ELSE 0 END) AS generated_invoices_missing_numbers,
             {$mraPendingSql} AS mra_pending_or_unsubmitted

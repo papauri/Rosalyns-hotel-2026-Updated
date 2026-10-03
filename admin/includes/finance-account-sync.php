@@ -369,6 +369,30 @@ if (!function_exists('rh_account_vat_split')) {
     }
 }
 
+if (!function_exists('rh_legacy_payment_status')) {
+    /**
+     * Map a payments.payment_status onto the legacy payments.status enum
+     * (pending/completed/failed/refunded). Writing 'paid', 'partial' or 'cancelled' into
+     * that column is rejected under STRICT_TRANS_TABLES ("Data truncated").
+     */
+    function rh_legacy_payment_status(string $paymentStatus): string
+    {
+        switch ($paymentStatus) {
+            case 'completed':
+            case 'paid':
+            case 'partially_refunded':
+                return 'completed';
+            case 'refunded':
+                return 'refunded';
+            case 'failed':
+            case 'cancelled':
+                return 'failed';
+            default:
+                return 'pending';
+        }
+    }
+}
+
 if (!function_exists('rh_payment_status_supported')) {
     /**
      * True when payments.payment_status can store $value (the column is an ENUM; migration

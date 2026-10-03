@@ -240,6 +240,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $_SESSION['alert'] = ['type' => 'error', 'message' => 'Payment amount must be greater than zero'];
     } elseif ($paymentAmount > 99999999) {
         $_SESSION['alert'] = ['type' => 'error', 'message' => 'Payment amount exceeds the maximum allowed value'];
+    } elseif (!in_array($paymentStatus, ['pending', 'partial', 'paid', 'completed', 'cancelled', 'refunded', 'partially_refunded'], true)) {
+        $_SESSION['alert'] = ['type' => 'error', 'message' => 'Invalid payment status.'];
     } elseif (in_array($paymentStatus, ['refunded', 'partially_refunded'], true) && !($editId && $editLocked)) {
         $_SESSION['alert'] = ['type' => 'error', 'message' => 'Refunded statuses are set by the refund process only. Use "Process Refund" on the payment details page.'];
     } elseif ($editId && $payment && $editRefundedTotal > 0 && $paymentAmount + BALANCE_TOLERANCE < $editRefundedTotal) {
@@ -279,6 +281,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     'payment_amount = ?',
                     'payment_method = ?',
                     'payment_status = ?',
+                    'status = ?',
                     "{$paymentTransactionColumn} = ?",
                     'notes = ?',
                     'cc_emails = ?',
@@ -290,6 +293,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     $paymentNet,
                     $paymentMethod,
                     $paymentStatus,
+                    rh_legacy_payment_status((string)$paymentStatus),
                     $transactionReference ?: null,
                     $notes ?: null,
                     $ccEmails ?: null,
@@ -347,6 +351,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     throw new Exception('Could not recalculate the account balance.');
                 }
 
+                // Raising an amount (or marking a pending payment collected) may overpay the
+                // account: the excess lives only in a credit note, same as when recording a payment.
+                $editOverpayCn = null;
+                if (in_array($bookingType, ['room', 'conference', 'gym', 'event'], true) && in_array($paymentStatus, ['completed', 'paid'], true)) {
+                    $wasCollected = in_array((string)$lockedRow['payment_status'], ['completed', 'paid'], true);
+                    $editMaxExcess = $wasCollected ? round($totalAmount - $storedTotal, 2) : round($totalAmount, 2);
+                    if ($editMaxExcess > BALANCE_TOLERANCE) {
+                        $editOverpayCn = rh_auto_credit_overpayment($pdo, $bookingType, (int)$bookingId, $editMaxExcess, (string)$payment['payment_reference'], (int)$user['id']);
+                    }
+                }
+
                 $pdo->commit();
 
                 // Audit trail: log every payment edit with before/after details
@@ -360,7 +375,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     'by'           => $user['username'] ?? null,
                 ]);
 
-                $_SESSION['alert'] = ['type' => 'success', 'message' => 'Payment updated successfully'];
+                $_SESSION['alert'] = ['type' => 'success', 'message' => 'Payment updated successfully'
+                    . ($editOverpayCn ? ' Overpayment detected - credit note ' . $editOverpayCn['credit_note_number'] . ' for ' . number_format((float)$editOverpayCn['excess'], 2) . ' issued.' : '')];
                 header('Location: payment-details.php?id=' . $editId);
                 exit;
             } else {
@@ -447,7 +463,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     $totalAmount,
                     $paymentMethod,
                     $paymentStatus,
-                    $paymentStatus,
+                    rh_legacy_payment_status((string)$paymentStatus),
                     $transactionReference ?: null,
                     $receiptNumber,
                     $ccEmails ?: null,

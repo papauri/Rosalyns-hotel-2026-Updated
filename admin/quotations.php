@@ -30,12 +30,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
         if ($action === 'resend' && $quotation_id > 0) {
             try {
-                $qStmt = $pdo->prepare("SELECT q.*, b.* FROM quotations q LEFT JOIN bookings b ON q.booking_id = b.id WHERE q.id = ?");
+                // The booking join only applies to room quotations: conference/event quotation
+                // booking_id values belong to other tables and must never match a room booking.
+                $qStmt = $pdo->prepare("SELECT q.*, b.*, q.booking_type AS qt_booking_type FROM quotations q LEFT JOIN bookings b ON q.booking_id = b.id AND q.booking_type = 'room' WHERE q.id = ?");
                 $qStmt->execute([$quotation_id]);
                 $qRow = $qStmt->fetch(PDO::FETCH_ASSOC);
 
                 if (!$qRow) {
                     throw new Exception('Quotation not found.');
+                }
+                if ((string)$qRow['qt_booking_type'] !== 'room') {
+                    throw new Exception('Only room quotations can be re-sent from here. Re-send conference and event quotations from their own enquiry page.');
                 }
 
                 // Lifecycle guard
@@ -69,11 +74,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
 
         if ($action === 'mark_accepted' && $quotation_id > 0) {
-            $mqStmt = $pdo->prepare("SELECT q.*, b.status as booking_status, b.amount_paid, b.amount_due, b.total_amount FROM quotations q LEFT JOIN bookings b ON q.booking_id = b.id WHERE q.id = ?");
+            $mqStmt = $pdo->prepare("SELECT q.*, b.status as booking_status, b.amount_paid, b.amount_due, b.total_amount FROM quotations q LEFT JOIN bookings b ON q.booking_id = b.id AND q.booking_type = 'room' WHERE q.id = ?");
             $mqStmt->execute([$quotation_id]);
             $mqRow = $mqStmt->fetch(PDO::FETCH_ASSOC);
             if ($mqRow) {
-                $expiryDate = !empty($mqRow['expires_at']) ? $mqRow['expires_at'] : null;
+                // quotations has valid_until (there is no expires_at column).
+                $expiryDate = !empty($mqRow['valid_until']) ? $mqRow['valid_until'] : null;
                 if ($expiryDate && $expiryDate < date('Y-m-d')) {
                     $error = 'Cannot accept an expired quotation (expired ' . $expiryDate . ').';
                 } else {
@@ -82,10 +88,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         $error = $lcCheck['reason'];
                     } else {
                         $pdo->prepare("UPDATE quotations SET status = 'accepted', updated_at = NOW() WHERE id = ?")->execute([$quotation_id]);
-                        if (!empty($mqRow['booking_id'])) {
+                        if (!empty($mqRow['booking_id']) && (string)$mqRow['booking_type'] === 'room') {
                             $pdo->prepare("UPDATE bookings SET status = 'confirmed', updated_at = NOW() WHERE id = ? AND status IN ('pending','tentative')")->execute([$mqRow['booking_id']]);
+                            $message = 'Quotation marked as accepted and booking confirmed.';
+                        } else {
+                            $message = 'Quotation marked as accepted. Confirm the enquiry from its own page.';
                         }
-                        $message = 'Quotation marked as accepted and booking confirmed.';
                     }
                 }
             } else {
@@ -94,7 +102,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
 
         if ($action === 'mark_declined' && $quotation_id > 0) {
-            $mdStmt = $pdo->prepare("SELECT q.*, b.status as booking_status, b.amount_paid, b.amount_due, b.total_amount FROM quotations q LEFT JOIN bookings b ON q.booking_id = b.id WHERE q.id = ?");
+            $mdStmt = $pdo->prepare("SELECT q.*, b.status as booking_status, b.amount_paid, b.amount_due, b.total_amount FROM quotations q LEFT JOIN bookings b ON q.booking_id = b.id AND q.booking_type = 'room' WHERE q.id = ?");
             $mdStmt->execute([$quotation_id]);
             $mdRow = $mdStmt->fetch(PDO::FETCH_ASSOC);
             if ($mdRow) {

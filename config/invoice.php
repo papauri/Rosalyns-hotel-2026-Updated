@@ -1903,13 +1903,32 @@ function sendEmailWithAttachmentAndCC(string $to, ?string $toName, string $subje
     }
 }
 
+if (!function_exists('rh_account_invoice_row')) {
+    /**
+     * The payment row that carries an account's invoice number (conference/gym/event):
+     * the live, non-refund row already holding a number, else the newest live non-refund
+     * row. Lets (re)generating and re-sending reuse the issued number instead of burning
+     * a new one from the sequence each time.
+     *
+     * @return array{id:int,invoice_number:string}|null
+     */
+    function rh_account_invoice_row(PDO $pdo, string $bookingType, int $bookingId): ?array
+    {
+        $st = $pdo->prepare("SELECT id, COALESCE(invoice_number, '') AS invoice_number FROM payments
+            WHERE booking_type = ? AND booking_id = ? AND deleted_at IS NULL AND COALESCE(payment_type, '') <> 'refund'
+            ORDER BY (invoice_number IS NOT NULL AND invoice_number <> '') DESC, id DESC LIMIT 1");
+        $st->execute([$bookingType, $bookingId]);
+        $row = $st->fetch(PDO::FETCH_ASSOC);
+        return $row ? ['id' => (int)$row['id'], 'invoice_number' => (string)$row['invoice_number']] : null;
+    }
+}
 /**
  * Generate PDF invoice for a conference enquiry
  *
  * @param int $enquiry_id Conference enquiry ID
  * @return array{filepath:string,invoice_number:string,relative_path:string}|false Returns array with file details or false on failure
  */
-function generateConferenceInvoicePDF(int $enquiry_id)
+function generateConferenceInvoicePDF(int $enquiry_id, ?string $invoice_number_override = null)
 {
     global $pdo, $tcpdf_loaded;
 
@@ -1949,7 +1968,13 @@ function generateConferenceInvoicePDF(int $enquiry_id)
         $invoice_prefix = getSetting('invoice_prefix', 'INV');
         $invoice_start = (int)getSetting('invoice_start_number', 1000);
 
-        $invoice_number = finance_next_invoice_number($pdo, 'CONF-' . $invoice_prefix, $invoice_start, date('Y-m-d'), 'conference');
+        if (trim((string)$invoice_number_override) === '') {
+            $existingInv = rh_account_invoice_row($pdo, 'conference', $enquiry_id);
+            $invoice_number_override = ($existingInv && $existingInv['invoice_number'] !== '') ? $existingInv['invoice_number'] : null;
+        }
+        $invoice_number = trim((string)$invoice_number_override) !== ''
+            ? trim((string)$invoice_number_override)
+            : finance_next_invoice_number($pdo, 'CONF-' . $invoice_prefix, $invoice_start, date('Y-m-d'), 'conference');
         $filename = $invoice_number . '.pdf';
         $filepath = $invoiceDir . '/' . $filename;
 
@@ -2188,10 +2213,12 @@ function sendConferenceInvoiceEmail(int $enquiry_id)
         $update_stmt = $pdo->prepare("
             UPDATE payments
             SET invoice_path = ?, invoice_number = ?, invoice_generated = 1
-            WHERE booking_type = 'conference' AND booking_id = ?
-            ORDER BY id DESC LIMIT 1
+            WHERE id = ?
         ");
-        $update_stmt->execute([$invoice_path, $invoice_number, $enquiry_id]);
+        $invRow = rh_account_invoice_row($pdo, 'conference', $enquiry_id);
+        if ($invRow) {
+            $update_stmt->execute([$invoice_path, $invoice_number, $invRow['id']]);
+        }
 
         // Get invoice recipients (comma-separated)
         $invoice_recipients = getEmailSetting('invoice_recipients', '');
@@ -2260,10 +2287,12 @@ function sendConferenceInvoiceEmailWithCC(int $enquiry_id, array $ccRecipients =
         $update_stmt = $pdo->prepare("
             UPDATE payments
             SET invoice_path = ?, invoice_number = ?, invoice_generated = 1
-            WHERE booking_type = 'conference' AND booking_id = ?
-            ORDER BY id DESC LIMIT 1
+            WHERE id = ?
         ");
-        $update_stmt->execute([$invoice_path, $invoice_number, $enquiry_id]);
+        $invRow = rh_account_invoice_row($pdo, 'conference', $enquiry_id);
+        if ($invRow) {
+            $update_stmt->execute([$invoice_path, $invoice_number, $invRow['id']]);
+        }
 
         // Send invoice to client with custom CC recipients
         $result = sendConferenceInvoiceEmailToClient($enquiry, $invoice_file, $ccRecipients);
@@ -2510,7 +2539,7 @@ function buildGymInvoiceHTML(array $inquiry, string $invoice_number, string $sit
 /**
  * Generate PDF invoice for a gym membership payment (mirrors generateConferenceInvoicePDF).
  */
-function generateGymInvoicePDF(int $inquiry_id)
+function generateGymInvoicePDF(int $inquiry_id, ?string $invoice_number_override = null)
 {
     global $pdo, $tcpdf_loaded;
 
@@ -2544,7 +2573,13 @@ function generateGymInvoicePDF(int $inquiry_id)
         $invoice_prefix = getSetting('invoice_prefix', 'INV');
         $invoice_start = (int)getSetting('invoice_start_number', 1000);
 
-        $invoice_number = finance_next_invoice_number($pdo, 'GYM-' . $invoice_prefix, $invoice_start, date('Y-m-d'), 'gym');
+        if (trim((string)$invoice_number_override) === '') {
+            $existingInv = rh_account_invoice_row($pdo, 'gym', $inquiry_id);
+            $invoice_number_override = ($existingInv && $existingInv['invoice_number'] !== '') ? $existingInv['invoice_number'] : null;
+        }
+        $invoice_number = trim((string)$invoice_number_override) !== ''
+            ? trim((string)$invoice_number_override)
+            : finance_next_invoice_number($pdo, 'GYM-' . $invoice_prefix, $invoice_start, date('Y-m-d'), 'gym');
         $filename = $invoice_number . '.pdf';
         $filepath = $invoiceDir . '/' . $filename;
 
@@ -2644,10 +2679,12 @@ function sendGymInvoiceEmail(int $inquiry_id)
         $update_stmt = $pdo->prepare("
             UPDATE payments
             SET invoice_path = ?, invoice_number = ?, invoice_generated = 1
-            WHERE booking_type = 'gym' AND booking_id = ?
-            ORDER BY id DESC LIMIT 1
+            WHERE id = ?
         ");
-        $update_stmt->execute([$invoice_path, $invoice_number, $inquiry_id]);
+        $invRow = rh_account_invoice_row($pdo, 'gym', $inquiry_id);
+        if ($invRow) {
+            $update_stmt->execute([$invoice_path, $invoice_number, $invRow['id']]);
+        }
 
         $invoice_recipients = getEmailSetting('invoice_recipients', '');
         $smtp_username = getEmailSetting('smtp_username', '');
@@ -2824,7 +2861,7 @@ function buildEventInvoiceHTML(array $inquiry, string $invoice_number, string $s
 /**
  * Generate PDF invoice for an event booking payment (mirrors generateGymInvoicePDF).
  */
-function generateEventInvoicePDF(int $inquiry_id)
+function generateEventInvoicePDF(int $inquiry_id, ?string $invoice_number_override = null)
 {
     global $pdo, $tcpdf_loaded;
 
@@ -2859,7 +2896,13 @@ function generateEventInvoicePDF(int $inquiry_id)
         $invoice_prefix = getSetting('invoice_prefix', 'INV');
         $invoice_start = (int)getSetting('invoice_start_number', 1000);
 
-        $invoice_number = finance_next_invoice_number($pdo, 'EVT-' . $invoice_prefix, $invoice_start, date('Y-m-d'), 'event');
+        if (trim((string)$invoice_number_override) === '') {
+            $existingInv = rh_account_invoice_row($pdo, 'event', $inquiry_id);
+            $invoice_number_override = ($existingInv && $existingInv['invoice_number'] !== '') ? $existingInv['invoice_number'] : null;
+        }
+        $invoice_number = trim((string)$invoice_number_override) !== ''
+            ? trim((string)$invoice_number_override)
+            : finance_next_invoice_number($pdo, 'EVT-' . $invoice_prefix, $invoice_start, date('Y-m-d'), 'event');
         $filename = $invoice_number . '.pdf';
         $filepath = $invoiceDir . '/' . $filename;
 
@@ -2964,10 +3007,12 @@ function sendEventInvoiceEmail(int $inquiry_id)
         $update_stmt = $pdo->prepare("
             UPDATE payments
             SET invoice_path = ?, invoice_number = ?, invoice_generated = 1
-            WHERE booking_type = 'event' AND booking_id = ?
-            ORDER BY id DESC LIMIT 1
+            WHERE id = ?
         ");
-        $update_stmt->execute([$invoice_path, $invoice_number, $inquiry_id]);
+        $invRow = rh_account_invoice_row($pdo, 'event', $inquiry_id);
+        if ($invRow) {
+            $update_stmt->execute([$invoice_path, $invoice_number, $invRow['id']]);
+        }
 
         $invoice_recipients = getEmailSetting('invoice_recipients', '');
         $smtp_username = getEmailSetting('smtp_username', '');

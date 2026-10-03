@@ -183,13 +183,14 @@ try {
 
     // 2. Revenue by Booking Type (date filtered)
     $revenueByTypeStmt = $pdo->prepare("
-        SELECT booking_type, COUNT(*) as count,
-               COALESCE(SUM(CASE WHEN payment_status IN ('completed', 'paid') AND COALESCE(payment_type, '') != 'refund' THEN total_amount ELSE 0 END), 0) as total_revenue,
-               COALESCE(SUM(CASE WHEN payment_status IN ('completed', 'paid') AND COALESCE(payment_type, '') != 'refund' THEN vat_amount
+        SELECT booking_type,
+               SUM(CASE WHEN payment_status IN ('completed', 'paid', 'refunded', 'partially_refunded') AND COALESCE(payment_type, '') != 'refund' THEN 1 ELSE 0 END) as count,
+               COALESCE(SUM(CASE WHEN payment_status IN ('completed', 'paid', 'refunded', 'partially_refunded') AND COALESCE(payment_type, '') != 'refund' THEN total_amount ELSE 0 END), 0) as total_revenue,
+               COALESCE(SUM(CASE WHEN payment_status IN ('completed', 'paid', 'refunded', 'partially_refunded') AND COALESCE(payment_type, '') != 'refund' THEN vat_amount
                                  WHEN payment_type = 'refund' AND refund_status IN ('completed','processing') THEN -vat_amount
                                  ELSE 0 END), 0) as total_vat
         FROM payments
-        WHERE (payment_status IN ('completed', 'paid') OR payment_type = 'refund') AND deleted_at IS NULL
+        WHERE (payment_status IN ('completed', 'paid', 'refunded', 'partially_refunded') OR payment_type = 'refund') AND deleted_at IS NULL
         AND payment_date >= ? AND payment_date <= ?
         GROUP BY booking_type
     ");
@@ -239,7 +240,7 @@ try {
     $paymentMethodsStmt = $pdo->prepare("
         SELECT payment_method, COUNT(*) as count, COALESCE(SUM(total_amount), 0) as total_amount
         FROM payments
-        WHERE payment_status IN ('completed', 'paid') AND COALESCE(payment_type, '') != 'refund' AND deleted_at IS NULL
+        WHERE payment_status IN ('completed', 'paid', 'refunded', 'partially_refunded') AND COALESCE(payment_type, '') != 'refund' AND deleted_at IS NULL
         AND payment_date >= ? AND payment_date <= ?
         GROUP BY payment_method ORDER BY total_amount DESC
     ");
@@ -252,7 +253,7 @@ try {
                COALESCE(SUM(total_amount), 0) as daily_revenue,
                COALESCE(SUM(vat_amount), 0) as daily_vat
         FROM payments
-        WHERE payment_status IN ('completed', 'paid') AND COALESCE(payment_type, '') != 'refund' AND deleted_at IS NULL
+        WHERE payment_status IN ('completed', 'paid', 'refunded', 'partially_refunded') AND COALESCE(payment_type, '') != 'refund' AND deleted_at IS NULL
         AND payment_date >= ? AND payment_date <= ?
         GROUP BY DATE(payment_date) ORDER BY date ASC
     ");
@@ -267,7 +268,7 @@ try {
                COALESCE(SUM(total_amount), 0) as monthly_revenue,
                COALESCE(SUM(vat_amount), 0) as monthly_vat
         FROM payments
-        WHERE payment_status IN ('completed', 'paid') AND COALESCE(payment_type, '') != 'refund' AND deleted_at IS NULL
+        WHERE payment_status IN ('completed', 'paid', 'refunded', 'partially_refunded') AND COALESCE(payment_type, '') != 'refund' AND deleted_at IS NULL
         AND payment_date >= ? AND payment_date <= ?
         GROUP BY month, month_label ORDER BY month ASC
     ");
@@ -277,12 +278,12 @@ try {
     // 7. VAT Collected
     $vatCollectedStmt = $pdo->prepare("
         SELECT DATE(payment_date) as date, COUNT(*) as transaction_count,
-               COALESCE(SUM(CASE WHEN payment_status IN ('completed', 'paid') AND COALESCE(payment_type, '') != 'refund' THEN vat_amount
+               COALESCE(SUM(CASE WHEN payment_status IN ('completed', 'paid', 'refunded', 'partially_refunded') AND COALESCE(payment_type, '') != 'refund' THEN vat_amount
                                  WHEN payment_type = 'refund' AND refund_status IN ('completed','processing') THEN -vat_amount
                                  ELSE 0 END), 0) as vat_collected,
-               COALESCE(SUM(CASE WHEN payment_status IN ('completed', 'paid') AND COALESCE(payment_type, '') != 'refund' THEN total_amount ELSE 0 END), 0) as total_revenue
+               COALESCE(SUM(CASE WHEN payment_status IN ('completed', 'paid', 'refunded', 'partially_refunded') AND COALESCE(payment_type, '') != 'refund' THEN total_amount ELSE 0 END), 0) as total_revenue
         FROM payments
-        WHERE (payment_status IN ('completed', 'paid') OR payment_type = 'refund') AND deleted_at IS NULL
+        WHERE (payment_status IN ('completed', 'paid', 'refunded', 'partially_refunded') OR payment_type = 'refund') AND deleted_at IS NULL
         AND payment_date >= ? AND payment_date <= ?
         GROUP BY DATE(payment_date) ORDER BY date ASC
     ");
@@ -309,7 +310,7 @@ try {
         LEFT JOIN conference_inquiries ci ON p.booking_type = 'conference' AND p.booking_id = ci.id
         LEFT JOIN gym_inquiries gi ON p.booking_type = 'gym' AND p.booking_id = gi.id
         LEFT JOIN event_inquiries ei ON p.booking_type = 'event' AND p.booking_id = ei.id
-        WHERE p.payment_status IN ('completed', 'paid') AND COALESCE(p.payment_type, '') != 'refund' AND p.deleted_at IS NULL
+        WHERE p.payment_status IN ('completed', 'paid', 'refunded', 'partially_refunded') AND COALESCE(p.payment_type, '') != 'refund' AND p.deleted_at IS NULL
         AND p.payment_date >= ? AND p.payment_date <= ?
         GROUP BY client_name, client_email, p.booking_type
         ORDER BY total_spent DESC LIMIT 10
@@ -759,7 +760,10 @@ try {
 
     $vatRegisterStmt = $pdo->prepare("
         SELECT p.payment_date, p.payment_reference, p.booking_type, p.payment_method,
-               p.payment_amount, p.vat_rate, p.vat_amount, p.total_amount,
+               p.vat_rate,
+               CASE WHEN p.payment_type = 'refund' THEN -p.payment_amount ELSE p.payment_amount END AS payment_amount,
+               CASE WHEN p.payment_type = 'refund' THEN -p.vat_amount ELSE p.vat_amount END AS vat_amount,
+               CASE WHEN p.payment_type = 'refund' THEN -p.total_amount ELSE p.total_amount END AS total_amount,
                COALESCE(b.guest_name, ci.{$conferenceFields['contact_name']}, so.customer_name, gi.name, ei.name, 'N/A') AS client_name
         FROM payments p
         LEFT JOIN bookings b ON p.booking_type = 'room' AND p.booking_id = b.id
@@ -767,8 +771,9 @@ try {
         LEFT JOIN stock_orders so ON p.booking_type = 'restaurant' AND p.booking_id = so.id
         LEFT JOIN gym_inquiries gi ON p.booking_type = 'gym' AND p.booking_id = gi.id
         LEFT JOIN event_inquiries ei ON p.booking_type = 'event' AND p.booking_id = ei.id
-        WHERE p.payment_date >= ? AND p.payment_date <= DATE_ADD(?, INTERVAL 1 DAY)
-        AND COALESCE(p.payment_type, '') != 'refund'
+        WHERE p.payment_date >= ? AND p.payment_date <= ?
+        AND ((COALESCE(p.payment_type, '') != 'refund' AND p.payment_status IN ('completed', 'paid', 'refunded', 'partially_refunded'))
+             OR (p.payment_type = 'refund' AND p.refund_status IN ('completed', 'processing')))
         AND p.deleted_at IS NULL
         AND p.vat_amount > 0
         ORDER BY p.payment_date ASC
@@ -781,10 +786,13 @@ try {
 
     $vatByTypeStmt = $pdo->prepare("
         SELECT booking_type, COUNT(*) AS count,
-               SUM(vat_amount) AS total_vat, SUM(total_amount) AS total_revenue
+               SUM(CASE WHEN payment_type = 'refund' THEN -vat_amount ELSE vat_amount END) AS total_vat,
+               SUM(CASE WHEN payment_type = 'refund' THEN -total_amount ELSE total_amount END) AS total_revenue
         FROM payments
-        WHERE payment_date >= ? AND payment_date <= DATE_ADD(?, INTERVAL 1 DAY)
-        AND COALESCE(payment_type, '') != 'refund' AND deleted_at IS NULL AND vat_amount > 0
+        WHERE payment_date >= ? AND payment_date <= ?
+        AND ((COALESCE(payment_type, '') != 'refund' AND payment_status IN ('completed', 'paid', 'refunded', 'partially_refunded'))
+             OR (payment_type = 'refund' AND refund_status IN ('completed', 'processing')))
+        AND deleted_at IS NULL AND vat_amount > 0
         GROUP BY booking_type ORDER BY total_vat DESC
     ");
     $vatByTypeStmt->execute([$start_date, $end_date]);
@@ -840,7 +848,7 @@ try {
                COALESCE(SUM(vat_amount), 0) as vat,
                COUNT(*) as txns
         FROM payments
-        WHERE payment_status IN ('confirmed','paid','completed')
+        WHERE payment_status IN ('completed', 'paid', 'refunded', 'partially_refunded')
           AND COALESCE(payment_type,'') != 'refund'
           AND deleted_at IS NULL
           AND payment_date >= ? AND payment_date <= ?
@@ -885,11 +893,12 @@ try {
     $deferredBookings = 0;
     try {
         $deferredStmt = $pdo->query("
-            SELECT COALESCE(SUM(p.total_amount), 0) as deferred_revenue,
+            SELECT COALESCE(SUM(CASE WHEN p.payment_type = 'refund' THEN -p.total_amount ELSE p.total_amount END), 0) as deferred_revenue,
                    COUNT(DISTINCT b.id) as future_bookings
             FROM payments p
             JOIN bookings b ON p.booking_id = b.id AND p.booking_type = 'room'
-            WHERE p.payment_status IN ('paid','partial','pending')
+            WHERE ((COALESCE(p.payment_type, '') != 'refund' AND p.payment_status IN ('completed', 'paid', 'refunded', 'partially_refunded'))
+                   OR (p.payment_type = 'refund' AND p.refund_status IN ('completed', 'processing')))
               AND b.check_in_date > CURDATE()
               AND b.status IN ('confirmed','tentative')
               AND p.deleted_at IS NULL
@@ -908,12 +917,13 @@ try {
         $vatByQStmt = $pdo->prepare("
             SELECT YEAR(payment_date) as yr, QUARTER(payment_date) as qtr,
                    COUNT(*) as txns,
-                   SUM(vat_amount) as vat,
-                   SUM(total_amount) as gross,
-                   SUM(total_amount - vat_amount) as net_ex_vat
+                   SUM(CASE WHEN payment_type = 'refund' THEN -vat_amount ELSE vat_amount END) as vat,
+                   SUM(CASE WHEN payment_type = 'refund' THEN -total_amount ELSE total_amount END) as gross,
+                   SUM(CASE WHEN payment_type = 'refund' THEN -(total_amount - vat_amount) ELSE total_amount - vat_amount END) as net_ex_vat
             FROM payments
-            WHERE payment_date >= ? AND payment_date <= DATE_ADD(?, INTERVAL 1 DAY)
-              AND COALESCE(payment_type,'') != 'refund'
+            WHERE payment_date >= ? AND payment_date <= ?
+              AND ((COALESCE(payment_type,'') != 'refund' AND payment_status IN ('completed', 'paid', 'refunded', 'partially_refunded'))
+                   OR (payment_type = 'refund' AND refund_status IN ('completed', 'processing')))
               AND deleted_at IS NULL AND vat_amount > 0
             GROUP BY YEAR(payment_date), QUARTER(payment_date)
             ORDER BY yr ASC, qtr ASC
