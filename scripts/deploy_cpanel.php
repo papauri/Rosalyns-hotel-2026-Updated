@@ -9,9 +9,7 @@ if (PHP_SAPI !== 'cli') { http_response_code(403); exit("CLI only.\n"); } // nev
  *   php scripts/deploy_cpanel.php           deploy: VersionControl::update (pulls the branch)
  *
  * Settings come from the project's .env (or the environment):
- *   CPANEL_HOST, CPANEL_PORT (2083), CPANEL_USER, CPANEL_REPO_PATH,
- *   CPANEL_TOKEN  - preferred: cPanel > Security > Manage API Tokens
- *   CPANEL_PASS   - fallback: account password (refused when 2FA is on)
+ *   CPANEL_HOST, CPANEL_PORT (2083), CPANEL_USER, CPANEL_PASS, CPANEL_REPO_PATH
  */
 
 // Load the project's .env (same rules as config/database.local.php: the file wins).
@@ -34,17 +32,16 @@ if (is_file($envFile)) {
 $host  = getenv('CPANEL_HOST') ?: '';
 $port  = getenv('CPANEL_PORT') ?: '2083';
 $user  = getenv('CPANEL_USER') ?: '';
-$token = getenv('CPANEL_TOKEN') ?: '';
 $pass  = getenv('CPANEL_PASS') ?: '';
 $repo  = getenv('CPANEL_REPO_PATH') ?: '';
 $check = in_array('--check', $argv ?? [], true);
 
-if ($host === '' || $user === '' || ($token === '' && $pass === '') || $repo === '') {
-    echo "Missing CPANEL_HOST / CPANEL_USER / CPANEL_TOKEN (or CPANEL_PASS) / CPANEL_REPO_PATH in .env" . PHP_EOL;
+if ($host === '' || $user === '' || $pass === '' || $repo === '') {
+    echo "Missing CPANEL_HOST / CPANEL_USER / CPANEL_PASS / CPANEL_REPO_PATH in .env" . PHP_EOL;
     exit(1);
 }
 
-function cpanel_call(string $url, string $user, string $token, string $pass, ?array $post = null): array
+function cpanel_call(string $url, string $user, string $pass, ?array $post = null): array
 {
     $ch = curl_init($url);
     $opts = [
@@ -55,11 +52,7 @@ function cpanel_call(string $url, string $user, string $token, string $pass, ?ar
     if (is_file(__DIR__ . '/../config/cacert.pem')) {
         $opts[CURLOPT_CAINFO] = __DIR__ . '/../config/cacert.pem';
     }
-    if ($token !== '') {
-        $opts[CURLOPT_HTTPHEADER] = ["Authorization: cpanel {$user}:{$token}"];
-    } else {
-        $opts[CURLOPT_USERPWD] = "{$user}:{$pass}";
-    }
+    $opts[CURLOPT_USERPWD] = "{$user}:{$pass}";
     if ($post !== null) {
         $opts[CURLOPT_POST] = true;
         $opts[CURLOPT_POSTFIELDS] = http_build_query($post);
@@ -73,22 +66,21 @@ function cpanel_call(string $url, string $user, string $token, string $pass, ?ar
 }
 
 $base = "https://{$host}:{$port}/execute/VersionControl";
-$auth = $token !== '' ? 'API token' : 'password';
 
 if ($check) {
-    [$code, $err, $data] = cpanel_call("{$base}/retrieve", $user, $token, $pass);
+    [$code, $err, $data] = cpanel_call("{$base}/retrieve", $user, $pass);
 } else {
-    [$code, $err, $data] = cpanel_call("{$base}/update", $user, $token, $pass, ['repository_root' => $repo]);
+    [$code, $err, $data] = cpanel_call("{$base}/update", $user, $pass, ['repository_root' => $repo]);
 }
 
 if ($err !== '') {
     echo "cURL error: {$err}" . PHP_EOL;
     exit(1);
 }
-echo "HTTP {$code} (auth: {$auth})" . PHP_EOL;
+echo "HTTP {$code}" . PHP_EOL;
 if ($code === 401 || $code === 403 || !is_array($data)) {
-    echo "cPanel refused the request. Create an API token (cPanel > Security > Manage API Tokens)," . PHP_EOL
-       . "put it in .env as CPANEL_TOKEN, and check CPANEL_USER / CPANEL_HOST." . PHP_EOL;
+    echo "cPanel refused the login. Check CPANEL_USER / CPANEL_PASS / CPANEL_HOST in .env" . PHP_EOL
+       . "(password logins over the API are refused while two-factor authentication is on)." . PHP_EOL;
     exit(1);
 }
 echo "status: " . ($data['status'] ?? '?') . PHP_EOL;
