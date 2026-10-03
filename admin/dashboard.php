@@ -247,7 +247,7 @@ if (!$is_card_insight_ajax) {
             // Outstanding receivables from every module this preset actually runs —
             // a gym must not be shown "bookings with amount due" it can never have.
             $outstandingSql = [];
-            if ($mod_bookings)   { $outstandingSql[] = "SELECT COUNT(*) c, COALESCE(SUM(amount_due),0) v FROM bookings WHERE amount_due > 0 AND status IN ('pending','confirmed','checked-in')"; }
+            if ($mod_bookings)   { $outstandingSql[] = "SELECT COUNT(*) c, COALESCE(SUM(amount_due),0) v FROM bookings WHERE amount_due > 0.01 AND (status IN ('pending','confirmed','checked-in','checked-out') OR (status = 'cancelled' AND COALESCE(cancellation_retained_amount,0) > 0))"; }
             if ($mod_conference) { $outstandingSql[] = "SELECT COUNT(*) c, COALESCE(SUM(amount_due),0) v FROM conference_inquiries WHERE amount_due > 0 AND status NOT IN ('cancelled')"; }
             if ($mod_gym)        { $outstandingSql[] = "SELECT COUNT(*) c, COALESCE(SUM(amount_due),0) v FROM gym_inquiries WHERE amount_due > 0 AND status NOT IN ('cancelled','closed')"; }
             if ($mod_events)     { $outstandingSql[] = "SELECT COUNT(*) c, COALESCE(SUM(amount_due),0) v FROM event_inquiries WHERE amount_due > 0 AND status NOT IN ('cancelled')"; }
@@ -749,7 +749,7 @@ if ($is_card_insight_ajax) {
                 // exceed Total — total_amount alone is the NET base and would read
                 // lower than the gross balance due.
                 $ob_union = [];
-                if ($mod_bookings)   { $ob_union[] = "SELECT id, booking_reference AS ref, guest_name AS who, status, amount_paid, amount_due, 'booking' AS src FROM bookings WHERE amount_due > 0 AND status IN ('pending','confirmed','checked-in')"; }
+                if ($mod_bookings)   { $ob_union[] = "SELECT id, booking_reference AS ref, guest_name AS who, status, amount_paid, amount_due, 'booking' AS src FROM bookings WHERE amount_due > 0.01 AND (status IN ('pending','confirmed','checked-in','checked-out') OR (status = 'cancelled' AND COALESCE(cancellation_retained_amount,0) > 0))"; }
                 if ($mod_conference) { $ob_union[] = "SELECT id, inquiry_reference AS ref, COALESCE(NULLIF(company_name,''), contact_person) AS who, status, amount_paid, amount_due, 'conference' AS src FROM conference_inquiries WHERE amount_due > 0 AND status NOT IN ('cancelled')"; }
                 if ($mod_gym)        { $ob_union[] = "SELECT id, reference_number AS ref, name AS who, status, amount_paid, amount_due, 'gym' AS src FROM gym_inquiries WHERE amount_due > 0 AND status NOT IN ('cancelled','closed')"; }
                 if ($mod_events)     { $ob_union[] = "SELECT id, reference_number AS ref, name AS who, status, amount_paid, amount_due, 'event' AS src FROM event_inquiries WHERE amount_due > 0 AND status NOT IN ('cancelled')"; }
@@ -1529,7 +1529,7 @@ if ($is_card_insight_ajax) {
                     $outstandingCount = 0;
                     $outstandingValue = 0.0;
                     $ofUnion = [];
-                    if ($mod_bookings)   { $ofUnion[] = "SELECT COUNT(*) c, COALESCE(SUM(amount_due),0) v FROM bookings WHERE amount_due > 0 AND status IN ('pending','confirmed','checked-in')"; }
+                    if ($mod_bookings)   { $ofUnion[] = "SELECT COUNT(*) c, COALESCE(SUM(amount_due),0) v FROM bookings WHERE amount_due > 0.01 AND (status IN ('pending','confirmed','checked-in','checked-out') OR (status = 'cancelled' AND COALESCE(cancellation_retained_amount,0) > 0))"; }
                     if ($mod_conference) { $ofUnion[] = "SELECT COUNT(*) c, COALESCE(SUM(amount_due),0) v FROM conference_inquiries WHERE amount_due > 0 AND status NOT IN ('cancelled')"; }
                     if ($mod_gym)        { $ofUnion[] = "SELECT COUNT(*) c, COALESCE(SUM(amount_due),0) v FROM gym_inquiries WHERE amount_due > 0 AND status NOT IN ('cancelled','closed')"; }
                     if ($mod_events)     { $ofUnion[] = "SELECT COUNT(*) c, COALESCE(SUM(amount_due),0) v FROM event_inquiries WHERE amount_due > 0 AND status NOT IN ('cancelled')"; }

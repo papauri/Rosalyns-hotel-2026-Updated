@@ -93,7 +93,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $valid_token) {
         $error_message = 'Passwords do not match.';
     } else {
         try {
-            // Update the password
+            $pdo->beginTransaction();
+            // Claim the token atomically so two concurrent submits cannot both use it
+            $claim = $pdo->prepare("UPDATE password_resets SET used_at = NOW() WHERE id = ? AND used_at IS NULL AND expires_at > NOW()");
+            $claim->execute([$user_data['id']]);
+            if ($claim->rowCount() !== 1) {
+                $pdo->rollBack();
+                throw new RuntimeException('token_used');
+            }
             $password_hash = password_hash($password, PASSWORD_DEFAULT);
             $stmt = $pdo->prepare("UPDATE admin_users SET password_hash = ?, updated_at = NOW() WHERE id = ?");
             $stmt->execute([$password_hash, $user_data['user_id']]);
@@ -109,6 +116,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $valid_token) {
             
             // Reset failed login attempts
             $pdo->prepare("UPDATE admin_users SET failed_login_attempts = 0 WHERE id = ?")->execute([$user_data['user_id']]);
+            $pdo->commit();
             
             // Log the password reset
             $ip = $_SERVER['REMOTE_ADDR'] ?? 'unknown';
@@ -122,7 +130,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $valid_token) {
             
             header('Location: login.php?reset=success');
             exit;
+        } catch (RuntimeException $e) {
+            $error_message = 'This reset link has already been used or has expired. Please request a new one.';
         } catch (PDOException $e) {
+            if ($pdo->inTransaction()) { $pdo->rollBack(); }
             error_log("Password reset error: " . $e->getMessage());
             $error_message = 'Failed to reset password. Please try again.';
         }

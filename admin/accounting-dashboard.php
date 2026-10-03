@@ -209,7 +209,8 @@ try {
                         AND p2.payment_date BETWEEN ? AND ?
                         AND p2.deleted_at IS NULL
                     )
-                    AND b2.status IN ('pending', 'confirmed', 'checked-in')
+                    AND b2.amount_due > 0.01
+                    AND (b2.status IN ('pending','confirmed','checked-in','checked-out') OR (b2.status = 'cancelled' AND COALESCE(b2.cancellation_retained_amount,0) > 0))
                 ) as total_room_outstanding
             FROM payments p
             WHERE p.booking_type = 'room'
@@ -386,7 +387,7 @@ try {
     // Outstanding payments summary (filtered by enabled modules)
     $outstandingParts = [];
     if ($mod_bookings) {
-        $outstandingParts[] = "SELECT 'room' as type, COUNT(*) as count, SUM(amount_due) as total_outstanding FROM bookings WHERE amount_due > 0 AND status IN ('pending', 'confirmed', 'checked-in')";
+        $outstandingParts[] = "SELECT 'room' as type, COUNT(*) as count, SUM(amount_due) as total_outstanding FROM bookings WHERE amount_due > 0.01 AND (status IN ('pending','confirmed','checked-in','checked-out') OR (status = 'cancelled' AND COALESCE(cancellation_retained_amount,0) > 0))";
     }
     if ($mod_conference) {
         $outstandingParts[] = "SELECT 'conference' as type, COUNT(*) as count, SUM(amount_due) as total_outstanding FROM conference_inquiries WHERE amount_due > 0 AND status NOT IN ('cancelled', 'rejected', 'expired')";

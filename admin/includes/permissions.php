@@ -1438,6 +1438,7 @@ function getPermissionForPage(string $page)
         'payments.php' => 'payments',
         'payment-details.php' => 'payments',
         'receipts.php' => 'receipts',
+        'ajax-receipt.php' => 'receipts', // email/WhatsApp a receipt
         'invoices.php' => 'invoices',
         'credit-notes.php' => 'invoices',
         'payment-add.php' => 'payment_add',

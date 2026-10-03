@@ -163,6 +163,26 @@ function getOccupiedRooms(PDO $pdo): array
 }
 
 /**
+ * housekeeping_assignments.status is enum(pending, in_progress, completed, blocked) - it has no
+ * 'verified' value, and strict SQL rejects one. 'Verified' is stored as completed + verified_at set
+ * and translated back when read (same approach as the maintenance schedules).
+ */
+function rhHkStatusToDb(string $status): string
+{
+    return $status === 'verified' ? 'completed' : $status;
+}
+
+function rhHkStatusFromRow(array $row): string
+{
+    $status = (string)($row['status'] ?? '');
+    $marker = $row['verified_at'] ?? null;
+    if ($status === 'completed' && $marker !== null && $marker !== '' && strpos((string)$marker, '0000-00-00') !== 0) {
+        return 'verified';
+    }
+    return $status;
+}
+
+/**
  * Get rooms that need checkout cleanup
  * Backward compatible: works with or without migration 004 columns
  */
@@ -619,7 +639,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 // Build INSERT columns and values based on available columns
                 $insertColumns = ['individual_room_id', 'status', 'due_date', 'assigned_to', 'created_by', 'notes', 'completed_at'];
                 $insertValues = ['?', '?', '?', '?', '?', '?', '?'];
-                $insertParams = [$room_id, $status, $due_date, $assigned_to, $user['id'] ?? null, $notes, $completedAt];
+                $insertParams = [$room_id, rhHkStatusToDb($status), $due_date, $assigned_to, $user['id'] ?? null, $notes, $completedAt];
 
                 if ($hasPriority) {
                     $insertColumns[] = 'priority';
@@ -751,20 +771,21 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $error = 'Assigned user is invalid.';
             } else {
                 $pdo->beginTransaction();
-                $existsStmt = $pdo->prepare("SELECT id, individual_room_id, status FROM housekeeping_assignments WHERE id = ?");
+                $existsStmt = $pdo->prepare("SELECT id, individual_room_id, status" . ($hasVerifiedAt ? ", verified_at" : "") . " FROM housekeeping_assignments WHERE id = ? FOR UPDATE");
                 $existsStmt->execute([$id]);
                 $existing = $existsStmt->fetch(PDO::FETCH_ASSOC);
                 if (!$existing) {
                     throw new RuntimeException('Assignment does not exist.');
                 }
-                if (($existing['status'] ?? '') === 'verified') {
+                $existingLogical = rhHkStatusFromRow($existing);
+                if ($existingLogical === 'verified') {
                     throw new DomainException('Verified assignments are locked and cannot be edited.');
                 }
 
                 // Auto-set verified_by when status changes to verified
                 $verifiedBy = null;
                 $verifiedAt = null;
-                if ($hasVerifiedBy && $hasVerifiedAt && $status === 'verified' && $existing['status'] !== 'verified') {
+                if ($hasVerifiedBy && $hasVerifiedAt && $status === 'verified' && $existingLogical !== 'verified') {
                     $verifiedBy = $user['id'] ?? null;
                     $verifiedAt = date('Y-m-d H:i:s');
                 } elseif ($status !== 'verified') {
@@ -778,7 +799,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
                 // Build UPDATE SET clause based on available columns
                 $setColumns = ['individual_room_id=?', 'status=?', 'due_date=?', 'assigned_to=?', 'notes=?', 'completed_at=?'];
-                $updateParams = [$room_id, $status, $due_date, $assigned_to, $notes, $completedAt];
+                $updateParams = [$room_id, rhHkStatusToDb($status), $due_date, $assigned_to, $notes, $completedAt];
 
                 if ($hasPriority) {
                     $setColumns[] = 'priority=?';
@@ -991,8 +1012,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
                     $stmt = $pdo->prepare("
                         UPDATE housekeeping_assignments
-                        SET status = 'verified', verified_by = ?, verified_at = NOW()
-                        WHERE id = ? AND status = 'completed'
+                        SET verified_by = ?, verified_at = NOW()
+                        WHERE id = ? AND status = 'completed' AND verified_at IS NULL
                     ");
                     $stmt->execute([$user['id'] ?? null, $id]);
 
@@ -1142,6 +1163,10 @@ $assignmentsStmt = $pdo->query(
     ORDER BY " . implode(', ', $orderByClauses)
 );
 $assignments = $assignmentsStmt->fetchAll(PDO::FETCH_ASSOC);
+foreach ($assignments as &$hkRow) {
+    $hkRow['status'] = rhHkStatusFromRow($hkRow);
+}
+unset($hkRow);
 
 // Statistics
 // Backward compatible: works with or without migration 004 columns

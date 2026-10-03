@@ -326,6 +326,13 @@ function createSchedule() {
         ApiResponse::validationError(['date_range' => 'Invalid start/end date range']);
     }
     
+    // recurring_pattern is an ENUM column: strict SQL throws on anything else
+    if (isset($input['recurring_pattern']) && $input['recurring_pattern'] === '') {
+        $input['recurring_pattern'] = null;
+    }
+    if (isset($input['recurring_pattern']) && !in_array($input['recurring_pattern'], ['daily','weekly','monthly'], true)) {
+        ApiResponse::validationError(['recurring_pattern' => 'Invalid recurring pattern']);
+    }
     if ($hasDueDate && $dueDate && !validateApiDueDate($dueDate)) {
         ApiResponse::validationError(['due_date' => 'Due date cannot be in the past']);
     }
@@ -476,7 +483,8 @@ function updateSchedule($id) {
     foreach ($allowed as $f) {
         if (array_key_exists($f, $input)) {
             $fields[] = "$f = ?";
-            $params[] = ($f === 'status') ? rh_maint_status_to_db((string)$input[$f]) : $input[$f];
+            $params[] = ($f === 'status') ? rh_maint_status_to_db((string)$input[$f])
+                : (($f === 'recurring_pattern' && $input[$f] === '') ? null : $input[$f]);
         }
     }
     if (!$fields) ApiResponse::error('No fields to update', 400);
@@ -507,6 +515,10 @@ function updateSchedule($id) {
         ApiResponse::validationError(['date_range' => 'Invalid start/end date range']);
     }
     
+    if (array_key_exists('recurring_pattern', $input) && $input['recurring_pattern'] !== null && $input['recurring_pattern'] !== ''
+        && !in_array($input['recurring_pattern'], ['daily','weekly','monthly'], true)) {
+        ApiResponse::validationError(['recurring_pattern' => 'Invalid recurring pattern']);
+    }
     if ($hasDueDate && isset($input['due_date']) && $input['due_date'] && !validateApiDueDate($input['due_date'])) {
         ApiResponse::validationError(['due_date' => 'Due date cannot be in the past']);
     }

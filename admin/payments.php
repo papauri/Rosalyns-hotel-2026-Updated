@@ -208,7 +208,7 @@ if ($showOutstanding) {
     $confContact = $conferenceFields['contact_name'] ?? 'contact_person';
     $outstandingSources = [];
     if ($mod_bookings) {
-        $outstandingSources[] = "SELECT 'room' AS src, id, booking_reference AS ref, guest_name AS client, status, total_amount, amount_paid, amount_due FROM bookings WHERE amount_due > 0 AND status IN ('pending','confirmed','checked-in')";
+        $outstandingSources[] = "SELECT 'room' AS src, id, booking_reference AS ref, guest_name AS client, status, total_amount, amount_paid, amount_due FROM bookings WHERE amount_due > 0.01 AND (status IN ('pending','confirmed','checked-in','checked-out') OR (status = 'cancelled' AND COALESCE(cancellation_retained_amount,0) > 0))";
     }
     if ($mod_conference) {
         $outstandingSources[] = "SELECT 'conference' AS src, id, {$confRef} AS ref, COALESCE(NULLIF({$confCompany},''), {$confContact}) AS client, status, total_amount, amount_paid, amount_due FROM conference_inquiries WHERE amount_due > 0 AND status NOT IN ('cancelled')";

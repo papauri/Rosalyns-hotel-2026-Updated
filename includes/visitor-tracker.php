@@ -208,7 +208,11 @@ try {
         $_SESSION['_vt_first_logged'] = true;
     }
 
-    $consent_level = $_COOKIE['cookie_consent'] ?? 'pending';
+    $consent_level = substr(preg_replace('/[^A-Za-z0-9_,-]/', '', (string)($_COOKIE['cookie_consent'] ?? '')), 0, 20); // column is VARCHAR(20); cookie is client-controlled
+    if ($consent_level === '') { $consent_level = 'pending'; }
+    $referrer_domain = function_exists('mb_strcut') ? mb_strcut((string)$referrer_domain, 0, 255, 'UTF-8') : substr((string)$referrer_domain, 0, 255);
+    // Byte-cut on a character boundary: a plain substr() can split a multibyte char and strict SQL rejects it
+    $_vt_cut = static function ($s, int $n) { $s = (string)$s; return function_exists('mb_strcut') ? mb_strcut($s, 0, $n, 'UTF-8') : substr($s, 0, $n); };
 
     // Insert visitor record into site_visitors table
     $stmt = $pdo->prepare("
@@ -217,9 +221,9 @@ try {
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())
     ");
     $stmt->execute([
-        $session_id, $ip, substr($ua, 0, 1000), $device_type, $browser, $os,
-        substr($referrer, 0, 1000), $referrer_domain, $country ? substr($country, 0, 100) : null,
-        substr($page_url, 0, 500), substr($page_title, 0, 255), $is_first, $consent_level
+        $session_id, $ip, $_vt_cut($ua, 1000), $device_type, $browser, $os,
+        $_vt_cut($referrer, 1000), $referrer_domain, $country ? $_vt_cut($country, 100) : null,
+        $_vt_cut($page_url, 500), $_vt_cut($page_title, 255), $is_first, $consent_level
     ]);
 
     // ── Also insert into session_logs table (dedicated session tracking) ──
@@ -266,7 +270,7 @@ try {
     ");
     $slog_stmt->execute([
         $session_id, $ip, $device_type, $browser, $os,
-        substr($page_url, 0, 500), $referrer_domain, $country ? substr($country, 0, 100) : null,
+        $_vt_cut($page_url, 500), $referrer_domain, $country ? $_vt_cut($country, 100) : null,
         $consent_level
     ]);
 

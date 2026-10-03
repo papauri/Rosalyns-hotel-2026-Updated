@@ -109,7 +109,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['contact_form'])) {
         if (!$email_v['valid']) {
             $validation_errors['email'] = $email_v['error'];
         } else {
-            $sanitized['email'] = $_POST['email'];
+            $sanitized['email'] = trim((string)$_POST['email']);
         }
 
         // Validate phone (optional)
@@ -118,7 +118,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['contact_form'])) {
             if (!$phone_v['valid']) {
                 $validation_errors['phone'] = $phone_v['error'];
             } else {
-                $sanitized['phone'] = $phone_v['sanitized'];
+                $sanitized['phone'] = substr((string)$phone_v['sanitized'], 0, 50); // column is VARCHAR(50)
             }
         } else {
             $sanitized['phone'] = null;

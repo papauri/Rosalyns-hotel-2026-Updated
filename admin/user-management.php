@@ -82,6 +82,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     $error_msg = 'All fields are required.';
                 } elseif (strlen($password) < 8) {
                     $error_msg = 'Password must be at least 8 characters.';
+                } elseif (!filter_var($email, FILTER_VALIDATE_EMAIL) || strlen($email) > 255) {
+                    $error_msg = 'Please enter a valid email address.';
+                } elseif (strlen($username) > 100 || strlen($full_name) > 255) {
+                    $error_msg = 'Username (max 100) or full name (max 255) is too long.';
                 } elseif (!isset($all_roles[$role])) {
                     $error_msg = 'Invalid role selected.';
                 } else {
@@ -131,6 +135,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     $error_msg = 'You cannot edit this user.';
                 } elseif ($uid <= 0 || empty($full_name) || empty($email)) {
                     $error_msg = 'Full name and email are required.';
+                } elseif (!filter_var($email, FILTER_VALIDATE_EMAIL) || strlen($email) > 255 || strlen($full_name) > 255) {
+                    $error_msg = 'Please enter a valid email address and a full name under 255 characters.';
                 } elseif (!isset($all_roles[$role])) {
                     $error_msg = 'Invalid role selected.';
                 } else {
@@ -145,10 +151,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         $current_role_stmt->execute([$uid]);
                         $current_role = $current_role_stmt->fetchColumn();
 
-                        if ($current_role === 'admin' && $role !== 'admin') {
+                        $target_active_stmt = $pdo->prepare("SELECT is_active FROM admin_users WHERE id = ?");
+                        $target_active_stmt->execute([$uid]);
+                        $target_was_active = (int)$target_active_stmt->fetchColumn() === 1;
+                        if ($current_role === 'admin' && $target_was_active && ($role !== 'admin' || !$is_active)) {
                             $admin_count = $pdo->query("SELECT COUNT(*) FROM admin_users WHERE role = 'admin' AND is_active = 1")->fetchColumn();
                             if ($admin_count <= 1) {
-                                $error_msg = 'Cannot change role: this is the last active admin.';
+                                $error_msg = 'Cannot change role or deactivate: this is the last active admin.';
                             }
                         }
 

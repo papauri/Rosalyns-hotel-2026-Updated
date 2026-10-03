@@ -89,6 +89,52 @@ function validateDueDate(string $dueDate): bool {
 }
 
 /**
+ * Normalise a date input to Y-m-d, or null when it is not a real date
+ * (strict SQL rejects free text such as "tomorrow" in DATE columns).
+ */
+function apiHkNormaliseDate($value): ?string {
+    if ($value === null || $value === '') return null;
+    $ts = strtotime((string)$value);
+    return $ts === false ? null : date('Y-m-d', $ts);
+}
+
+/**
+ * True when an admin user with this id exists (assigned_to / verified_by / created_by).
+ */
+function apiHkUserExists($userId): bool {
+    global $pdo;
+    if (!is_numeric($userId) || (int)$userId <= 0) return false;
+    $chk = $pdo->prepare("SELECT 1 FROM admin_users WHERE id = ?");
+    $chk->execute([(int)$userId]);
+    return (bool)$chk->fetchColumn();
+}
+
+/**
+ * housekeeping_assignments.status is enum(pending, in_progress, completed, blocked): there is no
+ * 'verified' value and strict SQL rejects one. 'verified' is stored as completed + verified_at set
+ * and translated back on read.
+ */
+function apiHkStatusToDb(string $status): string {
+    return $status === 'verified' ? 'completed' : $status;
+}
+
+function apiHkStatusFromRow(array $row): string {
+    $status = (string)($row['status'] ?? '');
+    $marker = $row['verified_at'] ?? null;
+    if ($status === 'completed' && $marker !== null && $marker !== '' && strpos((string)$marker, '0000-00-00') !== 0) {
+        return 'verified';
+    }
+    return $status;
+}
+
+function apiHkAssignmentExists(int $id): bool {
+    global $pdo;
+    $chk = $pdo->prepare("SELECT 1 FROM housekeeping_assignments WHERE id = ?");
+    $chk->execute([$id]);
+    return (bool)$chk->fetchColumn();
+}
+
+/**
  * Get occupied rooms that need housekeeping
  */
 function getOccupiedRooms(): array {
@@ -268,8 +314,14 @@ function listAssignments(): void {
     if ($status) {
         $validStatuses = ['pending','in_progress','completed','verified','blocked'];
         if (in_array($status, $validStatuses, true)) {
-            $sql .= " AND ha.status = ?";
-            $params[] = $status;
+            if ($status === 'verified') {
+                $sql .= " AND ha.status = 'completed' AND ha.verified_at IS NOT NULL";
+            } elseif ($status === 'completed') {
+                $sql .= " AND ha.status = 'completed' AND ha.verified_at IS NULL";
+            } else {
+                $sql .= " AND ha.status = ?";
+                $params[] = $status;
+            }
         }
     }
     if ($priority) {
@@ -306,6 +358,7 @@ function listAssignments(): void {
     $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
     foreach ($rows as &$row) {
+        $row['status'] = apiHkStatusFromRow($row);
         if (!empty($row['assigned_to'])) {
             $u = $pdo->prepare("SELECT username FROM admin_users WHERE id = ?");
             $u->execute([$row['assigned_to']]);
@@ -343,10 +396,21 @@ function createAssignment(): void {
     }
     if ($errors) ApiResponse::validationError($errors);
 
-    // Validate due date is not in the past
-    if (!validateDueDate($input['due_date'])) {
+    // Validate due date is a real date and not in the past
+    $dueDate = apiHkNormaliseDate($input['due_date']);
+    if ($dueDate === null) {
+        ApiResponse::error('Due date is not a valid date', 400);
+    }
+    if (!validateDueDate($dueDate)) {
         ApiResponse::error('Due date cannot be in the past', 400);
     }
+    foreach (['assigned_to', 'created_by'] as $uf) {
+        if (!empty($input[$uf]) && !apiHkUserExists($input[$uf])) {
+            ApiResponse::error(ucfirst(str_replace('_', ' ', $uf)) . ' user not found', 404);
+        }
+    }
+    $estimatedDuration = isset($input['estimated_duration']) && is_numeric($input['estimated_duration'])
+        ? max(0, min(1440, (int)$input['estimated_duration'])) : 30;
 
     // Validate room exists
     $chk = $pdo->prepare("SELECT id FROM individual_rooms WHERE id = ? AND is_active = 1");
@@ -384,7 +448,7 @@ function createAssignment(): void {
         if (!in_array($recurringPattern, $validPatterns, true)) {
             ApiResponse::error('Invalid recurring pattern', 400);
         }
-        $recurringEndDate = $input['recurring_end_date'] ?? null;
+        $recurringEndDate = apiHkNormaliseDate($input['recurring_end_date'] ?? null);
     }
 
     $completedAt = in_array($status, ['completed', 'verified'], true) ? date('Y-m-d H:i:s') : null;
@@ -398,22 +462,26 @@ function createAssignment(): void {
     ");
     $stmt->execute([
         (int)$input['individual_room_id'],
-        $status,
-        $input['due_date'],
-        $input['assigned_to'] ?? null,
-        $input['created_by'] ?? null,
-        $input['notes'] ?? null,
+        apiHkStatusToDb($status),
+        $dueDate,
+        !empty($input['assigned_to']) ? (int)$input['assigned_to'] : null,
+        !empty($input['created_by']) ? (int)$input['created_by'] : null,
+        isset($input['notes']) ? (string)$input['notes'] : null,
         $priority,
         $assignmentType,
         $isRecurring,
         $recurringPattern,
         $recurringEndDate,
-        $input['estimated_duration'] ?? 30,
+        $estimatedDuration,
         $completedAt,
         $verifiedAt
     ]);
+    $newId = $pdo->lastInsertId();
 
-    ApiResponse::success(['id' => $pdo->lastInsertId()], 'Assignment created', 201);
+    // An open task puts the room into 'cleaning' / housekeeping pending (same as the admin page)
+    apiReconcileRoomById((int)$input['individual_room_id']);
+
+    ApiResponse::success(['id' => $newId], 'Assignment created', 201);
 }
 
 /**
@@ -424,9 +492,61 @@ function updateAssignment($id): void {
     $input = json_decode(file_get_contents('php://input'), true);
     if (!$input) ApiResponse::error('Invalid JSON body', 400);
 
+    if (!apiHkAssignmentExists((int)$id)) {
+        ApiResponse::error('Assignment not found', 404);
+    }
+
     // Validate due date if provided
-    if (isset($input['due_date']) && !validateDueDate($input['due_date'])) {
-        ApiResponse::error('Due date cannot be in the past', 400);
+    if (isset($input['due_date'])) {
+        $normDue = apiHkNormaliseDate($input['due_date']);
+        if ($normDue === null) {
+            ApiResponse::error('Due date is not a valid date', 400);
+        }
+        if (!validateDueDate($normDue)) {
+            ApiResponse::error('Due date cannot be in the past', 400);
+        }
+        $input['due_date'] = $normDue;
+    }
+    // Enum / reference columns: strict SQL throws on bad values, so reject them cleanly
+    $enumRules = [
+        'status' => ['pending','in_progress','completed','verified','blocked'],
+        'priority' => ['high','medium','low'],
+        'assignment_type' => ['checkout_cleanup','regular_cleaning','maintenance','deep_clean','turn_down'],
+        'recurring_pattern' => ['daily','weekly','monthly'],
+    ];
+    foreach ($enumRules as $ef => $allowedValues) {
+        if (array_key_exists($ef, $input) && !($ef === 'recurring_pattern' && $input[$ef] === null)
+            && !in_array($input[$ef], $allowedValues, true)) {
+            ApiResponse::error('Invalid ' . str_replace('_', ' ', $ef), 400);
+        }
+    }
+    if (array_key_exists('recurring_end_date', $input)) {
+        $input['recurring_end_date'] = apiHkNormaliseDate($input['recurring_end_date']);
+    }
+    foreach (['assigned_to', 'created_by'] as $uf) {
+        if (!empty($input[$uf]) && !apiHkUserExists($input[$uf])) {
+            ApiResponse::error(ucfirst(str_replace('_', ' ', $uf)) . ' user not found', 404);
+        }
+        if (array_key_exists($uf, $input)) {
+            $input[$uf] = empty($input[$uf]) ? null : (int)$input[$uf];
+        }
+    }
+    foreach (['estimated_duration', 'actual_duration'] as $df) {
+        if (array_key_exists($df, $input)) {
+            if ($input[$df] === null || $input[$df] === '') {
+                $input[$df] = null;
+            } elseif (!is_numeric($input[$df])) {
+                ApiResponse::error('Invalid ' . str_replace('_', ' ', $df), 400);
+            } else {
+                $input[$df] = max(0, min(1440, (int)$input[$df]));
+            }
+        }
+    }
+    if (array_key_exists('individual_room_id', $input)) {
+        $rchk = $pdo->prepare("SELECT 1 FROM individual_rooms WHERE id = ? AND is_active = 1");
+        $rchk->execute([(int)$input['individual_room_id']]);
+        if (!$rchk->fetchColumn()) ApiResponse::error('Room not found or inactive', 404);
+        $input['individual_room_id'] = (int)$input['individual_room_id'];
     }
 
     $allowed = ['status','due_date','assigned_to','created_by','notes','individual_room_id','priority',
@@ -436,15 +556,25 @@ function updateAssignment($id): void {
     foreach ($allowed as $f) {
         if (array_key_exists($f, $input)) {
             $fields[] = "$f = ?";
-            $params[] = $input[$f];
+            $params[] = ($f === 'status') ? apiHkStatusToDb((string)$input[$f]) : $input[$f];
         }
     }
     
     // Handle completed_at based on status
     if (isset($input['status'])) {
         if (in_array($input['status'], ['completed', 'verified'], true)) {
-            $fields[] = "completed_at = ?";
+            $fields[] = "completed_at = COALESCE(completed_at, ?)";
             $params[] = date('Y-m-d H:i:s');
+            if ($input['status'] === 'completed') {
+                // Plain 'completed' is not 'verified': drop any earlier verification
+                $fields[] = "verified_at = NULL";
+                $fields[] = "verified_by = NULL";
+            }
+        } else {
+            // Re-opened task: it is no longer completed or verified
+            $fields[] = "completed_at = NULL";
+            $fields[] = "verified_at = NULL";
+            $fields[] = "verified_by = NULL";
         }
     }
     
@@ -452,9 +582,9 @@ function updateAssignment($id): void {
     if (isset($input['status']) && $input['status'] === 'verified') {
         $fields[] = "verified_at = ?";
         $params[] = date('Y-m-d H:i:s');
-        if (isset($input['verified_by'])) {
+        if (!empty($input['verified_by']) && apiHkUserExists($input['verified_by'])) {
             $fields[] = "verified_by = ?";
-            $params[] = $input['verified_by'];
+            $params[] = (int)$input['verified_by'];
         }
     }
     
@@ -491,12 +621,16 @@ function updateStatus($id): void {
         ApiResponse::validationError(['status' => 'Invalid status']);
     }
 
+    if (!apiHkAssignmentExists((int)$id)) {
+        ApiResponse::error('Assignment not found', 404);
+    }
+
     $completedAt = in_array($status, ['completed', 'verified'], true) ? date('Y-m-d H:i:s') : null;
     $verifiedAt = $status === 'verified' ? date('Y-m-d H:i:s') : null;
-    $verifiedBy = ($status === 'verified' && isset($input['verified_by'])) ? $input['verified_by'] : null;
+    $verifiedBy = ($status === 'verified' && !empty($input['verified_by']) && apiHkUserExists($input['verified_by'])) ? (int)$input['verified_by'] : null;
     
     $stmt = $pdo->prepare("UPDATE housekeeping_assignments SET status = ?, completed_at = ?, verified_at = ?, verified_by = ? WHERE id = ?");
-    $stmt->execute([$status, $completedAt, $verifiedAt, $verifiedBy, $id]);
+    $stmt->execute([apiHkStatusToDb($status), $completedAt, $verifiedAt, $verifiedBy, $id]);
     apiReconcileRoom($id);
     ApiResponse::success(null, 'Status updated');
 }
@@ -521,17 +655,17 @@ function verifyAssignment($id): void {
     }
     
     // Check if assignment is completed
-    $chk = $pdo->prepare("SELECT status FROM housekeeping_assignments WHERE id = ?");
+    $chk = $pdo->prepare("SELECT status, verified_at FROM housekeeping_assignments WHERE id = ?");
     $chk->execute([$id]);
     $assignment = $chk->fetch(PDO::FETCH_ASSOC);
     if (!$assignment) {
         ApiResponse::error('Assignment not found', 404);
     }
-    if ($assignment['status'] !== 'completed') {
+    if (apiHkStatusFromRow($assignment) !== 'completed') {
         ApiResponse::error('Assignment must be completed before verification', 400);
     }
     
-    $stmt = $pdo->prepare("UPDATE housekeeping_assignments SET status = 'verified', verified_by = ?, verified_at = NOW() WHERE id = ?");
+    $stmt = $pdo->prepare("UPDATE housekeeping_assignments SET verified_by = ?, verified_at = NOW() WHERE id = ? AND status = 'completed'");
     $stmt->execute([$verifiedBy, $id]);
     apiReconcileRoom($id);
     ApiResponse::success(null, 'Assignment verified');

@@ -154,7 +154,7 @@ $max_attempts = 5;
 $lockout_minutes = 15;
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
-    $username = trim($_POST['username'] ?? '');
+    $username = substr(trim((string)($_POST['username'] ?? '')), 0, 100); // admin_activity_log.username is VARCHAR(100)
     $password = $_POST['password'] ?? '';
     $ip = $_SERVER['REMOTE_ADDR'] ?? 'unknown';
     $ua = substr($_SERVER['HTTP_USER_AGENT'] ?? '', 0, 500);
@@ -217,6 +217,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 } else {
                     verify_password:
                     if ($user && password_verify($password, $user['password_hash'])) {
+                        session_regenerate_id(true); // new session id on privilege change (anti fixation)
                         // Successful login
                         $_SESSION['admin_user_id'] = $user['id'];
                         $_SESSION['admin_last_activity'] = time();
