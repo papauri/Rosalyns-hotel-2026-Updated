@@ -6,6 +6,7 @@
  * @version 2.0.0
  */
 require_once 'admin-init.php';
+require_once __DIR__ . '/includes/staff-invite-lib.php';
 /** @var array $user */
 /** @var string $csrf_token */
 
@@ -78,9 +79,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $password = $_POST['password'] ?? '';
                 $send_welcome = !empty($_POST['send_welcome']);
 
-                if (empty($username) || empty($email) || empty($full_name) || empty($password)) {
-                    $error_msg = 'All fields are required.';
-                } elseif (strlen($password) < 8) {
+                if (empty($username) || empty($email) || empty($full_name)) {
+                    $error_msg = 'Name, username and email are required.';
+                } elseif ($password === '' && !$send_welcome) {
+                    $error_msg = 'Set a password, or tick "Send invitation" so they choose their own.';
+                } elseif ($password !== '' && strlen($password) < 8) {
                     $error_msg = 'Password must be at least 8 characters.';
                 } elseif (!filter_var($email, FILTER_VALIDATE_EMAIL) || strlen($email) > 255) {
                     $error_msg = 'Please enter a valid email address.';
@@ -95,7 +98,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     if ($check->fetchColumn() > 0) {
                         $error_msg = 'Username or email already exists.';
                     } else {
-                        $hash = password_hash($password, PASSWORD_DEFAULT);
+                        // No password set = nobody can sign in until the invitation is accepted.
+                        $hash = $password !== '' ? password_hash($password, PASSWORD_DEFAULT) : rh_staff_invite_placeholder_hash();
                         $stmt = $pdo->prepare("INSERT INTO admin_users (username, email, password_hash, full_name, role, created_at) VALUES (?, ?, ?, ?, ?, NOW())");
                         $stmt->execute([$username, $email, $hash, $full_name, $role]);
                         $new_user_id = $pdo->lastInsertId();
@@ -105,12 +109,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
                         $success_msg = "User '{$full_name}' created successfully.";
 
-                        // Send welcome email if requested
+                        // Invitation: a one-time link to choose a password (no password is emailed).
                         if ($send_welcome) {
-                            $welcome = sendAdminWelcomeEmail($full_name, $email, $username, $password, $role);
-                            if (!$welcome['success']) {
-                                error_log('Welcome email failed for ' . $email . ': ' . $welcome['message']);
-                                $success_msg .= ' (Welcome email could not be sent — please share credentials manually.)';
+                            $invite = rh_staff_invite_send($pdo, (int)$new_user_id, (string)($user['full_name'] ?? 'An administrator'));
+                            if (!empty($invite['success'])) {
+                                logActivity($user['id'], 'user_invited', "Sent invitation to '{$username}' ({$email})");
+                                $success_msg .= ' Invitation sent to ' . htmlspecialchars($email) . ' (link valid ' . RH_STAFF_INVITE_HOURS . ' h).';
+                            } else {
+                                error_log('Invitation failed for ' . $email . ': ' . $invite['message']);
+                                $success_msg .= ' (The invitation email could not be sent - use "Resend invitation".)';
                             }
                         }
                     }
@@ -266,18 +273,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     } elseif (empty($target['email']) || !filter_var($target['email'], FILTER_VALIDATE_EMAIL)) {
                         $error_msg = 'This user has no valid email address on file.';
                     } else {
-                        // A welcome email is only useful with working credentials —
-                        // issue a fresh temporary password (same policy as create).
-                        $tempPassword = 'Rh' . bin2hex(random_bytes(4)) . '!' . random_int(10, 99);
-                        $pdo->prepare("UPDATE admin_users SET password_hash = ?, failed_login_attempts = 0 WHERE id = ?")
-                            ->execute([password_hash($tempPassword, PASSWORD_DEFAULT), $uid]);
-
-                        $welcome = sendAdminWelcomeEmail((string)$target['full_name'], (string)$target['email'], (string)$target['username'], $tempPassword, (string)$target['role']);
-                        if (!empty($welcome['success'])) {
-                            logActivity($user['id'], 'welcome_resent', "Resent welcome email (new temp password) to '{$target['username']}'");
-                            $success_msg = 'Welcome email with a new temporary password sent to ' . htmlspecialchars((string)$target['email']) . '.';
+                        // Fresh one-time invitation link; the current password is left alone and
+                        // earlier unused links stop working.
+                        $invite = rh_staff_invite_send($pdo, $uid, (string)($user['full_name'] ?? 'An administrator'));
+                        if (!empty($invite['success'])) {
+                            logActivity($user['id'], 'user_invited', "Resent invitation to '{$target['username']}'");
+                            $success_msg = 'Invitation sent to ' . htmlspecialchars((string)$target['email']) . ' (link valid ' . RH_STAFF_INVITE_HOURS . ' h).';
                         } else {
-                            $error_msg = 'Password was reset but the email failed: ' . (string)($welcome['message'] ?? 'unknown error') . ' — share credentials manually.';
+                            $error_msg = $invite['message'];
                         }
                     }
                 }
@@ -554,8 +557,8 @@ $nav_categories = getNavCategories();
                             <?php endif; ?>
 
                             <?php if ($u['id'] != $user['id'] && !empty($u['email']) && hasPermission($user['id'], 'user_edit') && canManageUser($user['id'], $u['id'])): ?>
-                            <button type="button" class="btn-sm btn-edit" title="Resend welcome email with a NEW temporary password"
-                                onclick="if (confirm('Resend the welcome email to <?php echo htmlspecialchars($u['full_name'], ENT_QUOTES); ?>? This resets their password to a new temporary one.')) { submitResendWelcome(<?php echo (int)$u['id']; ?>); }">
+                            <button type="button" class="btn-sm btn-edit" title="Resend the invitation (a fresh one-time link to set their password)"
+                                onclick="if (confirm('Resend the invitation to <?php echo htmlspecialchars($u['full_name'], ENT_QUOTES); ?>? They get a fresh one-time link to set their password; earlier links stop working.')) { submitResendWelcome(<?php echo (int)$u['id']; ?>); }">
                                 <i class="fas fa-envelope"></i>
                             </button>
                             <?php endif; ?>
@@ -664,8 +667,9 @@ $nav_categories = getNavCategories();
                     <div class="hint">Role determines default permissions. You can customize later.</div>
                 </div>
                 <div class="form-row">
-                    <label for="add-password">Password</label>
-                    <input type="password" id="add-password" name="password" required minlength="8" placeholder="Minimum 8 characters">
+                    <label for="add-password">Password <span style="font-weight:400;color:#888;">(optional)</span></label>
+                    <input type="password" id="add-password" name="password" minlength="8" placeholder="Leave blank - they set it from the invitation">
+                    <div class="hint">With "Send invitation" ticked, the person gets a one-time link (valid 72 h) to choose their own password. No password is ever emailed.</div>
                 </div>
             </div>
             <div class="modal-footer">

@@ -54,7 +54,7 @@ if (!empty($token)) {
     
     try {
         $stmt = $pdo->prepare("
-            SELECT pr.*, au.username, au.full_name, au.email 
+            SELECT pr.*, au.username, au.full_name, au.email, au.last_login 
             FROM password_resets pr 
             JOIN admin_users au ON pr.user_id = au.id 
             WHERE pr.token = ? AND pr.expires_at > NOW() AND pr.used_at IS NULL 
@@ -162,7 +162,9 @@ $site_name = getSetting('site_name');
                 <div class="logo">
                     <i class="fas fa-shield-alt"></i>
                 </div>
-                <h1>New Password</h1>
+                <?php $is_invite = $valid_token && empty($user_data['last_login']); ?>
+                <h1><?php echo $is_invite ? 'Accept your invitation' : 'New Password'; ?></h1>
+                <?php if ($is_invite): ?><p style="margin:0 0 12px;">Welcome, <?php echo htmlspecialchars((string)$user_data['full_name']); ?>. Choose a password to activate your account (username: <strong><?php echo htmlspecialchars((string)$user_data['username']); ?></strong>).</p><?php endif; ?>
                 <?php if ($valid_token && $user_data): ?>
                     <p>Create a new password for your account</p>
                     <div class="user-badge">
