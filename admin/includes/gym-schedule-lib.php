@@ -304,6 +304,20 @@ if (!function_exists('gymScheduleCreateReservation')) {
 
         try {
             $ref = gymScheduleReference($pdo);
+            // Re-count the slot under a lock and insert in the same transaction: two guests taking the
+            // last places at the same moment must not both get in (the count above is only a pre-check).
+            $pdo->beginTransaction();
+            $lockSt = $pdo->prepare("SELECT COALESCE(SUM(party_size),0) FROM gym_slot_reservations
+                WHERE slot_date = ? AND slot_time = ? AND status IN ('booked','attended') FOR UPDATE");
+            $lockSt->execute([$date, $slot['time'] . ':00']);
+            $bookedNow = (int)$lockSt->fetchColumn();
+            if ($bookedNow + $party > $cfg['capacity']) {
+                $pdo->rollBack();
+                $left = max(0, $cfg['capacity'] - $bookedNow);
+                return ['ok' => false, 'message' => $left > 0
+                    ? ('Only ' . $left . ' space' . ($left === 1 ? '' : 's') . ' left in that slot.')
+                    : 'That slot is fully booked. Please choose another time.'];
+            }
             $ins = $pdo->prepare("INSERT INTO gym_slot_reservations
                 (reference, slot_date, slot_time, member_id, member_number, full_name, phone, email, party_size, status, source)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'booked', ?)");
@@ -311,8 +325,10 @@ if (!function_exists('gymScheduleCreateReservation')) {
                 $ref, $date, $slot['time'] . ':00', $memberId, $memberNumber ?: null,
                 $name, $phone ?: null, $email ?: null, $party, $source,
             ]);
+            $pdo->commit();
             return ['ok' => true, 'message' => 'Reserved.', 'reference' => $ref];
         } catch (Throwable $e) {
+            if ($pdo->inTransaction()) { $pdo->rollBack(); }
             error_log('gymScheduleCreateReservation failed: ' . $e->getMessage());
             return ['ok' => false, 'message' => 'Could not save your reservation. Please try again.'];
         }

@@ -67,6 +67,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['gm_action'])) {
             if ($expiry !== '' && !DateTime::createFromFormat('Y-m-d', $expiry)) {
                 $gm_json(false, 'Expiry date must be a valid date or left empty.');
             }
+            if ($startDt->format('Y-m-d') !== $start) {
+                $gm_json(false, 'A valid start date is required.');
+            }
+            if ($expiry !== '' && $expiry < $start) {
+                $gm_json(false, 'Expiry date cannot be before the start date.');
+            }
             if ($fee !== null && ($fee < 0 || $fee > 99999999)) {
                 $gm_json(false, 'Fee must be zero or a positive amount.');
             }
@@ -131,6 +137,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['gm_action'])) {
                 }
 
                 $nameChanged = $name !== (string)$cur['full_name'];
+
+                // Editing contact details must not silently re-derive (and shorten/extend) the expiry:
+                // staff without financials rights get the package expiry recomputed from the start date
+                // on every save, wiping a renewal a manager set. Keep the stored expiry unless the
+                // package or start date actually changed.
+                if (!$gm_can_financials
+                    && (string)($cur['start_date'] ?? '') === $start
+                    && (string)($cur['membership_type'] ?? '') === (string)$type) {
+                    $expiry = (string)($cur['expiry_date'] ?? '');
+                }
 
                 // ── Name-change guards ──────────────────────────────────────
                 // A membership is not transferable to another person. Name edits
@@ -198,6 +214,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['gm_action'])) {
                 $chk->execute([$memberNumber]);
             } while ((int)$chk->fetchColumn() > 0);
             $inquiryId = (int)($_POST['gym_inquiry_id'] ?? 0);
+            if ($inquiryId > 0) {
+                // One inquiry converts to one member - a double-click / second tab must not enrol twice.
+                $dupChk = $pdo->prepare("SELECT member_number FROM gym_members WHERE gym_inquiry_id = ? LIMIT 1");
+                $dupChk->execute([$inquiryId]);
+                $dupNo = $dupChk->fetchColumn();
+                if ($dupNo) {
+                    $gm_json(false, 'This inquiry is already enrolled as member ' . $dupNo . '.');
+                }
+            }
             $stmt = $pdo->prepare("INSERT INTO gym_members (member_number, full_name, email, phone, membership_type, start_date, expiry_date, monthly_fee, is_complimentary, status, notes, gym_inquiry_id, created_by) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)");
             $stmt->execute([$memberNumber, $name, $email ?: null, $phone ?: null, $type ?: null, $start, $expiry ?: null, $fee, $isComplimentary, $status, $notes ?: null, $inquiryId ?: null, (int)($user['id'] ?? 0)]);
             $newMemberId = (int)$pdo->lastInsertId();

@@ -134,6 +134,44 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     try {
         $action = $_POST['action'] ?? '';
 
+        if (in_array($action, ['add', 'update'], true)) {
+            // Strict SQL rejects '' for TIME / INT / DECIMAL columns: validate and normalise first.
+            if (trim((string)($_POST['title'] ?? '')) === '') {
+                throw new Exception('Event title is required.');
+            }
+            $evDate = DateTime::createFromFormat('Y-m-d', (string)($_POST['event_date'] ?? ''));
+            if (!$evDate || $evDate->format('Y-m-d') !== (string)$_POST['event_date']) {
+                throw new Exception('A valid event date is required.');
+            }
+            foreach (['start_time', 'end_time'] as $tf) {
+                $tv = trim((string)($_POST[$tf] ?? ''));
+                if ($tv === '') {
+                    $_POST[$tf] = null;
+                } elseif (!preg_match('/^([01]\d|2[0-3]):[0-5]\d(:[0-5]\d)?$/', $tv)) {
+                    throw new Exception('Start and end time must be valid times (HH:MM).');
+                } else {
+                    $_POST[$tf] = $tv;
+                }
+            }
+            if ($_POST['start_time'] !== null && $_POST['end_time'] !== null && strcmp(substr($_POST['end_time'], 0, 5), substr($_POST['start_time'], 0, 5)) <= 0) {
+                throw new Exception('End time must be after the start time.');
+            }
+            $tp = trim((string)($_POST['ticket_price'] ?? ''));
+            if ($tp === '') {
+                $_POST['ticket_price'] = 0;
+            } elseif (!is_numeric($tp) || (float)$tp < 0) {
+                throw new Exception('Ticket price must be a number (0 or more).');
+            }
+            $cp = trim((string)($_POST['capacity'] ?? ''));
+            if ($cp === '') {
+                $_POST['capacity'] = null; // unlimited
+            } elseif (!ctype_digit($cp)) {
+                throw new Exception('Capacity must be a whole number (leave blank or 0 for unlimited).');
+            }
+            $do = trim((string)($_POST['display_order'] ?? ''));
+            $_POST['display_order'] = is_numeric($do) ? (int)$do : 0;
+        }
+
         if ($action === 'add') {
             // Handle image upload
             $imagePath = null;
@@ -309,6 +347,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             }
         } elseif ($action === 'delete') {
             $eventId = (int)($_POST['id'] ?? 0);
+            // Guests already holding a place (or waiting) would be orphaned: cancel their bookings first.
+            $liveRsvp = $pdo->prepare("SELECT COUNT(*) FROM event_inquiries WHERE event_id = ? AND status IN ('pending','confirmed','waitlisted')");
+            $liveRsvp->execute([$eventId]);
+            if ((int)$liveRsvp->fetchColumn() > 0) {
+                throw new Exception('This event has pending, confirmed or waitlisted bookings. Cancel them first (Event Bookings), or switch the event off instead of deleting it.');
+            }
             if ($eventId > 0 && function_exists('upsertManagedMediaForSource')) {
                 upsertManagedMediaForSource('events', $eventId, 'image_path', null, ['source_context' => '']);
                 upsertManagedMediaForSource('events', $eventId, 'video_path', null, ['source_context' => '']);
@@ -417,6 +461,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
     } catch (PDOException $e) {
         $error = 'Error: ' . $e->getMessage();
+    } catch (Exception $e) {
+        // Validation / quotation failures used to escape as an uncaught exception (blank 500 page).
+        $error = $e->getMessage();
+        if ($is_ajax) {
+            header('Content-Type: application/json; charset=utf-8');
+            echo json_encode(['success' => false, 'message' => $error]);
+            exit;
+        }
     }
 }
 

@@ -40,6 +40,22 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         // Complimentary packages are always free regardless of the price field.
         $gm_pkg_price = $gm_pkg_comp ? 0.0 : (float)($_POST['price'] ?? 0);
 
+        if (in_array($action, ['add', 'update'], true)) {
+            $gm_pkg_name = trim((string)($_POST['name'] ?? ''));
+            if ($gm_pkg_name === '' || mb_strlen($gm_pkg_name) > 150) {
+                throw new Exception('Package name is required (max 150 characters).');
+            }
+            if (!$gm_pkg_comp && (!is_numeric($_POST['price'] ?? '') || (float)$_POST['price'] < 0 || (float)$_POST['price'] > 99999999)) {
+                throw new Exception('Price must be a number (0 or more).');
+            }
+            // Enquiries and members store the package by NAME, so two packages must not share one.
+            $gm_dup = $pdo->prepare("SELECT COUNT(*) FROM gym_packages WHERE LOWER(name) = LOWER(?) AND id <> ?");
+            $gm_dup->execute([$gm_pkg_name, $action === 'update' ? (int)($_POST['id'] ?? 0) : 0]);
+            if ((int)$gm_dup->fetchColumn() > 0) {
+                throw new Exception('A package with that name already exists.');
+            }
+        }
+
         if ($action === 'add') {
             $stmt = $pdo->prepare("
                 INSERT INTO gym_packages

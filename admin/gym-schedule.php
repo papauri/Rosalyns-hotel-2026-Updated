@@ -78,7 +78,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['gs_action'])) {
             $id = (int)($_POST['id'] ?? 0);
             $newStatus = in_array($_POST['status'] ?? '', ['attended', 'no_show', 'booked'], true) ? (string)$_POST['status'] : '';
             if ($newStatus === '') { $gs_json(false, 'Invalid status.'); }
-            $pdo->prepare("UPDATE gym_slot_reservations SET status=? WHERE id=?")->execute([$newStatus, $id]);
+            // A cancelled reservation has released its place: it must not be revived here (that would bypass
+            // the slot capacity check). The guest has to book again.
+            $msUpd = $pdo->prepare("UPDATE gym_slot_reservations SET status=? WHERE id=? AND status <> 'cancelled'");
+            $msUpd->execute([$newStatus, $id]);
+            $msChk = $pdo->prepare("SELECT status FROM gym_slot_reservations WHERE id=?");
+            $msChk->execute([$id]);
+            if ((string)$msChk->fetchColumn() === 'cancelled') {
+                $gs_json(false, 'This reservation is cancelled and cannot be changed.');
+            }
             $gs_json(true, 'Marked ' . str_replace('_', ' ', $newStatus) . '.');
         }
 

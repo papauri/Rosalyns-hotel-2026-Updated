@@ -52,8 +52,9 @@ if (!function_exists('rh_event_seat_statuses')) {
      */
     function rh_event_rsvp_status(PDO $pdo, int $eventId, int $guests): ?string
     {
-        $st = $pdo->prepare('SELECT capacity FROM events WHERE id = ? AND is_active = 1 FOR UPDATE');
-        $st->execute([$eventId]);
+        // Past events are closed to new RSVPs (the page greys them out, the server must agree).
+        $st = $pdo->prepare('SELECT capacity FROM events WHERE id = ? AND is_active = 1 AND event_date >= ? FOR UPDATE');
+        $st->execute([$eventId, date('Y-m-d')]);
         $capacity = $st->fetchColumn();
         if ($capacity === false) {
             return null;

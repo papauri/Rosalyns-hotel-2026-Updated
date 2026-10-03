@@ -103,12 +103,20 @@ if (!function_exists('gym_checkin_process')) {
         // turn today's arrival into a "checked out".
         gym_auto_checkout_stale($pdo, $adminId);
 
+        $ownTx = false;
         try {
-            $stmt = $pdo->prepare("SELECT id, member_number, full_name, email, membership_type, start_date, expiry_date, status FROM gym_members WHERE member_number = ? LIMIT 1");
+            // Lock the member row for the whole decision: two near-simultaneous scans (double-tap, two
+            // desks) would otherwise both see 'no open visit' and open two visits.
+            if (!$pdo->inTransaction()) {
+                $pdo->beginTransaction();
+                $ownTx = true;
+            }
+            $stmt = $pdo->prepare("SELECT id, member_number, full_name, email, membership_type, start_date, expiry_date, status FROM gym_members WHERE member_number = ? LIMIT 1 FOR UPDATE");
             $stmt->execute([$code]);
             $member = $stmt->fetch(PDO::FETCH_ASSOC);
 
             if (!$member) {
+                if ($ownTx) { $pdo->rollBack(); }
                 return ['outcome' => 'not_found', 'message' => 'No member found for "' . $code . '". Check the number or enrol the member first.'];
             }
 
@@ -124,10 +132,18 @@ if (!function_exists('gym_checkin_process')) {
             $today   = date('Y-m-d');
             $expired = $member['expiry_date'] !== null && $member['expiry_date'] !== '' && $member['expiry_date'] < $today;
 
-            if ($member['status'] !== 'active' || $expired) {
+            // An open visit is always closable - a member whose card lapsed or was suspended while inside
+            // must still be able to check out (otherwise they show as 'in gym' until the nightly sweep).
+            $open = $pdo->prepare("SELECT id, checked_in_at FROM gym_attendance WHERE member_id = ? AND checked_out_at IS NULL ORDER BY checked_in_at DESC LIMIT 1");
+            $open->execute([(int)$member['id']]);
+            $visit = $open->fetch(PDO::FETCH_ASSOC);
+
+            $notStarted = !$visit && $member['start_date'] !== null && $member['start_date'] !== '' && $member['start_date'] > $today;
+            if (!$visit && ($member['status'] !== 'active' || $expired || $notStarted)) {
+                if ($ownTx) { $pdo->rollBack(); }
                 $why = $expired
                     ? 'membership expired ' . date('M j, Y', strtotime((string)$member['expiry_date']))
-                    : 'membership is ' . $member['status'];
+                    : ($notStarted ? 'membership starts ' . date('M j, Y', strtotime((string)$member['start_date'])) : 'membership is ' . $member['status']);
                 return [
                     'outcome' => 'blocked',
                     'message' => $member['full_name'] . ' cannot check in — ' . $why . '.',
@@ -136,15 +152,12 @@ if (!function_exists('gym_checkin_process')) {
             }
 
             // Open visit? → check out.
-            $open = $pdo->prepare("SELECT id, checked_in_at FROM gym_attendance WHERE member_id = ? AND checked_out_at IS NULL ORDER BY checked_in_at DESC LIMIT 1");
-            $open->execute([(int)$member['id']]);
-            $visit = $open->fetch(PDO::FETCH_ASSOC);
-
             if ($visit) {
                 $pdo->prepare("UPDATE gym_attendance SET checked_out_at = NOW(), checked_out_by = ? WHERE id = ?")
                     ->execute([$adminId ?: null, (int)$visit['id']]);
                 $mins = max(0, (int)floor((time() - strtotime((string)$visit['checked_in_at'])) / 60));
                 $dur  = $mins >= 60 ? floor($mins / 60) . 'h ' . ($mins % 60) . 'm' : $mins . 'm';
+                if ($ownTx) { $pdo->commit(); }
                 return [
                     'outcome'          => 'checked_out',
                     'message'          => 'Goodbye ' . $member['full_name'] . ' — visit duration ' . $dur . '.',
@@ -169,6 +182,7 @@ if (!function_exists('gym_checkin_process')) {
             $todayCount->execute([(int)$member['id']]);
             $visitsToday = (int)$todayCount->fetchColumn();
             if ($visitsToday >= $maxDaily) {
+                if ($ownTx) { $pdo->rollBack(); }
                 if (function_exists('logActivity')) {
                     try { logActivity($adminId ?: 0, 'gym_checkin_blocked', 'Possible pass sharing: ' . $member['member_number'] . ' (' . $member['full_name'] . ') attempted visit #' . ($visitsToday + 1) . ' today'); } catch (Throwable $e) { /* fine */ }
                 }
@@ -182,6 +196,7 @@ if (!function_exists('gym_checkin_process')) {
             $pdo->prepare("INSERT INTO gym_attendance (member_id, member_number, checked_in_at, checked_in_by, method) VALUES (?, ?, NOW(), ?, ?)")
                 ->execute([(int)$member['id'], (string)$member['member_number'], $adminId ?: null, $method]);
             $attendanceId = (int)$pdo->lastInsertId();
+            if ($ownTx) { $pdo->commit(); }
 
             $expiringSoon = $member['expiry_date'] !== null && $member['expiry_date'] !== ''
                 && $member['expiry_date'] <= date('Y-m-d', strtotime('+7 days'));
@@ -197,6 +212,7 @@ if (!function_exists('gym_checkin_process')) {
                 'attendance_id' => $attendanceId,
             ];
         } catch (Throwable $e) {
+            if ($ownTx && $pdo->inTransaction()) { $pdo->rollBack(); }
             error_log('gym_checkin_process: ' . $e->getMessage());
             return ['outcome' => 'error', 'message' => 'Database error while processing the scan.'];
         }

@@ -196,11 +196,15 @@ if (!function_exists('gymClassEnrolMember')) {
             return ['success' => false, 'message' => 'That class no longer exists.'];
         }
         try {
-            $chk = $pdo->prepare("SELECT id, full_name FROM gym_members WHERE id = ? LIMIT 1");
+            $chk = $pdo->prepare("SELECT id, full_name, status, expiry_date FROM gym_members WHERE id = ? LIMIT 1");
             $chk->execute([$memberId]);
             $member = $chk->fetch(PDO::FETCH_ASSOC);
             if (!$member) {
                 return ['success' => false, 'message' => 'Member not found.'];
+            }
+            // Only a live membership can take a class place (the picker already lists active members only).
+            if ((string)$member['status'] !== 'active' || (!empty($member['expiry_date']) && $member['expiry_date'] < date('Y-m-d'))) {
+                return ['success' => false, 'message' => $member['full_name'] . '\'s membership is not active, so they cannot be enrolled.'];
             }
             // Upsert: revive a previously cancelled enrolment or insert fresh.
             $stmt = $pdo->prepare("
@@ -252,7 +256,7 @@ if (!function_exists('gymClassSendReminders')) {
         $sent = 0; $skipped = 0; $failed = 0;
         foreach ($roster as $r) {
             $email = trim((string)($r['email'] ?? ''));
-            if ($email === '' || !filter_var($email, FILTER_VALIDATE_EMAIL)) {
+            if ($email === '' || !filter_var($email, FILTER_VALIDATE_EMAIL) || (string)($r['member_status'] ?? 'active') !== 'active') {
                 $skipped++;
                 continue;
             }

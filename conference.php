@@ -65,6 +65,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         if (!pub_csrf_validate($_POST['csrf_token'] ?? '', 'conference')) {
             throw new Exception('Security token invalid. Please refresh the page and try again.');
         }
+        // Same throttle as the events / gym / contact forms (conference was the only open one).
+        if (!pub_rate_limit('conference_form', 5, 600)) {
+            throw new Exception('Too many submissions. Please wait a few minutes before trying again.');
+        }
 
         // Initialize validation errors array
         $validation_errors = [];
@@ -101,6 +105,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         } else {
             // Use validated email directly - no need to sanitize as validation already ensures it's safe
             $sanitized_data['email'] = $_POST['email'];
+            if (strlen($sanitized_data['email']) > 100) {
+                $validation_errors['email'] = 'Email address is too long (maximum 100 characters)';
+            }
         }
 
         // Validate phone
@@ -109,6 +116,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $validation_errors['phone'] = $phone_validation['error'];
         } else {
             $sanitized_data['phone'] = $phone_validation['sanitized'];
+            if (strlen($sanitized_data['phone']) > 20) {
+                $validation_errors['phone'] = 'Phone number is too long (maximum 20 characters)';
+            }
         }
 
         // Get booking time buffer from settings (default to 60 minutes if not set)
@@ -181,6 +191,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
         // Validate catering_required (optional)
         $sanitized_data['catering_required'] = isset($_POST['catering_required']) ? 1 : 0;
+
+        // Consent is required on the form, so the server must enforce it too (as events / gym do).
+        if (!isset($_POST['consent'])) {
+            $validation_errors['consent'] = 'You must accept consent to proceed.';
+        }
 
         // Check for validation errors
         if (!empty($validation_errors)) {
@@ -347,10 +362,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         header('Location: conference-confirmation.php?ref=' . urlencode($inquiry_reference));
         exit;
     } catch (\Throwable $e) {
-        $inquiry_error = $e->getMessage();
+        // Validation messages are ours to show; database errors must never reach the guest.
+        $inquiry_error = ($e instanceof PDOException) ? 'We could not save your enquiry. Please try again or contact us directly.' : $e->getMessage();
         error_log('Conference inquiry error: ' . $e->getMessage() . ' in ' . $e->getFile() . ':' . $e->getLine());
     }
 }
+
+// Keep what the guest typed when the request is rejected (blank on first load / after success).
+$confOld = static function (string $k) use (&$inquiry_error): string {
+    return ($inquiry_error !== '' && isset($_POST[$k]) && is_scalar($_POST[$k])) ? htmlspecialchars((string)$_POST[$k], ENT_QUOTES, 'UTF-8') : '';
+};
 
 $currency_symbol = getSetting('currency_symbol');
 $site_name = getSetting('site_name');
@@ -495,75 +516,75 @@ function resolveConferenceImage(?string $imagePath): string
             <div class="form-row">
                 <div class="form-group">
                     <label>Company Name *</label>
-                    <input type="text" name="company_name" autocomplete="organization" autocapitalize="words" required>
+                    <input type="text" name="company_name" value="' . $confOld('company_name') . '" autocomplete="organization" autocapitalize="words" required>
                 </div>
                 <div class="form-group">
                     <label>Contact Person *</label>
-                    <input type="text" name="contact_person" autocomplete="name" autocapitalize="words" required>
+                    <input type="text" name="contact_person" value="' . $confOld('contact_person') . '" autocomplete="name" autocapitalize="words" required>
                 </div>
             </div>
 
             <div class="form-row">
                 <div class="form-group">
                     <label>Email *</label>
-                    <input type="email" name="email" autocomplete="email" inputmode="email" autocapitalize="off" spellcheck="false" required>
+                    <input type="email" name="email" value="' . $confOld('email') . '" autocomplete="email" inputmode="email" autocapitalize="off" spellcheck="false" required>
                 </div>
                 <div class="form-group">
                     <label>Phone *</label>
-                    <input type="tel" name="phone" autocomplete="tel" inputmode="tel" required>
+                    <input type="tel" name="phone" value="' . $confOld('phone') . '" autocomplete="tel" inputmode="tel" required>
                 </div>
             </div>
 
             <div class="form-group">
                 <label>Event Date *</label>
-                <input type="date" name="event_date" id="event_date" min="' . date('Y-m-d') . '" required>
+                <input type="date" name="event_date" id="event_date" value="' . $confOld('event_date') . '" min="' . date('Y-m-d') . '" required>
                 <small class="field-error" id="event_date_error"></small>
             </div>
 
             <div class="form-row">
                 <div class="form-group">
                     <label>Start Time *</label>
-                    <input type="time" name="start_time" id="start_time" required>
+                    <input type="time" name="start_time" id="start_time" value="' . $confOld('start_time') . '" required>
                     <small class="field-error" id="start_time_error"></small>
                 </div>
                 <div class="form-group">
                     <label>End Time *</label>
-                    <input type="time" name="end_time" id="end_time" required>
+                    <input type="time" name="end_time" id="end_time" value="' . $confOld('end_time') . '" required>
                 </div>
             </div>
 
             <div class="form-row">
                 <div class="form-group">
                     <label>Number of Attendees *</label>
-                    <input type="number" name="number_of_attendees" min="1" inputmode="numeric" required>
+                    <input type="number" name="number_of_attendees" value="' . $confOld('number_of_attendees') . '" min="1" inputmode="numeric" required>
                 </div>
                 <div class="form-group">
                     <label>Event Type</label>
                     <select name="event_type">
                         <option value="">Select type...</option>
-                        <option value="Meeting">Meeting</option>
-                        <option value="Conference">Conference</option>
-                        <option value="Workshop">Workshop</option>
-                        <option value="Seminar">Seminar</option>
-                        <option value="Training">Training</option>
-                        <option value="Other">Other</option>
+                        <option value="Meeting"' . ($confOld('event_type') === 'Meeting' ? ' selected' : '') . '>Meeting</option>
+                        <option value="Conference"' . ($confOld('event_type') === 'Conference' ? ' selected' : '') . '>Conference</option>
+                        <option value="Workshop"' . ($confOld('event_type') === 'Workshop' ? ' selected' : '') . '>Workshop</option>
+                        <option value="Seminar"' . ($confOld('event_type') === 'Seminar' ? ' selected' : '') . '>Seminar</option>
+                        <option value="Training"' . ($confOld('event_type') === 'Training' ? ' selected' : '') . '>Training</option>
+                        <option value="Other"' . ($confOld('event_type') === 'Other' ? ' selected' : '') . '>Other</option>
                     </select>
                 </div>
             </div>
 
             <div class="form-group">
                 <label>AV Equipment Requirements</label>
-                <input type="text" name="av_equipment" placeholder="e.g., Projector, Microphones, Sound System">
+                <input type="text" name="av_equipment" value="' . $confOld('av_equipment') . '" placeholder="e.g., Projector, Microphones, Sound System">
             </div>
 
             <div class="form-group checkbox-group">
-                <input type="checkbox" name="catering_required" id="catering">
+                <input type="checkbox" name="catering_required" id="catering"' . ($confOld('catering_required') !== '' ? ' checked' : '') . '>
                 <label for="catering" style="margin-bottom: 0;">Catering Required</label>
             </div>
 
             <div class="form-group">
                 <label>Special Requirements</label>
-                <textarea name="special_requirements" rows="4" placeholder="Any additional requests or requirements..."></textarea>
+                <textarea name="special_requirements" rows="4" placeholder="Any additional requests or requirements...">' . $confOld('special_requirements') . '</textarea>
             </div>
 
             <div class="form-group checkbox-group">

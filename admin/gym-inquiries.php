@@ -48,8 +48,31 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['inquiry_action'])) {
             $fetch = $pdo->prepare("SELECT * FROM gym_inquiries WHERE id = ?");
             $fetch->execute([$inquiry_id]);
             $inquiry_row = $fetch->fetch(PDO::FETCH_ASSOC);
+            if (!$inquiry_row) {
+                throw new Exception('Gym inquiry not found!');
+            }
+            $oldStatus = (string)($inquiry_row['status'] ?? '');
+            // Cancel has its own action (it voids the bill and resyncs the balance); a cancelled
+            // account stays cancelled - the quick switch must not reopen it or skip the deposit rule.
+            if ($new_status === 'cancelled' && $oldStatus !== 'cancelled') {
+                throw new Exception('Use the Cancel button in the inquiry details to cancel (it voids the bill and handles any payment).');
+            }
+            if ($oldStatus === 'cancelled' && $new_status !== 'cancelled') {
+                throw new Exception('Cancelled inquiries cannot be reopened. Ask the guest to submit a new one.');
+            }
+            if ($new_status === $oldStatus) {
+                throw new Exception('The inquiry is already ' . $new_status . '.');
+            }
+            if (in_array($new_status, ['confirmed', 'converted'], true)) {
+                $dSnap = syncGymInquiryPaymentSnapshot($pdo, (int)$inquiry_id);
+                $dReq = (float)($dSnap['deposit_required'] ?? 0);
+                $dPaid = (float)($dSnap['deposit_paid'] ?? 0);
+                if ($dReq > 0 && $dPaid + BALANCE_TOLERANCE < $dReq) {
+                    throw new Exception('Required gym deposit has not been fully paid yet.');
+                }
+            }
 
-            $stmt = $pdo->prepare("UPDATE gym_inquiries SET status = ? WHERE id = ?");
+            $stmt = $pdo->prepare("UPDATE gym_inquiries SET status = ?, updated_at = NOW() WHERE id = ?");
             $stmt->execute([$new_status, $inquiry_id]);
 
             // Send status-change emails
@@ -73,6 +96,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['inquiry_action'])) {
                 $message = 'Inquiry status updated successfully!';
             }
         } elseif ($action === 'delete') {
+            // Payments are ledger records: an inquiry that has any cannot be deleted (cancel it instead).
+            $payChk = $pdo->prepare("SELECT COUNT(*) FROM payments WHERE booking_type = 'gym' AND booking_id = ? AND deleted_at IS NULL");
+            $payChk->execute([(int)$inquiry_id]);
+            if ((int)$payChk->fetchColumn() > 0) {
+                throw new Exception('This inquiry has payments recorded against it and cannot be deleted. Cancel it instead.');
+            }
             $stmt = $pdo->prepare("DELETE FROM gym_inquiries WHERE id = ?");
             $stmt->execute([$inquiry_id]);
             $message = 'Gym inquiry deleted successfully!';
@@ -150,7 +179,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['inquiry_action'])) {
             if (in_array($action, ['confirm', 'complete'], true)) {
                 $depositRequired = (float)($paymentSnapshot['deposit_required'] ?? $inquiry['deposit_required'] ?? 0);
                 $depositPaid = (float)($paymentSnapshot['deposit_paid'] ?? $inquiry['deposit_paid'] ?? 0);
-                if ($depositRequired > 0 && $depositPaid + 0.0001 < $depositRequired) {
+                if ($depositRequired > 0 && $depositPaid + BALANCE_TOLERANCE < $depositRequired) {
                     throw new Exception('Required gym deposit has not been fully paid yet.');
                 }
             }
@@ -222,8 +251,21 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['inquiry_action'])) {
                     $totalWithVat = $vatParts['total'];
 
                     // Idempotency guard — if already fully paid just resend the invoice
+                    if ((string)($inquiry['status'] ?? '') === 'cancelled') {
+                        throw new Exception('Payment cannot be recorded for a cancelled booking.');
+                    }
+                    if ($totalAmount <= BALANCE_TOLERANCE) {
+                        throw new Exception('Set a total amount before recording payment.');
+                    }
                     $alreadyPaid = (float)($paymentSnapshot['amount_paid'] ?? 0);
-                    if ($alreadyPaid >= $totalWithVat - 0.01 && $totalWithVat > 0) {
+                    // Only the outstanding balance is collected: a part-paid account must not be paid in full again.
+                    $remainingGross = round($totalWithVat - $alreadyPaid, 2);
+                    $payParts = ['net' => $vatParts['net'], 'rate' => $vatRate, 'vat' => $vatAmount, 'total' => $totalWithVat];
+                    if ($alreadyPaid > BALANCE_TOLERANCE && $remainingGross > BALANCE_TOLERANCE) {
+                        $balSplit = rh_account_vat_split($pdo, 'gym', $inquiry_id, $remainingGross, (float)$vatRate);
+                        $payParts = ['net' => $balSplit['net'], 'rate' => $balSplit['rate'], 'vat' => $balSplit['vat'], 'total' => $remainingGross];
+                    }
+                    if ($alreadyPaid >= $totalWithVat - BALANCE_TOLERANCE && $totalWithVat > 0) {
                         $invoice_result = sendGymInvoiceEmail($inquiry_id);
                         $message = 'Payment already recorded. Invoice resent to ' . htmlspecialchars($inquiry['email'] ?? '');
                         $message .= $invoice_result['success'] ? '' : ' (Invoice email failed: ' . $invoice_result['message'] . ')';
@@ -249,22 +291,24 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['inquiry_action'])) {
                             $payment_reference,
                             $inquiry_id,
                             $inquiry['reference_number'],
-                            $vatParts['net'], // payment_amount is always the ex-VAT figure
-                            $vatRate,
-                            $vatAmount,
-                            $totalWithVat,
+                            $payParts['net'], // payment_amount is always the ex-VAT figure
+                            $payParts['rate'],
+                            $payParts['vat'],
+                            $payParts['total'],
                             $receipt_number,
                             $user['id']
                         ]);
                         $gym_payment_id = (int)$pdo->lastInsertId();
 
+                        // Lock the invoiced VAT figures, then derive paid/due from the ledger (never hard-code
+                        // them: refunds and earlier part-payments must net out).
                         $update_amounts = $pdo->prepare("
                                 UPDATE gym_inquiries
-                                SET amount_paid = ?, amount_due = 0, vat_rate = ?, vat_amount = ?,
-                                    total_with_vat = ?, last_payment_date = CURDATE(), payment_status = 'full_paid'
+                                SET vat_rate = ?, vat_amount = ?, total_with_vat = ?, payment_status = 'full_paid'
                                 WHERE id = ?
                             ");
-                        $update_amounts->execute([$totalWithVat, $vatRate, $vatAmount, $totalWithVat, $inquiry_id]);
+                        $update_amounts->execute([$vatRate, $vatAmount, $totalWithVat, $inquiry_id]);
+                        syncGymInquiryPaymentSnapshot($pdo, $inquiry_id);
                         $pdo->commit();
 
                         if ($gym_payment_id > 0) {
@@ -311,9 +355,29 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['inquiry_action'])) {
                     $error = 'Failed to send quotation: ' . ($quoteResult['message'] ?? 'Unknown error');
                 }
             } elseif ($action === 'update_amount') {
-                $amount = $_POST['total_amount'] ?? 0;
-                $stmt = $pdo->prepare("UPDATE gym_inquiries SET total_amount = ? WHERE id = ?");
-                $stmt->execute([$amount, $inquiry_id]);
+                $amountRaw = $_POST['total_amount'] ?? '';
+                if (!is_numeric($amountRaw) || (float)$amountRaw < 0 || (float)$amountRaw > 99999999) {
+                    throw new Exception('Total amount must be a number (0 or more).');
+                }
+                if ((string)($inquiry['status'] ?? '') === 'cancelled') {
+                    throw new Exception('A cancelled booking\'s bill is void; its amount cannot be changed.');
+                }
+                $amount = round((float)$amountRaw, 2);
+                // Re-lock the VAT figures on the new amount (the balance is measured against the locked gross,
+                // so changing total_amount alone left amount_due on the old price), then resync from the ledger.
+                $newVat = vat_components($amount);
+                $pdo->beginTransaction();
+                try {
+                    $stmt = $pdo->prepare("UPDATE gym_inquiries SET total_amount = ?, vat_rate = ?, vat_amount = ?, total_with_vat = ? WHERE id = ?");
+                    $stmt->execute([$amount, $newVat['rate'], $newVat['vat'], $newVat['total'], $inquiry_id]);
+                    syncGymInquiryPaymentSnapshot($pdo, $inquiry_id);
+                    $pdo->commit();
+                } catch (Throwable $amtEx) {
+                    if ($pdo->inTransaction()) {
+                        $pdo->rollBack();
+                    }
+                    throw $amtEx;
+                }
                 $message = 'Total amount updated successfully!';
             } elseif ($action === 'update_notes') {
                 $notes = $_POST['notes'] ?? '';
@@ -690,11 +754,11 @@ try {
                         <button type="submit" class="btn btn-secondary btn-sm"><i class="fas fa-flag-checkered"></i> Mark Completed</button>
                     </form>` : ''}
                     ${(inquiry.status !== 'cancelled') ? `
-                    <form method="POST" onsubmit="return confirm('Cancel this membership? Any recorded payment will be refunded.');">
+                    <form method="POST" onsubmit="return confirm('Cancel this membership? The bill is voided; any payment already recorded stays as credit owed back (refund it from the Payments screen).');">
                         <input type="hidden" name="inquiry_action" value="cancel">
                         <input type="hidden" name="inquiry_id" value="${inquiry.id}">
                         <input type="hidden" name="csrf_token" value="${gymCsrfToken}">
-                        <button type="submit" class="btn btn-danger btn-sm"><i class="fas fa-ban"></i> Cancel &amp; Refund</button>
+                        <button type="submit" class="btn btn-danger btn-sm"><i class="fas fa-ban"></i> Cancel Membership</button>
                     </form>` : ''}
                     ${inquiry.email ? `
                     <button type="button" class="btn btn-sm" style="background:#8B7355;color:#fff;" onclick="openEmailComposer(window._gymCurrentInquiry)">

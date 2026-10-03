@@ -154,6 +154,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['gym_booking_form'])) 
             $validation_errors['package_choice'] = $package_validation['error'];
         } else {
             $sanitized_data['package_choice'] = sanitizeString($package_validation['value'], 100);
+            // Only a package the gym actually offers (or the fallback when none are listed) is accepted.
+            $offeredPackages = array_map(static function ($p) { return (string)$p['name']; }, $gymPackages);
+            if (empty($offeredPackages)) {
+                $offeredPackages = ['Custom Request'];
+            }
+            if (!in_array(trim((string)($_POST['package_choice'] ?? '')), $offeredPackages, true)) {
+                $validation_errors['package_choice'] = 'Please choose one of the listed packages.';
+            }
         }
 
         // Validate goals (optional)
@@ -201,8 +209,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['gym_booking_form'])) 
             // Log booking data for diagnostics
             error_log("Gym booking data prepared: " . print_r($booking_data, true));
 
-            // Set success and generate reference after validation passes
-            $bookingSuccess = true;
+            // Generate the reference; success is only declared once the inquiry is really saved
             $bookingReference = 'GYM-' . strtoupper(substr(uniqid(), -8));
             $booking_data['reference_number'] = $bookingReference;
 
@@ -229,8 +236,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['gym_booking_form'])) 
                 error_log("Gym inquiry saved to database with reference: " . $bookingReference);
             } catch (PDOException $e) {
                 error_log("Failed to save gym inquiry to database: " . $e->getMessage());
-                // Continue with email sending even if database save fails
+                // Never tell the guest it worked (and email a reference that does not exist) when nothing was saved.
+                $bookingError = 'We could not save your booking request. Please try again or contact us directly.';
             }
+        }
+        if ($bookingError === '' && !empty($sanitized_data)) {
+            $bookingSuccess = true;
 
             // Send confirmation email to customer
             $customer_result = sendGymBookingEmail($booking_data);
@@ -264,6 +275,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['gym_booking_form'])) 
         } // end if (!empty($validation_errors)) else
     } // end CSRF/rate-limit else block
 }
+
+// Keep what the guest typed when the request is rejected (blank on first load / after success).
+$gymOld = static function (string $k) use (&$bookingError): string {
+    return ($bookingError !== '' && isset($_POST[$k]) && is_scalar($_POST[$k])) ? htmlspecialchars((string)$_POST[$k], ENT_QUOTES, 'UTF-8') : '';
+};
 
 // Fetch policies for footer modals
 $policies = [];
@@ -737,28 +753,28 @@ try {
                             <div class="form-grid">
                                 <div class="form-group">
                                     <label for="full_name">Full Name *</label>
-                                    <input type="text" id="full_name" name="full_name" autocomplete="name" autocapitalize="words" required>
+                                    <input type="text" id="full_name" name="full_name" value="<?php echo $gymOld('full_name'); ?>" autocomplete="name" autocapitalize="words" required>
                                 </div>
                                 <div class="form-group">
                                     <label for="email">Email *</label>
-                                    <input type="email" id="email" name="email" autocomplete="email" inputmode="email" autocapitalize="off" spellcheck="false" required>
+                                    <input type="email" id="email" name="email" value="<?php echo $gymOld('email'); ?>" autocomplete="email" inputmode="email" autocapitalize="off" spellcheck="false" required>
                                 </div>
                                 <div class="form-group">
                                     <label for="phone">Phone *</label>
-                                    <input type="tel" id="phone" name="phone" autocomplete="tel" inputmode="tel" required>
+                                    <input type="tel" id="phone" name="phone" value="<?php echo $gymOld('phone'); ?>" autocomplete="tel" inputmode="tel" required>
                                 </div>
                                 <div class="form-group">
                                     <label for="guests">Guests</label>
-                                    <input type="number" id="guests" name="guests" min="1" max="10" inputmode="numeric" placeholder="1">
+                                    <input type="number" id="guests" name="guests" value="<?php echo $gymOld('guests'); ?>" min="1" max="10" inputmode="numeric" placeholder="1">
                                 </div>
                                 <div class="form-group">
                                     <label for="preferred_date">Preferred Date *</label>
-                                    <input type="date" id="preferred_date" name="preferred_date" min="<?php echo date('Y-m-d'); ?>" required>
+                                    <input type="date" id="preferred_date" name="preferred_date" value="<?php echo $gymOld('preferred_date'); ?>" min="<?php echo date('Y-m-d'); ?>" required>
                                     <small class="field-error" id="preferred_date_error"></small>
                                 </div>
                                 <div class="form-group">
                                     <label for="preferred_time">Preferred Time *</label>
-                                    <input type="time" id="preferred_time" name="preferred_time" required>
+                                    <input type="time" id="preferred_time" name="preferred_time" value="<?php echo $gymOld('preferred_time'); ?>" required>
                                     <small class="field-error" id="preferred_time_error"></small>
                                 </div>
                                 <div class="form-group full">
@@ -766,7 +782,7 @@ try {
                                     <select id="package_choice" name="package_choice" required>
                                         <option value="">Choose a package</option>
                                         <?php foreach ($gymPackages as $pkg): ?>
-                                            <option value="<?php echo htmlspecialchars($pkg['name']); ?>">
+                                            <option value="<?php echo htmlspecialchars($pkg['name']); ?>"<?php echo $gymOld('package_choice') === htmlspecialchars($pkg['name'], ENT_QUOTES, 'UTF-8') ? ' selected' : ''; ?>>
                                                 <?php echo htmlspecialchars($pkg['name']); ?> (<?php echo htmlspecialchars($pkg['currency_code']); ?> <?php echo number_format($pkg['price'], 0); ?>)
                                             </option>
                                         <?php endforeach; ?>
@@ -777,7 +793,7 @@ try {
                                 </div>
                                 <div class="form-group full">
                                     <label for="goals">Fitness Goals / Notes</label>
-                                    <textarea id="goals" name="goals" rows="4" placeholder="Tell us what you want to achieve or any special requests"></textarea>
+                                    <textarea id="goals" name="goals" rows="4" placeholder="Tell us what you want to achieve or any special requests"><?php echo $gymOld('goals'); ?></textarea>
                                 </div>
                                 <div class="form-consent full">
                                     <label class="checkbox">

@@ -155,6 +155,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['event_booking_form'])
     }
 }
 
+// Keep what the guest typed when the request is rejected (blank on first load / after success).
+$evOld = static function (string $k) use (&$bookingError): string {
+    return ($bookingError !== '' && isset($_POST[$k]) && is_scalar($_POST[$k])) ? htmlspecialchars((string)$_POST[$k], ENT_QUOTES, 'UTF-8') : '';
+};
+
 function resolveEventImagePath(?string $imagePath): string
 {
     if (empty($imagePath)) {
@@ -479,23 +484,23 @@ $site_logo = getSetting('site_logo');
                             <div class="form-grid">
                                 <div class="form-group">
                                     <label for="event_full_name">Full Name *</label>
-                                    <input type="text" id="event_full_name" name="full_name" autocomplete="name" autocapitalize="words" required>
+                                    <input type="text" id="event_full_name" name="full_name" value="<?php echo $evOld('full_name'); ?>" autocomplete="name" autocapitalize="words" required>
                                 </div>
                                 <div class="form-group">
                                     <label for="event_email">Email *</label>
-                                    <input type="email" id="event_email" name="email" autocomplete="email" inputmode="email" autocapitalize="off" spellcheck="false" required>
+                                    <input type="email" id="event_email" name="email" value="<?php echo $evOld('email'); ?>" autocomplete="email" inputmode="email" autocapitalize="off" spellcheck="false" required>
                                 </div>
                                 <div class="form-group">
                                     <label for="event_phone">Phone *</label>
-                                    <input type="tel" id="event_phone" name="phone" autocomplete="tel" inputmode="tel" required>
+                                    <input type="tel" id="event_phone" name="phone" value="<?php echo $evOld('phone'); ?>" autocomplete="tel" inputmode="tel" required>
                                 </div>
                                 <div class="form-group">
                                     <label for="event_guests">Guests</label>
-                                    <input type="number" id="event_guests" name="guests" min="1" max="20" inputmode="numeric" placeholder="1">
+                                    <input type="number" id="event_guests" name="guests" value="<?php echo $evOld('guests'); ?>" min="1" max="20" inputmode="numeric" placeholder="1">
                                 </div>
                                 <div class="form-group full">
                                     <label for="event_message">Message / Special Requests</label>
-                                    <textarea id="event_message" name="message" rows="4" placeholder="Any special requests or questions"></textarea>
+                                    <textarea id="event_message" name="message" rows="4" placeholder="Any special requests or questions"><?php echo $evOld('message'); ?></textarea>
                                 </div>
                                 <div class="form-consent full">
                                     <label class="checkbox">

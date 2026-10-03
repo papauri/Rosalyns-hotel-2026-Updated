@@ -110,6 +110,24 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             throw new Exception('You do not have permission to manage conference room facilities.');
         }
 
+        if (in_array($action, ['add', 'update'], true)) {
+            if (trim((string)($_POST['name'] ?? '')) === '' || trim((string)($_POST['description'] ?? '')) === '') {
+                throw new Exception('Room name and description are required.');
+            }
+            if (!isset($_POST['capacity']) || !ctype_digit(trim((string)$_POST['capacity'])) || (int)$_POST['capacity'] < 1) {
+                throw new Exception('Capacity must be a whole number of at least 1.');
+            }
+            if (!isset($_POST['daily_rate']) || !is_numeric($_POST['daily_rate']) || (float)$_POST['daily_rate'] < 0) {
+                throw new Exception('Full day rate must be a number (0 or more).');
+            }
+            if (($_POST['size_sqm'] ?? '') !== '' && (!is_numeric($_POST['size_sqm']) || (float)$_POST['size_sqm'] < 0)) {
+                throw new Exception('Size must be a positive number.');
+            }
+            if (($_POST['display_order'] ?? '') === '' || !is_numeric($_POST['display_order'])) {
+                $_POST['display_order'] = 0;
+            }
+        }
+
         $imagePath = uploadConferenceImage($_FILES['image'] ?? []);
 
         if ($action === 'add') {
@@ -209,6 +227,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
 
         if ($action === 'delete') {
+            // A room with live enquiries cannot be removed: they would lose their room (and the
+            // double-booking guard would stop protecting that date). Deactivate it instead.
+            $liveChk = $pdo->prepare("SELECT COUNT(*) FROM conference_inquiries WHERE conference_room_id = ? AND status IN ('pending','confirmed')");
+            $liveChk->execute([(int)($_POST['id'] ?? 0)]);
+            if ((int)$liveChk->fetchColumn() > 0) {
+                throw new Exception('This room has pending or confirmed enquiries. Cancel or complete them first, or deactivate the room instead of deleting it.');
+            }
             $stmt = $pdo->prepare("DELETE FROM conference_rooms WHERE id = ?");
             $stmt->execute([$_POST['id']]);
             $message = 'Conference room deleted successfully!';
@@ -231,6 +256,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
     } catch (PDOException $e) {
         $error = 'Error: ' . $e->getMessage();
+        if ($is_ajax) {
+            header('Content-Type: application/json');
+            echo json_encode(['success' => false, 'message' => $error]);
+            exit;
+        }
+    } catch (Exception $e) {
+        // CSRF / permission failures used to escape as an uncaught exception (blank 500 page).
+        $error = $e->getMessage();
         if ($is_ajax) {
             header('Content-Type: application/json');
             echo json_encode(['success' => false, 'message' => $error]);
@@ -307,6 +340,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['enquiry_action'])) {
             $eventDate = (string)($enquiry['event_date'] ?? '');
             $startTime = (string)($enquiry['start_time'] ?? '');
             $endTime   = (string)($enquiry['end_time'] ?? '');
+            // Lock the room row so two staff confirming overlapping enquiries at once cannot both pass
+            // the clash check, then re-read this enquiry's status under the lock.
+            $pdo->beginTransaction();
+            try {
+            if ($roomId > 0) {
+                $roomLock = $pdo->prepare("SELECT id FROM conference_rooms WHERE id = ? FOR UPDATE");
+                $roomLock->execute([$roomId]);
+            }
+            $statusLock = $pdo->prepare("SELECT status FROM conference_inquiries WHERE id = ? FOR UPDATE");
+            $statusLock->execute([$enquiry_id]);
+            if ((string)$statusLock->fetchColumn() !== 'pending') {
+                throw new Exception('Only pending enquiries can be confirmed.');
+            }
             if ($roomId > 0 && $eventDate !== '') {
                 if ($startTime !== '' && $endTime !== '') {
                     // Standard half-open overlap: other.start < this.end AND other.end > this.start.
@@ -314,7 +360,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['enquiry_action'])) {
                         SELECT inquiry_reference, start_time, end_time
                         FROM conference_inquiries
                         WHERE conference_room_id = ? AND event_date = ? AND id <> ?
-                          AND status = 'confirmed'
+                          AND status IN ('confirmed', 'completed')
                           AND start_time < ? AND end_time > ?
                         LIMIT 1
                     ");
@@ -325,7 +371,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['enquiry_action'])) {
                         SELECT inquiry_reference, start_time, end_time
                         FROM conference_inquiries
                         WHERE conference_room_id = ? AND event_date = ? AND id <> ?
-                          AND status = 'confirmed'
+                          AND status IN ('confirmed', 'completed')
                         LIMIT 1
                     ");
                     $clashStmt->execute([$roomId, $eventDate, $enquiry_id]);
@@ -341,8 +387,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['enquiry_action'])) {
                 }
             }
 
-            $stmt = $pdo->prepare("UPDATE conference_inquiries SET status = 'confirmed', updated_at = NOW() WHERE id = ?");
+            $stmt = $pdo->prepare("UPDATE conference_inquiries SET status = 'confirmed', updated_at = NOW() WHERE id = ? AND status = 'pending'");
             $stmt->execute([$enquiry_id]);
+            $pdo->commit();
+            } catch (Throwable $confirmEx) {
+                if ($pdo->inTransaction()) {
+                    $pdo->rollBack();
+                }
+                throw $confirmEx;
+            }
 
             $email_result = sendConferenceConfirmedEmail($enquiry);
             if ($email_result['success']) {
@@ -452,8 +505,22 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['enquiry_action'])) {
                 $totalWithVat = $vatParts['total'];
 
                 // Idempotency guard — if already fully paid just resend the invoice
+                if (!in_array((string)($enquiry['status'] ?? ''), ['confirmed', 'completed'], true)) {
+                    throw new Exception('Payment can only be recorded for confirmed or completed bookings.');
+                }
+                if ($totalAmount <= BALANCE_TOLERANCE) {
+                    throw new Exception('Set a total amount before recording payment.');
+                }
                 $alreadyPaid = (float)($paymentSnapshot['amount_paid'] ?? 0);
-                if ($alreadyPaid >= $totalWithVat - 0.01) {
+                // Only the outstanding balance is collected: a part-paid account must not be paid in full again.
+                $remainingGross = round($totalWithVat - $alreadyPaid, 2);
+                $payParts = ['net' => $vatParts['net'], 'rate' => $vatRate, 'vat' => $vatAmount, 'total' => $totalWithVat];
+                if ($alreadyPaid > BALANCE_TOLERANCE && $remainingGross > BALANCE_TOLERANCE) {
+                    require_once __DIR__ . '/includes/finance-account-sync.php';
+                    $balSplit = rh_account_vat_split($pdo, 'conference', $enquiry_id, $remainingGross, (float)$vatRate);
+                    $payParts = ['net' => $balSplit['net'], 'rate' => $balSplit['rate'], 'vat' => $balSplit['vat'], 'total' => $remainingGross];
+                }
+                if ($alreadyPaid >= $totalWithVat - BALANCE_TOLERANCE) {
                     $invoice_result = sendConferenceInvoiceEmail($enquiry_id);
                     $message = 'Payment already recorded. Invoice resent to ' . htmlspecialchars($enquiry['email'] ?? '');
                     $message .= $invoice_result['success'] ? '' : ' (Invoice email failed: ' . $invoice_result['message'] . ')';
@@ -479,22 +546,24 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['enquiry_action'])) {
                         $payment_reference,
                         $enquiry_id,
                         $enquiry['inquiry_reference'],
-                        $vatParts['net'], // payment_amount is always the ex-VAT figure
-                        $vatRate,
-                        $vatAmount,
-                        $totalWithVat,
+                        $payParts['net'], // payment_amount is always the ex-VAT figure
+                        $payParts['rate'],
+                        $payParts['vat'],
+                        $payParts['total'],
                         $receipt_number,
                         $user['id']
                     ]);
                     $conf_payment_id = (int)$pdo->lastInsertId();
 
+                    // Lock the invoiced VAT figures, then derive paid/due/payment_status from the ledger
+                    // (never hard-code them: refunds and earlier part-payments must net out).
                     $update_amounts = $pdo->prepare("
                             UPDATE conference_inquiries
-                            SET amount_paid = ?, amount_due = 0, vat_rate = ?, vat_amount = ?,
-                                total_with_vat = ?, last_payment_date = CURDATE(), payment_status = 'full_paid'
+                            SET vat_rate = ?, vat_amount = ?, total_with_vat = ?
                             WHERE id = ?
                         ");
-                    $update_amounts->execute([$totalWithVat, $vatRate, $vatAmount, $totalWithVat, $enquiry_id]);
+                    $update_amounts->execute([$vatRate, $vatAmount, $totalWithVat, $enquiry_id]);
+                    syncConferenceEnquiryPaymentSnapshot($pdo, $enquiry_id);
                     $pdo->commit();
 
                     // Send receipt email with PDF
@@ -544,9 +613,29 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['enquiry_action'])) {
                 $error = 'Failed to send quotation: ' . ($quoteResult['message'] ?? 'Unknown error');
             }
         } elseif ($action === 'update_amount') {
-            $amount = $_POST['total_amount'] ?? 0;
-            $stmt = $pdo->prepare("UPDATE conference_inquiries SET total_amount = ? WHERE id = ?");
-            $stmt->execute([$amount, $enquiry_id]);
+            $amountRaw = $_POST['total_amount'] ?? '';
+            if (!is_numeric($amountRaw) || (float)$amountRaw < 0 || (float)$amountRaw > 99999999) {
+                throw new Exception('Total amount must be a number (0 or more).');
+            }
+            if ((string)($enquiry['status'] ?? '') === 'cancelled') {
+                throw new Exception('A cancelled booking\'s bill is void; its amount cannot be changed.');
+            }
+            $amount = round((float)$amountRaw, 2);
+            // Re-lock the VAT figures on the new amount (the balance is measured against the locked gross,
+            // so changing total_amount alone left amount_due on the old price), then resync from the ledger.
+            $newVat = vat_components($amount);
+            $pdo->beginTransaction();
+            try {
+                $stmt = $pdo->prepare("UPDATE conference_inquiries SET total_amount = ?, vat_rate = ?, vat_amount = ?, total_with_vat = ? WHERE id = ?");
+                $stmt->execute([$amount, $newVat['rate'], $newVat['vat'], $newVat['total'], $enquiry_id]);
+                syncConferenceEnquiryPaymentSnapshot($pdo, $enquiry_id);
+                $pdo->commit();
+            } catch (Throwable $amtEx) {
+                if ($pdo->inTransaction()) {
+                    $pdo->rollBack();
+                }
+                throw $amtEx;
+            }
             $message = 'Total amount updated successfully!';
         } elseif ($action === 'update_notes') {
             $notes = $_POST['notes'] ?? '';
