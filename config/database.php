@@ -20,6 +20,35 @@ if (file_exists(__DIR__ . '/database.local.php')) {
     include __DIR__ . '/database.local.php';
 }
 
+// Step 1b: if the loader is missing (it is not always deployed) or left the credentials
+// empty, read the project's .env here. The file wins over exported variables, the same
+// rule as database.local.php, so one hotel can never pick up another's DB_* values.
+if ((empty($db_host ?? null) || empty($db_name ?? null) || empty($db_user ?? null)) && is_readable(dirname(__DIR__) . '/.env')) {
+    foreach (file(dirname(__DIR__) . '/.env', FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES) as $_envLine) {
+        $_envLine = trim($_envLine);
+        if ($_envLine === '' || $_envLine[0] === '#' || strpos($_envLine, '=') === false) {
+            continue;
+        }
+        [$_envKey, $_envVal] = explode('=', $_envLine, 2);
+        $_envKey = trim(preg_replace("/^\xEF\xBB\xBF/", '', $_envKey)); // strip a UTF-8 BOM
+        $_envVal = trim($_envVal);
+        if (strlen($_envVal) >= 2 && ($_envVal[0] === '"' || $_envVal[0] === "'") && substr($_envVal, -1) === $_envVal[0]) {
+            $_envVal = substr($_envVal, 1, -1);
+        }
+        if ($_envKey !== '') {
+            putenv($_envKey . '=' . $_envVal);
+            $_ENV[$_envKey] = $_envVal;
+        }
+    }
+    unset($_envLine, $_envKey, $_envVal);
+    foreach (['host' => 'DB_HOST', 'name' => 'DB_NAME', 'user' => 'DB_USER', 'pass' => 'DB_PASS', 'port' => 'DB_PORT'] as $_k => $_e) {
+        if (empty(${'db_' . $_k}) && getenv($_e) !== false && getenv($_e) !== '') {
+            ${'db_' . $_k} = getenv($_e);
+        }
+    }
+    unset($_k, $_e);
+}
+
 // Step 2: fall through to getenv() for anything not set by the loader
 // (covers the case where database.local.php is absent, or env vars were
 //  set at the OS / cPanel level rather than via .env)
@@ -34,7 +63,7 @@ $db_charset = $db_charset ?? 'utf8mb4';
 if (empty($db_host) || empty($db_name) || empty($db_user)) {
     $envFile = dirname(__DIR__) . '/.env';
     $hint = file_exists($envFile)
-        ? 'A .env file was found but DB_HOST / DB_NAME / DB_USER appear to be empty inside it.'
+        ? 'A .env file was found at ' . $envFile . ' but DB_HOST / DB_NAME / DB_USER are empty or missing in it (check the key names and that the file was saved with values).'
         : 'No .env file found at the project root (' . dirname(__DIR__) . '). '
         . 'Create one from .env.example and fill in your credentials, or set '
         . 'DB_HOST / DB_NAME / DB_USER / DB_PASS as server environment variables.';
