@@ -27,6 +27,10 @@ if (!validateCsrfToken($_POST['csrf_token'] ?? '')) {
 }
 
 $token = (string) getSetting('facebook_page_access_token', '');
+// Stored encrypted by Facebook Settings (older rows may be plaintext): decrypt, falling back to the raw value.
+if ($token !== '' && function_exists('decryptApiKey')) {
+    $token = (string) (decryptApiKey($token) ?? $token);
+}
 if ($token === '') {
     echo json_encode(['success' => false, 'error' => 'No access token is saved. Paste and save a token first.', 'code' => 400]);
     exit;

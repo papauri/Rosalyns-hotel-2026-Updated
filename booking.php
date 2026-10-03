@@ -362,7 +362,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $child_supplement_total = $child_guests > 0 ? ($child_rate_per_night * $child_guests * $number_of_nights) : 0;
         $total_amount = $base_amount + $child_supplement_total;
 
-        $tourism_levy_enabled = (bool)getSetting('tourism_levy_enabled', false);
+        $tourism_levy_enabled = in_array(getSetting('tourism_levy_enabled', '0'), ['1', 1, true, 'true', 'on'], true);
         $tourism_levy_percent = (float)getSetting('tourism_levy_percent', 0);
         $tourism_levy_amount = 0.0;
         if ($tourism_levy_enabled && $tourism_levy_percent > 0) {
@@ -915,7 +915,7 @@ $email_reservations = getSetting('email_reservations');
 $email_reservations_esc = addslashes($email_reservations); // For JavaScript
 
 // Get maximum advance booking days
-$max_advance_days = (int)getSetting('max_advance_booking_days');
+$max_advance_days = (int)getSetting('max_advance_booking_days', 30);
 $max_advance_date = date('Y-m-d', strtotime("+{$max_advance_days} days"));
 
 // Build blocked date sets for booking calendar parity with admin logic
@@ -1528,7 +1528,7 @@ try {
         const childPriceMultiplier = <?php echo json_encode((float)getSetting('booking_child_price_multiplier', getSetting('child_guest_price_multiplier', 50))); ?>;
 
         // Tourism levy settings
-        const tourismLevyEnabled = <?php echo json_encode((bool)getSetting('tourism_levy_enabled', false)); ?>;
+        const tourismLevyEnabled = <?php echo json_encode(in_array(getSetting('tourism_levy_enabled', '0'), ['1', 1, true, 'true', 'on'], true)); ?>;
         const tourismLevyPercent = <?php echo json_encode((float)getSetting('tourism_levy_percent', 0)); ?>;
         // VAT settings (levy sits outside the VAT base; see rh_stay_totals in includes/pricing.php)
         const siteVatMode = <?php echo json_encode(vat_mode()); ?>;

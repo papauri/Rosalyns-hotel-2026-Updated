@@ -31,8 +31,8 @@ if (!function_exists('footer_parse_tags')) {
                 '{{address_country}}'    => getSetting('address_country', ''),
                 '{{working_hours}}'      => getSetting('working_hours', ''),
                 // Booking
-                '{{check_in_time}}'      => getSetting('check_in_time', ''),
-                '{{check_out_time}}'     => getSetting('check_out_time', ''),
+                '{{check_in_time}}'      => getSetting('check_in_time', '2:00 PM'),
+                '{{check_out_time}}'     => getSetting('check_out_time', '11:00 AM'),
                 '{{payment_policy}}'     => getSetting('payment_policy', ''),
                 '{{cancellation_policy}}' => getSetting('cancellation_policy', ''),
                 // Finance

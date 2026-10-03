@@ -19,7 +19,7 @@ $user = [
 $message = '';
 $error = '';
 $_can_gym_financials = hasPermission((int)($user['id'] ?? 0), 'gym_financials');
-$currency_symbol = (string)getSetting('currency_symbol', 'K');
+$currency_symbol = (string)getSetting('currency_symbol', 'MWK');
 
 // Receivable-account payment sync (syncGymInquiryPaymentSnapshot) is defined in
 // the shared include so payment-add.php and this page compute identical balances.
@@ -132,7 +132,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['inquiry_action'])) {
                 $subject = mb_substr($subject, 0, 200);
             }
 
-            $site_name = (string)getSetting('site_name', 'Our Gym');
+            $site_name = (string)getSetting('site_name', 'Hotel');
             $memberName = htmlspecialchars((string)($inquiry_row['name'] ?? 'Member'), ENT_QUOTES, 'UTF-8');
             // Preserve the admin's line breaks; escape everything to prevent HTML injection.
             $safeBody = nl2br(htmlspecialchars($bodyText, ENT_QUOTES, 'UTF-8'));

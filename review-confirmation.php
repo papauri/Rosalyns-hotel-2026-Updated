@@ -20,7 +20,7 @@ $review_details = $_SESSION['review_details'];
 unset($_SESSION['review_details']);
 
 // Get site name
-$site_name = getSetting('site_name', 'Hotel Website');
+$site_name = getSetting('site_name', 'Hotel');
 ?>
 <!DOCTYPE html>
 <html lang="en">

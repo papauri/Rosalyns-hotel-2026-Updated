@@ -312,6 +312,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['save_site_maintenance
         $maintenanceMessageInput = $default_site_maintenance_message;
     }
 
+    $maintenanceMessageInput = mb_substr($maintenanceMessageInput, 0, 1000);
     updateSetting('site_maintenance_message', $maintenanceMessageInput);
 
     if (function_exists('rh_log_event')) {
@@ -340,11 +341,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['booking_disabled_acti
             ? (string)getSetting('booking_disabled_action', 'message') : 'message';
     }
     // Redirect target: site-relative path or http(s) URL only (never javascript:/data:, never //host).
-    if ($newRedirectUrl !== '' && !preg_match('#^https?://#i', $newRedirectUrl) && !preg_match('#^/(?!/)#', $newRedirectUrl)) {
+    if (mb_strlen($newRedirectUrl) > 500) {
+        $error = 'Redirect URL is too long (500 characters maximum).';
+    } elseif ($newRedirectUrl !== '' && !preg_match('#^https?://#i', $newRedirectUrl) && !preg_match('#^/(?!/)#', $newRedirectUrl)) {
         $error = 'Redirect URL must start with http://, https:// or a single /.';
     } else {
         updateSetting('booking_disabled_action', $newDisabledAction);
-        updateSetting('booking_disabled_message', $_POST['booking_disabled_message'] ?? '');
+        updateSetting('booking_disabled_message', mb_substr(trim((string)($_POST['booking_disabled_message'] ?? '')), 0, 1000));
         if (isset($_POST['booking_disabled_redirect_url'])) {
             updateSetting('booking_disabled_redirect_url', $newRedirectUrl);
         }
@@ -356,7 +359,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['booking_disabled_acti
 $booking_enabled = isBookingEnabled();
 $disabled_action = getBookingDisabledAction();
 $disabled_message = getBookingDisabledMessage();
-$disabled_redirect_url = getSetting('booking_disabled_redirect_url', '/');
+$disabled_redirect_url = getSetting('booking_disabled_redirect_url', defined('BASE_URL') ? BASE_URL : '/');
 $site_maintenance_enabled = in_array(strtolower(trim((string)getSetting('site_maintenance_enabled', '0'))), ['1', 'true', 'on', 'yes'], true);
 $site_maintenance_message = trim((string)getSetting('site_maintenance_message', $default_site_maintenance_message));
 if ($site_maintenance_message === '') {
@@ -416,7 +419,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['booking_email_templat
         $ajaxAddressParts = array_values(array_filter($ajaxAddressParts, static fn(string $value): bool => $value !== ''));
         $ajaxAddress = implode(', ', $ajaxAddressParts);
         if ($ajaxAddress === '') {
-            $ajaxAddress = (string)getSetting('hotel_address', getSetting('address', 'Beachfront Road, Cape Maclear'));
+            $ajaxAddress = (string)getSetting('hotel_address', getSetting('address', ''));
         }
 
         $ajaxVars = [
@@ -451,8 +454,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['booking_email_templat
             '{{attendees}}'                => '60',
             '{{attendee_count}}'           => '4',
             '{{total_amount_formatted}}'   => number_format(4500, 2),
-            '{{total_amount}}'             => (string)getSetting('currency_symbol', 'ZAR') . number_format(4500, 2),
-            '{{currency_symbol}}'          => (string)getSetting('currency_symbol', 'ZAR'),
+            '{{total_amount}}'             => (string)getSetting('currency_symbol', 'MWK') . number_format(4500, 2),
+            '{{currency_symbol}}'          => (string)getSetting('currency_symbol', 'MWK'),
             '{{contact_email}}'            => (string)getSetting('email_from_email', getSetting('contact_email', 'reservations@example.com')),
             '{{contact_phone}}'            => (string)getSetting('phone_main', ''),
             '{{phone_main}}'               => (string)getSetting('phone_main', ''),
@@ -466,15 +469,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['booking_email_templat
             '{{quote_reference}}'          => 'QT-RBH-2026-PREVIEW-001',
             '{{valid_until}}'              => date('F j, Y', strtotime('+7 days')),
             '{{quotation_notes}}'          => 'Please reply by the validity date to secure your booking.',
-            '{{rate_per_night}}'           => (string)getSetting('currency_symbol', 'ZAR') . number_format(2250, 2),
-            '{{room_subtotal}}'            => (string)getSetting('currency_symbol', 'ZAR') . number_format(4500, 2),
-            '{{vat_amount}}'               => (string)getSetting('currency_symbol', 'ZAR') . number_format(675, 2),
+            '{{rate_per_night}}'           => (string)getSetting('currency_symbol', 'MWK') . number_format(2250, 2),
+            '{{room_subtotal}}'            => (string)getSetting('currency_symbol', 'MWK') . number_format(4500, 2),
+            '{{vat_amount}}'               => (string)getSetting('currency_symbol', 'MWK') . number_format(675, 2),
             '{{vat_rate}}'                 => '15',
-            '{{child_supplement}}'         => (string)getSetting('currency_symbol', 'ZAR') . '0',
-            '{{deposit_amount}}'           => (string)getSetting('currency_symbol', 'ZAR') . number_format(1000, 2),
-            '{{total_due}}'                => (string)getSetting('currency_symbol', 'ZAR') . number_format(5175, 2),
-            '{{amount_paid}}'              => (string)getSetting('currency_symbol', 'ZAR') . number_format(1000, 2),
-            '{{balance_due}}'              => (string)getSetting('currency_symbol', 'ZAR') . number_format(4175, 2),
+            '{{child_supplement}}'         => (string)getSetting('currency_symbol', 'MWK') . '0',
+            '{{deposit_amount}}'           => (string)getSetting('currency_symbol', 'MWK') . number_format(1000, 2),
+            '{{total_due}}'                => (string)getSetting('currency_symbol', 'MWK') . number_format(5175, 2),
+            '{{amount_paid}}'              => (string)getSetting('currency_symbol', 'MWK') . number_format(1000, 2),
+            '{{balance_due}}'              => (string)getSetting('currency_symbol', 'MWK') . number_format(4175, 2),
             '{{amount_due}}'               => number_format(4175, 2),
             '{{due_date}}'                 => date('F j, Y', strtotime('-3 days')),
             '{{days_overdue}}'             => '3',
@@ -488,22 +491,22 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['booking_email_templat
             '{{client_email}}'             => 'events@example.com',
             '{{client_phone}}'             => '+27 82 444 2211',
             '{{event_type}}'               => 'Corporate Seminar',
-            '{{rate_per_attendee}}'        => (string)getSetting('currency_symbol', 'ZAR') . number_format(750, 2),
+            '{{rate_per_attendee}}'        => (string)getSetting('currency_symbol', 'MWK') . number_format(750, 2),
             '{{payment_reference}}'        => 'PAY-2026-PREVIEW-001',
             '{{payment_date}}'             => date('d M Y'),
             '{{payment_method}}'           => 'Bank Transfer',
             '{{payment_type}}'             => 'Full Payment',
             '{{payment_status}}'           => 'Completed',
-            '{{payment_amount}}'           => (string)getSetting('currency_symbol', 'ZAR') . number_format(4500, 2),
+            '{{payment_amount}}'           => (string)getSetting('currency_symbol', 'MWK') . number_format(4500, 2),
             '{{receipt_number}}'           => 'RCP-2026-000042',
             '{{booking_type}}'             => 'Restaurant',
             '{{description}}'              => 'Restaurant order preview for table service payment.',
             '{{bank_details_html}}'        => '<div style="background:#FCFAF7;padding:7px 10px;border-top:2px solid #D5B37C;"><p style="margin:0 0 4px;font-size:6px;letter-spacing:1px;text-transform:uppercase;color:#20303E;font-weight:700;">Bank Details</p><p style="margin:0;font-size:6px;color:#1E2430;">Bank: Preview Bank<br>Account No.: 00123456789</p></div>',
             '{{receipt_terms}}'            => '<p style="margin:0;font-size:6px;line-height:1.5;color:#5F655F;">Thank you for your payment. Please retain this receipt for your records.</p>',
             '{{credit_note_number}}'       => 'CN-RBH-2026-001',
-            '{{amount}}'                   => (string)getSetting('currency_symbol', 'ZAR') . number_format(1200, 2),
-            '{{balance}}'                  => (string)getSetting('currency_symbol', 'ZAR') . number_format(850, 2),
-            '{{amount_used}}'              => (string)getSetting('currency_symbol', 'ZAR') . number_format(350, 2),
+            '{{amount}}'                   => (string)getSetting('currency_symbol', 'MWK') . number_format(1200, 2),
+            '{{balance}}'                  => (string)getSetting('currency_symbol', 'MWK') . number_format(850, 2),
+            '{{amount_used}}'              => (string)getSetting('currency_symbol', 'MWK') . number_format(350, 2),
             '{{reason}}'                   => 'Overpayment adjustment',
             '{{reason_notes}}'             => 'Issued after reservation amount was corrected.',
             '{{expires_at}}'               => date('F j, Y', strtotime('+90 days')),
@@ -520,14 +523,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['booking_email_templat
                 $siteName = (string)getSetting('site_name', 'Hotel');
                 return $url !== '' ? '<img src="' . htmlspecialchars($url, ENT_QUOTES, 'UTF-8') . '" alt="' . htmlspecialchars($siteName, ENT_QUOTES, 'UTF-8') . '" style="max-width:160px;height:auto;display:block;margin:0 auto;">' : '';
             })(),
-            '{{subtotal_amount}}'          => (string)getSetting('currency_symbol', 'ZAR') . number_format(4500, 2),
+            '{{subtotal_amount}}'          => (string)getSetting('currency_symbol', 'MWK') . number_format(4500, 2),
             '{{vat_number}}'               => (string)getSetting('vat_number', ''),
             '{{vat_number_html}}'          => (function (): string {
                 $n = (string)getSetting('vat_number', '');
                 return $n !== '' ? '<p style="margin:8px 0 0;font-size:11px;color:#9b8f7e;text-align:center;">VAT Reg. No.: ' . htmlspecialchars($n, ENT_QUOTES, 'UTF-8') . '</p>' : '';
             })(),
             '{{levy_rate}}'                => '1.0',
-            '{{levy_amount}}'              => (string)getSetting('currency_symbol', 'ZAR') . number_format(45, 2),
+            '{{levy_amount}}'              => (string)getSetting('currency_symbol', 'MWK') . number_format(45, 2),
         ];
 
         $ajaxResSubject  = strtr($ajaxSubject,  $ajaxVars);
@@ -547,29 +550,29 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['booking_email_templat
                 . '<tr>'
                 . '<td width="58%" style="padding:5px 7px;border-bottom:1px solid #ECE2D7;font-size:7px;color:#1F1C17;line-height:1.3;">Deluxe Ocean Suite - Accommodation</td>'
                 . '<td width="8%" style="padding:5px 7px;border-bottom:1px solid #ECE2D7;font-size:7px;color:#6C6258;text-align:center;">2</td>'
-                . '<td width="16%" style="padding:5px 7px;border-bottom:1px solid #ECE2D7;font-size:7px;color:#6C6258;text-align:right;">' . htmlspecialchars((string)getSetting('currency_symbol', 'MWK '), ENT_QUOTES, 'UTF-8') . ' 2,250.00</td>'
-                . '<td width="18%" style="padding:5px 7px;border-bottom:1px solid #ECE2D7;font-size:7px;color:#1F1C17;font-weight:600;text-align:right;">' . htmlspecialchars((string)getSetting('currency_symbol', 'MWK '), ENT_QUOTES, 'UTF-8') . ' 4,500.00</td>'
+                . '<td width="16%" style="padding:5px 7px;border-bottom:1px solid #ECE2D7;font-size:7px;color:#6C6258;text-align:right;">' . htmlspecialchars((string)getSetting('currency_symbol', 'MWK'), ENT_QUOTES, 'UTF-8') . ' 2,250.00</td>'
+                . '<td width="18%" style="padding:5px 7px;border-bottom:1px solid #ECE2D7;font-size:7px;color:#1F1C17;font-weight:600;text-align:right;">' . htmlspecialchars((string)getSetting('currency_symbol', 'MWK'), ENT_QUOTES, 'UTF-8') . ' 4,500.00</td>'
                 . '</tr>';
             $invoiceTotalsRows = ''
                 . '<tr>'
                 . '<td colspan="3" style="padding:5px 7px 2px;border-top:1px solid #DCCFC2;font-size:7px;color:#6C6258;text-align:right;">Subtotal</td>'
-                . '<td width="18%" style="padding:5px 7px 2px;border-top:1px solid #DCCFC2;font-size:7px;color:#1F1C17;text-align:right;">' . htmlspecialchars((string)getSetting('currency_symbol', 'MWK '), ENT_QUOTES, 'UTF-8') . ' 4,500.00</td>'
+                . '<td width="18%" style="padding:5px 7px 2px;border-top:1px solid #DCCFC2;font-size:7px;color:#1F1C17;text-align:right;">' . htmlspecialchars((string)getSetting('currency_symbol', 'MWK'), ENT_QUOTES, 'UTF-8') . ' 4,500.00</td>'
                 . '</tr>'
                 . '<tr>'
                 . '<td colspan="3" style="padding:2px 7px;font-size:7px;color:#6C6258;text-align:right;">VAT (15%)</td>'
-                . '<td width="18%" style="padding:2px 7px;font-size:7px;color:#1F1C17;text-align:right;">' . htmlspecialchars((string)getSetting('currency_symbol', 'MWK '), ENT_QUOTES, 'UTF-8') . ' 675.00</td>'
+                . '<td width="18%" style="padding:2px 7px;font-size:7px;color:#1F1C17;text-align:right;">' . htmlspecialchars((string)getSetting('currency_symbol', 'MWK'), ENT_QUOTES, 'UTF-8') . ' 675.00</td>'
                 . '</tr>'
                 . '<tr>'
                 . '<td colspan="3" style="padding:5px 7px;background:#20303E;color:#F7F1EA;font-size:7px;font-weight:700;text-align:right;">Invoice Total</td>'
-                . '<td width="18%" style="padding:5px 7px;background:#20303E;color:#D6A968;font-size:7px;font-weight:700;text-align:right;">' . htmlspecialchars((string)getSetting('currency_symbol', 'MWK '), ENT_QUOTES, 'UTF-8') . ' 5,175.00</td>'
+                . '<td width="18%" style="padding:5px 7px;background:#20303E;color:#D6A968;font-size:7px;font-weight:700;text-align:right;">' . htmlspecialchars((string)getSetting('currency_symbol', 'MWK'), ENT_QUOTES, 'UTF-8') . ' 5,175.00</td>'
                 . '</tr>'
                 . '<tr>'
                 . '<td colspan="3" style="padding:2px 7px 1px;font-size:7px;color:#6C6258;text-align:right;">Amount Paid</td>'
-                . '<td width="18%" style="padding:2px 7px 1px;font-size:7px;color:#1E6C43;font-weight:700;text-align:right;">' . htmlspecialchars((string)getSetting('currency_symbol', 'MWK '), ENT_QUOTES, 'UTF-8') . ' 1,000.00</td>'
+                . '<td width="18%" style="padding:2px 7px 1px;font-size:7px;color:#1E6C43;font-weight:700;text-align:right;">' . htmlspecialchars((string)getSetting('currency_symbol', 'MWK'), ENT_QUOTES, 'UTF-8') . ' 1,000.00</td>'
                 . '</tr>'
                 . '<tr>'
                 . '<td colspan="3" style="padding:1px 7px 4px;font-size:7px;color:#A63A3A;font-weight:700;text-align:right;">Balance Due</td>'
-                . '<td width="18%" style="padding:1px 7px 4px;font-size:7px;color:#A63A3A;font-weight:700;text-align:right;">' . htmlspecialchars((string)getSetting('currency_symbol', 'MWK '), ENT_QUOTES, 'UTF-8') . ' 4,175.00</td>'
+                . '<td width="18%" style="padding:1px 7px 4px;font-size:7px;color:#A63A3A;font-weight:700;text-align:right;">' . htmlspecialchars((string)getSetting('currency_symbol', 'MWK'), ENT_QUOTES, 'UTF-8') . ' 4,175.00</td>'
                 . '</tr>';
             $invoicePaymentHistorySection = '<div style="background:#FCFAF7;padding:9px 11px;border-top:2px solid #D5B37C;">'
                 . '<p style="margin:0 0 4px;font-size:6px;letter-spacing:1px;text-transform:uppercase;color:#20303E;font-weight:700;">Payment History</p>'
@@ -582,7 +585,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['booking_email_templat
                 . '<tr>'
                 . '<td style="padding:3px 0;border-top:1px solid #E6D9CC;font-size:6px;color:#6C6258;">' . date('j M Y', strtotime('-2 days')) . '</td>'
                 . '<td style="padding:3px 0;border-top:1px solid #E6D9CC;font-size:6px;color:#6C6258;">Bank Transfer</td>'
-                . '<td style="padding:3px 0;border-top:1px solid #E6D9CC;font-size:6px;color:#1F1C17;font-weight:600;text-align:right;">' . htmlspecialchars((string)getSetting('currency_symbol', 'MWK '), ENT_QUOTES, 'UTF-8') . ' 1,000.00</td>'
+                . '<td style="padding:3px 0;border-top:1px solid #E6D9CC;font-size:6px;color:#1F1C17;font-weight:600;text-align:right;">' . htmlspecialchars((string)getSetting('currency_symbol', 'MWK'), ENT_QUOTES, 'UTF-8') . ' 1,000.00</td>'
                 . '</tr>'
                 . '</table>'
                 . '</div>';
@@ -768,7 +771,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         } elseif (isset($_POST['tourism_levy_settings'])) {
             // Tourism levy settings
             $tourism_levy_enabled = isset($_POST['tourism_levy_enabled']) ? '1' : '0';
-            $tourism_levy_percent = (float)($_POST['tourism_levy_percent'] ?? 0);
+            $tourism_levy_percent = round((float)($_POST['tourism_levy_percent'] ?? 0), 2);
 
             // Validate input
             if ($tourism_levy_percent < 0) {
@@ -801,6 +804,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         } elseif (isset($_POST['booking_notification_settings'])) {
             $booking_notification_email = trim($_POST['booking_notification_email'] ?? '');
             $booking_notification_cc_emails = trim($_POST['booking_notification_cc_emails'] ?? '');
+            $booking_notification_cc_emails = implode(', ', array_filter(array_map('trim', preg_split('/[,;\s]+/', $booking_notification_cc_emails))));
+            if (mb_strlen($booking_notification_cc_emails) > 1000) {
+                throw new Exception('Too many CC addresses (1000 characters maximum)');
+            }
 
             if (!empty($booking_notification_email) && !filter_var($booking_notification_email, FILTER_VALIDATE_EMAIL)) {
                 throw new Exception('Booking notification email address is invalid');
@@ -911,7 +918,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 throw new Exception('This template has no content yet — save it first, or type content into the HTML body field.');
             }
 
-            $currencySymbol = (string)getSetting('currency_symbol', 'ZAR');
+            $currencySymbol = (string)getSetting('currency_symbol', 'MWK');
             $previewVars = [
                 '{{site_name}}'                => (string)getSetting('site_name', 'Hotel'),
                 '{{site_url}}'                 => (string)getSetting('site_url', ''),
@@ -998,8 +1005,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 '{{reason_notes}}'             => 'Issued after reservation amount was corrected.',
                 '{{expires_at}}'               => date('F j, Y', strtotime('+90 days')),
                 '{{hotel_phone}}'              => (string)getSetting('phone_main', ''),
-                '{{hotel_address}}'            => (string)getSetting('hotel_address', getSetting('address', 'Beachfront Road, Cape Maclear')),
-                '{{address}}'                  => (string)getSetting('hotel_address', getSetting('address', 'Beachfront Road, Cape Maclear')),
+                '{{hotel_address}}'            => (string)getSetting('hotel_address', getSetting('address', '')),
+                '{{address}}'                  => (string)getSetting('hotel_address', getSetting('address', '')),
                 '{{logo_html}}'                => (function () use ($currencySymbol): string {
                     $url      = function_exists('getHotelLogoUrl') ? getHotelLogoUrl() : '';
                     $siteName = (string)getSetting('site_name', 'Hotel');
@@ -1132,6 +1139,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 throw new Exception('SMTP port must be a valid port number (1-65535)');
             }
 
+            if (preg_match('/[
+]/', $email_settings['email_from_name']) || mb_strlen($email_settings['email_from_name']) > 100) {
+                throw new Exception('From name must be a single line of at most 100 characters');
+            }
+            if (!preg_match('/^[A-Za-z0-9.\-]{1,253}$/', $email_settings['smtp_host'])) {
+                throw new Exception('SMTP host must be a host name such as mail.example.com');
+            }
+
             // Validate emails
             if (!filter_var($email_settings['email_from_email'], FILTER_VALIDATE_EMAIL)) {
                 throw new Exception('From email address is invalid');
@@ -1141,10 +1156,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 throw new Exception('Admin email address is invalid');
             }
             if ($email_settings['invoice_recipients'] !== '') {
-                foreach (array_filter(array_map('trim', preg_split('/[,;]+/', $email_settings['invoice_recipients']))) as $invRcpt) {
+                $invList = [];
+                foreach (array_filter(array_map('trim', preg_split('/[,;\s]+/', $email_settings['invoice_recipients']))) as $invRcpt) {
                     if (!filter_var($invRcpt, FILTER_VALIDATE_EMAIL)) {
                         throw new Exception('Invoice recipients must be valid email addresses separated by commas');
                     }
+                    if (!isset($invList[strtolower($invRcpt)])) {
+                        $invList[strtolower($invRcpt)] = $invRcpt;
+                    }
+                }
+                // Consumers split on commas only, so store a clean comma-separated list.
+                $email_settings['invoice_recipients'] = implode(', ', array_values($invList));
+                if (mb_strlen($email_settings['invoice_recipients']) > 1000) {
+                    throw new Exception('Too many invoice recipients (1000 characters maximum)');
                 }
             }
 
@@ -1749,7 +1773,7 @@ foreach ($canonicalTemplateDefaults as $templateKey => $templateDefaults) {
                             id="tourism_levy_percent"
                             name="tourism_levy_percent"
                             class="form-control"
-                            value="<?php echo htmlspecialchars(getSetting('tourism_levy_percent', '1.00')); ?>"
+                            value="<?php echo htmlspecialchars(getSetting('tourism_levy_percent', '0')); ?>"
                             min="0"
                             max="100"
                             step="0.01"
@@ -1757,7 +1781,7 @@ foreach ($canonicalTemplateDefaults as $templateKey => $templateDefaults) {
                         <p class="help-text">
                             <i class="fas fa-info-circle"></i>
                             The percentage of the total booking amount (room rate + child supplement) to charge as tourism levy.
-                            Default is 1.00%. Common values range from 1% to 5% depending on local regulations.
+                            Common values range from 1% to 5% depending on local regulations.
                         </p>
                     </div>
 

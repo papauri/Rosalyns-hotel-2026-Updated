@@ -1546,8 +1546,8 @@ if ($stockReady) {
                 window._fbMenuDefaults = {
                     baseUrl: <?php echo json_encode(defined('BASE_URL') ? rtrim(BASE_URL, '/') : ''); ?>,
                     currency: <?php echo json_encode(getSetting('currency_symbol', 'MWK')); ?>,
-                    hashtags: <?php echo json_encode(getSetting('facebook_default_hashtags', '#hotel #restaurant #food')); ?>,
-                    pageName: <?php echo json_encode(getSetting('facebook_page_name', getSetting('site_name', 'Hotel'))); ?>
+                    hashtags: <?php echo json_encode(getSetting('facebook_default_hashtags', '#hotel #accommodation #luxury')); ?>,
+                    pageName: <?php echo json_encode(getSetting('facebook_page_name', '')); ?>
                 };
 
                 // Update live preview for single menu item modal

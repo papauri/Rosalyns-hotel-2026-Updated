@@ -120,7 +120,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 // Send reset email
                 require_once '../config/email.php';
 
-                $site_name = getSetting('site_name', 'Hotel Admin');
+                $site_name = getSetting('site_name', 'Hotel');
 
                 $htmlBody = '
                 <!DOCTYPE html>

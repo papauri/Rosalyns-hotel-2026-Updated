@@ -35,16 +35,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $description      = trim($_POST['description'] ?? '');
             $shortDesc        = trim($_POST['short_description'] ?? '');
             $icon             = trim($_POST['icon'] ?? 'fas fa-gift');
-            $priceType        = in_array($_POST['price_type'] ?? 'per_night', ['per_night', 'per_stay', 'per_person_per_night'])
+            $priceType        = in_array($_POST['price_type'] ?? 'per_night', ['per_night', 'per_stay', 'per_person_per_night'], true)
                 ? $_POST['price_type'] : 'per_night';
-            $priceAmount      = max(0, (float)($_POST['price_amount'] ?? 0));
-            $appliesTo        = in_array($_POST['applies_to'] ?? 'all', ['all', 'room_types']) ? $_POST['applies_to'] : 'all';
+            $priceRaw         = trim((string)($_POST['price_amount'] ?? '0'));
+            $priceAmount      = is_numeric($priceRaw) ? round((float)$priceRaw, 2) : -1.0;
+            $appliesTo        = in_array($_POST['applies_to'] ?? 'all', ['all', 'room_types'], true) ? $_POST['applies_to'] : 'all';
             $roomTypeIds      = ($appliesTo === 'room_types' && !empty($_POST['room_type_ids']))
                 ? json_encode(array_values(array_unique(array_map('intval', (array)$_POST['room_type_ids']))))
                 : null;
             $isFeatured       = empty($_POST['is_featured']) ? 0 : 1;
             $isActive         = empty($_POST['is_active'])   ? 0 : 1;
-            $sortOrder        = max(0, (int)($_POST['sort_order'] ?? 0));
+            $sortOrder        = min(65535, max(0, (int)($_POST['sort_order'] ?? 0)));
 
             // Build inclusions JSON from textarea (one per line)
             $inclusionsRaw = trim($_POST['inclusions'] ?? '');
@@ -52,7 +53,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $inclusionsJson = !empty($inclusionsList) ? json_encode($inclusionsList) : null;
 
             // Generate slug from name
-            $slug = strtolower(trim(preg_replace('/[^A-Za-z0-9-]+/', '-', $name), '-'));
+            $slug = substr(strtolower(trim(preg_replace('/[^A-Za-z0-9-]+/', '-', $name), '-')), 0, 90);
             if (empty($slug)) {
                 $slug = 'package-' . time();
             }
@@ -63,8 +64,30 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $slug .= '-' . random_int(100, 999);
             }
 
-            if (empty($name)) {
-                $message = 'Package name is required.';
+            $validRoomIds = array_map('intval', array_column($allRooms, 'id'));
+            $roomIdsPosted = ($appliesTo === 'room_types') ? array_values(array_unique(array_map('intval', (array)($_POST['room_type_ids'] ?? [])))) : [];
+            $pkgError = '';
+            if ($name === '') {
+                $pkgError = 'Package name is required.';
+            } elseif (mb_strlen($name) > 100) {
+                $pkgError = 'Package name cannot exceed 100 characters.';
+            } elseif (mb_strlen($shortDesc) > 255) {
+                $pkgError = 'Short description cannot exceed 255 characters.';
+            } elseif (mb_strlen($icon) > 60) {
+                $pkgError = 'Icon class cannot exceed 60 characters.';
+            } elseif ($priceAmount < 0 || $priceAmount > 99999999.99) {
+                $pkgError = 'Price must be a number between 0 and 99,999,999.99.';
+            } elseif ($appliesTo === 'room_types' && (!$roomIdsPosted || array_diff($roomIdsPosted, $validRoomIds))) {
+                $pkgError = 'Choose at least one valid room type, or set the package to apply to all rooms.';
+            } elseif ($id) {
+                $pkgExists = $pdo->prepare('SELECT COUNT(*) FROM room_packages WHERE id = ?');
+                $pkgExists->execute([$id]);
+                if (!(int)$pkgExists->fetchColumn()) {
+                    $pkgError = 'That package no longer exists.';
+                }
+            }
+            if ($pkgError !== '') {
+                $message = $pkgError;
                 $messageType = 'error';
             } else {
                 try {
@@ -139,7 +162,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             }
         } elseif ($action === 'toggle') {
             $id  = (int)($_POST['pkg_id'] ?? 0);
-            $val = (int)($_POST['is_active'] ?? 0);
+            $val = empty($_POST['is_active']) ? 0 : 1;
             if ($id > 0) {
                 $pdo->prepare("UPDATE room_packages SET is_active=? WHERE id=?")->execute([$val, $id]);
                 $message = $val ? 'Package activated.' : 'Package deactivated.';

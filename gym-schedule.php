@@ -28,7 +28,7 @@ if (!$gymEnabled) {
 }
 
 $cfg = gymScheduleSettings();
-$currency = (string)getSetting('currency_symbol', 'K');
+$currency = (string)getSetting('currency_symbol', 'MWK');
 
 $slotCsrf = pub_csrf_generate('gym_slot');
 

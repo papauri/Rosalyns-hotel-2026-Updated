@@ -11,8 +11,8 @@ if (session_status() !== PHP_SESSION_ACTIVE) {
 require_once 'config/database.php';
 require_once 'includes/page-guard.php';
 
-$site_name = getSetting('site_name', 'Our Hotel');
-$site_email = getSetting('email_main', 'info@example.com');
+$site_name = getSetting('site_name', 'Hotel');
+$site_email = getSetting('email_main', '');
 $site_address = getSetting('address_line1', '');
 $current_page = 'privacy-policy';
 $page_title = 'Privacy & Cookie Policy';

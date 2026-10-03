@@ -40,7 +40,7 @@ if ($gr_range === 'custom') {
 }
 $gr_start_dt = $gr_start . ' 00:00:00';
 $gr_end_dt   = $gr_end . ' 23:59:59';
-$gr_currency = (string)getSetting('currency_symbol', 'K');
+$gr_currency = (string)getSetting('currency_symbol', 'MWK');
 
 // ── Membership KPIs ──────────────────────────────────────────────────────────
 $gr_members_ready = true;

@@ -253,7 +253,7 @@ try {
 } catch (PDOException $e) {
     $pm_error = 'Could not load the product catalog: ' . $e->getMessage();
 }
-$pm_currency = (string)getSetting('currency_symbol', 'K');
+$pm_currency = (string)getSetting('currency_symbol', 'MWK');
 ?>
 <!DOCTYPE html>
 <html lang="en">

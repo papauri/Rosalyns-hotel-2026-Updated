@@ -245,7 +245,7 @@ function renderBookingDisabledContent(string $size = 'full'): string {
     $message = getBookingDisabledMessage();
     $phone = getSetting('phone_main', '');
     $email = getSetting('email_reservations', '');
-    $siteName = getSetting('site_name', 'Our Hotel');
+    $siteName = getSetting('site_name', 'Hotel');
     
     $html = '';
     
@@ -316,7 +316,7 @@ function getBookingSettings(): array {
         'disabled_action' => getBookingDisabledAction(),
         'disabled_message' => getBookingDisabledMessage(),
         'max_advance_days' => (int)getSetting('max_advance_booking_days', 30),
-        'currency_symbol' => getSetting('currency_symbol', '$'),
+        'currency_symbol' => getSetting('currency_symbol', 'MWK'),
         'payment_policy' => getSetting('payment_policy', ''),
         'tentative_duration_hours' => (int)getSetting('tentative_duration_hours', 48),
         'vat_enabled' => rh_vat_enabled(),

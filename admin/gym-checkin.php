@@ -24,7 +24,7 @@ if (!hasPermission((int)$user['id'], 'gym_checkin')) {
 
 $gc_table_missing = !gym_attendance_table_exists($pdo);
 $gc_snapshot = gym_checkin_snapshot($pdo);
-$siteName = getSetting('site_name', 'Gym');
+$siteName = getSetting('site_name', 'Hotel');
 $gc_member_count = 0;
 try {
     $gc_member_count = (int)$pdo->query("SELECT COUNT(*) FROM gym_members WHERE status='active'")->fetchColumn();

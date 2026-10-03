@@ -1315,7 +1315,7 @@ $fb_events_posting_on = getSetting('facebook_posting_enabled', '0') === '1'
         // ── Facebook event share modal ────────────────────────────────────────
         window._fbEventDefaults = {
             baseUrl: <?php echo json_encode(rtrim(defined('BASE_URL') ? BASE_URL : '', '/')); ?>,
-            hashtags: <?php echo json_encode(getSetting('facebook_default_hashtags', '#hotel #events')); ?>
+            hashtags: <?php echo json_encode(getSetting('facebook_default_hashtags', '#hotel #accommodation #luxury')); ?>
         };
 
         var _fbEventId = 0;

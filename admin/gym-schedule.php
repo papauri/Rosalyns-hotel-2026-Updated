@@ -105,7 +105,7 @@ if (!DateTime::createFromFormat('Y-m-d', $gs_date)) { $gs_date = date('Y-m-d'); 
 $gs_dateObj = new DateTime($gs_date);
 $gs_slots = gymScheduleGenerateSlots($pdo, $gs_date);
 $gs_reservations = gymScheduleDayReservations($pdo, $gs_date);
-$gs_currency = (string)getSetting('currency_symbol', 'K');
+$gs_currency = (string)getSetting('currency_symbol', 'MWK');
 
 // Day totals.
 $gs_total_booked = 0;

@@ -72,11 +72,11 @@ function generateQuotationPDF(array $booking, array $room, array $options = []):
     }
 
     // ── Config ────────────────────────────────────────────────────────────────
-    $site_name      = getSetting('site_name', "Rosalyn's Beach Hotel");
+    $site_name      = getSetting('site_name', 'Hotel');
     $site_address   = getSetting('address_line1', '') . (getSetting('address_line2', '') ? ', ' . getSetting('address_line2', '') : '');
     $site_phone     = getSetting('phone_main', '');
     $site_email     = getSetting('email_main', getSetting('email_from_email', ''));
-    $currency       = getSetting('currency_symbol', 'MWK ');
+    $currency       = getSetting('currency_symbol', 'MWK');
     $vat_enabled    = in_array(getSetting('vat_enabled'), ['1', 1, true, 'true', 'on'], true);
     $check_in_time  = getSetting('check_in_time', '2:00 PM');
     $check_out_time = getSetting('check_out_time', '11:00 AM');
@@ -226,11 +226,11 @@ function generateConferenceQuotationPDF(array $enquiry, array $room, array $opti
         throw new RuntimeException('The PDF engine (TCPDF) is not installed on this server. Upload the vendor/ folder (composer install) or a TCPDF/ folder to enable PDF documents.');
     }
 
-    $siteName = (string)getSetting('site_name', "Rosalyn's Beach Hotel");
+    $siteName = (string)getSetting('site_name', 'Hotel');
     $sitePhone = (string)getSetting('phone_main', '');
     $siteEmail = (string)getSetting('email_main', getSetting('email_from_email', ''));
     $siteAddress = trim((string)getSetting('address_line1', ''));
-    $currency = (string)getSetting('currency_symbol', 'MWK ');
+    $currency = (string)getSetting('currency_symbol', 'MWK');
     $paymentPolicy = (string)getSetting('payment_policy', 'Payment terms apply as agreed with our reservations team.');
 
     $validDays = max(1, (int)($options['valid_days'] ?? 7));
@@ -364,10 +364,10 @@ function generateEventQuotationPDF(array $event, array $recipient, array $option
         throw new RuntimeException('The PDF engine (TCPDF) is not installed on this server. Upload the vendor/ folder (composer install) or a TCPDF/ folder to enable PDF documents.');
     }
 
-    $siteName = (string)getSetting('site_name', "Rosalyn's Beach Hotel");
+    $siteName = (string)getSetting('site_name', 'Hotel');
     $sitePhone = (string)getSetting('phone_main', '');
     $siteEmail = (string)getSetting('email_main', getSetting('email_from_email', ''));
-    $currency = (string)getSetting('currency_symbol', 'MWK ');
+    $currency = (string)getSetting('currency_symbol', 'MWK');
 
     $attendeeCount = max(1, (int)($options['attendee_count'] ?? 1));
     $validDays = max(1, (int)($options['valid_days'] ?? 7));

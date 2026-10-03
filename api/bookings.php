@@ -158,7 +158,7 @@ try {
     }
     
     // Check advance booking restriction
-    $maxAdvanceDays = (int)getSetting('max_advance_booking_days');
+    $maxAdvanceDays = (int)getSetting('max_advance_booking_days', 30);
     $maxAdvanceDate = new DateTime();
     $maxAdvanceDate->modify('+' . $maxAdvanceDays . ' days');
     

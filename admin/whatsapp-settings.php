@@ -48,7 +48,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !isset($_POST['test_whatsapp'])) {
         $settings = [
             'whatsapp_enabled' => isset($_POST['whatsapp_enabled']) ? '1' : '0',
             'whatsapp_notifications_enabled' => isset($_POST['whatsapp_enabled']) ? '1' : '0',
-            'whatsapp_provider' => 'meta',
             'whatsapp_api_token' => trim($_POST['whatsapp_api_token'] ?? ''),
             'whatsapp_meta_access_token' => trim($_POST['whatsapp_api_token'] ?? ''),
             'whatsapp_phone_id' => trim($_POST['whatsapp_phone_id'] ?? ''),
@@ -75,6 +74,41 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !isset($_POST['test_whatsapp'])) {
             'whatsapp_cancelled_template' => trim($_POST['whatsapp_cancelled_template'] ?? 'booking_cancelled'),
         ];
         
+        // Validate before anything is written
+        $phonePattern = '/^\+?[0-9][0-9 ()\-]{5,20}$/';
+        if ($settings['whatsapp_number'] !== '' && !preg_match($phonePattern, $settings['whatsapp_number'])) {
+            throw new RuntimeException('Hotel WhatsApp number must be a phone number such as +265888123456.');
+        }
+        if ($settings['whatsapp_admin_numbers'] !== '') {
+            foreach (preg_split('/[,;\s]+/', $settings['whatsapp_admin_numbers'], -1, PREG_SPLIT_NO_EMPTY) as $adminNo) {
+                if (!preg_match($phonePattern, $adminNo)) {
+                    throw new RuntimeException('Admin WhatsApp numbers must be phone numbers separated by commas.');
+                }
+            }
+            if (mb_strlen($settings['whatsapp_admin_numbers']) > 500) {
+                throw new RuntimeException('Too many admin WhatsApp numbers (500 characters maximum).');
+            }
+        }
+        foreach (['whatsapp_phone_id' => 'Phone number ID', 'whatsapp_business_id' => 'Business account ID'] as $idKey => $idLabel) {
+            if ($settings[$idKey] !== '' && !preg_match('/^[0-9]{5,30}$/', $settings[$idKey])) {
+                throw new RuntimeException($idLabel . ' must be numeric (copy it from Meta WhatsApp Manager).');
+            }
+        }
+        if (mb_strlen($settings['whatsapp_api_token']) > 1000 || preg_match('/\s/', $settings['whatsapp_api_token'])) {
+            throw new RuntimeException('The access token looks invalid (no spaces, 1000 characters maximum).');
+        }
+        foreach (['whatsapp_confirmed_template' => 'Confirmed template', 'whatsapp_cancelled_template' => 'Cancelled template'] as $tplKey => $tplLabel) {
+            if ($settings[$tplKey] === '') {
+                $settings[$tplKey] = ($tplKey === 'whatsapp_confirmed_template') ? 'booking_confirmed' : 'booking_cancelled';
+            }
+            if (!preg_match('/^[A-Za-z0-9_]{1,100}$/', $settings[$tplKey])) {
+                throw new RuntimeException($tplLabel . ' name may only contain letters, digits and underscores.');
+            }
+        }
+        if ($settings['whatsapp_enabled'] === '1' && getSetting('whatsapp_provider', 'meta') === 'meta' && ($settings['whatsapp_api_token'] === '' || $settings['whatsapp_phone_id'] === '')) {
+            throw new RuntimeException('Add the access token and phone number ID before enabling WhatsApp.');
+        }
+
         // Update each setting
         $stmt = $pdo->prepare("
             INSERT INTO site_settings (setting_key, setting_value) 

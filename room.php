@@ -182,7 +182,7 @@ $seo_data = [
         'offers' => [
             '@type' => 'Offer',
             'price' => $room['price_per_night'],
-            'priceCurrency' => getSetting('currency_code', 'USD'),
+            'priceCurrency' => getSetting('currency_code', 'MWK'),
             'availability' => $room['rooms_available'] > 0 ? 'https://schema.org/InStock' : 'https://schema.org/SoldOut',
             'url' => $base_url . '/booking.php?room_id=' . $room['id']
         ],

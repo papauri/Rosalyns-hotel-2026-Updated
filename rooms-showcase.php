@@ -10,7 +10,7 @@ require_once 'includes/reviews-display.php';
 require_once 'includes/section-headers.php';
 require_once 'includes/booking-functions.php';
 
-$site_name = (string) getSetting('site_name', 'Rosalyns Hotel');
+$site_name = (string) getSetting('site_name', 'Hotel');
 $currency_symbol = (string) getSetting('currency_symbol', 'MWK');
 $phone_main = (string) getSetting('phone_main', '');
 $email_reservations = (string) getSetting('email_reservations', '');

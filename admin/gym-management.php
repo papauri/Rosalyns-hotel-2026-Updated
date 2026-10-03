@@ -186,7 +186,7 @@ try {
 
 $base_url = defined('BASE_URL') ? rtrim(BASE_URL, '/') : '';
 $currency = getSetting('currency_symbol', 'MWK');
-$fb_page_name = getSetting('facebook_page_name', $site_name);
+$fb_page_name = getSetting('facebook_page_name', '');
 $gym_css_version = (string)@filemtime(__DIR__ . '/css/gym-management.css');
 if ($gym_css_version === '' || $gym_css_version === '0') {
     $gym_css_version = (string)time();
@@ -715,7 +715,7 @@ if ($gym_css_version === '' || $gym_css_version === '0') {
             window._fbGymDefaults = {
                 baseUrl: <?php echo json_encode($base_url); ?>,
                 currency: <?php echo json_encode($currency); ?>,
-                hashtags: <?php echo json_encode(getSetting('facebook_default_hashtags', '#hotel #wellness #gym')); ?>,
+                hashtags: <?php echo json_encode(getSetting('facebook_default_hashtags', '#hotel #accommodation #luxury')); ?>,
                 pageName: <?php echo json_encode($fb_page_name); ?>
             };
 

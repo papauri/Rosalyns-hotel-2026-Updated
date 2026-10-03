@@ -3568,8 +3568,8 @@ function sendGymQuotationEmail(array $inquiry, array $options = []): array
             throw new Exception('Gym inquiry does not have a valid email address.');
         }
 
-        $siteName = $email_site_name ?: getSetting('site_name', "Rosalyn's Beach Hotel");
-        $currency = (string)getSetting('currency_symbol', 'MWK ');
+        $siteName = $email_site_name ?: getSetting('site_name', 'Hotel');
+        $currency = (string)getSetting('currency_symbol', 'MWK');
         $validDays = max(1, (int)($options['valid_days'] ?? 7));
         $notes = trim((string)($options['quotation_notes'] ?? ''));
         $attachPdf = (bool)($options['attach_pdf'] ?? true);
@@ -3784,8 +3784,8 @@ function sendEventInquiryQuotationEmail(array $inquiry, array $options = []): ar
             throw new Exception('Event inquiry does not have a valid email address.');
         }
 
-        $siteName = $email_site_name ?: getSetting('site_name', "Rosalyn's Beach Hotel");
-        $currency = (string)getSetting('currency_symbol', 'MWK ');
+        $siteName = $email_site_name ?: getSetting('site_name', 'Hotel');
+        $currency = (string)getSetting('currency_symbol', 'MWK');
         $validDays = max(1, (int)($options['valid_days'] ?? 7));
         $notes = trim((string)($options['quotation_notes'] ?? ''));
         $attachPdf = (bool)($options['attach_pdf'] ?? true);
@@ -4329,7 +4329,7 @@ function sendBookingReminderEmail(array $booking): array
         }
 
         // Fallback plain email if template not configured
-        $subject = 'Reminder: Your stay at ' . getSetting('site_name', 'Rosalyn\'s Hotel');
+        $subject = 'Reminder: Your stay at ' . getSetting('site_name', 'Hotel');
         $htmlBody = '<p>Dear ' . htmlspecialchars($booking['guest_name']) . ',</p>'
             . $urgencyLine
             . '<p>Booking Reference: <strong>' . htmlspecialchars($booking['booking_reference']) . '</strong></p>'
@@ -5191,7 +5191,7 @@ function wrapEmailTemplate(string $content, string $title = '')
         return $content;
     }
 
-    $site_name     = $email_site_name ?: getSetting('site_name', 'Our Hotel');
+    $site_name     = $email_site_name ?: getSetting('site_name', 'Hotel');
     $site_url      = $email_site_url  ?: getSetting('site_url', '');
     $contact_email = $email_from_email ?: getSetting('email_main', '');
     $phone         = getSetting('phone_main', '');
@@ -5946,8 +5946,8 @@ function sendTentativeQuotationEmail(array $booking, array $options = []): array
     global $email_admin_email, $email_bcc_admin, $development_mode, $email_preview_enabled;
 
     try {
-        $site_name      = $email_site_name ?: getSetting('site_name', "Rosalyn's Beach Hotel");
-        $currency       = getSetting('currency_symbol', 'MWK ');
+        $site_name      = $email_site_name ?: getSetting('site_name', 'Hotel');
+        $currency       = getSetting('currency_symbol', 'MWK');
         $valid_days     = max(1, (int)($options['valid_days'] ?? 7));
         $notes          = trim((string)($options['quotation_notes'] ?? ''));
         $attach_pdf     = (bool)($options['attach_pdf'] ?? true);
@@ -6306,7 +6306,7 @@ function sendEmailWithBinaryAttachment(
             $mail->SMTPDebug = $smtp_debug;
         }
 
-        $fromName = $email_from_name ?: ($email_site_name ?: getSetting('site_name', "Rosalyn's Beach Hotel"));
+        $fromName = $email_from_name ?: ($email_site_name ?: getSetting('site_name', 'Hotel'));
         $mail->setFrom($smtp_username, $fromName);
         $mail->addAddress($toEmail, $toName);
 
@@ -6357,8 +6357,8 @@ function sendConferenceQuotationEmail(array $enquiry, array $options = []): arra
             }
         }
 
-        $siteName = $email_site_name ?: getSetting('site_name', "Rosalyn's Beach Hotel");
-        $currency = (string)getSetting('currency_symbol', 'MWK ');
+        $siteName = $email_site_name ?: getSetting('site_name', 'Hotel');
+        $currency = (string)getSetting('currency_symbol', 'MWK');
         $validDays = max(1, (int)($options['valid_days'] ?? 7));
         $notes = trim((string)($options['quotation_notes'] ?? ''));
         $attachPdf = (bool)($options['attach_pdf'] ?? true);
@@ -6500,8 +6500,8 @@ function sendEventQuotationEmail(array $event, array $options = []): array
             throw new Exception('A valid recipient email is required for event quotations.');
         }
 
-        $siteName = $email_site_name ?: getSetting('site_name', "Rosalyn's Beach Hotel");
-        $currency = (string)getSetting('currency_symbol', 'MWK ');
+        $siteName = $email_site_name ?: getSetting('site_name', 'Hotel');
+        $currency = (string)getSetting('currency_symbol', 'MWK');
         $attendeeCount = max(1, (int)($options['attendee_count'] ?? 1));
         $validDays = max(1, (int)($options['valid_days'] ?? 7));
         $notes = trim((string)($options['quotation_notes'] ?? ''));
@@ -6649,7 +6649,7 @@ function sendRefundNotificationEmail(array $payment, string $refundRef, float $r
     global $email_from_email, $email_site_name, $pdo;
 
     try {
-        $currencySymbol = getSetting('currency_symbol', 'K');
+        $currencySymbol = getSetting('currency_symbol', 'MWK');
         $bookingType    = (string)($payment['booking_type'] ?? '');
 
         // Resolve guest name and email depending on booking type
@@ -6923,7 +6923,7 @@ function sendReviewAcknowledgementEmail(string $guestName, string $guestEmail, s
 if (!function_exists('rh_gym_data_notice')) {
     function rh_gym_data_notice(): string
     {
-        $siteName = function_exists('getSetting') ? (string)getSetting('site_name', 'the gym') : 'the gym';
+        $siteName = function_exists('getSetting') ? (string)getSetting('site_name', 'Hotel') : 'the gym';
         return '<p style="margin:22px 0 0;padding-top:14px;border-top:1px solid #eee;font-size:11px;line-height:1.6;color:#999;text-align:center;">'
             . 'Privacy note: when you check in and out we record your visit times and attendance. '
             . htmlspecialchars($siteName) . ' uses this data only to improve your gym experience &mdash; understanding peak hours, '
@@ -6949,7 +6949,7 @@ function sendGymMemberCardEmail(array $member): array
             return ['success' => false, 'message' => 'Member number missing.'];
         }
         $name     = (string)($member['full_name'] ?? 'Member');
-        $siteName = $email_site_name ?: getSetting('site_name', 'Gym');
+        $siteName = $email_site_name ?: getSetting('site_name', 'Hotel');
 
         // Barcode: CODE 128 symbology — same the check-in scanner reads.
         // PNG (GD/Imagick) is the primary format: a CID-embedded <img> is the
@@ -7132,7 +7132,7 @@ function sendGymClassReminderEmail(array $member, array $class): array
         return ['success' => false, 'message' => 'Member has no valid email address.'];
     }
     $name     = (string)($member['full_name'] ?? 'Member');
-    $siteName = $email_site_name ?: getSetting('site_name', 'Gym');
+    $siteName = $email_site_name ?: getSetting('site_name', 'Hotel');
 
     $title   = (string)($class['title'] ?? 'your class');
     $day     = trim((string)($class['day_label'] ?? ''));
@@ -7183,7 +7183,7 @@ function sendGymClassReminderEmail(array $member, array $class): array
 function sendPasswordChangeOtpEmail(string $toEmail, string $name, string $otp): array
 {
     global $email_site_name;
-    $siteName = $email_site_name ?: getSetting('site_name', 'Admin');
+    $siteName = $email_site_name ?: getSetting('site_name', 'Hotel');
 
     $htmlBody = '
         <h1 style="color: #8B7355; text-align: center;">Password Change Verification</h1>
@@ -7215,11 +7215,11 @@ function sendGymRenewalReminderEmail(array $member, int $daysLeft): array
         return ['success' => false, 'message' => 'Member has no valid email address.'];
     }
     $name       = (string)($member['full_name'] ?? 'Member');
-    $siteName   = $email_site_name ?: getSetting('site_name', 'Gym');
+    $siteName   = $email_site_name ?: getSetting('site_name', 'Hotel');
     $package    = trim((string)($member['membership_type'] ?? ''));
     $expiryDate = !empty($member['expiry_date']) ? date('l, F j, Y', strtotime((string)$member['expiry_date'])) : '';
     $fee        = isset($member['monthly_fee']) && $member['monthly_fee'] !== null && (float)$member['monthly_fee'] > 0
-        ? trim((string)getSetting('currency_symbol', 'K')) . ' ' . number_format((float)$member['monthly_fee'], 2)
+        ? trim((string)getSetting('currency_symbol', 'MWK')) . ' ' . number_format((float)$member['monthly_fee'], 2)
         : '';
     $phone      = (string)getSetting('phone_main', '');
 
@@ -7291,7 +7291,7 @@ function sendPreArrivalReminderEmail(array $booking): array
     }
 
     $checkInDate = !empty($booking['check_in_date']) ? date('l, F j, Y', strtotime((string)$booking['check_in_date'])) : '';
-    $checkInTime = trim((string)getSetting('check_in_time', ''));
+    $checkInTime = trim((string)getSetting('check_in_time', '2:00 PM'));
 
     $htmlBody = '
         <h1 style="color: #8B7355; text-align: center;">Your Stay Is Coming Up</h1>

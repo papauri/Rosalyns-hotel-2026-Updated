@@ -618,7 +618,7 @@ $gm_can_logs_ui = hasPermission((int)($user['id'] ?? 0), 'gym_logs');
 // complimentary option in the modal.
 $gm_is_hotel_context = function_exists('moduleEnabled') && moduleEnabled('bookings');
 
-$gm_currency = (string)getSetting('currency_symbol', 'K');
+$gm_currency = (string)getSetting('currency_symbol', 'MWK');
 ?>
 <!DOCTYPE html>
 <html lang="en">

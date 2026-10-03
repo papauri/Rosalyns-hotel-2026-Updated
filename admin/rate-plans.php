@@ -35,17 +35,33 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $ruleType = 'promotion';
             }
 
-            $startDate  = !empty($_POST['start_date'])      ? $_POST['start_date']      : null;
-            $endDate    = !empty($_POST['end_date'])         ? $_POST['end_date']        : null;
-            $daysOfWeek = !empty($_POST['days_of_week'])     ? implode(',', array_map('intval', (array)$_POST['days_of_week'])) : null;
-            $minNights  = !empty($_POST['min_nights'])       ? max(1, (int)$_POST['min_nights'])  : null;
-            $maxNights  = !empty($_POST['max_nights'])       ? max(1, (int)$_POST['max_nights'])  : null;
-            $daysBeforeMin = isset($_POST['days_before_min']) && $_POST['days_before_min'] !== '' ? max(0, (int)$_POST['days_before_min']) : null;
-            $daysBeforeMax = !empty($_POST['days_before_max']) ? max(0, (int)$_POST['days_before_max']) : null;
+            $isValidYmd = static function ($v): bool {
+                $d = is_string($v) ? DateTime::createFromFormat('!Y-m-d', $v) : false;
+                return $d !== false && $d->format('Y-m-d') === $v;
+            };
+            $startDate  = !empty($_POST['start_date']) ? trim((string)$_POST['start_date']) : null;
+            $endDate    = !empty($_POST['end_date'])   ? trim((string)$_POST['end_date'])   : null;
+            $dayList    = !empty($_POST['days_of_week']) ? array_values(array_unique(array_filter(array_map('intval', (array)$_POST['days_of_week']), static function ($d) { return $d >= 0 && $d <= 6; }))) : [];
+            sort($dayList);
+            $daysOfWeek = $dayList ? implode(',', $dayList) : null;
+            $minNights  = !empty($_POST['min_nights']) ? min(255, max(1, (int)$_POST['min_nights'])) : null;
+            $maxNights  = !empty($_POST['max_nights']) ? min(255, max(1, (int)$_POST['max_nights'])) : null;
+            // Last-minute and early-bird forms use separate field names (a shared name made the
+            // hidden early-bird inputs overwrite the last-minute window on every save).
+            $dbPrefix   = $ruleType === 'early_bird' ? 'eb_days_before_' : 'days_before_';
+            $daysBeforeMin = isset($_POST[$dbPrefix . 'min']) && $_POST[$dbPrefix . 'min'] !== '' ? min(65535, max(0, (int)$_POST[$dbPrefix . 'min'])) : null;
+            $daysBeforeMax = isset($_POST[$dbPrefix . 'max']) && $_POST[$dbPrefix . 'max'] !== '' ? min(65535, max(0, (int)$_POST[$dbPrefix . 'max'])) : null;
 
-            $adjType    = in_array($_POST['adjustment_type'] ?? 'percentage', ['percentage', 'fixed']) ? $_POST['adjustment_type'] : 'percentage';
-            $adjValue   = (float)($_POST['adjustment_value'] ?? 0);
-            $appliesTo  = in_array($_POST['applies_to'] ?? 'all', ['all', 'room_types']) ? $_POST['applies_to'] : 'all';
+            // Only the fields that belong to the chosen rule type are stored.
+            if ($ruleType !== 'seasonal') { $startDate = null; $endDate = null; }
+            if ($ruleType !== 'weekend') { $daysOfWeek = null; }
+            if ($ruleType !== 'los_discount') { $minNights = null; $maxNights = null; }
+            if (!in_array($ruleType, ['last_minute', 'early_bird'], true)) { $daysBeforeMin = null; $daysBeforeMax = null; }
+
+            $adjType    = in_array($_POST['adjustment_type'] ?? 'percentage', ['percentage', 'fixed'], true) ? $_POST['adjustment_type'] : 'percentage';
+            $adjRaw     = trim((string)($_POST['adjustment_value'] ?? '0'));
+            $adjValue   = is_numeric($adjRaw) ? round((float)$adjRaw, 2) : 0.0;
+            $appliesTo  = in_array($_POST['applies_to'] ?? 'all', ['all', 'room_types'], true) ? $_POST['applies_to'] : 'all';
             $roomTypeIds = ($appliesTo === 'room_types' && !empty($_POST['room_type_ids']))
                 ? json_encode(array_values(array_unique(array_map('intval', (array)$_POST['room_type_ids']))))
                 : null;
@@ -53,11 +69,51 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $isStacking = empty($_POST['is_stacking']) ? 0 : 1;
             $isActive   = empty($_POST['is_active'])   ? 0 : 1;
 
-            if (empty($name)) {
-                $message = 'Plan name is required.';
-                $messageType = 'error';
-            } elseif ($adjValue == 0) {
-                $message = 'Adjustment value cannot be zero.';
+            $validRoomIds = array_map('intval', array_column($allRooms, 'id'));
+            $roomIdsPosted = ($appliesTo === 'room_types') ? array_values(array_unique(array_map('intval', (array)($_POST['room_type_ids'] ?? [])))) : [];
+            $badRoomIds = array_diff($roomIdsPosted, $validRoomIds);
+
+            $validationError = '';
+            if ($name === '') {
+                $validationError = 'Plan name is required.';
+            } elseif (mb_strlen($name) > 100) {
+                $validationError = 'Plan name cannot exceed 100 characters.';
+            } elseif (mb_strlen($description) > 2000) {
+                $validationError = 'Description cannot exceed 2000 characters.';
+            } elseif (!is_numeric($adjRaw) || $adjValue == 0) {
+                $validationError = 'Adjustment value must be a non-zero number.';
+            } elseif ($adjType === 'percentage' && ($adjValue <= -100 || $adjValue > 1000)) {
+                $validationError = 'A percentage adjustment must be above -100 (a 100% discount makes the room free) and at most 1000.';
+            } elseif ($adjType === 'fixed' && abs($adjValue) > 9999999) {
+                $validationError = 'A fixed adjustment cannot exceed 9,999,999 either way.';
+            } elseif ($ruleType === 'seasonal' && ($startDate === null || $endDate === null)) {
+                $validationError = 'A seasonal plan needs both a start and an end date.';
+            } elseif (($startDate !== null && !$isValidYmd($startDate)) || ($endDate !== null && !$isValidYmd($endDate))) {
+                $validationError = 'Dates must be valid (YYYY-MM-DD).';
+            } elseif ($startDate !== null && $endDate !== null && $endDate < $startDate) {
+                $validationError = 'The end date cannot be before the start date.';
+            } elseif ($ruleType === 'weekend' && $daysOfWeek === null) {
+                $validationError = 'Choose at least one day of the week.';
+            } elseif ($minNights !== null && $maxNights !== null && $maxNights < $minNights) {
+                $validationError = 'Maximum nights cannot be lower than minimum nights.';
+            } elseif ($ruleType === 'los_discount' && $minNights === null && $maxNights === null) {
+                $validationError = 'A length-of-stay plan needs a minimum or maximum number of nights.';
+            } elseif ($daysBeforeMin !== null && $daysBeforeMax !== null && $daysBeforeMax < $daysBeforeMin) {
+                $validationError = 'The maximum days before arrival cannot be lower than the minimum.';
+            } elseif (in_array($ruleType, ['last_minute', 'early_bird'], true) && $daysBeforeMin === null && $daysBeforeMax === null) {
+                $validationError = 'Set the days-before-arrival window for this plan.';
+            } elseif ($appliesTo === 'room_types' && (!$roomIdsPosted || $badRoomIds)) {
+                $validationError = 'Choose at least one valid room type, or set the plan to apply to all rooms.';
+            } elseif ($id) {
+                $exists = $pdo->prepare("SELECT COUNT(*) FROM rate_plans WHERE id = ?");
+                $exists->execute([$id]);
+                if (!(int)$exists->fetchColumn()) {
+                    $validationError = 'That rate plan no longer exists.';
+                }
+            }
+
+            if ($validationError !== '') {
+                $message = $validationError;
                 $messageType = 'error';
             } else {
                 try {
@@ -128,6 +184,28 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         $message = 'Rate plan created successfully.';
                     }
                     $messageType = 'success';
+                    // Non-blocking: warn about overlapping active plans (pricing applies the single best
+                    // discount if any is non-stacking, otherwise combines stacking plans).
+                    if ($isActive) {
+                        $ovl = $pdo->prepare("SELECT name, start_date, end_date, applies_to, room_type_ids FROM rate_plans WHERE is_active = 1 AND rule_type = ? AND id <> ?");
+                        $ovl->execute([$ruleType, (int)$savedId]);
+                        $clashes = [];
+                        foreach ($ovl->fetchAll(PDO::FETCH_ASSOC) as $o) {
+                            if ($ruleType === 'seasonal' && $startDate && $endDate && $o['start_date'] && $o['end_date'] && ($o['end_date'] < $startDate || $o['start_date'] > $endDate)) {
+                                continue;
+                            }
+                            if ($appliesTo === 'room_types' && $o['applies_to'] === 'room_types') {
+                                $oIds = json_decode((string)$o['room_type_ids'], true);
+                                if (is_array($oIds) && !array_intersect(array_map('intval', $oIds), $roomIdsPosted)) {
+                                    continue;
+                                }
+                            }
+                            $clashes[] = $o['name'];
+                        }
+                        if ($clashes) {
+                            $message .= ' Note: it overlaps active plan(s) of the same type: ' . implode(', ', array_slice($clashes, 0, 5)) . '. Guests get the single best price if any overlapping plan is non-stacking.';
+                        }
+                    }
                 } catch (PDOException $e) {
                     error_log('rate_plans save error: ' . $e->getMessage());
                     $message = 'Database error saving rate plan.';
@@ -141,7 +219,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             }
         } elseif ($action === 'toggle') {
             $id  = (int)($_POST['plan_id'] ?? 0);
-            $val = (int)($_POST['is_active'] ?? 0);
+            $val = empty($_POST['is_active']) ? 0 : 1;
             if ($id > 0) {
                 $pdo->prepare("UPDATE rate_plans SET is_active=? WHERE id=?")->execute([$val, $id]);
                 $message = $val ? 'Rate plan activated.' : 'Rate plan deactivated.';
@@ -694,11 +772,11 @@ $dayNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
                         <div class="form-row">
                             <div class="form-group">
                                 <label for="fieldDaysBeforeMinEB">Min Days Before Arrival</label>
-                                <input type="number" id="fieldDaysBeforeMinEB" name="days_before_min" min="0" placeholder="e.g. 30">
+                                <input type="number" id="fieldDaysBeforeMinEB" name="eb_days_before_min" min="0" placeholder="e.g. 30">
                             </div>
                             <div class="form-group">
                                 <label for="fieldDaysBeforeMaxEB">Max Days Before Arrival (optional)</label>
-                                <input type="number" id="fieldDaysBeforeMaxEB" name="days_before_max" min="0" placeholder="Leave empty = no max">
+                                <input type="number" id="fieldDaysBeforeMaxEB" name="eb_days_before_max" min="0" placeholder="Leave empty = no max">
                             </div>
                         </div>
                         <p class="form-hint">Example: min 30 = book at least 30 days in advance.</p>
@@ -929,11 +1007,11 @@ $dayNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
             } else if (type === 'last_minute') {
                 document.getElementById('fields-last_minute').classList.add('visible');
                 document.getElementById('fieldDaysBeforeMinLM').value = plan ? (plan.days_before_min !== null ? plan.days_before_min : '') : '';
-                document.getElementById('fieldDaysBeforeMaxLM').value = plan ? (plan.days_before_max || '') : '';
+                document.getElementById('fieldDaysBeforeMaxLM').value = plan ? (plan.days_before_max !== null ? plan.days_before_max : '') : '';
             } else if (type === 'early_bird') {
                 document.getElementById('fields-early_bird').classList.add('visible');
                 document.getElementById('fieldDaysBeforeMinEB').value = plan ? (plan.days_before_min !== null ? plan.days_before_min : '') : '';
-                document.getElementById('fieldDaysBeforeMaxEB').value = plan ? (plan.days_before_max || '') : '';
+                document.getElementById('fieldDaysBeforeMaxEB').value = plan ? (plan.days_before_max !== null ? plan.days_before_max : '') : '';
             }
             // promotion: no extra fields
         }

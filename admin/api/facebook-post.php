@@ -191,8 +191,8 @@ try {
 
         $baseUrl    = rtrim(defined('BASE_URL') ? BASE_URL : (string) getSetting('site_url', ''), '/');
         $currency   = (string) getSetting('currency_symbol', 'MWK');
-        $hashtags   = (string) getSetting('facebook_default_hashtags', '#hotel #accommodation');
-        $hotelName  = (string) getSetting('hotel_name', "Rosalyn's Beach Hotel");
+        $hashtags   = (string) getSetting('facebook_default_hashtags', '#hotel #accommodation #luxury');
+        $hotelName  = (string) getSetting('hotel_name', 'Hotel');
 
         $lines = ["\u{1F3E8} {$hotelName} \u{2014} Our Rooms", ''];
         foreach ($records as $rec) {
@@ -267,8 +267,8 @@ try {
 
         $baseUrl   = rtrim(defined('BASE_URL') ? BASE_URL : (string) getSetting('site_url', ''), '/');
         $currency  = (string) getSetting('currency_symbol', 'MWK');
-        $hashtags  = (string) getSetting('facebook_default_hashtags', '#hotel #conference');
-        $hotelName = (string) getSetting('hotel_name', "Rosalyn's Beach Hotel");
+        $hashtags  = (string) getSetting('facebook_default_hashtags', '#hotel #accommodation #luxury');
+        $hotelName = (string) getSetting('hotel_name', 'Hotel');
 
         $lines = ["\u{1F3E2} {$hotelName} \u{2014} Conference Facilities", ''];
         foreach ($records as $rec) {
@@ -359,8 +359,8 @@ try {
 
         $baseUrl   = rtrim(defined('BASE_URL') ? BASE_URL : (string) getSetting('site_url', ''), '/');
         $currency  = (string) getSetting('currency_symbol', 'MWK');
-        $hashtags  = (string) getSetting('facebook_default_hashtags', '#hotel #wellness #gym');
-        $hotelName = (string) getSetting('hotel_name', "Rosalyn's Beach Hotel");
+        $hashtags  = (string) getSetting('facebook_default_hashtags', '#hotel #accommodation #luxury');
+        $hotelName = (string) getSetting('hotel_name', 'Hotel');
 
         $lines = ["\u{1F3E8} Wellness Packages at {$hotelName}", ''];
         $lines[] = "Elevate your wellbeing with our exclusive packages:";
@@ -390,7 +390,7 @@ try {
         }
 
         $baseUrl  = rtrim(defined('BASE_URL') ? BASE_URL : (string) getSetting('site_url', ''), '/');
-        $hashtags = (string) getSetting('facebook_default_hashtags', '#hotel #restaurant #food');
+        $hashtags = (string) getSetting('facebook_default_hashtags', '#hotel #accommodation #luxury');
 
         $post = [
             'message'   => '',

@@ -20,7 +20,7 @@ $roomServiceReminderTime = trim((string)getSetting('room_service_reminder_time',
 if (!preg_match('/^(?:[01]\d|2[0-3]):[0-5]\d$/', $roomServiceReminderTime)) {
     $roomServiceReminderTime = '12:00';
 }
-$roomServiceReminderTimezone = trim((string)getSetting('site_timezone', 'Africa/Blantyre'));
+$roomServiceReminderTimezone = trim((string)getSetting('site_timezone', date_default_timezone_get()));
 if ($roomServiceReminderTimezone === '' || !in_array($roomServiceReminderTimezone, DateTimeZone::listIdentifiers(), true)) {
     $roomServiceReminderTimezone = 'Africa/Blantyre';
 }

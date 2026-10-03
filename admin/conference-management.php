@@ -1494,7 +1494,7 @@ if ($facebook_settings_css_version === '' || $facebook_settings_css_version === 
             window._fbConfDefaults = {
                 baseUrl: <?php echo json_encode(defined('BASE_URL') ? rtrim(BASE_URL, '/') : ''); ?>,
                 currency: <?php echo json_encode(getSetting('currency_symbol', 'MWK')); ?>,
-                hashtags: <?php echo json_encode(getSetting('facebook_default_hashtags', '#hotel #conference')); ?>,
+                hashtags: <?php echo json_encode(getSetting('facebook_default_hashtags', '#hotel #accommodation #luxury')); ?>,
                 pageName: <?php echo json_encode(getSetting('facebook_page_name', '')); ?>
             };
 

@@ -18,7 +18,7 @@ require_once '../includes/booking-timeline.php';
 require_once '../includes/finance-sequences.php';
 $message = '';
 $error = '';
-$currency_symbol = (string)getSetting('currency_symbol', 'K');
+$currency_symbol = (string)getSetting('currency_symbol', 'MWK');
 finance_ensure_sequence_tables($pdo);
 
 function isAjaxRequest(): bool
@@ -3271,7 +3271,7 @@ try {
 $overdue_checkouts = [];
 $is_past_checkout_time = false; // pre-initialised; set inside try block below
 try {
-    $checkout_time = getSetting('check_out_time', '11:00'); // Assuming standard 11:00 checkout
+    $checkout_time = getSetting('check_out_time', '11:00 AM'); // Assuming standard 11:00 checkout
     $current_time = date('H:i');
     $is_past_checkout_time = ($current_time >= $checkout_time);
 

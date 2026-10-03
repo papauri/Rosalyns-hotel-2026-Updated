@@ -3121,11 +3121,11 @@ function generateGymQuotationPDF(array $inquiry, array $options = []): string
 {
     hotel_load_tcpdf();
 
-    $siteName = (string)getSetting('site_name', "Rosalyn's Beach Hotel");
+    $siteName = (string)getSetting('site_name', 'Hotel');
     $sitePhone = (string)getSetting('phone_main', '');
     $siteEmail = (string)getSetting('email_main', getSetting('email_from_email', ''));
     $siteAddress = trim((string)getSetting('address_line1', ''));
-    $currency = (string)getSetting('currency_symbol', 'MWK ');
+    $currency = (string)getSetting('currency_symbol', 'MWK');
     $paymentPolicy = (string)getSetting('payment_policy', 'Payment terms apply as agreed with our reception team.');
 
     $validDays = max(1, (int)($options['valid_days'] ?? 7));
@@ -3187,11 +3187,11 @@ function generateEventInquiryQuotationPDF(array $inquiry, array $options = []): 
 {
     hotel_load_tcpdf();
 
-    $siteName = (string)getSetting('site_name', "Rosalyn's Beach Hotel");
+    $siteName = (string)getSetting('site_name', 'Hotel');
     $sitePhone = (string)getSetting('phone_main', '');
     $siteEmail = (string)getSetting('email_main', getSetting('email_from_email', ''));
     $siteAddress = trim((string)getSetting('address_line1', ''));
-    $currency = (string)getSetting('currency_symbol', 'MWK ');
+    $currency = (string)getSetting('currency_symbol', 'MWK');
     $paymentPolicy = (string)getSetting('payment_policy', 'Payment terms apply as agreed with our reception team.');
 
     $validDays = max(1, (int)($options['valid_days'] ?? 7));

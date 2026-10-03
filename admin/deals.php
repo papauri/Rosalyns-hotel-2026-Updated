@@ -38,6 +38,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['ajax_action'])) {
             $validFrom = trim($_POST['valid_from'] ?? '') ?: null;
             $validTo   = trim($_POST['valid_to']   ?? '') ?: null;
 
+            $isHm = static function ($v): bool { return $v === null || (bool)preg_match('/^(?:[01]\d|2[0-3]):[0-5]\d(?::[0-5]\d)?$/', $v); };
+            $isYmd = static function ($v): bool { if ($v === null) { return true; } $d = DateTime::createFromFormat('!Y-m-d', $v); return $d !== false && $d->format('Y-m-d') === $v; };
+            if (!$isHm($startTime) || !$isHm($endTime)) throw new InvalidArgumentException('Times must be HH:MM.');
+            if (($startTime === null) !== ($endTime === null)) throw new InvalidArgumentException('Set both a start and an end time, or neither.');
+            // The POS evaluates the window within one calendar day, so a window crossing midnight would never fire.
+            if ($startTime !== null && substr($endTime, 0, 5) <= substr($startTime, 0, 5)) throw new InvalidArgumentException('The end time must be after the start time (windows cannot cross midnight - create two deals instead).');
+            if (!$isYmd($validFrom) || !$isYmd($validTo)) throw new InvalidArgumentException('Dates must be valid (YYYY-MM-DD).');
+            if ($validFrom !== null && $validTo !== null && $validTo < $validFrom) throw new InvalidArgumentException('"Valid to" cannot be before "valid from".');
+
             // Scope
             $appliesTo = $_POST['applies_to'] ?? 'all';
             if (!in_array($appliesTo, ['all','item_types','items'], true)) $appliesTo = 'all';
@@ -56,19 +65,25 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['ajax_action'])) {
             // Discount params
             $discPct   = max(0.0, min(100.0, (float)($_POST['discount_percent'] ?? 0)));
             $discFixed = max(0.0, (float)($_POST['discount_fixed'] ?? 0));
+            if ($appliesTo === 'item_types' && $itemTypes === null) throw new InvalidArgumentException('Choose at least one item category for this deal.');
+            if ($appliesTo === 'items' && $itemIds === null) throw new InvalidArgumentException('Choose at least one item for this deal.');
+            if ($discFixed > 99999999.99) throw new InvalidArgumentException('Fixed discount is too large.');
+            if (in_array($type, ['happy_hour', 'percent_off', 'combo'], true) && $discPct <= 0) throw new InvalidArgumentException('Enter a discount percentage above 0.');
+            if ($type === 'fixed_off' && $discFixed <= 0) throw new InvalidArgumentException('Enter a fixed discount amount above 0.');
+            if ($type === 'spend_save' && $discPct <= 0 && $discFixed <= 0) throw new InvalidArgumentException('Enter a discount percentage or a fixed amount.');
 
             // Multi-buy
             $mbQty = null; $mbPay = null;
             if ($type === 'multi_buy') {
-                $mbQty = max(2, (int)($_POST['multi_buy_qty'] ?? 3));
-                $mbPay = max(1, (int)($_POST['multi_buy_pay'] ?? 2));
+                $mbQty = min(255, max(2, (int)($_POST['multi_buy_qty'] ?? 3)));
+                $mbPay = min(255, max(1, (int)($_POST['multi_buy_pay'] ?? 2)));
                 if ($mbPay >= $mbQty) throw new InvalidArgumentException('"Pay for" must be less than "Buy" qty.');
             }
 
             // Spend threshold
             $spendThreshold = null;
             if ($type === 'spend_save') {
-                $spendThreshold = max(0.01, (float)($_POST['spend_threshold'] ?? 0));
+                $spendThreshold = min(99999999.99, max(0.01, (float)($_POST['spend_threshold'] ?? 0)));
             }
 
             // Combo requirements: [{item_types:[], min_qty:N}, ...]
@@ -77,11 +92,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['ajax_action'])) {
                 $comboJson = trim($_POST['combo_requires'] ?? '');
                 if ($comboJson !== '') {
                     $decoded = json_decode($comboJson, true);
-                    if (is_array($decoded) && count($decoded) >= 2) {
-                        $comboRequires = json_encode($decoded);
+                    $groupsOk = is_array($decoded) && count($decoded) >= 2;
+                    if ($groupsOk) {
+                        foreach ($decoded as $grp) {
+                            if (!is_array($grp) || empty($grp['item_types']) || !is_array($grp['item_types']) || (int)($grp['min_qty'] ?? 0) < 1) { $groupsOk = false; break; }
+                        }
+                    }
+                    if ($groupsOk) {
+                        $comboRequires = json_encode(array_values($decoded));
                     } else {
                         throw new InvalidArgumentException('Combo requires at least 2 groups in valid JSON.');
                     }
+                } else {
+                    throw new InvalidArgumentException('A combo deal needs its required item groups.');
                 }
             }
 
@@ -95,8 +118,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['ajax_action'])) {
             // Flags
             $isActive       = isset($_POST['is_active']) ? 1 : 0;
             $exclusive      = isset($_POST['exclusive'])  ? 1 : 0;
-            $maxUses        = trim($_POST['max_uses_per_order'] ?? '') !== '' ? max(1, (int)$_POST['max_uses_per_order']) : null;
-            $sort           = (int)($_POST['sort_order'] ?? 0);
+            $maxUses        = trim($_POST['max_uses_per_order'] ?? '') !== '' ? min(255, max(1, (int)$_POST['max_uses_per_order'])) : null;
+            $sort           = max(-32768, min(32767, (int)($_POST['sort_order'] ?? 0)));
 
             $params = [$name, $desc ?: null, $type, $dowArr, $startTime, $endTime,
                        $validFrom, $validTo, $appliesTo, $itemTypes, $itemIds,

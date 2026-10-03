@@ -50,6 +50,25 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             'facebook_post_log_enabled'   => isset($_POST['facebook_post_log_enabled']) ? '1' : '0',
         ];
 
+        if ($settings['facebook_page_id'] !== '' && !preg_match('/^[0-9]{5,30}$/', $settings['facebook_page_id'])) {
+            throw new RuntimeException('Facebook Page ID must be numeric.');
+        }
+        if (mb_strlen($settings['facebook_page_name']) > 100) {
+            throw new RuntimeException('Page name cannot exceed 100 characters.');
+        }
+        if (mb_strlen($settings['facebook_default_hashtags']) > 300) {
+            throw new RuntimeException('Default hashtags cannot exceed 300 characters.');
+        }
+        if ($settings['facebook_default_hashtags'] !== '' && !preg_match('/^#[^\s#]+(\s+#[^\s#]+)*$/u', $settings['facebook_default_hashtags'])) {
+            throw new RuntimeException('Hashtags must each start with # and be separated by spaces, e.g. #hotel #malawi.');
+        }
+        if ($newToken !== '' && (preg_match('/\s/', $newToken) || mb_strlen($newToken) > 1000)) {
+            throw new RuntimeException('The access token looks invalid (no spaces, 1000 characters maximum).');
+        }
+        if ($settings['facebook_posting_enabled'] === '1' && ($settings['facebook_page_id'] === '' || ($newToken === '' && !$fb_has_token))) {
+            throw new RuntimeException('Add the Page ID and an access token before enabling Facebook posting.');
+        }
+
         // Only overwrite the token if a new one was submitted — store encrypted
         if ($newToken !== '') {
             $settings['facebook_page_access_token'] = function_exists('encryptApiKey') ? encryptApiKey($newToken) : $newToken;

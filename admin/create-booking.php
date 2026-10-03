@@ -1120,7 +1120,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['create_booking'])) {
                     $adminCcEmail = trim((string)getEmailSetting('smtp_username', ''));
                 }
                 if (!empty($adminCcEmail) && filter_var($adminCcEmail, FILTER_VALIDATE_EMAIL)) {
-                    $adminCcName      = getSetting('site_name', 'Admin');
+                    $adminCcName      = getSetting('site_name', 'Hotel');
                     $adminBookingUrl  = rtrim((string)getSetting('site_url', ''), '/') . '/admin/booking-details.php?id=' . $primary_id;
                     $adminCreatedBy   = htmlspecialchars($user['full_name'] ?? $user['username'] ?? 'Admin');
                     $adminCcSubject   = '[Admin Copy] New Booking Created — ' . htmlspecialchars($primary_ref);

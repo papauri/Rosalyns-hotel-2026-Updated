@@ -21,7 +21,7 @@ if (mb_strlen($q) < 2) {
 }
 
 $like     = '%' . $q . '%';
-$currency = getSetting('currency_symbol', 'K');
+$currency = getSetting('currency_symbol', 'MWK');
 $rows     = [];
 
 // Primary query — joins payments for accurate lifetime spend

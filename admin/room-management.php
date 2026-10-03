@@ -1534,7 +1534,7 @@ $fb_rooms_posting_on = getSetting('facebook_posting_enabled', '0') === '1'
             window._fbDefaults = {
                 baseUrl: <?php echo json_encode(rtrim(defined('BASE_URL') ? BASE_URL : '', '/')); ?>,
                 currency: <?php echo json_encode(getSetting('currency_symbol', 'MWK')); ?>,
-                hashtags: <?php echo json_encode(getSetting('facebook_default_hashtags', '#hotel #accommodation')); ?>,
+                hashtags: <?php echo json_encode(getSetting('facebook_default_hashtags', '#hotel #accommodation #luxury')); ?>,
                 pageName: <?php echo json_encode(getSetting('facebook_page_name', '')); ?>
             };
 

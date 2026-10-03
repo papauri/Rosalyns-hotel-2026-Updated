@@ -37,6 +37,9 @@ try {
     // Ensure table exists by triggering auto-create
     moduleEnabled('bookings');
 
+    // All-or-nothing: a failure half-way must not leave a mixed module state.
+    $pdo->beginTransaction();
+
     $applied_modules = [];
     foreach ($preset['modules'] as $module_key => $enable) {
         if (in_array($module_key, $locked, true)) {
@@ -89,6 +92,8 @@ try {
         $seeded_categories[] = $name;
     }
 
+    $pdo->commit();
+
     if (function_exists('rh_log_event')) {
         rh_log_event('admin/module-settings', 'info',
             'Business preset applied: ' . $preset_key,
@@ -103,6 +108,9 @@ try {
         'seeded_categories' => $seeded_categories,
     ]);
 } catch (Throwable $e) {
+    if ($pdo->inTransaction()) {
+        $pdo->rollBack();
+    }
     error_log('apply-preset: ' . $e->getMessage());
     echo json_encode(['success' => false, 'error' => 'Database error — please try again.']);
 }

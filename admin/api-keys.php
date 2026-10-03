@@ -32,7 +32,7 @@ $availablePermissions = [
 function buildMetaRoomPriceTemplate(PDO $pdo): string
 {
     $siteName = getSetting('site_name', 'Hotel');
-    $currency = getSetting('currency_symbol', 'EUR');
+    $currency = getSetting('currency_symbol', 'MWK');
     $siteUrl = trim((string)getSetting('site_url', ''));
     $bookingUrl = $siteUrl !== '' ? rtrim($siteUrl, '/') . '/booking.php' : (defined('BASE_URL') ? rtrim(BASE_URL, '/') . '/booking.php' : '/booking.php');
 

@@ -172,7 +172,7 @@ function buildRoomFacebookPost(array $room): array
 function buildEventFacebookPost(array $event): array
 {
     $baseUrl  = defined('BASE_URL') ? rtrim(BASE_URL, '/') : '';
-    $hashtags = trim((string) getSetting('facebook_default_hashtags', '#hotel #events'));
+    $hashtags = trim((string) getSetting('facebook_default_hashtags', '#hotel #accommodation #luxury'));
 
     $datePart = '';
     if (!empty($event['event_date'])) {
@@ -222,7 +222,7 @@ function buildConferenceFacebookPost(array $room): array
 {
     $baseUrl  = defined('BASE_URL') ? rtrim(BASE_URL, '/') : '';
     $currency = (string) getSetting('currency_symbol', 'MWK');
-    $hashtags = trim((string) getSetting('facebook_default_hashtags', '#hotel #conference #events'));
+    $hashtags = trim((string) getSetting('facebook_default_hashtags', '#hotel #accommodation #luxury'));
 
     $link = $baseUrl . '/conference.php';
 
@@ -283,7 +283,7 @@ function buildMenuItemFacebookPost(array $item, string $menuType = 'food'): arra
 {
     $baseUrl  = defined('BASE_URL') ? rtrim(BASE_URL, '/') : '';
     $currency = (string) getSetting('currency_symbol', 'MWK');
-    $hashtags = trim((string) getSetting('facebook_default_hashtags', '#hotel #restaurant #food'));
+    $hashtags = trim((string) getSetting('facebook_default_hashtags', '#hotel #accommodation #luxury'));
 
     $icon = $menuType === 'drink' ? '🍹' : '🍽️';
     $link = $baseUrl . '/restaurant.php';
@@ -328,7 +328,7 @@ function buildGymPackageFacebookPost(array $package): array
 {
     $baseUrl  = defined('BASE_URL') ? rtrim(BASE_URL, '/') : '';
     $currency = (string) getSetting('currency_symbol', 'MWK');
-    $hashtags = trim((string) getSetting('facebook_default_hashtags', '#hotel #wellness #gym'));
+    $hashtags = trim((string) getSetting('facebook_default_hashtags', '#hotel #accommodation #luxury'));
 
     $link   = $baseUrl . '/gym.php';
     $price  = (float) ($package['price'] ?? 0);

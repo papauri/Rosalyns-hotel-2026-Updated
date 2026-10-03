@@ -19,7 +19,7 @@ $user = [
 $message = '';
 $error = '';
 $_can_events_financials = hasPermission((int)($user['id'] ?? 0), 'events_financials');
-$currency_symbol = (string)getSetting('currency_symbol', 'K');
+$currency_symbol = (string)getSetting('currency_symbol', 'MWK');
 
 // Receivable-account payment sync (syncEventInquiryPaymentSnapshot) lives in the
 // shared include so payment-add.php and this page compute identical balances.
