@@ -158,11 +158,17 @@ function sendWhatsAppViaTwilio(string $to, string $body): array
         CURLOPT_POSTFIELDS     => http_build_query($data),
         CURLOPT_USERPWD        => "{$accountSid}:{$authToken}",
         CURLOPT_TIMEOUT        => 20,
+        CURLOPT_CONNECTTIMEOUT => 8,
         CURLOPT_HTTPHEADER     => ['Content-Type: application/x-www-form-urlencoded'],
     ]);
     $body_resp = curl_exec($ch);
     $httpCode  = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+    $curlErr   = curl_error($ch);
     curl_close($ch);
+    if ($body_resp === false) {
+        // Network failure / timeout: report it instead of passing `false` on as a response body
+        $body_resp = 'cURL error: ' . $curlErr;
+    }
 
     $decoded = json_decode($body_resp, true);
     $success = $httpCode >= 200 && $httpCode < 300 && !empty($decoded['sid']);
@@ -203,6 +209,7 @@ function sendWhatsAppViaMeta(string $to, string $body): array
         CURLOPT_POST           => true,
         CURLOPT_POSTFIELDS     => $payload,
         CURLOPT_TIMEOUT        => 20,
+        CURLOPT_CONNECTTIMEOUT => 8,
         CURLOPT_HTTPHEADER     => [
             'Content-Type: application/json',
             "Authorization: Bearer {$accessToken}",
@@ -210,7 +217,12 @@ function sendWhatsAppViaMeta(string $to, string $body): array
     ]);
     $body_resp = curl_exec($ch);
     $httpCode  = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+    $curlErr   = curl_error($ch);
     curl_close($ch);
+    if ($body_resp === false) {
+        // Network failure / timeout: report it instead of passing `false` on as a response body
+        $body_resp = 'cURL error: ' . $curlErr;
+    }
 
     $decoded = json_decode($body_resp, true);
     $success = $httpCode === 200 && !empty($decoded['messages'][0]['id']);
@@ -233,6 +245,7 @@ function whatsAppHttpGet(string $url): array
     curl_setopt_array($ch, [
         CURLOPT_RETURNTRANSFER => true,
         CURLOPT_TIMEOUT        => 20,
+        CURLOPT_CONNECTTIMEOUT => 8,
         CURLOPT_FOLLOWLOCATION => true,
         CURLOPT_SSL_VERIFYPEER => true,
         CURLOPT_USERAGENT      => 'HotelBookingSystem/1.0',

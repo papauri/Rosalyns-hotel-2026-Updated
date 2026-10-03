@@ -468,6 +468,12 @@ function createRecurringAssignments(PDO $pdo, int $performedBy): int
     }
 
     $whereConditions[] = "status IN ('completed', 'verified')";
+    // Only the newest task of a recurring chain spawns the next one. Without this every completed
+    // ancestor re-spawned a task each period, so the number of open tasks grew without bound.
+    $whereConditions[] = "NOT EXISTS (SELECT 1 FROM housekeeping_assignments nx
+        WHERE nx.individual_room_id = housekeeping_assignments.individual_room_id
+          AND nx.assignment_type <=> housekeeping_assignments.assignment_type AND nx.is_recurring = 1
+          AND nx.id > housekeeping_assignments.id)";
 
     // Build SELECT columns based on available columns
     $selectColumns = ['*'];

@@ -1473,6 +1473,11 @@ function getPermissionForPage(string $page)
         'facebook-settings.php' => 'facebook_settings',
         'user-management.php' => 'user_management',
         'process-checkin.php' => 'bookings',
+        // Unmapped before: reachable by any signed-in user by URL. Keys match the nav entries in admin-header.php.
+        'stock-suppliers.php' => 'stock_management',
+        'purchase-orders.php' => 'stock_management',
+        'stock-reorder.php' => 'stock_management',
+        'gym-classes.php' => 'gym',
     ];
 
     return $map[$page] ?? null;
@@ -1495,6 +1500,11 @@ function getModuleForPage(string $page)
         'edit-booking.php' => 'bookings',
         'tentative-bookings.php' => 'bookings',
         'process-checkin.php' => 'bookings',
+        // Unmapped before: reachable by any signed-in user by URL. Keys match the nav entries in admin-header.php.
+        'stock-suppliers.php' => 'stock_management',
+        'purchase-orders.php' => 'stock_management',
+        'stock-reorder.php' => 'stock_management',
+        'gym-classes.php' => 'gym',
         'calendar.php' => 'bookings',
         'blocked-dates.php' => 'bookings',
         'rate-plans.php' => 'bookings',

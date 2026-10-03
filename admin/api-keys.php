@@ -106,6 +106,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
                 if ($clientName === '' || $clientEmail === '') {
                     throw new RuntimeException('Client name and email are required.');
                 }
+                if (!filter_var($clientEmail, FILTER_VALIDATE_EMAIL) || strlen($clientEmail) > 255 || strlen($clientName) > 255 || strlen($clientWebsite) > 255) {
+                    throw new RuntimeException('Enter a valid email address; name, email and website must each be under 255 characters.');
+                }
+                $rateLimit = min($rateLimit, 1000000);
+
+                if (!filter_var($clientEmail, FILTER_VALIDATE_EMAIL) || strlen($clientEmail) > 255 || strlen($clientName) > 255 || strlen($clientWebsite) > 255) {
+                    throw new RuntimeException('Enter a valid email address; name, email and website must each be under 255 characters.');
+                }
+                $rateLimit = min($rateLimit, 1000000);
 
                 $rawApiKey = bin2hex(random_bytes(32));
                 $hashedApiKey = password_hash($rawApiKey, PASSWORD_DEFAULT);

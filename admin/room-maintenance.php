@@ -438,6 +438,12 @@ function createRecurringMaintenance(PDO $pdo, int $performedBy): int
     }
 
     $whereConditions[] = "status IN ('completed', 'verified')";
+    // Only the newest task of a recurring chain spawns the next one. Without this every completed
+    // ancestor re-spawned a task each period, so the number of open tasks grew without bound.
+    $whereConditions[] = "NOT EXISTS (SELECT 1 FROM room_maintenance_schedules nx
+        WHERE nx.individual_room_id = room_maintenance_schedules.individual_room_id
+          AND nx.title = room_maintenance_schedules.title AND nx.is_recurring = 1
+          AND nx.id > room_maintenance_schedules.id)";
 
     $sql = "SELECT * FROM room_maintenance_schedules WHERE " . implode(' AND ', $whereConditions);
     $stmt = $pdo->prepare($sql);

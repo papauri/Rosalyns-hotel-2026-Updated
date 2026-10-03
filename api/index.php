@@ -248,8 +248,12 @@ class ApiAuth {
      */
     public function logUsage(int $apiKeyId, string $endpoint, string $method, int $responseCode, float $responseTime) {
         try {
-            $ip = $_SERVER['REMOTE_ADDR'] ?? 'unknown';
-            $userAgent = $_SERVER['HTTP_USER_AGENT'] ?? 'unknown';
+            // Column widths: ip VARCHAR(45), endpoint VARCHAR(255), method VARCHAR(10). A rejected insert
+            // would also skip rate-limit counting, so over-long input must be cut, not thrown.
+            $ip = substr((string)($_SERVER['REMOTE_ADDR'] ?? 'unknown'), 0, 45);
+            $userAgent = substr((string)($_SERVER['HTTP_USER_AGENT'] ?? 'unknown'), 0, 1000);
+            $endpoint = substr($endpoint, 0, 255);
+            $method = substr($method, 0, 10);
             
             $stmt = $this->pdo->prepare("
                 INSERT INTO api_usage_logs 
