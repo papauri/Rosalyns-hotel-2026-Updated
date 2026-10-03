@@ -189,8 +189,8 @@ if (!function_exists('guest_run_poststay_review_requests')) {
                 SELECT b.id, b.booking_reference, b.room_id, b.guest_name, b.guest_email,
                        b.check_in_date, b.check_out_date, b.status
                 FROM bookings b
-                WHERE b.check_out_date = DATE_SUB(CURDATE(), INTERVAL ? DAY)
-                  AND b.status IN ('confirmed', 'pending')
+                WHERE b.check_out_date BETWEEN DATE_SUB(CURDATE(), INTERVAL (? + 3) DAY) AND DATE_SUB(CURDATE(), INTERVAL ? DAY)
+                  AND b.status = 'checked-out'
                   AND b.guest_email IS NOT NULL AND b.guest_email <> ''
                   AND NOT EXISTS (
                       SELECT 1 FROM guest_communication_log l
@@ -198,7 +198,10 @@ if (!function_exists('guest_run_poststay_review_requests')) {
                   )
                 ORDER BY b.check_out_date ASC
             ");
-            $stmt->execute([$cfg['poststay_days']]);
+            // Only guests who actually stayed (status checked-out) are asked for a review; the 3-day
+            // catch-up window means a scheduler gap never silently drops a request (the log still
+            // guarantees one request per booking).
+            $stmt->execute([$cfg['poststay_days'], $cfg['poststay_days']]);
             $due = $stmt->fetchAll(PDO::FETCH_ASSOC);
         } catch (Throwable $e) {
             $out['errors'][] = 'Query failed: ' . $e->getMessage();

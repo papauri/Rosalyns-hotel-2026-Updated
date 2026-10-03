@@ -38,17 +38,22 @@ function mm_store_uploaded_media(array $fileInput, string $mediaType): array
     }
 
     $detected = mime_content_type($tmp) ?: '';
-    $isImage = stripos($detected, 'image/') === 0;
-    $isVideo = stripos($detected, 'video/') === 0;
-
-    if (($mediaType === 'image' && !$isImage) || ($mediaType === 'video' && !$isVideo)) {
-        throw new RuntimeException('Uploaded file does not match selected media type.');
+    // The stored extension is derived from the verified MIME type, never the client file name
+    // (a ".php"/".svg" name on a polyglot file would be executable / script-bearing).
+    $extByMime = ($mediaType === 'video')
+        ? ['video/mp4' => 'mp4', 'video/webm' => 'webm', 'video/ogg' => 'ogv', 'video/quicktime' => 'mov']
+        : ['image/jpeg' => 'jpg', 'image/png' => 'png', 'image/webp' => 'webp', 'image/gif' => 'gif'];
+    if (!isset($extByMime[$detected])) {
+        throw new RuntimeException('Uploaded file type is not allowed (' . ($mediaType === 'video' ? 'MP4, WebM, OGG, MOV' : 'JPG, PNG, WebP, GIF') . ').');
     }
-
-    $ext = strtolower(pathinfo($orig, PATHINFO_EXTENSION));
-    if ($ext === '') {
-        $ext = ($mediaType === 'video') ? 'mp4' : 'jpg';
+    $maxBytes = ($mediaType === 'video') ? 100 * 1024 * 1024 : 20 * 1024 * 1024;
+    if ((int)($fileInput['size'] ?? 0) > $maxBytes) {
+        throw new RuntimeException('File is too large (max ' . ($maxBytes / 1048576) . ' MB).');
     }
+    if ($mediaType === 'image' && !@getimagesize($tmp)) {
+        throw new RuntimeException('Uploaded file is not a valid image.');
+    }
+    $ext = $extByMime[$detected];
 
     $dir = ($mediaType === 'video') ? (__DIR__ . '/../videos/managed/') : (__DIR__ . '/../images/managed/');
     if (!is_dir($dir) && !mkdir($dir, 0755, true) && !is_dir($dir)) {
@@ -66,6 +71,24 @@ function mm_store_uploaded_media(array $fileInput, string $mediaType): array
         'mime_type' => $detected,
         'source_type' => 'upload',
     ];
+}
+
+/** Trim and clip posted text to the column width (strict SQL rejects over-long values). */
+function mm_clip($v, int $max): string
+{
+    return mb_substr(trim((string)$v), 0, $max);
+}
+
+/** Accept only http(s) links or site-relative paths (no javascript:/data:, no traversal). */
+function mm_valid_media_url(string $url): bool
+{
+    if (preg_match('#^https?://#i', $url)) {
+        return true;
+    }
+    if (preg_match('/^[a-z][a-z0-9+.\-]*:/i', $url) || strpos($url, '..') !== false || strpos($url, '//') === 0) {
+        return false;
+    }
+    return true;
 }
 
 function mm_get_allowed_source_columns(): array
@@ -300,7 +323,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     throw new RuntimeException('You do not have permission to create media items.');
                 }
 
-                $title = trim((string)($_POST['title'] ?? ''));
+                $title = mm_clip($_POST['title'] ?? '', 180);
                 $mediaType = (($_POST['media_type'] ?? 'image') === 'video') ? 'video' : 'image';
 
                 if ($title === '') {
@@ -315,6 +338,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $hasFile  = isset($_FILES['media_file']) && (int)($_FILES['media_file']['error'] ?? UPLOAD_ERR_NO_FILE) === UPLOAD_ERR_OK;
 
                 if ($urlInput !== '') {
+                    if (!mm_valid_media_url($urlInput)) {
+                        throw new RuntimeException('Media URL must start with http:// or https://, or be a path inside the site.');
+                    }
+                    if (strlen($urlInput) > 500) {
+                        throw new RuntimeException('Media URL is too long (500 characters maximum).');
+                    }
                     $mediaUrl   = $urlInput;
                     $sourceType = 'url';
                     $mimeType   = ($mediaType === 'video') ? 'url' : null;
@@ -330,17 +359,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $stmt = $pdo->prepare("INSERT INTO managed_media_catalog (title, description, media_type, source_type, media_url, mime_type, alt_text, caption, placement_key, page_slug, section_key, entity_type, entity_id, is_active, display_order, created_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
                 $stmt->execute([
                     $title,
-                    trim((string)($_POST['description'] ?? '')) ?: null,
+                    mm_clip($_POST['description'] ?? '', 255) ?: null,
                     $mediaType,
                     $sourceType,
                     $mediaUrl,
                     $mimeType,
-                    trim((string)($_POST['alt_text'] ?? '')) ?: null,
-                    trim((string)($_POST['caption'] ?? '')) ?: null,
-                    trim((string)($_POST['placement_key'] ?? '')) ?: null,
-                    trim((string)($_POST['page_slug'] ?? '')) ?: null,
-                    trim((string)($_POST['section_key'] ?? '')) ?: null,
-                    trim((string)($_POST['entity_type'] ?? '')) ?: null,
+                    mm_clip($_POST['alt_text'] ?? '', 255) ?: null,
+                    mm_clip($_POST['caption'] ?? '', 255) ?: null,
+                    mm_clip($_POST['placement_key'] ?? '', 120) ?: null,
+                    mm_clip($_POST['page_slug'] ?? '', 100) ?: null,
+                    mm_clip($_POST['section_key'] ?? '', 100) ?: null,
+                    mm_clip($_POST['entity_type'] ?? '', 50) ?: null,
                     ($_POST['entity_id'] ?? '') !== '' ? (int)$_POST['entity_id'] : null,
                     isset($_POST['is_active']) ? 1 : 0,
                     (int)($_POST['display_order'] ?? 0),
@@ -363,9 +392,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                             $linkRecId,
                             $linkColumn,
                             $mediaType,
-                            trim((string)($_POST['page_slug'] ?? '')) ?: null,
-                            trim((string)($_POST['section_key'] ?? '')) ?: null,
-                            trim((string)($_POST['entity_type'] ?? '')) ?: null,
+                            mm_clip($_POST['page_slug'] ?? '', 100) ?: null,
+                            mm_clip($_POST['section_key'] ?? '', 100) ?: null,
+                            mm_clip($_POST['entity_type'] ?? '', 50) ?: null,
                             ($_POST['entity_id'] ?? '') !== '' ? (int)$_POST['entity_id'] : null,
                         ]);
                         mm_propagate_media_to_sources($pdo, $newCatalogId, $mediaUrl, false);
@@ -405,6 +434,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $urlReplacement = trim((string)($_POST['media_url_input'] ?? ''));
                 $hasFileReplacement = isset($_FILES['media_file']) && (int)($_FILES['media_file']['error'] ?? UPLOAD_ERR_NO_FILE) === UPLOAD_ERR_OK;
 
+                $oldUploadToRemove = null;
+                if (mm_clip($_POST['title'] ?? '', 180) === '') {
+                    throw new RuntimeException('Title is required.');
+                }
+                if ($urlReplacement !== '' && !mm_valid_media_url($urlReplacement)) {
+                    throw new RuntimeException('Media URL must start with http:// or https://, or be a path inside the site.');
+                }
                 if ($urlReplacement !== '') {
                     $newMediaUrl = $urlReplacement;
                     $newSourceType = 'url';
@@ -415,28 +451,26 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     $newMimeType = $uploaded['mime_type'];
                     $newSourceType = 'upload';
 
-                    if (($current['source_type'] ?? '') === 'upload' && !empty($current['media_url'])) {
-                        $oldPath = __DIR__ . '/../' . ltrim($current['media_url'], '/');
-                        if (is_file($oldPath)) {
-                            @unlink($oldPath);
-                        }
-                    }
+                }
+                // Switching an uploaded item to a URL also orphans the old upload.
+                if (($current['source_type'] ?? '') === 'upload' && !empty($current['media_url']) && $newMediaUrl !== $current['media_url']) {
+                    $oldUploadToRemove = (string)$current['media_url'];
                 }
 
                 $stmt = $pdo->prepare("UPDATE managed_media_catalog SET title = ?, description = ?, media_type = ?, source_type = ?, media_url = ?, mime_type = ?, alt_text = ?, caption = ?, placement_key = ?, page_slug = ?, section_key = ?, entity_type = ?, entity_id = ?, is_active = ?, display_order = ? WHERE id = ?");
                 $stmt->execute([
-                    trim((string)($_POST['title'] ?? '')),
-                    trim((string)($_POST['description'] ?? '')) ?: null,
+                    mm_clip($_POST['title'] ?? '', 180),
+                    mm_clip($_POST['description'] ?? '', 255) ?: null,
                     $mediaType,
                     $newSourceType,
                     $newMediaUrl,
                     $newMimeType,
-                    trim((string)($_POST['alt_text'] ?? '')) ?: null,
-                    trim((string)($_POST['caption'] ?? '')) ?: null,
-                    trim((string)($_POST['placement_key'] ?? '')) ?: null,
-                    trim((string)($_POST['page_slug'] ?? '')) ?: null,
-                    trim((string)($_POST['section_key'] ?? '')) ?: null,
-                    trim((string)($_POST['entity_type'] ?? '')) ?: null,
+                    mm_clip($_POST['alt_text'] ?? '', 255) ?: null,
+                    mm_clip($_POST['caption'] ?? '', 255) ?: null,
+                    mm_clip($_POST['placement_key'] ?? '', 120) ?: null,
+                    mm_clip($_POST['page_slug'] ?? '', 100) ?: null,
+                    mm_clip($_POST['section_key'] ?? '', 100) ?: null,
+                    mm_clip($_POST['entity_type'] ?? '', 50) ?: null,
                     ($_POST['entity_id'] ?? '') !== '' ? (int)$_POST['entity_id'] : null,
                     isset($_POST['is_active']) ? 1 : 0,
                     (int)($_POST['display_order'] ?? 0),
@@ -444,6 +478,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 ]);
 
                 mm_propagate_media_to_sources($pdo, $itemId, $newMediaUrl, false);
+
+                // Only now that the row points at the new media is the old upload safe to remove,
+                // and only inside the managed upload folders.
+                if ($oldUploadToRemove !== null && preg_match('#^(images|videos)/managed/[A-Za-z0-9._-]+$#', $oldUploadToRemove)) {
+                    $oldPath = __DIR__ . '/../' . $oldUploadToRemove;
+                    if (is_file($oldPath)) {
+                        @unlink($oldPath);
+                    }
+                }
 
                 if (function_exists('invalidateDataCaches')) {
                     invalidateDataCaches();
@@ -475,7 +518,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $stmt = $pdo->prepare("DELETE FROM managed_media_catalog WHERE id = ?");
                 $stmt->execute([$itemId]);
 
-                if ($current && ($current['source_type'] ?? '') === 'upload' && !empty($current['media_url'])) {
+                if ($current && ($current['source_type'] ?? '') === 'upload' && !empty($current['media_url'])
+                    && preg_match('#^(images|videos)/managed/[A-Za-z0-9._-]+$#', (string)$current['media_url'])) {
                     $fullPath = __DIR__ . '/../' . ltrim($current['media_url'], '/');
                     if (is_file($fullPath)) {
                         @unlink($fullPath);

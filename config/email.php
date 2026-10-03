@@ -56,10 +56,15 @@ $email_log_enabled = (bool)getEmailSetting('email_log_enabled', 0);
 $email_preview_enabled = (bool)getEmailSetting('email_preview_enabled', 0);
 
 // Check if we're on localhost
-$is_localhost = isset($_SERVER['HTTP_HOST']) && (
-    strpos($_SERVER['HTTP_HOST'], 'localhost') !== false ||
-    strpos($_SERVER['HTTP_HOST'], '127.0.0.1') !== false ||
-    strpos($_SERVER['HTTP_HOST'], '.local') !== false
+// Host header is client-supplied: match the whole host name (port stripped), not a substring,
+// so "localhost.example.com" / "x.localdomain.com" never count as local.
+$rh_host_only = isset($_SERVER['HTTP_HOST']) ? strtolower(preg_replace('/:\d+$/', '', (string)$_SERVER['HTTP_HOST'])) : '';
+$is_localhost = $rh_host_only !== '' && (
+    $rh_host_only === 'localhost' ||
+    $rh_host_only === '127.0.0.1' ||
+    $rh_host_only === '[::1]' ||
+    substr($rh_host_only, -6) === '.local' ||
+    substr($rh_host_only, -10) === '.localhost'
 );
 
 // Development mode: show previews on localhost unless explicitly disabled
@@ -81,7 +86,14 @@ function rh_automated_email_adjust(string &$to, string &$subject, bool &$bccAdmi
         return;
     }
     $redirect = trim((string)($ctx['redirect'] ?? ''));
-    if ($redirect !== '' && filter_var($redirect, FILTER_VALIDATE_EMAIL)) {
+    if ($redirect !== '' && !filter_var($redirect, FILTER_VALIDATE_EMAIL)) {
+        // Test mode is on but the test address is unusable: fail closed (an empty recipient is
+        // rejected by the mailer) instead of falling through to the real guest.
+        $to = '';
+        $bccAdmin = false;
+        return;
+    }
+    if ($redirect !== '') {
         $to = $redirect;
         if (strpos($subject, '[TEST]') !== 0) {
             $subject = '[TEST] ' . $subject;
@@ -2243,6 +2255,16 @@ function buildBookingEmailVariables(array $booking, ?array $room = null, array $
     $vars['address']       = htmlspecialchars((string)getSetting('hotel_address', getSetting('address', '')), ENT_QUOTES, 'UTF-8');
     $vars['contact_phone'] = htmlspecialchars((string)getSetting('phone_main', ''), ENT_QUOTES, 'UTF-8');
 
+    // Guest-supplied text goes into HTML email bodies: escape it here once so a name or request
+    // like "<a href=...>" can never inject markup/links into mail sent from the hotel's address.
+    // (renderBookingEmailTemplate() decodes the entities again for the plain-text subject/body.)
+    foreach (['guest_name', 'guest_email', 'guest_phone', 'room_name', 'room_assignment', 'room_numbers', 'special_requests', 'rate_plan_label'] as $userKey) {
+        $vars[$userKey] = htmlspecialchars((string)$vars[$userKey], ENT_QUOTES, 'UTF-8');
+    }
+    if (isset($extra['cancellation_reason'])) {
+        $extra['cancellation_reason'] = htmlspecialchars((string)$extra['cancellation_reason'], ENT_QUOTES, 'UTF-8');
+    }
+
     return array_merge($vars, $extra);
 }
 
@@ -2265,10 +2287,12 @@ function renderBookingEmailTemplate(string $templateKey, array $vars)
         $replace['{{' . $k . '}}'] = (string)$v;
     }
 
+    // Variables arrive HTML-escaped (safe for the HTML body); the subject and plain-text part
+    // are not HTML, so decode entities there ("O&#039;Brien" -> "O'Brien").
     return [
-        'subject' => strtr($template['subject'], $replace),
+        'subject' => html_entity_decode(strtr($template['subject'], $replace), ENT_QUOTES | ENT_HTML5, 'UTF-8'),
         'html_body' => strtr($template['html_body'], $replace),
-        'text_body' => !empty($template['text_body']) ? strtr($template['text_body'], $replace) : ''
+        'text_body' => !empty($template['text_body']) ? html_entity_decode(strtr($template['text_body'], $replace), ENT_QUOTES | ENT_HTML5, 'UTF-8') : ''
     ];
 }
 

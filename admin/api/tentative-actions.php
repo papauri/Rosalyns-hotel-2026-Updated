@@ -111,13 +111,18 @@ try {
             $base_ts        = max(time(), (int)strtotime((string)$booking['tentative_expires_at']));
             $new_expires_at = date('Y-m-d H:i:s', $base_ts + ($hours * 3600));
 
-            $pdo->prepare("
+            $extUpd = $pdo->prepare("
                 UPDATE bookings
                 SET tentative_expires_at = ?,
                     reminder_sent        = 0,
                     reminder_sent_at     = NULL
-                WHERE id = ?
-            ")->execute([$new_expires_at, $booking_id]);
+                WHERE id = ? AND status = 'tentative' AND is_tentative = 1
+            ");
+            $extUpd->execute([$new_expires_at, $booking_id]);
+            if ($extUpd->rowCount() !== 1) {
+                echo json_encode(['success' => false, 'error' => 'This booking is no longer an active tentative hold.']);
+                exit;
+            }
 
             $pdo->prepare("
                 INSERT INTO tentative_booking_log
@@ -148,11 +153,19 @@ try {
 
             $pdo->beginTransaction();
 
-            $pdo->prepare("
+            // Conditional on the status still being open: a confirmation/cancellation that landed
+            // between the read above and this write must not be overwritten by 'expired'.
+            $expUpd = $pdo->prepare("
                 UPDATE bookings
                 SET status = 'expired', is_tentative = 0, expired_at = NOW()
-                WHERE id = ?
-            ")->execute([$booking_id]);
+                WHERE id = ? AND status IN ('tentative', 'pending')
+            ");
+            $expUpd->execute([$booking_id]);
+            if ($expUpd->rowCount() !== 1) {
+                $pdo->rollBack();
+                echo json_encode(['success' => false, 'error' => 'Booking is no longer tentative or pending; nothing was expired.']);
+                exit;
+            }
 
             $pdo->prepare("
                 INSERT INTO tentative_booking_log (booking_id, action, performed_by, action_reason)

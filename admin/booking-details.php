@@ -95,7 +95,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['charge_action'])) {
                 $quantity = (float)($_POST['quantity'] ?? 1);
                 $unit_price = (float)($_POST['unit_price'] ?? 0);
 
-                if (empty($description)) {
+                if (!in_array($charge_type, ['custom', 'service', 'minibar', 'laundry', 'room_service', 'breakfast', 'other'], true)) {
+                    $_SESSION['error_message'] = 'Invalid charge type.';
+                } elseif (mb_strlen($description) > 255) {
+                    $_SESSION['error_message'] = 'The description is too long (255 characters maximum).';
+                } elseif ($quantity <= 0 || $quantity > 100000) {
+                    $_SESSION['error_message'] = 'Quantity must be greater than 0.';
+                } elseif (empty($description)) {
                     $_SESSION['error_message'] = 'Please provide a description for the charge.';
                 } elseif ($unit_price < 0) {
                     $_SESSION['error_message'] = 'Unit price cannot be negative.';
@@ -132,8 +138,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['charge_action'])) {
                 $charge_id = (int)($_POST['charge_id'] ?? 0);
                 $void_reason = trim($_POST['void_reason'] ?? '');
 
-                if ($charge_id <= 0) {
+                // The lifecycle guard above checked THIS booking; the charge must belong to it, or a
+                // charge on a checked-out/cancelled booking could be voided through an open one.
+                $chargeOwner = $pdo->prepare('SELECT booking_id FROM booking_charges WHERE id = ?');
+                $chargeOwner->execute([max(0, $charge_id)]);
+                $chargeOwnerId = $chargeOwner->fetchColumn();
+
+                if ($charge_id <= 0 || $chargeOwnerId === false || (int)$chargeOwnerId !== (int)$booking_id) {
                     $_SESSION['error_message'] = 'Invalid charge ID.';
+                } elseif (mb_strlen($void_reason) > 255) {
+                    $_SESSION['error_message'] = 'The void reason is too long (255 characters maximum).';
                 } elseif (empty($void_reason)) {
                     $_SESSION['error_message'] = 'Please provide a reason for voiding the charge.';
                 } else {
@@ -349,14 +363,24 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['booking_action'])) {
                 } elseif ($booking_data['status'] !== 'tentative' || $booking_data['is_tentative'] != 1) {
                     $_SESSION['error_message'] = 'This is not a tentative booking.';
                 } else {
-                    // Convert to confirmed and clear tentative fields
-                    $update = $pdo->prepare("UPDATE bookings SET status = 'confirmed', is_tentative = 0, tentative_expires_at = NULL, updated_at = NOW() WHERE id = ?");
+                    // Convert exactly once: the status condition in the UPDATE decides the winner, so a
+                    // double click / second tab can neither double-decrement stock nor send two emails.
+                    $pdo->beginTransaction();
+                    $update = $pdo->prepare("UPDATE bookings SET status = 'confirmed', is_tentative = 0, tentative_expires_at = NULL, converted_to_confirmed_at = NOW(), converted_from_tentative = 1, updated_at = NOW() WHERE id = ? AND status = 'tentative' AND is_tentative = 1");
                     $update->execute([$booking_id]);
+                    if ($update->rowCount() !== 1) {
+                        $pdo->rollBack();
+                        $_SESSION['error_message'] = 'This booking was already converted or changed.';
+                        break;
+                    }
 
                     // Decrement room availability — tentative bookings don't consume rooms_available,
                     // but confirmed bookings do; apply the same decrement as pending→confirmed.
                     $pdo->prepare("UPDATE rooms SET rooms_available = rooms_available - 1 WHERE id = ? AND rooms_available > 0")
                         ->execute([$booking_data['room_id']]);
+                    $pdo->prepare("INSERT INTO tentative_booking_log (booking_id, action, performed_by, action_reason) VALUES (?, 'converted', ?, ?)")
+                        ->execute([$booking_id, (int)$user['id'], 'Converted to confirmed by ' . $user['full_name']]);
+                    $pdo->commit();
 
                     $auto_assign_msg = '';
                     if (in_array($booking_data['payment_status'] ?? '', ['paid', 'completed'], true) && empty($booking_data['individual_room_id'])) {
@@ -575,8 +599,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['booking_action'])) {
                         if (!$transitionValidation['allowed']) {
                             $_SESSION['error_message'] = getBookingActionErrorMessage('noshow', $transitionValidation['reason']);
                         } else {
-                            $stmt = $pdo->prepare("UPDATE bookings SET status = 'no-show', updated_at = NOW() WHERE id = ?");
-                            $stmt->execute([$booking_id]);
+                            // Conditional on the status we validated: a double click / second tab must not
+                            // mark twice (which would queue a second refund and send a second email).
+                            $stmt = $pdo->prepare("UPDATE bookings SET status = 'no-show', updated_at = NOW() WHERE id = ? AND status = ?");
+                            $stmt->execute([$booking_id, $noshow_row['status']]);
+                            if ($stmt->rowCount() !== 1) {
+                                $_SESSION['error_message'] = 'This booking was already updated by someone else. Nothing was changed.';
+                                break;
+                            }
 
                             logBookingEvent(
                                 $booking_id,

@@ -46,6 +46,10 @@ function logBookingEvent(
             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ");
 
+        // Strict SQL rejects over-long values and the whole event would be silently lost: clip to column widths.
+        $booking_reference = mb_substr($booking_reference, 0, 50);
+        $action = mb_substr($action, 0, 100);
+        $performed_by_name = $performed_by_name !== null ? mb_substr($performed_by_name, 0, 255) : null;
         $ip_address = $_SERVER['REMOTE_ADDR'] ?? null;
         $user_agent = $_SERVER['HTTP_USER_AGENT'] ?? null;
 
@@ -409,7 +413,7 @@ function getBookingTimeline(int $booking_id): array {
         $stmt = $pdo->prepare("
             SELECT * FROM booking_timeline_logs
             WHERE booking_id = ?
-            ORDER BY created_at DESC
+            ORDER BY created_at DESC, id DESC
         ");
         $stmt->execute([$booking_id]);
         return $stmt->fetchAll(PDO::FETCH_ASSOC);

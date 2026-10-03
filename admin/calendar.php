@@ -100,7 +100,7 @@ $blockedDatesByDate = [];
 $blockedDates = [];
 try {
     $startDate = sprintf('%04d-%02d-01', $currentYear, $currentMonth);
-    $endDate = sprintf('%04d-%02d-31', $currentYear, $currentMonth);
+    $endDate = date('Y-m-t', strtotime($startDate)); // real last day: '-31' is an invalid DATE in short months and throws under strict SQL
 
     // Use getBlockedDates() which correctly queries both blocked_dates and individual_room_blocked_dates tables
     $blockedDates = getBlockedDates(null, $startDate, $endDate);
@@ -124,7 +124,7 @@ $bookingsByIndividualRoom = []; // Also index by individual room for easier look
 $bookings = [];
 try {
     $startDate = sprintf('%04d-%02d-01', $currentYear, $currentMonth);
-    $endDate = sprintf('%04d-%02d-31', $currentYear, $currentMonth);
+    $endDate = date('Y-m-t', strtotime($startDate)); // real last day: '-31' is an invalid DATE in short months and throws under strict SQL
 
     $stmt = $pdo->prepare("
         SELECT b.*, r.name as room_name, r.id as room_id, r.price_per_night,
@@ -134,8 +134,7 @@ try {
         FROM bookings b
         INNER JOIN rooms r ON b.room_id = r.id
         LEFT JOIN individual_rooms ir ON b.individual_room_id = ir.id
-        WHERE b.status != 'cancelled'
-        AND b.status != 'checked-out'
+        WHERE b.status IN ('pending', 'tentative', 'confirmed', 'checked-in')
         AND (
             (b.check_in_date <= :end_date AND b.check_out_date >= :start_date)
         )

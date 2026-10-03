@@ -42,33 +42,31 @@ function uploadVideo($fileInput, $category = 'general', $maxSize = 104857600) {
     $fileType = mime_content_type($fileInput['tmp_name']);
     
     // Validate MIME type
-    if (!in_array($fileType, $allowedTypes)) {
+    if (!in_array($fileType, $allowedTypes, true)) {
         error_log("Video upload failed: Invalid file type '$fileType'");
         return null;
     }
 
-    // Create upload directory
+    // Create upload directory (category is restricted so it can never traverse out of /videos)
+    $category = preg_replace('/[^a-z0-9_-]/i', '', (string)$category) ?: 'general';
     $uploadDir = __DIR__ . '/../videos/' . $category . '/';
     if (!is_dir($uploadDir)) {
         mkdir($uploadDir, 0755, true);
     }
 
-    // Generate unique filename
-    $extension = pathinfo($fileInput['name'], PATHINFO_EXTENSION);
-    if (empty($extension)) {
-        // Fallback to extension from MIME type
-        $mimeToExt = [
-            'video/mp4' => 'mp4',
-            'video/webm' => 'webm',
-            'video/ogg' => 'ogv',
-            'video/quicktime' => 'mov',
-            'video/x-msvideo' => 'avi',
-            'video/x-matroska' => 'mkv'
-        ];
-        $extension = $mimeToExt[$fileType] ?? 'mp4';
-    }
-    
-    $filename = 'video_' . time() . '_' . random_int(1000, 9999) . '.' . strtolower($extension);
+    // The stored extension comes from the verified MIME type, never from the client file name
+    // (a ".php" name on a polyglot file would otherwise be executable).
+    $mimeToExt = [
+        'video/mp4' => 'mp4',
+        'video/webm' => 'webm',
+        'video/ogg' => 'ogv',
+        'video/quicktime' => 'mov',
+        'video/x-msvideo' => 'avi',
+        'video/x-matroska' => 'mkv'
+    ];
+    $extension = $mimeToExt[$fileType] ?? 'mp4';
+
+    $filename = 'video_' . time() . '_' . random_int(1000, 9999) . '.' . $extension;
     $relativePath = 'videos/' . $category . '/' . $filename;
     $destination = $uploadDir . $filename;
 
@@ -165,7 +163,15 @@ function processVideoUrl($url) {
     if (empty($url)) {
         return null;
     }
-    
+
+    // Only web links or site-relative paths: never javascript:/data: or other schemes.
+    if (preg_match('/^[a-z][a-z0-9+.\-]*:/i', $url) && !preg_match('#^https?://#i', $url)) {
+        return null;
+    }
+    if (strpos($url, '..') !== false) {
+        return null;
+    }
+
     // Detect video platform
     if (preg_match('/youtube\.com|youtu\.be/i', $url)) {
         return ['path' => $url, 'type' => 'youtube'];

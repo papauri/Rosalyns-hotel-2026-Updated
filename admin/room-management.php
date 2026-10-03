@@ -118,6 +118,16 @@ function getRoomsImageUploadConfig(): array
     ];
 }
 
+/** Posted number -> float (blank/non-numeric -> $default, negatives clamped to 0) so strict SQL never sees ''. */
+function rm_num($v, $default = 0.0)
+{
+    $v = is_string($v) ? trim(str_replace(',', '', $v)) : $v;
+    if ($v === '' || $v === null || !is_numeric($v)) {
+        return $default;
+    }
+    return max(0.0, (float)$v);
+}
+
 // Note: $user and $current_page are already set in admin-init.php
 $message = '';
 $error = '';
@@ -141,7 +151,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $total_rooms = (int)($_POST['total_rooms'] ?? 0);
             $room_image_url = normalizeRoomImagePath($_POST['image_url'] ?? '');
 
-            if ($rooms_available > $total_rooms) {
+            if (trim((string)($_POST['name'] ?? '')) === '') {
+                $error = 'Room name is required.';
+                if (is_ajax_request()) {
+                    header('Content-Type: application/json');
+                    echo json_encode(['success' => false, 'message' => $error]);
+                    exit;
+                }
+            } elseif ($rooms_available < 0 || $total_rooms < 0 || $rooms_available > $total_rooms) {
                 $error = 'Availability cannot exceed total rooms.';
                 if (is_ajax_request()) {
                     header('Content-Type: application/json');
@@ -166,19 +183,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $tripleEnabled = ($maxGuests >= 3 && isset($_POST['triple_occupancy_enabled'])) ? 1 : 0;
                 $childrenAllowed = isset($_POST['children_allowed']) ? 1 : 0;
                 $stmt->execute([
-                    $_POST['name'],
+                    trim((string)$_POST['name']),
                     $description,
                     $_POST['short_description'] ?? '',
-                    $_POST['price_per_night'],
-                    $_POST['price_single_occupancy'] ?? null,
-                    $_POST['price_double_occupancy'] ?? null,
-                    $_POST['price_triple_occupancy'] ?? null,
-                    $_POST['child_price_multiplier'] ?? 50,
+                    rm_num($_POST['price_per_night'] ?? 0),
+                    rm_num($_POST['price_single_occupancy'] ?? null, null),
+                    rm_num($_POST['price_double_occupancy'] ?? null, null),
+                    rm_num($_POST['price_triple_occupancy'] ?? null, null),
+                    min(100.0, rm_num($_POST['child_price_multiplier'] ?? 50, 50.0)),
                     $singleEnabled,
                     $doubleEnabled,
                     $tripleEnabled,
                     $childrenAllowed,
-                    $_POST['size_sqm'] ?? 0,
+                    rm_num($_POST['size_sqm'] ?? 0),
                     $maxGuests,
                     $rooms_available,
                     $total_rooms,
@@ -187,8 +204,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     $room_image_url,
                     isset($_POST['is_featured']) ? 1 : 0,
                     isset($_POST['is_active']) ? 1 : 0,
-                    $_POST['display_order'] ?? 0,
-                    $_POST['id']
+                    (int)($_POST['display_order'] ?? 0),
+                    (int)$_POST['id']
                 ]);
 
                 $mediaSyncStmt = $pdo->prepare("SELECT id, name, description, short_description, display_order, image_url, video_path, video_type FROM rooms WHERE id = ? LIMIT 1");
@@ -232,11 +249,28 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             }
         } elseif ($action === 'upload_image') {
             if (isset($_FILES['room_image']) && $_FILES['room_image']['error'] === 0) {
-                $room_id = $_POST['room_id'];
-                $allowed = ['jpg', 'jpeg', 'png', 'webp'];
-                $filename = $_FILES['room_image']['name'];
-                $ext = strtolower(pathinfo($filename, PATHINFO_EXTENSION));
+                $room_id = (int)($_POST['room_id'] ?? 0);
                 $size = (int)($_FILES['room_image']['size'] ?? 0);
+
+                // Extension comes from the verified MIME type, never the client file name.
+                $mimeToExt = ['image/jpeg' => 'jpg', 'image/png' => 'png', 'image/webp' => 'webp'];
+                $ext = '';
+                $mime_ok = false;
+                if (function_exists('finfo_open')) {
+                    $f = finfo_open(FILEINFO_MIME_TYPE);
+                    if ($f) {
+                        $mime = (string)finfo_file($f, $_FILES['room_image']['tmp_name']);
+                        finfo_close($f);
+                        $mime_ok = isset($mimeToExt[$mime]) && @getimagesize($_FILES['room_image']['tmp_name']);
+                        $ext = $mimeToExt[$mime] ?? '';
+                    }
+                }
+                $roomExists = false;
+                if ($room_id > 0) {
+                    $rx = $pdo->prepare('SELECT COUNT(*) FROM rooms WHERE id = ?');
+                    $rx->execute([$room_id]);
+                    $roomExists = (int)$rx->fetchColumn() > 0;
+                }
 
                 if ($size > 20 * 1024 * 1024) {
                     $error = 'File too large. Max size is 20MB.';
@@ -245,19 +279,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         echo json_encode(['success' => false, 'message' => $error]);
                         exit;
                     }
-                }
-
-                $mime_ok = true;
-                if (function_exists('finfo_open')) {
-                    $f = finfo_open(FILEINFO_MIME_TYPE);
-                    if ($f) {
-                        $mime = finfo_file($f, $_FILES['room_image']['tmp_name']);
-                        finfo_close($f);
-                        $mime_ok = in_array($mime, ['image/jpeg', 'image/png', 'image/webp'], true);
+                } elseif (!$roomExists) {
+                    $error = 'Room not found.';
+                    if (is_ajax_request()) {
+                        header('Content-Type: application/json');
+                        echo json_encode(['success' => false, 'message' => $error]);
+                        exit;
                     }
-                }
-
-                if (in_array($ext, $allowed) && $mime_ok) {
+                } elseif ($ext !== '' && $mime_ok) {
                     $uploadConfig = getRoomsImageUploadConfig();
                     $upload_dir = $uploadConfig['fs_dir'];
                     if (!is_dir($upload_dir)) mkdir($upload_dir, 0755, true);
@@ -387,40 +416,45 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ");
             // slug is required (NOT NULL): derive it from the name and keep it unique.
-            $slugBase = trim(preg_replace('/[^a-z0-9]+/', '-', strtolower((string)($_POST['name'] ?? 'room'))), '-') ?: 'room';
+            $slugBase = substr(trim(preg_replace('/[^a-z0-9]+/', '-', strtolower((string)($_POST['name'] ?? 'room'))), '-'), 0, 90) ?: 'room'; // slug is VARCHAR(100)
             $newSlug = $slugBase;
             $slugCheck = $pdo->prepare('SELECT COUNT(*) FROM rooms WHERE slug = ?');
             for ($si = 2; $slugCheck->execute([$newSlug]) && (int)$slugCheck->fetchColumn() > 0; $si++) {
                 $newSlug = $slugBase . '-' . $si;
             }
+            if (trim((string)($_POST['name'] ?? '')) === '') {
+                throw new RuntimeException('Room name is required.');
+            }
+            $addTotal = max(0, (int)($_POST['total_rooms'] ?? 1));
+            $addAvail = min($addTotal, max(0, (int)($_POST['rooms_available'] ?? 1)));
             $maxGuests = max(1, (int)($_POST['max_guests'] ?? 2));
             $singleEnabled = $maxGuests >= 1 ? 1 : 0;
             $doubleEnabled = $maxGuests >= 2 ? 1 : 0;
             $tripleEnabled = ($maxGuests >= 3 && isset($_POST['triple_occupancy_enabled'])) ? 1 : 0;
             $childrenAllowed = isset($_POST['children_allowed']) ? 1 : 0;
             $stmt->execute([
-                $_POST['name'],
+                trim((string)$_POST['name']),
                 $_POST['description'] ?? $_POST['short_description'] ?? '',
                 $_POST['short_description'] ?? '',
-                $_POST['price_per_night'] ?? 0,
-                $_POST['price_single_occupancy'] ?? null,
-                $_POST['price_double_occupancy'] ?? null,
-                $_POST['price_triple_occupancy'] ?? null,
-                $_POST['child_price_multiplier'] ?? 50,
+                rm_num($_POST['price_per_night'] ?? 0),
+                rm_num($_POST['price_single_occupancy'] ?? null, null),
+                rm_num($_POST['price_double_occupancy'] ?? null, null),
+                rm_num($_POST['price_triple_occupancy'] ?? null, null),
+                min(100.0, rm_num($_POST['child_price_multiplier'] ?? 50, 50.0)),
                 $singleEnabled,
                 $doubleEnabled,
                 $tripleEnabled,
                 $childrenAllowed,
-                $_POST['size_sqm'] ?? 0,
+                rm_num($_POST['size_sqm'] ?? 0),
                 $maxGuests,
-                $_POST['rooms_available'] ?? 1,
-                $_POST['total_rooms'] ?? 1,
+                $addAvail,
+                $addTotal,
                 $_POST['bed_type'] ?? 'Double',
                 $_POST['amenities'] ?? '',
                 $room_image_url,
                 isset($_POST['is_featured']) ? 1 : 0,
                 1,
-                $_POST['display_order'] ?? 0,
+                (int)($_POST['display_order'] ?? 0),
                 $videoPath,
                 $videoType,
                 $newSlug
@@ -488,36 +522,60 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $error = 'No video URL or file provided.';
             }
         } elseif ($action === 'delete_room') {
-            $room_id = $_POST['id'];
+            $room_id = (int)($_POST['id'] ?? 0);
+
+            // A room type with booking history must never be deleted (it would orphan or cascade
+            // away real reservations/folios); deactivate it instead.
+            $bk = $pdo->prepare("SELECT COUNT(*) FROM bookings WHERE room_id = ?");
+            $bk->execute([$room_id]);
+            if ((int)$bk->fetchColumn() > 0) {
+                $error = 'This room has booking history and cannot be deleted. Deactivate it instead.';
+                if (is_ajax_request()) {
+                    header('Content-Type: application/json');
+                    echo json_encode(['success' => false, 'message' => $error]);
+                    exit;
+                }
+                throw new RuntimeException($error);
+            }
 
             $stmt = $pdo->prepare("SELECT image_url FROM rooms WHERE id = ?");
             $stmt->execute([$room_id]);
             $old_image = $stmt->fetchColumn();
 
-            // Delete canonical room gallery images
+            // Collect canonical room gallery images, delete rows first, files only after the room is gone
+            $gallery_images = [];
             try {
                 $stmt = $pdo->prepare("SELECT image_url FROM gallery WHERE room_id = ?");
                 $stmt->execute([$room_id]);
                 $gallery_images = $stmt->fetchAll(PDO::FETCH_COLUMN);
-                foreach ($gallery_images as $img) {
-                    if ($img && !preg_match('#^https?://#i', $img)) {
-                        $path = '../' . $img;
-                        if (file_exists($path)) @unlink($path);
-                    }
-                }
-
-                $stmt = $pdo->prepare("DELETE FROM gallery WHERE room_id = ?");
-                $stmt->execute([$room_id]);
             } catch (PDOException $e) {
-                // Continue room deletion even if optional gallery cleanup fails.
+                // optional table
             }
 
-            $stmt = $pdo->prepare("DELETE FROM rooms WHERE id = ?");
-            $stmt->execute([$room_id]);
+            $pdo->beginTransaction();
+            try {
+                try {
+                    $stmt = $pdo->prepare("DELETE FROM gallery WHERE room_id = ?");
+                    $stmt->execute([$room_id]);
+                } catch (PDOException $e) {
+                    // Continue room deletion even if optional gallery cleanup fails.
+                }
+                $stmt = $pdo->prepare("DELETE FROM rooms WHERE id = ?");
+                $stmt->execute([$room_id]);
+                $pdo->commit();
+            } catch (Throwable $e) {
+                if ($pdo->inTransaction()) {
+                    $pdo->rollBack();
+                }
+                throw $e;
+            }
 
-            if ($old_image && !preg_match('#^https?://#i', $old_image)) {
-                $path = '../' . $old_image;
-                if (file_exists($path)) @unlink($path);
+            foreach (array_merge($gallery_images, [$old_image]) as $img) {
+                $img = trim((string)$img);
+                if ($img !== '' && !preg_match('#^https?://#i', $img) && strpos($img, '..') === false && preg_match('#^(images|videos)/#', $img)) {
+                    $path = '../' . $img;
+                    if (file_exists($path)) @unlink($path);
+                }
             }
 
             require_once __DIR__ . '/../config/cache.php';
@@ -546,7 +604,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $message = 'Room order updated!';
             }
         }
-    } catch (PDOException $e) {
+    } catch (Throwable $e) {
         $error = 'Error: ' . $e->getMessage();
         if (is_ajax_request()) {
             header('Content-Type: application/json');

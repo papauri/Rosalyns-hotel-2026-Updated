@@ -160,6 +160,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     $email_result = sendTentativeBookingConvertedEmail($booking);
                     break;
                 case 'booking_cancelled':
+                    // Never tell a guest with a live reservation that it was cancelled.
+                    if (!in_array($booking['status'], ['cancelled', 'expired', 'no-show'], true)) {
+                        throw new Exception('A cancellation email can only be resent for a cancelled, expired or no-show booking.');
+                    }
                     $cancellation_reason = 'Resent by admin';
                     $email_result = sendBookingCancelledEmail($booking, $cancellation_reason);
                     break;
@@ -293,14 +297,21 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 throw new Exception('This is not a tentative booking');
             }
 
-            // Convert to confirmed status and clear tentative fields
-            $update_stmt = $pdo->prepare("UPDATE bookings SET status = 'confirmed', is_tentative = 0, tentative_expires_at = NULL WHERE id = ?");
+            // Convert exactly once: the status condition in the UPDATE decides the winner, so a
+            // double click / second tab can neither double-decrement stock nor send two emails.
+            $pdo->beginTransaction();
+            $update_stmt = $pdo->prepare("UPDATE bookings SET status = 'confirmed', is_tentative = 0, tentative_expires_at = NULL, converted_to_confirmed_at = NOW(), converted_from_tentative = 1 WHERE id = ? AND status = 'tentative' AND is_tentative = 1");
             $update_stmt->execute([$booking_id]);
+            if ($update_stmt->rowCount() !== 1) {
+                $pdo->rollBack();
+                throw new Exception('This booking was already converted or changed.');
+            }
 
             // Decrement room availability — tentative bookings don't consume rooms_available,
             // but confirmed bookings do; apply the same decrement as pending→confirmed.
             $pdo->prepare("UPDATE rooms SET rooms_available = rooms_available - 1 WHERE id = ? AND rooms_available > 0")
                 ->execute([$booking['room_id']]);
+            $pdo->commit();
 
             $autoAssignMessage = '';
             if (in_array($booking['payment_status'] ?? '', ['paid', 'completed'], true) && empty($booking['individual_room_id'])) {
@@ -2036,13 +2047,20 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         if (!$transitionValidation['allowed']) {
                             $error = getBookingActionErrorMessage('noshow', $transitionValidation['reason']);
                         } else {
-                            // Update status to no-show
-                            $upd = $pdo->prepare("UPDATE bookings SET status = 'no-show', updated_at = NOW() WHERE id = ?");
-                            $upd->execute([$booking_id]);
+                            // Conditional on the status we validated: a double click / second tab must not
+                            // mark twice (a second refund would be queued and a second email sent).
+                            $upd = $pdo->prepare("UPDATE bookings SET status = 'no-show', updated_at = NOW() WHERE id = ? AND status = ?");
+                            $upd->execute([$booking_id, $bk['status']]);
+                            if ($upd->rowCount() !== 1) {
+                                throw new Exception('This booking was already updated by someone else. Nothing was changed.');
+                            }
 
-                            // Restore room availability (was decremented at confirmation)
-                            $restore = $pdo->prepare("UPDATE rooms SET rooms_available = rooms_available + 1 WHERE id = ? AND rooms_available < total_rooms");
-                            $restore->execute([$bk['room_id']]);
+                            // Restore room availability - only a confirmed booking held a stock unit
+                            // (decremented at confirmation); pending/other statuses never did.
+                            if ($bk['status'] === 'confirmed') {
+                                $restore = $pdo->prepare("UPDATE rooms SET rooms_available = rooms_available + 1 WHERE id = ? AND rooms_available < total_rooms");
+                                $restore->execute([$bk['room_id']]);
+                            }
 
                             updateBookingRoomsStatus(
                                 $booking_id,
@@ -2108,7 +2126,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 if (function_exists('fastcgi_finish_request')) { fastcgi_finish_request(); }
 
                 // Send guest no-show email after the connection is closed
-                if (!isset($error) && !empty($bk['guest_email'])) {
+                if (empty($error) && !empty($bk['guest_email'])) {
                     require_once __DIR__ . '/../config/email.php';
                     sendNoShowEmail(
                         $bk,

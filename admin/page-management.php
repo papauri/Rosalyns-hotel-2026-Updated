@@ -46,13 +46,15 @@ function normalizePageIcon(string $value): string
 
 function isValidPageFilePath(string $value): bool
 {
-    if ($value === '' || strlen($value) > 255) {
+    // site_pages.file_path is VARCHAR(100); only real PHP page files are valid (a name like
+    // ".htaccess" would otherwise be accepted and, with "Create PHP file", overwrite server config).
+    if ($value === '' || strlen($value) > 100) {
         return false;
     }
     if (strpos($value, '..') !== false || strpos($value, ':') !== false) {
         return false;
     }
-    return (bool)preg_match('/^[a-zA-Z0-9._\/-]+$/', $value);
+    return (bool)preg_match('/^[a-zA-Z0-9][a-zA-Z0-9._\/-]*\.php$/', $value);
 }
 
 function ensureSitePagesTable(PDO $pdo): bool
@@ -215,6 +217,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
                     if (!$page_key || !$title || !$file_path) {
                         $error = 'Page key, title, and file path are required.';
+                    } elseif (strlen($page_key) > 50 || mb_strlen($title) > 100 || mb_strlen($desc) > 255 || strlen($icon) > 50) {
+                        $error = 'Too long: key 50, title 100, icon 50 and description 255 characters at most.';
                     } elseif (!isValidPageFilePath($file_path)) {
                         $error = 'Invalid file path.';
                     } elseif (strpos($file_path, '/') !== false) {
@@ -334,6 +338,8 @@ PHP;
 
                     if ($id <= 0 || !$title || !$file_path) {
                         $error = 'Title and file path are required.';
+                    } elseif (mb_strlen($title) > 100 || mb_strlen($desc) > 255 || strlen($icon) > 50) {
+                        $error = 'Too long: title 100, icon 50 and description 255 characters at most.';
                     } elseif (!isValidPageFilePath($file_path)) {
                         $error = 'Invalid file path.';
                     } else {

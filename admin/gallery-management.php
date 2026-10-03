@@ -70,18 +70,14 @@ function uploadGalleryImage(?array $fileInput)
         return null;
     }
     // Extension whitelist
-    $ext = strtolower(pathinfo($fileInput['name'], PATHINFO_EXTENSION));
-    $allowedExt = ['jpg', 'jpeg', 'png', 'webp', 'gif'];
-    if (!in_array($ext, $allowedExt, true)) {
-        return null;
-    }
-    // MIME validation
+    // MIME validation; the stored extension comes from the verified MIME, never the client name.
     $finfo = new finfo(FILEINFO_MIME_TYPE);
     $mime = $finfo->file($fileInput['tmp_name']) ?: '';
-    $allowedMime = ['image/jpeg', 'image/png', 'image/webp', 'image/gif'];
-    if (!in_array($mime, $allowedMime, true)) {
+    $mimeToExt = ['image/jpeg' => 'jpg', 'image/png' => 'png', 'image/webp' => 'webp', 'image/gif' => 'gif'];
+    if (!isset($mimeToExt[$mime])) {
         return null;
     }
+    $ext = $mimeToExt[$mime];
     // Confirm it really is an image
     if (!@getimagesize($fileInput['tmp_name'])) {
         return null;
@@ -99,8 +95,43 @@ function uploadGalleryImage(?array $fileInput)
     return null;
 }
 
+/** External image link: http(s) or site-relative only (no javascript:/data:/traversal); '' when unusable. */
+function galleryCleanImageUrl($value): string
+{
+    $v = trim((string)$value);
+    if ($v === '' || preg_match('#^https?://#i', $v)) {
+        return $v;
+    }
+    if (preg_match('/^[a-z][a-z0-9+.\-]*:/i', $v) || strpos($v, '..') !== false || strpos($v, '//') === 0) {
+        return '';
+    }
+    return ltrim(str_replace('\\', '/', $v), '/');
+}
+
+/** True when a file was submitted in $_FILES[$key] (so a silent validation failure can be reported). */
+function galleryFileSubmitted(string $key): bool
+{
+    return isset($_FILES[$key]) && (int)($_FILES[$key]['error'] ?? UPLOAD_ERR_NO_FILE) !== UPLOAD_ERR_NO_FILE;
+}
+
+/** Remove a local gallery file only when it lives under images/ or videos/ (never traverse). */
+function galleryUnlinkLocal(?string $rel): void
+{
+    $rel = trim((string)$rel);
+    if ($rel === '' || preg_match('#^https?://#i', $rel) || strpos($rel, '..') !== false) {
+        return;
+    }
+    if (!preg_match('#^(images|videos)/#', $rel)) {
+        return;
+    }
+    $path = __DIR__ . '/../' . $rel;
+    if (is_file($path)) {
+        @unlink($path);
+    }
+}
+
 // Handle POST actions
-$isAjax  = !empty($_SERVER['HTTP_X_REQUESTED_WITH']) && strtolower($_SERVER['HTTP_X_REQUESTED_WITH']) === 'xmlhttprequest';
+$isAjax = !empty($_SERVER['HTTP_X_REQUESTED_WITH']) && strtolower($_SERVER['HTTP_X_REQUESTED_WITH']) === 'xmlhttprequest';
 $savedId = null;
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if (!validateCsrfToken($_POST['csrf_token'] ?? '')) {
@@ -117,10 +148,23 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
         if ($action === 'add') {
             $imagePath = uploadGalleryImage($_FILES['image'] ?? null);
-            $imageUrl = $imagePath ?: ($_POST['image_url_external'] ?? '');
+            $imageUrl = $imagePath ?: galleryCleanImageUrl($_POST['image_url_external'] ?? '');
 
-            if (empty($imageUrl)) {
-                $error = 'Please provide an image (upload or URL).';
+            if (trim((string)($_POST['title'] ?? '')) === '') {
+                $imageUrl = '';
+                $error = 'Title is required.';
+                if ($imagePath) {
+                    galleryUnlinkLocal($imagePath);
+                }
+                if ($isAjax) {
+                    header('Content-Type: application/json; charset=utf-8');
+                    echo json_encode(['success' => false, 'message' => $error]);
+                    exit;
+                }
+            } elseif (empty($imageUrl)) {
+                $error = galleryFileSubmitted('image')
+                    ? 'The image was rejected: use a JPG, PNG, WebP or GIF under 8 MB.'
+                    : 'Please provide an image (upload or URL).';
                 if ($isAjax) {
                     header('Content-Type: application/json; charset=utf-8');
                     echo json_encode(['success' => false, 'message' => $error]);
@@ -143,14 +187,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                 ");
                 $stmt->execute([
-                    $_POST['title'],
+                    trim((string)$_POST['title']),
                     $_POST['description'] ?? '',
                     $imageUrl,
                     $videoPath,
                     $videoType,
                     $_POST['category'] ?? 'general',
-                    isset($_POST['is_active']) ? 1 : 1,
-                    $_POST['display_order'] ?? 0
+                    1,
+                    (int)($_POST['display_order'] ?? 0)
                 ]);
 
                 $newId = (int)$pdo->lastInsertId();
@@ -188,20 +232,31 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $videoType = $videoUpload['type'] ?? null;
             }
 
+            if (trim((string)($_POST['title'] ?? '')) === '' || (int)($_POST['id'] ?? 0) <= 0) {
+                throw new RuntimeException('Title and a valid item are required.');
+            }
+            if (!$imagePath && galleryFileSubmitted('image')) {
+                throw new RuntimeException('The image was rejected: use a JPG, PNG, WebP or GIF under 8 MB.');
+            }
             $updateFields = ['title = ?', 'description = ?', 'category = ?', 'display_order = ?'];
             $updateValues = [
-                $_POST['title'],
+                trim((string)$_POST['title']),
                 $_POST['description'] ?? '',
                 $_POST['category'] ?? 'general',
-                $_POST['display_order'] ?? 0
+                (int)($_POST['display_order'] ?? 0)
             ];
 
-            if ($imagePath) {
+            $oldImageToRemove = null;
+            $externalImage = galleryCleanImageUrl($_POST['image_url_external'] ?? '');
+            if ($imagePath || $externalImage !== '') {
+                $oldImg = $pdo->prepare('SELECT image_url FROM hotel_gallery WHERE id = ?');
+                $oldImg->execute([(int)$_POST['id']]);
+                $oldImageToRemove = (string)$oldImg->fetchColumn();
                 $updateFields[] = 'image_url = ?';
-                $updateValues[] = $imagePath;
-            } elseif (!empty($_POST['image_url_external'])) {
-                $updateFields[] = 'image_url = ?';
-                $updateValues[] = $_POST['image_url_external'];
+                $updateValues[] = $imagePath ?: $externalImage;
+                if ($oldImageToRemove === ($imagePath ?: $externalImage)) {
+                    $oldImageToRemove = null;
+                }
             }
 
             if ($videoPath) {
@@ -219,11 +274,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $updateValues[] = null;
             }
 
-            $updateValues[] = $_POST['id'];
+            $updateValues[] = (int)$_POST['id'];
 
             $sql = "UPDATE hotel_gallery SET " . implode(', ', $updateFields) . " WHERE id = ?";
             $stmt = $pdo->prepare($sql);
             $stmt->execute($updateValues);
+            if ($oldImageToRemove) {
+                galleryUnlinkLocal($oldImageToRemove); // replaced image no longer referenced
+            }
 
             $itemId = (int)($_POST['id'] ?? 0);
             if ($itemId > 0) {
@@ -251,30 +309,24 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
             // Get image path before deleting
             $stmt = $pdo->prepare("SELECT image_url, video_path FROM hotel_gallery WHERE id = ?");
-            $stmt->execute([$_POST['id']]);
+            $stmt->execute([$itemId]);
             $item = $stmt->fetch(PDO::FETCH_ASSOC);
 
             $stmt = $pdo->prepare("DELETE FROM hotel_gallery WHERE id = ?");
-            $stmt->execute([$_POST['id']]);
+            $stmt->execute([$itemId]);
 
-            // Delete local files
+            // Delete local files (only inside images/ or videos/)
             if ($item) {
-                if ($item['image_url'] && !preg_match('#^https?://#i', $item['image_url'])) {
-                    $path = '../' . $item['image_url'];
-                    if (file_exists($path)) @unlink($path);
-                }
-                if ($item['video_path'] && !preg_match('#^https?://#i', $item['video_path'])) {
-                    $path = '../' . $item['video_path'];
-                    if (file_exists($path)) @unlink($path);
-                }
+                galleryUnlinkLocal($item['image_url']);
+                galleryUnlinkLocal($item['video_path']);
             }
             $message = 'Gallery item deleted successfully!';
         } elseif ($action === 'toggle_active') {
             $stmt = $pdo->prepare("UPDATE hotel_gallery SET is_active = NOT is_active WHERE id = ?");
-            $stmt->execute([$_POST['id']]);
+            $stmt->execute([(int)($_POST['id'] ?? 0)]);
             $message = 'Gallery item status updated!';
         }
-    } catch (PDOException $e) {
+    } catch (Throwable $e) {
         $error = 'Error: ' . $e->getMessage();
         if ($isAjax) {
             header('Content-Type: application/json; charset=utf-8');

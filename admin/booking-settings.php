@@ -128,7 +128,10 @@ $booking_template_short_names = [
 
 // Handle enable/disable via GET parameter
 if (isset($_GET['enable'])) {
-    updateSetting('booking_system_enabled', '1');
+    // A state change must never fire from a bare link (cross-site image/link): require the CSRF token.
+    if (validateCsrfToken((string)($_GET['csrf_token'] ?? ''))) {
+        updateSetting('booking_system_enabled', '1');
+    }
     header('Location: booking-settings.php');
     exit;
 }
@@ -323,19 +326,30 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['save_site_maintenance
 }
 
 // Handle disable via POST
-if (isset($_POST['disable_booking'])) {
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['disable_booking'])) {
     updateSetting('booking_system_enabled', '0');
     $message = "Booking system disabled successfully!";
 }
 
 // Handle disabled mode settings
-if (isset($_POST['booking_disabled_action'])) {
-    updateSetting('booking_disabled_action', $_POST['booking_disabled_action']);
-    updateSetting('booking_disabled_message', $_POST['booking_disabled_message'] ?? '');
-    if (isset($_POST['booking_disabled_redirect_url'])) {
-        updateSetting('booking_disabled_redirect_url', $_POST['booking_disabled_redirect_url']);
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['booking_disabled_action'])) {
+    $newDisabledAction = trim((string)$_POST['booking_disabled_action']);
+    $newRedirectUrl = trim((string)($_POST['booking_disabled_redirect_url'] ?? ''));
+    if (!in_array($newDisabledAction, ['message', 'contact', 'redirect'], true)) {
+        $newDisabledAction = in_array((string)getSetting('booking_disabled_action', 'message'), ['message', 'contact', 'redirect'], true)
+            ? (string)getSetting('booking_disabled_action', 'message') : 'message';
     }
-    $message = "Disabled mode settings updated successfully!";
+    // Redirect target: site-relative path or http(s) URL only (never javascript:/data:, never //host).
+    if ($newRedirectUrl !== '' && !preg_match('#^https?://#i', $newRedirectUrl) && !preg_match('#^/(?!/)#', $newRedirectUrl)) {
+        $error = 'Redirect URL must start with http://, https:// or a single /.';
+    } else {
+        updateSetting('booking_disabled_action', $newDisabledAction);
+        updateSetting('booking_disabled_message', $_POST['booking_disabled_message'] ?? '');
+        if (isset($_POST['booking_disabled_redirect_url'])) {
+            updateSetting('booking_disabled_redirect_url', $newRedirectUrl);
+        }
+        $message = "Disabled mode settings updated successfully!";
+    }
 }
 
 // Get booking system settings
@@ -735,8 +749,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             }
 
             // Update setting in database
-            $stmt = $pdo->prepare("UPDATE site_settings SET setting_value = ?, updated_at = NOW() WHERE setting_key = 'max_advance_booking_days'");
-            $stmt->execute([$max_advance_days]);
+            // updateSetting() upserts (a plain UPDATE silently did nothing when the row was missing)
+            if (!updateSetting('max_advance_booking_days', (string)$max_advance_days)) {
+                throw new Exception('Failed to save the advance booking limit');
+            }
 
             // Clear the setting cache (both in-memory and file cache)
             global $_SITE_SETTINGS;
@@ -1055,15 +1071,23 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
             $templateDefs = $booking_template_defs_master;
 
+            // Validate every template first so one bad template never leaves the set half-saved.
             foreach ($templateDefs as $templateKey => $templateName) {
-                $subject = trim($_POST[$templateKey . '_subject'] ?? '');
-                $htmlBody = trim($_POST[$templateKey . '_html_body'] ?? '');
-                $textBody = trim($_POST[$templateKey . '_text_body'] ?? '');
-                $isActive = isset($_POST[$templateKey . '_is_active']) ? 1 : 0;
-
-                if ($subject === '' || $htmlBody === '') {
+                $chkSubject = trim((string)($_POST[$templateKey . '_subject'] ?? ''));
+                $chkHtml = trim((string)($_POST[$templateKey . '_html_body'] ?? ''));
+                if ($chkSubject === '' || $chkHtml === '') {
                     throw new Exception("{$templateName}: subject and HTML body are required");
                 }
+                if (mb_strlen($chkSubject) > 255) {
+                    throw new Exception("{$templateName}: subject is too long (max 255 characters)");
+                }
+            }
+
+            foreach ($templateDefs as $templateKey => $templateName) {
+                $subject = trim((string)($_POST[$templateKey . '_subject'] ?? ''));
+                $htmlBody = trim((string)($_POST[$templateKey . '_html_body'] ?? ''));
+                $textBody = trim((string)($_POST[$templateKey . '_text_body'] ?? ''));
+                $isActive = isset($_POST[$templateKey . '_is_active']) ? 1 : 0;
 
                 if (!upsertBookingEmailTemplateConfig($templateKey, $templateName, $subject, $htmlBody, $textBody, $isActive)) {
                     throw new Exception("Failed to save template: {$templateName}");
@@ -1113,6 +1137,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
             if (!empty($email_settings['email_admin_email']) && !filter_var($email_settings['email_admin_email'], FILTER_VALIDATE_EMAIL)) {
                 throw new Exception('Admin email address is invalid');
+            }
+            if ($email_settings['invoice_recipients'] !== '') {
+                foreach (array_filter(array_map('trim', preg_split('/[,;]+/', $email_settings['invoice_recipients']))) as $invRcpt) {
+                    if (!filter_var($invRcpt, FILTER_VALIDATE_EMAIL)) {
+                        throw new Exception('Invoice recipients must be valid email addresses separated by commas');
+                    }
+                }
             }
 
             // Update email settings in database

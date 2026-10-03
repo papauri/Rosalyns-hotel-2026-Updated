@@ -18,6 +18,21 @@ if (!hasPermission((int)$user['id'], 'footer_management')) {
 $message = '';
 $error   = '';
 
+/** Footer link target: '', '#', http(s), mailto:, tel:, or a site path - never javascript:/data:. */
+function footerCheckUrl(string $url, string $label): string
+{
+    if (mb_strlen($url) > 500) {
+        throw new Exception($label . ' is too long (500 characters maximum).');
+    }
+    if ($url === '' || $url[0] === '#' || preg_match('#^(https?://|mailto:|tel:)#i', $url)) {
+        return $url;
+    }
+    if (preg_match('/^[a-z][a-z0-9+.\-]*:/i', $url) || strpos($url, '//') === 0) {
+        throw new Exception($label . ' must be http(s), mailto:, tel: or a path on this site.');
+    }
+    return $url;
+}
+
 // ─── Ensure tables exist ────────────────────────────────────────────────────
 try {
     $pdo->exec("
@@ -73,6 +88,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 if (!$col || !$text) {
                     throw new Exception('Column name and link text are required.');
                 }
+                if (mb_strlen($col) > 100 || mb_strlen($text) > 200) {
+                    throw new Exception('Column name (100) or link text (200) is too long.');
+                }
+                $url = footerCheckUrl($url, 'Link URL');
+                $sec = $sec !== null ? footerCheckUrl($sec, 'Secondary link URL') : null;
 
                 $stmt = $pdo->prepare("
                     INSERT INTO footer_links (column_name, link_text, link_url, secondary_link_url, display_order, is_active)
@@ -95,6 +115,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 if ($id <= 0 || !$col || !$text) {
                     throw new Exception('Column name and link text are required.');
                 }
+                if (mb_strlen($col) > 100 || mb_strlen($text) > 200) {
+                    throw new Exception('Column name (100) or link text (200) is too long.');
+                }
+                $url = footerCheckUrl($url, 'Link URL');
+                $sec = $sec !== null ? footerCheckUrl($sec, 'Secondary link URL') : null;
 
                 $stmt = $pdo->prepare("
                     UPDATE footer_links
@@ -124,10 +149,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 }
                 $pdo->prepare("UPDATE footer_links SET is_active = NOT is_active WHERE id = ?")->execute([$id]);
                 $message = 'Footer link visibility toggled.';
+                if (function_exists('clearCache')) clearCache();
 
             // ── Policies ────────────────────────────────────────────────────
             } elseif ($action === 'add_policy') {
-                $slug    = trim((string)preg_replace('/[^a-z0-9-]/', '-', strtolower($_POST['slug'] ?? '')));
+                $slug    = trim((string)preg_replace('/[^a-z0-9-]/', '-', strtolower($_POST['slug'] ?? '')), '-');
                 $title   = trim($_POST['title'] ?? '');
                 $summary = trim($_POST['summary'] ?? '');
                 $content = trim($_POST['content'] ?? '');
@@ -135,6 +161,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
                 if (!$slug || !$title || !$content) {
                     throw new Exception('Slug, title, and content are required.');
+                }
+                if (strlen($slug) > 100 || mb_strlen($title) > 200) {
+                    throw new Exception('Slug (100) or title (200) is too long.');
                 }
 
                 $chk = $pdo->prepare("SELECT COUNT(*) FROM policies WHERE slug = ?");
@@ -149,6 +178,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 ");
                 $stmt->execute([$slug, $title, $summary, $content, $order]);
                 $message = "Policy \"$title\" added.";
+                if (function_exists('clearCache')) clearCache();
                 rh_log_event('footer_management', 'info', 'Policy added', ['slug' => $slug, 'by' => $user['username']]);
 
             } elseif ($action === 'edit_policy') {
@@ -162,6 +192,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 if ($id <= 0 || !$title || !$content) {
                     throw new Exception('Title and content are required.');
                 }
+                if (mb_strlen($title) > 200) {
+                    throw new Exception('Title is too long (200 characters maximum).');
+                }
 
                 $stmt = $pdo->prepare("
                     UPDATE policies
@@ -170,6 +203,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 ");
                 $stmt->execute([$title, $summary, $content, $order, $active, $id]);
                 $message = "Policy \"$title\" updated.";
+                if (function_exists('clearCache')) clearCache();
                 rh_log_event('footer_management', 'info', 'Policy updated', ['id' => $id, 'by' => $user['username']]);
 
             } elseif ($action === 'delete_policy') {
@@ -179,6 +213,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 }
                 $pdo->prepare("DELETE FROM policies WHERE id = ?")->execute([$id]);
                 $message = 'Policy deleted.';
+                if (function_exists('clearCache')) clearCache();
                 rh_log_event('footer_management', 'info', 'Policy deleted', ['id' => $id, 'by' => $user['username']]);
 
             // ── Footer Settings ─────────────────────────────────────────────
@@ -200,7 +235,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     throw new Exception('Invalid email address.');
                 }
                 foreach (['facebook_url','instagram_url','twitter_url','linkedin_url'] as $urlField) {
-                    if (!empty($fields[$urlField]) && !filter_var($fields[$urlField], FILTER_VALIDATE_URL)) {
+                    if (!empty($fields[$urlField]) && (!filter_var($fields[$urlField], FILTER_VALIDATE_URL) || !preg_match('#^https?://#i', $fields[$urlField]))) {
                         throw new Exception('Invalid URL in social media fields.');
                     }
                 }

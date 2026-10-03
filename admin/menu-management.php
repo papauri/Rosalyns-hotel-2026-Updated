@@ -68,7 +68,33 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             header('Content-Type: application/json; charset=utf-8');
             echo json_encode(['success' => true]);
             exit;
-        } elseif ($action === 'add') {
+        } elseif ($action === 'add' || $action === 'update') {
+            // Validate/normalise once so strict SQL never sees '' for a DECIMAL or an over-long value.
+            $_POST['name'] = trim((string)($_POST['name'] ?? ''));
+            $_POST['category'] = trim((string)($_POST['category'] ?? ''));
+            $_POST['description'] = (string)($_POST['description'] ?? '');
+            $rawPrice = str_replace(',', '', trim((string)($_POST['price'] ?? '')));
+            if ($_POST['name'] === '' || mb_strlen($_POST['name']) > 200) {
+                throw new RuntimeException('Item name is required (200 characters maximum).');
+            }
+            if ($_POST['category'] === '' || mb_strlen($_POST['category']) > 100) {
+                throw new RuntimeException('Category is required (100 characters maximum).');
+            }
+            if ($rawPrice === '' || !is_numeric($rawPrice) || (float)$rawPrice < 0 || (float)$rawPrice > 99999999) {
+                throw new RuntimeException('Enter a valid price (0 or more).');
+            }
+            $_POST['price'] = number_format((float)$rawPrice, 2, '.', '');
+            if (isset($_POST['tags'])) {
+                $_POST['tags'] = mb_substr((string)$_POST['tags'], 0, 255);
+            }
+            if ($action === 'update' && (int)($_POST['id'] ?? 0) <= 0) {
+                throw new RuntimeException('Invalid menu item.');
+            }
+            $_POST['is_available'] = !empty($_POST['is_available']) ? 1 : 0;
+            $_POST['display_order'] = (int)($_POST['display_order'] ?? 0);
+            $menu_type = ($menu_type === 'drink') ? 'drink' : 'food';
+        }
+        if ($action === 'add') {
 
             if ($menu_type === 'food') {
                 // Add new food item - auto-increment display_order if not specified
@@ -147,12 +173,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     $_POST['description'],
                     $_POST['price'],
                     $_POST['category'],
-                    $_POST['is_available'] ?? 1,
-                    $_POST['display_order'] ?? 0,
+                    $_POST['is_available'],
+                    $_POST['display_order'],
                     in_array($_POST['station'] ?? 'kitchen', ['kitchen', 'bar', 'coffee_bar'], true) ? $_POST['station'] : 'kitchen',
                     isset($_POST['show_pos']) ? 1 : 0,
                     isset($_POST['show_room_service']) ? 1 : 0,
-                    $_POST['id']
+                    (int)$_POST['id']
                 ]);
             } else {
                 // Update existing drink item
@@ -166,13 +192,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     $_POST['description'],
                     $_POST['price'],
                     $_POST['category'],
-                    $_POST['is_available'] ?? 1,
-                    $_POST['display_order'] ?? 0,
+                    $_POST['is_available'],
+                    $_POST['display_order'],
                     $_POST['tags'] ?? '',
                     in_array($_POST['station'] ?? 'bar', ['kitchen', 'bar', 'coffee_bar'], true) ? $_POST['station'] : 'bar',
                     isset($_POST['show_pos']) ? 1 : 0,
                     isset($_POST['show_room_service']) ? 1 : 0,
-                    $_POST['id']
+                    (int)$_POST['id']
                 ]);
             }
             $message = 'Menu item updated successfully!';
@@ -210,7 +236,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $stmt->execute([$_POST['id']]);
             $message = 'Menu item availability updated!';
         }
-    } catch (PDOException $e) {
+    } catch (Throwable $e) {
+        if ($pdo->inTransaction()) {
+            $pdo->rollBack();
+        }
         $error = 'Error: ' . $e->getMessage();
         if ($isAjax) {
             header('Content-Type: application/json; charset=utf-8');

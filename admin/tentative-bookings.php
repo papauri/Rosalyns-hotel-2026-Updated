@@ -69,19 +69,36 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
 
         if ($action === 'convert') {
-            $stmt = $pdo->prepare("SELECT * FROM bookings WHERE id = ?");
-            $stmt->execute([$booking_id]);
-            $booking = $stmt->fetch(PDO::FETCH_ASSOC);
+            // Lock the row so a double click / second tab converts (and emails) exactly once.
+            $pdo->beginTransaction();
+            try {
+                $stmt = $pdo->prepare("SELECT * FROM bookings WHERE id = ? FOR UPDATE");
+                $stmt->execute([$booking_id]);
+                $booking = $stmt->fetch(PDO::FETCH_ASSOC);
 
-            if (!$booking || $booking['status'] !== 'tentative' || !$booking['is_tentative']) {
-                throw new Exception('This is not an active tentative booking.');
+                if (!$booking || $booking['status'] !== 'tentative' || !$booking['is_tentative']) {
+                    throw new Exception('This is not an active tentative booking.');
+                }
+
+                $conv = $pdo->prepare("UPDATE bookings SET status = 'confirmed', is_tentative = 0, converted_to_confirmed_at = NOW(), converted_from_tentative = 1 WHERE id = ? AND status = 'tentative' AND is_tentative = 1");
+                $conv->execute([$booking_id]);
+                if ($conv->rowCount() !== 1) {
+                    throw new Exception('This booking was already converted or changed.');
+                }
+                // Only confirmed bookings hold the room-type stock counter (cancel/checkout give it back),
+                // so confirming a hold must take it - same as booking-details.php "convert".
+                $pdo->prepare("UPDATE rooms SET rooms_available = rooms_available - 1 WHERE id = ? AND rooms_available > 0")
+                    ->execute([$booking['room_id']]);
+
+                $pdo->prepare("INSERT INTO tentative_booking_log (booking_id, action, performed_by, action_reason) VALUES (?, 'converted', ?, ?)")
+                    ->execute([$booking_id, (int)$user['id'], 'Converted to confirmed by ' . $user['full_name']]);
+                $pdo->commit();
+            } catch (Throwable $convEx) {
+                if ($pdo->inTransaction()) {
+                    $pdo->rollBack();
+                }
+                throw $convEx;
             }
-
-            $pdo->prepare("UPDATE bookings SET status = 'confirmed', is_tentative = 0, converted_to_confirmed_at = NOW(), converted_from_tentative = 1 WHERE id = ?")
-                ->execute([$booking_id]);
-
-            $pdo->prepare("INSERT INTO tentative_booking_log (booking_id, action, performed_by, action_reason) VALUES (?, 'converted', ?, ?)")
-                ->execute([$booking_id, (int)$user['id'], 'Converted to confirmed by ' . $user['full_name']]);
 
             require_once '../config/email.php';
             $email_result = sendTentativeBookingConvertedEmail($booking);
@@ -94,6 +111,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
             if (!$booking) {
                 throw new Exception('Booking not found.');
+            }
+            // This screen only releases holds; confirmed/in-house bookings are cancelled from the booking page.
+            if ($booking['status'] !== 'tentative') {
+                throw new Exception('Only an active tentative hold can be cancelled here.');
             }
 
             // Shared settled cancellation (status, room release, bill treatment, refunds).
