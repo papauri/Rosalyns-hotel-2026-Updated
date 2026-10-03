@@ -42,8 +42,10 @@ if (is_file($_envFile) && is_readable($_envFile)) {
                 $_val = substr($_val, 1, -1);
             }
         }
-        // Only set if not already in the environment (server env takes priority)
-        if ($_key !== '' && getenv($_key) === false) {
+        // The project's own .env wins for the keys it defines: a variable exported globally
+        // (e.g. another hotel's DB_NAME in a shell profile) must never point this installation
+        // at someone else's database. Without a .env, server environment variables apply.
+        if ($_key !== '') {
             putenv("$_key=$_val");
             $_ENV[$_key]    = $_val;
             $_SERVER[$_key] = $_val;
