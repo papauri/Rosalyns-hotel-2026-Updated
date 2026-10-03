@@ -1255,12 +1255,18 @@ try {
             jerr('Item not found', 404);
         }
         kds_lock_live_order($pdo, $preOrderId);
-        $row = $pdo->prepare("SELECT id, order_id, item_name, kds_status, menu_item_id, menu_type, quantity, stock_deducted FROM stock_order_items WHERE id=? FOR UPDATE");
+        $row = $pdo->prepare("SELECT id, order_id, item_name, kds_status, menu_item_id, menu_type, quantity, stock_deducted, station FROM stock_order_items WHERE id=? FOR UPDATE");
         $row->execute([$itemId]);
         $it = $row->fetch(PDO::FETCH_ASSOC);
         if (!$it) {
             $pdo->rollBack();
             jerr('Item not found', 404);
+        }
+        /* Station permission alone is not enough: the item must belong to the station the caller is
+         * acting on. Admin/manager roles and holders of pos_stations_overview oversee every station. */
+        if (!$isPrivileged && !hasPermission((int)$user['id'], 'pos_stations_overview') && (string)$it['station'] !== $STATION) {
+            $pdo->rollBack();
+            jerr('Item does not belong to your station', 403);
         }
 
         $orderId = (int)$it['order_id'];

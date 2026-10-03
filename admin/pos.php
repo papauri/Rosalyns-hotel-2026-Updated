@@ -1709,6 +1709,27 @@ if (isset($_GET['ajax']) && $_GET['ajax'] === 'manager_auth') {
      * Returns: { ok, token } or { error }
      * Token is stored in $_SESSION['pos_mgr_auth'] and consumed on first use. */
     header('Content-Type: application/json; charset=utf-8');
+    if (!validateCsrfToken((string)($_POST['csrf_token'] ?? ''))) {
+        http_response_code(403);
+        echo json_encode(['error' => 'Security token invalid - refresh the page.']);
+        exit;
+    }
+    /* Attempt limit: 5 failed manager authorisations per POS user per 10 minutes (session counter). */
+    $mgrWindow = 600;
+    $mgrFails = array_values(array_filter((array)($_SESSION['pos_mgr_auth_fails'] ?? []), static fn($t) => (int)$t > time() - $mgrWindow));
+    if (count($mgrFails) >= 5) {
+        $waitMin = max(1, (int)ceil(((int)min($mgrFails) + $mgrWindow - time()) / 60));
+        http_response_code(429);
+        echo json_encode(['error' => 'Too many attempts, wait ' . $waitMin . ' minute' . ($waitMin === 1 ? '' : 's') . ' before trying again.']);
+        exit;
+    }
+    $mgrRegisterFail = function (string $why) use (&$mgrFails, $user, $mgrWindow): void {
+        $mgrFails[] = time();
+        $_SESSION['pos_mgr_auth_fails'] = $mgrFails;
+        if (function_exists('rh_log_event')) {
+            rh_log_event('pos/manager_auth', 'warning', 'Manager authorisation failed: ' . $why, ['pos_user_id' => (int)$user['id'], 'fails_in_window' => count($mgrFails)]);
+        }
+    };
     $mgrUsername  = trim($_POST['username'] ?? '');
     $mgrPassword  = $_POST['password'] ?? '';
     $requiredPerm = trim($_POST['required_permission'] ?? '');
@@ -1729,20 +1750,24 @@ if (isset($_GET['ajax']) && $_GET['ajax'] === 'manager_auth') {
         $mgrStmt->execute([$mgrUsername]);
         $mgrUser = $mgrStmt->fetch(PDO::FETCH_ASSOC);
         if (!$mgrUser || !$mgrUser['is_active'] || !password_verify($mgrPassword, $mgrUser['password_hash'])) {
+            $mgrRegisterFail('invalid credentials');
             http_response_code(401);
             echo json_encode(['error' => 'Invalid manager credentials.']);
             exit;
         }
         if ((int)$mgrUser['id'] === (int)$user['id']) {
+            $mgrRegisterFail('self authorisation');
             http_response_code(400);
             echo json_encode(['error' => 'You cannot authorise your own actions — a different manager must approve.']);
             exit;
         }
         if (!hasPermission((int)$mgrUser['id'], $requiredPerm)) {
+            $mgrRegisterFail('missing permission ' . $requiredPerm);
             http_response_code(403);
             echo json_encode(['error' => $mgrUser['full_name'] . ' does not have the ' . ($allPerms[$requiredPerm]['label'] ?? $requiredPerm) . ' permission.']);
             exit;
         }
+        unset($_SESSION['pos_mgr_auth_fails']);
         // Issue session token (one-use, 5 min expiry)
         $token = bin2hex(random_bytes(24));
         $_SESSION['pos_mgr_auth'] = [
@@ -9718,6 +9743,7 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
             errEl.textContent = '';
             try {
                 const fd = new FormData();
+                fd.append('csrf_token', posCsrfToken);
                 fd.append('username', document.getElementById('mgrAuthUsername').value.trim());
                 fd.append('password', document.getElementById('mgrAuthPassword').value);
                 fd.append('required_permission', _mgrAuthPermission);
