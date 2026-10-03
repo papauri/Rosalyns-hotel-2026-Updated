@@ -218,25 +218,25 @@ if (!function_exists('footer_parse_tags')) {
                 <h4 class="footer__section-title">Connect With Us</h4>
                 <div class="footer__social">
                     <?php if (!empty(getSetting('facebook_url', ''))): ?>
-                        <a href="<?php echo htmlspecialchars(getSetting('facebook_url', '')); ?>" class="footer__social-link" target="_blank" aria-label="Facebook" title="Follow us on Facebook">
+                        <a href="<?php echo htmlspecialchars(getSetting('facebook_url', '')); ?>" class="footer__social-link" target="_blank" rel="noopener noreferrer" aria-label="Facebook" title="Follow us on Facebook">
                             <i class="fab fa-facebook-f"></i>
                         </a>
                     <?php endif; ?>
 
                     <?php if (!empty(getSetting('instagram_url', ''))): ?>
-                        <a href="<?php echo htmlspecialchars(getSetting('instagram_url', '')); ?>" class="footer__social-link" target="_blank" aria-label="Instagram" title="Follow us on Instagram">
+                        <a href="<?php echo htmlspecialchars(getSetting('instagram_url', '')); ?>" class="footer__social-link" target="_blank" rel="noopener noreferrer" aria-label="Instagram" title="Follow us on Instagram">
                             <i class="fab fa-instagram"></i>
                         </a>
                     <?php endif; ?>
 
                     <?php if (!empty(getSetting('twitter_url', ''))): ?>
-                        <a href="<?php echo htmlspecialchars(getSetting('twitter_url', '')); ?>" class="footer__social-link" target="_blank" aria-label="Twitter" title="Follow us on Twitter">
+                        <a href="<?php echo htmlspecialchars(getSetting('twitter_url', '')); ?>" class="footer__social-link" target="_blank" rel="noopener noreferrer" aria-label="Twitter" title="Follow us on Twitter">
                             <i class="fab fa-twitter"></i>
                         </a>
                     <?php endif; ?>
 
                     <?php if (!empty(getSetting('linkedin_url', ''))): ?>
-                        <a href="<?php echo htmlspecialchars(getSetting('linkedin_url', '')); ?>" class="footer__social-link" target="_blank" aria-label="LinkedIn" title="Connect with us on LinkedIn">
+                        <a href="<?php echo htmlspecialchars(getSetting('linkedin_url', '')); ?>" class="footer__social-link" target="_blank" rel="noopener noreferrer" aria-label="LinkedIn" title="Connect with us on LinkedIn">
                             <i class="fab fa-linkedin-in"></i>
                         </a>
                     <?php endif; ?>

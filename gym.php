@@ -96,7 +96,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['gym_booking_form'])) 
         $bookingError = 'Gym bookings are temporarily unavailable. Please contact us directly.';
     } elseif (!pub_csrf_validate($_POST['csrf_token'] ?? '', 'gym')) {
         $bookingError = 'Security token invalid. Please refresh the page and try again.';
-    } elseif (!pub_rate_limit('gym_booking_form', 5, 600)) {
+    } elseif ((!pub_rate_limit('gym_booking_form', 5, 600) || !pub_ip_rate_limit('gym_booking_form', 10, 600))) {
         // Rate limiting: 5 submissions per 10 minutes per session
         $bookingError = 'Too many submissions. Please wait a few minutes before trying again.';
     } else {
@@ -270,6 +270,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['gym_booking_form'])) 
             error_log("Gym booking submitted successfully from: " . $sanitized_data['email'] . " with reference: " . $bookingReference);
 
             // Redirect to dedicated confirmation page
+            pub_confirm_remember('gym', (string)$bookingReference);
             header('Location: gym-confirmation.php?ref=' . urlencode($bookingReference));
             exit;
         } // end if (!empty($validation_errors)) else

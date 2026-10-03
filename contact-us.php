@@ -88,7 +88,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['contact_form'])) {
     // CSRF validation
     if (!pub_csrf_validate($_POST['csrf_token'] ?? '', 'contact')) {
         $formError = 'Security token invalid. Please refresh the page and try again.';
-    } elseif (!pub_rate_limit('contact_form', 5, 600)) {
+    } elseif ((!pub_rate_limit('contact_form', 5, 600) || !pub_ip_rate_limit('contact_form', 10, 600))) {
         // Rate limiting: 5 submissions per 10 minutes per session
         $formError = 'Too many submissions. Please wait a few minutes before trying again.';
     } else {

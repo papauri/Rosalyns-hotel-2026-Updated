@@ -45,6 +45,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         // and offline-queue replays all converge to the SAME single booking.
         $__incomingClientUuid = $_POST['client_uuid'] ?? null;
         if ($__existing = idem_find_existing_booking($pdo, $__incomingClientUuid)) {
+            pub_confirm_remember('booking', (string)$__existing['booking_reference']);
             header('Location: booking-confirmation.php?ref=' . urlencode((string)$__existing['booking_reference']));
             exit;
         }
@@ -55,7 +56,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $_SESSION['booking_attempts'] = array_filter($_SESSION['booking_attempts'], function ($t) {
             return $t > time() - 600;
         });
-        if (count($_SESSION['booking_attempts']) >= 5) {
+        if (count($_SESSION['booking_attempts']) >= 5 || !pub_ip_rate_limit('booking_form', 10, 600)) {
             throw new Exception('Too many booking attempts. Please wait a few minutes before trying again.');
         }
         $_SESSION['booking_attempts'][] = time();
@@ -739,6 +740,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 'all_references' => $createdReferences
             ];
 
+            pub_confirm_remember('booking', (string)($createdReferences[0] ?? $booking_reference));
             header('Location: booking-confirmation.php?ref=' . urlencode($createdReferences[0] ?? $booking_reference));
             exit;
         } catch (Exception $e) {

@@ -1,7 +1,8 @@
 <?php
 require_once 'config/database.php';
-require_once 'config/settings.php';
-require_once 'includes/functions.php';
+require_once 'includes/public-csrf.php';
+require_once 'config/base-url.php';
+require_once 'includes/booking-functions.php';
 
 $ref = trim(strip_tags($_GET['ref'] ?? ''));
 
@@ -24,6 +25,13 @@ if ($ref === '') {
         $error = 'Unable to retrieve booking details.';
         error_log('gym-confirmation.php: ' . $e->getMessage());
     }
+}
+
+// Privacy: full details only on the session that created this reference (24h).
+$private_view = !pub_confirm_allowed('gym', (string)$ref);
+if ($private_view) {
+    $inquiry = null;
+    $error = 'For your privacy, booking details are only shown on the device that made the booking. If you need to discuss this booking, please contact us and quote your reference.' . ' Reference: ' . $ref;
 }
 
 $site_name       = getSetting('site_name');
@@ -75,7 +83,7 @@ try {
             <div class="conf-card">
                 <div class="conf-card-body conf-error">
                     <i class="fas fa-exclamation-circle"></i>
-                    <h1>Booking Not Found</h1>
+                    <h1><?php echo !empty($private_view) ? 'Reference Received' : 'Booking Not Found'; ?></h1>
                     <p><?php echo htmlspecialchars($error); ?></p>
                     <a href="gym.php" class="conf-btn conf-btn--primary">Back to Wellness</a>
                 </div>

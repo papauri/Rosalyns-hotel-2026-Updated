@@ -66,7 +66,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             throw new Exception('Security token invalid. Please refresh the page and try again.');
         }
         // Same throttle as the events / gym / contact forms (conference was the only open one).
-        if (!pub_rate_limit('conference_form', 5, 600)) {
+        if ((!pub_rate_limit('conference_form', 5, 600) || !pub_ip_rate_limit('conference_form', 10, 600))) {
             throw new Exception('Too many submissions. Please wait a few minutes before trying again.');
         }
 
@@ -364,6 +364,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         error_log("Conference enquiry submitted successfully from: " . $sanitized_data['email'] . " with reference: " . $inquiry_reference);
 
         // Redirect to dedicated confirmation page
+        pub_confirm_remember('conference', (string)$inquiry_reference);
         header('Location: conference-confirmation.php?ref=' . urlencode($inquiry_reference));
         exit;
     } catch (\Throwable $e) {

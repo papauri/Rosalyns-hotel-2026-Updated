@@ -73,3 +73,78 @@ if (!function_exists('pub_csrf_generate')) {
         return true;
     }
 }
+
+if (!function_exists('pub_client_ip')) {
+    /** Client IP (REMOTE_ADDR only — forwarded headers are spoofable). */
+    function pub_client_ip(): string
+    {
+        return (string)($_SERVER['REMOTE_ADDR'] ?? '0.0.0.0');
+    }
+
+    /**
+     * Per-IP rate limiter backed by the file cache (no schema). Complements the
+     * session limiter, which a client defeats by dropping its cookie.
+     * Falls back to a temp-dir file if the cache layer is off/unavailable.
+     *
+     * @return bool true = allowed, false = blocked
+     */
+    function pub_ip_rate_limit(string $action, int $limit = 10, int $window_seconds = 600): bool
+    {
+        $key = 'iprl_' . $action . '_' . substr(hash('sha256', pub_client_ip() . '|' . $action), 0, 24);
+        $now = time();
+        $hits = null;
+        $useCache = function_exists('getCache') && function_exists('setCache');
+        if ($useCache) {
+            $hits = getCache($key, null, 'ratelimit');
+        }
+        $file = sys_get_temp_dir() . DIRECTORY_SEPARATOR . $key . '.json';
+        if (!is_array($hits)) {
+            $raw = is_file($file) ? @file_get_contents($file) : false;
+            $hits = $raw ? json_decode($raw, true) : [];
+            if (!is_array($hits)) {
+                $hits = [];
+            }
+        }
+        $hits = array_values(array_filter($hits, fn($ts) => is_int($ts) && ($now - $ts) < $window_seconds));
+        if (count($hits) >= $limit) {
+            return false;
+        }
+        $hits[] = $now;
+        $stored = $useCache ? setCache($key, $hits, $window_seconds, 'ratelimit') : false;
+        // Always mirror to the temp file so a disabled cache cannot switch the limit off.
+        @file_put_contents($file, json_encode($hits), LOCK_EX);
+        return true;
+    }
+
+    /** Remember a just-created reference so ITS confirmation page may show full details. */
+    function pub_confirm_remember(string $type, string $ref): void
+    {
+        if ($ref === '') {
+            return;
+        }
+        if (session_status() === PHP_SESSION_NONE) {
+            session_start();
+        }
+        $list = $_SESSION['_confirm_refs'] ?? [];
+        $now = time();
+        $list = array_values(array_filter(is_array($list) ? $list : [], fn($e) => is_array($e) && ($now - (int)($e['t'] ?? 0)) < 86400));
+        $list[] = ['k' => $type, 'r' => $ref, 't' => $now];
+        $_SESSION['_confirm_refs'] = array_slice($list, -10);
+    }
+
+    /** True if this session created $ref (of $type) within the last 24h. */
+    function pub_confirm_allowed(string $type, string $ref): bool
+    {
+        if (session_status() === PHP_SESSION_NONE) {
+            session_start();
+        }
+        $now = time();
+        foreach ((array)($_SESSION['_confirm_refs'] ?? []) as $e) {
+            if (is_array($e) && ($e['k'] ?? '') === $type && hash_equals((string)($e['r'] ?? ''), $ref)
+                && ($now - (int)($e['t'] ?? 0)) < 86400) {
+                return true;
+            }
+        }
+        return false;
+    }
+}

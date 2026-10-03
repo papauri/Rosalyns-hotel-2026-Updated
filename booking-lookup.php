@@ -32,7 +32,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['lookup'])) {
     // CSRF validation
     if (!pub_csrf_validate($_POST['csrf_token'] ?? '', 'lookup')) {
         $error = 'Invalid request. Please refresh the page and try again.';
-    } elseif (!pub_rate_limit('lookup_form', 10, 600)) {
+    } elseif (!pub_rate_limit('lookup_form', 10, 600) || !pub_ip_rate_limit('lookup_form', 20, 600)) {
         // Rate limiting: 10 lookups per 10 minutes per session
         $error = 'Too many lookup attempts. Please wait a few minutes before trying again.';
     } else {
@@ -69,7 +69,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['cancel_booking'])) {
     // CSRF validation
     if (!pub_csrf_validate($_POST['csrf_token'] ?? '', 'lookup')) {
         $error = 'Invalid request. Please refresh the page and try again.';
-    } elseif (!pub_rate_limit('cancel_booking', 3, 600)) {
+    } elseif (!pub_rate_limit('cancel_booking', 3, 600) || !pub_ip_rate_limit('cancel_booking', 5, 3600)) {
         // Rate limiting: 3 cancellations per 10 minutes per session
         $error = 'Too many cancellation attempts. Please contact us directly.';
     } else {

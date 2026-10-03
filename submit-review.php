@@ -131,7 +131,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
 
     // Rate limiting: 5 review submissions per 10 minutes per session
-    if (!pub_rate_limit('review_form', 5, 600)) {
+    if (!pub_rate_limit('review_form', 5, 600) || !pub_ip_rate_limit('review_form', 10, 600)) {
         $_SESSION['alert'] = [
             'type' => 'error',
             'message' => 'Too many submissions. Please wait a few minutes before trying again.'

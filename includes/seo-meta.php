@@ -114,7 +114,16 @@ if ($seo['canonical']) {
         ? $seo['canonical']
         : $base_url . $seo['canonical'];
 } else {
-    $canonical_url = $base_url . $_SERVER['REQUEST_URI'];
+    // Drop tracking/session parameters so every campaign link shares one canonical URL
+    $__cu_path  = (string)parse_url($_SERVER['REQUEST_URI'], PHP_URL_PATH);
+    $__cu_query = [];
+    parse_str((string)parse_url($_SERVER['REQUEST_URI'], PHP_URL_QUERY), $__cu_query);
+    foreach (array_keys($__cu_query) as $__cu_k) {
+        if (preg_match('/^(utm_.*|fbclid|gclid|msclkid|mc_.*|ref|_ga|igshid)$/i', (string)$__cu_k)) {
+            unset($__cu_query[$__cu_k]);
+        }
+    }
+    $canonical_url = $base_url . $__cu_path . ($__cu_query ? '?' . http_build_query($__cu_query) : '');
 }
 
 // Get current page path for robots
@@ -193,7 +202,7 @@ foreach ($disallowed_paths as $path) {
 // Structured Data (JSON-LD)
 if (!empty($seo['structured_data'])):
     if (is_array($seo['structured_data'])):
-        $json_ld = json_encode($seo['structured_data'], JSON_UNESCAPED_SLASHES | JSON_PRETTY_PRINT);
+        $json_ld = json_encode($seo['structured_data'], JSON_UNESCAPED_SLASHES | JSON_PRETTY_PRINT | JSON_HEX_TAG | JSON_HEX_AMP);
 ?>
         <script type="application/ld+json">
             <?php echo $json_ld; ?>
@@ -214,17 +223,12 @@ if (!empty($seo['breadcrumbs'])):
                 $breadcrumb_items = [];
                 $position = 1;
                 foreach ($seo['breadcrumbs'] as $crumb):
-                    $breadcrumb_items[] = sprintf(
-                        '{
-                "@type": "ListItem",
-                "position": %d,
-                "name": "%s",
-                "item": "%s"
-            }',
-                        $position++,
-                        addslashes($crumb['name']),
-                        addslashes($crumb['url'])
-                    );
+                    $breadcrumb_items[] = json_encode([
+                        '@type'    => 'ListItem',
+                        'position' => $position++,
+                        'name'     => (string)($crumb['name'] ?? ''),
+                        'item'     => (string)($crumb['url'] ?? ''),
+                    ], JSON_UNESCAPED_SLASHES | JSON_HEX_TAG | JSON_HEX_AMP);
                 endforeach;
                 echo implode(",\n    ", $breadcrumb_items);
                 ?>
@@ -233,8 +237,8 @@ if (!empty($seo['breadcrumbs'])):
     </script>
 <?php endif; ?>
 <script>
-    window._siteTimezone = <?php echo json_encode((string)getSetting('site_timezone', date_default_timezone_get())); ?>;
-    window._siteName = <?php echo json_encode((string)($site_name ?: '')); ?>;
+    window._siteTimezone = <?php echo json_encode((string)getSetting('site_timezone', date_default_timezone_get()), JSON_HEX_TAG | JSON_HEX_AMP); ?>;
+    window._siteName = <?php echo json_encode((string)($site_name ?: ''), JSON_HEX_TAG | JSON_HEX_AMP); ?>;
 </script>
 <!-- PWA manifest — enables browser install prompt on desktop + mobile -->
 <link rel="manifest" href="<?php echo htmlspecialchars(defined('BASE_URL') ? rtrim(BASE_URL, '/') . '/manifest.php' : 'manifest.php'); ?>">

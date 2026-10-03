@@ -27,7 +27,7 @@ $bookingError = '';
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['event_booking_form'])) {
     if (!pub_csrf_validate($_POST['csrf_token'] ?? '', 'events')) {
         $bookingError = 'Security token invalid. Please refresh the page and try again.';
-    } elseif (!pub_rate_limit('event_booking_form', 5, 600)) {
+    } elseif ((!pub_rate_limit('event_booking_form', 5, 600) || !pub_ip_rate_limit('event_booking_form', 10, 600))) {
         $bookingError = 'Too many submissions. Please wait a few minutes before trying again.';
     } else {
         $validation_errors = [];
@@ -149,6 +149,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['event_booking_form'])
             }
 
             if ($bookingError === '') {
+                pub_confirm_remember('events', (string)$bookingReference);
                 header('Location: events-confirmation.php?ref=' . urlencode($bookingReference));
                 exit;
             }

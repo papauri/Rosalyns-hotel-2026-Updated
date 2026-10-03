@@ -11,6 +11,7 @@ session_start();
 header('Cache-Control: no-store, private');
 require_once 'config/base-url.php';
 require_once 'config/database.php';
+require_once 'includes/public-csrf.php';
 
 // Get booking reference from URL
 $booking_reference = is_string($_GET['ref'] ?? null) ? trim($_GET['ref']) : null;
@@ -58,6 +59,13 @@ if (!isset($error) && !empty($split_bookings)) {
     } catch (PDOException $e) {
         error_log("Confirmation page: packages query error: " . $e->getMessage());
     }
+}
+
+// Privacy: full details only on the session that created this reference (24h).
+$private_view = !pub_confirm_allowed('booking', (string)$booking_reference);
+if ($private_view) {
+    $split_bookings = []; $booking = null;
+    $error = 'For your privacy, full booking details are only shown on the device that made the booking. To view or manage this booking, use Check Booking Status with your booking reference and email address, or contact us.' . ' Reference: ' . $booking_reference;
 }
 
 $site_name = getSetting('site_name');
@@ -115,8 +123,9 @@ try {
             <div class="conf-card">
                 <div class="conf-card-body conf-error">
                     <i class="fas fa-exclamation-circle"></i>
-                    <h1>Booking Not Found</h1>
+                    <h1><?php echo !empty($private_view) ? 'Reference Received' : 'Booking Not Found'; ?></h1>
                     <p><?php echo htmlspecialchars($error); ?></p>
+                    <?php if (!empty($private_view)): ?><a href="booking-lookup.php?ref=<?php echo urlencode((string)$booking_reference); ?>" class="conf-btn conf-btn--primary">Check Booking Status</a><?php endif; ?>
                     <a href="booking.php" class="conf-btn conf-btn--primary">Back to Booking</a>
                 </div>
             </div>

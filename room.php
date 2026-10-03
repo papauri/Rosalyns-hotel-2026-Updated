@@ -104,7 +104,9 @@ try {
     }
 
     if (!$room) {
-        header('Location: ' . BASE_URL);
+        // Unknown or inactive room: a real 404, not a redirect
+        http_response_code(404);
+        require __DIR__ . '/404.php';
         exit;
     }
 
@@ -155,7 +157,7 @@ $seo_data = [
         '@type' => 'HotelRoom',
         'name' => $room['name'],
         'description' => $room['short_description'] ?? $site_tagline,
-        'image' => $base_url . $hero_image,
+        'image' => (stripos((string)$hero_image, 'http') === 0) ? $hero_image : $base_url . $hero_image,
         'numberOfBeds' => 1,
         'bed' => [
             '@type' => 'BedType',
@@ -199,19 +201,19 @@ $seo_data = [
 // Fetch room reviews for structured data
 try {
     $reviews_stmt = $pdo->prepare("
-        SELECT rating, comment, guest_name, created_at
+        SELECT COUNT(*) AS review_count, AVG(rating) AS avg_rating
         FROM reviews
-        WHERE room_id = ? AND status = 'approved'
-        LIMIT 5
+        WHERE room_id = ? AND status = 'approved' AND rating IS NOT NULL
     ");
     $reviews_stmt->execute([$room['id']]);
-    $room_reviews = $reviews_stmt->fetchAll(PDO::FETCH_ASSOC);
+    $room_reviews_agg = $reviews_stmt->fetch(PDO::FETCH_ASSOC);
 
-    if (!empty($room_reviews)) {
+    // Aggregate over ALL approved reviews (not just a sample of 5)
+    if (!empty($room_reviews_agg) && (int)$room_reviews_agg['review_count'] > 0) {
         $seo_data['structured_data']['aggregateRating'] = [
             '@type' => 'AggregateRating',
-            'ratingValue' => array_sum(array_column($room_reviews, 'rating')) / count($room_reviews),
-            'reviewCount' => count($room_reviews),
+            'ratingValue' => round((float)$room_reviews_agg['avg_rating'], 2),
+            'reviewCount' => (int)$room_reviews_agg['review_count'],
             'bestRating' => 5,
             'worstRating' => 1
         ];
