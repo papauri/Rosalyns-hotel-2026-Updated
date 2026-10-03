@@ -1,7 +1,7 @@
 # Rosalyn's Hotel 2026 — Project Instructions
 
 Vanilla PHP (≥7.4, no framework) hotel website + PMS. PDO/MySQL (creds via `.env` →
-`config/database.local.php`), PHPMailer, TCPDF. Page-per-file; shared functions in
+`config/database.php`), PHPMailer, TCPDF. Page-per-file; shared functions in
 `includes/`; admin panel in `admin/` (session + CSRF + per-page permissions via
 `admin/admin-init.php`); key-authenticated JSON API in `api/`. Plain HTML/CSS/JS, no build step.
 

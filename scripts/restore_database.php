@@ -22,7 +22,7 @@ if (php_sapi_name() !== 'cli') {
 $ROOT = dirname(__DIR__);
 require_once $ROOT . '/config/database.php';
 
-// config/database.php sets $db_* vars via database.local.php; use constants as fallback
+// config/database.php sets $db_* vars from .env; use constants as fallback
 // so static analysis does not report them as undefined.
 $db_host = $db_host ?? DB_HOST;
 $db_port = $db_port ?? DB_PORT;

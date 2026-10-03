@@ -12,7 +12,7 @@ if (PHP_SAPI !== 'cli') { http_response_code(403); exit("CLI only.\n"); } // nev
  *   CPANEL_HOST, CPANEL_PORT (2083), CPANEL_USER, CPANEL_PASS, CPANEL_REPO_PATH
  */
 
-// Load the project's .env (same rules as config/database.local.php: the file wins).
+// Load the project's .env (same rules as config/database.php: the file wins).
 $envFile = dirname(__DIR__) . '/.env';
 if (is_file($envFile)) {
     foreach (file($envFile, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES) as $line) {

@@ -10,21 +10,14 @@
 require_once __DIR__ . '/cache.php';
 require_once __DIR__ . '/../includes/system-logger.php';
 
-// Database configuration — load from .env / environment variables.
-// database.local.php (committed, no credentials) reads the .env file at
-// the project root and populates $db_* via getenv().  As a safety net,
-// getenv() is also read here in case the .env loader is skipped.
-
-// Step 1: include the env loader if present
-if (file_exists(__DIR__ . '/database.local.php')) {
-    include __DIR__ . '/database.local.php';
-}
-
-// Step 1b: if the loader is missing (it is not always deployed) or left the credentials
-// empty, read the project's .env here. The file wins over exported variables, the same
-// rule as database.local.php, so one hotel can never pick up another's DB_* values.
-if ((empty($db_host ?? null) || empty($db_name ?? null) || empty($db_user ?? null)) && is_readable(dirname(__DIR__) . '/.env')) {
-    foreach (file(dirname(__DIR__) . '/.env', FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES) as $_envLine) {
+// Database configuration — the project's .env file is the single source.
+// .env (gitignored, at the project root; see .env.example) is read here. Keys it defines
+// win over variables exported elsewhere, so one hotel can never pick up another hotel's
+// DB_* values. Without a .env, server environment variables (OS / cPanel) are used.
+// Every KEY=value in .env is also exposed via getenv()/$_ENV (e.g. APP_ENCRYPTION_SALT).
+$_envFile = dirname(__DIR__) . '/.env';
+if (is_readable($_envFile)) {
+    foreach (file($_envFile, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES) as $_envLine) {
         $_envLine = trim($_envLine);
         if ($_envLine === '' || $_envLine[0] === '#' || strpos($_envLine, '=') === false) {
             continue;
@@ -41,29 +34,19 @@ if ((empty($db_host ?? null) || empty($db_name ?? null) || empty($db_user ?? nul
         }
     }
     unset($_envLine, $_envKey, $_envVal);
-    foreach (['host' => 'DB_HOST', 'name' => 'DB_NAME', 'user' => 'DB_USER', 'pass' => 'DB_PASS', 'port' => 'DB_PORT'] as $_k => $_e) {
-        if (empty(${'db_' . $_k}) && getenv($_e) !== false && getenv($_e) !== '') {
-            ${'db_' . $_k} = getenv($_e);
-        }
-    }
-    unset($_k, $_e);
 }
 
-// Step 2: fall through to getenv() for anything not set by the loader
-// (covers the case where database.local.php is absent, or env vars were
-//  set at the OS / cPanel level rather than via .env)
-$db_host    = ($db_host    ?? getenv('DB_HOST'))    ?: '';
-$db_name    = ($db_name    ?? getenv('DB_NAME'))    ?: '';
-$db_user    = ($db_user    ?? getenv('DB_USER'))    ?: '';
-$db_pass    = ($db_pass    ?? getenv('DB_PASS'))    ?: '';
-$db_port    = ($db_port    ?? getenv('DB_PORT'))    ?: '3306';
-$db_charset = $db_charset ?? 'utf8mb4';
+$db_host    = getenv('DB_HOST') ?: '';
+$db_name    = getenv('DB_NAME') ?: '';
+$db_user    = getenv('DB_USER') ?: '';
+$db_pass    = getenv('DB_PASS') ?: '';
+$db_port    = getenv('DB_PORT') ?: '3306';
+$db_charset = 'utf8mb4';
 
 // Validate that credentials are set
 if (empty($db_host) || empty($db_name) || empty($db_user)) {
-    $envFile = dirname(__DIR__) . '/.env';
-    $hint = file_exists($envFile)
-        ? 'A .env file was found at ' . $envFile . ' but DB_HOST / DB_NAME / DB_USER are empty or missing in it (check the key names and that the file was saved with values).'
+    $hint = file_exists($_envFile)
+        ? 'A .env file was found at ' . $_envFile . ' but DB_HOST / DB_NAME / DB_USER are empty or missing in it (check the key names and that the file was saved with values).'
         : 'No .env file found at the project root (' . dirname(__DIR__) . '). '
         . 'Create one from .env.example and fill in your credentials, or set '
         . 'DB_HOST / DB_NAME / DB_USER / DB_PASS as server environment variables.';
