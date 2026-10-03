@@ -41,7 +41,8 @@ if (!$error && $_SERVER['REQUEST_METHOD'] === 'POST') {
         try {
             if ($action === 'mark_wasted') {
                 $batchId = (int)($_POST['batch_id'] ?? 0);
-                $reason = trim($_POST['reason'] ?? 'Wastage');
+                $reason = mb_substr(trim($_POST['reason'] ?? 'Wastage'), 0, 255);
+                if ($reason === '') $reason = 'Wastage';
 
                 $pdo->beginTransaction();
                 $sel = $pdo->prepare("SELECT b.*, i.cost_per_unit AS ing_cost FROM stock_batches b INNER JOIN stock_ingredients i ON i.id = b.ingredient_id WHERE b.id = ? FOR UPDATE");
@@ -76,7 +77,8 @@ if (!$error && $_SERVER['REQUEST_METHOD'] === 'POST') {
                 $message = 'Batch marked as wasted.';
             } elseif ($action === 'recall') {
                 $batchId = (int)($_POST['batch_id'] ?? 0);
-                $reason = trim($_POST['reason'] ?? 'Supplier recall');
+                $reason = mb_substr(trim($_POST['reason'] ?? 'Supplier recall'), 0, 200);
+                if ($reason === '') $reason = 'Supplier recall';
 
                 $pdo->beginTransaction();
                 $sel = $pdo->prepare("SELECT * FROM stock_batches WHERE id = ? FOR UPDATE");

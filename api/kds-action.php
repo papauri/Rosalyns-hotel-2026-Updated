@@ -133,6 +133,30 @@ function kds_recompute_order_status(PDO $pdo, int $orderId): string
 }
 
 /**
+ * Take the ORDER row lock first (the same order void / cancel / pay use, so a station tap can never
+ * deadlock against them) and refuse to act on an order that has been voided or cancelled. Without
+ * this a stale ticket on a station board could still be tapped after the cashier voided the order:
+ * ready_item / serve_item would flip a 'void' line back to ready/served and ready_item would take
+ * its stock off the shelf again. Rolls back and answers with an error when the order is closed.
+ * Caller must already have an open transaction. Returns the order status.
+ */
+function kds_lock_live_order(PDO $pdo, int $orderId): string
+{
+    $st = $pdo->prepare("SELECT status FROM stock_orders WHERE id=? FOR UPDATE");
+    $st->execute([$orderId]);
+    $status = $st->fetchColumn();
+    if ($status === false) {
+        $pdo->rollBack();
+        jerr('Order not found', 404);
+    }
+    if (in_array((string)$status, ['voided', 'cancelled'], true)) {
+        $pdo->rollBack();
+        jerr('This order was ' . (string)$status . ' - refresh the board.', 409);
+    }
+    return (string)$status;
+}
+
+/**
  * Fire a ready-collection notification when all items at $station for $orderId
  * are now either 'ready' or 'served'. Idempotent for the same order+station pair.
  */
@@ -1223,6 +1247,14 @@ try {
         if ($itemId <= 0) jerr('Missing item_id');
 
         $pdo->beginTransaction();
+        $preRow = $pdo->prepare("SELECT order_id FROM stock_order_items WHERE id=?");
+        $preRow->execute([$itemId]);
+        $preOrderId = (int)$preRow->fetchColumn();
+        if ($preOrderId <= 0) {
+            $pdo->rollBack();
+            jerr('Item not found', 404);
+        }
+        kds_lock_live_order($pdo, $preOrderId);
         $row = $pdo->prepare("SELECT id, order_id, item_name, kds_status, menu_item_id, menu_type, quantity, stock_deducted FROM stock_order_items WHERE id=? FOR UPDATE");
         $row->execute([$itemId]);
         $it = $row->fetch(PDO::FETCH_ASSOC);
@@ -1244,7 +1276,7 @@ try {
             kds_log($pdo, $orderId, $itemId, 'started', $from, 'preparing', $user, $ip);
             $to = 'preparing';
         } elseif ($action === 'ready_item') {
-            if (in_array($from, ['served', 'collection'], true)) {
+            if (in_array($from, ['served', 'collection', 'void'], true)) {
                 $pdo->rollBack();
                 jerr('Cannot mark ready from ' . $from);
             }
@@ -1283,8 +1315,26 @@ try {
                 $pdo->rollBack();
                 jerr('Already served');
             }
-            $pdo->prepare("UPDATE stock_order_items SET kds_status='served', started_at=COALESCE(started_at,NOW()), ready_at=COALESCE(ready_at,NOW()), served_at=NOW(), bumped_by=? WHERE id=?")
-                ->execute([(int)$user['id'], $itemId]);
+            if ($from === 'void') {
+                $pdo->rollBack();
+                jerr('Cannot serve a voided item');
+            }
+            /* Serving straight from pending/preparing (skipping ready) must still take the stock off
+             * the shelf, exactly as bump_ticket does - otherwise the item is sold and never deducted. */
+            $serveDeducted = (int)$it['stock_deducted'] === 1;
+            if (!$serveDeducted) {
+                $serveShort = kds_stock_shortages_for_items($pdo, [$it]);
+                if ($serveShort) {
+                    $pdo->rollBack();
+                    jerr(kds_stock_shortage_message($serveShort));
+                }
+                $serveDeducted = deductStockForMenuItem((int)$it['menu_item_id'], (string)$it['menu_type'], (float)$it['quantity'], 'pos_order', $itemId, (int)$user['id']);
+                if (!$serveDeducted) {
+                    rh_log_event('kds', 'warning', "Serve: stock deduction failed for item #{$itemId} (order #{$orderId})", ['item_id' => $itemId, 'order_id' => $orderId]);
+                }
+            }
+            $pdo->prepare("UPDATE stock_order_items SET kds_status='served', started_at=COALESCE(started_at,NOW()), ready_at=COALESCE(ready_at,NOW()), served_at=NOW(), bumped_by=?, stock_deducted=? WHERE id=?")
+                ->execute([(int)$user['id'], $serveDeducted ? 1 : 0, $itemId]);
             kds_log($pdo, $orderId, $itemId, 'served', $from, 'served', $user, $ip);
             $to = 'served';
         } else {
@@ -1318,6 +1368,7 @@ try {
         $orderId = (int)($_POST['order_id'] ?? 0);
         if ($orderId <= 0) jerr('Missing order_id');
         $pdo->beginTransaction();
+        kds_lock_live_order($pdo, $orderId);
         // Only operate on items belonging to the caller's station (admins: all)
         if ($isPrivileged && !$reqStation) {
             $pdo->prepare("UPDATE stock_order_items SET kds_status='preparing', started_at=COALESCE(started_at,NOW()) WHERE order_id=? AND kds_status='pending'")->execute([$orderId]);
@@ -1335,6 +1386,7 @@ try {
         $orderId = (int)($_POST['order_id'] ?? 0);
         if ($orderId <= 0) jerr('Missing order_id');
         $pdo->beginTransaction();
+        kds_lock_live_order($pdo, $orderId);
 
         // Deduct stock for any items that haven't been deducted yet (skipped ready_item step)
         if ($isPrivileged && !$reqStation) {
@@ -1386,7 +1438,9 @@ try {
         $orderId = (int)($_POST['order_id'] ?? 0);
         if ($orderId <= 0) jerr('Missing order_id');
         $pdo->beginTransaction();
-        // Only allow recall within 10 minutes of bump
+        // Only allow recall within 10 minutes of bump (and never on a voided / cancelled order,
+        // whose kitchen_status/served_at were stamped by the void itself)
+        kds_lock_live_order($pdo, $orderId);
         $st = $pdo->prepare("SELECT served_at FROM stock_orders WHERE id=? FOR UPDATE");
         $st->execute([$orderId]);
         $srv = $st->fetchColumn();

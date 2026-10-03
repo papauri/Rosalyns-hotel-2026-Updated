@@ -81,6 +81,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 /* Paid orders are immutable: once any payment (or split leg) is recorded the total,
                  * discount and service charge are fixed. A change is a refund / credit note plus a
                  * new sale - never an edit of what the guest already paid. */
+                /* Take the order row lock BEFORE judging whether it is still unpaid, and keep it until the
+                 * totals are written. Checked outside the lock, a payment landing in between would be
+                 * followed by a total rewrite on an order that had just been paid. */
+                $pdo->beginTransaction();
+                $lockStmt = $pdo->prepare("SELECT status, COALESCE(split_paid_count, 0) AS split_paid_count FROM stock_orders WHERE id = ? FOR UPDATE");
+                $lockStmt->execute([$orderId]);
+                $orderRow = array_merge($orderRow, $lockStmt->fetch(PDO::FETCH_ASSOC) ?: []);
                 $paidLegs = $pdo->prepare("SELECT COUNT(*) FROM payments WHERE booking_type = 'restaurant' AND booking_id = ? AND COALESCE(payment_type, '') != 'refund' AND deleted_at IS NULL");
                 $paidLegs->execute([$orderId]);
                 if ($orderRow['status'] !== 'placed' || (int)($orderRow['split_paid_count'] ?? 0) > 0 || (int)$paidLegs->fetchColumn() > 0) {
@@ -106,7 +113,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
                 $newTotal = round($subtotal - $discount + $service + $tax, 2);
 
-                $pdo->beginTransaction();
                 $pdo->prepare("UPDATE stock_orders SET subtotal = ?, discount_amount = ?, discount_reason = ?, service_charge = ?, tax_amount = ?, total_amount = ?, notes = TRIM(BOTH '\n' FROM CONCAT(COALESCE(notes,''), CASE WHEN COALESCE(notes,'')='' THEN '' ELSE '\n' END, ?)), updated_at = NOW() WHERE id = ?")
                     ->execute([$subtotal, $discount, $reason ?: null, $service, $tax, $newTotal, $extraNotes ? '[Consolidation] ' . $extraNotes : '', $orderId]);
 

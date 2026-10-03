@@ -36,6 +36,26 @@ function rh_po_recalc(PDO $pdo, int $poId): void
     $pdo->prepare("UPDATE stock_purchase_orders SET subtotal = ?, total_cost = ? WHERE id = ?")->execute([$t, $t, $poId]);
 }
 
+/**
+ * Lines can only be changed while the PO is still open for amendment. A received / closed /
+ * cancelled PO is a record of what was ordered and costed - editing its lines rewrites history
+ * and its total_cost - and a line can never be cut below what has already been received.
+ * Throws when the PO cannot be edited; returns the PO status.
+ */
+function rh_po_assert_editable(PDO $pdo, int $poId): string
+{
+    $st = $pdo->prepare("SELECT status FROM stock_purchase_orders WHERE id = ? LIMIT 1 FOR UPDATE");
+    $st->execute([$poId]);
+    $status = $st->fetchColumn();
+    if ($status === false) {
+        throw new RuntimeException('Purchase order not found.');
+    }
+    if (in_array((string)$status, ['received', 'closed', 'cancelled'], true)) {
+        throw new RuntimeException('This purchase order is ' . $status . ' - its lines can no longer be changed.');
+    }
+    return (string)$status;
+}
+
 $redirectTo = 'purchase-orders.php';
 
 if (!$error && $_SERVER['REQUEST_METHOD'] === 'POST') {
@@ -95,6 +115,7 @@ if (!$error && $_SERVER['REQUEST_METHOD'] === 'POST') {
                 $q    = (float)($_POST['ordered_qty'] ?? 0);
                 $c    = max(0, (float)($_POST['unit_cost'] ?? 0));
                 if ($q <= 0) throw new RuntimeException('Quantity must be greater than zero.');
+                rh_po_assert_editable($pdo, $poId);
                 if ($iid > 0) {
                     $m = $pdo->prepare("SELECT name, unit, cost_per_unit FROM stock_ingredients WHERE id = ?");
                     $m->execute([$iid]);
@@ -117,6 +138,12 @@ if (!$error && $_SERVER['REQUEST_METHOD'] === 'POST') {
             } elseif ($action === 'remove_line') {
                 $lineId = (int)($_POST['line_id'] ?? 0);
                 $poId   = (int)($_POST['po_id'] ?? 0);
+                rh_po_assert_editable($pdo, $poId);
+                $recvChk = $pdo->prepare("SELECT received_qty FROM stock_purchase_order_items WHERE id = ? AND purchase_order_id = ?");
+                $recvChk->execute([$lineId, $poId]);
+                if ((float)$recvChk->fetchColumn() > 0.0001) {
+                    throw new RuntimeException('Stock has already been received against this line - it cannot be removed.');
+                }
                 $pdo->prepare("DELETE FROM stock_purchase_order_items WHERE id = ? AND purchase_order_id = ?")->execute([$lineId, $poId]);
                 rh_po_recalc($pdo, $poId);
                 $message = 'Line removed.';
@@ -128,6 +155,13 @@ if (!$error && $_SERVER['REQUEST_METHOD'] === 'POST') {
                 $q = (float)($_POST['ordered_qty'] ?? 0);
                 $c = max(0, (float)($_POST['unit_cost'] ?? 0));
                 if ($q <= 0) throw new RuntimeException('Quantity must be greater than zero.');
+                rh_po_assert_editable($pdo, $poId);
+                $recvChk = $pdo->prepare("SELECT received_qty FROM stock_purchase_order_items WHERE id = ? AND purchase_order_id = ?");
+                $recvChk->execute([$lineId, $poId]);
+                $alreadyRecv = (float)$recvChk->fetchColumn();
+                if ($q + 0.0001 < $alreadyRecv) {
+                    throw new RuntimeException('Quantity cannot be lower than the ' . rtrim(rtrim(number_format($alreadyRecv, 4, '.', ''), '0'), '.') . ' already received.');
+                }
                 $pdo->prepare("UPDATE stock_purchase_order_items SET ordered_qty = ?, unit_cost = ?, line_total = ? WHERE id = ? AND purchase_order_id = ?")
                     ->execute([$q, $c, round($q * $c, 2), $lineId, $poId]);
                 rh_po_recalc($pdo, $poId);

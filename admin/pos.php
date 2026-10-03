@@ -223,12 +223,15 @@ function pos_buildOrderFromPost(PDO $pdo, array $user, string $orderType, ?strin
         $rs_booking_id = (int)$location['booking_id'];
         foreach ($folioItems as $fi) {
             $charge = addBookingChargeFromMenu($rs_booking_id, $fi['type'], $fi['item_id'], $fi['qty'], (int)$user['id']);
-            if (!empty($charge['success']) && !empty($charge['charge_id'])) {
-                $pdo->prepare("UPDATE booking_charges SET stock_order_id = ? WHERE id = ?")
-                    ->execute([$orderId, (int)$charge['charge_id']]);
-                $pdo->prepare("UPDATE stock_order_items SET stock_deducted = 1 WHERE id = ?")
-                    ->execute([$fi['soi_id']]);
+            if (empty($charge['success']) || empty($charge['charge_id'])) {
+                /* A room-service line that never reached the folio is revenue the guest is never billed.
+                 * Fail the whole order (rolled back by the caller) instead of sending food out uncharged. */
+                throw new RuntimeException('Could not post the room-service charge to the guest folio' . (!empty($charge['message']) ? ' (' . $charge['message'] . ')' : '') . ' - the order was not placed.');
             }
+            $pdo->prepare("UPDATE booking_charges SET stock_order_id = ? WHERE id = ?")
+                ->execute([$orderId, (int)$charge['charge_id']]);
+            $pdo->prepare("UPDATE stock_order_items SET stock_deducted = 1 WHERE id = ?")
+                ->execute([$fi['soi_id']]);
         }
         $pdo->prepare("UPDATE stock_orders SET folio_posted_at = NOW() WHERE id = ?")->execute([$orderId]);
         recalculateBookingFinancials($rs_booking_id);
@@ -684,12 +687,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     $rs_booking_id = (int)$tab['booking_id'];
                     foreach ($folioItems as $fi) {
                         $charge = addBookingChargeFromMenu($rs_booking_id, $fi['type'], $fi['item_id'], $fi['qty'], (int)$user['id']);
-                        if (!empty($charge['success']) && !empty($charge['charge_id'])) {
-                            $pdo->prepare("UPDATE booking_charges SET stock_order_id = ? WHERE id = ?")
-                                ->execute([$tabOrderId, (int)$charge['charge_id']]);
-                            $pdo->prepare("UPDATE stock_order_items SET stock_deducted = 1 WHERE id = ?")
-                                ->execute([$fi['soi_id']]);
+                        if (empty($charge['success']) || empty($charge['charge_id'])) {
+                            throw new RuntimeException('Could not post the room-service charge to the guest folio' . (!empty($charge['message']) ? ' (' . $charge['message'] . ')' : '') . ' - the round was not added.');
                         }
+                        $pdo->prepare("UPDATE booking_charges SET stock_order_id = ? WHERE id = ?")
+                            ->execute([$tabOrderId, (int)$charge['charge_id']]);
+                        $pdo->prepare("UPDATE stock_order_items SET stock_deducted = 1 WHERE id = ?")
+                            ->execute([$fi['soi_id']]);
                     }
                     $pdo->prepare("UPDATE stock_orders SET folio_posted_at = NOW() WHERE id = ?")->execute([$tabOrderId]);
                     recalculateBookingFinancials($rs_booking_id);
@@ -1611,6 +1615,11 @@ if (isset($_GET['ajax']) && $_GET['ajax'] === 'toggle_item') {
         echo json_encode(['error' => 'You do not have permission to toggle item availability.']);
         exit;
     }
+    if (!validateCsrfToken((string)($_GET['csrf_token'] ?? $_POST['csrf_token'] ?? ''))) {
+        http_response_code(403);
+        echo json_encode(['error' => 'Security token invalid - refresh the page.']);
+        exit;
+    }
     $toggleItemId = (int)($_GET['item_id'] ?? 0);
     if (!$toggleItemId) {
         http_response_code(400);
@@ -1724,7 +1733,7 @@ if (isset($_GET['ajax']) && $_GET['ajax'] === 'manager_auth') {
             echo json_encode(['error' => 'Invalid manager credentials.']);
             exit;
         }
-        if ($mgrUser['id'] === $user['id']) {
+        if ((int)$mgrUser['id'] === (int)$user['id']) {
             http_response_code(400);
             echo json_encode(['error' => 'You cannot authorise your own actions — a different manager must approve.']);
             exit;
@@ -9653,7 +9662,7 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
 
         async function doToggleItem(itemId) {
             try {
-                const r = await fetch('pos.php?ajax=toggle_item&item_id=' + encodeURIComponent(itemId), { credentials: 'same-origin' });
+                const r = await fetch('pos.php?ajax=toggle_item&item_id=' + encodeURIComponent(itemId) + '&csrf_token=' + encodeURIComponent(posCsrfToken), { credentials: 'same-origin' });
                 const j = await r.json();
                 if (j.ok) {
                     const item = menuList.find(m => m.id === itemId);

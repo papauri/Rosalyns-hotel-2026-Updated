@@ -29,7 +29,11 @@ if (!$error && $_SERVER['REQUEST_METHOD'] === 'POST') {
         $error = 'Security token invalid.';
     } else {
         try {
-            $date    = $_POST['recorded_date'] ?? date('Y-m-d');
+            $date    = (string)($_POST['recorded_date'] ?? '');
+            $dateObj = DateTime::createFromFormat('!Y-m-d', $date);
+            if (!$dateObj || $dateObj->format('Y-m-d') !== $date || $date > date('Y-m-d')) {
+                throw new RuntimeException('Enter a valid wastage date (not in the future).');
+            }
             $ingIds  = $_POST['ingredient_id'] ?? [];
             $qtys    = $_POST['quantity'] ?? [];
             $reasons = $_POST['reason'] ?? [];
@@ -51,7 +55,8 @@ if (!$error && $_SERVER['REQUEST_METHOD'] === 'POST') {
             for ($k = 0; $k < $count; $k++) {
                 $iid = (int)($ingIds[$k] ?? 0);
                 $q = (float)($qtys[$k] ?? 0);
-                $rs = trim($reasons[$k] ?? 'Wastage');
+                $rs = mb_substr(trim((string)($reasons[$k] ?? '')), 0, 255);
+                if ($rs === '') $rs = 'Wastage';
                 if ($iid <= 0 || $q <= 0) continue;
 
                 $costSel->execute([$iid]);

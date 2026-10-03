@@ -115,11 +115,21 @@ if (!$error && $_SERVER['REQUEST_METHOD'] === 'POST') {
 
                 $lines = $_POST['line'] ?? [];
                 $upd = $pdo->prepare("UPDATE stock_count_lines SET actual_quantity = ?, variance = ?, variance_cost = ?, reason_code = ?, reason_notes = ? WHERE id = ? AND count_id = ?");
+                /* The system quantity and cost are the SNAPSHOT taken when the count started (stored on the
+                 * line). They are read back from the database, never from the posted form: a tampered or
+                 * stale hidden field would otherwise set the variance - and, once approved, the stock
+                 * adjustment - to any figure. */
+                $snapSel = $pdo->prepare("SELECT system_quantity, cost_per_unit FROM stock_count_lines WHERE id = ? AND count_id = ?");
                 foreach ($lines as $lineId => $payload) {
                     $lineId = (int)$lineId;
                     $actual = (float)($payload['actual'] ?? 0);
-                    $sys    = (float)($payload['system'] ?? 0);
-                    $cost   = (float)($payload['cost'] ?? 0);
+                    $snapSel->execute([$lineId, $countId]);
+                    $snap = $snapSel->fetch(PDO::FETCH_ASSOC);
+                    if (!$snap) {
+                        continue;
+                    }
+                    $sys    = (float)$snap['system_quantity'];
+                    $cost   = (float)$snap['cost_per_unit'];
                     $reason = (string)($payload['reason'] ?? '');
                     $notes  = trim((string)($payload['notes'] ?? ''));
                     if ($actual < 0) {

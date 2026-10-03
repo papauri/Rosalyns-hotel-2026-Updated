@@ -288,7 +288,8 @@ if (!$error && $_SERVER['REQUEST_METHOD'] === 'POST') {
             } elseif ($action === 'discard_batch') {
                 // Mark a batch as wasted/expired/recalled and remove its remaining qty from stock.
                 $batchId = (int)($_POST['batch_id'] ?? 0);
-                $reason  = trim($_POST['reason'] ?? 'Discarded');
+                $reason  = mb_substr(trim($_POST['reason'] ?? 'Discarded'), 0, 200);
+                if ($reason === '') $reason = 'Discarded';
                 $newStatus = $_POST['status'] ?? 'wasted';
                 $allowed = ['expired', 'recalled', 'wasted'];
                 if (!in_array($newStatus, $allowed, true)) $newStatus = 'wasted';

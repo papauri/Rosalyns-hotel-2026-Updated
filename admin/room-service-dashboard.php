@@ -327,26 +327,30 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
                 // Deduct stock for any items that bypassed the KDS ready_item path
                 // (e.g. orders created via stock-orders.php where stock is deferred to KDS).
+                /* Deductions are keyed on the ORDER LINE id (source_type 'pos_order' + stock_order_items.id),
+                 * exactly as the KDS bump does, so a later void / 86 / recall can find and restore them.
+                 * Keying on the order id collided with unrelated line ids (false "already deducted" skips)
+                 * and left the real deduction untraceable. Only lines that actually deducted are flagged. */
                 $undeductedStmt = $pdo->prepare(
-                    "SELECT menu_item_id, menu_type, quantity FROM stock_order_items
+                    "SELECT id, menu_item_id, menu_type, quantity FROM stock_order_items
                      WHERE order_id = ? AND stock_deducted = 0 AND kds_status != 'void'"
                 );
                 $undeductedStmt->execute([$orderId]);
-                $undeductedItems = $undeductedStmt->fetchAll(PDO::FETCH_ASSOC);
-                foreach ($undeductedItems as $ud) {
-                    deductStockForMenuItem(
+                $flagDeducted = $pdo->prepare("UPDATE stock_order_items SET stock_deducted = 1 WHERE id = ?");
+                foreach ($undeductedStmt->fetchAll(PDO::FETCH_ASSOC) as $ud) {
+                    $deductedOk = deductStockForMenuItem(
                         (int)$ud['menu_item_id'],
                         (string)$ud['menu_type'],
                         (float)$ud['quantity'],
                         'pos_order',
-                        $orderId,
+                        (int)$ud['id'],
                         (int)$user['id']
                     );
-                }
-                if (!empty($undeductedItems)) {
-                    $pdo->prepare("UPDATE stock_order_items SET stock_deducted = 1
-                                   WHERE order_id = ? AND stock_deducted = 0 AND kds_status != 'void'")
-                        ->execute([$orderId]);
+                    if ($deductedOk) {
+                        $flagDeducted->execute([(int)$ud['id']]);
+                    } else {
+                        error_log("RS mark_delivered: stock deduction failed for item #{$ud['id']} on order #{$orderId}");
+                    }
                 }
 
                 $pdo->prepare("INSERT INTO stock_kds_events (order_id, event, to_status, user_id, user_name, ip_address) VALUES (?, 'delivered', 'served', ?, ?, ?)")

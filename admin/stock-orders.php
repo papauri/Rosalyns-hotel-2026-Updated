@@ -215,12 +215,24 @@ function voidRoomServiceFolioChargesForOrder(PDO $pdo, int $orderId, string $rea
     return count($charges);
 }
 
+/** Sum of refund rows (pending, processing or completed) raised against a restaurant order. */
+function restaurantOrderRefundTotal(PDO $pdo, int $orderId): float
+{
+    $st = $pdo->prepare("SELECT COALESCE(SUM(CASE WHEN COALESCE(refund_amount, 0) > 0 THEN refund_amount ELSE total_amount END), 0)
+                           FROM payments
+                          WHERE booking_type = 'restaurant' AND booking_id = ?
+                            AND payment_type = 'refund' AND deleted_at IS NULL
+                            AND COALESCE(refund_status, 'completed') IN ('pending', 'processing', 'completed')");
+    $st->execute([$orderId]);
+    return (float)$st->fetchColumn();
+}
+
 function getRestaurantOrderHealth(PDO $pdo, array $order): array
 {
     $orderId = (int)$order['id'];
     $issues = [];
 
-    $sumStmt = $pdo->prepare('SELECT COALESCE(SUM(line_total), 0) FROM stock_order_items WHERE order_id = ?');
+    $sumStmt = $pdo->prepare("SELECT COALESCE(SUM(line_total), 0) FROM stock_order_items WHERE order_id = ? AND kds_status <> 'void'");
     $sumStmt->execute([$orderId]);
     $lineSum = round((float)$sumStmt->fetchColumn(), 2);
     $expectedTotal = round($lineSum - (float)$order['discount_amount'] + (float)$order['service_charge'] + (float)$order['tax_amount'], 2);
@@ -236,7 +248,14 @@ function getRestaurantOrderHealth(PDO $pdo, array $order): array
     $activePaymentCount = (int)$pay['c'];
     $paymentSum = round((float)$pay['total'], 2);
 
-    if ($order['status'] === 'paid' && ($activePaymentCount === 0 || abs($paymentSum - (float)$order['total_amount']) > 0.01)) {
+    /* Net-paid rule: an 86'd line on a paid order lowers the order total and raises a refund row
+     * (pending, processing or completed). The paid figure to compare with the order total is the
+     * payments less those refunds - otherwise every 86'd paid order reads "unbalanced" and the
+     * Reconcile button would rewrite the original sale row to match. */
+    $refundedSum = round(restaurantOrderRefundTotal($pdo, $orderId), 2);
+    $paymentSum = round($paymentSum - $refundedSum, 2);
+
+    if ($order['status'] === 'paid' && ($activePaymentCount === 0 || abs($paymentSum - (float)$order['total_amount']) > BALANCE_TOLERANCE)) {
         $issues[] = 'Paid order is not balanced against the accounting payment row';
     }
     if (in_array($order['status'], ['voided', 'cancelled'], true) && $activePaymentCount > 0) {
@@ -278,7 +297,7 @@ function reconcileRestaurantOrder(PDO $pdo, int $orderId, array $user): array
         $order = $stmt->fetch(PDO::FETCH_ASSOC);
         if (!$order) throw new RuntimeException('Order not found.');
 
-        $sumStmt = $pdo->prepare('SELECT COALESCE(SUM(line_total), 0) FROM stock_order_items WHERE order_id = ?');
+        $sumStmt = $pdo->prepare("SELECT COALESCE(SUM(line_total), 0) FROM stock_order_items WHERE order_id = ? AND kds_status <> 'void'");
         $sumStmt->execute([$orderId]);
         $subtotal = round((float)$sumStmt->fetchColumn(), 2);
         $newTotal = round($subtotal - (float)$order['discount_amount'] + (float)$order['service_charge'] + (float)$order['tax_amount'], 2);
@@ -302,8 +321,15 @@ function reconcileRestaurantOrder(PDO $pdo, int $orderId, array $user): array
                 }
             }
         } elseif ($order['status'] === 'paid') {
-            syncRestaurantOrderPayment($pdo, $order, (int)$user['id'], (string)($order['payment_method'] ?: 'cash'));
-            $changes[] = 'payment ledger synced';
+            /* Never rewrite the original sale row of an order that already has refund rows (an 86'd
+             * line): the order total is intentionally lower than the sale, the difference lives in
+             * the refund row, and re-syncing would take it off twice. */
+            if (restaurantOrderRefundTotal($pdo, $orderId) > BALANCE_TOLERANCE) {
+                $changes[] = 'payment ledger left as recorded (refund rows exist)';
+            } else {
+                syncRestaurantOrderPayment($pdo, $order, (int)$user['id'], (string)($order['payment_method'] ?: 'cash'));
+                $changes[] = 'payment ledger synced';
+            }
         }
 
         if (in_array($order['status'], ['cancelled'], true)) {

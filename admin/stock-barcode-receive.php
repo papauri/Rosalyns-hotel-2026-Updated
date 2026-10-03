@@ -125,7 +125,7 @@ if (isset($_GET['ajax'])) {
             foreach ($items as $item) {
                 $ingId   = (int)($item['ingredient_id'] ?? 0);
                 $qty     = (float)($item['quantity'] ?? 0);
-                $cost    = (float)($item['cost_per_unit'] ?? 0);
+                $cost    = max(0.0, (float)($item['cost_per_unit'] ?? 0));
                 if (!$ingId || $qty <= 0) continue;
 
                 // Lock + get current ingredient
