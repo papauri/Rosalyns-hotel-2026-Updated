@@ -7401,7 +7401,7 @@ function voidBookingCharge(int $chargeId, string $voidReason, ?int $voidedBy = n
         $pdo->beginTransaction();
 
         // Get charge details (need extra fields for stock restoration)
-        $stmt = $pdo->prepare("SELECT booking_id, voided, charge_type, source_item_id, quantity, stock_tracked FROM booking_charges WHERE id = ?");
+        $stmt = $pdo->prepare("SELECT booking_id, voided, charge_type, source_item_id, quantity, stock_tracked FROM booking_charges WHERE id = ? FOR UPDATE");
         $stmt->execute([$chargeId]);
         $charge = $stmt->fetch(PDO::FETCH_ASSOC);
 
@@ -7425,9 +7425,13 @@ function voidBookingCharge(int $chargeId, string $voidReason, ?int $voidedBy = n
         $updateStmt = $pdo->prepare("
             UPDATE booking_charges
             SET voided = 1, voided_at = NOW(), void_reason = ?, voided_by = ?
-            WHERE id = ?
+            WHERE id = ? AND voided = 0
         ");
         $updateStmt->execute([$voidReason, $voidedBy, $chargeId]);
+        if ($updateStmt->rowCount() !== 1) { // a concurrent void got there first: never restore stock twice
+            $pdo->rollBack();
+            return ['success' => false, 'message' => 'Charge already voided'];
+        }
 
         // Stock integration: restore ingredients if this charge actually deducted stock.
         // Skips pre-migration charges (stock_tracked=0) so we never add phantom stock.

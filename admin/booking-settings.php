@@ -763,6 +763,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             deleteCache("setting_max_advance_booking_days");
 
             $message = "Maximum advance booking days updated to {$max_advance_days} days successfully!";
+        } elseif (isset($_POST['tourism_levy_settings']) && !hasPermission((int)($user['id'] ?? 0), 'finance_settings')) {
+            $error = 'You do not have permission to change the tourism levy.'; // same gate as VAT (finance_settings)
         } elseif (isset($_POST['tourism_levy_settings'])) {
             // Tourism levy settings
             $tourism_levy_enabled = isset($_POST['tourism_levy_enabled']) ? '1' : '0';
