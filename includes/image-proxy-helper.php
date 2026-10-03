@@ -19,7 +19,7 @@ function needsImageProxy($url) {
     $host = parse_url($url, PHP_URL_HOST);
     
     // Local images don't need proxy
-    if (empty($host) || strpos($host, $_SERVER['HTTP_HOST']) !== false) {
+    if (empty($host) || strcasecmp($host, (string)($_SERVER['HTTP_HOST'] ?? '')) === 0) {
         return false;
     }
     

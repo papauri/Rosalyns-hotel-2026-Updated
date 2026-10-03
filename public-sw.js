@@ -9,7 +9,7 @@
  *
  * BUMP SW_VERSION whenever cached assets must be force-refreshed on all clients.
  */
-const SW_VERSION = 'rh-public-v3-2026-06-24';
+const SW_VERSION = 'rh-public-v4-2026-10-03';
 const ASSET_CACHE = `${SW_VERSION}-assets`;
 const PAGE_CACHE  = `${SW_VERSION}-pages`;
 
@@ -26,6 +26,8 @@ const OFFLINE_FALLBACK = SW_BASE + 'offline.php';
 const isImmutableAsset = url => /\.(?:woff2?|ttf|eot|svg|png|jpe?g|webp|gif|ico)$/i.test(url.pathname);
 const isStyleOrScript  = url => /\.(?:css|js)(\?.*)?$/i.test(url.pathname + url.search);
 // Match .php pages AND directory-style URLs (e.g. / /rooms/ /about/)
+// Personalised / private pages: never stored in the cache (shared devices, stale guest data).
+const isPrivatePage    = url => /(?:booking-lookup|booking-confirmation|review-confirmation|submit-review)\.php$/i.test(url.pathname);
 const isPage           = url => /\.php(\?.*)?$/.test(url.pathname) || /\/$/.test(url.pathname);
 
 self.addEventListener('install', e => {
@@ -107,12 +109,21 @@ self.addEventListener('fetch', event => {
         return;
     }
 
+    // Private pages — network only; offline fallback page if unreachable, never cached
+    if (isPrivatePage(url)) {
+        event.respondWith(
+            fetch(req).catch(() => caches.match(OFFLINE_FALLBACK).then(hit => hit || Response.error()))
+        );
+        return;
+    }
+
     // Public HTML pages — network-first with offline fallback
     if (isPage(url)) {
         event.respondWith(
             fetch(req)
                 .then(resp => {
-                    if (resp && resp.ok) {
+                    const cc = (resp && resp.headers && resp.headers.get('Cache-Control')) || '';
+                    if (resp && resp.ok && !/no-store|private/i.test(cc)) {
                         caches.open(PAGE_CACHE).then(c => {
                             c.put(req, resp.clone()).catch(() => { });
                             // Evict oldest pages so the cache doesn't grow unbounded

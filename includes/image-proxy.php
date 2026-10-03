@@ -26,23 +26,32 @@ if (!filter_var($imageUrl, FILTER_VALIDATE_URL)) {
     exit('Invalid URL');
 }
 
-// Security: Only allow specific domains (Facebook, Instagram, etc.)
-$urlHost = parse_url($imageUrl, PHP_URL_HOST);
-$allowed = false;
+// Security: only http(s) on standard ports, and only hosts that ARE (or are subdomains of)
+// the allowed domains. Substring matching would allow e.g. facebook.com.evil.test (SSRF).
+$urlParts  = parse_url($imageUrl);
+$urlScheme = strtolower((string)($urlParts['scheme'] ?? ''));
+$urlHost   = strtolower((string)($urlParts['host'] ?? ''));
+$urlPort   = $urlParts['port'] ?? null;
+if (!in_array($urlScheme, ['http', 'https'], true) || $urlHost === ''
+    || isset($urlParts['user']) || isset($urlParts['pass'])
+    || ($urlPort !== null && !in_array((int)$urlPort, [80, 443], true))) {
+    header('HTTP/1.0 400 Bad Request');
+    exit('Invalid URL');
+}
 
-// Check if it's an external URL that needs proxy
+$allowed = false;
 $proxyDomains = ['fbcdn.net', 'facebook.com', 'instagram.com', 'fb.com', 'fbsbx.com'];
 foreach ($proxyDomains as $domain) {
-    if (strpos($urlHost, $domain) !== false) {
+    if ($urlHost === $domain || substr($urlHost, -strlen($domain) - 1) === '.' . $domain) {
         $allowed = true;
         break;
     }
 }
 
-// If not an external domain, redirect directly
+// Not a proxied domain: refuse (never act as an open redirect / open fetcher).
 if (!$allowed) {
-    header('Location: ' . $imageUrl);
-    exit;
+    header('HTTP/1.0 403 Forbidden');
+    exit('Host not allowed');
 }
 
 // Cache directory - use absolute path
@@ -101,8 +110,11 @@ if (function_exists('curl_init')) {
             CURLOPT_MAXREDIRS => 5,
             CURLOPT_TIMEOUT => 30,
             CURLOPT_CONNECTTIMEOUT => 10,
-            CURLOPT_SSL_VERIFYPEER => false,
-            CURLOPT_SSL_VERIFYHOST => false,
+            CURLOPT_SSL_VERIFYPEER => true,
+            CURLOPT_SSL_VERIFYHOST => 2,
+            CURLOPT_PROTOCOLS => CURLPROTO_HTTP | CURLPROTO_HTTPS,
+            CURLOPT_REDIR_PROTOCOLS => CURLPROTO_HTTP | CURLPROTO_HTTPS,
+            CURLOPT_MAXFILESIZE => 10485760,
             CURLOPT_USERAGENT => 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
             CURLOPT_REFERER => 'https://www.facebook.com/',
         ]);
@@ -134,12 +146,11 @@ if ($imageData === null) {
                 'Referer: https://www.facebook.com/',
             ],
             'timeout' => 30,
-            'follow_location' => true,
-            'max_redirects' => 5,
+            'follow_location' => false,
         ],
         'ssl' => [
-            'verify_peer' => false,
-            'verify_peer_name' => false,
+            'verify_peer' => true,
+            'verify_peer_name' => true,
         ]
     ];
     
@@ -155,6 +166,14 @@ if ($imageData === null) {
     
     error_log("Image Proxy: Image fetched successfully with file_get_contents");
 }
+
+// Only ever cache/serve genuine images (never HTML/JS from a spoofed response)
+$imgCheck = @getimagesizefromstring((string)$imageData);
+if (!$imgCheck || strlen((string)$imageData) > 10485760) {
+    header('HTTP/1.0 502 Bad Gateway');
+    exit('Not an image');
+}
+$contentType = $imgCheck['mime'];
 
 // Save to cache
 @file_put_contents($cacheFile, $imageData);

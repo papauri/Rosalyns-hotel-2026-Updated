@@ -10,6 +10,8 @@ if (session_status() === PHP_SESSION_NONE) {
     session_start();
 }
 
+header('Cache-Control: no-store, private');
+
 require_once 'config/database.php';
 require_once 'config/base-url.php';
 require_once 'includes/public-csrf.php';
@@ -73,7 +75,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['cancel_booking'])) {
     } else {
         $reference = trim($_POST['booking_reference'] ?? '');
         $email = trim($_POST['guest_email'] ?? '');
-        $cancel_reason = trim($_POST['cancel_reason'] ?? 'Cancelled by guest');
+        $cancel_reason = trim((string)($_POST['cancel_reason'] ?? ''));
+        if ($cancel_reason === '') {
+            $cancel_reason = 'Cancelled by guest';
+        }
+        $cancel_reason = function_exists('mb_substr') ? mb_substr($cancel_reason, 0, 300) : substr($cancel_reason, 0, 300);
 
         if (!empty($reference) && !empty($email)) {
             try {
@@ -95,10 +101,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['cancel_booking'])) {
                     // Enforce cancellation notice window before proceeding
                     $cancelNoticeDays = (int)getSetting('cancellation_notice_days', 0);
                     if ($cancelNoticeDays > 0) {
-                        $checkInTs  = strtotime($cancel_booking['check_in_date']);
-                        $nowTs      = time();
-                        if ($checkInTs > $nowTs) {
-                            $daysUntil = (int)(($checkInTs - $nowTs) / 86400);
+                        // Compare calendar dates (not midnight timestamps) so a same-day
+                        // check-in is correctly inside the notice window.
+                        $tz = new DateTimeZone('Africa/Blantyre');
+                        $today = new DateTimeImmutable('today', $tz);
+                        $checkInDt = DateTimeImmutable::createFromFormat('Y-m-d', substr((string)$cancel_booking['check_in_date'], 0, 10), $tz);
+                        if ($checkInDt) {
+                            $daysUntil = (int)$today->diff($checkInDt->setTime(0, 0))->format('%r%a');
                             if ($daysUntil < $cancelNoticeDays) {
                                 $error = 'Online cancellations are not available within ' . $cancelNoticeDays
                                     . ' day(s) of check-in. Please contact us directly.';
@@ -133,6 +142,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['cancel_booking'])) {
                     );
 
                     $success = 'Your booking has been cancelled successfully. A confirmation email has been sent to your email address.';
+                    if (($settled['refund_total'] ?? 0) > 0 && rh_refund_rule('guest_self_cancel_refund') !== 'auto') {
+                        $success .= ' Any refund due is pending approval by our team and will be processed shortly.';
+                    }
                     $booking = null; // Clear the booking display
                 }
             } catch (Throwable $e) {
@@ -201,7 +213,7 @@ try {
             <div class="lookup-card" data-lazy-reveal>
                 <form method="POST">
                     <input type="hidden" name="lookup" value="1">
-                    <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf_token, ENT_QUOTES, 'UTF-8'); ?>">
+                    <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars(pub_csrf_generate('lookup'), ENT_QUOTES, 'UTF-8'); ?>">
 
                     <div class="form-group">
                         <label for="booking_reference"><i class="fas fa-hashtag" style="color: var(--gold);"></i> Booking Reference</label>
@@ -304,7 +316,7 @@ try {
                             </p>
                             <form method="POST" id="cancel-form">
                                 <input type="hidden" name="cancel_booking" value="1">
-                                <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf_token, ENT_QUOTES, 'UTF-8'); ?>">
+                                <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars(pub_csrf_generate('lookup'), ENT_QUOTES, 'UTF-8'); ?>">
                                 <input type="hidden" name="booking_reference" value="<?php echo htmlspecialchars($booking['booking_reference']); ?>">
                                 <input type="hidden" name="guest_email" value="<?php echo htmlspecialchars($booking['guest_email']); ?>">
                                 <div class="form-group" style="margin-bottom: 12px;">

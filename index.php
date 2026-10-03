@@ -177,7 +177,7 @@ foreach ($footer_links_raw as $link) {
             "@context": "https://schema.org",
             "@type": "Hotel",
             "name": "<?php echo htmlspecialchars($site_name); ?>",
-            "image": "https://<?php echo $_SERVER['HTTP_HOST']; ?>/images/hotel_gallery/Front.jpeg",
+            "image": "https://<?php echo preg_replace('/[^A-Za-z0-9.:-]/', '', (string)($_SERVER['HTTP_HOST'] ?? '')); ?>/images/hotel_gallery/Front.jpeg",
             "description": "<?php echo htmlspecialchars($hero_subtitle); ?>",
             "address": {
                 "@type": "PostalAddress",
@@ -188,7 +188,7 @@ foreach ($footer_links_raw as $link) {
             },
             "telephone": "<?php echo htmlspecialchars($contact['phone_main']); ?>",
             "email": "<?php echo htmlspecialchars($contact['email_main']); ?>",
-            "url": "https://<?php echo $_SERVER['HTTP_HOST']; ?>/",
+            "url": "https://<?php echo preg_replace('/[^A-Za-z0-9.:-]/', '', (string)($_SERVER['HTTP_HOST'] ?? '')); ?>/",
             "starRating": {
                 "@type": "Rating",
                 "ratingValue": "<?php echo htmlspecialchars(getSetting('hotel_star_rating', '5')); ?>"

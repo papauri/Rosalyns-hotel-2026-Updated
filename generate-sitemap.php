@@ -73,28 +73,7 @@ try {
     // Silently fail if database error
 }
 
-// Dynamic event pages
-try {
-    if (!isEventsEnabled()) {
-        $events = [];
-    } else {
-        $stmt = $pdo->query("SELECT id, updated_at FROM events WHERE is_active = 1");
-        $events = $stmt->fetchAll(PDO::FETCH_ASSOC);
-    }
-
-    foreach ($events as $event) {
-        $lastmod = !empty($event['updated_at']) ? date('Y-m-d', strtotime($event['updated_at'])) : $current_date;
-        
-        echo '<url>';
-        echo '<loc>' . htmlspecialchars($base_url . '/event.php?id=' . $event['id']) . '</loc>';
-        echo '<lastmod>' . $lastmod . '</lastmod>';
-        echo '<changefreq>weekly</changefreq>';
-        echo '<priority>0.6</priority>';
-        echo '</url>';
-    }
-} catch (PDOException $e) {
-    // Silently fail if database error
-}
+// Event detail pages are not published (no event.php); /events.php is listed above.
 
 echo '</urlset>';
 ?>

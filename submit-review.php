@@ -149,7 +149,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if (!$name_validation['valid']) {
         $validation_errors['guest_name'] = $name_validation['error'];
     } else {
-        $sanitized_data['guest_name'] = sanitizeString($name_validation['value'], 100);
+        $sanitized_data['guest_name'] = sanitizePlainText($name_validation['value'], 100);
     }
 
     // Validate guest_email
@@ -158,7 +158,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if (!$email_validation['valid']) {
         $validation_errors['guest_email'] = $email_validation['error'];
     } else {
-        $sanitized_data['guest_email'] = sanitizeString($guest_email_input, 254);
+        $sanitized_data['guest_email'] = sanitizePlainText($guest_email_input, 254);
     }
 
     // Validate overall_rating
@@ -174,7 +174,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if (!$title_validation['valid']) {
         $validation_errors['review_title'] = $title_validation['error'];
     } else {
-        $sanitized_data['review_title'] = sanitizeString($title_validation['value'], 200);
+        $sanitized_data['review_title'] = sanitizePlainText($title_validation['value'], 200);
     }
 
     // Validate review_comment
@@ -182,7 +182,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if (!$comment_validation['valid']) {
         $validation_errors['review_comment'] = $comment_validation['error'];
     } else {
-        $sanitized_data['review_comment'] = sanitizeString($comment_validation['value'], 2000);
+        $sanitized_data['review_comment'] = sanitizePlainText($comment_validation['value'], 2000);
     }
 
     // Validate review_type (optional)

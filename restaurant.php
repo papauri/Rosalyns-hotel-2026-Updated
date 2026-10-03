@@ -666,8 +666,8 @@ try {
         <script src="js/spatial-loading.js" defer></script>
         <script>
             // Currency settings (from PHP)
-            const currencySymbol = '<?php echo $currency_symbol; ?>';
-            const currencyCode = '<?php echo $currency_code; ?>';
+            const currencySymbol = <?php echo json_encode((string)$currency_symbol, JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT); ?>;
+            const currencyCode = <?php echo json_encode((string)$currency_code, JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT); ?>;
 
             // Pre-loaded menu data from server (for immediate display)
             const initialMenuData = <?php echo json_encode($initial_menu_data); ?>;

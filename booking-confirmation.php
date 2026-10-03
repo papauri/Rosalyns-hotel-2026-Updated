@@ -7,13 +7,15 @@
 
 // Start session
 session_start();
+// Personalised page: never store in browser/proxy/service-worker caches
+header('Cache-Control: no-store, private');
 require_once 'config/base-url.php';
 require_once 'config/database.php';
 
 // Get booking reference from URL
-$booking_reference = $_GET['ref'] ?? null;
+$booking_reference = is_string($_GET['ref'] ?? null) ? trim($_GET['ref']) : null;
 
-if (!$booking_reference) {
+if (!$booking_reference || strlen($booking_reference) > 50) {
     header('Location: ' . BASE_URL . 'booking.php');
     exit;
 }
@@ -28,7 +30,8 @@ try {
         WHERE b.booking_reference = ? OR b.booking_reference LIKE ?
         ORDER BY b.booking_reference ASC
     ");
-    $stmt->execute([$booking_reference, $booking_reference . '-%']);
+    // Escape LIKE wildcards so ?ref=% cannot match other guests' bookings
+    $stmt->execute([$booking_reference, addcslashes($booking_reference, '\%_') . '-%']);
     $split_bookings = $stmt->fetchAll(PDO::FETCH_ASSOC);
     $booking = $split_bookings[0] ?? null;
 
@@ -359,7 +362,7 @@ try {
                 <a href="https://wa.me/<?php echo rawurlencode(preg_replace('/[^0-9+]/', '', (string)$whatsapp_number)); ?>?text=<?php echo rawurlencode('Hi, I have a booking (' . $booking['booking_reference'] . ')'); ?>" class="conf-btn conf-btn--whatsapp" target="_blank" rel="noopener">
                     <i class="fab fa-whatsapp"></i> WhatsApp
                 </a>
-                <a href="mailto:<?php echo $email_reservations; ?>?subject=Booking+<?php echo $booking['booking_reference']; ?>" class="conf-btn conf-btn--ghost">
+                <a href="mailto:<?php echo htmlspecialchars((string)$email_reservations); ?>?subject=Booking+<?php echo rawurlencode((string)$booking['booking_reference']); ?>" class="conf-btn conf-btn--ghost">
                     <i class="fas fa-envelope"></i> Email
                 </a>
                 <button onclick="window.print()" class="conf-btn conf-btn--ghost">
