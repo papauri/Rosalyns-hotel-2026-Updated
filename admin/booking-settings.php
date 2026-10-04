@@ -214,6 +214,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['save_cancellation_ref
     }
 }
 
+// Hotel details & policies (registry-driven; see admin/includes/hotel-details-settings.php)
+require_once __DIR__ . '/includes/hotel-details-settings.php';
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['save_hotel_details'])) {
+    [$hdMessage, $hdError] = rh_hotel_details_save($_POST, $user);
+    if ($hdError !== '') {
+        $error = $hdError;
+    } else {
+        $message = $hdMessage;
+    }
+}
+
 // Booking reference prefix (new references only; existing ones never change)
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['save_booking_reference_prefix'])) {
     $newPrefix = strtoupper(trim((string)($_POST['booking_reference_prefix'] ?? '')));
@@ -1607,6 +1618,8 @@ foreach ($canonicalTemplateDefaults as $templateKey => $templateDefaults) {
                     </div>
                 </form>
             </div>
+
+            <?php rh_hotel_details_render($user, $csrf_token); ?>
 
             <div class="settings-card" id="booking-references">
                 <h2><i class="fas fa-hashtag" style="color: #8B7355;"></i> Booking references</h2>
