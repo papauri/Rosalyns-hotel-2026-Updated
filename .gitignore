@@ -64,3 +64,6 @@ package-lock.json
 # Claude Code — per-machine settings (absolute paths, local permission
 # allowlist). The rest of .claude/ is the shared build system and IS tracked.
 .claude/settings.local.json
+
+# Test harness session files
+scripts/tests/sessions/
