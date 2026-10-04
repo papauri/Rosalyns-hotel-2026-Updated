@@ -45,9 +45,9 @@
 }
 
 .menu-list .filter-row button.active {
-    background: var(--color-primary, #8A775F);
+    background: var(--color-primary, #766550);
     color: #fff;
-    border-color: var(--color-primary, #8A775F);
+    border-color: var(--color-primary, #766550);
 }
 
 .menu-item {
@@ -63,7 +63,7 @@
 
 .menu-item.active {
     background: #fdf6ec;
-    border-left: 3px solid var(--color-primary, #8A775F);
+    border-left: 3px solid var(--color-primary, #766550);
 }
 
 .menu-item .name {
@@ -307,7 +307,7 @@
 }
 
 .stock-recipes-page .btn-primary {
-    background: var(--color-primary, #8A775F);
+    background: var(--color-primary, #766550);
     color: #fff;
     border: none;
     padding: 10px 18px;

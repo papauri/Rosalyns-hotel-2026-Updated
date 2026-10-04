@@ -124,14 +124,14 @@ try {
         .gcl-card__title{font-family:'Cormorant Garamond',serif;font-size:1.35rem;font-weight:600;color:#3e3930;line-height:1.2;margin:0}
         .gcl-card__desc{font-size:.86rem;color:#6f665b;line-height:1.5;margin:0}
         .gcl-meta{display:flex;flex-wrap:wrap;gap:8px 14px;font-size:.82rem;color:#5f574c}
-        .gcl-meta i{color:#8B7355;margin-right:5px}
+        .gcl-meta i{color:#7E684B;margin-right:5px}
         .gcl-enrolled{display:inline-flex;align-items:center;gap:7px;background:#f4f1ea;border:1px solid #e0d9cc;border-radius:999px;padding:5px 12px;font-size:.82rem;font-weight:600;color:#6b5f4d;cursor:pointer;white-space:nowrap}
         .gcl-enrolled:hover{background:#ece6da}
         .gcl-actions{display:flex;flex-wrap:wrap;gap:8px;margin-top:2px}
         .gcl-empty{text-align:center;padding:48px 20px;color:#9a8f82}
-        .gcl-empty i{font-size:40px;opacity:.35;display:block;margin-bottom:14px;color:#8B7355}
+        .gcl-empty i{font-size:40px;opacity:.35;display:block;margin-bottom:14px;color:#7E684B}
         .gcl-roster-item{display:flex;align-items:center;gap:12px;padding:10px 12px;border:1px solid #eee4d6;border-radius:6px;margin-bottom:8px;background:#fdfcfa}
-        .gcl-roster-item .gr-avatar{width:34px;height:34px;border-radius:50%;background:#f0ebe2;color:#8B7355;display:flex;align-items:center;justify-content:center;font-size:13px;flex-shrink:0}
+        .gcl-roster-item .gr-avatar{width:34px;height:34px;border-radius:50%;background:#f0ebe2;color:#7E684B;display:flex;align-items:center;justify-content:center;font-size:13px;flex-shrink:0}
         .gcl-roster-item .gr-name{flex:1;font-weight:600;font-size:.92rem;color:#3e3930;min-width:0}
         .gcl-roster-item .gr-sub{font-size:.76rem;color:#9a8f82;font-weight:400;margin-top:2px}
         .gcl-roster-item .gr-noemail{color:#b45309;font-size:.72rem}
@@ -188,7 +188,7 @@ try {
                         <div class="gcl-actions">
                             <button class="mm-btn mm-btn-sm" onclick='gcOpenRoster(<?php echo (int)$c['id']; ?>, <?php echo json_encode($c['title']); ?>)'><i class="fas fa-user-group"></i> Roster</button>
                             <?php if ($gc_can_edit): ?>
-                            <button class="mm-btn mm-btn-sm" style="background:#8B7355;color:#fff;" onclick='gcConfirm("Send a reminder email to everyone enrolled in &quot;" + <?php echo json_encode(htmlspecialchars($c['title'], ENT_QUOTES)); ?> + "&quot;?", function(){ gcSendReminders(<?php echo (int)$c['id']; ?>); })' title="Email all enrolled members"><i class="fas fa-bell"></i> Remind</button>
+                            <button class="mm-btn mm-btn-sm" style="background:#7E684B;color:#fff;" onclick='gcConfirm("Send a reminder email to everyone enrolled in &quot;" + <?php echo json_encode(htmlspecialchars($c['title'], ENT_QUOTES)); ?> + "&quot;?", function(){ gcSendReminders(<?php echo (int)$c['id']; ?>); })' title="Email all enrolled members"><i class="fas fa-bell"></i> Remind</button>
                             <button class="mm-btn mm-btn-sm mm-btn-ghost" onclick='gcOpenClassModal(<?php echo htmlspecialchars(json_encode($c), ENT_QUOTES); ?>)'><i class="fas fa-pen"></i> Edit</button>
                             <button class="mm-btn mm-btn-sm mm-btn-ghost" style="color:#c0392b;" onclick='gcConfirm("Delete class &quot;" + <?php echo json_encode(htmlspecialchars($c['title'], ENT_QUOTES)); ?> + "&quot;? Enrolments are removed too. This cannot be undone.", function(){ gcDeleteClass(<?php echo (int)$c['id']; ?>); })'><i class="fas fa-trash"></i></button>
                             <?php endif; ?>
@@ -262,7 +262,7 @@ try {
             </div>
             <div class="mm-modal-foot" style="display:flex;justify-content:space-between;gap:10px;padding:14px 18px;align-items:center;">
                 <?php if ($gc_can_edit): ?>
-                <button class="mm-btn" style="background:#8B7355;color:#fff;" id="gcRosterRemindBtn" onclick="gcRemindFromRoster()"><i class="fas fa-bell"></i> Send reminder to all</button>
+                <button class="mm-btn" style="background:#7E684B;color:#fff;" id="gcRosterRemindBtn" onclick="gcRemindFromRoster()"><i class="fas fa-bell"></i> Send reminder to all</button>
                 <?php else: ?><span></span><?php endif; ?>
                 <button class="mm-btn mm-btn-ghost" onclick="gcClose('gcRosterModal')">Close</button>
             </div>
@@ -273,7 +273,7 @@ try {
     <div class="mm-modal" id="gcConfirmModal">
         <div class="mm-modal-card sm">
             <div class="mm-modal-head">
-                <h3><i class="fas fa-circle-question" style="color:#8B7355;"></i> Please confirm</h3>
+                <h3><i class="fas fa-circle-question" style="color:#7E684B;"></i> Please confirm</h3>
                 <button type="button" class="mm-modal-close" onclick="gcClose('gcConfirmModal')" aria-label="Close">&times;</button>
             </div>
             <div class="mm-modal-body"><p id="gcConfirmText" style="margin:0;"></p></div>

@@ -132,7 +132,7 @@ $csrf_token = generateCsrfToken();
         .ro-table td.num, .ro-table th.num { text-align:right; font-variant-numeric:tabular-nums; }
         .ro-table tfoot td { font-weight:600; background:#faf8f4; }
         .low { color:#8a3a3a; font-weight:600; }
-        .btn-ro { padding:8px 16px; border:none; border-radius:2px; cursor:pointer; font-family:inherit; font-size:.86rem; background:#8B7355; color:#fff; }
+        .btn-ro { padding:8px 16px; border:none; border-radius:2px; cursor:pointer; font-family:inherit; font-size:.86rem; background:#7E684B; color:#fff; }
         .btn-ro[disabled] { opacity:.5; cursor:not-allowed; }
         .empty-ro { background:#fff; border:1px solid #e6e0d6; padding:40px; text-align:center; color:#8a8172; border-radius:2px; }
         @media (max-width:640px){ .ro-table thead { display:none; } }
@@ -144,7 +144,7 @@ $csrf_token = generateCsrfToken();
 
     <div class="content">
         <div class="page-header">
-            <h2 class="page-title"><i class="fas fa-cart-flatbed" style="color:#8B7355;"></i> Reorder / Buying</h2>
+            <h2 class="page-title"><i class="fas fa-cart-flatbed" style="color:#7E684B;"></i> Reorder / Buying</h2>
         </div>
 
         <?php if ($error): showAlert($error, 'error'); endif; ?>

@@ -44,7 +44,7 @@
 .btn-filter {
     border: 0;
     border-radius: 8px;
-    background: var(--color-primary, #8A775F);
+    background: var(--color-primary, #766550);
     color: #fff;
     padding: 8px 12px;
     font-weight: 600;
@@ -61,7 +61,7 @@
 }
 
 .hourly-bar {
-    background: linear-gradient(180deg, var(--color-primary-light, #B9A78F), var(--color-primary, #8A775F));
+    background: linear-gradient(180deg, var(--color-primary-light, #B9A78F), var(--color-primary, #766550));
     border-radius: 4px 4px 2px 2px;
     min-height: 2px;
     position: relative;
@@ -286,22 +286,22 @@
 }
 
 .stats-grid .stat-card[role="button"]:focus-visible {
-    outline: 2px solid var(--color-primary, #8A775F);
+    outline: 2px solid var(--color-primary, #766550);
     outline-offset: 3px;
 }
 
 .analytics-card[data-insight][role="button"]:focus-visible {
-    outline: 2px solid var(--color-primary, #8A775F);
+    outline: 2px solid var(--color-primary, #766550);
     outline-offset: 3px;
 }
 
 .stats-grid .stat-card.is-active {
-    border-color: var(--color-primary, #8A775F);
+    border-color: var(--color-primary, #766550);
     box-shadow: 0 0 0 3px rgba(138, 119, 95, 0.22), 0 12px 24px rgba(0, 0, 0, 0.12);
 }
 
 .analytics-card[data-insight].is-active {
-    border-color: var(--color-primary, #8A775F);
+    border-color: var(--color-primary, #766550);
     box-shadow: 0 0 0 3px rgba(138, 119, 95, 0.18), 0 8px 20px rgba(0, 0, 0, 0.10);
 }
 

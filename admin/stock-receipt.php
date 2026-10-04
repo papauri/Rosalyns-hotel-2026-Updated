@@ -467,7 +467,7 @@ $canConsolidate = in_array($user['role'] ?? '', ['admin', 'manager'], true);
     <div class="content">
         <div class="page-header" style="display:flex;align-items:center;gap:14px;">
             <a href="stock-orders.php" class="btn-secondary"><i class="fas fa-arrow-left"></i> Back to orders</a>
-            <h2 class="page-title" style="flex:1;"><i class="fas fa-receipt" style="color:#8B7355;"></i> Receipt — <?php echo htmlspecialchars($order['reference']); ?></h2>
+            <h2 class="page-title" style="flex:1;"><i class="fas fa-receipt" style="color:#7E684B;"></i> Receipt — <?php echo htmlspecialchars($order['reference']); ?></h2>
             <a href="stock-receipt.php?id=<?php echo (int)$orderId; ?>&pdf=1" target="_blank" class="btn-secondary"><i class="fas fa-file-pdf"></i> PDF</a>
             <a href="stock-receipt.php?id=<?php echo (int)$orderId; ?>&print=1" target="_blank" class="btn-primary"><i class="fas fa-print"></i> Print</a>
         </div>
@@ -508,7 +508,7 @@ $canConsolidate = in_array($user['role'] ?? '', ['admin', 'manager'], true);
                             <div><strong>Readiness:</strong> <?php echo $whatsappEnabled ? 'Enabled' : 'Disabled'; ?></div>
                             <div><i class="fas <?php echo $whatsappNumber !== '' ? 'fa-check-circle' : 'fa-times-circle'; ?>"></i> Number: <?php echo $whatsappNumber !== '' ? 'Configured' : 'Missing'; ?></div>
                             <div><i class="fas <?php echo $whatsappApiToken !== '' ? 'fa-check-circle' : 'fa-times-circle'; ?>"></i> API token: <?php echo $whatsappApiToken !== '' ? 'Configured' : 'Missing'; ?></div>
-                            <a href="whatsapp-settings.php" style="display:inline-block;margin-top:6px;color:#8B7355;text-decoration:none;"><i class="fas fa-sliders"></i> Open WhatsApp settings</a>
+                            <a href="whatsapp-settings.php" style="display:inline-block;margin-top:6px;color:#7E684B;text-decoration:none;"><i class="fas fa-sliders"></i> Open WhatsApp settings</a>
                         </div>
                     <?php endif; ?>
                     <form method="POST">

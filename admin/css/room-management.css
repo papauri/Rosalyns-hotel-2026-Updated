@@ -151,7 +151,7 @@
 }
 
 .detail-item-price i {
-    color: var(--gold, #8B7355);
+    color: var(--gold, #7E684B);
 }
 
 .room-card-meta {
@@ -269,7 +269,7 @@
     width: 100%;
     padding: 9px 14px;
     border-radius: 8px;
-    background: var(--gold, #8B7355);
+    background: var(--gold, #7E684B);
     color: #fff;
     border: none;
     font-family: inherit;
@@ -334,7 +334,7 @@
 }
 
 .fb-share-all-btn {
-    background: rgba(255, 255, 255, 0.15);
+    background: rgba(0, 0, 0, 0.30);
     color: #fff;
     border: 2px solid rgba(255, 255, 255, 0.55);
     border-radius: 8px;
@@ -352,7 +352,7 @@
 }
 
 .fb-share-all-btn:hover {
-    background: rgba(255, 255, 255, 0.28);
+    background: rgba(0, 0, 0, 0.42);
     border-color: rgba(255, 255, 255, 0.9);
 }
 
@@ -496,7 +496,7 @@
 }
 
 .upload-area:hover {
-    border-color: var(--gold, #8B7355);
+    border-color: var(--gold, #7E684B);
     background: #f5f8ff;
 }
 
@@ -536,3 +536,8 @@
     }
 }
 
+
+/* Featured badge: darker text for AA contrast on the tinted background */
+.badge.badge-featured {
+    color: #7a5f1a;
+}

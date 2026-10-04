@@ -273,7 +273,7 @@ $roomStatuses = getRoomStatuses();
             <h2>
                 <i class="fas fa-clipboard-check" style="color: #17a2b8;"></i>
                 Inspection Queue
-                <span class="badge" style="background: #17a2b8;"><?php echo count($inspectionQueue); ?></span>
+                <span class="badge" style="background: #117a8b;"><?php echo count($inspectionQueue); ?></span>
             </h2>
         </div>
         <div class="queue-body">

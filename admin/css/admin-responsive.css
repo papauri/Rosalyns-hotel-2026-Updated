@@ -32,7 +32,7 @@
     max-width: 100%;
     -webkit-overflow-scrolling: touch;
     scrollbar-width: thin;
-    scrollbar-color: var(--color-primary, #8A775F) #f1f1f1;
+    scrollbar-color: var(--color-primary, #766550) #f1f1f1;
 }
 
 .card,
@@ -94,7 +94,7 @@ body>footer {
 /* Focus visible for admin (gold outline) */
 .admin-panel :focus-visible,
 #admin-wrapper :focus-visible {
-    outline: 2px solid #B18247;
+    outline: 2px solid #8F6A35;
     outline-offset: 2px;
     border-radius: 3px;
 }

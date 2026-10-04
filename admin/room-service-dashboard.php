@@ -519,7 +519,7 @@ $current_page = basename($_SERVER['PHP_SELF']);
     <div class="content">
         <div class="page-header">
             <div>
-                <h2 class="page-title"><i class="fas fa-bell-concierge" style="color:#0c8d6c;"></i> Room Service Dashboard</h2>
+                <h2 class="page-title"><i class="fas fa-bell-concierge" style="color:#0a7058;"></i> Room Service Dashboard</h2>
                 <p style="color:#6c757d; margin:4px 0 0;">In-room dining, charged to folio &amp; routed to the right kitchen station automatically.</p>
             </div>
             <a href="menu-management.php?tab=food&amp;jump=room-service"
@@ -534,7 +534,7 @@ $current_page = basename($_SERVER['PHP_SELF']);
 
         <!-- Station-ready notifications (populated by JS polling) -->
         <div id="rs-notif-strip" style="display:none; background:#f0fdf4; border:1px solid #86efac; border-radius:8px; padding:12px 16px; margin-bottom:16px; display:none; align-items:flex-start; gap:12px;">
-            <i class="fas fa-bell" style="color:#0c8d6c; font-size:18px; margin-top:2px; flex-shrink:0;"></i>
+            <i class="fas fa-bell" style="color:#0a7058; font-size:18px; margin-top:2px; flex-shrink:0;"></i>
             <div id="rs-notif-list" style="flex:1; font-size:13px;"></div>
             <button type="button" onclick="rsDismissNotifs()" style="background:none; border:none; cursor:pointer; color:#6c757d; padding:0; flex-shrink:0;" title="Dismiss"><i class="fas fa-times"></i></button>
         </div>
@@ -565,7 +565,7 @@ $current_page = basename($_SERVER['PHP_SELF']);
         <?php if ($canManage): ?>
             <div class="panel">
                 <h3>
-                    <i class="fas fa-plus-circle" style="color:#0c8d6c;"></i> Place a Room Service Order
+                    <i class="fas fa-plus-circle" style="color:#0a7058;"></i> Place a Room Service Order
                     <span class="menu-source-badge" title="Items below are flagged 'Show in Room Service' in Menu Management.">
                         <i class="fas fa-bed"></i> Room Service menu
                     </span>
@@ -606,7 +606,7 @@ $current_page = basename($_SERVER['PHP_SELF']);
                                     </button>
                                 <?php $isFirst = false;
                                 endforeach; ?>
-                                <button type="button" data-tab="room_service" onclick="rsSwitchTab('room_service')" style="color:#0c8d6c; border-left:1px solid #dee2e6; margin-left:auto;"><i class="fas fa-concierge-bell" style="margin-right:5px;"></i>Room Service (<?php echo $rs_count; ?>)</button>
+                                <button type="button" data-tab="room_service" onclick="rsSwitchTab('room_service')" style="color:#0a7058; border-left:1px solid #dee2e6; margin-left:auto;"><i class="fas fa-concierge-bell" style="margin-right:5px;"></i>Room Service (<?php echo $rs_count; ?>)</button>
                             </div>
                             <div class="menu-grid" id="rsMenuGrid"></div>
                         </div>
@@ -659,7 +659,7 @@ $current_page = basename($_SERVER['PHP_SELF']);
                                 $fireDelaySec = $o['fired_at'] ? max(0, strtotime($o['fired_at']) - strtotime($o['created_at'])) : 0;
                             ?>
                                 <tr>
-                                    <td><button type="button" onclick="rhOpenLifecycle(<?php echo (int)$o['id']; ?>)" style="color:#8B7355; font-weight:600;"><?php echo htmlspecialchars($o['reference']); ?></button></td>
+                                    <td><button type="button" onclick="rhOpenLifecycle(<?php echo (int)$o['id']; ?>)" style="color:#7E684B; font-weight:600;"><?php echo htmlspecialchars($o['reference']); ?></button></td>
                                     <td>
                                         <strong><?php echo htmlspecialchars($o['table_number'] ?: '—'); ?></strong>
                                         <?php if ($o['customer_name']): ?><br><small style="color:#6c757d;"><?php echo htmlspecialchars($o['customer_name']); ?></small><?php endif; ?>
@@ -686,7 +686,7 @@ $current_page = basename($_SERVER['PHP_SELF']);
                                                 <input type="hidden" name="csrf_token" value="<?php echo $csrf_token; ?>">
                                                 <input type="hidden" name="action" value="mark_delivered">
                                                 <input type="hidden" name="order_id" value="<?php echo (int)$o['id']; ?>">
-                                                <button type="submit" style="padding:5px 10px; background:#0c8d6c; color:white; border:none; border-radius:4px; font-size:11px; font-weight:600; cursor:pointer;"><i class="fas fa-check"></i> Delivered</button>
+                                                <button type="submit" style="padding:5px 10px; background:#0a7058; color:white; border:none; border-radius:4px; font-size:11px; font-weight:600; cursor:pointer;"><i class="fas fa-check"></i> Delivered</button>
                                             </form>
                                         <?php endif; ?>
                                     </td>
@@ -723,7 +723,7 @@ $current_page = basename($_SERVER['PHP_SELF']);
                             <?php foreach ($rsCharges as $c): ?>
                                 <tr>
                                     <td><small><?php echo date('g:i A', strtotime($c['created_at'])); ?></small></td>
-                                    <td><a href="booking-details.php?id=<?php echo (int)$c['booking_id']; ?>" target="_blank" style="color:#8B7355;"><?php echo htmlspecialchars($c['booking_reference']); ?></a></td>
+                                    <td><a href="booking-details.php?id=<?php echo (int)$c['booking_id']; ?>" target="_blank" style="color:#7E684B;"><?php echo htmlspecialchars($c['booking_reference']); ?></a></td>
                                     <td><?php echo $c['room_number'] ? 'Rm ' . htmlspecialchars($c['room_number']) : '—'; ?></td>
                                     <td><?php echo htmlspecialchars($c['guest_name']); ?></td>
                                     <td><?php echo htmlspecialchars($c['description']); ?></td>
@@ -731,7 +731,7 @@ $current_page = basename($_SERVER['PHP_SELF']);
                                     <td><?php echo $currency_symbol . ' ' . number_format((float)$c['total_amount'], 2); ?></td>
                                     <td>
                                         <?php if ($c['stock_tracked']): ?>
-                                            <span style="color:#0c8d6c;" title="Ingredients deducted from stock"><i class="fas fa-check-circle"></i></span>
+                                            <span style="color:#0a7058;" title="Ingredients deducted from stock"><i class="fas fa-check-circle"></i></span>
                                         <?php else: ?>
                                             <span style="color:#856404;" title="No recipe linked / stock not deducted"><i class="fas fa-exclamation-circle"></i></span>
                                         <?php endif; ?>
@@ -971,7 +971,7 @@ $current_page = basename($_SERVER['PHP_SELF']);
                     const stnLabel = n.station_label || (n.station || '').replace('_', ' ');
                     if (list) {
                         const el = document.createElement('div');
-                        el.style.cssText = 'padding:3px 0; color:#0c8d6c;';
+                        el.style.cssText = 'padding:3px 0; color:#0a7058;';
                         el.innerHTML = '<i class="fas fa-check-circle"></i> ' + n.message;
                         list.appendChild(el);
                     }

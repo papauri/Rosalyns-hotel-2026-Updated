@@ -420,12 +420,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['enquiry_action'])) {
                 if (!empty($adminCcAddr) && filter_var($adminCcAddr, FILTER_VALIDATE_EMAIL)) {
                     $confSiteName  = getSetting('site_name', 'Hotel');
                     $confAdminUrl  = rtrim((string)getSetting('site_url', ''), '/') . '/admin/conference-management.php?id=' . $enquiry_id;
-                    $confAdminBody = '<h2 style="color:#8B7355;">Conference Enquiry Confirmed</h2>'
+                    $confAdminBody = '<h2 style="color:#7E684B;">Conference Enquiry Confirmed</h2>'
                         . '<p>Confirmed by: <strong>' . htmlspecialchars($user['full_name'] ?? $user['username'] ?? 'Admin') . '</strong></p>'
                         . '<p><strong>Reference:</strong> ' . htmlspecialchars($enquiry['inquiry_reference'] ?? '') . '<br>'
                         . '<strong>Company/Client:</strong> ' . htmlspecialchars($enquiry['company_name'] ?? $enquiry['contact_person'] ?? '') . '<br>'
                         . '<strong>Email:</strong> ' . htmlspecialchars($enquiry['email'] ?? '') . '</p>'
-                        . '<p><a href="' . htmlspecialchars($confAdminUrl) . '" style="background:#8B7355;color:#fff;padding:10px 20px;text-decoration:none;border-radius:4px;">View Enquiry</a></p>';
+                        . '<p><a href="' . htmlspecialchars($confAdminUrl) . '" style="background:#7E684B;color:#fff;padding:10px 20px;text-decoration:none;border-radius:4px;">View Enquiry</a></p>';
                     sendEmail($adminCcAddr, $confSiteName, '[Admin] Conference Confirmed — ' . htmlspecialchars($enquiry['inquiry_reference'] ?? ''), $confAdminBody);
                 }
             } catch (Throwable $confCcEx) {
@@ -711,7 +711,7 @@ if ($facebook_settings_css_version === '' || $facebook_settings_css_version === 
         <div class="page-header-row">
             <h2 class="page-title"><i class="fas fa-users"></i> Conference Rooms Management</h2>
             <div style="display:flex; gap:10px; align-items:center;">
-                <button class="btn-action" type="button" style="background:var(--gold,#8B7355); color:var(--deep-navy,#111111); padding:12px 24px; font-size:14px; border-radius:8px;" onclick="openAddModal()">
+                <button class="btn-action" type="button" style="background:var(--gold,#7E684B); color:#fff; padding:12px 24px; font-size:14px; border-radius:8px;" onclick="openAddModal()">
                     <i class="fas fa-plus"></i> Add New Room
                 </button>
             </div>
@@ -1048,7 +1048,7 @@ if ($facebook_settings_css_version === '' || $facebook_settings_css_version === 
                     <div id="addModalFeedback" class="admin-modal-feedback"></div>
                     <div style="display:flex; justify-content:flex-end; gap:10px;">
                         <button type="button" onclick="closeAddModal()" style="padding:10px 24px; border:1px solid #ddd; border-radius:6px; background:white; cursor:pointer;">Close</button>
-                        <button type="submit" id="addFormSaveBtn" style="padding:10px 24px; border:none; border-radius:6px; background:var(--gold,#8B7355); color:var(--deep-navy,#111111); font-weight:600; cursor:pointer;">
+                        <button type="submit" id="addFormSaveBtn" style="padding:10px 24px; border:none; border-radius:6px; background:var(--gold,#7E684B); color:#fff; font-weight:600; cursor:pointer;">
                             <i class="fas fa-plus"></i> Add Room
                         </button>
                     </div>
@@ -1128,7 +1128,7 @@ if ($facebook_settings_css_version === '' || $facebook_settings_css_version === 
                     <div id="editModalFeedback" class="admin-modal-feedback"></div>
                     <div style="display:flex; justify-content:flex-end; gap:10px;">
                         <button type="button" onclick="closeEditModal()" style="padding:10px 24px; border:1px solid #ddd; border-radius:6px; background:white; cursor:pointer;">Close</button>
-                        <button type="submit" id="editFormSaveBtn" style="padding:10px 24px; border:none; border-radius:6px; background:var(--gold,#8B7355); color:var(--deep-navy,#111111); font-weight:600; cursor:pointer;">
+                        <button type="submit" id="editFormSaveBtn" style="padding:10px 24px; border:none; border-radius:6px; background:var(--gold,#7E684B); color:#fff; font-weight:600; cursor:pointer;">
                             <i class="fas fa-save"></i> Save Changes
                         </button>
                     </div>

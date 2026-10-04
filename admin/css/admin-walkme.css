@@ -17,7 +17,7 @@
     height: 1.15rem;
     border-radius: 50%;
     background: var(--finance-border, #EAE1D8);
-    color: var(--finance-muted, #5E554D);
+    color: #4f4740;
     font-size: 0.65rem;
     font-weight: 700;
     cursor: help;
@@ -32,7 +32,7 @@
 
 .wm-help:hover,
 .wm-help:focus-visible {
-    background: var(--finance-accent, #8A775F);
+    background: var(--finance-accent, #766550);
     color: #fff;
 }
 
@@ -130,7 +130,7 @@
 
 .wm-card__accent {
     height: 4px;
-    background: linear-gradient(90deg, #8A775F 0%, #B9A78F 100%);
+    background: linear-gradient(90deg, #766550 0%, #B9A78F 100%);
     flex-shrink: 0;
 }
 
@@ -144,7 +144,7 @@
     align-items: center;
     gap: 0.5rem;
     margin-bottom: 0.5rem;
-    color: #8A775F;
+    color: #766550;
     font-size: 0.7rem;
     font-weight: 700;
     letter-spacing: 0.08em;
@@ -176,7 +176,7 @@
     border-radius: 3px;
     padding: 0 4px;
     font-size: 0.8em;
-    color: #8A775F;
+    color: #766550;
 }
 
 .wm-card__footer {
@@ -205,7 +205,7 @@
 }
 
 .wm-card__dot.is-active {
-    background: #8A775F;
+    background: #766550;
     transform: scale(1.3);
 }
 
@@ -239,14 +239,14 @@
 .wm-btn:hover { filter: brightness(0.92); }
 
 .wm-btn--primary {
-    background: #8A775F;
+    background: #766550;
     color: #fff;
-    border-color: #8A775F;
+    border-color: #766550;
 }
 
 .wm-btn--ghost {
     background: transparent;
-    color: #8A775F;
+    color: #766550;
     border-color: #d4c8b8;
 }
 
@@ -265,7 +265,7 @@
     gap: 0.4rem;
     padding: 0.42rem 0.9rem;
     background: #fff;
-    color: #8A775F;
+    color: #766550;
     border: 1px solid #d4c8b8;
     border-radius: 20px;
     font-size: 0.78rem;
@@ -282,19 +282,19 @@
 }
 
 .wm-start-btn i {
-    color: #8A775F;
+    color: #766550;
 }
 
 /* ── Highlight pulse on target element ── */
 .wm-highlight {
-    outline: 2.5px solid #8A775F !important;
+    outline: 2.5px solid #766550 !important;
     outline-offset: 3px !important;
     border-radius: 6px;
     animation: wm-pulse 1.6s ease infinite;
 }
 
 @keyframes wm-pulse {
-    0%, 100% { outline-color: #8A775F; }
+    0%, 100% { outline-color: #766550; }
     50%       { outline-color: #B9A78F; }
 }
 

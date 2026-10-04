@@ -674,7 +674,7 @@ $fb_rooms_posting_on = getSetting('facebook_posting_enabled', '0') === '1'
                 <a class="btn-action" href="individual-rooms.php?combinations=1" style="background:#f5f0e8; color:#3e3930; padding:12px 24px; font-size:14px; border-radius:8px; text-decoration:none; border:1px solid #d3cbc0;" title="Pair adjoining physical rooms into one bookable joined-room unit">
                     <i class="fas fa-link"></i> Joined Rooms
                 </a>
-                <button class="btn-action" type="button" style="background:var(--gold,#8B7355); color:var(--deep-navy,#111111); padding:12px 24px; font-size:14px; border-radius:8px;" onclick="openAddModal()">
+                <button class="btn-action" type="button" style="background:var(--gold,#7E684B); color:#fff; padding:12px 24px; font-size:14px; border-radius:8px;" onclick="openAddModal()">
                     <i class="fas fa-plus"></i> Add New Room
                 </button>
             </div>
@@ -957,7 +957,7 @@ $fb_rooms_posting_on = getSetting('facebook_posting_enabled', '0') === '1'
                     <div class="form-actions">
                         <div id="editRoomFeedback" class="admin-modal-feedback" style="width:100%;margin-bottom:8px;"></div>
                         <button type="button" onclick="closeEditModal()" style="padding:10px 24px; border:1px solid #ddd; border-radius:6px; background:white; cursor:pointer;">Close</button>
-                        <button type="submit" id="editRoomSaveBtn" style="padding:10px 24px; border:none; border-radius:6px; background:var(--gold,#8B7355); color:var(--deep-navy,#111111); font-weight:600; cursor:pointer;">
+                        <button type="submit" id="editRoomSaveBtn" style="padding:10px 24px; border:none; border-radius:6px; background:var(--gold,#7E684B); color:var(--deep-navy,#111111); font-weight:600; cursor:pointer;">
                             <i class="fas fa-save"></i> Save Changes
                         </button>
                     </div>
@@ -1097,7 +1097,7 @@ $fb_rooms_posting_on = getSetting('facebook_posting_enabled', '0') === '1'
                     <div class="form-actions">
                         <div id="addRoomFeedback" class="admin-modal-feedback" style="width:100%;margin-bottom:8px;"></div>
                         <button type="button" onclick="closeAddModal()" style="padding:10px 24px; border:1px solid #ddd; border-radius:6px; background:white; cursor:pointer;">Close</button>
-                        <button type="submit" id="addRoomSaveBtn" style="padding:10px 24px; border:none; border-radius:6px; background:var(--gold,#8B7355); color:var(--deep-navy,#111111); font-weight:600; cursor:pointer;">
+                        <button type="submit" id="addRoomSaveBtn" style="padding:10px 24px; border:none; border-radius:6px; background:var(--gold,#7E684B); color:var(--deep-navy,#111111); font-weight:600; cursor:pointer;">
                             <i class="fas fa-plus"></i> Add Room
                         </button>
                     </div>
@@ -1213,7 +1213,7 @@ $fb_rooms_posting_on = getSetting('facebook_posting_enabled', '0') === '1'
                             <label style="display:flex; align-items:center; gap:6px; cursor:pointer; font-size:13px; white-space:nowrap;">
                                 <input type="checkbox" name="set_featured"> Featured
                             </label>
-                            <button type="submit" class="btn-action" style="background:var(--gold,#8B7355); color:var(--deep-navy); padding:8px 16px;">
+                            <button type="submit" class="btn-action" style="background:var(--gold,#7E684B); color:#fff; padding:8px 16px;">
                                 <i class="fas fa-upload"></i> Upload
                             </button>
                         </div>

@@ -370,7 +370,7 @@ if ($stockReady) {
                     <div style="font-size:0.82rem;opacity:0.82;line-height:1.4;">Post a promotional update featuring your food &amp; drink highlights to your Facebook Page.</div>
                 </div>
                 <button type="button"
-                    style="background:rgba(255,255,255,0.15);color:#fff;border:2px solid rgba(255,255,255,0.55);border-radius:8px;padding:10px 22px;font-family:inherit;font-size:0.9rem;font-weight:600;cursor:pointer;display:inline-flex;align-items:center;gap:8px;transition:background 0.18s,border-color 0.18s;white-space:nowrap;"
+                    style="background:#0d47a1;color:#fff;border:2px solid rgba(255,255,255,0.55);border-radius:8px;padding:10px 22px;font-family:inherit;font-size:0.9rem;font-weight:600;cursor:pointer;display:inline-flex;align-items:center;gap:8px;transition:background 0.18s,border-color 0.18s;white-space:nowrap;"
                     onclick="openFbMenuShareAllModal()">
                     <i class="fab fa-facebook-f"></i> Share Full Menu
                 </button>

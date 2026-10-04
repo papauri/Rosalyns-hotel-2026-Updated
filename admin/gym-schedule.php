@@ -143,7 +143,7 @@ $gs_nextDate = (clone $gs_dateObj)->modify('+1 day')->format('Y-m-d');
         .gss-row:first-child .gss-time, .gss-row:first-child .gss-cell { border-top: 0; }
         .gss-cellhead { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
         .gss-meter { flex: 1; min-width: 120px; height: 8px; background: #ece4d8; border-radius: 6px; overflow: hidden; }
-        .gss-meter i { display: block; height: 100%; background: linear-gradient(90deg, #8B7355, #C8A45A); }
+        .gss-meter i { display: block; height: 100%; background: linear-gradient(90deg, #7E684B, #C8A45A); }
         .gss-count { font-size: .82rem; color: #6d6455; white-space: nowrap; }
         .gss-full { color: #a03030; font-weight: 600; }
         .gss-people { display: flex; flex-wrap: wrap; gap: 6px; }
@@ -151,9 +151,9 @@ $gs_nextDate = (clone $gs_dateObj)->modify('+1 day')->format('Y-m-d');
         .gss-chip.attended { background: #e7f2ea; border-color: #bfe0c8; }
         .gss-chip.no_show { background: #f7e6e6; border-color: #e6c3c3; opacity: .8; }
         .gss-chip button { border: 0; background: none; cursor: pointer; color: #9a8f82; font-size: .8rem; padding: 0 2px; }
-        .gss-chip button:hover { color: #8B7355; }
+        .gss-chip button:hover { color: #7E684B; }
         .gss-empty { color: #b8ad9e; font-size: .82rem; font-style: italic; }
-        .gss-classes { font-size: .74rem; color: #8B7355; }
+        .gss-classes { font-size: .74rem; color: #7E684B; }
         .gss-daynav { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 16px; }
         .gss-daynav input[type=date] { padding: 8px 10px; border: 1px solid #d3cbc0; border-radius: 6px; }
         .gss-card { background: #fff; border: 1px solid #e8e0d4; border-radius: 10px; padding: 18px 20px; margin-bottom: 20px; }

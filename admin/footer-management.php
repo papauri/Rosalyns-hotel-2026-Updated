@@ -313,9 +313,9 @@ $active_tab = $_GET['tab'] ?? 'links';
     <link rel="stylesheet" href="css/admin-components.css?v=<?php echo @filemtime(__DIR__ . '/css/admin-components.css'); ?>">
     <style>
         .fm-tabs { display:flex; gap:0; border-bottom:2px solid var(--border-color,#e5e7eb); margin-bottom:24px; flex-wrap:wrap; }
-        .fm-tab  { padding:12px 24px; cursor:pointer; font-weight:500; font-size:14px; border-bottom:3px solid transparent; margin-bottom:-2px; color:var(--text-secondary,#6b7280); text-decoration:none; display:flex; align-items:center; gap:8px; transition:all .18s; }
-        .fm-tab:hover { color:var(--primary,#8A775F); }
-        .fm-tab--active { color:var(--primary,#8A775F); border-bottom-color:var(--primary,#8A775F); }
+        .fm-tab  { padding:12px 24px; cursor:pointer; font-weight:500; font-size:14px; border-bottom:3px solid transparent; margin-bottom:-2px; color:var(--text-secondary,#4b5563); text-decoration:none; display:flex; align-items:center; gap:8px; transition:all .18s; }
+        .fm-tab:hover { color:var(--primary,#766550); }
+        .fm-tab--active { color:var(--primary,#766550); border-bottom-color:var(--primary,#766550); }
         .fm-section { background:#fff; border-radius:8px; border:1px solid var(--border-color,#e5e7eb); padding:24px; margin-bottom:24px; }
         .fm-section h3 { font-size:16px; font-weight:600; margin:0 0 16px; display:flex; align-items:center; gap:8px; color:var(--text-primary,#111); }
         .fm-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(280px,1fr)); gap:16px; }
@@ -330,7 +330,7 @@ $active_tab = $_GET['tab'] ?? 'links';
         .fm-btn:hover { background:var(--bg-subtle,#f3f4f6); }
         .fm-btn--danger { color:#dc2626; border-color:#fca5a5; }
         .fm-btn--danger:hover { background:#fef2f2; }
-        .fm-btn--primary { background:var(--primary,#8A775F); color:#fff; border-color:var(--primary,#8A775F); }
+        .fm-btn--primary { background:var(--primary,#766550); color:#fff; border-color:var(--primary,#766550); }
         .fm-btn--primary:hover { opacity:.88; }
         .policy-card { border:1px solid var(--border-color,#e5e7eb); border-radius:8px; padding:16px; background:#fff; }
         .policy-card h4 { margin:0 0 6px; font-size:15px; font-weight:600; }
@@ -362,21 +362,21 @@ $active_tab = $_GET['tab'] ?? 'links';
         .fm-tags-panel__hint { font-size:12px; color:var(--text-secondary,#6b7280); margin:0 0 12px; }
         .fm-tags-list { display:flex; flex-wrap:wrap; gap:8px; }
         .fm-tag-chip { display:inline-flex; flex-direction:column; align-items:flex-start; gap:1px; padding:6px 10px; border:1px solid var(--border-color,#e5e7eb); border-radius:6px; background:#fff; cursor:pointer; text-align:left; transition:all .15s; }
-        .fm-tag-chip:hover { background:var(--primary,#8A775F); border-color:var(--primary,#8A775F); color:#fff; }
+        .fm-tag-chip:hover { background:var(--primary,#766550); border-color:var(--primary,#766550); color:#fff; }
         .fm-tag-chip:hover .fm-tag-chip__label,
         .fm-tag-chip:hover .fm-tag-chip__live { color:#fff; opacity:.85; }
-        .fm-tag-chip code { font-size:12px; font-family:monospace; color:var(--primary,#8A775F); font-weight:600; }
+        .fm-tag-chip code { font-size:12px; font-family:monospace; color:var(--primary,#766550); font-weight:600; }
         .fm-tag-chip:hover code { color:#fff; }
         .fm-tag-chip__label { font-size:10px; color:var(--text-secondary,#6b7280); }
-        .fm-tag-chip__live  { font-size:10px; color:var(--text-secondary,#9ca3af); font-style:italic; max-width:140px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+        .fm-tag-chip__live  { font-size:10px; color:var(--text-secondary,#5b6472); font-style:italic; max-width:140px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 
         /* Tag autocomplete dropdown */
         .fm-autocomplete { position:absolute; z-index:9999; background:#fff; border:1px solid var(--border-color,#e5e7eb); border-radius:8px; box-shadow:0 8px 28px rgba(0,0,0,.13); display:none; max-height:300px; overflow-y:auto; }
         .fm-autocomplete__item { display:grid; grid-template-columns:auto 1fr auto; align-items:center; gap:8px; padding:8px 12px; cursor:pointer; font-size:13px; border-bottom:1px solid #f3f4f6; }
         .fm-autocomplete__item:last-child { border-bottom:none; }
-        .fm-autocomplete__item code { font-family:monospace; font-size:12px; color:var(--primary,#8A775F); font-weight:600; white-space:nowrap; }
+        .fm-autocomplete__item code { font-family:monospace; font-size:12px; color:var(--primary,#766550); font-weight:600; white-space:nowrap; }
         .fm-autocomplete__item--active,
-        .fm-autocomplete__item:hover { background:var(--primary,#8A775F); color:#fff; }
+        .fm-autocomplete__item:hover { background:var(--primary,#766550); color:#fff; }
         .fm-autocomplete__item--active code,
         .fm-autocomplete__item:hover code { color:#fff; }
         .fm-autocomplete__label { font-size:12px; color:var(--text-secondary,#6b7280); }
@@ -387,7 +387,7 @@ $active_tab = $_GET['tab'] ?? 'links';
         .fm-autocomplete__item:hover .fm-autocomplete__live { color:rgba(255,255,255,.6); }
         /* Tag hint line */
         .fm-tag-hint { font-size:12px; color:var(--text-secondary,#6b7280); margin-top:5px; display:flex; align-items:center; gap:6px; flex-wrap:wrap; }
-        .fm-tag-hint code { color:var(--primary,#8A775F); background:var(--bg-subtle,#f3f4f6); padding:0 4px; border-radius:3px; font-size:11px; }
+        .fm-tag-hint code { color:var(--primary,#766550); background:var(--bg-subtle,#f3f4f6); padding:0 4px; border-radius:3px; font-size:11px; }
     </style>
 </head>
 <body>

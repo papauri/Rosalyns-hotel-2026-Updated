@@ -49,7 +49,7 @@
 
 .cal-filter-label i {
     font-size: 10px;
-    color: var(--color-primary, #8A775F);
+    color: var(--color-primary, #766550);
 }
 
 .cal-filter-input,
@@ -69,7 +69,7 @@
 .cal-filter-input:focus,
 .cal-filter-select:focus {
     outline: none;
-    border-color: var(--color-primary, #8A775F);
+    border-color: var(--color-primary, #766550);
     box-shadow: 0 0 0 3px rgba(138, 119, 95, 0.12);
     background: #fff;
 }
@@ -85,7 +85,7 @@
 
 .cal-filter-count {
     font-size: 12px;
-    color: var(--color-primary, #8A775F);
+    color: var(--color-primary, #766550);
     font-weight: 600;
     white-space: nowrap;
 }
@@ -202,8 +202,8 @@
 .calendar-nav a:hover,
 .calendar-nav button:hover {
     background: #f3f4f6;
-    border-color: var(--color-primary, #8A775F);
-    color: var(--color-primary, #8A775F);
+    border-color: var(--color-primary, #766550);
+    color: var(--color-primary, #766550);
 }
 
 .calendar-nav .month-title {
@@ -396,7 +396,7 @@
 
 .room-price {
     font-size: 12px;
-    color: var(--color-primary, #8A775F);
+    color: var(--color-primary, #766550);
     font-weight: 600;
 }
 
@@ -468,7 +468,7 @@
 /* Today highlight */
 .calendar-day.today {
     background: #fef9ef;
-    outline: 2px solid var(--color-primary, #8A775F);
+    outline: 2px solid var(--color-primary, #766550);
     outline-offset: -2px;
     border-radius: 4px;
 }
@@ -513,7 +513,7 @@
 }
 
 .calendar-day.today .day-number {
-    color: var(--color-primary, #8A775F);
+    color: var(--color-primary, #766550);
 }
 
 /* Status indicator dot */
@@ -699,7 +699,7 @@
     margin: 8px 0 10px;
     font-size: 13px;
     font-weight: 700;
-    color: var(--color-primary, #8A775F);
+    color: var(--color-primary, #766550);
     text-transform: uppercase;
     letter-spacing: 0.6px;
     padding-left: 2px;

@@ -583,7 +583,7 @@ sort($sources);
                                 ?>
                                 <tr>
                                     <td style="white-space:nowrap;"><?php echo htmlspecialchars((string)$ev['performed_at']); ?></td>
-                                    <td><a href="booking-details.php?id=<?php echo (int)$ev['booking_id']; ?>" style="text-decoration:none;color:#8B7355;font-weight:600;"><?php echo htmlspecialchars($ev['booking_reference'] ?? ('Booking #' . $ev['booking_id'])); ?></a></td>
+                                    <td><a href="booking-details.php?id=<?php echo (int)$ev['booking_id']; ?>" style="text-decoration:none;color:#7E684B;font-weight:600;"><?php echo htmlspecialchars($ev['booking_reference'] ?? ('Booking #' . $ev['booking_id'])); ?></a></td>
                                     <td><span class="log-pill <?php echo $actionClass; ?>"><?php echo htmlspecialchars((string)$ev['action']); ?></span></td>
                                     <td><?php echo htmlspecialchars((string)($ev['performed_by_name'] ?? $ev['performed_by_username'] ?? ('#' . $ev['performed_by']))); ?></td>
                                     <td><?php echo $diffParts ? implode('<br>', $diffParts) : '<span style="color:#aaa;">—</span>'; ?></td>
@@ -742,7 +742,7 @@ sort($sources);
                             <th>Amount</th>
                             <th>Status</th>
                             <th>Payment</th>
-                            <th>User <span id="pos-filter-clear" style="display:none;cursor:pointer;font-size:11px;color:#8B7355;font-weight:400;margin-left:4px;">(clear)</span></th>
+                            <th>User <span id="pos-filter-clear" style="display:none;cursor:pointer;font-size:11px;color:#7E684B;font-weight:400;margin-left:4px;">(clear)</span></th>
                             <th>Audit</th>
                         </tr>
                     </thead>
@@ -761,7 +761,7 @@ sort($sources);
                                 $auditRows = $posAuditByOrder[(int)$order['id']] ?? [];
                                 $flags = [];
                                 if (!empty($order['is_priority'])) $flags[] = '<span style="color:#e53e3e;font-size:11px;font-weight:600;">PRIORITY</span>';
-                                if (!empty($order['opened_as_tab'])) $flags[] = '<span style="color:#8B7355;font-size:11px;">TAB</span>';
+                                if (!empty($order['opened_as_tab'])) $flags[] = '<span style="color:#7E684B;font-size:11px;">TAB</span>';
                             ?>
                                 <tr>
                                     <td style="white-space:nowrap;"><?php echo htmlspecialchars((string)$order['created_at']); ?></td>

@@ -56,7 +56,7 @@
 .cn-number {
     font-family: var(--font-mono, monospace);
     letter-spacing: 0.03em;
-    color: var(--finance-accent, #8A775F);
+    color: var(--finance-accent, #766550);
 }
 
 .cn-guest {
@@ -213,7 +213,7 @@
 
 .section-title i {
     font-size: 0.85em;
-    color: var(--finance-accent, #8A775F);
+    color: var(--finance-accent, #766550);
 }
 
 /* ── BEM Button Variants ────────────────────────────────────── */
@@ -236,12 +236,12 @@
 }
 
 .credit-notes-page .btn:focus-visible {
-    outline: 2px solid var(--finance-accent, #8A775F);
+    outline: 2px solid var(--finance-accent, #766550);
     outline-offset: 2px;
 }
 
 .credit-notes-page .btn--primary {
-    background: var(--finance-accent, #8A775F);
+    background: var(--finance-accent, #766550);
     color: #fff;
     border: 1px solid transparent;
 }
@@ -260,7 +260,7 @@
 
 .credit-notes-page .btn--secondary:hover {
     background: var(--finance-bg, #F7F3EE);
-    border-color: var(--finance-accent, #8A775F);
+    border-color: var(--finance-accent, #766550);
 }
 
 .credit-notes-page .btn--ghost {
@@ -271,7 +271,7 @@
 
 .credit-notes-page .btn--ghost:hover {
     background: var(--finance-bg, #F7F3EE);
-    border-color: var(--finance-accent, #8A775F);
+    border-color: var(--finance-accent, #766550);
 }
 
 .credit-notes-page .btn--danger {
@@ -405,7 +405,7 @@
 .filter-input:focus,
 .filter-select:focus {
     outline: none;
-    border-color: var(--finance-accent, #8A775F);
+    border-color: var(--finance-accent, #766550);
     box-shadow: 0 0 0 3px rgba(138, 119, 95, .12);
 }
 
@@ -436,13 +436,13 @@
 
 .pagination-item:hover {
     background: var(--finance-bg, #F7F3EE);
-    border-color: var(--finance-accent, #8A775F);
-    color: var(--finance-accent, #8A775F);
+    border-color: var(--finance-accent, #766550);
+    color: var(--finance-accent, #766550);
 }
 
 .pagination-item--active {
-    background: var(--finance-accent, #8A775F);
-    border-color: var(--finance-accent, #8A775F);
+    background: var(--finance-accent, #766550);
+    border-color: var(--finance-accent, #766550);
     color: #fff;
     pointer-events: none;
 }
@@ -474,7 +474,7 @@
     width: 16px;
     height: 16px;
     cursor: pointer;
-    accent-color: var(--finance-accent, #8A775F);
+    accent-color: var(--finance-accent, #766550);
 }
 
 /* ── Optional booking link section in Issue CN modal ─────────── */
@@ -500,7 +500,7 @@
 .cn-issue-booking-link__toggle input[type="checkbox"] {
     width: 16px;
     height: 16px;
-    accent-color: var(--finance-accent, #8A775F);
+    accent-color: var(--finance-accent, #766550);
     cursor: pointer;
 }
 

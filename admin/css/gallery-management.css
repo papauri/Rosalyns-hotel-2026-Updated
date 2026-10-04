@@ -14,8 +14,8 @@
 }
 
 .btn-add-gallery {
-    background: linear-gradient(135deg, var(--gold, #8B7355) 0%, #6f5b43 100%);
-    color: var(--deep-navy, #111111);
+    background: linear-gradient(135deg, var(--gold, #7E684B) 0%, #6f5b43 100%);
+    color: #fff;
     border: none;
     padding: 12px 24px;
     border-radius: 8px;
@@ -54,14 +54,14 @@
 }
 
 .filter-btn:hover {
-    border-color: var(--gold, #8B7355);
+    border-color: var(--gold, #7E684B);
     color: var(--navy, #1A1A1A);
 }
 
 .filter-btn.active {
-    background: var(--gold, #8B7355);
-    border-color: var(--gold, #8B7355);
-    color: var(--deep-navy, #111111);
+    background: var(--gold, #7E684B);
+    border-color: var(--gold, #7E684B);
+    color: #fff;
 }
 
 /* Gallery Grid */
@@ -89,7 +89,7 @@
 
 .gallery-card:hover {
     transform: translateY(-1px);
-    border-color: color-mix(in srgb, var(--gold, #8B7355) 38%, var(--admin-surface-border, #e5e7eb) 62%);
+    border-color: color-mix(in srgb, var(--gold, #7E684B) 38%, var(--admin-surface-border, #e5e7eb) 62%);
     box-shadow: 0 10px 24px rgba(15, 23, 42, 0.08);
 }
 
@@ -184,15 +184,15 @@
 }
 
 #rh-admin-page .gallery-card-actions .btn-edit {
-    background: var(--gold, #8B7355);
+    background: var(--gold, #7E684B);
     color: #fff;
-    border: 1px solid var(--gold, #8B7355);
+    border: 1px solid var(--gold, #7E684B);
     flex: 1 1 auto;
 }
 
 #rh-admin-page .gallery-card-actions .btn-edit {
-    background: var(--gold, #8B7355) !important;
-    border-color: var(--gold, #8B7355) !important;
+    background: var(--gold, #7E684B) !important;
+    border-color: var(--gold, #7E684B) !important;
     color: #fff !important;
 }
 

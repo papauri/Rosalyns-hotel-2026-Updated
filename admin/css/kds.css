@@ -55,7 +55,7 @@
     /* --color-japandi-charcoal */
     --txt-2: #5e554d;
     /* --color-japandi-ink-soft */
-    --txt-3: #7a6f63;
+    --txt-3: #6b6054;
     /* --color-text-muted */
     --txt-inv: #fffdfb;
 
@@ -263,7 +263,7 @@ a {
     --line-strong: rgba(255, 255, 255, .26);
     --txt: var(--chrome-txt);
     --txt-2: var(--chrome-txt-2);
-    --txt-3: #8d8375;
+    --txt-3: #a39888;
     --txt-inv: #231f1c;
     --kds-station-color: #c2b49c;
     /* Last-resort guard: an unusually long hotel or station name must never
@@ -400,13 +400,13 @@ a {
 }
 
 .station-open-pill.open {
-    color: var(--ready);
+    color: #5fbf80;
     background: color-mix(in srgb, var(--ready) 12%, transparent);
     border-color: color-mix(in srgb, var(--ready) 32%, transparent);
 }
 
 .station-open-pill.closed {
-    color: var(--late);
+    color: #c48d7c;
     background: color-mix(in srgb, var(--late) 12%, transparent);
     border-color: color-mix(in srgb, var(--late) 32%, transparent);
 }
@@ -528,7 +528,7 @@ a {
 }
 
 .right button.toggle.on {
-    color: var(--ready);
+    color: #5fbf80;
     border-color: color-mix(in srgb, var(--ready) 36%, transparent);
     background: color-mix(in srgb, var(--ready) 10%, transparent);
 }
@@ -536,7 +536,7 @@ a {
 /* Sound is on but the browser has not granted audio yet — the control has to
    read as "needs a tap", not as a working toggle. */
 .right button.toggle.on.needs-unlock {
-    color: var(--new);
+    color: #b8965f;
     border-color: color-mix(in srgb, var(--new) 40%, transparent);
     background: color-mix(in srgb, var(--new) 12%, transparent);
     animation: pulse-soft 2s var(--ease) infinite;
@@ -742,7 +742,7 @@ body.kds-sidebar-collapsed .kds-drawer__collapse i {
 .drawer-filter-btn.active {
     background: var(--kds-station-color);
     border-color: var(--kds-station-color);
-    color: var(--txt-inv);
+    color: var(--kds-station-ink, #231f1c);
     font-weight: 750;
 }
 
@@ -1962,13 +1962,13 @@ body.kds-sidebar-resizing .station-bottom {
 .station-control__pause.live {
     background: color-mix(in srgb, var(--new) 15%, transparent);
     border-color: color-mix(in srgb, var(--new) 42%, transparent);
-    color: var(--new);
+    color: #6e5532;
 }
 
 .station-control__pause:not(.live) {
     background: color-mix(in srgb, var(--ready) 15%, transparent);
     border-color: color-mix(in srgb, var(--ready) 42%, transparent);
-    color: var(--ready);
+    color: #286a40;
 }
 
 .station-control__save:hover {
@@ -2195,7 +2195,7 @@ body.kds-sidebar-resizing .station-bottom {
     min-height: 44px;
     border: 0;
     border-radius: var(--r-sm);
-    background: var(--late);
+    background: #7d5445;
     color: #fdfaf6;
     font-weight: 750;
 }

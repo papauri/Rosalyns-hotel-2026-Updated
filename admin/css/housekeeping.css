@@ -48,17 +48,17 @@
 
 .priority-badge.high {
     background: linear-gradient(135deg, #fee2e2 0%, #fecaca 100%);
-    color: #dc2626;
+    color: #991b1b;
 }
 
 .priority-badge.medium {
     background: linear-gradient(135deg, #fef3c7 0%, #fde68a 100%);
-    color: #d97706;
+    color: #92400e;
 }
 
 .priority-badge.low {
     background: linear-gradient(135deg, #e0e7ff 0%, #c7d2fe 100%);
-    color: #4f46e5;
+    color: #3730a3;
 }
 
 /* Assignment Type Badges */
@@ -75,22 +75,22 @@
 
 .type-badge.checkout_cleanup {
     background: linear-gradient(135deg, #fee2e2 0%, #fecaca 100%);
-    color: #dc2626;
+    color: #991b1b;
 }
 
 .type-badge.deep_clean {
     background: linear-gradient(135deg, #ede9fe 0%, #ddd6fe 100%);
-    color: #7c3aed;
+    color: #5b21b6;
 }
 
 .type-badge.turn_down {
     background: linear-gradient(135deg, #dbeafe 0%, #bfdbfe 100%);
-    color: #2563eb;
+    color: #1e40af;
 }
 
 .type-badge.maintenance {
     background: linear-gradient(135deg, #fef3c7 0%, #fde68a 100%);
-    color: #d97706;
+    color: #92400e;
 }
 
 /* Modal Styles */
@@ -142,7 +142,7 @@
 }
 
 .hk-alert--success {
-    border-inline-start: 0.25rem solid var(--color-primary, #8A775F);
+    border-inline-start: 0.25rem solid var(--color-primary, #766550);
 }
 
 .hk-alert--error {
@@ -177,7 +177,7 @@
 .hk-stat-card:focus-visible {
     transform: translateY(-2px);
     box-shadow: 0 4px 12px rgba(0, 0, 0, 0.12);
-    border-color: var(--color-primary, #8A775F);
+    border-color: var(--color-primary, #766550);
 }
 
 .hk-stat-card--interactive {
@@ -185,7 +185,7 @@
 }
 
 .hk-stat-card:focus-visible {
-    outline: 2px solid var(--color-primary, #8A775F);
+    outline: 2px solid var(--color-primary, #766550);
     outline-offset: 2px;
 }
 
@@ -313,7 +313,7 @@
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    background: var(--color-primary, #8A775F);
+    background: var(--color-primary, #766550);
     color: #fff;
     font-weight: 700;
 }
@@ -464,7 +464,7 @@
     padding: 3px 9px;
     border-radius: 99px;
     background: #e5e7eb;
-    color: #6b7280;
+    color: #4b5563;
     font-weight: 600;
     display: inline-flex;
     align-items: center;

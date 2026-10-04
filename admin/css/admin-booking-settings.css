@@ -47,7 +47,7 @@
 }
 
 .current-value .value {
-    color: var(--color-primary, #8A775F);
+    color: var(--color-primary, #766550);
     font-weight: 700;
 }
 
@@ -77,7 +77,7 @@
 
 .form-control:focus {
     outline: none;
-    border-color: var(--color-primary, #8A775F);
+    border-color: var(--color-primary, #766550);
     box-shadow: 0 0 0 3px rgba(138, 119, 95, 0.12);
 }
 
@@ -106,7 +106,7 @@
     border: none;
     border-radius: 8px;
     padding: 9px 15px;
-    background: linear-gradient(135deg, var(--color-primary, #8A775F) 0%, #a78d66 100%);
+    background: linear-gradient(135deg, var(--color-primary, #766550) 0%, #6b5a47 100%);
     color: #fff;
     font-weight: 700;
     font-size: 13px;
@@ -125,7 +125,7 @@
 /* ---- Info / tip boxes ---- */
 .info-box {
     background: #f8fafc;
-    border-left: 3px solid var(--color-primary, #8A775F);
+    border-left: 3px solid var(--color-primary, #766550);
     border-radius: 8px;
     padding: 10px 12px;
 }
@@ -259,7 +259,7 @@ details.template-block>summary::-webkit-details-marker {
 details.template-block>summary::after {
     content: '▸';
     margin-left: auto;
-    color: var(--color-primary, #8A775F);
+    color: var(--color-primary, #766550);
     transition: transform 0.2s;
 }
 

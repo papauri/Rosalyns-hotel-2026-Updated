@@ -243,7 +243,7 @@ if (isset($_POST['test_whatsapp']) && !empty($_POST['test_number'])) {
             <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf_token, ENT_QUOTES, 'UTF-8'); ?>">
             <!-- API Configuration -->
             <div class="settings-card whatsapp-card">
-                <h2><i class="fas fa-cog" style="color: #8B7355;"></i> API Configuration</h2>
+                <h2><i class="fas fa-cog" style="color: #7E684B;"></i> API Configuration</h2>
                 
                 <div class="form-group">
                     <label style="display: flex; align-items: center; gap: 10px; cursor: pointer;">
@@ -335,7 +335,7 @@ if (isset($_POST['test_whatsapp']) && !empty($_POST['test_number'])) {
 
             <!-- Notification Triggers -->
             <div class="settings-card">
-                <h2><i class="fas fa-bell" style="color: #8B7355;"></i> Notification Triggers</h2>
+                <h2><i class="fas fa-bell" style="color: #7E684B;"></i> Notification Triggers</h2>
                 <p class="help-text" style="margin-bottom: 20px;">
                     <i class="fas fa-info-circle"></i>
                     Select which events should trigger WhatsApp notifications.
@@ -381,7 +381,7 @@ if (isset($_POST['test_whatsapp']) && !empty($_POST['test_number'])) {
 
             <!-- Recipients -->
             <div class="settings-card">
-                <h2><i class="fas fa-users" style="color: #8B7355;"></i> Notification Recipients</h2>
+                <h2><i class="fas fa-users" style="color: #7E684B;"></i> Notification Recipients</h2>
 
                 <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 15px; margin-bottom: 20px;">
                     <div class="form-group">
@@ -417,7 +417,7 @@ if (isset($_POST['test_whatsapp']) && !empty($_POST['test_number'])) {
 
             <!-- Message Templates -->
             <div class="settings-card">
-                <h2><i class="fas fa-file-alt" style="color: #8B7355;"></i> Message Template Names</h2>
+                <h2><i class="fas fa-file-alt" style="color: #7E684B;"></i> Message Template Names</h2>
 
                 <div class="info-box" style="background: #fff3cd; border-left-color: #ffc107;">
                     <h4><i class="fas fa-exclamation-triangle"></i> Important</h4>
@@ -454,7 +454,7 @@ if (isset($_POST['test_whatsapp']) && !empty($_POST['test_number'])) {
 
             <!-- Test WhatsApp -->
             <div class="settings-card">
-                <h2><i class="fas fa-vial" style="color: #8B7355;"></i> Test WhatsApp Integration</h2>
+                <h2><i class="fas fa-vial" style="color: #7E684B;"></i> Test WhatsApp Integration</h2>
 
                 <div class="form-group">
                     <label for="test_number"><strong>Test Phone Number</strong></label>
@@ -470,7 +470,7 @@ if (isset($_POST['test_whatsapp']) && !empty($_POST['test_number'])) {
                     </p>
                 </div>
 
-                <button type="submit" name="test_whatsapp" class="btn-submit" style="background: #25D366;" onclick="return confirm('This sends a live WhatsApp message through the configured provider and may incur Meta/WhatsApp charges. Continue?');">
+                <button type="submit" name="test_whatsapp" class="btn-submit" style="background: #15803d;" onclick="return confirm('This sends a live WhatsApp message through the configured provider and may incur Meta/WhatsApp charges. Continue?');">
                     <i class="fab fa-whatsapp"></i> Send Test Message
                 </button>
             </div>

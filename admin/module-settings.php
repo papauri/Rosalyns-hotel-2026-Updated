@@ -46,7 +46,7 @@ $modules_meta = [
     ],
     'housekeeping' => [
         'icon'   => 'fas fa-broom',
-        'color'  => '#8B7355',
+        'color'  => '#7E684B',
         'bg'     => '#f5f2eb',
         'label'  => 'Housekeeping',
         'desc'   => 'Room cleaning schedules, task assignment, and housekeeping reconciliation.',
@@ -55,7 +55,7 @@ $modules_meta = [
     ],
     'pos' => [
         'icon'   => 'fas fa-cash-register',
-        'color'  => '#8B7355',
+        'color'  => '#7E684B',
         'bg'     => '#fdf8f0',
         'label'  => 'POS & Stations',
         'desc'   => 'Point-of-sale till, deals, offline log and station displays. Configure individual stations below.',
@@ -91,7 +91,7 @@ $modules_meta = [
     ],
     'finance' => [
         'icon'   => 'fas fa-calculator',
-        'color'  => '#B18247',
+        'color'  => '#8F6A35',
         'bg'     => '#fdf3e3',
         'label'  => 'Finance & Accounting',
         'desc'   => 'Payments, invoices, receipts, credit notes, quotations, accounting dashboard, reports and end-of-day.',
@@ -124,7 +124,7 @@ $front_end_state = [
 $front_end_meta = [
     'events_page' => [
         'icon'  => 'fas fa-calendar-day',
-        'color' => '#B18247',
+        'color' => '#8F6A35',
         'label' => 'Events Page',
         'desc'  => 'Guest events page, event bookings and the admin events inbox.',
     ],
@@ -187,7 +187,7 @@ foreach ($presets as $preset_key => $preset) {
             font-weight: 700;
             letter-spacing: .07em;
             text-transform: uppercase;
-            color: #8B7355;
+            color: #7E684B;
             margin: 0 0 6px;
         }
         .ms-presets-sub {
@@ -215,7 +215,7 @@ foreach ($presets as $preset_key => $preset) {
             transition: border-color .18s, background .18s, color .18s;
             user-select: none;
         }
-        .ms-preset-btn:hover { border-color: #8B7355; background: #f5f0e8; color: #3e3930; }
+        .ms-preset-btn:hover { border-color: #7E684B; background: #f5f0e8; color: #3e3930; }
         .ms-preset-btn.is-active-preset {
             border-color: #2e7d32;
             background: #e8f5e9;
@@ -229,7 +229,7 @@ foreach ($presets as $preset_key => $preset) {
             padding: 1px 6px; margin-left: 6px;
         }
         .ms-preset-btn:active { background: #ede5d6; }
-        .ms-preset-btn i { color: #8B7355; font-size: .9rem; }
+        .ms-preset-btn i { color: #7E684B; font-size: .9rem; }
         .ms-preset-btn .ms-preset-desc {
             font-size: .74rem;
             color: #9a8f82;
@@ -251,7 +251,7 @@ foreach ($presets as $preset_key => $preset) {
             align-items: flex-start;
             gap: 14px;
         }
-        .ms-intro i { color: #8B7355; font-size: 1.2rem; margin-top: 2px; flex-shrink: 0; }
+        .ms-intro i { color: #7E684B; font-size: 1.2rem; margin-top: 2px; flex-shrink: 0; }
         .ms-intro p { margin: 0; color: #5a5147; font-size: .88rem; line-height: 1.6; }
         .ms-intro strong { color: #3e3930; }
 
@@ -309,7 +309,7 @@ foreach ($presets as $preset_key => $preset) {
         }
         .ms-core-badge {
             display: inline-flex; align-items: center; gap: 4px;
-            background: #fdf3e3; color: #B18247;
+            background: #fdf3e3; color: #7a5a2a;
             border: 1px solid #e8c98a; border-radius: 3px;
             font-size: .68rem; font-weight: 700; letter-spacing: .05em;
             padding: 1px 6px; text-transform: uppercase;
@@ -323,7 +323,7 @@ foreach ($presets as $preset_key => $preset) {
         .ms-status-label { font-size: .79rem; font-weight: 500; color: #8a7f73; }
         .ms-status-label.enabled  { color: #2e7d32; }
         .ms-status-label.disabled { color: #9e4040; }
-        .ms-status-label.locked   { color: #B18247; }
+        .ms-status-label.locked   { color: #8F6A35; }
 
         /* Toggle switch */
         .ms-toggle { position: relative; display: inline-block; width: 48px; height: 25px; }
@@ -378,7 +378,7 @@ foreach ($presets as $preset_key => $preset) {
         .ms-preset-btn.applying { opacity: .6; pointer-events: none; }
         .ms-section-title {
             font-size: .82rem; font-weight: 700; letter-spacing: .07em;
-            text-transform: uppercase; color: #8B7355; margin: 0 0 14px;
+            text-transform: uppercase; color: #7E684B; margin: 0 0 14px;
         }
 
         /* ── Station sub-panel ───────────────────────────── */
@@ -390,7 +390,7 @@ foreach ($presets as $preset_key => $preset) {
         .ms-stations-toggle {
             display: flex; align-items: center; gap: 7px;
             background: none; border: none; padding: 4px 0; cursor: pointer;
-            font-size: .8rem; font-weight: 600; color: #8B7355;
+            font-size: .8rem; font-weight: 600; color: #7E684B;
             width: 100%;
         }
         .ms-stations-toggle:hover { color: #6e5a3e; }
@@ -427,7 +427,7 @@ foreach ($presets as $preset_key => $preset) {
     <div class="content">
         <div class="page-header">
             <h1 class="page-title">
-                <i class="fas fa-puzzle-piece" style="color:#8B7355;margin-right:10px;"></i>
+                <i class="fas fa-puzzle-piece" style="color:#7E684B;margin-right:10px;"></i>
                 Module Settings
             </h1>
         </div>
@@ -523,7 +523,7 @@ foreach ($presets as $preset_key => $preset) {
                 <!-- Station sub-modules — only relevant when POS is on -->
                 <div class="ms-stations-panel" id="ms-stations-panel" style="<?php echo $enabled ? '' : 'opacity:.45;pointer-events:none;'; ?>">
                     <button type="button" class="ms-stations-toggle" id="msStationsToggle" aria-expanded="false">
-                        <i class="fas fa-display" style="color:#8B7355;"></i>
+                        <i class="fas fa-display" style="color:#7E684B;"></i>
                         <span>Configure Stations</span>
                         <i class="fas fa-chevron-down ms-stations-chevron"></i>
                     </button>
@@ -616,12 +616,12 @@ foreach ($presets as $preset_key => $preset) {
     <!-- Preset impact dialog — shows which users lose access before a preset is applied -->
     <div class="ms-confirm-overlay" id="msPresetImpactOverlay">
         <div class="ms-confirm-box" style="max-width:520px;">
-            <h3><i class="fas fa-users" style="color:#B18247;margin-right:8px;"></i> Apply "<span id="msPresetImpactName"></span>" preset?</h3>
+            <h3><i class="fas fa-users" style="color:#8F6A35;margin-right:8px;"></i> Apply "<span id="msPresetImpactName"></span>" preset?</h3>
             <p id="msPresetImpactSummary" style="margin-bottom:12px;"></p>
             <div id="msPresetImpactUsers" style="max-height:280px;overflow-y:auto;margin-bottom:16px;"></div>
             <div class="ms-confirm-actions">
                 <button class="btn-cancel" id="msPresetImpactCancel">Cancel</button>
-                <button class="btn-disable" id="msPresetImpactProceed" style="background:#8B7355;">Apply Preset</button>
+                <button class="btn-disable" id="msPresetImpactProceed" style="background:#7E684B;">Apply Preset</button>
             </div>
         </div>
     </div>
@@ -652,7 +652,7 @@ foreach ($presets as $preset_key => $preset) {
             }
             var el = document.createElement('div');
             el.style.cssText = 'position:fixed;bottom:24px;right:24px;z-index:9999;background:' +
-                (type === 'error' ? '#c0392b' : type === 'info' ? '#8B7355' : '#2e7d32') +
+                (type === 'error' ? '#c0392b' : type === 'info' ? '#7E684B' : '#2e7d32') +
                 ';color:#fff;padding:12px 20px;border-radius:6px;font-size:.87rem;box-shadow:0 4px 16px rgba(0,0,0,.18);max-width:320px;';
             el.textContent = msg;
             document.body.appendChild(el);

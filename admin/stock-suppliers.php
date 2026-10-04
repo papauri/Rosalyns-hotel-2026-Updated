@@ -163,10 +163,10 @@ $csrf_token = generateCsrfToken();
         .sup-modal textarea { min-height:64px; resize:vertical; }
         .sup-modal footer { padding:16px 22px; border-top:1px solid #ece5da; display:flex; justify-content:flex-end; gap:10px; }
         .btn-sup { padding:9px 18px; border:none; border-radius:2px; cursor:pointer; font-family:inherit; font-size:.88rem; letter-spacing:.03em; }
-        .btn-sup-primary { background:#8B7355; color:#fff; }
+        .btn-sup-primary { background:#7E684B; color:#fff; }
         .btn-sup-ghost { background:transparent; color:#6a6255; border:1px solid #d3cbc0; }
         .sup-actions { display:flex; gap:8px; }
-        .sup-link { color:#8B7355; cursor:pointer; text-decoration:none; font-size:.84rem; }
+        .sup-link { color:#7E684B; cursor:pointer; text-decoration:none; font-size:.84rem; }
         @media (max-width:640px){ .sup-modal .body { grid-template-columns:1fr; } .sup-modal .body .full { grid-column:1; } .sup-table thead { display:none; } }
     </style>
 </head>
@@ -176,7 +176,7 @@ $csrf_token = generateCsrfToken();
 
     <div class="content">
         <div class="page-header" style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:12px;">
-            <h2 class="page-title"><i class="fas fa-truck-field" style="color:#8B7355;"></i> Suppliers</h2>
+            <h2 class="page-title"><i class="fas fa-truck-field" style="color:#7E684B;"></i> Suppliers</h2>
             <button class="btn-sup btn-sup-primary" onclick="openSupplier()"><i class="fas fa-plus"></i> Add Supplier</button>
         </div>
 

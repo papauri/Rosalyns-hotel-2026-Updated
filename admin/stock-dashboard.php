@@ -182,7 +182,7 @@ $csrf_token = generateCsrfToken();
 
     <div class="content">
         <div class="page-header">
-            <h2 class="page-title"><i class="fas fa-boxes" style="color:var(--color-primary,#8A775F);"></i> Stock Dashboard</h2>
+            <h2 class="page-title"><i class="fas fa-boxes" style="color:var(--color-primary,#766550);"></i> Stock Dashboard</h2>
             <a href="stock-orders.php" class="btn-add"><i class="fas fa-plus"></i> New Order</a>
         </div>
 
@@ -505,11 +505,11 @@ $csrf_token = generateCsrfToken();
                 <table style="width:100%;border-collapse:collapse;font-size:13px;">
                     <thead>
                         <tr style="border-bottom:2px solid #e5ddd0;text-align:left;">
-                            <th style="padding:6px 8px;color:#8A775F;font-weight:600;font-size:11px;text-transform:uppercase;">Item</th>
-                            <th style="padding:6px 8px;color:#8A775F;font-weight:600;font-size:11px;text-transform:uppercase;text-align:center;">Type</th>
-                            <th style="padding:6px 8px;color:#8A775F;font-weight:600;font-size:11px;text-transform:uppercase;text-align:right;">Qty Sold</th>
-                            <th style="padding:6px 8px;color:#8A775F;font-weight:600;font-size:11px;text-transform:uppercase;text-align:right;">Revenue</th>
-                            <th style="padding:6px 8px;color:#8A775F;font-weight:600;font-size:11px;text-transform:uppercase;text-align:right;">Orders</th>
+                            <th style="padding:6px 8px;color:#766550;font-weight:600;font-size:11px;text-transform:uppercase;">Item</th>
+                            <th style="padding:6px 8px;color:#766550;font-weight:600;font-size:11px;text-transform:uppercase;text-align:center;">Type</th>
+                            <th style="padding:6px 8px;color:#766550;font-weight:600;font-size:11px;text-transform:uppercase;text-align:right;">Qty Sold</th>
+                            <th style="padding:6px 8px;color:#766550;font-weight:600;font-size:11px;text-transform:uppercase;text-align:right;">Revenue</th>
+                            <th style="padding:6px 8px;color:#766550;font-weight:600;font-size:11px;text-transform:uppercase;text-align:right;">Orders</th>
                         </tr>
                     </thead>
                     <tbody>
@@ -545,10 +545,10 @@ $csrf_token = generateCsrfToken();
                 <table style="width:100%;border-collapse:collapse;font-size:13px;">
                     <thead>
                         <tr style="border-bottom:2px solid #e5ddd0;text-align:left;">
-                            <th style="padding:6px 8px;color:#8A775F;font-weight:600;font-size:11px;text-transform:uppercase;">Ingredient</th>
-                            <th style="padding:6px 8px;color:#8A775F;font-weight:600;font-size:11px;text-transform:uppercase;text-align:right;">Qty Lost</th>
-                            <th style="padding:6px 8px;color:#8A775F;font-weight:600;font-size:11px;text-transform:uppercase;text-align:right;">Cost Lost</th>
-                            <th style="padding:6px 8px;color:#8A775F;font-weight:600;font-size:11px;text-transform:uppercase;text-align:right;">Entries</th>
+                            <th style="padding:6px 8px;color:#766550;font-weight:600;font-size:11px;text-transform:uppercase;">Ingredient</th>
+                            <th style="padding:6px 8px;color:#766550;font-weight:600;font-size:11px;text-transform:uppercase;text-align:right;">Qty Lost</th>
+                            <th style="padding:6px 8px;color:#766550;font-weight:600;font-size:11px;text-transform:uppercase;text-align:right;">Cost Lost</th>
+                            <th style="padding:6px 8px;color:#766550;font-weight:600;font-size:11px;text-transform:uppercase;text-align:right;">Entries</th>
                         </tr>
                     </thead>
                     <tbody>

@@ -365,12 +365,12 @@ $receiptPlaceholderTokens = array_keys($templatePreviewMap);
         if ($scopeActive && $hiddenScopedCount > 0): ?>
             <div style="background:#faf8f4; border:1px solid #e5d9c9; border-radius:10px; padding:10px 14px; margin:0 0 14px; display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap; font-size:13px; color:#7a6f63;">
                 <span><i class="fas fa-filter" style="margin-right:6px;"></i>Showing receipts for your active modules only (<?php echo number_format($hiddenScopedCount); ?> older record<?php echo $hiddenScopedCount === 1 ? '' : 's'; ?> from disabled modules hidden).</span>
-                <a href="?<?php echo htmlspecialchars(http_build_query(array_merge($scopeQs, ['scope' => 'all']))); ?>" style="color:#8B7355; font-weight:600; text-decoration:none;">Show all history &rarr;</a>
+                <a href="?<?php echo htmlspecialchars(http_build_query(array_merge($scopeQs, ['scope' => 'all']))); ?>" style="color:#7E684B; font-weight:600; text-decoration:none;">Show all history &rarr;</a>
             </div>
         <?php elseif ($scopeAll && $filters['type'] === 'all'): ?>
             <div style="background:#faf8f4; border:1px solid #e5d9c9; border-radius:10px; padding:10px 14px; margin:0 0 14px; display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap; font-size:13px; color:#7a6f63;">
                 <span><i class="fas fa-clock-rotate-left" style="margin-right:6px;"></i>Showing full receipt history, including records from disabled modules.</span>
-                <a href="?<?php echo htmlspecialchars(http_build_query($scopeQs)); ?>" style="color:#8B7355; font-weight:600; text-decoration:none;">Show relevant only &rarr;</a>
+                <a href="?<?php echo htmlspecialchars(http_build_query($scopeQs)); ?>" style="color:#7E684B; font-weight:600; text-decoration:none;">Show relevant only &rarr;</a>
             </div>
         <?php endif; ?>
 
@@ -433,7 +433,7 @@ $receiptPlaceholderTokens = array_keys($templatePreviewMap);
                                     <form method="post" class="receipts-generate-form" style="display:inline;">
                                         <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf_token, ENT_QUOTES, 'UTF-8'); ?>">
                                         <input type="hidden" name="payment_id" value="<?php echo (int)$payment['id']; ?>">
-                                        <button type="submit" name="action" value="generate_receipt" class="quick-action" title="Generate / Regenerate PDF" style="color:var(--color-primary,#8A775F);">
+                                        <button type="submit" name="action" value="generate_receipt" class="quick-action" title="Generate / Regenerate PDF" style="color:var(--color-primary,#766550);">
                                             <i class="fas fa-file-pdf"></i>
                                         </button>
                                     </form>

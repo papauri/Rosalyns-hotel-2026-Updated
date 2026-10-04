@@ -37,7 +37,7 @@
 
 .gym-card:hover {
     transform: translateY(-1px);
-    border-color: color-mix(in srgb, var(--gold, #8B7355) 38%, var(--admin-surface-border, #e5e7eb) 62%);
+    border-color: color-mix(in srgb, var(--gold, #7E684B) 38%, var(--admin-surface-border, #e5e7eb) 62%);
     box-shadow: 0 10px 24px rgba(15, 23, 42, 0.08);
 }
 
@@ -56,7 +56,7 @@
 
 .gym-card-icon-area>i {
     font-size: 34px;
-    color: var(--gold, #8B7355);
+    color: var(--gold, #7E684B);
     opacity: 0.85;
 }
 
@@ -64,7 +64,7 @@
     position: absolute;
     top: 10px;
     left: 10px;
-    background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%);
+    background: linear-gradient(135deg, #b45309 0%, #92400e 100%);
     color: #fff;
     font-size: 11px;
     font-weight: 700;
@@ -131,7 +131,7 @@
 
 .gym-card-duration {
     font-size: 12px;
-    color: var(--gold, #8B7355);
+    color: var(--gold, #7E684B);
     font-weight: 600;
     display: flex;
     align-items: center;
@@ -284,7 +284,7 @@
     width: 100%;
     padding: 8px 12px;
     border-radius: 8px;
-    background: var(--gold, #8B7355);
+    background: var(--gold, #7E684B);
     color: #fff;
     border: none;
     font-family: inherit;
@@ -349,7 +349,7 @@
 }
 
 .fb-gym-all-btn {
-    background: rgba(255, 255, 255, 0.15);
+    background: rgba(0, 0, 0, 0.30);
     color: #fff;
     border: 2px solid rgba(255, 255, 255, 0.55);
     border-radius: 8px;
@@ -367,7 +367,7 @@
 }
 
 .fb-gym-all-btn:hover {
-    background: rgba(255, 255, 255, 0.28);
+    background: rgba(0, 0, 0, 0.42);
     border-color: rgba(255, 255, 255, 0.9);
 }
 
@@ -420,7 +420,7 @@
     align-items: center;
     justify-content: center;
     font-size: 16px;
-    color: var(--gold, #8B7355);
+    color: var(--gold, #7E684B);
     flex-shrink: 0;
 }
 

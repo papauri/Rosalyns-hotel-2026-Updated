@@ -285,9 +285,9 @@ if (!('BarcodeDetector' in window)) { window.BarcodeDetector = BarcodeDetectorPo
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
 :root{
   --bg:#f4f2ef;--surface:#fffdfb;--surface2:#ede9e3;--border:#d7dde6;
-  --primary:#8A775F;--success:#3f8f5a;--warn:#9a7c53;--danger:#956a5b;
+  --primary:#766550;--success:#3f8f5a;--warn:#9a7c53;--danger:#956a5b;
   --text:#1f2a37;--muted:#5f6b7c;--radius:12px;
-  --navy:#111827;--gold:#B18247;
+  --navy:#111827;--gold:#8F6A35;
 }
 html,body{height:100%;background:var(--bg);color:var(--text);font-family:'Jost',sans-serif;font-size:15px;overscroll-behavior:none}
 a{color:var(--primary);text-decoration:none}
@@ -358,7 +358,7 @@ a{color:var(--primary);text-decoration:none}
 
 /* ── Submit bar ── */
 .submit-bar{position:fixed;bottom:0;left:0;right:0;padding:12px 16px;background:var(--surface);border-top:1px solid var(--border);z-index:100;display:flex;gap:10px;align-items:center;box-shadow:0 -2px 12px rgba(0,0,0,.06)}
-.submit-btn{flex:1;padding:14px;background:var(--success);border:none;border-radius:var(--radius);color:#fff;font-size:16px;font-weight:700;cursor:pointer;font-family:inherit}
+.submit-btn{flex:1;padding:14px;background:#2f7a4a;border:none;border-radius:var(--radius);color:#fff;font-size:16px;font-weight:700;cursor:pointer;font-family:inherit}
 .submit-btn:disabled{opacity:.4;cursor:not-allowed}
 .submit-count{font-size:13px;color:var(--muted);white-space:nowrap}
 

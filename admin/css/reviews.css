@@ -131,7 +131,7 @@
     display: inline-block;
     margin-top: 8px;
     font-size: 12px;
-    color: var(--color-primary, #8A775F);
+    color: var(--color-primary, #766550);
     word-break: break-all;
 }
 
@@ -251,7 +251,7 @@
     width: 44px;
     height: 44px;
     border-radius: 50%;
-    background: linear-gradient(135deg, var(--color-primary, #8A775F), var(--color-primary-dark, #5F5343));
+    background: linear-gradient(135deg, var(--color-primary, #766550), var(--color-primary-dark, #5F5343));
     color: #fff;
     display: flex;
     align-items: center;
@@ -383,7 +383,7 @@
 /* Response form */
 .response-form {
     border: 1px solid var(--admin-surface-border, #e7ebf1);
-    border-left: 4px solid var(--color-primary, #8A775F);
+    border-left: 4px solid var(--color-primary, #766550);
     border-radius: 10px;
     padding: 16px;
     margin-top: -10px;
@@ -417,7 +417,7 @@
 }
 
 .response-form-hint:hover {
-    color: var(--color-primary, #8A775F);
+    color: var(--color-primary, #766550);
 }
 
 .response-form textarea {
@@ -435,7 +435,7 @@
 
 .response-form textarea:focus {
     outline: none;
-    border-color: var(--color-primary, #8A775F);
+    border-color: var(--color-primary, #766550);
     box-shadow: 0 0 0 3px rgba(138, 119, 95, 0.12);
 }
 

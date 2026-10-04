@@ -572,7 +572,7 @@ try {
 
             const statusColors = {
                 'pending': '#17a2b8',
-                'confirmed': '#8B7355',
+                'confirmed': '#7E684B',
                 'completed': '#6c757d',
                 'cancelled': '#dc3545',
                 'waitlisted': '#C8A45A'

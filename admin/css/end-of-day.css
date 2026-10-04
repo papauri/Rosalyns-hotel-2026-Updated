@@ -16,11 +16,11 @@
     --color-lux-clay-50:    #F3ECE4;
     --color-lux-clay-100:   #EAD8C8;
     --color-lux-ink:        #231F1C;
-    --color-lux-gold:       #B18247;
+    --color-lux-gold:       #8F6A35;
     --color-lux-gold-dark:  #8A6030;
 
     /* ── Primary (warm taupe) ───────────────────────────── */
-    --color-primary:        #8A775F;
+    --color-primary:        #766550;
     --color-primary-dark:   #5F5343;
     --color-primary-light:  #B09A82;
 
@@ -207,7 +207,7 @@
 
 .eod-btn--whatsapp {
     color: var(--color-white);
-    background: linear-gradient(135deg, var(--color-success-light), var(--color-success));
+    background: linear-gradient(135deg, #15803d, #166534);
     box-shadow: 0 0.5rem 1.2rem color-mix(in srgb, var(--color-success) 28%, transparent 72%);
 }
 

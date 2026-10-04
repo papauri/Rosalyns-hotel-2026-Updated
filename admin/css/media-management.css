@@ -70,7 +70,7 @@
 
 .mm-input:focus {
     outline: none;
-    border-color: var(--gold, #b18247);
+    border-color: var(--gold, #8f6a35);
     box-shadow: 0 0 0 2px rgba(177, 130, 71, 0.15);
 }
 
@@ -314,7 +314,7 @@
 }
 
 .mm-action-btn--edit {
-    background: linear-gradient(135deg, var(--gold, #b18247) 0%, #9b7448 100%);
+    background: linear-gradient(135deg, var(--gold, #8f6a35) 0%, #9b7448 100%);
     color: #fff;
     box-shadow: 0 6px 14px rgba(177, 130, 71, 0.24);
 }
@@ -427,7 +427,7 @@
 }
 
 .mm-modal-btn--primary {
-    background: linear-gradient(135deg, var(--gold, #b18247) 0%, #9b7448 100%);
+    background: linear-gradient(135deg, var(--gold, #8f6a35) 0%, #9b7448 100%);
     color: #fff;
     box-shadow: 0 8px 18px rgba(177, 130, 71, 0.24);
 }

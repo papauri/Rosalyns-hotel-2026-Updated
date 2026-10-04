@@ -315,7 +315,7 @@ $printTitle = match ($mode) {
         }
 
         .btn-print {
-            background: #22c55e;
+            background: #15803d;
             color: #fff;
             border: none;
             border-radius: 8px;
@@ -329,7 +329,7 @@ $printTitle = match ($mode) {
         }
 
         .btn-print:hover {
-            background: #16a34a;
+            background: #166534;
         }
 
         .btn-secondary {

@@ -19,7 +19,7 @@
     --admin-surface: #fffdfb;
     --admin-text: #1f2a37;
     --admin-muted: #5f6b7c;
-    --admin-accent: var(--color-primary, #8A775F);
+    --admin-accent: var(--color-primary, #766550);
     --admin-radius: 10px;
     /* Derived surface tokens */
     --admin-surface-border: #d7dde6;
@@ -40,6 +40,19 @@
     --admin-info-text: #123f67;
     /* Deep navy (used by header gradient) */
     --deep-navy: #111827;
+    /* Brand tokens. The public site defines these in css/base/variables.css, which admin pages
+       do not load, so without them every var(--gold)/var(--navy) background rendered transparent
+       (white text on a white page). Values are darkened so white text on them passes WCAG AA. */
+    --color-primary: #766550;
+    --gold: #8F6A35;
+    --gold-light: #F3ECE4;
+    --gold-on-dark: #D2AE72;
+    --navy: #231F1C;
+    --dark: #212529;
+    --finance-primary: var(--color-primary);
+    --color-error-bg: #FBEAE8;
+    --color-error-text: #8B2D24;
+    --shadow-lg: 0 12px 32px rgba(15, 23, 42, 0.12);
     /* Admin-specific variables — shared design tokens are in /css/base/variables.css */
     --admin-header-height: calc(74px + env(titlebar-area-height, 0px));
 }
@@ -127,7 +140,7 @@ footer {
 .admin-header h1 {
     font-family: 'Cormorant Garamond', Georgia, serif;
     font-size: 24px;
-    color: var(--gold, #B18247);
+    color: var(--gold-on-dark, #D2AE72);
     margin: 0;
     display: flex;
     align-items: center;
@@ -135,7 +148,7 @@ footer {
 }
 
 .admin-header h1 i {
-    color: var(--gold, #B18247);
+    color: var(--gold-on-dark, #D2AE72);
 }
 
 .admin-header .user-info {
@@ -163,7 +176,7 @@ footer {
 
 .admin-header .user-role {
     background: var(--gold);
-    color: var(--deep-navy);
+    color: #fff;
     padding: 4px 12px;
     border-radius: 12px;
     font-size: 11px;
@@ -281,8 +294,8 @@ footer {
 
 .admin-nav a:hover,
 .admin-nav a.active {
-    color: var(--gold, #8B7355);
-    border-bottom-color: var(--gold, #8B7355);
+    color: var(--gold, #7E684B);
+    border-bottom-color: var(--gold, #7E684B);
 }
 
 /* ============================================
@@ -737,7 +750,7 @@ footer {
     -webkit-overflow-scrolling: touch;
     margin-bottom: 20px;
     scrollbar-width: auto;
-    scrollbar-color: var(--color-primary, #8A775F) #f1f1f1;
+    scrollbar-color: var(--color-primary, #766550) #f1f1f1;
 }
 
 .table-container::-webkit-scrollbar {
@@ -750,7 +763,7 @@ footer {
 }
 
 .table-container::-webkit-scrollbar-thumb {
-    background: var(--color-primary, #8A775F);
+    background: var(--color-primary, #766550);
     border-radius: 5px;
     border: 2px solid #f1f1f1;
 }
@@ -892,7 +905,7 @@ footer {
 
 .tbl-btn--view {
     background: #F3ECE4;
-    color: #8A775F;
+    color: #766550;
     border-color: #D9C8B4;
 }
 
@@ -1354,7 +1367,7 @@ table.fit-or-card:not(.mobile-enhanced) td {
 }
 
 .btn-primary {
-    background: var(--color-primary, #8A775F);
+    background: var(--color-primary, #766550);
     color: #fff;
     border: none;
     font-weight: 500;
@@ -1433,13 +1446,13 @@ table.fit-or-card:not(.mobile-enhanced) td {
 
 .tab-button:hover {
     background: var(--gold);
-    color: var(--admin-text);
+    color: #fff;
     border-color: var(--gold);
 }
 
 .tab-button.active {
     background: var(--gold);
-    color: var(--admin-text);
+    color: #fff;
     border-color: var(--gold);
     box-shadow: 0 2px 6px rgba(139, 115, 85, 0.3);
 }
@@ -1459,7 +1472,7 @@ table.fit-or-card:not(.mobile-enhanced) td {
 
 .tab-button.active .tab-count {
     background: rgba(0, 0, 0, 0.12);
-    color: var(--admin-text);
+    color: #fff;
 }
 
 /* ============================================
@@ -1504,13 +1517,13 @@ table.fit-or-card:not(.mobile-enhanced) td {
 
 .filter-tab:hover {
     background: var(--gold);
-    color: var(--admin-text);
+    color: #fff;
     border-color: var(--gold);
 }
 
 .filter-tab.active {
     background: var(--gold);
-    color: var(--admin-text);
+    color: #fff;
     border-color: var(--gold);
 }
 
@@ -1525,7 +1538,7 @@ table.fit-or-card:not(.mobile-enhanced) td {
 
 .filter-tab.active .count {
     background: rgba(0, 0, 0, 0.12);
-    color: var(--admin-text);
+    color: #fff;
 }
 
 /* ============================================
@@ -1570,7 +1583,7 @@ table.fit-or-card:not(.mobile-enhanced) td {
 
 .report-tab:hover {
     background: var(--gold);
-    color: var(--admin-text);
+    color: #fff;
     border-color: var(--gold);
     transform: translateY(-2px);
     box-shadow: 0 4px 12px rgba(139, 115, 85, 0.2);
@@ -1578,7 +1591,7 @@ table.fit-or-card:not(.mobile-enhanced) td {
 
 .report-tab.active {
     background: var(--gold);
-    color: var(--admin-text);
+    color: #fff;
     border-color: var(--gold);
     box-shadow: 0 4px 12px rgba(139, 115, 85, 0.3);
 }
@@ -1641,14 +1654,14 @@ table.fit-or-card:not(.mobile-enhanced) td {
 
 .menu-type-tab:hover {
     background: var(--gold);
-    color: var(--admin-text);
+    color: #fff;
     border-color: var(--gold);
     transform: scale(1.05);
 }
 
 .menu-type-tab.active {
     background: var(--gold);
-    color: var(--admin-text);
+    color: #fff;
     border-color: var(--gold);
     box-shadow: 0 4px 12px rgba(139, 115, 85, 0.3);
 }
@@ -1695,7 +1708,7 @@ table.fit-or-card:not(.mobile-enhanced) td {
 
 .tab-btn.active {
     background: var(--gold);
-    color: var(--admin-text);
+    color: #fff;
     border-color: var(--gold);
     box-shadow: 0 4px 12px rgba(139, 115, 85, 0.3);
 }
@@ -2093,7 +2106,7 @@ table.fit-or-card:not(.mobile-enhanced) td {
     border: none;
     font-size: 22px;
     line-height: 1;
-    color: #999;
+    color: #4a4a4a;
     cursor: pointer;
     padding: 2px 6px;
     border-radius: 4px;
@@ -2358,8 +2371,8 @@ table.fit-or-card:not(.mobile-enhanced) td {
 
     .admin-nav.nav-open a:hover,
     .admin-nav.nav-open a.active {
-        color: var(--gold, #8B7355);
-        border-bottom-color: var(--gold, #8B7355);
+        color: var(--gold, #7E684B);
+        border-bottom-color: var(--gold, #7E684B);
     }
 
     /* Compact single-row header on mobile — override the desktop 74px height.
@@ -2753,8 +2766,8 @@ table.fit-or-card:not(.mobile-enhanced) td {
 }
 
 .admin-header .user-info .user-meta .user-role {
-    background: linear-gradient(135deg, var(--gold, #d4a843) 0%, #c9a227 100%);
-    color: var(--deep-navy, #1f2533);
+    background: linear-gradient(135deg, var(--gold, #d4a843) 0%, #7a5a2b 100%);
+    color: #fff;
     padding: 3px 10px;
     border-radius: 999px;
     font-size: 10px;
@@ -2889,7 +2902,7 @@ table.fit-or-card:not(.mobile-enhanced) td {
     --au-bg: #f5f6f8;
     --au-text: #1e2938;
     --au-muted: #5f6b7a;
-    --au-accent: #b18247;
+    --au-accent: #8f6a35;
     --au-accent-deep: #7a5b34;
     --au-info: #2563eb;
     --au-success: #15803d;
@@ -3297,7 +3310,7 @@ body {
 .badge-warning,
 .badge-tentative {
     background: rgba(245, 158, 11, 0.14);
-    color: #b45309;
+    color: #9a4a08;
     border-color: rgba(245, 158, 11, 0.30);
 }
 
@@ -3343,7 +3356,7 @@ body {
 .badge-unpaid,
 .badge-overdue {
     background: rgba(245, 158, 11, 0.14);
-    color: #b45309;
+    color: #9a4a08;
     border-color: rgba(245, 158, 11, 0.30);
 }
 
@@ -3416,7 +3429,7 @@ body {
 
 .badge-low {
     background: rgba(245, 158, 11, 0.14);
-    color: #b45309;
+    color: #9a4a08;
     border-color: rgba(245, 158, 11, 0.30);
 }
 
@@ -3451,7 +3464,7 @@ body {
 
 .badge-read {
     background: rgba(245, 158, 11, 0.14);
-    color: #b45309;
+    color: #9a4a08;
     border-color: rgba(245, 158, 11, 0.30);
 }
 
@@ -3490,7 +3503,7 @@ body {
 
 .badge-maintenance {
     background: rgba(245, 158, 11, 0.14);
-    color: #b45309;
+    color: #9a4a08;
     border-color: rgba(245, 158, 11, 0.30);
 }
 
@@ -3509,7 +3522,7 @@ body {
 
 .badge-reserved {
     background: rgba(245, 158, 11, 0.14);
-    color: #b45309;
+    color: #9a4a08;
     border-color: rgba(245, 158, 11, 0.30);
 }
 
@@ -3528,7 +3541,7 @@ body {
 /* Content flags (events / rooms / gallery cards) — uniform across pages */
 .badge-featured {
     background: rgba(200, 164, 90, 0.16);
-    color: #8a6d1f;
+    color: #7a5f1a;
     border-color: rgba(200, 164, 90, 0.40);
 }
 
@@ -3552,7 +3565,7 @@ body {
 
 .badge-price {
     background: rgba(245, 158, 11, 0.14);
-    color: #b45309;
+    color: #9a4a08;
     border-color: rgba(245, 158, 11, 0.30);
 }
 
@@ -4244,7 +4257,7 @@ button:focus-visible {
 }
 
 .quick-action:focus-visible {
-    outline: 2px solid var(--color-primary, #8A775F);
+    outline: 2px solid var(--color-primary, #766550);
     outline-offset: 2px;
 }
 
@@ -4295,7 +4308,7 @@ button:focus-visible {
 .actions-more-menu i {
     width: 14px;
     text-align: center;
-    color: var(--color-primary, #8A775F);
+    color: var(--color-primary, #766550);
     font-size: 0.78rem;
     flex-shrink: 0;
 }
@@ -5219,7 +5232,7 @@ a.ops-card:focus-visible {
 .form-group select:focus,
 .form-group textarea:focus {
     outline: none;
-    border-color: var(--admin-accent, #8B7355);
+    border-color: var(--admin-accent, #7E684B);
     box-shadow: 0 0 0 3px rgba(139, 115, 95, 0.15);
 }
 
@@ -5265,7 +5278,7 @@ a.ops-card:focus-visible {
     width: 17px;
     height: 17px;
     min-height: 17px;
-    accent-color: var(--admin-accent, #8B7355);
+    accent-color: var(--admin-accent, #7E684B);
     cursor: pointer;
     flex-shrink: 0;
 }
@@ -5309,7 +5322,7 @@ a.ops-card:focus-visible {
 }
 
 .form-card h3 i {
-    color: var(--admin-accent, #8B7355);
+    color: var(--admin-accent, #7E684B);
     font-size: 15px;
 }
 
@@ -5353,7 +5366,7 @@ a.ops-card:focus-visible {
 }
 
 .input-currency-wrap:focus-within {
-    border-color: var(--color-primary, #8A775F);
+    border-color: var(--color-primary, #766550);
     box-shadow: 0 0 0 3px rgba(138, 119, 95, 0.12);
 }
 
@@ -5435,7 +5448,7 @@ a.ops-card:focus-visible {
     display: inline-flex;
     align-items: center;
     gap: 9px;
-    background: var(--admin-accent, #8B7355);
+    background: var(--admin-accent, #7E684B);
     color: #ffffff;
     border: none;
     border-radius: 10px;
@@ -5509,7 +5522,7 @@ a.ops-card:focus-visible {
 }
 
 .room-info-box strong {
-    color: var(--admin-accent, #8B7355);
+    color: var(--admin-accent, #7E684B);
     font-size: 15px;
     display: block;
     margin-bottom: 4px;
@@ -5674,7 +5687,7 @@ a.ops-card:focus-visible {
         align-items: center;
         justify-content: center;
         background: #f7f3ea;
-        color: var(--gold, #8B7355);
+        color: var(--gold, #7E684B);
     }
 
     .admin-nav.nav-open .admin-nav-title-main {
@@ -5912,13 +5925,22 @@ button.tab-btn {
     line-height: 1;
 }
 
-/* Canonical rule: dark text on gold for all tab active/hover states */
+/* Tabs that sit on a light background keep dark text */
+.tab-btn:hover {
+    color: var(--admin-text, #1f2a37) !important;
+}
+
+/* Menu type tabs turn gold when active/hovered: white text (4.9:1) */
+.menu-type-tab.active, .menu-type-tab:hover {
+    color: #fff !important;
+}
+
+/* Canonical rule: white text on the darkened gold (4.9:1) for tab active/hover states */
 .tab-button.active, .tab-button:hover,
 .filter-tab.active, .filter-tab:hover,
 .report-tab.active, .report-tab:hover,
-.menu-type-tab.active, .menu-type-tab:hover,
-.tab-btn.active, .tab-btn:hover {
-    color: var(--admin-text, #1f2a37) !important;
+.tab-btn.active {
+    color: #fff !important;
 }
 
 @media (max-width: 480px) {
@@ -6049,7 +6071,7 @@ body>:is(.content,
     left: 0;
     height: 4px;
     width: 0%;
-    background: linear-gradient(90deg, var(--gold, #B18247) 0%, #d4a843 100%);
+    background: linear-gradient(90deg, var(--gold, #8F6A35) 0%, #d4a843 100%);
     z-index: 10120;
     opacity: 0;
     pointer-events: none;

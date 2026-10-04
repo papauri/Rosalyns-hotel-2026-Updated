@@ -117,7 +117,7 @@ $timeline[] = [
     'when'  => $order['created_at'],
     'who'   => $order['created_by_name'] ?: 'Unknown',
     'icon'  => 'fas fa-cash-register',
-    'color' => '#8B7355',
+    'color' => '#7E684B',
     'event' => 'Order created',
     'note'  => 'Reference ' . $order['reference'] . ' · ' . count($items) . ' line(s) · ' . $currency_symbol . ' ' . number_format((float)$order['total_amount'], 2)
               . ($locationLabel !== '' ? ' · ' . $locationLabel : '')
@@ -269,7 +269,7 @@ function fmt_dur(?int $from, ?int $to) { if (!$from || !$to) return '—'; $s = 
                      heading is dropped when embedded rather than showing "Timeline"
                      above "Order lifecycle". The reference, status and total stay —
                      those are the context, not chrome. */ ?>
-            <?php if (!$embed): ?><h1><i class="fas fa-stream" style="color:var(--color-primary,#8A775F);"></i> Order lifecycle</h1><?php endif; ?>
+            <?php if (!$embed): ?><h1><i class="fas fa-stream" style="color:var(--color-primary,#766550);"></i> Order lifecycle</h1><?php endif; ?>
             <div class="ref">
                 <strong><?php echo htmlspecialchars($order['reference']); ?></strong>
                 <?php $status = $order['status']; ?>
@@ -281,7 +281,7 @@ function fmt_dur(?int $from, ?int $to) { if (!$from || !$to) return '—'; $s = 
             </div>
         </div>
         <div style="text-align:right;">
-            <div style="font-size:24px; font-weight:700; color:var(--color-primary,#8A775F);"><?php echo $currency_symbol . ' ' . number_format((float)$order['total_amount'], 2); ?></div>
+            <div style="font-size:24px; font-weight:700; color:var(--color-primary,#766550);"><?php echo $currency_symbol . ' ' . number_format((float)$order['total_amount'], 2); ?></div>
             <?php if ($order['payment_method']): ?><div style="font-size:12px; color:#6c757d;"><?php echo htmlspecialchars(str_replace('_',' ', $order['payment_method'])); ?></div><?php endif; ?>
         </div>
     </div>
@@ -331,7 +331,7 @@ function fmt_dur(?int $from, ?int $to) { if (!$from || !$to) return '—'; $s = 
                     <td><strong><?php echo $currency_symbol . ' ' . number_format((float)$it['line_total'], 2); ?></strong></td>
                     <td><?php echo htmlspecialchars($it['menu_type']); ?></td>
                     <td><span class="bdg b-<?php echo htmlspecialchars($it['kds_status'] ?? 'pending'); ?>"><?php echo htmlspecialchars($it['kds_status'] ?? '—'); ?></span></td>
-                    <td style="color:var(--color-primary,#8A775F); font-style:italic;"><?php echo htmlspecialchars($it['notes'] ?? ''); ?></td>
+                    <td style="color:var(--color-primary,#766550); font-style:italic;"><?php echo htmlspecialchars($it['notes'] ?? ''); ?></td>
                 </tr>
             <?php endforeach; ?>
             </tbody>

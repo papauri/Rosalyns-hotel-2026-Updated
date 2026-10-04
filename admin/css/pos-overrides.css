@@ -4,7 +4,7 @@
    Design tokens → /css/base/variables.css */
 /* POS Till — admin/pos.php
    Dark-themed touchscreen POS interface.
-   Brand gold = var(--color-primary, #8A775F).
+   Brand gold = var(--color-primary, #766550).
    Gold accents (#d4a843, #e8c97a) are POS-specific aesthetic choices — preserved as-is.
 */
 
@@ -405,7 +405,7 @@ a.recent-toggle span {
     --menu-switch-track: rgba(42, 39, 35, .05);
     --menu-switch-border: #dccfc2;
     --menu-switch-glow: rgba(42, 39, 35, .18);
-    --menu-switch-knob: var(--color-primary, rgba(138, 119, 95, 1));
+    --menu-switch-knob: var(--color-primary, #766550);
     grid-column: 1 / -1;
     justify-self: start;
     align-self: start;
@@ -474,7 +474,7 @@ a.recent-toggle span {
 
 .menu-mode-btn:focus-visible {
     outline: none;
-    box-shadow: 0 0 0 2px #8a775f;
+    box-shadow: 0 0 0 2px #766550;
 }
 
 .menu-mode-btn.is-active {
@@ -608,16 +608,16 @@ a.recent-toggle span {
     min-width: clamp(2.75rem, 7vw, 3rem);
     min-height: clamp(2.75rem, 7vw, 3rem);
     padding: 0;
-    border: 1px solid color-mix(in srgb, var(--color-primary, #8A775F) 38%, transparent);
+    border: 1px solid color-mix(in srgb, var(--color-primary, #766550) 38%, transparent);
     border-radius: 999px;
-    background: linear-gradient(145deg, color-mix(in srgb, var(--color-primary, #8A775F) 18%, #17171d) 0%, color-mix(in srgb, var(--color-primary, #8A775F) 9%, #101015) 100%);
+    background: linear-gradient(145deg, color-mix(in srgb, var(--color-primary, #766550) 18%, #17171d) 0%, color-mix(in srgb, var(--color-primary, #766550) 9%, #101015) 100%);
     color: #f7efe5;
     font-size: clamp(0.84rem, 2.2vw, 0.94rem);
     font-weight: 600;
     cursor: pointer;
     position: relative;
     flex-shrink: 0;
-    box-shadow: 0 10px 22px rgba(15, 15, 20, .26), inset 0 0 0 1px color-mix(in srgb, var(--color-primary, #8A775F) 18%, transparent);
+    box-shadow: 0 10px 22px rgba(15, 15, 20, .26), inset 0 0 0 1px color-mix(in srgb, var(--color-primary, #766550) 18%, transparent);
     transition: background .18s ease, border-color .18s ease, transform .14s ease, color .18s ease, box-shadow .18s ease;
 }
 
@@ -628,8 +628,8 @@ a.recent-toggle span {
 }
 
 .pos-mobile-menu-btn:hover {
-    background: linear-gradient(145deg, color-mix(in srgb, var(--color-primary, #8A775F) 26%, #1b1b22) 0%, color-mix(in srgb, var(--color-primary, #8A775F) 13%, #121218) 100%);
-    border-color: color-mix(in srgb, var(--color-primary, #8A775F) 60%, transparent);
+    background: linear-gradient(145deg, color-mix(in srgb, var(--color-primary, #766550) 26%, #1b1b22) 0%, color-mix(in srgb, var(--color-primary, #766550) 13%, #121218) 100%);
+    border-color: color-mix(in srgb, var(--color-primary, #766550) 60%, transparent);
     transform: translateY(-1px);
 }
 
@@ -638,14 +638,14 @@ a.recent-toggle span {
 }
 
 .pos-mobile-menu-btn:focus-visible {
-    outline: 2px solid color-mix(in srgb, var(--color-primary, #8A775F) 55%, transparent);
+    outline: 2px solid color-mix(in srgb, var(--color-primary, #766550) 55%, transparent);
     outline-offset: 2px;
 }
 
 .pos-mobile-menu-btn[aria-expanded='true'] {
-    background: linear-gradient(145deg, color-mix(in srgb, var(--color-primary, #8A775F) 30%, #1d1b19) 0%, color-mix(in srgb, var(--color-primary, #8A775F) 16%, #121117) 100%);
-    border-color: color-mix(in srgb, var(--color-primary, #8A775F) 72%, transparent);
-    box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-primary, #8A775F) 20%, transparent), 0 14px 26px rgba(15, 15, 20, .3);
+    background: linear-gradient(145deg, color-mix(in srgb, var(--color-primary, #766550) 30%, #1d1b19) 0%, color-mix(in srgb, var(--color-primary, #766550) 16%, #121117) 100%);
+    border-color: color-mix(in srgb, var(--color-primary, #766550) 72%, transparent);
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-primary, #766550) 20%, transparent), 0 14px 26px rgba(15, 15, 20, .3);
 }
 
 .pos-mobile-menu-btn[aria-expanded='true'] i {
@@ -1339,7 +1339,7 @@ a.recent-toggle span {
         place-items: center;
         font-size: clamp(0.72rem, 1.24vw, 0.84rem);
         font-weight: 700;
-        color: var(--color-primary, #8A775F);
+        color: var(--color-primary, #766550);
         background: rgba(138, 119, 95, 0.12);
     }
 
@@ -1350,7 +1350,7 @@ a.recent-toggle span {
         padding: 0.16rem 0.48rem;
         border-radius: 999px;
         background: rgba(138, 119, 95, 0.12);
-        color: var(--color-primary, #8A775F);
+        color: var(--color-primary, #766550);
         font-size: clamp(0.6rem, 1vw, 0.68rem);
         font-weight: 700;
         letter-spacing: 0.05em;
@@ -1371,7 +1371,7 @@ a.recent-toggle span {
     #grid .item .pr {
         font-size: clamp(0.86rem, 1.34vw, 1.02rem);
         line-height: 1.25;
-        color: var(--color-primary, #8A775F);
+        color: var(--color-primary, #766550);
     }
 
     #grid .item .st {
@@ -1680,7 +1680,7 @@ a.recent-toggle span {
 
 .menu .toolbar button {
     padding: 0 18px;
-    background: var(--color-primary, #8A775F);
+    background: var(--color-primary, #766550);
     color: #fff;
     border: none;
     border-radius: 10px;
@@ -1745,7 +1745,7 @@ a.recent-toggle span {
 }
 
 .item:hover {
-    border-color: var(--color-primary, #8A775F);
+    border-color: var(--color-primary, #766550);
     box-shadow: 0 4px 12px rgba(138, 119, 95, 0.15);
 }
 
@@ -1761,7 +1761,7 @@ a.recent-toggle span {
 }
 
 .item .pr {
-    color: var(--color-primary, #8A775F);
+    color: var(--color-primary, #766550);
     font-weight: 700;
     font-size: 16px;
     margin-top: auto;
@@ -1844,7 +1844,7 @@ a.recent-toggle span {
     position: fixed;
     bottom: 20px;
     right: 20px;
-    background: var(--color-primary, #8A775F);
+    background: var(--color-primary, #766550);
     color: #fff;
     width: 60px;
     height: 60px;
@@ -1946,7 +1946,7 @@ a.recent-toggle span {
 .pay-btn {
     width: 100%;
     padding: 18px;
-    background: #28a745;
+    background: #1e7e34;
     color: #fff;
     border: none;
     border-radius: 12px;
@@ -2019,7 +2019,7 @@ a.recent-toggle span {
 
 .ctx-chip i {
     font-size: 13px;
-    color: var(--color-primary, #8A775F);
+    color: var(--color-primary, #766550);
 }
 
 .ctx-chip span {
@@ -2030,17 +2030,17 @@ a.recent-toggle span {
 }
 
 .ctx-chip:hover {
-    border-color: var(--color-primary, #8A775F);
+    border-color: var(--color-primary, #766550);
 }
 
 .ctx-chip.is-active {
-    border-color: var(--color-primary, #8A775F);
+    border-color: var(--color-primary, #766550);
     background: #fdf8f3;
     color: #5a4a36;
 }
 
 .ctx-chip.is-active i {
-    color: var(--color-primary, #8A775F);
+    color: var(--color-primary, #766550);
 }
 
 /* When the menu is in Room Service mode, all non-room chips are locked */
@@ -2071,7 +2071,7 @@ a.recent-toggle span {
 .ctx-fields input:focus,
 .ctx-fields select:focus {
     outline: none;
-    border-color: var(--color-primary, #8A775F);
+    border-color: var(--color-primary, #766550);
     box-shadow: 0 0 0 2px rgba(138, 119, 95, 0.15);
 }
 
@@ -2193,7 +2193,7 @@ a.recent-toggle span {
 }
 
 .pay-method-grid button.active {
-    border-color: var(--color-primary, #8A775F);
+    border-color: var(--color-primary, #766550);
     background: #fdf8f3;
 }
 
@@ -2204,7 +2204,7 @@ a.recent-toggle span {
 
 .pay-method-grid button i {
     font-size: 22px;
-    color: var(--color-primary, #8A775F);
+    color: var(--color-primary, #766550);
 }
 
 /* Split-bill way selector buttons */
@@ -2221,8 +2221,8 @@ a.recent-toggle span {
 }
 .split-way-btn.active,
 .split-way-btn:hover {
-    background: var(--color-primary, #8A775F);
-    border-color: var(--color-primary, #8A775F);
+    background: var(--color-primary, #766550);
+    border-color: var(--color-primary, #766550);
     color: #fff;
 }
 
@@ -2240,8 +2240,8 @@ a.recent-toggle span {
 }
 .tip-preset-btn.active,
 .tip-preset-btn:hover {
-    background: #059669;
-    border-color: #059669;
+    background: #047857;
+    border-color: #047857;
     color: #fff;
 }
 
@@ -2273,8 +2273,8 @@ a.recent-toggle span {
 }
 .discount-preset-btn.active,
 .discount-preset-btn:hover {
-    background: #d97706;
-    border-color: #d97706;
+    background: #b45309;
+    border-color: #b45309;
     color: #fff;
 }
 
@@ -2321,7 +2321,7 @@ a.recent-toggle span {
 }
 
 .btn-confirm {
-    background: #28a745;
+    background: #1e7e34;
     color: #fff;
 }
 
@@ -2367,7 +2367,7 @@ a.recent-toggle span {
 
 .success-modal .icon {
     font-size: 60px;
-    color: var(--color-primary, #8A775F);
+    color: var(--color-primary, #766550);
     margin-bottom: 14px;
 }
 
@@ -2423,7 +2423,7 @@ a.recent-toggle span {
 }
 
 .a-print {
-    background: var(--color-primary, #8A775F);
+    background: var(--color-primary, #766550);
     color: #fff;
 }
 
@@ -2813,7 +2813,7 @@ a.recent-toggle span {
     margin: 0 auto 14px;
     border-radius: 50%;
     border: 4px solid rgba(138, 119, 95, .22);
-    border-top-color: var(--color-primary, #8A775F);
+    border-top-color: var(--color-primary, #766550);
     animation: pos-spin .75s linear infinite;
 }
 
@@ -2896,7 +2896,7 @@ a.recent-toggle span {
 }
 
 #posMobileQuickViewTitle i {
-    color: var(--color-lux-gold, #B18247);
+    color: var(--color-lux-gold, #8F6A35);
     font-size: clamp(0.82rem, 3vw, 0.95rem);
 }
 
@@ -2945,7 +2945,7 @@ a.recent-toggle span {
 }
 
 .pos-mobile-quick-view-item__amount {
-    color: var(--color-primary, #8A775F);
+    color: var(--color-primary, #766550);
     font-size: clamp(0.8rem, 3.1vw, 0.92rem);
     font-weight: 700;
     white-space: nowrap;
@@ -2980,7 +2980,7 @@ a.recent-toggle span {
     padding: 0.2rem 0.5rem;
     border-radius: 999px;
     background: rgba(138, 119, 95, 0.14);
-    color: var(--color-primary, #8A775F);
+    color: var(--color-primary, #766550);
     font-size: clamp(0.62rem, 2.5vw, 0.72rem);
     font-weight: 700;
     letter-spacing: 0.04em;
@@ -2992,7 +2992,7 @@ a.recent-toggle span {
     align-items: center;
     gap: 0.35rem;
     margin-top: clamp(0.45rem, 1.8vw, 0.6rem);
-    color: var(--color-primary, #8A775F);
+    color: var(--color-primary, #766550);
     font-size: clamp(0.72rem, 2.8vw, 0.82rem);
     font-weight: 600;
 }
@@ -3022,7 +3022,7 @@ a.recent-toggle span {
     display: grid;
     place-items: center;
     font-size: clamp(1rem, 3.8vw, 1.2rem);
-    color: var(--color-lux-gold, #B18247);
+    color: var(--color-lux-gold, #8F6A35);
     background: rgba(177, 130, 71, 0.14);
 }
 
@@ -3048,7 +3048,7 @@ a.recent-toggle span {
     padding: 0.16rem 0.58rem;
     border-radius: 999px;
     background: rgba(139, 115, 85, 0.12);
-    color: var(--color-primary, #8A775F);
+    color: var(--color-primary, #766550);
     font-size: clamp(0.66rem, 2.7vw, 0.76rem);
     font-weight: 700;
     vertical-align: middle;
@@ -3072,7 +3072,7 @@ a.recent-toggle span {
 
 .pos-action-loader__icon {
     font-size: 18px;
-    color: var(--color-primary, #8A775F);
+    color: var(--color-primary, #766550);
     opacity: 0.9;
 }
 
@@ -3081,14 +3081,14 @@ a.recent-toggle span {
     font-size: clamp(18px, 4vw, 24px);
     font-weight: 600;
     letter-spacing: 0.04em;
-    color: var(--color-primary, #8A775F);
+    color: var(--color-primary, #766550);
     line-height: 1;
 }
 
 .pos-action-loader__divider {
     width: 48px;
     height: 1px;
-    background: linear-gradient(90deg, transparent, var(--color-primary, #8A775F), transparent);
+    background: linear-gradient(90deg, transparent, var(--color-primary, #766550), transparent);
     margin: 0 auto 20px;
     border-radius: 1px;
     opacity: 0.6;
@@ -3196,7 +3196,7 @@ a.recent-toggle span {
 }
 
 .tabs-tray-toggle:hover {
-    border-color: var(--color-primary, #8A775F);
+    border-color: var(--color-primary, #766550);
     transform: translateY(-1px);
 }
 
@@ -3229,7 +3229,7 @@ a.recent-toggle span {
 .tabs-bulk-check input {
     width: 14px;
     height: 14px;
-    accent-color: var(--color-primary, #8A775F);
+    accent-color: var(--color-primary, #766550);
     cursor: pointer;
 }
 
@@ -3251,7 +3251,7 @@ a.recent-toggle span {
 }
 
 .tabs-bulk-btn:hover {
-    border-color: var(--color-primary, #8A775F);
+    border-color: var(--color-primary, #766550);
     color: #3c342c;
     transform: translateY(-1px);
 }
@@ -3302,7 +3302,7 @@ a.recent-toggle span {
 }
 
 .tab-card:hover {
-    border-color: var(--color-primary, #8A775F);
+    border-color: var(--color-primary, #766550);
     box-shadow: 0 6px 18px rgba(138, 119, 95, .14);
     transform: translateY(-1px);
 }
@@ -3351,8 +3351,8 @@ a.recent-toggle span {
 }
 
 .tc-select-input:checked+.tc-select-indicator {
-    border-color: var(--color-primary, #8A775F);
-    background: var(--color-primary, #8A775F);
+    border-color: var(--color-primary, #766550);
+    background: var(--color-primary, #766550);
     color: #fff;
 }
 
@@ -3418,7 +3418,7 @@ a.recent-toggle span {
 
 .tc-flow-chip.pending {
     background: #f0f2f4;
-    color: #6c757d;
+    color: #495057;
 }
 
 .tc-flow-chip.preparing {
@@ -3466,7 +3466,7 @@ a.recent-toggle span {
 .tc-total {
     font-size: 18px;
     font-weight: 800;
-    color: var(--color-primary, #8A775F);
+    color: var(--color-primary, #766550);
     line-height: 1.15;
 }
 
@@ -3560,14 +3560,14 @@ a.recent-toggle span {
 }
 
 .tc-btn-settle {
-    background: linear-gradient(135deg, #188f48 0%, #0f6c36 100%);
+    background: linear-gradient(135deg, #147a3d 0%, #0f6c36 100%);
     border-color: #0f6c36;
     color: #fff;
     box-shadow: 0 6px 12px rgba(24, 143, 72, .2);
 }
 
 .tc-btn-add {
-    background: linear-gradient(135deg, #ea7317 0%, #c2540b 100%);
+    background: linear-gradient(135deg, #c2540b 0%, #a84708 100%);
     border-color: #c2540b;
     color: #fff;
     box-shadow: 0 6px 12px rgba(234, 115, 23, .2);
@@ -3673,7 +3673,7 @@ a.recent-toggle span {
 .tdi-total {
     font-size: 28px;
     font-weight: 800;
-    color: var(--color-primary, #8A775F);
+    color: var(--color-primary, #766550);
     line-height: 1;
 }
 
@@ -3774,7 +3774,7 @@ a.recent-toggle span {
 }
 
 .lc-step.lc-done .lc-dot {
-    background: #28a745;
+    background: #1e7e34;
     color: #fff;
     box-shadow: 0 0 0 3px #bbf7d0;
 }
@@ -3789,18 +3789,18 @@ a.recent-toggle span {
 }
 
 .lc-step.lc-active .lc-dot {
-    background: var(--color-primary, #8A775F);
+    background: var(--color-primary, #766550);
     color: #fff;
     box-shadow: 0 0 0 3px #d4b896;
 }
 
 .lc-step.lc-active .lc-label {
-    color: var(--color-primary, #8A775F);
+    color: var(--color-primary, #766550);
     font-weight: 800;
 }
 
 .lc-step.lc-active .lc-time {
-    color: var(--color-primary, #8A775F);
+    color: var(--color-primary, #766550);
 }
 
 .lc-step.lc-voided .lc-dot {
@@ -3877,16 +3877,16 @@ a.recent-toggle span {
 }
 
 .kds-step.has-items .step-dot {
-    background: var(--color-primary, #8A775F);
+    background: var(--color-primary, #766550);
     color: #fff;
 }
 
 .kds-step.has-items::before {
-    background: var(--color-primary, #8A775F);
+    background: var(--color-primary, #766550);
 }
 
 .kds-step.all-done .step-dot {
-    background: #28a745;
+    background: #1e7e34;
     color: #fff;
 }
 
@@ -4055,7 +4055,7 @@ a.recent-toggle span {
     width: 11px;
     height: 11px;
     border-radius: 50%;
-    background: var(--color-primary, #8A775F);
+    background: var(--color-primary, #766550);
     border: 2px solid #fff;
     box-shadow: 0 0 0 2px #d4b896;
 }
@@ -4066,7 +4066,7 @@ a.recent-toggle span {
 }
 
 .tl-item.tl-audit::before {
-    background: var(--color-primary, #8A775F);
+    background: var(--color-primary, #766550);
     box-shadow: 0 0 0 2px #d4b896;
 }
 
@@ -4139,7 +4139,7 @@ a.recent-toggle span {
 
 .prm-textarea:focus {
     outline: none;
-    border-color: var(--color-primary, #8A775F);
+    border-color: var(--color-primary, #766550);
     box-shadow: 0 0 0 2px rgba(138, 119, 95, .15);
 }
 
@@ -4484,7 +4484,7 @@ a.recent-toggle span {
         place-items: center;
         font-size: clamp(0.76rem, 2.8vw, 0.9rem);
         font-weight: 700;
-        color: var(--color-primary, #8A775F);
+        color: var(--color-primary, #766550);
         background: rgba(138, 119, 95, 0.12);
     }
 
@@ -4505,7 +4505,7 @@ a.recent-toggle span {
         padding: 0.14rem 0.44rem;
         border-radius: 999px;
         background: rgba(138, 119, 95, 0.12);
-        color: var(--color-primary, #8A775F);
+        color: var(--color-primary, #766550);
         font-size: clamp(0.58rem, 2.3vw, 0.68rem);
         font-weight: 700;
         letter-spacing: 0.05em;
@@ -4526,7 +4526,7 @@ a.recent-toggle span {
     .item .pr {
         font-size: clamp(0.82rem, 3.2vw, 1rem);
         line-height: 1.25;
-        color: var(--color-primary, #8A775F);
+        color: var(--color-primary, #766550);
     }
 
     .item .st {
@@ -4756,7 +4756,7 @@ a.recent-toggle span {
         overflow-x: auto;
         overflow-y: hidden;
         scrollbar-width: thin;
-        scrollbar-color: color-mix(in srgb, var(--color-primary, #8A775F) 70%, transparent) transparent;
+        scrollbar-color: color-mix(in srgb, var(--color-primary, #766550) 70%, transparent) transparent;
     }
 
     .till-bar .tb-actions::-webkit-scrollbar {
@@ -4764,7 +4764,7 @@ a.recent-toggle span {
     }
 
     .till-bar .tb-actions::-webkit-scrollbar-thumb {
-        background: color-mix(in srgb, var(--color-primary, #8A775F) 70%, transparent);
+        background: color-mix(in srgb, var(--color-primary, #766550) 70%, transparent);
         border-radius: 999px;
     }
 
@@ -4884,7 +4884,7 @@ a.recent-toggle span {
     height: 20px;
     padding: 0 6px;
     border-radius: 999px;
-    background: #8A775F;
+    background: #766550;
     color: #fff;
     font-size: 11px;
     font-weight: 800;
@@ -5014,7 +5014,7 @@ a.recent-toggle span {
     min-width: 26px;
     padding: 4px 8px;
     border-radius: 999px;
-    background: #8A775F;
+    background: #766550;
     color: #fff;
     font-size: 14px;
     font-weight: 700;
@@ -5064,12 +5064,12 @@ a.recent-toggle span {
 
 .svc-filter__btn span {
     margin-left: 6px;
-    color: #8A775F;
+    color: #766550;
 }
 
 .svc-filter__btn.is-active {
-    background: #8A775F;
-    border-color: #8A775F;
+    background: #766550;
+    border-color: #766550;
     color: #fff;
 }
 
@@ -5143,7 +5143,7 @@ a.recent-toggle span {
 
 button.svc-card { cursor: pointer; }
 button.svc-card:hover { border-color: #cbbba7; }
-button.svc-card:focus-visible { outline: 3px solid #8A775F; outline-offset: 2px; }
+button.svc-card:focus-visible { outline: 3px solid #766550; outline-offset: 2px; }
 
 .svc-order.is-wait { border-left-color: #c28a2c; }
 .svc-order.is-cooking { border-left-color: #2f6fad; }
@@ -5420,7 +5420,7 @@ button.svc-card:focus-visible { outline: 3px solid #8A775F; outline-offset: 2px;
     align-items: center;
     gap: 12px;
     padding: 16px 24px;
-    background: #8A775F;
+    background: #766550;
     color: #fff;
     font-size: 18px;
     font-weight: 700;
@@ -6103,7 +6103,7 @@ button.svc-card:focus-visible { outline: 3px solid #8A775F; outline-offset: 2px;
 }
 
 .ctx-chip.is-active i {
-    color: var(--color-primary, #8A775F);
+    color: var(--color-primary, #766550);
 }
 
 .ctx-fields {
@@ -6383,7 +6383,7 @@ button.svc-card:focus-visible { outline: 3px solid #8A775F; outline-offset: 2px;
 }
 
 .cart-foot .pay-btn {
-    background: #1f9d55;
+    background: #177a3c;
     color: #fff;
     box-shadow: 0 6px 16px rgba(31, 157, 85, .28);
 }

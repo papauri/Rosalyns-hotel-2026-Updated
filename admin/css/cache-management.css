@@ -29,7 +29,7 @@
 
 .cache-stat-icon.primary {
     background: rgba(138, 119, 95, 0.1);
-    color: var(--gold, var(--color-lux-gold, #B18247));
+    color: var(--gold, var(--color-lux-gold, #8F6A35));
 }
 
 .cache-stat-icon.success {
@@ -141,7 +141,7 @@
     color: var(--navy, #231F1C);
     margin-bottom: 20px;
     padding-bottom: 12px;
-    border-bottom: 2px solid var(--gold, var(--color-lux-gold, #B18247));
+    border-bottom: 2px solid var(--gold, var(--color-lux-gold, #8F6A35));
 }
 
 .cache-toggle-grid {
@@ -158,7 +158,7 @@
 }
 
 .cache-toggle-item:hover {
-    border-color: var(--gold, var(--color-lux-gold, #B18247));
+    border-color: var(--gold, var(--color-lux-gold, #8F6A35));
 }
 
 .cache-toggle-item.active {
@@ -256,7 +256,7 @@
 }
 
 .cache-checkbox-item:hover {
-    border-color: var(--gold, var(--color-lux-gold, #B18247));
+    border-color: var(--gold, var(--color-lux-gold, #8F6A35));
 }
 
 .cache-checkbox-item input[type="checkbox"] {
@@ -273,12 +273,12 @@
 }
 
 .cache-management-page .btn-primary {
-    background: var(--gold, var(--color-lux-gold, #B18247));
-    color: var(--deep-navy, #111827);
+    background: var(--gold, var(--color-lux-gold, #8F6A35));
+    color: #fff;
 }
 
 .cache-management-page .btn-primary:hover {
-    background: var(--color-primary, #8A775F);
+    background: var(--color-primary, #766550);
     transform: translateY(-2px);
     box-shadow: 0 4px 12px rgba(138, 119, 95, 0.3);
 }
@@ -314,7 +314,7 @@
 .form-group select:focus,
 .form-group input:focus {
     outline: none;
-    border-color: var(--gold, var(--color-lux-gold, #B18247));
+    border-color: var(--gold, var(--color-lux-gold, #8F6A35));
 }
 
 /* Toggle switch */
@@ -362,7 +362,7 @@
 }
 
 input:checked+.slider {
-    background-color: var(--gold, var(--color-lux-gold, #B18247));
+    background-color: var(--gold, var(--color-lux-gold, #8F6A35));
 }
 
 input:checked+.slider:before {
@@ -406,12 +406,12 @@ input:checked+.slider:before {
 
 .cache-management-page .badge-main {
     background: rgba(138, 119, 95, 0.15);
-    color: var(--color-primary, #8A775F);
+    color: var(--color-primary, #766550);
 }
 
 .cache-management-page .badge-image {
     background: rgba(23, 162, 184, 0.15);
-    color: #17a2b8;
+    color: #0e6e80;
 }
 
 .cache-management-page .badge-page {
@@ -421,12 +421,12 @@ input:checked+.slider:before {
 
 .cache-management-page .badge-active {
     background: rgba(40, 167, 69, 0.15);
-    color: #28a745;
+    color: #166534;
 }
 
 .cache-management-page .badge-expired {
     background: rgba(220, 53, 69, 0.15);
-    color: #dc3545;
+    color: #b02a37;
 }
 
 /* =====================================================================
@@ -456,7 +456,7 @@ input:checked+.slider:before {
 }
 
 .cache-section h2 i {
-    color: var(--gold, var(--color-lux-gold, #8B7355));
+    color: var(--gold, var(--color-lux-gold, #7E684B));
 }
 
 .cache-stat-card {
@@ -525,9 +525,9 @@ input:checked+.slider:before {
 
 .content .btn-action.btn-save,
 .content .btn-action.btn-primary {
-    background: var(--color-primary, #8A775F);
+    background: var(--color-primary, #766550);
     color: #fff;
-    border-color: var(--color-primary, #8A775F);
+    border-color: var(--color-primary, #766550);
 }
 
 .content .btn-action.btn-save:hover,
@@ -639,7 +639,7 @@ input:checked+.slider:before {
 }
 
 .cache-checkbox-item i {
-    color: var(--color-primary, #8A775F);
+    color: var(--color-primary, #766550);
     width: 16px;
     text-align: center;
 }

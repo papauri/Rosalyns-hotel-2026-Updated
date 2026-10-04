@@ -194,7 +194,7 @@ function getAllRoles()
             'label' => 'Restaurant Staff',
             'description' => 'POS till operator — can only place orders, take payments and print/email receipts',
             'icon' => 'fa-cash-register',
-            'color' => '#8B7355',
+            'color' => '#7E684B',
             'level' => 20,
             'is_system' => true,
             'permissions' => [
@@ -1955,7 +1955,7 @@ function rhDenyAndRedirectHome(int $user_id, string $role, string $current_page,
         . '<div style="font-size:2rem;margin-bottom:10px;">&#128274;</div>'
         . '<h1 style="font-size:1.1rem;color:#3e3930;margin:0 0 10px;">No accessible pages</h1>'
         . '<p style="font-size:.9rem;color:#7a6f63;line-height:1.6;margin:0 0 20px;">Your account (' . htmlspecialchars($username) . ') does not currently have permission to view this area. Please contact your administrator.</p>'
-        . '<a href="logout.php" style="display:inline-block;background:#8B7355;color:#fff;padding:10px 22px;border-radius:4px;text-decoration:none;font-size:.9rem;">Sign out</a>'
+        . '<a href="logout.php" style="display:inline-block;background:#7E684B;color:#fff;padding:10px 22px;border-radius:4px;text-decoration:none;font-size:.9rem;">Sign out</a>'
         . '</div></body></html>';
     exit;
 }

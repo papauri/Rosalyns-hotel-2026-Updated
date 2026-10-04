@@ -470,7 +470,7 @@ $stockNounLow = $stockIsFood ? 'ingredient' : 'stock item';
 
     <div class="content stock-ingredients-page">
         <div class="page-header">
-            <h2 class="page-title"><i class="fas <?php echo $stockIsFood ? 'fa-carrot' : 'fa-boxes-stacked'; ?>" style="color:var(--color-primary,#8A775F);"></i> <?php echo $stockNounPl; ?></h2>
+            <h2 class="page-title"><i class="fas <?php echo $stockIsFood ? 'fa-carrot' : 'fa-boxes-stacked'; ?>" style="color:var(--color-primary,#766550);"></i> <?php echo $stockNounPl; ?></h2>
             <div style="display:flex; gap:8px; flex-wrap:wrap;">
                 <?php if (!empty($ingredients)): ?>
                     <a class="btn-secondary" href="?export=csv" style="display:inline-flex; align-items:center; gap:6px; text-decoration:none;" title="Download all <?php echo strtolower($stockNounPl); ?> as an Excel-compatible spreadsheet"><i class="fas fa-file-excel"></i> Export to Excel</a>
@@ -607,7 +607,7 @@ $stockNounLow = $stockIsFood ? 'ingredient' : 'stock item';
                                         <button onclick='openBatchesModal(<?php echo (int)$i['id']; ?>, <?php echo json_encode($i['name'], JSON_HEX_APOS | JSON_HEX_QUOT | JSON_HEX_TAG | JSON_HEX_AMP); ?>, <?php echo json_encode($i['unit'], JSON_HEX_APOS | JSON_HEX_QUOT | JSON_HEX_TAG | JSON_HEX_AMP); ?>)' title="View &amp; manage batches / expiry dates" style="<?php echo $hasBatches ? '' : 'opacity:0.6;'; ?>">
                                             <i class="fas fa-boxes-stacked"></i> Batches
                                             <?php if ($hasBatches): ?>
-                                                <span style="background:#8B7355;color:#fff;border-radius:10px;padding:1px 6px;font-size:10px;margin-left:4px;"><?php echo count($batchesByIngredient[(int)$i['id']]); ?></span>
+                                                <span style="background:#7E684B;color:#fff;border-radius:10px;padding:1px 6px;font-size:10px;margin-left:4px;"><?php echo count($batchesByIngredient[(int)$i['id']]); ?></span>
                                             <?php endif; ?>
                                         </button>
                                         <button class="btn-adjust" onclick='openAdjustModal(<?php echo (int)$i['id']; ?>, <?php echo json_encode($i['name'], JSON_HEX_APOS | JSON_HEX_QUOT | JSON_HEX_TAG | JSON_HEX_AMP); ?>, <?php echo json_encode($i['unit'], JSON_HEX_APOS | JSON_HEX_QUOT | JSON_HEX_TAG | JSON_HEX_AMP); ?>)'>
@@ -831,7 +831,7 @@ $stockNounLow = $stockIsFood ? 'ingredient' : 'stock item';
     <div class="modal-overlay" id="batchesModal">
         <div class="modal-content">
             <h3 style="display:flex;align-items:center;gap:10px;">
-                <i class="fas fa-boxes-stacked" style="color:#8B7355;"></i>
+                <i class="fas fa-boxes-stacked" style="color:#7E684B;"></i>
                 Batches: <span id="bm_name"></span>
                 <span style="font-weight:400; font-size:13px; color:#6c757d;">(unit: <span id="bm_unit"></span>)</span>
             </h3>
@@ -851,7 +851,7 @@ $stockNounLow = $stockIsFood ? 'ingredient' : 'stock item';
     <!-- Edit Single Batch Modal -->
     <div class="modal-overlay" id="editBatchModal">
         <div class="modal-content" style="max-width:520px;">
-            <h3>Edit Batch <span id="eb_batchno" style="color:#8B7355;"></span></h3>
+            <h3>Edit Batch <span id="eb_batchno" style="color:#7E684B;"></span></h3>
             <form method="POST">
                 <input type="hidden" name="csrf_token" value="<?php echo $csrf_token; ?>">
                 <input type="hidden" name="action" value="update_batch">

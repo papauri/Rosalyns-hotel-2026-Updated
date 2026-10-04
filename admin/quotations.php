@@ -327,7 +327,7 @@ try {
 
     <div class="admin-container">
         <div class="qt-header">
-            <h1><i class="fas fa-file-invoice-dollar" style="color:#B18247;"></i> Quotations</h1>
+            <h1><i class="fas fa-file-invoice-dollar" style="color:#8F6A35;"></i> Quotations</h1>
             <div style="display:flex;gap:10px;align-items:center;">
                 <?php if ($qt_mod_bookings): ?>
                 <a href="bookings.php" class="btn btn-secondary" style="font-size:13px;padding:7px 14px;">
@@ -422,12 +422,12 @@ try {
         if ($scopeActive && ($hiddenScopedCount ?? 0) > 0): ?>
             <div style="background:#faf8f4; border:1px solid #e5d9c9; border-radius:10px; padding:10px 14px; margin:0 0 14px; display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap; font-size:13px; color:#7a6f63;">
                 <span><i class="fas fa-filter" style="margin-right:6px;"></i>Showing quotations for your active modules only (<?php echo number_format($hiddenScopedCount); ?> older record<?php echo (int)$hiddenScopedCount === 1 ? '' : 's'; ?> from disabled modules hidden).</span>
-                <a href="?<?php echo htmlspecialchars(http_build_query(array_merge($scopeQs, ['scope' => 'all']))); ?>" style="color:#8B7355; font-weight:600; text-decoration:none;">Show all history &rarr;</a>
+                <a href="?<?php echo htmlspecialchars(http_build_query(array_merge($scopeQs, ['scope' => 'all']))); ?>" style="color:#7E684B; font-weight:600; text-decoration:none;">Show all history &rarr;</a>
             </div>
         <?php elseif ($scopeAll && $filter_type === ''): ?>
             <div style="background:#faf8f4; border:1px solid #e5d9c9; border-radius:10px; padding:10px 14px; margin:0 0 14px; display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap; font-size:13px; color:#7a6f63;">
                 <span><i class="fas fa-clock-rotate-left" style="margin-right:6px;"></i>Showing full quotation history, including records from disabled modules.</span>
-                <a href="?<?php echo htmlspecialchars(http_build_query($scopeQs)); ?>" style="color:#8B7355; font-weight:600; text-decoration:none;">Show relevant only &rarr;</a>
+                <a href="?<?php echo htmlspecialchars(http_build_query($scopeQs)); ?>" style="color:#7E684B; font-weight:600; text-decoration:none;">Show relevant only &rarr;</a>
             </div>
         <?php endif; ?>
 

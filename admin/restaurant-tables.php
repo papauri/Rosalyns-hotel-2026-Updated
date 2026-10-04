@@ -1184,7 +1184,7 @@ foreach ($tables as $table) {
     <!-- Post-settlement receipt modal -->
     <div class="rt-modal-overlay" id="rtReceiptModal" aria-hidden="true">
         <div class="rt-modal-card" role="dialog" aria-modal="true" aria-labelledby="rt-receipt-title" style="max-width:540px;">
-            <div class="rt-modal-head" style="background:linear-gradient(135deg,#1d6a3e,#22c55e);color:#fff;border-radius:12px 12px 0 0;">
+            <div class="rt-modal-head" style="background:linear-gradient(135deg,#1d6a3e,#15803d);color:#fff;border-radius:12px 12px 0 0;">
                 <div style="display:flex;align-items:center;gap:12px;">
                     <div style="width:38px;height:38px;background:rgba(255,255,255,.2);border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:17px;flex-shrink:0;"><i class="fas fa-check"></i></div>
                     <div>
@@ -1197,13 +1197,13 @@ foreach ($tables as $table) {
             <div class="rt-modal-body">
                 <div id="rtReceiptSummary" style="background:#f0fdf4;border:1px solid #bbf7d0;border-radius:10px;padding:14px 16px;margin-bottom:16px;display:grid;grid-template-columns:1fr 1fr;gap:8px;font-size:13px;"></div>
                 <div style="font-size:13px;font-weight:700;color:#374151;margin-bottom:10px;display:flex;align-items:center;gap:6px;">
-                    <i class="fas fa-paper-plane" style="color:#8B7355;"></i> Send receipt to guest
+                    <i class="fas fa-paper-plane" style="color:#7E684B;"></i> Send receipt to guest
                 </div>
                 <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:14px;">
                     <div>
                         <label style="font-size:11px;font-weight:600;color:#6c757d;display:block;margin-bottom:4px;">Email</label>
                         <input type="email" id="rtReceiptEmail" placeholder="guest@example.com" style="width:100%;box-sizing:border-box;min-height:36px;border:1px solid #d1d5db;border-radius:7px;padding:7px 10px;font-size:12px;margin-bottom:6px;">
-                        <button type="button" id="rtReceiptEmailBtn" onclick="rtSendReceipt('email')" style="width:100%;padding:8px;background:#3b82f6;color:#fff;border:none;border-radius:7px;font-size:12px;font-weight:600;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:6px;"><i class="fas fa-envelope"></i> Send email</button>
+                        <button type="button" id="rtReceiptEmailBtn" onclick="rtSendReceipt('email')" style="width:100%;padding:8px;background:#2563eb;color:#fff;border:none;border-radius:7px;font-size:12px;font-weight:600;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:6px;"><i class="fas fa-envelope"></i> Send email</button>
                         <div id="rtReceiptEmailStatus" style="font-size:11px;margin-top:4px;min-height:14px;"></div>
                     </div>
                     <div>

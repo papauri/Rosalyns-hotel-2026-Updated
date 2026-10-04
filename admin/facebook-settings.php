@@ -175,7 +175,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
             <!-- API Credentials -->
             <div class="settings-card fb-card">
-                <h2><i class="fas fa-key" style="color:var(--color-lux-gold,#B18247);"></i> Page Credentials</h2>
+                <h2><i class="fas fa-key" style="color:var(--color-lux-gold,#8F6A35);"></i> Page Credentials</h2>
 
                 <div class="form-group">
                     <label style="display:flex;align-items:center;gap:10px;cursor:pointer;">
@@ -252,7 +252,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
             <!-- Posting options -->
             <div class="settings-card">
-                <h2><i class="fas fa-share-alt" style="color:var(--color-lux-gold,#B18247);"></i> Posting Options</h2>
+                <h2><i class="fas fa-share-alt" style="color:var(--color-lux-gold,#8F6A35);"></i> Posting Options</h2>
 
                 <div class="form-group">
                     <label for="facebook_default_hashtags"><strong>Default Hashtags</strong></label>
@@ -311,7 +311,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
         <!-- Test post — real-time AJAX -->
         <div class="settings-card" style="margin-top:32px;">
-            <h2><i class="fas fa-vial" style="color:var(--color-lux-gold,#B18247);"></i> Test Post</h2>
+            <h2><i class="fas fa-vial" style="color:var(--color-lux-gold,#8F6A35);"></i> Test Post</h2>
             <p class="help-text" style="margin-bottom:20px;">
                 Send a test post to your Facebook Page to confirm the token and page ID are working correctly.
                 This will publish a real post — delete it from your Page afterwards if you don't want it to remain.

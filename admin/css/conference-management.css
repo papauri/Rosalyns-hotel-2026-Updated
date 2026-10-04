@@ -42,7 +42,7 @@
 
 .conference-card:hover {
     transform: translateY(-1px);
-    border-color: color-mix(in srgb, var(--gold, #8B7355) 38%, var(--admin-surface-border, #e5e7eb) 62%);
+    border-color: color-mix(in srgb, var(--gold, #7E684B) 38%, var(--admin-surface-border, #e5e7eb) 62%);
     box-shadow: 0 10px 24px rgba(15, 23, 42, 0.08);
 }
 
@@ -144,7 +144,7 @@
 }
 
 .detail-item i {
-    color: var(--gold, #8B7355);
+    color: var(--gold, #7E684B);
     width: 14px;
 }
 
@@ -155,7 +155,7 @@
 }
 
 .detail-item-price i {
-    color: var(--gold, #8B7355);
+    color: var(--gold, #7E684B);
 }
 
 .conference-card-meta {
@@ -177,7 +177,7 @@
 }
 
 .conference-card-amenities i {
-    color: var(--gold, #8B7355);
+    color: var(--gold, #7E684B);
     margin-right: 4px;
 }
 
@@ -297,7 +297,7 @@
     width: 100%;
     padding: 8px 12px;
     border-radius: 8px;
-    background: var(--gold, #8B7355);
+    background: var(--gold, #7E684B);
     color: #fff;
     border: none;
     font-family: inherit;
@@ -321,7 +321,7 @@
 .fb-conf-all-banner {
     margin-top: 20px;
     border-radius: 12px;
-    background: linear-gradient(135deg, #1877F2 0%, #0d47a1 100%);
+    background: linear-gradient(135deg, #1259b3 0%, #0d47a1 100%);
     color: #fff;
     padding: 18px 24px;
     display: flex;
@@ -508,7 +508,7 @@
 }
 
 .room-meta i {
-    color: var(--gold, #8B7355);
+    color: var(--gold, #7E684B);
 }
 
 .room-form-section {
@@ -671,7 +671,7 @@
 }
 
 .conference-enquiries-title i {
-    color: var(--gold, #8B7355);
+    color: var(--gold, #7E684B);
 }
 
 .conference-enquiries-card .table-container {

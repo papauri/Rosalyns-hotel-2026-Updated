@@ -2048,7 +2048,7 @@ if ($posCanStations) {
     <title>POS Till — <?php echo htmlspecialchars($siteName); ?></title>
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, viewport-fit=cover">
     <?php require_once __DIR__ . '/includes/page-zoom.php'; rh_page_zoom_bootstrap(); ?>
-    <meta name="theme-color" content="#8B7355">
+    <meta name="theme-color" content="#7E684B">
     <meta name="mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -2089,7 +2089,7 @@ if ($posCanStations) {
             margin: 0 auto 10px;
             border-radius: 50%;
             border: 3px solid rgba(138, 119, 95, 0.22);
-            border-top-color: #8a775f;
+            border-top-color: #766550;
             animation: pos-loader-boot-spin .7s linear infinite;
         }
 
@@ -2241,8 +2241,8 @@ if ($posCanStations) {
             cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 5px;
         }
         .cc-act:active { background: rgba(255,255,255,0.16); }
-        .cc-act.is-pay { background: #16a34a; border-color: #15803d; color: #fff; flex: 2; font-size: 13px; }
-        .cc-act.is-pay:active { background: #15803d; }
+        .cc-act.is-pay { background: #15803d; border-color: #166534; color: #fff; flex: 2; font-size: 13px; }
+        .cc-act.is-pay:active { background: #166534; }
         /* Feed item X button */
         .fi-rm { background: none; border: none; color: rgba(255,255,255,0.28); font-size: 13px; cursor: pointer; padding: 4px 2px; line-height: 1; flex-shrink: 0; }
         .fi-rm:active { color: #f87171; }
@@ -2687,9 +2687,9 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
                         <span id="payKitchenWarningText"></span>
                     </div>
                     <div id="paySvcSummary" style="background:#f8fafc; border:1px solid #e5e7eb; border-radius:8px; padding:8px 12px; margin-bottom:12px; font-size:12.5px; color:#475569; display:flex; align-items:center; gap:8px;">
-                        <i class="fas fa-info-circle" style="color:#8B7355;"></i>
+                        <i class="fas fa-info-circle" style="color:#7E684B;"></i>
                         <span id="paySvcSummaryText">Walk-in</span>
-                        <button type="button" onclick="closePayModal()" style="margin-left:auto; background:transparent; border:none; color:#8B7355; font-size:12px; cursor:pointer; text-decoration:underline;">Change</button>
+                        <button type="button" onclick="closePayModal()" style="margin-left:auto; background:transparent; border:none; color:#7E684B; font-size:12px; cursor:pointer; text-decoration:underline;">Change</button>
                     </div>
 
                     <?php /* Payment method sits first: it is the one choice every sale needs, so on a
@@ -2839,8 +2839,8 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
                 <?php if (!$justParked): ?>
                     <div style="margin-top:14px;padding:12px 12px 10px;border:1px solid #e5e7eb;border-radius:10px;background:#fbfaf7;text-align:left;">
                         <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:8px;">
-                            <strong style="font-size:13px;color:#3f3a33;"><i class="fas fa-paper-plane" style="color:#8B7355;margin-right:6px;"></i>Send receipt now</strong>
-                            <?php if (rhCanLinkTo((int)$user['id'], 'whatsapp-settings.php')): ?><a href="whatsapp-settings.php" target="_blank" rel="noopener" style="font-size:11px;color:#8B7355;text-decoration:none;"><i class="fas fa-sliders"></i> WhatsApp setup</a><?php endif; ?>
+                            <strong style="font-size:13px;color:#3f3a33;"><i class="fas fa-paper-plane" style="color:#7E684B;margin-right:6px;"></i>Send receipt now</strong>
+                            <?php if (rhCanLinkTo((int)$user['id'], 'whatsapp-settings.php')): ?><a href="whatsapp-settings.php" target="_blank" rel="noopener" style="font-size:11px;color:#7E684B;text-decoration:none;"><i class="fas fa-sliders"></i> WhatsApp setup</a><?php endif; ?>
                         </div>
                         <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">
                             <form method="POST" action="stock-receipt.php?id=<?php echo (int)$lastOrderId; ?>" target="_blank" style="display:grid;gap:6px;">
@@ -3283,7 +3283,7 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
                     <h3 style="margin:0;"><i class="fas fa-credit-card"></i> Settle tab</h3>
                     <button class="close modal-close" onclick="closePayTabOverlay()">&times;</button>
                 </div>
-                <div id="payTabSplitStep" style="display:none;font-size:12px;color:#8B7355;font-weight:600;padding-left:2px;"></div>
+                <div id="payTabSplitStep" style="display:none;font-size:12px;color:#7E684B;font-weight:600;padding-left:2px;"></div>
             </div>
             <form method="POST" id="payTabForm">
                 <input type="hidden" name="csrf_token" value="<?php echo $csrf_token; ?>">
@@ -3309,7 +3309,7 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
                     <!-- Split bill selector -->
                     <div style="background:#f8f9fa;border-radius:8px;padding:10px 12px;margin-bottom:10px;">
                         <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
-                            <span style="font-size:13px;font-weight:600;color:#374151;white-space:nowrap;"><i class="fas fa-users" style="color:#8B7355;margin-right:4px;"></i>Split bill</span>
+                            <span style="font-size:13px;font-weight:600;color:#374151;white-space:nowrap;"><i class="fas fa-users" style="color:#7E684B;margin-right:4px;"></i>Split bill</span>
                             <div style="display:flex;gap:5px;flex-wrap:wrap;" id="payTabSplitWays">
                                 <button type="button" class="split-way-btn active" data-ways="1" onclick="ptSetSplitWays(1)">Off</button>
                                 <button type="button" class="split-way-btn" data-ways="2" onclick="ptSetSplitWays(2)">2</button>
@@ -3420,7 +3420,7 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
     <!-- Post-payment receipt modal -->
     <div class="overlay modal-overlay" id="receiptModal" style="z-index:100002;">
         <div class="modal modal-content" style="width:520px;max-width:96vw;">
-            <div class="modal-head modal-header" style="background:linear-gradient(135deg,#1d6a3e,#22c55e);color:#fff;border-radius:12px 12px 0 0;">
+            <div class="modal-head modal-header" style="background:linear-gradient(135deg,#1d6a3e,#15803d);color:#fff;border-radius:12px 12px 0 0;">
                 <div style="display:flex;align-items:center;gap:12px;">
                     <div style="width:40px;height:40px;background:rgba(255,255,255,.2);border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:18px;"><i class="fas fa-check"></i></div>
                     <div>
@@ -3436,13 +3436,13 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
                 </div>
                 <!-- Send receipt section -->
                 <div style="font-size:13px;font-weight:700;color:#374151;margin-bottom:10px;display:flex;align-items:center;gap:6px;">
-                    <i class="fas fa-paper-plane" style="color:#8B7355;"></i> Send receipt to guest
+                    <i class="fas fa-paper-plane" style="color:#7E684B;"></i> Send receipt to guest
                 </div>
                 <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:14px;">
                     <div>
                         <label style="font-size:11px;font-weight:600;color:#6c757d;display:block;margin-bottom:4px;">Email</label>
                         <input type="email" id="rmEmail" placeholder="guest@example.com" style="width:100%;box-sizing:border-box;min-height:36px;border:1px solid #d1d5db;border-radius:7px;padding:7px 10px;font-size:12px;margin-bottom:6px;">
-                        <button type="button" id="rmEmailBtn" onclick="sendPosReceipt('email')" style="width:100%;padding:8px;background:#3b82f6;color:#fff;border:none;border-radius:7px;font-size:12px;font-weight:600;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:6px;"><i class="fas fa-envelope"></i> Send email</button>
+                        <button type="button" id="rmEmailBtn" onclick="sendPosReceipt('email')" style="width:100%;padding:8px;background:#2563eb;color:#fff;border:none;border-radius:7px;font-size:12px;font-weight:600;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:6px;"><i class="fas fa-envelope"></i> Send email</button>
                         <div id="rmEmailStatus" style="font-size:11px;margin-top:4px;min-height:14px;"></div>
                     </div>
                     <div>
@@ -5247,7 +5247,7 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
             listEl.innerHTML = rows.map(row => {
                 const isReceived = row.direction === 'received';
                 const bg = isReceived ? '#fffbeb' : '#f5f3ff';
-                const border = isReceived ? '#f59e0b' : '#8B7355';
+                const border = isReceived ? '#f59e0b' : '#7E684B';
                 const icon = isReceived ? 'fa-inbox' : 'fa-paper-plane';
                 const dirLabel = isReceived ? 'Received' : 'Sent';
                 const urgentTag = row.urgent ? '<span style="margin-left:6px;background:#c82333;color:#fff;border-radius:9px;padding:1px 6px;font-size:10px;font-weight:700;">URGENT</span>' : '';
@@ -10115,7 +10115,7 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
                         '<td style="padding:7px 8px;text-align:right;">' + currencySymbol + ' ' + fmtMoney(o.total_amount) + '</td>' +
                         '<td style="padding:7px 8px;text-align:center;color:#6c757d;">' + escHtml(time) + '</td>' +
                         '<td style="padding:7px 8px;white-space:nowrap;">' +
-                        '<button type="button" onclick="openPosPageModal(&quot;order-lifecycle.php?embed=1&amp;id=' + o.id + '&quot;,&quot;Timeline&quot;,&quot;fas fa-stream&quot;)" style="font-size:11px;color:#8B7355;background:none;border:0;cursor:pointer;padding:0;font:inherit;" title="Lifecycle log">Log</button>' +
+                        '<button type="button" onclick="openPosPageModal(&quot;order-lifecycle.php?embed=1&amp;id=' + o.id + '&quot;,&quot;Timeline&quot;,&quot;fas fa-stream&quot;)" style="font-size:11px;color:#7E684B;background:none;border:0;cursor:pointer;padding:0;font:inherit;" title="Lifecycle log">Log</button>' +
                         '</td></tr>';
                 });
                 html += '</tbody></table>';

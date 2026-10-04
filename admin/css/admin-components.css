@@ -96,17 +96,17 @@ tr.rh-flash-group > td {
     --modal-header-bg: linear-gradient(135deg, var(--color-surface-soft, #F4EFE9) 0%, var(--color-surface-stone, #EEE6DC) 100%);
     --modal-header-color: var(--deep-navy, #111827);
     --modal-close-color: var(--deep-navy, #111827);
-    --modal-close-hover: var(--color-primary, #8A775F);
-    --rh-modal-header-bg: radial-gradient(circle at 92% -12%, color-mix(in srgb, var(--color-primary, #B18247) 22%, transparent) 0%, transparent 62%), linear-gradient(135deg, color-mix(in srgb, var(--color-background, #F7F3EE) 82%, var(--color-white, #fff)) 0%, color-mix(in srgb, var(--color-background, #F7F3EE) 58%, var(--color-white, #fff)) 100%);
+    --modal-close-hover: var(--color-primary, #766550);
+    --rh-modal-header-bg: radial-gradient(circle at 92% -12%, color-mix(in srgb, var(--color-primary, #8F6A35) 22%, transparent) 0%, transparent 62%), linear-gradient(135deg, color-mix(in srgb, var(--color-background, #F7F3EE) 82%, var(--color-white, #fff)) 0%, color-mix(in srgb, var(--color-background, #F7F3EE) 58%, var(--color-white, #fff)) 100%);
     --rh-modal-header-border: var(--admin-surface-border, #d7dde6);
     --rh-modal-title-color: var(--color-text-primary, #2A2723);
-    --rh-modal-title-icon-bg: color-mix(in srgb, var(--color-primary, #B18247) 16%, var(--color-white, #fff));
-    --rh-modal-title-icon-color: color-mix(in srgb, var(--color-primary, #B18247) 70%, var(--color-text-primary, #2A2723));
+    --rh-modal-title-icon-bg: color-mix(in srgb, var(--color-primary, #8F6A35) 16%, var(--color-white, #fff));
+    --rh-modal-title-icon-color: color-mix(in srgb, var(--color-primary, #8F6A35) 70%, var(--color-text-primary, #2A2723));
     --rh-modal-close-bg: color-mix(in srgb, var(--color-white, #fff) 88%, var(--color-background, #F7F3EE));
     --rh-modal-close-border: color-mix(in srgb, var(--rh-modal-header-border) 82%, var(--rh-modal-title-color));
-    --rh-modal-close-hover-bg: color-mix(in srgb, var(--color-primary, #B18247) 12%, var(--color-white, #fff));
-    --rh-modal-close-hover-border: color-mix(in srgb, var(--color-primary, #B18247) 52%, var(--rh-modal-title-color));
-    --rh-modal-close-hover-color: color-mix(in srgb, var(--color-primary, #B18247) 70%, var(--rh-modal-title-color));
+    --rh-modal-close-hover-bg: color-mix(in srgb, var(--color-primary, #8F6A35) 12%, var(--color-white, #fff));
+    --rh-modal-close-hover-border: color-mix(in srgb, var(--color-primary, #8F6A35) 52%, var(--rh-modal-title-color));
+    --rh-modal-close-hover-color: color-mix(in srgb, var(--color-primary, #8F6A35) 70%, var(--rh-modal-title-color));
     /* Alert variables */
     --rh-toast-radius: 10px;
     --rh-toast-shadow: 0 4px 24px rgba(0,0,0,0.11), 0 1px 6px rgba(0,0,0,0.07);
@@ -357,7 +357,7 @@ tr.rh-flash-group > td {
 }
 
 .modal-close:focus {
-    outline: 2px solid var(--gold, #8B7355);
+    outline: 2px solid var(--gold, #7E684B);
     outline-offset: 2px;
 }
 
@@ -1119,7 +1119,7 @@ body.modal-open {
     justify-content: center;
     gap: 8px;
     margin-bottom: 14px;
-    color: #8B7355;
+    color: #7E684B;
     font-family: 'Jost', sans-serif;
     font-size: 12px;
     font-weight: 600;
@@ -1166,8 +1166,8 @@ body.modal-open {
     inset: 0;
     border-radius: 50%;
     border: 4px solid transparent;
-    border-top-color: #B18247;
-    border-right-color: #B18247;
+    border-top-color: #8F6A35;
+    border-right-color: #8F6A35;
     animation: adminLoaderSpin 0.8s cubic-bezier(0.55, 0.055, 0.675, 0.19) infinite;
 }
 
@@ -1187,7 +1187,7 @@ body.modal-open {
     width: 10px;
     height: 10px;
     border-radius: 50%;
-    background: #B18247;
+    background: #8F6A35;
     animation: adminLoaderPulse 0.8s ease-in-out infinite alternate;
 }
 
@@ -1232,7 +1232,7 @@ body.modal-open {
     width: 60%;
     height: 100%;
     border-radius: inherit;
-    background: linear-gradient(90deg, transparent 0%, #B18247 40%, #d4a84b 60%, transparent 100%);
+    background: linear-gradient(90deg, transparent 0%, #8F6A35 40%, #d4a84b 60%, transparent 100%);
     animation: adminLoaderShimmer 1.4s ease-in-out infinite;
 }
 
@@ -1418,8 +1418,8 @@ body.modal-open {
 }
 
 :is(.admin-content, #rh-admin-page) :is(.bookings-pagination, .pagination, .log-table-pagination, .receipts-pagination, .pagination-bar, .inv-pagination) :is(.pg-current, .pagination .current, .pagination span.active, .pagination-item--active, a.acct-btn--primary, span.acct-btn--primary) {
-    border: 1px solid #8A775F !important;
-    background: #8A775F !important;
+    border: 1px solid #766550 !important;
+    background: #766550 !important;
     color: #fff !important;
     font-weight: 600 !important;
 }
@@ -1753,13 +1753,13 @@ body.modal-open {
 
 .btn-action:hover {
     background: #F7F3EE;
-    border-color: #8A775F;
+    border-color: #766550;
     color: #2A2723;
     text-decoration: none;
 }
 
 .btn-action:focus-visible {
-    outline: 2px solid #8A775F;
+    outline: 2px solid #766550;
     outline-offset: 2px;
 }
 
@@ -1791,7 +1791,7 @@ body.modal-open {
 
 .btn-action.btn-regenerate {
     background: #fff7ed;
-    color: #b7791f;
+    color: #8a5a0f;
     border-color: #fed7aa;
 }
 .btn-action.btn-regenerate:hover { background: #ffedd5; }
@@ -1948,7 +1948,7 @@ body.modal-open {
 }
 
 :is(.admin-content, #rh-admin-page) .btn:focus-visible {
-    outline: 0.12rem solid color-mix(in srgb, var(--au-accent-deep, var(--color-primary, #8A775F)) 42%, transparent);
+    outline: 0.12rem solid color-mix(in srgb, var(--au-accent-deep, var(--color-primary, #766550)) 42%, transparent);
     outline-offset: 0.1rem;
 }
 
@@ -2399,7 +2399,7 @@ body.modal-open {
 
 /* Accessibility: Focus visible for quick action buttons */
 .quick-action:focus-visible {
-    outline: 2px solid var(--gold, #8B7355);
+    outline: 2px solid var(--gold, #7E684B);
     outline-offset: 2px;
 }
 
@@ -2525,7 +2525,7 @@ body.modal-open {
 }
 
 :is(.modal-overlay, .overlay, .modal, .admin-modal, .modal-wrapper, .modal__wrapper, .modal-container, .modal__container) :is(.modal-header, .modal__header, .admin-modal__header, .modal-head) :is(.close-modal, .modal-close, .close, .modal__close):focus-visible {
-    outline: 2px solid var(--color-primary, #B18247) !important;
+    outline: 2px solid var(--color-primary, #8F6A35) !important;
     outline-offset: 1px !important;
 }
 
@@ -2558,7 +2558,7 @@ body.modal-open {
     align-items: center;
     gap: 6px;
     padding: 9px 18px;
-    background: linear-gradient(135deg, var(--color-primary, #8A775F) 0%, #6f5b43 100%);
+    background: linear-gradient(135deg, var(--color-primary, #766550) 0%, #6f5b43 100%);
     color: #fff;
     border: none;
     border-radius: 7px;
@@ -2616,7 +2616,7 @@ body.modal-open {
 }
 
 .inquiry-details .detail-item a {
-    color: var(--gold, #8B7355);
+    color: var(--gold, #7E684B);
     text-decoration: none;
 }
 
@@ -2719,7 +2719,7 @@ body.modal-open {
 /* Per-status colour theming */
 .status-pill-select[data-status="new"]       { --sp-color: #0f7c8c; --sp-tint: rgba(23, 162, 184, 0.12); }
 .status-pill-select[data-status="contacted"] { --sp-color: #a07800; --sp-tint: rgba(255, 193, 7, 0.16); }
-.status-pill-select[data-status="confirmed"] { --sp-color: #8B7355; --sp-tint: rgba(139, 115, 85, 0.14); }
+.status-pill-select[data-status="confirmed"] { --sp-color: #7E684B; --sp-tint: rgba(139, 115, 85, 0.14); }
 .status-pill-select[data-status="converted"] { --sp-color: #1e7e34; --sp-tint: rgba(40, 167, 69, 0.13); }
 .status-pill-select[data-status="closed"]    { --sp-color: #5a6268; --sp-tint: rgba(108, 117, 125, 0.12); }
 .status-pill-select[data-status="cancelled"] { --sp-color: #c82333; --sp-tint: rgba(220, 53, 69, 0.12); }

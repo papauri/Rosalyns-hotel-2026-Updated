@@ -28,7 +28,7 @@
 }
 
 .menu-card:hover {
-    border-color: var(--color-primary, #8A775F);
+    border-color: var(--color-primary, #766550);
     box-shadow: 0 2px 6px rgba(0, 0, 0, 0.08);
 }
 
@@ -43,7 +43,7 @@
 }
 
 .menu-card .price {
-    color: var(--color-primary, #8A775F);
+    color: var(--color-primary, #766550);
     margin-top: 5px;
     font-size: 14px;
     font-weight: 600;
@@ -130,7 +130,7 @@
 }
 
 .btn-primary {
-    background: var(--color-primary, #8A775F);
+    background: var(--color-primary, #766550);
     color: #fff;
     border: none;
     padding: 11px 18px;
@@ -256,13 +256,13 @@
 }
 
 .pay-btn:hover {
-    border-color: var(--color-primary, #8A775F);
+    border-color: var(--color-primary, #766550);
 }
 
 .pay-btn.active {
-    border-color: var(--color-primary, #8A775F);
+    border-color: var(--color-primary, #766550);
     background: #fdf6ee;
-    color: var(--color-primary, #8A775F);
+    color: var(--color-primary, #766550);
 }
 
 .pay-btn.disabled {
@@ -322,13 +322,13 @@
 a.shift-card:hover,
 .shift-card.is-link:hover {
     box-shadow: 0 3px 10px rgba(0, 0, 0, 0.08);
-    border-color: var(--color-primary, #8A775F);
+    border-color: var(--color-primary, #766550);
     transform: translateY(-1px);
     cursor: pointer;
 }
 
 .shift-card.active {
-    border-color: var(--color-primary, #8A775F);
+    border-color: var(--color-primary, #766550);
     background: #fdf6ee;
 }
 
@@ -356,12 +356,12 @@ a.shift-card:hover,
 
 .shift-card--interactive:hover {
     box-shadow: 0 8px 16px rgba(0, 0, 0, 0.09);
-    border-color: var(--color-primary, #8A775F);
+    border-color: var(--color-primary, #766550);
     transform: translateY(-2px);
 }
 
 .shift-card--interactive:focus-visible {
-    outline: 2px solid var(--color-primary, #8A775F);
+    outline: 2px solid var(--color-primary, #766550);
     outline-offset: 2px;
 }
 
@@ -369,7 +369,7 @@ a.shift-card:hover,
     margin-top: 8px;
     font-size: 11px;
     font-weight: 600;
-    color: var(--color-primary, #8A775F);
+    color: var(--color-primary, #766550);
     display: inline-flex;
     align-items: center;
     gap: 5px;
@@ -465,7 +465,7 @@ a.shift-card:hover,
 .health-panel.warn,
 .ops-panel--warn,
 .ops-banner--warn {
-    border-color: var(--color-lux-gold, #B18247);
+    border-color: var(--color-lux-gold, #8F6A35);
     background: var(--color-lux-clay-50, #F3ECE4);
 }
 
@@ -478,7 +478,7 @@ a.shift-card:hover,
 }
 
 .ops-banner--ok {
-    border-color: var(--color-primary, #8A775F);
+    border-color: var(--color-primary, #766550);
 }
 
 .ops-banner__content {
@@ -495,7 +495,7 @@ a.shift-card:hover,
 
 .ops-banner__action,
 .ops-panel__header-link {
-    color: var(--color-primary, #8A775F);
+    color: var(--color-primary, #766550);
     font-weight: 600;
     text-decoration: none;
     white-space: nowrap;
@@ -531,7 +531,7 @@ a.shift-card:hover,
 
 .ops-panel__metric-link--active,
 .ops-panel__chart-link--active {
-    border-color: var(--color-primary, #8A775F);
+    border-color: var(--color-primary, #766550);
     background: var(--color-lux-clay-50, #F3ECE4);
 }
 
@@ -545,7 +545,7 @@ a.shift-card:hover,
 .ops-banner:focus-visible,
 .ops-panel__header-link:focus-visible,
 .ops-panel__reason-link:focus-visible {
-    outline: 2px solid var(--color-primary, #8A775F);
+    outline: 2px solid var(--color-primary, #766550);
     outline-offset: 2px;
 }
 
@@ -666,8 +666,8 @@ a.shift-card:hover,
 }
 
 .mini-action.primary {
-    border-color: var(--color-primary, #8A775F);
-    color: var(--color-primary, #8A775F);
+    border-color: var(--color-primary, #766550);
+    color: var(--color-primary, #766550);
 }
 
 .mini-action.warn {

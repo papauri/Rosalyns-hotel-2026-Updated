@@ -217,6 +217,16 @@ $bootstrap['fingerprint'] = md5(
     <style>
         :root {
             --kds-station-color: <?php echo $STATION_COLOR; ?>;
+            --kds-station-ink: <?php // dark or white text, whichever reads better on the station colour
+                $_sc = ltrim((string)$STATION_COLOR, '#');
+                $_l = 0;
+                if (preg_match('/^[0-9a-fA-F]{6}$/', $_sc)) {
+                    foreach ([0.2126, 0.7152, 0.0722] as $_i => $_w) {
+                        $_v = hexdec(substr($_sc, $_i * 2, 2)) / 255;
+                        $_l += $_w * ($_v <= 0.03928 ? $_v / 12.92 : pow(($_v + 0.055) / 1.055, 2.4));
+                    }
+                }
+                echo $_l > 0.18 ? '#231f1c' : '#ffffff'; ?>;
         }
     </style>
     <script src="js/station-sounds.js"></script>
@@ -489,7 +499,7 @@ $bootstrap['fingerprint'] = md5(
                 <p id="kds-86-desc" style="margin:0 0 14px; font-size:14px; line-height:1.5;"></p>
                 <p style="margin:0 0 14px; font-size:13px; opacity:.7;">FOH will be notified so the cashier can apologise to the guest and offer an alternative.</p>
                 <div style="display:flex; gap:8px;">
-                    <button id="kds-86-confirm-btn" style="flex:1; padding:12px 0; background:#e67e22; border:none; border-radius:8px; color:#fff; font-size:15px; font-weight:700; cursor:pointer;" onclick="confirm86Item()"><i class="fas fa-ban"></i> 86 this item</button>
+                    <button id="kds-86-confirm-btn" style="flex:1; padding:12px 0; background:#b45309; border:none; border-radius:8px; color:#fff; font-size:15px; font-weight:700; cursor:pointer;" onclick="confirm86Item()"><i class="fas fa-ban"></i> 86 this item</button>
                     <button style="flex:0 0 auto; padding:12px 16px; background:rgba(255,255,255,.1); border:none; border-radius:8px; color:inherit; cursor:pointer; font-size:15px;" onclick="close86Modal()">Keep</button>
                 </div>
             </div>

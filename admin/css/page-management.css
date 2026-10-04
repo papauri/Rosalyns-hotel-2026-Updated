@@ -4,7 +4,7 @@
     align-items: flex-start;
     padding: 12px 14px;
     border: 1px solid #e6dcc9;
-    border-left: 4px solid var(--gold, #8B7355);
+    border-left: 4px solid var(--gold, #7E684B);
     border-radius: 10px;
     background: #fffaf1;
     margin-bottom: 18px;
@@ -178,7 +178,7 @@
 
 .page-management-page .btn-save-order,
 .page-management-page .btn-submit {
-    background: var(--gold, #8B7355);
+    background: var(--gold, #7E684B);
     color: #fff;
 }
 

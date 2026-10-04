@@ -201,7 +201,7 @@ function expiry_tier(?string $expiry, ?int $days): array
 
     <div class="content">
         <div class="page-header">
-            <h2 class="page-title"><i class="fas fa-layer-group" style="color:var(--color-primary,#8A775F);"></i> Batch Tracker</h2>
+            <h2 class="page-title"><i class="fas fa-layer-group" style="color:var(--color-primary,#766550);"></i> Batch Tracker</h2>
             <a href="stock-ingredients.php" class="btn-add"><i class="fas fa-truck-loading"></i> Receive Stock</a>
         </div>
 
@@ -455,7 +455,7 @@ function expiry_tier(?string $expiry, ?int $days): array
                     $pgActive = ($pg === $batches_page);
                 ?>
                     <a href="<?php echo htmlspecialchars($pgHref, ENT_QUOTES, 'UTF-8'); ?>"
-                        style="padding:6px 12px;border:1px solid <?php echo $pgActive ? 'var(--color-primary,#8A775F)' : '#dee2e6'; ?>;background:<?php echo $pgActive ? 'var(--color-primary,#8A775F)' : '#fff'; ?>;color:<?php echo $pgActive ? '#fff' : '#374151'; ?>;border-radius:4px;font-size:13px;text-decoration:none;"><?php echo $pg; ?></a>
+                        style="padding:6px 12px;border:1px solid <?php echo $pgActive ? 'var(--color-primary,#766550)' : '#dee2e6'; ?>;background:<?php echo $pgActive ? 'var(--color-primary,#766550)' : '#fff'; ?>;color:<?php echo $pgActive ? '#fff' : '#374151'; ?>;border-radius:4px;font-size:13px;text-decoration:none;"><?php echo $pg; ?></a>
                 <?php endfor; ?>
                 <span style="padding:6px 8px;font-size:12px;color:#888;">
                     Showing <?php echo (($batches_page - 1) * $batches_per_page) + 1; ?>–<?php echo min($batches_page * $batches_per_page, $batches_total); ?> of <?php echo $batches_total; ?>
@@ -494,7 +494,7 @@ function expiry_tier(?string $expiry, ?int $days): array
                 <input type="text" name="reason" required style="width:100%; padding:9px 12px; border:1px solid #d6d8db; border-radius:6px; margin-bottom:14px;" placeholder="e.g. Supplier recall notice">
                 <div style="display:flex; gap:10px; justify-content:flex-end;">
                     <button type="button" onclick="closeM('recallModal')" style="padding:9px 16px; background:#e9ecef; border:none; border-radius:6px; cursor:pointer;">Cancel</button>
-                    <button type="submit" style="padding:9px 16px; background:#8B7355; color:#fff; border:none; border-radius:6px; cursor:pointer;">Confirm Recall</button>
+                    <button type="submit" style="padding:9px 16px; background:#7E684B; color:#fff; border:none; border-radius:6px; cursor:pointer;">Confirm Recall</button>
                 </div>
             </form>
         </div>

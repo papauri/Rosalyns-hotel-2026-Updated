@@ -137,7 +137,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['inquiry_action'])) {
             // Preserve the admin's line breaks; escape everything to prevent HTML injection.
             $safeBody = nl2br(htmlspecialchars($bodyText, ENT_QUOTES, 'UTF-8'));
             $htmlBody = '
-                <h1 style="color:#8B7355;text-align:center;">' . htmlspecialchars($subject, ENT_QUOTES, 'UTF-8') . '</h1>
+                <h1 style="color:#7E684B;text-align:center;">' . htmlspecialchars($subject, ENT_QUOTES, 'UTF-8') . '</h1>
                 <p>Dear ' . $memberName . ',</p>
                 <div style="color:#333;line-height:1.7;font-size:15px;margin:16px 0;">' . $safeBody . '</div>
                 <p style="margin:28px 0 0;font-size:14px;color:#777;text-align:center;font-style:italic;">Warm regards &mdash; ' . htmlspecialchars($site_name, ENT_QUOTES, 'UTF-8') . '</p>';
@@ -574,7 +574,7 @@ try {
                                     <i class="fas fa-eye"></i> View
                                 </button>
                                 <?php if (!empty($inquiry['email'])): ?>
-                                <button type="button" class="btn btn-sm" style="background:#8B7355;color:#fff;"
+                                <button type="button" class="btn btn-sm" style="background:#7E684B;color:#fff;"
                                         title="Email this member directly"
                                         onclick='openEmailComposer(<?php echo htmlspecialchars(json_encode(['id' => (int)$inquiry['id'], 'name' => (string)$inquiry['name'], 'email' => (string)$inquiry['email'], 'reference_number' => (string)($inquiry['reference_number'] ?? '')]), ENT_QUOTES); ?>)'>
                                     <i class="fas fa-envelope"></i> Email
@@ -622,7 +622,7 @@ try {
     <div id="emailComposerModal" class="modal">
         <div class="modal-content" style="max-width:min(96vw,42rem);width:min(96vw,42rem);">
             <div class="modal-header">
-                <h3><i class="fas fa-envelope" style="color:#8B7355;"></i> Email Member</h3>
+                <h3><i class="fas fa-envelope" style="color:#7E684B;"></i> Email Member</h3>
                 <span class="close" onclick="closeEmailComposer()">&times;</span>
             </div>
             <div class="modal-body">
@@ -669,7 +669,7 @@ try {
             const statusColors = {
                 'new': '#17a2b8',
                 'contacted': '#ffc107',
-                'confirmed': '#8B7355',
+                'confirmed': '#7E684B',
                 'converted': '#28a745',
                 'closed': '#6c757d',
                 'cancelled': '#dc3545'
@@ -761,7 +761,7 @@ try {
                         <button type="submit" class="btn btn-danger btn-sm"><i class="fas fa-ban"></i> Cancel Membership</button>
                     </form>` : ''}
                     ${inquiry.email ? `
-                    <button type="button" class="btn btn-sm" style="background:#8B7355;color:#fff;" onclick="openEmailComposer(window._gymCurrentInquiry)">
+                    <button type="button" class="btn btn-sm" style="background:#7E684B;color:#fff;" onclick="openEmailComposer(window._gymCurrentInquiry)">
                         <i class="fas fa-envelope"></i> Email Member
                     </button>` : ''}
                 </div>

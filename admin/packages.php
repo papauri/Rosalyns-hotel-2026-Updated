@@ -229,7 +229,7 @@ $priceTypeLabels = [
             align-items: center;
             justify-content: center;
             font-size: 22px;
-            color: #8B7355;
+            color: #7E684B;
             flex-shrink: 0;
         }
 
@@ -350,7 +350,7 @@ $priceTypeLabels = [
         }
 
         .pkg-modal__header h3 i {
-            color: #8B7355;
+            color: #7E684B;
         }
 
         .pkg-modal__close {
@@ -461,7 +461,7 @@ $priceTypeLabels = [
         .form-group input:focus,
         .form-group select:focus,
         .form-group textarea:focus {
-            border-color: #8B7355;
+            border-color: #7E684B;
             outline: none;
         }
 
@@ -510,9 +510,9 @@ $priceTypeLabels = [
         }
 
         .price-toggle-btn.active {
-            border-color: #8B7355;
+            border-color: #7E684B;
             background: rgba(139, 115, 85, .08);
-            color: #8B7355;
+            color: #7E684B;
         }
 
         .price-toggle-btn.active.free-btn {
@@ -543,7 +543,7 @@ $priceTypeLabels = [
         }
 
         .icon-preview-wrap:focus-within {
-            border-color: #8B7355;
+            border-color: #7E684B;
         }
 
         .icon-preview-badge {
@@ -554,7 +554,7 @@ $priceTypeLabels = [
             width: 40px;
             background: rgba(139, 115, 85, .06);
             border-right: 1px solid #ced4da;
-            color: #8B7355;
+            color: #7E684B;
             font-size: 15px;
             flex-shrink: 0;
             transition: background .2s;
@@ -669,7 +669,7 @@ $priceTypeLabels = [
             <?php endif; ?>
 
             <div style="background:#f8f9fa; border:1px solid #e9ecef; border-radius:8px; padding:16px; margin-bottom:24px; font-size:14px; color:#343a40;">
-                <strong><i class="fas fa-info-circle" style="color:#8B7355;"></i> How it works:</strong>
+                <strong><i class="fas fa-info-circle" style="color:#7E684B;"></i> How it works:</strong>
                 Packages appear as optional add-ons on the booking form.
                 Guests check them before submitting. Package costs are added to the booking total.
                 Price is calculated automatically based on the pricing type you choose.

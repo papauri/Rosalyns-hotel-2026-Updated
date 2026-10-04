@@ -169,7 +169,7 @@ $gr_fmt_dur = static function (int $mins): string {
 
     <div class="content">
         <div class="page-header">
-            <h2 class="page-title"><i class="fas fa-chart-line" style="color:#8B7355;"></i> Gym Reports</h2>
+            <h2 class="page-title"><i class="fas fa-chart-line" style="color:#7E684B;"></i> Gym Reports</h2>
             <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
                 <?php foreach (['today' => 'Today', '7d' => '7 days', '30d' => '30 days', '90d' => '90 days'] as $rk => $rl): ?>
                     <a class="menu-type-tab <?php echo $gr_range === $rk ? 'active' : ''; ?>" style="text-decoration:none;padding:7px 14px;" href="?range=<?php echo $rk; ?>"><?php echo $rl; ?></a>
@@ -253,7 +253,7 @@ $gr_fmt_dur = static function (int $mins): string {
                 <?php endforeach; endif; ?>
             </div>
             <div class="gr-section">
-                <h3><i class="fas fa-arrow-right-from-bracket" style="color:#B18247;"></i> Busiest Check-Out Hours</h3>
+                <h3><i class="fas fa-arrow-right-from-bracket" style="color:#8F6A35;"></i> Busiest Check-Out Hours</h3>
                 <?php if (array_sum($gr_hours_out) === 0): ?>
                     <p style="color:#9a8f82;margin:0;">No check-outs in this period.</p>
                 <?php else: foreach ($gr_hours_out as $h => $c): if ($c === 0) { continue; } ?>
@@ -271,7 +271,7 @@ $gr_fmt_dur = static function (int $mins): string {
         </div>
 
         <div class="gr-section">
-            <h3><i class="fas fa-calendar-day" style="color:#8B7355;"></i> Daily Visits — Last 14 Days</h3>
+            <h3><i class="fas fa-calendar-day" style="color:#7E684B;"></i> Daily Visits — Last 14 Days</h3>
             <?php if (empty($gr_daily)): ?>
                 <p style="color:#9a8f82;margin:0;">No visits recorded in the last 14 days.</p>
             <?php else: ?>

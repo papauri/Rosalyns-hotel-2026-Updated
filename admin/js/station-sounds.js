@@ -486,7 +486,7 @@
 .rh-nc-icon{width:42px;height:42px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:17px;flex-shrink:0;color:#fff;}
 .rh-nc--normal .rh-nc-icon{background:#35794c;}
 .rh-nc--urgent .rh-nc-icon{background:#b3261e;animation:rh-nc-pulse 1.2s ease-in-out infinite;}
-.rh-nc--info .rh-nc-icon{background:#8a775f;}
+.rh-nc--info .rh-nc-icon{background:#766550;}
 .rh-nc--success .rh-nc-icon{background:#2f6fad;}
 @keyframes rh-nc-pulse{0%,100%{box-shadow:0 0 0 0 rgba(179,38,30,.35)}50%{box-shadow:0 0 0 7px rgba(179,38,30,0)}}
 .rh-nc-text{flex:1;min-width:0;}
@@ -502,7 +502,7 @@
 .rh-nc-prog-bar{height:100%;background:currentColor;opacity:.55;transition:width linear;}
 .rh-nc--normal .rh-nc-prog-bar{color:#35794c;}
 .rh-nc--urgent .rh-nc-prog-bar{color:#b3261e;}
-.rh-nc--info .rh-nc-prog-bar{color:#8a775f;}
+.rh-nc--info .rh-nc-prog-bar{color:#766550;}
 .rh-nc--success .rh-nc-prog-bar{color:#2f6fad;}
 /* Repeat counter — a second copy of the same alert bumps this instead of
    pushing another card onto a stack nobody can read. */

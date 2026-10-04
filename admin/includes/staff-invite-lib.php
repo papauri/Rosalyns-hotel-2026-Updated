@@ -63,18 +63,18 @@ if (!function_exists('rh_staff_invite_send')) {
 
         $button = $acceptUrl !== null
             ? '<p style="text-align:center;margin:28px 0 10px;">'
-              . '<a href="' . $e($acceptUrl) . '" style="display:inline-block;background:#8B7355;color:#ffffff;padding:14px 32px;text-decoration:none;border-radius:4px;font-size:15px;letter-spacing:0.04em;">Accept invitation &amp; set your password &rarr;</a></p>'
-              . '<p style="text-align:center;font-size:12px;color:#888;margin:0 0 24px;">Button not working? Copy this link into your browser:<br><span style="word-break:break-all;color:#8B7355;">' . $e($acceptUrl) . '</span></p>'
-            : '<p style="text-align:center;margin:28px 0;padding:14px;border:1px dashed #C8A45A;border-radius:6px;color:#8B7355;font-size:14px;">[ Accept invitation button &mdash; sent privately to ' . $e($u['email']) . ' ]</p>';
+              . '<a href="' . $e($acceptUrl) . '" style="display:inline-block;background:#7E684B;color:#ffffff;padding:14px 32px;text-decoration:none;border-radius:4px;font-size:15px;letter-spacing:0.04em;">Accept invitation &amp; set your password &rarr;</a></p>'
+              . '<p style="text-align:center;font-size:12px;color:#888;margin:0 0 24px;">Button not working? Copy this link into your browser:<br><span style="word-break:break-all;color:#7E684B;">' . $e($acceptUrl) . '</span></p>'
+            : '<p style="text-align:center;margin:28px 0;padding:14px;border:1px dashed #C8A45A;border-radius:6px;color:#7E684B;font-size:14px;">[ Accept invitation button &mdash; sent privately to ' . $e($u['email']) . ' ]</p>';
 
         return $copyBanner . '
-        <h1 style="color:#8B7355;text-align:center;margin-bottom:6px;">You&rsquo;re invited to join the team</h1>
+        <h1 style="color:#7E684B;text-align:center;margin-bottom:6px;">You&rsquo;re invited to join the team</h1>
         <p style="text-align:center;color:#8a7f70;margin-top:0;">' . $site . ' &middot; Staff portal</p>
         <p>Dear ' . $first . ',</p>
         <p>' . $e($invitedBy) . ' has created a staff account for you at <strong>' . $site . '</strong>. Accept the invitation to choose your own password and sign in &mdash; it only takes a minute.</p>
 
         <div style="background:#FAF6F0;border:2px solid #C8A45A;padding:20px;margin:22px 0;border-radius:10px;">
-            <h2 style="color:#8B7355;margin-top:0;text-align:left;">Your account</h2>
+            <h2 style="color:#7E684B;margin-top:0;text-align:left;">Your account</h2>
             <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="margin:0;">'
             . $row('Name:', $e($u['full_name']))
             . $row('Username:', '<span style="font-family:monospace;font-size:15px;">' . $e($u['username']) . '</span>')

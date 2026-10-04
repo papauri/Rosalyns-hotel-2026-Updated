@@ -214,7 +214,7 @@ $csrf_token = generateCsrfToken();
 
     <div class="content stock-recipes-page">
         <div class="page-header">
-            <h2 class="page-title"><i class="fas fa-book-open" style="color:#8B7355;"></i> Recipes</h2>
+            <h2 class="page-title"><i class="fas fa-book-open" style="color:#7E684B;"></i> Recipes</h2>
             <a href="stock-ingredients.php" class="btn-add"><i class="fas fa-carrot"></i> Manage Ingredients</a>
         </div>
 

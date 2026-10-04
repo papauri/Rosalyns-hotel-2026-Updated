@@ -1124,7 +1124,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['create_booking'])) {
                     $adminBookingUrl  = rtrim((string)getSetting('site_url', ''), '/') . '/admin/booking-details.php?id=' . $primary_id;
                     $adminCreatedBy   = htmlspecialchars($user['full_name'] ?? $user['username'] ?? 'Admin');
                     $adminCcSubject   = '[Admin Copy] New Booking Created — ' . htmlspecialchars($primary_ref);
-                    $adminCcBody      = '<h2 style="color:#8B7355;">Admin Copy — Booking Created</h2>'
+                    $adminCcBody      = '<h2 style="color:#7E684B;">Admin Copy — Booking Created</h2>'
                         . '<p>A new booking has been created by <strong>' . $adminCreatedBy . '</strong>.</p>'
                         . '<p><strong>Reference:</strong> ' . htmlspecialchars($primary_ref) . '<br>'
                         . '<strong>Guest:</strong> ' . htmlspecialchars($guest_name) . ' (' . htmlspecialchars($guest_email) . ')<br>'
@@ -1132,7 +1132,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['create_booking'])) {
                         . '<strong>Check-in:</strong> ' . htmlspecialchars($check_in_date) . '<br>'
                         . '<strong>Check-out:</strong> ' . htmlspecialchars($check_out_date) . '<br>'
                         . '<strong>Status:</strong> ' . htmlspecialchars($booking_status) . '</p>'
-                        . '<p><a href="' . htmlspecialchars($adminBookingUrl) . '" style="background:#8B7355;color:#fff;padding:10px 20px;text-decoration:none;border-radius:4px;">View Booking</a></p>';
+                        . '<p><a href="' . htmlspecialchars($adminBookingUrl) . '" style="background:#7E684B;color:#fff;padding:10px 20px;text-decoration:none;border-radius:4px;">View Booking</a></p>';
                     sendEmail($adminCcEmail, $adminCcName, $adminCcSubject, $adminCcBody);
                 }
             } catch (Throwable $adminCcEx) {
@@ -1279,7 +1279,7 @@ try {
         }
 
         .form-card h3 i {
-            color: var(--gold, #b18247);
+            color: var(--gold, #8f6a35);
         }
 
         .form-row {
@@ -1377,7 +1377,7 @@ try {
         }
 
         .ir-card.available:hover {
-            border-color: var(--gold, #b18247);
+            border-color: var(--gold, #8f6a35);
             background: #fdf8f2;
         }
 
@@ -1387,7 +1387,7 @@ try {
         }
 
         .ir-card input[type=radio] {
-            accent-color: var(--gold, #b18247);
+            accent-color: var(--gold, #8f6a35);
         }
 
         .ir-card-label {
@@ -1427,11 +1427,11 @@ try {
         }
 
         .accounting-table tr.total-row td {
-            border-top: 2px solid var(--gold, #b18247);
+            border-top: 2px solid var(--gold, #8f6a35);
             padding-top: 10px;
             font-size: 16px;
             font-weight: 700;
-            color: var(--gold, #b18247);
+            color: var(--gold, #8f6a35);
         }
 
         .accounting-table tr.tax-row td {
@@ -1451,7 +1451,7 @@ try {
         .payment-toggle-label input[type=checkbox] {
             width: 18px;
             height: 18px;
-            accent-color: var(--gold, #b18247);
+            accent-color: var(--gold, #8f6a35);
         }
 
         .payment-details-section {
@@ -1512,7 +1512,7 @@ try {
             display: inline-flex;
             align-items: center;
             gap: 8px;
-            background: var(--gold, #b18247);
+            background: var(--gold, #8f6a35);
             color: #fff;
             border: none;
             padding: 14px 32px;
@@ -1559,12 +1559,12 @@ try {
             cursor: pointer;
             font-family: inherit;
             font-size: 13px;
-            color: #999;
+            color: #6b6258;
             transition: all 0.2s;
         }
-        .cb-step:hover { border-color: #8A775F; color: #8A775F; }
-        .cb-step.active { border-color: #B18247; background: #B18247; color: #fff; }
-        .cb-step.done { border-color: #6b9e73; background: #edf7ee; color: #4a7a53; }
+        .cb-step:hover { border-color: #766550; color: #766550; }
+        .cb-step.active { border-color: #8F6A35; background: #8F6A35; color: #fff; }
+        .cb-step.done { border-color: #6b9e73; background: #edf7ee; color: #2f6b3a; }
         .cb-step-num {
             width: 22px; height: 22px;
             border-radius: 50%;
@@ -1596,12 +1596,12 @@ try {
             font-size: 13px;
             font-weight: 600;
             cursor: pointer;
-            border: 2px solid #B18247;
+            border: 2px solid #8F6A35;
             transition: all 0.2s;
         }
-        .cb-nav-next { background: #B18247; color: #fff; }
+        .cb-nav-next { background: #8F6A35; color: #fff; }
         .cb-nav-next:hover { background: #9a6f3b; border-color: #9a6f3b; }
-        .cb-nav-prev { background: #fff; color: #8A775F; }
+        .cb-nav-prev { background: #fff; color: #766550; }
         .cb-nav-prev:hover { background: #FAF6F0; }
         .cb-nav-prev:first-child:last-child { margin-left: auto; }
         .cb-section-error {
@@ -1655,7 +1655,7 @@ try {
         .line-subtotal {
             font-size: 13px;
             font-weight: 700;
-            color: var(--gold, #b18247);
+            color: var(--gold, #8f6a35);
             line-height: 36px;
         }
 
@@ -1677,8 +1677,8 @@ try {
             align-items: center;
             gap: 6px;
             background: none;
-            border: 1px dashed var(--gold, #b18247);
-            color: var(--gold, #b18247);
+            border: 1px dashed var(--gold, #8f6a35);
+            color: var(--gold, #8f6a35);
             padding: 8px 16px;
             border-radius: 6px;
             font-family: 'Jost', sans-serif;
@@ -1712,7 +1712,7 @@ try {
         .avail-card:hover { transform: translateY(-2px); box-shadow: 0 4px 12px rgba(0,0,0,.08); }
         .avail-card.ac-available { background: #f0faf4; border-color: #a3d5b3; }
         .avail-card.ac-unavailable { background: #fdf0f0; border-color: #f5b8b8; cursor: not-allowed; opacity: .75; }
-        .avail-card.ac-selected { border-color: var(--gold, #b18247); box-shadow: 0 0 0 3px rgba(177,130,71,.15); }
+        .avail-card.ac-selected { border-color: var(--gold, #8f6a35); box-shadow: 0 0 0 3px rgba(177,130,71,.15); }
         .avail-card-count { font-size: 24px; font-weight: 700; line-height: 1; }
         .ac-available .avail-card-count { color: #1a7a3c; }
         .ac-unavailable .avail-card-count { color: #c0392b; }
@@ -1775,7 +1775,7 @@ try {
             font-family: inherit;
         }
         .rg-search-input:focus {
-            border-color: var(--gold, #b18247);
+            border-color: var(--gold, #8f6a35);
             box-shadow: 0 0 0 2px rgba(177,130,71,.12);
         }
         .rg-clear-btn {
@@ -1818,7 +1818,7 @@ try {
         .rg-dropdown-avatar {
             width: 34px; height: 34px;
             border-radius: 50%;
-            background: linear-gradient(135deg, #b18247, #8a6535);
+            background: linear-gradient(135deg, #8f6a35, #8a6535);
             display: flex; align-items: center; justify-content: center;
             font-size: 14px; font-weight: 700; color: #fff;
             flex-shrink: 0;
@@ -1865,7 +1865,7 @@ try {
         .rg-selected-avatar {
             width: 44px; height: 44px;
             border-radius: 50%;
-            background: linear-gradient(135deg, #b18247, #7a5c28);
+            background: linear-gradient(135deg, #8f6a35, #7a5c28);
             display: flex; align-items: center; justify-content: center;
             font-size: 18px; font-weight: 700; color: #fff;
             flex-shrink: 0;
@@ -1896,7 +1896,7 @@ try {
         .rg-spinner {
             display: none;
             position: absolute; right: 36px;
-            color: var(--gold, #b18247);
+            color: var(--gold, #8f6a35);
             font-size: 13px;
         }
     </style>
@@ -2067,7 +2067,7 @@ try {
 
                     <!-- Returning Guest Lookup -->
                     <div class="rg-lookup-bar">
-                        <label><i class="fas fa-search" style="margin-right:5px;color:var(--gold,#b18247);"></i> Returning Guest Lookup</label>
+                        <label><i class="fas fa-search" style="margin-right:5px;color:var(--gold,#8f6a35);"></i> Returning Guest Lookup</label>
                         <div class="rg-search-wrap">
                             <i class="fas fa-user-check rg-search-icon"></i>
                             <input type="text" id="rgSearchInput" class="rg-search-input" placeholder="Search by name, email or phone…" autocomplete="off">
@@ -2231,7 +2231,7 @@ try {
                         <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;">
                             <div>
                                 <strong style="font-size:13px;color:#5c4a2f;"><i class="fas fa-wallet"></i> Guest Credit</strong>
-                                <div style="font-size:12px;color:#8A775F;margin-top:2px;">Apply store credit (credit notes) this guest holds toward the booking.</div>
+                                <div style="font-size:12px;color:#766550;margin-top:2px;">Apply store credit (credit notes) this guest holds toward the booking.</div>
                             </div>
                             <button type="button" class="cb-nav-btn" id="creditLoadBtn" onclick="loadGuestCredit()" style="flex:0 0 auto;">
                                 <i class="fas fa-magnifying-glass"></i> Check available credit
@@ -2302,7 +2302,7 @@ try {
                                 .then(function (res) {
                                     btn.disabled = false;
                                     if (!res.success || !res.data || res.data.length === 0) {
-                                        listEl.innerHTML = '<span style="color:#8A775F;">No redeemable credit on file for this guest.</span>';
+                                        listEl.innerHTML = '<span style="color:#766550;">No redeemable credit on file for this guest.</span>';
                                         return;
                                     }
                                     var html = '<div style="display:flex;flex-direction:column;gap:8px;">';
@@ -2310,7 +2310,7 @@ try {
                                         html += '<label style="display:flex;align-items:flex-start;gap:10px;background:#fff;border:1px solid #E2D8CC;border-radius:6px;padding:9px 11px;cursor:pointer;">'
                                             + '<input type="checkbox" name="apply_credit_note_ids[]" value="' + cn.id + '" class="credit-cn-check" style="margin-top:3px;">'
                                             + '<span><span style="font-weight:600;">' + cn.number + '</span> — ' + cn.balance_display
-                                            + '<span style="display:block;font-size:11px;color:#8A775F;">' + (cn.reason ? cn.reason + ' · ' : '') + 'Expires: ' + cn.expires_at + '</span>'
+                                            + '<span style="display:block;font-size:11px;color:#766550;">' + (cn.reason ? cn.reason + ' · ' : '') + 'Expires: ' + cn.expires_at + '</span>'
                                             + '</span></label>';
                                     });
                                     html += '</div>';
@@ -2351,7 +2351,7 @@ try {
 
                     <!-- Quotation options — visible only when Tentative status is selected -->
                     <div id="quotationOptionGroup" style="display:none;margin-top:16px;padding:16px;background:#FAF6F0;border-radius:6px;border:1px solid #D2C8BC;">
-                        <h4 style="margin:0 0 12px;font-size:13px;text-transform:uppercase;letter-spacing:0.06em;color:#8A775F;font-family:inherit;">
+                        <h4 style="margin:0 0 12px;font-size:13px;text-transform:uppercase;letter-spacing:0.06em;color:#766550;font-family:inherit;">
                             <i class="fas fa-file-invoice"></i> Quotation
                         </h4>
                         <div class="checkbox-group" style="margin-bottom:12px;">
@@ -2483,7 +2483,7 @@ try {
             div.id = 'room-line-' + idx;
             div.innerHTML = `
             <div class="room-line-header">
-                <span class="room-line-title"><i class="fas fa-door-open" style="color:var(--gold,#b18247);margin-right:5px;"></i> Room ${getVisibleLines().length + 1}</span>
+                <span class="room-line-title"><i class="fas fa-door-open" style="color:var(--gold,#8f6a35);margin-right:5px;"></i> Room ${getVisibleLines().length + 1}</span>
                 ${!isFirst ? `<button type="button" class="room-line-remove" onclick="removeRoomLine(${idx})"><i class="fas fa-times"></i> Remove</button>` : ''}
             </div>
             <div class="form-row three-col">

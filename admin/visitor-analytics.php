@@ -1004,7 +1004,7 @@ try {
                 </div>
 
                 <!-- SALES & MARKETING INSIGHTS -->
-                <div style="background: linear-gradient(135deg, #8A775F 0%, #B18247 100%); padding: 20px; border-radius: 8px; margin-bottom: 20px;">
+                <div style="background: linear-gradient(135deg, #766550 0%, #8F6A35 100%); padding: 20px; border-radius: 8px; margin-bottom: 20px;">
                     <h2 style="color: #fff; margin: 0; font-size: 20px; font-weight: 600; display: flex; align-items: center; gap: 10px;">
                         <i class="fas fa-chart-line"></i> Sales & Marketing Insights
                     </h2>
@@ -1021,7 +1021,7 @@ try {
                         ['key' => 'homepage', 'label' => 'Homepage Visits', 'icon' => 'fa-home', 'color' => '#4CAF50'],
                         ['key' => 'rooms', 'label' => 'Viewed Rooms', 'icon' => 'fa-bed', 'color' => '#2196F3'],
                         ['key' => 'booking', 'label' => 'Started Booking', 'icon' => 'fa-calendar-check', 'color' => '#FF9800'],
-                        ['key' => 'confirmation', 'label' => 'Completed Booking', 'icon' => 'fa-check-circle', 'color' => '#8A775F']
+                        ['key' => 'confirmation', 'label' => 'Completed Booking', 'icon' => 'fa-check-circle', 'color' => '#766550']
                     ];
                     ?>
                     <div style="display: flex; gap: 12px; align-items: stretch;">
@@ -1120,7 +1120,7 @@ try {
                                 <div style="font-size: 13px; opacity: 0.95;">New Visitors</div>
                                 <div style="font-size: 18px; font-weight: 600; margin-top: 4px;"><?php echo $new_pct; ?>%</div>
                             </div>
-                            <div style="flex: 1; text-align: center; padding: 20px; background: linear-gradient(135deg, #8A775F, #B18247); border-radius: 8px; color: #fff;">
+                            <div style="flex: 1; text-align: center; padding: 20px; background: linear-gradient(135deg, #766550, #8F6A35); border-radius: 8px; color: #fff;">
                                 <div style="font-size: 32px; font-weight: 600; margin-bottom: 8px;"><?php echo number_format($ret_vis); ?></div>
                                 <div style="font-size: 13px; opacity: 0.95;">Returning Visitors</div>
                                 <div style="font-size: 18px; font-weight: 600; margin-top: 4px;"><?php echo $ret_pct; ?>%</div>
@@ -1183,7 +1183,7 @@ try {
                     <?php $max_booking_hourly = max(1, max($booking_hours)); ?>
                     <div class="hourly-chart">
                         <?php for ($h = 0; $h < 24; $h++): ?>
-                            <div class="hourly-bar" style="height: <?php echo max(2, ($booking_hours[$h] / $max_booking_hourly) * 100); ?>%; background: linear-gradient(to top, #8A775F, #B18247);">
+                            <div class="hourly-bar" style="height: <?php echo max(2, ($booking_hours[$h] / $max_booking_hourly) * 100); ?>%; background: linear-gradient(to top, #766550, #8F6A35);">
                                 <span class="tooltip"><?php echo sprintf('%02d:00', $h); ?> - <?php echo $booking_hours[$h]; ?> bookings</span>
                             </div>
                         <?php endfor; ?>
@@ -1532,7 +1532,7 @@ try {
                                             <td><?php echo htmlspecialchars($latest['os']); ?></td>
                                             <td>
                                                 <details style="cursor: pointer;">
-                                                    <summary style="color: var(--color-primary, #8A775F); font-weight: 500; list-style: none; display: flex; align-items: center; gap: 6px;">
+                                                    <summary style="color: var(--color-primary, #766550); font-weight: 500; list-style: none; display: flex; align-items: center; gap: 6px;">
                                                         <i class="fas fa-chevron-right" style="transition: transform 0.2s; font-size: 10px;"></i>
                                                         View Pages
                                                     </summary>
@@ -2008,7 +2008,7 @@ try {
                 transition: color 0.2s ease;
             }
             details summary:hover {
-                color: #B18247 !important;
+                color: #8F6A35 !important;
             }
             details summary i {
                 transition: transform 0.2s ease;
@@ -2024,7 +2024,7 @@ try {
                 left: 0;
                 right: 0;
                 height: 4px;
-                background: linear-gradient(90deg, var(--gold, #8A775F), transparent);
+                background: linear-gradient(90deg, var(--gold, #766550), transparent);
                 transform: translateX(-100%);
                 transition: transform 0.3s ease;
             }

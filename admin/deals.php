@@ -217,12 +217,12 @@ $menuItemsRaw = $pdo->query("
 ")->fetchAll(PDO::FETCH_ASSOC);
 
 $TYPE_META = [
-    'happy_hour'  => ['label' => 'Happy Hour',    'icon' => 'fa-sun',          'color' => '#f59e0b'],
-    'percent_off' => ['label' => '% Discount',    'icon' => 'fa-percent',      'color' => '#10b981'],
-    'fixed_off'   => ['label' => 'Fixed Amount',  'icon' => 'fa-tag',          'color' => '#3b82f6'],
-    'multi_buy'   => ['label' => 'Multi-Buy',     'icon' => 'fa-layer-group',  'color' => '#8b5cf6'],
-    'spend_save'  => ['label' => 'Spend & Save',  'icon' => 'fa-coins',        'color' => '#ec4899'],
-    'combo'       => ['label' => 'Combo Deal',    'icon' => 'fa-object-group', 'color' => '#0ea5e9'],
+    'happy_hour'  => ['label' => 'Happy Hour',    'icon' => 'fa-sun',          'color' => '#b45309'],
+    'percent_off' => ['label' => '% Discount',    'icon' => 'fa-percent',      'color' => '#047857'],
+    'fixed_off'   => ['label' => 'Fixed Amount',  'icon' => 'fa-tag',          'color' => '#1d4ed8'],
+    'multi_buy'   => ['label' => 'Multi-Buy',     'icon' => 'fa-layer-group',  'color' => '#6d28d9'],
+    'spend_save'  => ['label' => 'Spend & Save',  'icon' => 'fa-coins',        'color' => '#be185d'],
+    'combo'       => ['label' => 'Combo Deal',    'icon' => 'fa-object-group', 'color' => '#0369a1'],
 ];
 $DAY_NAMES = ['','Mon','Tue','Wed','Thu','Fri','Sat','Sun'];
 ?>
@@ -270,8 +270,8 @@ $DAY_NAMES = ['','Mon','Tue','Wed','Thu','Fri','Sat','Sun'];
         .dc-btn.del   { color:#dc2626; border-color:#fecaca; background:#fef2f2; }
         .dc-btn.del:hover  { background:#fee2e2; }
         .dc-btn.tog   { min-width:62px; }
-        .dc-btn.tog.is-on  { color:#059669; border-color:#a7f3d0; background:#ecfdf5; }
-        .dc-btn.tog.is-off { color:#dc2626; border-color:#fecaca; background:#fef2f2; }
+        .dc-btn.tog.is-on  { color:#047857; border-color:#a7f3d0; background:#ecfdf5; }
+        .dc-btn.tog.is-off { color:#b91c1c; border-color:#fecaca; background:#fef2f2; }
 
         .deals-empty { text-align:center; padding:60px 20px; color:#9ca3af; }
         .deals-empty i { font-size:40px; margin-bottom:12px; display:block; }
@@ -338,8 +338,8 @@ $DAY_NAMES = ['','Mon','Tue','Wed','Thu','Fri','Sat','Sun'];
         /* Footer */
         .dm-footer { padding:16px 24px; border-top:1px solid #f3f4f6; display:flex; gap:10px; justify-content:flex-end; position:sticky; bottom:0; background:#fff; }
         .dm-footer .btn-cancel { padding:10px 20px; border-radius:10px; border:1px solid #d1d5db; background:#fff; font-size:14px; cursor:pointer; color:#374151; }
-        .dm-footer .btn-save   { padding:10px 24px; border-radius:10px; border:none; background:#6366f1; color:#fff; font-size:14px; font-weight:600; cursor:pointer; }
-        .dm-footer .btn-save:hover { background:#4f46e5; }
+        .dm-footer .btn-save   { padding:10px 24px; border-radius:10px; border:none; background:#4f46e5; color:#fff; font-size:14px; font-weight:600; cursor:pointer; }
+        .dm-footer .btn-save:hover { background:#4338ca; }
         .dm-footer .btn-save:disabled { opacity:.55; cursor:not-allowed; }
         @media(max-width:560px) { .dm-type-grid,.dm-scope-opts { grid-template-columns:repeat(2,1fr); } .dm-box { border-radius:14px; } .fm-2col { grid-template-columns:1fr; } }
 
@@ -347,8 +347,8 @@ $DAY_NAMES = ['','Mon','Tue','Wed','Thu','Fri','Sat','Sun'];
         .ip-row   { display:grid; grid-template-columns:1fr 1fr auto; gap:8px; align-items:flex-end; margin-bottom:10px; }
         .ip-row select { width:100%; box-sizing:border-box; padding:9px 12px; border:1px solid #d1d5db; border-radius:8px; font-size:14px; color:#1f2937; background:#fff; }
         .ip-row select:focus { border-color:#6366f1; box-shadow:0 0 0 3px rgba(99,102,241,.1); outline:none; }
-        .ip-add-btn { padding:9px 16px; border-radius:8px; border:none; background:#6366f1; color:#fff; font-size:13px; font-weight:600; cursor:pointer; white-space:nowrap; }
-        .ip-add-btn:hover { background:#4f46e5; }
+        .ip-add-btn { padding:9px 16px; border-radius:8px; border:none; background:#4f46e5; color:#fff; font-size:13px; font-weight:600; cursor:pointer; white-space:nowrap; }
+        .ip-add-btn:hover { background:#4338ca; }
         .ip-add-btn:disabled { opacity:.45; cursor:not-allowed; }
         .ip-chips { display:flex; flex-wrap:wrap; gap:6px; margin-top:4px; }
         .ip-chip  { display:inline-flex; align-items:center; gap:6px; background:#ede9fe; color:#5b21b6; border-radius:20px;

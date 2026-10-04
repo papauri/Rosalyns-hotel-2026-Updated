@@ -997,7 +997,7 @@
             document.querySelectorAll(selector).forEach(function (card) {
                 const isActive = !!activeToken && card.dataset.adminStatusToken === activeToken;
                 card.classList.toggle('is-active', isActive);
-                card.style.boxShadow = isActive ? '0 0 0 2px var(--color-primary, #8A775F)' : '';
+                card.style.boxShadow = isActive ? '0 0 0 2px var(--color-primary, #766550)' : '';
                 card.style.transform = isActive ? 'translateY(-2px)' : '';
             });
         }

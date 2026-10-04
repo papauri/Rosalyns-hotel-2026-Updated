@@ -134,12 +134,12 @@
     align-items: center;
     gap: 8px;
 }
-.sdash-section__title i { color: var(--color-primary, #8A775F); }
+.sdash-section__title i { color: var(--color-primary, #766550); }
 .sdash-section__hint { font-size: 11px; color: #9ca3af; }
 .sdash-section__action {
     font-size: 12px;
     font-weight: 600;
-    color: var(--color-primary, #8A775F);
+    color: var(--color-primary, #766550);
     text-decoration: none;
 }
 .sdash-section__action:hover { text-decoration: underline; }
@@ -254,7 +254,7 @@
 }
 .sdash-btn:hover { opacity: 0.85; text-decoration: none; }
 .sdash-btn--sm { font-size: 12px; padding: 5px 10px; }
-.sdash-btn--primary { background: var(--color-primary,#8A775F); color: #fff; }
+.sdash-btn--primary { background: var(--color-primary,#766550); color: #fff; }
 .sdash-btn--warn    { background: #d97706; color: #fff; }
 .sdash-btn--ghost   { background: #f3f4f6; color: #374151; }
 
@@ -383,12 +383,12 @@
     background: #fff;
     transform: translateY(-2px);
     box-shadow: 0 4px 12px rgba(0,0,0,0.08);
-    color: var(--color-primary,#8A775F);
+    color: var(--color-primary,#766550);
     text-decoration: none;
 }
 .sdash-qn-item i {
     font-size: 26px;
-    color: var(--color-primary, #8A775F);
+    color: var(--color-primary, #766550);
 }
 .sdash-qn-badge {
     font-style: normal;

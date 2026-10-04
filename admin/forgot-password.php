@@ -129,7 +129,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 <body style="margin: 0; padding: 0; background: #f5f5f5; font-family: Arial, sans-serif;">
                     <div style="max-width: 600px; margin: 40px auto; background: white; border-radius: 12px; overflow: hidden; box-shadow: 0 4px 20px rgba(0,0,0,0.1);">
                         <div style="background: linear-gradient(135deg, #1A1A1A 0%, #252525 100%); padding: 40px 30px; text-align: center;">
-                            <h1 style="color: #8B7355; font-size: 24px; margin: 0 0 8px;">Password Reset</h1>
+                            <h1 style="color: #7E684B; font-size: 24px; margin: 0 0 8px;">Password Reset</h1>
                             <p style="color: rgba(255,255,255,0.7); font-size: 14px; margin: 0;">' . htmlspecialchars($site_name) . '</p>
                         </div>
                         <div style="padding: 40px 30px;">
@@ -137,7 +137,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                             <p style="color: #555; font-size: 14px; line-height: 1.6;">We received a request to reset the password for your admin account (<strong>' . htmlspecialchars($user['username']) . '</strong>).</p>
                             <p style="color: #555; font-size: 14px; line-height: 1.6;">Click the button below to create a new password. This link expires in <strong>1 hour</strong>.</p>
                             <div style="text-align: center; margin: 32px 0;">
-                                <a href="' . htmlspecialchars($reset_url) . '" style="display: inline-block; background: linear-gradient(135deg, #8B7355 0%, #c49b2e 100%); color: #050D14; padding: 14px 40px; border-radius: 10px; text-decoration: none; font-weight: 700; font-size: 15px; letter-spacing: 0.5px;">
+                                <a href="' . htmlspecialchars($reset_url) . '" style="display: inline-block; background: linear-gradient(135deg, #7E684B 0%, #c49b2e 100%); color: #050D14; padding: 14px 40px; border-radius: 10px; text-decoration: none; font-weight: 700; font-size: 15px; letter-spacing: 0.5px;">
                                     Reset Password
                                 </a>
                             </div>

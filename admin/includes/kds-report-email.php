@@ -26,7 +26,7 @@ $topItems         = $topItems         ?? [];
 $rows             = $rows             ?? [];
 ?>
 <div style="font-family:Arial,sans-serif; max-width:780px; margin:0 auto; color:#212529;">
-    <h2 style="color:#8B7355; margin:0 0 6px;"><?php echo htmlspecialchars($site_name); ?> — Station Report</h2>
+    <h2 style="color:#7E684B; margin:0 0 6px;"><?php echo htmlspecialchars($site_name); ?> — Station Report</h2>
     <p style="margin:0 0 18px; color:#6c757d; font-size:14px;">
         <strong><?php echo htmlspecialchars($STATION_OPTIONS[$reqStation]); ?></strong>
         · <?php echo htmlspecialchars(date('l, d M Y', strtotime($reqDate))); ?>

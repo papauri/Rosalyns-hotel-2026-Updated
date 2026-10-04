@@ -398,7 +398,7 @@ $csrf_token = generateCsrfToken();
 
     <div class="content stock-count-page">
         <div class="page-header">
-            <h2 class="page-title"><i class="fas fa-clipboard-check" style="color:#8B7355;"></i> Stock Count &amp; Anti-Theft</h2>
+            <h2 class="page-title"><i class="fas fa-clipboard-check" style="color:#7E684B;"></i> Stock Count &amp; Anti-Theft</h2>
             <p style="color:#6c757d; margin-top:4px;">Every gram of physical stock must tie to a sale, wastage entry, or an approved variance. Surprise counts catch shrinkage before it grows.</p>
         </div>
 

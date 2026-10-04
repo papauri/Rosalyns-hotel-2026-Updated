@@ -15,8 +15,8 @@
 }
 
 .btn-add {
-    background: linear-gradient(135deg, var(--gold, #8B7355) 0%, #6f5b43 100%);
-    color: var(--deep-navy, #111111);
+    background: linear-gradient(135deg, var(--gold, #7E684B) 0%, #6f5b43 100%);
+    color: #fff;
     border: none;
     padding: 12px 24px;
     border-radius: 8px;
@@ -54,7 +54,7 @@
 
 .event-card:hover {
     transform: translateY(-2px);
-    border-color: color-mix(in srgb, var(--gold, #8B7355) 38%, var(--admin-surface-border, #e5e7eb) 62%);
+    border-color: color-mix(in srgb, var(--gold, #7E684B) 38%, var(--admin-surface-border, #e5e7eb) 62%);
     box-shadow: 0 8px 24px rgba(15, 23, 42, 0.1);
 }
 
@@ -147,7 +147,7 @@
 }
 
 .event-card-info-item i {
-    color: var(--gold, #8B7355);
+    color: var(--gold, #7E684B);
     width: 14px;
     text-align: center;
 }
@@ -187,8 +187,8 @@
 }
 
 .event-card-actions .btn-edit {
-    background: var(--gold, #8B7355);
-    color: var(--deep-navy, #111111);
+    background: var(--gold, #7E684B);
+    color: #fff;
     border: none;
 }
 
@@ -206,7 +206,7 @@
 
 .event-card-actions .btn-featured {
     background: #fff8e1;
-    color: #f57c00;
+    color: #8a4b00;
     border: 1px solid #ffe082;
 }
 
@@ -239,13 +239,13 @@
 }
 
 .image-upload-area:hover {
-    border-color: var(--gold, #8B7355);
+    border-color: var(--gold, #7E684B);
     background: #fffbf5;
 }
 
 .image-upload-area i {
     font-size: 28px;
-    color: var(--gold, #8B7355);
+    color: var(--gold, #7E684B);
     margin-bottom: 8px;
     display: block;
 }
@@ -313,7 +313,7 @@
 .form-group textarea:focus,
 .form-group select:focus {
     outline: none;
-    border-color: var(--gold, #8B7355);
+    border-color: var(--gold, #7E684B);
     box-shadow: 0 0 0 3px rgba(139, 115, 85, 0.1);
 }
 
@@ -331,7 +331,7 @@
 .checkbox-group input[type="checkbox"] {
     width: 16px;
     height: 16px;
-    accent-color: var(--gold, #8B7355);
+    accent-color: var(--gold, #7E684B);
 }
 
 .checkbox-group label {

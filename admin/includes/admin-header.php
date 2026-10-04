@@ -106,7 +106,7 @@ $_nav_groups = [
         ['events-inquiries.php',      'fas fa-calendar-check', 'Event Bookings',   'events_bookings',  '', ['website_cms', 'events']],
     ],
     'Restaurant & Bar' => [
-        ['pos.php',                    'fas fa-cash-register',  'POS Till',          'pos_till',          'color:#8B7355;', 'pos'],
+        ['pos.php',                    'fas fa-cash-register',  'POS Till',          'pos_till',          'color:#7E684B;', 'pos'],
         ['kds.php',                    'fas fa-utensils',       'Kitchen (KDS)',     'kds_view',          'color:#c82333;', ['pos', 'station_kds']],
         ['bds.php',                    'fas fa-cocktail',       'Bar Display (BDS)', 'bds_view',          'color:#5e35b1;', ['pos', 'station_bds']],
         ['cds.php',                    'fas fa-mug-hot',        'Coffee Bar (CDS)',  'cds_view',          'color:#6f4e37;', ['pos', 'station_cds']],
@@ -128,7 +128,7 @@ $_nav_groups = [
         ['accounting-dashboard.php', 'fas fa-calculator',          'Accounting', 'accounting', '',               'finance'],
         ['payments.php',             'fas fa-money-bill-wave',     'Payments',   'payments',   '',               'finance'],
         ['invoices.php',             'fas fa-file-invoice-dollar', 'Invoices',   'invoices',   '',               ['finance', 'billing']],
-        ['end-of-day-report.php',    'fas fa-sun',                 'End of Day', 'reports',    'color:#B18247;', 'finance'],
+        ['end-of-day-report.php',    'fas fa-sun',                 'End of Day', 'reports',    'color:#8F6A35;', 'finance'],
         ['reports.php',              'fas fa-chart-bar',           'Reports',    'reports',    '',               'finance'],
     ],
     'Gym' => [
@@ -167,7 +167,7 @@ $_nav_groups = [
         ['purchase-orders.php',            'fas fa-file-invoice',   'Purchase Orders',   'stock_management',  '', 'stock'],
         ['stock-reports.php',              'fas fa-chart-area',     'Stock Reports',     'stock_reports',     '', 'stock'],
         // Money
-        ['pos-accounting.php',             'fas fa-cash-register',  'POS Accounting',    'pos_accounting',    'color:#8B7355;', ['finance', 'pos']],
+        ['pos-accounting.php',             'fas fa-cash-register',  'POS Accounting',    'pos_accounting',    'color:#7E684B;', ['finance', 'pos']],
         ['receipts.php',                   'fas fa-receipt',        'Receipts',          'receipts',          '', 'finance'],
         ['credit-notes.php',               'fas fa-file-invoice',   'Credit Notes',      'invoices',          '', ['finance', 'advance_booking']],
         ['quotations.php',                 'fas fa-file-contract',  'Quotations',        'invoices',          '', ['finance', 'billing']],

@@ -193,7 +193,7 @@ if (!function_exists('rh_hotel_details_fields')) {
     {
         $canFinance = hasPermission((int)($user['id'] ?? 0), 'finance_settings');
         $e = static fn($v): string => htmlspecialchars((string)$v, ENT_QUOTES, 'UTF-8');
-        echo '<div class="settings-card" id="hotel-details"><h2><i class="fas fa-building" style="color:#8B7355;"></i> Hotel details &amp; policies</h2>';
+        echo '<div class="settings-card" id="hotel-details"><h2><i class="fas fa-building" style="color:#7E684B;"></i> Hotel details &amp; policies</h2>';
         echo '<form method="POST" action="booking-settings.php#hotel-details">';
         echo '<input type="hidden" name="csrf_token" value="' . $e($csrf) . '"><input type="hidden" name="save_hotel_details" value="1">';
         foreach (rh_hotel_details_fields() as $group => $fields) {

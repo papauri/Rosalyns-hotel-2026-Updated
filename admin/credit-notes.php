@@ -282,7 +282,7 @@ ob_start();
         <?php if ($cn_any_booking): ?>
         <label class="cn-issue-booking-link__toggle">
             <input type="checkbox" id="issue-link-booking-toggle" onchange="cnToggleIssueBookingSearch()">
-            <i class="fas fa-link" style="color:var(--finance-accent,#8A775F);"></i>
+            <i class="fas fa-link" style="color:var(--finance-accent,#766550);"></i>
             <span>Link to Existing Booking <small class="text-muted">(optional — leave unchecked for walk-in)</small></span>
         </label>
         <?php endif; ?>
@@ -528,12 +528,12 @@ $modalsHtml = ob_get_clean();
         if ($scopeActive && $hiddenScopedCount > 0): ?>
             <div style="background:#faf8f4; border:1px solid #e5d9c9; border-radius:10px; padding:10px 14px; margin:0 0 14px; display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap; font-size:13px; color:#7a6f63;">
                 <span><i class="fas fa-filter" style="margin-right:6px;"></i>Showing credit notes for your active modules only (<?php echo number_format($hiddenScopedCount); ?> older record<?php echo $hiddenScopedCount === 1 ? '' : 's'; ?> from disabled modules hidden).</span>
-                <a href="?<?php echo htmlspecialchars(http_build_query(array_merge($scopeQs, ['scope' => 'all']))); ?>" style="color:#8B7355; font-weight:600; text-decoration:none;">Show all history &rarr;</a>
+                <a href="?<?php echo htmlspecialchars(http_build_query(array_merge($scopeQs, ['scope' => 'all']))); ?>" style="color:#7E684B; font-weight:600; text-decoration:none;">Show all history &rarr;</a>
             </div>
         <?php elseif ($scopeAll && $filterType === 'all'): ?>
             <div style="background:#faf8f4; border:1px solid #e5d9c9; border-radius:10px; padding:10px 14px; margin:0 0 14px; display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap; font-size:13px; color:#7a6f63;">
                 <span><i class="fas fa-clock-rotate-left" style="margin-right:6px;"></i>Showing full credit-note history, including records from disabled modules.</span>
-                <a href="?<?php echo htmlspecialchars(http_build_query($scopeQs)); ?>" style="color:#8B7355; font-weight:600; text-decoration:none;">Show relevant only &rarr;</a>
+                <a href="?<?php echo htmlspecialchars(http_build_query($scopeQs)); ?>" style="color:#7E684B; font-weight:600; text-decoration:none;">Show relevant only &rarr;</a>
             </div>
         <?php endif; ?>
 

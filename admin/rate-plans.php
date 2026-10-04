@@ -402,9 +402,9 @@ $dayNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
         }
 
         .day-checkbox-row label:has(input:checked) {
-            background: var(--color-primary, #8B7355);
+            background: var(--color-primary, #7E684B);
             color: #fff;
-            border-color: var(--color-primary, #8B7355);
+            border-color: var(--color-primary, #7E684B);
         }
 
         /* Modal */
@@ -495,7 +495,7 @@ $dayNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 
         .form-group input:focus,
         .form-group select:focus {
-            border-color: var(--color-primary, #8B7355);
+            border-color: var(--color-primary, #7E684B);
             outline: none;
         }
 
@@ -574,7 +574,7 @@ $dayNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 
             <!-- Explainer -->
             <div style="background:#f8f9fa; border:1px solid #e9ecef; border-radius:8px; padding:16px; margin-bottom:24px; font-size:14px; color:#343a40;">
-                <strong><i class="fas fa-info-circle" style="color:#8B7355;"></i> How it works:</strong>
+                <strong><i class="fas fa-info-circle" style="color:#7E684B;"></i> How it works:</strong>
                 Rate plans are automatically applied to bookings when the stay conditions match.
                 Higher priority plans are evaluated first. Use <em>stacking</em> to apply multiple plans to the same stay.
                 <strong>Negative adjustment</strong> = discount &nbsp;|&nbsp; <strong>Positive adjustment</strong> = surcharge.

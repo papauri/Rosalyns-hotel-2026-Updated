@@ -66,7 +66,7 @@
 
 .receipts-page .receipts-activity-item strong {
     min-width: 6rem;
-    color: var(--color-primary, #8A775F);
+    color: var(--color-primary, #766550);
     font-size: 0.8rem;
     text-transform: uppercase;
     letter-spacing: 0.03em;
@@ -215,7 +215,7 @@
 .receipts-autocomplete__item:hover,
 .receipts-autocomplete__item.is-active {
     background: var(--color-bg, #f9f7f4);
-    color: var(--color-primary, #8A775F);
+    color: var(--color-primary, #766550);
 }
 
 /* ── Responsive ───────────────────────────────────────────────── */

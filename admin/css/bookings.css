@@ -334,7 +334,7 @@
 .bookings-toolbar__action--new {
     background: var(--gold, var(--color-lux-gold));
     border-color: color-mix(in srgb, var(--gold, var(--color-lux-gold)) 82%, var(--color-lux-ink));
-    color: var(--deep-navy, var(--color-lux-ink));
+    color: #fff;
 }
 
 .bookings-toolbar__badge {
@@ -346,7 +346,7 @@
     padding-inline: 0.32rem;
     border-radius: 999rem;
     background: color-mix(in srgb, var(--color-lux-ink) 68%, var(--color-lux-gold));
-    color: var(--color-white, var(--color-background));
+    color: #fff;
     font-size: clamp(0.64rem, 0.62rem + 0.1vw, 0.72rem);
     line-height: 1;
 }
@@ -723,7 +723,7 @@ body .modal-overlay.active {
 }
 
 .actions-row .quick-action:focus-visible {
-    outline: 2px solid var(--color-primary, #8A775F);
+    outline: 2px solid var(--color-primary, #766550);
     outline-offset: 2px;
 }
 
@@ -1038,7 +1038,7 @@ body.rh-help-on .actions-row .quick-action[data-help]::after {
 .actions-row .actions-more-menu i {
     width: 14px;
     text-align: center;
-    color: var(--color-primary, #8A775F);
+    color: var(--color-primary, #766550);
     flex-shrink: 0;
     font-size: clamp(0.72rem, 0.68rem + 0.16vw, 0.79rem);
 }
@@ -1281,7 +1281,7 @@ hr.menu-divider {
 
 .room-chip--unassigned {
     background: transparent;
-    color: #adb5bd;
+    color: #6b6b6b;
     font-style: italic;
     font-weight: 400;
     padding: 2px 0;
@@ -1443,7 +1443,7 @@ hr.menu-divider {
 }
 
 .bookings-stats-insight-card:focus-visible {
-    outline: 2px solid color-mix(in srgb, var(--color-primary, #8A775F) 70%, var(--color-lux-gold, #B18247));
+    outline: 2px solid color-mix(in srgb, var(--color-primary, #766550) 70%, var(--color-lux-gold, #8F6A35));
     outline-offset: 2px;
 }
 
@@ -1459,13 +1459,13 @@ hr.menu-divider {
 }
 
 .bookings-stats-insight-card:hover .bookings-stats-insight-card__hint {
-    color: var(--color-primary, #8A775F);
+    color: var(--color-primary, #766550);
 }
 
 .stat-card.tentative {
     background: linear-gradient(135deg,
-            color-mix(in srgb, var(--color-lux-gold, #B18247) 16%, var(--color-white, #fff)),
-            color-mix(in srgb, var(--color-lux-gold, #B18247) 32%, var(--color-white, #fff)));
+            color-mix(in srgb, var(--color-lux-gold, #8F6A35) 16%, var(--color-white, #fff)),
+            color-mix(in srgb, var(--color-lux-gold, #8F6A35) 32%, var(--color-white, #fff)));
 }
 
 .stat-card.tentative h3 {
@@ -1473,7 +1473,7 @@ hr.menu-divider {
 }
 
 .stat-card.tentative .number {
-    color: var(--color-primary, #8A775F);
+    color: var(--color-primary, #766550);
 }
 
 @media (max-width: 1200px) {
@@ -1575,8 +1575,8 @@ hr.menu-divider {
     gap: 0.75rem;
     padding: 1rem 1.15rem;
     background: linear-gradient(135deg,
-            color-mix(in srgb, var(--color-primary, #8A775F) 88%, var(--color-lux-ink, #231F1C)),
-            color-mix(in srgb, var(--color-lux-gold, #B18247) 78%, var(--color-lux-ink, #231F1C)));
+            color-mix(in srgb, var(--color-primary, #766550) 88%, var(--color-lux-ink, #231F1C)),
+            color-mix(in srgb, var(--color-lux-gold, #8F6A35) 78%, var(--color-lux-ink, #231F1C)));
     color: var(--color-white, #fff);
 }
 
@@ -1615,8 +1615,8 @@ hr.menu-divider {
     align-items: center;
     gap: 0.3rem;
     border-radius: 999px;
-    border: 1px solid color-mix(in srgb, var(--color-primary, #8A775F) 40%, var(--color-white, #fff));
-    background: color-mix(in srgb, var(--color-primary, #8A775F) 14%, var(--color-white, #fff));
+    border: 1px solid color-mix(in srgb, var(--color-primary, #766550) 40%, var(--color-white, #fff));
+    background: color-mix(in srgb, var(--color-primary, #766550) 14%, var(--color-white, #fff));
     color: var(--color-lux-ink, #231F1C);
     padding: 0.24rem 0.6rem;
     font-size: clamp(0.68rem, 0.66rem + 0.1vw, 0.77rem);
@@ -1640,9 +1640,9 @@ hr.menu-divider {
     align-items: center;
     gap: 0.45rem;
     border-radius: 0.65rem;
-    border: 1px solid color-mix(in srgb, var(--color-lux-gold, #B18247) 35%, var(--color-white, #fff));
-    background: color-mix(in srgb, var(--color-lux-gold, #B18247) 12%, var(--color-white, #fff));
-    color: color-mix(in srgb, var(--color-lux-ink, #231F1C) 80%, var(--color-lux-gold, #B18247));
+    border: 1px solid color-mix(in srgb, var(--color-lux-gold, #8F6A35) 35%, var(--color-white, #fff));
+    background: color-mix(in srgb, var(--color-lux-gold, #8F6A35) 12%, var(--color-white, #fff));
+    color: color-mix(in srgb, var(--color-lux-ink, #231F1C) 80%, var(--color-lux-gold, #8F6A35));
     padding: 0.5rem 0.68rem;
     font-size: clamp(0.74rem, 0.71rem + 0.12vw, 0.84rem);
 }
@@ -1689,7 +1689,7 @@ hr.menu-divider {
 }
 
 .bookings-checkin-modal__prerequisites .fa-check-circle {
-    color: color-mix(in srgb, var(--color-primary, #8A775F) 80%, var(--color-lux-ink, #231F1C));
+    color: color-mix(in srgb, var(--color-primary, #766550) 80%, var(--color-lux-ink, #231F1C));
 }
 
 .bookings-checkin-modal__prerequisites .fa-times-circle {
@@ -1790,7 +1790,7 @@ hr.menu-divider {
 }
 
 .bookings-alert-modal__header--warning h3 i {
-    color: color-mix(in srgb, var(--color-lux-gold, #B18247) 72%, var(--color-lux-ink, #231F1C));
+    color: color-mix(in srgb, var(--color-lux-gold, #8F6A35) 72%, var(--color-lux-ink, #231F1C));
 }
 
 .bookings-alert-modal__close {
@@ -1809,8 +1809,8 @@ hr.menu-divider {
 }
 
 .bookings-alert-modal__close:hover {
-    border-color: var(--color-primary, #8A775F);
-    color: var(--color-primary, #8A775F);
+    border-color: var(--color-primary, #766550);
+    color: var(--color-primary, #766550);
 }
 
 .bookings-alert-modal__body {
@@ -1973,8 +1973,8 @@ hr.menu-divider {
 }
 
 .bookings-alert-modal__notice--warning {
-    background: color-mix(in srgb, var(--color-lux-gold, #B18247) 14%, var(--color-white, #fff));
-    color: color-mix(in srgb, var(--color-lux-ink, #231F1C) 78%, var(--color-lux-gold, #B18247));
+    background: color-mix(in srgb, var(--color-lux-gold, #8F6A35) 14%, var(--color-white, #fff));
+    color: color-mix(in srgb, var(--color-lux-ink, #231F1C) 78%, var(--color-lux-gold, #8F6A35));
 }
 
 .bookings-alert-modal__notice--danger {
@@ -1988,7 +1988,7 @@ hr.menu-divider {
 }
 
 .bookings-alert-modal__warning-cell {
-    color: color-mix(in srgb, var(--color-lux-gold, #B18247) 78%, var(--color-lux-ink, #231F1C));
+    color: color-mix(in srgb, var(--color-lux-gold, #8F6A35) 78%, var(--color-lux-ink, #231F1C));
     font-weight: 600;
 }
 
@@ -2005,7 +2005,7 @@ hr.menu-divider {
 }
 
 .bookings-alert-modal__badge--warning {
-    background: color-mix(in srgb, var(--color-lux-gold, #B18247) 82%, var(--color-lux-ink, #231F1C));
+    background: color-mix(in srgb, var(--color-lux-gold, #8F6A35) 82%, var(--color-lux-ink, #231F1C));
     color: var(--color-white, #fff);
 }
 
@@ -2027,14 +2027,14 @@ hr.menu-divider {
 }
 
 .bookings-alert-modal__action-btn--admin-date {
-    background: color-mix(in srgb, var(--color-primary, #8A775F) 80%, var(--color-lux-gold, #B18247));
+    background: color-mix(in srgb, var(--color-primary, #766550) 80%, var(--color-lux-gold, #8F6A35));
     color: var(--color-white, #fff);
-    border-color: color-mix(in srgb, var(--color-primary, #8A775F) 80%, var(--color-lux-gold, #B18247));
+    border-color: color-mix(in srgb, var(--color-primary, #766550) 80%, var(--color-lux-gold, #8F6A35));
 }
 
 .bookings-alert-modal__action-btn--admin-date:hover {
-    background: color-mix(in srgb, var(--color-primary, #8A775F) 88%, var(--color-lux-ink, #231F1C));
-    border-color: color-mix(in srgb, var(--color-primary, #8A775F) 88%, var(--color-lux-ink, #231F1C));
+    background: color-mix(in srgb, var(--color-primary, #766550) 88%, var(--color-lux-ink, #231F1C));
+    border-color: color-mix(in srgb, var(--color-primary, #766550) 88%, var(--color-lux-ink, #231F1C));
 }
 
 .bookings-alert-modal__empty-row td {
@@ -2069,8 +2069,8 @@ hr.menu-divider {
     font-weight: 700;
     letter-spacing: -0.02em;
     color: var(--color-lux-ink, #231F1C);
-    background: color-mix(in srgb, var(--color-primary, #8A775F) 18%, var(--color-white, #fff));
-    border: 1px solid color-mix(in srgb, var(--color-primary, #8A775F) 26%, var(--color-white, #fff));
+    background: color-mix(in srgb, var(--color-primary, #766550) 18%, var(--color-white, #fff));
+    border: 1px solid color-mix(in srgb, var(--color-primary, #766550) 26%, var(--color-white, #fff));
 }
 
 .bookings-stats-insight-modal__summary p {

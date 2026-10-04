@@ -357,7 +357,7 @@ $pm_currency = (string)getSetting('currency_symbol', 'MWK');
                                         <?php endif; ?>
                                     </td>
                                     <?php endif; ?>
-                                    <td><?php echo $it['barcode'] !== null && $it['barcode'] !== '' ? '<i class="fas fa-barcode" style="margin-right:5px;color:#8B7355;"></i>' . htmlspecialchars($it['barcode']) : '<span style="color:#b8b0a4;">—</span>'; ?></td>
+                                    <td><?php echo $it['barcode'] !== null && $it['barcode'] !== '' ? '<i class="fas fa-barcode" style="margin-right:5px;color:#7E684B;"></i>' . htmlspecialchars($it['barcode']) : '<span style="color:#b8b0a4;">—</span>'; ?></td>
                                     <td style="color:#7a6f63;font-size:.85rem;"><?php echo htmlspecialchars(mb_strimwidth((string)$it['description'], 0, 80, '…')); ?></td>
                                     <td><?php echo (int)$it['display_order']; ?></td>
                                     <td>

@@ -18,7 +18,7 @@
     border-radius: 8px;
     background: rgba(12, 141, 108, 0.08);
     border: 1px solid rgba(12, 141, 108, 0.28);
-    color: #0c8d6c;
+    color: #0a7058;
     font-size: 13px;
     font-weight: 600;
     font-family: 'Jost', sans-serif;
@@ -68,7 +68,7 @@
 }
 
 .kpi.green .val {
-    color: #0c8d6c;
+    color: #0a7058;
 }
 
 .kpi.amber .val {
@@ -242,7 +242,7 @@
 }
 
 .menu-tile:hover {
-    border-color: var(--color-primary, #8A775F);
+    border-color: var(--color-primary, #766550);
     transform: translateY(-1px);
     box-shadow: 0 2px 4px rgba(0, 0, 0, 0.08);
 }
@@ -256,7 +256,7 @@
 
 .menu-tile .pr {
     font-size: 11px;
-    color: #0c8d6c;
+    color: #0a7058;
     font-weight: 600;
     margin-top: 4px;
 }
@@ -298,8 +298,8 @@
 }
 
 .menu-tabs button.active {
-    color: var(--color-primary, #8A775F);
-    border-bottom-color: var(--color-primary, #8A775F);
+    color: var(--color-primary, #766550);
+    border-bottom-color: var(--color-primary, #766550);
 }
 
 .total-line {
@@ -319,13 +319,13 @@
 .total-line .val {
     font-size: 20px;
     font-weight: 600;
-    color: #0c8d6c;
+    color: #0a7058;
     font-variant-numeric: tabular-nums;
 }
 
 .btn-fire {
     padding: 10px 20px;
-    background: #0c8d6c;
+    background: #0a7058;
     color: white;
     border: none;
     border-radius: 6px;

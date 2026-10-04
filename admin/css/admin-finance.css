@@ -7,12 +7,12 @@
     --finance-shadow-sm: 0 2px 8px rgba(16, 24, 40, 0.06);
     --finance-text: var(--color-text-primary, #2A2723);
     --finance-muted: var(--color-text-secondary, #5E554D);
-    --finance-accent: var(--color-primary, #8A775F);
+    --finance-accent: var(--color-primary, #766550);
     --finance-accent-2: var(--color-primary-light, #B9A78F);
     --finance-success: #1f7a42;
     --finance-success-bg: #ecfdf3;
     --finance-success-border: #bbf7d0;
-    --finance-warning: #b7791f;
+    --finance-warning: #8a5a0f;
     --finance-warning-bg: #fff7ed;
     --finance-warning-border: #fed7aa;
     --finance-danger: var(--color-error, #C62828);
@@ -415,7 +415,7 @@ body {
 }
 
 .finance-page .btn-action.btn-regenerate:hover {
-    background: #fed7aa;
+    background: #ffedd5;
     color: var(--finance-warning);
 }
 
@@ -2126,7 +2126,7 @@ body {
     width: 18px;
     height: 18px;
     cursor: pointer;
-    accent-color: var(--finance-primary, #8A775F);
+    accent-color: var(--finance-primary, #766550);
     flex-shrink: 0;
 }
 
@@ -2146,7 +2146,7 @@ body {
     font-size: clamp(0.72rem, 0.68rem + 0.18vw, 0.82rem);
     font-weight: 600;
     color: #fff;
-    background: var(--finance-primary, #8A775F);
+    background: var(--finance-primary, #766550);
     border: none;
     border-radius: 20px;
     cursor: pointer;
@@ -2200,7 +2200,7 @@ body {
     font-family: var(--font-body, 'Jost', sans-serif);
     font-size: clamp(0.72rem, 0.68rem + 0.18vw, 0.82rem);
     font-weight: 500;
-    color: var(--finance-primary, #8A775F);
+    color: var(--finance-primary, #766550);
     background: transparent;
     border: 1px solid var(--finance-border, #e3ddd5);
     border-radius: 20px;
@@ -2244,7 +2244,7 @@ body {
 
 .pos-acct-drawer__inner {
     padding: 0 0.75rem 1rem;
-    border-top: 2px solid var(--finance-primary, #8A775F);
+    border-top: 2px solid var(--finance-primary, #766550);
     background: color-mix(in srgb, var(--finance-bg, #f7f3ee) 60%, white);
     border-radius: 0 0 10px 10px;
 }
@@ -2274,7 +2274,7 @@ body {
     font-family: var(--font-body, 'Jost', sans-serif);
     font-size: clamp(0.72rem, 0.68rem + 0.15vw, 0.8rem);
     font-weight: 500;
-    background: var(--finance-primary, #8A775F);
+    background: var(--finance-primary, #766550);
     color: #fff;
     border: none;
     border-radius: 20px;
@@ -2319,14 +2319,14 @@ body {
 
 /* Highlight ticked rows */
 .pos-acct-drawer__table tbody tr:has(.pos-acct-order-tick:checked) {
-    background: color-mix(in srgb, var(--finance-primary, #8A775F) 8%, transparent);
+    background: color-mix(in srgb, var(--finance-primary, #766550) 8%, transparent);
 }
 
 .pos-acct-order-tick {
     width: 16px;
     height: 16px;
     cursor: pointer;
-    accent-color: var(--finance-primary, #8A775F);
+    accent-color: var(--finance-primary, #766550);
 }
 
 /* Per-order accountant note input inside the sales drawer */
@@ -2366,7 +2366,7 @@ body {
     gap: 0.35rem;
     cursor: pointer;
     list-style: none;
-    color: var(--finance-primary, #8A775F);
+    color: var(--finance-primary, #766550);
     font-size: clamp(0.7rem, 0.66rem + 0.14vw, 0.78rem);
     font-weight: 600;
 }
@@ -2392,7 +2392,7 @@ body {
 }
 
 .pos-acct-sale-details__qty {
-    color: var(--finance-primary, #8A775F);
+    color: var(--finance-primary, #766550);
     font-weight: 600;
     margin-right: 0.25rem;
 }
@@ -3663,12 +3663,14 @@ body {
     padding: 0 5px;
     border-radius: 999px;
     background: rgba(0, 0, 0, 0.12);
+    color: var(--finance-text);
     font-size: 10.5px;
     font-weight: 700;
 }
 
 .tb-tab--active .tb-tab__count {
-    background: rgba(255, 255, 255, 0.25);
+    background: rgba(0, 0, 0, 0.22);
+    color: #fff;
 }
 
 /* Row urgency tinting */
@@ -3953,7 +3955,7 @@ body {
 
 .acct-pill--restaurant {
     background: #fdecd1;
-    color: #b7791f;
+    color: #8a5a0f;
 }
 
 .acct-pill--gym {
@@ -4387,7 +4389,7 @@ body {
 .inv-page-info {
     flex: 1;
     text-align: center;
-    color: var(--admin-muted, #8B7355);
+    color: var(--admin-muted, #7E684B);
     font-weight: 500;
 }
 
@@ -4428,7 +4430,7 @@ body {
 .rh-help-panel {
     background: #f8f4ef;
     border: 1px solid var(--color-lux-clay-50, #F3ECE4);
-    border-left: 4px solid var(--color-lux-gold, #B18247);
+    border-left: 4px solid var(--color-lux-gold, #8F6A35);
     border-radius: 8px;
     margin-bottom: 20px;
     overflow: hidden;
@@ -4463,7 +4465,7 @@ details[open] .rh-help-panel__toggle::after {
 }
 
 .rh-help-panel__toggle i {
-    color: var(--color-lux-gold, #B18247);
+    color: var(--color-lux-gold, #8F6A35);
 }
 
 .rh-help-panel__body {
@@ -4565,7 +4567,7 @@ details[open] .rh-help-panel__toggle::after {
 .rh-funnel-step__value {
     font-size: 0.78rem;
     font-weight: 600;
-    color: var(--color-lux-gold, #B18247);
+    color: var(--color-lux-gold, #8F6A35);
     margin-bottom: 4px;
 }
 

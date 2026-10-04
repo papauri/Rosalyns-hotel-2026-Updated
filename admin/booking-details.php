@@ -1113,7 +1113,7 @@ $currency_symbol = getSetting('currency_symbol');
 // Status styling
 $status_colors = [
     'pending' => ['bg' => '#fef9ec', 'color' => '#92690a', 'icon' => 'fa-clock'],
-    'tentative' => ['bg' => '#fff8e1', 'color' => '#8B7355', 'icon' => 'fa-hourglass-half'],
+    'tentative' => ['bg' => '#fff8e1', 'color' => '#7E684B', 'icon' => 'fa-hourglass-half'],
     'confirmed' => ['bg' => '#ecf8fd', 'color' => '#1a7a96', 'icon' => 'fa-check-circle'],
     'checked-in' => ['bg' => '#edf7f0', 'color' => '#1f7a42', 'icon' => 'fa-sign-in-alt'],
     'checked-out' => ['bg' => '#f3f4f5', 'color' => '#555c66', 'icon' => 'fa-sign-out-alt'],
@@ -1288,7 +1288,7 @@ unset($_SESSION['success_message'], $_SESSION['error_message']);
         <!-- Group booking notice -->
         <?php if (!empty($group_bookings)): ?>
         <div style="background:rgba(139,115,85,0.08);border:1px solid rgba(139,115,85,0.25);border-radius:10px;padding:14px 18px;margin-bottom:16px;display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
-            <i class="fas fa-layer-group" style="color:#8B7355;font-size:1.1rem;flex-shrink:0;"></i>
+            <i class="fas fa-layer-group" style="color:#7E684B;font-size:1.1rem;flex-shrink:0;"></i>
             <span style="font-weight:600;color:#5A4A3A;font-size:0.9rem;">
                 <?php echo !empty($booking['primary_booking_id']) ? 'Secondary room in a group booking' : 'Primary booking — group of ' . (count($group_bookings) + 1) . ' rooms'; ?>
             </span>
@@ -1296,7 +1296,7 @@ unset($_SESSION['success_message'], $_SESSION['error_message']);
             <?php foreach ($group_bookings as $gb): ?>
             <a href="booking-details.php?id=<?php echo (int)$gb['id']; ?>"
                style="display:inline-flex;align-items:center;gap:6px;background:#fff;border:1px solid rgba(139,115,85,0.3);border-radius:6px;padding:4px 10px;font-size:0.82rem;color:#5A4A3A;text-decoration:none;white-space:nowrap;">
-                <i class="fas fa-door-open" style="font-size:0.75rem;color:#8B7355;"></i>
+                <i class="fas fa-door-open" style="font-size:0.75rem;color:#7E684B;"></i>
                 <?php echo htmlspecialchars($gb['room_name']); ?> &mdash; <strong><?php echo htmlspecialchars($gb['booking_reference']); ?></strong>
             </a>
             <?php endforeach; ?>
@@ -1858,7 +1858,7 @@ unset($_SESSION['success_message'], $_SESSION['error_message']);
                                 <div class="invoice-item">
                                     <div class="invoice-info">
                                         <div class="invoice-number">
-                                            <i class="fas fa-file-invoice" style="color: var(--gold, #8B7355); margin-right: 8px;"></i>
+                                            <i class="fas fa-file-invoice" style="color: var(--gold, #7E684B); margin-right: 8px;"></i>
                                             <?php echo htmlspecialchars($invoice['invoice_number']); ?>
                                         </div>
                                         <div class="invoice-date">
@@ -2155,7 +2155,7 @@ unset($_SESSION['success_message'], $_SESSION['error_message']);
     <div class="modal-overlay" id="addChargeModal">
         <div class="modal-content">
             <div class="modal-header">
-                <h3><i class="fas fa-plus" style="color: var(--gold, #8B7355);"></i> Add Custom Charge</h3>
+                <h3><i class="fas fa-plus" style="color: var(--gold, #7E684B);"></i> Add Custom Charge</h3>
                 <button class="modal-close" onclick="closeAddChargeModal()">&times;</button>
             </div>
             <form method="POST" id="addChargeForm">
@@ -2200,7 +2200,7 @@ unset($_SESSION['success_message'], $_SESSION['error_message']);
     <div class="modal-overlay" id="menuModal">
         <div class="modal-content wide">
             <div class="modal-header">
-                <h3><i class="fas fa-utensils" style="color: var(--gold, #8B7355);"></i> Add Menu Item to Folio</h3>
+                <h3><i class="fas fa-utensils" style="color: var(--gold, #7E684B);"></i> Add Menu Item to Folio</h3>
                 <button class="modal-close" onclick="closeMenuModal()">&times;</button>
             </div>
             <form method="POST" id="menuForm">
@@ -2305,7 +2305,7 @@ unset($_SESSION['success_message'], $_SESSION['error_message']);
     <div class="modal-overlay" id="dateAdjustModal">
         <div class="modal-content">
             <div class="modal-header">
-                <h3><i class="fas fa-calendar-alt" style="color: var(--color-lux-gold, #B18247);"></i> Adjust Stay Dates</h3>
+                <h3><i class="fas fa-calendar-alt" style="color: var(--color-lux-gold, #8F6A35);"></i> Adjust Stay Dates</h3>
                 <button class="modal-close" onclick="closeDateAdjustModal()">&times;</button>
             </div>
             <form method="POST" id="dateAdjustForm">

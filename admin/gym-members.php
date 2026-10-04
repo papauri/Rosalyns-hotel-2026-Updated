@@ -663,7 +663,7 @@ $gm_currency = (string)getSetting('currency_symbol', 'MWK');
                 </a>
                 <?php endif; ?>
                 <?php if (hasPermission((int)$user['id'], 'gym_reports')): ?>
-                <a class="btn-add" href="gym-reports.php" style="text-decoration:none;background:#8B7355;color:#ffffff;">
+                <a class="btn-add" href="gym-reports.php" style="text-decoration:none;background:#7E684B;color:#ffffff;">
                     <i class="fas fa-chart-line"></i> Gym Reports
                 </a>
                 <?php endif; ?>
@@ -681,9 +681,9 @@ $gm_currency = (string)getSetting('currency_symbol', 'MWK');
         <!-- Renewal reminder engine — configurable days-before-expiry email -->
         <?php /* Set-once reminder settings sit folded so the register comes first. */ ?>
         <details style="background:#fff;border:1px solid #d5cfc4;border-radius:4px;margin-bottom:18px;">
-            <summary style="min-height:44px;display:flex;align-items:center;gap:8px;padding:10px 18px;cursor:pointer;font-weight:700;color:#8B7355;font-size:.82rem;letter-spacing:.05em;text-transform:uppercase;"><i class="fas fa-bell"></i> Renewal reminders</summary>
+            <summary style="min-height:44px;display:flex;align-items:center;gap:8px;padding:10px 18px;cursor:pointer;font-weight:700;color:#7E684B;font-size:.82rem;letter-spacing:.05em;text-transform:uppercase;"><i class="fas fa-bell"></i> Renewal reminders</summary>
         <div style="background:#fff;border:0;border-top:1px solid #d5cfc4;padding:14px 18px;display:flex;align-items:center;gap:14px;flex-wrap:wrap;">
-            <span style="font-weight:700;color:#8B7355;font-size:.82rem;letter-spacing:.05em;text-transform:uppercase;">
+            <span style="font-weight:700;color:#7E684B;font-size:.82rem;letter-spacing:.05em;text-transform:uppercase;">
                 <i class="fas fa-bell"></i> Renewal Reminders
             </span>
             <label style="display:inline-flex;align-items:center;gap:7px;font-size:.86rem;color:#3e3930;cursor:pointer;">
@@ -695,12 +695,12 @@ $gm_currency = (string)getSetting('currency_symbol', 'MWK');
                 day(s) before expiry
             </label>
             <button class="mm-btn mm-btn-sm" onclick="gmSaveReminderSettings()"><i class="fas fa-save"></i> Save</button>
-            <button class="mm-btn mm-btn-sm" style="background:#8B7355;color:#fff;" onclick="gmRunReminders(this)" title="Checks for memberships expiring within the window and emails any not yet reminded — safe to click repeatedly">
+            <button class="mm-btn mm-btn-sm" style="background:#7E684B;color:#fff;" onclick="gmRunReminders(this)" title="Checks for memberships expiring within the window and emails any not yet reminded — safe to click repeatedly">
                 <i class="fas fa-paper-plane"></i> Send due reminders now
             </button>
             <span style="font-size:.78rem;color:#9a8f82;margin-left:auto;">
                 <?php if (!$gm_reminder_ready): ?>
-                    <i class="fas fa-triangle-exclamation" style="color:#B18247;"></i> Log table pending — run admin/migrations/2026_07_04_gym_reminder_log.sql
+                    <i class="fas fa-triangle-exclamation" style="color:#8F6A35;"></i> Log table pending — run admin/migrations/2026_07_04_gym_reminder_log.sql
                 <?php elseif ($gm_reminder_run['last_sent_at']): ?>
                     Last reminder sent <?php echo htmlspecialchars(date('M j, H:i', strtotime((string)$gm_reminder_run['last_sent_at']))); ?> · <?php echo (int)$gm_reminder_run['sent_today']; ?> today · <?php echo (int)$gm_reminder_run['total']; ?> all-time
                 <?php else: ?>
@@ -745,7 +745,7 @@ $gm_currency = (string)getSetting('currency_symbol', 'MWK');
                 </thead>
                 <tbody>
                     <?php foreach ($gm_members as $m):
-                        $statusColor = ['active' => '#2e7d32', 'expired' => '#9e4040', 'suspended' => '#B18247', 'cancelled' => '#6c757d'][$m['status']] ?? '#6c757d';
+                        $statusColor = ['active' => '#2e7d32', 'expired' => '#9e4040', 'suspended' => '#8F6A35', 'cancelled' => '#6c757d'][$m['status']] ?? '#6c757d';
                         $expPill = gym_days_to_expiry($m['expiry_date'] ?? null, (string)$m['status'], (int)$gm_reminder_cfg['days']);
                     ?>
                         <tr id="member-<?php echo (int)$m['id']; ?>" data-focus="member-<?php echo (int)$m['id']; ?>">
@@ -792,7 +792,7 @@ $gm_currency = (string)getSetting('currency_symbol', 'MWK');
                                     $seg  = gym_member_segment($m, $v30, $vs ? (int)$vs['visits'] : 0, $vs['last_in'] ?? null);
                                 ?>
                                 <?php if ($peak['top_slot']): ?>
-                                    <span style="color:#5a5147;" title="<?php echo htmlspecialchars((string)$peak['summary']); ?>"><i class="fas fa-clock" style="color:#B18247;"></i> <?php echo htmlspecialchars((string)$peak['top_slot']); ?></span><br>
+                                    <span style="color:#5a5147;" title="<?php echo htmlspecialchars((string)$peak['summary']); ?>"><i class="fas fa-clock" style="color:#8F6A35;"></i> <?php echo htmlspecialchars((string)$peak['top_slot']); ?></span><br>
                                 <?php endif; ?>
                                 <span style="display:inline-block;margin-top:2px;padding:1px 8px;border-radius:10px;font-size:.7rem;font-weight:700;color:#fff;background:<?php echo $seg['color']; ?>;" title="<?php echo htmlspecialchars($seg['hint']); ?>"><?php echo htmlspecialchars($seg['segment']); ?></span>
                             </td>
@@ -1137,7 +1137,7 @@ $gm_currency = (string)getSetting('currency_symbol', 'MWK');
                                 return '<span style="display:inline-block;margin-right:10px;"><strong>' + gmEscape(f) + ':</strong> ' + gmEscape(r.old_values[f]) + ' → ' + gmEscape(r.new_values[f]) + '</span>';
                             }).join('') + '</div>';
                         }
-                        return '<div style="border-left:3px solid #8B7355;padding:6px 0 6px 10px;margin-bottom:10px;">' +
+                        return '<div style="border-left:3px solid #7E684B;padding:6px 0 6px 10px;margin-bottom:10px;">' +
                             '<div><strong>' + gmEscape(actLabel[r.action] || r.action) + '</strong> · <span style="color:#9a8f82;font-size:.78rem;">' + when + ' by ' + who + '</span></div>' +
                             diff + note + '</div>';
                     }).join('');
@@ -1230,7 +1230,7 @@ $gm_currency = (string)getSetting('currency_symbol', 'MWK');
                     // ── Fitness report header: segment + headline stats ──
                     var st = d.stats || {};
                     if (d.segment && d.segment.segment) {
-                        html += '<div style="display:inline-block;background:' + gmEscape(d.segment.color || '#8B7355') + '1a;border:1px solid ' + gmEscape(d.segment.color || '#8B7355') + ';color:' + gmEscape(d.segment.color || '#8B7355') + ';border-radius:999px;padding:3px 12px;font-size:.74rem;font-weight:700;margin-bottom:10px;" title="' + gmEscape(d.segment.hint || '') + '">' + gmEscape(d.segment.segment) + '</div>';
+                        html += '<div style="display:inline-block;background:' + gmEscape(d.segment.color || '#7E684B') + '1a;border:1px solid ' + gmEscape(d.segment.color || '#7E684B') + ';color:' + gmEscape(d.segment.color || '#7E684B') + ';border-radius:999px;padding:3px 12px;font-size:.74rem;font-weight:700;margin-bottom:10px;" title="' + gmEscape(d.segment.hint || '') + '">' + gmEscape(d.segment.segment) + '</div>';
                     }
                     var statCell = function (val, label) {
                         return '<div style="flex:1;min-width:82px;background:#fff;border:1px solid #e8e0d4;border-radius:6px;padding:8px 10px;text-align:center;">' +
@@ -1256,12 +1256,12 @@ $gm_currency = (string)getSetting('currency_symbol', 'MWK');
                     if (dpTotal > 0) {
                         var dpMeta = [['early', 'Early (before 6)'], ['morning', 'Morning (6–11)'], ['midday', 'Midday (11–2)'], ['afternoon', 'Afternoon (2–5)'], ['evening', 'Evening (5+)']];
                         html += '<div style="background:#FAF6F0;border:1px solid #e8e0d4;border-radius:6px;padding:12px 14px;margin-bottom:14px;">' +
-                            '<div style="font-weight:700;color:#8B7355;font-size:.8rem;margin-bottom:8px;"><i class="fas fa-clock"></i> Training habits</div>' +
+                            '<div style="font-weight:700;color:#7E684B;font-size:.8rem;margin-bottom:8px;"><i class="fas fa-clock"></i> Training habits</div>' +
                             dpMeta.filter(function (m) { return dp[m[0]] > 0; }).map(function (m) {
                                 var c = dp[m[0]]; var pct = Math.round((c / dpTotal) * 100);
                                 return '<div style="display:flex;align-items:center;gap:8px;margin:3px 0;font-size:.74rem;color:#5a5147;">' +
                                     '<span style="width:130px;">' + m[1] + '</span>' +
-                                    '<span style="flex:1;background:#ece4d8;border-radius:3px;overflow:hidden;"><span style="display:block;height:10px;width:' + Math.max(4, pct) + '%;background:#8B7355;"></span></span>' +
+                                    '<span style="flex:1;background:#ece4d8;border-radius:3px;overflow:hidden;"><span style="display:block;height:10px;width:' + Math.max(4, pct) + '%;background:#7E684B;"></span></span>' +
                                     '<span style="width:46px;text-align:right;">' + pct + '% (' + c + ')</span></div>';
                             }).join('') + '</div>';
                     }
@@ -1272,14 +1272,14 @@ $gm_currency = (string)getSetting('currency_symbol', 'MWK');
                     if (moKeys.length > 1) {
                         var mmax = 0; moKeys.forEach(function (k) { if (months[k] > mmax) mmax = months[k]; });
                         html += '<div style="background:#FAF6F0;border:1px solid #e8e0d4;border-radius:6px;padding:12px 14px;margin-bottom:14px;">' +
-                            '<div style="font-weight:700;color:#8B7355;font-size:.8rem;margin-bottom:8px;"><i class="fas fa-arrow-trend-up"></i> Monthly momentum (6 months)</div>' +
+                            '<div style="font-weight:700;color:#7E684B;font-size:.8rem;margin-bottom:8px;"><i class="fas fa-arrow-trend-up"></i> Monthly momentum (6 months)</div>' +
                             '<div style="display:flex;align-items:flex-end;gap:8px;height:52px;">' +
                             moKeys.map(function (k) {
                                 var c = months[k]; var h = Math.max(6, Math.round((c / mmax) * 46));
                                 var lbl = new Date(k + '-01T00:00:00').toLocaleDateString([], { month: 'short' });
                                 return '<div style="flex:1;text-align:center;" title="' + gmEscape(k) + ': ' + c + ' visits">' +
                                     '<div style="font-size:.6rem;color:#9a8f82;">' + c + '</div>' +
-                                    '<div style="background:#B18247;border-radius:3px 3px 0 0;height:' + h + 'px;"></div>' +
+                                    '<div style="background:#8F6A35;border-radius:3px 3px 0 0;height:' + h + 'px;"></div>' +
                                     '<div style="font-size:.62rem;color:#9a8f82;margin-top:2px;">' + lbl + '</div></div>';
                             }).join('') + '</div></div>';
                     }
@@ -1290,13 +1290,13 @@ $gm_currency = (string)getSetting('currency_symbol', 'MWK');
                     if (wkKeys.length) {
                         var wmax = 0; wkKeys.forEach(function (k) { if (weeks[k] > wmax) wmax = weeks[k]; });
                         html += '<div style="background:#FAF6F0;border:1px solid #e8e0d4;border-radius:6px;padding:12px 14px;margin-bottom:14px;">' +
-                            '<div style="font-weight:700;color:#8B7355;font-size:.8rem;margin-bottom:8px;"><i class="fas fa-calendar-week"></i> Weekly consistency (last 8 weeks)</div>' +
+                            '<div style="font-weight:700;color:#7E684B;font-size:.8rem;margin-bottom:8px;"><i class="fas fa-calendar-week"></i> Weekly consistency (last 8 weeks)</div>' +
                             '<div style="display:flex;align-items:flex-end;gap:5px;height:52px;">' +
                             wkKeys.map(function (k) {
                                 var c = weeks[k];
                                 var h = Math.max(6, Math.round((c / wmax) * 46));
                                 return '<div style="flex:1;text-align:center;" title="Week ' + gmEscape(String(k).slice(4)) + ': ' + c + ' visit(s)">' +
-                                    '<div style="background:#B18247;border-radius:3px 3px 0 0;height:' + h + 'px;"></div>' +
+                                    '<div style="background:#8F6A35;border-radius:3px 3px 0 0;height:' + h + 'px;"></div>' +
                                     '<div style="font-size:.62rem;color:#9a8f82;margin-top:2px;">' + c + '</div></div>';
                             }).join('') + '</div></div>';
                     }
@@ -1304,7 +1304,7 @@ $gm_currency = (string)getSetting('currency_symbol', 'MWK');
                     // Peak-time profile: summary line + per-hour histogram bars
                     if (d.profile && d.profile.summary) {
                         html += '<div style="background:#FAF6F0;border:1px solid #e8e0d4;border-radius:6px;padding:12px 14px;margin-bottom:14px;">' +
-                            '<div style="font-weight:700;color:#8B7355;font-size:.8rem;margin-bottom:8px;"><i class="fas fa-chart-simple"></i> Peak training time: ' + gmEscape(d.profile.summary) + '</div>';
+                            '<div style="font-weight:700;color:#7E684B;font-size:.8rem;margin-bottom:8px;"><i class="fas fa-chart-simple"></i> Peak training time: ' + gmEscape(d.profile.summary) + '</div>';
                         var hours = d.hours || {};
                         var max = 0;
                         Object.keys(hours).forEach(function (h) { if (hours[h] > max) max = hours[h]; });
@@ -1314,7 +1314,7 @@ $gm_currency = (string)getSetting('currency_symbol', 'MWK');
                                 var pct = Math.max(4, Math.round((c / max) * 100));
                                 return '<div style="display:flex;align-items:center;gap:8px;margin:2px 0;font-size:.72rem;color:#5a5147;">' +
                                     '<span style="width:42px;text-align:right;">' + String(h).padStart(2, '0') + ':00</span>' +
-                                    '<span style="flex:1;background:#ece4d8;border-radius:3px;overflow:hidden;"><span style="display:block;height:9px;width:' + pct + '%;background:#B18247;border-radius:3px;"></span></span>' +
+                                    '<span style="flex:1;background:#ece4d8;border-radius:3px;overflow:hidden;"><span style="display:block;height:9px;width:' + pct + '%;background:#8F6A35;border-radius:3px;"></span></span>' +
                                     '<span style="width:20px;">' + c + '</span></div>';
                             }).join('');
                         }
@@ -1322,7 +1322,7 @@ $gm_currency = (string)getSetting('currency_symbol', 'MWK');
                     }
 
                     // ── Visit log — paginated 10 per page ──
-                    html += '<div style="font-weight:700;color:#8B7355;font-size:.8rem;margin-bottom:6px;"><i class="fas fa-list"></i> Visit log (' + parseInt(st.total_visits || 0, 10) + ' total)</div>' +
+                    html += '<div style="font-weight:700;color:#7E684B;font-size:.8rem;margin-bottom:6px;"><i class="fas fa-list"></i> Visit log (' + parseInt(st.total_visits || 0, 10) + ' total)</div>' +
                         '<div id="gmVisitsWrap" style="transition:opacity .15s;">' +
                         '<table class="menu-table" style="margin:0;"><thead><tr><th>In</th><th>Out</th><th>Duration</th><th>Method</th></tr></thead>' +
                         '<tbody id="gmVisitsBody">' + gmVisitsRows(visits) + '</tbody></table>' +

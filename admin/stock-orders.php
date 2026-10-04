@@ -1243,7 +1243,7 @@ $csrf_token = generateCsrfToken();
 
     <div class="content">
         <div class="page-header">
-            <h2 class="page-title"><i class="fas fa-receipt" style="color:#8B7355;"></i> Restaurant Orders</h2>
+            <h2 class="page-title"><i class="fas fa-receipt" style="color:#7E684B;"></i> Restaurant Orders</h2>
         </div>
 
         <?php if ($message): showAlert($message, 'success');
@@ -1391,7 +1391,7 @@ $csrf_token = generateCsrfToken();
                 <h3 style="margin:0;flex:1;">Operational Insights</h3>
                 <span id="insight-refresh-timer" style="display:none;"></span>
                 <button onclick="window.location.href=window.location.href.split('#')[0]+'#ops-insights'"
-                    style="background:#8B7355;color:#fff;border:none;padding:6px 14px;border-radius:6px;font-size:13px;cursor:pointer;display:flex;align-items:center;gap:6px;"
+                    style="background:#7E684B;color:#fff;border:none;padding:6px 14px;border-radius:6px;font-size:13px;cursor:pointer;display:flex;align-items:center;gap:6px;"
                     title="Refresh page and return to insights">
                     <i class="fas fa-rotate-right"></i> Refresh
                 </button>
@@ -1557,7 +1557,7 @@ $csrf_token = generateCsrfToken();
                         data-insight-key="cashier-performance"
                         data-insight-title="Cashier Performance Snapshot"
                         aria-label="Open cashier performance snapshot">
-                        <div class="lbl"><i class="fas fa-user-check" style="color:#8B7355;font-size:11px;"></i> Revenue by Cashier</div>
+                        <div class="lbl"><i class="fas fa-user-check" style="color:#7E684B;font-size:11px;"></i> Revenue by Cashier</div>
                         <div style="margin-top:6px;width:100%;display:flex;flex-direction:column;gap:5px;">
                             <?php foreach ($cashierStats as $cs):
                                 if ((float)($cs['revenue'] ?? 0) == 0 && (int)($cs['orders_open'] ?? 0) == 0) continue;
@@ -1585,7 +1585,7 @@ $csrf_token = generateCsrfToken();
             <div class="ops-panel ops-panel--pipeline" style="margin:0 0 14px;padding:16px 20px;">
                 <div class="ops-panel__header">
                     <strong class="ops-panel__header-title">
-                        <i class="fas fa-arrow-right-arrow-left" style="color:#8B7355;"></i>
+                        <i class="fas fa-arrow-right-arrow-left" style="color:#7E684B;"></i>
                         Live Order Pipeline
                     </strong>
                     <span class="ops-panel__header-note">Click any stage to filter the orders list</span>
@@ -1637,7 +1637,7 @@ $csrf_token = generateCsrfToken();
                 <!-- Station Queue with load bars -->
                 <div class="ops-panel ops-panel--station-queue" style="margin:0;">
                     <div class="ops-panel__header">
-                        <strong class="ops-panel__header-title"><i class="fas fa-layer-group" style="color:#8B7355;"></i> Station Queue</strong>
+                        <strong class="ops-panel__header-title"><i class="fas fa-layer-group" style="color:#7E684B;"></i> Station Queue</strong>
                         <a class="ops-panel__header-link" href="stock-orders.php?status=placed#ops-insights">View open orders</a>
                     </div>
                     <div class="table-responsive" style="margin-top:10px;">
@@ -1693,9 +1693,9 @@ $csrf_token = generateCsrfToken();
                                             <?php if ($stationScreen): ?>
                                                 <a href="<?php echo htmlspecialchars($stationScreen, ENT_QUOTES, 'UTF-8'); ?>" target="_blank"
                                                     title="Open <?php echo htmlspecialchars($stationLabel); ?> Display"
-                                                    style="margin-left:6px;color:#8B7355;font-size:11px;text-decoration:none;"
+                                                    style="margin-left:6px;color:#7E684B;font-size:11px;text-decoration:none;"
                                                     onclick="event.stopPropagation();"
-                                                    onmouseover="this.style.color='#0d6efd'" onmouseout="this.style.color='#8B7355'">
+                                                    onmouseover="this.style.color='#0d6efd'" onmouseout="this.style.color='#7E684B'">
                                                     <i class="fas fa-tv"></i>
                                                 </a>
                                             <?php endif; ?>
@@ -1738,7 +1738,7 @@ $csrf_token = generateCsrfToken();
                 <!-- Payment Mix with visual bars -->
                 <div class="ops-panel ops-panel--payment-mix" style="margin:0;">
                     <div class="ops-panel__header">
-                        <strong class="ops-panel__header-title"><i class="fas fa-wallet" style="color:#8B7355;"></i> Payment Mix Today</strong>
+                        <strong class="ops-panel__header-title"><i class="fas fa-wallet" style="color:#7E684B;"></i> Payment Mix Today</strong>
                         <span class="ops-panel__header-note">Click a payment method to filter the orders list</span>
                     </div>
                     <div style="margin-top:12px;display:flex;flex-direction:column;gap:10px;">
@@ -1769,7 +1769,7 @@ $csrf_token = generateCsrfToken();
                                 title="Filter orders paid with <?php echo htmlspecialchars($methodLabel); ?>">
                                 <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;">
                                     <span style="font-size:13px;font-weight:600;">
-                                        <i class="fas <?php echo $methodIcon; ?>" style="color:#8B7355;width:16px;"></i>
+                                        <i class="fas <?php echo $methodIcon; ?>" style="color:#7E684B;width:16px;"></i>
                                         <?php echo htmlspecialchars($methodLabel); ?>
                                     </span>
                                     <span style="font-size:12px;color:#6c757d;">
@@ -1778,9 +1778,9 @@ $csrf_token = generateCsrfToken();
                                     </span>
                                 </div>
                                 <div style="height:10px;background:#e9ecef;border-radius:5px;overflow:hidden;" title="<?php echo number_format($share, 1); ?>% of today's revenue">
-                                    <div style="width:<?php echo number_format($share, 1); ?>%;height:100%;background:#8B7355;border-radius:5px;transition:width .4s;"></div>
+                                    <div style="width:<?php echo number_format($share, 1); ?>%;height:100%;background:#7E684B;border-radius:5px;transition:width .4s;"></div>
                                 </div>
-                                <div style="font-size:11px;color:#8B7355;font-weight:600;margin-top:2px;"><?php echo number_format($share, 1); ?>%</div>
+                                <div style="font-size:11px;color:#7E684B;font-weight:600;margin-top:2px;"><?php echo number_format($share, 1); ?>%</div>
                             </a>
                         <?php endforeach; ?>
                         <?php if (empty($paymentMixToday)): ?>
@@ -1792,7 +1792,7 @@ $csrf_token = generateCsrfToken();
                 <!-- Order Channel / Type Split -->
                 <div class="ops-panel ops-panel--channel-split" style="margin:0;">
                     <div class="ops-panel__header">
-                        <strong class="ops-panel__header-title"><i class="fas <?php echo isRestaurantEnabled() ? 'fa-utensils' : 'fa-cash-register'; ?>" style="color:#8B7355;"></i> Order Channels Today</strong>
+                        <strong class="ops-panel__header-title"><i class="fas <?php echo isRestaurantEnabled() ? 'fa-utensils' : 'fa-cash-register'; ?>" style="color:#7E684B;"></i> Order Channels Today</strong>
                         <span class="ops-panel__header-note">Click a channel to filter the orders list</span>
                     </div>
                     <div style="margin-top:12px;display:flex;flex-direction:column;gap:10px;">
@@ -1825,7 +1825,7 @@ $csrf_token = generateCsrfToken();
                                 title="Filter orders for <?php echo htmlspecialchars($chLabel); ?>">
                                 <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;">
                                     <span style="font-size:13px;font-weight:600;">
-                                        <i class="fas <?php echo $chIcon; ?>" style="color:#8B7355;width:16px;"></i>
+                                        <i class="fas <?php echo $chIcon; ?>" style="color:#7E684B;width:16px;"></i>
                                         <?php echo htmlspecialchars($chLabel); ?>
                                     </span>
                                     <span style="font-size:12px;color:#6c757d;">
@@ -1835,9 +1835,9 @@ $csrf_token = generateCsrfToken();
                                     </span>
                                 </div>
                                 <div style="height:10px;background:#e9ecef;border-radius:5px;overflow:hidden;" title="<?php echo number_format($chPct, 1); ?>% of today's revenue">
-                                    <div style="width:<?php echo number_format($chPct, 1); ?>%;height:100%;background:#B18247;border-radius:5px;transition:width .4s;"></div>
+                                    <div style="width:<?php echo number_format($chPct, 1); ?>%;height:100%;background:#8F6A35;border-radius:5px;transition:width .4s;"></div>
                                 </div>
-                                <div style="font-size:11px;color:#B18247;font-weight:600;margin-top:2px;"><?php echo number_format($chPct, 1); ?>%</div>
+                                <div style="font-size:11px;color:#8F6A35;font-weight:600;margin-top:2px;"><?php echo number_format($chPct, 1); ?>%</div>
                             </a>
                         <?php endforeach; ?>
                         <?php if (empty($orderTypeSplit)): ?>
@@ -1854,7 +1854,7 @@ $csrf_token = generateCsrfToken();
                 <!-- Hourly Activity Bar Chart -->
                 <div class="ops-panel ops-panel--hourly-activity" style="margin:0;">
                     <div class="ops-panel__header">
-                        <strong class="ops-panel__header-title"><i class="fas fa-chart-bar" style="color:#8B7355;"></i> Hourly Activity Today</strong>
+                        <strong class="ops-panel__header-title"><i class="fas fa-chart-bar" style="color:#7E684B;"></i> Hourly Activity Today</strong>
                         <span class="ops-panel__header-note">Click an hour bar to filter that hour</span>
                     </div>
                     <?php if (!empty($hourlyBreakdown)): ?>
@@ -1872,15 +1872,15 @@ $csrf_token = generateCsrfToken();
                                     style="flex:1;display:flex;flex-direction:column;align-items:center;justify-content:flex-end;height:100px;position:relative;"
                                     title="<?php echo $hlbl; ?>: <?php echo (int)$h['orders_count']; ?> orders · <?php echo $currency_symbol . ' ' . number_format((float)$h['revenue'], 2); ?>">
                                     <?php if ((int)$h['orders_count'] > 0): ?>
-                                        <span style="font-size:9px;color:#8B7355;margin-bottom:2px;"><?php echo (int)$h['orders_count']; ?></span>
+                                        <span style="font-size:9px;color:#7E684B;margin-bottom:2px;"><?php echo (int)$h['orders_count']; ?></span>
                                     <?php endif; ?>
-                                    <div class="ops-panel__chart-bar" style="width:100%;background:<?php echo $isPeak ? '#B18247' : '#c8b89a'; ?>;height:<?php echo max($barPct, $h['revenue'] > 0 ? 4 : 0); ?>px;border-radius:3px 3px 0 0;min-height:<?php echo $h['revenue'] > 0 ? '4' : '0'; ?>px;transition:height .3s;"></div>
-                                    <span style="font-size:9px;color:<?php echo $isPeak ? '#B18247' : '#999'; ?>;font-weight:<?php echo $isPeak ? '700' : '400'; ?>;position:absolute;bottom:0;white-space:nowrap;"><?php echo htmlspecialchars($hlbl); ?></span>
+                                    <div class="ops-panel__chart-bar" style="width:100%;background:<?php echo $isPeak ? '#8F6A35' : '#c8b89a'; ?>;height:<?php echo max($barPct, $h['revenue'] > 0 ? 4 : 0); ?>px;border-radius:3px 3px 0 0;min-height:<?php echo $h['revenue'] > 0 ? '4' : '0'; ?>px;transition:height .3s;"></div>
+                                    <span style="font-size:9px;color:<?php echo $isPeak ? '#8F6A35' : '#999'; ?>;font-weight:<?php echo $isPeak ? '700' : '400'; ?>;position:absolute;bottom:0;white-space:nowrap;"><?php echo htmlspecialchars($hlbl); ?></span>
                                 </a>
                             <?php endforeach; ?>
                         </div>
                         <div style="font-size:11px;color:#6c757d;margin-top:4px;text-align:right;">
-                            <span style="display:inline-block;width:10px;height:10px;background:#B18247;border-radius:2px;margin-right:4px;vertical-align:middle;"></span>Peak hour &nbsp;
+                            <span style="display:inline-block;width:10px;height:10px;background:#8F6A35;border-radius:2px;margin-right:4px;vertical-align:middle;"></span>Peak hour &nbsp;
                             <span style="display:inline-block;width:10px;height:10px;background:#c8b89a;border-radius:2px;margin-right:4px;vertical-align:middle;"></span>Other hours
                             &nbsp;(bar height = revenue, number = orders)
                         </div>
@@ -1914,7 +1914,7 @@ $csrf_token = generateCsrfToken();
                                 </a>
                             <?php endforeach; ?>
                             <div style="margin-top:10px;">
-                                <a href="stock-orders.php?date=today&status=voided#ops-insights" style="font-size:12px;color:#8B7355;text-decoration:none;font-weight:600;">
+                                <a href="stock-orders.php?date=today&status=voided#ops-insights" style="font-size:12px;color:#7E684B;text-decoration:none;font-weight:600;">
                                     <i class="fas fa-magnifying-glass"></i> View all voided orders &rarr;
                                 </a>
                             </div>
@@ -1933,7 +1933,7 @@ $csrf_token = generateCsrfToken();
             <!-- ── Top Moving Items ──────────────────────────────── -->
             <details open style="margin:0 0 16px;">
                 <summary style="cursor:pointer;font-weight:600;padding:10px 14px;background:#f8f9fa;border:1px solid #dee2e6;border-radius:6px;list-style:none;display:flex;align-items:center;gap:8px;">
-                    <i class="fas fa-fire" style="color:#8B7355;"></i>
+                    <i class="fas fa-fire" style="color:#7E684B;"></i>
                     Top Moving Items Today
                     <span style="font-size:12px;color:#6c757d;font-weight:400;margin-left:4px;">(<?php echo count($topSellingItemsToday); ?> items with movement)</span>
                     <i class="fas fa-chevron-down" style="margin-left:auto;font-size:12px;color:#aaa;"></i>
@@ -1963,7 +1963,7 @@ $csrf_token = generateCsrfToken();
                                         <td data-label="#" style="color:#aaa;font-size:12px;"><?php echo $rank + 1; ?></td>
                                         <td data-label="Item"><strong><?php echo htmlspecialchars((string)($item['item_name'] ?? '')); ?></strong></td>
                                         <td data-label="Type">
-                                            <span style="background:#f3ece4;color:#8B7355;border-radius:4px;padding:2px 7px;font-size:11px;font-weight:600;">
+                                            <span style="background:#f3ece4;color:#7E684B;border-radius:4px;padding:2px 7px;font-size:11px;font-weight:600;">
                                                 <?php echo htmlspecialchars(ucfirst((string)($item['menu_type'] ?? ''))); ?>
                                             </span>
                                         </td>
@@ -2081,10 +2081,10 @@ $csrf_token = generateCsrfToken();
                         orderTypeLabel = orderTypeLabel.charAt(0).toUpperCase() + orderTypeLabel.slice(1);
                         var orderHref = 'order-lifecycle.php?id=' + item.order_id;
                         var tableInfo = item.order_type === 'room_service' ?
-                            '<i class="fas fa-bed" style="color:#8B7355;"></i> Room ' + (item.table_number || '—') :
-                            (item.table_number ? '<i class="fas fa-chair" style="color:#8B7355;"></i> ' + item.table_number : orderTypeLabel);
+                            '<i class="fas fa-bed" style="color:#7E684B;"></i> Room ' + (item.table_number || '—') :
+                            (item.table_number ? '<i class="fas fa-chair" style="color:#7E684B;"></i> ' + item.table_number : orderTypeLabel);
                         html += '<tr style="background:' + rowBg + ';border-bottom:1px solid #f0f0f0;">' +
-                            '<td style="padding:7px 10px;font-size:12px;color:#6c757d;font-family:monospace;"><a href="' + orderHref + '" target="_blank" rel="noopener" style="color:#8B7355;text-decoration:none;font-weight:600;">' + (item.order_reference || '#' + item.order_id) + '</a></td>' +
+                            '<td style="padding:7px 10px;font-size:12px;color:#6c757d;font-family:monospace;"><a href="' + orderHref + '" target="_blank" rel="noopener" style="color:#7E684B;text-decoration:none;font-weight:600;">' + (item.order_reference || '#' + item.order_id) + '</a></td>' +
                             '<td style="padding:7px 10px;font-weight:600;">' + (item.item_name || '—') + '</td>' +
                             '<td style="padding:7px 6px;text-align:center;">' + (item.quantity || 1) + '</td>' +
                             '<td style="padding:7px 10px;"><span style="color:' + statusColor + ';font-weight:600;text-transform:capitalize;">' + statusStr + '</span></td>' +
@@ -2195,7 +2195,7 @@ $csrf_token = generateCsrfToken();
 
                 // ── Accounting impact ─────────────────────────────────────────
                 html += '<div style="margin-bottom:16px;">';
-                html += '<h4 style="margin:0 0 8px;font-size:14px;color:#374151;"><i class="fas fa-chart-line" style="color:#8B7355;"></i> Accounting impact</h4>';
+                html += '<h4 style="margin:0 0 8px;font-size:14px;color:#374151;"><i class="fas fa-chart-line" style="color:#7E684B;"></i> Accounting impact</h4>';
                 html += '<div style="font-size:13px;background:#fff7e6;border:1px solid #ffc107;border-radius:6px;padding:10px 14px;">';
                 if (Math.abs(d.expected_total - d.total_amount) > 0.01) {
                     var diff = d.expected_total - d.total_amount;
@@ -2220,7 +2220,7 @@ $csrf_token = generateCsrfToken();
                 // ── Audit trail ───────────────────────────────────────────────
                 if (d.audit && d.audit.length > 0) {
                     html += '<div style="margin-bottom:16px;">';
-                    html += '<h4 style="margin:0 0 8px;font-size:14px;color:#374151;"><i class="fas fa-timeline" style="color:#8B7355;"></i> Audit trail</h4>';
+                    html += '<h4 style="margin:0 0 8px;font-size:14px;color:#374151;"><i class="fas fa-timeline" style="color:#7E684B;"></i> Audit trail</h4>';
                     html += '<div style="border-left:3px solid #dee2e6;padding-left:14px;display:flex;flex-direction:column;gap:8px;">';
                     d.audit.forEach(function(entry) {
                         var evtColor = {
@@ -2228,7 +2228,7 @@ $csrf_token = generateCsrfToken();
                             cancelled: '#c82333',
                             reconciled: '#155724',
                             paid: '#155724'
-                        } [entry.event] || '#8B7355';
+                        } [entry.event] || '#7E684B';
                         html += '<div style="font-size:12px;">' +
                             '<span style="display:inline-block;width:8px;height:8px;background:' + evtColor + ';border-radius:50%;margin-right:6px;"></span>' +
                             '<strong style="text-transform:capitalize;">' + (entry.event || '—') + '</strong>' +
@@ -2242,7 +2242,7 @@ $csrf_token = generateCsrfToken();
 
                 // ── Reconciliation tips ───────────────────────────────────────
                 html += '<div style="margin-bottom:16px;">';
-                html += '<h4 style="margin:0 0 8px;font-size:14px;color:#374151;"><i class="fas fa-wrench" style="color:#8B7355;"></i> How to reconcile</h4>';
+                html += '<h4 style="margin:0 0 8px;font-size:14px;color:#374151;"><i class="fas fa-wrench" style="color:#7E684B;"></i> How to reconcile</h4>';
                 html += '<ol style="margin:0;padding-left:20px;font-size:13px;">';
                 d.issues.forEach(function(issue) {
                     html += '<li style="padding:4px 0;">' + _reviewTip(issue) + '</li>';
@@ -2254,18 +2254,18 @@ $csrf_token = generateCsrfToken();
                     html += '<div style="padding-top:14px;border-top:1px solid #e9ecef;display:flex;gap:8px;justify-content:flex-end;flex-wrap:wrap;">';
                     html += '<button type="button" onclick="rhOpenLifecycle(' + orderId + ')" class="btn" style="background:#f8f9fa;color:#495057;border:1px solid #ced4da;padding:8px 16px;border-radius:6px;font-size:13px;cursor:pointer;font:inherit;">' +
                         '<i class="fas fa-timeline"></i> Full Timeline</a>';
-                    html += '<button type="button" onclick="_doReconcile()" style="padding:8px 18px;background:#8B7355;color:#fff;border:none;border-radius:6px;cursor:pointer;font-size:13px;font-weight:600;">' +
+                    html += '<button type="button" onclick="_doReconcile()" style="padding:8px 18px;background:#7E684B;color:#fff;border:none;border-radius:6px;cursor:pointer;font-size:13px;font-weight:600;">' +
                         '<i class="fas fa-rotate"></i> Run Reconciliation &amp; Sync Accounting</button>';
                     html += '</div>';
                 }
 
                 if (typeof Modal !== 'undefined' && Modal.showMessage) {
                     Modal.showMessage({
-                        title: '<i class="fas fa-magnifying-glass" style="color:#8B7355;"></i> Review &mdash; ' + d.reference,
+                        title: '<i class="fas fa-magnifying-glass" style="color:#7E684B;"></i> Review &mdash; ' + d.reference,
                         message: html
                     });
                 } else {
-                    showFallbackOverlay('<i class="fas fa-magnifying-glass" style="color:#8B7355;"></i> Review &mdash; ' + d.reference, html, {
+                    showFallbackOverlay('<i class="fas fa-magnifying-glass" style="color:#7E684B;"></i> Review &mdash; ' + d.reference, html, {
                         maxWidth: '680px',
                         alignTop: true
                     });
@@ -2507,7 +2507,7 @@ $csrf_token = generateCsrfToken();
                     $pgActive = ($pg === $orders_page);
                 ?>
                     <a href="<?php echo htmlspecialchars($pgHref, ENT_QUOTES, 'UTF-8'); ?>"
-                        style="padding:6px 12px;border:1px solid <?php echo $pgActive ? 'var(--color-primary,#8A775F)' : '#dee2e6'; ?>;background:<?php echo $pgActive ? 'var(--color-primary,#8A775F)' : '#fff'; ?>;color:<?php echo $pgActive ? '#fff' : '#374151'; ?>;border-radius:4px;font-size:13px;text-decoration:none;"><?php echo $pg; ?></a>
+                        style="padding:6px 12px;border:1px solid <?php echo $pgActive ? 'var(--color-primary,#766550)' : '#dee2e6'; ?>;background:<?php echo $pgActive ? 'var(--color-primary,#766550)' : '#fff'; ?>;color:<?php echo $pgActive ? '#fff' : '#374151'; ?>;border-radius:4px;font-size:13px;text-decoration:none;"><?php echo $pg; ?></a>
                 <?php endfor; ?>
                 <span style="padding:6px 8px;font-size:12px;color:#888;">
                     Showing <?php echo (($orders_page - 1) * $orders_per_page) + 1; ?>–<?php echo min($orders_page * $orders_per_page, $orders_total); ?> of <?php echo $orders_total; ?>
@@ -2938,8 +2938,8 @@ $csrf_token = generateCsrfToken();
                             lineTotal += lt;
                             html += '<tr style="background:' + rowBg + ';border-bottom:1px solid #f0f0f0;">' +
                                 '<td style="padding:8px 10px;font-weight:600;">' + (item.item_name || '—') +
-                                (item.notes ? '<div style="font-size:11px;color:#8B7355;font-weight:400;">' + item.notes + '</div>' : '') + '</td>' +
-                                '<td style="padding:8px 6px;text-align:center;"><span style="background:#f3ece4;color:#8B7355;border-radius:4px;padding:2px 7px;font-size:11px;font-weight:600;">' + (item.menu_type || '') + '</span></td>' +
+                                (item.notes ? '<div style="font-size:11px;color:#7E684B;font-weight:400;">' + item.notes + '</div>' : '') + '</td>' +
+                                '<td style="padding:8px 6px;text-align:center;"><span style="background:#f3ece4;color:#7E684B;border-radius:4px;padding:2px 7px;font-size:11px;font-weight:600;">' + (item.menu_type || '') + '</span></td>' +
                                 '<td style="padding:8px 6px;text-align:center;font-weight:700;">' + (item.quantity || '') + '</td>' +
                                 '<td style="padding:8px 10px;text-align:right;">' + (REVIEW_CURRENCY || '') + ' ' + Number(item.unit_price || 0).toFixed(2) + '</td>' +
                                 '<td style="padding:8px 10px;text-align:right;font-weight:600;">' + (REVIEW_CURRENCY || '') + ' ' + lt.toFixed(2) + '</td>' +
@@ -2954,7 +2954,7 @@ $csrf_token = generateCsrfToken();
                         html += '<p style="margin:10px 0 0;font-size:12px;color:#6c757d;">' + items.length + ' line item' + (items.length !== 1 ? 's' : '') + '</p>';
                     }
                     if (typeof Modal !== 'undefined' && Modal.showMessage) {
-                        Modal.showMessage({ title: '<i class="fas fa-list-ul" style="color:#8B7355;"></i> Items — ' + ref, message: html });
+                        Modal.showMessage({ title: '<i class="fas fa-list-ul" style="color:#7E684B;"></i> Items — ' + ref, message: html });
                     } else {
                         showFallbackOverlay('Items — ' + ref, html, { maxWidth: '780px' });
                     }

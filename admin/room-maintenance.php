@@ -1659,7 +1659,7 @@ try {
                     $pgActive = ($pg === $sched_page);
                 ?>
                     <a href="<?php echo htmlspecialchars($pgHref, ENT_QUOTES, 'UTF-8'); ?>"
-                        style="padding:6px 12px;border:1px solid <?php echo $pgActive ? 'var(--color-primary,#8A775F)' : '#dee2e6'; ?>;background:<?php echo $pgActive ? 'var(--color-primary,#8A775F)' : '#fff'; ?>;color:<?php echo $pgActive ? '#fff' : '#374151'; ?>;border-radius:4px;font-size:13px;text-decoration:none;"><?php echo $pg; ?></a>
+                        style="padding:6px 12px;border:1px solid <?php echo $pgActive ? 'var(--color-primary,#766550)' : '#dee2e6'; ?>;background:<?php echo $pgActive ? 'var(--color-primary,#766550)' : '#fff'; ?>;color:<?php echo $pgActive ? '#fff' : '#374151'; ?>;border-radius:4px;font-size:13px;text-decoration:none;"><?php echo $pg; ?></a>
                 <?php endfor; ?>
                 <span style="padding:6px 8px;font-size:12px;color:#888;">
                     Showing <?php echo (($sched_page - 1) * $sched_per_page) + 1; ?>–<?php echo min($sched_page * $sched_per_page, $sched_total); ?> of <?php echo $sched_total; ?>

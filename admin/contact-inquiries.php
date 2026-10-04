@@ -286,7 +286,7 @@ $site_name = getSetting('site_name');
             <div>
                 <div class="inquiry-subject"><?php echo htmlspecialchars($inq['subject']); ?></div>
                 <div class="inquiry-meta">
-                    <span><i class="fas fa-tag" style="color:#8A775F;"></i> <strong><?php echo htmlspecialchars($inq['reference_number']); ?></strong></span>
+                    <span><i class="fas fa-tag" style="color:#766550;"></i> <strong><?php echo htmlspecialchars($inq['reference_number']); ?></strong></span>
                     <span><i class="fas fa-user"></i> <strong><?php echo htmlspecialchars($inq['name']); ?></strong></span>
                     <span><i class="fas fa-envelope"></i> <a href="mailto:<?php echo htmlspecialchars($inq['email']); ?>"><?php echo htmlspecialchars($inq['email']); ?></a></span>
                     <?php if ($inq['phone']): ?>

@@ -363,14 +363,14 @@ $canReceive = $po && in_array($po['status'], ['sent', 'partial'], true);
         .row-form label { display:block; font-size:.72rem; text-transform:uppercase; letter-spacing:.04em; color:#8a8172; margin-bottom:4px; }
         .row-form input, .row-form select { padding:8px 10px; border:1px solid #d3cbc0; border-radius:2px; font-family:inherit; font-size:.88rem; background:#fff; }
         .btn { padding:9px 16px; border:none; border-radius:2px; cursor:pointer; font-family:inherit; font-size:.86rem; }
-        .btn-primary { background:#8B7355; color:#fff; }
+        .btn-primary { background:#7E684B; color:#fff; }
         .btn-ghost { background:transparent; border:1px solid #d3cbc0; color:#6a6255; }
         .btn-danger { background:#a25048; color:#fff; }
         .btn-sm { padding:5px 10px; font-size:.8rem; }
         .po-actions { display:flex; gap:10px; flex-wrap:wrap; margin-top:8px; }
         .mini { width:90px; }
         .mono { font-variant-numeric:tabular-nums; }
-        .po-link { color:#8B7355; text-decoration:none; font-weight:600; }
+        .po-link { color:#7E684B; text-decoration:none; font-weight:600; }
         @media (max-width:640px){ .po-table thead { display:none; } }
     </style>
 </head>
@@ -380,7 +380,7 @@ $canReceive = $po && in_array($po['status'], ['sent', 'partial'], true);
 
     <div class="content">
         <div class="page-header" style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:12px;">
-            <h2 class="page-title"><i class="fas fa-file-invoice" style="color:#8B7355;"></i> Purchase Orders</h2>
+            <h2 class="page-title"><i class="fas fa-file-invoice" style="color:#7E684B;"></i> Purchase Orders</h2>
             <?php if ($viewId <= 0): ?>
                 <button class="btn btn-primary" onclick="document.getElementById('newPoCard').scrollIntoView({behavior:'smooth'});"><i class="fas fa-plus"></i> New PO</button>
             <?php else: ?>

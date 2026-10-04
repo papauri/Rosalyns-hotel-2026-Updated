@@ -14,7 +14,7 @@
     align-items: center;
     gap: 8px;
     padding: 10px 22px;
-    background: #1877F2;
+    background: #1565C0;
     color: #fff;
     border: none;
     border-radius: 6px;
@@ -26,7 +26,7 @@
 }
 
 .fb-btn:hover {
-    background: #1558c0;
+    background: #0d47a1;
 }
 
 .fb-btn:disabled {
@@ -38,15 +38,15 @@
    .btn-action.btn-facebook uses 2-class specificity to override .btn-action (1 class). */
 .btn-facebook,
 .btn-action.btn-facebook {
-    background: #1877F2;
+    background: #1565C0;
     color: #fff;
-    border-color: #1877F2;
+    border-color: #1565C0;
 }
 
 .btn-facebook:hover,
 .btn-action.btn-facebook:hover {
-    background: #1558c0;
-    border-color: #1558c0;
+    background: #0d47a1;
+    border-color: #0d47a1;
     color: #fff;
 }
 

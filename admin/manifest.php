@@ -47,7 +47,7 @@ $manifest = [
     'display'          => 'fullscreen',
     'orientation'      => 'any',
     'background_color' => '#1f1f24',
-    'theme_color'      => '#8A775F',
+    'theme_color'      => '#766550',
     'lang'             => 'en',
     'icons'            => [
         ['src' => $icon_url, 'sizes' => '192x192', 'type' => 'image/png', 'purpose' => 'any'],

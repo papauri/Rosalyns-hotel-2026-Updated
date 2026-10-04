@@ -552,7 +552,7 @@ if ($gallery_css_version === '' || $gallery_css_version === '0') {
                     <div id="galleryModalFeedback" class="admin-modal-feedback"></div>
                     <div style="display:flex; justify-content:flex-end; gap:10px;">
                         <button type="button" onclick="closeModal()" style="padding:10px 24px; border:1px solid #ddd; border-radius:6px; background:white; cursor:pointer;">Close</button>
-                        <button type="submit" id="galleryFormSubmitBtn" style="padding:10px 24px; border:none; border-radius:6px; background:var(--gold, #8B7355); color:var(--deep-navy, #111111); font-weight:600; cursor:pointer;">
+                        <button type="submit" id="galleryFormSubmitBtn" style="padding:10px 24px; border:none; border-radius:6px; background:var(--gold, #7E684B); color:var(--deep-navy, #111111); font-weight:600; cursor:pointer;">
                             <i class="fas fa-save"></i> Save
                         </button>
                     </div>

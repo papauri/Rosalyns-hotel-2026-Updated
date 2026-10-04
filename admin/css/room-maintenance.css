@@ -53,17 +53,17 @@
 
 .priority-badge.high {
     background: linear-gradient(135deg, #fee2e2 0%, #fecaca 100%);
-    color: #dc2626;
+    color: #991b1b;
 }
 
 .priority-badge.medium {
     background: linear-gradient(135deg, #fef3c7 0%, #fde68a 100%);
-    color: #d97706;
+    color: #92400e;
 }
 
 .priority-badge.low {
     background: linear-gradient(135deg, #e0e7ff 0%, #c7d2fe 100%);
-    color: #4f46e5;
+    color: #3730a3;
 }
 
 /* Maintenance Type Badges */
@@ -80,22 +80,22 @@
 
 .type-badge.repair {
     background: linear-gradient(135deg, #fee2e2 0%, #fecaca 100%);
-    color: #dc2626;
+    color: #991b1b;
 }
 
 .type-badge.replacement {
     background: linear-gradient(135deg, #fef3c7 0%, #fde68a 100%);
-    color: #d97706;
+    color: #92400e;
 }
 
 .type-badge.inspection {
     background: linear-gradient(135deg, #dbeafe 0%, #bfdbfe 100%);
-    color: #2563eb;
+    color: #1e40af;
 }
 
 .type-badge.upgrade {
     background: linear-gradient(135deg, #e0e7ff 0%, #c7d2fe 100%);
-    color: #7c3aed;
+    color: #5b21b6;
 }
 
 .type-badge.emergency {
@@ -158,7 +158,7 @@
 }
 
 .rm-alert--success {
-    border-inline-start: 0.25rem solid var(--color-primary, #8A775F);
+    border-inline-start: 0.25rem solid var(--color-primary, #766550);
 }
 
 .rm-alert--error {
@@ -193,7 +193,7 @@
 .rm-stat-card:focus-visible {
     transform: translateY(-2px);
     box-shadow: 0 4px 12px rgba(0, 0, 0, 0.12);
-    border-color: var(--color-primary, #8A775F);
+    border-color: var(--color-primary, #766550);
 }
 
 .rm-stat-card--interactive {
@@ -201,7 +201,7 @@
 }
 
 .rm-stat-card:focus-visible {
-    outline: 2px solid var(--color-primary, #8A775F);
+    outline: 2px solid var(--color-primary, #766550);
     outline-offset: 2px;
 }
 
@@ -337,7 +337,7 @@
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    background: var(--color-primary, #8A775F);
+    background: var(--color-primary, #766550);
     color: #fff;
     font-weight: 700;
 }

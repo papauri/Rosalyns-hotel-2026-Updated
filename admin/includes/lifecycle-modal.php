@@ -89,7 +89,7 @@ define('RH_LIFECYCLE_MODAL_RENDERED', true);
     }
 
     .rh-lc__head i {
-        color: #8a775f;
+        color: #766550;
     }
 
     .rh-lc__close {

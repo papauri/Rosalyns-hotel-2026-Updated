@@ -84,9 +84,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         .pwc-field { margin-bottom: 16px; }
         .pwc-field label { display: block; font-size: .8rem; font-weight: 600; color: #5a5147; margin-bottom: 6px; }
         .pwc-field input { width: 100%; padding: 10px 12px; border: 1px solid #d3cbc0; border-radius: 3px; font-size: .92rem; box-sizing: border-box; }
-        .pwc-field input:focus { outline: none; border-color: #8B7355; }
+        .pwc-field input:focus { outline: none; border-color: #7E684B; }
         .pwc-otp-input { text-align: center; font-size: 1.6rem !important; letter-spacing: 12px; font-weight: 700; }
-        .pwc-btn { width: 100%; background: #8B7355; color: #fff; border: none; border-radius: 3px; padding: 12px; font-size: .92rem; font-weight: 600; cursor: pointer; }
+        .pwc-btn { width: 100%; background: #7E684B; color: #fff; border: none; border-radius: 3px; padding: 12px; font-size: .92rem; font-weight: 600; cursor: pointer; }
         .pwc-btn:hover { background: #6e5a3e; }
         .pwc-cancel { width: 100%; background: none; border: none; color: #9a8f82; font-size: .82rem; margin-top: 12px; cursor: pointer; text-decoration: underline; }
         .pwc-note { background: #fffbeb; border: 1px solid #f6c90e; border-radius: 4px; padding: 10px 14px; font-size: .8rem; color: #7a5f00; margin-bottom: 18px; }
@@ -103,7 +103,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
     <div class="content">
         <div class="page-header">
-            <h1 class="page-title"><i class="fas fa-key" style="color:#8B7355;margin-right:10px;"></i> Change Password</h1>
+            <h1 class="page-title"><i class="fas fa-key" style="color:#7E684B;margin-right:10px;"></i> Change Password</h1>
         </div>
 
         <div class="pwc-card">

@@ -48,9 +48,9 @@ if (!('BarcodeDetector' in window)) { window.BarcodeDetector = BarcodeDetectorPo
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
 :root{
   --bg:#f4f2ef;--surface:#fffdfb;--surface2:#ede9e3;--border:#d7dde6;
-  --primary:#8A775F;--success:#3f8f5a;--warn:#9a7c53;--danger:#956a5b;
+  --primary:#766550;--success:#3f8f5a;--warn:#9a7c53;--danger:#956a5b;
   --text:#1f2a37;--muted:#5f6b7c;--radius:12px;
-  --navy:#111827;--gold:#B18247;
+  --navy:#111827;--gold:#8F6A35;
 }
 html,body{height:100%;background:var(--bg);color:var(--text);font-family:'Jost',sans-serif;font-size:15px;overscroll-behavior:none}
 a{color:var(--primary);text-decoration:none}

@@ -835,7 +835,7 @@ $currency = htmlspecialchars(getSetting('currency_symbol'));
                     data-help="Manage Room Combinations|Pair adjoining rooms into one bookable joined-room unit. Accounting, refunds, invoices, and folios remain under a single booking.">
                     <i class="fas fa-link"></i> Room Combinations
                     <?php if (!empty($roomCombinations)): ?>
-                        <span style="background:#8A775F;color:#fff;border-radius:10px;padding:1px 7px;font-size:11px;margin-left:4px;"><?php echo count($roomCombinations); ?></span>
+                        <span style="background:#766550;color:#fff;border-radius:10px;padding:1px 7px;font-size:11px;margin-left:4px;"><?php echo count($roomCombinations); ?></span>
                     <?php endif; ?>
                 </button>
                 <button class="btn btn-primary" type="button" onclick="openAddModal()"
@@ -1108,7 +1108,7 @@ $currency = htmlspecialchars(getSetting('currency_symbol'));
                                     <td>
                                         <?php echo (int)($room['max_guests_override'] ?? $room['max_guests']); ?> guests
                                         <?php if ($room['max_guests_override'] !== null): ?>
-                                            <small style="display:block;color:#8A775F;">Override</small>
+                                            <small style="display:block;color:#766550;">Override</small>
                                         <?php endif; ?>
                                     </td>
                                     <td>
@@ -1254,7 +1254,7 @@ $currency = htmlspecialchars(getSetting('currency_symbol'));
         <div class="modal-content" style="max-width:880px;width:100%;max-height:90vh;overflow-y:auto;padding:0;">
             <div class="modal-header" style="display:flex;justify-content:space-between;align-items:center;padding:20px 24px 16px;border-bottom:1px solid #e8e0d8;">
                 <div>
-                    <h3 style="margin:0 0 4px;font-size:20px;font-family:'Cormorant Garamond',serif;font-weight:600;"><i class="fas fa-link" style="color:#8A775F;margin-right:8px;"></i> Joined Room Combinations</h3>
+                    <h3 style="margin:0 0 4px;font-size:20px;font-family:'Cormorant Garamond',serif;font-weight:600;"><i class="fas fa-link" style="color:#766550;margin-right:8px;"></i> Joined Room Combinations</h3>
                     <p style="margin:0;color:#6b625a;font-size:13px;">Pair adjoining rooms into one bookable unit. Accounting, refunds, invoices, and folios stay under one booking.</p>
                 </div>
                 <button class="modal-close" onclick="closeCombinationsModal()" style="background:none;border:none;font-size:22px;cursor:pointer;color:#6b625a;line-height:1;">&times;</button>
@@ -1262,7 +1262,7 @@ $currency = htmlspecialchars(getSetting('currency_symbol'));
             <div style="padding:20px 24px;">
                 <div style="background:#f8f6f3;border:1px solid #e8e0d8;border-radius:8px;padding:18px 20px 14px;margin-bottom:24px;">
                     <h4 style="margin:0 0 16px;font-size:14px;font-weight:600;color:#2A2723;display:flex;align-items:center;gap:8px;" id="combinationFormTitle">
-                        <i class="fas fa-plus-circle" style="color:#8A775F;"></i> Add / Edit Combination
+                        <i class="fas fa-plus-circle" style="color:#766550;"></i> Add / Edit Combination
                     </h4>
                     <form method="POST" id="combinationForm">
                         <input type="hidden" name="csrf_token" value="<?= htmlspecialchars($csrf_token, ENT_QUOTES) ?>">
@@ -1332,7 +1332,7 @@ $currency = htmlspecialchars(getSetting('currency_symbol'));
                 </div>
 
                 <h4 style="margin:0 0 12px;font-size:14px;font-weight:600;color:#2A2723;display:flex;align-items:center;gap:8px;">
-                    <i class="fas fa-list" style="color:#8A775F;"></i> Existing Combinations
+                    <i class="fas fa-list" style="color:#766550;"></i> Existing Combinations
                 </h4>
                 <div style="overflow-x:auto;border:1px solid #e8e0d8;border-radius:8px;overflow:hidden;">
                     <table class="table" style="margin:0;">
@@ -1424,7 +1424,7 @@ $currency = htmlspecialchars(getSetting('currency_symbol'));
 
             <div class="modal-body room-detail-body" id="rdBody">
                 <div id="rdSpinner" style="text-align:center;padding:60px 0;">
-                    <i class="fas fa-spinner fa-spin" style="font-size:2rem;color:#8A775F;"></i>
+                    <i class="fas fa-spinner fa-spin" style="font-size:2rem;color:#766550;"></i>
                 </div>
                 <div id="rdContent" style="display:none;">
 
@@ -1772,7 +1772,7 @@ $currency = htmlspecialchars(getSetting('currency_symbol'));
             document.getElementById('combination_id').value = '';
             document.getElementById('combination_is_active').checked = true;
             const title = document.getElementById('combinationFormTitle');
-            if (title) title.innerHTML = '<i class="fas fa-plus-circle" style="color:#8A775F;margin-right:6px;"></i> Add / Edit Combination';
+            if (title) title.innerHTML = '<i class="fas fa-plus-circle" style="color:#766550;margin-right:6px;"></i> Add / Edit Combination';
         }
 
         function openCombinationsModal() {
@@ -1796,7 +1796,7 @@ $currency = htmlspecialchars(getSetting('currency_symbol'));
             document.getElementById('combination_notes').value = combination.notes || '';
             document.getElementById('combination_is_active').checked = String(combination.is_active) === '1';
             const title = document.getElementById('combinationFormTitle');
-            if (title) title.innerHTML = '<i class="fas fa-edit" style="color:#8A775F;margin-right:6px;"></i> Editing: ' + (combination.combined_name || '');
+            if (title) title.innerHTML = '<i class="fas fa-edit" style="color:#766550;margin-right:6px;"></i> Editing: ' + (combination.combined_name || '');
             openCombinationsModal();
             const form = document.getElementById('combinationForm');
             if (form) form.scrollIntoView({ behavior: 'smooth', block: 'start' });
@@ -2542,7 +2542,7 @@ $currency = htmlspecialchars(getSetting('currency_symbol'));
                                 </a>
                             </div>
                             <div class="rd-up-guest">${_esc(b.guest_name)}</div>
-                            <div class="rd-up-dates">${_fmtDate(b.check_in)} → ${_fmtDate(b.check_out)} <span style="color:#8A775F;font-weight:500;">(${nights}n)</span></div>
+                            <div class="rd-up-dates">${_fmtDate(b.check_in)} → ${_fmtDate(b.check_out)} <span style="color:#766550;font-weight:500;">(${nights}n)</span></div>
                             <div class="rd-up-badges">
                                 ${_badge(_statusLabels[b.status] || b.status, _statusColors[b.status] || '#6b7280')}
                                 ${_badge(_payLabels[b.payment_status] || b.payment_status, _payColors[b.payment_status] || '#6b7280')}

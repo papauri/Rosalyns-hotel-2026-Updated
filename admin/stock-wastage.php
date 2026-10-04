@@ -193,7 +193,7 @@ $csrf_token = generateCsrfToken();
 
     <div class="content">
         <div class="page-header">
-            <h2 class="page-title"><i class="fas fa-trash-alt" style="color:#8B7355;"></i> Wastage Log</h2>
+            <h2 class="page-title"><i class="fas fa-trash-alt" style="color:#7E684B;"></i> Wastage Log</h2>
         </div>
 
         <?php if ($message): showAlert($message, 'success');
@@ -381,7 +381,7 @@ $csrf_token = generateCsrfToken();
                     $pgActive = ($pg === $entries_page);
                 ?>
                     <a href="<?php echo htmlspecialchars($pgHref, ENT_QUOTES, 'UTF-8'); ?>"
-                        style="padding:6px 12px;border:1px solid <?php echo $pgActive ? 'var(--color-primary,#8A775F)' : '#dee2e6'; ?>;background:<?php echo $pgActive ? 'var(--color-primary,#8A775F)' : '#fff'; ?>;color:<?php echo $pgActive ? '#fff' : '#374151'; ?>;border-radius:4px;font-size:13px;text-decoration:none;"><?php echo $pg; ?></a>
+                        style="padding:6px 12px;border:1px solid <?php echo $pgActive ? 'var(--color-primary,#766550)' : '#dee2e6'; ?>;background:<?php echo $pgActive ? 'var(--color-primary,#766550)' : '#fff'; ?>;color:<?php echo $pgActive ? '#fff' : '#374151'; ?>;border-radius:4px;font-size:13px;text-decoration:none;"><?php echo $pg; ?></a>
                 <?php endfor; ?>
                 <span style="padding:6px 8px;font-size:12px;color:#888;">
                     Showing <?php echo (($entries_page - 1) * $entries_per_page) + 1; ?>–<?php echo min($entries_page * $entries_per_page, $entries_total); ?> of <?php echo $entries_total; ?>

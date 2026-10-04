@@ -12,8 +12,8 @@
     --mm-bg-soft: var(--color-surface, #FBF8F4);
     --mm-text: var(--color-text-primary, #2A2723);
     --mm-muted: var(--color-text-secondary, #5E554D);
-    --mm-accent: var(--color-lux-gold, #B18247);
-    --mm-accent-dark: var(--color-primary, #8A775F);
+    --mm-accent: var(--color-lux-gold, #8F6A35);
+    --mm-accent-dark: var(--color-primary, #766550);
     --mm-success: #047857;
     --mm-danger: var(--color-error, #C62828);
     --mm-radius: 6px;
@@ -50,19 +50,19 @@
 
 /* Room Service shortcut tab — teal accent, never gets .active class */
 .menu-type-tab--rs {
-    color: #0c8d6c;
+    color: #0a7058;
     margin-left: auto;
     /* push to the right */
     border-left: 1px solid var(--mm-border);
 }
 
 .menu-type-tab--rs:hover {
-    color: #097a5e;
+    color: #085f4a;
     background: rgba(12, 141, 108, 0.06);
 }
 
 .menu-type-tab--rs i {
-    color: #0c8d6c;
+    color: #0a7058;
 }
 
 /* Highlight pulse on the category section after jump */
@@ -168,7 +168,7 @@
 
 .mm-btn-primary {
     background: var(--mm-accent);
-    color: #1f2533;
+    color: #fff;
     border-color: var(--mm-accent);
 }
 
@@ -201,7 +201,7 @@
     gap: 6px;
     padding: 8px 14px;
     background: var(--mm-accent);
-    color: #1f2533;
+    color: #fff;
     border: 1px solid var(--mm-accent);
     border-radius: var(--mm-radius);
     font-size: 13px;
@@ -762,4 +762,17 @@ tr.drag-over>td {
     display: flex;
     justify-content: center;
     gap: 10px;
+}
+
+/* Contrast: facebook-settings.css loads after this file, so the override needs extra specificity. */
+body .btn-action.btn-facebook {
+    background: #1565c0;
+    border-color: #1565c0;
+    color: #fff;
+}
+
+body .btn-action.btn-facebook:hover {
+    background: #0d47a1;
+    border-color: #0d47a1;
+    color: #fff;
 }

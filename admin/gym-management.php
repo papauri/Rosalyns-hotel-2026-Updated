@@ -244,7 +244,7 @@ if ($gym_css_version === '' || $gym_css_version === '0') {
 
             <!-- Page header -->
             <div class="page-header-row" style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;margin-bottom:20px;">
-                <h1 class="page-title"><i class="fas fa-dumbbell" style="color:var(--gold,#8B7355);margin-right:8px;"></i>Gym Package Management</h1>
+                <h1 class="page-title"><i class="fas fa-dumbbell" style="color:var(--gold,#7E684B);margin-right:8px;"></i>Gym Package Management</h1>
                 <div style="display:flex;gap:10px;align-items:center;">
                     <a href="gym-inquiries.php" class="btn btn-secondary" style="font-size:13px;">
                         <i class="fas fa-inbox"></i> View Inquiries
@@ -329,7 +329,7 @@ if ($gym_css_version === '' || $gym_css_version === '0') {
                                         $lines = array_filter(array_map('trim', explode("\n", $pkg['includes_text'] ?? '')));
                                         $bullets = array_slice($lines, 0, 4);
                                         foreach ($bullets as $b) {
-                                            echo '<span style="display:block;"><i class="fas fa-check" style="color:var(--gold,#8B7355);font-size:10px;margin-right:5px;"></i>'
+                                            echo '<span style="display:block;"><i class="fas fa-check" style="color:var(--gold,#7E684B);font-size:10px;margin-right:5px;"></i>'
                                                 . htmlspecialchars($b, ENT_QUOTES, 'UTF-8') . '</span>';
                                         }
                                         if (count($lines) > 4) {
@@ -425,7 +425,7 @@ if ($gym_css_version === '' || $gym_css_version === '0') {
     <div class="modal-overlay" id="addGymPackageModal" style="display:none;" onclick="if(event.target===this)closeAddGymPackageModal()">
         <div class="modal-content" style="max-width:620px;">
             <div class="modal-header">
-                <h3><i class="fas fa-plus" style="color:var(--gold,#8B7355);margin-right:8px;"></i>Add Gym Package</h3>
+                <h3><i class="fas fa-plus" style="color:var(--gold,#7E684B);margin-right:8px;"></i>Add Gym Package</h3>
                 <button class="modal-close" type="button" onclick="closeAddGymPackageModal()">&times;</button>
             </div>
             <form id="addGymPackageForm" method="post">
@@ -520,7 +520,7 @@ if ($gym_css_version === '' || $gym_css_version === '0') {
     <div class="modal-overlay" id="editGymPackageModal" style="display:none;" onclick="if(event.target===this)closeEditGymPackageModal()">
         <div class="modal-content" style="max-width:620px;">
             <div class="modal-header">
-                <h3><i class="fas fa-pencil-alt" style="color:var(--gold,#8B7355);margin-right:8px;"></i>Edit Gym Package</h3>
+                <h3><i class="fas fa-pencil-alt" style="color:var(--gold,#7E684B);margin-right:8px;"></i>Edit Gym Package</h3>
                 <button class="modal-close" type="button" onclick="closeEditGymPackageModal()">&times;</button>
             </div>
             <form id="editGymPackageForm" method="post">
@@ -634,7 +634,7 @@ if ($gym_css_version === '' || $gym_css_version === '0') {
                                 </div>
                             </div>
                             <div id="fbGymPreviewText" style="padding:10px 12px;white-space:pre-wrap;word-break:break-word;color:#050505;font-size:13px;line-height:1.5;min-height:60px;"></div>
-                            <div id="fbGymPreviewIconArea" style="background:linear-gradient(135deg,#f0f4ff,#e8f5e9);height:100px;display:flex;align-items:center;justify-content:center;font-size:40px;color:#8B7355;"></div>
+                            <div id="fbGymPreviewIconArea" style="background:linear-gradient(135deg,#f0f4ff,#e8f5e9);height:100px;display:flex;align-items:center;justify-content:center;font-size:40px;color:#7E684B;"></div>
                             <div style="padding:8px 12px;border-top:1px solid #f0f2f5;display:flex;gap:16px;">
                                 <span style="color:#65676b;font-size:12px;"><i class="far fa-thumbs-up"></i> Like</span>
                                 <span style="color:#65676b;font-size:12px;"><i class="far fa-comment"></i> Comment</span>
@@ -686,7 +686,7 @@ if ($gym_css_version === '' || $gym_css_version === '0') {
                                 </div>
                             </div>
                             <div id="fbGymAllPreviewText" style="padding:10px 12px;white-space:pre-wrap;word-break:break-word;color:#050505;font-size:13px;line-height:1.5;min-height:60px;"></div>
-                            <div style="background:linear-gradient(135deg,#f0f4ff,#e8f5e9);height:80px;display:flex;align-items:center;justify-content:center;font-size:32px;color:#8B7355;">
+                            <div style="background:linear-gradient(135deg,#f0f4ff,#e8f5e9);height:80px;display:flex;align-items:center;justify-content:center;font-size:32px;color:#7E684B;">
                                 <i class="fas fa-dumbbell"></i>
                             </div>
                             <div style="padding:8px 12px;border-top:1px solid #f0f2f5;display:flex;gap:16px;">
@@ -754,7 +754,7 @@ if ($gym_css_version === '' || $gym_css_version === '0') {
                 var caption = (document.getElementById('fbGymCaption').value || '');
                 document.getElementById('fbGymPreviewText').textContent = caption;
                 document.getElementById('fbGymCharCount').textContent = caption.length;
-                document.getElementById('fbGymPreviewIconArea').innerHTML = '<i class="' + _fbGymCurrentIcon + '" style="font-size:40px;color:#8B7355;"></i>';
+                document.getElementById('fbGymPreviewIconArea').innerHTML = '<i class="' + _fbGymCurrentIcon + '" style="font-size:40px;color:#7E684B;"></i>';
             }
 
             window.openFbGymModal = function(pkg) {

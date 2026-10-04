@@ -328,8 +328,8 @@ body.dashboard-insight-open {
 }
 
 .dashboard-insight-modal__close:hover {
-    border-color: var(--color-primary, #8A775F);
-    color: var(--color-primary, #8A775F);
+    border-color: var(--color-primary, #766550);
+    color: var(--color-primary, #766550);
 }
 
 .dashboard-insight-modal__body {
@@ -403,8 +403,8 @@ body.dashboard-insight-open {
     min-height: 2rem;
     padding: 0.2rem 0.62rem;
     border-radius: 999px;
-    border: 1px solid var(--color-primary, #8A775F);
-    color: var(--color-primary, #8A775F);
+    border: 1px solid var(--color-primary, #766550);
+    color: var(--color-primary, #766550);
     text-decoration: none;
     font-size: clamp(0.68rem, 0.62rem + 0.16vw, 0.78rem);
     font-weight: 600;
@@ -412,7 +412,7 @@ body.dashboard-insight-open {
 }
 
 .dashboard-insight-modal__row-link:hover {
-    background: color-mix(in srgb, var(--color-primary, #8A775F) 12%, transparent);
+    background: color-mix(in srgb, var(--color-primary, #766550) 12%, transparent);
 }
 
 .dashboard-insight-modal__details-cell {
@@ -485,15 +485,15 @@ body.dashboard-insight-open {
     min-height: 2.75rem;
     padding: 0 0.95rem;
     border-radius: 999px;
-    border: 1px solid var(--color-primary, #8A775F);
-    color: var(--color-primary, #8A775F);
+    border: 1px solid var(--color-primary, #766550);
+    color: var(--color-primary, #766550);
     text-decoration: none;
     font-weight: 600;
     font-size: clamp(0.8rem, 0.74rem + 0.18vw, 0.92rem);
 }
 
 .dashboard-insight-modal__link:hover {
-    background: color-mix(in srgb, var(--color-primary, #8A775F) 10%, transparent);
+    background: color-mix(in srgb, var(--color-primary, #766550) 10%, transparent);
 }
 
 @media (min-width: 48rem) {
@@ -750,13 +750,13 @@ body.dashboard-insight-open {
 }
 
 .guide-menu-btn:hover {
-    border-color: var(--color-primary, #8A775F);
+    border-color: var(--color-primary, #766550);
     box-shadow: 0 4px 12px rgba(0, 0, 0, 0.06);
     transform: translateY(-1px);
 }
 
 .guide-menu-btn i {
-    color: var(--color-primary, #8A775F);
+    color: var(--color-primary, #766550);
     width: 16px;
     text-align: center;
 }

@@ -73,7 +73,7 @@ if (!function_exists('gym_frequency_label')) {
             return ['label' => 'Active', 'color' => '#0c8d6c'];
         }
         if ($visits30d >= 1) {
-            return ['label' => 'Occasional', 'color' => '#B18247'];
+            return ['label' => 'Occasional', 'color' => '#8F6A35'];
         }
         if ($isNew) {
             return ['label' => 'New', 'color' => '#1565c0'];
@@ -125,7 +125,7 @@ if (!function_exists('gym_member_segment')) {
             return ['segment' => 'Active', 'color' => '#0c8d6c', 'hint' => 'Healthy habit: class invites, add-ons.'];
         }
         if ($visits30d >= 1) {
-            return ['segment' => 'Occasional', 'color' => '#B18247', 'hint' => 'Encourage routine: off-peak or buddy offers.'];
+            return ['segment' => 'Occasional', 'color' => '#8F6A35', 'hint' => 'Encourage routine: off-peak or buddy offers.'];
         }
         return ['segment' => 'Never visited', 'color' => '#6c757d', 'hint' => 'Activation push: first-visit reminder.'];
     }

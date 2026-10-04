@@ -182,7 +182,7 @@ function fmt_lag(?int $s): string {
                             <td data-label="Entity">
                                 <?php if ($r['entity_reference']): ?>
                                     <?php if ($entityLink): ?>
-                                        <a href="<?php echo htmlspecialchars($entityLink); ?>" target="_blank" rel="noopener" style="color:#8B7355; text-decoration:none;">
+                                        <a href="<?php echo htmlspecialchars($entityLink); ?>" target="_blank" rel="noopener" style="color:#7E684B; text-decoration:none;">
                                             <?php echo htmlspecialchars($r['entity_reference']); ?> <i class="fas fa-external-link-alt" style="font-size:10px;"></i>
                                         </a>
                                     <?php else: ?>
@@ -209,7 +209,7 @@ function fmt_lag(?int $s): string {
                 $pgActive = ($pg === $rows_page);
             ?>
             <a href="<?php echo htmlspecialchars($pgHref, ENT_QUOTES, 'UTF-8'); ?>"
-               style="padding:6px 12px;border:1px solid <?php echo $pgActive ? 'var(--color-primary,#8A775F)' : '#dee2e6'; ?>;background:<?php echo $pgActive ? 'var(--color-primary,#8A775F)' : '#fff'; ?>;color:<?php echo $pgActive ? '#fff' : '#374151'; ?>;border-radius:4px;font-size:13px;text-decoration:none;"
+               style="padding:6px 12px;border:1px solid <?php echo $pgActive ? 'var(--color-primary,#766550)' : '#dee2e6'; ?>;background:<?php echo $pgActive ? 'var(--color-primary,#766550)' : '#fff'; ?>;color:<?php echo $pgActive ? '#fff' : '#374151'; ?>;border-radius:4px;font-size:13px;text-decoration:none;"
             ><?php echo $pg; ?></a>
             <?php endfor; ?>
             <span style="padding:6px 8px;font-size:12px;color:#888;">

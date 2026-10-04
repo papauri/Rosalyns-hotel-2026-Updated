@@ -4083,7 +4083,7 @@ $today_str = $today->format('Y-m-d');
                 `;
                 overlay.innerHTML = `
                     <div style="background: white; padding: 30px 40px; border-radius: 12px; text-align: center; box-shadow: 0 10px 40px rgba(0,0,0,0.3);">
-                        <i class="fas fa-spinner fa-spin" style="font-size: 32px; color: var(--gold, #8B7355); margin-bottom: 16px; display: block;"></i>
+                        <i class="fas fa-spinner fa-spin" style="font-size: 32px; color: var(--gold, #7E684B); margin-bottom: 16px; display: block;"></i>
                         <div id="loadingMessage" style="font-size: 16px; color: var(--navy, #1A1A1A); font-weight: 500;">${message}</div>
                     </div>
                 `;
@@ -4614,7 +4614,7 @@ $today_str = $today->format('Y-m-d');
                     gap: 12px;
                     pointer-events: none;
                 `;
-                loader.innerHTML = '<i class="fas fa-spinner fa-spin" style="font-size: 20px; color: var(--gold, #8B7355);"></i><span style="font-size: 14px; color: #444; font-weight: 500;">Loading...</span>';
+                loader.innerHTML = '<i class="fas fa-spinner fa-spin" style="font-size: 20px; color: var(--gold, #7E684B);"></i><span style="font-size: 14px; color: #444; font-weight: 500;">Loading...</span>';
                 container.style.position = 'relative';
                 container.appendChild(loader);
             }
@@ -5436,7 +5436,7 @@ $today_str = $today->format('Y-m-d');
                         <small style="color: #666;">This note will be recorded in the booking log.</small>
                     </div>
                     <div class="form-group" style="background: #fff8e1; padding: 12px; border-radius: 8px;">
-                        <p style="margin: 0; color: #8B7355; font-size: 13px;">
+                        <p style="margin: 0; color: #7E684B; font-size: 13px;">
                             <i class="fas fa-info-circle"></i>
                             This will convert the booking to a tentative reservation, holding the room for
                             <strong id="tentative_duration_display">48</strong> hours. A confirmation email will be sent to the guest.
@@ -6098,7 +6098,7 @@ $today_str = $today->format('Y-m-d');
                     </label>
                 </div>
                 <div class="form-group" style="background: #fff8e1; padding: 12px; border-radius: 8px;">
-                    <p style="margin: 0; color: #8B7355; font-size: 13px;">
+                    <p style="margin: 0; color: #7E684B; font-size: 13px;">
                         <i class="fas fa-info-circle"></i>
                         Upgrading will recalculate the booking total based on the new room type price.
                         If the price increases, the guest will need to pay the difference upon check-in.
@@ -7363,7 +7363,7 @@ $today_str = $today->format('Y-m-d');
                     '<input type="hidden" name="action" value="consolidation_record">' +
                     '<input type="hidden" name="id" value="' + b.id + '">' +
                     '<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px;">' +
-                    '<div class="form-group" style="margin:0;"><label style="font-weight:600;">Amount (' + _currencySymbol + ') <span style="color:#dc3545;">*</span></label><input type="number" name="amount" id="con_amount" class="form-control" min="0.01" step="0.01" placeholder="e.g. 25000.00" required style="border-color:#B18247;"></div>' +
+                    '<div class="form-group" style="margin:0;"><label style="font-weight:600;">Amount (' + _currencySymbol + ') <span style="color:#dc3545;">*</span></label><input type="number" name="amount" id="con_amount" class="form-control" min="0.01" step="0.01" placeholder="e.g. 25000.00" required style="border-color:#8F6A35;"></div>' +
                     '<div class="form-group" style="margin:0;"><label style="font-weight:600;">Payment method <span style="color:#dc3545;">*</span></label><select name="payment_method" class="form-control"><option value="cash">Cash</option><option value="bank_transfer">Bank Transfer</option><option value="credit_card">Credit Card</option><option value="debit_card">Debit Card</option><option value="mobile_money">Mobile Money</option><option value="cheque">Cheque</option><option value="other">Other</option></select></div>' +
                     '</div>' +
                     '<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px;">' +
@@ -7371,10 +7371,10 @@ $today_str = $today->format('Y-m-d');
                     '<div class="form-group" style="margin:0;"><label style="font-weight:600;">Payment date</label><input type="date" name="payment_date" class="form-control" value="' + rhYmd(new Date()) + '"></div>' +
                     '</div>' +
                     '<div class="form-group" style="margin-bottom:10px;"><label>General notes</label><input type="text" name="notes" class="form-control" placeholder="e.g. Cash collected at front desk" maxlength="200"></div>' +
-                    '<div class="form-group" style="margin-bottom:14px;"><label style="font-weight:600;"><i class="fas fa-calculator" style="color:#B18247;"></i> Accountant notes</label><input type="text" name="accountant_notes" class="form-control" placeholder="e.g. Reconciled against invoice RFD-20260514, balance cleared" maxlength="300" style="border-color:#B18247;"><small style="color:#888;display:block;margin-top:4px;">Stored as &ldquo;ACCT: &hellip;&rdquo; prefix in payment notes &mdash; visible on invoices and ledger reports.</small></div>' +
+                    '<div class="form-group" style="margin-bottom:14px;"><label style="font-weight:600;"><i class="fas fa-calculator" style="color:#8F6A35;"></i> Accountant notes</label><input type="text" name="accountant_notes" class="form-control" placeholder="e.g. Reconciled against invoice RFD-20260514, balance cleared" maxlength="300" style="border-color:#8F6A35;"><small style="color:#888;display:block;margin-top:4px;">Stored as &ldquo;ACCT: &hellip;&rdquo; prefix in payment notes &mdash; visible on invoices and ledger reports.</small></div>' +
                     '<div style="display:flex;justify-content:flex-end;gap:10px;border-top:1px solid #eee;padding-top:14px;">' +
                     '<button type="button" class="btn btn-secondary" onclick="closeConsolidationModal()">Close</button>' +
-                    '<button type="submit" id="con_submit_btn" class="btn btn-primary" style="background:#B18247;border-color:#B18247;"><i class="fas fa-scale-balanced"></i> Record Payment</button>' +
+                    '<button type="submit" id="con_submit_btn" class="btn btn-primary" style="background:#8F6A35;border-color:#8F6A35;"><i class="fas fa-scale-balanced"></i> Record Payment</button>' +
                     '</div></form>';
 
                 document.getElementById('con_body').innerHTML =
@@ -7389,7 +7389,7 @@ $today_str = $today->format('Y-m-d');
                     summaryBar +
                     '<details style="margin-bottom:12px;" open><summary style="font-size:12px;font-weight:600;color:#555;cursor:pointer;padding:4px 0;">Folio Charges</summary>' + chargesHtml + '</details>' +
                     '<details style="margin-bottom:16px;" open><summary style="font-size:12px;font-weight:600;color:#555;cursor:pointer;padding:4px 0;">Payment History</summary>' + paysHtml + '</details>' +
-                    '<div style="border-top:2px solid #B18247;padding-top:14px;"><h4 style="margin:0 0 12px;font-size:14px;color:#2a2723;"><i class="fas fa-plus-circle"></i> Record New Payment</h4>' + paymentForm + '</div></div>';
+                    '<div style="border-top:2px solid #8F6A35;padding-top:14px;"><h4 style="margin:0 0 12px;font-size:14px;color:#2a2723;"><i class="fas fa-plus-circle"></i> Record New Payment</h4>' + paymentForm + '</div></div>';
 
                 document.getElementById('conPaymentForm').addEventListener('submit', async function(e) {
                     e.preventDefault();
@@ -7810,7 +7810,7 @@ $today_str = $today->format('Y-m-d');
                         <input type="text" name="note" id="mb_note" class="form-control" placeholder="e.g. Guest requested earlier check-in">
                     </div>
 
-                    <div style="background:#fff8e1;padding:10px 12px;border-radius:8px;color:#8B7355;font-size:13px;">
+                    <div style="background:#fff8e1;padding:10px 12px;border-radius:8px;color:#7E684B;font-size:13px;">
                         <i class="fas fa-info-circle"></i>
                         Changes are recorded in the booking audit log. Use <a href="#" id="mb_full_edit_link">the full edit page</a> for advanced fields (room type, occupancy pricing).
                     </div>

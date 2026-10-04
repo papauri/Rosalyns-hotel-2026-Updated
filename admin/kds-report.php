@@ -406,12 +406,12 @@ $current_page = basename($_SERVER['PHP_SELF']);
                                 $prepSec = ($r['fired_at'] && $r['served_at']) ? max(0, (int)(strtotime($r['served_at']) - strtotime($r['fired_at']))) : 0;
                             ?>
                                 <tr>
-                                    <td><button type="button" onclick="rhOpenLifecycle(<?php echo (int)$r['order_id']; ?>)" style="color:#8B7355; font-weight:600;"><?php echo htmlspecialchars($r['reference']); ?></button></td>
+                                    <td><button type="button" onclick="rhOpenLifecycle(<?php echo (int)$r['order_id']; ?>)" style="color:#7E684B; font-weight:600;"><?php echo htmlspecialchars($r['reference']); ?></button></td>
                                     <td><?php echo htmlspecialchars($r['order_type']); ?></td>
                                     <td><?php echo htmlspecialchars(($r['table_number'] ? 'T' . $r['table_number'] : '') . ($r['customer_name'] ? ' · ' . $r['customer_name'] : '')); ?></td>
                                     <td>
                                         <?php echo htmlspecialchars($r['item_name']); ?>
-                                        <?php if ($r['item_notes']): ?><br><small style="color:#8B7355; font-style:italic;"><?php echo htmlspecialchars($r['item_notes']); ?></small><?php endif; ?>
+                                        <?php if ($r['item_notes']): ?><br><small style="color:#7E684B; font-style:italic;"><?php echo htmlspecialchars($r['item_notes']); ?></small><?php endif; ?>
                                     </td>
                                     <td><?php echo rtrim(rtrim(number_format((float)$r['quantity'], 2), '0'), '.'); ?></td>
                                     <td><?php echo $currency_symbol . ' ' . number_format((float)$r['line_total'], 2); ?></td>

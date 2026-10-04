@@ -13,10 +13,9 @@
     scrollbar-width: none;
 }
 
-/* Active/hover sh-tab: dark text on gold for readability */
-.sh-tab--active,
-.sh-tab:hover {
-    color: var(--admin-text, #1f2a37) !important;
+/* Active sh-tab: white text on the darkened gold (4.9:1); hover keeps each button's own inline colours */
+.sh-tab--active {
+    color: #fff !important;
 }
 
 .sh-tabs::-webkit-scrollbar {
@@ -139,7 +138,7 @@
 }
 
 .sh-style-guide__heading i {
-    color: var(--gold, #B18247);
+    color: var(--gold, #8F6A35);
 }
 
 .sh-style-guide__grid {
@@ -149,7 +148,7 @@
 }
 
 .sh-style-guide__term {
-    color: var(--gold, #B18247);
+    color: var(--gold, #8F6A35);
     margin: 0 0 8px;
     font-size: 14px;
 }

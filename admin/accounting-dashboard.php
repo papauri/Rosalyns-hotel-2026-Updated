@@ -855,9 +855,9 @@ if (!isset($folio_fnb)) {
         <!-- Quotation Pipeline panel -->
         <section class="acct-panel" id="quotation-pipeline">
             <header class="acct-panel__head">
-                <h2 class="acct-panel__title"><i class="fas fa-file-contract" style="color:#B18247;"></i> Quotation Pipeline</h2>
+                <h2 class="acct-panel__title"><i class="fas fa-file-contract" style="color:#8F6A35;"></i> Quotation Pipeline</h2>
                 <p class="acct-panel__sub">Quotations issued in the selected period — track conversion from quoted to accepted bookings.</p>
-                <a href="quotations.php" style="margin-top:6px;display:inline-flex;align-items:center;gap:5px;font-size:12px;color:#8A775F;text-decoration:none;font-weight:500;">
+                <a href="quotations.php" style="margin-top:6px;display:inline-flex;align-items:center;gap:5px;font-size:12px;color:#766550;text-decoration:none;font-weight:500;">
                     View all quotations <i class="fas fa-arrow-right"></i>
                 </a>
             </header>
@@ -898,9 +898,9 @@ if (!isset($folio_fnb)) {
         <!-- Credit Note Summary panel -->
         <section class="acct-panel" id="credit-note-summary">
             <header class="acct-panel__head">
-                <h2 class="acct-panel__title"><i class="fas fa-file-invoice" style="color:#8A775F;"></i> Credit Notes</h2>
+                <h2 class="acct-panel__title"><i class="fas fa-file-invoice" style="color:#766550;"></i> Credit Notes</h2>
                 <p class="acct-panel__sub">Credit notes issued in the selected period — track outstanding liability and redemption rate.</p>
-                <a href="credit-notes.php" style="margin-top:6px;display:inline-flex;align-items:center;gap:5px;font-size:12px;color:#8A775F;text-decoration:none;font-weight:500;">
+                <a href="credit-notes.php" style="margin-top:6px;display:inline-flex;align-items:center;gap:5px;font-size:12px;color:#766550;text-decoration:none;font-weight:500;">
                     Manage credit notes <i class="fas fa-arrow-right"></i>
                 </a>
             </header>

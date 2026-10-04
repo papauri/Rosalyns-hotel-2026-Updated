@@ -556,7 +556,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['booking_email_templat
             $invoiceLogoHtml = $invoiceLogoUrl !== ''
                 ? '<img src="' . htmlspecialchars($invoiceLogoUrl, ENT_QUOTES, 'UTF-8') . '" alt="' . htmlspecialchars((string)getSetting('site_name', 'Hotel'), ENT_QUOTES, 'UTF-8') . '" height="116" style="height:116px;width:auto;display:block;margin:0 auto;">'
                 : '';
-            $invoiceRoomIconHtml = '<span style="color:#B18247;font-size:11px;vertical-align:middle;">&#9679;</span>';
+            $invoiceRoomIconHtml = '<span style="color:#8F6A35;font-size:11px;vertical-align:middle;">&#9679;</span>';
             $invoiceChargesRows = ''
                 . '<tr>'
                 . '<td width="58%" style="padding:5px 7px;border-bottom:1px solid #ECE2D7;font-size:7px;color:#1F1C17;line-height:1.3;">Deluxe Ocean Suite - Accommodation</td>'
@@ -1284,7 +1284,7 @@ foreach ($canonicalTemplateDefaults as $templateKey => $templateDefaults) {
 
         <div class="page-header">
             <h1 class="page-title">
-                <i class="fas fa-cog" style="color: #8B7355; margin-right: 10px;"></i>
+                <i class="fas fa-cog" style="color: #7E684B; margin-right: 10px;"></i>
                 <?php echo $mod_bookings ? 'Booking Settings' : 'Business Settings'; ?>
             </h1>
         </div>
@@ -1304,7 +1304,7 @@ foreach ($canonicalTemplateDefaults as $templateKey => $templateDefaults) {
         <?php endif; ?>
 
         <div class="settings-card">
-            <h2><i class="fas fa-tools" style="color: #8B7355;"></i> Frontend Maintenance Mode</h2>
+            <h2><i class="fas fa-tools" style="color: #7E684B;"></i> Frontend Maintenance Mode</h2>
 
             <div class="current-value">
                 <i class="fas fa-<?php echo $site_maintenance_enabled ? 'triangle-exclamation' : 'check-circle'; ?>" style="color: <?php echo $site_maintenance_enabled ? '#dc3545' : '#28a745'; ?>;"></i>
@@ -1356,7 +1356,7 @@ foreach ($canonicalTemplateDefaults as $templateKey => $templateDefaults) {
 
         <?php if ($mod_bookings): ?>
         <div class="settings-card">
-            <h2><i class="fas fa-toggle-on" style="color: #8B7355;"></i> Booking System Status</h2>
+            <h2><i class="fas fa-toggle-on" style="color: #7E684B;"></i> Booking System Status</h2>
 
             <div class="current-value">
                 <i class="fas fa-<?php echo $booking_enabled ? 'check-circle' : 'times-circle'; ?>" style="color: <?php echo $booking_enabled ? '#28a745' : '#dc3545'; ?>;"></i>
@@ -1401,7 +1401,7 @@ foreach ($canonicalTemplateDefaults as $templateKey => $templateDefaults) {
                 </div>
 
                 <div id="disabled-settings" style="display: none; margin-top: 25px;">
-                    <h3 style="color: #8B7355; margin-bottom: 20px;"><i class="fas fa-sliders-h"></i> Disabled Mode Settings</h3>
+                    <h3 style="color: #7E684B; margin-bottom: 20px;"><i class="fas fa-sliders-h"></i> Disabled Mode Settings</h3>
 
                     <form method="POST" action="booking-settings.php">
                         <div class="form-group">
@@ -1507,7 +1507,7 @@ foreach ($canonicalTemplateDefaults as $templateKey => $templateDefaults) {
             </script>
 
             <div class="settings-card">
-                <h2><i class="fas fa-calendar-alt" style="color: #8B7355;"></i> Advance Booking Configuration</h2>
+                <h2><i class="fas fa-calendar-alt" style="color: #7E684B;"></i> Advance Booking Configuration</h2>
 
                 <form method="POST" action="booking-settings.php">
                     <div class="form-group">
@@ -1551,7 +1551,7 @@ foreach ($canonicalTemplateDefaults as $templateKey => $templateDefaults) {
                 $canEditRefundRules = hasPermission((int)($user['id'] ?? 0), 'finance_settings');
                 ?>
                 <div class="current-value">
-                    <i class="fas fa-coins" style="color: #8B7355;"></i>
+                    <i class="fas fa-coins" style="color: #7E684B;"></i>
                     <div class="current-value-info">
                         <h3>Current handling</h3>
                         <div class="value"><?php echo htmlspecialchars(getCancellationRefundModeLabel($cancelModeNow)); ?></div>
@@ -1622,7 +1622,7 @@ foreach ($canonicalTemplateDefaults as $templateKey => $templateDefaults) {
             <?php rh_hotel_details_render($user, $csrf_token); ?>
 
             <div class="settings-card" id="booking-references">
-                <h2><i class="fas fa-hashtag" style="color: #8B7355;"></i> Booking references</h2>
+                <h2><i class="fas fa-hashtag" style="color: #7E684B;"></i> Booking references</h2>
                 <?php $refPrefixNow = rh_booking_reference_prefix(); ?>
                 <form method="POST" action="booking-settings.php#booking-references">
                     <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf_token, ENT_QUOTES); ?>">
@@ -1638,7 +1638,7 @@ foreach ($canonicalTemplateDefaults as $templateKey => $templateDefaults) {
             </div>
 
             <div class="settings-card" id="document-branding">
-                <h2><i class="fas fa-palette" style="color: #8B7355;"></i> Document branding</h2>
+                <h2><i class="fas fa-palette" style="color: #7E684B;"></i> Document branding</h2>
                 <?php
                 $canEditBranding = hasPermission((int)($user['id'] ?? 0), 'finance_settings');
                 $brandPrimaryNow = rh_theme_hex(getSetting('brand_primary_color', ''), '#524b3f');
@@ -1680,7 +1680,7 @@ foreach ($canonicalTemplateDefaults as $templateKey => $templateDefaults) {
             </div>
 
             <div class="settings-card" id="tentative">
-                <h2><i class="fas fa-clock" style="color: #8B7355;"></i> Tentative Bookings</h2>
+                <h2><i class="fas fa-clock" style="color: #7E684B;"></i> Tentative Bookings</h2>
 
                 <?php $tentativeCurrentlyEnabled = getSetting('tentative_bookings_enabled', '1') !== '0'; ?>
                 <div class="current-value">
@@ -1759,7 +1759,7 @@ foreach ($canonicalTemplateDefaults as $templateKey => $templateDefaults) {
             </div>
 
             <div class="settings-card">
-                <h2><i class="fas fa-percent" style="color: #8B7355;"></i> Tourism Levy / City Tax</h2>
+                <h2><i class="fas fa-percent" style="color: #7E684B;"></i> Tourism Levy / City Tax</h2>
 
                 <form method="POST" action="booking-settings.php">
                     <input type="hidden" name="tourism_levy_settings" value="1">
@@ -1820,7 +1820,7 @@ foreach ($canonicalTemplateDefaults as $templateKey => $templateDefaults) {
             <?php endif; /* $mod_bookings — Booking Status / Advance / Tentative / Tourism Levy */ ?>
 
             <div class="settings-card">
-                <h2><i class="fas fa-envelope" style="color: #8B7355;"></i> Email Configuration</h2>
+                <h2><i class="fas fa-envelope" style="color: #7E684B;"></i> Email Configuration</h2>
 
                 <?php
                 $email_settings = getAllEmailSettings();
@@ -1968,7 +1968,7 @@ foreach ($canonicalTemplateDefaults as $templateKey => $templateDefaults) {
 
             <?php if ($mod_bookings): ?>
             <div class="settings-card">
-                <h2><i class="fas fa-bell" style="color: #8B7355;"></i> Booking Notification Email</h2>
+                <h2><i class="fas fa-bell" style="color: #7E684B;"></i> Booking Notification Email</h2>
                 <form method="POST" action="booking-settings.php">
                     <input type="hidden" name="booking_notification_settings" value="1">
 
@@ -2027,7 +2027,7 @@ foreach ($canonicalTemplateDefaults as $templateKey => $templateDefaults) {
             <?php endif; /* $mod_bookings — Booking Notification Email */ ?>
 
             <div class="settings-card">
-                <h2><i class="fas fa-sliders-h" style="color: #8B7355;"></i> Service Modules &amp; Dedicated Notification Emails</h2>
+                <h2><i class="fas fa-sliders-h" style="color: #7E684B;"></i> Service Modules &amp; Dedicated Notification Emails</h2>
                 <form method="POST" action="booking-settings.php">
                     <input type="hidden" name="service_channel_settings" value="1">
 
@@ -2090,7 +2090,7 @@ foreach ($canonicalTemplateDefaults as $templateKey => $templateDefaults) {
             </div>
 
             <div class="settings-card" id="pwa-settings">
-                <h2><i class="fas fa-mobile-screen-button" style="color: #8B7355;"></i> PWA Install Banner</h2>
+                <h2><i class="fas fa-mobile-screen-button" style="color: #7E684B;"></i> PWA Install Banner</h2>
                 <p class="help-text">Controls how often the &ldquo;Install Admin App&rdquo; banner reappears after a staff member dismisses it.</p>
                 <form method="POST" action="booking-settings.php#pwa-settings">
                     <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf_token, ENT_QUOTES, 'UTF-8'); ?>">
@@ -2198,7 +2198,7 @@ foreach ($canonicalTemplateDefaults as $templateKey => $templateDefaults) {
             ?>
             <div class="settings-card tpl-editor-card" id="email-templates" style="scroll-margin-top:18px;">
                 <div style="margin-bottom:14px;">
-                    <h2 style="margin:0 0 4px;"><i class="fas fa-envelope-open-text" style="color:#8B7355;"></i> <?php echo $mod_bookings ? 'Booking Email &amp; PDF Templates' : 'Email &amp; PDF Templates'; ?></h2>
+                    <h2 style="margin:0 0 4px;"><i class="fas fa-envelope-open-text" style="color:#7E684B;"></i> <?php echo $mod_bookings ? 'Booking Email &amp; PDF Templates' : 'Email &amp; PDF Templates'; ?></h2>
                     <p class="help-text" style="margin:0;">Email tabs preview wrapped emails. PDF tabs preview document HTML and the test-send action emails a real PDF attachment generated from the preview.</p>
                 </div>
 
