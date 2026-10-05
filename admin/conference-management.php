@@ -52,9 +52,13 @@ function uploadConferenceImage(array $fileInput): ?string
     if (empty($fileInput) || ($fileInput['error'] ?? UPLOAD_ERR_NO_FILE) !== UPLOAD_ERR_OK) {
         return null;
     }
-    if (($fileInput['size'] ?? 0) > 8 * 1024 * 1024) {
-        error_log('Conference upload rejected: file > 8MB');
+    // Shared size cap (config/security.php) — was a local 8 MB literal.
+    if ($cf_sizeError = rh_check_image_upload_size($fileInput, $cf_sizeWarning)) {
+        error_log('Conference upload rejected: ' . $cf_sizeError);
         return null;
+    }
+    if (!empty($cf_sizeWarning)) {
+        error_log('Conference upload warning: ' . $cf_sizeWarning);
     }
 
     $uploadDir = __DIR__ . '/../images/conference/';

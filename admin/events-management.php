@@ -63,9 +63,13 @@ function uploadEventImage(array $fileInput)
     if (!$fileInput || !isset($fileInput['tmp_name']) || $fileInput['error'] !== UPLOAD_ERR_OK) {
         return null;
     }
-    if (($fileInput['size'] ?? 0) > 8 * 1024 * 1024) {
-        error_log('Event upload rejected: file > 8MB');
+    // Shared size cap (config/security.php) — was a local 8 MB literal.
+    if ($ev_sizeError = rh_check_image_upload_size($fileInput, $ev_sizeWarning)) {
+        error_log('Event upload rejected: ' . $ev_sizeError);
         return null;
+    }
+    if (!empty($ev_sizeWarning)) {
+        error_log('Event upload warning: ' . $ev_sizeWarning);
     }
 
     $uploadDir = __DIR__ . '/../images/events/';

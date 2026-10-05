@@ -219,6 +219,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             // ── Footer Settings ─────────────────────────────────────────────
             } elseif ($action === 'save_footer_settings') {
                 $fields = [
+                    'site_name'            => trim($_POST['site_name'] ?? ''),
+                    'site_tagline'         => trim($_POST['site_tagline'] ?? ''),
+                    'site_logo'            => trim($_POST['site_logo'] ?? ''),
                     'phone_main'           => trim($_POST['phone_main'] ?? ''),
                     'email_main'           => trim($_POST['email_main'] ?? ''),
                     'address_line1'        => trim($_POST['address_line1'] ?? ''),
@@ -231,6 +234,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     'footer_design_credit' => trim($_POST['footer_design_credit'] ?? ''),
                 ];
 
+                // site_name is rendered on every guest page (header brand, hero eyebrow,
+                // loader lockup, SEO title) — never let it be blanked out.
+                if ($fields['site_name'] === '') {
+                    throw new Exception('Site name is required.');
+                }
                 if (!empty($fields['email_main']) && !filter_var($fields['email_main'], FILTER_VALIDATE_EMAIL)) {
                     throw new Exception('Invalid email address.');
                 }
@@ -247,7 +255,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 if (function_exists('clearCache')) {
                     clearCache();
                 }
-                $message = 'Footer settings saved.';
+                $message = 'Site and footer settings saved.';
                 rh_log_event('footer_management', 'info', 'Footer settings updated', ['by' => $user['username']]);
 
             } else {
@@ -285,7 +293,10 @@ foreach ($footer_links as $col => $links) {
 
 // Footer settings
 $fs = [
-    'phone_main'           => getSetting('phone_main', ''),
+    'site_name'            => getSetting('site_name', ''),
+    'site_tagline'         => getSetting('site_tagline', ''),
+    'site_logo'            => getSetting('site_logo', ''),
+    'phone_main'          => getSetting('phone_main', ''),
     'email_main'           => getSetting('email_main', ''),
     'address_line1'        => getSetting('address_line1', ''),
     'working_hours'        => getSetting('working_hours', ''),
@@ -395,7 +406,7 @@ $active_tab = $_GET['tab'] ?? 'links';
 <div class="content">
     <div class="page-header">
         <h2 class="page-title"><i class="fas fa-shoe-prints" style="transform:rotate(-90deg);"></i>&nbsp; Footer Management</h2>
-        <p class="text-muted">Manage footer links, policies, and contact / social settings</p>
+        <p class="text-muted">Manage footer links, policies, site identity and contact / social settings</p>
     </div>
 
     <?php if ($message): ?><?php showAlert($message, 'success'); ?><?php endif; ?>
@@ -459,7 +470,7 @@ $active_tab = $_GET['tab'] ?? 'links';
     <nav class="fm-tabs">
         <a href="?tab=links"    class="fm-tab <?php echo $active_tab === 'links'    ? 'fm-tab--active' : ''; ?>"><i class="fas fa-link"></i> Footer Links</a>
         <a href="?tab=policies" class="fm-tab <?php echo $active_tab === 'policies' ? 'fm-tab--active' : ''; ?>"><i class="fas fa-file-contract"></i> Policies &amp; Modals</a>
-        <a href="?tab=settings" class="fm-tab <?php echo $active_tab === 'settings' ? 'fm-tab--active' : ''; ?>"><i class="fas fa-cog"></i> Contact &amp; Social</a>
+        <a href="?tab=settings" class="fm-tab <?php echo $active_tab === 'settings' ? 'fm-tab--active' : ''; ?>"><i class="fas fa-cog"></i> Identity, Contact &amp; Social</a>
     </nav>
 
     <!-- ═══════════════════════════════════════════════════════ TAB: LINKS -->
@@ -630,6 +641,34 @@ $active_tab = $_GET['tab'] ?? 'links';
             <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf_token); ?>">
 
             <div class="fm-section">
+                <h3><i class="fas fa-id-badge"></i> Site Identity</h3>
+                <div class="settings-grid">
+                    <div class="form-group">
+                        <label>Site Name</label>
+                        <input type="text" name="site_name" required value="<?php echo htmlspecialchars($fs['site_name']); ?>" placeholder="Rosalyn's Beach Hotel">
+                        <p class="help-text">Header brand, the badge above every page hero, the loading screen and the browser/SEO title.</p>
+                    </div>
+                    <div class="form-group">
+                        <label>Tagline</label>
+                        <input type="text" name="site_tagline" value="<?php echo htmlspecialchars($fs['site_tagline']); ?>" placeholder="Your hotel tagline">
+                        <p class="help-text">Shown under the logo, in the mobile menu, and split across the loading screen (first half above the site name, second half below) — so 4–6 words read best. Also used as the default SEO description.</p>
+                    </div>
+                    <div class="form-group">
+                        <label>Logo</label>
+                        <input type="text" name="site_logo" value="<?php echo htmlspecialchars($fs['site_logo']); ?>" placeholder="images/logo/logo.png">
+                        <p class="help-text">
+                            Path or URL of the header logo — upload the file in <a href="media-management.php">Media Portal</a>, then paste its path here.
+                            The header scales it to its own height and never caps its width, so keep it no wider than about 2.5&times;1; anything wider crowds the mobile header bar.
+                        </p>
+                        <?php if (!empty($fs['site_logo'])): ?>
+                            <img src="<?php echo htmlspecialchars(strpos($fs['site_logo'], 'http') === 0 ? $fs['site_logo'] : '../' . ltrim($fs['site_logo'], '/')); ?>"
+                                 alt="Current logo" style="height:48px;width:auto;margin-top:8px;background:#f5f2ec;padding:6px;border-radius:6px;">
+                        <?php endif; ?>
+                    </div>
+                </div>
+            </div>
+
+            <div class="fm-section">
                 <h3><i class="fas fa-address-card"></i> Contact Information</h3>
                 <div class="settings-grid">
                     <div class="form-group">
@@ -690,7 +729,7 @@ $active_tab = $_GET['tab'] ?? 'links';
             </div>
 
             <button type="submit" class="fm-btn fm-btn--primary" style="font-size:14px; padding:10px 24px;">
-                <i class="fas fa-save"></i> Save Footer Settings
+                <i class="fas fa-save"></i> Save Site &amp; Footer Settings
             </button>
         </form>
     </div>

@@ -18,6 +18,77 @@ if (!defined('SECURITY_INCLUDED')) {
 
 /**
  * ============================================================================
+ * IMAGE UPLOAD LIMITS
+ * ============================================================================
+ *
+ * One cap for every image upload path in the admin. Before this, the six upload
+ * handlers each carried their own number and they did not agree — room-pictures
+ * 5 MB, gallery/events/conference 8 MB, room-management 20 MB, and
+ * media-management had no cap at all, which is how an 8.1 MB JPEG reached
+ * images/. Guest pages are latency-sensitive on mobile, so oversized originals
+ * are a real conversion cost, not untidiness.
+ *
+ * Deliberately a SIZE CAP ONLY — no resizing. Resizing would need GD or Imagick,
+ * which this codebase already treats as optional (see the fallback in
+ * config/email.php for the gym member card), so a cap works everywhere and can
+ * never silently corrupt an upload.
+ *
+ * Tune here, not in the handlers.
+ */
+if (!defined('RH_IMAGE_MAX_BYTES')) {
+    define('RH_IMAGE_MAX_BYTES', 4 * 1024 * 1024);      // hard reject above 4 MB
+}
+if (!defined('RH_IMAGE_WARN_BYTES')) {
+    define('RH_IMAGE_WARN_BYTES', 1536 * 1024);         // advise below 1.5 MB
+}
+
+if (!function_exists('rh_format_bytes_short')) {
+    function rh_format_bytes_short(int $bytes): string
+    {
+        if ($bytes >= 1048576) {
+            return round($bytes / 1048576, 1) . ' MB';
+        }
+        return max(1, (int)round($bytes / 1024)) . ' KB';
+    }
+}
+
+/**
+ * Validate an uploaded image against the shared size cap.
+ *
+ * @param array       $fileInput A single $_FILES entry.
+ * @param string|null $warning   Set to advisory text when the file is allowed
+ *                               but large enough to hurt page speed.
+ * @return string|null Error message when the upload must be rejected, else null.
+ */
+if (!function_exists('rh_check_image_upload_size')) {
+    function rh_check_image_upload_size(array $fileInput, ?string &$warning = null): ?string
+    {
+        $warning = null;
+        $size = (int)($fileInput['size'] ?? 0);
+
+        if ($size <= 0) {
+            return null; // nothing uploaded; the caller's own checks handle this
+        }
+
+        if ($size > RH_IMAGE_MAX_BYTES) {
+            return 'Image is too large ('
+                . rh_format_bytes_short($size) . '). Maximum is '
+                . rh_format_bytes_short(RH_IMAGE_MAX_BYTES)
+                . '. Please compress it and try again.';
+        }
+
+        if ($size > RH_IMAGE_WARN_BYTES) {
+            $warning = 'Image accepted at ' . rh_format_bytes_short($size)
+                . ', which is large for a web page and will slow loading on mobile. '
+                . 'Under ' . rh_format_bytes_short(RH_IMAGE_WARN_BYTES) . ' is recommended.';
+        }
+
+        return null;
+    }
+}
+
+/**
+ * ============================================================================
  * SECURITY HEADERS
  * ============================================================================
  */

@@ -250,7 +250,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         } elseif ($action === 'upload_image') {
             if (isset($_FILES['room_image']) && $_FILES['room_image']['error'] === 0) {
                 $room_id = (int)($_POST['room_id'] ?? 0);
-                $size = (int)($_FILES['room_image']['size'] ?? 0);
 
                 // Extension comes from the verified MIME type, never the client file name.
                 $mimeToExt = ['image/jpeg' => 'jpg', 'image/png' => 'png', 'image/webp' => 'webp'];
@@ -272,8 +271,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     $roomExists = (int)$rx->fetchColumn() > 0;
                 }
 
-                if ($size > 20 * 1024 * 1024) {
-                    $error = 'File too large. Max size is 20MB.';
+                // Shared size cap (config/security.php); an oversize file is rejected, not uploaded anyway.
+                $rm_sizeError = rh_check_image_upload_size($_FILES['room_image'], $rm_sizeWarning);
+                if ($rm_sizeError) {
+                    $error = $rm_sizeError;
                     if (is_ajax_request()) {
                         header('Content-Type: application/json');
                         echo json_encode(['success' => false, 'message' => $error]);

@@ -467,7 +467,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['booking_email_templat
             '{{total_amount_formatted}}'   => number_format(4500, 2),
             '{{total_amount}}'             => (string)getSetting('currency_symbol', 'MWK') . number_format(4500, 2),
             '{{currency_symbol}}'          => (string)getSetting('currency_symbol', 'MWK'),
-            '{{contact_email}}'            => (string)getSetting('email_from_email', getSetting('contact_email', 'reservations@example.com')),
+            '{{contact_email}}'            => (string)(getSetting('email_from_email') ?: getEmailSetting('email_from_email') ?: getSetting('contact_email', 'reservations@example.com')),
             '{{contact_phone}}'            => (string)getSetting('phone_main', ''),
             '{{phone_main}}'               => (string)getSetting('phone_main', ''),
             '{{payment_policy}}'           => 'Full payment is due 48 hours before check-in.',
@@ -628,7 +628,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['booking_email_templat
             $invoiceTermsText = trim((string)getSetting('invoice_terms', getSetting('payment_terms', '')));
             if ($invoiceTermsText !== '') {
                 $invoiceTermsText = strtr($invoiceTermsText, [
-                    '{{contact_email}}' => (string)getSetting('email_from_email', getSetting('contact_email', 'reservations@example.com')),
+                    '{{contact_email}}' => (string)(getSetting('email_from_email') ?: getEmailSetting('email_from_email') ?: getSetting('contact_email', 'reservations@example.com')),
                     '{{contact_phone}}' => (string)getSetting('phone_main', ''),
                     '{{site_name}}' => (string)getSetting('site_name', 'Hotel'),
                 ]);
@@ -962,7 +962,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 '{{total_amount_formatted}}'   => number_format(4500, 2),
                 '{{total_amount}}'             => $currencySymbol . number_format(4500, 2),
                 '{{currency_symbol}}'          => $currencySymbol,
-                '{{contact_email}}'            => (string)getSetting('email_from_email', getSetting('contact_email', 'reservations@example.com')),
+                '{{contact_email}}'            => (string)(getSetting('email_from_email') ?: getEmailSetting('email_from_email') ?: getSetting('contact_email', 'reservations@example.com')),
                 '{{contact_phone}}'            => (string)getSetting('phone_main', ''),
                 '{{phone_main}}'               => (string)getSetting('phone_main', ''),
                 '{{payment_policy}}'           => 'Full payment is due 48 hours before check-in.',
@@ -2052,6 +2052,7 @@ foreach ($canonicalTemplateDefaults as $templateKey => $templateDefaults) {
 
             <div class="rh-panel settings-card" id="service-modules">
                 <div class="rh-panel__head"><h2 class="rh-panel__title">Service Modules &amp; Dedicated Notification Emails</h2></div>
+                <p class="help-text">Turning a service off here also removes its page — and every page that module governs — from the guest site navigation. The Events switch lives in <a href="module-settings.php">Module Settings</a>.</p>
                 <form method="POST" action="booking-settings.php">
                     <input type="hidden" name="service_channel_settings" value="1">
 

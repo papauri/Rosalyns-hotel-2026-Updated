@@ -64,12 +64,14 @@ function uploadGalleryImage(?array $fileInput)
     if (!$fileInput || !isset($fileInput['tmp_name']) || $fileInput['error'] !== UPLOAD_ERR_OK) {
         return null;
     }
-    // Size cap: 8 MB
-    if (($fileInput['size'] ?? 0) > 8 * 1024 * 1024) {
-        error_log('Gallery upload rejected: file > 8MB');
+    // Shared size cap (config/security.php) — was a local 8 MB literal.
+    if ($gm_sizeError = rh_check_image_upload_size($fileInput, $gm_sizeWarning)) {
+        error_log('Gallery upload rejected: ' . $gm_sizeError);
         return null;
     }
-    // Extension whitelist
+    if (!empty($gm_sizeWarning)) {
+        error_log('Gallery upload warning: ' . $gm_sizeWarning);
+    }
     // MIME validation; the stored extension comes from the verified MIME, never the client name.
     $finfo = new finfo(FILEINFO_MIME_TYPE);
     $mime = $finfo->file($fileInput['tmp_name']) ?: '';

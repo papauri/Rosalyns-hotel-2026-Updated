@@ -21,6 +21,7 @@ header('Content-Type: application/json');
 
 // Include database configuration
 require_once __DIR__ . '/../../config/database.php';
+require_once __DIR__ . '/../../config/security.php'; // RH_IMAGE_MAX_BYTES + rh_check_image_upload_size()
 require_once __DIR__ . '/../includes/permissions.php';
 
 // Start session and enforce admin auth/permission
@@ -70,12 +71,9 @@ function validateImageFile($file) {
         ];
     }
     
-    // Check file size
-    if ($file['size'] > $maxSize) {
-        return [
-            'valid' => false,
-            'error' => 'File size exceeds maximum limit of 5MB'
-        ];
+    // Shared size cap (config/security.php) — was a local 5MB literal.
+    if ($rp_sizeError = rh_check_image_upload_size($file, $rp_sizeWarning)) {
+        return ['valid' => false, 'error' => $rp_sizeError];
     }
     
     // Check file type

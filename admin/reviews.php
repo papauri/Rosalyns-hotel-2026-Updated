@@ -448,7 +448,6 @@ $pending_count = $pending_stmt->fetch(PDO::FETCH_ASSOC)['count'];
             const formData = new FormData();
             formData.append('review_id', reviewId);
             formData.append('response', responseText);
-            formData.append('csrf_token', _pageCsrf);
 
             setButtonLoading(btnEl, true);
             showLoadingOverlay('Submitting response...');
@@ -457,7 +456,7 @@ $pending_count = $pending_stmt->fetch(PDO::FETCH_ASSOC)['count'];
                 method: 'POST',
                 body: formData,
                 credentials: 'same-origin',
-                headers: { 'X-Requested-With': 'XMLHttpRequest' }
+                headers: { 'X-Requested-With': 'XMLHttpRequest', 'X-CSRF-Token': _pageCsrf }
             })
             .then(response => {
                 if (!response.ok) throw new Error('HTTP ' + response.status);
@@ -498,8 +497,7 @@ $pending_count = $pending_stmt->fetch(PDO::FETCH_ASSOC)['count'];
 
             const data = {
                 review_id: reviewId,
-                status: newStatus,
-                _csrf: _pageCsrf
+                status: newStatus
             };
 
             setButtonLoading(btnEl, true);
@@ -509,7 +507,8 @@ $pending_count = $pending_stmt->fetch(PDO::FETCH_ASSOC)['count'];
                 method: 'PUT',
                 headers: {
                     'Content-Type': 'application/json',
-                    'X-Requested-With': 'XMLHttpRequest'
+                    'X-Requested-With': 'XMLHttpRequest',
+                    'X-CSRF-Token': _pageCsrf
                 },
                 credentials: 'same-origin',
                 body: JSON.stringify(data)
@@ -542,10 +541,10 @@ $pending_count = $pending_stmt->fetch(PDO::FETCH_ASSOC)['count'];
             setButtonLoading(btnEl, true);
             showLoadingOverlay('Deleting review...');
 
-            fetch('api/reviews.php?review_id=' + encodeURIComponent(reviewId) + '&_csrf=' + encodeURIComponent(_pageCsrf), {
+            fetch('api/reviews.php?review_id=' + encodeURIComponent(reviewId), {
                 method: 'DELETE',
                 credentials: 'same-origin',
-                headers: { 'X-Requested-With': 'XMLHttpRequest' }
+                headers: { 'X-Requested-With': 'XMLHttpRequest', 'X-CSRF-Token': _pageCsrf }
             })
             .then(response => {
                 if (!response.ok) throw new Error('HTTP ' + response.status);
@@ -687,7 +686,7 @@ $pending_count = $pending_stmt->fetch(PDO::FETCH_ASSOC)['count'];
                         '<a class="scraper-card__source" href="' + safeSource + '" target="_blank" rel="noopener">' + safeSource + '</a>' +
                         '<div class="scraper-card__inputs">' +
                             '<label>Username' +
-                                '<input type="text" class="scraper-username" value="' + safeUser + '" placeholder="Enter source username" maxlength="120">' +
+                                '<input type="text" class="scraper-username" value="' + safeUser + '" placeholder="Source username (optional)" maxlength="120">' +
                             '</label>' +
                             '<label>Rating' +
                                 '<select class="scraper-rating">' +
@@ -704,8 +703,7 @@ $pending_count = $pending_stmt->fetch(PDO::FETCH_ASSOC)['count'];
                             '</label>' +
                         '</div>' +
                         '<div class="scraper-card__actions">' +
-                            '<button type="button" class="btn btn-secondary btn-sm" onclick="importScrapedFeedback(' + idx + ', \'pending\', this)"><i class="fas fa-hourglass-half"></i> Import Pending</button>' +
-                            '<button type="button" class="btn btn-success btn-sm" onclick="importScrapedFeedback(' + idx + ', \'approved\', this)"><i class="fas fa-check"></i> Import & Approve</button>' +
+                            '<button type="button" class="btn btn-secondary btn-sm" onclick="importScrapedFeedback(' + idx + ', this)"><i class="fas fa-hourglass-half"></i> Import for Review</button>' +
                         '</div>' +
                     '</article>';
             });
@@ -716,7 +714,10 @@ $pending_count = $pending_stmt->fetch(PDO::FETCH_ASSOC)['count'];
             wrap.innerHTML = html;
         }
 
-        function importScrapedFeedback(index, status, btnEl) {
+        // Imports always land as 'pending' — the server ignores any status the client sends,
+        // so there is no "Import & Approve" shortcut. Approve in the list below after
+        // checking the text, rating and attribution.
+        function importScrapedFeedback(index, btnEl) {
             const wrap = document.getElementById('scraper-results');
             let candidates = [];
 
@@ -749,11 +750,6 @@ $pending_count = $pending_stmt->fetch(PDO::FETCH_ASSOC)['count'];
             const email = emailInput ? emailInput.value.trim() : '';
             const sourceDate = sourceDateInput ? sourceDateInput.value.trim() : '';
 
-            if (!username) {
-                Alert.show('Username is required. Please provide the genuine source username.', 'error');
-                return;
-            }
-
             if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
                 Alert.show('Please enter a valid email format, or leave email blank.', 'error');
                 return;
@@ -761,7 +757,6 @@ $pending_count = $pending_stmt->fetch(PDO::FETCH_ASSOC)['count'];
 
             const payload = {
                 action: 'import',
-                status: status,
                 rating: rating,
                 username: username,
                 email: email,

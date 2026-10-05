@@ -86,7 +86,15 @@ $dbDebug = in_array(strtolower((string)getenv('DB_DEBUG')), ['1', 'true', 'on', 
 if (!function_exists('rh_auto_migrate_enabled')) {
     function rh_auto_migrate_enabled(): bool
     {
-        return in_array(strtolower((string)getenv('RH_ALLOW_AUTO_MIGRATE')), ['1', 'true', 'on', 'yes'], true);
+        static $enabled = null;
+        if ($enabled === null) {
+            $enabled = in_array(
+                strtolower((string)getenv('RH_ALLOW_AUTO_MIGRATE')),
+                ['1', 'true', 'on', 'yes'],
+                true
+            );
+        }
+        return $enabled;
     }
 }
 
@@ -7706,7 +7714,7 @@ function recalculateBookingFinancials(int $bookingId): bool
             $baseTotalWithVat = max(0.0, (float)($booking['cancellation_retained_amount'] ?? 0));
         }
         $totalWithVat = $baseTotalWithVat + $chargesTotal; // charges_total already includes VAT
-        $balance   = $totalWithVat - $amountPaid;
+        $balance = $totalWithVat - $amountPaid;
         $amountDue = max(0, $balance);
         // Overpayment is money owed back to the guest. Keep it on the booking so it
         // stays correct as charges and payments move — otherwise a credit written by

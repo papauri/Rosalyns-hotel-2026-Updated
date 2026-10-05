@@ -1,0 +1,17 @@
+# Public JSON API — always dynamic.
+#
+# The root .htaccess gives application/json a 1-month Expires, which would
+# otherwise let a browser replay stale API responses for weeks. That bites
+# hardest on page-content.php: SPA navigation would serve markup from before
+# the last front-end deploy while a hard reload of the same page served the
+# new markup.
+
+<IfModule mod_expires.c>
+    ExpiresActive Off
+</IfModule>
+
+<IfModule mod_headers.c>
+    Header always set Cache-Control "no-store, no-cache, must-revalidate"
+    Header always unset Expires
+    Header always set Pragma "no-cache"
+</IfModule>

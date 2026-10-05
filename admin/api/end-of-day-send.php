@@ -540,9 +540,18 @@ if ($channel === 'whatsapp') {
 // -----------------------------------------------------------------------------
 // Channel: Email — rich HTML
 // -----------------------------------------------------------------------------
+// `eod_report_recipients` lives in site_settings, but `email_admin_email` and
+// `email_from_email` live in email_settings — and getSetting() only reads
+// site_settings. Reading them with getSetting() therefore always returned the
+// empty default, so every fallback failed and the EOD email could never be sent
+// unless `eod_report_recipients` happened to be populated. Fall back through
+// getEmailSetting() for the two keys that belong to email_settings.
 $recipientsCsv = getSetting('eod_report_recipients');
 if (!$recipientsCsv) {
-    $recipientsCsv = getSetting('email_admin_email') ?: getSetting('email_from_email');
+    $recipientsCsv = getSetting('email_admin_email')
+        ?: getEmailSetting('email_admin_email')
+        ?: getSetting('email_from_email')
+        ?: getEmailSetting('email_from_email');
 }
 $recipients = [];
 foreach (preg_split('/[,;\s]+/', (string)$recipientsCsv) as $em) {

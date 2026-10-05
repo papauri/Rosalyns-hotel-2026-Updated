@@ -46,12 +46,25 @@ function mm_store_uploaded_media(array $fileInput, string $mediaType): array
     if (!isset($extByMime[$detected])) {
         throw new RuntimeException('Uploaded file type is not allowed (' . ($mediaType === 'video' ? 'MP4, WebM, OGG, MOV' : 'JPG, PNG, WebP, GIF') . ').');
     }
-    $maxBytes = ($mediaType === 'video') ? 100 * 1024 * 1024 : 20 * 1024 * 1024;
-    if ((int)($fileInput['size'] ?? 0) > $maxBytes) {
-        throw new RuntimeException('File is too large (max ' . ($maxBytes / 1048576) . ' MB).');
-    }
     if ($mediaType === 'image' && !@getimagesize($tmp)) {
         throw new RuntimeException('Uploaded file is not a valid image.');
+    }
+
+    // Shared image size cap (config/security.php). This handler previously had NO
+    // size limit of any kind, which is how oversized originals reached images/.
+    // Videos keep their own, much larger allowance and are not capped here.
+    if ($mediaType === 'image') {
+        $mm_sizeWarning = null;
+        if ($mm_sizeError = rh_check_image_upload_size($fileInput, $mm_sizeWarning)) {
+            throw new RuntimeException($mm_sizeError);
+        }
+        if (!empty($mm_sizeWarning)) {
+            error_log('Media upload warning: ' . $mm_sizeWarning);
+        }
+    }
+
+    if ($mediaType === 'video' && (int)($fileInput['size'] ?? 0) > 100 * 1024 * 1024) {
+        throw new RuntimeException('File is too large (max 100 MB).');
     }
     $ext = $extByMime[$detected];
 

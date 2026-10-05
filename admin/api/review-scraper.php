@@ -864,16 +864,25 @@ if ($action === 'import') {
     $username = trim((string)($input['username'] ?? ''));
     $emailInput = trim((string)($input['email'] ?? ''));
     $sourceDateInput = trim((string)($input['source_date'] ?? ''));
-    $status = trim((string)($input['status'] ?? 'pending'));
+    // Imported feedback ALWAYS lands as 'pending' — the caller cannot request
+    // 'approved'. This scraper imports **web-search snippets**, not verified
+    // reviews: it queries DuckDuckGo/Bing/r.jina.ai, so a candidate is whatever
+    // text a search engine returned. In practice that has meant Facebook page
+    // posts and even a news item stored as a 5-star guest review, with
+    // the rating chosen at import rather than derived from anything.
+    // Nothing scraped reaches the public site until a human approves it in
+    // admin/reviews.php. Owner decision, 2026-09-02.
+    $status = 'pending';
     $rating = (int)($input['rating'] ?? 5);
     $candidateSentiment = normalize_sentiment((string)($candidate['sentiment'] ?? ($input['sentiment'] ?? 'positive')));
 
+    // Username is optional (owner decision, 2026-09-02). A search snippet often has
+    // no attributable author — a page post, a listing, a news item — and forcing the
+    // admin to invent one produced worse data than leaving it unattributed.
+    // `reviews.guest_name` is NOT NULL, so fall back to a neutral label rather than
+    // writing an empty string that renders as a blank byline.
     if ($username === '') {
-        json_error('Username is required for imported feedback', 400);
-    }
-
-    if (!in_array($status, ['pending', 'approved'], true)) {
-        json_error('Status must be pending or approved', 400);
+        $username = 'Guest';
     }
 
     $rating = max(1, min(5, $rating));
