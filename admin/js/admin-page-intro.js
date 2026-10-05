@@ -567,6 +567,90 @@
         root.dataset.rhPageHeaderNormalized = '1';
     }
 
+    /* One position for every page title: the header (shared or the page's own
+       .rh-page-head) becomes the first thing in the page, and the shared
+       "Back to …" button moves inside it, above the title. Headers inside a
+       form stay put so their inputs keep their form. */
+    function placeHeader(root) {
+        if (!(root instanceof HTMLElement) || root.dataset.rhHeaderPlaced === '1') {
+            return;
+        }
+
+        const custom = root.querySelector('.rh-page-head');
+        let header = custom;
+        if (custom instanceof HTMLElement) {
+            root.querySelectorAll('.rh-admin-page-header').forEach((generated) => {
+                if (generated !== custom && !generated.contains(custom)) generated.remove();
+            });
+        } else {
+            header = root.querySelector('.rh-admin-page-header');
+        }
+        if (!(header instanceof HTMLElement) || header.closest('.modal, .modal-overlay, .admin-modal-overlay, [role="dialog"], dialog')) {
+            return;
+        }
+
+        const form = header.parentElement ? header.parentElement.closest('form') : null;
+        if (!(form && root.contains(form)) && root.firstElementChild !== header) {
+            root.insertBefore(header, root.firstElementChild);
+        }
+
+        const shell = document.getElementById(ROOT_ID);
+        const back = shell ? shell.querySelector(':scope > .content > a.btn-secondary.btn-sm[aria-label^="Back to"]') : null;
+        if (back instanceof HTMLAnchorElement) {
+            const wrapper = back.parentElement;
+            const host = custom
+                ? (custom.querySelector('.rh-page-head__main') || custom)
+                : (header.querySelector('.rh-admin-page-intro') || header);
+            back.classList.add('rh-admin-back');
+            host.insertBefore(back, host.firstChild);
+            if (wrapper && wrapper !== root && wrapper.children.length === 0) {
+                wrapper.remove();
+            }
+        }
+
+        root.dataset.rhHeaderPlaced = '1';
+    }
+
+    /* The back button returns to exactly where the user was (filters, page,
+       scroll) when the previous in-app page is the one it points at. */
+    const TRAIL_KEY = 'rhAdminNavTrail:v1';
+    function readTrail() {
+        try {
+            return JSON.parse(sessionStorage.getItem(TRAIL_KEY) || '[]');
+        } catch (e) {
+            return [];
+        }
+    }
+    function recordLocation() {
+        const here = location.pathname + location.search;
+        const trail = readTrail();
+        if (trail[trail.length - 1] === here) return;
+        trail.push(here);
+        try {
+            sessionStorage.setItem(TRAIL_KEY, JSON.stringify(trail.slice(-10)));
+        } catch (e) { /* storage unavailable: plain link behaviour */ }
+    }
+    function pageOf(url) {
+        try {
+            return new URL(url, location.href).pathname.split('/').pop();
+        } catch (e) {
+            return '';
+        }
+    }
+    document.addEventListener('click', function (event) {
+        const link = event.target.closest ? event.target.closest('a.rh-admin-back') : null;
+        if (!link || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+        const trail = readTrail();
+        const previous = trail.length > 1 ? trail[trail.length - 2] : '';
+        if (previous && history.length > 1 && pageOf(previous) === pageOf(link.href)) {
+            event.preventDefault();
+            event.stopPropagation();
+            trail.pop();
+            try { sessionStorage.setItem(TRAIL_KEY, JSON.stringify(trail)); } catch (e) { /* ignore */ }
+            history.back();
+        }
+    }, true);
+
     function resetDynamicFit(root) {
         if (!(root instanceof HTMLElement)) {
             return;
@@ -662,9 +746,11 @@
 
         isNormalizing = true;
         try {
+            recordLocation();
             const roots = getContentRoots();
             for (let i = 0; i < roots.length; i += 1) {
                 normalizeRoot(roots[i]);
+                placeHeader(roots[i]);
                 applyDynamicFit(roots[i]);
             }
         } finally {

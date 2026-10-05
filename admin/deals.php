@@ -238,7 +238,7 @@ $DAY_NAMES = ['','Mon','Tue','Wed','Thu','Fri','Sat','Sun'];
     <link rel="stylesheet" href="css/admin-styles.css?v=<?php echo @filemtime(__DIR__ . '/css/admin-styles.css'); ?>">
     <link rel="stylesheet" href="css/admin-components.css?v=<?php echo @filemtime(__DIR__ . '/css/admin-components.css'); ?>">
     <style>
-        .deals-page { max-width: 1100px; margin: 0 auto; padding: 24px 20px 80px; }
+        .deals-page { padding-bottom: 80px; }
         .deals-head { display:flex; align-items:center; justify-content:space-between; margin-bottom:28px; gap:16px; flex-wrap:wrap; }
         .deals-head h1 { font-size:24px; font-weight:600; margin:0; display:flex; align-items:center; gap:10px; }
         .deals-head p  { color:#666; margin:4px 0 0; font-size:14px; }

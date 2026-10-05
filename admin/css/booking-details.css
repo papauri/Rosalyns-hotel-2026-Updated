@@ -6,7 +6,9 @@
 
 .booking-details-page {
     width: 100%;
-    padding: clamp(1rem, 2vw + 0.4rem, 1.75rem);
+    max-width: 1800px;
+    margin: 0 auto;
+    padding: 2rem; /* same frame as .content */
     box-sizing: border-box;
     --bd-ink: #231F1C;
     --bd-muted: #5E554D;
@@ -1120,4 +1122,13 @@
 /* This page renders its own header; hide the generic generated page title so only one shows. */
 .booking-details-page > .rh-admin-page-header {
     display: none;
+}
+
+/* Match .content padding on tablets and phones */
+@media (max-width: 1024px) {
+    .booking-details-page { padding: 20px; }
+}
+
+@media (max-width: 480px) {
+    .booking-details-page { padding: 20px 14px 14px; }
 }

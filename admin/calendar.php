@@ -273,7 +273,6 @@ $calendarMonthLabel = $monthNames[(int)$currentMonth] . ' ' . $currentYear;
         <div class="calendar-container">
             <div class="calendar-header calendar-page-header">
                 <div class="calendar-header-main">
-                    <p class="calendar-header-label">Timeline View</p>
                     <h2><?php echo htmlspecialchars($calendarMonthLabel); ?></h2>
                     <p class="calendar-header-meta">
                         <?php echo (int)$activeRoomsCount; ?> active rooms,

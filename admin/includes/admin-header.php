@@ -243,6 +243,9 @@ $_admin_parent_fallback_map = [
     'payment-add.php' => 'payments.php',
     'stock-receipt.php' => 'stock-orders.php',
     'order-lifecycle.php' => 'stock-orders.php',
+    'pos-drift-report.php' => 'pos-accounting.php',
+    'room-dashboard.php' => 'dashboard.php',
+    'change-password.php' => 'dashboard.php',
 ];
 
 $_admin_parse_parent_target = static function (string $candidate, string $currentPage): ?array {

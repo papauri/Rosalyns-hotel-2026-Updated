@@ -66,7 +66,7 @@
     align-items: flex-end;
     justify-content: space-between;
     gap: 16px 24px;
-    padding: 4px 2px 2px;
+    padding: 0;
 }
 .ck-hero__intro { min-width: 0; flex: 1 1 320px; }
 .ck-eyebrow {

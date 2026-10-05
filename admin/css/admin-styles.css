@@ -326,9 +326,10 @@ footer {
 .qt-page,
 .wrap {
     width: 100%;
-    max-width: 1400px;
+    /* Same frame as .content so page titles line up on every page and width */
+    max-width: 1800px;
     margin: 0 auto;
-    padding: 1.75rem 2rem;
+    padding: 2rem;
     flex: 1 0 auto;
 }
 
@@ -6092,5 +6093,168 @@ body>:is(.content,
 @media (prefers-reduced-motion: reduce) {
     #rh-admin-page.rh-page-entering {
         animation: none;
+    }
+}
+
+/* ================================================================
+   PAGE HEADER CONTRACT
+   One look and one position for every admin page title, whatever the
+   page's own stylesheet says. ID-scoped so it outranks page-level class
+   rules. Covers the shared header (.rh-admin-page-header, built or
+   adopted by admin-page-intro.js) and the bespoke .rh-page-head used on
+   detail/settings pages. admin-page-intro.js also moves the header to the
+   top of the page and puts the "Back to …" button inside it.
+   ================================================================ */
+#rh-admin-page .rh-admin-page-header,
+#rh-admin-page .rh-page-head {
+    position: static;
+    display: flex;
+    flex-direction: row;
+    flex-wrap: wrap;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 14px 24px !important;
+    width: auto;
+    max-width: none;
+    margin: 0 0 24px !important;
+    padding: 0 0 18px !important;
+    background: none !important;
+    border: 0;
+    border-bottom: 1px solid var(--admin-surface-border, #ddd3c6) !important;
+    border-radius: 0 !important;
+    box-shadow: none !important;
+    text-align: left;
+}
+
+#rh-admin-page .rh-admin-page-header::before,
+#rh-admin-page .rh-admin-page-header::after,
+#rh-admin-page .rh-page-head::before,
+#rh-admin-page .rh-page-head::after {
+    content: none;
+}
+
+#rh-admin-page .rh-admin-page-intro,
+#rh-admin-page .rh-page-head__main {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 6px;
+    flex: 1 1 320px;
+    min-width: 0;
+    margin: 0;
+    padding: 0;
+    background: none;
+    border: 0;
+}
+
+#rh-admin-page .rh-admin-page-header .rh-admin-page-title,
+#rh-admin-page .rh-page-head__title h1,
+#rh-admin-page .rh-page-head__title h2 {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 8px 12px;
+    margin: 0 !important;
+    padding: 0 !important;
+    font-family: 'Cormorant Garamond', Georgia, serif !important;
+    font-size: clamp(26px, 1.25rem + 1vw, 34px) !important;
+    font-weight: 600 !important;
+    font-style: normal;
+    line-height: 1.1 !important;
+    letter-spacing: -0.005em !important;
+    text-transform: none !important;
+    color: var(--navy, #231F1C) !important;
+}
+
+#rh-admin-page .rh-admin-page-header .rh-admin-page-title::before {
+    content: none;
+}
+
+#rh-admin-page .rh-admin-page-header .rh-admin-page-title > i:first-child,
+#rh-admin-page .rh-page-head__title h1 > i:first-child,
+#rh-admin-page .rh-page-head__title h2 > i:first-child {
+    display: none;
+}
+
+#rh-admin-page .rh-admin-page-header .rh-admin-page-subtitle,
+#rh-admin-page .rh-page-head__meta {
+    margin: 0 !important;
+    max-width: 72ch;
+    font-family: 'Jost', system-ui, sans-serif !important;
+    font-size: 14.5px !important;
+    line-height: 1.5 !important;
+    color: var(--admin-muted, #5f6b7c) !important;
+}
+
+/* Actions sit on the right, top-aligned with the title */
+#rh-admin-page .rh-admin-page-header .page-actions,
+#rh-admin-page .rh-admin-page-header .header-actions,
+#rh-admin-page .rh-admin-page-header [class$="__actions"],
+#rh-admin-page .rh-page-head__actions {
+    display: flex;
+    flex: 0 1 auto;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 8px;
+    margin: 0;
+}
+
+/* "Back to …" sits above the title as a small pill, same place on every page */
+#rh-admin-page a.rh-admin-back {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    align-self: flex-start;
+    width: auto;
+    min-height: 32px;
+    margin: 0 0 4px;
+    padding: 0 12px 0 10px;
+    border-radius: 999px;
+    border: 1px solid var(--admin-surface-border, #ddd3c6);
+    background: var(--admin-surface, #fffdfb);
+    color: var(--color-primary, #766550);
+    font: 500 13px/1 'Jost', system-ui, sans-serif;
+    text-decoration: none;
+    box-shadow: none;
+    transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+}
+
+#rh-admin-page a.rh-admin-back:hover {
+    background: var(--navy, #231F1C);
+    border-color: var(--navy, #231F1C);
+    color: #fff;
+}
+
+#rh-admin-page a.rh-admin-back i {
+    font-size: 11px;
+}
+
+@media (pointer: coarse) {
+    #rh-admin-page a.rh-admin-back {
+        min-height: 40px;
+    }
+}
+
+@media (max-width: 680px) {
+    #rh-admin-page .rh-admin-page-header,
+    #rh-admin-page .rh-page-head {
+        flex-direction: column;
+        align-items: stretch;
+        margin-bottom: 18px;
+        padding-bottom: 14px;
+    }
+
+    /* Stacked: the 320px basis would otherwise become a 320px-tall block */
+    #rh-admin-page .rh-admin-page-intro,
+    #rh-admin-page .rh-page-head__main {
+        flex: 0 0 auto;
+    }
+
+    #rh-admin-page .rh-admin-page-header .page-actions,
+    #rh-admin-page .rh-admin-page-header .header-actions,
+    #rh-admin-page .rh-admin-page-header [class$="__actions"],
+    #rh-admin-page .rh-page-head__actions {
+        justify-content: flex-start;
     }
 }
