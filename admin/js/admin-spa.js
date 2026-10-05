@@ -335,6 +335,35 @@
         ].join('\n');
     }
 
+    // Page scripts that sit outside #rh-admin-page are dropped by swapping the content alone, so
+    // the page functions (e.g. openIngredientModal, exportToCSV) never exist. That covers scripts
+    // printed after admin-footer.php (after #rh-page-scripts-start) and scripts that end up after
+    // the content but before the footer (an extra </div> closes #rh-admin-page early). Shared
+    // layout scripts (header, and footer between its two markers) are left alone.
+    function _runPageTailScripts(doc) {
+        var content = doc.getElementById(CONTENT_ID);
+        var footerStart = doc.getElementById('rh-shared-footer-start');
+        var pageScriptsStart = doc.getElementById('rh-page-scripts-start');
+        if (!content || !doc.body) return Promise.resolve();
+        var FOLLOWING = Node.DOCUMENT_POSITION_FOLLOWING;
+        var tail = Array.from(doc.body.querySelectorAll('script')).filter(function (script) {
+            if (content.contains(script)) return false;
+            if (!(content.compareDocumentPosition(script) & FOLLOWING)) return false; // header scripts
+            var afterFooterStart = footerStart && (footerStart.compareDocumentPosition(script) & FOLLOWING);
+            var afterPageStart = pageScriptsStart && (pageScriptsStart.compareDocumentPosition(script) & FOLLOWING);
+            return !afterFooterStart || !!afterPageStart;
+        });
+        if (!tail.length) return Promise.resolve();
+        var holder = document.createElement('div');
+        holder.hidden = true;
+        holder.setAttribute('data-rh-spa-tail', '1');
+        tail.forEach(function (script) { holder.appendChild(document.importNode(script, true)); });
+        document.body.appendChild(holder);
+        return _runScripts(holder).then(function () {
+            if (holder.parentNode) holder.parentNode.removeChild(holder);
+        });
+    }
+
     function _initLoader() {
         if (_loader) return;
         _loader = document.createElement('div');
@@ -720,6 +749,11 @@
 
             // Skip anchor-only navigation on the same page
             if (url.pathname === window.location.pathname && !url.search && url.hash) return false;
+
+            // Downloads (?export=csv, ?download=..., PDFs) are not pages: let the browser fetch
+            // them natively. Intercepting them left the full-page loader up, because a
+            // download never unloads the page to clear it.
+            if (/[?&](export|download|format)=/i.test(url.search) || /\.(pdf|csv|xlsx?)$/i.test(file)) return false;
 
             return true;
         } catch (e) {
@@ -1194,10 +1228,13 @@
 
                 var ct = res.headers.get('content-type') || '';
                 if (ct.indexOf('text/html') === -1) {
-                    // Non-HTML response (PDF, CSV, etc.) — let browser handle
+                    // Non-HTML response (PDF, CSV, etc.) — let browser handle. It downloads
+                    // without unloading the page, so clear the loaders and skip the unload one.
                     _hideLoader();
+                    _hideOverlayLoader();
                     _navigating = false;
                     _abortController = null;
+                    if (window.AdminPageLoader && window.AdminPageLoader.suppressUnload) window.AdminPageLoader.suppressUnload(4000);
                     window.location.href = fullHref;
                     return null;
                 }
@@ -1244,6 +1281,7 @@
                         currentContent.innerHTML = newContent.innerHTML;
 
                         return _runScripts(currentContent)
+                            .then(function () { return _runPageTailScripts(doc); })
                             .catch(function (scriptErr) {
                                 console.warn('[Admin SPA] Script execution error (non-fatal):', scriptErr);
                             })

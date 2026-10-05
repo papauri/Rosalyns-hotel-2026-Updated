@@ -1,4 +1,7 @@
 </div>
+<?php /* Start of the shared footer: scripts from here to #rh-page-scripts-start belong to the
+   layout (same on every page); admin-spa.js does not re-run them on in-place navigation. */ ?>
+<template id="rh-shared-footer-start"></template>
 
 <!-- Simple Admin Footer -->
 <footer style="background: var(--deep-navy); color: white; padding: 15px 20px; text-align: center; border-top: 3px solid var(--gold);">
@@ -32,6 +35,10 @@
      a new tab; it renders a hidden div and is inert until rhOpenLifecycle() is
      called, and self-guards against being included twice. -->
 <?php require __DIR__ . '/lifecycle-modal.php'; ?>
+<?php /* Everything after this marker is page-specific: the scripts each page prints after
+   including this footer. admin-spa.js runs them after an in-place navigation, because they sit
+   outside #rh-admin-page and would otherwise be dropped. */ ?>
+<template id="rh-page-scripts-start"></template>
 
 </body>
 

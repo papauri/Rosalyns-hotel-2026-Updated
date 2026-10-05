@@ -1581,6 +1581,7 @@
         window.__adminPageLoaderInitialized = true;
 
         let hideTimer = null;
+        let stuckTimer = null;
         let unloading = false;
         let suppressBeforeUnloadLoaderUntil = 0;
 
@@ -1618,9 +1619,17 @@
             loader.classList.add('is-visible');
             loader.setAttribute('aria-hidden', 'false');
             document.body.classList.add('admin-page-loading');
+            // Safety net: a click or submit that turns out to be a file download never unloads
+            // the page, so nothing would ever hide this overlay. If we are still here and visible
+            // after 12 s, clear it so the page is usable again.
+            clearTimeout(stuckTimer);
+            stuckTimer = setTimeout(function () {
+                if (document.visibilityState === 'visible') hide();
+            }, 12000);
         }
 
         function hide() {
+            clearTimeout(stuckTimer);
             const loader = document.getElementById('adminPageLoader');
             if (!loader) return;
             loader.classList.remove('is-visible');
@@ -1629,7 +1638,12 @@
             document.body.classList.remove('admin-page-loading');
         }
 
-        window.AdminPageLoader = { show: show, hide: hide };
+        window.AdminPageLoader = {
+            show: show,
+            hide: hide,
+            // For code that starts a download by setting location.href: skip the unload loader.
+            suppressUnload: function (ms) { suppressBeforeUnloadLoaderUntil = Date.now() + (ms || 2500); }
+        };
 
         document.addEventListener('click', function (event) {
             const link = event.target.closest('a[href]');
@@ -1761,6 +1775,16 @@
         window.setTimeout(function () {
             if (event.defaultPrevented) return;
             if (form.dataset.noAdminLoader === '1') return;
+            // Forms that download a file (export/download) or open in another tab never unload
+            // this page, so a full-page loader would stay up.
+            const formTarget = (form.getAttribute('target') || '').toLowerCase();
+            if (formTarget && formTarget !== '_self') return;
+            const formAction = form.getAttribute('action') || '';
+            if (/[?&](export|download)=/i.test(formAction) || form.querySelector('input[name="export"], input[name="download"]')
+                || (submitter && /^(export|download)$/i.test(submitter.name || ''))) {
+                if (window.AdminPageLoader && window.AdminPageLoader.suppressUnload) window.AdminPageLoader.suppressUnload(4000);
+                return;
+            }
             if (window.AdminPageLoader) window.AdminPageLoader.show(form.dataset.adminLoaderText || 'Saving changes...');
             markElementLoading(submitter || form.querySelector('button[type="submit"], input[type="submit"]'), form.dataset.adminSubmitText || 'Saving...');
         }, 0);
