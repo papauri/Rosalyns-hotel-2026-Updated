@@ -3242,6 +3242,7 @@ body {
 .table thead th {
     position: sticky;
     top: 0;
+    z-index: 2; /* above positioned cells (badges, chips) so rows never paint over the header */
     background: #fafbfd;
     color: var(--au-text);
     font-weight: 600;

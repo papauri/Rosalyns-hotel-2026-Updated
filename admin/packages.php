@@ -674,7 +674,7 @@ $priceTypeLabels = [
                                 <?php endif; ?>
                             </div>
                             <div class="pkg-card__actions">
-                                <button class="btn btn-sm btn-outline-secondary" onclick='editPkg(<?php echo json_encode($pkg); ?>)'>
+                                <button class="btn btn-sm btn-outline-secondary" onclick='editPkg(<?php echo htmlspecialchars(json_encode($pkg), ENT_QUOTES, 'UTF-8'); ?>)'>
                                     <i class="fas fa-edit"></i>
                                 </button>
                                 <form method="POST" style="display:inline;">

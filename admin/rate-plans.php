@@ -620,7 +620,7 @@ $dayNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
                                 <?php endif; ?>
                             </div>
                             <div class="plan-card__actions">
-                                <button class="btn btn-sm btn-outline-secondary" onclick='editPlan(<?php echo json_encode($plan); ?>)'>
+                                <button class="btn btn-sm btn-outline-secondary" onclick='editPlan(<?php echo htmlspecialchars(json_encode($plan), ENT_QUOTES, 'UTF-8'); ?>)'>
                                     <i class="fas fa-edit"></i>
                                 </button>
                                 <form method="POST" style="display:inline;">

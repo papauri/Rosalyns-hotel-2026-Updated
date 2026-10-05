@@ -2423,7 +2423,7 @@ $csrf_token = generateCsrfToken();
                             <td>
                                 <button type="button" onclick="rhOpenLifecycle(<?php echo (int)$o['id']; ?>)" class="mini-action"><i class="fas fa-stream"></i> Timeline</button>
                                 <button type="button" class="mini-action"
-                                    onclick="showOrderItems(<?php echo (int)$o['id']; ?>, <?php echo json_encode($o['reference']); ?>)"
+                                    onclick="showOrderItems(<?php echo (int)$o['id']; ?>, <?php echo htmlspecialchars(json_encode($o['reference']), ENT_QUOTES, 'UTF-8'); ?>)"
                                     title="View line items for this order">
                                     <i class="fas fa-list-ul"></i> Items
                                 </button>
@@ -2448,7 +2448,7 @@ $csrf_token = generateCsrfToken();
                                     <button type="button" onclick="rhOpenLifecycle(<?php echo (int)$o['id']; ?>)" class="mini-action primary" title="View live order status, items, and kitchen progress"><i class="fas fa-hourglass-half"></i> Open</button>
                                     <?php if (($o['order_type'] ?? '') !== 'room_service'): ?>
                                         <button type="button" class="mini-action success"
-                                            onclick="promptSettle(document.getElementById('sf-<?php echo (int)$o['id']; ?>'), <?php echo json_encode($o['reference']); ?>, <?php echo json_encode((float)$o['total_amount']); ?>)"
+                                            onclick="promptSettle(document.getElementById('sf-<?php echo (int)$o['id']; ?>'), <?php echo htmlspecialchars(json_encode($o['reference']), ENT_QUOTES, 'UTF-8'); ?>, <?php echo htmlspecialchars(json_encode((float)$o['total_amount']), ENT_QUOTES, 'UTF-8'); ?>)"
                                             title="Settle this order and collect payment now">
                                             <i class="fas fa-circle-check"></i> Settle
                                         </button>

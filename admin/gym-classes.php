@@ -181,16 +181,16 @@ try {
                             <?php if (!empty($c['level_label'])): ?><span><i class="fas fa-signal"></i><?php echo htmlspecialchars($c['level_label']); ?></span><?php endif; ?>
                         </div>
                         <div>
-                            <span class="gcl-enrolled" onclick='gcOpenRoster(<?php echo (int)$c['id']; ?>, <?php echo json_encode($c['title']); ?>)' title="View &amp; manage the roster">
+                            <span class="gcl-enrolled" onclick='gcOpenRoster(<?php echo (int)$c['id']; ?>, <?php echo htmlspecialchars(json_encode($c['title']), ENT_QUOTES, 'UTF-8'); ?>)' title="View &amp; manage the roster">
                                 <i class="fas fa-users"></i> <span data-enrolled-count="<?php echo (int)$c['id']; ?>"><?php echo (int)$c['enrolled_count']; ?></span> enrolled
                             </span>
                         </div>
                         <div class="gcl-actions">
-                            <button class="mm-btn mm-btn-sm" onclick='gcOpenRoster(<?php echo (int)$c['id']; ?>, <?php echo json_encode($c['title']); ?>)'><i class="fas fa-user-group"></i> Roster</button>
+                            <button class="mm-btn mm-btn-sm" onclick='gcOpenRoster(<?php echo (int)$c['id']; ?>, <?php echo htmlspecialchars(json_encode($c['title']), ENT_QUOTES, 'UTF-8'); ?>)'><i class="fas fa-user-group"></i> Roster</button>
                             <?php if ($gc_can_edit): ?>
-                            <button class="mm-btn mm-btn-sm" style="background:#7E684B;color:#fff;" onclick='gcConfirm("Send a reminder email to everyone enrolled in &quot;" + <?php echo json_encode(htmlspecialchars($c['title'], ENT_QUOTES)); ?> + "&quot;?", function(){ gcSendReminders(<?php echo (int)$c['id']; ?>); })' title="Email all enrolled members"><i class="fas fa-bell"></i> Remind</button>
+                            <button class="mm-btn mm-btn-sm" style="background:#7E684B;color:#fff;" onclick='gcConfirm("Send a reminder email to everyone enrolled in “" + <?php echo htmlspecialchars(json_encode(htmlspecialchars($c['title'], ENT_QUOTES)), ENT_QUOTES, 'UTF-8'); ?> + "”?", function(){ gcSendReminders(<?php echo (int)$c['id']; ?>); })' title="Email all enrolled members"><i class="fas fa-bell"></i> Remind</button>
                             <button class="mm-btn mm-btn-sm mm-btn-ghost" onclick='gcOpenClassModal(<?php echo htmlspecialchars(json_encode($c), ENT_QUOTES); ?>)'><i class="fas fa-pen"></i> Edit</button>
-                            <button class="mm-btn mm-btn-sm mm-btn-ghost" style="color:#c0392b;" onclick='gcConfirm("Delete class &quot;" + <?php echo json_encode(htmlspecialchars($c['title'], ENT_QUOTES)); ?> + "&quot;? Enrolments are removed too. This cannot be undone.", function(){ gcDeleteClass(<?php echo (int)$c['id']; ?>); })'><i class="fas fa-trash"></i></button>
+                            <button class="mm-btn mm-btn-sm mm-btn-ghost" style="color:#c0392b;" onclick='gcConfirm("Delete class “" + <?php echo htmlspecialchars(json_encode(htmlspecialchars($c['title'], ENT_QUOTES)), ENT_QUOTES, 'UTF-8'); ?> + "”? Enrolments are removed too. This cannot be undone.", function(){ gcDeleteClass(<?php echo (int)$c['id']; ?>); })'><i class="fas fa-trash"></i></button>
                             <?php endif; ?>
                         </div>
                     </div>

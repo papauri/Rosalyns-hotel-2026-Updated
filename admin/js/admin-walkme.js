@@ -178,7 +178,7 @@
         _tourOverlay.setAttribute('aria-hidden', 'true');
 
         const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
-        svg.className = 'wm-overlay__svg';
+        svg.setAttribute('class', 'wm-overlay__svg'); // SVG className is read-only
         svg.setAttribute('xmlns', 'http://www.w3.org/2000/svg');
         _tourOverlay.appendChild(svg);
 

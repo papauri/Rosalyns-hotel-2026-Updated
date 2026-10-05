@@ -2660,7 +2660,7 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
                         <div style="color:#6c757d; font-size:11px;"><?php echo htmlspecialchars(ucfirst(str_replace('_', ' ', $r['payment_method'] ?? '—'))); ?> · <?php echo htmlspecialchars(date('H:i', strtotime($r['created_at']))); ?> · <span style="color:<?php echo $rStatusColor; ?>; font-weight:600;"><?php echo htmlspecialchars($rStatus); ?></span></div>
                     </a>
                     <?php if ($posCanRefund && $rStatus === 'paid'): ?>
-                        <button type="button" onclick="openRefundModal(<?php echo (int)$r['id']; ?>, <?php echo json_encode((string)$r['reference']); ?>, <?php echo (float)$r['total_amount']; ?>)" style="flex-shrink:0; padding:5px 9px; background:#6f42c1; color:#fff; border:none; border-radius:6px; font-size:11px; font-weight:600; cursor:pointer; white-space:nowrap;" title="Process refund"><i class="fas fa-rotate-left"></i> Refund</button>
+                        <button type="button" onclick="openRefundModal(<?php echo (int)$r['id']; ?>, <?php echo htmlspecialchars(json_encode((string)$r['reference']), ENT_QUOTES, 'UTF-8'); ?>, <?php echo (float)$r['total_amount']; ?>)" style="flex-shrink:0; padding:5px 9px; background:#6f42c1; color:#fff; border:none; border-radius:6px; font-size:11px; font-weight:600; cursor:pointer; white-space:nowrap;" title="Process refund"><i class="fas fa-rotate-left"></i> Refund</button>
                     <?php endif; ?>
                 </div>
             <?php endforeach; ?>
@@ -3047,13 +3047,13 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
                                 </div>
                                 <div class="tc-actions">
                                     <?php if ((int)($t['split_paid_count'] ?? 0) === 0): ?>
-                                    <button type="button" onclick="startAddToTab(<?php echo (int)$t['id']; ?>, <?php echo json_encode((string)$t['reference']); ?>, <?php echo (float)$t['total_amount']; ?>)"
+                                    <button type="button" onclick="startAddToTab(<?php echo (int)$t['id']; ?>, <?php echo htmlspecialchars(json_encode((string)$t['reference']), ENT_QUOTES, 'UTF-8'); ?>, <?php echo (float)$t['total_amount']; ?>)"
                                         class="tc-btn tc-btn-add"
                                         data-help="Add items|Add another round to this tab. Returns you to the menu; the next Fire adds to this tab.">
                                         <i class="fas fa-plus"></i> Add items
                                     </button>
                                     <?php endif; ?>
-                                    <button type="button" onclick="openPayForTab(<?php echo (int)$t['id']; ?>, <?php echo (float)$t['total_amount']; ?>, <?php echo json_encode((string)$t['reference']); ?>, <?php echo $canSettle ? 'true' : 'false'; ?>, <?php echo (int)($t['split_count'] ?? 1); ?>, <?php echo (int)($t['split_paid_count'] ?? 0); ?>)"
+                                    <button type="button" onclick="openPayForTab(<?php echo (int)$t['id']; ?>, <?php echo (float)$t['total_amount']; ?>, <?php echo htmlspecialchars(json_encode((string)$t['reference']), ENT_QUOTES, 'UTF-8'); ?>, <?php echo $canSettle ? 'true' : 'false'; ?>, <?php echo (int)($t['split_count'] ?? 1); ?>, <?php echo (int)($t['split_paid_count'] ?? 0); ?>)"
                                         class="tc-btn tc-btn-settle"
                                         data-help="Settle tab|Close this tab — take payment and mark the order as paid.">
                                         <i class="fas fa-credit-card"></i> Settle
@@ -3078,7 +3078,7 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
                                     </button>
                                     <?php if ($canCancelBeforePrep): ?>
                                         <button type="button"
-                                            onclick="cancelOpenOrder(<?php echo (int)$t['id']; ?>, <?php echo json_encode((string)$t['reference']); ?>)"
+                                            onclick="cancelOpenOrder(<?php echo (int)$t['id']; ?>, <?php echo htmlspecialchars(json_encode((string)$t['reference']), ENT_QUOTES, 'UTF-8'); ?>)"
                                             class="tc-btn tc-btn-cancel">
                                             <i class="fas fa-circle-xmark"></i> Cancel
                                         </button>
@@ -3090,7 +3090,7 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
                                             <i class="fas fa-stream"></i> Lifecycle
                                         </button>
                                         <button type="button"
-                                            onclick="adminVoidTab(<?php echo (int)$t['id']; ?>, <?php echo json_encode((string)$t['reference']); ?>)"
+                                            onclick="adminVoidTab(<?php echo (int)$t['id']; ?>, <?php echo htmlspecialchars(json_encode((string)$t['reference']), ENT_QUOTES, 'UTF-8'); ?>)"
                                             class="tc-btn tc-btn-void">
                                             <i class="fas fa-ban"></i> Void
                                         </button>
