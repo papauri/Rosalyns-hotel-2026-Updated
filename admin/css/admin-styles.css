@@ -6065,20 +6065,11 @@ body>:is(.content,
     }
 }
 
-/* SPA top loading bar (thin gold bar at very top of viewport) */
+/* SPA top loading bar: hidden. The content-area loader already shows that a
+   page is opening; the extra gold strip across the header was distracting.
+   admin-spa.js still drives its timing (it paces when the loader hides). */
 #rh-spa-loader {
-    position: fixed;
-    top: 0;
-    left: 0;
-    height: 4px;
-    width: 0%;
-    background: linear-gradient(90deg, var(--gold, #8F6A35) 0%, #d4a843 100%);
-    z-index: 10120;
-    opacity: 0;
-    pointer-events: none;
-    border-radius: 0 2px 2px 0;
-    box-shadow: 0 0 0 1px rgba(177, 130, 71, 0.18), 0 0 14px rgba(177, 130, 71, 0.45);
-    will-change: width, opacity;
+    display: none !important;
 }
 
 /* Page content entry animation on SPA navigation.
