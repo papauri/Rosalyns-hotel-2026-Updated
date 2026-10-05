@@ -669,7 +669,7 @@ if (!function_exists('rh_job_overdue_payment_reminders')) {
         return $res;
     }
 
-    /* ── sample sends ("Send test to me" and scripts/auto-emails-dry-run.php) ─ */
+    /* ── sample sends ("Send test to me" on Automated Emails) ─ */
 
     /** @return array<string,string> template/job key => label */
     function rh_auto_sample_keys(): array

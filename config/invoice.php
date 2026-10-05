@@ -719,7 +719,7 @@ function buildInvoiceHTML(array $booking, string $invoice_number, string $site_n
         $payments = rh_invoice_signed_payments($ps->fetchAll(PDO::FETCH_ASSOC));
     }
 
-    // Sample rendering only (scripts/send-test-documents.php): supply rows instead of reading the DB.
+    // Sample rendering only (test sends): supply rows instead of reading the DB.
     if ($preload !== null) {
         $pkgRows      = (array)($preload['packages'] ?? $pkgRows);
         $folioCharges = (array)($preload['folio_charges'] ?? $folioCharges);
