@@ -238,14 +238,65 @@
             window.scrollTo({ top: y, behavior: 'smooth' });
         }
 
+        // Keep the pager in one place on every page: measure the tallest page once and pad the
+        // pager down by however much shorter the current page is (rows themselves never stretch).
+        var tallestPage = 0;
+        var baseMargin = null;
+
+        function showRows(page) {
+            var from = (page - 1) * PAGE_SIZE;
+            var to = from + PAGE_SIZE;
+            rows.forEach(function (row, index) {
+                row.hidden = !(index >= from && index < to);
+            });
+        }
+
+        function measureTallestPage() {
+            tallestPage = 0;
+            var limit = Math.min(totalPages, 60);
+            for (var pg = 1; pg <= limit; pg++) {
+                showRows(pg);
+                tallestPage = Math.max(tallestPage, host.getBoundingClientRect().height);
+            }
+        }
+
+        function holdPagerPosition() {
+            if (baseMargin === null) baseMargin = parseFloat(window.getComputedStyle(nav).marginTop) || 0;
+            var height = host.getBoundingClientRect().height;
+            if (height > tallestPage) tallestPage = height; // a page taller than first measured
+            var deficit = tallestPage - height;
+            nav.style.marginTop = deficit > 0.5 ? (baseMargin + deficit) + 'px' : '';
+        }
+
+        // Row heights settle late (web fonts, images, cells filled by other scripts): re-measure
+        // then, and on resize, so the held height matches what the user actually sees.
+        function remeasure() {
+            if (!host.isConnected) return;
+            measureTallestPage();
+            showRows(currentPage);
+            holdPagerPosition();
+        }
+        var resizeTimer = null;
+        window.addEventListener('resize', function () {
+            window.clearTimeout(resizeTimer);
+            resizeTimer = window.setTimeout(remeasure, 150);
+        });
+        if (document.readyState !== 'complete') {
+            window.addEventListener('load', function () { window.setTimeout(remeasure, 50); }, { once: true });
+        }
+        if (document.fonts && document.fonts.ready) {
+            document.fonts.ready.then(function () { window.setTimeout(remeasure, 50); });
+        }
+        window.setTimeout(remeasure, 1200);
+
         function renderPage(targetPage, shouldScroll) {
             currentPage = Math.max(1, Math.min(totalPages, targetPage));
             var from = (currentPage - 1) * PAGE_SIZE;
             var to = from + PAGE_SIZE;
 
-            rows.forEach(function (row, index) {
-                row.hidden = !(index >= from && index < to);
-            });
+            if (!tallestPage) measureTallestPage();
+            showRows(currentPage);
+            holdPagerPosition();
 
             nav.innerHTML = '';
 

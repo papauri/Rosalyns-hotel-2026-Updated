@@ -969,6 +969,29 @@
         currentNav.replaceWith(replacementClone);
     }
 
+    // Keep the pager where it was when a shorter page of results comes in: hold the section at the
+    // tallest height seen so far (pager outside the section), or push the pager down by the
+    // shortfall (pager inside the section).
+    function _holdPagerPosition(el, heldHeight, navInside, navSelector) {
+        if (!el || !heldHeight) return;
+        el.dataset.rhHeldHeight = String(heldHeight);
+        if (navInside) {
+            var nav = (navSelector && el.querySelector(navSelector)) || el.querySelector('nav');
+            if (!nav) return;
+            nav.style.marginTop = '';
+            var deficit = heldHeight - el.getBoundingClientRect().height;
+            if (deficit > 0.5) {
+                nav.style.marginTop = ((parseFloat(window.getComputedStyle(nav).marginTop) || 0) + deficit) + 'px';
+            }
+            return;
+        }
+        if (el.tagName === 'TABLE') return;
+        el.style.minHeight = '';
+        if (heldHeight - el.getBoundingClientRect().height > 0.5) {
+            el.style.minHeight = heldHeight + 'px';
+        }
+    }
+
     function _gotoPagination(href, pushState, navEl, loaderMessage) {
         if (typeof pushState === 'undefined') pushState = true;
 
@@ -1073,8 +1096,11 @@
                     return;
                 }
 
+                var heldHeight = Math.max(scope.element.getBoundingClientRect().height, parseFloat(scope.element.dataset.rhHeldHeight || '0') || 0);
+                var navWasInside = !!navEl && scope.element.contains(navEl);
                 scope.element.innerHTML = newScope.innerHTML;
                 _syncPaginationNav(currentContent, newContent, scope, navEl, navSelector, navIndex);
+                _holdPagerPosition(scope.element, heldHeight, navWasInside, navSelector);
 
                 _runScripts(scope.element)
                     .catch(function () { /* non-fatal script errors are ignored here */ })

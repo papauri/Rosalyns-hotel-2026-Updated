@@ -1445,7 +1445,15 @@
 
             previousFocus = document.activeElement;
             setTone(modal, opts.tone);
-            modal.querySelector('.admin-confirm-icon i').className = 'fas ' + opts.icon;
+            // Rebuild the icon rather than assigning className: if the <i> was swapped for an
+            // <svg> (whose className is read-only) the assignment throws and the confirm never opens.
+            const iconHost = modal.querySelector('.admin-confirm-icon');
+            if (iconHost) {
+                const iconEl = document.createElement('i');
+                iconEl.setAttribute('class', 'fas ' + String(opts.icon || 'fa-shield-alt').replace(/[^a-z0-9 -]/gi, ''));
+                iconEl.setAttribute('aria-hidden', 'true');
+                iconHost.replaceChildren(iconEl);
+            }
             modal.querySelector('#adminConfirmTitle').textContent = opts.title;
             modal.querySelector('#adminConfirmMessage').textContent = opts.message;
             modal.querySelector('[data-admin-confirm-ok]').textContent = opts.confirmText;

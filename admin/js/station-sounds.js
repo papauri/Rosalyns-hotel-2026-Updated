@@ -440,7 +440,7 @@
         const icon = btn.querySelector('i');
         const span = btn.querySelector('span');
         btn.classList.toggle('muted', !_settings.enabled);
-        if (icon) icon.className = _settings.enabled ? 'fas fa-volume-mute' : 'fas fa-volume-up';
+        if (icon) icon.setAttribute('class', _settings.enabled ? 'fas fa-volume-mute' : 'fas fa-volume-up');
         if (span) span.textContent = _settings.enabled ? 'Mute All Sounds' : 'Unmute Sounds';
     }
     function _sendTest() {
