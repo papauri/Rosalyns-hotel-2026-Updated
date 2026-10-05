@@ -1211,44 +1211,6 @@ unset($_SESSION['success_message'], $_SESSION['error_message']);
             --bd-status-bg: <?php echo htmlspecialchars($current_status['bg']); ?>;
             --bd-status-color: <?php echo htmlspecialchars($current_status['color']); ?>;
         }
-        /* Returning guest history */
-        .gh-badge {
-            display: inline-flex; align-items: center; gap: 5px;
-            font-size: 11px; font-weight: 700; letter-spacing: .03em;
-            border-radius: 12px; padding: 3px 10px; margin-bottom: 10px;
-        }
-        .gh-badge--returning { background: #d4f0dc; color: #1a6632; border: 1px solid #a3d5b3; }
-        .gh-badge--new       { background: #e8f4e8; color: #2d6a2d; border: 1px solid #a8d4a8; }
-        .gh-stats-row {
-            display: grid; grid-template-columns: 1fr 1fr 1.5fr; gap: 8px; margin: 8px 0 10px;
-        }
-        .gh-stat {
-            min-width: 0;
-            background: #faf5ef; border: 1px solid #e8d9c4;
-            border-radius: 6px; padding: 8px 10px; text-align: center;
-        }
-        .gh-stat-val { font-size: 16px; font-weight: 700; color: #2a2723; line-height: 1.2; word-break: break-word; overflow-wrap: anywhere; }
-        .gh-stat-val--lifetime { font-size: 12px; }
-        .gh-stat-lbl { font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: .04em; color: #8a7a68; margin-top: 2px; }
-        .gh-past-list { margin-top: 8px; }
-        .gh-past-item {
-            display: flex; align-items: center; justify-content: space-between;
-            padding: 7px 0; border-bottom: 1px solid #f0ebe4; font-size: 12px;
-        }
-        .gh-past-item:last-child { border-bottom: none; }
-        .gh-past-ref { font-weight: 600; color: #2a2723; }
-        .gh-past-dates { color: #7a7068; }
-        .gh-past-status {
-            font-size: 10px; font-weight: 700; text-transform: uppercase;
-            border-radius: 8px; padding: 2px 7px;
-        }
-        .gh-past-status.confirmed,
-        .gh-past-status.checked_out,
-        .gh-past-status.completed  { background:#d4edda; color:#1a6632; }
-        .gh-past-status.checked_in { background:#cce5ff; color:#004085; }
-        .gh-past-status.cancelled  { background:#f8d7da; color:#721c24; }
-        .gh-past-status.pending    { background:#fff3cd; color:#856404; }
-        .gh-past-status.no-show   { background:#f8d7da; color:#721c24; }
     </style>
 </head>
 
@@ -1257,6 +1219,169 @@ unset($_SESSION['success_message'], $_SESSION['error_message']);
     <?php require_once 'includes/admin-header.php'; ?>
 
     <div class="booking-details-page">
+
+        <?php
+        $can_cancel = !in_array($booking['status'], ['checked-in', 'checked-out', 'cancelled', 'no-show']);
+        $can_adjust_dates = !in_array($booking['status'], ['cancelled', 'checked-out', 'no-show']);
+        $child_guests = (int)($booking['child_guests'] ?? 0);
+        $adult_guests = (int)($booking['adult_guests'] ?? max(1, ((int) $booking['number_of_guests']) - $child_guests));
+        // No individual room yet: empty fallback, so the page says "not assigned" instead of a bare "Room".
+        $bookingRoomFallback = !empty($booking['individual_room_id'])
+            ? (string)($booking['individual_room_name'] ?: trim(($booking['room_type_name'] ?: 'Room') . ' ' . $booking['individual_room_number']))
+            : '';
+        $bookingRoomLabel = trim((string) getBookingRoomLabel((int) $booking['id'], $bookingRoomFallback));
+        ?>
+
+        <a href="bookings.php" class="bd-back" onclick="if(history.length>1){history.back();return false;}"><i class="fas fa-arrow-left"></i> Back to Bookings</a>
+
+        <!-- Header: identity on the left, actions on the right -->
+        <header class="bd-header">
+            <div class="bd-header__main">
+                <div class="bd-header__title">
+                    <h1>Booking <?php echo htmlspecialchars($booking['booking_reference']); ?></h1>
+                    <span class="hero-status-badge">
+                        <i class="fas <?php echo htmlspecialchars($current_status['icon']); ?>"></i>
+                        <?php echo htmlspecialchars(ucfirst(str_replace('-', ' ', $booking['status']))); ?>
+                    </span>
+                </div>
+                <p class="bd-header__sub">
+                    <strong><?php echo htmlspecialchars($booking['guest_name']); ?></strong>
+                    <span class="bd-sep" aria-hidden="true">&middot;</span>
+                    <?php echo date('D j M', strtotime($booking['check_in_date'])); ?> &ndash; <?php echo date('D j M Y', strtotime($booking['check_out_date'])); ?>
+                    <span class="bd-sep" aria-hidden="true">&middot;</span>
+                    <?php echo (int) $booking['number_of_nights']; ?> night<?php echo ((int) $booking['number_of_nights']) === 1 ? '' : 's'; ?>
+                </p>
+                <p class="bd-header__meta">
+                    Created <?php echo date('M j, Y \a\t g:i A', strtotime($booking['created_at'])); ?>
+                    <?php if ($booking['updated_at'] && $booking['updated_at'] != $booking['created_at']): ?>
+                        &middot; Updated <?php echo date('M j, Y \a\t g:i A', strtotime($booking['updated_at'])); ?>
+                    <?php endif; ?>
+                </p>
+            </div>
+
+            <div class="bd-actions booking-actions-flow">
+                <?php if ($booking['status'] == 'tentative' || $booking['is_tentative'] == 1): ?>
+                    <form method="POST" class="booking-action-form" data-admin-confirm="Convert this tentative booking to confirmed and send the conversion email?" data-admin-confirm-title="Convert tentative booking" data-admin-confirm-ok="Convert" data-admin-confirm-icon="fa-circle-check" data-admin-submit-text="Converting...">
+                        <input type="hidden" name="booking_action" value="convert">
+                        <button type="submit" class="action-btn convert" aria-label="Convert to confirmed"><i class="fas fa-circle-check"></i> Convert to Confirmed</button>
+                    </form>
+                <?php endif; ?>
+
+                <?php if ($booking['status'] == 'pending'): ?>
+                    <form method="POST" class="booking-action-form" data-admin-confirm="Confirm this booking and send the guest confirmation email?" data-admin-confirm-title="Confirm booking" data-admin-confirm-ok="Confirm" data-admin-confirm-icon="fa-circle-check" data-admin-submit-text="Confirming...">
+                        <input type="hidden" name="booking_action" value="confirm">
+                        <button type="submit" class="action-btn confirm" aria-label="Confirm booking"><i class="fas fa-circle-check"></i> Confirm Booking</button>
+                    </form>
+                <?php endif; ?>
+
+                <?php if ($booking['status'] == 'confirmed'): ?>
+                    <?php
+                    $can_checkin = !in_array($booking['actual_payment_status'] ?? '', ['unpaid', ''], true);
+                    $room_assigned = !empty($booking['individual_room_id']);
+                    $check_in_date = new DateTime($booking['check_in_date']);
+                    $check_in_date->setTime(0, 0, 0);
+                    $today = new DateTime('today');
+                    $checkin_date_reached = $check_in_date <= $today;
+                    $checkin_disabled_reason = '';
+                    if (!$can_checkin) {
+                        $checkin_disabled_reason = 'At least a partial payment must be recorded before check-in';
+                    } elseif (!$room_assigned) {
+                        $checkin_disabled_reason = 'Room must be assigned before check-in';
+                    } elseif (!$checkin_date_reached) {
+                        $checkin_disabled_reason = 'Check-in date has not been reached yet (' . htmlspecialchars($booking['check_in_date']) . ')';
+                    }
+                    $ci_room_gate = ($checkin_disabled_reason === '') ? evaluateCheckInRoomReady((int)$booking['id'], (int)($user['id'] ?? 0), false) : null;
+                    $ci_room_override = $ci_room_gate && $ci_room_gate['needs_confirm'];
+                    if ($ci_room_gate && !$ci_room_gate['allowed'] && !$ci_room_override) {
+                        $checkin_disabled_reason = $ci_room_gate['message'];
+                    }
+                    ?>
+
+                    <?php if (!$room_assigned): ?>
+                        <a href="bookings.php?action=assign-room&booking_id=<?php echo $booking_id; ?>" class="action-btn assign-room" data-help="Assign Room|Pick a specific physical room for this confirmed booking. Required before check-in can proceed.">
+                            <i class="fas fa-key"></i> Assign Room
+                        </a>
+                    <?php else: ?>
+                        <a href="bookings.php?action=assign-room&booking_id=<?php echo $booking_id; ?>" class="action-btn change-room">
+                            <i class="fas fa-right-left"></i> Change Room
+                        </a>
+                    <?php endif; ?>
+
+                    <form method="POST" class="booking-action-form" data-admin-confirm="<?php echo $ci_room_override ? htmlspecialchars($ci_room_gate['message'], ENT_QUOTES) : 'Check in this guest and mark the assigned room occupied?'; ?>" data-admin-confirm-title="<?php echo $ci_room_override ? 'Room not marked clean' : 'Check in guest'; ?>" data-admin-confirm-ok="<?php echo $ci_room_override ? 'Check in anyway' : 'Check in'; ?>" data-admin-confirm-icon="fa-right-to-bracket" data-admin-submit-text="Checking in...">
+                        <input type="hidden" name="booking_action" value="checkin">
+                        <?php if ($ci_room_override): ?><input type="hidden" name="confirm_checkin_room_not_ready" value="1"><?php endif; ?>
+                        <button type="submit" class="action-btn checkin" data-help="Check In|Check the guest into their assigned room and mark the room occupied. Requires payment recorded, a room assigned, and the check-in date to have arrived." <?php echo ($can_checkin && $room_assigned && $checkin_date_reached) ? '' : 'disabled title="' . htmlspecialchars($checkin_disabled_reason) . '"'; ?>>
+                            <i class="fas fa-right-to-bracket"></i> Check In
+                        </button>
+                    </form>
+                    <?php if ($checkin_disabled_reason): ?>
+                        <p class="booking-action-inline-hint booking-action-inline-hint--error">
+                            <i class="fas fa-info-circle"></i> <?php echo htmlspecialchars($checkin_disabled_reason); ?>
+                        </p>
+                    <?php endif; ?>
+                <?php endif; ?>
+
+                <?php if ($booking['status'] == 'checked-in'):
+                    $co_balance = round(max(0.0, (float)($folio_summary['balance_due'] ?? ($booking['amount_due'] ?? 0))), 2);
+                    $co_has_balance = $co_balance > BALANCE_TOLERANCE;
+                    $co_can_override = $co_has_balance && hasPermission((int)($user['id'] ?? 0), 'checkout_with_balance');
+                    $co_confirm_text = $co_can_override
+                        ? 'This guest still owes ' . $currency_symbol . ' ' . number_format($co_balance, 2) . '. Check out anyway with the outstanding balance? This will be recorded in the booking timeline.'
+                        : 'Check out this guest and generate the final invoice where applicable?';
+                ?>
+                    <form method="POST" class="booking-action-form" data-admin-confirm="<?php echo htmlspecialchars($co_confirm_text, ENT_QUOTES); ?>" data-admin-confirm-title="Check out guest" data-admin-confirm-ok="<?php echo $co_can_override ? 'Check out with balance' : 'Check out'; ?>" data-admin-confirm-icon="fa-right-from-bracket" data-admin-submit-text="Checking out...">
+                        <input type="hidden" name="booking_action" value="checkout">
+                        <?php if ($co_can_override): ?><input type="hidden" name="confirm_checkout_with_balance" value="1"><?php endif; ?>
+                        <button type="submit" class="action-btn checkout" data-help="Check Out|Check the guest out, release the room, and generate the final invoice where applicable."<?php echo ($co_has_balance && !$co_can_override) ? ' disabled title="Outstanding balance ' . htmlspecialchars($currency_symbol . ' ' . number_format($co_balance, 2), ENT_QUOTES) . ' - record payment before checkout"' : ''; ?>>
+                            <i class="fas fa-right-from-bracket"></i> Check Out
+                        </button>
+                    </form>
+                    <?php if ($co_has_balance): ?>
+                        <p class="booking-action-inline-hint booking-action-inline-hint--error">
+                            <i class="fas fa-info-circle"></i> Outstanding balance: <?php echo htmlspecialchars($currency_symbol . ' ' . number_format($co_balance, 2)); ?><?php echo $co_can_override ? ' - you may check out with the balance after confirming.' : ' - payment must be recorded before checkout.'; ?>
+                        </p>
+                    <?php endif; ?>
+                <?php endif; ?>
+
+                <?php if (in_array($booking['status'], ['confirmed', 'pending'], true) && strtotime($booking['check_in_date']) < strtotime('today')): ?>
+                    <form method="POST" class="booking-action-form" data-admin-confirm="Mark this booking as no-show and release the assigned room?" data-admin-confirm-title="Mark no-show" data-admin-confirm-ok="Mark no-show" data-admin-confirm-tone="danger" data-admin-confirm-icon="fa-user-slash" data-admin-submit-text="Updating...">
+                        <input type="hidden" name="booking_action" value="noshow">
+                        <button type="submit" class="action-btn noshow"><i class="fas fa-user-slash"></i> Mark No-Show</button>
+                    </form>
+                <?php endif; ?>
+
+                <a href="edit-booking.php?id=<?php echo $booking_id; ?>" class="action-btn edit"><i class="fas fa-edit"></i> Edit Booking</a>
+                <?php if ($can_adjust_dates): ?>
+                    <button type="button" class="action-btn adjust-dates" onclick="openDateAdjustModal()">
+                        <i class="fas fa-calendar-alt"></i> Adjust Stay Dates
+                    </button>
+                <?php endif; ?>
+                <?php if ($bPerms['can_send_quotation']): ?>
+                    <button type="button" class="action-btn quote" onclick="openBookingQuoteModal(<?php echo (int) $booking_id; ?>, '<?php echo htmlspecialchars($booking['booking_reference'], ENT_QUOTES); ?>', '<?php echo htmlspecialchars($booking['guest_name'], ENT_QUOTES); ?>', '<?php echo htmlspecialchars($booking['guest_email'], ENT_QUOTES); ?>')">
+                        <i class="fas fa-file-invoice"></i> Send Quotation
+                    </button>
+                <?php else: ?>
+                    <button type="button" class="action-btn quote action-btn--locked" disabled title="<?php echo htmlspecialchars($bPerms['can_send_quotation_reason']); ?>">
+                        <i class="fas fa-lock"></i> Send Quotation
+                    </button>
+                <?php endif; ?>
+
+                <?php if ($can_cancel): ?>
+                    <form method="POST" class="booking-action-form" data-admin-confirm="<?php echo htmlspecialchars('Cancel this booking, release the room, and send the guest cancellation email? Cancellation handling: ' . getCancellationRefundModeLabel() . '.', ENT_QUOTES); ?>" data-admin-confirm-title="Cancel booking" data-admin-confirm-ok="Cancel booking" data-admin-confirm-tone="danger" data-admin-confirm-icon="fa-ban" data-admin-submit-text="Cancelling...">
+                        <input type="hidden" name="booking_action" value="cancel">
+                        <input type="hidden" name="cancellation_reason" value="Cancelled by admin">
+                        <button type="submit" class="action-btn cancel" aria-label="Cancel booking"><i class="fas fa-ban"></i> Cancel Booking</button>
+                    </form>
+                <?php endif; ?>
+
+                <?php if (!empty($booking['last_quotation_sent_at'])): ?>
+                    <p class="booking-actions-meta">
+                        <i class="fas fa-paper-plane"></i>
+                        Quotation last sent <?php echo date('M j, Y \a\t g:i A', strtotime($booking['last_quotation_sent_at'])); ?>
+                    </p>
+                <?php endif; ?>
+            </div>
+        </header>
 
         <?php
         // Status banner for terminal and restricted states
@@ -1285,85 +1410,6 @@ unset($_SESSION['success_message'], $_SESSION['error_message']);
             </div>
         <?php endif; ?>
 
-        <!-- Group booking notice -->
-        <?php if (!empty($group_bookings)): ?>
-        <div style="background:rgba(139,115,85,0.08);border:1px solid rgba(139,115,85,0.25);border-radius:10px;padding:14px 18px;margin-bottom:16px;display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
-            <i class="fas fa-layer-group" style="color:#7E684B;font-size:1.1rem;flex-shrink:0;"></i>
-            <span style="font-weight:600;color:#5A4A3A;font-size:0.9rem;">
-                <?php echo !empty($booking['primary_booking_id']) ? 'Secondary room in a group booking' : 'Primary booking — group of ' . (count($group_bookings) + 1) . ' rooms'; ?>
-            </span>
-            <span style="color:#7A6A58;font-size:0.85rem;">Linked rooms:</span>
-            <?php foreach ($group_bookings as $gb): ?>
-            <a href="booking-details.php?id=<?php echo (int)$gb['id']; ?>"
-               style="display:inline-flex;align-items:center;gap:6px;background:#fff;border:1px solid rgba(139,115,85,0.3);border-radius:6px;padding:4px 10px;font-size:0.82rem;color:#5A4A3A;text-decoration:none;white-space:nowrap;">
-                <i class="fas fa-door-open" style="font-size:0.75rem;color:#7E684B;"></i>
-                <?php echo htmlspecialchars($gb['room_name']); ?> &mdash; <strong><?php echo htmlspecialchars($gb['booking_reference']); ?></strong>
-            </a>
-            <?php endforeach; ?>
-        </div>
-        <?php endif; ?>
-
-        <!-- Hero Section -->
-        <div class="booking-hero">
-            <div class="booking-hero-content">
-                <div class="booking-hero-left">
-                    <h1><i class="fas fa-calendar-check"></i> Booking Details</h1>
-                    <div class="reference">Reference: <strong><?php echo htmlspecialchars($booking['booking_reference']); ?></strong></div>
-                    <div class="booking-hero-meta">
-                        <div class="hero-meta-item">
-                            <i class="fas fa-clock"></i>
-                            <span>Created: <?php echo date('M j, Y \a\t g:i A', strtotime($booking['created_at'])); ?></span>
-                        </div>
-                        <?php if ($booking['updated_at'] && $booking['updated_at'] != $booking['created_at']): ?>
-                            <div class="hero-meta-item">
-                                <i class="fas fa-edit"></i>
-                                <span>Updated: <?php echo date('M j, Y \a\t g:i A', strtotime($booking['updated_at'])); ?></span>
-                            </div>
-                        <?php endif; ?>
-                    </div>
-                </div>
-                <div class="booking-hero-right">
-                    <div class="hero-status-badge">
-                        <i class="fas <?php echo $current_status['icon']; ?>"></i>
-                        <?php echo ucfirst(str_replace('-', ' ', $booking['status'])); ?>
-                    </div>
-                    <div class="hero-dates">
-                        <?php echo date('M j', strtotime($booking['check_in_date'])); ?> - <?php echo date('M j, Y', strtotime($booking['check_out_date'])); ?>
-                    </div>
-                </div>
-            </div>
-        </div>
-
-        <div class="booking-kpi-strip">
-            <div class="booking-kpi-card">
-                <span class="booking-kpi-card__label">Folio Total</span>
-                <strong class="booking-kpi-card__value"><?php echo $currency_symbol; ?><?php echo number_format($folio_total_amount, 2); ?></strong>
-            </div>
-            <div class="booking-kpi-card">
-                <span class="booking-kpi-card__label">VAT + Levy</span>
-                <strong class="booking-kpi-card__value"><?php echo $currency_symbol; ?><?php echo number_format($folio_total_vat + $booking_levy_amount, 2); ?></strong>
-            </div>
-            <div class="booking-kpi-card">
-                <span class="booking-kpi-card__label">Amount Paid</span>
-                <strong class="booking-kpi-card__value"><?php echo $currency_symbol; ?><?php echo number_format($folio_amount_paid, 2); ?></strong>
-            </div>
-            <?php if ($folio_credit_balance > BALANCE_TOLERANCE): ?>
-            <div class="booking-kpi-card booking-kpi-card--attention">
-                <span class="booking-kpi-card__label">Credit Owed to Guest</span>
-                <strong class="booking-kpi-card__value"><?php echo $currency_symbol; ?><?php echo number_format($folio_credit_balance, 2); ?></strong>
-            </div>
-            <?php else: ?>
-            <div class="booking-kpi-card <?php echo $folio_balance_due > 0 ? 'booking-kpi-card--attention' : ''; ?>">
-                <span class="booking-kpi-card__label">Balance Due</span>
-                <strong class="booking-kpi-card__value"><?php echo $currency_symbol; ?><?php echo number_format($folio_balance_due, 2); ?></strong>
-            </div>
-            <?php endif; ?>
-            <div class="booking-kpi-card">
-                <span class="booking-kpi-card__label">Room Status</span>
-                <strong class="booking-kpi-card__value"><?php echo htmlspecialchars($room_status_label); ?></strong>
-            </div>
-        </div>
-
         <?php if ($booking_alert_message !== ''): ?>
             <div class="booking-status-alert booking-status-alert--<?php echo htmlspecialchars($booking_alert_tone); ?>">
                 <i class="fas <?php echo $booking_alert_tone === 'danger' ? 'fa-triangle-exclamation' : ($booking_alert_tone === 'warning' ? 'fa-clock' : 'fa-circle-info'); ?>"></i>
@@ -1371,240 +1417,272 @@ unset($_SESSION['success_message'], $_SESSION['error_message']);
             </div>
         <?php endif; ?>
 
-        <!-- Details Grid -->
-        <div class="details-grid">
+        <!-- Group booking notice -->
+        <?php if (!empty($group_bookings)): ?>
+        <div class="bd-group-notice">
+            <i class="fas fa-layer-group"></i>
+            <span class="bd-group-notice__title">
+                <?php echo !empty($booking['primary_booking_id']) ? 'Secondary room in a group booking' : 'Primary booking — group of ' . (count($group_bookings) + 1) . ' rooms'; ?>
+            </span>
+            <span class="bd-group-notice__label">Linked rooms:</span>
+            <?php foreach ($group_bookings as $gb): ?>
+            <a href="booking-details.php?id=<?php echo (int)$gb['id']; ?>" class="bd-group-notice__link">
+                <i class="fas fa-door-open"></i>
+                <?php echo htmlspecialchars($gb['room_name']); ?> &mdash; <strong><?php echo htmlspecialchars($gb['booking_reference']); ?></strong>
+            </a>
+            <?php endforeach; ?>
+        </div>
+        <?php endif; ?>
 
-            <!-- Overview cards: equal 4-up row (guest / stay / room / payment) -->
-            <div class="story-grid">
+        <?php
+        $bd_pay_raw = strtolower((string)($booking['payment_status'] ?? 'unpaid'));
+        $bd_pay_class = in_array($bd_pay_raw, ['paid', 'completed'], true) ? 'paid' : ($bd_pay_raw === 'partial' ? 'partial' : 'unpaid');
+        $bd_pay_labels = ['paid' => 'Paid', 'completed' => 'Paid', 'partial' => 'Part paid', 'unpaid' => 'Unpaid', 'pending' => 'Unpaid', 'refunded' => 'Refunded', 'failed' => 'Failed'];
+        $bd_pay_label = $bd_pay_labels[$bd_pay_raw] ?? ucfirst($bd_pay_raw);
+        $bd_has_credit = $folio_credit_balance > BALANCE_TOLERANCE;
+        $bd_has_due = !$bd_has_credit && $folio_balance_due > BALANCE_TOLERANCE;
+        ?>
 
-            <!-- Guest Information Card -->
-            <div class="info-card story-card story-card--guest">
-                <div class="info-card-header">
-                    <div class="icon guest"><i class="fas fa-user"></i></div>
-                    <div class="story-head-text">
-                        <h3>Guest Information</h3>
+        <!-- Summary strip -->
+        <div class="bd-strip" role="group" aria-label="Booking financial summary">
+            <div class="bd-strip__cell">
+                <span class="bd-strip__label">Folio total</span>
+                <strong class="bd-strip__value"><?php echo $currency_symbol; ?><?php echo number_format($folio_total_amount, 2); ?></strong>
+            </div>
+            <div class="bd-strip__cell">
+                <span class="bd-strip__label">Paid</span>
+                <strong class="bd-strip__value"><?php echo $currency_symbol; ?><?php echo number_format($folio_amount_paid, 2); ?></strong>
+            </div>
+            <?php if ($bd_has_credit): ?>
+            <div class="bd-strip__cell bd-strip__cell--balance is-credit">
+                <span class="bd-strip__label">Credit owed to guest</span>
+                <strong class="bd-strip__value"><?php echo $currency_symbol; ?><?php echo number_format($folio_credit_balance, 2); ?></strong>
+            </div>
+            <?php else: ?>
+            <div class="bd-strip__cell bd-strip__cell--balance <?php echo $bd_has_due ? 'is-due' : 'is-settled'; ?>">
+                <span class="bd-strip__label">Balance due</span>
+                <strong class="bd-strip__value"><?php echo $currency_symbol; ?><?php echo number_format($folio_balance_due, 2); ?></strong>
+            </div>
+            <?php endif; ?>
+            <div class="bd-strip__cell">
+                <span class="bd-strip__label">Payment status</span>
+                <span class="bd-pill bd-pill--<?php echo $bd_pay_class; ?>"><?php echo htmlspecialchars($bd_pay_label); ?></span>
+            </div>
+            <div class="bd-strip__cell">
+                <span class="bd-strip__label">Room status</span>
+                <strong class="bd-strip__value bd-strip__value--text"><?php echo htmlspecialchars($room_status_label); ?></strong>
+            </div>
+        </div>
+
+        <div class="bd-layout">
+
+            <!-- LEFT: stay, folio, payment, invoices -->
+            <div class="bd-main">
+
+                <section class="bd-panel" id="stay-details">
+                    <div class="bd-panel__head">
+                        <h2 class="bd-panel__title">Stay details</h2>
                     </div>
-                </div>
-                <div class="info-card-body">
-                    <div class="info-row">
-                        <span class="info-label">Name</span>
-                        <span class="info-value"><?php echo htmlspecialchars($booking['guest_name']); ?></span>
-                    </div>
-                    <div class="info-row">
-                        <span class="info-label">Email</span>
-                        <span class="info-value"><?php echo htmlspecialchars($booking['guest_email']); ?></span>
-                    </div>
-                    <div class="info-row">
-                        <span class="info-label">Phone</span>
-                        <span class="info-value"><?php echo htmlspecialchars($booking['guest_phone']); ?></span>
-                    </div>
-                    <div class="info-row">
-                        <span class="info-label">Country</span>
-                        <span class="info-value"><?php echo htmlspecialchars($booking['guest_country'] ?: 'N/A'); ?></span>
-                    </div>
-                    <?php
-                    $child_guests = (int)($booking['child_guests'] ?? 0);
-                    $adult_guests = (int)($booking['adult_guests'] ?? max(1, ((int) $booking['number_of_guests']) - $child_guests));
-                    ?>
-                    <div class="info-row">
-                        <span class="info-label">Guests</span>
-                        <span class="info-value">
-                            <?php echo $adult_guests; ?> adult<?php echo $adult_guests === 1 ? '' : 's'; ?>
-                            <?php if ($child_guests > 0): ?>
-                                + <?php echo $child_guests; ?> child<?php echo $child_guests === 1 ? '' : 'ren'; ?>
+                    <table class="bd-kv no-auto-pagination">
+                        <tbody>
+                            <tr>
+                                <th scope="row">Guest name</th>
+                                <td><?php echo htmlspecialchars($booking['guest_name']); ?></td>
+                            </tr>
+                            <tr>
+                                <th scope="row">Email</th>
+                                <td>
+                                    <span class="bd-kv__text"><?php echo htmlspecialchars($booking['guest_email']); ?></span>
+                                    <a href="mailto:<?php echo htmlspecialchars($booking['guest_email']); ?>" class="bd-mini-link email"><i class="fas fa-envelope"></i> Email</a>
+                                </td>
+                            </tr>
+                            <tr>
+                                <th scope="row">Phone</th>
+                                <td>
+                                    <span class="bd-kv__text"><?php echo htmlspecialchars($booking['guest_phone']); ?></span>
+                                    <a href="tel:<?php echo htmlspecialchars($booking['guest_phone']); ?>" class="bd-mini-link phone"><i class="fas fa-phone"></i> Call</a>
+                                </td>
+                            </tr>
+                            <tr>
+                                <th scope="row">Country</th>
+                                <td><?php echo htmlspecialchars($booking['guest_country'] ?: 'N/A'); ?></td>
+                            </tr>
+                            <tr>
+                                <th scope="row">Guests</th>
+                                <td>
+                                    <?php echo $adult_guests; ?> adult<?php echo $adult_guests === 1 ? '' : 's'; ?><?php if ($child_guests > 0): ?>, <?php echo $child_guests; ?> child<?php echo $child_guests === 1 ? '' : 'ren'; ?><?php endif; ?>
+                                    <span class="bd-muted">(<?php echo (int) $booking['number_of_guests']; ?> total)</span>
+                                </td>
+                            </tr>
+                            <tr>
+                                <th scope="row">Check-in</th>
+                                <td><?php echo date('D, M j, Y', strtotime($booking['check_in_date'])); ?></td>
+                            </tr>
+                            <tr>
+                                <th scope="row">Check-out</th>
+                                <td><?php echo date('D, M j, Y', strtotime($booking['check_out_date'])); ?></td>
+                            </tr>
+                            <tr>
+                                <th scope="row">Nights</th>
+                                <td><?php echo (int) $booking['number_of_nights']; ?></td>
+                            </tr>
+                            <tr>
+                                <th scope="row">Room type</th>
+                                <td><?php echo htmlspecialchars($booking['room_name']); ?></td>
+                            </tr>
+                            <?php if (!empty($booking['rate_plan_label'])): ?>
+                            <tr>
+                                <th scope="row">Rate plan</th>
+                                <td><?php echo htmlspecialchars($booking['rate_plan_label']); ?><?php if ((float)($booking['rate_plan_discount'] ?? 0) > 0): ?> &mdash; -<?php echo $currency_symbol; ?><?php echo number_format((float) $booking['rate_plan_discount'], 2); ?>/night<?php endif; ?></td>
+                            </tr>
                             <?php endif; ?>
-                        </span>
-                    </div>
+                            <tr>
+                                <th scope="row">Rate / night</th>
+                                <td><?php echo $currency_symbol; ?><?php echo number_format((float) $booking['price_per_night'], 0); ?></td>
+                            </tr>
+                            <tr>
+                                <th scope="row">Assigned room</th>
+                                <td>
+                                    <?php if ($bookingRoomLabel !== ''): ?>
+                                        <span class="bd-kv__text"><i class="fas fa-door-open bd-kv__icon"></i> <?php echo htmlspecialchars($bookingRoomLabel); ?><?php if ($booking['individual_room_floor']): ?> <span class="bd-muted">(floor <?php echo htmlspecialchars($booking['individual_room_floor']); ?>)</span><?php endif; ?></span>
+                                    <?php else: ?>
+                                        <span class="bd-muted">No specific room assigned yet</span>
+                                    <?php endif; ?>
+                                    <?php if ($booking['status'] == 'confirmed'): ?>
+                                        <a href="bookings.php?action=assign-room&booking_id=<?php echo $booking_id; ?>" class="bd-mini-link"><i class="fas fa-key"></i> <?php echo $bookingRoomLabel !== '' ? 'Change' : 'Assign'; ?></a>
+                                    <?php endif; ?>
+                                </td>
+                            </tr>
+                            <tr>
+                                <th scope="row">Special requests</th>
+                                <td>
+                                    <?php if ($booking['special_requests']): ?>
+                                        <span class="bd-kv__requests"><?php echo nl2br(htmlspecialchars($booking['special_requests'])); ?></span>
+                                    <?php else: ?>
+                                        <span class="bd-muted">None</span>
+                                    <?php endif; ?>
+                                </td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </section>
 
-                    <div class="guest-contact-actions">
-                        <a href="mailto:<?php echo htmlspecialchars($booking['guest_email']); ?>" class="email">
-                            <i class="fas fa-envelope"></i> Email
-                        </a>
-                        <a href="tel:<?php echo htmlspecialchars($booking['guest_phone']); ?>" class="phone">
-                            <i class="fas fa-phone"></i> Call
-                        </a>
-                    </div>
-
-                    <?php if (!empty($booking['guest_email'])): ?>
-                    <div style="margin-top:14px;padding-top:14px;border-top:1px solid #f0ebe4;">
-                        <?php if ($guest_history['completed_stays'] >= 1): ?>
-                            <span class="gh-badge gh-badge--returning"><i class="fas fa-redo-alt"></i> Returning Guest</span>
-                        <?php else: ?>
-                            <span class="gh-badge gh-badge--new"><i class="fas fa-star"></i> First Stay</span>
-                        <?php endif; ?>
-
-                        <div class="gh-stats-row">
-                            <div class="gh-stat">
-                                <div class="gh-stat-val"><?php echo $guest_history['completed_stays']; ?></div>
-                                <div class="gh-stat-lbl">Stays</div>
-                            </div>
-                            <div class="gh-stat">
-                                <div class="gh-stat-val"><?php echo $guest_history['total_bookings']; ?></div>
-                                <div class="gh-stat-lbl">Bookings</div>
-                            </div>
-                            <div class="gh-stat">
-                                <div class="gh-stat-val gh-stat-val--lifetime"><?php echo $currency_symbol . number_format($guest_history['lifetime_spend'], 0); ?></div>
-                                <div class="gh-stat-lbl">Lifetime</div>
+                <!-- Folio + payment breakdown (refreshed in place after charges are added or voided) -->
+                <div id="folio" class="bd-folio-wrap">
+                    <section class="bd-panel folio-card">
+                        <div class="bd-panel__head">
+                            <h2 class="bd-panel__title">Folio / Charges</h2>
+                            <div class="bd-panel__actions folio-actions">
+                                <?php if ($bPerms['can_add_charge']): ?>
+                                    <button class="folio-btn primary" onclick="openAddChargeModal()" data-help="Add Charge|Add a manual line item to this guest's folio — e.g. minibar, damages, or a service fee — with a custom description and amount.">
+                                        <i class="fas fa-plus"></i> Add Charge
+                                    </button>
+                                    <button class="folio-btn secondary" onclick="openMenuModal()">
+                                        <i class="fas fa-utensils"></i> Add Menu Item
+                                    </button>
+                                <?php else: ?>
+                                    <span class="folio-locked-msg">
+                                        <i class="fas fa-lock"></i>
+                                        <?php echo htmlspecialchars($bPerms['can_add_charge_reason']); ?>
+                                    </span>
+                                <?php endif; ?>
                             </div>
                         </div>
 
-                        <?php if (!empty($guest_history['bookings'])): ?>
-                        <div class="gh-past-list">
-                            <?php foreach ($guest_history['bookings'] as $pb): ?>
-                            <div class="gh-past-item">
-                                <div>
-                                    <a href="booking-details.php?id=<?php echo (int)$pb['id']; ?>" class="gh-past-ref"><?php echo htmlspecialchars($pb['booking_reference']); ?></a>
-                                    <div class="gh-past-dates"><?php echo date('M j, Y', strtotime($pb['check_in_date'])); ?> → <?php echo date('M j, Y', strtotime($pb['check_out_date'])); ?></div>
-                                </div>
-                                <span class="gh-past-status <?php echo htmlspecialchars(str_replace('-', '_', $pb['status'])); ?>"><?php echo htmlspecialchars(ucfirst(str_replace(['-','_'], ' ', $pb['status']))); ?></span>
-                            </div>
-                            <?php endforeach; ?>
-                        </div>
-                        <?php endif; ?>
-                    </div>
-                    <?php endif; ?>
-                </div>
-            </div>
-
-            <!-- Stay Duration Card -->
-            <div class="info-card story-card story-card--stay">
-                <div class="info-card-header">
-                    <div class="icon stay"><i class="fas fa-calendar-alt"></i></div>
-                    <div class="story-head-text">
-                        <h3>Stay Duration</h3>
-                    </div>
-                </div>
-                <div class="info-card-body">
-                    <div class="stay-duration-display">
-                        <div class="date-range">
-                            <div class="date-box">
-                                <div class="day"><?php echo date('d', strtotime($booking['check_in_date'])); ?></div>
-                                <div class="month-year"><?php echo date('M Y', strtotime($booking['check_in_date'])); ?></div>
-                                <div class="label">Check-in</div>
-                            </div>
-                            <div class="date-arrow"><i class="fas fa-arrow-right"></i></div>
-                            <div class="date-box">
-                                <div class="day"><?php echo date('d', strtotime($booking['check_out_date'])); ?></div>
-                                <div class="month-year"><?php echo date('M Y', strtotime($booking['check_out_date'])); ?></div>
-                                <div class="label">Check-out</div>
-                            </div>
-                        </div>
-                        <div class="nights-display">
-                            <i class="fas fa-moon"></i>
-                            <?php echo $booking['number_of_nights']; ?> night<?php echo $booking['number_of_nights'] == 1 ? '' : 's'; ?>
-                        </div>
-                    </div>
-                </div>
-            </div>
-
-            <!-- Room Information Card -->
-            <div class="info-card story-card story-card--room">
-                <div class="info-card-header">
-                    <div class="icon room"><i class="fas fa-bed"></i></div>
-                    <div class="story-head-text">
-                        <h3>Room Details</h3>
-                    </div>
-                </div>
-                <div class="info-card-body">
-                    <div class="room-info-display">
-                        <div class="room-hero">
-                            <div class="room-hero-icon"><i class="fas fa-bed"></i></div>
-                            <div class="room-hero-text">
-                                <div class="room-name-display"><?php echo htmlspecialchars($booking['room_name']); ?></div>
-                                <div class="room-type-display">Room type</div>
-                            </div>
-                        </div>
-
-                        <?php if (!empty($booking['rate_plan_label'])): ?>
-                            <div class="room-rate-plan">
-                                <i class="fas fa-tag"></i>
-                                <span><?php echo htmlspecialchars($booking['rate_plan_label']); ?><?php if ((float)($booking['rate_plan_discount'] ?? 0) > 0): ?> &mdash; -<?php echo $currency_symbol; ?><?php echo number_format((float) $booking['rate_plan_discount'], 2); ?>/night<?php endif; ?></span>
-                            </div>
-                        <?php endif; ?>
-
-                        <div class="room-meta-grid">
-                            <div class="room-meta-cell">
-                                <span class="room-meta-label">Rate / night</span>
-                                <span class="room-meta-value"><?php echo $currency_symbol; ?><?php echo number_format((float) $booking['price_per_night'], 0); ?></span>
-                            </div>
-                            <div class="room-meta-cell">
-                                <span class="room-meta-label">Nights</span>
-                                <span class="room-meta-value"><?php echo (int) $booking['number_of_nights']; ?></span>
-                            </div>
-                            <div class="room-meta-cell">
-                                <span class="room-meta-label">Occupancy</span>
-                                <span class="room-meta-value"><?php echo (int) $booking['number_of_guests']; ?> guest<?php echo ((int) $booking['number_of_guests']) === 1 ? '' : 's'; ?></span>
-                            </div>
-                            <?php if ($booking['individual_room_floor']): ?>
-                            <div class="room-meta-cell">
-                                <span class="room-meta-label">Floor</span>
-                                <span class="room-meta-value"><?php echo htmlspecialchars($booking['individual_room_floor']); ?></span>
-                            </div>
-                            <?php endif; ?>
-                        </div>
-
-                        <?php $bookingRoomLabel = getBookingRoomLabel((int) $booking['id'], (string)($booking['individual_room_name'] ?: (($booking['room_type_name'] ?: 'Room') . ' ' . $booking['individual_room_number']))); ?>
-                        <?php if ($bookingRoomLabel !== ''): ?>
-                            <div class="assigned-room-badge">
-                                <i class="fas fa-door-open"></i>
-                                <span><?php echo htmlspecialchars($bookingRoomLabel); ?></span>
-                            </div>
-                        <?php else: ?>
-                            <div class="room-unassigned">
-                                <i class="fas fa-info-circle"></i> No specific room assigned yet
-                            </div>
-                        <?php endif; ?>
-
-                        <div class="room-status-indicator">
-                            <span class="status-dot <?php echo htmlspecialchars($booking['derived_room_status']); ?>"></span>
-                            Room status: <strong><?php echo ucfirst($booking['derived_room_status']); ?></strong>
-                        </div>
-                    </div>
-                </div>
-            </div>
-
-            <!-- Payment Information Card -->
-            <div class="info-card story-card story-card--payment">
-                <div class="info-card-header">
-                    <div class="icon payment"><i class="fas fa-credit-card"></i></div>
-                    <div class="story-head-text">
-                        <h3>Payment Information</h3>
-                    </div>
-                </div>
-                <div class="info-card-body">
-                    <div class="payment-summary">
                         <?php
-                        $display_total = $folio_total_amount;
-                        $payment_status = $booking['actual_payment_status'];
-                        $status_class = in_array($payment_status, ['paid', 'completed']) ? 'paid' : (in_array($payment_status, ['partial']) ? 'partial' : 'unpaid');
-                        $status_labels = [
-                            'paid' => 'Paid',
-                            'unpaid' => 'Unpaid',
-                            'partial' => 'Partial',
-                            'completed' => 'Paid',
-                            'pending' => 'Pending',
-                            'failed' => 'Failed',
-                            'refunded' => 'Refunded',
-                        ];
+                        // Filter out voided charges for active display
+                        $active_charges = array_filter($folio_charges, function ($c) {
+                            return !$c['voided'];
+                        });
                         ?>
-                        <div class="payment-amount-block">
-                            <span class="payment-amount-label">Total amount</span>
-                            <div class="payment-amount">
-                                <span class="currency"><?php echo $currency_symbol; ?></span>
-                                <?php echo number_format($display_total, 2); ?>
+
+                        <?php if (!empty($active_charges)): ?>
+                            <div class="bd-table-wrap">
+                            <table class="folio-table">
+                                <thead>
+                                    <tr>
+                                        <th>Date</th>
+                                        <th>Type</th>
+                                        <th>Description</th>
+                                        <th class="num">Qty</th>
+                                        <th class="num">Unit Price</th>
+                                        <th class="num">VAT</th>
+                                        <th class="num">Line Total</th>
+                                        <th>Action</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    <?php foreach ($folio_charges as $charge): ?>
+                                        <tr class="<?php echo $charge['voided'] ? 'voided' : ''; ?>">
+                                            <td class="nowrap">
+                                                <?php echo date('M j, Y', strtotime($charge['posted_at'])); ?>
+                                            </td>
+                                            <td>
+                                                <span class="charge-type <?php echo $charge['charge_type']; ?>">
+                                                    <?php echo htmlspecialchars($charge['charge_type']); ?>
+                                                </span>
+                                                <?php if ($charge['voided']): ?>
+                                                    <span class="void-badge"><i class="fas fa-ban"></i> Voided</span>
+                                                <?php endif; ?>
+                                            </td>
+                                            <td>
+                                                <?php echo htmlspecialchars($charge['description']); ?>
+                                                <?php if ($charge['voided'] && $charge['void_reason']): ?>
+                                                    <br><small class="void-reason">Reason: <?php echo htmlspecialchars($charge['void_reason']); ?></small>
+                                                <?php endif; ?>
+                                            </td>
+                                            <td class="num"><?php echo number_format($charge['quantity'], 0); ?></td>
+                                            <td class="num"><?php echo $currency_symbol; ?><?php echo number_format($charge['unit_price'], 2); ?></td>
+                                            <td class="num"><?php echo $charge['vat_rate'] > 0 ? number_format($charge['vat_amount'], 2) : '-'; ?></td>
+                                            <td class="num strong"><?php echo $currency_symbol; ?><?php echo number_format($charge['line_total'], 2); ?></td>
+                                            <td>
+                                                <?php if (!$charge['voided'] && $bPerms['can_void_charge']): ?>
+                                                    <button class="void-charge-btn" onclick="openVoidChargeModal(<?php echo $charge['id']; ?>, '<?php echo htmlspecialchars($charge['description'], ENT_QUOTES); ?>')">
+                                                        <i class="fas fa-ban"></i> Void
+                                                    </button>
+                                                <?php elseif (!$charge['voided']): ?>
+                                                    <span class="void-charge-btn void-charge-btn--locked" title="<?php echo htmlspecialchars($bPerms['can_void_charge_reason']); ?>">
+                                                        <i class="fas fa-lock"></i> Locked
+                                                    </span>
+                                                <?php endif; ?>
+                                            </td>
+                                        </tr>
+                                    <?php endforeach; ?>
+                                </tbody>
+                            </table>
                             </div>
-                            <div class="info-value badge badge-<?php echo $status_class; ?>">
-                                <i class="fas <?php echo $status_class === 'paid' ? 'fa-check-circle' : 'fa-exclamation-circle'; ?>"></i>
-                                <?php echo $status_labels[$payment_status] ?? ucfirst($payment_status); ?>
-                            </div>
-                        </div>
-                        <?php if ($booking['payment_reference']): ?>
-                            <div class="payment-reference">
-                                <i class="fas fa-receipt"></i> <?php echo htmlspecialchars($booking['payment_reference']); ?>
-                            </div>
+                        <?php else: ?>
+                            <p class="bd-empty">No folio charges yet. Use Add Charge or Add Menu Item.</p>
                         <?php endif; ?>
+                    </section>
+
+                    <section class="bd-panel bd-payment">
+                        <div class="bd-panel__head">
+                            <h2 class="bd-panel__title">Payment breakdown</h2>
+                            <span class="bd-pill bd-pill--<?php echo $bd_pay_class; ?>"><?php echo htmlspecialchars($bd_pay_label); ?></span>
+                        </div>
 
                         <div class="payment-tax-breakdown">
+                            <div class="payment-tax-row payment-tax-row--sub">
+                                <span>Room base</span>
+                                <strong><?php echo $currency_symbol; ?><?php echo number_format((float) $booking['total_amount'] - (float)($booking['package_total'] ?? 0), 2); ?></strong>
+                            </div>
+                            <?php if (!empty($booking['rate_plan_label']) && (float)($booking['rate_plan_discount'] ?? 0) > 0): ?>
+                                <div class="payment-tax-row payment-tax-row--sub">
+                                    <span><?php echo htmlspecialchars($booking['rate_plan_label']); ?></span>
+                                    <strong class="is-credit">-<?php echo $currency_symbol; ?><?php echo number_format((float) $booking['rate_plan_discount'] * max(1, (int) $booking['number_of_nights']), 2); ?></strong>
+                                </div>
+                            <?php endif; ?>
+                            <?php foreach ($booking_packages as $bp): ?>
+                                <div class="payment-tax-row payment-tax-row--sub">
+                                    <span><?php echo htmlspecialchars($bp['package_name']); ?></span>
+                                    <strong><?php echo $currency_symbol; ?><?php echo number_format((float) $bp['total_cost'], 2); ?></strong>
+                                </div>
+                            <?php endforeach; ?>
+                            <div class="payment-tax-row payment-tax-row--sub">
+                                <span>Extras</span>
+                                <strong><?php echo $currency_symbol; ?><?php echo number_format($folio_summary['extras_total'] ?? 0, 2); ?></strong>
+                            </div>
                             <div class="payment-tax-row">
                                 <span>Subtotal</span>
                                 <strong><?php echo $currency_symbol; ?><?php echo number_format($folio_subtotal_before_vat, 2); ?></strong>
@@ -1620,219 +1698,69 @@ unset($_SESSION['success_message'], $_SESSION['error_message']);
                                 <strong><?php echo $currency_symbol; ?><?php echo number_format($folio_total_vat, 2); ?></strong>
                             </div>
                             <div class="payment-tax-row payment-tax-row--total">
-                                <span>Total Due</span>
+                                <span>Total</span>
                                 <strong><?php echo $currency_symbol; ?><?php echo number_format($folio_total_amount, 2); ?></strong>
                             </div>
-                        </div>
-                    </div>
-
-                    <?php if ($booking['payment_status'] !== 'paid'): ?>
-                        <div class="payment-form">
-                            <form method="POST" data-admin-confirm="Mark this booking payment as paid and send the payment invoice email?" data-admin-confirm-title="Record payment" data-admin-confirm-ok="Mark paid" data-admin-confirm-icon="fa-money-bill-wave" data-admin-submit-text="Recording payment...">
-                                <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf_token, ENT_QUOTES); ?>">
-                                <input type="hidden" name="update_payment" value="1">
-                                <input type="hidden" name="payment_status" value="paid">
-                                <button type="submit" class="payment-mark-paid-btn">
-                                    <i class="fas fa-check-circle"></i> Mark as Paid
-                                </button>
-                            </form>
-                        </div>
-                    <?php else: ?>
-                        <div style="margin-top: 12px; padding: 10px 14px; background: #edf7f0; border-radius: 10px; font-size: 12px; color: #1f7a42; display: flex; align-items: center; gap: 8px;">
-                            <i class="fas fa-check-circle"></i>
-                            Payment received - Thank you!
-                        </div>
-                    <?php endif; ?>
-                </div>
-            </div>
-
-            </div><!-- /.story-grid -->
-
-            <!-- Folio/Charges Card -->
-            <div class="info-card folio-card" id="folio">
-                <div class="info-card-header">
-                    <div class="icon folio"><i class="fas fa-receipt"></i></div>
-                    <h3>Folio / Charges</h3>
-                </div>
-                <div class="info-card-body">
-                    <div class="folio-header">
-                        <div class="folio-actions">
-                            <?php if ($bPerms['can_add_charge']): ?>
-                                <button class="folio-btn primary" onclick="openAddChargeModal()" data-help="Add Charge|Add a manual line item to this guest's folio — e.g. minibar, damages, or a service fee — with a custom description and amount.">
-                                    <i class="fas fa-plus"></i> Add Charge
-                                </button>
-                                <button class="folio-btn secondary" onclick="openMenuModal()">
-                                    <i class="fas fa-utensils"></i> Add Menu Item
-                                </button>
-                            <?php else: ?>
-                                <span class="folio-locked-msg">
-                                    <i class="fas fa-lock"></i>
-                                    <?php echo htmlspecialchars($bPerms['can_add_charge_reason']); ?>
-                                </span>
-                            <?php endif; ?>
-                        </div>
-                    </div>
-
-                    <?php
-                    // Filter out voided charges for active display
-                    $active_charges = array_filter($folio_charges, function ($c) {
-                        return !$c['voided'];
-                    });
-                    ?>
-
-                    <?php if (!empty($active_charges)): ?>
-                        <table class="folio-table">
-                            <thead>
-                                <tr>
-                                    <th>Date</th>
-                                    <th>Type</th>
-                                    <th>Description</th>
-                                    <th style="text-align: right;">Qty</th>
-                                    <th style="text-align: right;">Unit Price</th>
-                                    <th style="text-align: right;">VAT</th>
-                                    <th style="text-align: right;">Line Total</th>
-                                    <th>Action</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                <?php foreach ($folio_charges as $charge): ?>
-                                    <tr class="<?php echo $charge['voided'] ? 'voided' : ''; ?>">
-                                        <td>
-                                            <span style="font-size: 12px; color: #666;">
-                                                <?php echo date('M j, Y', strtotime($charge['posted_at'])); ?>
-                                            </span>
-                                        </td>
-                                        <td>
-                                            <span class="charge-type <?php echo $charge['charge_type']; ?>">
-                                                <?php echo htmlspecialchars($charge['charge_type']); ?>
-                                            </span>
-                                            <?php if ($charge['voided']): ?>
-                                                <span class="void-badge"><i class="fas fa-ban"></i> Voided</span>
-                                            <?php endif; ?>
-                                        </td>
-                                        <td>
-                                            <?php echo htmlspecialchars($charge['description']); ?>
-                                            <?php if ($charge['voided'] && $charge['void_reason']): ?>
-                                                <br><small style="color: #a03030;">Reason: <?php echo htmlspecialchars($charge['void_reason']); ?></small>
-                                            <?php endif; ?>
-                                        </td>
-                                        <td style="text-align: right;"><?php echo number_format($charge['quantity'], 0); ?></td>
-                                        <td style="text-align: right;"><?php echo $currency_symbol; ?><?php echo number_format($charge['unit_price'], 2); ?></td>
-                                        <td style="text-align: right;"><?php echo $charge['vat_rate'] > 0 ? number_format($charge['vat_amount'], 2) : '-'; ?></td>
-                                        <td style="text-align: right; font-weight: 600;"><?php echo $currency_symbol; ?><?php echo number_format($charge['line_total'], 2); ?></td>
-                                        <td>
-                                            <?php if (!$charge['voided'] && $bPerms['can_void_charge']): ?>
-                                                <button class="void-charge-btn" onclick="openVoidChargeModal(<?php echo $charge['id']; ?>, '<?php echo htmlspecialchars($charge['description'], ENT_QUOTES); ?>')">
-                                                    <i class="fas fa-ban"></i> Void
-                                                </button>
-                                            <?php elseif (!$charge['voided']): ?>
-                                                <span class="void-charge-btn void-charge-btn--locked" title="<?php echo htmlspecialchars($bPerms['can_void_charge_reason']); ?>">
-                                                    <i class="fas fa-lock"></i> Locked
-                                                </span>
-                                            <?php endif; ?>
-                                        </td>
-                                    </tr>
-                                <?php endforeach; ?>
-                            </tbody>
-                        </table>
-
-                        <div class="folio-summary">
-                            <div class="folio-summary-item">
-                                <div class="folio-summary-label">Room Base</div>
-                                <div class="folio-summary-value"><?php echo $currency_symbol; ?><?php echo number_format((float) $booking['total_amount'] - (float)($booking['package_total'] ?? 0), 2); ?></div>
+                            <div class="payment-tax-row">
+                                <span>Paid</span>
+                                <strong><?php echo $currency_symbol; ?><?php echo number_format($folio_amount_paid, 2); ?></strong>
                             </div>
-                            <?php if (!empty($booking['rate_plan_label']) && (float)($booking['rate_plan_discount'] ?? 0) > 0): ?>
-                                <div class="folio-summary-item">
-                                    <div class="folio-summary-label"><?php echo htmlspecialchars($booking['rate_plan_label']); ?></div>
-                                    <div class="folio-summary-value" style="color:#1f7a42;">-<?php echo $currency_symbol; ?><?php echo number_format((float) $booking['rate_plan_discount'] * max(1, (int) $booking['number_of_nights']), 2); ?></div>
-                                </div>
-                            <?php endif; ?>
-                            <?php foreach ($booking_packages as $bp): ?>
-                                <div class="folio-summary-item">
-                                    <div class="folio-summary-label"><?php echo htmlspecialchars($bp['package_name']); ?></div>
-                                    <div class="folio-summary-value"><?php echo $currency_symbol; ?><?php echo number_format((float) $bp['total_cost'], 2); ?></div>
-                                </div>
-                            <?php endforeach; ?>
-                            <div class="folio-summary-item">
-                                <div class="folio-summary-label">Extras</div>
-                                <div class="folio-summary-value"><?php echo $currency_symbol; ?><?php echo number_format($folio_summary['extras_total'] ?? 0, 2); ?></div>
+                            <div class="payment-tax-row payment-tax-row--balance <?php echo $bd_has_due ? 'is-due' : 'is-settled'; ?>">
+                                <span><?php echo $bd_has_credit ? 'Credit owed to guest' : 'Balance'; ?></span>
+                                <strong><?php echo $currency_symbol; ?><?php echo number_format($bd_has_credit ? $folio_credit_balance : $folio_balance_due, 2); ?></strong>
                             </div>
-                            <?php if ($booking_levy_amount > 0): ?>
-                                <div class="folio-summary-item">
-                                    <div class="folio-summary-label">Tourism Levy<?php echo $booking_levy_percent > 0 ? ' (' . number_format($booking_levy_percent, 2) . '%)' : ''; ?></div>
-                                    <div class="folio-summary-value"><?php echo $currency_symbol; ?><?php echo number_format($booking_levy_amount, 2); ?></div>
-                                </div>
-                            <?php endif; ?>
-                            <div class="folio-summary-item">
-                                <div class="folio-summary-label">VAT</div>
-                                <div class="folio-summary-value"><?php echo $currency_symbol; ?><?php echo number_format($folio_total_vat, 2); ?></div>
-                            </div>
-                            <div class="folio-summary-item">
-                                <div class="folio-summary-label">Total Due</div>
-                                <div class="folio-summary-value total"><?php echo $currency_symbol; ?><?php echo number_format($folio_total_amount, 2); ?></div>
-                            </div>
-                            <?php if ($folio_amount_paid > 0): ?>
-                                <div class="folio-summary-item">
-                                    <div class="folio-summary-label">Amount Paid</div>
-                                    <div class="folio-summary-value paid"><?php echo $currency_symbol; ?><?php echo number_format($folio_amount_paid, 2); ?></div>
-                                </div>
-                            <?php endif; ?>
-                            <?php if ($folio_balance_due > BALANCE_TOLERANCE): ?>
-                                <div class="folio-summary-item folio-summary-item--alert">
-                                    <div class="folio-summary-label"><i class="fas fa-exclamation-triangle" style="color:#d97706;"></i> Balance Due</div>
-                                    <div class="folio-summary-value balance"><?php echo $currency_symbol; ?><?php echo number_format($folio_balance_due, 2); ?></div>
-                                </div>
-                            <?php elseif ($folio_amount_paid > $folio_total_amount + BALANCE_TOLERANCE): ?>
-                                <?php $overpaid_amount = $folio_amount_paid - $folio_total_amount; ?>
-                                <div class="folio-summary-item folio-summary-item--overpay">
-                                    <div class="folio-summary-label"><i class="fas fa-coins" style="color:#0369a1;"></i> Overpayment</div>
-                                    <div class="folio-summary-value" style="color:#0369a1;"><?php echo $currency_symbol; ?><?php echo number_format($overpaid_amount, 2); ?></div>
-                                </div>
-                                <p class="folio-overpay-hint">
-                                    <i class="fas fa-info-circle"></i>
-                                    Guest has overpaid by <?php echo $currency_symbol . number_format($overpaid_amount, 2); ?>.
-                                    <a href="credit-notes.php?booking_id=<?php echo $booking_id; ?>">Issue a credit note</a> to apply the excess.
-                                </p>
-                            <?php elseif ($folio_amount_paid >= $folio_total_amount - BALANCE_TOLERANCE && $folio_total_amount > 0): ?>
-                                <div class="folio-summary-item folio-summary-item--settled">
-                                    <div class="folio-summary-label"><i class="fas fa-circle-check" style="color:#16a34a;"></i> Fully Settled</div>
-                                    <div class="folio-summary-value" style="color:#16a34a;">Paid in full</div>
-                                </div>
-                            <?php endif; ?>
                         </div>
-                    <?php else: ?>
-                        <div class="empty-state">
-                            <i class="fas fa-receipt"></i>
-                            <p>No folio charges yet</p>
-                            <small>Click "Add Charge" or "Add Menu Item" to add items to the guest folio.</small>
-                        </div>
-                    <?php endif; ?>
-                </div>
-            </div>
 
-            <!-- Invoices Card -->
-            <div class="info-card invoices-card" id="invoices">
-                <div class="info-card-header">
-                    <div class="icon invoice"><i class="fas fa-file-invoice"></i></div>
-                    <h3>Invoices</h3>
-                </div>
-                <div class="info-card-body">
-                    <div class="folio-header">
-                        <div class="folio-actions">
+                        <?php if (!$bd_has_due && $folio_amount_paid > $folio_total_amount + BALANCE_TOLERANCE): ?>
+                            <?php $overpaid_amount = $folio_amount_paid - $folio_total_amount; ?>
+                            <p class="folio-overpay-hint">
+                                <i class="fas fa-info-circle"></i>
+                                Guest has overpaid by <?php echo $currency_symbol . number_format($overpaid_amount, 2); ?>.
+                                <a href="credit-notes.php?booking_id=<?php echo $booking_id; ?>">Issue a credit note</a> to apply the excess.
+                            </p>
+                        <?php endif; ?>
+
+                        <?php if ($booking['payment_reference']): ?>
+                            <p class="payment-reference">
+                                <i class="fas fa-receipt"></i> Reference: <?php echo htmlspecialchars($booking['payment_reference']); ?>
+                            </p>
+                        <?php endif; ?>
+
+                        <?php if ($booking['payment_status'] !== 'paid'): ?>
+                            <div class="payment-form">
+                                <form method="POST" data-admin-confirm="Mark this booking payment as paid and send the payment invoice email?" data-admin-confirm-title="Record payment" data-admin-confirm-ok="Mark paid" data-admin-confirm-icon="fa-money-bill-wave" data-admin-submit-text="Recording payment...">
+                                    <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf_token, ENT_QUOTES); ?>">
+                                    <input type="hidden" name="update_payment" value="1">
+                                    <input type="hidden" name="payment_status" value="paid">
+                                    <button type="submit" class="payment-mark-paid-btn">
+                                        <i class="fas fa-check-circle"></i> Mark as Paid
+                                    </button>
+                                </form>
+                            </div>
+                        <?php else: ?>
+                            <p class="bd-paid-note"><i class="fas fa-check-circle"></i> Payment received.</p>
+                        <?php endif; ?>
+                    </section>
+                </div><!-- /#folio -->
+
+                <section class="bd-panel invoices-card" id="invoices">
+                    <div class="bd-panel__head">
+                        <h2 class="bd-panel__title">Invoices</h2>
+                        <div class="bd-panel__actions folio-actions">
                             <?php if (!$bPerms['can_generate_invoice'] || !$bPerms['can_send_invoice']): ?>
                                 <div class="folio-locked-msg">
                                     <i class="fas fa-lock"></i>
                                     <?php echo htmlspecialchars($bPerms['can_generate_invoice_reason'] ?: $bPerms['can_send_invoice_reason']); ?>
                                 </div>
                             <?php else: ?>
-                                <form method="POST" style="display: inline;" data-admin-confirm="Generate an invoice PDF for this booking without sending it?" data-admin-confirm-title="Generate invoice" data-admin-confirm-ok="Generate" data-admin-confirm-icon="fa-file-pdf" data-admin-submit-text="Generating...">
+                                <form method="POST" data-admin-confirm="Generate an invoice PDF for this booking without sending it?" data-admin-confirm-title="Generate invoice" data-admin-confirm-ok="Generate" data-admin-confirm-icon="fa-file-pdf" data-admin-submit-text="Generating...">
                                     <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf_token); ?>">
                                     <input type="hidden" name="invoice_action" value="generate_invoice">
                                     <button type="submit" class="folio-btn primary">
                                         <i class="fas fa-file-pdf"></i> Generate Invoice
                                     </button>
                                 </form>
-                                <form method="POST" style="display: inline;" data-admin-confirm="Send this booking invoice to the guest by email?" data-admin-confirm-title="Send invoice email" data-admin-confirm-ok="Send email" data-admin-confirm-icon="fa-envelope-circle-check" data-admin-submit-text="Sending invoice...">
+                                <form method="POST" data-admin-confirm="Send this booking invoice to the guest by email?" data-admin-confirm-title="Send invoice email" data-admin-confirm-ok="Send email" data-admin-confirm-icon="fa-envelope-circle-check" data-admin-submit-text="Sending invoice...">
                                     <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf_token); ?>">
                                     <input type="hidden" name="invoice_action" value="send_invoice">
                                     <button type="submit" class="folio-btn success">
@@ -1840,10 +1768,10 @@ unset($_SESSION['success_message'], $_SESSION['error_message']);
                                     </button>
                                 </form>
                                 <?php if (function_exists('isWhatsAppEnabled') && isWhatsAppEnabled()): ?>
-                                    <form method="POST" style="display: inline;" data-admin-confirm="Send the invoice link to the guest on WhatsApp? This can use the configured WhatsApp provider." data-admin-confirm-title="Send invoice via WhatsApp" data-admin-confirm-ok="Send WhatsApp" data-admin-confirm-icon="fa-whatsapp" data-admin-submit-text="Sending WhatsApp...">
+                                    <form method="POST" data-admin-confirm="Send the invoice link to the guest on WhatsApp? This can use the configured WhatsApp provider." data-admin-confirm-title="Send invoice via WhatsApp" data-admin-confirm-ok="Send WhatsApp" data-admin-confirm-icon="fa-whatsapp" data-admin-submit-text="Sending WhatsApp...">
                                         <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf_token); ?>">
                                         <input type="hidden" name="invoice_action" value="send_invoice_whatsapp">
-                                        <button type="submit" class="folio-btn" style="background:#25D366;color:#fff;border-color:#25D366;">
+                                        <button type="submit" class="folio-btn whatsapp">
                                             <i class="fab fa-whatsapp"></i> Send via WhatsApp
                                         </button>
                                     </form>
@@ -1853,17 +1781,12 @@ unset($_SESSION['success_message'], $_SESSION['error_message']);
                     </div>
 
                     <?php if (!empty($existing_invoices)): ?>
-                        <div class="invoice-list">
+                        <ul class="invoice-list">
                             <?php foreach ($existing_invoices as $invoice): ?>
-                                <div class="invoice-item">
+                                <li class="invoice-item">
                                     <div class="invoice-info">
-                                        <div class="invoice-number">
-                                            <i class="fas fa-file-invoice" style="color: var(--gold, #7E684B); margin-right: 8px;"></i>
-                                            <?php echo htmlspecialchars($invoice['invoice_number']); ?>
-                                        </div>
-                                        <div class="invoice-date">
-                                            Generated: <?php echo date('M j, Y \a\t g:i A', strtotime($invoice['created_at'])); ?>
-                                        </div>
+                                        <span class="invoice-number"><i class="fas fa-file-invoice"></i> <?php echo htmlspecialchars($invoice['invoice_number']); ?></span>
+                                        <span class="invoice-date">Generated <?php echo date('M j, Y \a\t g:i A', strtotime($invoice['created_at'])); ?></span>
                                     </div>
                                     <div class="invoice-actions">
                                         <?php if ($invoice['invoice_path']): ?>
@@ -1872,34 +1795,85 @@ unset($_SESSION['success_message'], $_SESSION['error_message']);
                                             </a>
                                         <?php endif; ?>
                                     </div>
+                                </li>
+                            <?php endforeach; ?>
+                        </ul>
+                    <?php else: ?>
+                        <p class="bd-empty">No invoices generated yet.</p>
+                    <?php endif; ?>
+                </section>
+            </div><!-- /.bd-main -->
+
+            <!-- RIGHT: guest history, notes, activity -->
+            <aside class="bd-side">
+
+                <?php if (!empty($booking['guest_email'])): ?>
+                <section class="bd-panel">
+                    <div class="bd-panel__head">
+                        <h2 class="bd-panel__title">Guest history</h2>
+                        <?php if ($guest_history['completed_stays'] >= 1): ?>
+                            <span class="gh-badge gh-badge--returning"><i class="fas fa-redo-alt"></i> Returning guest</span>
+                        <?php else: ?>
+                            <span class="gh-badge gh-badge--new"><i class="fas fa-star"></i> First stay</span>
+                        <?php endif; ?>
+                    </div>
+                    <dl class="bd-stats">
+                        <div><dt>Stays</dt><dd><?php echo (int) $guest_history['completed_stays']; ?></dd></div>
+                        <div><dt>Bookings</dt><dd><?php echo (int) $guest_history['total_bookings']; ?></dd></div>
+                        <div><dt>Lifetime spend</dt><dd><?php echo $currency_symbol . number_format($guest_history['lifetime_spend'], 0); ?></dd></div>
+                    </dl>
+                    <?php if (!empty($guest_history['bookings'])): ?>
+                    <div class="gh-past-list">
+                        <?php foreach ($guest_history['bookings'] as $pb): ?>
+                        <div class="gh-past-item">
+                            <div>
+                                <a href="booking-details.php?id=<?php echo (int)$pb['id']; ?>" class="gh-past-ref"><?php echo htmlspecialchars($pb['booking_reference']); ?></a>
+                                <div class="gh-past-dates"><?php echo date('M j, Y', strtotime($pb['check_in_date'])); ?> → <?php echo date('M j, Y', strtotime($pb['check_out_date'])); ?></div>
+                            </div>
+                            <span class="gh-past-status <?php echo htmlspecialchars(str_replace('-', '_', $pb['status'])); ?>"><?php echo htmlspecialchars(ucfirst(str_replace(['-','_'], ' ', $pb['status']))); ?></span>
+                        </div>
+                        <?php endforeach; ?>
+                    </div>
+                    <?php endif; ?>
+                </section>
+                <?php endif; ?>
+
+                <section class="bd-panel notes-card">
+                    <div class="bd-panel__head">
+                        <h2 class="bd-panel__title">Internal notes</h2>
+                    </div>
+                    <div class="notes-form">
+                        <form method="POST">
+                            <textarea name="note_text" placeholder="Add a note about this booking..." required></textarea>
+                            <button type="submit" name="add_note">
+                                <i class="fas fa-plus"></i> Add Note
+                            </button>
+                        </form>
+                    </div>
+                    <div class="notes-list">
+                        <?php if (empty($notes)): ?>
+                            <p class="bd-empty">No notes yet.</p>
+                        <?php else: ?>
+                            <?php foreach ($notes as $note): ?>
+                                <div class="note-item">
+                                    <div class="note-header">
+                                        <span class="note-author"><?php echo htmlspecialchars($note['created_by_name'] ?? 'Unknown'); ?></span>
+                                        <span class="note-time"><?php echo date('M j, H:i', strtotime($note['created_at'])); ?></span>
+                                    </div>
+                                    <div class="note-text"><?php echo nl2br(htmlspecialchars($note['note_text'])); ?></div>
                                 </div>
                             <?php endforeach; ?>
-                        </div>
-                    <?php else: ?>
-                        <div class="empty-state">
-                            <i class="fas fa-file-invoice"></i>
-                            <p>No invoices generated yet</p>
-                            <small>Click "Generate Invoice" to create an invoice for this booking.</small>
-                        </div>
-                    <?php endif; ?>
-                </div>
-            </div>
+                        <?php endif; ?>
+                    </div>
+                </section>
 
-            <div class="timeline-notes-row">
-
-            <!-- Timeline Card -->
-            <div class="info-card timeline-card">
-                <div class="info-card-header">
-                    <div class="icon timeline"><i class="fas fa-history"></i></div>
-                    <h3>Activity Timeline</h3>
-                </div>
-                <div class="info-card-body">
+                <section class="bd-panel timeline-card">
+                    <div class="bd-panel__head">
+                        <h2 class="bd-panel__title">Activity timeline</h2>
+                    </div>
                     <div class="timeline-list">
                         <?php if (empty($timeline)): ?>
-                            <div class="empty-state empty-state--compact">
-                                <i class="fas fa-history empty-state__icon-md"></i>
-                                <p>No activity recorded yet</p>
-                            </div>
+                            <p class="bd-empty">No activity recorded yet.</p>
                         <?php else: ?>
                             <?php foreach (array_slice($timeline, 0, 10) as $event):
                                 $type_info = formatActionType($event['action_type']);
@@ -1917,6 +1891,7 @@ unset($_SESSION['success_message'], $_SESSION['error_message']);
                                             <?php else: ?>
                                                 System
                                             <?php endif; ?>
+                                            &middot; <?php echo date('M j, H:i', strtotime($event['created_at'])); ?>
                                         </div>
                                         <?php if ($event['action_type'] === 'date_adjustment' && !empty($event_metadata)): ?>
                                             <div class="timeline-adjustment-details">
@@ -1942,213 +1917,13 @@ unset($_SESSION['success_message'], $_SESSION['error_message']);
                                             </div>
                                         <?php endif; ?>
                                     </div>
-                                    <div class="timeline-time"><?php echo date('M j, H:i', strtotime($event['created_at'])); ?></div>
                                 </div>
                             <?php endforeach; ?>
                         <?php endif; ?>
                     </div>
-                </div>
-            </div>
-
-            <!-- Notes Card -->
-            <div class="info-card notes-card">
-                <div class="info-card-header">
-                    <div class="icon notes"><i class="fas fa-sticky-note"></i></div>
-                    <h3>Internal Notes</h3>
-                </div>
-                <div class="info-card-body">
-                    <div class="notes-form">
-                        <form method="POST">
-                            <textarea name="note_text" placeholder="Add a note about this booking..." required></textarea>
-                            <button type="submit" name="add_note">
-                                <i class="fas fa-plus"></i> Add Note
-                            </button>
-                        </form>
-                    </div>
-                    <div class="notes-list">
-                        <?php if (empty($notes)): ?>
-                            <div class="empty-state empty-state--compact">
-                                <i class="fas fa-sticky-note empty-state__icon-sm"></i>
-                                <p>No notes yet</p>
-                            </div>
-                        <?php else: ?>
-                            <?php foreach ($notes as $note): ?>
-                                <div class="note-item">
-                                    <div class="note-header">
-                                        <span class="note-author"><?php echo htmlspecialchars($note['created_by_name'] ?? 'Unknown'); ?></span>
-                                        <span class="note-time"><?php echo date('M j, H:i', strtotime($note['created_at'])); ?></span>
-                                    </div>
-                                    <div class="note-text"><?php echo nl2br(htmlspecialchars($note['note_text'])); ?></div>
-                                </div>
-                            <?php endforeach; ?>
-                        <?php endif; ?>
-                    </div>
-                </div>
-            </div>
-
-            </div><!-- /.timeline-notes-row -->
-
-            <?php if ($booking['special_requests']): ?>
-                <!-- Special Requests -->
-                <div class="info-card booking-special-card">
-                    <div class="info-card-header">
-                        <div class="icon special-requests"><i class="fas fa-comment-dots"></i></div>
-                        <h3>Special Requests</h3>
-                    </div>
-                    <div class="info-card-body">
-                        <div class="booking-special-card__content">
-                            <?php echo nl2br(htmlspecialchars($booking['special_requests'])); ?>
-                        </div>
-                    </div>
-                </div>
-            <?php endif; ?>
-
-            <!-- Actions Card -->
-            <div class="info-card actions-card">
-                <div class="info-card-header">
-                    <div class="icon actions"><i class="fas fa-bolt"></i></div>
-                    <h3>Quick Actions</h3>
-                </div>
-                <div class="info-card-body">
-                    <?php
-                    $can_cancel = !in_array($booking['status'], ['checked-in', 'checked-out', 'cancelled', 'no-show']);
-                    $can_adjust_dates = !in_array($booking['status'], ['cancelled', 'checked-out', 'no-show']);
-                    ?>
-                    <div class="booking-actions-grid">
-                        <section class="booking-actions-group">
-                            <h4 class="booking-actions-group__title">Primary Actions</h4>
-                            <div class="booking-actions-flow">
-                                <?php if ($booking['status'] == 'tentative' || $booking['is_tentative'] == 1): ?>
-                                    <form method="POST" class="booking-action-form" data-admin-confirm="Convert this tentative booking to confirmed and send the conversion email?" data-admin-confirm-title="Convert tentative booking" data-admin-confirm-ok="Convert" data-admin-confirm-icon="fa-circle-check" data-admin-submit-text="Converting...">
-                                        <input type="hidden" name="booking_action" value="convert">
-                                        <button type="submit" class="action-btn convert" aria-label="Convert to confirmed"><i class="fas fa-circle-check"></i> Convert to Confirmed</button>
-                                    </form>
-                                <?php endif; ?>
-
-                                <?php if ($booking['status'] == 'pending'): ?>
-                                    <form method="POST" class="booking-action-form" data-admin-confirm="Confirm this booking and send the guest confirmation email?" data-admin-confirm-title="Confirm booking" data-admin-confirm-ok="Confirm" data-admin-confirm-icon="fa-circle-check" data-admin-submit-text="Confirming...">
-                                        <input type="hidden" name="booking_action" value="confirm">
-                                        <button type="submit" class="action-btn confirm" aria-label="Confirm booking"><i class="fas fa-circle-check"></i> Confirm Booking</button>
-                                    </form>
-                                <?php endif; ?>
-
-                                <?php if ($booking['status'] == 'confirmed'): ?>
-                                    <?php
-                                    $can_checkin = !in_array($booking['actual_payment_status'] ?? '', ['unpaid', ''], true);
-                                    $room_assigned = !empty($booking['individual_room_id']);
-                                    $check_in_date = new DateTime($booking['check_in_date']);
-                                    $check_in_date->setTime(0, 0, 0);
-                                    $today = new DateTime('today');
-                                    $checkin_date_reached = $check_in_date <= $today;
-                                    $checkin_disabled_reason = '';
-                                    if (!$can_checkin) {
-                                        $checkin_disabled_reason = 'At least a partial payment must be recorded before check-in';
-                                    } elseif (!$room_assigned) {
-                                        $checkin_disabled_reason = 'Room must be assigned before check-in';
-                                    } elseif (!$checkin_date_reached) {
-                                        $checkin_disabled_reason = 'Check-in date has not been reached yet (' . htmlspecialchars($booking['check_in_date']) . ')';
-                                    }
-                                    $ci_room_gate = ($checkin_disabled_reason === '') ? evaluateCheckInRoomReady((int)$booking['id'], (int)($user['id'] ?? 0), false) : null;
-                                    $ci_room_override = $ci_room_gate && $ci_room_gate['needs_confirm'];
-                                    if ($ci_room_gate && !$ci_room_gate['allowed'] && !$ci_room_override) {
-                                        $checkin_disabled_reason = $ci_room_gate['message'];
-                                    }
-                                    ?>
-
-                                    <?php if (!$room_assigned): ?>
-                                        <a href="bookings.php?action=assign-room&booking_id=<?php echo $booking_id; ?>" class="action-btn assign-room" data-help="Assign Room|Pick a specific physical room for this confirmed booking. Required before check-in can proceed.">
-                                            <i class="fas fa-key"></i> Assign Room
-                                        </a>
-                                    <?php else: ?>
-                                        <a href="bookings.php?action=assign-room&booking_id=<?php echo $booking_id; ?>" class="action-btn change-room">
-                                            <i class="fas fa-right-left"></i> Change Room
-                                        </a>
-                                    <?php endif; ?>
-
-                                    <form method="POST" class="booking-action-form" data-admin-confirm="<?php echo $ci_room_override ? htmlspecialchars($ci_room_gate['message'], ENT_QUOTES) : 'Check in this guest and mark the assigned room occupied?'; ?>" data-admin-confirm-title="<?php echo $ci_room_override ? 'Room not marked clean' : 'Check in guest'; ?>" data-admin-confirm-ok="<?php echo $ci_room_override ? 'Check in anyway' : 'Check in'; ?>" data-admin-confirm-icon="fa-right-to-bracket" data-admin-submit-text="Checking in...">
-                                        <input type="hidden" name="booking_action" value="checkin">
-                                        <?php if ($ci_room_override): ?><input type="hidden" name="confirm_checkin_room_not_ready" value="1"><?php endif; ?>
-                                        <button type="submit" class="action-btn checkin" data-help="Check In|Check the guest into their assigned room and mark the room occupied. Requires payment recorded, a room assigned, and the check-in date to have arrived." <?php echo ($can_checkin && $room_assigned && $checkin_date_reached) ? '' : 'disabled title="' . htmlspecialchars($checkin_disabled_reason) . '"'; ?>>
-                                            <i class="fas fa-right-to-bracket"></i> Check In
-                                        </button>
-                                    </form>
-                                    <?php if ($checkin_disabled_reason): ?>
-                                        <p class="booking-action-inline-hint booking-action-inline-hint--error">
-                                            <i class="fas fa-info-circle"></i> <?php echo htmlspecialchars($checkin_disabled_reason); ?>
-                                        </p>
-                                    <?php endif; ?>
-                                <?php endif; ?>
-
-                                <?php if ($booking['status'] == 'checked-in'):
-                                    $co_balance = round(max(0.0, (float)($folio_summary['balance_due'] ?? ($booking['amount_due'] ?? 0))), 2);
-                                    $co_has_balance = $co_balance > BALANCE_TOLERANCE;
-                                    $co_can_override = $co_has_balance && hasPermission((int)($user['id'] ?? 0), 'checkout_with_balance');
-                                    $co_confirm_text = $co_can_override
-                                        ? 'This guest still owes ' . $currency_symbol . ' ' . number_format($co_balance, 2) . '. Check out anyway with the outstanding balance? This will be recorded in the booking timeline.'
-                                        : 'Check out this guest and generate the final invoice where applicable?';
-                                ?>
-                                    <form method="POST" class="booking-action-form" data-admin-confirm="<?php echo htmlspecialchars($co_confirm_text, ENT_QUOTES); ?>" data-admin-confirm-title="Check out guest" data-admin-confirm-ok="<?php echo $co_can_override ? 'Check out with balance' : 'Check out'; ?>" data-admin-confirm-icon="fa-right-from-bracket" data-admin-submit-text="Checking out...">
-                                        <input type="hidden" name="booking_action" value="checkout">
-                                        <?php if ($co_can_override): ?><input type="hidden" name="confirm_checkout_with_balance" value="1"><?php endif; ?>
-                                        <button type="submit" class="action-btn checkout" data-help="Check Out|Check the guest out, release the room, and generate the final invoice where applicable."<?php echo ($co_has_balance && !$co_can_override) ? ' disabled title="Outstanding balance ' . htmlspecialchars($currency_symbol . ' ' . number_format($co_balance, 2), ENT_QUOTES) . ' - record payment before checkout"' : ''; ?>>
-                                            <i class="fas fa-right-from-bracket"></i> Check Out
-                                        </button>
-                                    </form>
-                                    <?php if ($co_has_balance): ?>
-                                        <p class="booking-action-inline-hint booking-action-inline-hint--error">
-                                            <i class="fas fa-info-circle"></i> Outstanding balance: <?php echo htmlspecialchars($currency_symbol . ' ' . number_format($co_balance, 2)); ?><?php echo $co_can_override ? ' - you may check out with the balance after confirming.' : ' - payment must be recorded before checkout.'; ?>
-                                        </p>
-                                    <?php endif; ?>
-                                <?php endif; ?>
-
-                                <?php if (in_array($booking['status'], ['confirmed', 'pending'], true) && strtotime($booking['check_in_date']) < strtotime('today')): ?>
-                                    <form method="POST" class="booking-action-form" data-admin-confirm="Mark this booking as no-show and release the assigned room?" data-admin-confirm-title="Mark no-show" data-admin-confirm-ok="Mark no-show" data-admin-confirm-tone="danger" data-admin-confirm-icon="fa-user-slash" data-admin-submit-text="Updating...">
-                                        <input type="hidden" name="booking_action" value="noshow">
-                                        <button type="submit" class="action-btn noshow"><i class="fas fa-user-slash"></i> Mark No-Show</button>
-                                    </form>
-                                <?php endif; ?>
-
-                                <?php if ($can_cancel): ?>
-                                    <form method="POST" class="booking-action-form" data-admin-confirm="<?php echo htmlspecialchars('Cancel this booking, release the room, and send the guest cancellation email? Cancellation handling: ' . getCancellationRefundModeLabel() . '.', ENT_QUOTES); ?>" data-admin-confirm-title="Cancel booking" data-admin-confirm-ok="Cancel booking" data-admin-confirm-tone="danger" data-admin-confirm-icon="fa-ban" data-admin-submit-text="Cancelling...">
-                                        <input type="hidden" name="booking_action" value="cancel">
-                                        <input type="hidden" name="cancellation_reason" value="Cancelled by admin">
-                                        <button type="submit" class="action-btn cancel" aria-label="Cancel booking"><i class="fas fa-ban"></i> Cancel Booking</button>
-                                    </form>
-                                <?php endif; ?>
-                            </div>
-                        </section>
-
-                        <section class="booking-actions-group booking-actions-group--support">
-                            <h4 class="booking-actions-group__title">Management Tools</h4>
-                            <div class="booking-actions-flow">
-                                <a href="bookings.php" class="action-btn back" onclick="if(history.length>1){history.back();return false;}"><i class="fas fa-arrow-left"></i> Back to Bookings</a>
-                                <a href="edit-booking.php?id=<?php echo $booking_id; ?>" class="action-btn edit"><i class="fas fa-edit"></i> Edit Booking</a>
-                                <?php if ($bPerms['can_send_quotation']): ?>
-                                    <button type="button" class="action-btn quote" onclick="openBookingQuoteModal(<?php echo (int) $booking_id; ?>, '<?php echo htmlspecialchars($booking['booking_reference'], ENT_QUOTES); ?>', '<?php echo htmlspecialchars($booking['guest_name'], ENT_QUOTES); ?>', '<?php echo htmlspecialchars($booking['guest_email'], ENT_QUOTES); ?>')">
-                                        <i class="fas fa-file-invoice"></i> Send Quotation
-                                    </button>
-                                <?php else: ?>
-                                    <button type="button" class="action-btn quote action-btn--locked" disabled title="<?php echo htmlspecialchars($bPerms['can_send_quotation_reason']); ?>">
-                                        <i class="fas fa-lock"></i> Send Quotation
-                                    </button>
-                                <?php endif; ?>
-                                <?php if ($can_adjust_dates): ?>
-                                    <button type="button" class="action-btn adjust-dates" onclick="openDateAdjustModal()">
-                                        <i class="fas fa-calendar-alt"></i> Adjust Stay Dates
-                                    </button>
-                                <?php endif; ?>
-                            </div>
-                            <?php if (!empty($booking['last_quotation_sent_at'])): ?>
-                                <p class="booking-actions-meta">
-                                    <i class="fas fa-paper-plane"></i>
-                                    Quotation last sent <?php echo date('M j, Y \a\t g:i A', strtotime($booking['last_quotation_sent_at'])); ?>
-                                </p>
-                            <?php endif; ?>
-                        </section>
-                    </div>
-                </div>
-            </div>
-        </div>
+                </section>
+            </aside>
+        </div><!-- /.bd-layout -->
     </div>
 
     <!-- Add Charge Modal -->
