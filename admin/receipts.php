@@ -281,20 +281,22 @@ $receiptPlaceholderTokens = array_keys($templatePreviewMap);
     <div class="admin-container finance-page receipts-page">
 
         <!-- Page header -->
-        <div class="cn-page-header">
-            <div class="cn-page-header__left">
-                <h2 class="section-title"><i class="fas fa-receipt"></i> Receipts</h2>
-                <p class="cn-page-header__sub">Track every receipt from room, conference, restaurant and POS payments.</p>
+        <header class="rh-page-head">
+            <div class="rh-page-head__main">
+                <div class="rh-page-head__title">
+                    <h1>Receipts</h1>
+                </div>
+                <p class="rh-page-head__meta">Track every receipt from room, conference, restaurant and POS payments.</p>
             </div>
-            <div class="cn-page-header__actions">
-                <form method="post" style="display:inline;">
+            <div class="rh-page-head__actions">
+                <form method="post">
                     <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf_token, ENT_QUOTES, 'UTF-8'); ?>">
                     <input type="hidden" name="action" value="backfill_receipts">
                     <button class="btn btn--primary" type="submit"><i class="fas fa-wand-magic-sparkles"></i> Generate Missing</button>
                 </form>
                 <a class="btn btn--ghost" href="receipts.php?<?php echo htmlspecialchars(http_build_query(array_merge($filters, ['export' => 'csv'])), ENT_QUOTES, 'UTF-8'); ?>"><i class="fas fa-file-csv"></i> Export CSV</a>
             </div>
-        </div>
+        </header>
 
         <?php if ($message): ?>
             <div class="alert alert--success"><i class="fas fa-check-circle"></i> <?php echo htmlspecialchars($message); ?></div>
@@ -304,31 +306,32 @@ $receiptPlaceholderTokens = array_keys($templatePreviewMap);
         <?php endif; ?>
 
         <!-- KPI Strip -->
-        <div class="acct-kpis">
-            <div class="acct-kpi">
-                <div class="acct-kpi__label">Total Receipts</div>
-                <div class="acct-kpi__value"><?php echo number_format((int)($summary['total_receipts'] ?? 0)); ?></div>
-                <div class="acct-kpi__meta">payment records</div>
+        <div class="rh-strip" role="group" aria-label="Receipt summary">
+            <div class="rh-strip__cell">
+                <span class="rh-strip__label">Total receipts</span>
+                <strong class="rh-strip__value"><?php echo number_format((int)($summary['total_receipts'] ?? 0)); ?></strong>
+                <span class="rh-strip__sub">payment records</span>
             </div>
-            <div class="acct-kpi acct-kpi--pending">
-                <div class="acct-kpi__label">Missing Numbers</div>
-                <div class="acct-kpi__value"><?php echo number_format((int)($summary['missing_receipts'] ?? 0)); ?></div>
-                <div class="acct-kpi__meta">need generation</div>
+            <div class="rh-strip__cell">
+                <span class="rh-strip__label">Missing numbers</span>
+                <strong class="rh-strip__value <?php echo (int)($summary['missing_receipts'] ?? 0) > 0 ? 'rh-strip__value--alert' : ''; ?>"><?php echo number_format((int)($summary['missing_receipts'] ?? 0)); ?></strong>
+                <span class="rh-strip__sub">need generation</span>
             </div>
-            <div class="acct-kpi acct-kpi--paid">
-                <div class="acct-kpi__label">Generated PDFs</div>
-                <div class="acct-kpi__value"><?php echo number_format((int)($summary['generated_receipts'] ?? 0)); ?></div>
-                <div class="acct-kpi__meta"><?php echo number_format((int)($summary['emailed_receipts'] ?? 0)); ?> emailed</div>
+            <div class="rh-strip__cell">
+                <span class="rh-strip__label">Generated PDFs</span>
+                <strong class="rh-strip__value"><?php echo number_format((int)($summary['generated_receipts'] ?? 0)); ?></strong>
+                <span class="rh-strip__sub"><?php echo number_format((int)($summary['emailed_receipts'] ?? 0)); ?> emailed</span>
             </div>
-            <div class="acct-kpi acct-kpi--revenue">
-                <div class="acct-kpi__label">Receipt Value</div>
-                <div class="acct-kpi__value"><span class="acct-kpi__currency"><?php echo htmlspecialchars($currency_symbol); ?></span><?php echo number_format((float)($summary['receipt_value'] ?? 0), 2); ?></div>
-                <div class="acct-kpi__meta">all matched payments</div>
+            <div class="rh-strip__cell">
+                <span class="rh-strip__label">Receipt value</span>
+                <strong class="rh-strip__value"><?php echo htmlspecialchars($currency_symbol); ?> <?php echo number_format((float)($summary['receipt_value'] ?? 0), 2); ?></strong>
+                <span class="rh-strip__sub">all matched payments</span>
             </div>
         </div>
 
         <!-- Filter bar -->
-        <div class="filter-section">
+        <section class="rh-panel">
+            <div class="rh-panel__body">
             <form method="get" action="receipts.php" class="filter-bar">
                 <input type="text" name="search" class="filter-input" placeholder="Receipt #, payment ref, booking ref..." value="<?php echo htmlspecialchars($filters['search']); ?>">
                 <select name="type" class="filter-select">
@@ -357,25 +360,32 @@ $receiptPlaceholderTokens = array_keys($templatePreviewMap);
                     <a href="receipts.php" class="btn btn--ghost btn--sm">Clear</a>
                 <?php endif; ?>
             </form>
-        </div>
+            </div>
+        </section>
 
         <?php
         $scopeQs = $_GET;
         unset($scopeQs['scope'], $scopeQs['page']);
         if ($scopeActive && $hiddenScopedCount > 0): ?>
-            <div style="background:#faf8f4; border:1px solid #e5d9c9; border-radius:10px; padding:10px 14px; margin:0 0 14px; display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap; font-size:13px; color:#7a6f63;">
-                <span><i class="fas fa-filter" style="margin-right:6px;"></i>Showing receipts for your active modules only (<?php echo number_format($hiddenScopedCount); ?> older record<?php echo $hiddenScopedCount === 1 ? '' : 's'; ?> from disabled modules hidden).</span>
-                <a href="?<?php echo htmlspecialchars(http_build_query(array_merge($scopeQs, ['scope' => 'all']))); ?>" style="color:#7E684B; font-weight:600; text-decoration:none;">Show all history &rarr;</a>
-            </div>
+            <p class="receipts-scope-note">
+                <span><i class="fas fa-filter"></i> Showing receipts for your active modules only (<?php echo number_format($hiddenScopedCount); ?> older record<?php echo $hiddenScopedCount === 1 ? '' : 's'; ?> from disabled modules hidden).</span>
+                <a class="rh-mini-link" href="?<?php echo htmlspecialchars(http_build_query(array_merge($scopeQs, ['scope' => 'all']))); ?>">Show all history</a>
+            </p>
         <?php elseif ($scopeAll && $filters['type'] === 'all'): ?>
-            <div style="background:#faf8f4; border:1px solid #e5d9c9; border-radius:10px; padding:10px 14px; margin:0 0 14px; display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap; font-size:13px; color:#7a6f63;">
-                <span><i class="fas fa-clock-rotate-left" style="margin-right:6px;"></i>Showing full receipt history, including records from disabled modules.</span>
-                <a href="?<?php echo htmlspecialchars(http_build_query($scopeQs)); ?>" style="color:#7E684B; font-weight:600; text-decoration:none;">Show relevant only &rarr;</a>
-            </div>
+            <p class="receipts-scope-note">
+                <span><i class="fas fa-clock-rotate-left"></i> Showing full receipt history, including records from disabled modules.</span>
+                <a class="rh-mini-link" href="?<?php echo htmlspecialchars(http_build_query($scopeQs)); ?>">Show relevant only</a>
+            </p>
         <?php endif; ?>
 
         <!-- Receipts Table -->
-        <div class="table-container" data-admin-pagination-scope data-receipts-pagination-scope data-page-size="<?php echo (int)$limit; ?>" data-current-page="<?php echo (int)$page; ?>" data-total-pages="<?php echo (int)$totalPages; ?>">
+        <section class="rh-panel rh-panel--flush receipts-list-panel">
+        <div class="rh-panel__head">
+            <h2 class="rh-panel__title">Receipts</h2>
+            <span class="rh-page-head__meta"><?php echo number_format($totalRows); ?> match<?php echo $totalRows === 1 ? '' : 'es'; ?></span>
+        </div>
+        <div class="rh-panel__body">
+        <div class="table-container"data-admin-pagination-scope data-receipts-pagination-scope data-page-size="<?php echo (int)$limit; ?>" data-current-page="<?php echo (int)$page; ?>" data-total-pages="<?php echo (int)$totalPages; ?>">
             <?php if (!$payments): ?>
                 <div class="empty-state">
                     <i class="fas fa-receipt"></i>
@@ -482,6 +492,8 @@ $receiptPlaceholderTokens = array_keys($templatePreviewMap);
                 </div>
             <?php endif; ?>
         </div>
+        </div>
+        </section>
 
         <!-- Email modal -->
         <div class="modal" id="modal-receipt-email" role="dialog" aria-modal="true" aria-label="Email Receipt" style="display:none;">
@@ -510,14 +522,15 @@ $receiptPlaceholderTokens = array_keys($templatePreviewMap);
         </div>
 
         <!-- Templates panel -->
-        <div class="receipts-panel">
-            <div class="receipts-panel__head">
-                <div>
-                    <h3 class="section-title" style="font-size:1.1rem;"><i class="fas fa-pen-to-square"></i> Editable Receipt Templates</h3>
-                    <p class="text-muted" style="font-size:0.85rem;margin:4px 0 0;">Placeholders: {{site_name}}, {{guest_name}}, {{receipt_number}}, {{payment_reference}}, {{booking_reference}}, {{payment_date}}, {{payment_method}}, {{payment_type}}, {{total_amount}}, {{contact_email}}.</p>
+        <section class="rh-panel">
+            <div class="rh-panel__head">
+                <h2 class="rh-panel__title">Editable receipt templates</h2>
+                <div class="rh-panel__actions">
+                    <button type="button" class="btn btn--ghost btn--sm" id="receiptsPreviewToggle"><i class="fas fa-eye"></i> Preview</button>
                 </div>
-                <button type="button" class="btn btn--ghost btn--sm" id="receiptsPreviewToggle"><i class="fas fa-eye"></i> Preview</button>
             </div>
+            <div class="rh-panel__body">
+            <p class="rh-page-head__meta receipts-placeholders">Placeholders: {{site_name}}, {{guest_name}}, {{receipt_number}}, {{payment_reference}}, {{booking_reference}}, {{payment_date}}, {{payment_method}}, {{payment_type}}, {{total_amount}}, {{contact_email}}.</p>
             <form method="post" class="receipts-template-form" id="receiptTemplateForm" data-receipt-placeholder-tokens="<?php echo htmlspecialchars((string)json_encode($receiptPlaceholderTokens), ENT_QUOTES, 'UTF-8'); ?>">
                 <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf_token, ENT_QUOTES, 'UTF-8'); ?>">
                 <input type="hidden" name="action" value="save_templates">
@@ -552,16 +565,15 @@ $receiptPlaceholderTokens = array_keys($templatePreviewMap);
                     <p class="receipts-template-preview__whatsapp" id="receiptPreviewWhatsapp"></p>
                 </div>
             </div>
-        </div>
+            </div>
+        </section>
 
         <!-- Recent Activity panel -->
-        <div class="receipts-panel">
-            <div class="receipts-panel__head">
-                <div>
-                    <h3 class="section-title" style="font-size:1.1rem;"><i class="fas fa-clock-rotate-left"></i> Recent Receipt Activity</h3>
-                </div>
+        <section class="rh-panel">
+            <div class="rh-panel__head">
+                <h2 class="rh-panel__title">Recent receipt activity</h2>
             </div>
-            <div class="receipts-activity-log">
+            <div class="receipts-activity-log rh-panel__body">
                 <?php foreach ($recentEvents as $event): ?>
                     <div class="receipts-activity-item">
                         <strong><?php echo htmlspecialchars(ucfirst((string)$event['event_type'])); ?></strong>
@@ -570,10 +582,10 @@ $receiptPlaceholderTokens = array_keys($templatePreviewMap);
                     </div>
                 <?php endforeach; ?>
                 <?php if (!$recentEvents): ?>
-                    <div class="empty-state" style="padding:2rem;"><i class="fas fa-inbox"></i><p>No receipt events yet.</p></div>
+                    <p class="rh-empty">No receipt events yet.</p>
                 <?php endif; ?>
             </div>
-        </div>
+        </section>
 
     </div>
 

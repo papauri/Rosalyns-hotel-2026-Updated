@@ -1235,9 +1235,9 @@ unset($_SESSION['success_message'], $_SESSION['error_message']);
         <a href="bookings.php" class="bd-back" onclick="if(history.length>1){history.back();return false;}"><i class="fas fa-arrow-left"></i> Back to Bookings</a>
 
         <!-- Header: identity on the left, actions on the right -->
-        <header class="bd-header">
-            <div class="bd-header__main">
-                <div class="bd-header__title">
+        <header class="rh-page-head">
+            <div class="rh-page-head__main">
+                <div class="rh-page-head__title">
                     <h1>Booking <?php echo htmlspecialchars($booking['booking_reference']); ?></h1>
                     <span class="hero-status-badge">
                         <i class="fas <?php echo htmlspecialchars($current_status['icon']); ?>"></i>
@@ -1251,7 +1251,7 @@ unset($_SESSION['success_message'], $_SESSION['error_message']);
                     <span class="bd-sep" aria-hidden="true">&middot;</span>
                     <?php echo (int) $booking['number_of_nights']; ?> night<?php echo ((int) $booking['number_of_nights']) === 1 ? '' : 's'; ?>
                 </p>
-                <p class="bd-header__meta">
+                <p class="rh-page-head__meta">
                     Created <?php echo date('M j, Y \a\t g:i A', strtotime($booking['created_at'])); ?>
                     <?php if ($booking['updated_at'] && $booking['updated_at'] != $booking['created_at']): ?>
                         &middot; Updated <?php echo date('M j, Y \a\t g:i A', strtotime($booking['updated_at'])); ?>
@@ -1259,7 +1259,7 @@ unset($_SESSION['success_message'], $_SESSION['error_message']);
                 </p>
             </div>
 
-            <div class="bd-actions booking-actions-flow">
+            <div class="rh-page-head__actions booking-actions-flow">
                 <?php if ($booking['status'] == 'tentative' || $booking['is_tentative'] == 1): ?>
                     <form method="POST" class="booking-action-form" data-admin-confirm="Convert this tentative booking to confirmed and send the conversion email?" data-admin-confirm-title="Convert tentative booking" data-admin-confirm-ok="Convert" data-admin-confirm-icon="fa-circle-check" data-admin-submit-text="Converting...">
                         <input type="hidden" name="booking_action" value="convert">
@@ -1436,7 +1436,7 @@ unset($_SESSION['success_message'], $_SESSION['error_message']);
 
         <?php
         $bd_pay_raw = strtolower((string)($booking['payment_status'] ?? 'unpaid'));
-        $bd_pay_class = in_array($bd_pay_raw, ['paid', 'completed'], true) ? 'paid' : ($bd_pay_raw === 'partial' ? 'partial' : 'unpaid');
+        $bd_pay_class = in_array($bd_pay_raw, ['paid', 'completed'], true) ? 'ok' : ($bd_pay_raw === 'partial' ? 'warn' : 'alert');
         $bd_pay_labels = ['paid' => 'Paid', 'completed' => 'Paid', 'partial' => 'Part paid', 'unpaid' => 'Unpaid', 'pending' => 'Unpaid', 'refunded' => 'Refunded', 'failed' => 'Failed'];
         $bd_pay_label = $bd_pay_labels[$bd_pay_raw] ?? ucfirst($bd_pay_raw);
         $bd_has_credit = $folio_credit_balance > BALANCE_TOLERANCE;
@@ -1444,46 +1444,46 @@ unset($_SESSION['success_message'], $_SESSION['error_message']);
         ?>
 
         <!-- Summary strip -->
-        <div class="bd-strip" role="group" aria-label="Booking financial summary">
-            <div class="bd-strip__cell">
-                <span class="bd-strip__label">Folio total</span>
-                <strong class="bd-strip__value"><?php echo $currency_symbol; ?><?php echo number_format($folio_total_amount, 2); ?></strong>
+        <div class="rh-strip" role="group" aria-label="Booking financial summary">
+            <div class="rh-strip__cell">
+                <span class="rh-strip__label">Folio total</span>
+                <strong class="rh-strip__value"><?php echo $currency_symbol; ?><?php echo number_format($folio_total_amount, 2); ?></strong>
             </div>
-            <div class="bd-strip__cell">
-                <span class="bd-strip__label">Paid</span>
-                <strong class="bd-strip__value"><?php echo $currency_symbol; ?><?php echo number_format($folio_amount_paid, 2); ?></strong>
+            <div class="rh-strip__cell">
+                <span class="rh-strip__label">Paid</span>
+                <strong class="rh-strip__value"><?php echo $currency_symbol; ?><?php echo number_format($folio_amount_paid, 2); ?></strong>
             </div>
             <?php if ($bd_has_credit): ?>
-            <div class="bd-strip__cell bd-strip__cell--balance is-credit">
-                <span class="bd-strip__label">Credit owed to guest</span>
-                <strong class="bd-strip__value"><?php echo $currency_symbol; ?><?php echo number_format($folio_credit_balance, 2); ?></strong>
+            <div class="rh-strip__cell bd-strip__cell--balance is-credit">
+                <span class="rh-strip__label">Credit owed to guest</span>
+                <strong class="rh-strip__value"><?php echo $currency_symbol; ?><?php echo number_format($folio_credit_balance, 2); ?></strong>
             </div>
             <?php else: ?>
-            <div class="bd-strip__cell bd-strip__cell--balance <?php echo $bd_has_due ? 'is-due' : 'is-settled'; ?>">
-                <span class="bd-strip__label">Balance due</span>
-                <strong class="bd-strip__value"><?php echo $currency_symbol; ?><?php echo number_format($folio_balance_due, 2); ?></strong>
+            <div class="rh-strip__cell bd-strip__cell--balance <?php echo $bd_has_due ? 'is-due' : 'is-settled'; ?>">
+                <span class="rh-strip__label">Balance due</span>
+                <strong class="rh-strip__value <?php echo $bd_has_due ? 'rh-strip__value--alert' : 'rh-strip__value--ok'; ?>"><?php echo $currency_symbol; ?><?php echo number_format($folio_balance_due, 2); ?></strong>
             </div>
             <?php endif; ?>
-            <div class="bd-strip__cell">
-                <span class="bd-strip__label">Payment status</span>
-                <span class="bd-pill bd-pill--<?php echo $bd_pay_class; ?>"><?php echo htmlspecialchars($bd_pay_label); ?></span>
+            <div class="rh-strip__cell">
+                <span class="rh-strip__label">Payment status</span>
+                <span class="rh-pill rh-pill--<?php echo $bd_pay_class; ?>"><?php echo htmlspecialchars($bd_pay_label); ?></span>
             </div>
-            <div class="bd-strip__cell">
-                <span class="bd-strip__label">Room status</span>
-                <strong class="bd-strip__value bd-strip__value--text"><?php echo htmlspecialchars($room_status_label); ?></strong>
+            <div class="rh-strip__cell">
+                <span class="rh-strip__label">Room status</span>
+                <strong class="rh-strip__value bd-strip__value--text"><?php echo htmlspecialchars($room_status_label); ?></strong>
             </div>
         </div>
 
-        <div class="bd-layout">
+        <div class="rh-layout">
 
             <!-- LEFT: stay, folio, payment, invoices -->
-            <div class="bd-main">
+            <div>
 
-                <section class="bd-panel" id="stay-details">
-                    <div class="bd-panel__head">
-                        <h2 class="bd-panel__title">Stay details</h2>
+                <section class="rh-panel" id="stay-details">
+                    <div class="rh-panel__head">
+                        <h2 class="rh-panel__title">Stay details</h2>
                     </div>
-                    <table class="bd-kv no-auto-pagination">
+                    <table class="rh-kv no-auto-pagination">
                         <tbody>
                             <tr>
                                 <th scope="row">Guest name</th>
@@ -1493,14 +1493,14 @@ unset($_SESSION['success_message'], $_SESSION['error_message']);
                                 <th scope="row">Email</th>
                                 <td>
                                     <span class="bd-kv__text"><?php echo htmlspecialchars($booking['guest_email']); ?></span>
-                                    <a href="mailto:<?php echo htmlspecialchars($booking['guest_email']); ?>" class="bd-mini-link email"><i class="fas fa-envelope"></i> Email</a>
+                                    <a href="mailto:<?php echo htmlspecialchars($booking['guest_email']); ?>" class="rh-mini-link email"><i class="fas fa-envelope"></i> Email</a>
                                 </td>
                             </tr>
                             <tr>
                                 <th scope="row">Phone</th>
                                 <td>
                                     <span class="bd-kv__text"><?php echo htmlspecialchars($booking['guest_phone']); ?></span>
-                                    <a href="tel:<?php echo htmlspecialchars($booking['guest_phone']); ?>" class="bd-mini-link phone"><i class="fas fa-phone"></i> Call</a>
+                                    <a href="tel:<?php echo htmlspecialchars($booking['guest_phone']); ?>" class="rh-mini-link phone"><i class="fas fa-phone"></i> Call</a>
                                 </td>
                             </tr>
                             <tr>
@@ -1549,7 +1549,7 @@ unset($_SESSION['success_message'], $_SESSION['error_message']);
                                         <span class="bd-muted">No specific room assigned yet</span>
                                     <?php endif; ?>
                                     <?php if ($booking['status'] == 'confirmed'): ?>
-                                        <a href="bookings.php?action=assign-room&booking_id=<?php echo $booking_id; ?>" class="bd-mini-link"><i class="fas fa-key"></i> <?php echo $bookingRoomLabel !== '' ? 'Change' : 'Assign'; ?></a>
+                                        <a href="bookings.php?action=assign-room&booking_id=<?php echo $booking_id; ?>" class="rh-mini-link"><i class="fas fa-key"></i> <?php echo $bookingRoomLabel !== '' ? 'Change' : 'Assign'; ?></a>
                                     <?php endif; ?>
                                 </td>
                             </tr>
@@ -1569,10 +1569,10 @@ unset($_SESSION['success_message'], $_SESSION['error_message']);
 
                 <!-- Folio + payment breakdown (refreshed in place after charges are added or voided) -->
                 <div id="folio" class="bd-folio-wrap">
-                    <section class="bd-panel folio-card">
-                        <div class="bd-panel__head">
-                            <h2 class="bd-panel__title">Folio / Charges</h2>
-                            <div class="bd-panel__actions folio-actions">
+                    <section class="rh-panel folio-card">
+                        <div class="rh-panel__head">
+                            <h2 class="rh-panel__title">Folio / Charges</h2>
+                            <div class="rh-panel__actions folio-actions">
                                 <?php if ($bPerms['can_add_charge']): ?>
                                     <button class="folio-btn primary" onclick="openAddChargeModal()" data-help="Add Charge|Add a manual line item to this guest's folio — e.g. minibar, damages, or a service fee — with a custom description and amount.">
                                         <i class="fas fa-plus"></i> Add Charge
@@ -1652,14 +1652,14 @@ unset($_SESSION['success_message'], $_SESSION['error_message']);
                             </table>
                             </div>
                         <?php else: ?>
-                            <p class="bd-empty">No folio charges yet. Use Add Charge or Add Menu Item.</p>
+                            <p class="rh-empty">No folio charges yet. Use Add Charge or Add Menu Item.</p>
                         <?php endif; ?>
                     </section>
 
-                    <section class="bd-panel bd-payment">
-                        <div class="bd-panel__head">
-                            <h2 class="bd-panel__title">Payment breakdown</h2>
-                            <span class="bd-pill bd-pill--<?php echo $bd_pay_class; ?>"><?php echo htmlspecialchars($bd_pay_label); ?></span>
+                    <section class="rh-panel bd-payment">
+                        <div class="rh-panel__head">
+                            <h2 class="rh-panel__title">Payment breakdown</h2>
+                            <span class="rh-pill rh-pill--<?php echo $bd_pay_class; ?>"><?php echo htmlspecialchars($bd_pay_label); ?></span>
                         </div>
 
                         <div class="payment-tax-breakdown">
@@ -1743,10 +1743,10 @@ unset($_SESSION['success_message'], $_SESSION['error_message']);
                     </section>
                 </div><!-- /#folio -->
 
-                <section class="bd-panel invoices-card" id="invoices">
-                    <div class="bd-panel__head">
-                        <h2 class="bd-panel__title">Invoices</h2>
-                        <div class="bd-panel__actions folio-actions">
+                <section class="rh-panel invoices-card" id="invoices">
+                    <div class="rh-panel__head">
+                        <h2 class="rh-panel__title">Invoices</h2>
+                        <div class="rh-panel__actions folio-actions">
                             <?php if (!$bPerms['can_generate_invoice'] || !$bPerms['can_send_invoice']): ?>
                                 <div class="folio-locked-msg">
                                     <i class="fas fa-lock"></i>
@@ -1799,18 +1799,18 @@ unset($_SESSION['success_message'], $_SESSION['error_message']);
                             <?php endforeach; ?>
                         </ul>
                     <?php else: ?>
-                        <p class="bd-empty">No invoices generated yet.</p>
+                        <p class="rh-empty">No invoices generated yet.</p>
                     <?php endif; ?>
                 </section>
-            </div><!-- /.bd-main -->
+            </div><!-- /.main column -->
 
             <!-- RIGHT: guest history, notes, activity -->
-            <aside class="bd-side">
+            <aside class="rh-layout__side">
 
                 <?php if (!empty($booking['guest_email'])): ?>
-                <section class="bd-panel">
-                    <div class="bd-panel__head">
-                        <h2 class="bd-panel__title">Guest history</h2>
+                <section class="rh-panel">
+                    <div class="rh-panel__head">
+                        <h2 class="rh-panel__title">Guest history</h2>
                         <?php if ($guest_history['completed_stays'] >= 1): ?>
                             <span class="gh-badge gh-badge--returning"><i class="fas fa-redo-alt"></i> Returning guest</span>
                         <?php else: ?>
@@ -1838,9 +1838,9 @@ unset($_SESSION['success_message'], $_SESSION['error_message']);
                 </section>
                 <?php endif; ?>
 
-                <section class="bd-panel notes-card">
-                    <div class="bd-panel__head">
-                        <h2 class="bd-panel__title">Internal notes</h2>
+                <section class="rh-panel notes-card">
+                    <div class="rh-panel__head">
+                        <h2 class="rh-panel__title">Internal notes</h2>
                     </div>
                     <div class="notes-form">
                         <form method="POST">
@@ -1852,7 +1852,7 @@ unset($_SESSION['success_message'], $_SESSION['error_message']);
                     </div>
                     <div class="notes-list">
                         <?php if (empty($notes)): ?>
-                            <p class="bd-empty">No notes yet.</p>
+                            <p class="rh-empty">No notes yet.</p>
                         <?php else: ?>
                             <?php foreach ($notes as $note): ?>
                                 <div class="note-item">
@@ -1867,13 +1867,13 @@ unset($_SESSION['success_message'], $_SESSION['error_message']);
                     </div>
                 </section>
 
-                <section class="bd-panel timeline-card">
-                    <div class="bd-panel__head">
-                        <h2 class="bd-panel__title">Activity timeline</h2>
+                <section class="rh-panel timeline-card">
+                    <div class="rh-panel__head">
+                        <h2 class="rh-panel__title">Activity timeline</h2>
                     </div>
                     <div class="timeline-list">
                         <?php if (empty($timeline)): ?>
-                            <p class="bd-empty">No activity recorded yet.</p>
+                            <p class="rh-empty">No activity recorded yet.</p>
                         <?php else: ?>
                             <?php foreach (array_slice($timeline, 0, 10) as $event):
                                 $type_info = formatActionType($event['action_type']);
@@ -1923,7 +1923,7 @@ unset($_SESSION['success_message'], $_SESSION['error_message']);
                     </div>
                 </section>
             </aside>
-        </div><!-- /.bd-layout -->
+        </div><!-- /.rh-layout -->
     </div>
 
     <!-- Add Charge Modal -->

@@ -684,33 +684,35 @@ try {
 
     <div class="content">
         <div class="analytics-container">
-            <div class="page-header">
-                <div>
-                    <h1 class="page-title"><i class="fas fa-chart-line" style="color: var(--gold);"></i> Visitor Analytics</h1>
-                    <p style="color: #888; margin-top: 4px;">Monitor your website traffic and visitor behavior</p>
+            <header class="rh-page-head">
+                <div class="rh-page-head__main">
+                    <div class="rh-page-head__title"><h1>Visitor Analytics</h1></div>
+                    <p class="rh-page-head__meta">Monitor your website traffic and visitor behavior</p>
                 </div>
-                <form method="POST" class="cleanup-inline-form">
-                    <input type="hidden" name="action" value="cleanup_analytics">
-                    <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf_token); ?>">
-                    <label for="retention_days" class="cleanup-inline-label">Cleanup older than</label>
-                    <select id="retention_days" name="retention_days" class="cleanup-inline-select">
-                        <option value="30">30 days</option>
-                        <option value="60">60 days</option>
-                        <option value="90" selected>90 days</option>
-                        <option value="180">180 days</option>
-                        <option value="365">365 days</option>
-                    </select>
-                    <button type="submit" class="btn btn-secondary btn-sm" onclick="return confirm('Cleanup old visitor analytics data now?')">
-                        <i class="fas fa-broom"></i> Cleanup
-                    </button>
-                </form>
-            </div>
+                <div class="rh-page-head__actions">
+                    <form method="POST" class="cleanup-inline-form">
+                        <input type="hidden" name="action" value="cleanup_analytics">
+                        <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf_token); ?>">
+                        <label for="retention_days" class="cleanup-inline-label">Cleanup older than</label>
+                        <select id="retention_days" name="retention_days" class="cleanup-inline-select">
+                            <option value="30">30 days</option>
+                            <option value="60">60 days</option>
+                            <option value="90" selected>90 days</option>
+                            <option value="180">180 days</option>
+                            <option value="365">365 days</option>
+                        </select>
+                        <button type="submit" class="btn btn-secondary btn-sm" onclick="return confirm('Cleanup old visitor analytics data now?')">
+                            <i class="fas fa-broom"></i> Cleanup
+                        </button>
+                    </form>
+                </div>
+            </header>
 
             <?php if ($message): ?>
-                <div class="alert alert-success" style="margin-bottom: 14px;"><?php echo htmlspecialchars($message); ?></div>
+                <div class="alert alert-success va-alert"><?php echo htmlspecialchars($message); ?></div>
             <?php endif; ?>
             <?php if ($error): ?>
-                <div class="alert alert-error" style="margin-bottom: 14px;"><?php echo htmlspecialchars($error); ?></div>
+                <div class="alert alert-error va-alert"><?php echo htmlspecialchars($error); ?></div>
             <?php endif; ?>
 
             <?php if (!$table_exists): ?>
@@ -718,25 +720,25 @@ try {
                     <i class="fas fa-database"></i>
                     <h3>Visitor tracking not yet initialized</h3>
                     <p>The tracking table will be created automatically when the first visitor accesses your website.</p>
-                    <p style="margin-top: 10px;">Or run the migration: <code>Database/migrations/002_create_site_visitors.sql</code></p>
+                    <p class="va-note">Or run the migration: <code>Database/migrations/002_create_site_visitors.sql</code></p>
                 </div>
             <?php else: ?>
 
                 <!-- Filters -->
                 <form class="filter-bar" method="GET">
-                    <label style="font-weight: 600; color: var(--navy); font-size: 13px;"><i class="fas fa-filter"></i> Period:</label>
+                    <label class="va-filter-label"><i class="fas fa-filter"></i> Period:</label>
                     <select name="range" onchange="toggleCustomDates(this.value)">
                         <option value="7days" <?php echo $filter_range === '7days' ? 'selected' : ''; ?>>Last 7 Days</option>
                         <option value="today" <?php echo $filter_range === 'today' ? 'selected' : ''; ?>>Today</option>
                         <option value="30days" <?php echo $filter_range === '30days' ? 'selected' : ''; ?>>Last 30 Days</option>
                         <option value="custom" <?php echo $filter_range === 'custom' ? 'selected' : ''; ?>>Custom Range</option>
                     </select>
-                    <div id="customDates" style="display: <?php echo $filter_range === 'custom' ? 'flex' : 'none'; ?>; gap: 8px; align-items: center;">
+                    <div id="customDates" class="va-custom-dates" style="display: <?php echo $filter_range === 'custom' ? 'flex' : 'none'; ?>;">
                         <input type="date" name="date_start" value="<?php echo htmlspecialchars($_GET['date_start'] ?? date('Y-m-d')); ?>">
                         <span>to</span>
                         <input type="date" name="date_end" value="<?php echo htmlspecialchars($_GET['date_end'] ?? date('Y-m-d')); ?>">
                     </div>
-                    <label style="font-weight: 600; color: var(--navy); font-size: 13px;">Device:</label>
+                    <label class="va-filter-label">Device:</label>
                     <select name="device">
                         <option value="all" <?php echo $filter_device === 'all' || empty($filter_device) ? 'selected' : ''; ?>>All Devices</option>
                         <option value="desktop" <?php echo $filter_device === 'desktop' ? 'selected' : ''; ?>>Desktop</option>
@@ -747,169 +749,141 @@ try {
                     <button type="submit" class="btn-filter"><i class="fas fa-search"></i> Apply</button>
                 </form>
 
-                <!-- Summary Stats -->
-                <div class="stats-grid">
-                    <div class="stat-card">
-                        <div class="stat-icon"><i class="fas fa-eye"></i></div>
-                        <div class="stat-value"><?php echo number_format($stats['total_views'] ?? 0); ?></div>
-                        <div class="stat-label">Page Views</div>
+                <!-- Summary strip -->
+                <div class="rh-strip" role="group" aria-label="Traffic summary">
+                    <div class="rh-strip__cell">
+                        <span class="rh-strip__label">Page views</span>
+                        <strong class="rh-strip__value"><?php echo number_format($stats['total_views'] ?? 0); ?></strong>
                     </div>
-                    <div class="stat-card">
-                        <div class="stat-icon"><i class="fas fa-users"></i></div>
-                        <div class="stat-value"><?php echo number_format($stats['unique_sessions'] ?? 0); ?></div>
-                        <div class="stat-label">Unique Sessions</div>
+                    <div class="rh-strip__cell">
+                        <span class="rh-strip__label">Unique sessions</span>
+                        <strong class="rh-strip__value"><?php echo number_format($stats['unique_sessions'] ?? 0); ?></strong>
                     </div>
-                    <div class="stat-card">
-                        <div class="stat-icon"><i class="fas fa-globe"></i></div>
-                        <div class="stat-value"><?php echo number_format($stats['unique_ips'] ?? 0); ?></div>
-                        <div class="stat-label">Unique IPs</div>
+                    <div class="rh-strip__cell">
+                        <span class="rh-strip__label">Unique IPs</span>
+                        <strong class="rh-strip__value"><?php echo number_format($stats['unique_ips'] ?? 0); ?></strong>
                     </div>
-                    <div class="stat-card">
-                        <div class="stat-icon"><i class="fas fa-user-plus"></i></div>
-                        <div class="stat-value"><?php echo number_format($stats['new_visitors'] ?? 0); ?></div>
-                        <div class="stat-label">New Visitors</div>
+                    <div class="rh-strip__cell">
+                        <span class="rh-strip__label">New visitors</span>
+                        <strong class="rh-strip__value"><?php echo number_format($stats['new_visitors'] ?? 0); ?></strong>
                     </div>
-                    <div class="stat-card" style="background: <?php echo $bounce_rate > 60 ? 'linear-gradient(135deg, #f44336, #e91e63)' : ($bounce_rate > 40 ? 'linear-gradient(135deg, #ff9800, #ff5722)' : 'linear-gradient(135deg, #4CAF50, #66BB6A)'); ?>; color: white;">
-                        <div class="stat-icon" style="color: rgba(255,255,255,0.9);"><i class="fas fa-door-open"></i></div>
-                        <div class="stat-value"><?php echo $bounce_rate; ?>%</div>
-                        <div class="stat-label" style="color: rgba(255,255,255,0.95);">Bounce Rate <?php echo $bounce_rate > 60 ? '⚠️ CRITICAL' : ($bounce_rate > 40 ? '⚠️ HIGH' : '✓ Good'); ?></div>
+                    <div class="rh-strip__cell">
+                        <span class="rh-strip__label">Bounce rate</span>
+                        <strong class="rh-strip__value <?php echo $bounce_rate > 40 ? 'rh-strip__value--alert' : 'rh-strip__value--ok'; ?>"><?php echo $bounce_rate; ?>%</strong>
+                        <span class="rh-strip__sub"><?php echo $bounce_rate > 60 ? 'Critical' : ($bounce_rate > 40 ? 'High' : 'Good'); ?></span>
                     </div>
                 </div>
 
-                <!-- CRITICAL ALERTS -->
+                <!-- Issues needing action -->
                 <?php if ($bounce_rate > 50 || $abandoned_bookings > 0 || !empty($problem_pages)): ?>
-                    <div style="background: linear-gradient(135deg, #f44336, #e91e63); padding: 20px; border-radius: 8px; margin-bottom: 20px; box-shadow: 0 4px 12px rgba(244, 67, 54, 0.3);">
-                        <h2 style="color: #fff; margin: 0 0 16px 0; font-size: 22px; font-weight: 600; display: flex; align-items: center; gap: 10px;">
-                            <i class="fas fa-exclamation-triangle"></i> CRITICAL ISSUES - ACTION REQUIRED
-                        </h2>
-                        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 16px;">
+                    <section class="rh-panel">
+                        <div class="rh-panel__head">
+                            <h2 class="rh-panel__title">Needs attention</h2>
+                        </div>
+                        <ul class="va-issues">
                             <?php if ($bounce_rate > 50): ?>
-                                <div style="background: rgba(255,255,255,0.95); padding: 16px; border-radius: 6px; border-left: 4px solid #f44336;">
-                                    <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 8px;">
-                                        <i class="fas fa-user-slash" style="color: #f44336; font-size: 24px;"></i>
-                                        <strong style="color: #333; font-size: 15px;">High Bounce Rate</strong>
+                                <li class="va-issue">
+                                    <i class="fas fa-user-slash"></i>
+                                    <div>
+                                        <strong>High bounce rate</strong>
+                                        <span><?php echo $bounce_rate; ?>% of visitors leave after viewing only one page. Fix: improve landing page content, add clear CTAs, ensure mobile responsiveness.</span>
                                     </div>
-                                    <p style="margin: 0 0 8px 0; color: #666; font-size: 13px;"><?php echo $bounce_rate; ?>% of visitors leave after viewing only one page.</p>
-                                    <div style="background: #fff3cd; padding: 8px; border-radius: 4px; font-size: 12px; color: #856404;">
-                                        <strong>Fix:</strong> Improve landing page content, add clear CTAs, ensure mobile responsiveness
-                                    </div>
-                                </div>
+                                </li>
                             <?php endif; ?>
-
                             <?php if ($abandoned_bookings > 0): ?>
-                                <div style="background: rgba(255,255,255,0.95); padding: 16px; border-radius: 6px; border-left: 4px solid #ff9800;">
-                                    <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 8px;">
-                                        <i class="fas fa-shopping-cart" style="color: #ff9800; font-size: 24px;"></i>
-                                        <strong style="color: #333; font-size: 15px;">Cart Abandonment</strong>
+                                <li class="va-issue">
+                                    <i class="fas fa-shopping-cart"></i>
+                                    <div>
+                                        <strong>Cart abandonment</strong>
+                                        <span><?php echo number_format($abandoned_bookings); ?> visitors started booking but didn't complete. Fix: simplify the booking form, add trust badges, send follow-up emails.</span>
                                     </div>
-                                    <p style="margin: 0 0 8px 0; color: #666; font-size: 13px;"><?php echo number_format($abandoned_bookings); ?> visitors started booking but didn't complete.</p>
-                                    <div style="background: #fff3cd; padding: 8px; border-radius: 4px; font-size: 12px; color: #856404;">
-                                        <strong>Fix:</strong> Simplify booking form, add trust badges, enable save & continue later, send follow-up emails
-                                    </div>
-                                </div>
+                                </li>
                             <?php endif; ?>
-
                             <?php if (!empty($problem_pages)):
                                 $worst_page = $problem_pages[0];
                             ?>
-                                <div style="background: rgba(255,255,255,0.95); padding: 16px; border-radius: 6px; border-left: 4px solid #9c27b0;">
-                                    <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 8px;">
-                                        <i class="fas fa-chart-line-down" style="color: #9c27b0; font-size: 24px;"></i>
-                                        <strong style="color: #333; font-size: 15px;">Low Conversion Pages</strong>
+                                <li class="va-issue">
+                                    <i class="fas fa-chart-line-down"></i>
+                                    <div>
+                                        <strong>Low conversion pages</strong>
+                                        <span><?php echo count($problem_pages); ?> pages have high traffic but low booking conversions. Worst: <?php echo htmlspecialchars(basename($worst_page['page_url'])); ?> (<?php echo $worst_page['conversion_efficiency']; ?>% conversion).</span>
                                     </div>
-                                    <p style="margin: 0 0 8px 0; color: #666; font-size: 13px;"><?php echo count($problem_pages); ?> pages have high traffic but low booking conversions.</p>
-                                    <div style="background: #f3e5f5; padding: 8px; border-radius: 4px; font-size: 12px; color: #6a1b9a;">
-                                        <strong>Worst:</strong> <?php echo htmlspecialchars(basename($worst_page['page_url'])); ?> (<?php echo $worst_page['conversion_efficiency']; ?>% conversion)
-                                    </div>
-                                </div>
+                                </li>
                             <?php endif; ?>
-                        </div>
-                    </div>
+                        </ul>
+                    </section>
                 <?php endif; ?>
 
-                <!-- TRAFFIC SOURCES - ULTRA PROMINENT -->
-                <div style="background: linear-gradient(135deg, #2196F3, #1976D2); padding: 24px; border-radius: 8px; margin-bottom: 20px; box-shadow: 0 6px 16px rgba(33, 150, 243, 0.3);">
-                    <h2 style="color: #fff; margin: 0 0 8px 0; font-size: 24px; font-weight: 600; display: flex; align-items: center; gap: 12px;">
-                        <i class="fas fa-chart-pie"></i> WHERE YOUR TRAFFIC COMES FROM
-                    </h2>
-                    <p style="color: rgba(255,255,255,0.95); margin: 0 0 20px 0; font-size: 14px;">Know your sources, optimize your marketing spend</p>
-
+                <!-- Traffic sources by category -->
+                <section class="rh-panel rh-panel--flush">
+                    <div class="rh-panel__head">
+                        <h2 class="rh-panel__title">Where your traffic comes from</h2>
+                    </div>
                     <?php if (empty($traffic_by_category)): ?>
-                        <div style="background: rgba(255,255,255,0.15); padding: 20px; border-radius: 6px; text-align: center; color: white;">
-                            <i class="fas fa-info-circle" style="font-size: 32px; margin-bottom: 12px; opacity: 0.7;"></i>
-                            <p style="margin: 0; font-size: 15px;">No traffic source data yet. As visitors arrive, their sources will appear here.</p>
-                        </div>
+                        <p class="rh-empty">No traffic source data yet. As visitors arrive, their sources will appear here.</p>
                     <?php else: ?>
-                        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 16px; margin-bottom: 20px;">
-                            <?php
-                            $total_all_visits = max(1, array_sum(array_column($traffic_by_category, 'visits')));
-                            $source_colors = [
-                                'Direct Traffic' => '#4CAF50',
-                                'Search Engines' => '#2196F3',
-                                'Social Media' => '#E91E63',
-                                'Travel Sites' => '#FF9800',
-                                'Referral Sites' => '#9C27B0'
-                            ];
-                            foreach ($traffic_by_category as $tbc):
-                                $pct = round(($tbc['visits'] / $total_all_visits) * 100, 1);
-                                $color = $source_colors[$tbc['category']] ?? '#666';
-                            ?>
-                                <div style="background: rgba(255,255,255,0.95); padding: 18px; border-radius: 8px; border-top: 4px solid <?php echo $color; ?>; cursor: pointer; transition: transform 0.3s ease, box-shadow 0.3s ease;" class="traffic-source-card">
-                                    <div style="text-align: center;">
-                                        <div style="font-size: 36px; font-weight: 700; color: <?php echo $color; ?>; margin-bottom: 8px;">
-                                            <?php echo number_format($tbc['visits']); ?>
-                                        </div>
-                                        <div style="font-size: 14px; font-weight: 600; color: #333; margin-bottom: 4px;">
-                                            <?php echo htmlspecialchars($tbc['category']); ?>
-                                        </div>
-                                        <div style="font-size: 20px; font-weight: 600; color: <?php echo $color; ?>; margin-bottom: 12px;">
-                                            <?php echo $pct; ?>%
-                                        </div>
-                                        <div style="background: #f5f5f5; padding: 8px; border-radius: 4px;">
-                                            <div style="font-size: 12px; color: #666; margin-bottom: 4px;">
-                                                <?php echo number_format($tbc['unique_visitors']); ?> visitors • <?php echo number_format($tbc['sessions']); ?> sessions
-                                            </div>
-                                            <div style="font-size: 13px; font-weight: 600; color: <?php echo $tbc['conversion_rate'] > 5 ? '#4CAF50' : ($tbc['conversion_rate'] > 2 ? '#FF9800' : '#f44336'); ?>;">
-                                                <?php echo $tbc['conversion_rate']; ?>% conversion rate
-                                            </div>
-                                        </div>
-                                    </div>
-                                </div>
-                            <?php endforeach; ?>
+                        <div class="rh-panel__body">
+                            <table class="visitors-table va-table no-auto-pagination">
+                                <thead>
+                                    <tr>
+                                        <th>Source</th>
+                                        <th class="num">Visits</th>
+                                        <th class="num">Share</th>
+                                        <th class="num">Visitors</th>
+                                        <th class="num">Sessions</th>
+                                        <th class="num">Conversion</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    <?php
+                                    $total_all_visits = max(1, array_sum(array_column($traffic_by_category, 'visits')));
+                                    foreach ($traffic_by_category as $tbc):
+                                        $pct = round(($tbc['visits'] / $total_all_visits) * 100, 1);
+                                        $conv_class = $tbc['conversion_rate'] > 5 ? 'ok' : ($tbc['conversion_rate'] > 2 ? 'warn' : 'alert');
+                                    ?>
+                                        <tr>
+                                            <td><strong><?php echo htmlspecialchars($tbc['category']); ?></strong></td>
+                                            <td class="num"><?php echo number_format($tbc['visits']); ?></td>
+                                            <td class="num"><?php echo $pct; ?>%</td>
+                                            <td class="num"><?php echo number_format($tbc['unique_visitors']); ?></td>
+                                            <td class="num"><?php echo number_format($tbc['sessions']); ?></td>
+                                            <td class="num"><span class="rh-pill rh-pill--<?php echo $conv_class; ?>"><?php echo $tbc['conversion_rate']; ?>%</span></td>
+                                        </tr>
+                                    <?php endforeach; ?>
+                                </tbody>
+                            </table>
                         </div>
 
                         <!-- Detailed Traffic Sources -->
-                        <details style="background: rgba(255,255,255,0.15); padding: 16px; border-radius: 6px;">
-                            <summary style="color: white; font-weight: 600; cursor: pointer; font-size: 15px; list-style: none; display: flex; align-items: center; gap: 8px;">
-                                <i class="fas fa-chevron-right" style="transition: transform 0.2s; font-size: 12px;"></i>
-                                View Detailed Traffic Sources (<?php echo count($traffic_source_details); ?> sources)
+                        <details class="va-details">
+                            <summary>
+                                <i class="fas fa-chevron-right"></i>
+                                View detailed traffic sources (<?php echo count($traffic_source_details); ?> sources)
                             </summary>
-                            <div style="margin-top: 16px; max-height: 400px; overflow-y: auto;">
-                                <table style="width: 100%; background: white; border-radius: 4px; overflow: hidden;">
-                                    <thead style="background: rgba(0,0,0,0.05);">
+                            <div class="va-details__scroll">
+                                <table class="visitors-table va-table no-auto-pagination">
+                                    <thead>
                                         <tr>
-                                            <th style="text-align: left; padding: 10px; font-size: 13px; color: #333;">Source</th>
-                                            <th style="text-align: center; padding: 10px; font-size: 13px; color: #333;">Visits</th>
-                                            <th style="text-align: center; padding: 10px; font-size: 13px; color: #333;">Sessions</th>
-                                            <th style="text-align: center; padding: 10px; font-size: 13px; color: #333;">Conv. Rate</th>
+                                            <th>Source</th>
+                                            <th class="num">Visits</th>
+                                            <th class="num">Sessions</th>
+                                            <th class="num">Conv. rate</th>
                                         </tr>
                                     </thead>
                                     <tbody>
-                                        <?php foreach ($traffic_source_details as $tsd): ?>
-                                            <tr style="border-bottom: 1px solid #eee;">
-                                                <td style="padding: 10px; font-size: 13px;">
+                                        <?php foreach ($traffic_source_details as $tsd):
+                                            $tsd_class = $tsd['conversion_rate'] > 5 ? 'ok' : ($tsd['conversion_rate'] > 2 ? 'warn' : 'alert');
+                                        ?>
+                                            <tr>
+                                                <td>
                                                     <strong><?php echo htmlspecialchars($tsd['source_category']); ?></strong>
                                                     <?php if ($tsd['referrer_domain']): ?>
-                                                        <br><small style="color: #999;"><?php echo htmlspecialchars($tsd['referrer_domain']); ?></small>
+                                                        <small class="va-muted"><?php echo htmlspecialchars($tsd['referrer_domain']); ?></small>
                                                     <?php endif; ?>
                                                 </td>
-                                                <td style="text-align: center; padding: 10px; font-weight: 600;"><?php echo number_format($tsd['visits']); ?></td>
-                                                <td style="text-align: center; padding: 10px;"><?php echo number_format($tsd['sessions']); ?></td>
-                                                <td style="text-align: center; padding: 10px;">
-                                                    <span style="padding: 4px 8px; border-radius: 4px; font-size: 12px; font-weight: 600; background: <?php echo $tsd['conversion_rate'] > 5 ? '#4CAF50' : ($tsd['conversion_rate'] > 2 ? '#FF9800' : '#f44336'); ?>; color: white;">
-                                                        <?php echo round($tsd['conversion_rate'], 1); ?>%
-                                                    </span>
-                                                </td>
+                                                <td class="num"><?php echo number_format($tsd['visits']); ?></td>
+                                                <td class="num"><?php echo number_format($tsd['sessions']); ?></td>
+                                                <td class="num"><span class="rh-pill rh-pill--<?php echo $tsd_class; ?>"><?php echo round($tsd['conversion_rate'], 1); ?>%</span></td>
                                             </tr>
                                         <?php endforeach; ?>
                                     </tbody>
@@ -917,78 +891,70 @@ try {
                             </div>
                         </details>
                     <?php endif; ?>
-                </div>
+                </section>
 
-                <!-- WHERE WE'RE FAILING -->
+                <!-- Where visitors are lost -->
                 <?php if (!empty($exit_rates) || !empty($problem_pages)): ?>
-                    <div style="background: linear-gradient(135deg, #FF9800, #F57C00); padding: 20px; border-radius: 8px; margin-bottom: 20px;">
-                        <h2 style="color: #fff; margin: 0 0 16px 0; font-size: 20px; font-weight: 600; display: flex; align-items: center; gap: 10px;">
-                            <i class="fas fa-bug"></i> WHERE WE'RE LOSING MONEY
-                        </h2>
-
-                        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 16px;">
-                            <!-- High Exit Pages -->
-                            <?php if (!empty($exit_rates)): ?>
-                                <div style="background: white; padding: 16px; border-radius: 6px;">
-                                    <h3 style="margin: 0 0 12px 0; font-size: 15px; color: #333; display: flex; align-items: center; gap: 8px;">
-                                        <i class="fas fa-sign-out-alt" style="color: #f44336;"></i> High Exit Pages
-                                    </h3>
-                                    <p style="font-size: 12px; color: #666; margin-bottom: 12px;">Pages where visitors leave most often</p>
-                                    <div style="max-height: 240px; overflow-y: auto;">
-                                        <?php foreach (array_slice($exit_rates, 0, 5) as $er): ?>
-                                            <div style="padding: 10px; border-bottom: 1px solid #eee; display: flex; justify-content: space-between; align-items: center;">
-                                                <div style="flex: 1; min-width: 0;">
-                                                    <div style="font-size: 13px; color: #333; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
-                                                        <?php echo htmlspecialchars(basename($er['page_url'])); ?>
-                                                    </div>
-                                                    <small style="color: #999;"><?php echo number_format($er['total_views']); ?> views</small>
-                                                </div>
-                                                <div style="text-align: right; margin-left: 12px;">
-                                                    <div style="font-size: 16px; font-weight: 600; color: <?php echo $er['exit_rate'] > 60 ? '#f44336' : ($er['exit_rate'] > 40 ? '#ff9800' : '#4CAF50'); ?>;">
-                                                        <?php echo $er['exit_rate']; ?>%
-                                                    </div>
-                                                    <small style="color: #666;">exit rate</small>
-                                                </div>
-                                            </div>
-                                        <?php endforeach; ?>
-                                    </div>
+                    <div class="va-grid">
+                        <?php if (!empty($exit_rates)): ?>
+                            <section class="rh-panel rh-panel--flush">
+                                <div class="rh-panel__head">
+                                    <h2 class="rh-panel__title">High exit pages</h2>
+                                    <span class="va-muted">Pages where visitors leave most often</span>
                                 </div>
-                            <?php endif; ?>
-
-                            <!-- Low Conversion Pages -->
-                            <?php if (!empty($problem_pages)): ?>
-                                <div style="background: white; padding: 16px; border-radius: 6px;">
-                                    <h3 style="margin: 0 0 12px 0; font-size: 15px; color: #333; display: flex; align-items: center; gap: 8px;">
-                                        <i class="fas fa-chart-line-down" style="color: #9c27b0;"></i> Low Conversion Pages
-                                    </h3>
-                                    <p style="font-size: 12px; color: #666; margin-bottom: 12px;">High traffic but not converting to bookings</p>
-                                    <div style="max-height: 240px; overflow-y: auto;">
-                                        <?php foreach (array_slice($problem_pages, 0, 5) as $pp): ?>
-                                            <div style="padding: 10px; border-bottom: 1px solid #eee; display: flex; justify-content: space-between; align-items: center;">
-                                                <div style="flex: 1; min-width: 0;">
-                                                    <div style="font-size: 13px; color: #333; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
-                                                        <?php echo htmlspecialchars(basename($pp['page_url'])); ?>
-                                                    </div>
-                                                    <small style="color: #999;"><?php echo number_format($pp['views']); ?> views • <?php echo number_format($pp['sessions']); ?> sessions</small>
-                                                </div>
-                                                <div style="text-align: right; margin-left: 12px;">
-                                                    <div style="font-size: 16px; font-weight: 600; color: <?php echo $pp['conversion_efficiency'] > 10 ? '#4CAF50' : ($pp['conversion_efficiency'] > 5 ? '#ff9800' : '#f44336'); ?>;">
-                                                        <?php echo $pp['conversion_efficiency']; ?>%
-                                                    </div>
-                                                    <small style="color: #666;">to booking</small>
-                                                </div>
-                                            </div>
-                                        <?php endforeach; ?>
-                                    </div>
+                                <div class="rh-panel__body">
+                                    <table class="visitors-table va-table no-auto-pagination">
+                                        <thead>
+                                            <tr><th>Page</th><th class="num">Views</th><th class="num">Exit rate</th></tr>
+                                        </thead>
+                                        <tbody>
+                                            <?php foreach (array_slice($exit_rates, 0, 5) as $er):
+                                                $er_class = $er['exit_rate'] > 60 ? 'alert' : ($er['exit_rate'] > 40 ? 'warn' : 'ok');
+                                            ?>
+                                                <tr>
+                                                    <td class="va-cell-trunc"><?php echo htmlspecialchars(basename($er['page_url'])); ?></td>
+                                                    <td class="num"><?php echo number_format($er['total_views']); ?></td>
+                                                    <td class="num"><span class="rh-pill rh-pill--<?php echo $er_class; ?>"><?php echo $er['exit_rate']; ?>%</span></td>
+                                                </tr>
+                                            <?php endforeach; ?>
+                                        </tbody>
+                                    </table>
                                 </div>
-                            <?php endif; ?>
-                        </div>
+                            </section>
+                        <?php endif; ?>
+
+                        <?php if (!empty($problem_pages)): ?>
+                            <section class="rh-panel rh-panel--flush">
+                                <div class="rh-panel__head">
+                                    <h2 class="rh-panel__title">Low conversion pages</h2>
+                                    <span class="va-muted">High traffic but not converting to bookings</span>
+                                </div>
+                                <div class="rh-panel__body">
+                                    <table class="visitors-table va-table no-auto-pagination">
+                                        <thead>
+                                            <tr><th>Page</th><th class="num">Views</th><th class="num">Sessions</th><th class="num">To booking</th></tr>
+                                        </thead>
+                                        <tbody>
+                                            <?php foreach (array_slice($problem_pages, 0, 5) as $pp):
+                                                $pp_class = $pp['conversion_efficiency'] > 10 ? 'ok' : ($pp['conversion_efficiency'] > 5 ? 'warn' : 'alert');
+                                            ?>
+                                                <tr>
+                                                    <td class="va-cell-trunc"><?php echo htmlspecialchars(basename($pp['page_url'])); ?></td>
+                                                    <td class="num"><?php echo number_format($pp['views']); ?></td>
+                                                    <td class="num"><?php echo number_format($pp['sessions']); ?></td>
+                                                    <td class="num"><span class="rh-pill rh-pill--<?php echo $pp_class; ?>"><?php echo $pp['conversion_efficiency']; ?>%</span></td>
+                                                </tr>
+                                            <?php endforeach; ?>
+                                        </tbody>
+                                    </table>
+                                </div>
+                            </section>
+                        <?php endif; ?>
                     </div>
                 <?php endif; ?>
 
                 <!-- Hourly Traffic -->
-                <div class="analytics-card" style="margin-bottom: 20px;">
-                    <h3><i class="fas fa-clock"></i> Hourly Traffic Distribution</h3>
+                <div class="rh-panel"><div class="rh-panel__head"><h2 class="rh-panel__title">Hourly Traffic Distribution</h2></div>
                     <?php $max_hourly = max(1, max($hourly_data)); ?>
                     <div class="hourly-chart">
                         <?php for ($h = 0; $h < 24; $h++): ?>
@@ -1003,80 +969,59 @@ try {
                     </div>
                 </div>
 
-                <!-- SALES & MARKETING INSIGHTS -->
-                <div style="background: linear-gradient(135deg, #766550 0%, #8F6A35 100%); padding: 20px; border-radius: 8px; margin-bottom: 20px;">
-                    <h2 style="color: #fff; margin: 0; font-size: 20px; font-weight: 600; display: flex; align-items: center; gap: 10px;">
-                        <i class="fas fa-chart-line"></i> Sales & Marketing Insights
-                    </h2>
-                    <p style="color: rgba(255,255,255,0.9); margin: 6px 0 0 0; font-size: 14px;">Actionable data to drive bookings and revenue</p>
-                </div>
-
                 <!-- Conversion Funnel -->
-                <div class="analytics-card" style="margin-bottom: 20px;">
-                    <h3><i class="fas fa-filter"></i> Booking Conversion Funnel</h3>
-                    <p style="color: #666; font-size: 13px; margin-bottom: 16px;">Track visitor journey from homepage to booking confirmation</p>
+                <section class="rh-panel rh-panel--flush">
+                    <div class="rh-panel__head">
+                        <h2 class="rh-panel__title">Booking conversion funnel</h2>
+                        <span class="va-muted">Visitor journey from homepage to booking confirmation</span>
+                    </div>
                     <?php
                     $funnel_max = max(1, max(array_values($funnel ?? [])));
                     $funnel_steps = [
-                        ['key' => 'homepage', 'label' => 'Homepage Visits', 'icon' => 'fa-home', 'color' => '#4CAF50'],
-                        ['key' => 'rooms', 'label' => 'Viewed Rooms', 'icon' => 'fa-bed', 'color' => '#2196F3'],
-                        ['key' => 'booking', 'label' => 'Started Booking', 'icon' => 'fa-calendar-check', 'color' => '#FF9800'],
-                        ['key' => 'confirmation', 'label' => 'Completed Booking', 'icon' => 'fa-check-circle', 'color' => '#766550']
+                        ['key' => 'homepage', 'label' => 'Homepage visits'],
+                        ['key' => 'rooms', 'label' => 'Viewed rooms'],
+                        ['key' => 'booking', 'label' => 'Started booking'],
+                        ['key' => 'confirmation', 'label' => 'Completed booking']
                     ];
                     ?>
-                    <div style="display: flex; gap: 12px; align-items: stretch;">
-                        <?php foreach ($funnel_steps as $idx => $step):
-                            $value = (int)($funnel[$step['key']] ?? 0);
-                            $pct = $funnel_max > 0 ? round(($value / $funnel_max) * 100) : 0;
-                            $prev_value = $idx > 0 ? (int)($funnel[$funnel_steps[$idx - 1]['key']] ?? 0) : $value;
-                            $drop_rate = $prev_value > 0 ? round((($prev_value - $value) / $prev_value) * 100) : 0;
-                        ?>
-                            <div style="flex: 1; background: #f9f9f9; border-radius: 8px; padding: 16px; position: relative;">
-                                <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 8px;">
-                                    <i class="fas <?php echo $step['icon']; ?>" style="color: <?php echo $step['color']; ?>; font-size: 18px;"></i>
-                                    <strong style="font-size: 13px; color: #333;"><?php echo $step['label']; ?></strong>
-                                </div>
-                                <div style="font-size: 28px; font-weight: 600; color: <?php echo $step['color']; ?>; margin: 8px 0;">
-                                    <?php echo number_format($value); ?>
-                                </div>
-                                <div style="background: #e0e0e0; height: 6px; border-radius: 3px; overflow: hidden; margin-bottom: 8px;">
-                                    <div style="background: <?php echo $step['color']; ?>; height: 100%; width: <?php echo $pct; ?>%;"></div>
-                                </div>
-                                <?php if ($idx > 0 && $drop_rate > 0): ?>
-                                    <small style="color: #f44336; font-weight: 500;">
-                                        <i class="fas fa-arrow-down"></i> <?php echo $drop_rate; ?>% drop-off
-                                    </small>
-                                <?php endif; ?>
-                                <?php if ($idx > 0 && $prev_value > 0): ?>
-                                    <small style="color: #666; display: block; margin-top: 4px;">
-                                        <?php echo round(($value / $prev_value) * 100, 1); ?>% conversion
-                                    </small>
-                                <?php endif; ?>
-                            </div>
-                            <?php if ($idx < count($funnel_steps) - 1): ?>
-                                <div style="display: flex; align-items: center; color: #999;">
-                                    <i class="fas fa-arrow-right"></i>
-                                </div>
-                            <?php endif; ?>
-                        <?php endforeach; ?>
+                    <div class="rh-panel__body">
+                        <table class="visitors-table va-table no-auto-pagination">
+                            <thead>
+                                <tr><th>Step</th><th class="num">Visitors</th><th>Of top step</th><th class="num">Drop-off</th><th class="num">Conversion</th></tr>
+                            </thead>
+                            <tbody>
+                                <?php foreach ($funnel_steps as $idx => $step):
+                                    $value = (int)($funnel[$step['key']] ?? 0);
+                                    $pct = $funnel_max > 0 ? round(($value / $funnel_max) * 100) : 0;
+                                    $prev_value = $idx > 0 ? (int)($funnel[$funnel_steps[$idx - 1]['key']] ?? 0) : $value;
+                                    $drop_rate = $prev_value > 0 ? round((($prev_value - $value) / $prev_value) * 100) : 0;
+                                ?>
+                                    <tr>
+                                        <td><strong><?php echo $step['label']; ?></strong></td>
+                                        <td class="num"><?php echo number_format($value); ?></td>
+                                        <td>
+                                            <div class="va-meter"><div class="va-meter__fill" style="width: <?php echo $pct; ?>%;"></div></div>
+                                        </td>
+                                        <td class="num"><?php echo ($idx > 0 && $drop_rate > 0) ? '<span class="va-bad">' . $drop_rate . '%</span>' : '&mdash;'; ?></td>
+                                        <td class="num"><?php echo ($idx > 0 && $prev_value > 0) ? round(($value / $prev_value) * 100, 1) . '%' : '&mdash;'; ?></td>
+                                    </tr>
+                                <?php endforeach; ?>
+                            </tbody>
+                        </table>
                     </div>
                     <?php if ($abandoned_bookings > 0): ?>
-                        <div style="margin-top: 16px; padding: 12px; background: #fff3cd; border-left: 4px solid #ff9800; border-radius: 4px;">
-                            <strong style="color: #856404;"><i class="fas fa-exclamation-triangle"></i> <?php echo number_format($abandoned_bookings); ?> abandoned bookings</strong>
-                            <p style="margin: 4px 0 0 0; font-size: 13px; color: #856404;">Visitors who reached the booking page but didn't complete. Consider retargeting or follow-up campaigns.</p>
-                        </div>
+                        <p class="va-footnote"><i class="fas fa-exclamation-triangle"></i> <strong><?php echo number_format($abandoned_bookings); ?> abandoned bookings</strong> &mdash; visitors who reached the booking page but didn't complete. Consider retargeting or follow-up campaigns.</p>
                     <?php endif; ?>
-                </div>
+                </section>
 
                 <!-- Two-column layout for additional insights -->
-                <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 20px; margin-bottom: 20px;">
+                <div class="va-grid">
 
                     <!-- Traffic Sources -->
-                    <div class="analytics-card">
-                        <h3><i class="fas fa-bullseye"></i> Traffic Sources</h3>
-                        <p style="color: #666; font-size: 13px; margin-bottom: 12px;">Where your visitors come from</p>
+                    <div class="rh-panel"><div class="rh-panel__head"><h2 class="rh-panel__title">Traffic Sources</h2></div>
+                        <p class="va-note">Where your visitors come from</p>
                         <?php if (empty($traffic_sources)): ?>
-                            <p style="color: #999; text-align: center; padding: 20px;">No traffic source data</p>
+                            <p class="rh-empty">No traffic source data</p>
                         <?php else: ?>
                             <ul class="breakdown-list">
                                 <?php
@@ -1104,9 +1049,8 @@ try {
                     </div>
 
                     <!-- Visitor Loyalty -->
-                    <div class="analytics-card">
-                        <h3><i class="fas fa-heart"></i> Visitor Loyalty</h3>
-                        <p style="color: #666; font-size: 13px; margin-bottom: 12px;">New vs returning visitors</p>
+                    <div class="rh-panel"><div class="rh-panel__head"><h2 class="rh-panel__title">Visitor Loyalty</h2></div>
+                        <p class="va-note">New vs returning visitors</p>
                         <?php
                         $new_vis = (int)($visitor_loyalty['new_unique'] ?? 0);
                         $ret_vis = (int)($visitor_loyalty['returning'] ?? 0);
@@ -1114,29 +1058,20 @@ try {
                         $new_pct = round(($new_vis / $total_loyalty) * 100);
                         $ret_pct = round(($ret_vis / $total_loyalty) * 100);
                         ?>
-                        <div style="display: flex; gap: 20px; margin-bottom: 16px;">
-                            <div style="flex: 1; text-align: center; padding: 20px; background: linear-gradient(135deg, #4CAF50, #66BB6A); border-radius: 8px; color: #fff;">
-                                <div style="font-size: 32px; font-weight: 600; margin-bottom: 8px;"><?php echo number_format($new_vis); ?></div>
-                                <div style="font-size: 13px; opacity: 0.95;">New Visitors</div>
-                                <div style="font-size: 18px; font-weight: 600; margin-top: 4px;"><?php echo $new_pct; ?>%</div>
-                            </div>
-                            <div style="flex: 1; text-align: center; padding: 20px; background: linear-gradient(135deg, #766550, #8F6A35); border-radius: 8px; color: #fff;">
-                                <div style="font-size: 32px; font-weight: 600; margin-bottom: 8px;"><?php echo number_format($ret_vis); ?></div>
-                                <div style="font-size: 13px; opacity: 0.95;">Returning Visitors</div>
-                                <div style="font-size: 18px; font-weight: 600; margin-top: 4px;"><?php echo $ret_pct; ?>%</div>
-                            </div>
-                        </div>
-                        <p style="font-size: 13px; color: #666; text-align: center;">
-                            <i class="fas fa-info-circle"></i> Returning visitors indicate brand loyalty and satisfaction
-                        </p>
+                        <table class="rh-kv no-auto-pagination">
+                            <tbody>
+                                <tr><th scope="row">New visitors</th><td><?php echo number_format($new_vis); ?> <small class="va-muted"><?php echo $new_pct; ?>%</small></td></tr>
+                                <tr><th scope="row">Returning visitors</th><td><?php echo number_format($ret_vis); ?> <small class="va-muted"><?php echo $ret_pct; ?>%</small></td></tr>
+                            </tbody>
+                        </table>
+                        <p class="va-note"><i class="fas fa-info-circle"></i> Returning visitors indicate brand loyalty and satisfaction</p>
                     </div>
 
                     <!-- Entry Pages -->
-                    <div class="analytics-card">
-                        <h3><i class="fas fa-door-open"></i> Top Entry Pages</h3>
-                        <p style="color: #666; font-size: 13px; margin-bottom: 12px;">Where visitors first land on your site</p>
+                    <div class="rh-panel"><div class="rh-panel__head"><h2 class="rh-panel__title">Top Entry Pages</h2></div>
+                        <p class="va-note">Where visitors first land on your site</p>
                         <?php if (empty($entry_pages)): ?>
-                            <p style="color: #999; text-align: center; padding: 20px;">No entry page data</p>
+                            <p class="rh-empty">No entry page data</p>
                         <?php else: ?>
                             <ul style="list-style: none; padding: 0; margin: 0;">
                                 <?php foreach (array_slice($entry_pages, 0, 5) as $ep): ?>
@@ -1152,11 +1087,10 @@ try {
                     </div>
 
                     <!-- Exit Pages -->
-                    <div class="analytics-card">
-                        <h3><i class="fas fa-door-closed"></i> Top Exit Pages</h3>
-                        <p style="color: #666; font-size: 13px; margin-bottom: 12px;">Where visitors leave your site</p>
+                    <div class="rh-panel"><div class="rh-panel__head"><h2 class="rh-panel__title">Top Exit Pages</h2></div>
+                        <p class="va-note">Where visitors leave your site</p>
                         <?php if (empty($exit_pages)): ?>
-                            <p style="color: #999; text-align: center; padding: 20px;">No exit page data</p>
+                            <p class="rh-empty">No exit page data</p>
                         <?php else: ?>
                             <ul style="list-style: none; padding: 0; margin: 0;">
                                 <?php foreach (array_slice($exit_pages, 0, 5) as $exp): ?>
@@ -1177,9 +1111,8 @@ try {
                 </div>
 
                 <!-- Peak Booking Hours -->
-                <div class="analytics-card" style="margin-bottom: 20px;">
-                    <h3><i class="fas fa-calendar-check"></i> Peak Booking Hours</h3>
-                    <p style="color: #666; font-size: 13px; margin-bottom: 12px;">When guests actually complete bookings - optimize your marketing campaigns around these times</p>
+                <div class="rh-panel"><div class="rh-panel__head"><h2 class="rh-panel__title">Peak Booking Hours</h2></div>
+                    <p class="va-note">When guests actually complete bookings - optimize your marketing campaigns around these times</p>
                     <?php $max_booking_hourly = max(1, max($booking_hours)); ?>
                     <div class="hourly-chart">
                         <?php for ($h = 0; $h < 24; $h++): ?>
@@ -1195,13 +1128,12 @@ try {
                 </div>
 
                 <!-- Room Interest & Geographic Opportunities -->
-                <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 20px; margin-bottom: 20px;">
+                <div class="va-grid">
 
                     <!-- Most Viewed Rooms -->
                     <?php if (!empty($room_views)): ?>
-                        <div class="analytics-card">
-                            <h3><i class="fas fa-bed"></i> Most Viewed Rooms</h3>
-                            <p style="color: #666; font-size: 13px; margin-bottom: 12px;">Rooms attracting the most interest</p>
+                        <div class="rh-panel"><div class="rh-panel__head"><h2 class="rh-panel__title">Most Viewed Rooms</h2></div>
+                            <p class="va-note">Rooms attracting the most interest</p>
                             <ul style="list-style: none; padding: 0; margin: 0;">
                                 <?php foreach (array_slice($room_views, 0, 5) as $rv):
                                     $room_id = '';
@@ -1227,9 +1159,8 @@ try {
 
                     <!-- Geographic Opportunities -->
                     <?php if (!empty($geo_opportunities)): ?>
-                        <div class="analytics-card">
-                            <h3><i class="fas fa-globe-africa"></i> Geographic Opportunities</h3>
-                            <p style="color: #666; font-size: 13px; margin-bottom: 12px;">High-traffic countries - potential for targeted campaigns</p>
+                        <div class="rh-panel"><div class="rh-panel__head"><h2 class="rh-panel__title">Geographic Opportunities</h2></div>
+                            <p class="va-note">High-traffic countries - potential for targeted campaigns</p>
                             <ul style="list-style: none; padding: 0; margin: 0;">
                                 <?php foreach (array_slice($geo_opportunities, 0, 6) as $geo):
                                     $conv_rate = $geo['visitor_sessions'] > 0 ? round(($geo['bookings'] / $geo['visitor_sessions']) * 100, 1) : 0;
@@ -1252,24 +1183,22 @@ try {
                     <?php endif; ?>
 
                     <!-- Engagement Metric -->
-                    <div class="analytics-card">
-                        <h3><i class="fas fa-mouse-pointer"></i> Engagement</h3>
-                        <p style="color: #666; font-size: 13px; margin-bottom: 12px;">How deeply visitors explore your site</p>
-                        <div style="text-align: center; padding: 30px 20px; background: linear-gradient(135deg, #f5f5f5, #fff); border-radius: 8px;">
-                            <div style="font-size: 48px; font-weight: 600; color: var(--gold); margin-bottom: 12px;">
-                                <?php echo number_format($avg_pages_per_session, 1); ?>
-                            </div>
-                            <div style="font-size: 15px; color: #666; font-weight: 500;">Pages per Session</div>
-                            <div style="margin-top: 16px; padding-top: 16px; border-top: 1px solid #ddd; font-size: 13px; color: #666;">
-                                <?php if ($avg_pages_per_session >= 3): ?>
-                                    <i class="fas fa-check-circle" style="color: #4CAF50;"></i> Excellent engagement
-                                <?php elseif ($avg_pages_per_session >= 2): ?>
-                                    <i class="fas fa-thumbs-up" style="color: #FF9800;"></i> Good engagement
-                                <?php else: ?>
-                                    <i class="fas fa-arrow-up" style="color: #2196F3;"></i> Room for improvement
-                                <?php endif; ?>
-                            </div>
-                        </div>
+                    <div class="rh-panel"><div class="rh-panel__head"><h2 class="rh-panel__title">Engagement</h2></div>
+                        <p class="va-note">How deeply visitors explore your site</p>
+                        <table class="rh-kv no-auto-pagination">
+                            <tbody>
+                                <tr><th scope="row">Pages per session</th><td><?php echo number_format($avg_pages_per_session, 1); ?></td></tr>
+                                <tr><th scope="row">Assessment</th><td>
+                                    <?php if ($avg_pages_per_session >= 3): ?>
+                                        <span class="rh-pill rh-pill--ok">Excellent engagement</span>
+                                    <?php elseif ($avg_pages_per_session >= 2): ?>
+                                        <span class="rh-pill rh-pill--warn">Good engagement</span>
+                                    <?php else: ?>
+                                        <span class="rh-pill rh-pill--muted">Room for improvement</span>
+                                    <?php endif; ?>
+                                </td></tr>
+                            </tbody>
+                        </table>
                     </div>
 
                 </div>
@@ -1277,10 +1206,9 @@ try {
                 <!-- Breakdowns -->
                 <div class="analytics-grid">
                     <!-- Country Breakdown -->
-                    <div class="analytics-card">
-                        <h3><i class="fas fa-earth-africa"></i> Countries</h3>
+                    <div class="rh-panel"><div class="rh-panel__head"><h2 class="rh-panel__title">Countries</h2></div>
                         <?php if (empty($country_breakdown)): ?>
-                            <p style="color: #999; text-align: center; padding: 20px;">No country data yet</p>
+                            <p class="rh-empty">No country data yet</p>
                         <?php else: ?>
                             <ul class="breakdown-list">
                                 <?php
@@ -1301,10 +1229,9 @@ try {
                     </div>
 
                     <!-- Device Breakdown -->
-                    <div class="analytics-card">
-                        <h3><i class="fas fa-mobile-alt"></i> Devices</h3>
+                    <div class="rh-panel"><div class="rh-panel__head"><h2 class="rh-panel__title">Devices</h2></div>
                         <?php if (empty($devices)): ?>
-                            <p style="color: #999; text-align: center; padding: 20px;">No data yet</p>
+                            <p class="rh-empty">No data yet</p>
                         <?php else: ?>
                             <ul class="breakdown-list">
                                 <?php
@@ -1328,10 +1255,9 @@ try {
                     </div>
 
                     <!-- Browser Breakdown -->
-                    <div class="analytics-card">
-                        <h3><i class="fas fa-globe"></i> Browsers</h3>
+                    <div class="rh-panel"><div class="rh-panel__head"><h2 class="rh-panel__title">Browsers</h2></div>
                         <?php if (empty($browsers)): ?>
-                            <p style="color: #999; text-align: center; padding: 20px;">No data yet</p>
+                            <p class="rh-empty">No data yet</p>
                         <?php else: ?>
                             <ul class="breakdown-list">
                                 <?php
@@ -1352,10 +1278,9 @@ try {
                     </div>
 
                     <!-- OS Breakdown -->
-                    <div class="analytics-card">
-                        <h3><i class="fas fa-laptop"></i> Operating Systems</h3>
+                    <div class="rh-panel"><div class="rh-panel__head"><h2 class="rh-panel__title">Operating Systems</h2></div>
                         <?php if (empty($operating_systems)): ?>
-                            <p style="color: #999; text-align: center; padding: 20px;">No data yet</p>
+                            <p class="rh-empty">No data yet</p>
                         <?php else: ?>
                             <ul class="breakdown-list">
                                 <?php
@@ -1376,10 +1301,9 @@ try {
                     </div>
 
                     <!-- Top Referrers -->
-                    <div class="analytics-card">
-                        <h3><i class="fas fa-link"></i> Top Referrers</h3>
+                    <div class="rh-panel"><div class="rh-panel__head"><h2 class="rh-panel__title">Top Referrers</h2></div>
                         <?php if (empty($referrers)): ?>
-                            <p style="color: #999; text-align: center; padding: 20px;">No referrer data yet</p>
+                            <p class="rh-empty">No referrer data yet</p>
                         <?php else: ?>
                             <ul class="breakdown-list">
                                 <?php
@@ -1401,8 +1325,7 @@ try {
                 </div>
 
                 <!-- Most Visited Sections -->
-                <div class="analytics-card" style="margin-bottom: 20px;">
-                    <h3><i class="fas fa-layer-group"></i> Most Visited Sections</h3>
+                <div class="rh-panel"><div class="rh-panel__head"><h2 class="rh-panel__title">Most Visited Sections</h2></div>
                     <div class="table-wrapper">
                         <table class="visitors-table tablet-table no-scroll">
                             <thead>
@@ -1432,8 +1355,7 @@ try {
                 </div>
 
                 <!-- Top Visitor IPs -->
-                <div class="analytics-card" style="margin-bottom: 20px;">
-                    <h3><i class="fas fa-network-wired"></i> Top Visitor IPs</h3>
+                <div class="rh-panel"><div class="rh-panel__head"><h2 class="rh-panel__title">Top Visitor IPs</h2></div>
                     <div class="table-wrapper">
                         <table class="visitors-table tablet-table no-scroll">
                             <thead>
@@ -1465,8 +1387,7 @@ try {
                 </div>
 
                 <!-- Top Pages -->
-                <div class="analytics-card" style="margin-bottom: 20px;">
-                    <h3><i class="fas fa-file-alt"></i> Top Pages</h3>
+                <div class="rh-panel"><div class="rh-panel__head"><h2 class="rh-panel__title">Top Pages</h2></div>
                     <div class="table-wrapper">
                         <table class="visitors-table tablet-table no-scroll">
                             <thead>
@@ -1496,8 +1417,7 @@ try {
                 </div>
 
                 <!-- Recent Visitors Log -->
-                <div class="analytics-card" id="visitor-log-container">
-                    <h3><i class="fas fa-list"></i> Recent Visitor Log</h3>
+                <div class="rh-panel" id="visitor-log-container"><div class="rh-panel__head"><h2 class="rh-panel__title">Recent Visitor Log</h2></div>
                     <div class="table-wrapper">
                         <table class="visitors-table tablet-table no-scroll">
                             <thead>

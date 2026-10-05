@@ -3051,3 +3051,366 @@ body.modal-open {
     font-size: 0.8rem;
     color: #6b6258;
 }
+
+
+/* ==========================================================================
+   SHARED PAGE LAYOUT COMPONENTS (rh-*)
+   Generic building blocks so every admin page looks the same. Pattern comes from
+   booking-details. Use these first; add a page class only for genuinely page-specific bits.
+
+   Markup skeleton:
+
+   Page header (title + pill left, buttons right):
+     <header class="rh-page-head">
+       <div class="rh-page-head__main">
+         <div class="rh-page-head__title"><h1>Title</h1><span class="rh-pill rh-pill--ok">Active</span></div>
+         <p class="rh-page-head__meta">One muted line of context</p>
+       </div>
+       <div class="rh-page-head__actions"><a class="btn ..." href="#">Action</a></div>
+     </header>
+
+   Summary strip (one bordered bar split into cells):
+     <div class="rh-strip" role="group" aria-label="Summary">
+       <div class="rh-strip__cell">
+         <span class="rh-strip__label">Label</span>
+         <strong class="rh-strip__value">123.00</strong>     (add --alert for red, --ok for green)
+         <span class="rh-strip__sub">optional small note</span>
+       </div>
+     </div>
+
+   Two-column body (2/3 + 1/3, stacks under 1000px):
+     <div class="rh-layout">
+       <div> ...panels... </div>
+       <aside class="rh-layout__side"> ...panels... </aside>
+     </div>
+
+   Panel (add rh-panel--flush when the body is a table or list that should touch the edges):
+     <section class="rh-panel">
+       <div class="rh-panel__head">
+         <h2 class="rh-panel__title">Title</h2>
+         <div class="rh-panel__actions"><button class="btn ...">Add</button></div>
+       </div>
+       <div class="rh-panel__body"> content </div>
+       <p class="rh-empty">Nothing here yet.</p>           (one-line empty state)
+     </section>
+
+   Key/value table (put inside a panel, no wrapper needed):
+     <table class="rh-kv"><tbody>
+       <tr><th scope="row">Email</th><td>a@b.com <a class="rh-mini-link" href="#">Copy</a></td></tr>
+     </tbody></table>
+
+   Pills: <span class="rh-pill rh-pill--ok|warn|alert|muted">Text</span>
+   ========================================================================== */
+:root {
+    --rh-ink: #231F1C;
+    --rh-muted: #5E554D;
+    --rh-brand: var(--color-primary, #766550);
+    --rh-brand-dark: #5f503f;
+    --rh-line: var(--admin-surface-border, #d7dde6);
+    --rh-line-soft: #eceff3;
+    --rh-danger: #b9201d;
+    --rh-ok: #166534;
+}
+
+/* Page header */
+.rh-page-head {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 1rem 1.5rem;
+    background: #fff;
+    border: 1px solid var(--rh-line);
+    border-left: 4px solid var(--rh-brand);
+    border-radius: 10px;
+    padding: 0.85rem 0.9rem;
+    margin-bottom: 0.9rem;
+}
+
+.rh-page-head__main {
+    flex: 1 1 320px;
+    min-width: 0;
+}
+
+.rh-page-head__title {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.5rem 0.75rem;
+}
+
+.rh-page-head__title h1,
+.rh-page-head__title h2 {
+    margin: 0;
+    font-family: 'Cormorant Garamond', serif;
+    font-size: clamp(1.5rem, 1.1rem + 1.4vw, 2rem);
+    font-weight: 600;
+    line-height: 1.15;
+    color: var(--rh-ink);
+    overflow-wrap: anywhere;
+}
+
+.rh-page-head__meta {
+    margin: 0.2rem 0 0;
+    font-size: 0.75rem;
+    color: var(--rh-muted);
+}
+
+.rh-page-head__actions {
+    flex: 1 1 360px;
+    min-width: 0;
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: flex-start;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+/* Summary strip */
+.rh-strip {
+    display: flex;
+    flex-wrap: wrap;
+    overflow: hidden;
+    background: #fff;
+    border: 1px solid var(--rh-line);
+    border-radius: 10px;
+    margin-bottom: 1rem;
+}
+
+.rh-strip__cell {
+    flex: 1 1 45%;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    gap: 0.2rem;
+    padding: 0.7rem 1rem;
+    margin: 0 -1px -1px 0;
+    border-right: 1px solid var(--rh-line);
+    border-bottom: 1px solid var(--rh-line);
+}
+
+.rh-strip__label {
+    font-size: 0.68rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--rh-muted);
+}
+
+.rh-strip__value {
+    font-size: clamp(0.95rem, 0.85rem + 0.3vw, 1.1rem);
+    font-weight: 700;
+    color: var(--rh-ink);
+    overflow-wrap: anywhere;
+}
+
+.rh-strip__value--alert { color: var(--rh-danger); }
+.rh-strip__value--ok    { color: var(--rh-ok); }
+
+.rh-strip__sub {
+    font-size: 0.72rem;
+    color: var(--rh-muted);
+}
+
+/* Two-column layout: 2/3 + 1/3, stacks on small screens */
+.rh-layout {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    gap: 1rem;
+    align-items: start;
+}
+
+.rh-layout > *,
+.rh-layout__side {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    gap: 1rem;
+    align-content: start;
+    min-width: 0;
+}
+
+/* Panels */
+.rh-panel {
+    background: #fff;
+    border: 1px solid var(--rh-line);
+    border-radius: 10px;
+    overflow: hidden;
+    min-width: 0;
+}
+
+.rh-panel__head {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.5rem 0.75rem;
+    padding: 0.65rem 1rem;
+    background: #faf8f5;
+    border-bottom: 1px solid var(--rh-line);
+}
+
+.rh-panel__title {
+    margin: 0;
+    font-family: 'Jost', sans-serif;
+    font-size: 0.95rem;
+    font-weight: 600;
+    letter-spacing: 0.01em;
+    color: var(--rh-ink);
+}
+
+.rh-panel__actions {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+.rh-panel__actions form {
+    margin: 0;
+}
+
+.rh-panel__body {
+    padding: 0.85rem 1rem;
+}
+
+.rh-panel--flush .rh-panel__body {
+    padding: 0;
+    overflow-x: auto;
+}
+
+.rh-empty {
+    margin: 0;
+    padding: 0.85rem 1rem;
+    font-size: 0.85rem;
+    color: var(--rh-muted);
+}
+
+/* Key/value table */
+.rh-kv {
+    width: 100%;
+    border-collapse: collapse;
+}
+
+.rh-kv th,
+.rh-kv td {
+    padding: 0.55rem 0.5rem 0.55rem 0.75rem;
+    border-bottom: 1px solid var(--rh-line-soft);
+    font-size: 0.88rem;
+    text-align: left;
+    vertical-align: top;
+}
+
+.rh-kv tr:last-child th,
+.rh-kv tr:last-child td {
+    border-bottom: none;
+}
+
+.rh-kv th {
+    width: 38%;
+    max-width: 200px;
+    font-size: 0.78rem;
+    font-weight: 600;
+    color: var(--rh-muted);
+    background: #fcfbf9;
+}
+
+.rh-kv td {
+    padding-right: 0.75rem;
+    color: var(--rh-ink);
+    overflow-wrap: anywhere;
+}
+
+/* Pills */
+.rh-pill {
+    align-self: flex-start;
+    display: inline-flex;
+    align-items: center;
+    padding: 0.2rem 0.7rem;
+    border-radius: 999px;
+    border: 1px solid #d4d4d4;
+    background: #f1f1f1;
+    color: #444;
+    font-size: 0.78rem;
+    font-weight: 700;
+    white-space: nowrap;
+}
+
+.rh-pill--ok    { background: #e3f5ea; color: #14532d; border-color: #a7dbb8; }
+.rh-pill--warn  { background: #fef3c7; color: #78350f; border-color: #f2d27a; }
+.rh-pill--alert { background: #fde8e8; color: #991b1b; border-color: #f3b4b4; }
+.rh-pill--muted { background: #f4f0ea; color: #4a3f31; border-color: #ddd2c2; }
+
+/* Small inline link-button */
+.rh-mini-link {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.3rem;
+    min-height: 28px;
+    margin: 0.25rem 0 0;
+    padding: 0.1rem 0.55rem;
+    border: 1px solid #c9bda9;
+    border-radius: 6px;
+    color: var(--rh-brand-dark);
+    font-size: 0.75rem;
+    font-weight: 600;
+    text-decoration: none;
+    vertical-align: middle;
+}
+
+.rh-mini-link:hover {
+    background: #f4f0ea;
+}
+
+@media (pointer: coarse) {
+    .rh-mini-link {
+        min-height: 44px;
+        padding: 0.3rem 0.8rem;
+    }
+}
+
+@media (min-width: 600px) {
+    .rh-page-head {
+        padding: 1rem 1.25rem;
+    }
+
+    .rh-strip__cell {
+        flex-basis: 165px;
+    }
+
+    .rh-kv th,
+    .rh-kv td {
+        padding-left: 1rem;
+        padding-right: 1rem;
+    }
+
+    .rh-kv th {
+        width: 34%;
+    }
+
+    .rh-mini-link {
+        margin: 0 0 0 0.5rem;
+    }
+}
+
+@media (min-width: 1000px) {
+    .rh-page-head__actions {
+        justify-content: flex-end;
+    }
+
+    .rh-layout {
+        grid-template-columns: minmax(0, 2fr) minmax(0, 1fr);
+    }
+}
+
+/* Pages built with .rh-page-head carry their own title, so the generic title that
+   admin-page-intro.js injects would be a second header: hide it on those pages only. */
+#rh-admin-page:has(.rh-page-head) .rh-admin-page-header {
+    display: none;
+}
+
+/* Let the identity block take the free width so a status pill stays beside the title. */
+.rh-page-head__main {
+    flex: 1 1 22rem;
+    min-width: 0;
+}

@@ -1029,12 +1029,12 @@ try {
 
     <div class="reports-container finance-page">
 
-        <div class="acct-page-header">
-            <div class="acct-page-header__copy">
-                <h1 class="acct-page-header__title"><i class="fas fa-chart-line"></i> Reports &amp; Analytics</h1>
-                <p class="acct-page-header__subtitle">Central accounting intelligence — P&amp;L, VAT, aging, and operational KPIs</p>
+        <header class="rh-page-head">
+            <div class="rh-page-head__main">
+                <div class="rh-page-head__title"><h1>Reports &amp; Analytics</h1></div>
+                <p class="rh-page-head__meta">Central accounting intelligence — P&amp;L, VAT, aging, and operational KPIs &middot; <?php echo htmlspecialchars($start_date); ?> to <?php echo htmlspecialchars($end_date); ?></p>
             </div>
-            <div class="acct-quick-actions">
+            <div class="rh-page-head__actions">
                 <a href="payments.php" class="acct-quick-action"><i class="fas fa-money-bill-wave"></i> Payments</a>
                 <?php if (function_exists('rh_module_key_enabled') && rh_module_key_enabled('billing')): ?>
                 <a href="invoices.php" class="acct-quick-action"><i class="fas fa-file-invoice"></i> Invoices</a>
@@ -1042,7 +1042,7 @@ try {
                 <a href="accounting-dashboard.php" class="acct-quick-action"><i class="fas fa-tachometer-alt"></i> Dashboard</a>
                 <button type="button" class="acct-quick-action" onclick="exportToCSV()"><i class="fas fa-download"></i> Export CSV</button>
             </div>
-        </div>
+        </header>
 
         <!-- Report Tabs -->
         <div class="report-tabs">
@@ -1159,26 +1159,26 @@ try {
                     if ($mod_events) { $_rpt_categories[] = 'Events'; }
                     if ($mod_pos) { $_rpt_categories[] = rh_pos_short_label(); }
                 ?>
-                <div class="acct-kpis">
-                    <div class="acct-kpi acct-kpi--revenue">
-                        <div class="acct-kpi__label">Gross Revenue</div>
-                        <div class="acct-kpi__value"><?php echo $currency_symbol . ' ' . number_format($grossRevenue, 2); ?></div>
-                        <div class="acct-kpi__sub"><?php echo htmlspecialchars(implode(' + ', $_rpt_categories) ?: 'Revenue'); ?> <?php echo rh_reports_delta($grossRevenue, $priorRevenue); ?></div>
+                <div class="rh-strip" role="group" aria-label="Summary">
+                    <div class="rh-strip__cell">
+                        <span class="rh-strip__label">Gross Revenue</span>
+                        <strong class="rh-strip__value"><?php echo $currency_symbol . ' ' . number_format($grossRevenue, 2); ?></strong>
+                        <span class="rh-strip__sub"><?php echo htmlspecialchars(implode(' + ', $_rpt_categories) ?: 'Revenue'); ?> <?php echo rh_reports_delta($grossRevenue, $priorRevenue); ?></span>
                     </div>
-                    <div class="acct-kpi acct-kpi--cash">
-                        <div class="acct-kpi__label">Gross Profit</div>
-                        <div class="acct-kpi__value"><?php echo $currency_symbol . ' ' . number_format($grossProfit, 2); ?></div>
-                        <div class="acct-kpi__sub"><?php echo $grossMarginPct; ?>% margin · After <?php echo htmlspecialchars(rh_pos_short_label()); ?> COGS</div>
+                    <div class="rh-strip__cell">
+                        <span class="rh-strip__label">Gross Profit</span>
+                        <strong class="rh-strip__value"><?php echo $currency_symbol . ' ' . number_format($grossProfit, 2); ?></strong>
+                        <span class="rh-strip__sub"><?php echo $grossMarginPct; ?>% margin · After <?php echo htmlspecialchars(rh_pos_short_label()); ?> COGS</span>
                     </div>
-                    <div class="acct-kpi acct-kpi--vat">
-                        <div class="acct-kpi__label">VAT Collected</div>
-                        <div class="acct-kpi__value"><?php echo $currency_symbol . ' ' . number_format($totalVatCollected, 2); ?></div>
-                        <div class="acct-kpi__sub">At <?php echo $vatRate; ?>% · Payable to MRA</div>
+                    <div class="rh-strip__cell">
+                        <span class="rh-strip__label">VAT Collected</span>
+                        <strong class="rh-strip__value"><?php echo $currency_symbol . ' ' . number_format($totalVatCollected, 2); ?></strong>
+                        <span class="rh-strip__sub">At <?php echo $vatRate; ?>% · Payable to MRA</span>
                     </div>
-                    <div class="acct-kpi acct-kpi--receivables">
-                        <div class="acct-kpi__label">Outstanding</div>
-                        <div class="acct-kpi__value"><?php echo $currency_symbol . ' ' . number_format($totalOutstanding, 2); ?></div>
-                        <div class="acct-kpi__sub"><?php echo count($outstandingPayments); ?> pending · <a href="?tab=aging&start_date=<?php echo htmlspecialchars($start_date); ?>&end_date=<?php echo htmlspecialchars($end_date); ?>" class="acct-link">View aging →</a></div>
+                    <div class="rh-strip__cell">
+                        <span class="rh-strip__label">Outstanding</span>
+                        <strong class="rh-strip__value"><?php echo $currency_symbol . ' ' . number_format($totalOutstanding, 2); ?></strong>
+                        <span class="rh-strip__sub"><?php echo count($outstandingPayments); ?> pending · <a href="?tab=aging&start_date=<?php echo htmlspecialchars($start_date); ?>&end_date=<?php echo htmlspecialchars($end_date); ?>" class="acct-link">View aging →</a></span>
                     </div>
                 </div>
 
@@ -1197,8 +1197,8 @@ try {
                 <div class="acct-grid acct-grid--2">
 
                     <!-- P&L Statement -->
-                    <div class="acct-panel">
-                        <h2 class="acct-panel__title"><i class="fas fa-calculator"></i> P&amp;L Summary</h2>
+                    <div class="rh-panel">
+                        <div class="rh-panel__head"><h2 class="rh-panel__title">P&amp;L Summary</h2></div>
                         <table class="acct-table">
                             <thead>
                                 <tr>
@@ -1294,8 +1294,8 @@ try {
                     </div>
 
                     <!-- Hotel KPIs -->
-                    <div class="acct-panel">
-                        <h2 class="acct-panel__title"><i class="fas fa-hotel"></i> Hotel KPIs</h2>
+                    <div class="rh-panel">
+                        <div class="rh-panel__head"><h2 class="rh-panel__title">Hotel KPIs</h2></div>
                         <p class="acct-muted" style="margin-bottom:10px; font-size:0.8em">Comparing <?php echo htmlspecialchars($start_date); ?> – <?php echo htmlspecialchars($end_date); ?> vs prior <?php echo $periodDays; ?> days (<?php echo htmlspecialchars($priorStartDate); ?> – <?php echo htmlspecialchars($priorEndDate); ?>)</p>
                         <table class="acct-table">
                             <tbody>
@@ -1356,8 +1356,8 @@ try {
 
                 <!-- Revenue by Source + Payment Methods side by side -->
                 <div class="acct-grid acct-grid--2">
-                    <div class="acct-panel">
-                        <h2 class="acct-panel__title"><i class="fas fa-chart-pie"></i> Revenue by Source</h2>
+                    <div class="rh-panel">
+                        <div class="rh-panel__head"><h2 class="rh-panel__title">Revenue by Source</h2></div>
                         <?php if (empty($revenueByType)): ?>
                             <p class="acct-empty">No revenue data for this period.</p>
                         <?php else: ?>
@@ -1384,8 +1384,8 @@ try {
                         <?php endif; ?>
                     </div>
 
-                    <div class="acct-panel">
-                        <h2 class="acct-panel__title"><i class="fas fa-credit-card"></i> Payment Methods</h2>
+                    <div class="rh-panel">
+                        <div class="rh-panel__head"><h2 class="rh-panel__title">Payment Methods</h2></div>
                         <?php if (empty($paymentMethods)): ?>
                             <p class="acct-empty">No payment data for this period.</p>
                         <?php else: ?>
@@ -1420,8 +1420,8 @@ try {
 
                 <!-- Payment Status + Outstanding -->
                 <div class="acct-grid acct-grid--2">
-                    <div class="acct-panel">
-                        <h2 class="acct-panel__title"><i class="fas fa-tasks"></i> Payment Status Mix</h2>
+                    <div class="rh-panel">
+                        <div class="rh-panel__head"><h2 class="rh-panel__title">Payment Status Mix</h2></div>
                         <?php if (empty($statusData)): ?>
                             <p class="acct-empty">No payment data.</p>
                         <?php else: ?>
@@ -1457,8 +1457,8 @@ try {
                         <?php endif; ?>
                     </div>
 
-                    <div class="acct-panel">
-                        <h2 class="acct-panel__title"><i class="fas fa-exclamation-triangle"></i> Top Outstanding Balances</h2>
+                    <div class="rh-panel">
+                        <div class="rh-panel__head"><h2 class="rh-panel__title">Top Outstanding Balances</h2></div>
                         <?php if (empty($outstandingPayments)): ?>
                             <p class="acct-empty acct-empty--good"><i class="fas fa-check-circle"></i> No outstanding payments.</p>
                         <?php else: ?>
@@ -1520,32 +1520,32 @@ try {
                     </div>
                 </details>
 
-                <div class="acct-kpis">
-                    <div class="acct-kpi acct-kpi--revenue">
-                        <div class="acct-kpi__label">Gross Revenue</div>
-                        <div class="acct-kpi__value"><?php echo $currency_symbol . ' ' . number_format($totalRevenue, 2); ?></div>
-                        <div class="acct-kpi__sub"><?php echo number_format($totalTransactions); ?> transactions</div>
+                <div class="rh-strip" role="group" aria-label="Summary">
+                    <div class="rh-strip__cell">
+                        <span class="rh-strip__label">Gross Revenue</span>
+                        <strong class="rh-strip__value"><?php echo $currency_symbol . ' ' . number_format($totalRevenue, 2); ?></strong>
+                        <span class="rh-strip__sub"><?php echo number_format($totalTransactions); ?> transactions</span>
                     </div>
-                    <div class="acct-kpi acct-kpi--cash">
-                        <div class="acct-kpi__label">Net Revenue</div>
-                        <div class="acct-kpi__value"><?php echo $currency_symbol . ' ' . number_format($totalRevenue - $totalRefunds, 2); ?></div>
-                        <div class="acct-kpi__sub">After refunds of <?php echo $currency_symbol . ' ' . number_format($totalRefunds, 2); ?></div>
+                    <div class="rh-strip__cell">
+                        <span class="rh-strip__label">Net Revenue</span>
+                        <strong class="rh-strip__value"><?php echo $currency_symbol . ' ' . number_format($totalRevenue - $totalRefunds, 2); ?></strong>
+                        <span class="rh-strip__sub">After refunds of <?php echo $currency_symbol . ' ' . number_format($totalRefunds, 2); ?></span>
                     </div>
-                    <div class="acct-kpi acct-kpi--vat">
-                        <div class="acct-kpi__label">VAT Collected</div>
-                        <div class="acct-kpi__value"><?php echo $currency_symbol . ' ' . number_format($totalVatCollected, 2); ?></div>
-                        <div class="acct-kpi__sub"><a href="?tab=vat&start_date=<?php echo htmlspecialchars($start_date); ?>&end_date=<?php echo htmlspecialchars($end_date); ?>" class="acct-link">Full VAT Register →</a></div>
+                    <div class="rh-strip__cell">
+                        <span class="rh-strip__label">VAT Collected</span>
+                        <strong class="rh-strip__value"><?php echo $currency_symbol . ' ' . number_format($totalVatCollected, 2); ?></strong>
+                        <span class="rh-strip__sub"><a href="?tab=vat&start_date=<?php echo htmlspecialchars($start_date); ?>&end_date=<?php echo htmlspecialchars($end_date); ?>" class="acct-link">Full VAT Register →</a></span>
                     </div>
-                    <div class="acct-kpi">
-                        <div class="acct-kpi__label">Avg per Transaction</div>
-                        <div class="acct-kpi__value"><?php echo $currency_symbol . ' ' . ($totalTransactions > 0 ? number_format($totalRevenue / $totalTransactions, 2) : '0.00'); ?></div>
-                        <div class="acct-kpi__sub">ADR: <?php echo $currency_symbol . ' ' . number_format($adr); ?> · RevPAR: <?php echo $currency_symbol . ' ' . number_format($revpar); ?></div>
+                    <div class="rh-strip__cell">
+                        <span class="rh-strip__label">Avg per Transaction</span>
+                        <strong class="rh-strip__value"><?php echo $currency_symbol . ' ' . ($totalTransactions > 0 ? number_format($totalRevenue / $totalTransactions, 2) : '0.00'); ?></strong>
+                        <span class="rh-strip__sub">ADR: <?php echo $currency_symbol . ' ' . number_format($adr); ?> · RevPAR: <?php echo $currency_symbol . ' ' . number_format($revpar); ?></span>
                     </div>
                 </div>
 
                 <!-- Payment Method Breakdown -->
-                <div class="report-section">
-                    <h2><i class="fas fa-credit-card"></i> Payment Method Breakdown</h2>
+                <div class="rh-panel">
+                    <div class="rh-panel__head"><h2 class="rh-panel__title">Payment Method Breakdown</h2></div>
                     <?php if (empty($paymentMethods)): ?>
                         <div class="empty-state"><i class="fas fa-credit-card"></i>
                             <p>No payment data for this period</p>
@@ -1576,8 +1576,8 @@ try {
 
                 <div class="two-col">
                     <!-- Daily Revenue -->
-                    <div class="report-section">
-                        <h2><i class="fas fa-chart-line"></i> Daily Revenue Trend</h2>
+                    <div class="rh-panel">
+                        <div class="rh-panel__head"><h2 class="rh-panel__title">Daily Revenue Trend</h2></div>
                         <?php if (empty($dailyRevenue)): ?>
                             <div class="empty-state"><i class="fas fa-chart-line"></i>
                                 <p>No daily data</p>
@@ -1605,8 +1605,8 @@ try {
                     </div>
 
                     <!-- Monthly Revenue -->
-                    <div class="report-section">
-                        <h2><i class="fas fa-calendar-alt"></i> Monthly Revenue</h2>
+                    <div class="rh-panel">
+                        <div class="rh-panel__head"><h2 class="rh-panel__title">Monthly Revenue</h2></div>
                         <?php if (empty($monthlyRevenue)): ?>
                             <div class="empty-state"><i class="fas fa-calendar-alt"></i>
                                 <p>No monthly data</p>
@@ -1652,8 +1652,8 @@ try {
                 </div>
 
                 <!-- Top Clients -->
-                <div class="report-section">
-                    <h2><i class="fas fa-trophy"></i> Top Clients by Revenue</h2>
+                <div class="rh-panel">
+                    <div class="rh-panel__head"><h2 class="rh-panel__title">Top Clients by Revenue</h2></div>
                     <?php if (empty($topClients)): ?>
                         <div class="empty-state"><i class="fas fa-trophy"></i>
                             <p>No client data for this period</p>
@@ -1688,8 +1688,8 @@ try {
 
                 <!-- VAT Report -->
                 <?php if ($vatEnabled): ?>
-                    <div class="report-section">
-                        <h2><i class="fas fa-percent"></i> VAT Collection Report</h2>
+                    <div class="rh-panel">
+                        <div class="rh-panel__head"><h2 class="rh-panel__title">VAT Collection Report</h2></div>
                         <?php if (empty($vatCollected)): ?>
                             <div class="empty-state"><i class="fas fa-percent"></i>
                                 <p>No VAT data for this period</p>
@@ -1728,36 +1728,36 @@ try {
                 <?php endif; ?>
 
                 <!-- Refund Analysis -->
-                <div class="report-section">
-                    <h2><i class="fas fa-undo"></i> Refund Analysis</h2>
+                <div class="rh-panel">
+                    <div class="rh-panel__head"><h2 class="rh-panel__title">Refund Analysis</h2></div>
 
                     <!-- Refund Summary Cards -->
-                    <div class="summary-cards" style="margin-bottom: 20px;">
-                        <div class="summary-card" style="border-left: 4px solid #dc3545;">
-                            <h3>Total Refunds</h3>
-                            <div class="value">-<?php echo $currency_symbol . ' ' . number_format($totalRefunds, 2); ?></div>
-                            <div class="subtitle">Issued in period</div>
+                    <div class="rh-strip" role="group" aria-label="Refund summary">
+                        <div class="rh-strip__cell">
+                            <span class="rh-strip__label">Total Refunds</span>
+                            <strong class="rh-strip__value">-<?php echo $currency_symbol . ' ' . number_format($totalRefunds, 2); ?></strong>
+                            <span class="rh-strip__sub">Issued in period</span>
                         </div>
-                        <div class="summary-card" style="border-left: 4px solid #ffc107;">
-                            <h3>Pending Refunds</h3>
-                            <div class="value"><?php echo $currency_symbol . ' ' . number_format($pendingRefunds, 2); ?></div>
-                            <div class="subtitle">Awaiting processing</div>
+                        <div class="rh-strip__cell">
+                            <span class="rh-strip__label">Pending Refunds</span>
+                            <strong class="rh-strip__value"><?php echo $currency_symbol . ' ' . number_format($pendingRefunds, 2); ?></strong>
+                            <span class="rh-strip__sub">Awaiting processing</span>
                         </div>
-                        <div class="summary-card" style="border-left: 4px solid #28a745;">
-                            <h3>Completed Refunds</h3>
-                            <div class="value"><?php echo $currency_symbol . ' ' . number_format($completedRefunds, 2); ?></div>
-                            <div class="subtitle">Successfully processed</div>
+                        <div class="rh-strip__cell">
+                            <span class="rh-strip__label">Completed Refunds</span>
+                            <strong class="rh-strip__value"><?php echo $currency_symbol . ' ' . number_format($completedRefunds, 2); ?></strong>
+                            <span class="rh-strip__sub">Successfully processed</span>
                         </div>
-                        <div class="summary-card" style="border-left: 4px solid #17a2b8;">
-                            <h3>Net Revenue</h3>
-                            <div class="value"><?php echo $currency_symbol . ' ' . number_format($totalRevenue - $totalRefunds, 2); ?></div>
-                            <div class="subtitle">After refunds</div>
+                        <div class="rh-strip__cell">
+                            <span class="rh-strip__label">Net Revenue</span>
+                            <strong class="rh-strip__value"><?php echo $currency_symbol . ' ' . number_format($totalRevenue - $totalRefunds, 2); ?></strong>
+                            <span class="rh-strip__sub">After refunds</span>
                         </div>
                     </div>
 
                     <?php if (!empty($refundReasons)): ?>
                         <!-- Refund Breakdown by Reason -->
-                        <h3 style="margin-top: 24px; margin-bottom: 12px; font-size: 15px;">Refunds by Reason</h3>
+                        <h3 class="reports-subhead">Refunds by Reason</h3>
                         <table class="report-table">
                             <thead>
                                 <tr>
@@ -1797,7 +1797,7 @@ try {
 
                     <?php if (!empty($refundStatuses)): ?>
                         <!-- Refund Status Breakdown -->
-                        <h3 style="margin-top: 24px; margin-bottom: 12px; font-size: 15px;">Refunds by Status</h3>
+                        <h3 class="reports-subhead">Refunds by Status</h3>
                         <table class="report-table">
                             <thead>
                                 <tr>
@@ -1843,8 +1843,8 @@ try {
                 </div>
 
                 <!-- Monthly ADR Trend -->
-                <div class="report-section">
-                    <h2><i class="fas fa-chart-line"></i> Monthly ADR Trend</h2>
+                <div class="rh-panel">
+                    <div class="rh-panel__head"><h2 class="rh-panel__title">Monthly ADR Trend</h2></div>
                     <?php if (empty($monthlyAdr)): ?>
                         <div class="empty-state"><i class="fas fa-chart-line"></i>
                             <p>No ADR data for this period</p>
@@ -1875,10 +1875,10 @@ try {
 
                 <?php if (!empty($quoteFunnel)): ?>
                     <!-- Quotation Conversion Funnel -->
-                    <div class="report-section">
-                        <h2><i class="fas fa-funnel-dollar"></i> Quotation Pipeline
+                    <div class="rh-panel">
+                        <div class="rh-panel__head"><h2 class="rh-panel__title">Quotation Pipeline
                             <span class="acct-muted" style="font-size:0.75em; font-weight:400; margin-left:8px">Conversion rate: <?php echo $quoteConvRate; ?>%</span>
-                        </h2>
+                        </h2></div>
                         <?php
                         $qStatusLabels = [
                             'draft'    => ['label' => 'Draft',    'cls' => 'acct-pill--pending'],
@@ -1937,33 +1937,33 @@ try {
                     </div>
                 </details>
 
-                <div class="acct-kpis">
-                    <div class="acct-kpi acct-kpi--vat">
-                        <div class="acct-kpi__label">Total VAT Collected</div>
-                        <div class="acct-kpi__value"><?php echo $currency_symbol . ' ' . number_format($vatRegisterTotal, 2); ?></div>
-                        <div class="acct-kpi__sub">At <?php echo $vatRate; ?>% · Tax-inclusive revenue</div>
+                <div class="rh-strip" role="group" aria-label="Summary">
+                    <div class="rh-strip__cell">
+                        <span class="rh-strip__label">Total VAT Collected</span>
+                        <strong class="rh-strip__value"><?php echo $currency_symbol . ' ' . number_format($vatRegisterTotal, 2); ?></strong>
+                        <span class="rh-strip__sub">At <?php echo $vatRate; ?>% · Tax-inclusive revenue</span>
                     </div>
-                    <div class="acct-kpi acct-kpi--revenue">
-                        <div class="acct-kpi__label">Gross Revenue (VAT incl.)</div>
-                        <div class="acct-kpi__value"><?php echo $currency_symbol . ' ' . number_format($vatRegisterGross, 2); ?></div>
-                        <div class="acct-kpi__sub"><?php echo count($vatRegister); ?> VAT-bearing transactions</div>
+                    <div class="rh-strip__cell">
+                        <span class="rh-strip__label">Gross Revenue (VAT incl.)</span>
+                        <strong class="rh-strip__value"><?php echo $currency_symbol . ' ' . number_format($vatRegisterGross, 2); ?></strong>
+                        <span class="rh-strip__sub"><?php echo count($vatRegister); ?> VAT-bearing transactions</span>
                     </div>
-                    <div class="acct-kpi acct-kpi--cash">
-                        <div class="acct-kpi__label">Net (ex-VAT)</div>
-                        <div class="acct-kpi__value"><?php echo $currency_symbol . ' ' . number_format($vatRegisterGross - $vatRegisterTotal, 2); ?></div>
-                        <div class="acct-kpi__sub">Revenue net of VAT</div>
+                    <div class="rh-strip__cell">
+                        <span class="rh-strip__label">Net (ex-VAT)</span>
+                        <strong class="rh-strip__value"><?php echo $currency_symbol . ' ' . number_format($vatRegisterGross - $vatRegisterTotal, 2); ?></strong>
+                        <span class="rh-strip__sub">Revenue net of VAT</span>
                     </div>
-                    <div class="acct-kpi acct-kpi--receivables">
-                        <div class="acct-kpi__label">Effective VAT Rate</div>
-                        <div class="acct-kpi__value"><?php echo $vatRegisterGross > 0 ? number_format(($vatRegisterTotal / $vatRegisterGross) * 100, 2) : '0.00'; ?>%</div>
-                        <div class="acct-kpi__sub">VAT as % of total revenue</div>
+                    <div class="rh-strip__cell">
+                        <span class="rh-strip__label">Effective VAT Rate</span>
+                        <strong class="rh-strip__value"><?php echo $vatRegisterGross > 0 ? number_format(($vatRegisterTotal / $vatRegisterGross) * 100, 2) : '0.00'; ?>%</strong>
+                        <span class="rh-strip__sub">VAT as % of total revenue</span>
                     </div>
                 </div>
 
                 <!-- VAT by Source -->
                 <div class="acct-grid acct-grid--2">
-                    <div class="acct-panel">
-                        <h2 class="acct-panel__title"><i class="fas fa-chart-pie"></i> VAT by Revenue Source</h2>
+                    <div class="rh-panel">
+                        <div class="rh-panel__head"><h2 class="rh-panel__title">VAT by Revenue Source</h2></div>
                         <?php if (empty($vatByType)): ?>
                             <p class="acct-empty">No VAT data for this period.</p>
                         <?php else: ?>
@@ -2002,8 +2002,8 @@ try {
                     </div>
 
                     <!-- Monthly VAT from existing data -->
-                    <div class="acct-panel">
-                        <h2 class="acct-panel__title"><i class="fas fa-calendar-alt"></i> Monthly VAT Summary</h2>
+                    <div class="rh-panel">
+                        <div class="rh-panel__head"><h2 class="rh-panel__title">Monthly VAT Summary</h2></div>
                         <?php if (empty($monthlyRevenue)): ?>
                             <p class="acct-empty">No monthly data for this period.</p>
                         <?php else: ?>
@@ -2041,8 +2041,8 @@ try {
 
                 <!-- Full VAT Register — transaction detail -->
                 <?php if (!empty($vatByQuarter)): ?>
-                    <div class="acct-panel" style="margin-bottom: 16px">
-                        <h2 class="acct-panel__title"><i class="fas fa-calendar-check"></i> VAT by Quarter (MRA Filing Periods)</h2>
+                    <div class="rh-panel">
+                        <div class="rh-panel__head"><h2 class="rh-panel__title">VAT by Quarter (MRA Filing Periods)</h2></div>
                         <p class="acct-muted" style="margin-bottom:12px; font-size:0.85em">Use these quarterly totals to complete your MRA Output VAT figures. Net MRA payable = Output VAT (below) − Input VAT on your supplier invoices.</p>
                         <table class="acct-table">
                             <thead>
@@ -2082,10 +2082,10 @@ try {
                     </div>
                 <?php endif; ?>
 
-                <div class="acct-panel">
-                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px">
-                        <h2 class="acct-panel__title" style="margin-bottom: 0"><i class="fas fa-list"></i> Transaction VAT Register</h2>
-                        <button class="acct-btn" onclick="exportToCSV()"><i class="fas fa-download"></i> Export for Filing</button>
+                <div class="rh-panel rh-panel--flush-head">
+                    <div class="rh-panel__head">
+                        <h2 class="rh-panel__title">Transaction VAT Register</h2>
+                        <div class="rh-panel__actions"><button class="acct-btn" onclick="exportToCSV()"><i class="fas fa-download"></i> Export for Filing</button></div>
                     </div>
                     <?php if (empty($vatRegister)): ?>
                         <p class="acct-empty">No VAT-bearing transactions in this period.</p>
@@ -2170,32 +2170,32 @@ try {
                     </div>
                 </details>
 
-                <div class="acct-kpis">
-                    <div class="acct-kpi acct-kpi--receivables">
-                        <div class="acct-kpi__label">Total Outstanding AR</div>
-                        <div class="acct-kpi__value"><?php echo $currency_symbol . ' ' . number_format($totalAgingAmount, 2); ?></div>
-                        <div class="acct-kpi__sub"><?php echo count($agingDetail); ?> unpaid accounts</div>
+                <div class="rh-strip" role="group" aria-label="Summary">
+                    <div class="rh-strip__cell">
+                        <span class="rh-strip__label">Total Outstanding AR</span>
+                        <strong class="rh-strip__value"><?php echo $currency_symbol . ' ' . number_format($totalAgingAmount, 2); ?></strong>
+                        <span class="rh-strip__sub"><?php echo count($agingDetail); ?> unpaid accounts</span>
                     </div>
-                    <div class="acct-kpi">
-                        <div class="acct-kpi__label">Current (0–30 days)</div>
-                        <div class="acct-kpi__value"><?php echo $currency_symbol . ' ' . number_format($agingBuckets['0-30']['amount'], 2); ?></div>
-                        <div class="acct-kpi__sub"><?php echo $agingBuckets['0-30']['count']; ?> accounts</div>
+                    <div class="rh-strip__cell">
+                        <span class="rh-strip__label">Current (0–30 days)</span>
+                        <strong class="rh-strip__value"><?php echo $currency_symbol . ' ' . number_format($agingBuckets['0-30']['amount'], 2); ?></strong>
+                        <span class="rh-strip__sub"><?php echo $agingBuckets['0-30']['count']; ?> accounts</span>
                     </div>
-                    <div class="acct-kpi">
-                        <div class="acct-kpi__label">31–90 Days Overdue</div>
-                        <div class="acct-kpi__value"><?php echo $currency_symbol . ' ' . number_format($agingBuckets['31-60']['amount'] + $agingBuckets['61-90']['amount'], 2); ?></div>
-                        <div class="acct-kpi__sub"><?php echo $agingBuckets['31-60']['count'] + $agingBuckets['61-90']['count']; ?> accounts</div>
+                    <div class="rh-strip__cell">
+                        <span class="rh-strip__label">31–90 Days Overdue</span>
+                        <strong class="rh-strip__value"><?php echo $currency_symbol . ' ' . number_format($agingBuckets['31-60']['amount'] + $agingBuckets['61-90']['amount'], 2); ?></strong>
+                        <span class="rh-strip__sub"><?php echo $agingBuckets['31-60']['count'] + $agingBuckets['61-90']['count']; ?> accounts</span>
                     </div>
-                    <div class="acct-kpi acct-kpi--receivables">
-                        <div class="acct-kpi__label">90+ Days (Critical)</div>
-                        <div class="acct-kpi__value" style="color: #c82333"><?php echo $currency_symbol . ' ' . number_format($agingBuckets['90+']['amount'], 2); ?></div>
-                        <div class="acct-kpi__sub"><?php echo $agingBuckets['90+']['count']; ?> accounts — immediate action</div>
+                    <div class="rh-strip__cell">
+                        <span class="rh-strip__label">90+ Days (Critical)</span>
+                        <strong class="rh-strip__value rh-strip__value--alert"><?php echo $currency_symbol . ' ' . number_format($agingBuckets['90+']['amount'], 2); ?></strong>
+                        <span class="rh-strip__sub"><?php echo $agingBuckets['90+']['count']; ?> accounts — immediate action</span>
                     </div>
                 </div>
 
                 <!-- Aging Buckets Summary -->
-                <div class="acct-panel">
-                    <h2 class="acct-panel__title"><i class="fas fa-hourglass-half"></i> Receivables Aging Summary</h2>
+                <div class="rh-panel">
+                    <div class="rh-panel__head"><h2 class="rh-panel__title">Receivables Aging Summary</h2></div>
                     <table class="acct-table">
                         <thead>
                             <tr>
@@ -2240,10 +2240,10 @@ try {
                 </div>
 
                 <!-- Detailed AR Ledger -->
-                <div class="acct-panel">
-                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px">
-                        <h2 class="acct-panel__title" style="margin-bottom: 0"><i class="fas fa-list-alt"></i> Outstanding Accounts Ledger</h2>
-                        <button class="acct-btn" onclick="exportToCSV()"><i class="fas fa-download"></i> Export AR Ledger</button>
+                <div class="rh-panel rh-panel--flush-head">
+                    <div class="rh-panel__head">
+                        <h2 class="rh-panel__title">Outstanding Accounts Ledger</h2>
+                        <div class="rh-panel__actions"><button class="acct-btn" onclick="exportToCSV()"><i class="fas fa-download"></i> Export AR Ledger</button></div>
                     </div>
                     <?php if (empty($agingDetail)): ?>
                         <p class="acct-empty acct-empty--good"><i class="fas fa-check-circle"></i> No outstanding balances — all accounts settled.</p>
@@ -2315,32 +2315,32 @@ try {
                     </div>
                 </details>
 
-                <div class="acct-kpis">
-                    <div class="acct-kpi acct-kpi--revenue">
-                        <div class="acct-kpi__label">Total Bookings</div>
-                        <div class="acct-kpi__value"><?php echo number_format($totalBookings); ?></div>
-                        <div class="acct-kpi__sub">Non-cancelled · Avg value <?php echo $currency_symbol . ' ' . number_format($avgRevenuePerBooking, 2); ?></div>
+                <div class="rh-strip" role="group" aria-label="Summary">
+                    <div class="rh-strip__cell">
+                        <span class="rh-strip__label">Total Bookings</span>
+                        <strong class="rh-strip__value"><?php echo number_format($totalBookings); ?></strong>
+                        <span class="rh-strip__sub">Non-cancelled · Avg value <?php echo $currency_symbol . ' ' . number_format($avgRevenuePerBooking, 2); ?></span>
                     </div>
-                    <div class="acct-kpi">
-                        <div class="acct-kpi__label">Total Guests</div>
-                        <div class="acct-kpi__value"><?php echo number_format($bookingSummary['total_guests'] ?? 0); ?></div>
-                        <div class="acct-kpi__sub"><?php echo number_format($bookingSummary['total_adults'] ?? 0); ?> adults · <?php echo number_format($bookingSummary['total_children'] ?? 0); ?> children</div>
+                    <div class="rh-strip__cell">
+                        <span class="rh-strip__label">Total Guests</span>
+                        <strong class="rh-strip__value"><?php echo number_format($bookingSummary['total_guests'] ?? 0); ?></strong>
+                        <span class="rh-strip__sub"><?php echo number_format($bookingSummary['total_adults'] ?? 0); ?> adults · <?php echo number_format($bookingSummary['total_children'] ?? 0); ?> children</span>
                     </div>
-                    <div class="acct-kpi">
-                        <div class="acct-kpi__label">Avg Stay Length</div>
-                        <div class="acct-kpi__value"><?php echo $avgStayLength; ?> nights</div>
-                        <div class="acct-kpi__sub">Child supplement revenue: <?php echo $currency_symbol . ' ' . number_format($bookingSummary['total_child_revenue'] ?? 0, 2); ?></div>
+                    <div class="rh-strip__cell">
+                        <span class="rh-strip__label">Avg Stay Length</span>
+                        <strong class="rh-strip__value"><?php echo $avgStayLength; ?> nights</strong>
+                        <span class="rh-strip__sub">Child supplement revenue: <?php echo $currency_symbol . ' ' . number_format($bookingSummary['total_child_revenue'] ?? 0, 2); ?></span>
                     </div>
-                    <div class="acct-kpi acct-kpi--receivables">
-                        <div class="acct-kpi__label">Cancellation Rate</div>
-                        <div class="acct-kpi__value"><?php echo $cancellationRate; ?>%</div>
-                        <div class="acct-kpi__sub"><?php echo $cancelData['cancelled'] ?? 0; ?> of <?php echo $cancelData['total'] ?? 0; ?> bookings</div>
+                    <div class="rh-strip__cell">
+                        <span class="rh-strip__label">Cancellation Rate</span>
+                        <strong class="rh-strip__value"><?php echo $cancellationRate; ?>%</strong>
+                        <span class="rh-strip__sub"><?php echo $cancelData['cancelled'] ?? 0; ?> of <?php echo $cancelData['total'] ?? 0; ?> bookings</span>
                     </div>
                 </div>
 
                 <!-- Booking Status Breakdown -->
-                <div class="acct-panel">
-                    <h2 class="acct-panel__title"><i class="fas fa-chart-bar"></i> Booking Status Breakdown</h2>
+                <div class="rh-panel">
+                    <div class="rh-panel__head"><h2 class="rh-panel__title">Booking Status Breakdown</h2></div>
                     <?php if (empty($bookingStatusData)): ?>
                         <p class="acct-empty">No booking data for this period.</p>
                     <?php else: ?>
@@ -2377,8 +2377,8 @@ try {
                 </div>
 
                 <!-- Room-level Stats -->
-                <div class="report-section">
-                    <h2><i class="fas fa-bed"></i> Bookings by Room Type</h2>
+                <div class="rh-panel">
+                    <div class="rh-panel__head"><h2 class="rh-panel__title">Bookings by Room Type</h2></div>
                     <?php if (empty($roomBookingStats)): ?>
                         <div class="empty-state"><i class="fas fa-bed"></i>
                             <p>No room data available</p>
@@ -2419,8 +2419,8 @@ try {
                 </div>
 
                 <!-- Recent Bookings -->
-                <div class="report-section">
-                    <h2><i class="fas fa-clock"></i> Recent Bookings</h2>
+                <div class="rh-panel">
+                    <div class="rh-panel__head"><h2 class="rh-panel__title">Recent Bookings</h2></div>
                     <?php if (empty($recentBookings)): ?>
                         <div class="empty-state"><i class="fas fa-calendar"></i>
                             <p>No recent bookings</p>
@@ -2494,32 +2494,32 @@ try {
                     </div>
                 </details>
 
-                <div class="acct-kpis">
-                    <div class="acct-kpi acct-kpi--revenue">
-                        <div class="acct-kpi__label">Occupancy Rate</div>
-                        <div class="acct-kpi__value"><?php echo $overallOccupancyRate; ?>%</div>
-                        <div class="acct-kpi__sub"><?php echo round($daysInPeriod); ?>-day period</div>
+                <div class="rh-strip" role="group" aria-label="Summary">
+                    <div class="rh-strip__cell">
+                        <span class="rh-strip__label">Occupancy Rate</span>
+                        <strong class="rh-strip__value"><?php echo $overallOccupancyRate; ?>%</strong>
+                        <span class="rh-strip__sub"><?php echo round($daysInPeriod); ?>-day period</span>
                     </div>
-                    <div class="acct-kpi">
-                        <div class="acct-kpi__label">Room-Nights Booked</div>
-                        <div class="acct-kpi__value"><?php echo number_format($overallOccupancy['total_nights_booked']); ?></div>
-                        <div class="acct-kpi__sub">of <?php echo number_format($totalRoomNightsAvailable); ?> available</div>
+                    <div class="rh-strip__cell">
+                        <span class="rh-strip__label">Room-Nights Booked</span>
+                        <strong class="rh-strip__value"><?php echo number_format($overallOccupancy['total_nights_booked']); ?></strong>
+                        <span class="rh-strip__sub">of <?php echo number_format($totalRoomNightsAvailable); ?> available</span>
                     </div>
-                    <div class="acct-kpi">
-                        <div class="acct-kpi__label">Room Inventory</div>
-                        <div class="acct-kpi__value"><?php echo number_format($totalRoomInventory); ?></div>
-                        <div class="acct-kpi__sub">Active rooms</div>
+                    <div class="rh-strip__cell">
+                        <span class="rh-strip__label">Room Inventory</span>
+                        <strong class="rh-strip__value"><?php echo number_format($totalRoomInventory); ?></strong>
+                        <span class="rh-strip__sub">Active rooms</span>
                     </div>
-                    <div class="acct-kpi acct-kpi--cash">
-                        <div class="acct-kpi__label">Guests Served</div>
-                        <div class="acct-kpi__value"><?php echo number_format($overallOccupancy['total_guests']); ?></div>
-                        <div class="acct-kpi__sub">Avg <?php echo number_format($overallOccupancy['avg_guests_per_booking'], 1); ?> per booking</div>
+                    <div class="rh-strip__cell">
+                        <span class="rh-strip__label">Guests Served</span>
+                        <strong class="rh-strip__value"><?php echo number_format($overallOccupancy['total_guests']); ?></strong>
+                        <span class="rh-strip__sub">Avg <?php echo number_format($overallOccupancy['avg_guests_per_booking'], 1); ?> per booking</span>
                     </div>
                 </div>
 
                 <!-- Overall Occupancy Bar -->
-                <div class="acct-panel">
-                    <h2 class="acct-panel__title"><i class="fas fa-hotel"></i> Overall Occupancy Rate</h2>
+                <div class="rh-panel">
+                    <div class="rh-panel__head"><h2 class="rh-panel__title">Overall Occupancy Rate</h2></div>
                     <div style="margin-bottom: 8px; font-size: 13px; color: var(--color-text-secondary);">
                         <?php echo number_format($overallOccupancy['total_nights_booked']); ?> room-nights booked out of <?php echo number_format($totalRoomNightsAvailable); ?> available
                     </div>
@@ -2531,8 +2531,8 @@ try {
             </div>
 
             <!-- Occupancy by Room Type -->
-            <div class="acct-panel" style="margin-top: 16px">
-                <h2 class="acct-panel__title"><i class="fas fa-bed"></i> Occupancy by Room Type</h2>
+            <div class="rh-panel">
+                <div class="rh-panel__head"><h2 class="rh-panel__title">Occupancy by Room Type</h2></div>
                 <?php if (empty($occupancyData)): ?>
                     <p class="acct-empty">No occupancy data for this period.</p>
                 <?php else: ?>
@@ -2573,8 +2573,8 @@ try {
 
             <?php if (!empty($roomTypeAdr)): ?>
                 <!-- Per Room Type ADR / RevPAR -->
-                <div class="acct-panel" style="margin-top: 16px">
-                    <h2 class="acct-panel__title"><i class="fas fa-chart-bar"></i> ADR &amp; RevPAR by Room Type</h2>
+                <div class="rh-panel">
+                    <div class="rh-panel__head"><h2 class="rh-panel__title">ADR &amp; RevPAR by Room Type</h2></div>
                     <p class="acct-muted" style="margin-bottom:12px; font-size:0.85em">ADR = Revenue ÷ Nights Sold. RevPAR = Revenue ÷ (Rooms × Days in Period). RevPAR below 40% of ADR means significant empty nights.</p>
                     <table class="acct-table">
                         <thead>
@@ -2643,30 +2643,30 @@ try {
             </div>
         </details>
 
-        <div class="acct-kpis">
-            <div class="acct-kpi acct-kpi--revenue">
-                <div class="acct-kpi__label">Unique Guests</div>
-                <div class="acct-kpi__value"><?php echo number_format($guestMetrics['unique_guests'] ?? 0); ?></div>
+        <div class="rh-strip" role="group" aria-label="Summary">
+            <div class="rh-strip__cell">
+                <span class="rh-strip__label">Unique Guests</span>
+                <strong class="rh-strip__value"><?php echo number_format($guestMetrics['unique_guests'] ?? 0); ?></strong>
             </div>
-            <div class="acct-kpi acct-kpi--cash">
-                <div class="acct-kpi__label">Avg Spend per Guest</div>
-                <div class="acct-kpi__value"><?php echo $currency_symbol . ' ' . number_format($guestMetrics['avg_spend'] ?? 0, 2); ?></div>
+            <div class="rh-strip__cell">
+                <span class="rh-strip__label">Avg Spend per Guest</span>
+                <strong class="rh-strip__value"><?php echo $currency_symbol . ' ' . number_format($guestMetrics['avg_spend'] ?? 0, 2); ?></strong>
             </div>
-            <div class="acct-kpi">
-                <div class="acct-kpi__label">Repeat Guests</div>
-                <div class="acct-kpi__value"><?php echo count($repeatGuests); ?></div>
+            <div class="rh-strip__cell">
+                <span class="rh-strip__label">Repeat Guests</span>
+                <strong class="rh-strip__value"><?php echo count($repeatGuests); ?></strong>
             </div>
-            <div class="acct-kpi">
-                <div class="acct-kpi__label">Avg Rating</div>
-                <div class="acct-kpi__value"><?php echo number_format($reviewStats['avg_rating'] ?? 0, 1); ?> <i class="fas fa-star" style="color: var(--color-lux-gold); font-size: 0.7em"></i></div>
-                <div class="acct-kpi__sub"><?php echo ($reviewStats['total_reviews'] ?? 0); ?> review(s)</div>
+            <div class="rh-strip__cell">
+                <span class="rh-strip__label">Avg Rating</span>
+                <strong class="rh-strip__value"><?php echo number_format($reviewStats['avg_rating'] ?? 0, 1); ?> <i class="fas fa-star" style="color: var(--color-lux-gold); font-size: 0.7em"></i></strong>
+                <span class="rh-strip__sub"><?php echo ($reviewStats['total_reviews'] ?? 0); ?> review(s)</span>
             </div>
         </div>
 
         <div class="acct-grid acct-grid--2">
             <!-- Country Distribution -->
-            <div class="acct-panel">
-                <h2 class="acct-panel__title"><i class="fas fa-globe-africa"></i> Guest Origin Countries</h2>
+            <div class="rh-panel">
+                <div class="rh-panel__head"><h2 class="rh-panel__title">Guest Origin Countries</h2></div>
                 <?php if (empty($guestCountryData)): ?>
                     <p class="acct-empty">No guest data for this period.</p>
                 <?php else: ?>
@@ -2694,8 +2694,8 @@ try {
             </div>
 
             <!-- Review Summary -->
-            <div class="report-section">
-                <h2><i class="fas fa-star"></i> Guest Reviews Summary</h2>
+            <div class="rh-panel">
+                <div class="rh-panel__head"><h2 class="rh-panel__title">Guest Reviews Summary</h2></div>
                 <?php if (($reviewStats['total_reviews'] ?? 0) == 0): ?>
                     <p class="acct-empty">No approved reviews for this period.</p>
                 <?php else: ?>
@@ -2728,8 +2728,8 @@ try {
         </div>
 
         <!-- Repeat Guests -->
-        <div class="acct-panel">
-            <h2 class="acct-panel__title"><i class="fas fa-redo"></i> Repeat Guests (Loyalty Analysis)</h2>
+        <div class="rh-panel">
+            <div class="rh-panel__head"><h2 class="rh-panel__title">Repeat Guests (Loyalty Analysis)</h2></div>
             <?php if (empty($repeatGuests)): ?>
                 <p class="acct-empty">No repeat guests found in this period.</p>
             <?php else: ?>
@@ -2826,46 +2826,46 @@ try {
             $confOutstanding = $totalConfRevenue - $totalConfPaid;
         ?>
 
-        <div class="acct-kpis">
+        <div class="rh-strip" role="group" aria-label="Summary">
             <?php if ($mod_conference): ?>
-            <div class="acct-kpi acct-kpi--revenue">
-                <div class="acct-kpi__label">Conference Revenue</div>
-                <div class="acct-kpi__value"><?php echo $currency_symbol . ' ' . number_format($totalConfRevenue, 2); ?></div>
-                <div class="acct-kpi__sub"><?php echo number_format($totalConfEvents); ?> inquiries</div>
+            <div class="rh-strip__cell">
+                <span class="rh-strip__label">Conference Revenue</span>
+                <strong class="rh-strip__value"><?php echo $currency_symbol . ' ' . number_format($totalConfRevenue, 2); ?></strong>
+                <span class="rh-strip__sub"><?php echo number_format($totalConfEvents); ?> inquiries</span>
             </div>
-            <div class="acct-kpi acct-kpi--cash">
-                <div class="acct-kpi__label">Amount Collected</div>
-                <div class="acct-kpi__value"><?php echo $currency_symbol . ' ' . number_format($totalConfPaid, 2); ?></div>
-                <div class="acct-kpi__sub"><?php echo $confCollectionPct; ?>% collection rate</div>
+            <div class="rh-strip__cell">
+                <span class="rh-strip__label">Amount Collected</span>
+                <strong class="rh-strip__value"><?php echo $currency_symbol . ' ' . number_format($totalConfPaid, 2); ?></strong>
+                <span class="rh-strip__sub"><?php echo $confCollectionPct; ?>% collection rate</span>
             </div>
-            <div class="acct-kpi acct-kpi--receivables">
-                <div class="acct-kpi__label">Outstanding (Conf.)</div>
-                <div class="acct-kpi__value"><?php echo $currency_symbol . ' ' . number_format($confOutstanding, 2); ?></div>
-                <div class="acct-kpi__sub">Unpaid conference balances</div>
+            <div class="rh-strip__cell">
+                <span class="rh-strip__label">Outstanding (Conf.)</span>
+                <strong class="rh-strip__value"><?php echo $currency_symbol . ' ' . number_format($confOutstanding, 2); ?></strong>
+                <span class="rh-strip__sub">Unpaid conference balances</span>
             </div>
             <?php endif; ?>
             <?php if ($mod_gym): ?>
-            <div class="acct-kpi">
-                <div class="acct-kpi__label">Gym Revenue</div>
-                <div class="acct-kpi__value"><?php echo $currency_symbol . ' ' . number_format($totalGymRevenue, 2); ?></div>
-                <div class="acct-kpi__sub"><?php echo number_format($totalGymInquiries); ?> inquiries</div>
+            <div class="rh-strip__cell">
+                <span class="rh-strip__label">Gym Revenue</span>
+                <strong class="rh-strip__value"><?php echo $currency_symbol . ' ' . number_format($totalGymRevenue, 2); ?></strong>
+                <span class="rh-strip__sub"><?php echo number_format($totalGymInquiries); ?> inquiries</span>
             </div>
-            <div class="acct-kpi acct-kpi--receivables">
-                <div class="acct-kpi__label">Outstanding (Gym)</div>
-                <div class="acct-kpi__value"><?php echo $currency_symbol . ' ' . number_format($gymOutstanding, 2); ?></div>
-                <div class="acct-kpi__sub">Unpaid gym balances</div>
+            <div class="rh-strip__cell">
+                <span class="rh-strip__label">Outstanding (Gym)</span>
+                <strong class="rh-strip__value"><?php echo $currency_symbol . ' ' . number_format($gymOutstanding, 2); ?></strong>
+                <span class="rh-strip__sub">Unpaid gym balances</span>
             </div>
             <?php endif; ?>
             <?php if ($mod_events): ?>
-            <div class="acct-kpi">
-                <div class="acct-kpi__label">Event Revenue</div>
-                <div class="acct-kpi__value"><?php echo $currency_symbol . ' ' . number_format($totalEventRevenue, 2); ?></div>
-                <div class="acct-kpi__sub"><?php echo number_format($totalEventBookings); ?> bookings</div>
+            <div class="rh-strip__cell">
+                <span class="rh-strip__label">Event Revenue</span>
+                <strong class="rh-strip__value"><?php echo $currency_symbol . ' ' . number_format($totalEventRevenue, 2); ?></strong>
+                <span class="rh-strip__sub"><?php echo number_format($totalEventBookings); ?> bookings</span>
             </div>
-            <div class="acct-kpi acct-kpi--receivables">
-                <div class="acct-kpi__label">Outstanding (Events)</div>
-                <div class="acct-kpi__value"><?php echo $currency_symbol . ' ' . number_format($eventOutstanding, 2); ?></div>
-                <div class="acct-kpi__sub">Unpaid event balances</div>
+            <div class="rh-strip__cell">
+                <span class="rh-strip__label">Outstanding (Events)</span>
+                <strong class="rh-strip__value"><?php echo $currency_symbol . ' ' . number_format($eventOutstanding, 2); ?></strong>
+                <span class="rh-strip__sub">Unpaid event balances</span>
             </div>
             <?php endif; ?>
         </div>
@@ -2873,8 +2873,8 @@ try {
         <div class="acct-grid acct-grid--2">
             <?php if ($mod_conference): ?>
             <!-- Conference Status -->
-            <div class="acct-panel">
-                <h2 class="acct-panel__title"><i class="fas fa-briefcase"></i> Conference Inquiry Status</h2>
+            <div class="rh-panel">
+                <div class="rh-panel__head"><h2 class="rh-panel__title">Conference Inquiry Status</h2></div>
                 <?php if (empty($conferenceStats)): ?>
                     <p class="acct-empty">No conference inquiries for this period.</p>
                 <?php else: ?>
@@ -2904,8 +2904,8 @@ try {
 
             <?php if ($mod_gym): ?>
             <!-- Gym Inquiry Status -->
-            <div class="acct-panel">
-                <h2 class="acct-panel__title"><i class="fas fa-dumbbell"></i> Gym Inquiry Status</h2>
+            <div class="rh-panel">
+                <div class="rh-panel__head"><h2 class="rh-panel__title">Gym Inquiry Status</h2></div>
                 <?php if (empty($gymInquiryStats)): ?>
                     <p class="acct-empty">No gym inquiries for this period.</p>
                 <?php else: ?>
@@ -2935,8 +2935,8 @@ try {
 
             <?php if ($mod_events): ?>
             <!-- Event Booking Status -->
-            <div class="acct-panel">
-                <h2 class="acct-panel__title"><i class="fas fa-calendar-check"></i> Event Booking Status</h2>
+            <div class="rh-panel">
+                <div class="rh-panel__head"><h2 class="rh-panel__title">Event Booking Status</h2></div>
                 <?php if (empty($eventInquiryStats)): ?>
                     <p class="acct-empty">No event bookings for this period.</p>
                 <?php else: ?>
@@ -2967,8 +2967,8 @@ try {
 
         <?php if ($mod_conference): ?>
         <!-- Conference Room Utilization -->
-        <div class="acct-panel">
-            <h2 class="acct-panel__title"><i class="fas fa-building"></i> Conference Room Utilization</h2>
+        <div class="rh-panel">
+            <div class="rh-panel__head"><h2 class="rh-panel__title">Conference Room Utilization</h2></div>
             <?php if (empty($conferenceRoomStats)): ?>
                 <p class="acct-empty">No conference room data available.</p>
             <?php else: ?>
@@ -3010,8 +3010,8 @@ try {
 
         <?php if ($mod_gym): ?>
         <!-- Gym Revenue Trend -->
-        <div class="acct-panel">
-            <h2 class="acct-panel__title"><i class="fas fa-dumbbell"></i> Gym Revenue Trend</h2>
+        <div class="rh-panel">
+            <div class="rh-panel__head"><h2 class="rh-panel__title">Gym Revenue Trend</h2></div>
             <?php if (empty($gymRevenueTrend)): ?>
                 <p class="acct-empty">No gym bookings in this period.</p>
             <?php else: ?>
@@ -3039,8 +3039,8 @@ try {
 
         <?php if ($mod_events): ?>
         <!-- Event Revenue Trend -->
-        <div class="acct-panel">
-            <h2 class="acct-panel__title"><i class="fas fa-calendar-check"></i> Event Revenue Trend</h2>
+        <div class="rh-panel">
+            <div class="rh-panel__head"><h2 class="rh-panel__title">Event Revenue Trend</h2></div>
             <?php if (empty($eventRevenueTrend)): ?>
                 <p class="acct-empty">No event bookings in this period.</p>
             <?php else: ?>

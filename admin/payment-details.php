@@ -408,389 +408,337 @@ if (($payment['payment_type'] ?? '') === 'refund' && !empty($payment['original_p
     <?php require_once 'includes/admin-header.php'; ?>
 
     <div class="content finance-page">
-        <div class="acct-page-header">
-            <div class="acct-page-header__copy">
-                <h1 class="acct-page-header__title">
-                    Payment <?php echo htmlspecialchars($payment['payment_reference']); ?>
-                </h1>
-                <p class="acct-page-header__subtitle">
-                    <?php echo date('M j, Y', strtotime($payment['payment_date'])); ?> ·
-                    <?php echo htmlspecialchars(ucfirst((string)$payment['booking_type'])); ?> ·
-                    <?php echo htmlspecialchars(ucfirst(str_replace('_', ' ', (string)$payment['payment_method']))); ?> ·
-                    <span class="acct-pill acct-pill--<?php echo htmlspecialchars((string)$payment['payment_status']); ?>"><?php echo htmlspecialchars(ucfirst(str_replace('_', ' ', (string)$payment['payment_status']))); ?></span>
-                    <?php if (($payment['payment_type'] ?? '') === 'refund'): ?>
-                        <span class="acct-pill acct-pill--danger">Refund</span>
+        <?php
+        $pd_is_refund = (($payment['payment_type'] ?? '') === 'refund');
+        $pd_status_map = ['completed' => 'ok', 'paid' => 'ok', 'refunded' => 'muted', 'partially_refunded' => 'warn', 'pending' => 'warn', 'failed' => 'alert', 'cancelled' => 'alert'];
+        $pd_status_cls = $pd_status_map[(string)$payment['payment_status']] ?? 'muted';
+        ?>
+        <header class="rh-page-head">
+            <div class="rh-page-head__main">
+                <div class="rh-page-head__title">
+                    <h1>Payment <?php echo htmlspecialchars($payment['payment_reference']); ?></h1>
+                    <span class="rh-pill rh-pill--<?php echo $pd_status_cls; ?>"><?php echo htmlspecialchars(ucfirst(str_replace('_', ' ', (string)$payment['payment_status']))); ?></span>
+                    <?php if ($pd_is_refund): ?>
+                        <span class="rh-pill rh-pill--alert">Refund</span>
                     <?php endif; ?>
+                </div>
+                <p class="rh-page-head__meta">
+                    <?php echo date('M j, Y', strtotime($payment['payment_date'])); ?> &middot;
+                    <?php echo htmlspecialchars(ucfirst((string)$payment['booking_type'])); ?> &middot;
+                    <?php echo htmlspecialchars(ucfirst(str_replace('_', ' ', (string)$payment['payment_method']))); ?>
                 </p>
             </div>
-            <div style="display:flex; gap:8px; flex-wrap:wrap;">
-                <?php if ($payment['payment_status'] !== 'completed' && ($payment['payment_type'] ?? '') !== 'refund'): ?>
-                    <a href="payment-add.php?edit=<?php echo $paymentId; ?>" class="acct-quick-action acct-quick-action--accent">
+            <div class="rh-page-head__actions">
+                <?php if ($payment['payment_status'] !== 'completed' && !$pd_is_refund): ?>
+                    <a href="payment-add.php?edit=<?php echo $paymentId; ?>" class="btn btn--primary btn--sm">
                         <i class="fas fa-edit"></i> Edit
                     </a>
                 <?php endif; ?>
-                <?php if (in_array($payment['payment_status'], ['completed', 'paid', 'partially_refunded'], true) && ($payment['payment_type'] ?? '') !== 'refund'): ?>
-                    <a href="payment-refund.php?id=<?php echo $paymentId; ?>" class="acct-quick-action">
+                <?php if (in_array($payment['payment_status'], ['completed', 'paid', 'partially_refunded'], true) && !$pd_is_refund): ?>
+                    <a href="payment-refund.php?id=<?php echo $paymentId; ?>" class="btn btn--secondary btn--sm">
                         <i class="fas fa-undo"></i> Refund
                     </a>
                 <?php endif; ?>
-                <?php if (in_array($payment['payment_status'], ['completed', 'paid'], true) && ($payment['payment_type'] ?? '') !== 'refund'): ?>
+                <?php if (in_array($payment['payment_status'], ['completed', 'paid'], true) && !$pd_is_refund): ?>
                     <?php if (($payment['booking_type'] ?? '') === 'restaurant' && !empty($payment['booking_id'])): ?>
-                        <button type="button" class="acct-quick-action" onclick="pdOpenReceiptModal(<?php echo (int)$payment['booking_id']; ?>, 'order')">
+                        <button type="button" class="btn btn--secondary btn--sm" onclick="pdOpenReceiptModal(<?php echo (int)$payment['booking_id']; ?>, 'order')">
                             <i class="fas fa-paper-plane"></i> Send Receipt
                         </button>
                     <?php else: ?>
-                        <button type="button" class="acct-quick-action" onclick="pdOpenReceiptModal(<?php echo $paymentId; ?>, 'payment')">
+                        <button type="button" class="btn btn--secondary btn--sm" onclick="pdOpenReceiptModal(<?php echo $paymentId; ?>, 'payment')">
                             <i class="fas fa-paper-plane"></i> Send Receipt
                         </button>
                     <?php endif; ?>
                 <?php endif; ?>
-                <a href="invoices.php?search=<?php echo urlencode($payment['payment_reference']); ?>" class="acct-quick-action">
+                <a href="invoices.php?search=<?php echo urlencode($payment['payment_reference']); ?>" class="btn btn--secondary btn--sm">
                     <i class="fas fa-file-invoice"></i> Invoice
                 </a>
-                <a href="payments.php" class="acct-quick-action" onclick="if(history.length>1){history.back();return false;}">
+                <a href="payments.php" class="btn btn--ghost btn--sm" onclick="if(history.length>1){history.back();return false;}">
                     <i class="fas fa-arrow-left"></i> Back
                 </a>
             </div>
-        </div>
+        </header>
 
-        <!-- Compact KPI strip replaces the bulky payment-summary-card -->
+
         <?php
         $paymentPercentage = $bookingTotalAmount > 0 ? ($paymentSummary['total_paid'] / $bookingTotalAmount) * 100 : 0;
         $paymentStatusText = $dueAmount <= 0 ? 'Fully Paid' : ($paymentSummary['total_paid'] > 0 ? 'Partially Paid' : 'Unpaid');
         ?>
-        <div class="acct-kpis">
-            <div class="acct-kpi acct-kpi--revenue">
-                <div class="acct-kpi__label">This Payment</div>
-                <div class="acct-kpi__value"><?php echo $currency_symbol . number_format((float)$payment['total_amount'], 0); ?></div>
-                <div class="acct-kpi__meta">
+        <div class="rh-strip" role="group" aria-label="Payment summary">
+            <div class="rh-strip__cell">
+                <span class="rh-strip__label">This payment</span>
+                <strong class="rh-strip__value"><?php echo $currency_symbol . number_format((float)$payment['total_amount'], 0); ?></strong>
+                <span class="rh-strip__sub">
                     Subtotal <?php echo $currency_symbol . number_format((float)$payment['payment_amount'], 0); ?>
                     <?php if ((float)$payment['vat_amount'] > 0): ?>
-                        · VAT <?php echo $currency_symbol . number_format((float)$payment['vat_amount'], 0); ?>
+                        &middot; VAT <?php echo $currency_symbol . number_format((float)$payment['vat_amount'], 0); ?>
                     <?php endif; ?>
-                </div>
+                </span>
             </div>
-            <div class="acct-kpi acct-kpi--cash">
-                <div class="acct-kpi__label">Booking Total</div>
-                <div class="acct-kpi__value"><?php echo $currency_symbol . number_format((float)$bookingTotalAmount, 0); ?></div>
-                <div class="acct-kpi__meta">
-                    Paid <?php echo $currency_symbol . number_format((float)$paymentSummary['total_paid'], 0); ?> of total
-                </div>
+            <div class="rh-strip__cell">
+                <span class="rh-strip__label">Booking total</span>
+                <strong class="rh-strip__value"><?php echo $currency_symbol . number_format((float)$bookingTotalAmount, 0); ?></strong>
+                <span class="rh-strip__sub">Paid <?php echo $currency_symbol . number_format((float)$paymentSummary['total_paid'], 0); ?> of total</span>
             </div>
-            <div class="acct-kpi acct-kpi--receivables">
-                <div class="acct-kpi__label">Outstanding</div>
-                <div class="acct-kpi__value"><?php echo $currency_symbol . number_format(max(0, (float)$dueAmount), 0); ?></div>
-                <div class="acct-kpi__meta">
-                    <?php echo htmlspecialchars($paymentStatusText); ?> · <?php echo number_format($paymentPercentage, 0); ?>% complete
-                </div>
+            <div class="rh-strip__cell">
+                <span class="rh-strip__label">Outstanding</span>
+                <strong class="rh-strip__value <?php echo $dueAmount > 0 ? 'rh-strip__value--alert' : 'rh-strip__value--ok'; ?>"><?php echo $currency_symbol . number_format(max(0, (float)$dueAmount), 0); ?></strong>
+                <span class="rh-strip__sub"><?php echo htmlspecialchars($paymentStatusText); ?> &middot; <?php echo number_format($paymentPercentage, 0); ?>% complete</span>
             </div>
-            <div class="acct-kpi acct-kpi--vat">
-                <div class="acct-kpi__label">Refunded From This</div>
-                <div class="acct-kpi__value"><?php echo $currency_symbol . number_format($totalRefundedHere, 0); ?></div>
-                <div class="acct-kpi__meta">
-                    <?php echo count($refundsAgainst); ?> refund<?php echo count($refundsAgainst) === 1 ? '' : 's'; ?>
-                </div>
+            <div class="rh-strip__cell">
+                <span class="rh-strip__label">Refunded</span>
+                <strong class="rh-strip__value"><?php echo $currency_symbol . number_format($totalRefundedHere, 0); ?></strong>
+                <span class="rh-strip__sub"><?php echo count($refundsAgainst); ?> refund<?php echo count($refundsAgainst) === 1 ? '' : 's'; ?></span>
             </div>
         </div>
 
-        <?php if ($originalPayment): ?>
-            <div class="acct-error" style="margin-top: 16px; background: var(--finance-info-bg, #eff6ff); border-color: var(--finance-info-border, #bfdbfe); color: var(--finance-info, #1d4ed8);">
-                <i class="fas fa-rotate-left"></i> This is a refund of original payment
-                <a class="acct-link" href="payment-details.php?id=<?php echo (int)$originalPayment['id']; ?>"><strong><?php echo htmlspecialchars($originalPayment['payment_reference']); ?></strong></a>
-                · <?php echo $currency_symbol . number_format((float)$originalPayment['total_amount'], 0); ?>
-                · <?php echo date('M j, Y', strtotime($originalPayment['payment_date'])); ?>
-            </div>
-        <?php endif; ?>
+        <?php
+        $pd_pill = static function (string $status): string {
+            $map = ['completed' => 'ok', 'paid' => 'ok', 'confirmed' => 'ok', 'checked-in' => 'ok', 'checked-out' => 'muted', 'refunded' => 'muted',
+                'partially_refunded' => 'warn', 'pending' => 'warn', 'processing' => 'warn', 'tentative' => 'warn',
+                'failed' => 'alert', 'cancelled' => 'alert', 'no-show' => 'alert'];
+            return '<span class="rh-pill rh-pill--' . ($map[$status] ?? 'muted') . '">' . htmlspecialchars(ucfirst(str_replace(['_', '-'], ' ', $status))) . '</span>';
+        };
+        if ($bookingDetails) {
+            // Per-type vocabulary: a gym payment is a membership, an event payment
+            // an event booking, a restaurant payment an order - not a room booking.
+            $pd_type_labels = [
+                'room'       => ['heading' => 'Booking',       'noun' => 'Booking'],
+                'conference' => ['heading' => 'Booking',       'noun' => 'Booking'],
+                'restaurant' => ['heading' => 'Order',         'noun' => 'Order'],
+                'gym'        => ['heading' => 'Membership',    'noun' => 'Membership'],
+                'event'      => ['heading' => 'Event booking', 'noun' => 'Event Booking'],
+            ];
+            $pd_labels = $pd_type_labels[$bookingDetails['type']] ?? ['heading' => 'Record', 'noun' => 'Record'];
+            // Preset-aware source link: restaurant payments go to the orders console only
+            // when the stock module is on (POS-only presets keep the till); gym/event
+            // payments go to their inquiry pages.
+            $pd_source_href = match ($bookingDetails['type']) {
+                'room'       => 'booking-details.php?id=' . $bookingDetails['id'],
+                'restaurant' => (function_exists('moduleEnabled') && moduleEnabled('stock')) ? 'stock-orders.php' : 'pos.php',
+                'gym'        => 'gym-inquiries.php',
+                'event'      => 'events-inquiries.php',
+                default      => 'conference-management.php',
+            };
+        }
+        ?>
+        <div class="rh-layout">
+            <div>
+                <?php if ($originalPayment): ?>
+                    <section class="rh-panel">
+                        <p class="rh-empty">
+                            <i class="fas fa-rotate-left"></i> This is a refund of original payment
+                            <a class="rh-mini-link" href="payment-details.php?id=<?php echo (int)$originalPayment['id']; ?>"><?php echo htmlspecialchars($originalPayment['payment_reference']); ?></a>
+                            &middot; <?php echo $currency_symbol . number_format((float)$originalPayment['total_amount'], 0); ?>
+                            &middot; <?php echo date('M j, Y', strtotime($originalPayment['payment_date'])); ?>
+                        </p>
+                    </section>
+                <?php endif; ?>
 
-        <?php if (($payment['payment_type'] ?? '') === 'refund' && in_array((string)($payment['refund_status'] ?? ''), ['pending', 'processing'], true) && (string)$payment['payment_method'] !== 'credit_note'): ?>
-            <div class="acct-panel" style="margin-top: 18px;">
-                <div class="acct-panel__head">
-                    <h3 class="acct-panel__title"><i class="fas fa-check-double"></i> &nbsp;Settle This Refund</h3>
-                    <span class="acct-panel__sub">Currently <?php echo htmlspecialchars((string)$payment['refund_status']); ?></span>
-                </div>
-                <form method="POST" action="payment-details.php?id=<?php echo (int)$paymentId; ?>" style="padding: 14px 18px; display:flex; gap:12px; flex-wrap:wrap; align-items:flex-end;"
-                    data-admin-confirm="Update this refund's status?" data-admin-confirm-title="Settle refund">
-                    <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf_token ?? generateCsrfToken(), ENT_QUOTES, 'UTF-8'); ?>">
-                    <input type="hidden" name="action" value="settle_refund">
-                    <div>
-                        <label for="new_refund_status" style="display:block; font-size:12px; font-weight:600; margin-bottom:4px;">Move to</label>
-                        <select id="new_refund_status" name="new_refund_status" style="padding:9px 11px; min-height:44px;" required>
-                            <?php if ((string)$payment['refund_status'] === 'pending'): ?>
-                                <option value="processing">Processing (sent to provider)</option>
-                            <?php endif; ?>
-                            <option value="completed">Completed (money paid out)</option>
-                            <option value="failed">Failed (money not paid out)</option>
-                        </select>
-                    </div>
-                    <div style="flex:1; min-width:220px;">
-                        <label for="settle_notes" style="display:block; font-size:12px; font-weight:600; margin-bottom:4px;">Note (optional)</label>
-                        <input type="text" id="settle_notes" name="settle_notes" maxlength="250" style="width:100%; padding:9px 11px; min-height:44px;" placeholder="Provider reference, reason for failure…">
-                    </div>
-                    <button type="submit" class="acct-quick-action acct-quick-action--accent" style="min-height:44px;"><i class="fas fa-check"></i> Update refund</button>
-                </form>
-            </div>
-        <?php endif; ?>
+                <?php if (($payment['payment_type'] ?? '') === 'refund' && in_array((string)($payment['refund_status'] ?? ''), ['pending', 'processing'], true) && (string)$payment['payment_method'] !== 'credit_note'): ?>
+                    <section class="rh-panel">
+                        <div class="rh-panel__head">
+                            <h2 class="rh-panel__title">Settle this refund</h2>
+                            <span class="rh-page-head__meta">Currently <?php echo htmlspecialchars((string)$payment['refund_status']); ?></span>
+                        </div>
+                        <form method="POST" action="payment-details.php?id=<?php echo (int)$paymentId; ?>" class="rh-panel__body pd-settle-form"
+                            data-admin-confirm="Update this refund's status?" data-admin-confirm-title="Settle refund">
+                            <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf_token ?? generateCsrfToken(), ENT_QUOTES, 'UTF-8'); ?>">
+                            <input type="hidden" name="action" value="settle_refund">
+                            <div class="pd-settle-form__field">
+                                <label for="new_refund_status">Move to</label>
+                                <select id="new_refund_status" name="new_refund_status" required>
+                                    <?php if ((string)$payment['refund_status'] === 'pending'): ?>
+                                        <option value="processing">Processing (sent to provider)</option>
+                                    <?php endif; ?>
+                                    <option value="completed">Completed (money paid out)</option>
+                                    <option value="failed">Failed (money not paid out)</option>
+                                </select>
+                            </div>
+                            <div class="pd-settle-form__field pd-settle-form__field--grow">
+                                <label for="settle_notes">Note (optional)</label>
+                                <input type="text" id="settle_notes" name="settle_notes" maxlength="250" placeholder="Provider reference, reason for failure...">
+                            </div>
+                            <button type="submit" class="btn btn--primary btn--sm"><i class="fas fa-check"></i> Update refund</button>
+                        </form>
+                    </section>
+                <?php endif; ?>
 
-        <?php if (!empty($refundsAgainst)): ?>
-            <div class="acct-panel" style="margin-top: 18px;">
-                <div class="acct-panel__head">
-                    <h3 class="acct-panel__title"><i class="fas fa-rotate-left"></i> &nbsp;Refunds Against This Payment</h3>
-                    <span class="acct-panel__sub"><?php echo count($refundsAgainst); ?> total · <?php echo $currency_symbol . number_format($totalRefundedHere, 0); ?> refunded</span>
-                </div>
-                <div class="acct-table-wrap">
-                    <table class="acct-table">
-                        <thead>
-                            <tr>
-                                <th>Reference</th>
-                                <th>Date</th>
-                                <th class="num">Amount</th>
-                                <th>Reason</th>
-                                <th>Status</th>
-                                <th></th>
-                            </tr>
-                        </thead>
+                <!-- Payment -->
+                <section class="rh-panel">
+                    <div class="rh-panel__head">
+                        <h2 class="rh-panel__title">Payment</h2>
+                    </div>
+                    <table class="rh-kv no-auto-pagination">
                         <tbody>
-                            <?php foreach ($refundsAgainst as $r): ?>
-                                <tr>
-                                    <td><?php echo htmlspecialchars($r['payment_reference']); ?></td>
-                                    <td><?php echo date('M j, Y', strtotime($r['payment_date'])); ?></td>
-                                    <td class="num"><strong><?php echo $currency_symbol . number_format((float)($r['refund_amount'] ?: $r['total_amount']), 0); ?></strong></td>
-                                    <td><?php echo htmlspecialchars(ucfirst(str_replace('_', ' ', (string)($r['refund_reason'] ?? '—')))); ?></td>
-                                    <td><span class="acct-pill acct-pill--<?php echo htmlspecialchars((string)($r['refund_status'] ?? 'pending')); ?>"><?php echo htmlspecialchars(ucfirst((string)($r['refund_status'] ?? 'pending'))); ?></span></td>
-                                    <td><a class="acct-link" href="payment-details.php?id=<?php echo (int)$r['id']; ?>">View →</a></td>
-                                </tr>
-                            <?php endforeach; ?>
+                            <tr><th scope="row">Reference</th><td><?php echo htmlspecialchars($payment['payment_reference']); ?></td></tr>
+                            <tr><th scope="row">Date</th><td><?php echo date('F j, Y', strtotime($payment['payment_date'])); ?></td></tr>
+                            <tr><th scope="row">Method</th><td><?php echo htmlspecialchars(ucfirst(str_replace('_', ' ', (string)$payment['payment_method']))); ?></td></tr>
+                            <tr><th scope="row">Status</th><td><?php echo $pd_pill((string)$payment['payment_status']); ?></td></tr>
+                            <?php if (!empty($payment['transaction_reference_value'])): ?>
+                                <tr><th scope="row">Transaction reference</th><td><?php echo htmlspecialchars($payment['transaction_reference_value']); ?></td></tr>
+                            <?php endif; ?>
+                            <tr><th scope="row">Processed by</th><td><?php echo htmlspecialchars($payment['processed_by'] ?? 'System'); ?></td></tr>
+                            <tr><th scope="row">Created</th><td><?php echo date('F j, Y g:i A', strtotime($payment['created_at'])); ?></td></tr>
+                            <?php if ($payment['updated_at'] !== $payment['created_at']): ?>
+                                <tr><th scope="row">Last updated</th><td><?php echo date('F j, Y g:i A', strtotime($payment['updated_at'])); ?></td></tr>
+                            <?php endif; ?>
+                            <tr><th scope="row">Receipt no.</th><td><?php echo $payment['receipt_number'] ? htmlspecialchars($payment['receipt_number']) : '<span class="rh-page-head__meta">Not generated yet</span>'; ?></td></tr>
+                            <?php if ($payment['notes']): ?>
+                                <tr><th scope="row">Notes</th><td><?php echo nl2br(htmlspecialchars($payment['notes'])); ?></td></tr>
+                            <?php endif; ?>
                         </tbody>
                     </table>
-                </div>
-            </div>
-        <?php endif; ?>
+                </section>
 
-        <div class="details-grid">
-            <!-- Payment Information -->
-            <div class="detail-card">
-                <h3><i class="fas fa-money-bill-wave"></i> Payment Information</h3>
-
-                <div class="detail-row">
-                    <span class="detail-label">Payment Reference</span>
-                    <span class="detail-value"><?php echo htmlspecialchars($payment['payment_reference']); ?></span>
-                </div>
-
-                <div class="detail-row">
-                    <span class="detail-label">Payment Date</span>
-                    <span class="detail-value"><?php echo date('F j, Y', strtotime($payment['payment_date'])); ?></span>
-                </div>
-
-                <div class="detail-row">
-                    <span class="detail-label">Payment Method</span>
-                    <span class="detail-value"><?php echo ucfirst(str_replace('_', ' ', $payment['payment_method'])); ?></span>
-                </div>
-
-                <div class="detail-row">
-                    <span class="detail-label">Status</span>
-                    <span class="detail-value">
-                        <span class="badge badge-<?php echo $payment['payment_status']; ?>">
-                            <?php echo ucfirst(str_replace('_', ' ', $payment['payment_status'])); ?>
-                        </span>
-                    </span>
-                </div>
-
-                <?php if (!empty($payment['transaction_reference_value'])): ?>
-                    <div class="detail-row">
-                        <span class="detail-label">Transaction Reference</span>
-                        <span class="detail-value"><?php echo htmlspecialchars($payment['transaction_reference_value']); ?></span>
+                <!-- Amount breakdown -->
+                <section class="rh-panel">
+                    <div class="rh-panel__head">
+                        <h2 class="rh-panel__title">Amount breakdown</h2>
                     </div>
-                <?php endif; ?>
+                    <table class="rh-kv no-auto-pagination">
+                        <tbody>
+                            <tr><th scope="row">Subtotal (excl. VAT)</th><td><?php echo $currency_symbol; ?><?php echo number_format($payment['payment_amount'], 2); ?></td></tr>
+                            <?php if ($payment['vat_amount'] > 0): ?>
+                                <tr><th scope="row">VAT rate</th><td><?php echo number_format($payment['vat_rate'], 2); ?>%</td></tr>
+                                <tr><th scope="row">VAT</th><td><?php echo $currency_symbol; ?><?php echo number_format($payment['vat_amount'], 2); ?></td></tr>
+                            <?php endif; ?>
+                            <tr><th scope="row">Total</th><td><strong><?php echo $currency_symbol; ?><?php echo number_format($payment['total_amount'], 2); ?></strong></td></tr>
+                        </tbody>
+                    </table>
+                </section>
 
-                <div class="detail-row">
-                    <span class="detail-label">Processed By</span>
-                    <span class="detail-value"><?php echo htmlspecialchars($payment['processed_by'] ?? 'System'); ?></span>
-                </div>
-
-                <div class="detail-row">
-                    <span class="detail-label">Created</span>
-                    <span class="detail-value"><?php echo date('F j, Y g:i A', strtotime($payment['created_at'])); ?></span>
-                </div>
-
-                <?php if ($payment['updated_at'] !== $payment['created_at']): ?>
-                    <div class="detail-row">
-                        <span class="detail-label">Last Updated</span>
-                        <span class="detail-value"><?php echo date('F j, Y g:i A', strtotime($payment['updated_at'])); ?></span>
-                    </div>
-                <?php endif; ?>
-
-                <?php if ($payment['notes']): ?>
-                    <div class="detail-row">
-                        <span class="detail-label">Notes</span>
-                        <span class="detail-value" style="text-align: left; font-weight: 400;">
-                            <?php echo nl2br(htmlspecialchars($payment['notes'])); ?>
-                        </span>
-                    </div>
-                <?php endif; ?>
-            </div>
-
-            <!-- Amount Breakdown -->
-            <div class="detail-card">
-                <h3><i class="fas fa-calculator"></i> Amount Breakdown</h3>
-
-                <div class="detail-row">
-                    <span class="detail-label">Subtotal (excl. VAT)</span>
-                    <span class="detail-value"><?php echo $currency_symbol; ?><?php echo number_format($payment['payment_amount'], 2); ?></span>
-                </div>
-
-                <?php if ($payment['vat_amount'] > 0): ?>
-                    <div class="detail-row">
-                        <span class="detail-label">VAT Rate</span>
-                        <span class="detail-value"><?php echo number_format($payment['vat_rate'], 2); ?>%</span>
-                    </div>
-
-                    <div class="detail-row">
-                        <span class="detail-label">VAT Amount</span>
-                        <span class="detail-value"><?php echo $currency_symbol; ?><?php echo number_format($payment['vat_amount'], 2); ?></span>
-                    </div>
-                <?php endif; ?>
-
-                <div class="detail-row">
-                    <span class="detail-label">Total Amount</span>
-                    <span class="detail-value large"><?php echo $currency_symbol; ?><?php echo number_format($payment['total_amount'], 2); ?></span>
-                </div>
-
-                <!-- Receipt Information -->
-                <div class="receipt-preview <?php echo $payment['receipt_number'] ? 'has-receipt' : ''; ?>">
-                    <?php if ($payment['receipt_number']): ?>
-                        <i class="fas fa-receipt" style="font-size: 32px; color: var(--navy); margin-bottom: 12px;"></i>
-                        <div class="receipt-number"><?php echo htmlspecialchars($payment['receipt_number']); ?></div>
-                        <p style="color: #666;">Receipt Generated</p>
-                    <?php else: ?>
-                        <i class="fas fa-clock" style="font-size: 32px; color: #999; margin-bottom: 12px;"></i>
-                        <p style="color: #999;">No receipt generated</p>
-                        <p style="font-size: 12px; color: #999;">Receipt will be generated when payment is completed</p>
-                    <?php endif; ?>
-                </div>
-            </div>
-        </div>
-
-        <!-- Source record information — labelled by what the payment actually is -->
-        <?php if ($bookingDetails):
-            // Per-type vocabulary: a gym payment is a membership, an event payment
-            // an event booking, a restaurant payment an order — not a room booking.
-            $pd_type_labels = [
-                'room'       => ['heading' => 'Booking Information',       'title' => 'Room Booking',      'noun' => 'Booking'],
-                'conference' => ['heading' => 'Booking Information',       'title' => 'Conference Booking', 'noun' => 'Booking'],
-                'restaurant' => ['heading' => 'Order Information',         'title' => 'Restaurant Order',  'noun' => 'Order'],
-                'gym'        => ['heading' => 'Membership Information',    'title' => 'Gym Membership',    'noun' => 'Membership'],
-                'event'      => ['heading' => 'Event Booking Information', 'title' => 'Event Booking',     'noun' => 'Event Booking'],
-            ];
-            $pd_labels = $pd_type_labels[$bookingDetails['type']] ?? ['heading' => 'Record Information', 'title' => ucfirst($bookingDetails['type']), 'noun' => 'Record'];
-        ?>
-            <div class="detail-card" style="margin-bottom: 24px;">
-                <h3><i class="fas fa-calendar-check"></i> <?php echo $pd_labels['heading']; ?></h3>
-
-                <div class="booking-summary">
-                    <h4><?php echo $pd_labels['title']; ?></h4>
-
-                    <?php if ($bookingDetails['type'] === 'room'): ?>
-                        <p><strong>Reference:</strong> <?php echo htmlspecialchars($bookingDetails['reference']); ?></p>
-                        <p><strong>Room:</strong> <?php echo htmlspecialchars($bookingDetails['room']['name']); ?></p>
-                        <p><strong>Guest:</strong> <?php echo htmlspecialchars($bookingDetails['guest']['name']); ?></p>
-                        <p><strong>Email:</strong> <?php echo htmlspecialchars($bookingDetails['guest']['email']); ?></p>
-                        <p><strong>Dates:</strong> <?php echo date('M j, Y', strtotime($bookingDetails['dates']['check_in'])); ?> - <?php echo date('M j, Y', strtotime($bookingDetails['dates']['check_out'])); ?> (<?php echo $bookingDetails['dates']['nights']; ?> nights)</p>
-                        <p><strong>Total Amount:</strong> <?php echo $currency_symbol; ?><?php echo number_format($bookingDetails['amounts']['total_amount'], 0); ?></p>
-                        <p><strong>Amount Paid:</strong> <span style="color: #28a745;"><?php echo $currency_symbol; ?><?php echo number_format($bookingDetails['amounts']['amount_paid'], 0); ?></span></p>
-                        <p><strong>Amount Due:</strong> <span style="color: <?php echo $bookingDetails['amounts']['amount_due'] > 0 ? '#dc3545' : '#28a745'; ?>;"><?php echo $currency_symbol; ?><?php echo number_format($bookingDetails['amounts']['amount_due'], 0); ?></span></p>
-                        <?php if ($bookingDetails['amounts']['vat_amount'] > 0): ?>
-                            <p><strong>VAT:</strong> <?php echo $currency_symbol; ?><?php echo number_format($bookingDetails['amounts']['vat_amount'], 0); ?> (<?php echo $bookingDetails['amounts']['vat_rate']; ?>%)</p>
-                        <?php endif; ?>
-                        <p><strong>Status:</strong> <span class="badge badge-<?php echo $bookingDetails['status']; ?>"><?php echo ucfirst($bookingDetails['status']); ?></span></p>
-                    <?php elseif ($bookingDetails['type'] === 'conference'): ?>
-                        <p><strong>Reference:</strong> <?php echo htmlspecialchars($bookingDetails['reference']); ?></p>
-                        <p><strong>Organization:</strong> <?php echo htmlspecialchars($bookingDetails['organization']['name']); ?></p>
-                        <p><strong>Contact:</strong> <?php echo htmlspecialchars($bookingDetails['organization']['contact_person']); ?></p>
-                        <p><strong>Email:</strong> <?php echo htmlspecialchars($bookingDetails['organization']['email']); ?></p>
-                        <p><strong>Event Type:</strong> <?php echo htmlspecialchars($bookingDetails['event']['type']); ?></p>
-                        <p><strong>Dates:</strong> <?php echo date('M j, Y', strtotime($bookingDetails['event']['start_date'])); ?> - <?php echo date('M j, Y', strtotime($bookingDetails['event']['end_date'])); ?></p>
-                        <p><strong>Total Amount:</strong> <?php echo $currency_symbol; ?><?php echo number_format($bookingDetails['amounts']['total_amount'], 0); ?></p>
-                        <p><strong>Amount Paid:</strong> <span style="color: #28a745;"><?php echo $currency_symbol; ?><?php echo number_format($bookingDetails['amounts']['amount_paid'], 0); ?></span></p>
-                        <p><strong>Amount Due:</strong> <span style="color: <?php echo $bookingDetails['amounts']['amount_due'] > 0 ? '#dc3545' : '#28a745'; ?>;"><?php echo $currency_symbol; ?><?php echo number_format($bookingDetails['amounts']['amount_due'], 0); ?></span></p>
-                        <?php if ($bookingDetails['amounts']['deposit_required'] > 0): ?>
-                            <p><strong>Deposit Required:</strong> <?php echo $currency_symbol; ?><?php echo number_format($bookingDetails['amounts']['deposit_required'], 0); ?> (Paid: <?php echo $currency_symbol; ?><?php echo number_format($bookingDetails['amounts']['deposit_paid'], 0); ?>)</p>
-                        <?php endif; ?>
-                        <?php if ($bookingDetails['amounts']['vat_amount'] > 0): ?>
-                            <p><strong>VAT:</strong> <?php echo $currency_symbol; ?><?php echo number_format($bookingDetails['amounts']['vat_amount'], 0); ?> (<?php echo $bookingDetails['amounts']['vat_rate']; ?>%)</p>
-                        <?php endif; ?>
-                        <p><strong>Status:</strong> <span class="badge badge-<?php echo $bookingDetails['status']; ?>"><?php echo ucfirst($bookingDetails['status']); ?></span></p>
-                    <?php elseif (in_array($bookingDetails['type'], ['gym', 'event'], true)): ?>
-                        <p><strong>Reference:</strong> <?php echo htmlspecialchars($bookingDetails['reference']); ?></p>
-                        <p><strong><?php echo htmlspecialchars($bookingDetails['person']['label']); ?>:</strong> <?php echo htmlspecialchars($bookingDetails['person']['name']); ?></p>
-                        <?php if (!empty($bookingDetails['person']['email'])): ?>
-                            <p><strong>Email:</strong> <?php echo htmlspecialchars($bookingDetails['person']['email']); ?></p>
-                        <?php endif; ?>
-                        <?php foreach ($bookingDetails['detail_rows'] as $pd_dl => $pd_dv): ?>
-                            <p><strong><?php echo htmlspecialchars($pd_dl); ?>:</strong> <?php echo htmlspecialchars((string)$pd_dv); ?></p>
-                        <?php endforeach; ?>
-                        <p><strong>Total Amount:</strong> <?php echo $currency_symbol; ?><?php echo number_format($bookingDetails['amounts']['total_amount'], 0); ?></p>
-                        <p><strong>Amount Paid:</strong> <span style="color: #28a745;"><?php echo $currency_symbol; ?><?php echo number_format($bookingDetails['amounts']['amount_paid'], 0); ?></span></p>
-                        <p><strong>Amount Due:</strong> <span style="color: <?php echo $bookingDetails['amounts']['amount_due'] > 0 ? '#dc3545' : '#28a745'; ?>;"><?php echo $currency_symbol; ?><?php echo number_format($bookingDetails['amounts']['amount_due'], 0); ?></span></p>
-                        <?php if ($bookingDetails['amounts']['vat_amount'] > 0): ?>
-                            <p><strong>VAT:</strong> <?php echo $currency_symbol; ?><?php echo number_format($bookingDetails['amounts']['vat_amount'], 0); ?> (<?php echo $bookingDetails['amounts']['vat_rate']; ?>%)</p>
-                        <?php endif; ?>
-                        <p><strong>Status:</strong> <span class="badge badge-<?php echo $bookingDetails['status']; ?>"><?php echo ucfirst($bookingDetails['status']); ?></span></p>
-                    <?php else: ?>
-                        <p><strong>Reference:</strong> <?php echo htmlspecialchars($bookingDetails['reference']); ?></p>
-                        <p><strong>Customer:</strong> <?php echo htmlspecialchars($bookingDetails['customer']['name']); ?></p>
-                        <?php if (!empty($bookingDetails['customer']['table_number'])): ?>
-                            <p><strong>Table:</strong> <?php echo htmlspecialchars($bookingDetails['customer']['table_number']); ?></p>
-                        <?php endif; ?>
-                        <p><strong>Total Amount:</strong> <?php echo $currency_symbol; ?><?php echo number_format($bookingDetails['amounts']['total_amount'], 0); ?></p>
-                        <p><strong>Estimated Stock Cost:</strong> <?php echo $currency_symbol; ?><?php echo number_format($bookingDetails['amounts']['total_cost'], 0); ?></p>
-                        <p><strong>Status:</strong> <span class="badge badge-<?php echo $bookingDetails['status']; ?>"><?php echo ucfirst($bookingDetails['status']); ?></span></p>
-                    <?php endif; ?>
-                </div>
-
-                <?php
-                // Preset-aware source link: restaurant payments go to the orders
-                // console only when the stock module is on (POS-only presets keep
-                // the till); gym/event payments go to their inquiry pages.
-                $pd_source_href = match ($bookingDetails['type']) {
-                    'room'       => 'booking-details.php?id=' . $bookingDetails['id'],
-                    'restaurant' => (function_exists('moduleEnabled') && moduleEnabled('stock')) ? 'stock-orders.php' : 'pos.php',
-                    'gym'        => 'gym-inquiries.php',
-                    'event'      => 'events-inquiries.php',
-                    default      => 'conference-management.php',
-                };
-                ?>
-                <a href="<?php echo htmlspecialchars($pd_source_href); ?>" class="btn-primary" style="display: inline-block; padding: 10px 20px; text-decoration: none;">
-                    <i class="fas fa-external-link-alt"></i> View Full <?php echo $pd_labels['noun']; ?> Details
-                </a>
-            </div>
-        <?php endif; ?>
-
-        <!-- Other Payments for this record -->
-        <?php if (!empty($otherPayments)): ?>
-            <div class="detail-card">
-                <h3><i class="fas fa-list"></i> Other Payments for this <?php echo isset($pd_labels) ? $pd_labels['noun'] : 'Record'; ?></h3>
-
-                <div class="other-payments">
-                    <?php foreach ($otherPayments as $otherPayment): ?>
-                        <div class="payment-item">
-                            <div class="payment-item-info">
-                                <div class="payment-item-ref"><?php echo htmlspecialchars($otherPayment['payment_reference']); ?></div>
-                                <div class="payment-item-date"><?php echo date('M j, Y', strtotime($otherPayment['payment_date'])); ?></div>
-                            </div>
-                            <div class="payment-item-amount">
-                                <?php echo $currency_symbol; ?><?php echo number_format($otherPayment['total_amount'], 0); ?>
-                                <span class="badge badge-<?php echo $otherPayment['payment_status']; ?>" style="margin-left: 8px;">
-                                    <?php echo ucfirst(str_replace('_', ' ', $otherPayment['payment_status'])); ?>
-                                </span>
-                            </div>
-                            <a href="payment-details.php?id=<?php echo $otherPayment['id']; ?>" class="btn-secondary" style="padding: 6px 12px; font-size: 12px; margin-left: 12px;">
-                                <i class="fas fa-eye"></i> View
-                            </a>
+                <?php if (!empty($refundsAgainst)): ?>
+                    <section class="rh-panel rh-panel--flush">
+                        <div class="rh-panel__head">
+                            <h2 class="rh-panel__title">Refunds against this payment</h2>
+                            <span class="rh-page-head__meta"><?php echo count($refundsAgainst); ?> total &middot; <?php echo $currency_symbol . number_format($totalRefundedHere, 0); ?> refunded</span>
                         </div>
-                    <?php endforeach; ?>
-                </div>
+                        <div class="rh-panel__body">
+                            <table class="acct-table">
+                                <thead>
+                                    <tr>
+                                        <th>Reference</th>
+                                        <th>Date</th>
+                                        <th class="num">Amount</th>
+                                        <th>Reason</th>
+                                        <th>Status</th>
+                                        <th></th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    <?php foreach ($refundsAgainst as $r): ?>
+                                        <tr>
+                                            <td><?php echo htmlspecialchars($r['payment_reference']); ?></td>
+                                            <td><?php echo date('M j, Y', strtotime($r['payment_date'])); ?></td>
+                                            <td class="num"><strong><?php echo $currency_symbol . number_format((float)($r['refund_amount'] ?: $r['total_amount']), 0); ?></strong></td>
+                                            <td><?php echo htmlspecialchars(ucfirst(str_replace('_', ' ', (string)($r['refund_reason'] ?? '-')))); ?></td>
+                                            <td><?php echo $pd_pill((string)($r['refund_status'] ?? 'pending')); ?></td>
+                                            <td><a class="rh-mini-link" href="payment-details.php?id=<?php echo (int)$r['id']; ?>">View</a></td>
+                                        </tr>
+                                    <?php endforeach; ?>
+                                </tbody>
+                            </table>
+                        </div>
+                    </section>
+                <?php endif; ?>
+
+                <?php if (!empty($otherPayments)): ?>
+                    <section class="rh-panel rh-panel--flush">
+                        <div class="rh-panel__head">
+                            <h2 class="rh-panel__title">Other payments for this <?php echo htmlspecialchars(isset($pd_labels) ? strtolower($pd_labels['noun']) : 'record'); ?></h2>
+                        </div>
+                        <div class="rh-panel__body">
+                            <table class="acct-table">
+                                <thead>
+                                    <tr>
+                                        <th>Reference</th>
+                                        <th>Date</th>
+                                        <th class="num">Amount</th>
+                                        <th>Status</th>
+                                        <th></th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    <?php foreach ($otherPayments as $otherPayment): ?>
+                                        <tr>
+                                            <td><?php echo htmlspecialchars($otherPayment['payment_reference']); ?></td>
+                                            <td><?php echo date('M j, Y', strtotime($otherPayment['payment_date'])); ?></td>
+                                            <td class="num"><strong><?php echo $currency_symbol; ?><?php echo number_format($otherPayment['total_amount'], 0); ?></strong></td>
+                                            <td><?php echo $pd_pill((string)$otherPayment['payment_status']); ?></td>
+                                            <td><a class="rh-mini-link" href="payment-details.php?id=<?php echo (int)$otherPayment['id']; ?>">View</a></td>
+                                        </tr>
+                                    <?php endforeach; ?>
+                                </tbody>
+                            </table>
+                        </div>
+                    </section>
+                <?php endif; ?>
             </div>
-        <?php endif; ?>
+
+            <aside class="rh-layout__side">
+                <?php if ($bookingDetails): ?>
+                    <section class="rh-panel">
+                        <div class="rh-panel__head">
+                            <h2 class="rh-panel__title"><?php echo htmlspecialchars($pd_labels['heading']); ?></h2>
+                            <div class="rh-panel__actions">
+                                <a href="<?php echo htmlspecialchars($pd_source_href); ?>" class="btn btn--secondary btn--sm">
+                                    <i class="fas fa-external-link-alt"></i> View full <?php echo htmlspecialchars(strtolower($pd_labels['noun'])); ?>
+                                </a>
+                            </div>
+                        </div>
+                        <?php
+                        $pd_amt = $bookingDetails['amounts'];
+                        $pd_fmt = static function ($v) use ($currency_symbol) { return $currency_symbol . number_format((float)$v, 0); };
+                        ?>
+                        <table class="rh-kv no-auto-pagination">
+                            <tbody>
+                                <tr><th scope="row">Reference</th><td><?php echo htmlspecialchars((string)$bookingDetails['reference']); ?></td></tr>
+                                <?php if ($bookingDetails['type'] === 'room'): ?>
+                                    <tr><th scope="row">Room</th><td><?php echo htmlspecialchars((string)$bookingDetails['room']['name']); ?></td></tr>
+                                    <tr><th scope="row">Guest</th><td><?php echo htmlspecialchars((string)$bookingDetails['guest']['name']); ?></td></tr>
+                                    <tr><th scope="row">Email</th><td><?php echo htmlspecialchars((string)$bookingDetails['guest']['email']); ?></td></tr>
+                                    <tr><th scope="row">Dates</th><td><?php echo date('M j, Y', strtotime($bookingDetails['dates']['check_in'])); ?> &ndash; <?php echo date('M j, Y', strtotime($bookingDetails['dates']['check_out'])); ?> (<?php echo (int)$bookingDetails['dates']['nights']; ?> nights)</td></tr>
+                                <?php elseif ($bookingDetails['type'] === 'conference'): ?>
+                                    <tr><th scope="row">Organization</th><td><?php echo htmlspecialchars((string)$bookingDetails['organization']['name']); ?></td></tr>
+                                    <tr><th scope="row">Contact</th><td><?php echo htmlspecialchars((string)$bookingDetails['organization']['contact_person']); ?></td></tr>
+                                    <tr><th scope="row">Email</th><td><?php echo htmlspecialchars((string)$bookingDetails['organization']['email']); ?></td></tr>
+                                    <tr><th scope="row">Event type</th><td><?php echo htmlspecialchars((string)$bookingDetails['event']['type']); ?></td></tr>
+                                    <tr><th scope="row">Dates</th><td><?php echo date('M j, Y', strtotime($bookingDetails['event']['start_date'])); ?> &ndash; <?php echo date('M j, Y', strtotime($bookingDetails['event']['end_date'])); ?></td></tr>
+                                <?php elseif (in_array($bookingDetails['type'], ['gym', 'event'], true)): ?>
+                                    <tr><th scope="row"><?php echo htmlspecialchars($bookingDetails['person']['label']); ?></th><td><?php echo htmlspecialchars((string)$bookingDetails['person']['name']); ?></td></tr>
+                                    <?php if (!empty($bookingDetails['person']['email'])): ?>
+                                        <tr><th scope="row">Email</th><td><?php echo htmlspecialchars((string)$bookingDetails['person']['email']); ?></td></tr>
+                                    <?php endif; ?>
+                                    <?php foreach ($bookingDetails['detail_rows'] as $pd_dl => $pd_dv): ?>
+                                        <tr><th scope="row"><?php echo htmlspecialchars($pd_dl); ?></th><td><?php echo htmlspecialchars((string)$pd_dv); ?></td></tr>
+                                    <?php endforeach; ?>
+                                <?php else: ?>
+                                    <tr><th scope="row">Customer</th><td><?php echo htmlspecialchars((string)$bookingDetails['customer']['name']); ?></td></tr>
+                                    <?php if (!empty($bookingDetails['customer']['table_number'])): ?>
+                                        <tr><th scope="row">Table</th><td><?php echo htmlspecialchars((string)$bookingDetails['customer']['table_number']); ?></td></tr>
+                                    <?php endif; ?>
+                                <?php endif; ?>
+                                <tr><th scope="row">Total</th><td><?php echo $pd_fmt($pd_amt['total_amount']); ?></td></tr>
+                                <?php if ($bookingDetails['type'] === 'restaurant'): ?>
+                                    <tr><th scope="row">Est. stock cost</th><td><?php echo $pd_fmt($pd_amt['total_cost']); ?></td></tr>
+                                <?php else: ?>
+                                    <tr><th scope="row">Paid</th><td><?php echo $pd_fmt($pd_amt['amount_paid']); ?></td></tr>
+                                    <tr><th scope="row">Due</th><td><strong class="<?php echo $pd_amt['amount_due'] > 0 ? 'rh-strip__value--alert' : 'rh-strip__value--ok'; ?>"><?php echo $pd_fmt($pd_amt['amount_due']); ?></strong></td></tr>
+                                    <?php if ($bookingDetails['type'] === 'conference' && $pd_amt['deposit_required'] > 0): ?>
+                                        <tr><th scope="row">Deposit</th><td><?php echo $pd_fmt($pd_amt['deposit_required']); ?> (paid <?php echo $pd_fmt($pd_amt['deposit_paid']); ?>)</td></tr>
+                                    <?php endif; ?>
+                                    <?php if (($pd_amt['vat_amount'] ?? 0) > 0): ?>
+                                        <tr><th scope="row">VAT</th><td><?php echo $pd_fmt($pd_amt['vat_amount']); ?> (<?php echo htmlspecialchars((string)$pd_amt['vat_rate']); ?>%)</td></tr>
+                                    <?php endif; ?>
+                                <?php endif; ?>
+                                <tr><th scope="row">Status</th><td><?php echo $pd_pill((string)$bookingDetails['status']); ?></td></tr>
+                            </tbody>
+                        </table>
+                    </section>
+                <?php endif; ?>
+            </aside>
+        </div>
     </div>
 
     <!-- Send Receipt Modal -->

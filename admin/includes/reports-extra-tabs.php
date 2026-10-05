@@ -230,17 +230,17 @@ $voids = [
 
 <!-- F&B / POS Tab -->
 <div class="tab-content <?php echo $active_tab === 'fnb' ? 'active' : ''; ?>" id="tab-fnb">
-    <div class="rx-kpis">
-        <div class="rx-kpi"><div class="lbl"><?php echo htmlspecialchars(rh_pos_short_label()); ?> Net Revenue</div><div class="val"><?php echo $rp_currency.' '.number_format((float)($fnb['totals']['net_revenue'] ?? 0), 2); ?></div></div>
-        <div class="rx-kpi"><div class="lbl">Orders</div><div class="val"><?php echo number_format((int)($fnb['totals']['orders'] ?? 0)); ?></div></div>
-        <div class="rx-kpi"><div class="lbl">Avg Check</div><div class="val"><?php echo $rp_currency.' '.number_format((float)($fnb['totals']['avg_check'] ?? 0), 2); ?></div></div>
-        <div class="rx-kpi"><div class="lbl">Voided Value</div><div class="val" style="color:#c82333;"><?php echo $rp_currency.' '.number_format((float)($fnb['totals']['voided_value'] ?? 0), 2); ?></div></div>
-        <div class="rx-kpi"><div class="lbl">Avg Kitchen Time</div><div class="val"><?php $sec = (int)($fnb['kitchen_time']['avg_seconds'] ?? 0); echo $sec ? floor($sec/60).'m '.($sec%60).'s' : '—'; ?></div><div class="sub"><?php echo number_format((int)($fnb['kitchen_time']['tickets'] ?? 0)); ?> tickets</div></div>
+    <div class="rh-strip" role="group" aria-label="Summary">
+        <div class="rh-strip__cell"><span class="rh-strip__label"><?php echo htmlspecialchars(rh_pos_short_label()); ?> Net Revenue</span><strong class="rh-strip__value"><?php echo $rp_currency.' '.number_format((float)($fnb['totals']['net_revenue'] ?? 0), 2); ?></strong></div>
+        <div class="rh-strip__cell"><span class="rh-strip__label">Orders</span><strong class="rh-strip__value"><?php echo number_format((int)($fnb['totals']['orders'] ?? 0)); ?></strong></div>
+        <div class="rh-strip__cell"><span class="rh-strip__label">Avg Check</span><strong class="rh-strip__value"><?php echo $rp_currency.' '.number_format((float)($fnb['totals']['avg_check'] ?? 0), 2); ?></strong></div>
+        <div class="rh-strip__cell"><span class="rh-strip__label">Voided Value</span><strong class="rh-strip__value rh-strip__value--alert"><?php echo $rp_currency.' '.number_format((float)($fnb['totals']['voided_value'] ?? 0), 2); ?></strong></div>
+        <div class="rh-strip__cell"><span class="rh-strip__label">Avg Kitchen Time</span><strong class="rh-strip__value"><?php $sec = (int)($fnb['kitchen_time']['avg_seconds'] ?? 0); echo $sec ? floor($sec/60).'m '.($sec%60).'s' : '—'; ?></strong><span class="rh-strip__sub"><?php echo number_format((int)($fnb['kitchen_time']['tickets'] ?? 0)); ?> tickets</span></div>
     </div>
 
     <div class="rx-grid-2">
-        <div class="rx-section">
-            <h2><i class="fas fa-store"></i> Sales by Station</h2>
+        <div class="rh-panel">
+            <div class="rh-panel__head"><h2 class="rh-panel__title">Sales by Station</h2></div>
             <?php if (!$fnb['station_sales']): ?><div class="rx-empty">No station sales</div><?php else: ?>
             <table class="rx-table"><thead><tr><th>Station</th><th class="num">Orders</th><th class="num">Items</th><th class="num">Revenue</th></tr></thead><tbody>
             <?php foreach ($fnb['station_sales'] as $s): ?>
@@ -255,8 +255,8 @@ $voids = [
             <?php endif; ?>
         </div>
 
-        <div class="rx-section">
-            <h2><i class="fas fa-credit-card"></i> Payment Methods</h2>
+        <div class="rh-panel">
+            <div class="rh-panel__head"><h2 class="rh-panel__title">Payment Methods</h2></div>
             <?php if (!$fnb['payment_split']): ?><div class="rx-empty">No payments recorded</div><?php else: ?>
             <table class="rx-table"><thead><tr><th>Method</th><th class="num">#</th><th class="num">Total</th></tr></thead><tbody>
             <?php foreach ($fnb['payment_split'] as $p): ?>
@@ -267,8 +267,8 @@ $voids = [
         </div>
     </div>
 
-    <div class="rx-section">
-        <h2><i class="fas fa-list-ol"></i> Top Items</h2>
+    <div class="rh-panel">
+        <div class="rh-panel__head"><h2 class="rh-panel__title">Top Items</h2></div>
         <?php if (!$fnb['top_items']): ?><div class="rx-empty">No items sold</div><?php else: ?>
         <table class="rx-table"><thead><tr><th>#</th><th>Item</th><th>Type</th><th>Station</th><th class="num">Qty</th><th class="num">Orders</th><th class="num">Revenue</th></tr></thead><tbody>
         <?php foreach ($fnb['top_items'] as $i => $it): ?>
@@ -286,8 +286,8 @@ $voids = [
         <?php endif; ?>
     </div>
 
-    <div class="rx-section">
-        <h2><i class="fas fa-utensils"></i> Order Types</h2>
+    <div class="rh-panel">
+        <div class="rh-panel__head"><h2 class="rh-panel__title">Order Types</h2></div>
         <?php if (!$fnb['order_types']): ?><div class="rx-empty">No data</div><?php else: ?>
         <table class="rx-table"><thead><tr><th>Type</th><th class="num">Orders</th><th class="num">Revenue</th><th class="num">Avg Check</th></tr></thead><tbody>
         <?php foreach ($fnb['order_types'] as $ot): ?>
@@ -300,16 +300,16 @@ $voids = [
 
 <!-- Stock Tab -->
 <div class="tab-content <?php echo $active_tab === 'stock' ? 'active' : ''; ?>" id="tab-stock">
-    <div class="rx-kpis">
-        <div class="rx-kpi"><div class="lbl">Stock Value (Now)</div><div class="val"><?php echo $rp_currency.' '.number_format((float)($stock['stock_value']['total_value'] ?? 0), 2); ?></div></div>
-        <div class="rx-kpi"><div class="lbl">Active SKUs</div><div class="val"><?php echo number_format((int)($stock['stock_value']['active_items'] ?? 0)); ?></div></div>
-        <div class="rx-kpi"><div class="lbl">Low Stock</div><div class="val" style="color:#d4a843;"><?php echo number_format((int)($stock['stock_value']['low_count'] ?? 0)); ?></div></div>
-        <div class="rx-kpi"><div class="lbl">Out of Stock</div><div class="val" style="color:#c82333;"><?php echo number_format((int)($stock['stock_value']['oos_count'] ?? 0)); ?></div></div>
+    <div class="rh-strip" role="group" aria-label="Summary">
+        <div class="rh-strip__cell"><span class="rh-strip__label">Stock Value (Now)</span><strong class="rh-strip__value"><?php echo $rp_currency.' '.number_format((float)($stock['stock_value']['total_value'] ?? 0), 2); ?></strong></div>
+        <div class="rh-strip__cell"><span class="rh-strip__label">Active SKUs</span><strong class="rh-strip__value"><?php echo number_format((int)($stock['stock_value']['active_items'] ?? 0)); ?></strong></div>
+        <div class="rh-strip__cell"><span class="rh-strip__label">Low Stock</span><strong class="rh-strip__value"><?php echo number_format((int)($stock['stock_value']['low_count'] ?? 0)); ?></strong></div>
+        <div class="rh-strip__cell"><span class="rh-strip__label">Out of Stock</span><strong class="rh-strip__value rh-strip__value--alert"><?php echo number_format((int)($stock['stock_value']['oos_count'] ?? 0)); ?></strong></div>
     </div>
 
     <div class="rx-grid-2">
-        <div class="rx-section">
-            <h2><i class="fas fa-arrow-down"></i> Low Stock Alerts</h2>
+        <div class="rh-panel">
+            <div class="rh-panel__head"><h2 class="rh-panel__title">Low Stock Alerts</h2></div>
             <?php if (!$stock['low_stock']): ?><div class="rx-empty">All ingredients above reorder point</div><?php else: ?>
             <table class="rx-table"><thead><tr><th>Ingredient</th><th class="num">Current</th><th class="num">Min</th><th>Unit</th></tr></thead><tbody>
             <?php foreach ($stock['low_stock'] as $l): ?>
@@ -319,8 +319,8 @@ $voids = [
             <?php endif; ?>
         </div>
 
-        <div class="rx-section">
-            <h2><i class="fas fa-trash"></i> Wastage</h2>
+        <div class="rh-panel">
+            <div class="rh-panel__head"><h2 class="rh-panel__title">Wastage</h2></div>
             <?php if (!$stock['wastage']): ?><div class="rx-empty">No wastage logged</div><?php else: ?>
             <table class="rx-table"><thead><tr><th>Ingredient</th><th class="num">Qty</th><th class="num">Value</th></tr></thead><tbody>
             <?php foreach ($stock['wastage'] as $w): ?>
@@ -331,8 +331,8 @@ $voids = [
         </div>
     </div>
 
-    <div class="rx-section">
-        <h2><i class="fas fa-chart-pie"></i> Top Consumed Ingredients (by cost)</h2>
+    <div class="rh-panel">
+        <div class="rh-panel__head"><h2 class="rh-panel__title">Top Consumed Ingredients (by cost)</h2></div>
         <?php if (!$stock['top_used']): ?><div class="rx-empty">No consumption data</div><?php else: ?>
         <table class="rx-table"><thead><tr><th>#</th><th>Ingredient</th><th class="num">Qty Used</th><th class="num">Cost</th></tr></thead><tbody>
         <?php foreach ($stock['top_used'] as $i => $u): ?>
@@ -345,8 +345,8 @@ $voids = [
 
 <!-- Staff Activity Tab -->
 <div class="tab-content <?php echo $active_tab === 'staff' ? 'active' : ''; ?>" id="tab-staff">
-    <div class="rx-section">
-        <h2><i class="fas fa-cash-register"></i> POS Activity by User</h2>
+    <div class="rh-panel">
+        <div class="rh-panel__head"><h2 class="rh-panel__title">POS Activity by User</h2></div>
         <?php if (!$staff['pos_actions']): ?><div class="rx-empty">No POS activity</div><?php else: ?>
         <table class="rx-table"><thead><tr><th>User</th><th>Role</th><th class="num">Orders</th><th class="num">Revenue Handled</th><th class="num">Voids Caused</th></tr></thead><tbody>
         <?php foreach ($staff['pos_actions'] as $u): ?>
@@ -357,8 +357,8 @@ $voids = [
     </div>
 
     <div class="rx-grid-2">
-        <div class="rx-section">
-            <h2><i class="fas fa-fire"></i> KDS / BDS / CDS Actions</h2>
+        <div class="rh-panel">
+            <div class="rh-panel__head"><h2 class="rh-panel__title">KDS / BDS / CDS Actions</h2></div>
             <?php if (!$staff['kds_actions']): ?><div class="rx-empty">No station activity</div><?php else: ?>
             <table class="rx-table"><thead><tr><th>User</th><th>Action</th><th class="num">Count</th></tr></thead><tbody>
             <?php foreach ($staff['kds_actions'] as $k): ?>
@@ -368,8 +368,8 @@ $voids = [
             <?php endif; ?>
         </div>
 
-        <div class="rx-section">
-            <h2><i class="fas fa-sign-in-alt"></i> Recent Logins</h2>
+        <div class="rh-panel">
+            <div class="rh-panel__head"><h2 class="rh-panel__title">Recent Logins</h2></div>
             <?php if (!$staff['logins']): ?><div class="rx-empty">No login records in range</div><?php else: ?>
             <table class="rx-table"><thead><tr><th>User</th><th>Role</th><th>Last Login</th></tr></thead><tbody>
             <?php foreach ($staff['logins'] as $l): ?>
@@ -383,15 +383,15 @@ $voids = [
 
 <!-- Voids / Refunds Tab -->
 <div class="tab-content <?php echo $active_tab === 'voids' ? 'active' : ''; ?>" id="tab-voids">
-    <div class="rx-kpis">
-        <div class="rx-kpi"><div class="lbl">Voided Orders</div><div class="val" style="color:#c82333;"><?php echo number_format((int)($voids['totals']['n'] ?? 0)); ?></div></div>
-        <div class="rx-kpi"><div class="lbl">Voided Value</div><div class="val" style="color:#c82333;"><?php echo $rp_currency.' '.number_format((float)($voids['totals']['value'] ?? 0), 2); ?></div></div>
-        <div class="rx-kpi"><div class="lbl">Distinct Voiders</div><div class="val"><?php echo number_format((int)($voids['totals']['distinct_actors'] ?? 0)); ?></div></div>
-        <div class="rx-kpi"><div class="lbl">Refunds</div><div class="val"><?php echo number_format(count($voids['refunds'])); ?></div></div>
+    <div class="rh-strip" role="group" aria-label="Summary">
+        <div class="rh-strip__cell"><span class="rh-strip__label">Voided Orders</span><strong class="rh-strip__value rh-strip__value--alert"><?php echo number_format((int)($voids['totals']['n'] ?? 0)); ?></strong></div>
+        <div class="rh-strip__cell"><span class="rh-strip__label">Voided Value</span><strong class="rh-strip__value rh-strip__value--alert"><?php echo $rp_currency.' '.number_format((float)($voids['totals']['value'] ?? 0), 2); ?></strong></div>
+        <div class="rh-strip__cell"><span class="rh-strip__label">Distinct Voiders</span><strong class="rh-strip__value"><?php echo number_format((int)($voids['totals']['distinct_actors'] ?? 0)); ?></strong></div>
+        <div class="rh-strip__cell"><span class="rh-strip__label">Refunds</span><strong class="rh-strip__value"><?php echo number_format(count($voids['refunds'])); ?></strong></div>
     </div>
 
-    <div class="rx-section">
-        <h2><i class="fas fa-ban"></i> Voided Orders</h2>
+    <div class="rh-panel">
+        <div class="rh-panel__head"><h2 class="rh-panel__title">Voided Orders</h2></div>
         <?php if (!$voids['list']): ?><div class="rx-empty">No voids in this period — clean sweep.</div><?php else: ?>
         <table class="rx-table"><thead><tr><th>When</th><th>Reference</th><th>Type</th><th>Created by</th><th>Voided by</th><th class="num">Value</th><th>Reason</th><th></th></tr></thead><tbody>
         <?php foreach ($voids['list'] as $v): ?>
@@ -402,8 +402,8 @@ $voids = [
     </div>
 
     <?php if ($staff['voids_by_user']): ?>
-    <div class="rx-section">
-        <h2><i class="fas fa-user-shield"></i> Voids by User</h2>
+    <div class="rh-panel">
+        <div class="rh-panel__head"><h2 class="rh-panel__title">Voids by User</h2></div>
         <table class="rx-table"><thead><tr><th>User</th><th class="num">Voids</th><th class="num">Voided Value</th></tr></thead><tbody>
         <?php foreach ($staff['voids_by_user'] as $vu): ?>
             <tr><td><?php echo htmlspecialchars($vu['full_name'] ?: $vu['username']); ?></td><td class="num"><?php echo number_format((int)$vu['voids']); ?></td><td class="num"><?php echo $rp_currency.' '.number_format((float)$vu['voided_value'], 2); ?></td></tr>
@@ -413,8 +413,8 @@ $voids = [
     <?php endif; ?>
 
     <?php if ($voids['refunds']): ?>
-    <div class="rx-section">
-        <h2><i class="fas fa-undo"></i> Refunds</h2>
+    <div class="rh-panel">
+        <div class="rh-panel__head"><h2 class="rh-panel__title">Refunds</h2></div>
         <table class="rx-table"><thead><tr><th>When</th><th>Reference</th><th class="num">Amount</th><th>Reason</th></tr></thead><tbody>
         <?php foreach ($voids['refunds'] as $r): ?>
             <tr><td><?php echo htmlspecialchars($r['refunded_at']); ?></td><td><?php echo htmlspecialchars($r['payment_reference']); ?></td><td class="num"><?php echo $rp_currency.' '.number_format((float)$r['amount'], 2); ?></td><td><?php echo htmlspecialchars($r['refund_reason']); ?></td></tr>

@@ -2,55 +2,149 @@
    Booking Settings page — scoped via body.booking-settings-page
    ============================================================ */
 
-.page-header {
-    margin-bottom: 14px;
+/* ---- Page jump list ---- */
+.bs-jump {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.4rem 0.5rem;
+    margin-bottom: 0.9rem;
 }
 
-.page-title {
-    margin: 0;
+.bs-jump__label {
+    font-size: 0.72rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--rh-muted, #5E554D);
 }
 
-/* ---- Cards ---- */
-.settings-card {
+.bs-jump a {
+    display: inline-flex;
+    align-items: center;
+    min-height: 32px;
+    padding: 0 0.7rem;
+    border: 1px solid #c9bda9;
+    border-radius: 999px;
     background: #fff;
-    border: 1px solid var(--color-border-light, #EAE1D8);
-    border-radius: 12px;
-    box-shadow: 0 3px 12px rgba(18, 24, 38, 0.05);
-    padding: 16px 20px;
-    margin-bottom: 12px;
+    color: var(--rh-brand-dark, #5f503f);
+    font-size: 0.78rem;
+    font-weight: 600;
+    text-decoration: none;
 }
 
-.settings-card h2 {
-    margin: 0 0 12px;
-    color: var(--navy, #231F1C);
-    font-size: 1.1rem;
+.bs-jump a:hover {
+    background: #f4f0ea;
+}
+
+@media (pointer: coarse) {
+    .bs-jump a {
+        min-height: 44px;
+    }
+}
+
+.rh-page-head .back-link {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    min-height: 44px;
+    margin: 0;
+    padding: 0 0.9rem;
+    border: 1px solid #c9bda9;
+    border-radius: 8px;
+    background: #fff;
+    color: var(--rh-brand-dark, #5f503f);
+    font-size: 0.85rem;
+    font-weight: 600;
+    text-decoration: none;
+}
+
+/* ---- Settings groups (rh-panel) ---- */
+.settings-card.rh-panel {
+    margin-bottom: 1rem;
+    padding: 0 1rem 1rem;
+    scroll-margin-top: 18px;
+}
+
+.settings-card.rh-panel > .rh-panel__head {
+    margin: 0 -1rem 0.85rem;
 }
 
 .settings-card h3 {
     margin: 18px 0 10px;
     padding-bottom: 7px;
-    border-bottom: 1px solid var(--color-border-light, #EAE1D8);
-    color: var(--navy, #231F1C);
+    border-bottom: 1px solid var(--rh-line-soft, #eceff3);
+    color: var(--rh-ink, #231F1C);
     font-size: 0.9rem;
 }
 
-/* ---- Status row ---- */
+/* Hotel details field grid (markup from includes/hotel-details-settings.php) */
+.bs-field-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(min(260px, 100%), 1fr));
+    gap: 4px 18px;
+}
+
+.bs-field-grid > [data-wide] {
+    grid-column: 1 / -1;
+}
+
+.bs-field-grid .form-group input,
+.bs-field-grid .form-group select,
+.bs-field-grid .form-group textarea {
+    width: 100%;
+    border: 1px solid #d8d2c6;
+    border-radius: 8px;
+    padding: 8px 10px;
+    background: #fff;
+    font-size: 13px;
+    box-sizing: border-box;
+}
+
+.bs-notice {
+    margin-top: 16px;
+    padding: 12px 14px;
+    border-left: 4px solid #ffc107;
+    border-radius: 6px;
+    background: #fff8e1;
+    color: #856404;
+    font-size: 0.85rem;
+}
+
+.bs-notice h4 {
+    margin: 0 0 6px;
+}
+
+.bs-notice p {
+    margin: 0 0 8px;
+}
+
+.bs-notice a {
+    color: #7a5b00;
+    font-weight: 600;
+}
+
+/* ---- Status row (flat, no box) ---- */
 .current-value {
     display: flex;
     align-items: center;
     gap: 12px;
-    background: var(--color-background, #F7F3EE);
-    border: 1px solid var(--color-border-light, #EAE1D8);
-    border-radius: 10px;
-    padding: 10px 12px;
-    margin-bottom: 10px;
+    padding: 0 0 10px;
+    margin-bottom: 12px;
+    border-bottom: 1px solid var(--rh-line-soft, #eceff3);
+}
+
+.current-value h3 {
+    margin: 0;
+    padding: 0;
+    border: 0;
+    font-size: 0.95rem;
 }
 
 .current-value .value {
     color: var(--color-primary, #766550);
     font-weight: 700;
 }
-
 /* ---- Form atoms ---- */
 .form-group {
     margin-bottom: 10px;
@@ -147,15 +241,14 @@
 
 /* Collapsible tips */
 details.tips-box {
-    background: var(--color-background, #F7F3EE);
-    border: 1px solid var(--color-border-light, #EAE1D8);
-    border-radius: 8px;
-    margin-top: 10px;
-    overflow: hidden;
+    margin-top: 12px;
+    padding-top: 8px;
+    border-top: 1px solid var(--rh-line-soft, #eceff3);
 }
 
 details.tips-box>summary {
-    padding: 9px 12px;
+    min-height: 32px;
+    padding: 0;
     cursor: pointer;
     font-weight: 600;
     font-size: 12px;
@@ -181,7 +274,7 @@ details.tips-box[open]>summary::after {
 }
 
 details.tips-box .tips-body {
-    padding: 0 12px 10px;
+    padding: 4px 0 0;
 }
 
 details.tips-box ul {

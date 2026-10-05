@@ -860,7 +860,6 @@ body {
 }
 
 .summary-cards,
-.rx-kpis,
 .status-grid {
     grid-template-columns: repeat(auto-fit, minmax(min(15rem, 100%), 1fr));
     gap: clamp(0.75rem, 1vw, 1.15rem);
@@ -868,8 +867,7 @@ body {
 }
 
 .summary-card,
-.status-card,
-.rx-kpi {
+.status-card {
     --report-card-accent: var(--finance-accent);
     position: relative;
     isolation: isolate;
@@ -912,8 +910,7 @@ body {
 }
 
 .summary-card::after,
-.status-card::after,
-.rx-kpi::after {
+.status-card::after {
     content: '';
     position: absolute;
     inset: auto -12% -32% auto;
@@ -925,7 +922,6 @@ body {
 }
 
 .summary-card h3,
-.rx-kpi .lbl,
 .status-card .label {
     display: flex;
     align-items: center;
@@ -939,7 +935,6 @@ body {
 }
 
 .summary-card .value,
-.rx-kpi .val,
 .status-card .count {
     color: var(--finance-text);
     font-size: clamp(1.55rem, 1.4vw + 1rem, 2.65rem);
@@ -949,7 +944,6 @@ body {
 }
 
 .summary-card .subtitle,
-.rx-kpi .sub,
 .status-card .amount {
     margin-top: 0.65rem;
     color: var(--finance-muted);
@@ -968,28 +962,24 @@ body {
 }
 
 .summary-card.is-expanded .report-card-detail,
-.status-card.is-expanded .report-card-detail,
-.rx-kpi.is-expanded .report-card-detail {
+.status-card.is-expanded .report-card-detail {
     display: block;
 }
 
 .summary-card.is-expanded,
-.status-card.is-expanded,
-.rx-kpi.is-expanded {
+.status-card.is-expanded {
     border-color: var(--report-card-accent);
     box-shadow: var(--finance-shadow);
 }
 
-.report-section,
-.rx-section {
+.report-section {
     padding: clamp(0.95rem, 1.5vw, 1.4rem);
     margin-bottom: 0;
     border-radius: clamp(0.65rem, 0.8vw, 0.9rem);
     overflow: hidden;
 }
 
-.report-section h2,
-.rx-section h2 {
+.report-section h2 {
     display: flex;
     align-items: center;
     gap: 0.55rem;
@@ -999,8 +989,7 @@ body {
     font-weight: 700;
 }
 
-.report-section h2 i,
-.rx-section h2 i {
+.report-section h2 i {
     color: var(--finance-accent);
 }
 
@@ -1137,15 +1126,9 @@ body {
     opacity: 0.65;
 }
 
-.rx-section {
-    background: var(--finance-surface);
-    border: 1px solid var(--finance-border);
-    box-shadow: var(--finance-shadow-sm);
-}
 
-.rx-kpi {
-    padding: clamp(0.95rem, 1.2vw, 1.2rem);
-}
+
+
 
 .rx-station-pill {
     display: inline-flex;
@@ -1230,8 +1213,7 @@ body {
     }
 
     .summary-cards,
-    .rx-kpis,
-    .status-grid {
+.status-grid {
         grid-template-columns: repeat(auto-fit, minmax(min(18rem, 100%), 1fr));
     }
 }
@@ -1242,8 +1224,7 @@ body {
     }
 
     .summary-cards,
-    .rx-kpis,
-    .status-grid {
+.status-grid {
         grid-template-columns: repeat(auto-fit, minmax(min(22rem, 100%), 1fr));
     }
 
@@ -1257,28 +1238,23 @@ body {
 @media (prefers-reduced-motion: no-preference) {
 
     .summary-card,
-    .status-card,
-    .rx-kpi,
-    .report-section,
-    .rx-section,
-    .finance-page .btn-filter,
-    .reports-container .report-tab {
+.status-card,
+.report-section,
+.finance-page .btn-filter,
+.reports-container .report-tab {
         transition: transform 0.2s ease, box-shadow 0.2s ease, border-color 0.2s ease, background 0.2s ease, color 0.2s ease;
     }
 
     .summary-card:hover,
-    .summary-card:focus-visible,
-    .status-card:hover,
-    .status-card:focus-visible,
-    .rx-kpi:hover,
-    .rx-kpi:focus-visible {
+.summary-card:focus-visible,
+.status-card:hover,
+.status-card:focus-visible {
         transform: translateY(-4px);
         box-shadow: var(--finance-shadow);
         outline: none;
     }
 
-    .report-section:hover,
-    .rx-section:hover {
+    .report-section:hover {
         transform: translateY(-2px);
         box-shadow: var(--finance-shadow);
     }
@@ -4649,4 +4625,58 @@ details[open] .rh-help-panel__toggle::after {
     #pdReceiptModal .pd-receipt-grid {
         grid-template-columns: minmax(0, 1fr);
     }
+}
+
+/* Payment details: settle-refund form (inside .rh-panel) */
+.pd-settle-form { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 0.75rem; }
+.pd-settle-form__field { min-width: 0; }
+.pd-settle-form__field--grow { flex: 1 1 220px; }
+.pd-settle-form label { display: block; margin-bottom: 0.25rem; font-size: 0.78rem; font-weight: 600; color: var(--rh-muted, #5E554D); }
+.pd-settle-form select, .pd-settle-form input[type="text"] { width: 100%; min-height: 44px; padding: 0.5rem 0.7rem; }
+
+
+/* ============================================================
+   REPORTS PAGE — shared rh-* panels/strips inside .reports-container
+   (layout comes from admin-components.css; only spacing glue here)
+   ============================================================ */
+.reports-container .rh-panel {
+    margin-bottom: 1rem;
+    overflow-x: auto;
+}
+
+.reports-container .acct-grid > .rh-panel,
+.reports-container .two-col > .rh-panel,
+.reports-container .rx-grid-2 > .rh-panel {
+    margin-bottom: 0;
+}
+
+.reports-container .rh-panel > :not(.rh-panel__head):not(table) {
+    margin-left: 1rem;
+    margin-right: 1rem;
+}
+
+.reports-container .rh-panel > .rh-panel__head + :not(table) {
+    margin-top: 0.85rem;
+}
+
+.reports-container .rh-panel > :last-child:not(table) {
+    margin-bottom: 0.85rem;
+}
+
+.reports-container .rh-panel > table {
+    margin: 0;
+}
+
+.reports-container .reports-subhead {
+    margin: 1rem 1rem 0.5rem;
+    font-size: 0.9rem;
+    font-weight: 600;
+}
+
+.reports-container .rh-page-head__actions .acct-quick-action {
+    min-height: 44px;
+}
+
+.reports-container .rh-strip {
+    margin-bottom: 1rem;
 }

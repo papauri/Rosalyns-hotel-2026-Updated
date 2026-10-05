@@ -12,24 +12,42 @@
     white-space: nowrap;
 }
 
-/* ── Panels (templates + activity) ───────────────────────────── */
-.receipts-page .receipts-panel {
-    background: #fff;
-    border: 1px solid var(--color-border, #e8e0d6);
-    border-radius: 10px;
-    padding: 1.5rem;
-    margin-top: 1.25rem;
-    box-shadow: 0 2px 8px rgba(0,0,0,.04);
+/* ── Panel extras (rh-panel is the shared card) ──────────────── */
+.receipts-page .rh-panel,
+.receipts-page .receipts-scope-note {
+    margin-bottom: 1rem;
 }
 
-.receipts-page .receipts-panel__head {
+.receipts-page .rh-panel .table-container {
+    background: none;
+    border: 0;
+    border-radius: 0;
+    box-shadow: none;
+    padding: 0;
+    margin: 0;
+}
+
+.receipts-page .rh-panel .filter-bar {
+    margin: 0;
+}
+
+.receipts-page .receipts-scope-note {
     display: flex;
+    flex-wrap: wrap;
+    align-items: center;
     justify-content: space-between;
-    align-items: flex-start;
-    gap: 1rem;
-    margin-bottom: 1.25rem;
-    padding-bottom: 1rem;
-    border-bottom: 1px solid var(--color-border, #e8e0d6);
+    gap: 0.5rem 1rem;
+    margin-top: 0;
+    padding: 0.55rem 1rem;
+    background: #faf8f5;
+    border: 1px solid var(--rh-line, #d7dde6);
+    border-radius: 10px;
+    font-size: 0.82rem;
+    color: var(--rh-muted, #5E554D);
+}
+
+.receipts-page .receipts-placeholders {
+    margin: 0 0 0.85rem;
 }
 
 /* ── Template form ────────────────────────────────────────────── */
@@ -181,12 +199,10 @@
 
 /* ── Responsive ───────────────────────────────────────────────── */
 @media (max-width: 768px) {
-    .receipts-page .receipts-panel__head {
-        flex-direction: column;
-    }
-
     .receipts-page .receipts-activity-item small {
         margin-left: 0;
         width: 100%;
     }
 }
+
+.receipts-page .receipts-template-preview[hidden] { display: none; }

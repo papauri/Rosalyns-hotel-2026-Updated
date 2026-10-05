@@ -193,15 +193,15 @@ if (!function_exists('rh_hotel_details_fields')) {
     {
         $canFinance = hasPermission((int)($user['id'] ?? 0), 'finance_settings');
         $e = static fn($v): string => htmlspecialchars((string)$v, ENT_QUOTES, 'UTF-8');
-        echo '<div class="settings-card" id="hotel-details"><h2><i class="fas fa-building" style="color:#7E684B;"></i> Hotel details &amp; policies</h2>';
+        echo '<div class="rh-panel settings-card" id="hotel-details"><div class="rh-panel__head"><h2 class="rh-panel__title">Hotel details &amp; policies</h2></div>';
         echo '<form method="POST" action="booking-settings.php#hotel-details">';
         echo '<input type="hidden" name="csrf_token" value="' . $e($csrf) . '"><input type="hidden" name="save_hotel_details" value="1">';
         foreach (rh_hotel_details_fields() as $group => $fields) {
-            echo '<h3 style="margin:18px 0 8px;font-size:1rem;color:#5C4A32;">' . $e($group) . '</h3>';
+            echo '<h3>' . $e($group) . '</h3>';
             if ($group === 'Payments & documents' && !$canFinance) {
                 echo '<p class="help-text"><i class="fas fa-lock"></i> Only users with the "Change VAT &amp; refund settings" permission can change these.</p>';
             }
-            echo '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:4px 18px;">';
+            echo '<div class="bs-field-grid">';
             foreach ($fields as $key => $spec) {
                 $id = 'hd_' . $key;
                 $val = rh_hotel_details_value($key, $spec);
@@ -209,7 +209,7 @@ if (!function_exists('rh_hotel_details_fields')) {
                     $val = html_entity_decode($m[1]);
                 }
                 $dis = (!empty($spec['finance']) && !$canFinance) ? ' disabled' : '';
-                $wide = in_array($spec['type'], ['textarea', 'maps'], true) ? ' style="grid-column:1/-1;"' : '';
+                $wide = in_array($spec['type'], ['textarea', 'maps'], true) ? ' data-wide="1"' : '';
                 echo '<div class="form-group"' . $wide . '><label for="' . $id . '">' . $e($spec['label']) . '</label>';
                 if ($spec['type'] === 'textarea') {
                     echo '<textarea id="' . $id . '" name="' . $key . '" rows="3" maxlength="' . (int)$spec['max'] . '"' . $dis . '>' . $e($val) . '</textarea>';
@@ -236,7 +236,7 @@ if (!function_exists('rh_hotel_details_fields')) {
             }
             echo '</div>';
         }
-        echo '<p class="help-text" style="margin-top:10px;">Time zone: <strong>' . $e(date_default_timezone_get()) . '</strong> (set per installation with HOTEL_TIMEZONE in .env).</p>';
-        echo '<button type="submit" class="btn-submit" style="margin-top:8px;"><i class="fas fa-save"></i> Save Hotel Details</button></form></div>';
+        echo '<p class="help-text">Time zone: <strong>' . $e(date_default_timezone_get()) . '</strong> (set per installation with HOTEL_TIMEZONE in .env).</p>';
+        echo '<button type="submit" class="btn-submit"><i class="fas fa-save"></i> Save Hotel Details</button></form></div>';
     }
 }

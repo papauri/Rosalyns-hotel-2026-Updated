@@ -504,12 +504,16 @@ $cache_types = [
     <?php require_once 'includes/admin-header.php'; ?>
 
     <div class="content cache-management-page">
-        <div class="page-header">
-            <h2 class="page-title">
-                <i class="fas fa-bolt"></i> Cache Management
-            </h2>
-            <p class="text-muted">Control data, image, and page-output caching for current frontend sections and assets</p>
-        </div>
+        <?php $global_cache_on = !isset($cache_settings['cache_global_enabled']) || (string)$cache_settings['cache_global_enabled'] !== '0'; ?>
+        <header class="rh-page-head">
+            <div class="rh-page-head__main">
+                <div class="rh-page-head__title">
+                    <h1>Cache Management</h1>
+                    <span class="rh-pill rh-pill--<?php echo $global_cache_on ? 'ok' : 'muted'; ?>"><?php echo $global_cache_on ? 'Caching on' : 'Caching off'; ?></span>
+                </div>
+                <p class="rh-page-head__meta">Control data, image, and page-output caching for current frontend sections and assets</p>
+            </div>
+        </header>
 
         <?php if ($message): ?>
             <?php showAlert($message, 'success'); ?>
@@ -519,238 +523,246 @@ $cache_types = [
             <?php showAlert($error, 'error'); ?>
         <?php endif; ?>
 
-        <!-- Cache Statistics Overview -->
-        <div class="cache-overview">
-            <div class="cache-stat-card">
-                <div class="cache-stat-icon primary">
-                    <i class="fas fa-file-alt"></i>
-                </div>
-                <div class="cache-stat-info">
-                    <h3><?php echo $stats['total_files']; ?></h3>
-                    <p>Total Cache Files</p>
-                </div>
+        <div class="rh-strip" role="group" aria-label="Cache summary">
+            <div class="rh-strip__cell">
+                <span class="rh-strip__label">Total cache files</span>
+                <strong class="rh-strip__value"><?php echo $stats['total_files']; ?></strong>
             </div>
-
-            <div class="cache-stat-card">
-                <div class="cache-stat-icon success">
-                    <i class="fas fa-check-circle"></i>
-                </div>
-                <div class="cache-stat-info">
-                    <h3><?php echo $stats['active_files']; ?></h3>
-                    <p>Active Caches</p>
-                </div>
+            <div class="rh-strip__cell">
+                <span class="rh-strip__label">Active caches</span>
+                <strong class="rh-strip__value rh-strip__value--ok"><?php echo $stats['active_files']; ?></strong>
             </div>
-
-            <div class="cache-stat-card">
-                <div class="cache-stat-icon warning">
-                    <i class="fas fa-clock"></i>
-                </div>
-                <div class="cache-stat-info">
-                    <h3><?php echo $stats['expired_files']; ?></h3>
-                    <p>Expired Caches</p>
-                </div>
+            <div class="rh-strip__cell">
+                <span class="rh-strip__label">Expired caches</span>
+                <strong class="rh-strip__value"><?php echo $stats['expired_files']; ?></strong>
             </div>
-
-            <div class="cache-stat-card">
-                <div class="cache-stat-icon danger">
-                    <i class="fas fa-hdd"></i>
-                </div>
-                <div class="cache-stat-info">
-                    <h3><?php echo $stats['total_size_formatted']; ?></h3>
-                    <p>Total Size</p>
-                </div>
+            <div class="rh-strip__cell">
+                <span class="rh-strip__label">Total size</span>
+                <strong class="rh-strip__value"><?php echo $stats['total_size_formatted']; ?></strong>
             </div>
         </div>
 
-        <!-- Global Cache Control -->
-        <div class="cache-section">
-            <h2><i class="fas fa-power-off"></i> Global Cache Control</h2>
-            <form method="POST" class="cache-inline-form">
-                <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf_token, ENT_QUOTES, 'UTF-8'); ?>">
-                <input type="hidden" name="action" value="set_global_cache">
+        <div class="rh-layout">
+            <div>
+                <!-- Individual Cache Toggles -->
+                <section class="rh-panel rh-panel--flush">
+                    <div class="rh-panel__head">
+                        <h2 class="rh-panel__title">Individual cache controls</h2>
+                    </div>
+                    <div class="rh-panel__body">
+                        <table class="cache-controls-table">
+                            <thead>
+                                <tr>
+                                    <th scope="col">Cache</th>
+                                    <th scope="col">Description</th>
+                                    <th scope="col">Status</th>
+                                    <th scope="col"><span class="cache-sr-only">Action</span></th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <?php foreach ($cache_types as $type => $info): ?>
+                                    <?php
+                                    $enabled = isset($cache_settings["cache_{$type}_enabled"])
+                                        ? (int)$cache_settings["cache_{$type}_enabled"]
+                                        : 1; // Default enabled
+                                    ?>
+                                    <tr>
+                                        <td class="cache-controls-table__name">
+                                            <i class="fas <?php echo $info['icon']; ?>"></i>
+                                            <?php echo $info['name']; ?>
+                                        </td>
+                                        <td class="cache-controls-table__desc"><?php echo $info['description']; ?></td>
+                                        <td>
+                                            <span class="rh-pill rh-pill--<?php echo $enabled ? 'ok' : 'muted'; ?>">
+                                                <?php echo $enabled ? 'ON' : 'OFF'; ?>
+                                            </span>
+                                        </td>
+                                        <td class="cache-controls-table__act">
+                                            <form method="POST">
+                                                <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf_token, ENT_QUOTES, 'UTF-8'); ?>">
+                                                <input type="hidden" name="action" value="toggle_cache">
+                                                <input type="hidden" name="cache_type" value="<?php echo $type; ?>">
+                                                <input type="hidden" name="enabled" value="<?php echo $enabled ? 0 : 1; ?>">
+                                                <button type="submit" class="cache-toggle-btn <?php echo $enabled ? 'disable' : 'enable'; ?>">
+                                                    <?php echo $enabled ? 'Disable' : 'Enable'; ?>
+                                                </button>
+                                            </form>
+                                        </td>
+                                    </tr>
+                                <?php endforeach; ?>
+                            </tbody>
+                        </table>
+                    </div>
+                </section>
 
-                <div class="switch-container">
-                    <label class="switch">
-                        <input type="checkbox" name="global_cache_enabled"
-                            <?php echo !isset($cache_settings['cache_global_enabled']) || (string)$cache_settings['cache_global_enabled'] !== '0' ? 'checked' : ''; ?>>
-                        <span class="slider"></span>
-                    </label>
-                    <span class="switch-label">
-                        Enable All Caching
-                    </span>
-                </div>
+                <!-- Bulk Cache Clearing -->
+                <section class="rh-panel">
+                    <div class="rh-panel__head">
+                        <h2 class="rh-panel__title">Bulk cache clearing</h2>
+                    </div>
+                    <form method="POST">
+                        <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf_token, ENT_QUOTES, 'UTF-8'); ?>">
+                        <input type="hidden" name="action" value="clear_cache">
 
-                <button type="submit" class="btn-action btn-save">
-                    <i class="fas fa-save"></i> Save Setting
-                </button>
-            </form>
-        </div>
+                        <div class="bulk-clear-form">
+                            <label class="cache-checkbox-item">
+                                <input type="checkbox" name="cache_types[]" value="email">
+                                <span><i class="fas fa-envelope"></i> Email Settings (<?php echo count(array_filter($caches, function ($c) {
+                                                                                            return strpos($c['key'], 'email_') === 0;
+                                                                                        })); ?> files)</span>
+                            </label>
 
-        <!-- Individual Cache Toggles -->
-        <div class="cache-section">
-            <h2><i class="fas fa-toggle-on"></i> Individual Cache Controls</h2>
-            <div class="cache-toggle-grid">
-                <?php foreach ($cache_types as $type => $info): ?>
-                    <?php
-                    $enabled = isset($cache_settings["cache_{$type}_enabled"])
-                        ? (int)$cache_settings["cache_{$type}_enabled"]
-                        : 1; // Default enabled
-                    ?>
-                    <div class="cache-toggle-item <?php echo $enabled ? 'active' : 'inactive'; ?>">
-                        <div class="cache-toggle-header">
-                            <div class="cache-toggle-name">
-                                <i class="fas <?php echo $info['icon']; ?>"></i>
-                                <?php echo $info['name']; ?>
-                            </div>
-                            <span class="cache-toggle-status <?php echo $enabled ? 'enabled' : 'disabled'; ?>">
-                                <?php echo $enabled ? 'ON' : 'OFF'; ?>
-                            </span>
+                            <label class="cache-checkbox-item">
+                                <input type="checkbox" name="cache_types[]" value="settings">
+                                <span><i class="fas fa-cog"></i> Site Settings (<?php echo count(array_filter($caches, function ($c) {
+                                                                                return strpos($c['key'], 'setting_') === 0;
+                                                                            })); ?> files)</span>
+                            </label>
+
+                            <label class="cache-checkbox-item">
+                                <input type="checkbox" name="cache_types[]" value="rooms">
+                                <span><i class="fas fa-bed"></i> Rooms &amp; Prices (<?php
+                                                                                    $room_count = count(array_filter($caches, function ($c) {
+                                                                                        return strpos($c['key'], 'rooms_') === 0 || strpos($c['key'], 'room_') === 0 ||
+                                                                                            strpos($c['key'], 'facilities_') === 0 || strpos($c['key'], 'gallery_') === 0 ||
+                                                                                            strpos($c['key'], 'hero_') === 0;
+                                                                                    }));
+                                                                                    echo $room_count; ?> files)</span>
+                            </label>
+
+                            <label class="cache-checkbox-item">
+                                <input type="checkbox" name="cache_types[]" value="images">
+                                <span><i class="fas fa-image"></i> Image Cache (<?php
+                                                                                echo $stats['image_cache']['files']; ?> images, <?php echo $stats['image_cache']['size_formatted']; ?>)</span>
+                            </label>
+
+                            <label class="cache-checkbox-item">
+                                <input type="checkbox" name="cache_types[]" value="pages">
+                                <span><i class="fas fa-file-code"></i> Page HTML Cache (<?php
+                                                                                        echo $stats['page_cache']['files']; ?> files, <?php echo $stats['page_cache']['size_formatted']; ?>)</span>
+                            </label>
+
+                            <label class="cache-checkbox-item">
+                                <input type="checkbox" name="cache_types[]" value="tables">
+                                <span><i class="fas fa-database"></i> Database Tables (<?php echo count(array_filter($caches, function ($c) {
+                                                                                            return strpos($c['key'], 'table_') === 0;
+                                                                                        })); ?> files)</span>
+                            </label>
+
+                            <label class="cache-checkbox-item cache-option-all">
+                                <input type="checkbox" name="cache_types[]" value="all">
+                                <span><i class="fas fa-trash"></i> <strong>All caches</strong> (<?php echo $stats['total_files']; ?> files, <?php echo $stats['total_size_formatted']; ?>)</span>
+                            </label>
                         </div>
-                        <p class="cache-toggle-desc"><?php echo $info['description']; ?></p>
-                        <form method="POST">
+
+                        <div class="cache-form-foot">
+                            <button type="submit" class="btn-action btn-delete"
+                                onclick="return confirm('Are you sure you want to clear the selected caches?');">
+                                <i class="fas fa-eraser"></i> Clear Selected Caches
+                            </button>
+                        </div>
+                    </form>
+                </section>
+            </div>
+
+            <aside class="rh-layout__side">
+                <!-- Global Cache Control -->
+                <section class="rh-panel">
+                    <div class="rh-panel__head">
+                        <h2 class="rh-panel__title">Global cache control</h2>
+                    </div>
+                    <div class="rh-panel__body">
+                        <form method="POST" class="cache-inline-form">
                             <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf_token, ENT_QUOTES, 'UTF-8'); ?>">
-                            <input type="hidden" name="action" value="toggle_cache">
-                            <input type="hidden" name="cache_type" value="<?php echo $type; ?>">
-                            <input type="hidden" name="enabled" value="<?php echo $enabled ? 0 : 1; ?>">
-                            <button type="submit" class="cache-toggle-btn <?php echo $enabled ? 'disable' : 'enable'; ?>">
-                                <i class="fas fa-power-off"></i>
-                                <?php echo $enabled ? 'Disable' : 'Enable'; ?>
+                            <input type="hidden" name="action" value="set_global_cache">
+
+                            <div class="switch-container">
+                                <label class="switch">
+                                    <input type="checkbox" name="global_cache_enabled"
+                                        <?php echo !isset($cache_settings['cache_global_enabled']) || (string)$cache_settings['cache_global_enabled'] !== '0' ? 'checked' : ''; ?>>
+                                    <span class="slider"></span>
+                                </label>
+                                <span class="switch-label">
+                                    Enable All Caching
+                                </span>
+                            </div>
+
+                            <button type="submit" class="btn-action btn-save">
+                                <i class="fas fa-save"></i> Save Setting
                             </button>
                         </form>
                     </div>
-                <?php endforeach; ?>
-            </div>
-        </div>
+                </section>
 
-        <!-- Bulk Cache Clearing -->
-        <div class="cache-section">
-            <h2><i class="fas fa-eraser"></i> Bulk Cache Clearing</h2>
-            <form method="POST">
-                <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf_token, ENT_QUOTES, 'UTF-8'); ?>">
-                <input type="hidden" name="action" value="clear_cache">
-
-                <div class="bulk-clear-form">
-                    <label class="cache-checkbox-item">
-                        <input type="checkbox" name="cache_types[]" value="email">
-                        <span><i class="fas fa-envelope"></i> Email Settings (<?php echo count(array_filter($caches, function ($c) {
-                                                                                    return strpos($c['key'], 'email_') === 0;
-                                                                                })); ?> files)</span>
-                    </label>
-
-                    <label class="cache-checkbox-item">
-                        <input type="checkbox" name="cache_types[]" value="settings">
-                        <span><i class="fas fa-cog"></i> Site Settings (<?php echo count(array_filter($caches, function ($c) {
-                                                                            return strpos($c['key'], 'setting_') === 0;
-                                                                        })); ?> files)</span>
-                    </label>
-
-                    <label class="cache-checkbox-item cache-option-rooms">
-                        <input type="checkbox" name="cache_types[]" value="rooms">
-                        <span><i class="fas fa-bed"></i> <strong>Rooms & Prices</strong> (<?php
-                                                                                            $room_count = count(array_filter($caches, function ($c) {
-                                                                                                return strpos($c['key'], 'rooms_') === 0 || strpos($c['key'], 'room_') === 0 ||
-                                                                                                    strpos($c['key'], 'facilities_') === 0 || strpos($c['key'], 'gallery_') === 0 ||
-                                                                                                    strpos($c['key'], 'hero_') === 0;
-                                                                                            }));
-                                                                                            echo $room_count; ?> files)</span>
-                    </label>
-
-                    <label class="cache-checkbox-item cache-option-images">
-                        <input type="checkbox" name="cache_types[]" value="images">
-                        <span><i class="fas fa-image"></i> <strong>Image Cache</strong> (<?php
-                                                                                            echo $stats['image_cache']['files']; ?> images, <?php echo $stats['image_cache']['size_formatted']; ?>)</span>
-                    </label>
-
-                    <label class="cache-checkbox-item cache-option-pages">
-                        <input type="checkbox" name="cache_types[]" value="pages">
-                        <span><i class="fas fa-file-code"></i> <strong>Page HTML Cache</strong> (<?php
-                                                                                                    echo $stats['page_cache']['files']; ?> files, <?php echo $stats['page_cache']['size_formatted']; ?>)</span>
-                    </label>
-
-                    <label class="cache-checkbox-item">
-                        <input type="checkbox" name="cache_types[]" value="tables">
-                        <span><i class="fas fa-database"></i> Database Tables (<?php echo count(array_filter($caches, function ($c) {
-                                                                                    return strpos($c['key'], 'table_') === 0;
-                                                                                })); ?> files)</span>
-                    </label>
-
-                    <label class="cache-checkbox-item cache-option-all">
-                        <input type="checkbox" name="cache_types[]" value="all">
-                        <span><i class="fas fa-trash"></i> <strong>ALL CACHES (<?php echo $stats['total_files']; ?> files, <?php echo $stats['total_size_formatted']; ?>)</strong></span>
-                    </label>
-                </div>
-
-                <button type="submit" class="btn-action btn-delete"
-                    onclick="return confirm('Are you sure you want to clear the selected caches?');">
-                    <i class="fas fa-eraser"></i> Clear Selected Caches
-                </button>
-            </form>
-        </div>
-
-        <!-- Quick Actions: SEO & Favicon Purge -->
-        <div class="cache-section">
-            <h2><i class="fas fa-wand-magic-sparkles"></i> Quick Actions</h2>
-            <form method="POST" onsubmit="return confirm('This will clear ALL page HTML caches and bump favicon/meta asset versions so browsers refetch them. Proceed?');">
-                <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf_token, ENT_QUOTES, 'UTF-8'); ?>">
-                <input type="hidden" name="action" value="purge_seo_favicon">
-                <p class="cache-toggle-desc cache-list-intro">
-                    Runs a targeted purge to ensure favicon and SEO/meta changes are reflected immediately:
-                </p>
-                <ul class="cache-bullet-list">
-                    <li>Clear all Page HTML caches (refreshes meta tags across the site)</li>
-                    <li>Delete cached proxied logo (if logo is external and proxied)</li>
-                    <li>Bump a version parameter on favicon and touch-icon links to bypass CDN/browser cache</li>
-                </ul>
-                <button type="submit" class="btn-action btn-primary">
-                    <i class="fas fa-broom"></i> Purge SEO &amp; Favicon
-                </button>
-            </form>
-        </div>
-
-        <!-- PWA / Service Worker Version -->
-        <div class="cache-section">
-            <h2><i class="fas fa-mobile-screen-button"></i> PWA Service Worker</h2>
-            <p class="text-muted cache-section-intro">
-                Bumping the SW version forces all browsers and installed PWA instances to discard their cached assets and reload fresh copies on their next visit.
-                Do this after a significant release or when you update JS, CSS, or images.
-            </p>
-            <div class="sw-version-grid">
-                <div class="sw-version-card">
-                    <div class="sw-version-label">Public Site SW</div>
-                    <code class="sw-version-code"><?php echo htmlspecialchars($pwa_public_version, ENT_QUOTES, 'UTF-8'); ?></code>
-                </div>
-                <div class="sw-version-card">
-                    <div class="sw-version-label">Admin SW</div>
-                    <code class="sw-version-code"><?php echo htmlspecialchars($pwa_admin_version, ENT_QUOTES, 'UTF-8'); ?></code>
-                </div>
-            </div>
-            <form method="POST" onsubmit="return confirm('Bump both SW versions now? All browsers will re-download cached assets on next visit.');">
-                <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf_token, ENT_QUOTES, 'UTF-8'); ?>">
-                <input type="hidden" name="action" value="bump_sw">
-                <button type="submit" class="btn-action btn-primary">
-                    <i class="fas fa-arrow-up-right-dots"></i> Bump SW Version Now
-                </button>
-            </form>
-        </div>
-
-        <!-- Scheduled Cache Clearing -->
-        <div class="cache-section">
-            <h2><i class="fas fa-clock"></i> Scheduled Cache Clearing</h2>
-            <form method="POST">
-                <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf_token, ENT_QUOTES, 'UTF-8'); ?>">
-                <input type="hidden" name="action" value="set_schedule">
-
-                <div class="schedule-form">
-                    <div class="switch-container">
-                        <label class="switch">
-                            <input type="checkbox" name="schedule_enabled"
-                                <?php echo isset($cache_settings['cache_schedule_enabled']) && $cache_settings['cache_schedule_enabled'] ? 'checked' : ''; ?>>
-                            <span class="slider"></span>
-                        </label>
-                        <span class="switch-label">
-                            Enable Auto-Clear
-                        </span>
+                <!-- Quick Actions: SEO & Favicon Purge -->
+                <section class="rh-panel">
+                    <div class="rh-panel__head">
+                        <h2 class="rh-panel__title">Quick actions</h2>
                     </div>
+                    <div class="rh-panel__body">
+                        <form method="POST" onsubmit="return confirm('This will clear ALL page HTML caches and bump favicon/meta asset versions so browsers refetch them. Proceed?');">
+                            <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf_token, ENT_QUOTES, 'UTF-8'); ?>">
+                            <input type="hidden" name="action" value="purge_seo_favicon">
+                            <p class="cache-toggle-desc cache-list-intro">
+                                Runs a targeted purge to ensure favicon and SEO/meta changes are reflected immediately:
+                            </p>
+                            <ul class="cache-bullet-list">
+                                <li>Clear all Page HTML caches (refreshes meta tags across the site)</li>
+                                <li>Delete cached proxied logo (if logo is external and proxied)</li>
+                                <li>Bump a version parameter on favicon and touch-icon links to bypass CDN/browser cache</li>
+                            </ul>
+                            <button type="submit" class="btn-action btn-primary">
+                                <i class="fas fa-broom"></i> Purge SEO &amp; Favicon
+                            </button>
+                        </form>
+                    </div>
+                </section>
+
+                <!-- PWA / Service Worker Version -->
+                <section class="rh-panel">
+                    <div class="rh-panel__head">
+                        <h2 class="rh-panel__title">PWA service worker</h2>
+                    </div>
+                    <table class="rh-kv"><tbody>
+                        <tr><th scope="row">Public site SW</th><td><code class="sw-version-code"><?php echo htmlspecialchars($pwa_public_version, ENT_QUOTES, 'UTF-8'); ?></code></td></tr>
+                        <tr><th scope="row">Admin SW</th><td><code class="sw-version-code"><?php echo htmlspecialchars($pwa_admin_version, ENT_QUOTES, 'UTF-8'); ?></code></td></tr>
+                    </tbody></table>
+                    <div class="rh-panel__body cache-panel-foot">
+                        <p class="cache-toggle-desc">
+                            Bumping the SW version forces all browsers and installed PWA instances to discard their cached assets and reload fresh copies on their next visit.
+                            Do this after a significant release or when you update JS, CSS, or images.
+                        </p>
+                        <form method="POST" onsubmit="return confirm('Bump both SW versions now? All browsers will re-download cached assets on next visit.');">
+                            <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf_token, ENT_QUOTES, 'UTF-8'); ?>">
+                            <input type="hidden" name="action" value="bump_sw">
+                            <button type="submit" class="btn-action btn-primary">
+                                <i class="fas fa-arrow-up-right-dots"></i> Bump SW Version Now
+                            </button>
+                        </form>
+                    </div>
+                </section>
+
+                <!-- Scheduled Cache Clearing -->
+                <section class="rh-panel">
+                    <div class="rh-panel__head">
+                        <h2 class="rh-panel__title">Scheduled cache clearing</h2>
+                    </div>
+                    <div class="rh-panel__body">
+                        <form method="POST">
+                            <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf_token, ENT_QUOTES, 'UTF-8'); ?>">
+                            <input type="hidden" name="action" value="set_schedule">
+
+                            <div class="schedule-form">
+                                <div class="switch-container">
+                                    <label class="switch">
+                                        <input type="checkbox" name="schedule_enabled"
+                                            <?php echo isset($cache_settings['cache_schedule_enabled']) && $cache_settings['cache_schedule_enabled'] ? 'checked' : ''; ?>>
+                                        <span class="slider"></span>
+                                    </label>
+                                    <span class="switch-label">
+                                        Enable Auto-Clear
+                                    </span>
+                                </div>
 
                     <div class="form-group">
                         <label>Clear Frequency</label>
@@ -822,59 +834,64 @@ $cache_types = [
                     <button type="submit" class="btn-action btn-save">
                         <i class="fas fa-save"></i> Save Schedule
                     </button>
-                </div>
-            </form>
+                            </div>
+                        </form>
 
-            <div class="schedule-note">
-                <i class="fas fa-info-circle"></i>
-                <strong>Note:</strong> Scheduled cache clearing requires a cron job (Linux/Mac) or Task Scheduler (Windows) to be set up.
-                <br><br>
-                <strong>Cron Setup (Linux/Mac):</strong><br>
-                For intervals &lt; 1 minute: <code>* * * * * php scripts/scheduled-cache-clear.php</code> (runs every minute)<br>
-                For other intervals: Script will check if it should run based on your settings.<br>
-                <br>
-                <strong>Windows Task Scheduler:</strong><br>
-                Set trigger to run every 1 minute for best accuracy with short intervals.
-            </div>
+                        <div class="schedule-note">
+                            <i class="fas fa-info-circle"></i>
+                            <strong>Note:</strong> Scheduled cache clearing requires a cron job (Linux/Mac) or Task Scheduler (Windows) to be set up.
+                            <br><br>
+                            <strong>Cron Setup (Linux/Mac):</strong><br>
+                            For intervals &lt; 1 minute: <code>* * * * * php scripts/scheduled-cache-clear.php</code> (runs every minute)<br>
+                            For other intervals: Script will check if it should run based on your settings.<br>
+                            <br>
+                            <strong>Windows Task Scheduler:</strong><br>
+                            Set trigger to run every 1 minute for best accuracy with short intervals.
+                        </div>
+                    </div>
+                </section>
+            </aside>
+        </div>
 
-            <script>
-                function toggleCustomInterval() {
-                    const intervalSelect = document.getElementById('schedule_interval');
-                    const customGroup = document.getElementById('custom_interval_group');
-                    const timeInput = document.querySelector('input[name="schedule_time"]');
-                    const timeGroup = timeInput ? timeInput.closest('.form-group') : null;
+        <script>
+            function toggleCustomInterval() {
+                const intervalSelect = document.getElementById('schedule_interval');
+                const customGroup = document.getElementById('custom_interval_group');
+                const timeInput = document.querySelector('input[name="schedule_time"]');
+                const timeGroup = timeInput ? timeInput.closest('.form-group') : null;
 
-                    if (!intervalSelect || !customGroup || !timeGroup) {
-                        return;
-                    }
-
-                    const interval = intervalSelect.value;
-                    const hideTimeGroup = interval === 'custom' || ['30sec', '1min', '5min', '15min', '30min', 'hourly'].includes(interval);
-                    const showCustomGroup = interval === 'custom';
-
-                    // Batch style writes in one frame to avoid repeated sync layout work.
-                    requestAnimationFrame(function() {
-                        customGroup.style.display = showCustomGroup ? 'block' : 'none';
-                        timeGroup.style.display = hideTimeGroup ? 'none' : 'block';
-                    });
+                if (!intervalSelect || !customGroup || !timeGroup) {
+                    return;
                 }
 
-                // Run on page load
-                document.addEventListener('DOMContentLoaded', function() {
-                    const intervalSelect = document.getElementById('schedule_interval');
-                    if (intervalSelect) {
-                        intervalSelect.addEventListener('change', toggleCustomInterval);
-                    }
-                    toggleCustomInterval();
+                const interval = intervalSelect.value;
+                const hideTimeGroup = interval === 'custom' || ['30sec', '1min', '5min', '15min', '30min', 'hourly'].includes(interval);
+                const showCustomGroup = interval === 'custom';
+
+                // Batch style writes in one frame to avoid repeated sync layout work.
+                requestAnimationFrame(function() {
+                    customGroup.style.display = showCustomGroup ? 'block' : 'none';
+                    timeGroup.style.display = hideTimeGroup ? 'none' : 'block';
                 });
-            </script>
-        </div>
+            }
+
+            // Run on page load
+            document.addEventListener('DOMContentLoaded', function() {
+                const intervalSelect = document.getElementById('schedule_interval');
+                if (intervalSelect) {
+                    intervalSelect.addEventListener('change', toggleCustomInterval);
+                }
+                toggleCustomInterval();
+            });
+        </script>
 
         <!-- Cache Files List -->
         <?php if (!empty($caches)): ?>
-            <div class="cache-section">
-                <h2><i class="fas fa-list"></i> Current Cache Files (<?php echo count($caches); ?>)</h2>
-                <div class="cache-table-wrap">
+            <section class="rh-panel rh-panel--flush">
+                <div class="rh-panel__head">
+                    <h2 class="rh-panel__title">Current cache files (<?php echo count($caches); ?>)</h2>
+                </div>
+                <div class="rh-panel__body">
                     <table class="cache-table">
                         <thead>
                             <tr>
@@ -910,7 +927,7 @@ $cache_types = [
                         </tbody>
                     </table>
                 </div>
-            </div>
+            </section>
         <?php endif; ?>
     </div>
 
