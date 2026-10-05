@@ -1078,28 +1078,42 @@ body.modal-open {
    BUTTON LOADING STATE
    ============================================ */
 
-/* Admin page-level loader */
+/* Admin page-level loader.
+   Covers only the page area: below the fixed header and right of the docked
+   sidebar (--admin-current-sidebar-width is set from 1024px up), and sits under
+   both (header z 1000, nav 1001+), so navigation chrome never blurs or flickers
+   while a page opens. */
 .admin-page-loader {
     position: fixed;
-    inset: 0;
+    top: var(--admin-header-height, 74px);
+    right: 0;
+    bottom: 0;
+    left: var(--admin-current-sidebar-width, 0px);
     display: flex;
     align-items: center;
     justify-content: center;
     padding: 18px;
-    background: rgba(15, 29, 46, 0.5);
-    backdrop-filter: blur(6px);
-    -webkit-backdrop-filter: blur(6px);
+    background: rgba(244, 242, 239, 0.55);
+    backdrop-filter: blur(3px);
+    -webkit-backdrop-filter: blur(3px);
     opacity: 0;
     visibility: hidden;
     pointer-events: none;
-    z-index: 10080;
-    transition: opacity 0.2s ease, visibility 0.2s ease;
+    z-index: 995;
+    transition: opacity 0.2s ease, visibility 0.2s ease, left 0.2s ease;
 }
 
 .admin-page-loader.is-visible {
     opacity: 1;
     visibility: visible;
     pointer-events: auto;
+}
+
+/* Screens without the admin header/sidebar (POS, KDS stations, sign-in)
+   keep a full-screen loader. */
+body:not(:has(> .admin-header)) .admin-page-loader {
+    top: 0;
+    left: 0;
 }
 
 .admin-page-loader-card {
