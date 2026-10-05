@@ -1906,6 +1906,3 @@ $netPctTxt = abs($net_change) < 0.01 ? 'flat' : ($prevHasTakings ? number_format
     </script>
 
     <?php require_once 'includes/admin-footer.php'; ?>
-</body>
-
-</html>

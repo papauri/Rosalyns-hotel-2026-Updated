@@ -1536,7 +1536,7 @@ if (!isset($folio_fnb)) {
         $donutCss = $donutStops ? 'conic-gradient(' . implode(', ', $donutStops) . ')' : 'conic-gradient(#ebe4da 0 100%)';
         $srcTxns = array_sum(array_column($srcRows, 'count'));
 
-        // ---- Daily trend (chronological, gaps between first and last day filled) ----
+        // ---- Daily trend (chronological, every day of the window shown) ----
         $trendBars = [];
         if (!empty($dailyTrend)) {
             $byDay = [];
@@ -1547,8 +1547,9 @@ if (!isset($folio_fnb)) {
                 ];
             }
             ksort($byDay);
-            $firstDay = array_key_first($byDay);
-            $lastDay = array_key_last($byDay);
+            // Plot the whole trend window so one busy day is a bar, not the full width.
+            $firstDay = isset($trendStart) ? min($trendStart, array_key_first($byDay)) : array_key_first($byDay);
+            $lastDay = isset($trendEnd) ? max($trendEnd, array_key_last($byDay)) : array_key_last($byDay);
             for ($i = 0; $i < 31; $i++) {
                 $dk = date('Y-m-d', strtotime($firstDay . ' +' . $i . ' day'));
                 if ($dk > $lastDay) { break; }
@@ -2491,6 +2492,8 @@ if (!isset($folio_fnb)) {
             })();
         </script>
 
-        <?php require_once 'includes/admin-footer.php'; ?>
+    </div><!-- /.content -->
+
+    <?php require_once 'includes/admin-footer.php'; ?>
 
 

@@ -1081,4 +1081,6 @@ function ipRender() {
     ).join('');
 }
 </script>
+</div><!-- /.content -->
+
 <?php require_once 'includes/admin-footer.php'; ?>

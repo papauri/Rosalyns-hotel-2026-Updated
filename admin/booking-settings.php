@@ -2896,5 +2896,7 @@ foreach ($canonicalTemplateDefaults as $templateKey => $templateDefaults) {
                 })();
             </script>
 
+            </div><!-- /.content -->
+
             <?php require_once 'includes/admin-footer.php'; ?>
 

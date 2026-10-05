@@ -2373,5 +2373,7 @@ $fb_rooms_posting_on = getSetting('facebook_posting_enabled', '0') === '1'
             </div>
         </div>
 
+        </div><!-- /.content -->
+
         <?php require_once 'includes/admin-footer.php'; ?>
 
