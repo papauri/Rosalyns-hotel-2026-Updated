@@ -240,6 +240,13 @@
 
         const viewportWidth = window.innerWidth || document.documentElement.clientWidth || 0;
 
+        // Owner rule (P3-05), applied to every table: on laptop/desktop viewports (> 1024px)
+        // always keep a real data table. Its .table-responsive wrapper scrolls sideways if it is
+        // too wide; collapsing to cards beside the sidebar made desktop pages a pile of tiles.
+        if (viewportWidth > 1024) {
+            return false;
+        }
+
         // "fit-or-card": keep a REAL table at ANY width for as long as every
         // column fits inside the container (wrapping allowed) — only fall back
         // to cards when it would otherwise overflow horizontally. This is the

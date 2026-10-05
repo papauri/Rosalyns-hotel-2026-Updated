@@ -1538,7 +1538,7 @@ try {
                                                     </summary>
                                                     <div style="margin-top: 12px; padding: 12px; background: #f9f9f9; border-radius: 4px; max-height: 300px; overflow-y: auto;">
                                                         <table style="width: 100%; font-size: 13px; border-collapse: collapse;">
-                                                            <thead style="background: #fff; position: sticky; top: 0;">
+                                                            <thead style="background: #fff; position: sticky; top: 0; z-index: 2;">
                                                                 <tr>
                                                                     <th style="text-align: left; padding: 6px 8px; border-bottom: 1px solid #ddd;">Time</th>
                                                                     <th style="text-align: left; padding: 6px 8px; border-bottom: 1px solid #ddd;">Page URL</th>
